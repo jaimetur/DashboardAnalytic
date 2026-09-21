@@ -89,6 +89,24 @@ def test_dashboard_prepare_retries_one_transient_proxy_501_response():
     assert "await new Promise(resolve => window.setTimeout(resolve, 250));" in script
 
 
+def test_auto_calculated_field_editor_uses_wide_content_aware_dialog_geometry():
+    stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/app.css').read_text(encoding='utf-8')
+    script = (Path(__file__).parents[1] / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
+
+    dialog_rule = stylesheet.split('.confirm-panel.calculated-dimensions-dialog {', 1)[1].split('}', 1)[0]
+    assert 'width: 90vw;' in dialog_rule
+    assert 'height: fit-content !important;' in dialog_rule
+    assert 'max-width: none;' in dialog_rule
+    assert 'max-height: calc(100dvh - 2rem) !important;' in dialog_rule
+    assert '.confirm-overlay.calculated-dimensions-overlay { display: flex; align-items: center;' in stylesheet
+    assert script.count("overlay.className = 'confirm-overlay calculated-dimensions-overlay';") == 2
+    assert '.calculated-dimensions-list { display: grid; flex: 0 1 auto;' in stylesheet
+    assert '.calculated-dimension-editor { display: grid; flex: 0 1 auto;' in stylesheet
+    assert 'grid-template-rows: auto auto minmax(12rem, 1fr) auto;' in stylesheet
+    assert '.calculated-dimensions-manager-actions { display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end;' in stylesheet
+    assert '.calculated-dimension-editor > .confirm-actions.calculated-dimension-rules > button { flex: 0 0 auto;' in stylesheet
+
+
 def test_dashboard_warmup_retries_contention_and_compact_panel_headers_stay_aligned():
     dashboard_module = (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
     app_stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/app.css').read_text(encoding='utf-8')

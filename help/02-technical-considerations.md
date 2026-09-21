@@ -43,7 +43,7 @@ Derived preview columns are visually distinguished from source columns. They do 
 
 ### Auto-calculated Fields and combined tables
 
-Auto-calculated Fields are workspace definitions. A field has a name, selected CDR sources, a fallback and case-insensitive rule conditions. It is materialised only in the individual and combined CDR tables for its selected sources.
+Auto-calculated Fields are workspace definitions. A field has a name, selected CDR sources, a fallback and either ordered case-insensitive `condition => result` rules or a nested Tableau-style `IF / THEN / ELSEIF / ELSE / END` expression. It is materialised only in the individual and combined CDR tables for its selected sources. The same parsed decision tree drives in-memory previews and parameterized SQLite materialization so nested-branch and fallback semantics remain identical.
 
 Combined reporting tables are intentionally compact. They always retain reporting-core fields, Preview filter fields, source fields required by applicable Auto-calculated Field rules and resulting calculated fields. Other template-requested source fields are added lazily when a chart/report first requires them. This avoids eagerly copying every source column for every template, which would make imports and template changes unnecessarily expensive.
 

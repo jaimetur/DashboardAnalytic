@@ -305,12 +305,26 @@ class CalculatedDimensionRule:
 
 
 @dataclass(frozen=True)
+class CalculatedDimensionExpressionBranch:
+    conditions: tuple[FilterCondition, ...]
+    result: str | CalculatedDimensionExpression
+
+
+@dataclass(frozen=True)
+class CalculatedDimensionExpression:
+    branches: tuple[CalculatedDimensionExpressionBranch, ...]
+    otherwise: str | CalculatedDimensionExpression | None = None
+
+
+@dataclass(frozen=True)
 class CalculatedDimension:
     name: str
     sources: tuple[str, ...]
     rules: tuple[CalculatedDimensionRule, ...]
     default: str = ""
     default_from: tuple[str, ...] = ()
+    expression: CalculatedDimensionExpression | None = None
+    expression_text: str = ""
 
 
 @dataclass(frozen=True)
@@ -380,6 +394,255 @@ def parse_catalog_filters(value: str) -> tuple[FilterCondition, ...]:
     return tuple(conditions)
 
 
+@dataclass(frozen=True)
+class _CalculatedExpressionToken:
+    kind: str
+    value: str
+    offset: int
+
+
+def _calculated_expression_tokens(value: str) -> tuple[_CalculatedExpressionToken, ...]:
+    tokens: list[_CalculatedExpressionToken] = []
+    cursor = 0
+    length = len(value)
+    while cursor < length:
+        whitespace = re.match(r"\s+", value[cursor:])
+        if whitespace:
+            cursor += len(whitespace.group(0))
+            continue
+        start = cursor
+        character = value[cursor]
+        if character == "[":
+            end = value.find("]", cursor + 1)
+            if end < 0:
+                raise ValueError("Invalid IF expression: a source field is missing its closing ']'.")
+            tokens.append(_CalculatedExpressionToken("FIELD", value[cursor + 1:end].strip(), start))
+            cursor = end + 1
+            continue
+        if character in {"'", '"'}:
+            quote = character
+            cursor += 1
+            content: list[str] = []
+            while cursor < length:
+                if value[cursor] == quote:
+                    if cursor + 1 < length and value[cursor + 1] == quote:
+                        content.append(quote)
+                        cursor += 2
+                        continue
+                    cursor += 1
+                    break
+                if value[cursor] == "\\" and cursor + 1 < length:
+                    content.append(value[cursor + 1])
+                    cursor += 2
+                    continue
+                content.append(value[cursor])
+                cursor += 1
+            else:
+                raise ValueError("Invalid IF expression: a quoted value is not closed.")
+            tokens.append(_CalculatedExpressionToken("VALUE", "".join(content), start))
+            continue
+        operator = re.match(r"<=|>=|!=|<>|=|<|>", value[cursor:])
+        if operator:
+            tokens.append(_CalculatedExpressionToken("OP", operator.group(0), start))
+            cursor += len(operator.group(0))
+            continue
+        if character in "(),":
+            tokens.append(_CalculatedExpressionToken({"(": "LPAREN", ")": "RPAREN", ",": "COMMA"}[character], character, start))
+            cursor += 1
+            continue
+        number = re.match(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)", value[cursor:])
+        if number:
+            tokens.append(_CalculatedExpressionToken("VALUE", number.group(0), start))
+            cursor += len(number.group(0))
+            continue
+        word = re.match(r"[A-Za-z_][A-Za-z0-9_.\-/]*", value[cursor:])
+        if word:
+            tokens.append(_CalculatedExpressionToken("WORD", word.group(0), start))
+            cursor += len(word.group(0))
+            continue
+        raise ValueError(f"Invalid IF expression near character {cursor + 1}: unsupported token '{character}'.")
+    return tuple(tokens)
+
+
+def _strip_calculated_condition_parentheses(
+    tokens: tuple[_CalculatedExpressionToken, ...],
+) -> tuple[_CalculatedExpressionToken, ...]:
+    while len(tokens) >= 2 and tokens[0].kind == "LPAREN" and tokens[-1].kind == "RPAREN":
+        depth = 0
+        closes_at_end = True
+        for index, token in enumerate(tokens):
+            if token.kind == "LPAREN":
+                depth += 1
+            elif token.kind == "RPAREN":
+                depth -= 1
+                if depth == 0 and index != len(tokens) - 1:
+                    closes_at_end = False
+                    break
+        if not closes_at_end or depth != 0:
+            break
+        tokens = tokens[1:-1]
+    return tokens
+
+
+def _parse_calculated_expression_condition(
+    tokens: tuple[_CalculatedExpressionToken, ...],
+) -> FilterCondition:
+    tokens = _strip_calculated_condition_parentheses(tokens)
+    if len(tokens) < 3 or tokens[0].kind != "FIELD" or not tokens[0].value:
+        raise ValueError("Invalid IF condition: use a bracketed source field such as [Mean Data Rate].")
+    cursor = 1
+    if tokens[cursor].kind == "OP":
+        operator = "!=" if tokens[cursor].value == "<>" else tokens[cursor].value
+        cursor += 1
+    elif tokens[cursor].kind == "WORD":
+        operator = tokens[cursor].value.upper()
+        cursor += 1
+        if operator == "NOT" and cursor < len(tokens) and tokens[cursor].kind == "WORD":
+            operator = f"NOT {tokens[cursor].value.upper()}"
+            cursor += 1
+    else:
+        raise ValueError("Invalid IF condition: expected a comparison operator after the source field.")
+    if operator not in {"=", "!=", ">", ">=", "<", "<=", "IN", "NOT IN", "CONTAINS", "NOT CONTAINS"}:
+        raise ValueError(f"Invalid IF condition: unsupported operator '{operator}'.")
+    remaining = tokens[cursor:]
+    if operator in {"IN", "NOT IN"}:
+        if len(remaining) < 3 or remaining[0].kind != "LPAREN" or remaining[-1].kind != "RPAREN":
+            raise ValueError("Invalid IF condition: IN values must use parentheses.")
+        values: list[str] = []
+        expect_value = True
+        for token in remaining[1:-1]:
+            if expect_value and token.kind in {"VALUE", "WORD"}:
+                values.append(token.value)
+                expect_value = False
+            elif not expect_value and token.kind == "COMMA":
+                expect_value = True
+            else:
+                raise ValueError("Invalid IF condition: IN values must be separated by commas.")
+        if expect_value or not values:
+            raise ValueError("Invalid IF condition: IN requires at least one value.")
+        return FilterCondition(tokens[0].value, operator, tuple(values))
+    if len(remaining) != 1 or remaining[0].kind not in {"VALUE", "WORD"}:
+        raise ValueError("Invalid IF condition: comparisons require one quoted, numeric or single-word value.")
+    return FilterCondition(tokens[0].value, operator, (remaining[0].value,))
+
+
+def _parse_calculated_expression_conditions(
+    tokens: tuple[_CalculatedExpressionToken, ...],
+) -> tuple[FilterCondition, ...]:
+    tokens = _strip_calculated_condition_parentheses(tokens)
+    groups: list[tuple[_CalculatedExpressionToken, ...]] = []
+    start = 0
+    depth = 0
+    for index, token in enumerate(tokens):
+        if token.kind == "LPAREN":
+            depth += 1
+        elif token.kind == "RPAREN":
+            depth -= 1
+        elif depth == 0 and token.kind == "WORD" and token.value.upper() == "AND":
+            groups.append(tokens[start:index])
+            start = index + 1
+    groups.append(tokens[start:])
+    if depth != 0 or any(not group for group in groups):
+        raise ValueError("Invalid IF condition: unbalanced parentheses or incomplete AND condition.")
+    return tuple(_parse_calculated_expression_condition(group) for group in groups)
+
+
+class _CalculatedExpressionParser:
+    def __init__(self, value: str) -> None:
+        self.tokens = _calculated_expression_tokens(value)
+        self.cursor = 0
+
+    def peek_keyword(self, *values: str) -> bool:
+        if self.cursor >= len(self.tokens) or self.tokens[self.cursor].kind != "WORD":
+            return False
+        return self.tokens[self.cursor].value.upper() in values
+
+    def expect_keyword(self, value: str) -> None:
+        if not self.peek_keyword(value):
+            found = self.tokens[self.cursor].value if self.cursor < len(self.tokens) else "end of expression"
+            raise ValueError(f"Invalid IF expression: expected {value}, found '{found}'.")
+        self.cursor += 1
+
+    def condition_before_then(self) -> tuple[FilterCondition, ...]:
+        start = self.cursor
+        depth = 0
+        while self.cursor < len(self.tokens):
+            token = self.tokens[self.cursor]
+            if token.kind == "LPAREN":
+                depth += 1
+            elif token.kind == "RPAREN":
+                depth -= 1
+            elif depth == 0 and token.kind == "WORD" and token.value.upper() == "THEN":
+                break
+            self.cursor += 1
+        if self.cursor >= len(self.tokens):
+            raise ValueError("Invalid IF expression: every IF or ELSEIF requires THEN.")
+        conditions = _parse_calculated_expression_conditions(self.tokens[start:self.cursor])
+        self.cursor += 1
+        return conditions
+
+    def result(self) -> str | CalculatedDimensionExpression:
+        if self.peek_keyword("IF"):
+            return self.expression()
+        if self.cursor >= len(self.tokens) or self.tokens[self.cursor].kind not in {"VALUE", "WORD"}:
+            raise ValueError("Invalid IF expression: THEN and ELSE require a result value or nested IF block.")
+        result = self.tokens[self.cursor].value
+        self.cursor += 1
+        return result
+
+    def expression(self) -> CalculatedDimensionExpression:
+        self.expect_keyword("IF")
+        branches = [CalculatedDimensionExpressionBranch(self.condition_before_then(), self.result())]
+        while self.peek_keyword("ELSEIF") or (
+            self.peek_keyword("ELSE") and self.cursor + 1 < len(self.tokens)
+            and self.tokens[self.cursor + 1].kind == "WORD"
+            and self.tokens[self.cursor + 1].value.upper() == "IF"
+        ):
+            if self.peek_keyword("ELSEIF"):
+                self.cursor += 1
+            else:
+                self.cursor += 2
+            branches.append(CalculatedDimensionExpressionBranch(self.condition_before_then(), self.result()))
+        otherwise: str | CalculatedDimensionExpression | None = None
+        if self.peek_keyword("ELSE"):
+            self.cursor += 1
+            otherwise = self.result()
+        self.expect_keyword("END")
+        return CalculatedDimensionExpression(tuple(branches), otherwise)
+
+    def parse(self) -> CalculatedDimensionExpression:
+        if not self.tokens:
+            raise ValueError("IF expression cannot be empty.")
+        expression = self.expression()
+        if self.cursor != len(self.tokens):
+            raise ValueError(f"Invalid IF expression: unexpected token '{self.tokens[self.cursor].value}' after END.")
+        return expression
+
+
+def parse_calculated_dimension_expression(value: str) -> CalculatedDimensionExpression:
+    """Parse a Tableau-style IF/THEN/ELSEIF/ELSE/END expression."""
+    return _CalculatedExpressionParser(value).parse()
+
+
+def _flatten_calculated_expression(
+    expression: CalculatedDimensionExpression,
+    inherited: tuple[FilterCondition, ...] = (),
+) -> tuple[CalculatedDimensionRule, ...]:
+    rules: list[CalculatedDimensionRule] = []
+    for branch in expression.branches:
+        conditions = (*inherited, *branch.conditions)
+        if isinstance(branch.result, CalculatedDimensionExpression):
+            rules.extend(_flatten_calculated_expression(branch.result, conditions))
+        else:
+            rules.append(CalculatedDimensionRule(conditions, branch.result))
+    if expression.otherwise is not None:
+        if isinstance(expression.otherwise, CalculatedDimensionExpression):
+            rules.extend(_flatten_calculated_expression(expression.otherwise, inherited))
+        else:
+            rules.append(CalculatedDimensionRule(inherited, expression.otherwise))
+    return tuple(rules)
+
+
 def parse_calculated_dimensions(payload: object) -> tuple[CalculatedDimension, ...]:
     """Validate workspace-owned auto-calculated fields from their JSON representation."""
     if payload is None:
@@ -406,6 +669,8 @@ def parse_calculated_dimensions(payload: object) -> tuple[CalculatedDimension, .
         sources = tuple(dict.fromkeys(str(value).strip().casefold() for value in raw_sources if str(value).strip()))
         if not sources or any(source not in CATALOG_SOURCE_KINDS for source in sources):
             raise ValueError(f"Auto-calculated field '{name}' contains an unsupported CDR source.")
+        expression_text = str(item.get("expression") or "").strip()
+        expression = parse_calculated_dimension_expression(expression_text) if expression_text else None
         raw_rules = item.get("rules") or []
         if not isinstance(raw_rules, list):
             raise ValueError(f"Auto-calculated field '{name}' rules must be a list.")
@@ -418,11 +683,15 @@ def parse_calculated_dimensions(payload: object) -> tuple[CalculatedDimension, .
             if not when or not value:
                 raise ValueError(f"Rule {rule_index} of auto-calculated field '{name}' requires a condition and result.")
             rules.append(CalculatedDimensionRule(parse_catalog_filters(when), value))
+        if expression is not None:
+            rules = list(_flatten_calculated_expression(expression))
         default_from = tuple(part.strip() for part in str(item.get("default_from") or "").split("|") if part.strip())
         default = str(item.get("default") or "")
         if not rules and not default_from and not default:
             raise ValueError(f"Auto-calculated field '{name}' requires at least one rule, a default value or a default source field.")
-        dimensions.append(CalculatedDimension(name, sources, tuple(rules), default, default_from))
+        dimensions.append(CalculatedDimension(
+            name, sources, tuple(rules), default, default_from, expression, expression_text,
+        ))
     return tuple(dimensions)
 
 
@@ -451,6 +720,7 @@ def calculated_dimensions_json(dimensions: Iterable[CalculatedDimension]) -> lis
             "sources": list(dimension.sources),
             "default": dimension.default,
             "default_from": compact_column_aliases("|".join(dimension.default_from)),
+            "expression": dimension.expression_text,
             "rules": [
                 {"when": "; ".join(condition_text(condition) for condition in rule.conditions), "value": rule.value}
                 for rule in dimension.rules
@@ -1247,24 +1517,61 @@ def _calculated_condition_mask(frame: pd.DataFrame, condition: FilterCondition) 
     return ~mask if condition.operator == "NOT IN" else mask
 
 
+def _calculated_conditions_mask(
+    frame: pd.DataFrame, conditions: Iterable[FilterCondition],
+) -> pd.Series | None:
+    mask = pd.Series(True, index=frame.index)
+    for condition in conditions:
+        condition_mask = _calculated_condition_mask(frame, condition)
+        if condition_mask is None:
+            return None
+        mask &= condition_mask.fillna(False)
+    return mask
+
+
+def _calculated_expression_values(
+    frame: pd.DataFrame, expression: CalculatedDimensionExpression,
+) -> pd.Series:
+    output = pd.Series(pd.NA, index=frame.index, dtype="string")
+    remaining = pd.Series(True, index=frame.index)
+    for branch in expression.branches:
+        mask = _calculated_conditions_mask(frame, branch.conditions)
+        if mask is None:
+            continue
+        selected = remaining & mask
+        if isinstance(branch.result, CalculatedDimensionExpression):
+            nested = _calculated_expression_values(frame, branch.result)
+            output.loc[selected] = nested.loc[selected]
+        else:
+            output.loc[selected] = branch.result
+        # A matching outer branch consumes the row even when its nested block
+        # yields no value; the following outer ELSEIF must not be evaluated.
+        remaining &= ~mask
+    if expression.otherwise is not None:
+        if isinstance(expression.otherwise, CalculatedDimensionExpression):
+            nested = _calculated_expression_values(frame, expression.otherwise)
+            output.loc[remaining] = nested.loc[remaining]
+        else:
+            output.loc[remaining] = expression.otherwise
+    return output
+
+
 def _calculated_dimension_column(frame: pd.DataFrame, name: str, dimensions: Iterable[CalculatedDimension]) -> str | None:
     definition = next((item for item in dimensions if _normalise_catalog_name(item.name) == _normalise_catalog_name(name)), None)
     source = str(frame.attrs.get("catalogue_cdr_source") or "").casefold()
     if not definition or (source and source not in definition.sources):
         return None
     target = f"__catalog_calculated_{_normalise_catalog_name(definition.name)}"
-    output = pd.Series(pd.NA, index=frame.index, dtype="string")
-    for rule in definition.rules:
-        mask = pd.Series(True, index=frame.index)
-        usable = True
-        for condition in rule.conditions:
-            condition_mask = _calculated_condition_mask(frame, condition)
-            if condition_mask is None:
-                usable = False
-                break
-            mask &= condition_mask
-        if usable:
-            output.loc[mask & output.isna()] = rule.value
+    output = (
+        _calculated_expression_values(frame, definition.expression)
+        if definition.expression is not None
+        else pd.Series(pd.NA, index=frame.index, dtype="string")
+    )
+    if definition.expression is None:
+        for rule in definition.rules:
+            mask = _calculated_conditions_mask(frame, rule.conditions)
+            if mask is not None:
+                output.loc[mask & output.isna()] = rule.value
     default_column = _column(frame, definition.default_from)
     if default_column:
         output = output.fillna(frame[default_column].astype("string"))
@@ -3672,6 +3979,16 @@ def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | N
         for bucket_index, bucket in enumerate(buckets):
             value = len(subset[subset[stack] == bucket]) / total; segment = value * height; y = top + height - running - segment
             draw.rectangle((x, y, x + bar_width, y + segment), fill=bucket_colours.get((bucket,), _colour(bucket, bucket_index)))
+            value_label = f"{value:.1%}"
+            label_font = _font(18, True)
+            label_box = draw.textbbox((0, 0), value_label, font=label_font)
+            label_height = label_box[3] - label_box[1]
+            if _text_width(draw, value_label, label_font) + 12 <= bar_width and label_height + 10 <= segment:
+                _draw_inside_bar_label(
+                    image, draw, value_label,
+                    x=x, y=y, width=bar_width, height=segment,
+                    fill="#FFFFFF", font=label_font,
+                )
             running += segment
     _draw_top_column_group_separators(
         draw,

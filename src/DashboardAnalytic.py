@@ -514,9 +514,71 @@ def rename_calculated_dimension_template_references(renames: dict[str, str]) -> 
             pending_writes[(technology, str(template['identifier']), bool(template['active']))] = content
             changed_templates += 1
     with TEMPLATE_SAVE_LOCK:
-        for (technology, name, is_default), content in pending_writes.items():
-            persist_report_template(technology, name, content, is_default=is_default)
+        for (technology, name, _is_default), content in pending_writes.items():
+            # Keep reference migration inside the foreground save phase.  The
+            # normal persistence helper starts reconciliation immediately;
+            # doing that for the first renamed template can acquire the
+            # Workspace writer while the remaining templates and dashboards
+            # still need to be updated, leaving the editor waiting behind its
+            # own materialization job.
+            repository.set_report_template_content(technology, name, content)
     return changed_templates
+
+
+def rename_calculated_dimension_dashboard_references(renames: dict[str, str]) -> int:
+    """Rename calculated-field references in every saved Dashboard definition."""
+    if not renames:
+        return 0
+
+    state_key = 'e2e_dashboards_v2'
+    stored = repository.get_workspace_state(state_key)
+    if stored is None:
+        state_key = 'e2e_dashboard_sets_v1'
+        stored = repository.get_workspace_state(state_key)
+    if stored is None:
+        return 0
+    dashboards = json.loads(stored or '{}')
+    if not isinstance(dashboards, dict):
+        return 0
+
+    rename_by_key = {
+        _normalise_catalogue_dimension_name(old_name): new_name
+        for old_name, new_name in renames.items()
+    }
+
+    def renamed_name(value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        return rename_by_key.get(_normalise_catalogue_dimension_name(value), value)
+
+    changed_dashboards = 0
+    updated_dashboards: dict[str, Any] = {}
+    for dashboard_id, raw_definition in dashboards.items():
+        if not isinstance(raw_definition, dict):
+            updated_dashboards[dashboard_id] = raw_definition
+            continue
+        definition = dict(raw_definition)
+        for field in ('custom_fields', 'hidden_filters'):
+            values = definition.get(field)
+            if isinstance(values, list):
+                definition[field] = [renamed_name(value) for value in values]
+        filters = definition.get('filters')
+        if isinstance(filters, dict):
+            renamed_filters: dict[str, Any] = {}
+            for field_name, values in filters.items():
+                renamed_field = str(renamed_name(field_name))
+                if renamed_field in renamed_filters and isinstance(renamed_filters[renamed_field], list) and isinstance(values, list):
+                    renamed_filters[renamed_field] = list(dict.fromkeys([*renamed_filters[renamed_field], *values]))
+                else:
+                    renamed_filters[renamed_field] = values
+            definition['filters'] = renamed_filters
+        if definition != raw_definition:
+            changed_dashboards += 1
+        updated_dashboards[dashboard_id] = definition
+
+    if changed_dashboards:
+        repository.set_workspace_state(state_key, json.dumps(updated_dashboards, ensure_ascii=False))
+    return changed_dashboards
 
 
 def load_template_catalogue(catalogue_content: bytes | str, technology: str, *, validate_filters: bool = True, task_repository: Repository | None = None):
@@ -634,24 +696,56 @@ def _auto_field_sql_expression(
             return expression, [str(value).casefold() for value in condition.values]
         return None
 
-    clauses: list[str] = []
+    def compile_result(result: Any) -> tuple[str, list[Any]]:
+        if isinstance(result, str):
+            return '?', [result]
+        return compile_expression(result)
+
+    def compile_expression(expression: Any) -> tuple[str, list[Any]]:
+        clauses: list[str] = []
+        parameters: list[Any] = []
+        for branch in expression.branches:
+            compiled = [condition_sql(condition) for condition in branch.conditions]
+            if any(item is None for item in compiled):
+                continue
+            conditions = [item for item in compiled if item is not None]
+            result_sql, result_parameters = compile_result(branch.result)
+            clauses.append(f"WHEN {' AND '.join(item[0] for item in conditions)} THEN {result_sql}")
+            for _sql, values in conditions:
+                parameters.extend(values)
+            parameters.extend(result_parameters)
+        otherwise_sql = 'NULL'
+        if expression.otherwise is not None:
+            otherwise_sql, otherwise_parameters = compile_result(expression.otherwise)
+            parameters.extend(otherwise_parameters)
+        return f"CASE {' '.join(clauses)} ELSE {otherwise_sql} END", parameters
+
     parameters: list[Any] = []
-    for rule in definition.rules:
-        compiled = [condition_sql(condition) for condition in rule.conditions]
-        if any(item is None for item in compiled):
-            continue
-        conditions = [item for item in compiled if item is not None]
-        clauses.append(f"WHEN {' AND '.join(item[0] for item in conditions)} THEN ?")
-        for _sql, values in conditions:
-            parameters.extend(values)
-        parameters.append(rule.value)
+    if definition.expression is not None:
+        expression, parameters = compile_expression(definition.expression)
+    else:
+        clauses: list[str] = []
+        for rule in definition.rules:
+            compiled = [condition_sql(condition) for condition in rule.conditions]
+            if any(item is None for item in compiled):
+                continue
+            conditions = [item for item in compiled if item is not None]
+            clauses.append(f"WHEN {' AND '.join(item[0] for item in conditions)} THEN ?")
+            for _sql, values in conditions:
+                parameters.extend(values)
+            parameters.append(rule.value)
+        expression = f"CASE {' '.join(clauses)} ELSE NULL END" if clauses else 'NULL'
     default_column = resolve(definition.default_from)
     fallback = f'CAST({quote(default_column)} AS TEXT)' if default_column else 'NULL'
     if definition.default != '':
         fallback = f'COALESCE({fallback}, ?)'
         parameters.append(definition.default)
-    expression = f"CASE {' '.join(clauses)} ELSE {fallback} END" if clauses else fallback
+    if fallback != 'NULL':
+        expression = f'COALESCE({expression}, {fallback})'
     return expression, parameters
+
+
+AUTO_FIELD_UPDATE_BATCH_SIZE = 25_000
 
 
 def _incremental_auto_field_table_update(
@@ -661,8 +755,9 @@ def _incremental_auto_field_table_update(
     previous: Iterable[Any],
     current: Iterable[Any],
     renames: dict[str, str],
+    checkpoint: Callable[[], None] | None = None,
 ) -> bool:
-    """Apply changed fields in one SQL scan without replacing the source table."""
+    """Apply changed fields in bounded transactions without replacing the source table."""
     quote = task_repository._quote_identifier
     previous_items = tuple(previous)
     current_items = tuple(current)
@@ -671,12 +766,7 @@ def _incremental_auto_field_table_update(
         _normalise_catalogue_dimension_name(new_name): previous_by_key.get(_normalise_catalogue_dimension_name(old_name))
         for old_name, new_name in renames.items()
     }
-    with task_repository.connection() as connection:
-        exists = connection.execute(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table_name,),
-        ).fetchone()
-        if not exists:
-            return False
+    def configure_functions(connection: sqlite3.Connection) -> None:
         connection.create_function(
             'da_casefold', 1,
             lambda value: str(value).casefold() if value is not None else None,
@@ -693,6 +783,16 @@ def _incremental_auto_field_table_update(
             return parsed if pd.notna(parsed) else None
 
         connection.create_function('da_try_number', 1, try_number, deterministic=True)
+
+    updates: list[tuple[str, list[Any], Any]] = []
+    removable_keys: set[str] = set()
+    with task_repository.connection() as connection:
+        exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table_name,),
+        ).fetchone()
+        if not exists:
+            return False
+        configure_functions(connection)
         columns = task_repository._table_columns(connection, table_name)
         column_lookup = {_normalise_catalogue_dimension_name(column): column for column in columns}
         source = cdr_source.casefold()
@@ -741,7 +841,6 @@ def _incremental_auto_field_table_update(
             columns.remove(physical)
             column_lookup.pop(key, None)
 
-        updates: list[tuple[str, list[Any], Any]] = []
         for key, definition in applicable_current.items():
             old_definition = previous_by_key.get(key) or rename_sources.get(key)
             physical = column_lookup.get(key)
@@ -768,34 +867,57 @@ def _incremental_auto_field_table_update(
             ]
             expression, values = _auto_field_sql_expression(definition, expression_columns, quote)
             updates.append((f'{quote(physical)} = {expression}', values, definition))
-        if updates:
-            changed_keys = {
-                _normalise_catalogue_dimension_name(definition.name)
-                for _assignment, _values, definition in updates
-            }
-            has_dependencies = any(
-                changed_keys.intersection({
-                    _normalise_catalogue_dimension_name(alias)
-                    for rule in definition.rules
-                    for condition in rule.conditions
-                    for alias in condition.column.split('|')
-                } | {
-                    _normalise_catalogue_dimension_name(alias) for alias in definition.default_from
-                })
-                for _assignment, _values, definition in updates
-            )
-            if has_dependencies:
-                # SQLite evaluates all SET expressions against the old row.
-                # Preserve ordered field dependencies with one scan per field
-                # only when a changed field references another changed field.
-                for assignment, values, _definition in updates:
-                    connection.execute(f'UPDATE {quote(table_name)} SET {assignment}', values)
-            else:
+    if checkpoint:
+        checkpoint()
+    if not updates:
+        return bool(removable_keys or renames)
+
+    changed_keys = {
+        _normalise_catalogue_dimension_name(definition.name)
+        for _assignment, _values, definition in updates
+    }
+    has_dependencies = any(
+        changed_keys.intersection({
+            _normalise_catalogue_dimension_name(alias)
+            for rule in definition.rules
+            for condition in rule.conditions
+            for alias in condition.column.split('|')
+        } | {
+            _normalise_catalogue_dimension_name(alias) for alias in definition.default_from
+        })
+        for _assignment, _values, definition in updates
+    )
+    update_groups = [[item] for item in updates] if has_dependencies else [updates]
+    with task_repository.connection() as connection:
+        bounds = connection.execute(
+            f'SELECT MIN(rowid) AS first_row, MAX(rowid) AS last_row FROM {quote(table_name)}',
+        ).fetchone()
+    first_row = int(bounds['first_row']) if bounds and bounds['first_row'] is not None else None
+    last_row = int(bounds['last_row']) if bounds and bounds['last_row'] is not None else None
+    if first_row is None or last_row is None:
+        return True
+
+    # A single UPDATE on a large CDR can own SQLite's only writer for tens of
+    # seconds.  Commit bounded rowid ranges so foreground metadata saves can
+    # acquire the writer between batches while materialization continues.
+    for group in update_groups:
+        lower_bound = first_row - 1
+        while lower_bound < last_row:
+            upper_bound = min(lower_bound + AUTO_FIELD_UPDATE_BATCH_SIZE, last_row)
+            if checkpoint:
+                checkpoint()
+            assignments = ', '.join(item[0] for item in group)
+            parameters = [
+                value for _assignment, values, _definition in group for value in values
+            ]
+            with task_repository.connection() as connection:
+                configure_functions(connection)
                 connection.execute(
-                    f'UPDATE {quote(table_name)} SET {", ".join(item[0] for item in updates)}',
-                    [value for _assignment, values, _definition in updates for value in values],
+                    f'UPDATE {quote(table_name)} SET {assignments} WHERE rowid > ? AND rowid <= ?',
+                    [*parameters, lower_bound, upper_bound],
                 )
-        return bool(updates or removable_keys or renames)
+            lower_bound = upper_bound
+    return True
 
 
 def workspace_template_kpi_columns(task_repository: Repository, kind: str) -> list[str]:
@@ -905,8 +1027,9 @@ def materialize_workspace_auto_fields_incrementally(
     task_repository: Repository,
     affected_sources: Iterable[str],
     progress_callback: Callable[[int, int, str], None] | None = None,
+    stop_callback: Callable[[], None] | None = None,
 ) -> dict[str, int]:
-    """Update only changed columns, scanning each affected SQLite table once."""
+    """Update only changed columns while yielding the Workspace writer between batches."""
     selected_sources = {
         str(source).casefold().removeprefix('cdr-') for source in affected_sources if str(source).strip()
     }
@@ -923,6 +1046,7 @@ def materialize_workspace_auto_fields_incrementally(
         _incremental_auto_field_table_update(
             task_repository, task_repository.dataset_rows_table_name(int(dataset['id'])),
             f'cdr-{kind}', previous, current, renames,
+            checkpoint=stop_callback,
         )
         completed += 1
         if progress_callback:
@@ -941,6 +1065,7 @@ def materialize_workspace_auto_fields_incrementally(
             _incremental_auto_field_table_update(
                 task_repository, task_repository.reporting_rows_table_name(kind),
                 f'cdr-{kind}', previous, current, renames,
+                checkpoint=stop_callback,
             )
         completed += 1
         task_repository.set_workspace_state(
@@ -1078,7 +1203,9 @@ def _run_auto_calculated_field_job(job_id: str, workspace: Workspace) -> None:
                 current_sources = affected_calculated_dimension_sources(previous, current)
                 stats = materialize_workspace_auto_fields_incrementally(
                     previous, current, renames, task_repository,
-                    set(affected_sources) | current_sources, update_progress,
+                    set(affected_sources) | current_sources,
+                    progress_callback=update_progress,
+                    stop_callback=lambda: ensure_auto_calculated_field_job_not_stopped(job_id),
                 )
         ensure_auto_calculated_field_job_not_stopped(job_id)
         with AUTO_CALCULATED_FIELD_JOBS_LOCK:
@@ -1509,7 +1636,10 @@ def catalogue_editor_columns(datasets: Iterable[Any] | None = None, calculated_d
     """Offer the processed CDR fields that can be used in the template editor."""
     common = {'Operator', 'Campaign', 'source_sheet', 'vendor', 'RAT_A', 'RAT'}
     columns: dict[str, set[str]] = {
-        'cdr-data': set(common) | {'Test_Result', 'Test_Name', 'Type_of_Test', 'Direction', 'G Level 4'},
+        'cdr-data': set(common) | {
+            'Test_Result', 'Test_Name', 'Type_of_Test', 'Direction', 'G Level 4',
+            'Buckets', 'Rate Bucket',
+        },
         'cdr-voice': set(common) | {'Call_Status', 'Session_Type', 'Call_Setup_Time', 'G Level 4'},
         'cdr-speech': set(common) | {'Call_Status', 'Session_Type', 'LQ', 'G Level 4'},
     }
@@ -14295,11 +14425,13 @@ async def _save_workspace_dimensions(request: Request, user: SessionUser) -> JSO
             affected_sources = affected_calculated_dimension_sources(previous, dimensions)
             renames = calculated_dimension_rename_map(payload, previous, dimensions)
             renamed_templates = rename_calculated_dimension_template_references(renames)
+            renamed_dashboards = rename_calculated_dimension_dashboard_references(renames)
 
             def record_save(job: dict[str, Any]) -> None:
                 repository.add_log(user.username, 'save_workspace_calculated_dimensions', json.dumps({
                     'workspace': workspace.id, 'count': len(dimensions),
                     'materialization_job': job['id'], 'renamed_templates': renamed_templates,
+                    'renamed_dashboards': renamed_dashboards,
                     'affected_sources': sorted(affected_sources),
                 }))
 
@@ -14307,12 +14439,12 @@ async def _save_workspace_dimensions(request: Request, user: SessionUser) -> JSO
                 workspace, previous, dimensions, renames, user.username,
                 before_submit=record_save,
             )
-            return dimensions, affected_sources, renamed_templates, job
+            return dimensions, affected_sources, renamed_templates, renamed_dashboards, job
 
         # Workspace writes may briefly wait for a large CDR transaction. Keep
         # that wait away from the ASGI event loop so the rest of the Dashboard
         # API remains responsive instead of surfacing unrelated 504 errors.
-        dimensions, affected_sources, renamed_templates, job = await run_in_threadpool(save_and_queue)
+        dimensions, affected_sources, renamed_templates, renamed_dashboards, job = await run_in_threadpool(save_and_queue)
     except (ValueError, TypeError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except (OSError, sqlite3.Error) as exc:
@@ -14322,6 +14454,7 @@ async def _save_workspace_dimensions(request: Request, user: SessionUser) -> JSO
         'materialization_job': job['id'],
         'materialization_status_url': f'/api/workspace/auto-calculated-fields/materialization/{job["id"]}',
         'renamed_templates': renamed_templates,
+        'renamed_dashboards': renamed_dashboards,
         'notice': (
             'The fields were saved. Updating applicable CDR tables can take a while and is running in the background.'
             if affected_sources else 'The fields were already up to date; no CDR tables required changes.'
@@ -14334,6 +14467,19 @@ async def save_workspace_calculated_dimensions(
     request: Request, user: SessionUser = Depends(current_user),
 ) -> JSONResponse:
     return await _save_workspace_dimensions(request, user)
+
+
+@app.get('/api/workspace/calculated-dimensions')
+def get_workspace_calculated_dimensions(
+    user: SessionUser = Depends(current_user),
+) -> JSONResponse:
+    """Return the current definitions so long-lived editors never use a stale snapshot."""
+    if not active_workspace:
+        raise HTTPException(status_code=400, detail='Open a workspace first.')
+    return JSONResponse(
+        {'dimensions': calculated_dimensions_json(load_workspace_calculated_dimensions())},
+        headers={'Cache-Control': 'no-store'},
+    )
 
 
 @app.put('/api/admin/report-templates/{technology}/{catalogue_id}/calculated-dimensions')

@@ -224,82 +224,106 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
   };
   const renderMaterializationJobs = (jobs) => {
     if (!(progressJobList instanceof HTMLElement)) return;
-    progressJobList.replaceChildren();
-    jobs.forEach((job) => {
+    const retainedKeys = new Set();
+    let insertionPoint = progressJobList.firstElementChild;
+    jobs.forEach((job, jobIndex) => {
+      const jobKey = String(job.id || `${job.operation || 'materialization'}:${job.combined_kind || job.workspace_id || jobIndex}`);
+      retainedKeys.add(jobKey);
       const processing = ['queued', 'processing'].includes(job.status);
       const failed = ['failed', 'stopped'].includes(job.status);
-      const percent = materializationJobProgressPercent(job);
-      const article = document.createElement('article');
-      article.className = `auto-calculated-field-job${processing ? ' is-processing' : ''}${failed ? ' is-failed' : ''}`;
-      const heading = document.createElement('div');
-      heading.className = 'auto-calculated-field-job-heading';
-      const label = document.createElement('strong');
-      label.textContent = materializationJobLabel(job);
-      const state = document.createElement('span');
-      const stateLabel = job.cancel_requested ? 'Stopping' : job.status === 'queued' ? 'Queued' : job.status === 'processing' ? 'In progress' : job.status === 'stopped' ? 'Stopped' : job.status === 'failed' ? 'Failed' : 'Up to date';
-      state.textContent = `${stateLabel} · ${percent}%`;
-      heading.append(label, state);
-      const progressRow = document.createElement('div');
-      progressRow.className = 'auto-calculated-field-progress-row';
-      const track = document.createElement('div');
-      track.className = 'auto-calculated-field-progress-track';
-      track.setAttribute('role', 'progressbar');
-      track.setAttribute('aria-label', `${label.textContent} materialization`);
-      track.setAttribute('aria-valuemin', '0');
-      track.setAttribute('aria-valuemax', '100');
-      track.setAttribute('aria-valuenow', String(percent));
-      const bar = document.createElement('span');
-      bar.className = 'auto-calculated-field-progress-bar';
-      bar.style.width = `${percent}%`;
-      const percentLabel = document.createElement('span');
-      percentLabel.className = 'auto-calculated-field-progress-percent';
-      percentLabel.textContent = `${percent}%`;
-      track.append(bar, percentLabel);
-      progressRow.append(track);
-      if (processing && job.workspace_id) {
-        const stop = document.createElement('button');
-        stop.type = 'button';
-        stop.className = 'auto-calculated-field-stop-button combined-dataset-stop-button';
-        stop.textContent = 'Stop';
-        stop.title = 'Stop materialization';
-        stop.setAttribute('aria-label', stop.title);
-        stop.disabled = Boolean(job.cancel_requested);
-        stop.addEventListener('click', async () => {
-          const accepted = await showConfirmDialog(
-            `Stop “${label.textContent}”?`,
-            {title: 'Stop materialization', confirmLabel: 'Stop materialization', tone: 'warning'},
-          );
-          if (!accepted) return;
-          stop.disabled = true;
-          try {
-            const taskId = job.id
-              ? `auto-fields:${job.id}`
-              : `auto-fields-state:${job.workspace_id}`;
-            const body = new URLSearchParams({task_id: taskId});
-            const response = await fetch(`/api/background-tasks/${job.workspace_id}/stop`, {
-              method: 'POST', credentials: 'same-origin',
-              headers: {'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json'}, body,
-            });
-            if (!response.ok) {
-              const payload = await response.json().catch(() => ({}));
-              throw new Error(payload.detail || 'The materialization task could not be stopped.');
-            }
-            state.textContent = `Stopping · ${percent}%`;
-            window.setTimeout(refreshMaterializationProgress, 250);
-          } catch (error) {
-            stop.disabled = false;
-            showInfoDialog(error instanceof Error ? error.message : 'The materialization task could not be stopped.', {
-              title: 'Stop materialization failed', tone: 'error',
-            });
-          }
-        });
-        progressRow.append(stop);
+      let article = Array.from(progressJobList.querySelectorAll('[data-materialization-job-key]'))
+        .find((item) => item.dataset.materializationJobKey === jobKey);
+      if (!(article instanceof HTMLElement)) {
+        article = document.createElement('article');
+        article.dataset.materializationJobKey = jobKey;
+        article.innerHTML = `
+          <div class="auto-calculated-field-job-heading">
+            <strong data-materialization-job-label></strong>
+            <span data-materialization-job-state></span>
+          </div>
+          <div class="auto-calculated-field-progress-row">
+            <div class="auto-calculated-field-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+              <span class="auto-calculated-field-progress-bar"></span>
+              <span class="auto-calculated-field-progress-percent"></span>
+            </div>
+          </div>
+          <p class="form-note" data-materialization-job-message></p>
+        `;
       }
-      const copy = document.createElement('p');
-      copy.className = 'form-note';
-      copy.textContent = job.error || job.message || 'All materialized fields are up to date.';
-      article.append(heading, progressRow, copy);
-      progressJobList.append(article);
+      if (article !== insertionPoint) progressJobList.insertBefore(article, insertionPoint);
+      insertionPoint = article.nextElementSibling;
+      article.className = `auto-calculated-field-job${processing ? ' is-processing' : ''}${failed ? ' is-failed' : ''}`;
+      const computedPercent = materializationJobProgressPercent(job);
+      const previousPercent = Number(article.dataset.progressPercent || 0);
+      const percent = job.status === 'processing' && article.dataset.progressStatus === 'processing'
+        ? Math.max(previousPercent, computedPercent)
+        : computedPercent;
+      article.dataset.progressPercent = String(percent);
+      article.dataset.progressStatus = String(job.status || '');
+      const label = article.querySelector('[data-materialization-job-label]');
+      const state = article.querySelector('[data-materialization-job-state]');
+      const progressRow = article.querySelector('.auto-calculated-field-progress-row');
+      const track = article.querySelector('.auto-calculated-field-progress-track');
+      const bar = article.querySelector('.auto-calculated-field-progress-bar');
+      const percentLabel = article.querySelector('.auto-calculated-field-progress-percent');
+      const copy = article.querySelector('[data-materialization-job-message]');
+      if (label instanceof HTMLElement) label.textContent = materializationJobLabel(job);
+      const stateLabel = job.cancel_requested ? 'Stopping' : job.status === 'queued' ? 'Queued' : job.status === 'processing' ? 'In progress' : job.status === 'stopped' ? 'Stopped' : job.status === 'failed' ? 'Failed' : 'Up to date';
+      if (state instanceof HTMLElement) state.textContent = `${stateLabel} · ${percent}%`;
+      if (track instanceof HTMLElement) {
+        track.setAttribute('aria-label', `${materializationJobLabel(job)} materialization`);
+        track.setAttribute('aria-valuenow', String(percent));
+      }
+      if (bar instanceof HTMLElement && bar.style.width !== `${percent}%`) bar.style.width = `${percent}%`;
+      if (percentLabel instanceof HTMLElement) percentLabel.textContent = `${percent}%`;
+      if (copy instanceof HTMLElement) copy.textContent = job.error || job.message || 'All materialized fields are up to date.';
+      const existingStop = progressRow?.querySelector('.auto-calculated-field-stop-button');
+      if (processing && job.workspace_id) {
+        const stop = existingStop instanceof HTMLButtonElement ? existingStop : document.createElement('button');
+        if (!(existingStop instanceof HTMLButtonElement)) {
+          stop.type = 'button';
+          stop.className = 'auto-calculated-field-stop-button combined-dataset-stop-button';
+          stop.textContent = 'Stop';
+          stop.title = 'Stop materialization';
+          stop.setAttribute('aria-label', stop.title);
+          stop.addEventListener('click', async () => {
+            const accepted = await showConfirmDialog(
+              `Stop “${stop.dataset.jobLabel || 'Auto-calculated Fields'}”?`,
+              {title: 'Stop materialization', confirmLabel: 'Stop materialization', tone: 'warning'},
+            );
+            if (!accepted) return;
+            stop.disabled = true;
+            try {
+              const body = new URLSearchParams({task_id: stop.dataset.taskId || ''});
+              const response = await fetch(stop.dataset.stopUrl || '', {
+                method: 'POST', credentials: 'same-origin',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json'}, body,
+              });
+              if (!response.ok) {
+                const payload = await response.json().catch(() => ({}));
+                throw new Error(payload.detail || 'The materialization task could not be stopped.');
+              }
+              if (state instanceof HTMLElement) state.textContent = `Stopping · ${article.dataset.progressPercent || 0}%`;
+              window.setTimeout(refreshMaterializationProgress, 250);
+            } catch (error) {
+              stop.disabled = false;
+              showInfoDialog(error instanceof Error ? error.message : 'The materialization task could not be stopped.', {
+                title: 'Stop materialization failed', tone: 'error',
+              });
+            }
+          });
+          progressRow?.append(stop);
+        }
+        stop.dataset.jobLabel = materializationJobLabel(job);
+        stop.dataset.taskId = job.id ? `auto-fields:${job.id}` : `auto-fields-state:${job.workspace_id}`;
+        stop.dataset.stopUrl = `/api/background-tasks/${job.workspace_id}/stop`;
+        stop.disabled = Boolean(job.cancel_requested);
+      } else {
+        existingStop?.remove();
+      }
+    });
+    progressJobList.querySelectorAll('[data-materialization-job-key]').forEach((article) => {
+      if (!retainedKeys.has(article.dataset.materializationJobKey || '')) article.remove();
     });
   };
   const refreshMaterializationProgress = async () => {
@@ -346,7 +370,7 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
   window.addEventListener('auto-calculated-field-job-status', refreshMaterializationProgress);
   let dimensions = [];
   try { dimensions = JSON.parse(host.dataset.calculatedDimensions || '[]'); } catch (_error) { dimensions = []; }
-  const saveDimensions = async (next, rename = null) => {
+  const saveDimensions = async (next, rename = null, showNotice = true) => {
     const response = await fetch(host.dataset.saveUrl, {
       method: 'PUT', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({dimensions: next, renames: rename ? [rename] : []}),
@@ -354,7 +378,7 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.detail || 'Unable to save auto-calculated fields.');
     dimensions = payload.dimensions || next;
-    monitorAutoCalculatedFieldJob(payload.materialization_status_url, payload.notice);
+    monitorAutoCalculatedFieldJob(payload.materialization_status_url, showNotice ? payload.notice : '');
     refreshMaterializationProgress();
     return payload;
   };
@@ -381,15 +405,27 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
       });
     }
   });
-  manage?.addEventListener('click', () => {
-    const overlay = document.createElement('div'); overlay.className = 'confirm-overlay';
+  manage?.addEventListener('click', async () => {
+    try {
+      const response = await fetch(host.dataset.saveUrl, {credentials: 'same-origin', cache: 'no-store'});
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || 'Unable to load auto-calculated fields.');
+      dimensions = Array.isArray(payload.dimensions) ? payload.dimensions : [];
+      host.dataset.calculatedDimensions = JSON.stringify(dimensions);
+    } catch (error) {
+      showInfoDialog(error instanceof Error ? error.message : 'Unable to load auto-calculated fields.', {
+        title: 'Auto-calculated Fields', tone: 'error',
+      });
+      return;
+    }
+    const overlay = document.createElement('div'); overlay.className = 'confirm-overlay calculated-dimensions-overlay';
     const panel = document.createElement('section'); panel.className = 'confirm-panel calculated-dimensions-dialog';
     panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true');
     const header = document.createElement('div'); header.className = 'catalogue-chart-preview-header';
     const heading = document.createElement('div'); heading.innerHTML = '<p class="eyebrow">Active Workspace</p><h3>Auto-calculated Fields</h3>';
     const close = document.createElement('button'); close.type = 'button'; close.className = 'calculated-dimensions-close calculated-dimensions-icon-close report-chart-viewer-close'; close.textContent = '×'; close.setAttribute('aria-label', 'Close auto-calculated fields');
     header.append(heading, close);
-    const note = document.createElement('p'); note.className = 'form-note'; note.textContent = 'Rules run from top to bottom. Comparisons ignore case. Use | only for genuinely different source field names and semicolons for AND conditions.';
+    const note = document.createElement('p'); note.className = 'form-note'; note.textContent = 'Use ordered condition => result rules or one Tableau-style IF / THEN / ELSEIF / ELSE / END expression. Expressions may be nested, bracket source fields and quote text values. Comparisons ignore case.';
     const list = document.createElement('div'); list.className = 'calculated-dimensions-list';
     const add = document.createElement('button'); add.type = 'button'; add.textContent = '+ Add Auto-calculated Field';
     const managerActions = document.createElement('div'); managerActions.className = 'calculated-dimensions-manager-actions';
@@ -413,13 +449,29 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
       )) return;
       finish();
     };
+    const returnToList = async (confirmDiscard = true) => {
+      if (form.hidden) return false;
+      if (confirmDiscard && hasUnsavedEditorChanges() && !await showConfirmDialog(
+        'This Auto-calculated Field has unsaved changes. Close without saving them?',
+        {title: 'Unsaved Auto-calculated Field', confirmLabel: 'Close', cancelLabel: 'Keep editing', tone: 'warning'},
+      )) return false;
+      form.hidden = true;
+      list.hidden = false;
+      restoreManagerActions();
+      render();
+      add.focus();
+      return true;
+    };
     const handleEscape = (event) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      void requestFinish();
+      if (form.hidden) void requestFinish(); else void returnToList();
     };
-    close.addEventListener('click', () => { void requestFinish(); }); panelClose.addEventListener('click', () => { void requestFinish(); });
+    close.addEventListener('click', () => { void requestFinish(); });
+    panelClose.addEventListener('click', () => {
+      if (form.hidden) void requestFinish(); else void returnToList();
+    });
     overlay.addEventListener('click', (event) => { if (event.target === overlay) void requestFinish(); });
     window.addEventListener('keydown', handleEscape, true);
     const restoreManagerActions = () => { managerActions.hidden = false; managerActions.append(add, panelClose); };
@@ -448,34 +500,43 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
       });
       sourceMenu.append(sourceSummary, sourceChoices); sourceMenu.addEventListener('change', updateSourceSummary); configureCalculatedDimensionSourceMenu(sourceMenu, overlay); updateSourceSummary(); sources.append(sourcesLabel, sourceMenu); form.append(sources);
       const rulesLabel = document.createElement('label'); rulesLabel.className = 'calculated-dimension-rules'; rulesLabel.textContent = 'Rules';
-      const rules = document.createElement('textarea'); rules.placeholder = 'Test_Result IN (Completed, Visible Completed) => Success';
-      rules.value = (current.rules || []).map((rule) => `${rule.when} => ${rule.value}`).join('\n'); rulesLabel.append(rules); form.append(rulesLabel);
+      const rules = document.createElement('textarea'); rules.placeholder = "Test_Result IN (Completed, Visible Completed) => Success\n\nor\n\nIF ([Mean Data Rate] < 1) THEN 'below1'\nELSE 'Above'\nEND";
+      rules.value = current.expression || (current.rules || []).map((rule) => `${rule.when} => ${rule.value}`).join('\n'); rulesLabel.append(rules); form.append(rulesLabel);
       const actions = document.createElement('div'); actions.className = 'confirm-actions calculated-dimension-rules';
       const save = document.createElement('button'); save.type = 'button'; save.textContent = 'Save and Materialize'; actions.append(panelClose, save); form.append(actions);
       save.addEventListener('click', async () => {
         try {
-          const parsedRules = rules.value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
+          const ruleText = rules.value.trim();
+          const isExpression = /^IF\b/i.test(ruleText);
+          const parsedRules = isExpression ? [] : ruleText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
             const separator = line.lastIndexOf('=>');
-            if (separator < 1) throw new Error(`Invalid rule '${line}'. Use condition => result.`);
+            if (separator < 1) throw new Error(`Invalid rule '${line}'. Use condition => result or a complete IF / THEN / END expression.`);
             return {when: line.slice(0, separator).trim(), value: line.slice(separator + 2).trim()};
           });
-          const dimension = {name: name.value.trim(), sources: Array.from(sources.querySelectorAll('input:checked')).map((item) => item.value), default: fallback.value, default_from: fallbackField.value.trim(), rules: parsedRules};
+          const dimension = {name: name.value.trim(), sources: Array.from(sources.querySelectorAll('input:checked')).map((item) => item.value), default: fallback.value, default_from: fallbackField.value.trim(), rules: parsedRules, expression: isExpression ? ruleText : ''};
           const next = [...dimensions]; if (index === null) next.push(dimension); else next[index] = dimension;
           const rename = index === null || current.name === dimension.name ? null : {from: current.name, to: dimension.name};
           const message = rename
-            ? `Renaming '${rename.from}' to '${rename.to}' will rebuild every applicable CDR table and update every Report Template that uses this field. Continue?`
+            ? `Renaming '${rename.from}' to '${rename.to}' will update every Report Template and Dashboard that uses this field, then rebuild every applicable CDR table. Continue?`
             : 'Saving will rebuild this auto-calculated field in every applicable CDR table. Continue?';
           if (!await showConfirmDialog(message, {title: 'Save and Materialize', confirmLabel: 'Save and Materialize', tone: 'warning'})) return;
           const originalLabel = save.textContent;
           save.disabled = true;
           save.setAttribute('aria-busy', 'true');
           save.textContent = 'Saving…';
+          showLoadingOverlay(
+            'Saving Auto-calculated Field',
+            rename
+              ? 'Saving the renamed field and updating its references in every Report Template and Dashboard. Materialization will continue in the background.'
+              : 'Saving the field definition. Materialization will continue in the background.',
+          );
           try {
-            await saveDimensions(next, rename);
-            form.hidden = true;
-            list.hidden = false;
-            restoreManagerActions();
-            render();
+            await saveDimensions(next, rename, false);
+            hideLoadingOverlay();
+            await returnToList(false);
+          } catch (error) {
+            hideLoadingOverlay();
+            throw error;
           } finally {
             save.disabled = false;
             save.removeAttribute('aria-busy');
@@ -495,11 +556,17 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
         (dimension.rules || []).forEach((rule, ruleIndex) => {
           const line = document.createElement('div');
           const number = document.createElement('strong'); number.textContent = `${ruleIndex + 1}.`;
-          const condition = document.createElement('code'); condition.textContent = rule.when;
+          const condition = document.createElement('code'); condition.textContent = rule.when || 'ELSE';
           const arrow = document.createElement('span'); arrow.textContent = '→';
           const result = document.createElement('b'); result.textContent = rule.value;
           line.append(number, condition, arrow, result); summary.append(line);
         });
+        if (dimension.expression) {
+          const expression = document.createElement('div'); expression.className = 'calculated-dimension-expression';
+          const expressionLabel = document.createElement('strong'); expressionLabel.textContent = 'IF expression';
+          const expressionText = document.createElement('pre'); expressionText.textContent = dimension.expression;
+          expression.append(expressionLabel, expressionText); summary.append(expression);
+        }
         if (dimension.default_from || dimension.default) {
           const fallbackLine = document.createElement('div'); fallbackLine.className = 'calculated-dimension-fallback';
           fallbackLine.textContent = `Fallback: ${dimension.default_from || dimension.default}`; summary.append(fallbackLine);
@@ -1804,7 +1871,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   };
   refreshCalculatedDimensionSuggestions();
 
-  const saveCalculatedDimensions = async (rename = null) => {
+  const saveCalculatedDimensions = async (rename = null, showNotice = true) => {
     const response = await fetch(editor.dataset.calculatedDimensionsUrl, {
       method: 'PUT', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({dimensions: calculatedDimensions, renames: rename ? [rename] : []}),
@@ -1813,12 +1880,49 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (!response.ok) throw new Error(payload.detail || 'Unable to save auto-calculated fields.');
     calculatedDimensions = Array.isArray(payload.dimensions) ? payload.dimensions : calculatedDimensions;
     refreshCalculatedDimensionSuggestions();
-    monitorAutoCalculatedFieldJob(payload.materialization_status_url, payload.notice);
+    monitorAutoCalculatedFieldJob(payload.materialization_status_url, showNotice ? payload.notice : '');
     return payload;
   };
 
-  const openCalculatedDimensionsManager = () => {
-    const overlay = document.createElement('div'); overlay.className = 'confirm-overlay';
+  const openCalculatedDimensionsManager = async () => {
+    try {
+      const response = await fetch(editor.dataset.calculatedDimensionsUrl, {credentials: 'same-origin', cache: 'no-store'});
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || 'Unable to load auto-calculated fields.');
+      calculatedDimensions = Array.isArray(payload.dimensions) ? payload.dimensions : [];
+      refreshCalculatedDimensionSuggestions();
+    } catch (error) {
+      showInfoDialog(error instanceof Error ? error.message : 'Unable to load auto-calculated fields.', {
+        title: 'Auto-calculated Fields', tone: 'error',
+      });
+      return;
+    }
+    let managerWindow = window;
+    try {
+      if (window.top !== window && window.top.location.origin === window.location.origin) managerWindow = window.top;
+    } catch (_error) { managerWindow = window; }
+    const managerDocument = managerWindow.document;
+    const managerConfirm = (...args) => (
+      typeof managerWindow.showConfirmDialog === 'function'
+        ? managerWindow.showConfirmDialog(...args)
+        : showConfirmDialog(...args)
+    );
+    const managerInfo = (...args) => (
+      typeof managerWindow.showInfoDialog === 'function'
+        ? managerWindow.showInfoDialog(...args)
+        : showInfoDialog(...args)
+    );
+    const managerShowLoading = (...args) => (
+      typeof managerWindow.showLoadingOverlay === 'function'
+        ? managerWindow.showLoadingOverlay(...args)
+        : showLoadingOverlay(...args)
+    );
+    const managerHideLoading = () => (
+      typeof managerWindow.hideLoadingOverlay === 'function'
+        ? managerWindow.hideLoadingOverlay()
+        : hideLoadingOverlay()
+    );
+    const overlay = document.createElement('div'); overlay.className = 'confirm-overlay calculated-dimensions-overlay';
     const panel = document.createElement('section'); panel.className = 'confirm-panel calculated-dimensions-dialog';
     panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true');
     const header = document.createElement('div'); header.className = 'catalogue-chart-preview-header';
@@ -1828,34 +1932,49 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     const close = document.createElement('button'); close.type = 'button'; close.className = 'calculated-dimensions-close calculated-dimensions-icon-close report-chart-viewer-close'; close.textContent = '×'; close.title = 'Close'; close.setAttribute('aria-label', 'Close auto-calculated fields');
     headingWrap.append(eyebrow, title); header.append(headingWrap, close);
     const note = document.createElement('p'); note.className = 'form-note';
-    note.textContent = 'Rules are evaluated from top to bottom. Comparisons ignore case. Use | only for genuinely different source field names and semicolons for AND conditions.';
+    note.textContent = 'Use ordered condition => result rules or one Tableau-style IF / THEN / ELSEIF / ELSE / END expression. Expressions may be nested, bracket source fields and quote text values. Comparisons ignore case.';
     const list = document.createElement('div'); list.className = 'calculated-dimensions-list';
     const add = document.createElement('button'); add.type = 'button'; add.textContent = '+ Add Auto-calculated Field';
     const managerActions = document.createElement('div'); managerActions.className = 'calculated-dimensions-manager-actions';
     const panelClose = document.createElement('button'); panelClose.type = 'button'; panelClose.className = 'calculated-dimensions-close'; panelClose.textContent = 'Close';
     managerActions.append(add, panelClose);
     const form = document.createElement('div'); form.className = 'calculated-dimension-editor'; form.hidden = true;
-    panel.append(header, note, list, managerActions, form); overlay.append(panel); document.body.append(overlay);
+    panel.append(header, note, list, managerActions, form); overlay.append(panel); managerDocument.body.append(overlay);
     let editingIndex = null, savedEditorState = '';
     const editorState = () => JSON.stringify(Array.from(form.querySelectorAll('input, textarea')).map((input) => ({
       type: input.type, value: input.value, checked: input.checked,
     })));
     const hasUnsavedEditorChanges = () => !form.hidden && editorState() !== savedEditorState;
     const finish = () => {
-      window.removeEventListener('keydown', handleEscape, true);
+      managerWindow.removeEventListener('keydown', handleEscape, true);
       overlay.remove();
     };
     const handleEscape = (event) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (!hasUnsavedEditorChanges()) finish();
+      if (form.hidden) finish(); else void returnToList();
     };
     close.addEventListener('click', finish);
-    panelClose.addEventListener('click', finish);
+    panelClose.addEventListener('click', () => {
+      if (form.hidden) finish(); else void returnToList();
+    });
     overlay.addEventListener('click', (event) => { if (event.target === overlay) finish(); });
-    window.addEventListener('keydown', handleEscape, true);
+    managerWindow.addEventListener('keydown', handleEscape, true);
     const restoreManagerActions = () => { managerActions.hidden = false; managerActions.append(add, panelClose); };
+    const returnToList = async (confirmDiscard = true) => {
+      if (form.hidden) return false;
+      if (confirmDiscard && hasUnsavedEditorChanges() && !await managerConfirm(
+        'This Auto-calculated Field has unsaved changes. Close without saving them?',
+        {title: 'Unsaved Auto-calculated Field', confirmLabel: 'Close', cancelLabel: 'Keep editing', tone: 'warning'},
+      )) return false;
+      form.hidden = true;
+      list.hidden = false;
+      restoreManagerActions();
+      renderList();
+      add.focus();
+      return true;
+    };
 
     const editDimension = (index = null) => {
       editingIndex = index;
@@ -1883,16 +2002,18 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       });
       sourceMenu.append(sourceSummary, sourceChoices); sourceMenu.addEventListener('change', updateSourceSummary); configureCalculatedDimensionSourceMenu(sourceMenu, overlay); updateSourceSummary(); sources.append(sourcesLabel, sourceMenu); form.append(sources);
       const rulesLabel = document.createElement('label'); rulesLabel.className = 'calculated-dimension-rules'; rulesLabel.textContent = 'Rules';
-      const rules = document.createElement('textarea'); rules.placeholder = 'Test_Result IN (Completed, Visible Completed) => Success';
-      rules.value = (current.rules || []).map((rule) => `${rule.when} => ${rule.value}`).join('\n'); rulesLabel.append(rules); form.append(rulesLabel);
+      const rules = document.createElement('textarea'); rules.placeholder = "Test_Result IN (Completed, Visible Completed) => Success\n\nor\n\nIF ([Mean Data Rate] < 1) THEN 'below1'\nELSE 'Above'\nEND";
+      rules.value = current.expression || (current.rules || []).map((rule) => `${rule.when} => ${rule.value}`).join('\n'); rulesLabel.append(rules); form.append(rulesLabel);
       const actions = document.createElement('div'); actions.className = 'confirm-actions calculated-dimension-rules';
       const save = document.createElement('button'); save.type = 'button'; save.textContent = 'Save and Materialize'; actions.append(panelClose, save); form.append(actions);
       save.addEventListener('click', async () => {
         const previous = calculatedDimensions;
         try {
-          const parsedRules = rules.value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
+          const ruleText = rules.value.trim();
+          const isExpression = /^IF\b/i.test(ruleText);
+          const parsedRules = isExpression ? [] : ruleText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
             const separator = line.lastIndexOf('=>');
-            if (separator < 1) throw new Error(`Invalid rule '${line}'. Use condition => result.`);
+            if (separator < 1) throw new Error(`Invalid rule '${line}'. Use condition => result or a complete IF / THEN / END expression.`);
             return {when: line.slice(0, separator).trim(), value: line.slice(separator + 2).trim()};
           });
           const dimension = {
@@ -1901,18 +2022,33 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
             default: defaultValue.value,
             default_from: defaultFrom.value.trim(),
             rules: parsedRules,
+            expression: isExpression ? ruleText : '',
           };
           const next = [...calculatedDimensions];
           if (editingIndex === null) next.push(dimension); else next[editingIndex] = dimension;
           const rename = editingIndex === null || current.name === dimension.name ? null : {from: current.name, to: dimension.name};
           const message = rename
-            ? `Renaming '${rename.from}' to '${rename.to}' will rebuild every applicable CDR table and update every Report Template that uses this field. Continue?`
+            ? `Renaming '${rename.from}' to '${rename.to}' will update every Report Template and Dashboard that uses this field, then rebuild every applicable CDR table. Continue?`
             : 'Saving will rebuild this auto-calculated field in every applicable CDR table. Continue?';
-          if (!await showConfirmDialog(message, {title: 'Save and Materialize', confirmLabel: 'Save and Materialize', tone: 'warning'})) return;
-          calculatedDimensions = next; await saveCalculatedDimensions(rename); form.hidden = true; list.hidden = false; restoreManagerActions(); renderList();
+          if (!await managerConfirm(message, {title: 'Save and Materialize', confirmLabel: 'Save and Materialize', tone: 'warning'})) return;
+          calculatedDimensions = next;
+          managerShowLoading(
+            'Saving Auto-calculated Field',
+            rename
+              ? 'Saving the renamed field and updating its references in every Report Template and Dashboard. Materialization will continue in the background.'
+              : 'Saving the field definition. Materialization will continue in the background.',
+          );
+          try {
+            await saveCalculatedDimensions(rename, false);
+            managerHideLoading();
+            await returnToList(false);
+          } catch (error) {
+            managerHideLoading();
+            throw error;
+          }
         } catch (error) {
           calculatedDimensions = previous;
-          showInfoDialog(error.message || 'Unable to save auto-calculated field.', {title: 'Auto-calculated Fields', tone: 'error'});
+          managerInfo(error.message || 'Unable to save auto-calculated field.', {title: 'Auto-calculated Fields', tone: 'error'});
         }
       });
       savedEditorState = editorState();
@@ -1935,11 +2071,17 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
         (dimension.rules || []).forEach((rule, ruleIndex) => {
           const line = document.createElement('div');
           const number = document.createElement('strong'); number.textContent = `${ruleIndex + 1}.`;
-          const condition = document.createElement('code'); condition.textContent = rule.when;
+          const condition = document.createElement('code'); condition.textContent = rule.when || 'ELSE';
           const arrow = document.createElement('span'); arrow.textContent = '→';
           const result = document.createElement('b'); result.textContent = rule.value;
           line.append(number, condition, arrow, result); summary.append(line);
         });
+        if (dimension.expression) {
+          const expression = document.createElement('div'); expression.className = 'calculated-dimension-expression';
+          const expressionLabel = document.createElement('strong'); expressionLabel.textContent = 'IF expression';
+          const expressionText = document.createElement('pre'); expressionText.textContent = dimension.expression;
+          expression.append(expressionLabel, expressionText); summary.append(expression);
+        }
         if (dimension.default_from || dimension.default) {
           const fallbackLine = document.createElement('div'); fallbackLine.className = 'calculated-dimension-fallback';
           fallbackLine.textContent = `Fallback: ${dimension.default_from || dimension.default}`; summary.append(fallbackLine);
@@ -1951,7 +2093,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
         const remove = createActionButton('−', 'delete', `Delete ${dimension.name}`, 'chart', 'catalogue-row-delete auto-calculated-field-remove'); delete remove.dataset.catalogueChartAction;
         edit.addEventListener('click', () => editDimension(index));
         duplicate.addEventListener('click', async () => {
-          if (!await showConfirmDialog(
+          if (!await managerConfirm(
             `Duplicate auto-calculated field '${dimension.name}' and materialize the copy in every applicable CDR table?`,
             {title: 'Duplicate Auto-calculated Field', confirmLabel: 'Duplicate and Materialize', tone: 'warning'},
           )) return;
@@ -1968,12 +2110,12 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
           } catch (error) {
             calculatedDimensions = previous;
             renderList();
-            showInfoDialog(error.message || 'Unable to duplicate auto-calculated field.', {title: 'Auto-calculated Fields', tone: 'error'});
+            managerInfo(error.message || 'Unable to duplicate auto-calculated field.', {title: 'Auto-calculated Fields', tone: 'error'});
           }
         });
         exportButton.addEventListener('click', () => exportDimension(index));
         remove.addEventListener('click', async () => {
-          if (!await showConfirmDialog(`Delete auto-calculated field '${dimension.name}'?`, {title: 'Delete Auto-calculated Field', confirmLabel: 'Delete', tone: 'danger'})) return;
+          if (!await managerConfirm(`Delete auto-calculated field '${dimension.name}'?`, {title: 'Delete Auto-calculated Field', confirmLabel: 'Delete', tone: 'danger'})) return;
           const previous = calculatedDimensions;
           const deletedName = String(dimension.name || '').toLocaleLowerCase();
           try {
@@ -1989,7 +2131,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
           } catch (error) {
             calculatedDimensions = previous;
             renderList();
-            showInfoDialog(error.message || 'Unable to delete auto-calculated field.', {title: 'Auto-calculated Fields', tone: 'error'});
+            managerInfo(error.message || 'Unable to delete auto-calculated field.', {title: 'Auto-calculated Fields', tone: 'error'});
           }
         });
         actions.append(edit, duplicate, exportButton, remove); item.append(identity, summary, actions); list.append(item);
@@ -1998,8 +2140,8 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     add.addEventListener('click', () => editDimension());
     renderList(); close.focus();
   };
-  editor.querySelector('[data-manage-calculated-dimensions]')?.addEventListener('click', openCalculatedDimensionsManager);
-  editor.querySelector('[data-catalogue-chart-preview-manage-dimensions]')?.addEventListener('click', openCalculatedDimensionsManager);
+  editor.querySelector('[data-manage-calculated-dimensions]')?.addEventListener('click', () => { void openCalculatedDimensionsManager(); });
+  editor.querySelector('[data-catalogue-chart-preview-manage-dimensions]')?.addEventListener('click', () => { void openCalculatedDimensionsManager(); });
   let activeCell = null;
   const catalogueHeaders = Array.from(table.querySelectorAll('thead th[data-catalogue-field]'))
     .map((cell) => cell.dataset.catalogueField);

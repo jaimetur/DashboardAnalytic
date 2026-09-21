@@ -159,6 +159,14 @@ def test_catalogue_editor_offers_result_group_for_every_cdr_source(client) -> No
     assert all('Result Group' in values for values in columns.values())
 
 
+def test_catalogue_editor_offers_declarative_distribution_bucket_fields(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    columns = app_module.catalogue_editor_columns([], ())
+
+    assert {'Buckets', 'Rate Bucket'} <= set(columns['cdr-data'])
+
+
 def test_config_page_persists_runtime_overrides(client, monkeypatch) -> None:
     monkeypatch.setenv('DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER', 'dashboard-canvas')
     monkeypatch.setenv('IGNORE_EVENT_TIME_FILTERING', 'false')
@@ -225,6 +233,103 @@ def test_calculated_dimension_rules_ignore_case_and_compact_redundant_field_alia
     payload = calculated_dimensions_json(dimensions)[0]
     assert payload['default_from'] == 'Test_Name'
     assert payload['rules'][0]['when'] == 'Test_Name CONTAINS YOUTUBE'
+
+
+def test_calculated_dimensions_support_nested_tableau_if_expressions() -> None:
+    import pandas as pd
+    from src.modules.cdr_reporting import calculated_dimensions_json, materialize_calculated_dimensions, parse_calculated_dimensions
+
+    expression = '''IF ([Test Name] = "FDTT UDP UL ST") THEN
+  IF ([Mean Data Rate] < 1) THEN 'below1'
+  ELSEIF ([Mean Data Rate] < 3) THEN 'below3'
+  ELSEIF ([Mean Data Rate] < 10) THEN 'below10'
+  ELSEIF ([Mean Data Rate] < 20) THEN 'below20'
+  ELSEIF ([Mean Data Rate] > 20) THEN 'Above'
+  END
+ELSEIF ([Test Name] = "FDTT http DL MT") THEN
+  IF ([Mean Data Rate] < 2) THEN 'below2'
+  ELSEIF ([Mean Data Rate] < 5) THEN 'below5'
+  ELSEIF ([Mean Data Rate] < 20) THEN 'below20'
+  ELSEIF ([Mean Data Rate] < 100) THEN 'below100'
+  ELSEIF ([Mean Data Rate] > 100) THEN 'Above'
+  END
+ELSE 'Not applicable'
+END'''
+    dimensions = parse_calculated_dimensions([{
+        'name': 'Rate Group', 'sources': ['cdr-data'], 'expression': expression,
+    }])
+    frame = materialize_calculated_dimensions(pd.DataFrame({
+        'Test Name': [
+            'FDTT UDP UL ST', 'FDTT UDP UL ST', 'FDTT UDP UL ST',
+            'FDTT http DL MT', 'FDTT http DL MT', 'Other',
+        ],
+        'Mean Data Rate': [0.5, 20, 20.1, 2, 101, 50],
+    }), dimensions, 'cdr-data')
+
+    values = frame['Rate Group'].tolist()
+    assert values[:1] == ['below1']
+    assert pd.isna(values[1])
+    assert values[2:] == ['Above', 'below5', 'Above', 'Not applicable']
+    serialized = calculated_dimensions_json(dimensions)[0]
+    assert serialized['expression'] == expression
+    assert {rule['value'] for rule in serialized['rules']} >= {'below1', 'below100', 'Above', 'Not applicable'}
+
+
+def test_nested_if_consumes_matching_outer_branch_before_outer_elseif() -> None:
+    import pandas as pd
+    from src.modules.cdr_reporting import materialize_calculated_dimensions, parse_calculated_dimensions
+
+    dimensions = parse_calculated_dimensions([{
+        'name': 'Decision', 'sources': ['cdr-data'], 'default': 'Fallback',
+        'expression': '''IF ([Score] > 0) THEN
+  IF ([Kind] = "accepted") THEN 'First branch'
+  END
+ELSEIF ([Score] > -1) THEN 'Second branch'
+ELSE 'Negative'
+END''',
+    }])
+    frame = materialize_calculated_dimensions(pd.DataFrame({
+        'Score': [1, 1, 0, -1],
+        'Kind': ['accepted', 'other', 'other', 'other'],
+    }), dimensions, 'cdr-data')
+
+    assert frame['Decision'].tolist() == ['First branch', 'Fallback', 'Second branch', 'Negative']
+
+
+def test_incremental_auto_field_materialization_compiles_tableau_if_expression(tmp_path: Path) -> None:
+    import src.DashboardAnalytic as app_module
+    from src.modules.repository import Repository
+
+    repository = Repository(tmp_path / 'if-expression.db')
+    repository.initialize()
+    with repository.connection() as connection:
+        connection.execute('CREATE TABLE dataset_rows_1 (Test_Name TEXT, Mean_Data_Rate REAL)')
+        connection.executemany('INSERT INTO dataset_rows_1 VALUES (?, ?)', [
+            ('FDTT UDP UL ST', 0.5),
+            ('FDTT UDP UL ST', 20),
+            ('FDTT http DL MT', 4),
+            ('Other', 50),
+        ])
+    dimensions = app_module.parse_calculated_dimensions([{
+        'name': 'Rate Group', 'sources': ['cdr-data'], 'default': 'Unclassified',
+        'expression': '''IF ([Test_Name] = "FDTT UDP UL ST") THEN
+  IF ([Mean_Data_Rate] < 1) THEN 'below1'
+  ELSEIF ([Mean_Data_Rate] > 20) THEN 'Above'
+  END
+ELSEIF ([Test_Name] = "FDTT http DL MT") THEN
+  IF ([Mean_Data_Rate] < 5) THEN 'below5'
+  ELSE 'Above'
+  END
+END''',
+    }])
+
+    app_module._incremental_auto_field_table_update(
+        repository, 'dataset_rows_1', 'cdr-data', (), dimensions, {},
+    )
+
+    with repository.connection() as connection:
+        values = [row['Rate Group'] for row in connection.execute('SELECT "Rate Group" FROM dataset_rows_1 ORDER BY rowid')]
+    assert values == ['below1', 'Unclassified', 'below5', 'Unclassified']
 
 
 def test_incremental_auto_field_materialization_updates_columns_in_place(tmp_path: Path) -> None:
@@ -302,6 +407,45 @@ def test_incremental_auto_fields_preserve_ordered_dependencies(tmp_path: Path) -
             'SELECT Family, Category FROM dataset_rows_1 ORDER BY rowid',
         )]
     assert values == [('Video', 'Streaming'), ('Other', 'General')]
+
+
+def test_incremental_auto_field_materialization_yields_between_write_batches(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    import src.DashboardAnalytic as app_module
+    from src.modules.repository import Repository
+
+    repository = Repository(tmp_path / 'batched-auto-fields.db')
+    repository.initialize()
+    with repository.connection() as connection:
+        connection.execute('CREATE TABLE dataset_rows_1 (Test_Name TEXT)')
+        connection.executemany(
+            'INSERT INTO dataset_rows_1 VALUES (?)',
+            [(f'test-{index}',) for index in range(7)],
+        )
+    dimensions = app_module.parse_calculated_dimensions([{
+        'name': 'Family', 'sources': ['cdr-data'], 'default': 'Other',
+        'rules': [{'when': 'Test_Name CONTAINS test', 'value': 'Matched'}],
+    }])
+    monkeypatch.setattr(app_module, 'AUTO_FIELD_UPDATE_BATCH_SIZE', 2)
+    checkpoints: list[int] = []
+
+    def checkpoint() -> None:
+        checkpoints.append(len(checkpoints) + 1)
+        if len(checkpoints) == 2:
+            repository.set_workspace_state('foreground_save', 'completed')
+
+    app_module._incremental_auto_field_table_update(
+        repository, 'dataset_rows_1', 'cdr-data', (), dimensions, {},
+        checkpoint=checkpoint,
+    )
+
+    assert len(checkpoints) >= 5
+    assert repository.get_workspace_state('foreground_save') == 'completed'
+    with repository.connection() as connection:
+        assert connection.execute(
+            'SELECT COUNT(*) FROM dataset_rows_1 WHERE Family = ?', ('Matched',),
+        ).fetchone()[0] == 7
 
 
 def test_incremental_auto_fields_use_fallback_when_rule_columns_are_missing(tmp_path: Path) -> None:
@@ -587,6 +731,13 @@ def test_workspace_calculated_dimensions_panel_exports_and_imports_json(client) 
     assert 'data-auto-calculated-field-rematerialize' not in calculated_panel
     assert calculated_panel.index('data-workspace-manage-calculated-dimensions') < calculated_panel.index('workspace-calculated-dimensions-export-link')
 
+    current_definitions = client.get('/api/workspace/calculated-dimensions')
+    assert current_definitions.status_code == 200
+    assert current_definitions.headers['cache-control'] == 'no-store'
+    assert current_definitions.json()['dimensions'] == app_module.calculated_dimensions_json(
+        app_module.load_workspace_calculated_dimensions()
+    )
+
     status = client.get('/api/workspace/auto-calculated-fields/materialization')
     assert status.status_code == 200
     assert status.json()['status'] in {'idle', 'queued', 'processing', 'ready'}
@@ -686,10 +837,18 @@ def test_combined_table_progress_matches_its_active_recreation_job(client, monke
     assert processing['recreation_progress'] == 41
 
 
-def test_renaming_calculated_dimension_rebuilds_references_in_workspace_templates(client) -> None:
+def test_renaming_calculated_dimension_rebuilds_references_in_templates_and_dashboards(client) -> None:
     import src.DashboardAnalytic as app_module
 
     login(client)
+    app_module.repository.set_workspace_state(app_module.DASHBOARD_STATE_KEY, json.dumps({
+        'dashboard-1': {
+            'name': 'Calculated fields dashboard', 'template': 'Baseline Q4',
+            'filters': {'Test Family': ['Video'], 'Operator': ['EE']},
+            'custom_fields': ['Test Family', 'Call Family'],
+            'hidden_filters': ['Test Family'],
+        },
+    }))
     dimensions = app_module.calculated_dimensions_json(app_module.load_workspace_calculated_dimensions())
     renamed = next(item for item in dimensions if item['name'] == 'Test Family')
     renamed['name'] = 'Test Classification'
@@ -703,11 +862,16 @@ def test_renaming_calculated_dimension_rebuilds_references_in_workspace_template
     assert response.json()['materialization_job']
     assert response.json()['materialization_status_url'].startswith('/api/workspace/auto-calculated-fields/materialization/')
     assert response.json()['renamed_templates'] >= 1
+    assert response.json()['renamed_dashboards'] == 1
     assert any(item.name == 'Test Classification' for item in app_module.load_workspace_calculated_dimensions())
     template = next(item for item in app_module.report_catalogue_options('nsa') if item['active'])
     template_text = bytes(template['content']).decode('utf-8')
     assert 'Test Classification' in template_text
     assert 'Test Family' not in template_text
+    dashboards = json.loads(app_module.repository.get_workspace_state(app_module.DASHBOARD_STATE_KEY) or '{}')
+    assert dashboards['dashboard-1']['custom_fields'] == ['Test Classification', 'Call Family']
+    assert dashboards['dashboard-1']['hidden_filters'] == ['Test Classification']
+    assert dashboards['dashboard-1']['filters'] == {'Test Classification': ['Video'], 'Operator': ['EE']}
 
 
 def test_reporting_deletion_requires_admin(client) -> None:
@@ -6078,6 +6242,17 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert 'data-catalogue-reenumerate' in embedded_editor.text
     assert 'Title and 1 column + Comments' in embedded_editor.text
     assert 'catalogue-editor-catalogue-picker" aria-label="Workspace templates" hidden' in embedded_editor.text
+
+    app_script = (app_module.PROJECT_ROOT / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
+    assert "fetch(editor.dataset.calculatedDimensionsUrl, {credentials: 'same-origin', cache: 'no-store'})" in app_script
+    assert 'window.top.location.origin === window.location.origin' in app_script
+    assert 'managerDocument.body.append(overlay)' in app_script
+    assert "expressionLabel.textContent = 'IF expression'" in app_script
+    assert app_script.count('await returnToList(false);') == 2
+    assert app_script.count('else void returnToList();') >= 2
+    assert 'data-materialization-job-key' in app_script
+    assert 'progressJobList.replaceChildren();' not in app_script
+    assert 'Math.max(previousPercent, computedPercent)' in app_script
 
     copy_options = client.get('/api/admin/report-templates/copy-options')
     assert copy_options.status_code == 200

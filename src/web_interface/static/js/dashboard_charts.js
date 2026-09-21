@@ -537,6 +537,12 @@
       buckets.forEach((bucket, bucketIndex) => {
         const ratio = Number(ratios[bucketIndex] || 0), segmentHeight = ratio * height, y = top + height - running - segmentHeight;
         context.fillStyle = bucket.colour; context.fillRect(x, y, barWidth, segmentHeight);
+        const label = percent(ratio); font(context, 18, true);
+        const labelWidth = textWidth(context, label);
+        if (labelWidth + 12 <= barWidth && segmentHeight >= 28) {
+          context.fillStyle = '#FFFFFF'; context.textAlign = 'center'; context.textBaseline = 'middle';
+          context.fillText(label, x + barWidth / 2, y + segmentHeight / 2); context.textBaseline = 'top';
+        }
         if (segmentHeight > 0) pushRectangleHit(state, transform, {x, y, width: barWidth, height: segmentHeight}, {label: displayKey(key), series: bucket.name, value: tooltipPercent(ratio)});
         running += segmentHeight;
       });

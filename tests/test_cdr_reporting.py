@@ -16,7 +16,7 @@ from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _draw_chart_legend, _draw_inside_bar_label, _draw_top_column_group_separators, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_caption_spans, _hierarchy_group_colours, _hierarchy_spans, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_map, _render_mean_column, _render_status_100, _render_table, _resolved_legend_items, _series_colours, _status_chart_categories, assign_cdr_vendors, catalog_chart_hover_targets, catalog_chart_payload, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, load_catalog_csv, normalise_operator_aliases, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_kpi_expression, parse_legend_position, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _draw_chart_legend, _draw_inside_bar_label, _draw_top_column_group_separators, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_caption_spans, _hierarchy_group_colours, _hierarchy_spans, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_map, _render_mean_column, _render_stacked_distribution, _render_status_100, _render_table, _resolved_legend_items, _series_colours, _status_chart_categories, assign_cdr_vendors, catalog_chart_hover_targets, catalog_chart_payload, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, load_catalog_csv, normalise_operator_aliases, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_kpi_expression, parse_legend_position, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
 
 
 def test_kpi_expression_supports_explicit_aggregation_aliases() -> None:
@@ -917,6 +917,25 @@ def test_distribution_inclusive_upper_bound_buckets_are_supported() -> None:
         'Above', 'below20', 'below10', 'below3', 'below1',
     ]
     assert model['cells'] == [pytest.approx([.2, .2, .2, .2, .2])]
+
+
+def test_static_distribution_draws_horizontal_white_percentage_labels_inside_segments() -> None:
+    frame = pd.DataFrame({
+        'Operator': ['EE'] * 10,
+        'Campaign': ['2026-Q2'] * 10,
+        '__catalog_stack': ['Above'] * 8 + ['below100'] * 2,
+    })
+    frame.attrs['catalogue_distribution_buckets'] = [
+        'below2', 'below5', 'below20', 'below100', 'Above',
+    ]
+
+    with patch('src.modules.cdr_reporting._draw_inside_bar_label') as draw_label:
+        _render_stacked_distribution(
+            'Distribution', frame, 'Operator', 'Campaign', '__catalog_stack',
+        )
+
+    assert [item.args[2] for item in draw_label.call_args_list] == ['80.0%', '20.0%']
+    assert {item.kwargs['fill'] for item in draw_label.call_args_list} == {'#FFFFFF'}
 
 
 def test_interactive_mean_model_uses_reporting_aggregation_and_vendor_palette() -> None:

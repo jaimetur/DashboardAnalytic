@@ -189,7 +189,7 @@ Smart Orchestrator Logs is reserved in the input-type catalogue so existing work
 
 ### Auto-calculated Fields
 
-The **Auto-calculated Fields** panel follows Datasets in Workspace. Fields define a name, optional fallback and ordered rules, and select the applicable CDR types through **Available for**. Rule matching is case-insensitive.
+The **Auto-calculated Fields** panel follows Datasets in Workspace. Fields define a name, optional fallback and ordered rules, and select the applicable CDR types through **Available for**. Rule matching is case-insensitive. The Rules editor accepts either one `condition => result` rule per line or a Tableau-style `IF / THEN / ELSEIF / ELSE / END` expression. Expressions may be nested, use bracketed source fields such as `[Mean Data Rate]`, quote text values with single or double quotes and join conditions with `AND`. Branches retain normal decision-tree semantics: after an outer `IF` matches, later outer `ELSEIF` branches are not evaluated even when a nested block produces no result.
 
 Saving an edit, deleting a field, importing JSON or pressing the green rematerialization action in the **Materialization status** panel creates a background materialization job. Workspace remains usable while it runs. The panel shows progress, affected individual/combined table totals and completion or failure.
 
