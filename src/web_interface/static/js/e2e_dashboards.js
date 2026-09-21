@@ -2360,6 +2360,9 @@
   });
   const rebuildDashboardAfterTemplateSave = async () => {
     if (expandedChartMode === 'ppt') return;
+    const expandedChartIndex = !$('ds-chart-expanded-overlay').hidden && expandedChartMode === 'dashboard'
+      ? expandedChart?.index
+      : null;
     forgetPrepared();
     prepared = null;
     appliedFilterState = '';
@@ -2367,6 +2370,10 @@
     chartPayloads.clear();
     renderedChartPayloads.clear();
     await prepare();
+    if (Number.isInteger(expandedChartIndex) && !$('ds-chart-expanded-overlay').hidden) {
+      const refreshedChart = expandedCharts().find(chart => chart.index === expandedChartIndex);
+      if (refreshedChart) await openExpandedChart(refreshedChart, null, 'dashboard', {preserveFocus: true});
+    }
   };
   const closeTemplateEditor = async () => {
     const hasUnsavedChanges = templateEditorHasUnsavedChanges();
@@ -2433,13 +2440,13 @@
     } : definition;
     openTemplateEditor(expandedChart?.focus_row, sourceDefinition);
   });
-  function expandedChartOverlay(show) {
+  function expandedChartOverlay(show, {preserveFocus = false} = {}) {
     const overlay = $('ds-chart-expanded-overlay');
     if (show) {
       slidePreloadRequest += 1;
-      focusReturn.set('ds-chart-expanded-overlay', document.activeElement);
+      if (!preserveFocus) focusReturn.set('ds-chart-expanded-overlay', document.activeElement);
       overlay.hidden = false;
-      overlay.querySelector('[role=dialog]').focus();
+      if (!preserveFocus) overlay.querySelector('[role=dialog]').focus();
     } else {
       expandedChartRequest += 1;
       expandedChartPreloadRequest += 1;
@@ -2457,7 +2464,7 @@
   $('ds-chart-expanded-overlay').addEventListener('click', event => {
     if (event.target === event.currentTarget) expandedChartOverlay(false);
   });
-  async function openExpandedChart(chart, renderedPayload = null, mode = 'dashboard') {
+  async function openExpandedChart(chart, renderedPayload = null, mode = 'dashboard', {preserveFocus = false} = {}) {
     stopPresentation();
     const request = ++expandedChartRequest;
     const contextKey = mode === 'ppt' ? dashboardPptChartsJobId : prepared?.token;
@@ -2489,7 +2496,7 @@
     canvas.hidden = true;
     message.hidden = false;
     message.textContent = `Loading ${chart.title || 'chart'}…`;
-    expandedChartOverlay(true);
+    expandedChartOverlay(true, {preserveFocus});
     let payload;
     try {
       payload = renderedPayload || await loadChartPayload(chart);

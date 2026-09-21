@@ -295,15 +295,20 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .admin-stack [data-panel-state-key="admin:audit"] { order: 3; }
 .operator-mappings-panel .collapsible-panel-body { display: grid; gap: 1rem; }
 .operator-mappings-panel .lede, .operator-mappings-panel .form-note { margin: 0; }
-.operator-mappings-table { min-width: 720px; table-layout: fixed; }
-.operator-mappings-table th:first-child { width: 30%; }
+.operator-mappings-table { min-width: 820px; table-layout: fixed; }
+.operator-mappings-table th:first-child { width: 6rem; }
+.operator-mappings-table th:nth-child(2) { width: 24%; }
+.operator-mappings-table th:nth-child(4) { width: 6rem; }
 .operator-mappings-table th:last-child { width: 7rem; }
 .operator-mappings-table .operator-mapping-canonical, .operator-mappings-table .operator-mapping-aliases { width: 100%; box-sizing: border-box; }
 .operator-mappings-table .operator-mapping-aliases { min-height: 4.8rem; resize: vertical; }
 .operator-mappings-table .table-actions { justify-content: flex-end; }
-.operator-mapping-create { display: grid; grid-template-columns: minmax(180px, 0.7fr) minmax(280px, 1.3fr) auto; gap: 0.8rem; align-items: end; padding: 1rem; border: 1px solid rgba(139, 29, 36, 0.18); border-radius: 0.9rem; background: rgba(255, 255, 255, 0.72); }
+.operator-mapping-create { display: grid; grid-template-columns: minmax(180px, 0.7fr) minmax(280px, 1.3fr) 6rem auto; gap: 0.8rem; align-items: end; padding: 1rem; border: 1px solid rgba(139, 29, 36, 0.18); border-radius: 0.9rem; background: rgba(255, 255, 255, 0.72); }
 .operator-mapping-create label { display: grid; gap: 0.35rem; }
 .operator-mapping-create input, .operator-mapping-create textarea { width: 100%; box-sizing: border-box; }
+.mapping-order-actions { display: flex; gap: 0.3rem; }
+.mapping-order-actions form { margin: 0; }
+.mapping-color { width: 3.2rem; height: 2.4rem; padding: 0.15rem; border-radius: 0.45rem; cursor: pointer; }
 @media (max-width: 760px) { .operator-mapping-create { grid-template-columns: 1fr; } }
 .database-management-content { display: grid; gap: 1rem; }
 .database-management-content .lede { margin: 0; }

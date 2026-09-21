@@ -4381,7 +4381,7 @@ function setupWorkspaceUserPickers() {
 }
 
 const workspaceElementExportTargets = new Set([
-  'slides-templates', 'auto-calculated-fields', 'dashboards', 'operator-mappings',
+  'slides-templates', 'auto-calculated-fields', 'dashboards', 'operator-mappings', 'vendor-mappings',
 ]);
 
 function normalizeExportTargetSelection(select) {

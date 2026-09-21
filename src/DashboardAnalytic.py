@@ -4777,15 +4777,15 @@ DASHBOARD_STATE_KEY = 'e2e_dashboards_v2'
 
 
 def _operator_mappings_archive_payload(workspace: Workspace) -> bytes:
-    """Serialize complete canonical Operator groups for portable workspace operations."""
+    """Serialize complete Operator and Vendor chart mappings."""
     task_repository = Repository(
         workspace.database_path, repository.global_db_path, workspace_registry.registry_path,
     )
-    groups = task_repository.list_operator_mapping_groups()
     return json.dumps({
         'format': 'dashboard-analytic-operator-mappings',
-        'version': 1,
-        'mappings': groups,
+        'version': 2,
+        'mappings': task_repository.list_operator_mapping_groups(),
+        'vendor_mappings': task_repository.list_vendor_mapping_groups(),
     }, ensure_ascii=False, indent=2).encode('utf-8')
 
 
@@ -4810,7 +4810,7 @@ def _restore_workspace_operator_mappings(workspace: Workspace, payload: bytes) -
     if (
         not isinstance(document, dict)
         or document.get('format') != 'dashboard-analytic-operator-mappings'
-        or document.get('version') != 1
+        or document.get('version') not in {1, 2}
         or not isinstance(groups, list)
     ):
         raise ValueError(f'Operator Mappings for "{workspace.name}" are invalid.')
@@ -4818,6 +4818,11 @@ def _restore_workspace_operator_mappings(workspace: Workspace, payload: bytes) -
         workspace.database_path, repository.global_db_path, workspace_registry.registry_path,
     )
     task_repository.replace_operator_mapping_groups(groups)
+    if document.get('version') == 2:
+        vendor_groups = document.get('vendor_mappings')
+        if not isinstance(vendor_groups, list):
+            raise ValueError(f'Operator Mappings for "{workspace.name}" are invalid.')
+        task_repository.replace_vendor_mapping_groups(vendor_groups)
     if active_workspace and workspace.id == active_workspace.id:
         ANALYSIS_CACHE.clear()
         DATAFRAME_CACHE.clear()
@@ -6835,6 +6840,9 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
             'operator_mapping_groups': repository.list_operator_mapping_groups() if active_workspace else [],
             'operator_mapping_notice': request.query_params.get('operator_mapping_notice') or None,
             'operator_mapping_error': request.query_params.get('operator_mapping_error') or None,
+            'vendor_mapping_groups': repository.list_vendor_mapping_groups() if active_workspace else [],
+            'vendor_mapping_notice': request.query_params.get('vendor_mapping_notice') or None,
+            'vendor_mapping_error': request.query_params.get('vendor_mapping_error') or None,
             'recurring_backup': recurring_backup_settings(),
             'recurring_backup_status': recurring_backup_status(recurring_backup_settings()),
             'database_notice': database_notice,
@@ -9590,11 +9598,13 @@ def _combined_reporting_frame(
         source_sheet_keys = combined['source_sheet'].fillna('').astype(str).str.strip().str.casefold()
         combined = combined.loc[~source_sheet_keys.isin(CDR_IGNORED_SHEET_KEYS)].copy()
     try:
-        operator_mappings = task_repository.list_operator_mappings()
+        mapping_settings = task_repository.chart_mapping_settings()
+        operator_mappings = mapping_settings['operator_mappings']
     except sqlite3.OperationalError:
+        mapping_settings = {}
         operator_mappings = {}
     combined = apply_operator_mappings(combined, operator_mappings)
-    combined.attrs['operator_mappings'] = operator_mappings
+    combined.attrs.update(mapping_settings)
     combined = normalise_operator_aliases(combined)
     # Data tests may legitimately fall back to LTE or report NR SA at the
     # failure instant. Treating that sample RAT as a report-wide NSA/SA filter
@@ -10542,11 +10552,12 @@ def _chart_builder_context(payload: dict[str, Any]) -> tuple[pd.DataFrame, Catal
         ]
         if not frames:
             raise HTTPException(status_code=400, detail='The selected CDR Sources are not ready.')
-        operator_mappings = repository.list_operator_mappings()
+        mapping_settings = repository.chart_mapping_settings()
+        operator_mappings = mapping_settings['operator_mappings']
         result = apply_operator_mappings(
             pd.concat(frames, ignore_index=True, sort=False), operator_mappings,
         )
-        result.attrs['operator_mappings'] = operator_mappings
+        result.attrs.update(mapping_settings)
         return normalise_operator_aliases(result)
     return _bounded_preview_frame(CHART_PREVIEW_FRAME_CACHE, frame_key, load_frame, 4), entry
 
@@ -13505,6 +13516,7 @@ def save_admin_operator_mapping_group(
     original_canonical: str = Form(''),
     canonical_value: str = Form(...),
     aliases: str = Form(''),
+    color: str = Form(''),
     user: SessionUser = Depends(admin_user),
 ) -> Response:
     if not active_workspace:
@@ -13517,7 +13529,7 @@ def save_admin_operator_mapping_group(
     ]
     try:
         repository.replace_operator_mapping_group(
-            original_canonical or None, canonical_value, parsed_aliases,
+            original_canonical or None, canonical_value, parsed_aliases, color,
         )
     except (ValueError, sqlite3.IntegrityError) as exc:
         return RedirectResponse(
@@ -13534,6 +13546,42 @@ def save_admin_operator_mapping_group(
     }))
     return RedirectResponse(
         f'/admin?{urlencode({"operator_mapping_notice": "Operator Mapping saved."})}',
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post('/admin/vendor-mappings/save')
+def save_admin_vendor_mapping_group(
+    original_canonical: str = Form(''),
+    canonical_value: str = Form(...),
+    aliases: str = Form(''),
+    color: str = Form(''),
+    user: SessionUser = Depends(admin_user),
+) -> Response:
+    if not active_workspace:
+        return RedirectResponse(
+            f'/admin?{urlencode({"vendor_mapping_error": "Open a workspace before editing Vendor Mappings."})}',
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    parsed_aliases = [value.strip() for value in re.split(r'[\n,;]+', aliases) if value.strip()]
+    try:
+        repository.replace_vendor_mapping_group(
+            original_canonical or None, canonical_value, parsed_aliases, color,
+        )
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        return RedirectResponse(
+            f'/admin?{urlencode({"vendor_mapping_error": str(exc)})}',
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    ANALYSIS_CACHE.clear()
+    DATAFRAME_CACHE.clear()
+    _clear_chart_preview_caches()
+    repository.add_log(user.username, 'vendor_mapping_group_save', json.dumps({
+        'original_canonical': original_canonical, 'canonical': canonical_value.strip(),
+        'aliases': parsed_aliases, 'color': color,
+    }))
+    return RedirectResponse(
+        f'/admin?{urlencode({"vendor_mapping_notice": "Vendor Mapping saved."})}',
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -13561,6 +13609,62 @@ def delete_admin_operator_mapping_group(
     repository.add_log(user.username, 'operator_mapping_group_delete', canonical_value.strip())
     return RedirectResponse(
         f'/admin?{urlencode({"operator_mapping_notice": "Operator Mapping deleted."})}',
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post('/admin/vendor-mappings/delete')
+def delete_admin_vendor_mapping_group(
+    canonical_value: str = Form(...),
+    user: SessionUser = Depends(admin_user),
+) -> Response:
+    if not active_workspace:
+        return RedirectResponse(
+            f'/admin?{urlencode({"vendor_mapping_error": "Open a workspace before editing Vendor Mappings."})}',
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    try:
+        repository.delete_vendor_mapping_group(canonical_value)
+    except ValueError as exc:
+        return RedirectResponse(
+            f'/admin?{urlencode({"vendor_mapping_error": str(exc)})}',
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    ANALYSIS_CACHE.clear()
+    DATAFRAME_CACHE.clear()
+    _clear_chart_preview_caches()
+    repository.add_log(user.username, 'vendor_mapping_group_delete', canonical_value.strip())
+    return RedirectResponse(
+        f'/admin?{urlencode({"vendor_mapping_notice": "Vendor Mapping deleted."})}',
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post('/admin/{mapping_type}-mappings/move')
+def move_admin_chart_mapping_group(
+    mapping_type: str,
+    canonical_value: str = Form(...),
+    direction: str = Form(...),
+    user: SessionUser = Depends(admin_user),
+) -> Response:
+    if mapping_type not in {'operator', 'vendor'}:
+        raise HTTPException(status_code=404, detail='Unknown mapping type.')
+    try:
+        repository.move_chart_mapping_group(mapping_type, canonical_value, direction)
+    except ValueError as exc:
+        parameter = f'{mapping_type}_mapping_error'
+        return RedirectResponse(
+            f'/admin?{urlencode({parameter: str(exc)})}', status_code=status.HTTP_303_SEE_OTHER,
+        )
+    ANALYSIS_CACHE.clear()
+    DATAFRAME_CACHE.clear()
+    _clear_chart_preview_caches()
+    repository.add_log(user.username, f'{mapping_type}_mapping_group_move', json.dumps({
+        'canonical': canonical_value.strip(), 'direction': direction,
+    }))
+    parameter = f'{mapping_type}_mapping_notice'
+    return RedirectResponse(
+        f'/admin?{urlencode({parameter: f"{mapping_type.title()} Mapping order updated."})}',
         status_code=status.HTTP_303_SEE_OTHER,
     )
 

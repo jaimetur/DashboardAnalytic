@@ -219,6 +219,19 @@ CREATE TABLE IF NOT EXISTS operator_mappings (
     canonical_value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS vendor_mappings (
+    source_value TEXT PRIMARY KEY COLLATE NOCASE,
+    canonical_value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS chart_mapping_groups (
+    mapping_type TEXT NOT NULL CHECK(mapping_type IN ('operator', 'vendor')),
+    canonical_value TEXT NOT NULL COLLATE NOCASE,
+    position INTEGER NOT NULL DEFAULT 0,
+    color TEXT NOT NULL,
+    PRIMARY KEY (mapping_type, canonical_value)
+);
+
 CREATE TABLE IF NOT EXISTS generated_jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     job_type TEXT NOT NULL CHECK(job_type IN ('report', 'chart_set')),
@@ -458,6 +471,7 @@ class Repository:
             self._configure_database_journal(conn)
             self._migrate_calculated_dimensions_table(conn)
             conn.executescript(SCHEMA)
+            self._ensure_chart_mapping_groups(conn)
             self._ensure_dashboard_filter_selection_columns(conn)
             self._remove_legacy_dashboard_selection_rows(conn)
             # Functional indexes are created when reporting rows are imported
@@ -498,6 +512,47 @@ class Repository:
                         "INSERT INTO users (username, password_hash, role, active, created_at) VALUES (?, ?, ?, 1, ?)",
                         (username, hash_password(password), role, local_now_iso()),
                     )
+
+    @staticmethod
+    def _ensure_chart_mapping_groups(conn: sqlite3.Connection) -> None:
+        """Migrate the former hardcoded chart order and colours into workspace data."""
+        defaults = {
+            'operator': (
+                ('VF', '#E15759'), ('3', '#F28E2B'), ('EE', '#76B7B2'), ('O2', '#4E79A7'),
+            ),
+            'vendor': (
+                ('Ericsson', '#2E8B57'), ('Huawei', '#E15759'),
+                ('Samsung', '#7B3FB5'), ('NSN', '#4E79A7'),
+            ),
+        }
+        for mapping_type, entries in defaults.items():
+            alias_table = f'{mapping_type}_mappings'
+            for position, (canonical, color) in enumerate(entries):
+                conn.execute(
+                    'INSERT OR IGNORE INTO chart_mapping_groups '
+                    '(mapping_type, canonical_value, position, color) VALUES (?, ?, ?, ?)',
+                    (mapping_type, canonical, position, color),
+                )
+                conn.execute(
+                    f'INSERT OR IGNORE INTO {alias_table} (source_value, canonical_value) VALUES (?, ?)',
+                    (canonical, canonical),
+                )
+            existing = conn.execute(
+                f'SELECT DISTINCT canonical_value FROM {alias_table} ORDER BY canonical_value COLLATE NOCASE'
+            ).fetchall()
+            next_position = int(conn.execute(
+                'SELECT COALESCE(MAX(position), -1) + 1 FROM chart_mapping_groups WHERE mapping_type = ?',
+                (mapping_type,),
+            ).fetchone()[0])
+            for row in existing:
+                canonical = str(row['canonical_value']).strip()
+                inserted = conn.execute(
+                    'INSERT OR IGNORE INTO chart_mapping_groups '
+                    '(mapping_type, canonical_value, position, color) VALUES (?, ?, ?, ?)',
+                    (mapping_type, canonical, next_position, '#6F42C1'),
+                )
+                if inserted.rowcount:
+                    next_position += 1
             if not bootstrap_done:
                 conn.execute(
                     "INSERT INTO application_state (key, value) VALUES ('bootstrap_users_created', '1')"
@@ -1474,36 +1529,88 @@ class Repository:
         return [json.loads(str(row['definition_json'])) for row in rows]
 
     def list_operator_mappings(self) -> dict[str, str]:
+        return self._list_chart_mappings('operator')
+
+    def list_vendor_mappings(self) -> dict[str, str]:
+        return self._list_chart_mappings('vendor')
+
+    def _list_chart_mappings(self, mapping_type: str) -> dict[str, str]:
+        table = self._chart_mapping_table(mapping_type)
         with self.connection() as conn:
             rows = conn.execute(
-                'SELECT source_value, canonical_value FROM operator_mappings ORDER BY source_value COLLATE NOCASE'
+                f'SELECT source_value, canonical_value FROM {table} ORDER BY source_value COLLATE NOCASE'
             ).fetchall()
         return {str(row['source_value']).strip().casefold(): str(row['canonical_value']).strip() for row in rows}
 
     def list_operator_mapping_groups(self) -> list[dict[str, Any]]:
-        """Group source aliases by the canonical Operator shown in Admin."""
+        return self._list_chart_mapping_groups('operator')
+
+    def list_vendor_mapping_groups(self) -> list[dict[str, Any]]:
+        return self._list_chart_mapping_groups('vendor')
+
+    @staticmethod
+    def _chart_mapping_table(mapping_type: str) -> str:
+        if mapping_type not in {'operator', 'vendor'}:
+            raise ValueError('Unknown chart mapping type.')
+        return f'{mapping_type}_mappings'
+
+    def _list_chart_mapping_groups(self, mapping_type: str) -> list[dict[str, Any]]:
+        """Return editable aliases, colour and explicit chart order."""
+        table = self._chart_mapping_table(mapping_type)
         with self.connection() as conn:
             rows = conn.execute(
-                'SELECT source_value, canonical_value FROM operator_mappings '
-                'ORDER BY canonical_value COLLATE NOCASE, source_value COLLATE NOCASE'
+                f'SELECT m.source_value, m.canonical_value, g.position, g.color FROM {table} m '
+                'JOIN chart_mapping_groups g ON g.mapping_type = ? '
+                'AND g.canonical_value = m.canonical_value COLLATE NOCASE '
+                'ORDER BY g.position, g.canonical_value COLLATE NOCASE, m.source_value COLLATE NOCASE',
+                (mapping_type,),
             ).fetchall()
         grouped: dict[str, dict[str, Any]] = {}
         for row in rows:
             canonical = str(row['canonical_value']).strip()
             key = canonical.casefold()
-            group = grouped.setdefault(key, {'canonical': canonical, 'aliases': []})
+            group = grouped.setdefault(key, {
+                'canonical': canonical, 'aliases': [], 'position': int(row['position']),
+                'color': str(row['color']),
+            })
             source = str(row['source_value']).strip()
             if source.casefold() != key:
                 group['aliases'].append(source)
-        return sorted(grouped.values(), key=lambda group: str(group['canonical']).casefold())
+        return list(grouped.values())
+
+    def chart_mapping_settings(self) -> dict[str, Any]:
+        return {
+            'operator_mappings': self.list_operator_mappings(),
+            'operator_mapping_groups': self.list_operator_mapping_groups(),
+            'vendor_mappings': self.list_vendor_mappings(),
+            'vendor_mapping_groups': self.list_vendor_mapping_groups(),
+        }
 
     def replace_operator_mapping_group(
         self, original_canonical: str | None, canonical_value: str, aliases: Iterable[object],
+        color: str | None = None,
     ) -> None:
-        """Create or replace one canonical Operator and its complete alias set."""
+        self._replace_chart_mapping_group('operator', original_canonical, canonical_value, aliases, color)
+
+    def replace_vendor_mapping_group(
+        self, original_canonical: str | None, canonical_value: str, aliases: Iterable[object],
+        color: str | None = None,
+    ) -> None:
+        self._replace_chart_mapping_group('vendor', original_canonical, canonical_value, aliases, color)
+
+    def _replace_chart_mapping_group(
+        self, mapping_type: str, original_canonical: str | None, canonical_value: str,
+        aliases: Iterable[object], color: str | None,
+    ) -> None:
+        """Create or replace one canonical chart identity and its aliases."""
+        table = self._chart_mapping_table(mapping_type)
+        label = mapping_type.title()
         canonical = str(canonical_value).strip()
         if not canonical:
-            raise ValueError('Canonical Operator is required.')
+            raise ValueError(f'Canonical {label} is required.')
+        normalized_color = str(color or '').strip().upper()
+        if normalized_color and not re.fullmatch(r'#[0-9A-F]{6}', normalized_color):
+            raise ValueError('Colour must use the #RRGGBB format.')
         original = str(original_canonical or '').strip()
         desired_sources: dict[str, str] = {canonical.casefold(): canonical}
         for raw_alias in aliases:
@@ -1513,18 +1620,18 @@ class Repository:
 
         with self.connection() as conn:
             rows = conn.execute(
-                'SELECT source_value, canonical_value FROM operator_mappings'
+                f'SELECT source_value, canonical_value FROM {table}'
             ).fetchall()
             if original and not any(
                 str(row['canonical_value']).strip().casefold() == original.casefold() for row in rows
             ):
-                raise ValueError('The Operator Mapping group no longer exists.')
+                raise ValueError(f'The {label} Mapping group no longer exists.')
             if any(
                 str(row['canonical_value']).strip().casefold() == canonical.casefold()
                 and str(row['canonical_value']).strip().casefold() != original.casefold()
                 for row in rows
             ):
-                raise ValueError('Another Operator Mapping already uses this canonical label.')
+                raise ValueError(f'Another {label} Mapping already uses this canonical label.')
             conflicts = sorted({
                 str(row['source_value']).strip()
                 for row in rows
@@ -1533,63 +1640,155 @@ class Repository:
             }, key=str.casefold)
             if conflicts:
                 raise ValueError(
-                    f"These aliases already belong to another canonical Operator: {', '.join(conflicts)}."
+                    f"These aliases already belong to another canonical {label}: {', '.join(conflicts)}."
                 )
+            previous = conn.execute(
+                'SELECT position, color FROM chart_mapping_groups '
+                'WHERE mapping_type = ? AND canonical_value = ? COLLATE NOCASE',
+                (mapping_type, original or canonical),
+            ).fetchone()
+            position = int(previous['position']) if previous else int(conn.execute(
+                'SELECT COALESCE(MAX(position), -1) + 1 FROM chart_mapping_groups WHERE mapping_type = ?',
+                (mapping_type,),
+            ).fetchone()[0])
+            selected_color = normalized_color or (str(previous['color']) if previous else '#6F42C1')
             if original:
                 conn.execute(
-                    'DELETE FROM operator_mappings WHERE canonical_value = ? COLLATE NOCASE',
+                    f'DELETE FROM {table} WHERE canonical_value = ? COLLATE NOCASE',
                     (original,),
                 )
+                conn.execute(
+                    'DELETE FROM chart_mapping_groups WHERE mapping_type = ? AND canonical_value = ? COLLATE NOCASE',
+                    (mapping_type, original),
+                )
+            conn.execute(
+                'INSERT INTO chart_mapping_groups (mapping_type, canonical_value, position, color) VALUES (?, ?, ?, ?)',
+                (mapping_type, canonical, position, selected_color),
+            )
             conn.executemany(
-                'INSERT INTO operator_mappings (source_value, canonical_value) VALUES (?, ?)',
+                f'INSERT INTO {table} (source_value, canonical_value) VALUES (?, ?)',
                 [(source, canonical) for source in desired_sources.values()],
             )
 
     def delete_operator_mapping_group(self, canonical_value: str) -> None:
+        self._delete_chart_mapping_group('operator', canonical_value)
+
+    def delete_vendor_mapping_group(self, canonical_value: str) -> None:
+        self._delete_chart_mapping_group('vendor', canonical_value)
+
+    def _delete_chart_mapping_group(self, mapping_type: str, canonical_value: str) -> None:
+        table = self._chart_mapping_table(mapping_type)
         canonical = str(canonical_value).strip()
         if not canonical:
-            raise ValueError('Canonical Operator is required.')
+            raise ValueError(f'Canonical {mapping_type.title()} is required.')
         with self.connection() as conn:
             result = conn.execute(
-                'DELETE FROM operator_mappings WHERE canonical_value = ? COLLATE NOCASE',
+                f'DELETE FROM {table} WHERE canonical_value = ? COLLATE NOCASE',
                 (canonical,),
             )
             if result.rowcount < 1:
-                raise ValueError('The Operator Mapping group no longer exists.')
+                raise ValueError(f'The {mapping_type.title()} Mapping group no longer exists.')
+            conn.execute(
+                'DELETE FROM chart_mapping_groups WHERE mapping_type = ? AND canonical_value = ? COLLATE NOCASE',
+                (mapping_type, canonical),
+            )
+            self._compact_chart_mapping_positions(conn, mapping_type)
+
+    def move_chart_mapping_group(self, mapping_type: str, canonical_value: str, direction: str) -> None:
+        if direction not in {'up', 'down'}:
+            raise ValueError('Choose a valid mapping direction.')
+        canonical = str(canonical_value).strip()
+        with self.connection() as conn:
+            groups = conn.execute(
+                'SELECT canonical_value, position FROM chart_mapping_groups WHERE mapping_type = ? '
+                'ORDER BY position, canonical_value COLLATE NOCASE',
+                (mapping_type,),
+            ).fetchall()
+            index = next((i for i, row in enumerate(groups) if str(row['canonical_value']).casefold() == canonical.casefold()), None)
+            if index is None:
+                raise ValueError(f'The {mapping_type.title()} Mapping group no longer exists.')
+            target = index - 1 if direction == 'up' else index + 1
+            if target < 0 or target >= len(groups):
+                return
+            current_row, target_row = groups[index], groups[target]
+            temporary_position = max(int(row['position']) for row in groups) + 1
+            conn.execute(
+                'UPDATE chart_mapping_groups SET position = ? WHERE mapping_type = ? AND canonical_value = ?',
+                (temporary_position, mapping_type, current_row['canonical_value']),
+            )
+            conn.execute(
+                'UPDATE chart_mapping_groups SET position = ? WHERE mapping_type = ? AND canonical_value = ?',
+                (int(current_row['position']), mapping_type, target_row['canonical_value']),
+            )
+            conn.execute(
+                'UPDATE chart_mapping_groups SET position = ? WHERE mapping_type = ? AND canonical_value = ?',
+                (int(target_row['position']), mapping_type, current_row['canonical_value']),
+            )
+
+    @staticmethod
+    def _compact_chart_mapping_positions(conn: sqlite3.Connection, mapping_type: str) -> None:
+        rows = conn.execute(
+            'SELECT canonical_value FROM chart_mapping_groups WHERE mapping_type = ? '
+            'ORDER BY position, canonical_value COLLATE NOCASE',
+            (mapping_type,),
+        ).fetchall()
+        for position, row in enumerate(rows):
+            conn.execute(
+                'UPDATE chart_mapping_groups SET position = ? WHERE mapping_type = ? AND canonical_value = ?',
+                (position, mapping_type, row['canonical_value']),
+            )
 
     def replace_operator_mapping_groups(self, groups: Iterable[dict[str, Any]]) -> None:
-        """Replace every Operator Mapping group with one validated portable payload."""
+        self._replace_chart_mapping_groups('operator', groups)
+
+    def replace_vendor_mapping_groups(self, groups: Iterable[dict[str, Any]]) -> None:
+        self._replace_chart_mapping_groups('vendor', groups)
+
+    def _replace_chart_mapping_groups(self, mapping_type: str, groups: Iterable[dict[str, Any]]) -> None:
+        """Replace every mapping group with one validated portable payload."""
+        table = self._chart_mapping_table(mapping_type)
+        label = mapping_type.title()
         rows: list[tuple[str, str]] = []
+        group_rows: list[tuple[str, str, int, str]] = []
         assigned_sources: dict[str, str] = {}
         canonical_labels: set[str] = set()
-        for group in groups:
+        for position, group in enumerate(groups):
             if not isinstance(group, dict):
-                raise ValueError('Each Operator Mapping group must be an object.')
+                raise ValueError(f'Each {label} Mapping group must be an object.')
             canonical = str(group.get('canonical') or '').strip()
             if not canonical:
-                raise ValueError('Every Operator Mapping group requires a canonical label.')
+                raise ValueError(f'Every {label} Mapping group requires a canonical label.')
             canonical_key = canonical.casefold()
             if canonical_key in canonical_labels:
-                raise ValueError(f'Duplicate canonical Operator Mapping: {canonical}.')
+                raise ValueError(f'Duplicate canonical {label} Mapping: {canonical}.')
             canonical_labels.add(canonical_key)
             aliases = group.get('aliases')
             if not isinstance(aliases, list):
-                raise ValueError(f'Operator Mapping aliases for {canonical} must be a list.')
+                raise ValueError(f'{label} Mapping aliases for {canonical} must be a list.')
+            color = str(group.get('color') or '#6F42C1').strip().upper()
+            if not re.fullmatch(r'#[0-9A-F]{6}', color):
+                raise ValueError(f'Colour for {canonical} must use the #RRGGBB format.')
+            group_rows.append((mapping_type, canonical, position, color))
             for source in [canonical, *(str(value).strip() for value in aliases)]:
                 if not source:
                     continue
                 source_key = source.casefold()
                 previous = assigned_sources.get(source_key)
                 if previous and previous.casefold() != canonical_key:
-                    raise ValueError(f'Operator alias {source} belongs to more than one canonical label.')
+                    raise ValueError(f'{label} alias {source} belongs to more than one canonical label.')
                 if previous:
                     continue
                 assigned_sources[source_key] = canonical
                 rows.append((source, canonical))
         with self.connection() as conn:
-            conn.execute('DELETE FROM operator_mappings')
+            conn.execute(f'DELETE FROM {table}')
+            conn.execute('DELETE FROM chart_mapping_groups WHERE mapping_type = ?', (mapping_type,))
             conn.executemany(
-                'INSERT INTO operator_mappings (source_value, canonical_value) VALUES (?, ?)', rows,
+                'INSERT INTO chart_mapping_groups (mapping_type, canonical_value, position, color) '
+                'VALUES (?, ?, ?, ?)', group_rows,
+            )
+            conn.executemany(
+                f'INSERT INTO {table} (source_value, canonical_value) VALUES (?, ?)', rows,
             )
 
     def invalidate_cdr_normalization(self) -> None:

@@ -72,6 +72,9 @@ def test_saving_the_embedded_template_rebuilds_the_dashboard_immediately():
     script = (Path(__file__).parents[1] / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
 
     assert 'const rebuildDashboardAfterTemplateSave = async () =>' in script
+    assert "const expandedChartIndex = !$('ds-chart-expanded-overlay').hidden" in script
+    assert "await openExpandedChart(refreshedChart, null, 'dashboard', {preserveFocus: true});" in script
+    assert 'function expandedChartOverlay(show, {preserveFocus = false} = {})' in script
     assert "if (event.data?.type === 'dashboard-analytic:template-saved')" in script
     assert 'await rebuildDashboardAfterTemplateSave();' in script
     assert 'templateEditorSaved = false;' in script

@@ -1099,48 +1099,11 @@ REPORT_CHART_SPECS = {
     },
 }
 
-OPERATOR_COLORS = {
-    "vodafone": "#E15759", "vf": "#E15759",
-    "three": "#F28E2B", "3": "#F28E2B",
-    "o2": "#4E79A7", "telefonica": "#4E79A7",
-    "ee": "#76B7B2",
-}
-
-OPERATOR_COLOUR_VARIANTS = {
-    # Deliberately high-contrast shades: adjacent vendors must remain
-    # distinguishable when they belong to the same operator family.
-    "#E15759": ("#E15759", "#9B1D20", "#F58B8E", "#A03A6B"),
-    "#F28E2B": ("#F28E2B", "#A84B09", "#FFC145", "#C96500"),
-    "#4E79A7": ("#4E79A7", "#123B68", "#63A4E8", "#365A9B"),
-    "#76B7B2": ("#76B7B2", "#176B70", "#3CC4BD", "#368A8F"),
-}
-
 NEUTRAL_SERIES_COLORS = ("#6F42C1", "#2E8B57", "#A0612A", "#C23B8B", "#607D8B", "#B8860B")
 
 # Tableau palette used by the throughput-below calculation, ordered from the
 # lowest bucket through the successful Above bucket.
 THROUGHPUT_DISTRIBUTION_COLORS = ("#FF9DA7", "#F28E2B", "#E15759", "#76B7B2", "#4E79A7")
-
-VENDOR_COLOUR_VARIANTS = {
-    # A vendor remains recognisable in every chart. Different operators using
-    # the same vendor receive contrasting shades from that vendor's family.
-    "ericsson": ("#2E8B57", "#0D5A34", "#65B984", "#176B42"),
-    "huawei": ("#E15759", "#A61E2B", "#F58B8E", "#C43D4D"),
-    "samsung": ("#7B3FB5", "#54258A", "#A56BD5", "#8E4FC2"),
-    "nsn": ("#4E79A7", "#123B68", "#63A4E8", "#365A9B"),
-    "mixed": ("#D9A514", "#9A7000", "#F2CC5C", "#C28D00"),
-    "other": ("#D9A514", "#9A7000", "#F2CC5C", "#C28D00"),
-    "blank": ("#7A8791", "#58656F", "#A8B1B8", "#687580"),
-}
-
-# Charts use one operator sequence everywhere. Unknown operators remain after
-# the UK comparison operators and are ordered by their display label.
-OPERATOR_DISPLAY_ORDER = ("VF", "3", "EE", "O2")
-
-# A consistent vendor sequence makes Vendor Comparison charts comparable from
-# one operator to another. Unknown vendors remain after this canonical set.
-VENDOR_DISPLAY_ORDER = ("ericsson", "huawei", "samsung", "nsn")
-
 
 @dataclass(frozen=True)
 class ReportSelection:
@@ -1172,20 +1135,8 @@ def _normalise_operator_label(value: object, mappings: dict[str, str] | None = N
 
 
 def _operator_sort_label(value: object) -> str:
-    """Return a stable visual sort identity without changing displayed data."""
-    text = _normalise_operator(value)
-    key = re.sub(
-        r"[^a-z0-9]+",
-        "",
-        unicodedata.normalize("NFKD", text.casefold()).encode("ascii", "ignore").decode("ascii"),
-    )
-    if key in {"vodafone", "vodafoneuk", "vf", "vfuk"}:
-        return "VF"
-    if key.startswith("o2") or key in {"telefonica", "telefonicao2"}:
-        return "O2"
-    if key in {"ee", "eeuk", "everythingeverywhere"}:
-        return "EE"
-    return text
+    """Return the displayed operator identity; ordering comes from Admin."""
+    return str(value or '').strip()
 
 
 def _vendor_operator(value: object, mappings: dict[str, str] | None = None) -> str:
@@ -1195,16 +1146,20 @@ def _vendor_operator(value: object, mappings: dict[str, str] | None = None) -> s
     return _normalise_operator_label(operator or text, mappings)
 
 
-def _normalise_vendor(value: object, mappings: dict[str, str] | None = None) -> str:
-    """Normalise only an ``Operator_Vendor`` label's operator prefix.
-
-    The suffix is a vendor value and is never transformed. With no Admin
-    mapping, this deliberately returns the original label unchanged.
-    """
+def _normalise_vendor(
+    value: object,
+    operator_mappings: dict[str, str] | None = None,
+    vendor_mappings: dict[str, str] | None = None,
+) -> str:
+    """Normalise both halves of an ``Operator_Vendor`` label from Admin data."""
     text = str(value or "").strip()
     operator, separator, vendor = text.partition("_")
-    normalized_operator = _normalise_operator_label(operator or text, mappings)
-    return f"{normalized_operator}_{vendor}" if separator else normalized_operator
+    if separator:
+        normalized_operator = _normalise_operator_label(operator, operator_mappings)
+        normalized_vendor = _normalise_operator_label(vendor, vendor_mappings)
+        return f"{normalized_operator}_{normalized_vendor}"
+    vendor_label = _normalise_operator_label(text, vendor_mappings)
+    return vendor_label if vendor_label != text else _normalise_operator_label(text, operator_mappings)
 
 
 def normalise_operator_aliases(frame: pd.DataFrame, mappings: dict[str, str] | None = None) -> pd.DataFrame:
@@ -1216,6 +1171,10 @@ def normalise_operator_aliases(frame: pd.DataFrame, mappings: dict[str, str] | N
     result = frame.copy()
     source_mappings = mappings if mappings is not None else frame.attrs.get('operator_mappings', {})
     configured = {str(key).strip().casefold(): str(value).strip() for key, value in source_mappings.items()}
+    vendor_mappings = {
+        str(key).strip().casefold(): str(value).strip()
+        for key, value in frame.attrs.get('vendor_mappings', {}).items()
+    }
     def mapped(value: object) -> object:
         if pd.isna(value) or not str(value).strip():
             return value
@@ -1223,15 +1182,18 @@ def normalise_operator_aliases(frame: pd.DataFrame, mappings: dict[str, str] | N
     for column in result.columns:
         if _normalise_catalog_name(str(column)) == "operator":
             result[column] = result[column].map(mapped)
-    vendor_column = _first_existing(result, ["Vendor", "vendor"])
-    if vendor_column:
+    for vendor_column in [
+        column for column in result.columns
+        if _normalise_catalog_name(str(column)) in {"vendor", "vendoronly", "operatorvendor"}
+    ]:
         def mapped_vendor(value: object) -> object:
             if pd.isna(value) or not str(value).strip():
                 return value
-            return _normalise_vendor(value, configured)
+            return _normalise_vendor(value, configured, vendor_mappings)
         result[vendor_column] = result[vendor_column].map(mapped_vendor)
     result.attrs['operator_aliases_normalized'] = True
     result.attrs['operator_mappings'] = configured
+    result.attrs['vendor_mappings'] = vendor_mappings
     return result
 
 
@@ -2283,16 +2245,14 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
     def vendor_sort_key(value: object) -> tuple[int, str, int, str]:
         if split_vendor_hierarchy:
             normalized_vendor = _vendor_label(value).casefold()
-            vendor_rank = next(
-                (index for index, name in enumerate(VENDOR_DISPLAY_ORDER) if name in normalized_vendor),
-                len(VENDOR_DISPLAY_ORDER),
-            )
+            vendor_group = _mapping_group(normalized_vendor, 'vendor', frame)
+            vendor_rank = int(vendor_group.get('position', 0)) if vendor_group else len(_mapping_groups(frame, 'vendor'))
             return 0, "", vendor_rank, normalized_vendor
-        return _vendor_display_sort_key(value)
+        return _vendor_display_sort_key(value, frame)
 
     operator_columns = [
         column for column, dimension in hierarchy
-        if _normalise_catalog_name(dimension) == "operator"
+        if _normalise_catalog_name(dimension) in {"operator", "subscriber"}
     ]
     needs_campaign_sort = any(
         (observed := frame[column].drop_duplicates().tolist()) != sorted(observed, key=_campaign_sort_key)
@@ -2303,7 +2263,9 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
         for column in vendor_columns
     ) if not frame.empty else False
     needs_operator_sort = any(
-        (observed := frame[column].drop_duplicates().tolist()) != sorted(observed, key=_operator_display_sort_key)
+        (observed := frame[column].drop_duplicates().tolist()) != sorted(
+            observed, key=lambda value: _operator_display_sort_key(value, frame),
+        )
         for column in operator_columns
     ) if not frame.empty else False
     if needs_campaign_sort or needs_vendor_sort or needs_operator_sort:
@@ -2315,8 +2277,8 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
                 values = sorted(values, key=_campaign_sort_key)
             elif normalized_dimension == "vendor":
                 values = sorted(values, key=vendor_sort_key)
-            elif normalized_dimension == "operator":
-                values = sorted(values, key=_operator_display_sort_key)
+            elif normalized_dimension in {"operator", "subscriber"}:
+                values = sorted(values, key=lambda value: _operator_display_sort_key(value, frame))
             configured_dimension_values[column] = list(values)
             ranks = {value: rank for rank, value in enumerate(values)}
             sort_column = f"__catalog_sort_{index}"
@@ -2767,18 +2729,30 @@ def _metric_column(frame: pd.DataFrame, spec: dict) -> str | None:
     return None
 
 
-def _operator_colour(label: object) -> str | None:
-    """Return the stable palette colour for a recognised UK operator/vendor."""
-    normalized = str(label).strip().casefold()
-    if "vodafone" in normalized or re.search(r"(?:^|[^a-z0-9])vf(?:$|[^a-z0-9])", normalized):
-        return OPERATOR_COLORS["vodafone"]
-    if "three" in normalized or re.search(r"(?:^|[^a-z0-9])3(?:$|[^a-z0-9])", normalized):
-        return OPERATOR_COLORS["three"]
-    if "telefonica" in normalized or re.search(r"(?:^|[^a-z0-9])o2(?:$|[^a-z0-9])", normalized):
-        return OPERATOR_COLORS["o2"]
-    if re.search(r"(?:^|[^a-z0-9])ee(?:$|[^a-z0-9])", normalized):
-        return OPERATOR_COLORS["ee"]
+def _mapping_groups(frame: pd.DataFrame | None, mapping_type: str) -> list[dict[str, object]]:
+    if frame is None:
+        return []
+    groups = frame.attrs.get(f'{mapping_type}_mapping_groups', [])
+    return groups if isinstance(groups, list) else []
+
+
+def _mapping_group(value: object, mapping_type: str, frame: pd.DataFrame | None) -> dict[str, object] | None:
+    normalized = str(value or '').strip().casefold()
+    for group in _mapping_groups(frame, mapping_type):
+        labels = [group.get('canonical'), *(group.get('aliases') or [])]
+        if normalized in {str(label or '').strip().casefold() for label in labels}:
+            return group
     return None
+
+
+def _operator_colour(label: object, frame: pd.DataFrame | None = None) -> str | None:
+    """Return the workspace theme colour for an Operator identity."""
+    text = str(label or '').strip()
+    group = _mapping_group(text, 'operator', frame)
+    if group is None:
+        operator = re.split(r'[_·|/]', text, maxsplit=1)[0].strip()
+        group = _mapping_group(operator, 'operator', frame)
+    return str(group.get('color')) if group and group.get('color') else None
 
 
 def _colour(label: object, index: int = 0) -> str:
@@ -2814,7 +2788,21 @@ def _outcome_colour(value: object) -> str | None:
     return OUTCOME_COLOUR_VARIANTS[kind][0] if kind else None
 
 
-def _hierarchy_group_colours(keys: list[tuple[object, ...]], level: int = 0) -> dict[str, str]:
+def _colour_variants(color: str) -> tuple[str, ...]:
+    """Build contrasting shades around one Admin-selected theme colour."""
+    try:
+        red, green, blue = (int(color[index:index + 2], 16) for index in (1, 3, 5))
+    except (TypeError, ValueError):
+        return (str(color),)
+    def blend(target: int, ratio: float) -> str:
+        channels = [round(channel + (target - channel) * ratio) for channel in (red, green, blue)]
+        return '#' + ''.join(f'{channel:02X}' for channel in channels)
+    return color.upper(), blend(0, .38), blend(255, .34), blend(0, .2)
+
+
+def _hierarchy_group_colours(
+    keys: list[tuple[object, ...]], level: int = 0, frame: pd.DataFrame | None = None,
+) -> dict[str, str]:
     """Colour one hierarchy level consistently, with readable variants."""
     colours: dict[str, str] = {}
     offsets: dict[str, int] = {}
@@ -2823,10 +2811,11 @@ def _hierarchy_group_colours(keys: list[tuple[object, ...]], level: int = 0) -> 
         group = str(key[level]) if len(key) > level else ""
         if group in colours:
             continue
-        base = _operator_colour(group)
-        if base and base in OPERATOR_COLOUR_VARIANTS:
+        base = _operator_colour(group, frame)
+        if base:
             offset = offsets.get(base, 0)
-            colours[group] = OPERATOR_COLOUR_VARIANTS[base][offset % len(OPERATOR_COLOUR_VARIANTS[base])]
+            variants = _colour_variants(base)
+            colours[group] = variants[offset % len(variants)]
             offsets[base] = offset + 1
         else:
             # Use the category's position among neutral groups. The same
@@ -2846,45 +2835,41 @@ def _dimension_roles(frame: pd.DataFrame, axis_columns: list[str]) -> list[set[s
         definition = definitions.get(column, column)
         labels = definition if isinstance(definition, (tuple, list)) else (definition,)
         normalised = {_normalise_catalog_name(str(label)) for label in labels}
-        roles.append({role for role in ("operator", "vendor") if any(role in label for label in normalised)})
+        roles.append({
+            role for role in ("operator", "vendor")
+            if any(role in label or (role == 'operator' and 'subscriber' in label) for label in normalised)
+        })
     return roles
 
 
 def _vendor_label(value: object) -> str:
     """Extract the vendor portion from an Operator_Vendor-style label."""
     parts = [part.strip() for part in re.split(r"[_·|/]", str(value)) if part.strip()]
-    non_operators = [part for part in parts if _operator_colour(part) is None]
-    return non_operators[-1] if non_operators else (parts[-1] if parts else str(value).strip())
+    return parts[-1] if parts else str(value).strip()
 
 
-def _vendor_colour_family(vendor: str) -> str | None:
-    normalized = vendor.casefold()
-    if not normalized or normalized in {"(blank)", "blank", "nan", "none"}:
-        return "blank"
-    return next((family for family in VENDOR_COLOUR_VARIANTS if family in normalized), None)
+def _vendor_colour(vendor: object, frame: pd.DataFrame | None) -> str | None:
+    group = _mapping_group(_vendor_label(vendor), 'vendor', frame)
+    return str(group.get('color')) if group and group.get('color') else None
 
 
-def _operator_display_sort_key(value: object) -> tuple[int, str]:
-    """Order recognised operators before all other operators by display label."""
+def _operator_display_sort_key(value: object, frame: pd.DataFrame | None = None) -> tuple[int, str]:
+    """Order configured operators before unknown labels."""
     normalized = _operator_sort_label(value)
-    rank = next(
-        (index for index, operator in enumerate(OPERATOR_DISPLAY_ORDER) if normalized.casefold() == operator.casefold()),
-        len(OPERATOR_DISPLAY_ORDER),
-    )
+    group = _mapping_group(normalized, 'operator', frame)
+    rank = int(group.get('position', 0)) if group else len(_mapping_groups(frame, 'operator'))
     return rank, normalized.casefold()
 
 
-def _vendor_display_sort_key(value: object) -> tuple[int, str, int, str]:
-    """Order ``Operator_Vendor`` values by operator then canonical vendor rank."""
+def _vendor_display_sort_key(value: object, frame: pd.DataFrame | None = None) -> tuple[int, str, int, str]:
+    """Order ``Operator_Vendor`` values from the two Admin mapping tables."""
     text = str(value).strip()
     operator, _separator, vendor = text.partition("_")
     normalized_operator = _operator_sort_label(operator or text)
     normalized_vendor = _vendor_label(vendor or text).casefold()
-    vendor_rank = next(
-        (index for index, name in enumerate(VENDOR_DISPLAY_ORDER) if name in normalized_vendor),
-        len(VENDOR_DISPLAY_ORDER),
-    )
-    operator_rank, operator_label = _operator_display_sort_key(normalized_operator)
+    vendor_group = _mapping_group(normalized_vendor, 'vendor', frame)
+    vendor_rank = int(vendor_group.get('position', 0)) if vendor_group else len(_mapping_groups(frame, 'vendor'))
+    operator_rank, operator_label = _operator_display_sort_key(normalized_operator, frame)
     return operator_rank, operator_label, vendor_rank, normalized_vendor
 
 
@@ -2936,17 +2921,17 @@ def _series_colours(
     vendor_levels = [index for index, role in enumerate(roles) if "vendor" in role]
     identity_levels = list(dict.fromkeys([*operator_levels, *vendor_levels]))
     operator_level = next(
-        (index for index in identity_levels if any(_operator_colour(key[index]) for key in keys if len(key) > index)),
+        (index for index in identity_levels if any(_operator_colour(key[index], frame) for key in keys if len(key) > index)),
         None,
     )
     operator_for_key = {
         key: next(
-            (str(key[index]) for index in identity_levels if len(key) > index and _operator_colour(key[index])),
+            (str(key[index]) for index in identity_levels if len(key) > index and _operator_colour(key[index], frame)),
             "",
         )
         for key in keys
     }
-    operator_values = {colour for key in keys if (colour := _operator_colour(operator_for_key[key]))}
+    operator_values = {colour for key in keys if (colour := _operator_colour(operator_for_key[key], frame))}
 
     if vendor_levels:
         vendor_level = vendor_levels[0]
@@ -2959,12 +2944,12 @@ def _series_colours(
             identity = (vendor.casefold(), operator)
             if identity in vendor_colours:
                 continue
-            family = _vendor_colour_family(vendor)
-            if family:
-                variants = VENDOR_COLOUR_VARIANTS[family]
-                offset = family_offsets.get(family, 0)
+            base = _vendor_colour(vendor, frame)
+            if base:
+                variants = _colour_variants(base)
+                offset = family_offsets.get(base, 0)
                 vendor_colours[identity] = variants[offset % len(variants)]
-                family_offsets[family] = offset + 1
+                family_offsets[base] = offset + 1
             else:
                 vendor_colours[identity] = _colour(vendor, neutral_index)
                 neutral_index += 1
@@ -2979,13 +2964,13 @@ def _series_colours(
             f"{operator_for_key[key]} · {_vendor_label(key[vendor_level])}" if len(key) > vendor_level else operator_for_key[key]
             for key in keys
         ]
-        palette = _hierarchy_group_colours([(value,) for value in palette_keys])
+        palette = _hierarchy_group_colours([(value,) for value in palette_keys], frame=frame)
         return {key: palette[palette_key] for key, palette_key in zip(keys, palette_keys, strict=True)}
 
     # Keep a non-semantic category stable across subordinate dimensions such
     # as Campaign. Legends contain each primary category once, whereas bars or
     # lines may contain several hierarchy combinations for that category.
-    primary_colours = _hierarchy_group_colours(keys)
+    primary_colours = _hierarchy_group_colours(keys, frame=frame)
     return {key: primary_colours[str(key[0]) if key else ""] for key in keys}
 
 
@@ -3164,7 +3149,7 @@ def _resolved_legend_items(
             colour = (
                 legend_colours.get(legend_keys[index])
                 or _outcome_colour(caption)
-                or _operator_colour(caption)
+                or _operator_colour(caption, frame)
                 or _colour(caption, index)
             )
             items.append((caption, colour, 2))

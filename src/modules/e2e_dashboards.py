@@ -415,7 +415,7 @@ def install_dashboard_routes(core):
         material = {
             'definition': definition.model_dump(mode='json'),
             'template_content': sha256(template_content).hexdigest(),
-            'operator_mappings': task_repository.list_operator_mappings(),
+            'chart_mappings': task_repository.chart_mapping_settings(),
         }
         return sha256(json.dumps(material, sort_keys=True, default=str).encode()).hexdigest()
 
@@ -2956,9 +2956,10 @@ def install_dashboard_routes(core):
             connection.close()
         if snapshot.multivendor:
             visible = ensure_vendor_group(visible)
-        operator_mappings = task_repository.list_operator_mappings()
+        mapping_settings = task_repository.chart_mapping_settings()
+        operator_mappings = mapping_settings['operator_mappings']
         visible = apply_operator_mappings(visible, operator_mappings)
-        visible.attrs['operator_mappings'] = operator_mappings
+        visible.attrs.update(mapping_settings)
         visible = normalise_operator_aliases(visible)
         return visible, total, chart_total, filter_values
 
@@ -3009,7 +3010,7 @@ def install_dashboard_routes(core):
             raw_key = sha256(json.dumps({
                 'kind': entry.source_kind, 'columns': requested_columns, 'where': where, 'parameters': parameters,
                 'aggregation_columns': aggregation_columns,
-                'operator_mappings': task_repository.list_operator_mappings(),
+                'chart_mappings': task_repository.chart_mapping_settings(),
             }, sort_keys=True, default=str).encode()).hexdigest()
             with lock:
                 raw_frame = snapshot.frames.get(raw_key)
@@ -3025,9 +3026,10 @@ def install_dashboard_routes(core):
                         )
                         if snapshot.multivendor:
                             raw_frame = ensure_vendor_group(raw_frame)
-                        operator_mappings = task_repository.list_operator_mappings()
+                        mapping_settings = task_repository.chart_mapping_settings()
+                        operator_mappings = mapping_settings['operator_mappings']
                         raw_frame = apply_operator_mappings(raw_frame, operator_mappings)
-                        raw_frame.attrs['operator_mappings'] = operator_mappings
+                        raw_frame.attrs.update(mapping_settings)
                         raw_frame = normalise_operator_aliases(raw_frame)
                         raw_frame.attrs['operator_aliases_normalized'] = True
                         with lock:
@@ -3117,7 +3119,7 @@ def install_dashboard_routes(core):
         entry_key = sha256(repr(entry).encode()).hexdigest()
         task_repository = Repository(Path(snapshot.workspace), core.repository.global_db_path)
         operator_mapping_key = sha256(json.dumps(
-            task_repository.list_operator_mappings(), sort_keys=True,
+            task_repository.chart_mapping_settings(), sort_keys=True,
         ).encode()).hexdigest()
         filename = sha256(
             f'{DASHBOARD_CHART_MODEL_CACHE_VERSION}:{snapshot.selection_key}:{snapshot.definition.scope}:'
@@ -3304,9 +3306,10 @@ def install_dashboard_routes(core):
         )
         if snapshot.multivendor:
             raw_frame = ensure_vendor_group(raw_frame)
-        operator_mappings = task_repository.list_operator_mappings()
+        mapping_settings = task_repository.chart_mapping_settings()
+        operator_mappings = mapping_settings['operator_mappings']
         raw_frame = apply_operator_mappings(raw_frame, operator_mappings)
-        raw_frame.attrs['operator_mappings'] = operator_mappings
+        raw_frame.attrs.update(mapping_settings)
         raw_frame = normalise_operator_aliases(raw_frame)
         raw_frame.attrs['operator_aliases_normalized'] = True
         try:
@@ -3629,7 +3632,7 @@ def install_dashboard_routes(core):
         entry_key = sha256(repr(entry).encode()).hexdigest()
         task_repository = Repository(Path(snapshot.workspace), core.repository.global_db_path)
         operator_mapping_key = sha256(json.dumps(
-            task_repository.list_operator_mappings(), sort_keys=True,
+            task_repository.chart_mapping_settings(), sort_keys=True,
         ).encode()).hexdigest()
         key = (snapshot.selection_key, snapshot.definition.scope, entry_key, operator_mapping_key)
         cache_dir = pil_chart_cache_dir(snapshot.workspace)
