@@ -167,6 +167,7 @@ def test_auto_calculated_field_editor_uses_wide_content_aware_dialog_geometry():
     assert '.calculated-dimension-order-actions { display: grid;' in stylesheet
     assert 'body: JSON.stringify({dimensions: next, renames, materialize}),' in script
     assert 'body: JSON.stringify({dimensions: calculatedDimensions, renames, materialize}),' in script
+    assert script.count('updateSaveActions();\n        finish();') == 2
 
 
 def test_dashboard_warmup_retries_contention_and_compact_panel_headers_stay_aligned():

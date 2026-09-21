@@ -803,6 +803,7 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
         pendingRenames.clear();
         hideLoadingOverlay();
         updateSaveActions();
+        finish();
       } catch (error) {
         hideLoadingOverlay();
         updateSaveActions();
@@ -2382,6 +2383,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
         pendingRenames.clear();
         managerHideLoading();
         updateSaveActions();
+        finish();
       } catch (error) {
         managerHideLoading();
         updateSaveActions();
