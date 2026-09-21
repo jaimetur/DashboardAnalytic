@@ -1089,8 +1089,8 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     assert '<optgroup label="Full Environment">' in admin_response.text
     assert admin_response.text.index('<optgroup label="Full Workspace">') < admin_response.text.index('<optgroup label="Full Environment">')
     assert 'Config</option>' in admin_response.text
-    assert 'Operator Mappings (from active workspace)' in admin_response.text
-    assert 'Full Environment (App Config + Dashboards + Report Templates + Operator Mappings + Auto-calculated Fields + Selected Workspaces)' in admin_response.text
+    assert 'Operator/Vendor Mappings &amp; Colors (from active workspace)' in admin_response.text
+    assert 'Full Environment (App Config + Dashboards + Report Templates + Operator/Vendor Mappings &amp; Colors + Auto-calculated Fields + Selected Workspaces)' in admin_response.text
     assert 'Workspace: Default' in admin_response.text
     stylesheet = app_module.PROJECT_ROOT.joinpath('src/web_interface/static/css/app.css').read_text(encoding='utf-8')
     assert '.multiselect-shell { position: relative; min-width: 0; max-width: 100%; }' in stylesheet
@@ -1180,8 +1180,15 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
         assert full_manifest['workspaces'][0]['id'] == 'default'
         assert {'super', 'admin', 'demo'} <= set(full_manifest['workspaces'][0]['access_usernames'])
         assert 'dashboards' in full_manifest['workspace_components']
+        assert 'operator_mappings' in full_manifest['workspace_components']
         exported_dashboards = json.loads(archive.read('workspaces/Default/dashboards/dashboards.json'))
         assert exported_dashboards['dashboards']['exported-dashboard']['name'] == 'Exported Dashboard'
+        exported_mappings = json.loads(archive.read('workspaces/Default/operator-mappings/operator-mappings.json'))
+        assert exported_mappings['version'] == 2
+        assert exported_mappings['mappings'][0]['canonical'] == 'VF'
+        assert exported_mappings['mappings'][0]['color'] == '#E15759'
+        assert exported_mappings['vendor_mappings'][0]['canonical'] == 'Ericsson'
+        assert exported_mappings['vendor_mappings'][0]['color'] == '#2E8B57'
         assert 'config/workspace-registry.db' not in archive.namelist()
     full_import_response = client.post(
         '/admin/import-export/import',
@@ -1246,6 +1253,7 @@ def test_operator_mappings_export_and_import_replace_the_selected_workspace_grou
 
     login_super(client)
     app_module.repository.replace_operator_mapping_group(None, 'Portable Carrier', ['Portable Alias'])
+    app_module.repository.replace_vendor_mapping_group(None, 'Portable Vendor', ['PV'], '#123456')
 
     exported = client.get('/admin/import-export/export?export_target=operator-mappings')
 
@@ -1256,9 +1264,15 @@ def test_operator_mappings_export_and_import_replace_the_selected_workspace_grou
     assert manifest['kind'] == 'operator-mappings'
     assert manifest['workspace_components'] == ['operator_mappings']
     assert payload['format'] == 'dashboard-analytic-operator-mappings'
+    assert payload['version'] == 2
     assert any(group['canonical'] == 'Portable Carrier' for group in payload['mappings'])
+    assert any(
+        group['canonical'] == 'Portable Vendor' and group['color'] == '#123456'
+        for group in payload['vendor_mappings']
+    )
 
     app_module.repository.delete_operator_mapping_group('Portable Carrier')
+    app_module.repository.delete_vendor_mapping_group('Portable Vendor')
     inspected = client.post(
         '/admin/import-export/inspect',
         files={'package': ('operator-mappings.zip', BytesIO(exported.content), 'application/zip')},
@@ -1279,6 +1293,7 @@ def test_operator_mappings_export_and_import_replace_the_selected_workspace_grou
         time.sleep(0.01)
     assert status_payload['status'] == 'ready'
     assert app_module.repository.list_operator_mappings()['portable alias'] == 'Portable Carrier'
+    assert app_module.repository.list_vendor_mappings()['pv'] == 'Portable Vendor'
 
 
 def test_full_environment_import_remaps_permissions_to_replaced_workspace_id(client, tmp_path: Path) -> None:
@@ -3905,7 +3920,15 @@ def test_admin_operator_mapping_panel_groups_and_edits_aliases(client) -> None:
     import src.DashboardAnalytic as app_module
 
     login(client)
-    assert app_module.repository.list_operator_mappings() == {}
+    initial_mappings = app_module.repository.list_operator_mappings()
+    assert initial_mappings['vodafone uk'] == 'VF'
+    assert initial_mappings['three uk'] == '3'
+    assert [group['canonical'] for group in app_module.repository.list_operator_mapping_groups()[:4]] == [
+        'VF', '3', 'EE', 'O2',
+    ]
+    assert [group['color'] for group in app_module.repository.list_operator_mapping_groups()[:4]] == [
+        '#E15759', '#F28E2B', '#76B7B2', '#4E79A7',
+    ]
     app_module.repository.replace_operator_mapping_group(
         None, 'Legacy Carrier', ['Legacy A', 'Legacy B'],
     )
@@ -3913,8 +3936,9 @@ def test_admin_operator_mapping_panel_groups_and_edits_aliases(client) -> None:
     assert page.status_code == 200
     assert 'data-panel-state-key="admin:operator-mappings"' in page.text
     assert '<h2>Operator Mappings</h2>' in page.text
+    assert '<h2>Vendor Mappings</h2>' in page.text
     assert page.text.index('<h2>Report Templates Management</h2>') < page.text.index('<h2>Operator Mappings</h2>')
-    assert 'value="Vodafone UK"' not in page.text
+    assert 'value="VF"' in page.text
     assert 'value="Legacy Carrier"' in page.text
     assert 'Legacy A\nLegacy B' in page.text
     assert 'Add operator mapping' not in page.text
@@ -3948,6 +3972,38 @@ def test_admin_operator_mapping_panel_groups_and_edits_aliases(client) -> None:
     }, follow_redirects=False)
     assert deleted.status_code == 303
     assert not any(value == 'Example Wireless' for value in app_module.repository.list_operator_mappings().values())
+
+
+def test_admin_vendor_mappings_support_aliases_colours_and_reordering(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    groups = app_module.repository.list_vendor_mapping_groups()
+    assert [group['canonical'] for group in groups[:4]] == ['Ericsson', 'Huawei', 'Samsung', 'NSN']
+    assert [group['color'] for group in groups[:4]] == ['#2E8B57', '#E15759', '#7B3FB5', '#4E79A7']
+
+    created = client.post('/admin/vendor-mappings/save', data={
+        'canonical_value': 'Nokia', 'aliases': 'Nokia Networks', 'color': '#123456',
+    }, follow_redirects=False)
+    assert created.status_code == 303
+    assert app_module.repository.list_vendor_mappings()['nokia networks'] == 'Nokia'
+    assert app_module.repository.list_vendor_mapping_groups()[-1]['color'] == '#123456'
+
+    moved = client.post('/admin/vendor-mappings/move', data={
+        'canonical_value': 'Nokia', 'direction': 'up',
+    }, follow_redirects=False)
+    assert moved.status_code == 303
+    reordered = app_module.repository.list_vendor_mapping_groups()
+    assert [group['canonical'] for group in reordered][-2:] == ['Nokia', '(blank)']
+
+    page = client.get('/admin')
+    assert 'data-panel-state-key="admin:vendor-mappings"' in page.text
+    assert 'name="color" value="#123456"' in page.text
+    assert 'action="/admin/vendor-mappings/move"' in page.text
+    script = app_module.PROJECT_ROOT.joinpath('src/web_interface/static/js/app.js').read_text(encoding='utf-8')
+    assert 'async function submitChartMappingForm(form)' in script
+    assert 'currentBody.replaceWith(freshBody);' in script
+    assert 'top: scrollTop, left: scrollLeft, behavior: \'auto\'' in script
 
 
 def test_paginated_dataset_viewers_preserve_the_exact_horizontal_scroll_offset() -> None:
@@ -4144,6 +4200,7 @@ def test_operator_mapping_backup_supports_selective_restore(client, tmp_path: Pa
 
     login(client)
     app_module.repository.replace_operator_mapping_group(None, 'Backup Carrier', ['Backup Alias'])
+    app_module.repository.replace_vendor_mapping_group(None, 'Backup Vendor', ['Backup Vendor Alias'], '#654321')
     archive_path = app_module.create_recurring_database_backup({
         'components': ['operator_mappings'],
         'backup_path': str(tmp_path / 'backups'),
@@ -4158,9 +4215,16 @@ def test_operator_mapping_backup_supports_selective_restore(client, tmp_path: Pa
     assert app_module._backup_archive_components(archive_path) == ['operator_mappings']
 
     app_module.repository.delete_operator_mapping_group('Backup Carrier')
+    app_module.repository.delete_vendor_mapping_group('Backup Vendor')
     app_module.restore_database_backup(archive_path, ['operator_mappings'])
 
     assert app_module.repository.list_operator_mappings()['backup alias'] == 'Backup Carrier'
+    restored_vendor = next(
+        group for group in app_module.repository.list_vendor_mapping_groups()
+        if group['canonical'] == 'Backup Vendor'
+    )
+    assert app_module.repository.list_vendor_mappings()['backup vendor alias'] == 'Backup Vendor'
+    assert restored_vendor['color'] == '#654321'
 
 
 def test_login_and_admin_remain_available_after_closing_the_active_workspace(client) -> None:

@@ -4306,7 +4306,7 @@ def create_recurring_database_backup(
                     report_progress(f'Archiving Report Templates for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                     _archive_workspace_report_templates(archive, workspace, f'{archive_workspace_root}/report-templates', archived_bytes)
                 if 'operator_mappings' in components:
-                    report_progress(f'Exporting Operator Mappings for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
+                    report_progress(f'Exporting Operator/Vendor Mappings & Colors for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                     _archive_workspace_operator_mappings(archive, workspace, archive_workspace_root, archived_bytes)
                 if 'auto_calculated_fields' in components:
                     report_progress(f'Exporting Auto-calculated Fields for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
@@ -4806,14 +4806,14 @@ def _restore_workspace_operator_mappings(workspace: Workspace, payload: bytes) -
         document = json.loads(payload.decode('utf-8'))
         groups = document.get('mappings') if isinstance(document, dict) else None
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError(f'Operator Mappings for "{workspace.name}" are invalid.') from exc
+        raise ValueError(f'Operator/Vendor Mappings & Colors for "{workspace.name}" are invalid.') from exc
     if (
         not isinstance(document, dict)
         or document.get('format') != 'dashboard-analytic-operator-mappings'
         or document.get('version') not in {1, 2}
         or not isinstance(groups, list)
     ):
-        raise ValueError(f'Operator Mappings for "{workspace.name}" are invalid.')
+        raise ValueError(f'Operator/Vendor Mappings & Colors for "{workspace.name}" are invalid.')
     task_repository = Repository(
         workspace.database_path, repository.global_db_path, workspace_registry.registry_path,
     )
@@ -4821,7 +4821,7 @@ def _restore_workspace_operator_mappings(workspace: Workspace, payload: bytes) -
     if document.get('version') == 2:
         vendor_groups = document.get('vendor_mappings')
         if not isinstance(vendor_groups, list):
-            raise ValueError(f'Operator Mappings for "{workspace.name}" are invalid.')
+            raise ValueError(f'Operator/Vendor Mappings & Colors for "{workspace.name}" are invalid.')
         task_repository.replace_vendor_mapping_groups(vendor_groups)
     if active_workspace and workspace.id == active_workspace.id:
         ANALYSIS_CACHE.clear()
@@ -5009,7 +5009,7 @@ def _build_single_export_archive_file(
             source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
             source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
             if not source_workspace:
-                raise ValueError('Open a workspace before exporting Operator Mappings.')
+                raise ValueError('Open a workspace before exporting Operator/Vendor Mappings & Colors.')
             archive_path = f'workspaces/{source_workspace.name}/operator-mappings/operator-mappings.json'
             manifest = archive_manifest(
                 'operator-mappings',
@@ -5313,7 +5313,7 @@ def _recovered_transfer_details(manifest: dict[str, Any]) -> tuple[str, list[str
     if kind == 'operator-mappings':
         source = manifest.get('source_workspace')
         name = str(source.get('name') or '') if isinstance(source, dict) else ''
-        return ('Operator Mappings', [name] if name else [])
+        return ('Operator/Vendor Mappings & Colors', [name] if name else [])
     if kind == 'workspace':
         workspace = manifest.get('workspace')
         name = str(workspace.get('name') or '') if isinstance(workspace, dict) else ''
@@ -6037,7 +6037,7 @@ def _apply_import_archive(
                 member not in archive.namelist()
                 or not re.fullmatch(r'workspaces/[^/]+/operator-mappings/operator-mappings\.json', member)
             ):
-                raise ValueError('The package does not contain valid Operator Mappings.')
+                raise ValueError('The package does not contain valid Operator/Vendor Mappings & Colors.')
             destinations = [workspace_registry.get(workspace_id) for workspace_id in destination_workspace_ids]
             destinations = [workspace for workspace in destinations if workspace]
             if not destinations:
@@ -6050,7 +6050,7 @@ def _apply_import_archive(
             payload = archive.read(member)
             for workspace in destinations:
                 _restore_workspace_operator_mappings(workspace, payload)
-            return f'Imported Operator Mappings into {len(destinations)} workspaces.'
+            return f'Imported Operator/Vendor Mappings & Colors into {len(destinations)} workspaces.'
         if kind == 'auto-calculated-fields':
             try:
                 member = next((candidate for candidate in (
@@ -6251,7 +6251,7 @@ def _transfer_content_label(target: str | Iterable[str]) -> str:
         'full-environment': 'Full Environment',
         'auto-calculated-fields': 'Auto-calculated Fields',
         'dashboards': 'Dashboards',
-        'operator-mappings': 'Operator Mappings',
+        'operator-mappings': 'Operator/Vendor Mappings & Colors',
     }
     if target.startswith('workspace:'):
         workspace = workspace_registry.get(target.removeprefix('workspace:'))
@@ -6746,7 +6746,9 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         'dataset_source_columns': 'Dataset source columns',
         'datasets': 'Datasets',
         'generated_jobs': 'Generated jobs',
+        'chart_mapping_groups': 'Chart mapping groups',
         'operator_mappings': 'Operator Mappings',
+        'vendor_mappings': 'Vendor Mappings',
         'report_templates': 'Report Templates',
         'workspace_state': 'Workspace State',
         'transfer_offers': 'Server transfer offers',
@@ -6784,9 +6786,9 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         {'value': 'config', 'label': 'App Config'},
         {'value': 'dashboards', 'label': 'Dashboards (from active workspace)', 'disabled': not active_workspace},
         {'value': 'slides-templates', 'label': 'Report Templates (from active workspace)', 'disabled': not active_workspace},
-        {'value': 'operator-mappings', 'label': 'Operator Mappings (from active workspace)', 'disabled': not active_workspace},
+        {'value': 'operator-mappings', 'label': 'Operator/Vendor Mappings & Colors (from active workspace)', 'disabled': not active_workspace},
         {'value': 'auto-calculated-fields', 'label': 'Auto-calculated Fields (from active workspace)', 'disabled': not active_workspace},
-        {'value': 'full-environment', 'label': 'Full Environment (App Config + Dashboards + Report Templates + Operator Mappings + Auto-calculated Fields + Selected Workspaces)'},
+        {'value': 'full-environment', 'label': 'Full Environment (App Config + Dashboards + Report Templates + Operator/Vendor Mappings & Colors + Auto-calculated Fields + Selected Workspaces)'},
         *[
             {'value': f'workspace:{workspace.id}', 'label': f'Full Workspace: {workspace.name}'}
             for workspace in accessible_workspaces(user)
@@ -7035,8 +7037,12 @@ def build_datasets_analysis_payload(selected_dataset: dict[str, Any] | None, req
         repository.replace_dataset_rows(selected_dataset['id'], df)
     if str(selected_dataset.get('dataset_kind') or '').casefold() in CDR_DATASET_KINDS:
         # General Dataset Analysis filters use source-faithful table values.
-        # Canonical Operator labels belong only to the in-memory chart frame.
-        df = apply_operator_mappings(df, repository.list_operator_mappings())
+        # Canonical Operator/Vendor labels and theme metadata belong only to
+        # the in-memory analysis/chart frame.
+        mapping_settings = repository.chart_mapping_settings()
+        df = apply_operator_mappings(df, mapping_settings['operator_mappings'])
+        df.attrs.update(mapping_settings)
+        df = normalise_operator_aliases(df)
     analyses: list[dict[str, Any]] = []
     for metric in selected_metrics:
         try:
@@ -13490,7 +13496,7 @@ async def update_admin_database_table(request: Request, user: SessionUser = Depe
         raise HTTPException(status_code=400, detail='Send a valid table update payload.')
     table = str(payload.get('table') or '').strip()
     updates = payload.get('updates')
-    if table == 'operator_mappings' and isinstance(updates, dict):
+    if table in {'operator_mappings', 'vendor_mappings'} and isinstance(updates, dict):
         if 'canonical_value' in updates and not str(updates['canonical_value']).strip():
             raise HTTPException(status_code=400, detail='The canonical operator value is required.')
     try:
@@ -13505,7 +13511,7 @@ async def update_admin_database_table(request: Request, user: SessionUser = Depe
         raise HTTPException(status_code=400, detail=f'The update violates a database constraint: {exc}.') from exc
     ANALYSIS_CACHE.clear()
     DATAFRAME_CACHE.clear()
-    if table == 'operator_mappings':
+    if table in {'operator_mappings', 'vendor_mappings', 'chart_mapping_groups'}:
         _clear_chart_preview_caches()
     repository.add_log(user.username, 'database_table_update', f'Updated row {rowid} in {table}.')
     return JSONResponse({'ok': True, 'message': 'Row saved.'})
@@ -13692,7 +13698,7 @@ async def delete_admin_database_table_row(request: Request, user: SessionUser = 
         raise HTTPException(status_code=400, detail=f'The row cannot be deleted because of a database constraint: {exc}.') from exc
     ANALYSIS_CACHE.clear()
     DATAFRAME_CACHE.clear()
-    if table == 'operator_mappings':
+    if table in {'operator_mappings', 'vendor_mappings', 'chart_mapping_groups'}:
         _clear_chart_preview_caches()
     repository.add_log(user.username, 'database_table_delete', f'Deleted row {rowid} from {table}.')
     return JSONResponse({'ok': True, 'message': 'Row deleted.'})

@@ -360,6 +360,36 @@ def _selected_count(filters: dict[str, Any], key: str) -> int | None:
     return len(values) if values else None
 
 
+def _chart_mapping_group(df: pd.DataFrame, dimension: str, value: object) -> dict[str, Any] | None:
+    mapping_type = 'operator' if dimension in {'operator', 'subscriber'} else 'vendor' if dimension in {'vendor', 'vendor_only', 'operator_vendor'} else ''
+    if not mapping_type:
+        return None
+    text = str(value or '').strip()
+    if mapping_type == 'vendor':
+        text = text.rsplit('_', 1)[-1].strip()
+    normalized = text.casefold()
+    groups = df.attrs.get(f'{mapping_type}_mapping_groups', [])
+    for group in groups if isinstance(groups, list) else []:
+        labels = [group.get('canonical'), *(group.get('aliases') or [])]
+        if normalized in {str(label or '').strip().casefold() for label in labels}:
+            return group
+    return None
+
+
+def _chart_category_key(df: pd.DataFrame, dimension: str, value: object) -> tuple[int, str]:
+    group = _chart_mapping_group(df, dimension, value)
+    configured = df.attrs.get(
+        'operator_mapping_groups' if dimension in {'operator', 'subscriber'} else 'vendor_mapping_groups',
+        [],
+    )
+    return (int(group.get('position', 0)) if group else len(configured), str(value).casefold())
+
+
+def _chart_category_color(df: pd.DataFrame, dimension: str, value: object) -> str | None:
+    group = _chart_mapping_group(df, dimension, value)
+    return str(group.get('color')) if group and group.get('color') else None
+
+
 def _build_global_kpis(df: pd.DataFrame, dataset_kind: str, filters: dict[str, Any] | None = None) -> dict[str, Any]:
     filters = filters or {}
     vendor_only_column = 'vendor_only' if 'vendor_only' in df.columns else 'vendor' if 'vendor' in df.columns else None
@@ -478,7 +508,7 @@ def _build_cdf_chart(df: pd.DataFrame, metric: str, filters: dict[str, Any], cdf
         selected_groups = _coerce_filter_values((filters.get('extra_filters') or {}).get(grouping_column))
 
     grouped_values: dict[str, dict[str, Any]] = {}
-    for raw_group_value, group_frame in df.dropna(subset=[grouping_column]).groupby(grouping_column, dropna=False):
+    for raw_group_value, group_frame in df.dropna(subset=[grouping_column]).groupby(grouping_column, dropna=False, sort=False):
         display_name = str(raw_group_value).strip()
         normalized_name = display_name.lower()
         if not display_name or normalized_name in grouped_values:
@@ -503,6 +533,8 @@ def _build_cdf_chart(df: pd.DataFrame, metric: str, filters: dict[str, Any], cdf
         ordered_keys = preferred_keys
     else:
         ordered_keys = list(grouped_values.keys())
+        if grouping_column in {'operator', 'subscriber', 'vendor', 'vendor_only', 'operator_vendor'}:
+            ordered_keys.sort(key=lambda key: _chart_category_key(df, grouping_column, grouped_values[key]['name']))
 
     point_budget = _resolve_cdf_point_budget(len(ordered_keys[:8]))
     series_collection: list[dict[str, Any]] = []
@@ -515,6 +547,7 @@ def _build_cdf_chart(df: pd.DataFrame, metric: str, filters: dict[str, Any], cdf
             continue
         series_collection.append({
             'name': item['name'],
+            'color': _chart_category_color(df, grouping_column, item['name']),
             'labels': [pair[0] for pair in pairs],
             'series': [pair[1] for pair in pairs],
             '_raw_values': np.sort(item['values'].astype(float).to_numpy()),
@@ -587,13 +620,22 @@ def _top_records(df: pd.DataFrame, metric: str) -> list[dict[str, Any]]:
     return rows.to_dict(orient='records')
 
 
-def _build_comparison_chart(table_rows: list[dict[str, Any]], aggregation: str | None) -> dict[str, Any]:
+def _build_comparison_chart(
+    table_rows: list[dict[str, Any]], aggregation: str | None, frame: pd.DataFrame,
+) -> dict[str, Any]:
     if not aggregation:
         return {'labels': [], 'series': [], 'type': 'bar'}
-    compact_rows = table_rows[:8]
+    compact_rows = table_rows
+    if aggregation in {'operator', 'subscriber', 'vendor', 'vendor_only', 'operator_vendor'}:
+        compact_rows = sorted(
+            compact_rows,
+            key=lambda row: _chart_category_key(frame, aggregation, row.get(aggregation, '')),
+        )
+    compact_rows = compact_rows[:8]
     return {
         'labels': [str(row.get(aggregation, 'n/a')) for row in compact_rows],
         'series': [round(float(row.get('mean_metric', 0.0)), 4) for row in compact_rows],
+        'colors': [_chart_category_color(frame, aggregation, row.get(aggregation, '')) for row in compact_rows],
         'type': 'bar',
         'y_axis_label': 'Mean metric',
     }
@@ -648,7 +690,7 @@ def build_analysis(df: pd.DataFrame, filters: dict[str, Any], metric: str, *, pr
         global_kpis=global_kpis,
         metric_kpis=_build_metric_kpis(analysis_frame, selected_metric),
         cdf_chart=_build_cdf_chart(analysis_frame, selected_metric, normalized_filters, cdf_grouping),
-        comparison_chart=_build_comparison_chart(table_rows, aggregation),
+        comparison_chart=_build_comparison_chart(table_rows, aggregation, analysis_frame),
         table_rows=table_rows,
         scorecard=compute_scorecard(analysis_frame, selected_metric),
         scorecard_groups=compute_grouped_scorecards(analysis_frame, selected_metric, aggregation, table_rows),

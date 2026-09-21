@@ -2936,34 +2936,48 @@ def _series_colours(
     if vendor_levels:
         vendor_level = vendor_levels[0]
         vendor_keys = [_vendor_label(key[vendor_level]) if len(key) > vendor_level else "" for key in keys]
-        vendor_colours: dict[tuple[str, str], str] = {}
+        vendor_colours: dict[tuple[str, str, tuple[str, ...]], str] = {}
         family_offsets: dict[str, int] = {}
         neutral_index = 0
         for key, vendor in zip(keys, vendor_keys, strict=True):
             operator = operator_for_key[key].casefold()
-            identity = (vendor.casefold(), operator)
+            subordinate = tuple(str(value).casefold() for index, value in enumerate(key) if index not in identity_levels)
+            identity = (vendor.casefold(), operator, subordinate if line_chart else ())
             if identity in vendor_colours:
                 continue
-            base = _vendor_colour(vendor, frame)
+            vendor_group = _mapping_group(vendor, 'vendor', frame)
+            base = str(vendor_group.get('color')) if vendor_group and vendor_group.get('color') else None
             if base:
                 variants = _colour_variants(base)
-                offset = family_offsets.get(base, 0)
+                family = str(vendor_group.get('canonical') or vendor).casefold()
+                offset = family_offsets.get(family, 0)
                 vendor_colours[identity] = variants[offset % len(variants)]
-                family_offsets[base] = offset + 1
+                family_offsets[family] = offset + 1
             else:
                 vendor_colours[identity] = _colour(vendor, neutral_index)
                 neutral_index += 1
         return {
-            key: vendor_colours[(vendor.casefold(), operator_for_key[key].casefold())]
+            key: vendor_colours[(
+                vendor.casefold(), operator_for_key[key].casefold(),
+                tuple(str(value).casefold() for index, value in enumerate(key) if index not in identity_levels)
+                if line_chart else (),
+            )]
             for key, vendor in zip(keys, vendor_keys, strict=True)
         }
 
     if operator_level is not None and (len(operator_values) > 1 or line_chart):
         vendor_level = vendor_levels[0] if vendor_levels else operator_level
-        palette_keys = [
-            f"{operator_for_key[key]} · {_vendor_label(key[vendor_level])}" if len(key) > vendor_level else operator_for_key[key]
-            for key in keys
-        ]
+        palette_keys = []
+        for key in keys:
+            identity = (
+                f"{operator_for_key[key]} · {_vendor_label(key[vendor_level])}"
+                if len(key) > vendor_level else operator_for_key[key]
+            )
+            if line_chart:
+                subordinate = [str(value) for index, value in enumerate(key) if index not in identity_levels]
+                if subordinate:
+                    identity = f"{identity} · {' · '.join(subordinate)}"
+            palette_keys.append(identity)
         palette = _hierarchy_group_colours([(value,) for value in palette_keys], frame=frame)
         return {key: palette[palette_key] for key, palette_key in zip(keys, palette_keys, strict=True)}
 

@@ -21,6 +21,7 @@ def build_multi_series_chart_payload(series_collection: list[dict[str, Any]], **
                 "name": str(item.get("name") or "Series"),
                 "labels": [round(float(value), 4) for value in item.get("labels", [])],
                 "series": [round(float(value), 4) for value in item.get("series", [])],
+                **({'color': str(item['color'])} if item.get('color') else {}),
             }
             for item in series_collection
             if item.get("labels") and item.get("series")

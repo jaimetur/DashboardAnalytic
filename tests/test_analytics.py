@@ -592,3 +592,24 @@ def test_top_records_deduplicates_metric_column_when_metric_is_preferred_field()
     assert rows
     first_row = rows[0]
     assert list(first_row.keys()).count("quality_score") == 1
+
+
+def test_dataset_analysis_charts_use_workspace_operator_order_and_colours() -> None:
+    df = pd.DataFrame({
+        'dataset_kind': ['data', 'data'],
+        'operator': ['Alpha', 'Beta'],
+        'quality_score': [1.0, 2.0],
+    })
+    df.attrs['operator_mapping_groups'] = [
+        {'canonical': 'Beta', 'aliases': [], 'position': 0, 'color': '#123456'},
+        {'canonical': 'Alpha', 'aliases': [], 'position': 1, 'color': '#654321'},
+    ]
+
+    analysis = build_analysis(
+        df, {'aggregation': 'operator', 'cdf_grouping': 'operator'}, 'quality_score',
+    )
+
+    assert analysis.comparison_chart['labels'] == ['Beta', 'Alpha']
+    assert analysis.comparison_chart['colors'] == ['#123456', '#654321']
+    assert [item['name'] for item in analysis.cdf_chart['series_collection']] == ['Beta', 'Alpha']
+    assert [item['color'] for item in analysis.cdf_chart['series_collection']] == ['#123456', '#654321']

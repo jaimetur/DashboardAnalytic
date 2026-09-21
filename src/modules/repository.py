@@ -512,31 +512,61 @@ class Repository:
                         "INSERT INTO users (username, password_hash, role, active, created_at) VALUES (?, ?, ?, 1, ?)",
                         (username, hash_password(password), role, local_now_iso()),
                     )
+            if not bootstrap_done:
+                conn.execute(
+                    "INSERT INTO application_state (key, value) VALUES ('bootstrap_users_created', '1')"
+                )
+            # The three shipped accounts are intended to be usable immediately
+            # in the bootstrap workspace. Add the membership idempotently.
+            for username in ('super', 'admin', 'demo'):
+                row = conn.execute(
+                    'SELECT id, workspace_ids_json FROM users WHERE username COLLATE NOCASE = ?',
+                    (username,),
+                ).fetchone()
+                if not row:
+                    continue
+                workspace_ids = self._workspace_ids_from_json(row['workspace_ids_json'])
+                if 'default' not in workspace_ids:
+                    workspace_ids.append('default')
+                    conn.execute(
+                        'UPDATE users SET workspace_ids_json = ? WHERE id = ?',
+                        (self._workspace_ids_json(workspace_ids), int(row['id'])),
+                    )
 
     @staticmethod
     def _ensure_chart_mapping_groups(conn: sqlite3.Connection) -> None:
         """Migrate the former hardcoded chart order and colours into workspace data."""
         defaults = {
             'operator': (
-                ('VF', '#E15759'), ('3', '#F28E2B'), ('EE', '#76B7B2'), ('O2', '#4E79A7'),
+                ('VF', '#E15759', ('Vodafone', 'Vodafone UK', 'VFUK')),
+                ('3', '#F28E2B', ('Three', 'Three UK', '3 UK')),
+                ('EE', '#76B7B2', ('EE UK', 'Everything Everywhere')),
+                ('O2', '#4E79A7', ('Telefonica', 'Telefonica O2')),
             ),
             'vendor': (
-                ('Ericsson', '#2E8B57'), ('Huawei', '#E15759'),
-                ('Samsung', '#7B3FB5'), ('NSN', '#4E79A7'),
+                ('Ericsson', '#2E8B57', ()), ('Huawei', '#E15759', ()),
+                ('Samsung', '#7B3FB5', ()), ('NSN', '#4E79A7', ()),
+                ('Mixed Vendor', '#D9A514', ('Mixed',)),
+                ('Other Vendor', '#D9A514', ('Other',)),
+                ('(blank)', '#7A8791', ('Blank', 'nan', 'none')),
             ),
         }
+        defaults_seeded = conn.execute(
+            "SELECT 1 FROM workspace_state WHERE key = 'chart_mapping_defaults_v1'"
+        ).fetchone()
         for mapping_type, entries in defaults.items():
             alias_table = f'{mapping_type}_mappings'
-            for position, (canonical, color) in enumerate(entries):
-                conn.execute(
-                    'INSERT OR IGNORE INTO chart_mapping_groups '
-                    '(mapping_type, canonical_value, position, color) VALUES (?, ?, ?, ?)',
-                    (mapping_type, canonical, position, color),
-                )
-                conn.execute(
-                    f'INSERT OR IGNORE INTO {alias_table} (source_value, canonical_value) VALUES (?, ?)',
-                    (canonical, canonical),
-                )
+            if not defaults_seeded:
+                for position, (canonical, color, aliases) in enumerate(entries):
+                    conn.execute(
+                        'INSERT OR IGNORE INTO chart_mapping_groups '
+                        '(mapping_type, canonical_value, position, color) VALUES (?, ?, ?, ?)',
+                        (mapping_type, canonical, position, color),
+                    )
+                    conn.executemany(
+                        f'INSERT OR IGNORE INTO {alias_table} (source_value, canonical_value) VALUES (?, ?)',
+                        [(source, canonical) for source in (canonical, *aliases)],
+                    )
             existing = conn.execute(
                 f'SELECT DISTINCT canonical_value FROM {alias_table} ORDER BY canonical_value COLLATE NOCASE'
             ).fetchall()
@@ -553,29 +583,10 @@ class Repository:
                 )
                 if inserted.rowcount:
                     next_position += 1
-            if not bootstrap_done:
-                conn.execute(
-                    "INSERT INTO application_state (key, value) VALUES ('bootstrap_users_created', '1')"
-                )
-            # The three shipped accounts are intended to be usable immediately
-            # in the bootstrap workspace.  Add the membership idempotently on
-            # every startup so older installations are repaired without
-            # recreating deleted users or changing any other access grants.
-            for username in ('super', 'admin', 'demo'):
-                row = conn.execute(
-                    'SELECT id, workspace_ids_json FROM users WHERE username COLLATE NOCASE = ?',
-                    (username,),
-                ).fetchone()
-                if not row:
-                    continue
-                workspace_ids = self._workspace_ids_from_json(row['workspace_ids_json'])
-                if 'default' not in workspace_ids:
-                    workspace_ids.append('default')
-                    conn.execute(
-                        'UPDATE users SET workspace_ids_json = ? WHERE id = ?',
-                        (self._workspace_ids_json(workspace_ids), int(row['id'])),
-                    )
-
+        if not defaults_seeded:
+            conn.execute(
+                "INSERT INTO workspace_state (key, value) VALUES ('chart_mapping_defaults_v1', '1')"
+            )
     @staticmethod
     def _configure_database_journal(conn: sqlite3.Connection) -> None:
         """Enable concurrent readers once, outside request-time connections.
@@ -1622,6 +1633,10 @@ class Repository:
             rows = conn.execute(
                 f'SELECT source_value, canonical_value FROM {table}'
             ).fetchall()
+            if not original and any(
+                str(row['canonical_value']).strip().casefold() == canonical.casefold() for row in rows
+            ):
+                original = canonical
             if original and not any(
                 str(row['canonical_value']).strip().casefold() == original.casefold() for row in rows
             ):

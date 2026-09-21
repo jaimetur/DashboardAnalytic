@@ -778,13 +778,13 @@ function drawLineChart(svg, labels, series, width, height, padding, axisLabels =
     <text x="${leftPadding - 10}" y="${scaleY(value) + 4}" text-anchor="end" fill="#526371" font-size="11">${formatAxisValue(value)}</text>
   `).join('');
   const lines = seriesCollection.map((item, index) => {
-    const color = palette[index % palette.length];
+    const color = item.color || palette[index % palette.length];
     const points = (item.labels || []).map((label, pointIndex) => `${scaleX(label)},${scaleY((item.series || [])[pointIndex])}`).join(' ');
     return `<polyline fill="none" stroke="${color}" stroke-width="3" points="${points}" />`;
   }).join('');
   const legend = seriesCollection.length > 1
     ? seriesCollection.map((item, index) => {
-        const color = palette[index % palette.length];
+        const color = item.color || palette[index % palette.length];
         const x = padding + (index % 3) * 170;
         const y = 18 + Math.floor(index / 3) * 18;
         return `
@@ -805,7 +805,7 @@ function drawLineChart(svg, labels, series, width, height, padding, axisLabels =
   `;
 }
 
-function drawBarChart(svg, labels, series, width, height, padding, axisLabels = {}) {
+function drawBarChart(svg, labels, series, width, height, padding, axisLabels = {}, colors = []) {
   const numericSeries = series.map((value) => Number(value)).filter((value) => Number.isFinite(value));
   const maxValue = numericSeries.length > 0 ? Math.max(...numericSeries) : 1;
   const yAxisLabel = String(axisLabels.y || 'Mean metric');
@@ -825,7 +825,7 @@ function drawBarChart(svg, labels, series, width, height, padding, axisLabels = 
     const valueY = scaledHeight > 28 ? y + 18 : Math.max(y - 8, topPadding + 12);
     const valueFill = scaledHeight > 28 ? 'rgba(255,255,255,0.96)' : '#334550';
     return `
-      <rect x="${x}" y="${y}" width="${Math.max(barWidth - 16, 24)}" height="${scaledHeight}" rx="10" fill="#dd653e"></rect>
+      <rect x="${x}" y="${y}" width="${Math.max(barWidth - 16, 24)}" height="${scaledHeight}" rx="10" fill="${colors[index] || '#dd653e'}"></rect>
       <text x="${textX}" y="${valueY}" text-anchor="middle" fill="${valueFill}" font-size="11" font-weight="700">${valueLabel}</text>
       <text x="${textX}" y="${height - 10}" text-anchor="middle" fill="#526371" font-size="11">${String(label).slice(0, 12)}</text>
     `;
@@ -857,7 +857,7 @@ function drawChart(container) {
   svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
   const padding = 34;
   if (payload.type === 'bar') {
-    drawBarChart(svg, labels, series, width, height, padding, {y: payload.y_axis_label});
+    drawBarChart(svg, labels, series, width, height, padding, {y: payload.y_axis_label}, payload.colors || []);
     return;
   }
   const activeXMax = Number(container.dataset.cdfXMax || payload.x_view_max_default || payload.x_max);
@@ -5469,8 +5469,8 @@ function importWarningDetails(payload) {
   }
   if (kind === 'operator-mappings') {
     return {
-      title: 'Overwrite Operator Mappings?',
-      message: 'Choose the destination workspaces next. Their complete Operator Mapping lists will be replaced. Stored CDR values will not be modified or rematerialized.',
+      title: 'Overwrite Operator/Vendor Mappings & Colors?',
+      message: 'Choose the destination workspaces next. Their complete Operator and Vendor aliases, order and theme colors will be replaced. Stored CDR values will not be modified or rematerialized.',
     };
   }
   if (kind === 'auto-calculated-fields') {
@@ -5514,7 +5514,7 @@ function selectAutoCalculatedFieldWorkspaces(workspaces, kind = 'auto-calculated
     : kind === 'dashboards'
       ? 'Dashboard definitions and their saved filters will replace the Dashboard list in every selected workspace. The original workspace is preselected when present; generated caches are not imported.'
       : kind === 'operator-mappings'
-        ? 'The complete Operator Mapping list will replace the mappings in every selected workspace. Stored CDR values will remain unchanged.'
+        ? 'The complete Operator/Vendor mapping and color configuration will replace aliases, order and theme colors in every selected workspace. Stored CDR values will remain unchanged.'
       : kind === 'bundle'
         ? 'Workspace elements in the selection will be imported into every selected workspace. Full Workspace packages keep their own workspace identity.'
         : 'The original workspace is preselected when present. Fields will be merged into every selected workspace; matching field names will be replaced.';
@@ -6065,7 +6065,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
             : offer.kind === 'dashboards'
               ? 'Next, choose the destination workspaces. The original workspace will be preselected when present. Dashboard definitions and saved filters will be restored; generated caches are not transferred.'
             : offer.kind === 'operator-mappings'
-              ? 'Next, choose the destination workspaces. Their complete Operator Mapping lists will be replaced without modifying stored CDR values.'
+              ? 'Next, choose the destination workspaces. Their complete Operator/Vendor aliases, order and theme colors will be replaced without modifying stored CDR values.'
           : 'After the complete package is received, it will be imported automatically and may overwrite matching configuration or workspaces.';
         accepted = await showConfirmDialog(
           `${offer.source}${sourceAddress} wants to transfer “${offer.content}” to this server.${workspaceCopy}\n\n${importEffect}`,
@@ -6523,12 +6523,73 @@ function bindConfirmForm(form) {
       if (form.action.includes('/admin/report-templates/')) {
         preserveAdminScrollPosition();
       }
-      form.submit();
+      if (isChartMappingForm(form)) await submitChartMappingForm(form);
+      else form.submit();
     }
   });
 }
 
 document.querySelectorAll('form[data-confirm]').forEach(bindConfirmForm);
+
+function isChartMappingForm(form) {
+  try {
+    return /^\/admin\/(?:operator|vendor)-mappings\/(?:save|delete|move)$/.test(new URL(form.action, window.location.href).pathname);
+  } catch (_error) {
+    return false;
+  }
+}
+
+async function submitChartMappingForm(form) {
+  if (!(form instanceof HTMLFormElement) || form.dataset.mappingSubmitting === '1') return;
+  const panel = form.closest('[data-panel-state-key^="admin:"]');
+  const panelKey = panel?.dataset.panelStateKey;
+  if (!panelKey || !['admin:operator-mappings', 'admin:vendor-mappings'].includes(panelKey)) return;
+  form.dataset.mappingSubmitting = '1';
+  const scrollTop = window.scrollY;
+  const scrollLeft = window.scrollX;
+  const submitters = panel.querySelectorAll('button[type="submit"]');
+  submitters.forEach((button) => { button.disabled = true; });
+  try {
+    const response = await fetch(form.action, {
+      method: 'POST', body: new FormData(form), credentials: 'same-origin',
+      headers: {'X-Requested-With': 'XMLHttpRequest'},
+    });
+    if (!response.ok) throw new Error(`The mapping could not be updated (status ${response.status}).`);
+    const freshDocument = new DOMParser().parseFromString(await response.text(), 'text/html');
+    const selector = `[data-panel-state-key="${panelKey}"] .collapsible-panel-body`;
+    const currentBody = document.querySelector(selector);
+    const freshBody = freshDocument.querySelector(selector);
+    if (!(currentBody instanceof HTMLElement) || !(freshBody instanceof HTMLElement)) {
+      throw new Error('The updated mapping table could not be loaded.');
+    }
+    currentBody.replaceWith(freshBody);
+    bindChartMappingForms(freshBody);
+    freshBody.querySelectorAll('form[data-confirm]').forEach(bindConfirmForm);
+    window.requestAnimationFrame(() => window.scrollTo({
+      top: scrollTop, left: scrollLeft, behavior: 'auto',
+    }));
+  } catch (error) {
+    submitters.forEach((button) => { button.disabled = false; });
+    showInfoDialog(error instanceof Error ? error.message : 'The mapping could not be updated.', {
+      title: 'Mapping Update Failed', tone: 'error',
+    });
+  } finally {
+    form.dataset.mappingSubmitting = '0';
+  }
+}
+
+function bindChartMappingForms(root = document) {
+  root.querySelectorAll('form').forEach((form) => {
+    if (!isChartMappingForm(form) || form.dataset.confirm || form.dataset.mappingBound === '1') return;
+    form.dataset.mappingBound = '1';
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      submitChartMappingForm(form);
+    });
+  });
+}
+
+bindChartMappingForms();
 
 function sizeAdminDatasetNameColumn(panel = document) {
   const table = panel.querySelector?.('.admin-datasets-table');

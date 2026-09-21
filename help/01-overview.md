@@ -245,7 +245,7 @@ The complete authoring specification, examples and supported chart catalogue are
 
 ### Import / Export / Transfer
 
-- Export the active workspace's Dashboards, Report Templates, Operator Mappings, Auto-calculated Fields, accessible workspaces or a Full Environment.
+- Export the active workspace's Dashboards, Report Templates, Operator/Vendor Mappings & Colors, Auto-calculated Fields, accessible workspaces or a Full Environment.
 - After choosing Full Environment, press Export or Transfer to select which workspaces belong to that operation's package.
 - Inspect an import before overwriting configuration or workspaces.
 - Dashboard, template, Operator Mapping and Auto-calculated Field packages select the source workspace automatically when a workspace with the same name exists; additional accessible workspaces can also be selected.
@@ -255,7 +255,7 @@ The complete authoring specification, examples and supported chart catalogue are
 
 ### Database Management
 
-- Use **Backup Protection** for on-demand or scheduled ZIP backups. It offers independent Application database, Workspace Database, Dashboards, Report Templates, Operator Mappings, Auto-calculated Fields, Input and Output selections, then restores detected granular components after an overwrite confirmation.
+- Use **Backup Protection** for on-demand or scheduled ZIP backups. It offers independent Application database, Workspace Database, Dashboards, Report Templates, Operator/Vendor Mappings & Colors, Auto-calculated Fields, Input and Output selections, then restores detected granular components after an overwrite confirmation.
 - Use **Database Viewer** to browse grouped application-configuration, active-workspace and combined-CDR tables.
 - Filter complete tables with Excel-style column menus.
 - Edit or delete individual rows.

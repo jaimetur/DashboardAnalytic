@@ -19,6 +19,31 @@ from pptx.dml.color import RGBColor
 from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _cdf_visible_points, _draw_chart_legend, _draw_inside_bar_label, _draw_top_column_group_separators, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_caption_spans, _hierarchy_group_colours, _hierarchy_spans, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_map, _render_mean_column, _render_stacked_distribution, _render_status_100, _render_table, _resolved_legend_items, _series_colours, _status_chart_categories, assign_cdr_vendors, catalog_chart_hover_targets, catalog_chart_payload, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, load_catalog_csv, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_kpi_expression, parse_label_position, parse_legend_position, parse_template_boolean, prepare_catalog_chart_preview_frame, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
 
 
+CHART_MAPPING_ATTRS = {
+    'operator_mapping_groups': [
+        {'canonical': 'VF', 'aliases': ['Vodafone', 'Vodafone UK', 'VFUK'], 'position': 0, 'color': '#E15759'},
+        {'canonical': '3', 'aliases': ['Three', 'Three UK', '3 UK'], 'position': 1, 'color': '#F28E2B'},
+        {'canonical': 'EE', 'aliases': ['EE UK', 'Everything Everywhere'], 'position': 2, 'color': '#76B7B2'},
+        {'canonical': 'O2', 'aliases': ['Telefonica', 'Telefonica O2'], 'position': 3, 'color': '#4E79A7'},
+    ],
+    'vendor_mapping_groups': [
+        {'canonical': 'Ericsson', 'aliases': [], 'position': 0, 'color': '#2E8B57'},
+        {'canonical': 'Huawei', 'aliases': [], 'position': 1, 'color': '#E15759'},
+        {'canonical': 'Samsung', 'aliases': [], 'position': 2, 'color': '#7B3FB5'},
+        {'canonical': 'NSN', 'aliases': [], 'position': 3, 'color': '#4E79A7'},
+        {'canonical': 'Mixed Vendor', 'aliases': ['Mixed'], 'position': 4, 'color': '#D9A514'},
+        {'canonical': 'Other Vendor', 'aliases': ['Other'], 'position': 5, 'color': '#D9A514'},
+        {'canonical': '(blank)', 'aliases': ['Blank'], 'position': 6, 'color': '#7A8791'},
+    ],
+}
+
+
+def chart_frame(data: dict[str, object]) -> pd.DataFrame:
+    frame = pd.DataFrame(data)
+    frame.attrs.update(CHART_MAPPING_ATTRS)
+    return frame
+
+
 def test_kpi_expression_supports_explicit_aggregation_aliases() -> None:
     assert parse_kpi_expression('COUNTD(Test_ID)') == ('Test_ID', 'countd')
     assert parse_kpi_expression('MEAN(`Mean Data Rate`)') == ('Mean Data Rate', 'mean')
@@ -27,7 +52,7 @@ def test_kpi_expression_supports_explicit_aggregation_aliases() -> None:
 
 
 def test_table_payload_counts_test_ids_across_the_declared_row_hierarchy() -> None:
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Benchmark': ['UK_Q1_2026'] * 4,
         'Subscriber': ['EE'] * 4,
         'G Level 4': ['Belfast'] * 4,
@@ -52,7 +77,7 @@ def test_table_payload_counts_test_ids_across_the_declared_row_hierarchy() -> No
 
 
 def test_dynamic_table_pivots_columns_and_exposes_hierarchy_metadata() -> None:
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Benchmark': ['UK_Q1_2026'] * 6,
         'Subscriber': ['EE'] * 6,
         'Test_Result': ['Completed', 'Cutoff', 'Failed', 'Completed', 'Failed', 'Completed'],
@@ -83,7 +108,7 @@ def test_dynamic_table_pivots_columns_and_exposes_hierarchy_metadata() -> None:
 
 
 def test_dynamic_table_rejects_an_unreadable_number_of_pivot_columns() -> None:
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Benchmark': ['UK_Q1_2026'] * 21,
         'G_Level_4': [f'City {index}' for index in range(21)],
         'Test_ID': [f'Test {index}' for index in range(21)],
@@ -143,7 +168,7 @@ def test_vendor_formula_keeps_vodafone_ericsson_null_exception_as_mixed() -> Non
 
 
 def test_report_operator_aliases_use_only_workspace_configuration() -> None:
-    frame = pd.DataFrame({
+    frame = chart_frame({
         "Operator": ["Vodafone", "Vodafone UK", "o2 - de", "O2(UK)", "Telefónica", "Three", "Three UK", "3 UK", "EE UK", "Everything Everywhere"],
         "Campaign": ["UK_Q4_2025", "UK_Q2_2026", "UK_Q4_2025", "UK_Q2_2026", "UK_Q2_2026", "UK_Q4_2025", "UK_Q2_2026", "UK_Q4_2025", "UK_Q2_2026", "UK_Q4_2025"],
         "Call_Status": ["Completed"] * 10,
@@ -167,7 +192,7 @@ def test_report_operator_aliases_use_only_workspace_configuration() -> None:
 
 
 def test_catalog_filters_accept_case_separators_and_subscriber_spelling_alias() -> None:
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Suscriber': ['Alpha User', 'Beta User'],
         'Test_Result': ['Completed', 'Failed'],
         'Campaign': ['UK_Q3_2026', 'UK_Q4_2026'],
@@ -186,7 +211,7 @@ def test_catalog_filters_accept_case_separators_and_subscriber_spelling_alias() 
 
 def test_catalog_timestamp_conditions_remain_active_when_date_range_filtering_is_disabled(monkeypatch) -> None:
     monkeypatch.setenv('IGNORE_EVENT_TIME_FILTERING', 'true')
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Event_Start_Time': ['2026-09-01 10:00:00', '2026-09-02 10:00:00'],
         'Metric': [1, 2],
     })
@@ -202,13 +227,13 @@ def test_catalog_timestamp_conditions_remain_active_when_date_range_filtering_is
 
 
 def test_h3g_is_not_normalised_as_operator_three() -> None:
-    frame = pd.DataFrame({"Operator": ["H3G", "H3G UK", "Three UK"]})
+    frame = chart_frame({"Operator": ["H3G", "H3G UK", "Three UK"]})
 
     assert normalise_operator_aliases(frame)["Operator"].tolist() == ["H3G", "H3G UK", "Three UK"]
 
 
 def test_vendor_aliases_normalise_only_with_workspace_configuration() -> None:
-    frame = pd.DataFrame({"vendor": ["Vodafone_Ericsson", "Three UK_Nokia", "O2 (UK)_Huawei", "EE_Ericsson", "H3G_Huawei"]})
+    frame = chart_frame({"vendor": ["Vodafone_Ericsson", "Three UK_Nokia", "O2 (UK)_Huawei", "EE_Ericsson", "H3G_Huawei"]})
 
     assert normalise_operator_aliases(frame)["vendor"].tolist() == frame["vendor"].tolist()
     assert normalise_operator_aliases(frame, {
@@ -223,7 +248,7 @@ def test_vendor_legend_colours_match_the_vendor_bar_colours() -> None:
         1, "", "", "", "", "CDR-Speech", "LQ", "Average Vertical Bars",
         "Vendor", "", "Vendor", "", "Right",
     )
-    frame = pd.DataFrame({
+    frame = chart_frame({
         "__catalog_row_0": ["VF_Ericsson", "VF_Samsung", "VF_Huawei", "3_Huawei"],
         "LQ": [4.64, 4.65, 4.64, 4.64],
     })
@@ -514,7 +539,7 @@ def test_catalogue_converter_assigns_layouts_for_missing_legacy_layouts() -> Non
 
 
 def test_vendor_group_fills_unmapped_operators_in_the_official_vendor_field() -> None:
-    frame = pd.DataFrame({'Operator': ['Vodafone UK', 'O2 (UK)'], 'vendor': ['Vodafone_Ericsson', pd.NA]})
+    frame = chart_frame({'Operator': ['Vodafone UK', 'O2 (UK)'], 'vendor': ['Vodafone_Ericsson', pd.NA]})
 
     grouped = ensure_vendor_group(frame)
 
@@ -626,7 +651,7 @@ def test_catalogue_null_and_zero_exclusions_are_independent_and_backward_compati
 
 
 def test_null_and_zero_exclusions_filter_plotted_values_independently() -> None:
-    frame = pd.DataFrame({'Operator': ['A'] * 4, 'Metric': [None, 0.0, 1.0, 2.0]})
+    frame = chart_frame({'Operator': ['A'] * 4, 'Metric': [None, 0.0, 1.0, 2.0]})
     base = dict(
         slide=1, slide_title='Chart', slide_subtitle='', layout='Layout', chart_title='Chart',
         cdr_source='CDR-Data', kpi='Metric', chart_type='CDF Line', legend='', filters='',
@@ -652,7 +677,7 @@ def test_null_and_zero_exclusions_filter_plotted_values_independently() -> None:
     assert payload['series'][0]['samples'] == 2
     assert payload['domain']['x'][0] == 1.0
 
-    scatter_frame = pd.DataFrame({
+    scatter_frame = chart_frame({
         'Operator': ['A'] * 5,
         'Y': [10.0, 0.0, 20.0, None, 30.0],
         'X': [1.0, 2.0, 0.0, 3.0, None],
@@ -685,7 +710,7 @@ def test_catalogue_rejects_visual_settings_for_incompatible_chart_types() -> Non
 
 
 def test_chart_payload_applies_cdf_ranges_and_bar_label_override() -> None:
-    frame = pd.DataFrame({'Operator': ['A'] * 4, 'Metric': [0.0, 1.0, 2.0, 3.0]})
+    frame = chart_frame({'Operator': ['A'] * 4, 'Metric': [0.0, 1.0, 2.0, 3.0]})
     base = dict(
         slide=1, slide_title='Chart', slide_subtitle='', layout='Layout', chart_title='Chart',
         cdr_source='CDR-Data', kpi='Metric', legend='', filters='',
@@ -717,7 +742,7 @@ def test_cdf_visible_points_preserve_the_vertical_step_at_the_automatic_minimum(
         (0.01, 0.75), (1.0, 1.0),
     ]
 
-    frame = pd.DataFrame({'Operator': ['A'] * 4, 'Metric': values})
+    frame = chart_frame({'Operator': ['A'] * 4, 'Metric': values})
     payload = catalog_chart_payload(
         frame,
         CatalogEntry(
@@ -746,7 +771,7 @@ def test_legend_parser_supports_manual_captions_and_dimension_selection() -> Non
 
 
 def test_resolved_legend_uses_selected_chart_field_values_and_empty_disables_it() -> None:
-    frame = pd.DataFrame({'Test_Name': ['FDFS', 'FDTT', 'FDFS'], 'Test_Result': ['Completed', 'Failed', 'Completed']})
+    frame = chart_frame({'Test_Name': ['FDFS', 'FDTT', 'FDFS'], 'Test_Result': ['Completed', 'Failed', 'Completed']})
     base = dict(
         slide=5, slide_title='', slide_subtitle='', layout='', chart_title='', cdr_source='CDR-Data',
         kpi='Test_Result', chart_type='100% Stacked Vertical Bars', filters='',
@@ -768,7 +793,7 @@ def test_resolved_filter_legend_is_text_only() -> None:
 
 
 def test_cdf_resolved_legend_reproduces_historical_and_latest_line_widths() -> None:
-    frame = pd.DataFrame({
+    frame = chart_frame({
         '__catalog_row_0': ['EE', 'EE'],
         '__catalog_column_0': ['2026-Q1', '2026-Q2'],
         'Campaign': ['2026-Q1', '2026-Q2'],
@@ -790,7 +815,7 @@ def test_cdf_resolved_legend_reproduces_historical_and_latest_line_widths() -> N
 
 
 def test_cdf_resolved_legend_decreases_four_campaign_widths_per_operator() -> None:
-    frame = pd.DataFrame({
+    frame = chart_frame({
         '__catalog_row_0': ['EE'] * 4 + ['O2'] * 3,
         '__catalog_column_0': [
             '2026-Q1', '2026-Q2', '2026-Q3', '2026-Q4',
@@ -830,7 +855,7 @@ def test_interactive_cdf_model_uses_reporting_hierarchy_palette_and_legend() -> 
         1, 'Speech', '', '', 'POLQA CDF', 'CDR-Speech', 'LQ', 'CDF Line',
         'Vendor, Campaign', '', 'Vendor', 'Campaign', 'Right',
     )
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Vendor': ['VF_Ericsson'] * 4 + ['VF_Huawei'] * 4,
         'Campaign': ['UK_Q2_2026', 'UK_Q2_2026', 'UK_Q1_2026', 'UK_Q1_2026'] * 2,
         'LQ': [1.2, 4.2, 1.0, 4.0, 1.4, 4.4, 1.1, 4.1],
@@ -843,18 +868,18 @@ def test_interactive_cdf_model_uses_reporting_hierarchy_palette_and_legend() -> 
     )
     assert [(series['key'], series['colour'], series['width']) for series in model['series']] == [
         (['VF_Ericsson', '2026-Q1'], '#2E8B57', 1),
-        (['VF_Ericsson', '2026-Q2'], '#2E8B57', 4),
+        (['VF_Ericsson', '2026-Q2'], '#1D5636', 4),
         (['VF_Huawei', '2026-Q1'], '#E15759', 1),
-        (['VF_Huawei', '2026-Q2'], '#E15759', 4),
+        (['VF_Huawei', '2026-Q2'], '#8C3637', 4),
     ]
     assert model['legend'] == {
         'position': 'right',
         'line_markers': True,
         'items': [
             {'label': 'VF_Ericsson · 2026-Q1', 'colour': '#2E8B57', 'width': 1},
-            {'label': 'VF_Ericsson · 2026-Q2', 'colour': '#2E8B57', 'width': 4},
+            {'label': 'VF_Ericsson · 2026-Q2', 'colour': '#1D5636', 'width': 4},
             {'label': 'VF_Huawei · 2026-Q1', 'colour': '#E15759', 'width': 1},
-            {'label': 'VF_Huawei · 2026-Q2', 'colour': '#E15759', 'width': 4},
+            {'label': 'VF_Huawei · 2026-Q2', 'colour': '#8C3637', 'width': 4},
         ],
     }
     assert all(series['x'] and series['y'] and series['samples'] == 2 for series in model['series'])
@@ -866,7 +891,7 @@ def test_interactive_cdf_model_uses_progressive_campaign_widths() -> None:
         'Operator, Campaign', '', 'Operator', 'Campaign', 'Top',
     )
     campaigns = ['2026-Q1', '2026-Q2', '2026-Q3', '2026-Q4']
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Operator': ['EE'] * 8,
         'Campaign': [campaign for campaign in campaigns for _ in range(2)],
         'Rate': [1.0, 2.0, 1.1, 2.1, 1.2, 2.2, 1.3, 2.3],
@@ -886,7 +911,7 @@ def test_multi_cdf_payload_bounds_high_cardinality_identifier_groups() -> None:
         'Multi KPI CDF Lines', 'Operator', '',
         'Test Info × Test_Name × Latency Score × Operator', '', 'Right',
     )
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Test_Info': [f'test-{index}' for index in range(entries)],
         'Test_Name': ['Interactivity'] * entries,
         'Latency_Score': [str(index % 4) for index in range(entries)],
@@ -909,7 +934,7 @@ def test_multivendor_cdf_legend_keeps_operator_and_vendor_for_each_curve() -> No
         1, 'Speech', '', '', 'Interactivity', 'CDR-Speech', 'LQ', 'CDF Line',
         'Operator', '', 'Operator', 'Campaign', 'Bottom',
     )
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'vendor': ['VF_Ericsson'] * 3 + ['VF_Huawei'] * 3 + ['3_Ericsson'] * 3,
         'Campaign': ['2026 Q1'] * 9,
         'LQ': [1.0, 2.0, 3.0] * 3,
@@ -928,7 +953,7 @@ def test_interactive_status_model_preserves_reporting_row_and_column_aggregation
         '100% Stacked Vertical Bars', 'Test_Result', '', 'Call Family',
         'Operator × Campaign', 'Right',
     )
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Call Family': ['VoLTE'] * 8,
         'Operator': ['VF'] * 4 + ['3'] * 4,
         'Campaign': ['UK_Q2_2026', 'UK_Q2_2026', 'UK_Q1_2026', 'UK_Q1_2026'] * 2,
@@ -965,7 +990,7 @@ def test_interactive_status_model_preserves_sql_aggregated_row_weights() -> None
         '100% Stacked Vertical Bars', 'Test_Result', '', 'Type_of_Test',
         'Operator × Campaign', 'Right',
     )
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Type_of_Test': ['Browsing'] * 6,
         'Operator': ['VF'] * 3 + ['3'] * 3,
         'Campaign': ['2026 Q1'] * 2 + ['2026 Q2'] + ['2026 Q1'] + ['2026 Q2'] * 2,
@@ -981,6 +1006,7 @@ def test_interactive_status_model_preserves_sql_aggregated_row_weights() -> None
         .rename('__catalog_weight')
         .reset_index()
     )
+    weighted.attrs.update(CHART_MAPPING_ATTRS)
 
     expanded_model = catalog_chart_payload(frame, entry, prefiltered=True)
     weighted_model = catalog_chart_payload(weighted, entry, prefiltered=True)
@@ -993,7 +1019,7 @@ def test_interactive_status_legend_uses_the_colours_of_its_plotted_states() -> N
         1, 'Voice', '', '', 'Failed ratio', 'CDR-Voice', 'Test_Result',
         '100% Stacked Vertical Bars', 'Operator', '', 'Test Name', 'Operator', 'Right',
     )
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Test Name': ['httpBrowser', 'httpBrowser', 'VideoStreaming', 'VideoStreaming'],
         'Operator': ['O2', 'O2', 'VF', 'VF'],
         'Test_Result': ['Completed', 'Failed', 'Completed', 'Failed'],
@@ -1013,7 +1039,7 @@ def test_interactive_distribution_model_uses_reporting_buckets_and_nested_keys()
         'Distribution Stacked Vertical Bars', 'Buckets', 'Buckets = 1,5,20;',
         'Operator', 'Campaign × Rate Bucket', 'Bottom',
     )
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Operator': ['VF'] * 4 + ['3'] * 4,
         'Campaign': ['UK_Q2_2026', 'UK_Q2_2026', 'UK_Q1_2026', 'UK_Q1_2026'] * 2,
         'Mean_Data_Rate': [2, 25, .5, 7, 2, 2, .2, 25],
@@ -1044,7 +1070,7 @@ def test_distribution_upper_bound_buckets_match_tableau_formula_and_palette() ->
         'Distribution Stacked Vertical Bars', 'Buckets', 'Buckets < 2,5,20,100;',
         'Operator', 'Campaign × Rate Bucket', 'Right',
     )
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Operator': ['EE'] * 6,
         'Campaign': ['UK_Q2_2026'] * 6,
         'Mean_Data_Rate': [.5, 2, 5, 20, 100, 101],
@@ -1074,7 +1100,7 @@ def test_distribution_inclusive_upper_bound_buckets_are_supported() -> None:
         'Distribution Stacked Vertical Bars', 'Buckets', 'Buckets <= 1,3,10,20;',
         'Operator', 'Campaign × Rate Bucket', 'Right',
     )
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Operator': ['EE'] * 5,
         'Campaign': ['2026-Q2'] * 5,
         'Rate': [1, 3, 10, 20, 21],
@@ -1089,7 +1115,7 @@ def test_distribution_inclusive_upper_bound_buckets_are_supported() -> None:
 
 
 def test_static_distribution_draws_horizontal_white_percentage_labels_inside_segments() -> None:
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Operator': ['EE'] * 10,
         'Campaign': ['2026-Q2'] * 10,
         '__catalog_stack': ['Above'] * 8 + ['below100'] * 2,
@@ -1112,7 +1138,7 @@ def test_interactive_mean_model_uses_reporting_aggregation_and_vendor_palette() 
         1, 'Speech', '', '', 'Average POLQA', 'CDR-Speech', 'LQ',
         'Average Vertical Bars', 'Vendor', '', 'Vendor', 'Campaign', 'Right',
     )
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Vendor': ['VF_Ericsson'] * 4 + ['VF_Huawei'] * 4,
         'Campaign': ['UK_Q2_2026', 'UK_Q2_2026', 'UK_Q1_2026', 'UK_Q1_2026'] * 2,
         'LQ': [4.0, 4.4, 3.8, 4.0, 3.0, 3.4, 2.8, 3.0],
@@ -1137,7 +1163,7 @@ def test_interactive_mean_model_nests_column_only_hierarchies_by_parent() -> Non
         1, 'Speech', '', '', 'Average POLQA', 'CDR-Speech', 'LQ',
         'Average Vertical Bars', 'Vendor', '', '', 'Operator × Campaign', 'Right',
     )
-    frame = pd.DataFrame({
+    frame = chart_frame({
         # This is the natural order after appending one CDR per campaign.
         'Operator': ['VF', '3', 'EE', 'VF', '3', 'EE'],
         'Campaign': ['UK_Q1_2026'] * 3 + ['UK_Q2_2026'] * 3,
@@ -1213,7 +1239,7 @@ def test_interactive_failure_model_matches_reporting_legend_plot_geometry() -> N
         'Count Stacked Horizontal Bars', 'Call_Status', '', 'Call Family',
         'Operator × Campaign', 'Right',
     )
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Call Family': ['VoLTE', 'VoLTE', 'MultiRAB'],
         'Operator': ['VF', 'VF', '3'],
         'Campaign': ['2026 Q1', '2026 Q2', '2026 Q2'],
@@ -1236,7 +1262,7 @@ def test_interactive_map_model_preserves_operator_colours_and_osm_geometry() -> 
         1, 'Map', '', '', 'Coverage', 'CDR-Data', 'Latitude vs Longitude',
         'Map', 'Operator', '', 'Operator', 'Campaign', 'Right',
     )
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Latitude': [51.5, 51.51, 53.8],
         'Longitude': [-.12, -.11, -1.55],
         'Operator': ['VF', 'VF', '3'],
@@ -1260,7 +1286,7 @@ def test_interactive_map_keeps_manual_legend_labels_only_when_they_cover_every_s
         1, 'Map', '', '', 'Coverage', 'CDR-Data', 'Latitude vs Longitude',
         'Map', 'Success/Failure', '', 'Operator', '', 'Right',
     )
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Latitude': [51.5, 51.51, 53.8],
         'Longitude': [-.12, -.11, -1.55],
         'Operator': ['VF', '3', 'EE'],
@@ -1295,7 +1321,7 @@ def test_threshold_legend_uses_the_resolved_value_and_chart_segment_colours() ->
 
 
 def test_distribution_bucket_legend_uses_resolved_bucket_colours_not_filter_text() -> None:
-    frame = pd.DataFrame({
+    frame = chart_frame({
         '__catalog_stack': ['20-100', '100+', '5-20', '1-5', '<1', '20-100'],
     })
     entry = CatalogEntry(
@@ -1311,7 +1337,7 @@ def test_distribution_bucket_legend_uses_resolved_bucket_colours_not_filter_text
 
 
 def test_mean_chart_renders_selected_dimension_legend_at_requested_position() -> None:
-    frame = pd.DataFrame({
+    frame = chart_frame({
         '__catalog_row_0': ['VF', '3'], '__catalog_column_0': ['2026-Q2', '2026-Q2'],
         'Metric': [1.0, 2.0], '__catalog_primary': ['VF', '3'], '__catalog_series': ['2026-Q2', '2026-Q2'],
     })
@@ -1330,7 +1356,7 @@ def test_mean_chart_renders_selected_dimension_legend_at_requested_position() ->
 
 
 def test_status_chart_draws_legend_at_the_catalogue_position() -> None:
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Operator': ['Vodafone'],
         'Campaign': ['2026 Q1'],
         'Call_Status': ['Completed'],
@@ -1380,7 +1406,7 @@ def test_catalogue_filter_and_grouping_contract_is_parsed_and_applied() -> None:
         ','.join(CATALOG_HEADERS) + '\n8,Quality,,Title and 1 column + Comments,Quality by city,CDR-Speech,LQ,Average Vertical Bars,Session_Type IN (VoLTE); LQ >= 1.6,City,Operator × Campaign,,\n',
         'nsa',
     )[0]
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Session_Type': ['VoLTE', 'WhatsApp'], 'LQ': [3.2, 4.0], 'City': ['London', 'Leeds'],
         'Operator': ['EE', 'O2'], 'Campaign': ['Q1', 'Q1'],
     })
@@ -1431,7 +1457,7 @@ def test_multivendor_rendering_rewrites_display_and_grouping_and_excludes_unreso
     assert rendered.grouping_columns == 'Operator × Vendor × Campaign'
     assert rendered.filters == 'Operator = Vodafone UK; vendor NOT CONTAINS (Mixed, Other)'
 
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Operator': ['Vodafone UK', 'Vodafone UK', '3'],
         'vendor': ['Vodafone_Ericsson', 'Vodafone_Mixed Vendor', '3_Nokia'],
         'Campaign': ['UK_Q2_SA_2026', 'UK_Q2_SA_2026', 'UK_Q2_SA_2026'],
@@ -1448,7 +1474,7 @@ def test_multivendor_rendering_rewrites_display_and_grouping_and_excludes_unreso
 
 
 def test_vendor_filters_accept_full_or_operator_independent_vendor_values() -> None:
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'vendor': [
             'VF_Ericsson', 'VF_Huawei', 'VF_Mixed Vendor', '3_Ericsson',
             '3_Huawei', '3_Samsung', '3_Mixed Vendor', 'O2_NSN',
@@ -1478,7 +1504,7 @@ def test_multivendor_operator_filters_match_vendor_prefixes_and_keep_full_groupi
         'nsa',
     )[0]
     rendered = prepare_multivendor_catalog_entry(entry)
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Operator': ['Vodafone UK', 'Vodafone UK', '3', 'O2', 'EE'],
         'vendor': ['Vodafone_Ericsson', 'Vodafone_Huawei', '3_Nokia', 'O2_Ericsson', 'EE_Nokia'],
         'Campaign': ['2025 Q4', '2026 Q1', '2025 Q4', '2026 Q1', '2026 Q1'],
@@ -1505,7 +1531,7 @@ def test_grouping_orders_operators_vf_three_ee_o2_then_unknown_operators() -> No
         1, "", "", "", "", "CDR-Speech", "LQ", "Average Vertical Bars",
         "", "", "Operator", "Campaign", "Top",
     )
-    frame = pd.DataFrame({
+    frame = chart_frame({
         "vendor": ["O2_NSN", "Lebara_NSN", "EE_NSN", "3_Ericsson", "VF_Huawei"],
         "Campaign": ["2026 Q2"] * 5,
         "LQ": [4.0] * 5,
@@ -1518,12 +1544,64 @@ def test_grouping_orders_operators_vf_three_ee_o2_then_unknown_operators() -> No
     assert grouped["__catalog_row_0"].tolist() == ["VF", "3", "EE", "O2", "Lebara"]
 
 
+def test_chart_grouping_uses_workspace_order_for_subscribers_and_combined_vendors() -> None:
+    subscriber_entry = CatalogEntry(
+        1, '', '', '', '', 'CDR-Data', 'Mean_Data_Rate', 'Average Vertical Bars',
+        '', '', 'Subscriber', 'Campaign', 'Top',
+    )
+    subscriber_frame = chart_frame({
+        'Subscriber': ['Alpha', 'Beta'], 'Campaign': ['2026 Q1', '2026 Q1'],
+        'Mean_Data_Rate': [1.0, 2.0],
+    })
+    subscriber_frame.attrs['operator_mapping_groups'] = [
+        {'canonical': 'Beta', 'aliases': [], 'position': 0, 'color': '#112233'},
+        {'canonical': 'Alpha', 'aliases': [], 'position': 1, 'color': '#445566'},
+    ]
+
+    grouped, primary, _series = _apply_catalog_grouping(
+        subscriber_frame, subscriber_entry, False, 'Mean_Data_Rate',
+    )
+    assert grouped[primary].tolist() == ['Beta', 'Alpha']
+
+    vendor_entry = replace(subscriber_entry, grouping_rows='Vendor')
+    vendor_frame = chart_frame({
+        'Vendor': ['VF_Ericsson', 'VF_Huawei'], 'Campaign': ['2026 Q1', '2026 Q1'],
+        'Mean_Data_Rate': [1.0, 2.0],
+    })
+    vendor_frame.attrs['vendor_mapping_groups'] = [
+        {'canonical': 'Huawei', 'aliases': [], 'position': 0, 'color': '#ABCDEF'},
+        {'canonical': 'Ericsson', 'aliases': [], 'position': 1, 'color': '#123456'},
+    ]
+
+    grouped, primary, _series = _apply_catalog_grouping(
+        vendor_frame, vendor_entry, False, 'Mean_Data_Rate',
+    )
+    assert grouped[primary].tolist() == ['VF_Huawei', 'VF_Ericsson']
+
+
+def test_cdf_campaigns_use_variants_of_the_workspace_theme_colour() -> None:
+    frame = chart_frame({'operator': [], 'campaign': []})
+    frame.attrs['operator_mapping_groups'] = [
+        {'canonical': 'Carrier', 'aliases': [], 'position': 0, 'color': '#204060'},
+    ]
+    frame.attrs['catalogue_dimension_labels'] = {
+        'operator': ('Operator',), 'campaign': ('Campaign',),
+    }
+
+    colours = _series_colours(
+        [('Carrier', 'Q1'), ('Carrier', 'Q2')], ['operator', 'campaign'], frame, line_chart=True,
+    )
+
+    assert colours[('Carrier', 'Q1')] == '#204060'
+    assert colours[('Carrier', 'Q2')] != '#204060'
+
+
 def test_multivendor_grouping_uses_the_same_vendor_order_for_each_operator() -> None:
     entry = CatalogEntry(
         1, "", "", "", "", "CDR-Speech", "LQ", "Average Vertical Bars",
         "Vendor", "", "Vendor", "Campaign", "Top",
     )
-    frame = pd.DataFrame({
+    frame = chart_frame({
         "vendor": [
             "VF_Samsung", "VF_NSN", "VF_Huawei", "VF_Ericsson",
             "3_Huawei", "3_Samsung", "3_Ericsson",
@@ -1545,7 +1623,7 @@ def test_vendor_grouping_keeps_each_operator_together_outside_multivendor_mode()
         1, "", "", "", "", "CDR-Speech", "LQ", "Average Vertical Bars",
         "Vendor", "", "Vendor", "Campaign", "Top",
     )
-    frame = pd.DataFrame({
+    frame = chart_frame({
         "Vendor": [
             "VF_Ericsson", "VF_Huawei", "3_Ericsson", "3_Huawei",
             "3_Samsung", "VF_Samsung", "VF_NSN",
@@ -1567,7 +1645,7 @@ def test_rows_only_grouping_uses_one_all_series_without_repeating_the_category()
         ','.join(CATALOG_HEADERS) + '\n8,Quality,,Title and 1 column + Comments,Quality,CDR-Speech,LQ,Average Vertical Bars,,Operator,,,\n',
         'nsa',
     )[0]
-    frame = pd.DataFrame({'Operator': ['EE', 'O2'], 'LQ': [3.2, 3.8]})
+    frame = chart_frame({'Operator': ['EE', 'O2'], 'LQ': [3.2, 3.8]})
 
     grouped, primary, series = _apply_catalog_grouping(frame, entry, False, 'LQ')
 
@@ -1580,7 +1658,7 @@ def test_campaign_grouping_displays_only_year_and_quarter() -> None:
         ','.join(CATALOG_HEADERS) + '\n8,Quality,,Title and 1 column + Comments,Quality,CDR-Speech,LQ,Average Vertical Bars,,Operator,Campaign,,\n',
         'nsa',
     )[0]
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Operator': ['EE', '3', 'Vodafone UK'],
         'Campaign': ['UK_Q2_SA_2026', 'UK_Q4_2025', '2024 Q3 NSA'],
         'LQ': [3.2, 3.8, 4.0],
@@ -1594,7 +1672,7 @@ def test_campaign_grouping_displays_only_year_and_quarter() -> None:
 
 
 def test_cdf_renders_a_curve_for_each_complete_rows_and_columns_combination() -> None:
-    frame = pd.DataFrame({
+    frame = chart_frame({
         '__catalog_row_0': ['Vodafone', 'Vodafone', 'Vodafone', 'Vodafone', 'O2', 'O2', 'O2', 'O2'],
         '__catalog_column_0': ['2025', '2025', '2026', '2026', '2025', '2025', '2026', '2026'],
         '__catalog_primary': ['unused'] * 8,
@@ -1613,7 +1691,7 @@ def test_cdf_renders_a_curve_for_each_complete_rows_and_columns_combination() ->
 
 
 def test_cdf_uses_emphasised_lines_when_only_one_campaign_is_rendered() -> None:
-    frame = pd.DataFrame({
+    frame = chart_frame({
         '__catalog_row_0': ['Vodafone', 'Vodafone', 'O2', 'O2'],
         '__catalog_primary': ['unused'] * 4, '__catalog_series': ['unused'] * 4,
         'Campaign': ['2026 Q2'] * 4, 'Metric': [1.0, 2.0, 1.2, 2.2],
@@ -1627,7 +1705,7 @@ def test_cdf_uses_emphasised_lines_when_only_one_campaign_is_rendered() -> None:
 
 def test_cdf_renderer_uses_progressive_widths_for_four_campaigns() -> None:
     campaigns = ['2026-Q1', '2026-Q2', '2026-Q3', '2026-Q4']
-    frame = pd.DataFrame({
+    frame = chart_frame({
         '__catalog_row_0': ['Vodafone'] * 8,
         '__catalog_column_0': [campaign for campaign in campaigns for _ in range(2)],
         '__catalog_primary': ['unused'] * 8,
@@ -1694,14 +1772,15 @@ def test_status_categories_colour_failure_and_success_outcomes_semantically() ->
 
 
 def test_operator_vendor_column_groups_keep_campaign_bars_in_their_operator_palette() -> None:
+    frame = chart_frame({})
     colours = _hierarchy_group_colours([
         ('Vodafone_Ericsson', '2026 Q1'), ('Vodafone_Ericsson', '2026 Q2'),
         ('Vodafone_Huawei', '2026 Q1'), ('Vodafone_Huawei', '2026 Q2'),
         ('3_Ericsson', '2026 Q1'), ('3_Ericsson', '2026 Q2'),
-    ])
+    ], frame=frame)
 
     assert colours['Vodafone_Ericsson'] == '#E15759'
-    assert colours['Vodafone_Huawei'] == '#9B1D20'
+    assert colours['Vodafone_Huawei'] == '#8C3637'
     assert colours['3_Ericsson'] == '#F28E2B'
 
 
@@ -1721,7 +1800,7 @@ def test_neutral_operator_colour_matches_between_campaign_bars_and_legend() -> N
 
 
 def test_table_renders_percentages_for_a_categorical_metric() -> None:
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Test': ['Browse', 'Browse', 'Transfer'],
         'Result': ['Completed', 'Failed', 'Completed'],
     })
@@ -1733,7 +1812,7 @@ def test_table_renders_percentages_for_a_categorical_metric() -> None:
 
 def test_chart_colours_use_vendor_families_for_multi_operator_dimensions() -> None:
     keys = [('Vodafone', 'Ericsson'), ('Vodafone', 'Huawei'), ('3', 'Ericsson'), ('3', 'Huawei')]
-    frame = pd.DataFrame({'__catalog_row_0': [], '__catalog_row_1': []})
+    frame = chart_frame({'__catalog_row_0': [], '__catalog_row_1': []})
     frame.attrs['catalogue_dimension_labels'] = {
         '__catalog_row_0': ('Operator',), '__catalog_row_1': ('Vendor',),
     }
@@ -1741,9 +1820,9 @@ def test_chart_colours_use_vendor_families_for_multi_operator_dimensions() -> No
     colours = _series_colours(keys, ['__catalog_row_0', '__catalog_row_1'], frame)
 
     assert colours[('Vodafone', 'Ericsson')] == '#2E8B57'
-    assert colours[('3', 'Ericsson')] == '#0D5A34'
+    assert colours[('3', 'Ericsson')] == '#1D5636'
     assert colours[('Vodafone', 'Huawei')] == '#E15759'
-    assert colours[('3', 'Huawei')] == '#A61E2B'
+    assert colours[('3', 'Huawei')] == '#8C3637'
 
     line_colours = _series_colours(keys, ['__catalog_row_0', '__catalog_row_1'], frame, line_chart=True)
     assert line_colours == colours
@@ -1751,7 +1830,7 @@ def test_chart_colours_use_vendor_families_for_multi_operator_dimensions() -> No
 
 def test_chart_colours_use_vendor_families_for_one_operator() -> None:
     keys = [('Vodafone', 'Ericsson'), ('Vodafone', 'Huawei'), ('Vodafone', 'Samsung'), ('Vodafone', 'NSN')]
-    frame = pd.DataFrame({'__catalog_row_0': [], '__catalog_row_1': []})
+    frame = chart_frame({'__catalog_row_0': [], '__catalog_row_1': []})
     frame.attrs['catalogue_dimension_labels'] = {
         '__catalog_row_0': ('Operator',), '__catalog_row_1': ('Vendor',),
     }
@@ -1766,7 +1845,7 @@ def test_chart_colours_use_vendor_families_for_one_operator() -> None:
 
 def test_chart_colours_detect_a_single_operator_from_composite_vendor_values() -> None:
     keys = [('3_Ericsson',), ('3_Huawei',), ('3_Nokia',)]
-    frame = pd.DataFrame({'__catalog_column_0': []})
+    frame = chart_frame({'__catalog_column_0': []})
     frame.attrs['catalogue_dimension_labels'] = {'__catalog_column_0': ('Vendor',)}
 
     colours = _series_colours(keys, ['__catalog_column_0'], frame)
@@ -1781,7 +1860,7 @@ def test_primary_vendor_dimension_assigns_semantic_colours_to_special_vendors() 
         ('Vodafone_Other Vendor',), ('Vodafone_NSN',), ('3_Ericsson',), ('3_Mixed Vendor',),
         ('3_Huawei',), ('3_Samsung',),
     ]
-    frame = pd.DataFrame({'__catalog_column_0': []})
+    frame = chart_frame({'__catalog_column_0': []})
     frame.attrs['catalogue_dimension_labels'] = {'__catalog_column_0': ('Vendor',)}
 
     colours = _series_colours(keys, ['__catalog_column_0'], frame)
@@ -1790,8 +1869,8 @@ def test_primary_vendor_dimension_assigns_semantic_colours_to_special_vendors() 
         ('(blank)',): '#7A8791', ('Vodafone_Ericsson',): '#2E8B57',
         ('Vodafone_Mixed Vendor',): '#D9A514', ('Vodafone_Huawei',): '#E15759',
         ('Vodafone_Other Vendor',): '#D9A514', ('Vodafone_NSN',): '#4E79A7',
-        ('3_Ericsson',): '#0D5A34', ('3_Mixed Vendor',): '#9A7000',
-        ('3_Huawei',): '#A61E2B', ('3_Samsung',): '#7B3FB5',
+        ('3_Ericsson',): '#1D5636', ('3_Mixed Vendor',): '#87660C',
+        ('3_Huawei',): '#8C3637', ('3_Samsung',): '#7B3FB5',
     }
 
 
@@ -1811,7 +1890,7 @@ def test_reporting_query_columns_splits_map_coordinates() -> None:
 
 
 def test_map_renderer_keeps_a_colour_key_for_every_filtered_point() -> None:
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Latitude': [51.5, 51.51, 51.52],
         'Longitude': [-0.12, -0.11, -0.10],
         'Operator': ['VF', 'EE', 'VF'],
@@ -1863,7 +1942,7 @@ def test_catalogue_filter_contract_supports_not_in_and_not_contains() -> None:
         ','.join(CATALOG_HEADERS) + '\n8,Quality,,Title and 1 column + Comments,Quality,CDR-Speech,LQ,Average Vertical Bars,Session_Type NOT IN (WhatsApp); Campaign NOT CONTAINS legacy,Operator,Campaign,,\n',
         'nsa',
     )[0]
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Session_Type': ['VoLTE', 'WhatsApp', 'VoLTE'], 'Campaign': ['Q1', 'Q1', 'legacy-Q2'],
         'LQ': [3.2, 4.0, 3.8], 'Operator': ['EE', 'EE', 'O2'],
     })
@@ -1871,7 +1950,7 @@ def test_catalogue_filter_contract_supports_not_in_and_not_contains() -> None:
 
 
 def test_campaign_filters_accept_compact_permutations_without_merging_sa_and_nsa() -> None:
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Campaign': ['UK_Q2_2026', 'UK_Q2_2026_SA', '2026_Q2_NSA_UK'],
         'Metric': [1, 2, 3],
     })
@@ -1897,7 +1976,7 @@ def test_tableau_result_group_filter_uses_the_workbook_bins() -> None:
         '100% Stacked Vertical Bars', 'Result Group', 'Result Group NOT IN (Success)',
         'Operator', '', 'Right', dimensions,
     )
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Operator': ['EE'] * 5,
         'Test_Result': ['Completed', 'Visible Completed', 'Cutoff', 'Failed', 'Unknown'],
     })
@@ -1913,7 +1992,7 @@ def test_multi_kpi_cdf_lines_render_each_tableau_measure() -> None:
         'NR SINR | LTE SINR', 'Multi KPI CDF Lines', 'Operator', '',
         'Operator', 'Campaign', 'Right',
     )
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Operator': ['EE', 'EE', 'VF', 'VF'],
         'Campaign': ['2026 Q1', '2026 Q2', '2026 Q1', '2026 Q2'],
         'NR SINR': [4.0, 5.0, 6.0, 7.0],
@@ -1934,7 +2013,7 @@ def test_dashboard_canvas_report_renderer_uses_dashboard_payload() -> None:
         1, 'Radio quality', '', '', 'Radio quality', 'CDR-Data',
         'NR SINR', 'CDF Line', 'Operator', '', 'Operator', 'Campaign', 'Right',
     )
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Operator': ['EE', 'VF'],
         'Campaign': ['2026 Q1', '2026 Q1'],
         'NR SINR': [4.0, 8.0],
@@ -1955,7 +2034,7 @@ def test_report_renderer_rejects_unknown_engine() -> None:
         1, 'Radio quality', '', '', 'Radio quality', 'CDR-Data',
         'NR SINR', 'CDF Line', '', '', 'Operator', 'Campaign', 'Right',
     )
-    frame = pd.DataFrame({'Operator': ['EE'], 'Campaign': ['2026 Q1'], 'NR SINR': [4.0]})
+    frame = chart_frame({'Operator': ['EE'], 'Campaign': ['2026 Q1'], 'NR SINR': [4.0]})
 
     with pytest.raises(ValueError, match="Expected 'pil' or 'dashboard-canvas'"):
         render_catalog_chart_preview(frame, entry, renderer='unknown')
@@ -1977,7 +2056,7 @@ def test_canvas_hits_are_reused_by_static_chart_tooltips() -> None:
         1, 'Throughput', '', '', 'Throughput', 'CDR-Data',
         'Mean_Data_Rate', 'Average Vertical Bars', '', '', 'Operator', 'Campaign', 'Right',
     )
-    frame = pd.DataFrame({'Operator': ['EE'], 'Campaign': ['2026 Q1'], 'Mean_Data_Rate': [42.0]})
+    frame = chart_frame({'Operator': ['EE'], 'Campaign': ['2026 Q1'], 'Mean_Data_Rate': [42.0]})
     hits = [{
         'kind': 'rectangle', 'x': 10, 'y': 20, 'width': 30, 'height': 40,
         'label': 'EE · 2026 Q1', 'series': 'EE', 'value': '42.00',
@@ -1998,7 +2077,7 @@ def test_not_contains_filter_excludes_each_comma_separated_term() -> None:
         1, 'Quality', '', 'Title and 1 column', '', 'CDR-Speech', 'LQ', 'CDF Line',
         '', 'Vendor NOT CONTAINS (Mixed, Other)', 'Vendor', 'Campaign', 'Top',
     )
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Vendor': ['Vodafone_Ericsson', 'Vodafone_Mixed Vendor', '3_Other Vendor'],
         'Campaign': ['2026 Q1'] * 3,
         'LQ': [3.5, 3.6, 3.7],
@@ -2013,7 +2092,7 @@ def test_catalogue_call_family_uses_documented_netcheck_session_values() -> None
         + '\n8,Completed Call Ratio,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,"Call Family IN (VoLTE, MultiRAB, WhatsApp)",Call Family,Operator × Campaign,,\n',
         'nsa',
     )[0])
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Session_Type': ['CALL', 'MultiRAB CALL', 'WhatsApp CALL'],
         'L1_Call_Mode_A': ['VoLTE', '', ''],
         'Operator': ['EE', 'EE', 'EE'],
@@ -2043,7 +2122,7 @@ def test_status_chart_uses_nested_columns_without_a_row_grouping() -> None:
         8, 'Completed Call Ratio', '', 'Title and 1 column + Comments', '', 'CDR-Voice',
         'Call_Status', '100% Stacked Vertical Bars', '', '', '', 'Operator × Campaign',
     )
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Operator': ['Vodafone', 'Vodafone', 'O2', 'O2'],
         'Campaign': ['2025 Q4', '2026 Q1', '2025 Q4', '2026 Q1'],
         'Call_Status': ['Completed', 'Failed', 'Completed', 'Dropped'],
@@ -2064,7 +2143,7 @@ def test_status_chart_keeps_row_only_hierarchy_on_the_left() -> None:
         8, 'Status', '', '', '', 'CDR-Data', 'Test_Result',
         '100% Stacked Vertical Bars', '', '', 'City × G Level 1', '',
     )
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'City': ['London', 'London'],
         'G_Level_1': ['Drive', 'Connecting Roads'],
         'Test_Result': ['Completed', 'Failed'],
@@ -2081,7 +2160,7 @@ def test_status_chart_keeps_row_only_hierarchy_on_the_left() -> None:
 
 
 def test_status_chart_leaves_status_row_inclusion_to_the_template_filter() -> None:
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Operator': ['EE'] * 8,
         'Campaign': ['2026-Q2'] * 8,
         'Test_Result': ['Completed', 'Failed', None, float('nan'), '', ' NaN ', 'Not executed', 'Unknown'],
@@ -2100,7 +2179,7 @@ def test_status_chart_leaves_status_row_inclusion_to_the_template_filter() -> No
 
 
 def test_status_chart_honours_selected_kpi_when_other_status_columns_exist() -> None:
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Operator': ['EE', 'EE'],
         'Campaign': ['2026-Q2', '2026-Q2'],
         'Call_Status': ['Completed', 'Completed'],
@@ -2118,7 +2197,7 @@ def test_status_chart_honours_selected_kpi_when_other_status_columns_exist() -> 
 
 
 def test_status_chart_maps_cutoff_to_a_visible_failure_segment_without_filtering_rows() -> None:
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Operator': ['EE'] * 8,
         'Campaign': ['2026-Q2'] * 8,
         'Test_Result': ['Incomplete', 'Unsuccessful', 'Aborted', 'Cancelled', 'Timeout', 'Cutoff', 'Failed', 'Completed'],
@@ -2140,7 +2219,7 @@ def test_status_chart_maps_cutoff_to_a_visible_failure_segment_without_filtering
 
 
 def test_data_cutoffs_are_excluded_from_tableau_status_denominator() -> None:
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Operator': ['EE'] * 1000,
         'Campaign': ['2026-Q2'] * 1000,
         'Test_Result': ['Completed'] * 692 + ['Cutoff'] * 278 + ['Failed'] * 30,
@@ -2157,7 +2236,7 @@ def test_data_cutoffs_are_excluded_from_tableau_status_denominator() -> None:
 
 
 def test_hierarchical_grouping_keeps_campaign_bars_together_per_operator() -> None:
-    frame = pd.DataFrame({
+    frame = chart_frame({
         '__catalog_column_0': ['Vodafone', 'O2', 'Vodafone', 'O2'],
         '__catalog_column_1': ['2025 Q4', '2025 Q4', '2026 Q1', '2026 Q1'],
     })
@@ -2192,7 +2271,7 @@ def test_campaign_aggregation_is_ordered_oldest_to_newest_for_every_chart_render
         5, 'Data failures', '', '', '', 'CDR-Data', 'Test_Result',
         '100% Stacked Vertical Bars', '', '', 'Test_Name', 'Operator × Campaign',
     )
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Test_Name': ['FDFS', 'FDFS', 'FDFS', 'FDFS'],
         'Operator': ['EE', 'VF', 'EE', 'VF'],
         'Campaign': ['UK_Q2_2026', 'UK_Q2_2026', 'UK_Q1_2026', 'UK_Q1_2026'],
@@ -2250,7 +2329,7 @@ def test_failure_count_uses_row_and_column_hierarchies_without_flattening() -> N
         + '\n9,Voice failures per Q/city,,Title and 1 column + Comments,Failures,CDR-Voice,Call_Status,Count Stacked Horizontal Bars,,Call Family × G Level 4,Operator × Campaign,Failed/Dropped,\n',
         'nsa',
     )[0])
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Session_Type': ['VoLTE', 'VoLTE', 'MultiRAB CALL'],
         'G_Level_4': ['London', 'London', 'Belfast'],
         'Operator': ['EE', 'EE', '3'],
@@ -2274,7 +2353,7 @@ def test_failure_count_hover_targets_cover_rendered_horizontal_segments() -> Non
         + '\n9,Voice failures per Q/city,,Title and 1 column + Comments,Failures,CDR-Voice,Call_Status,Count Stacked Horizontal Bars,,Call Family × G Level 4,Operator × Campaign,Failed/Dropped,Right\n',
         'nsa',
     )[0])
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Session_Type': ['VoLTE', 'VoLTE', 'VoLTE'], 'G_Level_4': ['London', 'London', 'Belfast'],
         'Operator': ['EE', 'EE', '3'], 'Campaign': ['Q2', 'Q2', 'Q3'],
         'Call_Status': ['Failed', 'Dropped', 'Completed'],
@@ -2292,7 +2371,7 @@ def test_failure_count_hover_targets_use_the_renderer_width_for_field_legends() 
         + '\n9,Voice failures,,Title and 1 column + Comments,Failures,CDR-Voice,Call_Status,Count Stacked Horizontal Bars,,Call Family,Operator × Campaign,Call_Status,Right\n',
         'nsa',
     )[0])
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Session_Type': ['VoLTE', 'VoLTE'], 'Operator': ['EE', '3'],
         'Campaign': ['Q2', 'Q2'], 'Call_Status': ['Failed', 'Failed'],
     })
@@ -2310,7 +2389,7 @@ def test_status_100_hover_targets_support_multi_level_row_grouping() -> None:
         + '\n12,Success Ratio per Type of Test (Vendor Split),,Title and 1 column + Comments,Success Ratio per Type of Test (Vendor Split),CDR-Data,Result Group,100% Stacked Vertical Bars,,Type_of_Test × Vendor,,Result Group,Right\n',
         'nsa',
     )[0]
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Type_of_Test': ['FTP', 'HTTP', 'FTP', 'HTTP'],
         'Vendor': ['EE', 'EE', '3', '3'],
         'Result Group': ['Completed', 'Failed', 'Completed', 'Cutoff'],
@@ -2329,7 +2408,7 @@ def test_status_100_hover_targets_support_tableau_dashboard_geography_hierarchy(
         + '\n1,SR Dashboard,,Title and 3 columns + Comments,Success Ratio per glevel,CDR-Data,Result Group,100% Stacked Vertical Bars,,G_Level_2 × G_Level_1 × Operator,,Result Group,Right\n',
         'nsa',
     )[0]
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'G_Level_2': ['England', 'England', 'Scotland', 'Scotland'],
         'G_Level_1': ['North', 'North', 'Central', 'Central'],
         'Operator': ['EE', '3', 'EE', '3'],
@@ -2353,7 +2432,7 @@ def test_cdf_hover_targets_use_the_same_clipped_domain_as_the_renderer() -> None
     # 100 / 101 samples exceeds 99%, so the common terminal value remains
     # inside the clipped renderer domain under the stricter CDF policy.
     values = list(range(1, 101)) + [1000]
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Session_Type': ['WhatsApp CALL'] * 303, 'Operator': ['VF'] * 101 + ['3'] * 101 + ['EE'] * 101,
         'Campaign': ['UK_Q2_2026'] * 303, 'LQ': values * 3,
     })
@@ -2373,7 +2452,7 @@ def test_cdf_hover_targets_are_bounded_per_series() -> None:
     entry = CatalogEntry(
         13, 'POLQA CDF', '', '', '', 'CDR-Speech', 'LQ', 'CDF Line', 'Operator', '', 'Operator', '', 'Top',
     )
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Session_Type': ['WhatsApp CALL'] * 2_000,
         'Operator': ['VF'] * 1_000 + ['EE'] * 1_000,
         'LQ': list(range(1_000)) * 2,
@@ -2391,7 +2470,7 @@ def test_failure_count_keeps_zero_count_hierarchy_categories_from_all_filtered_r
         + '\n9,Voice failures,,Title and 1 column + Comments,Failures,CDR-Voice,Call_Status,Count Stacked Horizontal Bars,,Call Family,Operator × Campaign,Failed/Dropped,\n',
         'nsa',
     )[0])
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Session_Type': ['VoLTE', 'VoLTE'], 'Operator': ['Vodafone', '3'],
         'Campaign': ['Q2', 'Q2'], 'Call_Status': ['Completed', 'Completed'],
     })
@@ -2412,7 +2491,7 @@ def test_failure_count_keeps_explicit_in_filter_categories_with_zero_matching_ro
         'Call_Status IN (Failed, Dropped); G Level 4 IN (Belfast, Bristol, Cardiff)',
         'Call Family × G Level 4', 'Operator × Campaign',
     )
-    frame = pd.DataFrame({
+    frame = chart_frame({
         'Call Family': ['VoLTE'], 'G_Level_4': ['Belfast'], 'Operator': ['EE'],
         'Campaign': ['2026 Q2'], 'Call_Status': ['Failed'],
     })
@@ -2427,7 +2506,7 @@ def test_failure_count_keeps_explicit_in_filter_categories_with_zero_matching_ro
 
 
 def test_failure_hierarchy_reserves_a_right_legend_lane() -> None:
-    frame = pd.DataFrame({
+    frame = chart_frame({
         '__catalog_row_0': ['VoLTE'],
         '__catalog_column_0': ['Vodafone'],
         '__catalog_column_1': ['2026 Q2'],
@@ -2445,7 +2524,7 @@ def test_failure_hierarchy_reserves_a_right_legend_lane() -> None:
 
 
 def test_failure_hierarchy_uses_dashed_child_boundaries_within_one_operator() -> None:
-    frame = pd.DataFrame({
+    frame = chart_frame({
         '__catalog_row_0': ['VoLTE', 'VoLTE'],
         '__catalog_column_0': ['Vodafone', 'Vodafone'],
         '__catalog_column_1': ['2026 Q2', '2026 Q1'],
@@ -2462,7 +2541,7 @@ def test_failure_hierarchy_uses_dashed_child_boundaries_within_one_operator() ->
 
 
 def test_failure_hierarchy_uses_dashed_child_boundaries_within_one_row_group() -> None:
-    frame = pd.DataFrame({
+    frame = chart_frame({
         '__catalog_row_0': ['VoLTE', 'VoLTE', 'MultiRAB'],
         '__catalog_row_1': ['Belfast', 'Bristol', 'Belfast'],
         '__catalog_column_0': ['VF', 'VF', 'VF'],
