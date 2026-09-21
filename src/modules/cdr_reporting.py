@@ -832,8 +832,6 @@ def parse_axis_range(value: str, axis: str) -> tuple[float | None, float | None]
         raise ValueError(f"Axis {axis.upper()} Range must define at least one limit.")
     if low is not None and high is not None and low >= high:
         raise ValueError(f"Axis {axis.upper()} Range minimum must be lower than its maximum.")
-    if axis.casefold() == "y" and any(limit is not None and not 0 <= limit <= 100 for limit in values):
-        raise ValueError("Axis Y Range limits must be cumulative percentages between 0 and 100.")
     return low, high
 
 
@@ -936,10 +934,6 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
             parse_label_position(entry.label_position)
             parse_axis_range(entry.axis_x_range, "x")
             parse_axis_range(entry.axis_y_range, "y")
-            if (entry.axis_x_range or entry.axis_y_range) and "cdf" not in entry.chart_type.casefold():
-                raise ValueError("Axis ranges are supported only by CDF charts.")
-            if entry.label_position and entry.chart_type.casefold() not in BAR_CHART_TYPES:
-                raise ValueError("Label is supported only by bar charts.")
         except ValueError as exc:
             raise ValueError(f"{editor_location} -> {exc}") from exc
         entries.append(entry)
@@ -2748,11 +2742,24 @@ def is_empty_catalog_chart(image: bytes, entry: CatalogEntry) -> bool:
     return image in {_empty_chart(title).getvalue(), render_unavailable_source_chart(entry)}
 
 
-def render_unavailable_source_chart(entry: CatalogEntry, message: str | None = None) -> bytes:
+def render_unavailable_source_chart(
+    entry: CatalogEntry,
+    message: str | None = None,
+    *,
+    width: int = 1600,
+    height: int = 900,
+) -> bytes:
     """Render a stable placeholder when a chart source or definition is unavailable."""
     title = entry.chart_title or entry.slide_title
-    image, draw = _canvas(title)
-    draw.text((50, 440), message or f"Unavailable source type: {entry.cdr_source}", fill="#61727D", font=_font(24))
+    image = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(image)
+    scale = min(width / 1600, height / 900)
+    draw.text((round(width * .02), round(height * .02)), title, fill="#1D3345", font=_font(max(16, round(40 * scale)), True))
+    draw.text(
+        (round(width * .03), round(height * .49)),
+        message or f"Unavailable source type: {entry.cdr_source}",
+        fill="#61727D", font=_font(max(12, round(24 * scale))),
+    )
     output = BytesIO(); image.save(output, format="PNG")
     return output.getvalue()
 
@@ -3093,10 +3100,6 @@ def _series_colours(
                 f"{operator_for_key[key]} · {_vendor_label(key[vendor_level], frame)}"
                 if len(key) > vendor_level else operator_for_key[key]
             )
-            if line_chart:
-                subordinate = [str(value) for index, value in enumerate(key) if index not in identity_levels]
-                if subordinate:
-                    identity = f"{identity} · {' · '.join(subordinate)}"
             palette_keys.append(identity)
         palette = _hierarchy_group_colours([(value,) for value in palette_keys], frame=frame)
         return {key: palette[palette_key] for key, palette_key in zip(keys, palette_keys, strict=True)}
@@ -3724,6 +3727,37 @@ def _draw_inside_bar_label(
     return False
 
 
+def _draw_adjacent_stacked_bar_label(
+    draw: ImageDraw.ImageDraw,
+    value: str,
+    *,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    bar_top: float,
+    bar_bottom: float,
+    fill: str,
+    font: ImageFont.ImageFont,
+) -> bool:
+    """Place a tiny segment label inside its bar, adjacent to that segment."""
+    box = draw.textbbox((0, 0), value, font=font)
+    label_width, label_height = box[2] - box[0], box[3] - box[1]
+    if label_width + 8 > width:
+        return False
+    below = y + height + 3
+    above = y - label_height - 5
+    label_y = below if below + label_height + 4 <= bar_bottom else above if above >= bar_top else None
+    if label_y is None:
+        return False
+    draw.rectangle((x + 2, label_y - 1, x + width - 2, label_y + label_height + 3), fill=(255, 255, 255))
+    draw.text(
+        (x + (width - label_width) / 2, label_y - box[1]),
+        value, fill=fill, font=font,
+    )
+    return True
+
+
 def _draw_configured_bar_label(
     image: Image.Image,
     draw: ImageDraw.ImageDraw,
@@ -3946,7 +3980,11 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
                 if value >= .08 and _draw_inside_bar_label(image, draw, value_label, x=x, y=y, width=bar_width, height=height, fill="white", font=_font(20, True)):
                     return
                 if value >= .005:
-                    draw.text((x + bar_width + 3, max(chart_top, y - 7)), value_label, fill=colour, font=_font(16, True))
+                    _draw_adjacent_stacked_bar_label(
+                        draw, value_label, x=x, y=y, width=bar_width, height=height,
+                        bar_top=chart_top, bar_bottom=chart_top + chart_height,
+                        fill=colour, font=_font(14, True),
+                    )
             _draw_configured_bar_label(image, draw, value_label, x=x, y=y, width=bar_width, height=height, colour=colour, font=_font(20, True), position=label_position, horizontal=False, automatic=automatic_label)
             running += height
         label = _catalogue_display_label(g, p)[:24]
@@ -4079,9 +4117,11 @@ def _render_status_100_hierarchy(
                     if ratio >= 0.08 and _draw_inside_bar_label(image, draw, ratio_label, x=x, y=y, width=bar_width, height=segment_height, fill="white", font=_font(21, True)):
                         return
                     if ratio >= 0.005:
-                        # Small failure rates still matter. Put their label beside
-                        # the narrow segment instead of suppressing it entirely.
-                        draw.text((x + bar_width + 3, max(pane_top, y - 7)), ratio_label, fill=colour, font=_font(16, True))
+                        _draw_adjacent_stacked_bar_label(
+                            draw, ratio_label, x=x, y=y, width=bar_width, height=segment_height,
+                            bar_top=pane_top, bar_bottom=pane_bottom,
+                            fill=colour, font=_font(14, True),
+                        )
                 _draw_configured_bar_label(image, draw, ratio_label, x=x, y=y, width=bar_width, height=segment_height, colour=colour, font=_font(21, True), position=label_position, horizontal=False, automatic=automatic_label)
                 running += segment_height
 
@@ -5209,6 +5249,8 @@ def _chart_payload_base(
     show_legend: bool = True,
 ) -> dict[str, object]:
     """Create the fixed 1600 x 900 model used by both chart presentations."""
+    x_range = parse_axis_range(entry.axis_x_range, "x")
+    y_range = parse_axis_range(entry.axis_y_range, "y")
     return {
         "renderer": "catalog-v2",
         "width": 1600,
@@ -5221,7 +5263,33 @@ def _chart_payload_base(
             ) if show_legend else {"position": "right", "line_markers": False, "items": []}
         ),
         "label_position": entry.label_position,
+        "axis_ranges": {"x": list(x_range), "y": list(y_range)},
     }
+
+
+def _configured_axis_domain(
+    entry: CatalogEntry,
+    axis: str,
+    automatic_low: float,
+    automatic_high: float,
+    *,
+    percentage: bool = False,
+) -> list[float]:
+    """Apply an optional template range to a numeric Canvas axis."""
+    requested_low, requested_high = parse_axis_range(
+        entry.axis_x_range if axis.casefold() == "x" else entry.axis_y_range,
+        axis,
+    )
+    scale = 100.0 if percentage else 1.0
+    low = float(automatic_low) if requested_low is None else float(requested_low) / scale
+    high = float(automatic_high) if requested_high is None else float(requested_high) / scale
+    if low >= high:
+        span = max(abs(low), abs(high), 1.0) * 0.05
+        if requested_low is not None and requested_high is None:
+            high = low + span
+        elif requested_high is not None and requested_low is None:
+            low = high - span
+    return [low, high]
 
 
 def catalog_chart_payload(
@@ -5471,6 +5539,9 @@ def catalog_chart_payload(
             for index, (state, colour) in enumerate(zip(states, colours, strict=True))
         ]
         model = _chart_payload_base("status_100", title, render_entry, state_data, metric, fallback)
+        model["domain"] = {
+            "y": _configured_axis_domain(render_entry, "y", 0.0, 1.0, percentage=True),
+        }
         model["states"] = [
             {
                 "name": _legend_caption(_legend_labels(render_entry.legend), index, state),
@@ -5593,6 +5664,9 @@ def catalog_chart_payload(
                 "row_keys": [serialise_key(key) for key in row_keys],
                 "column_keys": [serialise_key(key) for key in column_keys],
                 "maximum": maximum,
+                "domain": {
+                    "x": _configured_axis_domain(render_entry, "x", 0.0, float(maximum)),
+                },
                 "cells": cells,
             })
             return model
@@ -5616,6 +5690,11 @@ def catalog_chart_payload(
                 for label, values in counts.iterrows()
             ],
         })
+        model["domain"] = {
+            "x": _configured_axis_domain(
+                render_entry, "x", 0.0, float(model["maximum"]),
+            ),
+        }
         return model
 
     if chart_type == "distribution stacked vertical bars" and "__catalog_stack" in data:
@@ -5647,6 +5726,9 @@ def catalog_chart_payload(
         ]
         model = _chart_payload_base("distribution", title, render_entry, distribution, metric, fallback)
         model.update({
+            "domain": {
+                "y": _configured_axis_domain(render_entry, "y", 0.0, 1.0, percentage=True),
+            },
             "axis_columns": axes,
             "keys": [serialise_key(key) for key in combinations],
             "buckets": [
@@ -5706,8 +5788,12 @@ def catalog_chart_payload(
                 "points": [[longitude_value, latitude_value] for _source_index, (longitude_value, latitude_value) in sampled],
             })
             fallback.append((label, colour, 2))
-        lon_low, lon_high = float(points[longitude].min()), float(points[longitude].max())
-        lat_low, lat_high = float(points[metric].min()), float(points[metric].max())
+        lon_low, lon_high = _configured_axis_domain(
+            render_entry, "x", float(points[longitude].min()), float(points[longitude].max()),
+        )
+        lat_low, lat_high = _configured_axis_domain(
+            render_entry, "y", float(points[metric].min()), float(points[metric].max()),
+        )
         lon_padding = max((lon_high - lon_low) * .06, .004)
         lat_padding = max((lat_high - lat_low) * .06, .004)
         geometry = _osm_map_tile_geometry(
@@ -5921,6 +6007,11 @@ def catalog_chart_payload(
                 "metric": metric.replace("_", " "),
                 "aggregation": aggregation,
                 "maximum": max(float(means.max()), 1.0),
+                "domain": {
+                    "y": _configured_axis_domain(
+                        render_entry, "y", min(0.0, float(means.min())), max(float(means.max()), 1.0),
+                    ),
+                },
                 "row_keys": [serialise_key(key) for key in row_keys],
                 "column_keys": [serialise_key(key) for key in column_keys],
                 "cells": [[mean_value(row_key, column_key) for column_key in column_keys] for row_key in row_keys],
@@ -5944,6 +6035,11 @@ def catalog_chart_payload(
             "aggregation": aggregation,
             "axis_columns": axes,
             "maximum": max(float(means.max()), 1.0),
+            "domain": {
+                "y": _configured_axis_domain(
+                    render_entry, "y", min(0.0, float(means.min())), max(float(means.max()), 1.0),
+                ),
+            },
             "bars": [
                 {
                     "key": serialise_key(key),
@@ -5988,8 +6084,12 @@ def catalog_chart_payload(
             "x_label": x_metric.replace("_", " "),
             "y_label": metric.replace("_", " "),
             "domain": {
-                "x": [float(points[x_metric].min()), float(points[x_metric].max())],
-                "y": [float(points[metric].min()), float(points[metric].max())],
+                "x": _configured_axis_domain(
+                    render_entry, "x", float(points[x_metric].min()), float(points[x_metric].max()),
+                ),
+                "y": _configured_axis_domain(
+                    render_entry, "y", float(points[metric].min()), float(points[metric].max()),
+                ),
             },
             "series": payload_series,
         }

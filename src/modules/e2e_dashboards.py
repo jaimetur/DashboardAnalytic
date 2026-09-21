@@ -122,11 +122,11 @@ FILTER_COLUMNS = {
 ADAPTATIVE_FILTER_FIELDS = (
     'Market', 'Operator', 'Vendor', 'Region', 'City', 'Campaign', 'RAT', 'Session Type', 'Call Status',
 )
-DASHBOARD_RENDER_CACHE_VERSION = 1
+DASHBOARD_RENDER_CACHE_VERSION = 3
 DASHBOARD_SELECTION_CACHE_VERSION = 11
 DASHBOARD_SELECTION_CACHE_LIMIT = 128
 DASHBOARD_PROFILE_SELECTION_THRESHOLD = 100_000
-DASHBOARD_CHART_MODEL_CACHE_VERSION = 11
+DASHBOARD_CHART_MODEL_CACHE_VERSION = 13
 DASHBOARD_CHART_MODEL_DISK_LIMIT = 500
 DASHBOARD_CHART_RENDER_WORKERS = 3
 DASHBOARD_PREVIEW_MANIFEST_VERSION = 8
@@ -635,14 +635,27 @@ def install_dashboard_routes(core):
                     chart_error = chart_model_errors.get(index)
                     payload = None
                     if chart_error:
-                        png = render_unavailable_source_chart(entry, f'Chart unavailable: {chart_error}')
+                        png = render_unavailable_source_chart(
+                            entry, f'Chart unavailable: {chart_error}',
+                            width=render_width, height=render_height,
+                        )
                         hover_targets = []
                     else:
-                        model_path = canvas_model_path(snapshot, entry)
-                        payload = json.loads(model_path.read_text(encoding='utf-8'))
-                        png, hover_targets = _render_dashboard_payload(
-                            payload, width=render_width, height=render_height,
-                        )
+                        try:
+                            model_path = canvas_model_path(snapshot, entry)
+                            payload = json.loads(model_path.read_text(encoding='utf-8'))
+                            png, hover_targets = _render_dashboard_payload(
+                                payload, width=render_width, height=render_height,
+                            )
+                        except Exception as exc:
+                            # A renderer defect in one chart must not discard
+                            # every other slide in an otherwise valid export.
+                            chart_error = f'Chart rendering failed: {exc}'
+                            chart_model_errors[index] = chart_error
+                            png = render_unavailable_source_chart(
+                                entry, chart_error, width=render_width, height=render_height,
+                            )
+                            hover_targets = []
                     if not run_is_active():
                         return
                     file_name = f'slide-{slide_number:03d}-chart-{chart_number:02d}.png'
@@ -710,6 +723,9 @@ def install_dashboard_routes(core):
                     task_repository, job_id, status='failed', progress=100, last_error=str(exc),
                     finished_at=datetime.now(timezone.utc).isoformat(),
                 )
+                task_repository.add_log(user.username, 'export_dashboard_ppt_failed', json.dumps({
+                    'dashboard_id': dashboard_id, 'job_id': job_id, 'error': str(exc),
+                }, ensure_ascii=False))
 
     def read_dashboards(task_repository):
         stored = task_repository.get_workspace_state(STATE_KEY)
@@ -3303,10 +3319,6 @@ def install_dashboard_routes(core):
             core.parse_axis_range(preview_entry.axis_y_range, 'y')
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        if (preview_entry.axis_x_range or preview_entry.axis_y_range) and 'cdf' not in preview_entry.chart_type.casefold():
-            raise HTTPException(400, 'Axis ranges are supported only by CDF charts.')
-        if preview_entry.label_position and preview_entry.chart_type.casefold() not in BAR_CHART_TYPES:
-            raise HTTPException(400, 'Label is supported only by bar charts.')
         if not preview_entry.source_kind:
             raise HTTPException(400, 'Select a valid CDR type.')
         task_repository = Repository(Path(snapshot.workspace), core.repository.global_db_path)
@@ -3500,10 +3512,6 @@ def install_dashboard_routes(core):
             core.parse_axis_range(updated_entry.axis_y_range, 'y')
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        if (updated_entry.axis_x_range or updated_entry.axis_y_range) and 'cdf' not in updated_entry.chart_type.casefold():
-            raise HTTPException(400, 'Axis ranges are supported only by CDF charts.')
-        if updated_entry.label_position and updated_entry.chart_type.casefold() not in BAR_CHART_TYPES:
-            raise HTTPException(400, 'Label is supported only by bar charts.')
         entries[index] = updated_entry
         try:
             task_repository.set_report_template_content(technology, template_name, core.catalogue_csv(entries))

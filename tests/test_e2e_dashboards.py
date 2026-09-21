@@ -60,24 +60,29 @@ def test_dashboard_library_can_change_nr_mode_and_template_with_confirmation_con
     assert 'await openDashboard(last, {showFilters: rememberedFiltersOpen()});' in dashboard_script
 
 
-def test_template_visual_controls_follow_the_selected_chart_type():
+def test_template_visual_controls_are_available_for_every_chart_type():
     root = Path(__file__).parents[1]
     app_script = (root / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
     reporting_template = (root / 'src/web_interface/templates/reporting.html').read_text(encoding='utf-8')
+    chart_script = (root / 'src/web_interface/static/js/dashboard_charts.js').read_text(encoding='utf-8')
 
     assert 'const syncConditionalVisualCells = (row, {clear = true} = {}) =>' in app_script
-    assert "'Axis X Range': chartType.includes('cdf')" in app_script
-    assert "Label: chartType.includes('bars')" in app_script
+    assert "'Axis X Range': true" in app_script
+    assert "'Axis Y Range': true" in app_script
+    assert "Label: true" in app_script
     assert "cell.contentEditable = enabled ? 'true' : 'false';" in app_script
     assert "if (!enabled && clear && cell.textContent.trim()) cell.textContent = '';" in app_script
     assert 'const syncConditionalVisualControls = () =>' in app_script
-    assert "axis_x_range: chartType.includes('cdf')" in app_script
-    assert "label_position: chartType.includes('bars')" in app_script
+    assert "axis_x_range: true" in app_script
+    assert "axis_y_range: true" in app_script
+    assert "label_position: true" in app_script
     assert "if (control.name === 'chart_type') syncConditionalVisualControls();" in app_script
     assert "['axis_x_range', 'Axis X Range']" in reporting_template
     assert "['label_position', 'Label']" in reporting_template
     assert "['exclude_null_empty', 'Exclude Null/Empty']" in app_script
     assert "['exclude_zero', 'Exclude Zero']" in app_script
+    assert 'function drawConfiguredPointLabel(' in chart_script
+    assert "drawConfiguredPointLabel(context, series.name" in chart_script
 
 
 def test_saving_the_embedded_template_rebuilds_the_dashboard_immediately():
@@ -980,6 +985,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'function drawConfiguredBarLabel(' in chart_script
     assert 'labelWidth + 8 > width && size + 8 <= width && labelWidth + 8 <= height' in chart_script
     assert "verticalLabel(context, value, x + width / 2, centreY, '#FFFFFF', size);" in chart_script
+    assert 'function drawAdjacentStackLabel(' in chart_script
+    assert 'drawAdjacentStackLabel(context, label, x, y, barWidth, segmentHeight, paneTop, paneBottom, series.colour)' in chart_script
     assert 'Math.floor((layout.right - left) / Math.max(headers.length, 1))' in chart_script
     assert 'function selectionStartAllowed(canvas, event)' in chart_script
     assert 'return logicalY >= 90;' in chart_script

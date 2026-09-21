@@ -236,6 +236,20 @@
     context.restore();
   }
 
+  function drawAdjacentStackLabel(context, value, x, y, width, height, barTop, barBottom, colour, size = 14) {
+    const below = y + height + 3, above = y - size - 5;
+    const labelY = below + size + 4 <= barBottom ? below : (above >= barTop ? above : null);
+    if (labelY === null) return false;
+    context.save(); font(context, size, true);
+    const label = String(value), labelWidth = textWidth(context, label);
+    if (labelWidth + 8 > width) { context.restore(); return false; }
+    context.fillStyle = 'rgba(255, 255, 255, 0.9)';
+    context.fillRect(x + 2, labelY - 1, width - 4, size + 4);
+    context.fillStyle = colour; context.textAlign = 'center'; context.textBaseline = 'top';
+    context.fillText(label, x + width / 2, labelY);
+    context.restore(); return true;
+  }
+
   function drawConfiguredBarLabel(context, value, x, y, width, height, colour, size, position, orientation, automatic) {
     const placement = String(position || '').toLowerCase();
     if (!placement) { automatic?.(); return; }
@@ -267,6 +281,26 @@
       }
     }
     context.restore();
+  }
+
+  function drawConfiguredPointLabel(context, value, x, y, colour, position, size = 15) {
+    const placement = String(position || '').toLowerCase();
+    if (!placement || placement === 'none') return;
+    const offsets = {
+      top: [0, -9, 'center', 'bottom'],
+      up: [8, -7, 'left', 'bottom'],
+      middle: [9, 0, 'left', 'middle'],
+      down: [8, 7, 'left', 'top'],
+    };
+    const [offsetX, offsetY, align, baseline] = offsets[placement] || offsets.middle;
+    context.save(); font(context, size, true); context.textAlign = align; context.textBaseline = baseline;
+    const label = String(value ?? ''), labelWidth = textWidth(context, label);
+    const labelX = x + offsetX, labelY = y + offsetY;
+    context.fillStyle = 'rgba(255, 255, 255, 0.9)';
+    const boxX = align === 'center' ? labelX - labelWidth / 2 - 2 : labelX - 2;
+    const boxY = baseline === 'bottom' ? labelY - size - 2 : (baseline === 'middle' ? labelY - size / 2 - 2 : labelY - 2);
+    context.fillRect(boxX, boxY, labelWidth + 4, size + 4);
+    context.fillStyle = colour; context.fillText(label, labelX, labelY); context.restore();
   }
 
   function dashedVertical(context, x, top, bottom) {
@@ -398,16 +432,19 @@
     if (payload.mode === 'flat') {
       const categories = payload.categories || [], layout = legendLayout(payload.legend, 16);
       const left = layout.left, top = layout.top, width = layout.right - left, height = Math.max(180, layout.bottom - top - 80);
+      const yDomain = expandedDomain(payload.domain?.y), ySpan = yDomain[1] - yDomain[0];
       const barWidth = Math.max(24, Math.min(220, Math.floor(width / Math.max(categories.length * 1.25, 1))));
       categories.forEach((category, index) => {
         const ratios = payload.cells[index] || [], x = left + index * width / categories.length + 12; let running = 0;
         states.forEach((series, seriesIndex) => {
-          const ratio = Number(ratios[seriesIndex] || 0), segmentHeight = ratio * height, y = top + height - running - segmentHeight;
+          const ratio = Number(ratios[seriesIndex] || 0), segmentLow = running, segmentHigh = running + ratio;
+          const visibleLow = Math.max(segmentLow, yDomain[0]), visibleHigh = Math.min(segmentHigh, yDomain[1]);
+          const segmentHeight = Math.max(0, visibleHigh - visibleLow) / ySpan * height, y = top + (yDomain[1] - visibleHigh) / ySpan * height;
           context.fillStyle = series.colour; context.fillRect(x, y, barWidth, segmentHeight);
           const label = percent(ratio);
           drawConfiguredBarLabel(context, label, x, y, barWidth, segmentHeight, series.colour, 20, payload.label_position, 'vertical', () => {
             if (ratio >= .08 && drawInsideBarLabel(context, label, x, y, barWidth, segmentHeight, '#FFFFFF', 20)) {}
-            else if (ratio >= .005) drawOutsideBarLabel(context, label, x + barWidth + 5, Math.max(top, y - 7), series.colour, 16);
+            else if (ratio >= .005) drawAdjacentStackLabel(context, label, x, y, barWidth, segmentHeight, top, top + height, series.colour);
           });
           if (segmentHeight > 0) pushRectangleHit(state, transform, {x, y, width: barWidth, height: segmentHeight}, {label: category, series: series.name, value: tooltipPercent(ratio)});
           running += segmentHeight;
@@ -416,9 +453,9 @@
         if (textWidth(context, label) > width / categories.length - 8) rotatedLabel(context, label, x + barWidth / 2, top + height + 75, '#5A6B78', 18);
         else { context.fillStyle = '#5A6B78'; context.textAlign = 'left'; context.fillText(label, x - 4, top + height + 8); }
       });
-      for (let tick = 0; tick <= 100; tick += 20) {
-        const y = top + height - tick / 100 * height; line(context, left - 20, y, left + width, y, '#E4E9ED');
-        context.fillStyle = '#4E6271'; context.textAlign = 'right'; font(context, 18, true); context.fillText(`${tick}%`, left - 14, y - 10);
+      for (let tick = 0; tick <= 5; tick += 1) {
+        const value = yDomain[0] + ySpan * tick / 5, y = top + height - tick / 5 * height; line(context, left - 20, y, left + width, y, '#E4E9ED');
+        context.fillStyle = '#4E6271'; context.textAlign = 'right'; font(context, 18, true); context.fillText(`${(value * 100).toFixed(0)}%`, left - 14, y - 10);
       }
       drawLegend(context, payload.legend, {fontSize: 16}); return;
     }
@@ -433,6 +470,7 @@
     const chartTop = layout.top + upperLevels * headerBandHeight + 8, chartRight = layout.right - 10;
     const chartHeight = Math.max(180, layout.bottom - chartTop - 90), chartWidth = chartRight - chartLeft;
     const rowHeight = chartHeight / rowKeys.length, columnWidth = chartWidth / columnKeys.length, barWidth = Math.max(18, Math.min(250, columnWidth * .72));
+    const yDomain = expandedDomain(payload.domain?.y), ySpan = yDomain[1] - yDomain[0];
     const headerTop = chartTop - upperLevels * headerBandHeight - 8;
     const rowLabelTotal = Math.max(rowLabelWidths.reduce((sum, value) => sum + value, 0), 1);
     const rowLabelFactor = Math.min((chartLeft - rowOrigin - 68) / rowLabelTotal, 1);
@@ -457,21 +495,23 @@
       const changed = next ? rowKey.findIndex((value, level) => value !== next[level]) : 0;
       if (!next || changed === 0) line(context, rowOrigin, paneBottom, chartLeft + chartWidth, paneBottom, '#AEBBC4', 2);
       else dashedHorizontal(context, paneBottom, nestedRowStart(changed), chartLeft + chartWidth);
-      (rowIndex === rowKeys.length - 1 ? [0, 50, 100] : [50, 100]).forEach(tick => {
-        const y = paneBottom - tick / 100 * rowHeight; line(context, chartLeft, y, chartLeft + chartWidth, y, '#E8ECEF');
-        context.fillStyle = '#566A78'; context.textAlign = 'left'; font(context, 15, true); context.fillText(`${tick}%`, chartLeft - 50, y - 9);
+      (rowIndex === rowKeys.length - 1 ? [0, .5, 1] : [.5, 1]).forEach(fraction => {
+        const value = yDomain[0] + ySpan * fraction, y = paneBottom - fraction * rowHeight; line(context, chartLeft, y, chartLeft + chartWidth, y, '#E8ECEF');
+        context.fillStyle = '#566A78'; context.textAlign = 'left'; font(context, 15, true); context.fillText(`${(value * 100).toFixed(0)}%`, chartLeft - 50, y - 9);
       });
       columnKeys.forEach((columnKey, columnIndex) => {
         const ratios = payload.cells[rowIndex]?.[columnIndex], centreX = chartLeft + (columnIndex + .5) * columnWidth;
         if (!ratios) { context.fillStyle = '#B5C0C8'; context.textAlign = 'center'; font(context, 14); context.fillText('—', centreX, paneTop + rowHeight / 2 - 7); return; }
         const x = chartLeft + columnIndex * columnWidth + (columnWidth - barWidth) / 2; let running = 0;
         states.forEach((series, seriesIndex) => {
-          const ratio = Number(ratios[seriesIndex] || 0), segmentHeight = ratio * rowHeight, y = paneBottom - running - segmentHeight;
+          const ratio = Number(ratios[seriesIndex] || 0), segmentLow = running, segmentHigh = running + ratio;
+          const visibleLow = Math.max(segmentLow, yDomain[0]), visibleHigh = Math.min(segmentHigh, yDomain[1]);
+          const segmentHeight = Math.max(0, visibleHigh - visibleLow) / ySpan * rowHeight, y = paneTop + (yDomain[1] - visibleHigh) / ySpan * rowHeight;
           context.fillStyle = series.colour; context.fillRect(x, y, barWidth, segmentHeight);
           const label = percent(ratio);
           drawConfiguredBarLabel(context, label, x, y, barWidth, segmentHeight, series.colour, 21, payload.label_position, 'vertical', () => {
             if (ratio >= .08 && drawInsideBarLabel(context, label, x, y, barWidth, segmentHeight, '#FFFFFF', 21)) {}
-            else if (ratio >= .005) drawOutsideBarLabel(context, label, x + barWidth + 5, Math.max(paneTop, y - 7), series.colour, 16);
+            else if (ratio >= .005) drawAdjacentStackLabel(context, label, x, y, barWidth, segmentHeight, paneTop, paneBottom, series.colour);
           });
           if (segmentHeight > 0) pushRectangleHit(state, transform, {x, y, width: barWidth, height: segmentHeight}, {label: displayKey([...rowKey, ...columnKey]), series: series.name, value: tooltipPercent(ratio)});
           running += segmentHeight;
@@ -505,13 +545,16 @@
     if (payload.mode === 'flat') {
       const layout = legendLayout(payload.legend, 13), rowOrigin = layout.position === 'left' ? layout.left : 28;
       const barLeft = rowOrigin + 362, maximumBarWidth = Math.max(220, layout.right - barLeft - 20);
+      const xDomain = expandedDomain(payload.domain?.x), xSpan = xDomain[1] - xDomain[0];
       (payload.rows || []).forEach((row, index) => {
-        const y = layout.top + 28 + index * 42; let x = barLeft;
+        const y = layout.top + 28 + index * 42; let running = 0;
         context.fillStyle = '#263B4A'; context.textAlign = 'left'; font(context, 17, true); context.fillText(displayKey(row.key).slice(0, 42), rowOrigin, y + 4);
         states.forEach((series, seriesIndex) => {
-          const value = Number(row.values?.[seriesIndex] || 0), width = maximumBarWidth * value / Math.max(payload.maximum, 1);
+          const value = Number(row.values?.[seriesIndex] || 0), segmentLow = running, segmentHigh = running + value;
+          const visibleLow = Math.max(segmentLow, xDomain[0]), visibleHigh = Math.min(segmentHigh, xDomain[1]);
+          const x = barLeft + (visibleLow - xDomain[0]) / xSpan * maximumBarWidth, width = Math.max(0, visibleHigh - visibleLow) / xSpan * maximumBarWidth;
           if (width) { context.fillStyle = series.colour; context.fillRect(x, y, width, 30); drawConfiguredBarLabel(context, String(value), x, y, width, 30, series.colour, 20, payload.label_position, 'horizontal', () => drawInsideBarLabel(context, String(value), x, y, width, 30, '#FFFFFF', 20)); pushRectangleHit(state, transform, {x, y, width, height: 30}, {label: displayKey(row.key), series: series.name, value: String(value)}); }
-          x += width;
+          running = segmentHigh;
         });
       });
       drawLegend(context, payload.legend, {fontSize: 13}); context.fillStyle = '#4E6271'; context.textAlign = 'left'; font(context, 19, true); context.fillText('# of failed / dropped sessions', barLeft, layout.bottom - 20); return;
@@ -534,6 +577,7 @@
     const rowLabelFactor = Math.min((rowLabelArea - rowLabelGap * (rowLevels - 1)) / rowLabelTotal, 1);
     const chartLeft = rowOrigin + rowLabelArea + (rowLevels ? 56 : 110), chartTop = layout.top + upperLevels * headerBandHeight + 8;
     const chartHeight = Math.max(180, layout.bottom - chartTop - 40), chartWidth = layout.right - chartLeft - 10;
+    const xDomain = expandedDomain(payload.domain?.x), xSpan = xDomain[1] - xDomain[0];
     const headerTop = chartTop - upperLevels * headerBandHeight - 8, leafLabelY = chartTop - 10, rowHeight = chartHeight / rowKeys.length, columnWidth = chartWidth / columnKeys.length;
     for (let level = 0; level < upperLevels; level += 1) {
       const y = headerTop + level * headerBandHeight;
@@ -547,7 +591,7 @@
       const centre = chartLeft + (index + .5) * columnWidth, cellLeft = chartLeft + index * columnWidth;
       context.fillStyle = '#4E6271'; context.textAlign = 'center'; aggregationFont(context, 15); context.fillText(fittedText(context, String(key.at(-1) ?? ''), columnWidth - 8), centre, leafLabelY);
       if (index) { let changed = columnKeys[index - 1].findIndex((value, level) => value !== key[level]); if (changed < 0) changed = key.length - 1; const lineTop = changed === 0 ? headerTop : headerTop + Math.min(changed, upperLevels) * headerBandHeight; if (changed === 0) line(context, cellLeft, lineTop, cellLeft, chartTop + chartHeight + 25, '#AEBBC4', 2); else dashedVertical(context, cellLeft, lineTop, chartTop + chartHeight + 25); } else line(context, cellLeft, headerTop, cellLeft, chartTop + chartHeight + 25, '#AEBBC4', 2);
-      context.fillStyle = '#566A78'; context.textAlign = 'left'; font(context, 13, true); context.fillText('0', cellLeft + 3, chartTop + chartHeight + 7); context.textAlign = 'right'; context.fillText(String(payload.maximum), cellLeft + columnWidth - 3, chartTop + chartHeight + 7);
+      context.fillStyle = '#566A78'; context.textAlign = 'left'; font(context, 13, true); context.fillText(numericLabel(xDomain[0]), cellLeft + 3, chartTop + chartHeight + 7); context.textAlign = 'right'; context.fillText(numericLabel(xDomain[1]), cellLeft + columnWidth - 3, chartTop + chartHeight + 7);
     });
     const nestedRowStart = level => rowOrigin + rowLabelWidths.slice(0, level).reduce((sum, width) => sum + width * rowLabelFactor + rowLabelGap, 0);
     for (let level = 0; level < rowLevels; level += 1) {
@@ -562,10 +606,10 @@
       const changed = next ? rowKey.findIndex((value, level) => value !== next[level]) : 0;
       if (next && changed > 0) dashedHorizontal(context, rowBottom, nestedRowStart(changed), chartLeft + chartWidth); else line(context, rowOrigin, rowBottom, chartLeft + chartWidth, rowBottom, '#AEBBC4', 2);
       columnKeys.forEach((columnKey, columnIndex) => {
-        const values = payload.cells[rowIndex]?.[columnIndex] || [], cellLeft = chartLeft + columnIndex * columnWidth, available = Math.max(columnWidth - 10, 1); let x = cellLeft + 4;
+        const values = payload.cells[rowIndex]?.[columnIndex] || [], cellLeft = chartLeft + columnIndex * columnWidth, available = Math.max(columnWidth - 10, 1); let running = 0;
         const barHeight = Math.max(16, Math.min(26, rowHeight * .84)), y = rowTop + (rowHeight - barHeight) / 2, outside = [];
-        states.forEach((series, seriesIndex) => { const value = Number(values[seriesIndex] || 0), segmentWidth = available * value / Math.max(payload.maximum, 1); if (segmentWidth) { context.fillStyle = series.colour; context.fillRect(x, y, segmentWidth, barHeight); drawConfiguredBarLabel(context, String(value), x, y, segmentWidth, barHeight, series.colour, 16, payload.label_position, 'horizontal', () => { if (!drawInsideBarLabel(context, String(value), x, y, segmentWidth, barHeight, '#FFFFFF', 16)) outside.push(String(value)); }); pushRectangleHit(state, transform, {x, y, width: segmentWidth, height: barHeight}, {label: displayKey([...rowKey, ...columnKey]), series: series.name, value: String(value)}); } x += segmentWidth; });
-        if (outside.length) { context.fillStyle = '#34495A'; context.textAlign = 'left'; context.textBaseline = 'top'; font(context, 16, true); context.fillText(outside.join(' / '), x + 3, y + 1); }
+        states.forEach((series, seriesIndex) => { const value = Number(values[seriesIndex] || 0), segmentLow = running, segmentHigh = running + value, visibleLow = Math.max(segmentLow, xDomain[0]), visibleHigh = Math.min(segmentHigh, xDomain[1]), x = cellLeft + 4 + (visibleLow - xDomain[0]) / xSpan * available, segmentWidth = Math.max(0, visibleHigh - visibleLow) / xSpan * available; if (segmentWidth) { context.fillStyle = series.colour; context.fillRect(x, y, segmentWidth, barHeight); drawConfiguredBarLabel(context, String(value), x, y, segmentWidth, barHeight, series.colour, 16, payload.label_position, 'horizontal', () => { if (!drawInsideBarLabel(context, String(value), x, y, segmentWidth, barHeight, '#FFFFFF', 16)) outside.push(String(value)); }); pushRectangleHit(state, transform, {x, y, width: segmentWidth, height: barHeight}, {label: displayKey([...rowKey, ...columnKey]), series: series.name, value: String(value)}); } running = segmentHigh; });
+        if (outside.length) { context.fillStyle = '#34495A'; context.textAlign = 'right'; context.textBaseline = 'top'; font(context, 16, true); context.fillText(outside.join(' / '), cellLeft + available, y + 1); }
       });
     });
     line(context, chartLeft + chartWidth, headerTop, chartLeft + chartWidth, chartTop + chartHeight + 25, '#AEBBC4', 2); drawLegend(context, payload.legend, {fontSize: 13, sideX: layout.position === 'right' ? chartLeft + chartWidth + 18 : undefined});
@@ -577,11 +621,14 @@
     const left = layout.left, top = layout.top + hierarchyHeight, width = layout.right - left;
     const usableBottom = layout.position === 'bottom' ? layout.bottom : 884;
     const height = Math.max(180, usableBottom - top - bottomAxisReserve(context, keys, width));
+    const yDomain = expandedDomain(payload.domain?.y), ySpan = yDomain[1] - yDomain[0];
     const barWidth = Math.max(24, Math.min(220, Math.floor(width / Math.max(keys.length * 1.25, 1))));
     keys.forEach((key, index) => {
       const ratios = payload.cells[index] || [], x = left + index * width / keys.length + 10; let running = 0;
       buckets.forEach((bucket, bucketIndex) => {
-        const ratio = Number(ratios[bucketIndex] || 0), segmentHeight = ratio * height, y = top + height - running - segmentHeight;
+        const ratio = Number(ratios[bucketIndex] || 0), segmentLow = running, segmentHigh = running + ratio;
+        const visibleLow = Math.max(segmentLow, yDomain[0]), visibleHigh = Math.min(segmentHigh, yDomain[1]);
+        const segmentHeight = Math.max(0, visibleHigh - visibleLow) / ySpan * height, y = top + (yDomain[1] - visibleHigh) / ySpan * height;
         context.fillStyle = bucket.colour; context.fillRect(x, y, barWidth, segmentHeight);
         const label = percent(ratio); font(context, 22, true);
         const labelWidth = textWidth(context, label);
@@ -607,6 +654,7 @@
   function drawCdf(context, payload, state, transform) {
     const plot = cdfGeometry(payload.legend), xLow = Number(payload.domain?.x?.[0] ?? 0), xHigh = Number(payload.domain?.x?.[1] ?? 1);
     const yLow = Number(payload.domain?.y?.[0] ?? 0), yHigh = Number(payload.domain?.y?.[1] ?? 1);
+    const endpointLabels = [];
     context.save(); context.beginPath(); context.rect(plot.left, plot.top, plot.width, plot.height); context.clip();
     (payload.series || []).forEach(series => {
       const points = [];
@@ -620,9 +668,14 @@
         points.forEach((point, index) => index ? context.lineTo(point.x, point.y) : context.moveTo(point.x, point.y)); context.stroke();
         context.setLineDash([]);
         pushLineHit(state, transform, points, {label: payload.metric, series: series.name || series.legend_name});
+        const endpoint = points.at(-1);
+        endpointLabels.push({x: endpoint.x, y: endpoint.y, label: series.name || series.legend_name, colour: series.colour});
       }
     });
     context.restore();
+    endpointLabels.forEach(item => drawConfiguredPointLabel(
+      context, item.label, item.x, item.y, item.colour, payload.label_position, 13,
+    ));
     for (let tick = 0; tick <= 4; tick += 1) {
       const cumulative = yLow + (yHigh - yLow) * tick / 4;
       const y = plot.top + plot.height - tick / 4 * plot.height; line(context, plot.left, y, plot.left + plot.width, y, '#E4E9ED');
@@ -658,6 +711,7 @@
       const upperLevels = Math.max((columnKeys[0]?.length || 1) - 1, 0), headerHeight = upperLevels * 28;
       const chartTop = layout.top + headerHeight + 8, chartHeight = Math.max(180, layout.bottom - chartTop - 20), chartWidth = chartRight - chartLeft;
       const rowHeight = chartHeight / Math.max(rowKeys.length, 1), columnWidth = chartWidth / Math.max(columnKeys.length, 1);
+      const yDomain = expandedDomain(payload.domain?.y), ySpan = yDomain[1] - yDomain[0];
       for (let level = 0; level < upperLevels; level += 1) hierarchySpans(columnKeys, level).forEach(([start, end, value]) => {
         const left = chartLeft + start * columnWidth, right = chartLeft + end * columnWidth;
         context.fillStyle = '#405765'; context.textAlign = 'center'; aggregationFont(context, 22); context.fillText(fittedText(context, value, right - left - 8), (left + right) / 2, layout.top + level * 28);
@@ -683,8 +737,9 @@
         rowKey.forEach((value, level) => { context.fillStyle = '#405765'; context.textAlign = 'left'; aggregationFont(context, 15); context.fillText(fittedText(context, value, labelWidth - 8), rowOrigin + level * labelWidth + 4, top + rowHeight / 2 - 8); });
         columnKeys.forEach((columnKey, columnIndex) => {
           const value = Number(payload.cells?.[rowIndex]?.[columnIndex]); if (!Number.isFinite(value)) return;
-          const cellLeft = chartLeft + columnIndex * columnWidth, height = Math.max(0, (rowHeight - 28) * value / Math.max(Number(payload.maximum), 1));
-          const width = Math.max(14, Math.min(columnWidth * .68, 110)), x = cellLeft + (columnWidth - width) / 2, y = bottom - 10 - height;
+          const cellLeft = chartLeft + columnIndex * columnWidth, plotTop = top + 4, plotBottom = bottom - 10, plotHeight = Math.max(1, plotBottom - plotTop);
+          const valueY = plotBottom - (value - yDomain[0]) / ySpan * plotHeight, zeroY = plotBottom - (clamp(0, yDomain[0], yDomain[1]) - yDomain[0]) / ySpan * plotHeight;
+          const width = Math.max(14, Math.min(columnWidth * .68, 110)), x = cellLeft + (columnWidth - width) / 2, y = Math.max(plotTop, Math.min(valueY, zeroY)), height = Math.max(0, Math.min(plotBottom, Math.max(valueY, zeroY)) - y);
           const colour = payload.cell_colours?.[rowIndex]?.[columnIndex] || '#4E79A7';
           context.fillStyle = colour; context.fillRect(x, y, width, height); const label = value.toFixed(2);
           drawConfiguredBarLabel(context, label, x, y, width, height, colour, 19, payload.label_position, 'vertical', () => { if (!(height >= 36 && drawInsideBarLabel(context, label, x, y, width, height, '#FFFFFF', 19))) { context.fillStyle = colour; context.textAlign = 'center'; font(context, 18, true); context.fillText(label, x + width / 2, Math.max(top + 2, y - 22)); } });
@@ -699,9 +754,12 @@
     const left = Math.max(105, layout.left), top = layout.top + hierarchyHeight;
     const width = layout.right - left, usableBottom = layout.position === 'bottom' ? layout.bottom : 884;
     const baseline = Math.max(top + 180, usableBottom - bottomAxisReserve(context, keys, width));
+    const yDomain = expandedDomain(payload.domain?.y), ySpan = yDomain[1] - yDomain[0], plotHeight = baseline - top;
+    const zeroY = baseline - (clamp(0, yDomain[0], yDomain[1]) - yDomain[0]) / ySpan * plotHeight;
     const barWidth = Math.min(260, Math.max(32, width / Math.max(bars.length * 1.22, 1)));
     bars.forEach((bar, index) => {
-      const height = (baseline - top) * Number(bar.value) / Math.max(Number(payload.maximum), 1), x = left + (index + .5) * width / bars.length - barWidth / 2, y = baseline - height;
+      const valueY = baseline - (Number(bar.value) - yDomain[0]) / ySpan * plotHeight, x = left + (index + .5) * width / bars.length - barWidth / 2;
+      const y = Math.max(top, Math.min(valueY, zeroY)), height = Math.max(0, Math.min(baseline, Math.max(valueY, zeroY)) - y);
       context.fillStyle = bar.colour; context.fillRect(x, y, barWidth, height);
       const label = Number(bar.value).toFixed(2); font(context, 24, true);
       drawConfiguredBarLabel(context, label, x, y, barWidth, height, bar.colour, 24, payload.label_position, 'vertical', () => {
@@ -723,8 +781,10 @@
     const layout = legendLayout(payload.legend, 14), left = layout.left, top = layout.top;
     const width = layout.right - left, height = Math.max(180, layout.bottom - top - 42), xDomain = expandedDomain(payload.domain?.x), yDomain = expandedDomain(payload.domain?.y);
     (payload.series || []).forEach(series => (series.points || []).forEach(point => {
+      if (Number(point[0]) < xDomain[0] || Number(point[0]) > xDomain[1] || Number(point[1]) < yDomain[0] || Number(point[1]) > yDomain[1]) return;
       const x = left + (Number(point[0]) - xDomain[0]) / (xDomain[1] - xDomain[0]) * width, y = top + height - (Number(point[1]) - yDomain[0]) / (yDomain[1] - yDomain[0]) * height;
       context.fillStyle = series.colour; context.beginPath(); context.arc(x, y, 4, 0, Math.PI * 2); context.fill();
+      drawConfiguredPointLabel(context, series.name, x, y, series.colour, payload.label_position, 13);
       pushPointHit(state, transform, x, y, {label: series.name, series: `${payload.x_label} / ${payload.y_label}`, value: `${numericLabel(point[0])} / ${numericLabel(point[1])}`});
     }));
     for (let tick = 0; tick <= 5; tick += 1) {
@@ -763,6 +823,7 @@
     }
     context.strokeStyle = '#B9CDC4'; context.lineWidth = 2; context.strokeRect(left, top, width, height);
     (payload.series || []).forEach(series => (series.points || []).forEach(point => {
+      if (Number(point[0]) < rawX[0] || Number(point[0]) > rawX[1] || Number(point[1]) < rawY[0] || Number(point[1]) > rawY[1]) return;
       let x, y;
       if (Array.isArray(worldBounds) && worldBounds.length === 4) {
         const [worldLeft, worldTop, worldRight, worldBottom] = worldBounds.map(Number);
@@ -774,6 +835,7 @@
         y = top + height - (Number(point[1]) - yDomain[0]) / (yDomain[1] - yDomain[0]) * height;
       }
       context.fillStyle = series.colour; context.strokeStyle = '#FFFFFF'; context.lineWidth = 1; context.beginPath(); context.arc(x, y, 4, 0, Math.PI * 2); context.fill(); context.stroke();
+      drawConfiguredPointLabel(context, series.name, x, y, series.colour, payload.label_position, 13);
       pushPointHit(state, transform, x, y, {label: series.name, series: `${payload.y_label} / ${payload.x_label}`, value: `${numericLabel(point[1])} / ${numericLabel(point[0])}`});
     }));
     drawLegend(context, payload.legend, {fontSize: 13, sideX: layout.position === 'right' ? left + width + 25 : undefined});

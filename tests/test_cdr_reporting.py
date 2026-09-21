@@ -16,7 +16,7 @@ from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _cdf_visible_points, _draw_chart_legend, _draw_configured_bar_label, _draw_inside_bar_label, _draw_top_column_group_separators, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_caption_spans, _hierarchy_group_colours, _hierarchy_spans, _horizontal_legend_columns, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_map, _render_mean_column, _render_stacked_distribution, _render_status_100, _render_table, _resolved_legend_items, _series_colours, _series_line_dashes, _status_chart_categories, assign_cdr_vendors, catalog_chart_hover_targets, catalog_chart_payload, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, load_catalog_csv, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_kpi_expression, parse_label_position, parse_legend_position, parse_template_boolean, prepare_catalog_chart_preview_frame, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_campaign_line_widths, _cdf_plot_geometry, _cdf_terminal_x_maximum, _cdf_visible_points, _draw_adjacent_stacked_bar_label, _draw_chart_legend, _draw_configured_bar_label, _draw_inside_bar_label, _draw_top_column_group_separators, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_caption_spans, _hierarchy_group_colours, _hierarchy_spans, _horizontal_legend_columns, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_map, _render_mean_column, _render_stacked_distribution, _render_status_100, _render_table, _resolved_legend_items, _series_colours, _series_line_dashes, _status_chart_categories, assign_cdr_vendors, catalog_chart_hover_targets, catalog_chart_payload, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, load_catalog_csv, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_kpi_expression, parse_label_position, parse_legend_position, parse_template_boolean, prepare_catalog_chart_preview_frame, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
 
 
 CHART_MAPPING_ATTRS = {
@@ -762,20 +762,20 @@ def test_null_and_zero_exclusions_filter_plotted_values_independently() -> None:
     assert scatter['series'][0]['points'] == [[1.0, 10.0]]
 
 
-def test_catalogue_rejects_visual_settings_for_incompatible_chart_types() -> None:
+def test_catalogue_accepts_axis_ranges_and_labels_for_every_chart_type() -> None:
     non_cdf_range = (
         ','.join(CATALOG_HEADERS)
         + '\n8,Quality,,Title and 1 column + Comments,Quality,CDR-Data,Metric,Average Vertical Bars,,Operator,,,Top,,"[0.01,]",\n'
     )
-    with pytest.raises(ValueError, match='Axis ranges are supported only by CDF charts'):
-        parse_catalog_csv(non_cdf_range, 'nsa')
+    bar_entry = parse_catalog_csv(non_cdf_range, 'nsa')[0]
+    assert bar_entry.axis_x_range == '[0.01,]'
 
     non_bar_label = (
         ','.join(CATALOG_HEADERS)
         + '\n8,Quality,,Title and 1 column + Comments,Quality,CDR-Data,Metric,CDF Line,,Operator,,,Top,Down,,\n'
     )
-    with pytest.raises(ValueError, match='Label is supported only by bar charts'):
-        parse_catalog_csv(non_bar_label, 'nsa')
+    cdf_entry = parse_catalog_csv(non_bar_label, 'nsa')[0]
+    assert cdf_entry.label_position == 'down'
 
 
 def test_chart_payload_applies_cdf_ranges_and_bar_label_override() -> None:
@@ -792,13 +792,32 @@ def test_chart_payload_applies_cdf_ranges_and_bar_label_override() -> None:
     )
     bars = catalog_chart_payload(
         frame,
-        CatalogEntry(chart_type='Average Vertical Bars', label_position='down', **base),
+        CatalogEntry(
+            chart_type='Average Vertical Bars', axis_y_range='[1,5]',
+            label_position='down', **base,
+        ),
         prefiltered=True,
     )
 
     assert cdf['domain'] == {'x': [0.01, 3.0], 'y': [0.5, 1.0]}
     assert cdf['series'][0]['x'][0] == 0.01
     assert bars['label_position'] == 'down'
+    assert bars['domain']['y'] == [1.0, 5.0]
+    assert bars['axis_ranges']['y'] == [1.0, 5.0]
+
+    scatter_frame = chart_frame({
+        'Operator': ['A', 'B'], 'Y': [10.0, 20.0], 'X': [1.0, 2.0],
+    })
+    scatter = catalog_chart_payload(
+        scatter_frame,
+        CatalogEntry(
+            chart_type='Scatter', kpi='Y vs X', axis_x_range='[0,3]',
+            axis_y_range='[5,25]', label_position='top',
+            **{key: value for key, value in base.items() if key != 'kpi'},
+        ),
+    )
+    assert scatter['domain'] == {'x': [0.0, 3.0], 'y': [5.0, 25.0]}
+    assert scatter['label_position'] == 'top'
 
 
 def test_cdf_visible_points_preserve_the_vertical_step_at_the_automatic_minimum() -> None:
@@ -1026,6 +1045,7 @@ def test_interactive_status_model_preserves_reporting_row_and_column_aggregation
         '100% Stacked Vertical Bars', 'Test_Result', '', 'Call Family',
         'Operator × Campaign', 'Right',
     )
+    entry = replace(entry, axis_y_range='[25,75]', label_position='middle')
     frame = chart_frame({
         'Call Family': ['VoLTE'] * 8,
         'Operator': ['VF'] * 4 + ['3'] * 4,
@@ -1039,6 +1059,8 @@ def test_interactive_status_model_preserves_reporting_row_and_column_aggregation
     model = catalog_chart_payload(frame, entry, prefiltered=True)
 
     assert (model['type'], model['mode'], model['row_keys']) == ('status_100', 'hierarchy', [['VoLTE']])
+    assert model['domain']['y'] == [.25, .75]
+    assert model['label_position'] == 'middle'
     assert model['column_keys'] == [
         ['VF', '2026-Q1'], ['VF', '2026-Q2'],
         ['3', '2026-Q1'], ['3', '2026-Q2'],
@@ -1112,6 +1134,7 @@ def test_interactive_distribution_model_uses_reporting_buckets_and_nested_keys()
         'Distribution Stacked Vertical Bars', 'Buckets', 'Buckets = 1,5,20;',
         'Operator', 'Campaign × Rate Bucket', 'Bottom',
     )
+    entry = replace(entry, axis_y_range='[10,90]', label_position='down')
     frame = chart_frame({
         'Operator': ['VF'] * 4 + ['3'] * 4,
         'Campaign': ['UK_Q2_2026', 'UK_Q2_2026', 'UK_Q1_2026', 'UK_Q1_2026'] * 2,
@@ -1121,6 +1144,8 @@ def test_interactive_distribution_model_uses_reporting_buckets_and_nested_keys()
     model = catalog_chart_payload(frame, entry, prefiltered=True)
 
     assert model['type'] == 'distribution'
+    assert model['domain']['y'] == [.1, .9]
+    assert model['label_position'] == 'down'
     assert model['keys'] == [
         ['VF', '2026-Q1'], ['VF', '2026-Q2'],
         ['3', '2026-Q1'], ['3', '2026-Q2'],
@@ -1293,6 +1318,21 @@ def test_configured_vertical_bar_label_rotates_when_many_bars_make_it_too_wide()
     draw_vertical.assert_called_once()
 
 
+def test_tiny_stacked_label_stays_inside_its_own_bar_below_the_segment() -> None:
+    draw = MagicMock()
+    draw.textbbox.return_value = (0, 0, 28, 12)
+
+    drawn = _draw_adjacent_stacked_bar_label(
+        draw, '0.6%', x=100, y=20, width=80, height=2,
+        bar_top=20, bar_bottom=180, fill='#C83E4D', font=ImageFont.load_default(),
+    )
+
+    assert drawn is True
+    assert draw.rectangle.call_args.args[0] == (102, 24, 178, 40)
+    assert draw.text.call_args.args[0][0] == pytest.approx(126)
+    assert 100 <= draw.text.call_args.args[0][0] <= 180
+
+
 def test_top_column_group_separator_is_solid_from_the_header_to_the_plot() -> None:
     draw = MagicMock()
 
@@ -1327,6 +1367,7 @@ def test_interactive_failure_model_matches_reporting_legend_plot_geometry() -> N
         'Count Stacked Horizontal Bars', 'Call_Status', '', 'Call Family',
         'Operator × Campaign', 'Right',
     )
+    entry = replace(entry, axis_x_range='[0,4]', label_position='top')
     frame = chart_frame({
         'Call Family': ['VoLTE', 'VoLTE', 'MultiRAB'],
         'Operator': ['VF', 'VF', '3'],
@@ -1340,6 +1381,8 @@ def test_interactive_failure_model_matches_reporting_legend_plot_geometry() -> N
     )
 
     assert field_legend['type'] == manual_legend['type'] == 'failure_count'
+    assert field_legend['domain']['x'] == [0.0, 4.0]
+    assert field_legend['label_position'] == 'top'
     assert field_legend['plot_legend_position'] == 'none'
     assert manual_legend['plot_legend_position'] == 'right'
     assert [state['name'] for state in manual_legend['states']] == ['Failed', 'Dropped']
@@ -1350,6 +1393,7 @@ def test_interactive_map_model_preserves_operator_colours_and_osm_geometry() -> 
         1, 'Map', '', '', 'Coverage', 'CDR-Data', 'Latitude vs Longitude',
         'Map', 'Operator', '', 'Operator', 'Campaign', 'Right',
     )
+    entry = replace(entry, axis_x_range='[-2,0]', axis_y_range='[50,55]', label_position='up')
     frame = chart_frame({
         'Latitude': [51.5, 51.51, 53.8],
         'Longitude': [-.12, -.11, -1.55],
@@ -1360,6 +1404,8 @@ def test_interactive_map_model_preserves_operator_colours_and_osm_geometry() -> 
     model = catalog_chart_payload(frame, entry, prefiltered=True)
 
     assert model['type'] == 'map'
+    assert model['domain'] == {'x': [-2.0, 0.0], 'y': [50.0, 55.0]}
+    assert model['label_position'] == 'up'
     assert [(series['name'], series['colour'], len(series['points'])) for series in model['series']] == [
         ('VF', '#E15759', 2), ('3', '#F28E2B', 1),
     ]
@@ -1668,7 +1714,7 @@ def test_chart_grouping_uses_workspace_order_for_subscribers_and_combined_vendor
     assert grouped[primary].tolist() == ['VF_Huawei', 'VF_Ericsson']
 
 
-def test_cdf_campaigns_use_variants_of_the_workspace_theme_colour() -> None:
+def test_cdf_campaigns_share_the_exact_workspace_theme_colour() -> None:
     frame = chart_frame({'operator': [], 'campaign': []})
     frame.attrs['operator_mapping_groups'] = [
         {'canonical': 'Carrier', 'aliases': [], 'position': 0, 'color': '#204060'},
@@ -1682,7 +1728,26 @@ def test_cdf_campaigns_use_variants_of_the_workspace_theme_colour() -> None:
     )
 
     assert colours[('Carrier', 'Q1')] == '#204060'
-    assert colours[('Carrier', 'Q2')] != '#204060'
+    assert colours[('Carrier', 'Q2')] == '#204060'
+
+
+def test_vf_uk_cdf_quarters_share_colour_and_use_width_for_recency() -> None:
+    frame = chart_frame({'operator': [], 'campaign': []})
+    frame.attrs['operator_mapping_groups'] = [
+        {'canonical': 'VF_UK', 'aliases': [], 'position': 0, 'color': '#C83E4D'},
+    ]
+    frame.attrs['catalogue_dimension_labels'] = {
+        'operator': ('Operator',), 'campaign': ('Campaign',),
+    }
+    keys = [('VF_UK', '2026-Q1'), ('VF_UK', '2026-Q2')]
+
+    colours = _series_colours(keys, ['operator', 'campaign'], frame, line_chart=True)
+    widths = _cdf_campaign_line_widths(
+        [(key, [key[1]]) for key in keys], ['operator', 'campaign'], frame,
+    )
+
+    assert set(colours.values()) == {'#C83E4D'}
+    assert widths[('VF_UK', '2026-Q2')] > widths[('VF_UK', '2026-Q1')]
 
 
 def test_multivendor_grouping_uses_the_same_vendor_order_for_each_operator() -> None:

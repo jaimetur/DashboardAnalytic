@@ -2508,9 +2508,9 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (field === 'KPI') return 'Choose a processed field and, optionally, an explicit aggregation. COUNT counts non-empty rows; COUNTD counts distinct values.';
     if (field === 'Legend') return 'Select one or more CDR fields to use as the displayed legend labels. Values are stored as a comma-separated list.';
     if (field === 'Legend Position') return 'Leave this empty when the chart has no legend, or choose where the legend is drawn.';
-    if (field === 'Label') return 'Override bar value labels: None hides them; Top places them outside; Up, Middle and Down place them inside the bar. Leave empty to retain automatic placement.';
-    if (field === 'Axis X Range') return 'Optional CDF range in KPI units: [min,max], [min,] or [,max]. Leave empty to keep automatic limits.';
-    if (field === 'Axis Y Range') return 'Optional CDF cumulative percentage range from 0 to 100: [min,max], [min,] or [,max]. Leave empty to keep 0–100%.';
+    if (field === 'Label') return 'Override value-label placement for any chart: None hides labels; Top, Up, Middle and Down select their chart-aware position. Leave empty to retain automatic placement.';
+    if (field === 'Axis X Range') return 'Optional horizontal-axis range in chart units: [min,max], [min,] or [,max]. Leave empty to keep automatic limits.';
+    if (field === 'Axis Y Range') return 'Optional vertical-axis range in chart units: [min,max], [min,] or [,max]. Percentage charts use values from 0 to 100.';
     if (field === 'Exclude Null/Empty') return 'Choose Yes to exclude rows whose plotted value is null or empty. Leave empty to keep them.';
     if (field === 'Exclude Zero') return 'Choose Yes to exclude rows whose plotted numeric value is exactly zero. Leave empty to keep them.';
     if (field === 'Filters') return 'Build complete conditions from a processed CDR field, operator and real observed value. Conditions are joined with semicolons (AND), and the cell remains manually editable.';
@@ -2840,11 +2840,10 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   };
   const syncConditionalVisualCells = (row, {clear = true} = {}) => {
     if (!row) return;
-    const chartType = rowValue(row, 'Chart type').toLocaleLowerCase();
     const applicability = {
-      'Axis X Range': chartType.includes('cdf'),
-      'Axis Y Range': chartType.includes('cdf'),
-      Label: chartType.includes('bars'),
+      'Axis X Range': true,
+      'Axis Y Range': true,
+      Label: true,
     };
     Object.entries(applicability).forEach(([field, enabled]) => {
       const cell = row.querySelector(`[data-catalogue-field="${field}"]`);
@@ -5483,11 +5482,10 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
     return field;
   }));
   const syncConditionalVisualControls = () => {
-    const chartType = String(fieldsElement.querySelector('[name="chart_type"]')?.value || '').toLocaleLowerCase();
     const applicability = {
-      axis_x_range: chartType.includes('cdf'),
-      axis_y_range: chartType.includes('cdf'),
-      label_position: chartType.includes('bars'),
+      axis_x_range: true,
+      axis_y_range: true,
+      label_position: true,
     };
     Object.entries(applicability).forEach(([name, enabled]) => {
       const control = fieldsElement.querySelector(`[name="${name}"]`);
