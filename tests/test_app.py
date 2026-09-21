@@ -3060,16 +3060,22 @@ def test_dashboard_library_ppt_export_selects_scope_cdrs_explicitly() -> None:
     assert 'input[type="checkbox"]{box-sizing:border-box;width:1rem' in styles
 
 
-def test_dashboard_filters_panel_defaults_closed_and_persists_for_the_session() -> None:
+def test_dashboard_filters_panel_defaults_hidden_and_expanded_and_persists_for_the_session() -> None:
     root = Path(__file__).parents[1] / 'src' / 'web_interface'
     template = (root / 'templates' / 'e2e_dashboards.html').read_text(encoding='utf-8')
     app_script = (root / 'static' / 'js' / 'app.js').read_text(encoding='utf-8')
 
     panel = template.split('id="ds-filter-panel"', 1)[1].split('>', 1)[0]
-    assert ' open' not in panel
+    assert ' open' in panel
     assert 'data-panel-state-storage="session"' in panel
     assert "const sessionScoped = panel.dataset.panelStateStorage === 'session';" in app_script
     assert 'const storage = sessionScoped ? window.sessionStorage : window.localStorage;' in app_script
+
+    dashboard_script = (root / 'static' / 'js' / 'e2e_dashboards.js').read_text(encoding='utf-8')
+    assert "const authenticatedSession = document.body.dataset.authenticatedSession || 'anonymous';" in dashboard_script
+    assert ':open:${authenticatedSession}`' in dashboard_script
+    assert ':filters-open:${authenticatedSession}`' in dashboard_script
+    assert 'await openDashboard(last, {showFilters: rememberedFiltersOpen()});' in dashboard_script
 
 
 def test_dashboard_open_hydrates_saved_state_before_preparation_catalogues() -> None:

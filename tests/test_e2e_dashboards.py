@@ -40,6 +40,13 @@ def test_dashboard_filter_panel_state_is_scoped_to_the_authenticated_session():
     assert "const sessionMarker = document.body.dataset.authenticatedSession || 'anonymous';" in app_script
     assert "${sessionScoped ? `:${sessionMarker}` : ''}" in app_script
 
+    dashboard_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
+    assert "const authenticatedSession = document.body.dataset.authenticatedSession || 'anonymous';" in dashboard_script
+    assert ':open:${authenticatedSession}`' in dashboard_script
+    assert ':filters-open:${authenticatedSession}`' in dashboard_script
+    assert "sessionStorage.setItem(filtersOpenStorageKey, isOpen ? 'open' : 'closed')" in dashboard_script
+    assert 'await openDashboard(last, {showFilters: rememberedFiltersOpen()});' in dashboard_script
+
 
 def test_compact_landscape_dashboard_comments_are_docked_to_the_bottom():
     stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
@@ -465,7 +472,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '>Dashboard Datasets & Filters<' in page.text
     assert 'id="ds-active-dashboard-heading">Dashboard Filters<' in page.text
     filter_panel = page.text.split('id="ds-filter-panel"', 1)[1].split('>', 1)[0]
-    assert ' open' not in filter_panel
+    assert ' open' in filter_panel
+    assert ' hidden' in filter_panel
     assert 'data-panel-state-storage="session"' in filter_panel
     assert 'id="ds-ppt-dataset-overlay"' in page.text
     assert 'id="ds-ppt-dataset-choices"' in page.text
@@ -583,7 +591,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "sessionStorage.removeItem(scrollStorageKey);" in dashboard_script
     assert "last = sessionStorage.getItem(openStorageKey) || '';" in dashboard_script
     assert 'const restoreOpenDashboard = restorePageState;' not in dashboard_script
-    assert "if (dashboards[last]) await openDashboard(last);" in dashboard_script
+    assert "if (dashboards[last]) await openDashboard(last, {showFilters: rememberedFiltersOpen()});" in dashboard_script
     assert dashboard_script.index("action('View Dashboard', 'View Dashboard'") < dashboard_script.index("filtersAreOpen ? 'Close Filters' : 'Open Filters'")
     assert "preview_snapshot = replace(" in (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
     assert "The template owns these required chart attributes." in (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
@@ -925,7 +933,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "title: 'Unsaved Dataset Universe'" in dashboard_script
     assert "confirmLabel: 'Save Universe'" in dashboard_script
     assert "if (link.classList.contains('topnav-link-logout'))" in dashboard_script
-    assert 'for (const key of [openStorageKey, scrollStorageKey, preparedStorageKey, universeStorageKey])' in dashboard_script
+    assert 'for (const key of [openStorageKey, filtersOpenStorageKey, scrollStorageKey, preparedStorageKey, universeStorageKey])' in dashboard_script
     assert "secondaryLabel: 'Discard'" in dashboard_script
     assert "window.location.assign(target.href);" in dashboard_script
     assert "$('ds-apply-filters').disabled = !hasUnappliedFilterChanges() || filterActionBusy;" in dashboard_script
