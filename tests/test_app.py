@@ -4006,6 +4006,105 @@ def test_admin_vendor_mappings_support_aliases_colours_and_reordering(client) ->
     assert 'top: scrollTop, left: scrollLeft, behavior: \'auto\'' in script
 
 
+def test_canonical_mapping_renames_update_all_templates_and_dashboards_exactly(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    app_module.repository.replace_operator_mapping_group(
+        None, 'VF_SA', ['VF SA UK'], '#8000FF',
+    )
+    app_module.repository.replace_vendor_mapping_group(None, 'SA', [], '#ABCDEF')
+    entry = app_module.CatalogEntry(
+        slide=1,
+        slide_title='VF vs VF_SA',
+        slide_subtitle='',
+        layout='Title and 1 column + Comments',
+        chart_title='VF and VF_SA by Ericsson',
+        cdr_source='CDR-Data',
+        kpi='Mean_Data_Rate',
+        chart_type='CDF Line',
+        filters='Operator IN (VF, VF_SA); Vendor IN (VF_Ericsson, VF_SA_Ericsson, Ericsson)',
+        grouping_rows='Operator',
+        grouping_columns='',
+        legend='Operator',
+    )
+    app_module.repository.add_report_template(
+        'nsa', 'Mapping references', app_module.catalogue_csv([entry]),
+    )
+    app_module.repository.set_workspace_state('e2e_dashboards_v2', json.dumps({
+        'mapping-dashboard': {
+            'name': 'VF vs VF_SA',
+            'template': 'VF',
+            'filters': {
+                'Operator': ['VF', 'VF_SA'],
+                'Vendor': ['VF_Ericsson', 'VF_SA_Ericsson', 'Ericsson'],
+            },
+        },
+    }))
+
+    operator_rename = client.post('/admin/operator-mappings/save', data={
+        'original_canonical': 'VF',
+        'canonical_value': 'VF_UK',
+        'aliases': 'Vodafone\nVodafone UK\nVFUK',
+        'color': '#E15759',
+    }, follow_redirects=False)
+
+    assert operator_rename.status_code == 303
+    renamed_entry = app_module.parse_catalog_csv(
+        app_module.repository.report_template_content('nsa', 'Mapping references'), 'nsa',
+        validate_filters=False,
+    )[0]
+    assert renamed_entry.slide_title == 'VF_UK vs VF_SA'
+    assert renamed_entry.chart_title == 'VF_UK and VF_SA by Ericsson'
+    assert renamed_entry.filters == (
+        'Operator IN (VF_UK, VF_SA); '
+        'Vendor IN (VF_UK_Ericsson, VF_SA_Ericsson, Ericsson)'
+    )
+    dashboard = json.loads(app_module.repository.get_workspace_state('e2e_dashboards_v2'))['mapping-dashboard']
+    assert dashboard['name'] == 'VF_UK vs VF_SA'
+    assert dashboard['template'] == 'VF'
+    assert dashboard['filters']['Operator'] == ['VF_UK', 'VF_SA']
+    assert dashboard['filters']['Vendor'] == ['VF_UK_Ericsson', 'VF_SA_Ericsson', 'Ericsson']
+
+    vendor_rename = client.post('/admin/vendor-mappings/save', data={
+        'original_canonical': 'Ericsson',
+        'canonical_value': 'ERI',
+        'aliases': '',
+        'color': '#2E8B57',
+    }, follow_redirects=False)
+
+    assert vendor_rename.status_code == 303
+    renamed_entry = app_module.parse_catalog_csv(
+        app_module.repository.report_template_content('nsa', 'Mapping references'), 'nsa',
+        validate_filters=False,
+    )[0]
+    assert renamed_entry.chart_title == 'VF_UK and VF_SA by ERI'
+    assert renamed_entry.filters == (
+        'Operator IN (VF_UK, VF_SA); '
+        'Vendor IN (VF_UK_ERI, VF_SA_ERI, ERI)'
+    )
+    dashboard = json.loads(app_module.repository.get_workspace_state('e2e_dashboards_v2'))['mapping-dashboard']
+    assert dashboard['filters']['Vendor'] == ['VF_UK_ERI', 'VF_SA_ERI', 'ERI']
+
+    duplicate = client.post('/admin/operator-mappings/save', data={
+        'original_canonical': 'VF_UK', 'canonical_value': '3', 'aliases': '',
+    }, follow_redirects=False)
+    assert duplicate.status_code == 303
+    assert 'operator_mapping_error=' in duplicate.headers['location']
+    groups = app_module.repository.list_operator_mapping_groups()
+    assert any(group['canonical'] == 'VF_UK' for group in groups)
+    assert sum(group['canonical'] == '3' for group in groups) == 1
+
+    duplicate_vendor = client.post('/admin/vendor-mappings/save', data={
+        'original_canonical': 'ERI', 'canonical_value': 'Huawei', 'aliases': '',
+    }, follow_redirects=False)
+    assert duplicate_vendor.status_code == 303
+    assert 'vendor_mapping_error=' in duplicate_vendor.headers['location']
+    vendor_groups = app_module.repository.list_vendor_mapping_groups()
+    assert any(group['canonical'] == 'ERI' for group in vendor_groups)
+    assert sum(group['canonical'] == 'Huawei' for group in vendor_groups) == 1
+
+
 def test_paginated_dataset_viewers_preserve_the_exact_horizontal_scroll_offset() -> None:
     import src.DashboardAnalytic as app_module
 

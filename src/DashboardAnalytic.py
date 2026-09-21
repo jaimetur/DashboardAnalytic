@@ -23,7 +23,7 @@ import time as time_module
 import zipfile
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager, closing, nullcontext
-from dataclasses import asdict, replace
+from dataclasses import asdict, fields, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from threading import Lock, Thread, current_thread
@@ -523,6 +523,163 @@ def rename_calculated_dimension_template_references(renames: dict[str, str]) -> 
             # own materialization job.
             repository.set_report_template_content(technology, name, content)
     return changed_templates
+
+
+def chart_mapping_reference_renamer(
+    mapping_type: str,
+    old_name: str,
+    new_name: str,
+    mapping_settings: dict[str, Any],
+) -> Callable[[str], str]:
+    """Build an exact identity renamer shared by templates and dashboards."""
+    previous = str(old_name).strip()
+    replacement = str(new_name).strip()
+    if not previous or not replacement or previous == replacement:
+        return lambda value: value
+
+    def group_labels(group_type: str) -> list[str]:
+        labels = {
+            str(label).strip()
+            for group in mapping_settings.get(f'{group_type}_mapping_groups', [])
+            for label in [group.get('canonical'), *(group.get('aliases') or [])]
+            if str(label or '').strip()
+        }
+        return sorted(labels, key=len, reverse=True)
+
+    operator_labels = group_labels('operator')
+    vendor_labels = group_labels('vendor')
+    standalone = re.compile(
+        rf'(?<![\w]){re.escape(previous)}(?![\w])', re.IGNORECASE,
+    )
+    if mapping_type == 'operator' and vendor_labels:
+        longer_operator_labels = [
+            label for label in operator_labels
+            if len(label) > len(previous)
+            and label.casefold().startswith(f'{previous.casefold()}_')
+        ]
+        suffixes = '|'.join(re.escape(label) for label in vendor_labels)
+        combined = re.compile(
+            rf'(?<![\w]){re.escape(previous)}_(?P<vendor>{suffixes})(?![\w])',
+            re.IGNORECASE,
+        )
+
+        def renamed_text(value: str) -> str:
+            def replace_combined(match: re.Match[str]) -> str:
+                remainder = value[match.start():]
+                if any(
+                    remainder[:len(label)].casefold() == label.casefold()
+                    and (
+                        len(remainder) == len(label)
+                        or not remainder[len(label)].isalnum()
+                    )
+                    for label in longer_operator_labels
+                ):
+                    return match.group(0)
+                return f'{replacement}_{match.group("vendor")}'
+
+            value = combined.sub(replace_combined, value)
+            return standalone.sub(replacement, value)
+    elif mapping_type == 'vendor' and operator_labels:
+        prefixes = '|'.join(re.escape(label) for label in operator_labels)
+        combined = re.compile(
+            rf'(?<![\w])(?P<operator>{prefixes})_{re.escape(previous)}(?![\w])',
+            re.IGNORECASE,
+        )
+
+        def renamed_text(value: str) -> str:
+            value = combined.sub(lambda match: f'{match.group("operator")}_{replacement}', value)
+            return standalone.sub(replacement, value)
+    else:
+        def renamed_text(value: str) -> str:
+            return standalone.sub(replacement, value)
+    return renamed_text
+
+
+def rename_chart_mapping_template_references(
+    mapping_type: str,
+    old_name: str,
+    new_name: str,
+    mapping_settings: dict[str, Any],
+) -> int:
+    """Rename one canonical Operator/Vendor identity in every Report Template."""
+    renamed_text = chart_mapping_reference_renamer(
+        mapping_type, old_name, new_name, mapping_settings,
+    )
+
+    pending_writes: dict[tuple[str, str], bytes] = {}
+    for technology in TEMPLATE_NAMES:
+        for template in repository.list_report_templates(technology):
+            content = bytes(template['content'] or b'')
+            entries = parse_catalog_csv(content, technology, validate_filters=False)
+            updated_entries: list[CatalogEntry] = []
+            for entry in entries:
+                updates = {
+                    field.name: renamed
+                    for field in fields(entry)
+                    if isinstance((value := getattr(entry, field.name)), str)
+                    and (renamed := renamed_text(value)) != value
+                }
+                updated_entries.append(replace(entry, **updates) if updates else entry)
+            if updated_entries != entries:
+                pending_writes[(technology, str(template['name']))] = catalogue_csv(updated_entries)
+    with TEMPLATE_SAVE_LOCK:
+        for (technology, name), content in pending_writes.items():
+            repository.set_report_template_content(technology, name, content)
+    return len(pending_writes)
+
+
+def rename_chart_mapping_dashboard_references(
+    mapping_type: str,
+    old_name: str,
+    new_name: str,
+    mapping_settings: dict[str, Any],
+) -> int:
+    """Rename one canonical Operator/Vendor identity in all saved Dashboards."""
+    renamed_text = chart_mapping_reference_renamer(
+        mapping_type, old_name, new_name, mapping_settings,
+    )
+
+    def renamed_value(value: Any) -> Any:
+        if isinstance(value, str):
+            return renamed_text(value)
+        if isinstance(value, list):
+            return [renamed_value(item) for item in value]
+        if isinstance(value, dict):
+            return {key: renamed_value(item) for key, item in value.items()}
+        return value
+
+    changed_dashboards = 0
+    protected_definition_fields = {
+        'template', 'template_technology', 'technology', 'scope', 'datasets',
+        'custom_fields', 'hidden_filters', 'date_from', 'date_to',
+    }
+    for state_key in ('e2e_dashboards_v2', 'e2e_dashboard_sets_v1'):
+        stored = repository.get_workspace_state(state_key)
+        if stored is None:
+            continue
+        dashboards = json.loads(stored or '{}')
+        if not isinstance(dashboards, dict):
+            continue
+        updated_dashboards: dict[str, Any] = {}
+        changed_state = False
+        for dashboard_id, raw_definition in dashboards.items():
+            definition = (
+                {
+                    key: item if key in protected_definition_fields else renamed_value(item)
+                    for key, item in raw_definition.items()
+                }
+                if isinstance(raw_definition, dict)
+                else raw_definition
+            )
+            if definition != raw_definition:
+                changed_dashboards += 1
+                changed_state = True
+            updated_dashboards[dashboard_id] = definition
+        if changed_state:
+            repository.set_workspace_state(
+                state_key, json.dumps(updated_dashboards, ensure_ascii=False),
+            )
+    return changed_dashboards
 
 
 def rename_calculated_dimension_dashboard_references(renames: dict[str, str]) -> int:
@@ -13533,10 +13690,28 @@ def save_admin_operator_mapping_group(
     parsed_aliases = [
         value.strip() for value in re.split(r'[\n,;]+', aliases) if value.strip()
     ]
+    original = original_canonical.strip()
+    canonical = canonical_value.strip()
+    mapping_settings = repository.chart_mapping_settings()
+    renamed_templates = 0
+    renamed_dashboards = 0
     try:
+        if original and original.casefold() != canonical.casefold() and any(
+            str(group.get('canonical') or '').strip().casefold() == canonical.casefold()
+            and str(group.get('canonical') or '').strip().casefold() != original.casefold()
+            for group in mapping_settings['operator_mapping_groups']
+        ):
+            raise ValueError('Another Operator Mapping already uses this canonical label.')
         repository.replace_operator_mapping_group(
             original_canonical or None, canonical_value, parsed_aliases, color,
         )
+        if original and original != canonical:
+            renamed_templates = rename_chart_mapping_template_references(
+                'operator', original, canonical, mapping_settings,
+            )
+            renamed_dashboards = rename_chart_mapping_dashboard_references(
+                'operator', original, canonical, mapping_settings,
+            )
     except (ValueError, sqlite3.IntegrityError) as exc:
         return RedirectResponse(
             f'/admin?{urlencode({"operator_mapping_error": str(exc)})}',
@@ -13547,11 +13722,16 @@ def save_admin_operator_mapping_group(
     _clear_chart_preview_caches()
     repository.add_log(user.username, 'operator_mapping_group_save', json.dumps({
         'original_canonical': original_canonical,
-        'canonical': canonical_value.strip(),
+        'canonical': canonical,
         'aliases': parsed_aliases,
+        'renamed_templates': renamed_templates,
+        'renamed_dashboards': renamed_dashboards,
     }))
+    notice = 'Operator Mapping saved.'
+    if renamed_templates or renamed_dashboards:
+        notice += f' Updated {renamed_templates} Report Template(s) and {renamed_dashboards} Dashboard(s).'
     return RedirectResponse(
-        f'/admin?{urlencode({"operator_mapping_notice": "Operator Mapping saved."})}',
+        f'/admin?{urlencode({"operator_mapping_notice": notice})}',
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -13570,10 +13750,28 @@ def save_admin_vendor_mapping_group(
             status_code=status.HTTP_303_SEE_OTHER,
         )
     parsed_aliases = [value.strip() for value in re.split(r'[\n,;]+', aliases) if value.strip()]
+    original = original_canonical.strip()
+    canonical = canonical_value.strip()
+    mapping_settings = repository.chart_mapping_settings()
+    renamed_templates = 0
+    renamed_dashboards = 0
     try:
+        if original and original.casefold() != canonical.casefold() and any(
+            str(group.get('canonical') or '').strip().casefold() == canonical.casefold()
+            and str(group.get('canonical') or '').strip().casefold() != original.casefold()
+            for group in mapping_settings['vendor_mapping_groups']
+        ):
+            raise ValueError('Another Vendor Mapping already uses this canonical label.')
         repository.replace_vendor_mapping_group(
             original_canonical or None, canonical_value, parsed_aliases, color,
         )
+        if original and original != canonical:
+            renamed_templates = rename_chart_mapping_template_references(
+                'vendor', original, canonical, mapping_settings,
+            )
+            renamed_dashboards = rename_chart_mapping_dashboard_references(
+                'vendor', original, canonical, mapping_settings,
+            )
     except (ValueError, sqlite3.IntegrityError) as exc:
         return RedirectResponse(
             f'/admin?{urlencode({"vendor_mapping_error": str(exc)})}',
@@ -13583,11 +13781,15 @@ def save_admin_vendor_mapping_group(
     DATAFRAME_CACHE.clear()
     _clear_chart_preview_caches()
     repository.add_log(user.username, 'vendor_mapping_group_save', json.dumps({
-        'original_canonical': original_canonical, 'canonical': canonical_value.strip(),
+        'original_canonical': original_canonical, 'canonical': canonical,
         'aliases': parsed_aliases, 'color': color,
+        'renamed_templates': renamed_templates, 'renamed_dashboards': renamed_dashboards,
     }))
+    notice = 'Vendor Mapping saved.'
+    if renamed_templates or renamed_dashboards:
+        notice += f' Updated {renamed_templates} Report Template(s) and {renamed_dashboards} Dashboard(s).'
     return RedirectResponse(
-        f'/admin?{urlencode({"vendor_mapping_notice": "Vendor Mapping saved."})}',
+        f'/admin?{urlencode({"vendor_mapping_notice": notice})}',
         status_code=status.HTTP_303_SEE_OTHER,
     )
 

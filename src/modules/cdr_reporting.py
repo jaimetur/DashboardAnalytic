@@ -1155,6 +1155,11 @@ def _split_operator_vendor(
         return text, '', ''
     operators = {str(key).strip().casefold() for key in (operator_mappings or {})}
     vendors = {str(key).strip().casefold() for key in (vendor_mappings or {})}
+    # A complete configured Operator is never an Operator_Vendor composite.
+    # Resolve this before inspecting underscores so VF_SA cannot become
+    # Operator VF plus Vendor SA, even when both VF and SA are configured.
+    if text.casefold() in operators:
+        return text, '', ''
     recognised = [
         candidate for candidate in candidates
         if candidate[0].strip().casefold() in operators or candidate[2].strip().casefold() in vendors
@@ -1994,7 +1999,7 @@ def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor
             # An underscore explicitly selects one materialised operator/vendor
             # value. A bare name selects that vendor beneath every operator.
             full_value = "_" in text
-            candidates = series.map(lambda value: _normalise_vendor(value, operator_mappings)).astype(str) if full_value else series.map(_vendor_label).astype(str)
+            candidates = series.map(lambda value: _normalise_vendor(value, operator_mappings)).astype(str) if full_value else series.map(lambda value: _vendor_label(value, result)).astype(str)
             expected = mapped_vendor(text) if full_value else text
             if contains:
                 return candidates.str.contains(expected, case=False, na=False, regex=False)
@@ -2145,7 +2150,9 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
             frame["__catalog_multivendor_operator"] = frame[vendor].map(
                 lambda value: _vendor_operator(value, mappings)
             )
-            frame["__catalog_multivendor_vendor"] = frame[vendor].map(_vendor_label)
+            frame["__catalog_multivendor_vendor"] = frame[vendor].map(
+                lambda value: _vendor_label(value, frame)
+            )
 
     def resolve_dimensions(dimensions: tuple[str, ...], axis: str) -> list[str]:
         resolved: list[str] = []
@@ -2890,6 +2897,8 @@ def _dimension_roles(frame: pd.DataFrame, axis_columns: list[str]) -> list[set[s
 def _vendor_label(value: object, frame: pd.DataFrame | None = None) -> str:
     """Extract everything after the longest configured Operator prefix."""
     text = str(value).strip()
+    if _mapping_group(text, 'operator', frame):
+        return text
     prefix_matches: list[str] = []
     for group in _mapping_groups(frame, 'operator'):
         for label in [group.get('canonical'), *(group.get('aliases') or [])]:

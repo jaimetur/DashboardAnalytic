@@ -1628,6 +1628,33 @@ def test_multivendor_grouping_uses_the_same_vendor_order_for_each_operator() -> 
     ]
 
 
+def test_multivendor_grouping_does_not_split_an_exact_underscore_operator() -> None:
+    entry = CatalogEntry(
+        1, "", "", "", "", "CDR-Speech", "LQ", "Average Vertical Bars",
+        "Vendor", "", "Vendor", "Campaign", "Top",
+    )
+    frame = chart_frame({
+        "Operator": ["VF_SA"],
+        "vendor": ["VF_SA"],
+        "Campaign": ["2026 Q2"],
+        "LQ": [4.0],
+    })
+    frame.attrs['operator_mappings'] = {'vf': 'VF', 'vf_sa': 'VF_SA'}
+    frame.attrs['vendor_mappings'] = {'sa': 'SA'}
+    frame.attrs['operator_mapping_groups'].append({
+        'canonical': 'VF_SA', 'aliases': [], 'position': 4, 'color': '#8000FF',
+    })
+    frame.attrs['vendor_mapping_groups'].append({
+        'canonical': 'SA', 'aliases': [], 'position': 7, 'color': '#123456',
+    })
+
+    grouped, primary, _series = _apply_catalog_grouping(
+        frame, prepare_multivendor_catalog_entry(entry), True, "LQ",
+    )
+
+    assert grouped[primary].tolist() == ['VF_SA · VF_SA']
+
+
 def test_vendor_grouping_keeps_each_operator_together_outside_multivendor_mode() -> None:
     entry = CatalogEntry(
         1, "", "", "", "", "CDR-Speech", "LQ", "Average Vertical Bars",
