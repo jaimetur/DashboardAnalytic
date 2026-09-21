@@ -1517,19 +1517,35 @@ def prepare_multivendor_catalog_entry(entry: CatalogEntry) -> CatalogEntry:
     against the operator prefix of the materialised ``Operator_Vendor`` value.
     """
     def vendor_grouping(value: str) -> str:
-        """Expand the materialised vendor group into operator and vendor levels."""
+        """Expand comparison identities into Vendor then Operator levels."""
         dimensions = parse_catalog_grouping(value).dimensions
         expanded: list[str] = []
         for dimension in dimensions:
             normalized = _normalise_catalog_name(dimension)
             if normalized in {"operator", "vendor"}:
-                if not any(_normalise_catalog_name(item) == "operator" for item in expanded):
-                    expanded.append("Operator")
                 if not any(_normalise_catalog_name(item) == "vendor" for item in expanded):
                     expanded.append("Vendor")
+                if not any(_normalise_catalog_name(item) == "operator" for item in expanded):
+                    expanded.append("Operator")
             else:
                 expanded.append(dimension)
         return " × ".join(expanded)
+
+    def vendor_legend(value: str) -> str:
+        """Keep multivendor legend dimensions in Vendor/Operator hierarchy."""
+        if not value or _legend_labels(value):
+            return value
+        dimensions = _legend_dimensions(value)
+        if not any(_normalise_catalog_name(item) in {"operator", "vendor"} for item in dimensions):
+            return value
+        expanded: list[str] = []
+        for dimension in dimensions:
+            if _normalise_catalog_name(dimension) in {"operator", "vendor"}:
+                if "Vendor" not in expanded:
+                    expanded.extend(("Vendor", "Operator"))
+            else:
+                expanded.append(dimension)
+        return ", ".join(expanded)
 
     filters = entry.filters.strip()
     vendor_exclusion = "vendor NOT CONTAINS (Mixed, Other)"
@@ -1547,9 +1563,9 @@ def prepare_multivendor_catalog_entry(entry: CatalogEntry) -> CatalogEntry:
         slide_title=_replace_operator_label(entry.slide_title, "Vendor"),
         slide_subtitle=_replace_operator_label(entry.slide_subtitle, "Vendor"),
         chart_title=_replace_operator_label(entry.chart_title, "Vendor"),
-        # Keep both levels in a comparison legend so the same vendor used by two
-        # operators remains distinguishable and retains its plotted colour.
-        legend=("Operator, Vendor" if _normalise_catalog_name(entry.legend) == "operator" else entry.legend),
+        # Keep both levels in Vendor-first comparison legends so the same
+        # vendor used by two operators remains distinguishable.
+        legend=vendor_legend(entry.legend),
         grouping_rows=vendor_grouping(entry.grouping_rows),
         grouping_columns=vendor_grouping(entry.grouping_columns),
         filters=filters,
@@ -2142,7 +2158,7 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
     bucket_operator = _catalog_bucket_operator(entry)
     # Multivendor data stores the effective comparison identity as one
     # ``Operator_Vendor`` field. Materialise its two display levels here so
-    # every bar chart can render Operator above its individual vendors.
+    # every chart can render Vendor first and its individual Operators below.
     if multivendor:
         vendor = _group_column(frame, True)
         if vendor:
@@ -2303,7 +2319,11 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
         )
         for column in operator_columns
     ) if not frame.empty else False
-    if needs_campaign_sort or needs_vendor_sort or needs_operator_sort:
+    # Individually sorted Vendor and Operator domains can still be interleaved
+    # in the source rows (for example Ericsson/VF, Huawei/VF, Ericsson/O2).
+    # A multivendor hierarchy must therefore always receive the full stable
+    # multi-column sort so Vendor remains the outer group in every renderer.
+    if needs_campaign_sort or needs_vendor_sort or needs_operator_sort or split_vendor_hierarchy:
         sort_columns: list[str] = []
         for index, (column, dimension) in enumerate(hierarchy):
             values = frame[column].drop_duplicates().tolist()
@@ -2952,8 +2972,9 @@ def _series_colours(
     """Choose colours from declared dimensions rather than label coincidences.
 
     Vendor is the stable visual identity for bars, points, stacks and lines.
-    Recognised vendors use their own colour family regardless of operator;
-    repeated vendors across operators receive distinct shades in that family.
+    Recognised vendors use their exact thematic colour regardless of operator.
+    Line charts distinguish operators through stroke patterns instead of
+    introducing additional shades of the same vendor colour.
     """
     if not keys:
         return {}
@@ -3005,32 +3026,34 @@ def _series_colours(
     if vendor_levels:
         vendor_level = vendor_levels[0]
         vendor_keys = [_vendor_label(key[vendor_level], frame) if len(key) > vendor_level else "" for key in keys]
-        vendor_colours: dict[tuple[str, str, tuple[str, ...]], str] = {}
-        family_offsets: dict[str, int] = {}
+        vendor_colours: dict[str, str] = {}
         neutral_index = 0
         for key, vendor in zip(keys, vendor_keys, strict=True):
-            operator = operator_for_key[key].casefold()
-            subordinate = tuple(str(value).casefold() for index, value in enumerate(key) if index not in identity_levels)
-            identity = (vendor.casefold(), operator, subordinate if line_chart else ())
+            missing_vendor = vendor.strip().casefold() in {'', '(blank)', 'blank', 'none', 'n/a', 'na'}
+            identity = (
+                f"operator:{operator_for_key[key].casefold()}" if missing_vendor and operator_for_key[key]
+                else vendor.casefold()
+            )
             if identity in vendor_colours:
                 continue
             vendor_group = _mapping_group(vendor, 'vendor', frame)
-            base = str(vendor_group.get('color')) if vendor_group and vendor_group.get('color') else None
+            operator_base = _operator_colour(operator_for_key[key], frame) or _operator_colour(key[vendor_level], frame)
+            base = (
+                operator_base if missing_vendor and operator_base
+                else str(vendor_group.get('color')) if vendor_group and vendor_group.get('color')
+                else operator_base
+            )
             if base:
-                variants = _colour_variants(base)
-                family = str(vendor_group.get('canonical') or vendor).casefold()
-                offset = family_offsets.get(family, 0)
-                vendor_colours[identity] = variants[offset % len(variants)]
-                family_offsets[family] = offset + 1
+                vendor_colours[identity] = base.upper()
             else:
                 vendor_colours[identity] = _colour(vendor, neutral_index)
                 neutral_index += 1
         return {
-            key: vendor_colours[(
-                vendor.casefold(), operator_for_key[key].casefold(),
-                tuple(str(value).casefold() for index, value in enumerate(key) if index not in identity_levels)
-                if line_chart else (),
-            )]
+            key: vendor_colours[
+                f"operator:{operator_for_key[key].casefold()}"
+                if vendor.strip().casefold() in {'', '(blank)', 'blank', 'none', 'n/a', 'na'} and operator_for_key[key]
+                else vendor.casefold()
+            ]
             for key, vendor in zip(keys, vendor_keys, strict=True)
         }
 
@@ -3055,6 +3078,70 @@ def _series_colours(
     # lines may contain several hierarchy combinations for that category.
     primary_colours = _hierarchy_group_colours(keys, frame=frame)
     return {key: primary_colours[str(key[0]) if key else ""] for key in keys}
+
+
+CDF_COMPARISON_LINE_DASHES: tuple[tuple[int, ...], ...] = (
+    (), (18, 8), (2, 10), (18, 6, 3, 6), (10, 7), (22, 6, 2, 6, 2, 6),
+)
+
+
+def _series_line_dashes(
+    keys: list[tuple[object, ...]], axis_columns: list[str], frame: pd.DataFrame,
+) -> dict[tuple[object, ...], tuple[int, ...]]:
+    """Distinguish Operators within each Vendor, starting with a solid line."""
+    roles = _dimension_roles(frame, axis_columns)
+    operator_levels = [index for index, role in enumerate(roles) if "operator" in role]
+    vendor_levels = [index for index, role in enumerate(roles) if "vendor" in role]
+    identity_levels = list(dict.fromkeys([*operator_levels, *vendor_levels]))
+    if not vendor_levels:
+        return {key: () for key in keys}
+
+    identities: dict[tuple[object, ...], tuple[str, str | None]] = {}
+    vendor_operators: dict[str, set[str]] = {}
+    for key in keys:
+        operator_group = None
+        operator_label = ""
+        for index in identity_levels:
+            if index >= len(key):
+                continue
+            value = str(key[index])
+            operator_group = _mapping_group(value, 'operator', frame) or _mapping_prefix_group(value, 'operator', frame)
+            if operator_group:
+                operator_label = str(operator_group.get('canonical') or value).casefold()
+                break
+        if not operator_label:
+            operator_label = str(key[operator_levels[0]] if operator_levels else key[0]).casefold()
+
+        vendor_value = str(key[vendor_levels[0]]) if vendor_levels[0] < len(key) else ""
+        vendor = _vendor_label(vendor_value, frame).strip()
+        missing_vendor = (
+            vendor.casefold() in {'', '(blank)', 'blank', 'none', 'n/a', 'na', operator_label}
+            or _mapping_group(vendor_value, 'operator', frame) is not None
+        )
+        vendor_identity = None if missing_vendor else vendor.casefold()
+        identities[key] = operator_label, vendor_identity
+        if vendor_identity is not None:
+            vendor_operators.setdefault(vendor_identity, set()).add(operator_label)
+
+    configured_operators = {
+        str(group.get('canonical') or '').strip().casefold(): int(group.get('position', 0))
+        for group in _mapping_groups(frame, 'operator')
+    }
+    operator_patterns: dict[str, dict[str, tuple[int, ...]]] = {}
+    for vendor, operators in vendor_operators.items():
+        ordered = sorted(
+            operators,
+            key=lambda operator: (configured_operators.get(operator, len(configured_operators)), operator),
+        )
+        operator_patterns[vendor] = {
+            operator: CDF_COMPARISON_LINE_DASHES[index % len(CDF_COMPARISON_LINE_DASHES)]
+            for index, operator in enumerate(ordered)
+        }
+
+    dashes: dict[tuple[object, ...], tuple[int, ...]] = {}
+    for key, (operator, vendor) in identities.items():
+        dashes[key] = operator_patterns.get(vendor or '', {}).get(operator, ())
+    return dashes
 
 
 def _operator_hierarchy_level(keys: list[tuple[object, ...]], axis_columns: list[str]) -> int:
@@ -3276,9 +3363,88 @@ def _apply_resolved_legend(
     return output
 
 
+def _draw_patterned_polyline(
+    draw: ImageDraw.ImageDraw,
+    points: list[tuple[float, float]],
+    colour: str,
+    width: int,
+    dash: tuple[int, ...] = (),
+) -> None:
+    """Draw one continuous polyline while preserving an optional dash phase."""
+    if len(points) < 2:
+        return
+    if not dash:
+        draw.line(points, fill=colour, width=width)
+        return
+    pattern = tuple(max(float(value), 1.0) for value in dash)
+    pattern_index = 0
+    remaining = pattern[0]
+    drawing = True
+    for start, end in zip(points, points[1:]):
+        delta_x, delta_y = end[0] - start[0], end[1] - start[1]
+        length = math.hypot(delta_x, delta_y)
+        if length <= 0:
+            continue
+        travelled = 0.0
+        while travelled < length:
+            step = min(remaining, length - travelled)
+            first_ratio = travelled / length
+            second_ratio = (travelled + step) / length
+            first = (start[0] + delta_x * first_ratio, start[1] + delta_y * first_ratio)
+            second = (start[0] + delta_x * second_ratio, start[1] + delta_y * second_ratio)
+            if drawing:
+                draw.line((first, second), fill=colour, width=width)
+            travelled += step
+            remaining -= step
+            if remaining <= 1e-9:
+                pattern_index = (pattern_index + 1) % len(pattern)
+                remaining = pattern[pattern_index]
+                drawing = not drawing
+
+
+def _horizontal_legend_columns(
+    captions: list[str], font_size: int, *, line_markers: bool,
+) -> int:
+    """Fit complete horizontal legend entries without allowing overlap."""
+    if not captions:
+        return 1
+    font = _font(max(font_size, 17), True)
+    marker_width = 43 if line_markers else 32
+    longest = max(float(font.getlength(caption[:28])) for caption in captions)
+    item_width = max(120.0, marker_width + longest + 24)
+    maximum = 6 if line_markers else 5
+    return max(1, min(len(captions), maximum, int(1400 // item_width)))
+
+
+def _group_vendor_legend_items(
+    items: list[tuple], frame: pd.DataFrame,
+) -> list[tuple]:
+    """Group multivendor legend entries by Vendor, then by Operator order."""
+    classified: list[tuple[tuple[int, str, int, str, int], tuple, str | None]] = []
+    for source_index, item in enumerate(items):
+        parts = [part.strip() for part in re.split(r'\s*·\s*', str(item[0])) if part.strip()]
+        vendor_group = None
+        operator_group = None
+        for part in parts:
+            vendor_group = vendor_group or _mapping_group(part, 'vendor', frame)
+            vendor_group = vendor_group or _mapping_group(_vendor_label(part, frame), 'vendor', frame)
+            operator_group = operator_group or _mapping_group(part, 'operator', frame)
+            operator_group = operator_group or _mapping_prefix_group(part, 'operator', frame)
+        vendor_identity = str(vendor_group.get('canonical')).casefold() if vendor_group else None
+        vendor_rank = int(vendor_group.get('position', 0)) if vendor_group else len(_mapping_groups(frame, 'vendor'))
+        operator_rank = int(operator_group.get('position', 0)) if operator_group else len(_mapping_groups(frame, 'operator'))
+        classified.append(((
+            vendor_rank, vendor_identity or '', operator_rank,
+            str(operator_group.get('canonical') if operator_group else '').casefold(), source_index,
+        ), item, vendor_identity))
+    if len({vendor for _key, _item, vendor in classified if vendor is not None}) < 2:
+        return items
+    return [item for _key, item, _vendor in sorted(classified, key=lambda value: value[0])]
+
+
 def _draw_chart_legend(
     draw: ImageDraw.ImageDraw,
-    items: list[tuple[str, str, int]],
+    items: list[tuple[str, str, int] | tuple[str, str, int, tuple[int, ...]]],
     position: str,
     *,
     font_size: int = 15,
@@ -3306,29 +3472,39 @@ def _draw_chart_legend(
         # combination. Reserve six evenly distributed entries per row for
         # line legends (as used by CDF charts), rather than relying on a fixed
         # step that can visually clip the sixth item on narrower renderers.
-        columns = min(max(len(items), 1), 6) if line_markers else 5
+        columns = _horizontal_legend_columns(
+            [str(item[0]) for item in items], font_size, line_markers=line_markers,
+        )
         row_height = font_size + 12
         rows = max(1, (len(items) + columns - 1) // columns)
         start_x = 100
         available_width = 1400
         column_width = available_width / columns
         start_y = 80 if position == "top" else 900 - (rows * row_height) - 8
-        for index, (caption, colour, width) in enumerate(items):
+        for index, item in enumerate(items):
+            caption, colour, width = item[:3]
+            dash = item[3] if len(item) > 3 else ()
             x = start_x + (index % columns) * (column_width if line_markers else 275)
             y = start_y + (index // columns) * row_height
             text_only = not colour
             if line_markers and not text_only:
-                draw.line((x, y + 11, x + 34, y + 11), fill=colour, width=legend_line_width(width))
+                _draw_patterned_polyline(
+                    draw, [(x, y + 11), (x + 34, y + 11)], colour, legend_line_width(width), dash,
+                )
             elif not text_only:
                 draw.rectangle((x, y, x + marker_size, y + marker_size), fill=colour)
             draw.text((x if text_only else x + (43 if line_markers else 32), y - 1), caption[:28], fill="#263B4A", font=_font(font_size, True))
         return
     x, start_y = (side_x if side_x is not None else (26 if position == "left" else 1380)), 112
-    for index, (caption, colour, width) in enumerate(items):
+    for index, item in enumerate(items):
+        caption, colour, width = item[:3]
+        dash = item[3] if len(item) > 3 else ()
         y = start_y + index * (font_size + 14)
         text_only = not colour
         if line_markers and not text_only:
-            draw.line((x, y + 11, x + 34, y + 11), fill=colour, width=legend_line_width(width))
+            _draw_patterned_polyline(
+                draw, [(x, y + 11), (x + 34, y + 11)], colour, legend_line_width(width), dash,
+            )
         elif not text_only:
             draw.rectangle((x, y, x + marker_size, y + marker_size), fill=colour)
         draw.text((x if text_only else x + (43 if line_markers else 32), y - 1), caption[:24], fill="#263B4A", font=_font(font_size, True))
@@ -4297,12 +4473,18 @@ def _cdf_terminal_x_maximum(
     return fallback
 
 
-def _cdf_plot_geometry(legend_position: str) -> tuple[int, int, int, int]:
-    """Reserve a non-overlapping lane for a lateral CDF legend."""
+def _cdf_plot_geometry(legend_position: str, legend_rows: int = 1) -> tuple[int, int, int, int]:
+    """Reserve a non-overlapping lane for a CDF legend."""
     if legend_position == "right":
         return 100, 135, 1190, 590
     if legend_position == "left":
         return 400, 135, 1020, 590
+    if legend_position == "top":
+        top = max(135, 80 + legend_rows * 29 + 26)
+        return 100, top, 1320, max(360, 725 - top)
+    if legend_position == "bottom":
+        bottom = min(725, 900 - legend_rows * 29 - 66)
+        return 100, 135, 1320, max(360, bottom - 135)
     return 100, 135, 1320, 590
 
 
@@ -4409,12 +4591,19 @@ def _render_cdf_line(
     automatic_high = _cdf_terminal_x_maximum(series_values, low, observed_high)
     automatic_high = automatic_high if automatic_high > low else low + 1
     (low, high), (y_low, y_high) = _cdf_domains(low, automatic_high, axis_x_range, axis_y_range)
-    image, draw = _canvas(title)
     layout_position = layout_legend_position or legend_position
-    left, top, width, height = _cdf_plot_geometry(layout_position)
+    series_labels = [
+        _legend_key_caption(combination, grouping_columns, data, legend_labels)
+        for combination, _subset, _values in series_data
+    ]
+    legend_columns = _horizontal_legend_columns(series_labels, 11, line_markers=True)
+    legend_rows = max(1, math.ceil(len(series_labels) / legend_columns))
+    image, draw = _canvas(title)
+    left, top, width, height = _cdf_plot_geometry(layout_position, legend_rows)
     # Colour policy is driven by the template's declared dimensions: operator
     # families are used only for genuine multi-operator comparisons.
     comparison_colours = _series_colours(combinations, grouping_columns, data, line_chart=True)
+    line_dashes = _series_line_dashes(combinations, grouping_columns, data)
     # A campaign is the temporal comparison within an operator/vendor.  Keep
     # that relationship visible even in monochrome printouts by making newer
     # campaigns progressively thicker than their earlier counterparts.
@@ -4426,12 +4615,12 @@ def _render_cdf_line(
         for combination, subset, _values in series_data
     ]
     line_widths = _cdf_campaign_line_widths(series_campaigns, grouping_columns, data)
-    legend_items: list[tuple[str, str, int]] = []
+    legend_items: list[tuple[str, str, int, tuple[int, ...]]] = []
     for index, (combination, subset, values) in enumerate(series_data):
         visible_points = _cdf_visible_points(values, low, high)
         if not visible_points:
             continue
-        label = _legend_key_caption(combination, grouping_columns, data, legend_labels)
+        label = series_labels[index]
         points = [
             (
                 left + (value - low) / (high - low) * width,
@@ -4443,8 +4632,9 @@ def _render_cdf_line(
             continue
         line_width = line_widths.get(tuple(str(value) for value in combination), 4)
         colour = comparison_colours.get(combination, _colour(label, index))
-        draw.line(points, fill=colour, width=line_width)
-        legend_items.append((label, colour, line_width))
+        dash = line_dashes.get(combination, ())
+        _draw_patterned_polyline(draw, points, colour, line_width, dash)
+        legend_items.append((label, colour, line_width, dash))
     for tick in range(0, 6):
         cumulative = y_low + (y_high - y_low) * tick / 5
         y = top + height - tick / 5 * height; draw.line((left, y, left + width, y), fill="#E4E9ED", width=1); draw.text((left - 84, y - 10), f"{cumulative * 100:.0f}%", fill="#4E6271", font=_font(18, True))
@@ -4454,6 +4644,8 @@ def _render_cdf_line(
         draw.line((x, top + height, x, top + height + 7), fill="#62727E", width=1)
         draw.text((x - 18, top + height + 7), f"{value:.1f}", fill="#4E6271", font=_font(16, True))
     draw.text((left + width / 2 - 70, top + height + 31), metric.replace("_", " "), fill="#405765", font=_font(20, True))
+    if not legend_labels:
+        legend_items = _group_vendor_legend_items(legend_items, data)
     _draw_chart_legend(draw, legend_items, legend_position, font_size=11, line_markers=True)
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0); return output
 
@@ -4953,6 +5145,8 @@ def _chart_payload_legend(
             ]
     else:
         items = (fallback or []) if _legend_labels(entry.legend) else _resolved_legend_items(entry, frame, metric)
+    if chart_type == "cdf" and not _legend_labels(entry.legend):
+        items = _group_vendor_legend_items(list(items), frame)
     return {
         "position": parse_legend_position(entry.legend_position),
         "line_markers": line_markers,
@@ -5150,6 +5344,7 @@ def catalog_chart_payload(
             low, automatic_high, render_entry.axis_x_range, render_entry.axis_y_range,
         )
         colours = _series_colours(combinations, grouping_columns, numeric, line_chart=True)
+        line_dashes = _series_line_dashes(combinations, grouping_columns, numeric)
         line_widths = _cdf_campaign_line_widths(
             [(combination, campaigns) for combination, _values, campaigns in series_rows],
             grouping_columns,
@@ -5170,12 +5365,14 @@ def catalog_chart_payload(
             # is represented by its own multivendor aggregation level.
             tooltip_label = full_label
             colour = colours.get(combination, _colour(full_label, index))
+            dash = line_dashes.get(combination, ())
             payload_series.append({
                 "key": serialise_key(combination),
                 "name": tooltip_label,
                 "legend_name": full_label,
                 "colour": colour,
                 "width": line_width,
+                "dash": list(dash),
                 "x": [point[0] for _source_index, point in sampled],
                 "y": [point[1] for _source_index, point in sampled],
                 "samples": len(values),
@@ -5185,6 +5382,9 @@ def catalog_chart_payload(
             "cdf", candidate_title, render_entry, numeric, candidate_metric,
             fallback_legend, line_markers=True,
         )
+        dash_by_label = {str(series["legend_name"]): list(series["dash"]) for series in payload_series}
+        for legend_item in model.get("legend", {}).get("items", []):
+            legend_item["dash"] = dash_by_label.get(str(legend_item.get("label", "")), [])
         model.update({
             "metric": candidate_metric.replace("_", " "),
             "domain": {"x": [low, high], "y": [y_low, y_high]},
@@ -5546,6 +5746,29 @@ def catalog_chart_payload(
                     return f"{int(value):,}"
                 return f"{float(value):.2f}"
 
+            def dimension_sort_key(column: str, value: object) -> tuple[object, ...]:
+                """Use Admin mapping order before the table's manual drag order."""
+                declared = labels.get(column, column)
+                declared_values = declared if isinstance(declared, (tuple, list)) else (declared,)
+                roles = {
+                    _normalise_catalog_name(str(item)) for item in declared_values
+                }
+                if roles & {"operator", "subscriber"}:
+                    return (0, *_operator_display_sort_key(value, data))
+                if roles & {"vendor", "vendoronly", "operatorvendor"}:
+                    return (0, *_vendor_display_sort_key(value, data))
+                if "campaign" in roles:
+                    return (0, *_campaign_sort_key(value))
+                return (1, str(value).casefold())
+
+            def hierarchy_sort_key(
+                columns: list[str], values: tuple[object, ...],
+            ) -> tuple[tuple[object, ...], ...]:
+                return tuple(
+                    dimension_sort_key(column, value)
+                    for column, value in zip(columns, values, strict=True)
+                )
+
             if visible_columns:
                 table = aggregated.unstack(visible_columns)
                 column_keys = [
@@ -5558,7 +5781,7 @@ def catalog_chart_payload(
                 ]
                 column_order = sorted(
                     range(len(column_keys)),
-                    key=lambda index: tuple(str(value).casefold() for value in column_keys[index]),
+                    key=lambda index: hierarchy_sort_key(visible_columns, column_keys[index]),
                 )
                 table = table.iloc[:, column_order]
                 column_keys = [column_keys[index] for index in column_order]
@@ -5575,7 +5798,9 @@ def catalog_chart_payload(
                     index_values = index if isinstance(index, tuple) else (index,)
                     rows.append([*[_chart_payload_value(item) for item in index_values], formatted(value)])
             if dynamic_table:
-                rows.sort(key=lambda row: tuple(str(value).casefold() for value in row[:len(visible_rows)]))
+                rows.sort(key=lambda row: hierarchy_sort_key(
+                    visible_rows, tuple(row[:len(visible_rows)]),
+                ))
             rows = rows[:36 if dynamic_table else 18]
             return {
                 **_chart_payload_base("table", title, render_entry, data, metric),

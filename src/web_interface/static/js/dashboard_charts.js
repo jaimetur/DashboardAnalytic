@@ -19,8 +19,9 @@
   const finite = value => Number.isFinite(Number(value));
   const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
   const font = (context, size, bold = false) => { context.font = `${bold ? '700 ' : ''}${size}px ${FONT_FAMILY}`; };
-  const line = (context, x1, y1, x2, y2, colour = '#AEBBC4', width = 1) => {
+  const line = (context, x1, y1, x2, y2, colour = '#AEBBC4', width = 1, dash = []) => {
     context.save(); context.strokeStyle = colour; context.lineWidth = width;
+    context.setLineDash(Array.isArray(dash) ? dash.map(Number).filter(value => value > 0) : []);
     context.beginPath(); context.moveTo(x1, y1); context.lineTo(x2, y2); context.stroke(); context.restore();
   };
   const textWidth = (context, value) => context.measureText(String(value)).width;
@@ -329,7 +330,14 @@
     let position = items.length ? String(legend?.position || 'none').toLowerCase() : 'none';
     if (!['none', 'top', 'bottom', 'left', 'right'].includes(position)) position = 'top';
     const size = Math.max(Number(fontSize || 15), 17);
-    const columns = legend?.line_markers ? Math.min(Math.max(items.length, 1), 6) : 5;
+    const lineMarkers = Boolean(legend?.line_markers);
+    const markerWidth = lineMarkers ? 43 : 32;
+    const longestLabel = items.reduce((length, item) => Math.max(length, String(item?.label || '').slice(0, 28).length), 0);
+    const estimatedItemWidth = Math.max(120, markerWidth + longestLabel * size * .62 + 24);
+    const maximumColumns = lineMarkers ? 6 : 5;
+    const columns = ['top', 'bottom'].includes(position)
+      ? Math.max(1, Math.min(items.length || 1, maximumColumns, Math.floor(1400 / estimatedItemWidth)))
+      : maximumColumns;
     const rows = Math.max(1, Math.ceil(items.length / columns));
     const rowHeight = size + 12;
     return {
@@ -356,9 +364,9 @@
     if (position === 'top' || position === 'bottom') {
       const startY = position === 'top' ? 80 : 900 - layout.rows * rowHeight - 8;
       items.forEach((item, index) => {
-        const x = 100 + (index % columns) * (lineMarkers ? 1400 / columns : 275), y = startY + Math.floor(index / columns) * rowHeight;
+        const x = 100 + (index % columns) * (1400 / columns), y = startY + Math.floor(index / columns) * rowHeight;
         const textOnly = !item.colour;
-        if (lineMarkers && !textOnly) line(context, x, y + 11, x + 34, y + 11, item.colour, legendLineWidth(item.width));
+        if (lineMarkers && !textOnly) line(context, x, y + 11, x + 34, y + 11, item.colour, legendLineWidth(item.width), item.dash);
         else if (!textOnly) { context.fillStyle = item.colour; context.fillRect(x, y, markerSize, markerSize); }
         context.fillStyle = '#263B4A'; context.textAlign = 'left'; context.textBaseline = 'top'; font(context, size, true);
         context.fillText(String(item.label).slice(0, 28), textOnly ? x : x + (lineMarkers ? 43 : 32), y - 1);
@@ -368,7 +376,7 @@
     const x = options.sideX ?? layout.sideX;
     items.forEach((item, index) => {
       const y = 112 + index * (size + 14), textOnly = !item.colour;
-      if (lineMarkers && !textOnly) line(context, x, y + 11, x + 34, y + 11, item.colour, legendLineWidth(item.width));
+      if (lineMarkers && !textOnly) line(context, x, y + 11, x + 34, y + 11, item.colour, legendLineWidth(item.width), item.dash);
       else if (!textOnly) { context.fillStyle = item.colour; context.fillRect(x, y, markerSize, markerSize); }
       context.fillStyle = '#263B4A'; context.textAlign = 'left'; context.textBaseline = 'top'; font(context, size, true);
       context.fillText(String(item.label).slice(0, 24), textOnly ? x : x + (lineMarkers ? 43 : 32), y - 1);
@@ -598,7 +606,9 @@
       });
       if (points.length) {
         context.strokeStyle = series.colour; context.lineWidth = Number(series.width || 1); context.beginPath();
+        context.setLineDash(Array.isArray(series.dash) ? series.dash.map(Number).filter(value => value > 0) : []);
         points.forEach((point, index) => index ? context.lineTo(point.x, point.y) : context.moveTo(point.x, point.y)); context.stroke();
+        context.setLineDash([]);
         pushLineHit(state, transform, points, {label: payload.metric, series: series.name || series.legend_name});
       }
     });

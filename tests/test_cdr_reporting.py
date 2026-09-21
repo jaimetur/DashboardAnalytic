@@ -16,7 +16,7 @@ from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _cdf_visible_points, _draw_chart_legend, _draw_inside_bar_label, _draw_top_column_group_separators, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_caption_spans, _hierarchy_group_colours, _hierarchy_spans, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_map, _render_mean_column, _render_stacked_distribution, _render_status_100, _render_table, _resolved_legend_items, _series_colours, _status_chart_categories, assign_cdr_vendors, catalog_chart_hover_targets, catalog_chart_payload, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, load_catalog_csv, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_kpi_expression, parse_label_position, parse_legend_position, parse_template_boolean, prepare_catalog_chart_preview_frame, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _cdf_visible_points, _draw_chart_legend, _draw_inside_bar_label, _draw_top_column_group_separators, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_caption_spans, _hierarchy_group_colours, _hierarchy_spans, _horizontal_legend_columns, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_map, _render_mean_column, _render_stacked_distribution, _render_status_100, _render_table, _resolved_legend_items, _series_colours, _series_line_dashes, _status_chart_categories, assign_cdr_vendors, catalog_chart_hover_targets, catalog_chart_payload, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, load_catalog_csv, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_kpi_expression, parse_label_position, parse_legend_position, parse_template_boolean, prepare_catalog_chart_preview_frame, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
 
 
 CHART_MAPPING_ATTRS = {
@@ -105,6 +105,39 @@ def test_dynamic_table_pivots_columns_and_exposes_hierarchy_metadata() -> None:
         ['UK_Q1_2026', 'EE', 'Cutoff', '', '1'],
         ['UK_Q1_2026', 'EE', 'Failed', '1', '1'],
     ]
+
+
+def test_dynamic_table_uses_operator_mapping_order_by_default() -> None:
+    frame = chart_frame({
+        'Subscriber': ['VF_SA', 'VF_UK', 'O2', 'EE', '3'],
+        'Test_Result': ['Completed'] * 5,
+        'G_Level_4': ['London'] * 5,
+        'Test_ID': ['A', 'B', 'C', 'D', 'E'],
+    })
+    frame.attrs['operator_mapping_groups'] = [
+        {'canonical': '3', 'aliases': [], 'position': 0, 'color': '#F28E2B'},
+        {'canonical': 'EE', 'aliases': [], 'position': 1, 'color': '#76B7B2'},
+        {'canonical': 'O2', 'aliases': [], 'position': 2, 'color': '#4E79A7'},
+        {'canonical': 'VF_UK', 'aliases': [], 'position': 3, 'color': '#E15759'},
+        {'canonical': 'VF_SA', 'aliases': [], 'position': 4, 'color': '#8000FF'},
+    ]
+    entry = CatalogEntry(
+        slide=3, slide_title='Validation', slide_subtitle='', layout='', chart_title='Test count',
+        cdr_source='CDR-Data', kpi='COUNT(Test_ID)', chart_type='Dynamic Table', legend='', filters='',
+        grouping_rows='Subscriber × Test_Result', grouping_columns='G Level 4',
+        legend_position='',
+    )
+
+    model = catalog_chart_payload(frame, entry, prefiltered=True)
+
+    assert [row[0] for row in model['rows']] == ['3', 'EE', 'O2', 'VF_UK', 'VF_SA']
+    column_model = catalog_chart_payload(
+        frame,
+        replace(entry, grouping_rows='Test_Result', grouping_columns='Subscriber'),
+        prefiltered=True,
+    )
+    assert column_model['headers'][1:] == ['3', 'EE', 'O2', 'VF_UK', 'VF_SA']
+    assert column_model['column_keys'] == [['3'], ['EE'], ['O2'], ['VF_UK'], ['VF_SA']]
 
 
 def test_dynamic_table_rejects_an_unreadable_number_of_pivot_columns() -> None:
@@ -876,20 +909,20 @@ def test_interactive_cdf_model_uses_reporting_hierarchy_palette_and_legend() -> 
     assert (model['renderer'], model['type'], model['width'], model['height'], model['title']) == (
         'catalog-v2', 'cdf', 1600, 900, 'POLQA CDF',
     )
-    assert [(series['key'], series['colour'], series['width']) for series in model['series']] == [
-        (['VF_Ericsson', '2026-Q1'], '#2E8B57', 1),
-        (['VF_Ericsson', '2026-Q2'], '#1D5636', 4),
-        (['VF_Huawei', '2026-Q1'], '#E15759', 1),
-        (['VF_Huawei', '2026-Q2'], '#8C3637', 4),
+    assert [(series['key'], series['colour'], series['width'], series['dash']) for series in model['series']] == [
+        (['VF_Ericsson', '2026-Q1'], '#2E8B57', 1, []),
+        (['VF_Ericsson', '2026-Q2'], '#2E8B57', 4, []),
+        (['VF_Huawei', '2026-Q1'], '#E15759', 1, []),
+        (['VF_Huawei', '2026-Q2'], '#E15759', 4, []),
     ]
     assert model['legend'] == {
         'position': 'right',
         'line_markers': True,
         'items': [
-            {'label': 'VF_Ericsson · 2026-Q1', 'colour': '#2E8B57', 'width': 1},
-            {'label': 'VF_Ericsson · 2026-Q2', 'colour': '#1D5636', 'width': 4},
-            {'label': 'VF_Huawei · 2026-Q1', 'colour': '#E15759', 'width': 1},
-            {'label': 'VF_Huawei · 2026-Q2', 'colour': '#8C3637', 'width': 4},
+            {'label': 'VF_Ericsson · 2026-Q1', 'colour': '#2E8B57', 'width': 1, 'dash': []},
+            {'label': 'VF_Ericsson · 2026-Q2', 'colour': '#2E8B57', 'width': 4, 'dash': []},
+            {'label': 'VF_Huawei · 2026-Q1', 'colour': '#E15759', 'width': 1, 'dash': []},
+            {'label': 'VF_Huawei · 2026-Q2', 'colour': '#E15759', 'width': 4, 'dash': []},
         ],
     }
     assert all(series['x'] and series['y'] and series['samples'] == 2 for series in model['series'])
@@ -953,8 +986,12 @@ def test_multivendor_cdf_legend_keeps_operator_and_vendor_for_each_curve() -> No
     model = catalog_chart_payload(frame, entry, multivendor=True, prefiltered=True)
 
     labels = [item['label'] for item in model['legend']['items']]
-    assert labels == ['VF · Ericsson · 2026-Q1', 'VF · Huawei · 2026-Q1', '3 · Ericsson · 2026-Q1']
-    assert [series['name'] for series in model['series']] == labels
+    assert labels == ['Ericsson · VF · 2026-Q1', 'Ericsson · 3 · 2026-Q1', 'Huawei · VF · 2026-Q1']
+    assert [series['name'] for series in model['series']] == [
+        'Ericsson · VF · 2026-Q1', 'Ericsson · 3 · 2026-Q1', 'Huawei · VF · 2026-Q1',
+    ]
+    assert [item['colour'] for item in model['legend']['items']] == ['#2E8B57', '#2E8B57', '#E15759']
+    assert [item['dash'] for item in model['legend']['items']] == [[], [18, 8], []]
 
 
 def test_interactive_status_model_preserves_reporting_row_and_column_aggregation() -> None:
@@ -1462,9 +1499,9 @@ def test_multivendor_rendering_rewrites_display_and_grouping_and_excludes_unreso
     assert rendered.slide_title == 'Vendor comparison'
     assert rendered.slide_subtitle == 'Vendor subtitle'
     assert rendered.chart_title == 'Vendor chart'
-    assert rendered.legend == 'Operator, Vendor'
-    assert rendered.grouping_rows == 'Operator × Vendor'
-    assert rendered.grouping_columns == 'Operator × Vendor × Campaign'
+    assert rendered.legend == 'Vendor, Operator'
+    assert rendered.grouping_rows == 'Vendor × Operator'
+    assert rendered.grouping_columns == 'Vendor × Operator × Campaign'
     assert rendered.filters == 'Operator = Vodafone UK; vendor NOT CONTAINS (Mixed, Other)'
 
     frame = chart_frame({
@@ -1476,8 +1513,8 @@ def test_multivendor_rendering_rewrites_display_and_grouping_and_excludes_unreso
     frame = normalise_operator_aliases(frame, {'vodafone uk': 'VF', 'vodafone': 'VF'})
     filtered = _apply_catalog_filters(frame, rendered, True, 'LQ')
     grouped, primary, series = _apply_catalog_grouping(filtered, rendered, True, 'LQ')
-    assert grouped[primary].tolist() == ['VF · Ericsson']
-    assert grouped[series].tolist() == ['VF · Ericsson · 2026-Q2_SA']
+    assert grouped[primary].tolist() == ['Ericsson · VF']
+    assert grouped[series].tolist() == ['Ericsson · VF · 2026-Q2_SA']
 
     already_filtered = replace(entry, filters='vendor NOT CONTAINS (Mixed, Other)')
     assert prepare_multivendor_catalog_entry(already_filtered).filters == already_filtered.filters
@@ -1526,17 +1563,17 @@ def test_multivendor_operator_filters_match_vendor_prefixes_and_keep_full_groupi
     grouped, primary, series = _apply_catalog_grouping(filtered, rendered, True, 'LQ')
 
     assert filtered['vendor'].tolist() == ['VF_Ericsson', 'VF_Huawei', '3_Nokia', 'O2_Ericsson']
-    assert grouped[primary].tolist() == ['VF · Ericsson', 'VF · Huawei', '3 · Nokia', 'O2 · Ericsson']
+    assert grouped[primary].tolist() == ['Ericsson · VF', 'Ericsson · O2', 'Huawei · VF', 'Nokia · 3']
     assert grouped[series].tolist() == [
-        'VF · Ericsson · 2025-Q4', 'VF · Huawei · 2026-Q1',
-        '3 · Nokia · 2025-Q4', 'O2 · Ericsson · 2026-Q1',
+        'Ericsson · VF · 2025-Q4', 'Ericsson · O2 · 2026-Q1',
+        'Huawei · VF · 2026-Q1', 'Nokia · 3 · 2025-Q4',
     ]
     assert [caption for caption, _colour, _width in _resolved_legend_items(rendered, grouped, 'LQ')] == [
-        'VF · Ericsson', 'VF · Huawei', '3 · Nokia', 'O2 · Ericsson',
+        'Ericsson · VF', 'Ericsson · O2', 'Huawei · VF', 'Nokia · 3',
     ]
 
 
-def test_grouping_orders_operators_vf_three_ee_o2_then_unknown_operators() -> None:
+def test_multivendor_grouping_orders_vendors_then_operators() -> None:
     entry = CatalogEntry(
         1, "", "", "", "", "CDR-Speech", "LQ", "Average Vertical Bars",
         "", "", "Operator", "Campaign", "Top",
@@ -1551,7 +1588,8 @@ def test_grouping_orders_operators_vf_three_ee_o2_then_unknown_operators() -> No
         frame, prepare_multivendor_catalog_entry(entry), True, "LQ",
     )
 
-    assert grouped["__catalog_row_0"].tolist() == ["VF", "3", "EE", "O2", "Lebara"]
+    assert grouped["__catalog_row_0"].tolist() == ["Ericsson", "Huawei", "NSN", "NSN", "NSN"]
+    assert grouped["__catalog_row_1"].tolist() == ["3", "VF", "EE", "O2", "Lebara"]
 
 
 def test_chart_grouping_uses_workspace_order_for_subscribers_and_combined_vendors() -> None:
@@ -1623,8 +1661,8 @@ def test_multivendor_grouping_uses_the_same_vendor_order_for_each_operator() -> 
     grouped, primary, _series = _apply_catalog_grouping(frame, prepare_multivendor_catalog_entry(entry), True, "LQ")
 
     assert grouped[primary].drop_duplicates().tolist() == [
-        "VF · Ericsson", "VF · Huawei", "VF · Samsung", "VF · NSN",
-        "3 · Ericsson", "3 · Huawei", "3 · Samsung",
+        "Ericsson · VF", "Ericsson · 3", "Huawei · VF", "Huawei · 3",
+        "Samsung · VF", "Samsung · 3", "NSN · VF",
     ]
 
 
@@ -1852,7 +1890,7 @@ def test_vendor_is_the_complete_suffix_after_the_longest_configured_operator() -
 
     assert colours == {
         ('VF_SA_Open_RAN',): '#12AB34',
-        ('VF_NSA_Open_RAN',): '#0B6A20',
+        ('VF_NSA_Open_RAN',): '#12AB34',
     }
 
 
@@ -1892,12 +1930,18 @@ def test_chart_colours_use_vendor_families_for_multi_operator_dimensions() -> No
     colours = _series_colours(keys, ['__catalog_row_0', '__catalog_row_1'], frame)
 
     assert colours[('Vodafone', 'Ericsson')] == '#2E8B57'
-    assert colours[('3', 'Ericsson')] == '#1D5636'
+    assert colours[('3', 'Ericsson')] == '#2E8B57'
     assert colours[('Vodafone', 'Huawei')] == '#E15759'
-    assert colours[('3', 'Huawei')] == '#8C3637'
+    assert colours[('3', 'Huawei')] == '#E15759'
 
     line_colours = _series_colours(keys, ['__catalog_row_0', '__catalog_row_1'], frame, line_chart=True)
     assert line_colours == colours
+
+    line_dashes = _series_line_dashes(keys, ['__catalog_row_0', '__catalog_row_1'], frame)
+    assert line_dashes[('Vodafone', 'Ericsson')] == ()
+    assert line_dashes[('Vodafone', 'Huawei')] == ()
+    assert line_dashes[('3', 'Ericsson')] == (18, 8)
+    assert line_dashes[('3', 'Huawei')] == (18, 8)
 
 
 def test_chart_colours_use_vendor_families_for_one_operator() -> None:
@@ -1913,6 +1957,60 @@ def test_chart_colours_use_vendor_families_for_one_operator() -> None:
         ('Vodafone', 'Ericsson'): '#2E8B57', ('Vodafone', 'Huawei'): '#E15759',
         ('Vodafone', 'Samsung'): '#7B3FB5', ('Vodafone', 'NSN'): '#4E79A7',
     }
+
+
+def test_multivendor_chart_uses_operator_colour_when_vendor_is_missing() -> None:
+    keys = [('Vodafone', '(blank)'), ('3', '(blank)'), ('EE', 'EE')]
+    frame = chart_frame({'__catalog_row_0': [], '__catalog_row_1': []})
+    frame.attrs['catalogue_dimension_labels'] = {
+        '__catalog_row_0': ('Operator',), '__catalog_row_1': ('Vendor',),
+    }
+
+    colours = _series_colours(keys, ['__catalog_row_0', '__catalog_row_1'], frame)
+
+    assert colours == {
+        ('Vodafone', '(blank)'): '#E15759',
+        ('3', '(blank)'): '#F28E2B',
+        ('EE', 'EE'): '#76B7B2',
+    }
+
+
+def test_cdf_uses_solid_first_operator_and_distinct_later_operators_per_vendor() -> None:
+    keys = [
+        ('Ericsson', '3'), ('Huawei', '3'), ('Samsung', '3'),
+        ('Ericsson', 'VF'), ('Huawei', 'VF'), ('Samsung', 'VF'),
+        ('Ericsson', 'EE'), ('Huawei', 'EE'),
+        ('NSN', 'VF'), ('EE', 'EE'), ('O2', 'O2'), ('VF_SA', 'VF_SA'),
+    ]
+    frame = chart_frame({'__catalog_row_0': [], '__catalog_row_1': []})
+    frame.attrs['operator_mapping_groups'].append({
+        'canonical': 'VF_SA', 'aliases': [], 'position': 4, 'color': '#8000FF',
+    })
+    frame.attrs['operator_mapping_groups'] = [
+        {**group, 'position': index}
+        for index, group in enumerate(sorted(
+            frame.attrs['operator_mapping_groups'],
+            key=lambda group: {'3': 0, 'VF': 1, 'EE': 2, 'O2': 3, 'VF_SA': 4}.get(str(group['canonical']), 9),
+        ))
+    ]
+    frame.attrs['catalogue_dimension_labels'] = {
+        '__catalog_row_0': ('Vendor',), '__catalog_row_1': ('Operator',),
+    }
+
+    dashes = _series_line_dashes(keys, ['__catalog_row_0', '__catalog_row_1'], frame)
+
+    assert dashes[('Ericsson', '3')] == ()
+    assert dashes[('Huawei', '3')] == ()
+    assert dashes[('Samsung', '3')] == ()
+    assert dashes[('Ericsson', 'VF')] == (18, 8)
+    assert dashes[('Huawei', 'VF')] == (18, 8)
+    assert dashes[('Samsung', 'VF')] == (18, 8)
+    assert dashes[('Ericsson', 'EE')] == (2, 10)
+    assert dashes[('Huawei', 'EE')] == (2, 10)
+    assert dashes[('NSN', 'VF')] == ()
+    assert dashes[('EE', 'EE')] == ()
+    assert dashes[('O2', 'O2')] == ()
+    assert dashes[('VF_SA', 'VF_SA')] == ()
 
 
 def test_chart_colours_detect_a_single_operator_from_composite_vendor_values() -> None:
@@ -1941,9 +2039,19 @@ def test_primary_vendor_dimension_assigns_semantic_colours_to_special_vendors() 
         ('(blank)',): '#7A8791', ('Vodafone_Ericsson',): '#2E8B57',
         ('Vodafone_Mixed Vendor',): '#D9A514', ('Vodafone_Huawei',): '#E15759',
         ('Vodafone_Other Vendor',): '#D9A514', ('Vodafone_NSN',): '#4E79A7',
-        ('3_Ericsson',): '#1D5636', ('3_Mixed Vendor',): '#87660C',
-        ('3_Huawei',): '#8C3637', ('3_Samsung',): '#7B3FB5',
+        ('3_Ericsson',): '#2E8B57', ('3_Mixed Vendor',): '#D9A514',
+        ('3_Huawei',): '#E15759', ('3_Samsung',): '#7B3FB5',
     }
+
+
+def test_horizontal_line_legend_reduces_columns_for_long_cdf_labels() -> None:
+    captions = [
+        'VF_UK · Ericsson · 2026-Q2', 'VF_UK · Huawei · 2026-Q2',
+        'VF_UK · Samsung · 2026-Q2', 'VF_SA · Ericsson · 2026-Q2',
+        'VF_SA · Huawei · 2026-Q2', 'VF_SA · Samsung · 2026-Q2',
+    ]
+
+    assert _horizontal_legend_columns(captions, 11, line_markers=True) < 6
 
 
 def test_reporting_query_columns_splits_map_coordinates() -> None:
