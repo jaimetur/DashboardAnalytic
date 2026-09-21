@@ -986,7 +986,9 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'labelWidth + 8 > width && size + 8 <= width && labelWidth + 8 <= height' in chart_script
     assert "verticalLabel(context, value, x + width / 2, centreY, '#FFFFFF', size);" in chart_script
     assert 'function drawAdjacentStackLabel(' in chart_script
-    assert 'drawAdjacentStackLabel(context, label, x, y, barWidth, segmentHeight, paneTop, paneBottom, series.colour)' in chart_script
+    assert 'sideSpace, colour, occupied, size = 10' in chart_script
+    assert "else if (ratio > 0) drawAdjacentStackLabel(" in chart_script
+    assert 'series.colour, sideLabels' in chart_script
     assert 'Math.floor((layout.right - left) / Math.max(headers.length, 1))' in chart_script
     assert 'function selectionStartAllowed(canvas, event)' in chart_script
     assert 'return logicalY >= 90;' in chart_script

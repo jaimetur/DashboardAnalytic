@@ -2242,6 +2242,11 @@ def clear_outdated_workspace_caches(workspace: Workspace) -> bool:
         stored_signature = json.loads(version_file.read_text(encoding='utf-8'))
     except (OSError, json.JSONDecodeError):
         stored_signature = None
+    def write_signature() -> None:
+        temporary = version_file.with_suffix(f'.{uuid4().hex}.tmp')
+        temporary.write_text(json.dumps(current_signature, sort_keys=True), encoding='utf-8')
+        temporary.replace(version_file)
+
     if isinstance(stored_signature, dict):
         # The application version is informative.  A patch release can safely
         # reuse a cache when every cache-format version remains unchanged.
@@ -2249,10 +2254,30 @@ def clear_outdated_workspace_caches(workspace: Workspace) -> bool:
         current_formats = {key: value for key, value in current_signature.items() if key != 'application'}
         if stored_formats == current_formats:
             if stored_signature != current_signature:
-                temporary = version_file.with_suffix(f'.{uuid4().hex}.tmp')
-                temporary.write_text(json.dumps(current_signature, sort_keys=True), encoding='utf-8')
-                temporary.replace(version_file)
+                write_signature()
             return False
+
+        # A renderer-only change must not discard reusable prepared Dataset
+        # Universes.  Their manifests and selection rows are independent from
+        # both Canvas models and PIL images, and remain valid across visual
+        # improvements such as bar-label placement.
+        data_formats = ('workspace_cache', 'dashboard_selection', 'dashboard_preview_manifest')
+        data_stale = any(stored_formats.get(key) != current_formats.get(key) for key in data_formats)
+        chart_model_stale = stored_formats.get('dashboard_chart_model') != current_formats.get('dashboard_chart_model')
+        render_stale = stored_formats.get('dashboard_render') != current_formats.get('dashboard_render')
+        known_formats = set(data_formats) | {'dashboard_chart_model', 'dashboard_render'}
+        if not data_stale and not chart_model_stale and not render_stale and set(stored_formats) == known_formats:
+            write_signature()
+            return False
+        if not data_stale:
+            if chart_model_stale:
+                shutil.rmtree(cache_root / 'charts-canvas', ignore_errors=True)
+            if render_stale:
+                shutil.rmtree(cache_root / 'charts-pil', ignore_errors=True)
+                shutil.rmtree(workspace_root / '.dashboard-chart-cache', ignore_errors=True)
+            write_signature()
+            invalidate_workspace_size_cache(workspace_root)
+            return True
 
     cancel_dashboard_tasks = getattr(sys.modules[__name__], 'e2e_dashboard_cancel_workspace_tasks', None)
     if callable(cancel_dashboard_tasks):
@@ -2261,9 +2286,7 @@ def clear_outdated_workspace_caches(workspace: Workspace) -> bool:
     shutil.rmtree(workspace_root / '.dashboard-chart-cache', ignore_errors=True)
     with repository.connection() as connection:
         connection.execute('DELETE FROM dashboard_filter_selections')
-    temporary = version_file.with_suffix(f'.{uuid4().hex}.tmp')
-    temporary.write_text(json.dumps(current_signature, sort_keys=True), encoding='utf-8')
-    temporary.replace(version_file)
+    write_signature()
     invalidate_workspace_size_cache(workspace_root)
     return True
 

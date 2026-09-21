@@ -236,15 +236,13 @@
     context.restore();
   }
 
-  function drawAdjacentStackLabel(context, value, x, y, width, height, barTop, barBottom, colour, size = 14) {
-    const below = y + height + 3, above = y - size - 5;
-    const labelY = below + size + 4 <= barBottom ? below : (above >= barTop ? above : null);
-    if (labelY === null) return false;
+  function drawAdjacentStackLabel(context, value, x, y, width, height, barTop, barBottom, sideSpace, colour, occupied, size = 10) {
     context.save(); font(context, size, true);
     const label = String(value), labelWidth = textWidth(context, label);
-    if (labelWidth + 8 > width) { context.restore(); return false; }
-    context.fillStyle = colour; context.textAlign = 'center'; context.textBaseline = 'top';
-    context.fillText(label, x + width / 2, labelY);
+    const centreY = Math.max(barTop + size / 2, Math.min(barBottom - size / 2, y + height / 2));
+    if (labelWidth + 6 > sideSpace || occupied.some(existing => Math.abs(existing - centreY) < size + 3)) { context.restore(); return false; }
+    context.fillStyle = colour; context.textAlign = 'left'; context.textBaseline = 'middle';
+    context.fillText(label, x + width + 4, centreY);
     context.restore(); return true;
   }
 
@@ -434,6 +432,7 @@
       const barWidth = Math.max(24, Math.min(220, Math.floor(width / Math.max(categories.length * 1.25, 1))));
       categories.forEach((category, index) => {
         const ratios = payload.cells[index] || [], x = left + index * width / categories.length + 12; let running = 0;
+        const sideLabels = [];
         states.forEach((series, seriesIndex) => {
           const ratio = Number(ratios[seriesIndex] || 0), segmentLow = running, segmentHigh = running + ratio;
           const visibleLow = Math.max(segmentLow, yDomain[0]), visibleHigh = Math.min(segmentHigh, yDomain[1]);
@@ -442,7 +441,7 @@
           const label = percent(ratio);
           drawConfiguredBarLabel(context, label, x, y, barWidth, segmentHeight, series.colour, 20, payload.label_position, 'vertical', () => {
             if (ratio >= .08 && drawInsideBarLabel(context, label, x, y, barWidth, segmentHeight, '#FFFFFF', 20)) {}
-            else if (ratio >= .005) drawAdjacentStackLabel(context, label, x, y, barWidth, segmentHeight, top, top + height, series.colour);
+            else if (ratio > 0) drawAdjacentStackLabel(context, label, x, y, barWidth, segmentHeight, top, top + height, width / categories.length - barWidth - 18, series.colour, sideLabels);
           });
           if (segmentHeight > 0) pushRectangleHit(state, transform, {x, y, width: barWidth, height: segmentHeight}, {label: category, series: series.name, value: tooltipPercent(ratio)});
           running += ratio;
@@ -501,6 +500,7 @@
         const ratios = payload.cells[rowIndex]?.[columnIndex], centreX = chartLeft + (columnIndex + .5) * columnWidth;
         if (!ratios) { context.fillStyle = '#B5C0C8'; context.textAlign = 'center'; font(context, 14); context.fillText('—', centreX, paneTop + rowHeight / 2 - 7); return; }
         const x = chartLeft + columnIndex * columnWidth + (columnWidth - barWidth) / 2; let running = 0;
+        const sideLabels = [];
         states.forEach((series, seriesIndex) => {
           const ratio = Number(ratios[seriesIndex] || 0), segmentLow = running, segmentHigh = running + ratio;
           const visibleLow = Math.max(segmentLow, yDomain[0]), visibleHigh = Math.min(segmentHigh, yDomain[1]);
@@ -509,7 +509,7 @@
           const label = percent(ratio);
           drawConfiguredBarLabel(context, label, x, y, barWidth, segmentHeight, series.colour, 21, payload.label_position, 'vertical', () => {
             if (ratio >= .08 && drawInsideBarLabel(context, label, x, y, barWidth, segmentHeight, '#FFFFFF', 21)) {}
-            else if (ratio >= .005) drawAdjacentStackLabel(context, label, x, y, barWidth, segmentHeight, paneTop, paneBottom, series.colour);
+            else if (ratio > 0) drawAdjacentStackLabel(context, label, x, y, barWidth, segmentHeight, paneTop, paneBottom, (columnWidth - barWidth) / 2 - 6, series.colour, sideLabels);
           });
           if (segmentHeight > 0) pushRectangleHit(state, transform, {x, y, width: barWidth, height: segmentHeight}, {label: displayKey([...rowKey, ...columnKey]), series: series.name, value: tooltipPercent(ratio)});
           running += ratio;
@@ -630,6 +630,7 @@
     line(context, left, top, left, top + height, '#AEBBC4', 2);
     keys.forEach((key, index) => {
       const ratios = payload.cells[index] || [], x = left + index * width / keys.length + 10; let running = 0;
+      const sideLabels = [];
       buckets.forEach((bucket, bucketIndex) => {
         const ratio = Number(ratios[bucketIndex] || 0), segmentLow = running, segmentHigh = running + ratio;
         const visibleLow = Math.max(segmentLow, yDomain[0]), visibleHigh = Math.min(segmentHigh, yDomain[1]);
@@ -641,7 +642,7 @@
           if (labelWidth + 10 <= barWidth && segmentHeight >= 24) {
             context.fillStyle = '#FFFFFF'; context.textAlign = 'center'; context.textBaseline = 'middle';
             context.fillText(label, x + barWidth / 2, y + segmentHeight / 2); context.textBaseline = 'top';
-          } else if (ratio > 0) drawAdjacentStackLabel(context, label, x, y, barWidth, segmentHeight, top, top + height, bucket.colour, 12);
+          } else if (ratio > 0) drawAdjacentStackLabel(context, label, x, y, barWidth, segmentHeight, top, top + height, width / keys.length - barWidth - 16, bucket.colour, sideLabels);
         });
         if (segmentHeight > 0) pushRectangleHit(state, transform, {x, y, width: barWidth, height: segmentHeight}, {label: displayKey(key), series: bucket.name, value: tooltipPercent(ratio)});
         running += ratio;

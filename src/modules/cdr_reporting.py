@@ -3737,21 +3737,21 @@ def _draw_adjacent_stacked_bar_label(
     height: float,
     bar_top: float,
     bar_bottom: float,
+    side_space: float,
     fill: str,
     font: ImageFont.ImageFont,
+    occupied: list[float] | None = None,
 ) -> bool:
-    """Place a tiny segment label inside its bar, adjacent to that segment."""
+    """Place a tiny segment label beside its bar only when it has clear space."""
     box = draw.textbbox((0, 0), value, font=font)
     label_width, label_height = box[2] - box[0], box[3] - box[1]
-    if label_width + 8 > width:
+    centre_y = max(bar_top + label_height / 2, min(bar_bottom - label_height / 2, y + height / 2))
+    occupied = occupied if occupied is not None else []
+    if label_width + 6 > side_space or any(abs(existing - centre_y) < label_height + 3 for existing in occupied):
         return False
-    below = y + height + 3
-    above = y - label_height - 5
-    label_y = below if below + label_height + 4 <= bar_bottom else above if above >= bar_top else None
-    if label_y is None:
-        return False
+    occupied.append(centre_y)
     draw.text(
-        (x + (width - label_width) / 2, label_y - box[1]),
+        (x + width + 4, centre_y - label_height / 2 - box[1]),
         value, fill=fill, font=font,
     )
     return True
@@ -3969,6 +3969,7 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
         subset = data[(data[group].astype(str) == g) & (data[period].astype(str) == p)]
         total = max(len(subset), 1); x = chart_left + i * (chart_width / len(combos)) + 12
         running = 0
+        side_labels: list[float] = []
         for state, colour in zip(states, colours, strict=True):
             value = len(subset[subset["state"] == state]) / total
             height = value * chart_height
@@ -3978,11 +3979,12 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
             def automatic_label() -> None:
                 if value >= .08 and _draw_inside_bar_label(image, draw, value_label, x=x, y=y, width=bar_width, height=height, fill="white", font=_font(20, True)):
                     return
-                if value >= .005:
+                if value > 0:
                     _draw_adjacent_stacked_bar_label(
                         draw, value_label, x=x, y=y, width=bar_width, height=height,
                         bar_top=chart_top, bar_bottom=chart_top + chart_height,
-                        fill=colour, font=_font(14, True),
+                        side_space=chart_width / len(combos) - bar_width - 18,
+                        fill=colour, font=_font(10, True), occupied=side_labels,
                     )
             _draw_configured_bar_label(image, draw, value_label, x=x, y=y, width=bar_width, height=height, colour=colour, font=_font(20, True), position=label_position, horizontal=False, automatic=automatic_label)
             running += height
@@ -4106,6 +4108,7 @@ def _render_status_100_hierarchy(
             x = chart_left + column_index * column_width + (column_width - bar_width) / 2
             total = len(subset)
             running = 0.0
+            side_labels: list[float] = []
             for state, colour in zip(states, colours, strict=True):
                 ratio = float(subset["state"].eq(state).sum()) / total
                 segment_height = ratio * row_height
@@ -4115,11 +4118,12 @@ def _render_status_100_hierarchy(
                 def automatic_label() -> None:
                     if ratio >= 0.08 and _draw_inside_bar_label(image, draw, ratio_label, x=x, y=y, width=bar_width, height=segment_height, fill="white", font=_font(21, True)):
                         return
-                    if ratio >= 0.005:
+                    if ratio > 0:
                         _draw_adjacent_stacked_bar_label(
                             draw, ratio_label, x=x, y=y, width=bar_width, height=segment_height,
                             bar_top=pane_top, bar_bottom=pane_bottom,
-                            fill=colour, font=_font(14, True),
+                            side_space=(column_width - bar_width) / 2 - 6,
+                            fill=colour, font=_font(10, True), occupied=side_labels,
                         )
                 _draw_configured_bar_label(image, draw, ratio_label, x=x, y=y, width=bar_width, height=segment_height, colour=colour, font=_font(21, True), position=label_position, horizontal=False, automatic=automatic_label)
                 running += segment_height
@@ -4450,6 +4454,7 @@ def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | N
         for column, value in zip(axis_columns, key, strict=True):
             subset = subset[subset[column].astype(str) == str(value)]
         total = max(len(subset), 1); x = left + index * (width / len(combinations)) + 10; running = 0
+        side_labels: list[float] = []
         for bucket_index, bucket in enumerate(buckets):
             value = len(subset[subset[stack] == bucket]) / total; segment = value * height; y = top + height - running - segment
             draw.rectangle((x, y, x + bar_width, y + segment), fill=bucket_colours.get((bucket,), _colour(bucket, bucket_index)))
@@ -4468,7 +4473,8 @@ def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | N
                     _draw_adjacent_stacked_bar_label(
                         draw, value_label, x=x, y=y, width=bar_width, height=segment,
                         bar_top=top, bar_bottom=top + height,
-                        fill=colour, font=_font(12, True),
+                        side_space=width / len(combinations) - bar_width - 16,
+                        fill=colour, font=_font(10, True), occupied=side_labels,
                     )
             colour = bucket_colours.get((bucket,), _colour(bucket, bucket_index))
             _draw_configured_bar_label(image, draw, value_label, x=x, y=y, width=bar_width, height=segment, colour=colour, font=label_font, position=label_position, horizontal=False, automatic=automatic_label)

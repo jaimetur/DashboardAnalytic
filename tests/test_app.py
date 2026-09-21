@@ -2864,6 +2864,25 @@ def test_opening_workspace_removes_only_cache_from_previous_versions(client) -> 
     assert current_model.exists()
     assert json.loads(version_file.read_text(encoding='utf-8')) == app_module.workspace_cache_version_signature()
 
+    prepared_manifest = workspace_root / '.dashboard-data-cache' / 'dashboard-previews' / 'prepared.json'
+    prepared_manifest.parent.mkdir(parents=True, exist_ok=True)
+    prepared_manifest.write_text('{}', encoding='utf-8')
+    stale_png = workspace_root / '.dashboard-data-cache' / 'charts-pil' / 'stale.png'
+    stale_png.parent.mkdir(parents=True, exist_ok=True)
+    stale_png.write_bytes(b'png')
+    render_only_signature = dict(app_module.workspace_cache_version_signature())
+    render_only_signature['dashboard_render'] = int(render_only_signature['dashboard_render']) - 1
+    version_file.write_text(json.dumps(render_only_signature), encoding='utf-8')
+    with app_module.repository.connection() as connection:
+        connection.execute("INSERT INTO dashboard_filter_selections (cache_key) VALUES ('prepared-selection')")
+
+    app_module.activate_workspace(workspace.id)
+
+    assert prepared_manifest.exists()
+    assert not stale_png.exists()
+    with app_module.repository.connection() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM dashboard_filter_selections WHERE cache_key = 'prepared-selection'").fetchone()[0] == 1
+
 
 def test_workspace_management_reports_every_supported_row_status(client, tmp_path: Path) -> None:
     import src.DashboardAnalytic as app_module

@@ -1318,19 +1318,33 @@ def test_configured_vertical_bar_label_rotates_when_many_bars_make_it_too_wide()
     draw_vertical.assert_called_once()
 
 
-def test_tiny_stacked_label_stays_inside_its_own_bar_below_the_segment() -> None:
+def test_tiny_stacked_label_uses_clear_space_beside_its_bar() -> None:
     draw = MagicMock()
     draw.textbbox.return_value = (0, 0, 28, 12)
 
     drawn = _draw_adjacent_stacked_bar_label(
         draw, '0.6%', x=100, y=20, width=80, height=2,
-        bar_top=20, bar_bottom=180, fill='#C83E4D', font=ImageFont.load_default(),
+        bar_top=20, bar_bottom=180, side_space=40, fill='#C83E4D', font=ImageFont.load_default(),
     )
 
     assert drawn is True
     draw.rectangle.assert_not_called()
-    assert draw.text.call_args.args[0][0] == pytest.approx(126)
-    assert 100 <= draw.text.call_args.args[0][0] <= 180
+    assert draw.text.call_args.args[0][0] == pytest.approx(184)
+    assert draw.text.call_args.kwargs['fill'] == '#C83E4D'
+
+
+def test_tiny_stacked_label_is_hidden_without_lateral_space() -> None:
+    draw = MagicMock()
+    draw.textbbox.return_value = (0, 0, 28, 12)
+
+    drawn = _draw_adjacent_stacked_bar_label(
+        draw, '0.6%', x=100, y=20, width=80, height=2,
+        bar_top=20, bar_bottom=180, side_space=5, fill='#C83E4D',
+        font=ImageFont.load_default(),
+    )
+
+    assert drawn is False
+    draw.text.assert_not_called()
 
 
 def test_top_column_group_separator_is_solid_from_the_header_to_the_plot() -> None:
