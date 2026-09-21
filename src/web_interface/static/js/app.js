@@ -42,6 +42,32 @@ const materializationJobProgressPercent = (job) => {
   return total ? Math.min(99, Math.max(0, Math.round(completed * 100 / total))) : 0;
 };
 
+function syncCombinedDatasetStopButton(row, recreation = {}) {
+  if (!(row instanceof HTMLElement)) return;
+  const actions = row.querySelector('.queue-actions');
+  const recreateButton = row.querySelector('[data-combined-dataset-recreate]');
+  if (!(actions instanceof HTMLElement)) return;
+  let stopButton = actions.querySelector('[data-combined-dataset-stop]');
+  const active = Boolean(recreation.active && recreation.stopUrl && recreation.stopTaskId);
+  if (!active) {
+    stopButton?.remove();
+    return;
+  }
+  if (!(stopButton instanceof HTMLButtonElement)) {
+    stopButton = document.createElement('button');
+    stopButton.type = 'button';
+    stopButton.className = 'combined-dataset-stop-button';
+    stopButton.setAttribute('data-combined-dataset-stop', '');
+    stopButton.textContent = 'Stop';
+    stopButton.title = 'Stop combined table recreation';
+    stopButton.setAttribute('aria-label', stopButton.title);
+    actions.insertBefore(stopButton, recreateButton || null);
+  }
+  stopButton.dataset.stopUrl = String(recreation.stopUrl);
+  stopButton.dataset.stopTaskId = String(recreation.stopTaskId);
+  stopButton.dataset.combinedName = String(recreation.combinedName || 'the combined CDR table');
+}
+
 function updateCombinedDatasetRecreationRow(job) {
   if (job.operation !== 'combined_recreation' || !job.combined_kind) return;
   const row = document.querySelector(`[data-combined-dataset-row][data-dataset-kind="${job.combined_kind}"]`);
@@ -52,6 +78,12 @@ function updateCombinedDatasetRecreationRow(job) {
   const status = row.querySelector('[data-combined-dataset-status]');
   const bar = row.querySelector('[data-combined-dataset-progress-bar]');
   const label = row.querySelector('[data-combined-dataset-progress-percent]');
+  syncCombinedDatasetStopButton(row, {
+    active: processing,
+    stopUrl: job.workspace_id ? `/api/background-tasks/${job.workspace_id}/stop` : '',
+    stopTaskId: job.id ? `auto-fields:${job.id}` : '',
+    combinedName: `CDR-${String(job.combined_kind).replace(/^./, (value) => value.toUpperCase())} (combined)`,
+  });
   row.classList.toggle('combined-dataset-ready', !processing && !failed);
   row.classList.toggle('combined-dataset-warning', processing || failed);
   if (status instanceof HTMLElement) {
@@ -143,6 +175,36 @@ document.querySelectorAll('[data-combined-dataset-recreate]').forEach((button) =
       });
     }
   });
+});
+
+document.addEventListener('click', async (event) => {
+  const button = event.target instanceof Element ? event.target.closest('[data-combined-dataset-stop]') : null;
+  if (!(button instanceof HTMLButtonElement)) return;
+  const accepted = await showConfirmDialog(
+    `Stop recreating ${button.dataset.combinedName || 'the combined CDR table'}?`,
+    {title: 'Stop combined table recreation', confirmLabel: 'Stop recreation', tone: 'warning'},
+  );
+  if (!accepted) return;
+  button.disabled = true;
+  try {
+    const body = new URLSearchParams({task_id: String(button.dataset.stopTaskId || '')});
+    const response = await fetch(String(button.dataset.stopUrl || ''), {
+      method: 'POST', credentials: 'same-origin',
+      headers: {'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json'}, body,
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.detail || 'The combined table recreation could not be stopped.');
+    }
+    const status = button.closest('[data-combined-dataset-row]')?.querySelector('[data-combined-dataset-status]');
+    if (status instanceof HTMLElement) status.textContent = 'Stopping';
+    window.dispatchEvent(new CustomEvent('workspace-dataset-table-refresh-requested'));
+  } catch (error) {
+    button.disabled = false;
+    showInfoDialog(error instanceof Error ? error.message : 'The combined table recreation could not be stopped.', {
+      title: 'Stop recreation failed', tone: 'error',
+    });
+  }
 });
 
 document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEach((host) => {
@@ -7020,6 +7082,12 @@ if (queueNode) {
       bar.style.width = `${progressValue}%`;
     }
     if (percent instanceof HTMLElement) percent.textContent = `${progressValue}%`;
+    syncCombinedDatasetStopButton(row, {
+      active: combined.is_recalculating,
+      stopUrl: combined.recreation_stop_url,
+      stopTaskId: combined.recreation_stop_task_id,
+      combinedName: combined.name,
+    });
   };
 
   const pollQueue = async ({scheduleNext = true, suppressReload = false} = {}) => {

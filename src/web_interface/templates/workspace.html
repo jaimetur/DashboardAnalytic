@@ -355,6 +355,7 @@
             <td data-label="Actions">
               <div class="queue-actions">
                 <a class="ghost-link action-link-preview" href="/workspace/combined/{{ combined.kind }}/preview" target="_blank" rel="noopener" data-preview-open-link data-combined-dataset-preview data-dataset-kind="{{ combined.kind }}" data-integrity-url="/api/workspace/combined/{{ combined.kind }}/integrity" data-loading-label="Generating dataset preview" title="Preview combined dataset" aria-label="Preview combined dataset">Preview dataset</a>
+                {% if combined.recreation_stop_task_id %}<button type="button" class="combined-dataset-stop-button" data-combined-dataset-stop data-stop-url="{{ combined.recreation_stop_url }}" data-stop-task-id="{{ combined.recreation_stop_task_id }}" data-combined-name="{{ combined.name }}" title="Stop combined table recreation" aria-label="Stop combined table recreation">Stop</button>{% endif %}
                 <button type="button" class="combined-dataset-recreate-button" data-combined-dataset-recreate data-recreate-url="/workspace/combined/{{ combined.kind }}/recreate" data-combined-name="{{ combined.name }}" title="Recreate combined table" aria-label="Recreate combined table">↻</button>
               </div>
             </td>

@@ -3449,6 +3449,13 @@ def workspace_combined_tables(
                 'is_recalculating': is_recalculating,
                 'recreation_status': str(recreation_job.get('status') or '') if recreation_job else '',
                 'recreation_progress': materialization_job_progress_percent(recreation_job) if recreation_job else 100,
+                'recreation_stop_task_id': (
+                    f'auto-fields:{recreation_job["id"]}' if recreation_job else ''
+                ),
+                'recreation_stop_url': (
+                    f'/api/background-tasks/{recreation_job["workspace_id"]}/stop'
+                    if recreation_job else ''
+                ),
                 'needs_recalculation': needs_recalculation,
                 'updated_at_label': format_local_timestamp(updated_at) if updated_at else '—',
             })
@@ -7470,6 +7477,11 @@ def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
                         'label': 'Materializing Auto-calculated Fields',
                         'detail': 'Updating CDR tables',
                         'progress': None,
+                        # This persisted marker can survive an application
+                        # restart after its worker has disappeared. Keep the
+                        # orphaned task dismissible from the same global panel.
+                        'stop_task_id': f'auto-fields-state:{workspace.id}',
+                        'stop_url': f'/api/background-tasks/{workspace.id}/stop',
                     })
     except sqlite3.Error:
         # A worker may briefly hold the database while publishing a progress
@@ -7807,6 +7819,26 @@ def stop_background_task(
             if not job or str(job.get('workspace_id') or '') != workspace_id or job.get('status') not in {'queued', 'processing'}:
                 raise HTTPException(status_code=409, detail='This materialization task can no longer be stopped.')
             job.update(cancel_requested=True, message='Stopping background job')
+    elif prefix == 'auto-fields-state':
+        if raw_identifier != workspace_id:
+            raise HTTPException(status_code=400, detail='Invalid materialization task.')
+        with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+            running_jobs = [
+                job for job in AUTO_CALCULATED_FIELD_JOBS.values()
+                if str(job.get('workspace_id') or '') == workspace_id
+                and job.get('status') in {'queued', 'processing'}
+            ]
+            for job in running_jobs:
+                job.update(cancel_requested=True, message='Stopping background job')
+        if not running_jobs:
+            state = task_repository.get_workspace_state('calculated_dimensions_need_materialization')
+            if state != 'processing':
+                raise HTTPException(status_code=409, detail='This materialization task can no longer be stopped.')
+            task_repository.set_workspace_state('calculated_dimensions_need_materialization', 'stopped')
+        task_repository.try_add_log(
+            user.username, 'stop_orphaned_auto_calculated_fields',
+            json.dumps({'workspace_id': workspace_id, 'active_jobs': len(running_jobs)}),
+        )
     elif prefix == 'dashboard-prepare':
         stop_dashboard = getattr(sys.modules[__name__], 'e2e_dashboard_stop_task', None)
         if not callable(stop_dashboard) or not stop_dashboard(workspace.database_path, raw_identifier):

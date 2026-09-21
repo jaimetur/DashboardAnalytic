@@ -672,6 +672,13 @@ def test_combined_table_progress_matches_its_active_recreation_job(client, monke
     assert queued['is_recalculating'] is True
     assert queued['recreation_status'] == 'queued'
     assert queued['recreation_progress'] == 0
+    assert queued['recreation_stop_task_id'] == 'auto-fields:queued-data'
+    assert queued['recreation_stop_url'] == f'/api/background-tasks/{workspace_id}/stop'
+    workspace_page = client.get('/workspace')
+    assert workspace_page.status_code == 200
+    assert 'data-combined-dataset-stop' in workspace_page.text
+    assert 'data-stop-task-id="auto-fields:queued-data"' in workspace_page.text
+    assert 'aria-label="Stop combined table recreation"' in workspace_page.text
 
     app_module.AUTO_CALCULATED_FIELD_JOBS['queued-data'].update(status='processing', completed=41, total=100)
     processing = next(item for item in app_module.workspace_combined_tables(workspace_id=workspace_id) if item['kind'] == 'data')
@@ -920,6 +927,10 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     assert 'Operator Mappings (from active workspace)' in admin_response.text
     assert 'Full Environment (App Config + Dashboards + Report Templates + Operator Mappings + Auto-calculated Fields + Selected Workspaces)' in admin_response.text
     assert 'Workspace: Default' in admin_response.text
+    stylesheet = app_module.PROJECT_ROOT.joinpath('src/web_interface/static/css/app.css').read_text(encoding='utf-8')
+    assert '.multiselect-shell { position: relative; min-width: 0; max-width: 100%; }' in stylesheet
+    assert '.multiselect-trigger-label { flex: 1 1 auto; min-width: 0;' in stylesheet
+    assert '.admin-export-components { min-width: 0; }' in stylesheet
 
     config_response = client.get('/admin/import-export/export?export_target=config')
     assert config_response.status_code == 200
@@ -3401,6 +3412,38 @@ def test_background_task_stop_endpoint_stops_accessible_workspace_work(client) -
         app_module.AUTO_CALCULATED_FIELD_JOBS.pop('stoppable-auto-fields')
 
 
+def test_orphaned_auto_field_materialization_can_be_stopped_from_background_panel(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    workspace = app_module.active_workspace
+    assert workspace is not None
+    monkeypatch.setattr(app_module, 'AUTO_CALCULATED_FIELD_JOBS', {})
+    workspace_repository = app_module.Repository(
+        workspace.database_path,
+        global_db_path=app_module.repository.global_db_path,
+        workspace_registry_db_path=app_module.workspace_registry.registry_path,
+    )
+    workspace_repository.set_workspace_state('calculated_dimensions_need_materialization', 'processing')
+
+    task = next(
+        task for task in app_module._workspace_background_tasks(workspace)
+        if task['id'] == f'auto-fields-state:{workspace.id}'
+    )
+    assert task['stop_task_id'] == f'auto-fields-state:{workspace.id}'
+    assert task['stop_url'] == f'/api/background-tasks/{workspace.id}/stop'
+
+    response = client.post(task['stop_url'], data={'task_id': task['stop_task_id']})
+
+    assert response.status_code == 200
+    assert workspace_repository.get_workspace_state('calculated_dimensions_need_materialization') == 'stopped'
+    remaining = app_module._workspace_background_tasks(workspace)
+    assert all(
+        candidate['id'] != f'auto-fields-state:{workspace.id}'
+        for candidate in remaining
+    )
+
+
 def test_dashboard_interruption_succeeds_when_its_audit_log_is_locked(client, monkeypatch) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -4315,7 +4358,10 @@ def test_workspace_lists_combined_cdr_with_preview_and_kind_filter_metadata(clie
     script_text = app_script.read_text(encoding='utf-8')
     assert 'workspace-dataset-table-refresh-requested' in script_text
     assert 'combinedTables.forEach(updateCombinedQueueRow)' in script_text
+    assert 'syncCombinedDatasetStopButton(row' in script_text
+    assert "event.target.closest('[data-combined-dataset-stop]')" in script_text
     assert 'aria-label="Recreate combined table">↻</button>' in workspace_response.text
+    assert 'data-combined-dataset-stop' not in workspace_response.text
 
     preview_response = client.get('/workspace/combined/data/preview')
     assert preview_response.status_code == 200
