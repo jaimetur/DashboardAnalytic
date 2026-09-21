@@ -2293,12 +2293,9 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
         _normalise_catalog_name(dimension) == "operator" for _column_name, dimension in hierarchy
     )
 
-    def vendor_sort_key(value: object) -> tuple[int, str, int, str]:
+    def vendor_sort_key(value: object) -> tuple[object, ...]:
         if split_vendor_hierarchy:
-            normalized_vendor = _vendor_label(value, frame).casefold()
-            vendor_group = _mapping_group(normalized_vendor, 'vendor', frame)
-            vendor_rank = int(vendor_group.get('position', 0)) if vendor_group else len(_mapping_groups(frame, 'vendor'))
-            return 0, "", vendor_rank, normalized_vendor
+            return _multivendor_vendor_sort_key(value, frame)
         return _vendor_display_sort_key(value, frame)
 
     operator_columns = [
@@ -2960,6 +2957,26 @@ def _vendor_display_sort_key(value: object, frame: pd.DataFrame | None = None) -
     vendor_rank = int(vendor_group.get('position', 0)) if vendor_group else len(_mapping_groups(frame, 'vendor'))
     operator_rank, operator_label = _operator_display_sort_key(normalized_operator, frame)
     return operator_rank, operator_label, vendor_rank, normalized_vendor
+
+
+def _multivendor_vendor_sort_key(value: object, frame: pd.DataFrame | None = None) -> tuple[object, ...]:
+    """Order real Vendors first and Operator-only identities last."""
+    text = str(value).strip()
+    vendor = _vendor_label(text, frame)
+    vendor_group = _mapping_group(vendor, 'vendor', frame)
+    exact_operator = _mapping_group(text, 'operator', frame)
+    if exact_operator or text.casefold() in {'', '(blank)', 'blank', 'none', 'n/a', 'na'}:
+        operator_rank, operator_label = _operator_display_sort_key(text, frame)
+        return 2, operator_rank, operator_label
+    if vendor_group:
+        operator_rank, operator_label = _operator_display_sort_key(text, frame)
+        return (
+            0, int(vendor_group.get('position', 0)),
+            str(vendor_group.get('canonical') or vendor).casefold(), operator_rank, operator_label,
+        )
+    # Preserve unconfigured but genuine Vendor labels after the configured
+    # Vendor Mapping domain and before identities that have no Vendor.
+    return 1, vendor.casefold(), text.casefold()
 
 
 def _series_colours(
@@ -5756,6 +5773,8 @@ def catalog_chart_payload(
                 if roles & {"operator", "subscriber"}:
                     return (0, *_operator_display_sort_key(value, data))
                 if roles & {"vendor", "vendoronly", "operatorvendor"}:
+                    if multivendor:
+                        return (0, *_multivendor_vendor_sort_key(value, data))
                     return (0, *_vendor_display_sort_key(value, data))
                 if "campaign" in roles:
                     return (0, *_campaign_sort_key(value))

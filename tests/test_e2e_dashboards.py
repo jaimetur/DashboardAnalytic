@@ -825,6 +825,9 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'lines.push(tooltipPercent(point.cumulative))' in chart_script
     assert "const dynamic = Boolean(payload.dynamic)" in chart_script
     assert "const repeatedHierarchyValue = dynamic" in chart_script
+    assert "const boundaryStyle = (level, levels) =>" in chart_script
+    assert "left + changedLevel * columnWidth" in chart_script
+    assert "const columnKeys = Array.isArray(payload.column_keys)" in chart_script
     assert 'function sameImmediateHierarchyParent(left, right)' in chart_script
     assert 'cell.row >= drag.parent.start && cell.row < drag.parent.end' in chart_script
     assert 'sameImmediateHierarchyParent(drag.sourceKey, targetKey)' in chart_script

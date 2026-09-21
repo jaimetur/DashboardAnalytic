@@ -140,6 +140,32 @@ def test_dynamic_table_uses_operator_mapping_order_by_default() -> None:
     assert column_model['column_keys'] == [['3'], ['EE'], ['O2'], ['VF_UK'], ['VF_SA']]
 
 
+def test_multivendor_dynamic_table_places_operator_only_identities_after_vendors() -> None:
+    frame = chart_frame({
+        'vendor': ['EE', 'O2', 'VF_SA', '3_Huawei', '3_Ericsson', 'VF_Ericsson'],
+        'Test_Result': ['Completed'] * 6,
+        'G_Level_4': ['London'] * 6,
+        'Test_ID': ['A', 'B', 'C', 'D', 'E', 'F'],
+    })
+    frame.attrs['operator_mapping_groups'].append({
+        'canonical': 'VF_SA', 'aliases': [], 'position': 4, 'color': '#8000FF',
+    })
+    frame.attrs['operator_mappings'] = {'vf': 'VF', 'vf_sa': 'VF_SA'}
+    entry = CatalogEntry(
+        slide=3, slide_title='Validation', slide_subtitle='', layout='', chart_title='Test count',
+        cdr_source='CDR-Data', kpi='COUNT(Test_ID)', chart_type='Dynamic Table', legend='', filters='',
+        grouping_rows='Vendor × Operator × Test_Result', grouping_columns='G Level 4',
+        legend_position='',
+    )
+
+    model = catalog_chart_payload(frame, entry, multivendor=True, prefiltered=True)
+
+    assert [row[:2] for row in model['rows']] == [
+        ['Ericsson', 'VF'], ['Ericsson', '3'], ['Huawei', '3'],
+        ['EE', 'EE'], ['O2', 'O2'], ['VF_SA', 'VF_SA'],
+    ]
+
+
 def test_dynamic_table_rejects_an_unreadable_number_of_pivot_columns() -> None:
     frame = chart_frame({
         'Benchmark': ['UK_Q1_2026'] * 21,

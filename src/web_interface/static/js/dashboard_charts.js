@@ -809,6 +809,39 @@
       const text = String(displayValue).slice(0, 28); const textX = column >= rowDimensionCount && dynamic ? x + columnWidth - 8 : x + 8;
       context.fillText(text, textX, y + (dynamic ? 4 : 8));
     }));
+    if (dynamic) {
+      const tableBottom = top + (rows.length + headerBands) * rowHeight;
+      const boundaryStyle = (level, levels) => {
+        const relativeDepth = level / Math.max(levels - 1, 1);
+        if (level === 0) return {colour: '#607887', width: 4};
+        if (relativeDepth <= .5) return {colour: '#8296A3', width: 3};
+        return {colour: '#A8B7C0', width: 2};
+      };
+      for (let rowIndex = 1; rowIndex < rows.length; rowIndex += 1) {
+        const previous = rows[rowIndex - 1] || [], current = rows[rowIndex] || [];
+        const changedLevel = Array.from({length: rowDimensionCount}, (_item, level) => level)
+          .find(level => String(previous[level] ?? '') !== String(current[level] ?? ''));
+        if (changedLevel === undefined) continue;
+        const style = boundaryStyle(changedLevel, rowDimensionCount);
+        const y = top + (rowIndex + headerBands) * rowHeight;
+        line(context, left + changedLevel * columnWidth, y, layout.right, y, style.colour, style.width);
+      }
+      const columnKeys = Array.isArray(payload.column_keys) ? payload.column_keys : [];
+      const columnLevels = Math.max(1, columnKeys[0]?.length || 0);
+      for (let columnIndex = 1; columnIndex < columnKeys.length; columnIndex += 1) {
+        const previous = columnKeys[columnIndex - 1] || [], current = columnKeys[columnIndex] || [];
+        let changedLevel = previous.findIndex((value, level) => String(value ?? '') !== String(current[level] ?? ''));
+        if (changedLevel < 0) changedLevel = columnLevels - 1;
+        const style = boundaryStyle(changedLevel, columnLevels);
+        const x = left + (rowDimensionCount + columnIndex) * columnWidth;
+        const lineTop = changedLevel === 0 ? top : headerTop;
+        line(context, x, lineTop, x, tableBottom, style.colour, style.width);
+      }
+      if (columnKeys.length) {
+        const pivotLeft = left + rowDimensionCount * columnWidth;
+        line(context, pivotLeft, top, pivotLeft, tableBottom, '#607887', 4);
+      }
+    }
     const drag = tableDragStates.get(state.canvas);
     if (dynamic && drag?.targetIndex !== undefined) {
       context.save();
