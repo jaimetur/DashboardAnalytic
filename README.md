@@ -125,9 +125,15 @@ Open `http://127.0.0.1:7279`.
 
 ### macOS launcher
 
-The project root includes `Dashboard Analytic.app`. It uses the bundled Dashboard Analytic logo as its macOS icon and a universal native launcher for Apple Silicon and Intel Macs. Double-click it to start the local server on port `7278`; its control window remains visible in the foreground and the browser is not opened automatically. Use **Open in Browser** to open the configured local URL, **Restart Server** to stop the current process cleanly before starting its replacement, or **Stop Server and Quit**. Closing the window, pressing `⌘Q`, or choosing **Quit** in the Dock also stops the server cleanly. The launcher monitors forced application termination so the server cannot remain orphaned after its window disappears. It reuses a working project `.venv` when available; otherwise, including when that environment contains Intel-only packages, it creates the separate native `.dashboard-analytic-venv` environment and installs the dependencies. Python 3.11 or later must be available on the Mac.
+The project keeps `Dashboard Analytic.app` under `macos-launcher/`. It uses the Dashboard Analytic logo as its icon and a universal native executable for Apple Silicon and Intel Macs. Its control window starts the local server on port `7278` without opening the browser automatically. Use **Open in Browser** to open the configured local URL, **Restart Server** to stop the current process cleanly before starting its replacement, or **Stop Server and Quit**. Closing the window, pressing `⌘Q`, or choosing **Quit** in the Dock also stops the server cleanly. The launcher monitors forced application termination so the server cannot remain orphaned after its window disappears. It reuses a working project `.venv` when available; otherwise, including when that environment contains Intel-only packages, it creates the separate native `.dashboard-analytic-venv` environment and installs the dependencies. Python 3.11 or later must be available on the Mac.
 
-To install it in macOS Applications automatically, double-click `Dashboard Analytic Installer.pkg` and follow the standard Installer prompts. The package installs the app in `/Applications`; administrator approval may be requested by macOS. You can regenerate the package after changing the app bundle by running `./macos-launcher/build-installer.zsh` from the project root.
+Build the complete installer from the project root:
+
+```bash
+./macos-installer/build-installer.zsh
+```
+
+The script compiles the universal native executable into `macos-launcher/Dashboard Analytic.app`, signs the application bundle, and creates `macos-installer/Dashboard Analytic Installer.pkg`. Double-click the resulting package and follow the standard Installer prompts to install the launcher in `/Applications`; administrator approval may be requested by macOS.
 
 When opened from `/Applications`, the launcher asks for the project folder once and remembers it in Application Support. Keep the project folder available: the launcher runs its source code and stores its PID and log in `.dashboard-analytic-runtime/`.
 

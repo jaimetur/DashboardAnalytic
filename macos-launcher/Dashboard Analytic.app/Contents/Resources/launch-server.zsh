@@ -23,6 +23,9 @@ APPLESCRIPT
 
 launcher_dir="${0:A:h}"
 project_root="${launcher_dir:h:h:h}"
+if [[ ! -f "${project_root}/src/main.py" ]] && [[ -f "${project_root:h}/src/main.py" ]]; then
+    project_root="${project_root:h}"
+fi
 project_location_file="${HOME}/Library/Application Support/Dashboard Analytic/project-path"
 
 if [[ ! -f "${project_root}/src/main.py" ]]; then
