@@ -3444,6 +3444,42 @@ def test_orphaned_auto_field_materialization_can_be_stopped_from_background_pane
     )
 
 
+def test_incoming_transfer_uses_server_stop_and_stops_child_materialization(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login_super(client)
+    workspace = app_module.active_workspace
+    assert workspace is not None
+    offer_id = 'incoming-stop-test'
+    monkeypatch.setattr(app_module, '_save_transfer_offer', lambda _offer: None)
+    monkeypatch.setattr(app_module, 'TRANSFER_OFFERS', {
+        offer_id: {
+            'id': offer_id, 'status': 'importing', 'phase': 'validating', 'progress': 0,
+            'content': 'Auto-calculated Fields', 'destination_workspace_ids': [workspace.id],
+            'created_at': 1,
+        },
+    })
+    monkeypatch.setattr(app_module, 'AUTO_CALCULATED_FIELD_JOBS', {
+        'child-materialization': {
+            'id': 'child-materialization', 'workspace_id': workspace.id, 'status': 'processing',
+            'parent_task_id': f'incoming-transfer:{offer_id}', 'created_at': 2,
+        },
+    })
+
+    groups = client.get('/api/background-tasks').json()['groups']
+    task = next(
+        task for group in groups for task in group['tasks']
+        if task['id'] == f'incoming-transfer:{offer_id}'
+    )
+    assert task['stop_url'] == '/api/server-background-tasks/stop'
+
+    response = client.post(task['stop_url'], data={'task_id': task['stop_task_id']})
+
+    assert response.status_code == 200
+    assert app_module.TRANSFER_OFFERS[offer_id]['cancel_requested'] is True
+    assert app_module.AUTO_CALCULATED_FIELD_JOBS['child-materialization']['cancel_requested'] is True
+
+
 def test_dashboard_interruption_succeeds_when_its_audit_log_is_locked(client, monkeypatch) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -4360,6 +4396,8 @@ def test_workspace_lists_combined_cdr_with_preview_and_kind_filter_metadata(clie
     assert 'combinedTables.forEach(updateCombinedQueueRow)' in script_text
     assert 'syncCombinedDatasetStopButton(row' in script_text
     assert "event.target.closest('[data-combined-dataset-stop]')" in script_text
+    assert "className = 'auto-calculated-field-stop-button combined-dataset-stop-button'" in script_text
+    assert '`auto-fields-state:${job.workspace_id}`' in script_text
     assert 'aria-label="Recreate combined table">↻</button>' in workspace_response.text
     assert 'data-combined-dataset-stop' not in workspace_response.text
 

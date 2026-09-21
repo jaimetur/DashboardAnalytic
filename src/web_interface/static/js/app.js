@@ -236,9 +236,11 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
       const label = document.createElement('strong');
       label.textContent = materializationJobLabel(job);
       const state = document.createElement('span');
-      const stateLabel = job.status === 'queued' ? 'Queued' : job.status === 'processing' ? 'In progress' : job.status === 'stopped' ? 'Stopped' : job.status === 'failed' ? 'Failed' : 'Up to date';
+      const stateLabel = job.cancel_requested ? 'Stopping' : job.status === 'queued' ? 'Queued' : job.status === 'processing' ? 'In progress' : job.status === 'stopped' ? 'Stopped' : job.status === 'failed' ? 'Failed' : 'Up to date';
       state.textContent = `${stateLabel} · ${percent}%`;
       heading.append(label, state);
+      const progressRow = document.createElement('div');
+      progressRow.className = 'auto-calculated-field-progress-row';
       const track = document.createElement('div');
       track.className = 'auto-calculated-field-progress-track';
       track.setAttribute('role', 'progressbar');
@@ -253,10 +255,50 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
       percentLabel.className = 'auto-calculated-field-progress-percent';
       percentLabel.textContent = `${percent}%`;
       track.append(bar, percentLabel);
+      progressRow.append(track);
+      if (processing && job.workspace_id) {
+        const stop = document.createElement('button');
+        stop.type = 'button';
+        stop.className = 'auto-calculated-field-stop-button combined-dataset-stop-button';
+        stop.textContent = 'Stop';
+        stop.title = 'Stop materialization';
+        stop.setAttribute('aria-label', stop.title);
+        stop.disabled = Boolean(job.cancel_requested);
+        stop.addEventListener('click', async () => {
+          const accepted = await showConfirmDialog(
+            `Stop “${label.textContent}”?`,
+            {title: 'Stop materialization', confirmLabel: 'Stop materialization', tone: 'warning'},
+          );
+          if (!accepted) return;
+          stop.disabled = true;
+          try {
+            const taskId = job.id
+              ? `auto-fields:${job.id}`
+              : `auto-fields-state:${job.workspace_id}`;
+            const body = new URLSearchParams({task_id: taskId});
+            const response = await fetch(`/api/background-tasks/${job.workspace_id}/stop`, {
+              method: 'POST', credentials: 'same-origin',
+              headers: {'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json'}, body,
+            });
+            if (!response.ok) {
+              const payload = await response.json().catch(() => ({}));
+              throw new Error(payload.detail || 'The materialization task could not be stopped.');
+            }
+            state.textContent = `Stopping · ${percent}%`;
+            window.setTimeout(refreshMaterializationProgress, 250);
+          } catch (error) {
+            stop.disabled = false;
+            showInfoDialog(error instanceof Error ? error.message : 'The materialization task could not be stopped.', {
+              title: 'Stop materialization failed', tone: 'error',
+            });
+          }
+        });
+        progressRow.append(stop);
+      }
       const copy = document.createElement('p');
       copy.className = 'form-note';
       copy.textContent = job.error || job.message || 'All materialized fields are up to date.';
-      article.append(heading, track, copy);
+      article.append(heading, progressRow, copy);
       progressJobList.append(article);
     });
   };
@@ -266,7 +308,10 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
       const response = await fetch(progressPanel.dataset.statusUrl, {credentials: 'same-origin', cache: 'no-store'});
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.detail || 'Unable to read materialization progress.');
-      const activeJobs = Array.isArray(payload.jobs) ? payload.jobs : [];
+      const listedJobs = Array.isArray(payload.jobs) ? payload.jobs : [];
+      const activeJobs = listedJobs.length
+        ? listedJobs
+        : ['queued', 'processing'].includes(payload.status) ? [payload] : [];
       const jobs = activeJobs.length ? activeJobs : [payload];
       const processingJobs = activeJobs.filter((job) => job.status === 'processing');
       const queuedJobs = activeJobs.filter((job) => job.status === 'queued');

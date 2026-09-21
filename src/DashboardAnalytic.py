@@ -1076,6 +1076,7 @@ def start_auto_calculated_field_job(
     workspace: Workspace, previous: Iterable[Any], current: Iterable[Any],
     renames: dict[str, str], username: str, *, background: bool = True,
     before_submit: Callable[[dict[str, Any]], None] | None = None,
+    parent_task_id: str = '',
 ) -> dict[str, Any]:
     """Queue materialization so the web request and UI remain responsive."""
     job_id = uuid4().hex
@@ -1090,6 +1091,7 @@ def start_auto_calculated_field_job(
         'affected_sources': sorted(set(affected_sources)), 'username': username,
         'renames': dict(renames),
         'created_at': datetime.now(timezone.utc).timestamp(),
+        **({'parent_task_id': parent_task_id} if parent_task_id else {}),
     }
     with AUTO_CALCULATED_FIELD_JOBS_LOCK:
         cutoff = datetime.now(timezone.utc).timestamp() - EXPORT_PACKAGE_TTL.total_seconds()
@@ -5653,6 +5655,7 @@ def import_auto_calculated_fields(
     payload: object,
     destination_workspace_ids: Iterable[str],
     progress_callback: Callable[[str, float], None] | None = None,
+    parent_task_id: str = '',
 ) -> tuple[int, int]:
     """Merge fields by normalized name and materialize each selected workspace once."""
     imported = parse_calculated_dimensions(payload)
@@ -5686,9 +5689,12 @@ def import_auto_calculated_fields(
             }
             job = start_auto_calculated_field_job(
                 workspace, previous, saved, imported_renames, 'system', background=False,
+                parent_task_id=parent_task_id,
             )
             if job.get('status') == 'failed':
                 raise RuntimeError(str(job.get('error') or 'Auto-calculated field materialization failed.'))
+            if job.get('status') == 'stopped':
+                raise InterruptedError('Import stopped while materializing Auto-calculated Fields.')
         if progress_callback:
             progress_callback(
                 f'updating workspace {index + 1} of {len(selected_ids)}',
@@ -5702,6 +5708,7 @@ def _apply_import_archive(
     manifest: dict[str, Any],
     progress_callback: Callable[[str, float], None] | None = None,
     destination_workspace_ids: Iterable[str] = (),
+    parent_task_id: str = '',
 ) -> str:
     """Apply a disk-backed package and return its user-facing completion message."""
     with zipfile.ZipFile(package_path) as archive, tempfile.TemporaryDirectory(prefix='dashboard-analytic-import-') as temporary_dir:
@@ -5746,6 +5753,7 @@ def _apply_import_archive(
                 notices.append(_apply_import_archive(
                     nested_path, nested_manifest, None,
                     destination_workspace_ids=destination_workspace_ids,
+                    parent_task_id=parent_task_id,
                 ))
             if progress_callback:
                 progress_callback('finalising', 100.0)
@@ -5844,7 +5852,7 @@ def _apply_import_archive(
             except (KeyError, UnicodeDecodeError, json.JSONDecodeError) as exc:
                 raise ValueError('The package does not contain valid auto-calculated fields.') from exc
             imported_count, workspace_count = import_auto_calculated_fields(
-                definitions, destination_workspace_ids, progress_callback,
+                definitions, destination_workspace_ids, progress_callback, parent_task_id,
             )
             return f'Imported {imported_count} auto-calculated fields into {workspace_count} workspaces.'
         if kind == 'full-environment':
@@ -5908,6 +5916,7 @@ def _run_import_job(job_id: str) -> None:
         notice = _apply_import_archive(
             package_path, manifest, update_progress,
             destination_workspace_ids=job.get('destination_workspace_ids') or (),
+            parent_task_id=f'import:{job_id}',
         )
         with IMPORT_JOBS_LOCK:
             job.update({'status': 'ready', 'notice': notice, 'finished_at': datetime.now(timezone.utc).timestamp()})
@@ -6099,6 +6108,7 @@ def _run_received_transfer(offer_id: str) -> None:
         notice = _apply_import_archive(
             package_path, manifest, update_progress,
             offer.get('destination_workspace_ids') or (),
+            parent_task_id=f'incoming-transfer:{offer_id}',
         )
         with TRANSFER_LOCK:
             offer.update({'status': 'ready', 'phase': 'complete', 'progress': 100.0, 'notice': notice, 'finished_at': datetime.now(timezone.utc).timestamp()})
@@ -7513,8 +7523,8 @@ def _global_background_tasks(user: SessionUser, accessible_ids: set[str]) -> lis
         if prefix in {'export', 'import', 'transfer', 'incoming-transfer'}:
             task['stop_task_id'] = f'{prefix}:{job.get("id")}'
             task['stop_url'] = (
-                '/api/background-tasks/server/stop'
-                if workspace_id == '__server__'
+                '/api/server-background-tasks/stop'
+                if workspace_id == '__server__' or prefix == 'incoming-transfer'
                 else f'/api/background-tasks/{workspace_id}/stop'
             )
         tasks.append(task)
@@ -7546,7 +7556,7 @@ def _global_background_tasks(user: SessionUser, accessible_ids: set[str]) -> lis
             'progress': max(0, min(100, int(job.get('progress') or 0))),
             **_background_task_timing(job),
             'stop_task_id': f'manual-backup:{job.get("id")}',
-            'stop_url': '/api/background-tasks/server/stop',
+            'stop_url': '/api/server-background-tasks/stop',
         })
 
     if user.role == 'super-admin':
@@ -7562,7 +7572,7 @@ def _global_background_tasks(user: SessionUser, accessible_ids: set[str]) -> lis
                 'progress': max(0, min(100, int(job.get('progress') or 0))),
                 **_background_task_timing(job),
                 'stop_task_id': f'scheduled-backup:{job.get("id")}',
-                'stop_url': '/api/background-tasks/server/stop',
+                'stop_url': '/api/server-background-tasks/stop',
             })
 
     with MANUAL_RESTORE_JOBS_LOCK:
@@ -7582,7 +7592,7 @@ def _global_background_tasks(user: SessionUser, accessible_ids: set[str]) -> lis
         # interrupted safely. A queued restore is still cancellable.
         if job.get('status') == 'queued':
             task['stop_task_id'] = f'manual-restore:{job.get("id")}'
-            task['stop_url'] = '/api/background-tasks/server/stop'
+            task['stop_url'] = '/api/server-background-tasks/stop'
         tasks.append(task)
 
     with TRANSFER_LOCK:
@@ -7860,6 +7870,13 @@ def stop_background_task(
             if job.get('status') not in {'queued', 'processing'}:
                 raise HTTPException(status_code=409, detail='This import task can no longer be stopped.')
             job.update(cancel_requested=True, phase='stopping import')
+        with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+            for child_job in AUTO_CALCULATED_FIELD_JOBS.values():
+                if (
+                    child_job.get('parent_task_id') == f'import:{raw_identifier}'
+                    and child_job.get('status') in {'queued', 'processing'}
+                ):
+                    child_job.update(cancel_requested=True, message='Stopping with parent import')
     elif prefix == 'transfer':
         with TRANSFER_LOCK:
             job = TRANSFER_JOBS.get(raw_identifier)
@@ -7899,7 +7916,7 @@ def stop_background_task(
     return JSONResponse({'stopping': task_id})
 
 
-@app.post('/api/background-tasks/server/stop')
+@app.post('/api/server-background-tasks/stop')
 def stop_server_background_task(task_id: str = Form(...), user: SessionUser = Depends(current_user)) -> JSONResponse:
     """Stop an owner-visible server task that does not belong to one workspace."""
     prefix, _, job_id = str(task_id).partition(':')
@@ -7937,6 +7954,13 @@ def stop_server_background_task(task_id: str = Form(...), user: SessionUser = De
                 raise HTTPException(status_code=409, detail='This incoming transfer can no longer be stopped.')
             offer.update(cancel_requested=True, status='cancelling', phase='cancellation requested')
             _save_transfer_offer(offer)
+        with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+            for child_job in AUTO_CALCULATED_FIELD_JOBS.values():
+                if (
+                    child_job.get('parent_task_id') == f'incoming-transfer:{job_id}'
+                    and child_job.get('status') in {'queued', 'processing'}
+                ):
+                    child_job.update(cancel_requested=True, message='Stopping with incoming transfer')
         return JSONResponse({'stopping': task_id})
     with MANUAL_BACKUP_JOBS_LOCK:
         job = MANUAL_BACKUP_JOBS.get(job_id)
