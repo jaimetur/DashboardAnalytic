@@ -3725,6 +3725,7 @@ def _draw_inside_bar_label(
 
 
 def _draw_configured_bar_label(
+    image: Image.Image,
     draw: ImageDraw.ImageDraw,
     value: str,
     *,
@@ -3758,6 +3759,17 @@ def _draw_configured_bar_label(
         label_x = x + width - label_width - 4 if placement == "up" else (x + 4 if placement == "down" else x + (width - label_width) / 2)
         label_y = y + (height - label_height) / 2 - box[1]
     else:
+        if label_width + 8 > width and label_height + 8 <= width and label_width + 8 <= height:
+            centre_y = (
+                y + label_width / 2 + 4 if placement == "up"
+                else y + height - label_width / 2 - 4 if placement == "down"
+                else y + height / 2
+            )
+            _draw_vertical_label(
+                image, value, centre_x=x + width / 2, centre_y=centre_y,
+                fill="#FFFFFF", font=font,
+            )
+            return
         label_x = x + (width - label_width) / 2
         label_y = y + 4 - box[1] if placement == "up" else (y + height - label_height - 4 - box[1] if placement == "down" else y + (height - label_height) / 2 - box[1])
     draw.text((label_x, label_y), value, fill="#FFFFFF", font=font)
@@ -3931,11 +3943,11 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
             draw.rectangle((x, y, x + bar_width, y + height), fill=colour)
             value_label = f"{value:.1%}"
             def automatic_label() -> None:
-                if value >= .08 and _draw_inside_bar_label(image, draw, value_label, x=x, y=y, width=bar_width, height=height, fill="white", font=_font(16, True)):
+                if value >= .08 and _draw_inside_bar_label(image, draw, value_label, x=x, y=y, width=bar_width, height=height, fill="white", font=_font(20, True)):
                     return
                 if value >= .005:
-                    draw.text((x + bar_width + 3, max(chart_top, y - 7)), value_label, fill=colour, font=_font(12, True))
-            _draw_configured_bar_label(draw, value_label, x=x, y=y, width=bar_width, height=height, colour=colour, font=_font(16, True), position=label_position, horizontal=False, automatic=automatic_label)
+                    draw.text((x + bar_width + 3, max(chart_top, y - 7)), value_label, fill=colour, font=_font(16, True))
+            _draw_configured_bar_label(image, draw, value_label, x=x, y=y, width=bar_width, height=height, colour=colour, font=_font(20, True), position=label_position, horizontal=False, automatic=automatic_label)
             running += height
         label = _catalogue_display_label(g, p)[:24]
         label_font = _font(18, True)
@@ -4064,13 +4076,13 @@ def _render_status_100_hierarchy(
                 draw.rectangle((x, y, x + bar_width, y + segment_height), fill=colour)
                 ratio_label = f"{ratio:.1%}"
                 def automatic_label() -> None:
-                    if ratio >= 0.08 and _draw_inside_bar_label(image, draw, ratio_label, x=x, y=y, width=bar_width, height=segment_height, fill="white", font=_font(17, True)):
+                    if ratio >= 0.08 and _draw_inside_bar_label(image, draw, ratio_label, x=x, y=y, width=bar_width, height=segment_height, fill="white", font=_font(21, True)):
                         return
                     if ratio >= 0.005:
                         # Small failure rates still matter. Put their label beside
                         # the narrow segment instead of suppressing it entirely.
-                        draw.text((x + bar_width + 3, max(pane_top, y - 7)), ratio_label, fill=colour, font=_font(12, True))
-                _draw_configured_bar_label(draw, ratio_label, x=x, y=y, width=bar_width, height=segment_height, colour=colour, font=_font(17, True), position=label_position, horizontal=False, automatic=automatic_label)
+                        draw.text((x + bar_width + 3, max(pane_top, y - 7)), ratio_label, fill=colour, font=_font(16, True))
+                _draw_configured_bar_label(image, draw, ratio_label, x=x, y=y, width=bar_width, height=segment_height, colour=colour, font=_font(21, True), position=label_position, horizontal=False, automatic=automatic_label)
                 running += segment_height
 
     if row_hierarchy:
@@ -4149,8 +4161,8 @@ def _render_failure_count(title: str, frame: pd.DataFrame, group: str | None, pe
         for state in ("Failed", "Dropped"):
             count = int(values.get(state, 0)); width = int(980 * count / maximum)
             if width:
-                draw.rectangle((x, y, x + width, y + 25), fill=colours[state])
-                _draw_configured_bar_label(draw, str(count), x=x, y=y, width=width, height=25, colour=colours[state], font=_font(16, True), position=label_position, horizontal=True, automatic=lambda: _draw_inside_bar_label(image, draw, str(count), x=x, y=y, width=width, height=25, fill="white", font=_font(16, True)))
+                draw.rectangle((x, y, x + width, y + 30), fill=colours[state])
+                _draw_configured_bar_label(image, draw, str(count), x=x, y=y, width=width, height=30, colour=colours[state], font=_font(20, True), position=label_position, horizontal=True, automatic=lambda: _draw_inside_bar_label(image, draw, str(count), x=x, y=y, width=width, height=30, fill="white", font=_font(20, True)))
             x += width
     _draw_chart_legend(draw, [(_legend_caption(legend_labels, index, state), colours[state], 2) for index, state in enumerate(("Failed", "Dropped"))], legend_position, font_size=13)
     draw.text((390, 820), "# of failed / dropped sessions", fill="#4E6271", font=_font(19, True))
@@ -4260,9 +4272,9 @@ def _render_failure_count_hierarchy(
             # Dense failure charts can contain dozens of city rows.  Reserve
             # enough height for a real count label rather than rendering a
             # clipped white glyph against the bar edge.
-            bar_height = max(12, min(22, row_height * 0.84))
+            bar_height = max(16, min(26, row_height * 0.84))
             y = row_top + (row_height - bar_height) / 2
-            count_font = _font(12, True)
+            count_font = _font(16, True)
             outside_counts: list[str] = []
             for state in ("Failed", "Dropped"):
                 count = state_counts[state]
@@ -4274,7 +4286,7 @@ def _render_failure_count_hierarchy(
                     def automatic_label() -> None:
                         if not _draw_inside_bar_label(image, draw, label, x=x, y=y, width=segment_width, height=bar_height, fill="white", font=count_font):
                             outside_counts.append(label)
-                    _draw_configured_bar_label(draw, label, x=x, y=y, width=segment_width, height=bar_height, colour=colours[state], font=count_font, position=label_position, horizontal=True, automatic=automatic_label)
+                    _draw_configured_bar_label(image, draw, label, x=x, y=y, width=segment_width, height=bar_height, colour=colours[state], font=count_font, position=label_position, horizontal=True, automatic=automatic_label)
                 x += segment_width
             if outside_counts:
                 # Keep labels visible even when an individual stacked segment
@@ -4384,7 +4396,7 @@ def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | N
     if not combinations or not buckets:
         return _empty_chart(title)
     image, draw = _canvas(title); left, top, width, height = 125, 260, 1260, 475
-    bar_width = max(20, min(70, width // max(len(combinations) * 2, 1)))
+    bar_width = max(20, min(96, width // max(len(combinations) * 2, 1)))
     bucket_colours = _distribution_bucket_colours(buckets, data)
     for index, key in enumerate(combinations):
         subset = data
@@ -4395,7 +4407,7 @@ def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | N
             value = len(subset[subset[stack] == bucket]) / total; segment = value * height; y = top + height - running - segment
             draw.rectangle((x, y, x + bar_width, y + segment), fill=bucket_colours.get((bucket,), _colour(bucket, bucket_index)))
             value_label = f"{value:.1%}"
-            label_font = _font(18, True)
+            label_font = _font(22, True)
             label_box = draw.textbbox((0, 0), value_label, font=label_font)
             label_height = label_box[3] - label_box[1]
             def automatic_label() -> None:
@@ -4406,7 +4418,7 @@ def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | N
                         fill="#FFFFFF", font=label_font,
                     )
             colour = bucket_colours.get((bucket,), _colour(bucket, bucket_index))
-            _draw_configured_bar_label(draw, value_label, x=x, y=y, width=bar_width, height=segment, colour=colour, font=label_font, position=label_position, horizontal=False, automatic=automatic_label)
+            _draw_configured_bar_label(image, draw, value_label, x=x, y=y, width=bar_width, height=segment, colour=colour, font=label_font, position=label_position, horizontal=False, automatic=automatic_label)
             running += segment
     _draw_top_column_group_separators(
         draw,
@@ -4878,13 +4890,13 @@ def _render_mean_column(
         colour = group_colours.get(keys[index], _colour(label, index))
         value_label = f"{float(value):.2f}"
         draw.rectangle((x, y, x + bar_width, baseline), fill=colour)
-        label_font = _font(20, True)
+        label_font = _font(24, True)
         def automatic_label() -> None:
-            if height >= 42 and _draw_inside_bar_label(image, draw, value_label, x=x, y=y, width=bar_width, height=height, fill="white", font=label_font):
+            if height >= 46 and _draw_inside_bar_label(image, draw, value_label, x=x, y=y, width=bar_width, height=height, fill="white", font=label_font):
                 return
             label_width = _text_width(draw, value_label, label_font)
-            draw.text((x + (bar_width - label_width) / 2, y - 25), value_label, fill=colour, font=label_font)
-        _draw_configured_bar_label(draw, value_label, x=x, y=y, width=bar_width, height=height, colour=colour, font=label_font, position=label_position, horizontal=False, automatic=automatic_label)
+            draw.text((x + (bar_width - label_width) / 2, y - 29), value_label, fill=colour, font=label_font)
+        _draw_configured_bar_label(image, draw, value_label, x=x, y=y, width=bar_width, height=height, colour=colour, font=label_font, position=label_position, horizontal=False, automatic=automatic_label)
     _draw_top_column_group_separators(
         draw,
         keys,

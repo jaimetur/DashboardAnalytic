@@ -19,6 +19,7 @@
   const finite = value => Number.isFinite(Number(value));
   const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
   const font = (context, size, bold = false) => { context.font = `${bold ? '700 ' : ''}${size}px ${FONT_FAMILY}`; };
+  const aggregationFont = (context, size) => { context.font = `800 ${size}px ${FONT_FAMILY}`; };
   const line = (context, x1, y1, x2, y2, colour = '#AEBBC4', width = 1, dash = []) => {
     context.save(); context.strokeStyle = colour; context.lineWidth = width;
     context.setLineDash(Array.isArray(dash) ? dash.map(Number).filter(value => value > 0) : []);
@@ -178,7 +179,7 @@
   function hierarchyRowLabelSize(context, rowKeys, availableWidth, preferredSize = 18, minimumSize = 9) {
     const levels = rowKeys[0]?.length || 0;
     for (let size = preferredSize; size >= minimumSize; size -= 1) {
-      font(context, size, true);
+      aggregationFont(context, size);
       const required = Array.from({length: levels}, (_value, level) => Math.max(
         ...rowKeys.map(key => textWidth(context, String(key[level] ?? ''))), 0,
       ) + 12).reduce((total, width) => total + width, 0);
@@ -189,7 +190,7 @@
 
   function drawFullHierarchyLabel(context, value, x, y, width, size, colour = '#405765') {
     const label = String(value ?? '');
-    context.fillStyle = colour; context.textAlign = 'left'; context.textBaseline = 'top'; font(context, size, true);
+    context.fillStyle = colour; context.textAlign = 'left'; context.textBaseline = 'top'; aggregationFont(context, size);
     const measured = textWidth(context, label);
     if (measured <= width) { context.fillText(label, x, y); return; }
     // Preserve the complete aggregation value in its own pane when even the
@@ -251,6 +252,15 @@
         const labelX = placement === 'up' ? x + width - 4 : (placement === 'down' ? x + 4 : x + width / 2);
         context.fillText(String(value), labelX, y + height / 2);
       } else {
+        const labelWidth = textWidth(context, value);
+        if (labelWidth + 8 > width && size + 8 <= width && labelWidth + 8 <= height) {
+          const centreY = placement === 'up'
+            ? y + labelWidth / 2 + 4
+            : (placement === 'down' ? y + height - labelWidth / 2 - 4 : y + height / 2);
+          verticalLabel(context, value, x + width / 2, centreY, '#FFFFFF', size);
+          context.restore();
+          return;
+        }
         context.textAlign = 'center';
         const labelY = placement === 'up' ? y + size / 2 + 4 : (placement === 'down' ? y + height - size / 2 - 4 : y + height / 2);
         context.fillText(String(value), x + width / 2, labelY);
@@ -314,14 +324,14 @@
         const centre = left + ((start + end) / 2) * itemWidth, value = rawValue.slice(0, 20), y = top - 30 * (levels - level), available = (end - start) * itemWidth;
         const angle = labelAngle(context, value, available, 22);
         if (angle) rotatedLabel(context, value, centre, y + 24, '#566A78', 22, true, angle);
-        else { context.fillStyle = '#566A78'; context.textAlign = 'center'; context.textBaseline = 'top'; font(context, 22, true); context.fillText(value, centre, y); }
+        else { context.fillStyle = '#566A78'; context.textAlign = 'center'; context.textBaseline = 'top'; aggregationFont(context, 22); context.fillText(value, centre, y); }
         line(context, left + start * itemWidth, y + 24, left + end * itemWidth, y + 24, '#CDD7DE', 1);
       }
     }
     keys.forEach((key, index) => {
       const value = String(key.at(-1) ?? '').slice(0, 18), centre = left + (index + .5) * itemWidth, angle = labelAngle(context, value, itemWidth, 22);
       if (angle) rotatedLabel(context, value, centre, angle === 45 ? bottom + 82 : bottom + 112, '#62727E', 22, true, angle);
-      else { context.fillStyle = '#62727E'; context.textAlign = 'center'; context.textBaseline = 'top'; font(context, 22, true); context.fillText(value, centre, bottom + 11); }
+      else { context.fillStyle = '#62727E'; context.textAlign = 'center'; context.textBaseline = 'top'; aggregationFont(context, 22); context.fillText(value, centre, bottom + 11); }
     });
   }
 
@@ -395,9 +405,9 @@
           const ratio = Number(ratios[seriesIndex] || 0), segmentHeight = ratio * height, y = top + height - running - segmentHeight;
           context.fillStyle = series.colour; context.fillRect(x, y, barWidth, segmentHeight);
           const label = percent(ratio);
-          drawConfiguredBarLabel(context, label, x, y, barWidth, segmentHeight, series.colour, 16, payload.label_position, 'vertical', () => {
-            if (ratio >= .08 && drawInsideBarLabel(context, label, x, y, barWidth, segmentHeight, '#FFFFFF', 16)) {}
-            else if (ratio >= .005) drawOutsideBarLabel(context, label, x + barWidth + 5, Math.max(top, y - 7), series.colour);
+          drawConfiguredBarLabel(context, label, x, y, barWidth, segmentHeight, series.colour, 20, payload.label_position, 'vertical', () => {
+            if (ratio >= .08 && drawInsideBarLabel(context, label, x, y, barWidth, segmentHeight, '#FFFFFF', 20)) {}
+            else if (ratio >= .005) drawOutsideBarLabel(context, label, x + barWidth + 5, Math.max(top, y - 7), series.colour, 16);
           });
           if (segmentHeight > 0) pushRectangleHit(state, transform, {x, y, width: barWidth, height: segmentHeight}, {label: category, series: series.name, value: tooltipPercent(ratio)});
           running += segmentHeight;
@@ -427,7 +437,7 @@
     const rowLabelTotal = Math.max(rowLabelWidths.reduce((sum, value) => sum + value, 0), 1);
     const rowLabelFactor = Math.min((chartLeft - rowOrigin - 68) / rowLabelTotal, 1);
     const nestedRowStart = level => rowOrigin + rowLabelWidths.slice(0, level).reduce((sum, value) => sum + value * rowLabelFactor, 0);
-    font(context, 15, true);
+    aggregationFont(context, 15);
     for (let level = 0; level < upperLevels; level += 1) {
       const bandTop = headerTop + level * headerBandHeight;
       hierarchySpans(columnKeys, level).forEach(([start, end, value]) => {
@@ -459,9 +469,9 @@
           const ratio = Number(ratios[seriesIndex] || 0), segmentHeight = ratio * rowHeight, y = paneBottom - running - segmentHeight;
           context.fillStyle = series.colour; context.fillRect(x, y, barWidth, segmentHeight);
           const label = percent(ratio);
-          drawConfiguredBarLabel(context, label, x, y, barWidth, segmentHeight, series.colour, 17, payload.label_position, 'vertical', () => {
-            if (ratio >= .08 && drawInsideBarLabel(context, label, x, y, barWidth, segmentHeight, '#FFFFFF', 17)) {}
-            else if (ratio >= .005) drawOutsideBarLabel(context, label, x + barWidth + 5, Math.max(paneTop, y - 7), series.colour);
+          drawConfiguredBarLabel(context, label, x, y, barWidth, segmentHeight, series.colour, 21, payload.label_position, 'vertical', () => {
+            if (ratio >= .08 && drawInsideBarLabel(context, label, x, y, barWidth, segmentHeight, '#FFFFFF', 21)) {}
+            else if (ratio >= .005) drawOutsideBarLabel(context, label, x + barWidth + 5, Math.max(paneTop, y - 7), series.colour, 16);
           });
           if (segmentHeight > 0) pushRectangleHit(state, transform, {x, y, width: barWidth, height: segmentHeight}, {label: displayKey([...rowKey, ...columnKey]), series: series.name, value: tooltipPercent(ratio)});
           running += segmentHeight;
@@ -479,7 +489,7 @@
       });
     }
     if (!payload.single_column) {
-      const captions = columnKeys.map(key => String(key.at(-1) ?? '')); font(context, 16, true);
+      const captions = columnKeys.map(key => String(key.at(-1) ?? '')); aggregationFont(context, 16);
       const rotate = captions.some(caption => textWidth(context, caption) + 8 > columnWidth);
       captions.forEach((caption, index) => {
         const centre = chartLeft + (index + .5) * columnWidth;
@@ -500,7 +510,7 @@
         context.fillStyle = '#263B4A'; context.textAlign = 'left'; font(context, 17, true); context.fillText(displayKey(row.key).slice(0, 42), rowOrigin, y + 4);
         states.forEach((series, seriesIndex) => {
           const value = Number(row.values?.[seriesIndex] || 0), width = maximumBarWidth * value / Math.max(payload.maximum, 1);
-          if (width) { context.fillStyle = series.colour; context.fillRect(x, y, width, 25); drawConfiguredBarLabel(context, String(value), x, y, width, 25, series.colour, 16, payload.label_position, 'horizontal', () => drawInsideBarLabel(context, String(value), x, y, width, 25, '#FFFFFF', 16)); pushRectangleHit(state, transform, {x, y, width, height: 25}, {label: displayKey(row.key), series: series.name, value: String(value)}); }
+          if (width) { context.fillStyle = series.colour; context.fillRect(x, y, width, 30); drawConfiguredBarLabel(context, String(value), x, y, width, 30, series.colour, 20, payload.label_position, 'horizontal', () => drawInsideBarLabel(context, String(value), x, y, width, 30, '#FFFFFF', 20)); pushRectangleHit(state, transform, {x, y, width, height: 30}, {label: displayKey(row.key), series: series.name, value: String(value)}); }
           x += width;
         });
       });
@@ -529,13 +539,13 @@
       const y = headerTop + level * headerBandHeight;
       hierarchySpans(columnKeys, level).forEach(([start, end, value]) => {
         const centre = chartLeft + (start + end) / 2 * columnWidth;
-        context.fillStyle = '#566A78'; context.textAlign = 'center'; font(context, 17, true); context.fillText(fittedText(context, value.slice(0, 20), (end - start) * columnWidth - 8), centre, y);
+        context.fillStyle = '#566A78'; context.textAlign = 'center'; aggregationFont(context, 17); context.fillText(fittedText(context, value.slice(0, 20), (end - start) * columnWidth - 8), centre, y);
         line(context, chartLeft + start * columnWidth, y + headerBandHeight - 4, chartLeft + end * columnWidth, y + headerBandHeight - 4, '#C8D2D9');
       });
     }
     columnKeys.forEach((key, index) => {
       const centre = chartLeft + (index + .5) * columnWidth, cellLeft = chartLeft + index * columnWidth;
-      context.fillStyle = '#4E6271'; context.textAlign = 'center'; font(context, 15, true); context.fillText(fittedText(context, String(key.at(-1) ?? ''), columnWidth - 8), centre, leafLabelY);
+      context.fillStyle = '#4E6271'; context.textAlign = 'center'; aggregationFont(context, 15); context.fillText(fittedText(context, String(key.at(-1) ?? ''), columnWidth - 8), centre, leafLabelY);
       if (index) { let changed = columnKeys[index - 1].findIndex((value, level) => value !== key[level]); if (changed < 0) changed = key.length - 1; const lineTop = changed === 0 ? headerTop : headerTop + Math.min(changed, upperLevels) * headerBandHeight; if (changed === 0) line(context, cellLeft, lineTop, cellLeft, chartTop + chartHeight + 25, '#AEBBC4', 2); else dashedVertical(context, cellLeft, lineTop, chartTop + chartHeight + 25); } else line(context, cellLeft, headerTop, cellLeft, chartTop + chartHeight + 25, '#AEBBC4', 2);
       context.fillStyle = '#566A78'; context.textAlign = 'left'; font(context, 13, true); context.fillText('0', cellLeft + 3, chartTop + chartHeight + 7); context.textAlign = 'right'; context.fillText(String(payload.maximum), cellLeft + columnWidth - 3, chartTop + chartHeight + 7);
     });
@@ -553,9 +563,9 @@
       if (next && changed > 0) dashedHorizontal(context, rowBottom, nestedRowStart(changed), chartLeft + chartWidth); else line(context, rowOrigin, rowBottom, chartLeft + chartWidth, rowBottom, '#AEBBC4', 2);
       columnKeys.forEach((columnKey, columnIndex) => {
         const values = payload.cells[rowIndex]?.[columnIndex] || [], cellLeft = chartLeft + columnIndex * columnWidth, available = Math.max(columnWidth - 10, 1); let x = cellLeft + 4;
-        const barHeight = Math.max(12, Math.min(22, rowHeight * .84)), y = rowTop + (rowHeight - barHeight) / 2, outside = [];
-        states.forEach((series, seriesIndex) => { const value = Number(values[seriesIndex] || 0), segmentWidth = available * value / Math.max(payload.maximum, 1); if (segmentWidth) { context.fillStyle = series.colour; context.fillRect(x, y, segmentWidth, barHeight); drawConfiguredBarLabel(context, String(value), x, y, segmentWidth, barHeight, series.colour, 12, payload.label_position, 'horizontal', () => { if (!drawInsideBarLabel(context, String(value), x, y, segmentWidth, barHeight, '#FFFFFF', 12)) outside.push(String(value)); }); pushRectangleHit(state, transform, {x, y, width: segmentWidth, height: barHeight}, {label: displayKey([...rowKey, ...columnKey]), series: series.name, value: String(value)}); } x += segmentWidth; });
-        if (outside.length) { context.fillStyle = '#34495A'; context.textAlign = 'left'; context.textBaseline = 'top'; font(context, 12, true); context.fillText(outside.join(' / '), x + 3, y + 1); }
+        const barHeight = Math.max(16, Math.min(26, rowHeight * .84)), y = rowTop + (rowHeight - barHeight) / 2, outside = [];
+        states.forEach((series, seriesIndex) => { const value = Number(values[seriesIndex] || 0), segmentWidth = available * value / Math.max(payload.maximum, 1); if (segmentWidth) { context.fillStyle = series.colour; context.fillRect(x, y, segmentWidth, barHeight); drawConfiguredBarLabel(context, String(value), x, y, segmentWidth, barHeight, series.colour, 16, payload.label_position, 'horizontal', () => { if (!drawInsideBarLabel(context, String(value), x, y, segmentWidth, barHeight, '#FFFFFF', 16)) outside.push(String(value)); }); pushRectangleHit(state, transform, {x, y, width: segmentWidth, height: barHeight}, {label: displayKey([...rowKey, ...columnKey]), series: series.name, value: String(value)}); } x += segmentWidth; });
+        if (outside.length) { context.fillStyle = '#34495A'; context.textAlign = 'left'; context.textBaseline = 'top'; font(context, 16, true); context.fillText(outside.join(' / '), x + 3, y + 1); }
       });
     });
     line(context, chartLeft + chartWidth, headerTop, chartLeft + chartWidth, chartTop + chartHeight + 25, '#AEBBC4', 2); drawLegend(context, payload.legend, {fontSize: 13, sideX: layout.position === 'right' ? chartLeft + chartWidth + 18 : undefined});
@@ -573,9 +583,9 @@
       buckets.forEach((bucket, bucketIndex) => {
         const ratio = Number(ratios[bucketIndex] || 0), segmentHeight = ratio * height, y = top + height - running - segmentHeight;
         context.fillStyle = bucket.colour; context.fillRect(x, y, barWidth, segmentHeight);
-        const label = percent(ratio); font(context, 18, true);
+        const label = percent(ratio); font(context, 22, true);
         const labelWidth = textWidth(context, label);
-        drawConfiguredBarLabel(context, label, x, y, barWidth, segmentHeight, bucket.colour, 18, payload.label_position, 'vertical', () => {
+        drawConfiguredBarLabel(context, label, x, y, barWidth, segmentHeight, bucket.colour, 22, payload.label_position, 'vertical', () => {
           if (labelWidth + 12 <= barWidth && segmentHeight >= 28) {
             context.fillStyle = '#FFFFFF'; context.textAlign = 'center'; context.textBaseline = 'middle';
             context.fillText(label, x + barWidth / 2, y + segmentHeight / 2); context.textBaseline = 'top';
@@ -650,7 +660,7 @@
       const rowHeight = chartHeight / Math.max(rowKeys.length, 1), columnWidth = chartWidth / Math.max(columnKeys.length, 1);
       for (let level = 0; level < upperLevels; level += 1) hierarchySpans(columnKeys, level).forEach(([start, end, value]) => {
         const left = chartLeft + start * columnWidth, right = chartLeft + end * columnWidth;
-        context.fillStyle = '#405765'; context.textAlign = 'center'; font(context, 22, true); context.fillText(fittedText(context, value, right - left - 8), (left + right) / 2, layout.top + level * 28);
+        context.fillStyle = '#405765'; context.textAlign = 'center'; aggregationFont(context, 22); context.fillText(fittedText(context, value, right - left - 8), (left + right) / 2, layout.top + level * 28);
         line(context, left, layout.top + (level + 1) * 28 - 3, right, layout.top + (level + 1) * 28 - 3, '#C8D2D9');
       });
       for (let columnIndex = 0; columnIndex < columnKeys.length; columnIndex += 1) {
@@ -670,16 +680,16 @@
         const top = chartTop + rowIndex * rowHeight, bottom = top + rowHeight, next = rowKeys[rowIndex + 1];
         const changed = next ? rowKey.findIndex((value, level) => value !== next[level]) : 0;
         if (next && changed > 0) dashedHorizontal(context, bottom, rowOrigin + changed * labelWidth, chartRight); else line(context, rowOrigin, bottom, chartRight, bottom, '#AEBBC4', 2);
-        rowKey.forEach((value, level) => { context.fillStyle = '#405765'; context.textAlign = 'left'; font(context, 15, true); context.fillText(fittedText(context, value, labelWidth - 8), rowOrigin + level * labelWidth + 4, top + rowHeight / 2 - 8); });
+        rowKey.forEach((value, level) => { context.fillStyle = '#405765'; context.textAlign = 'left'; aggregationFont(context, 15); context.fillText(fittedText(context, value, labelWidth - 8), rowOrigin + level * labelWidth + 4, top + rowHeight / 2 - 8); });
         columnKeys.forEach((columnKey, columnIndex) => {
           const value = Number(payload.cells?.[rowIndex]?.[columnIndex]); if (!Number.isFinite(value)) return;
           const cellLeft = chartLeft + columnIndex * columnWidth, height = Math.max(0, (rowHeight - 28) * value / Math.max(Number(payload.maximum), 1));
           const width = Math.max(14, Math.min(columnWidth * .68, 110)), x = cellLeft + (columnWidth - width) / 2, y = bottom - 10 - height;
           const colour = payload.cell_colours?.[rowIndex]?.[columnIndex] || '#4E79A7';
           context.fillStyle = colour; context.fillRect(x, y, width, height); const label = value.toFixed(2);
-          drawConfiguredBarLabel(context, label, x, y, width, height, colour, 15, payload.label_position, 'vertical', () => { if (!(height >= 32 && drawInsideBarLabel(context, label, x, y, width, height, '#FFFFFF', 15))) { context.fillStyle = colour; context.textAlign = 'center'; font(context, 14, true); context.fillText(label, x + width / 2, Math.max(top + 2, y - 18)); } });
+          drawConfiguredBarLabel(context, label, x, y, width, height, colour, 19, payload.label_position, 'vertical', () => { if (!(height >= 36 && drawInsideBarLabel(context, label, x, y, width, height, '#FFFFFF', 19))) { context.fillStyle = colour; context.textAlign = 'center'; font(context, 18, true); context.fillText(label, x + width / 2, Math.max(top + 2, y - 22)); } });
           pushRectangleHit(state, transform, {x, y, width, height}, {label: displayKey([...rowKey, ...columnKey]), series: payload.aggregation || 'mean', value: label});
-          if (rowIndex === rowKeys.length - 1) { context.fillStyle = '#4E6271'; context.textAlign = 'center'; font(context, 22, true); context.fillText(fittedText(context, String(columnKey.at(-1) || ''), columnWidth - 8), cellLeft + columnWidth / 2, bottom + 3); }
+          if (rowIndex === rowKeys.length - 1) { context.fillStyle = '#4E6271'; context.textAlign = 'center'; aggregationFont(context, 22); context.fillText(fittedText(context, String(columnKey.at(-1) || ''), columnWidth - 8), cellLeft + columnWidth / 2, bottom + 3); }
         });
       });
       drawLegend(context, payload.legend); return;
@@ -693,9 +703,9 @@
     bars.forEach((bar, index) => {
       const height = (baseline - top) * Number(bar.value) / Math.max(Number(payload.maximum), 1), x = left + (index + .5) * width / bars.length - barWidth / 2, y = baseline - height;
       context.fillStyle = bar.colour; context.fillRect(x, y, barWidth, height);
-      const label = Number(bar.value).toFixed(2); font(context, 20, true);
-      drawConfiguredBarLabel(context, label, x, y, barWidth, height, bar.colour, 20, payload.label_position, 'vertical', () => {
-        if (height >= 42 && drawInsideBarLabel(context, label, x, y, barWidth, height, '#FFFFFF', 20)) {} else {
+      const label = Number(bar.value).toFixed(2); font(context, 24, true);
+      drawConfiguredBarLabel(context, label, x, y, barWidth, height, bar.colour, 24, payload.label_position, 'vertical', () => {
+        if (height >= 46 && drawInsideBarLabel(context, label, x, y, barWidth, height, '#FFFFFF', 24)) {} else {
           context.fillStyle = bar.colour; context.textAlign = 'center'; context.fillText(label, x + barWidth / 2, y - 25);
         }
       });

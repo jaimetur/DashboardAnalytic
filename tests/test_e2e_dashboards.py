@@ -958,6 +958,10 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "function bottomAxisReserve(context, keys, width, size = 22)" in chart_script
     assert "function hierarchyRowLabelSize(context, rowKeys, availableWidth" in chart_script
     assert "function drawFullHierarchyLabel(context, value, x, y, width, size" in chart_script
+    assert "const aggregationFont = (context, size) => { context.font = `800 ${size}px ${FONT_FAMILY}`; };" in chart_script
+    assert "bar.colour, 24, payload.label_position" in chart_script
+    assert "series.colour, 21, payload.label_position" in chart_script
+    assert "bucket.colour, 22, payload.label_position" in chart_script
     assert "drawFullHierarchyLabel(context, value, x + 4" in chart_script
     assert "const rowLabelGap = rowLevels > 1 ? 20 : 0;" in chart_script
     assert "const rowLabelArea = rowLevels ? Math.min(440, Math.max(230" in chart_script
@@ -965,8 +969,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "const usableBottom = layout.position === 'bottom' ? layout.bottom : 884;" in chart_script
     assert 'Math.min(250, columnWidth * .72)' in chart_script
     assert "const colour = payload.cell_colours?.[rowIndex]?.[columnIndex] || '#4E79A7';" in chart_script
-    assert "context.textAlign = 'center'; font(context, 22, true); context.fillText(fittedText(context, value" in chart_script
-    assert "font(context, 22, true); context.fillText(fittedText(context, String(columnKey.at(-1)" in chart_script
+    assert "context.textAlign = 'center'; aggregationFont(context, 22); context.fillText(fittedText(context, value" in chart_script
+    assert "aggregationFont(context, 22); context.fillText(fittedText(context, String(columnKey.at(-1)" in chart_script
     assert "line(context, left, layout.top + (level + 1) * 28 - 3, right" in chart_script
     assert "const lineTop = layout.top + Math.min(changed, upperLevels) * 28;" in chart_script
     assert "else dashedVertical(context, cellLeft, lineTop, chartTop + chartHeight + 22);" in chart_script
@@ -974,6 +978,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "context.fillStyle = 'rgba(255, 255, 255, 0.94)'" in chart_script
     assert "context.fillText(`${(cumulative * 100).toFixed(0)}%`, plot.left - 14, y - 10)" in chart_script
     assert 'function drawConfiguredBarLabel(' in chart_script
+    assert 'labelWidth + 8 > width && size + 8 <= width && labelWidth + 8 <= height' in chart_script
+    assert "verticalLabel(context, value, x + width / 2, centreY, '#FFFFFF', size);" in chart_script
     assert 'Math.floor((layout.right - left) / Math.max(headers.length, 1))' in chart_script
     assert 'function selectionStartAllowed(canvas, event)' in chart_script
     assert 'return logicalY >= 90;' in chart_script

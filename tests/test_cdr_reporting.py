@@ -16,7 +16,7 @@ from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _cdf_visible_points, _draw_chart_legend, _draw_inside_bar_label, _draw_top_column_group_separators, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_caption_spans, _hierarchy_group_colours, _hierarchy_spans, _horizontal_legend_columns, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_map, _render_mean_column, _render_stacked_distribution, _render_status_100, _render_table, _resolved_legend_items, _series_colours, _series_line_dashes, _status_chart_categories, assign_cdr_vendors, catalog_chart_hover_targets, catalog_chart_payload, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, load_catalog_csv, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_kpi_expression, parse_label_position, parse_legend_position, parse_template_boolean, prepare_catalog_chart_preview_frame, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _cdf_visible_points, _draw_chart_legend, _draw_configured_bar_label, _draw_inside_bar_label, _draw_top_column_group_separators, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_caption_spans, _hierarchy_group_colours, _hierarchy_spans, _horizontal_legend_columns, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_map, _render_mean_column, _render_stacked_distribution, _render_status_100, _render_table, _resolved_legend_items, _series_colours, _series_line_dashes, _status_chart_categories, assign_cdr_vendors, catalog_chart_hover_targets, catalog_chart_payload, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, load_catalog_csv, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_kpi_expression, parse_label_position, parse_legend_position, parse_template_boolean, prepare_catalog_chart_preview_frame, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
 
 
 CHART_MAPPING_ATTRS = {
@@ -1204,6 +1204,7 @@ def test_static_distribution_draws_horizontal_white_percentage_labels_inside_seg
 
     assert [item.args[2] for item in draw_label.call_args_list] == ['80.0%', '20.0%']
     assert {item.kwargs['fill'] for item in draw_label.call_args_list} == {'#FFFFFF'}
+    assert {item.kwargs['font'].size for item in draw_label.call_args_list} == {22}
 
 
 def test_interactive_mean_model_uses_reporting_aggregation_and_vendor_palette() -> None:
@@ -1275,6 +1276,20 @@ def test_bar_value_label_rotates_when_it_only_fits_vertically() -> None:
         )
 
     assert drawn is True
+    draw_vertical.assert_called_once()
+
+
+def test_configured_vertical_bar_label_rotates_when_many_bars_make_it_too_wide() -> None:
+    image = Image.new('RGB', (200, 200), 'white')
+    draw = ImageDraw.Draw(image)
+
+    with patch('src.modules.cdr_reporting._draw_vertical_label') as draw_vertical:
+        _draw_configured_bar_label(
+            image, draw, '104.62', x=20, y=20, width=30, height=150,
+            colour='#4E79A7', font=ImageFont.load_default(), position='middle',
+            horizontal=False, automatic=lambda: None,
+        )
+
     draw_vertical.assert_called_once()
 
 
