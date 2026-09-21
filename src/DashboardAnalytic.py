@@ -15,6 +15,7 @@ except ImportError:  # pragma: no cover - Windows does not expose resource.
 import re
 import secrets
 import hashlib
+import ipaddress
 import shutil
 import sqlite3
 import warnings
@@ -6500,6 +6501,42 @@ def _transfer_api_url(base_url: str, path: str) -> str:
     return f'{base_url.rstrip("/")}/{path.lstrip("/")}'
 
 
+def transfer_uses_environment_proxy(destination: str) -> bool:
+    """Keep public transfers proxy-aware while routing literal LAN IPs directly."""
+    hostname = urlsplit(destination).hostname
+    if not hostname:
+        return True
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        return True
+    return not (address.is_private or address.is_loopback or address.is_link_local)
+
+
+def transfer_connection_error(destination: str) -> str:
+    hostname = urlsplit(destination).hostname or destination
+    direct_note = ''
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        address = None
+    if address and (address.is_private or address.is_loopback or address.is_link_local):
+        direct_note = ' The private address was contacted directly without using Docker or system proxy settings.'
+    return (
+        f'Could not connect to {destination}. No server accepted the TCP connection at that address and port.'
+        f'{direct_note} Verify that the destination application is running and listening on 0.0.0.0, and that its host firewall allows inbound TCP traffic on the selected port.'
+        ' If the destination runs on the same Docker host, use host.docker.internal instead of the host LAN address.'
+    )
+
+
+def _cancel_remote_transfer_offer(destination: str, offer_id: str, headers: dict[str, str]) -> None:
+    with httpx.Client(timeout=5.0, trust_env=transfer_uses_environment_proxy(destination)) as client:
+        client.delete(
+            _transfer_api_url(destination, f'/api/import-export/transfers/offers/{offer_id}'),
+            headers=headers,
+        )
+
+
 def _transfer_workspace_names(workspace_ids: list[str] | None) -> list[str]:
     if workspace_ids is None:
         return []
@@ -6643,7 +6680,11 @@ def _run_transfer_job(job_id: str) -> None:
             raise InterruptedError('The server transfer was cancelled.')
 
     try:
-        with httpx.Client(timeout=httpx.Timeout(65.0, connect=5.0), follow_redirects=False) as client:
+        with httpx.Client(
+            timeout=httpx.Timeout(65.0, connect=5.0),
+            follow_redirects=False,
+            trust_env=transfer_uses_environment_proxy(destination),
+        ) as client:
             target = targets[0]
             archive_kind = 'bundle' if len(targets) > 1 else 'full-environment' if target == 'full-environment' else 'workspace' if target.startswith('workspace:') else 'config' if target in {'config', 'config-with-templates'} else target
             offered_components: list[str] = []
@@ -6809,11 +6850,7 @@ def _run_transfer_job(job_id: str) -> None:
     except InterruptedError as exc:
         if offer_id:
             try:
-                httpx.delete(
-                    _transfer_api_url(destination, f'/api/import-export/transfers/offers/{offer_id}'),
-                    headers=headers,
-                    timeout=5.0,
-                )
+                _cancel_remote_transfer_offer(destination, offer_id, headers)
             except (httpx.HTTPError, OSError):
                 pass
         with TRANSFER_LOCK:
@@ -6824,15 +6861,11 @@ def _run_transfer_job(job_id: str) -> None:
         # idempotent and deliberately leaves an already completed offer alone.
         if offer_id:
             try:
-                httpx.delete(
-                    _transfer_api_url(destination, f'/api/import-export/transfers/offers/{offer_id}'),
-                    headers=headers,
-                    timeout=5.0,
-                )
+                _cancel_remote_transfer_offer(destination, offer_id, headers)
             except (httpx.HTTPError, OSError):
                 pass
         if isinstance(exc, httpx.ConnectError):
-            error = f'Could not connect to {destination}. The host was resolved, but no server accepted the connection at that address and port.'
+            error = transfer_connection_error(destination)
         else:
             error = str(exc)
         with TRANSFER_LOCK:

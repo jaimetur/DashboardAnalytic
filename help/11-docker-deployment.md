@@ -126,6 +126,9 @@ For direct transfers:
 - the source server must reach the destination URL and port;
 - the destination must expose the transfer API through its proxy/firewall;
 - URL hostnames must resolve inside the source container/network;
+- literal private IP destinations bypass inherited Docker/system HTTP proxies and connect directly;
+- the destination service must bind to `0.0.0.0` and its host firewall must admit the published TCP port;
+- use `host.docker.internal` when the destination is the Docker host itself, and use the destination computer's LAN IP when it is another device;
 - use HTTPS unless operating on a trusted private network;
 - a destination super-admin must be logged in to approve the offer.
 

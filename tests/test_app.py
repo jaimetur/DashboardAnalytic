@@ -1851,7 +1851,7 @@ def test_persisted_pending_transfer_offer_expires_after_approval_window(client, 
 def test_outgoing_server_transfer_waits_for_acceptance_and_streams_package(client, monkeypatch) -> None:
     import src.DashboardAnalytic as app_module
 
-    state = {'uploaded': False, 'bytes': 0, 'post_attempts': 0}
+    state = {'uploaded': False, 'bytes': 0, 'post_attempts': 0, 'client_kwargs': {}}
 
     class FakeResponse:
         def __init__(self, payload):
@@ -1865,7 +1865,7 @@ def test_outgoing_server_transfer_waits_for_acceptance_and_streams_package(clien
 
     class FakeClient:
         def __init__(self, *args, **kwargs):
-            pass
+            state['client_kwargs'] = kwargs
 
         def __enter__(self):
             return self
@@ -1910,6 +1910,7 @@ def test_outgoing_server_transfer_waits_for_acceptance_and_streams_package(clien
     assert payload['progress'] == 100.0
     assert state['post_attempts'] == 2
     assert state['bytes'] == len(b'streamed-transfer-package')
+    assert state['client_kwargs']['trust_env'] is True
 
 
 def test_transfer_owner_can_request_job_cancellation(client) -> None:
@@ -1935,6 +1936,25 @@ def test_transfer_url_explicit_port_overrides_prefilled_default_port() -> None:
     assert app_module.normalize_transfer_destination('https://destination.example', 7278) == 'https://destination.example'
     assert app_module.normalize_transfer_destination('http://destination.example', 7278) == 'http://destination.example'
     assert app_module.normalize_transfer_destination('https://destination.example', 8443) == 'https://destination.example:8443'
+
+
+def test_private_transfer_addresses_bypass_environment_proxies() -> None:
+    import src.DashboardAnalytic as app_module
+
+    assert app_module.transfer_uses_environment_proxy('http://192.168.1.17:7278') is False
+    assert app_module.transfer_uses_environment_proxy('http://127.0.0.1:7278') is False
+    assert app_module.transfer_uses_environment_proxy('http://169.254.10.20:7278') is False
+    assert app_module.transfer_uses_environment_proxy('https://destination.example') is True
+    assert app_module.transfer_uses_environment_proxy('https://8.8.8.8') is True
+
+
+def test_private_transfer_connection_error_has_docker_lan_diagnostics() -> None:
+    import src.DashboardAnalytic as app_module
+
+    message = app_module.transfer_connection_error('http://192.168.1.17:7278')
+    assert 'contacted directly without using Docker or system proxy settings' in message
+    assert 'listening on 0.0.0.0' in message
+    assert 'host.docker.internal' in message
 
 
 def test_admin_export_and_transfer_are_limited_to_templates_and_accessible_workspaces(client, monkeypatch) -> None:

@@ -351,10 +351,6 @@
   const safe = fn => async (...args) => { try { await fn(...args); } catch (error) { if (error.name !== 'AbortError') { status(error.message); if (window.showInfoDialog) window.showInfoDialog(error.message, {title:'E2E Dashboards',tone:'error'}); } } };
   const bind = (id, fn) => $(id).addEventListener('click', safe(fn));
   const dashboardIsReady = id => Boolean(id && !dashboardPreparationTokens.has(id) && dashboardStatuses.get(id)?.state === 'ready');
-  const dashboardIsPreparing = id => Boolean(id && (
-    dashboardPreparationTokens.has(id)
-    || ['loading-data', 'rendering', 'data-queued', 'charts-queued'].includes(dashboardStatuses.get(id)?.state)
-  ));
   const setActiveDashboardHeading = name => {
     const heading = $('ds-active-dashboard-heading');
     heading.replaceChildren(document.createTextNode(name ? 'Dashboard Filters: ' : 'Dashboard Filters'));
@@ -378,11 +374,10 @@
   };
   const syncDashboardViewActions = () => {
     document.querySelectorAll('[data-dashboard-view-id]').forEach(button => {
-      const id = button.dataset.dashboardViewId;
-      button.disabled = dashboardIsPreparing(id) || (id === activeId && $('ds-view').disabled);
+      button.disabled = false;
     });
   };
-  const setViewEnabled = enabled => { $('ds-view').disabled = !enabled; syncDashboardViewActions(); syncDashboardPptActions(); };
+  const setViewEnabled = enabled => { $('ds-view').disabled = !definition; syncDashboardViewActions(); syncDashboardPptActions(); };
   const updateUnsavedFiltersBadge = () => {
     $('ds-unapplied-universe-badge').hidden = !hasUnappliedUniverseChanges();
     $('ds-unsaved-universe-badge').hidden = !hasUnsavedUniverseChanges();
@@ -660,6 +655,38 @@
     await refreshDashboardPptJobs();
     window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));
   }
+  const updateDashboardTemplate = async (id, item, technology, templateName) => {
+    const normalizedTechnology = config.templates[technology] ? technology : 'nsa';
+    const selectedTemplate = (config.templates[normalizedTechnology] || []).find(row => row.name === templateName);
+    const currentTechnology = item.technology || item.template_technology || 'nsa';
+    if (!selectedTemplate || (currentTechnology === normalizedTechnology && item.template === selectedTemplate.name)) {
+      library();
+      return;
+    }
+    if (id === activeId && !await confirmDiscard(['template', 'template_technology', 'technology'])) {
+      library();
+      return;
+    }
+    const accepted = await window.showConfirmDialog(
+      `Changing the NR Mode or Template for “${item.name}” will invalidate every report and chart created inside this Dashboard. Its saved Dataset Universe and filters will be preserved. Continue?`,
+      {title: 'Update Dashboard definition?', confirmLabel: 'Update Dashboard', cancelLabel: 'Cancel', tone: 'warning'},
+    );
+    if (!accepted) {
+      library();
+      return;
+    }
+    status(`Updating NR Mode and Template for “${item.name}”…`);
+    const result = await api(`/${encodeURIComponent(id)}/template`, 'PATCH', {
+      technology: normalizedTechnology,
+      template: selectedTemplate.name,
+    });
+    dashboards[id] = structuredClone(result.definition);
+    dashboardStatuses.delete(id);
+    if (id === activeId) await openDashboard(id, {showFilters: dashboardFiltersOpen});
+    else library();
+    status(`Updated NR Mode and Template for “${item.name}”. Dataset Universe and filters were preserved.`);
+    void refreshDashboardStatuses();
+  };
   function library() {
     rememberLibrary();
     $('ds-create').disabled = !$('ds-template').options.length;
@@ -690,8 +717,37 @@
         library(); status(`Renamed Dashboard to “${result.name}”.`);
       });
       nameEditor.append(nameInput, nameSave); nameCell.append(nameEditor);
-      const technologyCell = node('td', (item.technology || item.template_technology || 'nsa').toUpperCase()); technologyCell.dataset.label = 'NR Mode';
-      const templateCell = node('td', item.template); templateCell.dataset.label = 'Template';
+      const currentTechnology = item.technology || item.template_technology || 'nsa';
+      const technologyCell = node('td'); technologyCell.dataset.label = 'NR Mode';
+      const technologySelect = document.createElement('select'); technologySelect.className = 'ds-dashboard-definition-select ds-dashboard-nr-mode-select';
+      technologySelect.setAttribute('aria-label', `NR Mode for ${item.name}`);
+      for (const technology of ['nsa', 'sa']) {
+        const choice = option(technology, technology.toUpperCase());
+        choice.disabled = !(config.templates[technology] || []).length;
+        technologySelect.append(choice);
+      }
+      technologySelect.value = currentTechnology;
+      const templateCell = node('td'); templateCell.dataset.label = 'Template';
+      const templateSelect = document.createElement('select'); templateSelect.className = 'ds-dashboard-definition-select ds-dashboard-template-select';
+      templateSelect.setAttribute('aria-label', `Template for ${item.name}`);
+      const setRowTemplateOptions = (technology, selectedName = '') => {
+        const choices = config.templates[technology] || [];
+        templateSelect.replaceChildren(...choices.map(row => option(row.name, row.name)));
+        const selected = choices.find(row => row.name === selectedName) || choices[0];
+        templateSelect.value = selected?.name || '';
+        templateSelect.disabled = !selected;
+        return selected;
+      };
+      setRowTemplateOptions(currentTechnology, item.template);
+      technologySelect.addEventListener('change', () => {
+        const selected = setRowTemplateOptions(technologySelect.value, item.template);
+        if (selected) void safe(() => updateDashboardTemplate(id, item, technologySelect.value, selected.name))();
+        else library();
+      });
+      templateSelect.addEventListener('change', () => {
+        void safe(() => updateDashboardTemplate(id, item, technologySelect.value, templateSelect.value))();
+      });
+      technologyCell.append(technologySelect); templateCell.append(templateSelect);
       row.append(nameCell, technologyCell, templateCell);
       const statusCell = node('td'); statusCell.dataset.label = 'Status';
       const dashboardStatus = dashboardStatuses.get(id) || {state: 'checking', label: 'Checking'};
@@ -725,7 +781,7 @@
       view.classList.remove('icon-action');
       primaryActionLabel(view, 'View', 'Dashboard');
       view.dataset.dashboardViewId = id;
-      view.disabled = dashboardIsPreparing(id) || (id === activeId && $('ds-view').disabled);
+      view.disabled = false;
       const filtersAreOpen = id === activeId && dashboardFiltersOpen;
       const open = action(filtersAreOpen ? 'Close Filters' : 'Open Filters', filtersAreOpen ? 'Close Filters' : 'Open Filters', async () => {
         if (filtersAreOpen) { if (await confirmDiscard()) closeDashboard(); }

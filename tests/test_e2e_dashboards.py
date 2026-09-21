@@ -34,6 +34,18 @@ def test_dashboard_filter_panel_state_is_scoped_to_the_authenticated_session():
     assert first_user.session_marker
     assert first_user.session_marker != second_user.session_marker
 
+
+def test_dashboard_library_can_change_nr_mode_and_template_with_confirmation_controls():
+    script = (Path(__file__).parents[1] / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
+    stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
+
+    assert "technologySelect.className = 'ds-dashboard-definition-select ds-dashboard-nr-mode-select'" in script
+    assert "templateSelect.className = 'ds-dashboard-definition-select ds-dashboard-template-select'" in script
+    assert 'will invalidate every report and chart created inside this Dashboard' in script
+    assert 'Its saved Dataset Universe and filters will be preserved.' in script
+    assert "api(`/${encodeURIComponent(id)}/template`, 'PATCH'" in script
+    assert '.ds-dashboard-definition-select{' in stylesheet
+
     app_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
     assert "activeCell.textContent = operation ? `${operation}(${selected[0]})` : selected[0];" in app_script
     assert "if (editedCell?.dataset.catalogueField === 'CDR source' && !assistanceFocused) normaliseCatalogueRows();" in app_script
@@ -329,6 +341,81 @@ def test_dashboard_persists_dataset_universe_separately_from_filters(client):
     assert prepared.status_code == 200, prepared.text
     assert prepared.json()['date_bounds'] == {'min': '2026-09-01', 'max': '2026-09-03'}
     assert prepared.json()['rows']['data'] == 3
+
+
+def test_dashboard_background_warmup_prepares_the_four_automatic_date_universes(client):
+    payload = setup_dashboard(client)
+    for index in (2, 3):
+        response = client.post('/datasets-analysis/upload', data={'dataset_kinds': 'data'}, files={
+            'dataset_files': (
+                f'sample-{index}.csv',
+                BytesIO(f'Operator,City,Mean_Data_Rate,Test_Name,Test_Start_Time\nA,London,{index},HTTP DL,2026-09-0{index}\n'.encode()),
+                'text/csv',
+            ),
+        })
+        assert response.status_code == 200
+    dashboard_id = 'four-universes'
+    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+
+    deadline = time.monotonic() + 15
+    dashboard_status = {}
+    while time.monotonic() < deadline:
+        dashboard_status = client.get('/api/e2e-dashboards/statuses').json()[dashboard_id]
+        if dashboard_status['state'] == 'ready':
+            break
+        assert dashboard_status['state'] == 'loading-data'
+        assert dashboard_status['label'].startswith('Preparing ')
+        time.sleep(0.05)
+
+    assert dashboard_status == {'state': 'ready', 'label': 'Ready'}
+    manifests = [
+        json.loads(path.read_text(encoding='utf-8'))
+        for path in (Path(core.repository.db_path).parent / '.dashboard-data-cache' / 'dashboard-previews').glob('*.json')
+    ]
+    definitions = [manifest['definition'] for manifest in manifests if manifest.get('dashboard_id') == dashboard_id]
+    assert {tuple(definition['datasets']['data']) for definition in definitions} == {
+        (3, 2, 1), (3,), (3, 2), (3, 1),
+    }
+    assert {
+        tuple(definition['datasets']['data']): (definition['date_from'], definition['date_to'])
+        for definition in definitions
+    } == {
+        (3, 2, 1): ('2026-09-01', '2026-09-03'),
+        (3,): ('2026-09-03', '2026-09-03'),
+        (3, 2): ('2026-09-02', '2026-09-03'),
+        (3, 1): ('2026-09-01', '2026-09-03'),
+    }
+
+
+def test_dashboard_template_change_preserves_saved_universe_and_filters(client):
+    payload = setup_dashboard(client)
+    core.repository.add_report_template('sa', 'Dashboard SA test', core.repository.report_template_content(
+        'nsa', 'Dashboard test',
+    ), is_default=False)
+    payload.update({
+        'scope': 'multivendor',
+        'datasets': {'data': [1], 'voice': [], 'speech': []},
+        'filters': {'City': ['London']},
+        'custom_fields': ['Mean_Data_Rate'],
+        'hidden_filters': ['Vendor'],
+        'date_from': '2026-09-01',
+        'date_to': '2026-09-03',
+        'slide_comments': {'1': ['Keep this note']},
+    })
+    assert client.put('/api/e2e-dashboards/change-template', json=payload).status_code == 200
+    saved_before_change = client.get('/api/e2e-dashboards').json()['change-template']
+
+    changed = client.patch('/api/e2e-dashboards/change-template/template', json={
+        'technology': 'sa', 'template': 'Dashboard SA test',
+    })
+
+    assert changed.status_code == 200, changed.text
+    definition_payload = changed.json()['definition']
+    assert changed.json()['invalidated'] is True
+    assert definition_payload['technology'] == definition_payload['template_technology'] == 'sa'
+    assert definition_payload['template'] == 'Dashboard SA test'
+    for field in ('scope', 'datasets', 'filters', 'custom_fields', 'hidden_filters', 'date_from', 'date_to', 'slide_comments'):
+        assert definition_payload[field] == saved_before_change[field]
 
 
 def test_dashboard_library_ppt_scope_builds_its_automatic_dataset_universe(client):
@@ -1023,8 +1110,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "if (activePrepared) dashboardStatuses.set(id, {state: 'ready', label: 'Ready'});" in dashboard_script
     assert "setDashboardStatus(activeId, 'ready', 'Ready');" in dashboard_script
     assert "view.dataset.dashboardViewId = id;" in dashboard_script
-    assert "button.disabled = dashboardIsPreparing(id) || (id === activeId && $('ds-view').disabled);" in dashboard_script
-    assert "const setViewEnabled = enabled => { $('ds-view').disabled = !enabled; syncDashboardViewActions(); syncDashboardPptActions(); };" in dashboard_script
+    assert 'button.disabled = false;' in dashboard_script
+    assert "const setViewEnabled = enabled => { $('ds-view').disabled = !definition; syncDashboardViewActions(); syncDashboardPptActions(); };" in dashboard_script
     assert "const payload = await api('/statuses', 'POST', statusDefinitions);" in dashboard_script
     assert "window.setInterval(refreshDashboardStatuses, 2000);" in dashboard_script
     assert "const dashboardName = String(task.dashboard_name || '');" in app_script
@@ -1307,9 +1394,9 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypa
     assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
 
     deadline = time.monotonic() + 15
-    assert client.get('/api/e2e-dashboards/statuses').json()[dashboard_id] == {
-        'state': 'not-cached', 'label': 'Open to prepare',
-    }
+    initial_status = client.get('/api/e2e-dashboards/statuses').json()[dashboard_id]
+    assert initial_status['state'] in {'loading-data', 'ready'}
+    assert initial_status['label'] == 'Ready' or initial_status['label'].startswith('Preparing ')
 
     with core.repository.connection() as connection:
         connection.execute('UPDATE dataset_profiles SET vendor_mapping_applied = 1')
@@ -1568,15 +1655,15 @@ def test_closed_dashboard_status_uses_its_remembered_session_universe(client):
     )
     assert prepared.status_code == 200, prepared.text
 
-    assert client.get('/api/e2e-dashboards/statuses').json()[dashboard_id] == {
-        'state': 'not-cached', 'label': 'Open to prepare',
-    }
-    assert client.post('/api/e2e-dashboards/statuses', json={
+    background_status = client.get('/api/e2e-dashboards/statuses').json()[dashboard_id]
+    assert background_status['state'] in {'loading-data', 'ready'}
+    session_status = client.post('/api/e2e-dashboards/statuses', json={
         dashboard_id: session_definition,
-    }).json()[dashboard_id] == {'state': 'ready', 'label': 'Ready'}
+    }).json()[dashboard_id]
+    assert session_status['state'] in {'loading-data', 'ready'}
 
 
-def test_saving_dashboard_does_not_prepare_data_or_render_charts(client, monkeypatch):
+def test_saving_dashboard_prepares_data_in_background_without_rendering_charts(client, monkeypatch):
     payload = setup_dashboard(client)
     import src.modules.e2e_dashboards as dashboards_module
     monkeypatch.setattr(
@@ -1587,9 +1674,9 @@ def test_saving_dashboard_does_not_prepare_data_or_render_charts(client, monkeyp
     dashboard_id = 'saved-dashboard'
     assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
     assert client.get(f'/api/e2e-dashboards/prefetched/{dashboard_id}').status_code == 409
-    assert client.get('/api/e2e-dashboards/statuses').json()[dashboard_id] == {
-        'state': 'not-cached', 'label': 'Open to prepare',
-    }
+    saved_status = client.get('/api/e2e-dashboards/statuses').json()[dashboard_id]
+    assert saved_status['state'] in {'loading-data', 'ready'}
+    assert saved_status['label'] == 'Ready' or saved_status['label'].startswith('Preparing ')
 
 
 def test_direct_dashboard_preparation_separates_queue_and_execution_timestamps(client, monkeypatch):
@@ -1657,7 +1744,7 @@ def test_applying_filters_prepares_only_data_and_renders_charts_on_demand(client
     core.repository.set_workspace_state('e2e_dashboards_v2', json.dumps({'filtered-dashboard': payload}))
     uncached = client.get('/api/e2e-dashboards/statuses')
     assert uncached.status_code == 200
-    assert uncached.json()['filtered-dashboard'] == {'state': 'not-cached', 'label': 'Open to prepare'}
+    assert uncached.json()['filtered-dashboard']['state'] in {'loading-data', 'ready'}
 
     calls = []
     original = dashboards_module.catalog_chart_payload
@@ -1699,9 +1786,8 @@ def test_applying_filters_prepares_only_data_and_renders_charts_on_demand(client
     assert {path.name for path in cache_dir.glob('*.json')} == first_models
 
     core.repository.update_dataset_profile(1, progress=100)
-    assert client.get('/api/e2e-dashboards/statuses').json()['filtered-dashboard'] == {
-        'state': 'not-cached', 'label': 'Open to prepare',
-    }
+    refreshed_status = client.get('/api/e2e-dashboards/statuses').json()['filtered-dashboard']
+    assert refreshed_status['state'] in {'loading-data', 'ready'}
 
 
 def test_adding_a_dataset_builds_a_new_chart_model_with_every_campaign(client):

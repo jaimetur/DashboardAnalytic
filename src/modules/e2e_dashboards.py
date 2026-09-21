@@ -102,6 +102,11 @@ class DashboardName(BaseModel):
     name: str = Field(min_length=1, max_length=120)
 
 
+class DashboardTemplateSelection(BaseModel):
+    technology: Literal['nsa', 'sa']
+    template: str = Field(min_length=1)
+
+
 def identity(value):
     return column_identity(value)
 
@@ -234,7 +239,7 @@ def install_dashboard_routes(core):
     dashboard_ppt_data_tokens: dict[tuple[str, int, str], str] = {}
     dashboard_warmup_runs: set[tuple[str, str]] = set()
     dashboard_warmup_checked: set[tuple[str, str]] = set()
-    dashboard_warmup_cancellations: dict[tuple[str, str], dict[str, bool]] = {}
+    dashboard_warmup_cancellations: dict[tuple[str, str], dict[str, object]] = {}
     dashboard_warmup_pending: dict[tuple[str, str], tuple[dict, str]] = {}
     dashboard_warmup_retries: set[tuple[str, str]] = set()
     interactive_chart_preview_jobs: OrderedDict[str, dict] = OrderedDict()
@@ -1439,6 +1444,36 @@ def install_dashboard_routes(core):
             task_repository.add_log(user.username, 'rename_dashboard', json.dumps({'id': dashboard_id, 'name': name}))
         return {'id': dashboard_id, 'name': name}
 
+    @app.patch('/api/e2e-dashboards/{dashboard_id}/template')
+    def change_dashboard_template(
+        dashboard_id: str, payload: DashboardTemplateSelection, user=Depends(dashboard_user),
+    ):
+        """Change only NR Mode and template while retaining the saved universe and filters."""
+        workspace = workspace_key()
+        with lock:
+            task_repository = bound_repository()
+            dashboards = read_dashboards(task_repository)
+            current = dashboards.get(dashboard_id)
+            if current is None:
+                raise HTTPException(404, 'Dashboard not found.')
+            updated = dict(current)
+            updated['technology'] = payload.technology
+            updated['template_technology'] = payload.technology
+            updated['template'] = payload.template
+            definition = DashboardDefinition.model_validate(updated)
+            validate(definition, task_repository)
+            saved_definition = normalize_dashboard_filters(definition.model_dump(mode='json'))
+            dashboards[dashboard_id] = saved_definition
+            task_repository.set_workspace_state(STATE_KEY, json.dumps(dashboards))
+            task_repository.add_log(user.username, 'change_dashboard_template', json.dumps({
+                'id': dashboard_id, 'name': definition.name,
+                'technology': payload.technology, 'template': payload.template,
+            }))
+        # Template and NR Mode belong to the preview fingerprint, so every old
+        # report/chart snapshot becomes ineligible and a fresh warm-up is queued.
+        schedule_dashboard_warmup(workspace, dashboard_id, saved_definition, user.username, force=True)
+        return {'id': dashboard_id, 'definition': saved_definition, 'invalidated': True}
+
     @app.delete('/api/e2e-dashboards/{dashboard_id}')
     def delete_dashboard(dashboard_id: str, user=Depends(dashboard_user)):
         with lock:
@@ -2266,7 +2301,7 @@ def install_dashboard_routes(core):
         return None
 
     def dashboard_warmup_definitions(raw_definition: dict, task_repository: Repository) -> list[DashboardDefinition]:
-        """Return the three automatic, date-unrestricted Dashboard universes."""
+        """Return the four automatic, date-unrestricted Dashboard universes."""
         base = DashboardDefinition.model_validate(
             runtime_dashboard_definition(raw_definition, task_repository),
         )
@@ -2292,14 +2327,17 @@ def install_dashboard_routes(core):
             ) for kind in KINDS
         }
         universes = (
-            ('operator', 'single', {kind: [int(row['id']) for row in rows[:2]] for kind, rows in ordered.items()}),
-            ('multivendor', 'multivendor', {kind: [int(row['id']) for row in rows[:1]] for kind, rows in ordered.items()}),
-            ('all-cdrs', 'single', {kind: [int(row['id']) for row in rows] for kind, rows in ordered.items()}),
+            ('all-cdrs', {kind: [int(row['id']) for row in rows] for kind, rows in ordered.items()}),
+            ('latest', {kind: [int(row['id']) for row in rows[:1]] for kind, rows in ordered.items()}),
+            ('latest-two', {kind: [int(row['id']) for row in rows[:2]] for kind, rows in ordered.items()}),
+            ('latest-and-third-latest', {
+                kind: [int(rows[index]['id']) for index in (0, 2) if index < len(rows)]
+                for kind, rows in ordered.items()
+            }),
         )
         definitions = []
-        for _name, scope, datasets in universes:
+        for _name, datasets in universes:
             definition = base.model_copy(deep=True)
-            definition.scope = scope
             definition.datasets = datasets
             # Oldest/Newest deliberately keeps this cache valid for the full
             # automatic date range instead of pinning it to today's bounds.
@@ -2324,7 +2362,9 @@ def install_dashboard_routes(core):
                     dashboard_warmup_cancellations.get(key, {})['requested'] = True
                 return
             dashboard_warmup_runs.add(key)
-            cancellation = dashboard_warmup_cancellations[key] = {'requested': False}
+            cancellation = dashboard_warmup_cancellations[key] = {
+                'requested': False, 'completed': 0, 'total': 4,
+            }
             scheduled_definition = dict(raw_definition)
 
         def retry_later() -> None:
@@ -2380,10 +2420,13 @@ def install_dashboard_routes(core):
                 try:
                     task_repository = Repository(Path(workspace), core.repository.global_db_path)
                     owner = SimpleNamespace(username=username)
-                    for definition in dashboard_warmup_definitions(raw_definition, task_repository):
+                    definitions = dashboard_warmup_definitions(raw_definition, task_repository)
+                    cancellation['total'] = len(definitions)
+                    for index, definition in enumerate(definitions, start=1):
                         if cancellation['requested']:
                             return
                         if restore_matching_preview_manifest(workspace, dashboard_id, definition, materialize=False) is not None:
+                            cancellation['completed'] = index
                             continue
                         preview = build_preview(
                             definition, owner, workspace=workspace,
@@ -2400,6 +2443,7 @@ def install_dashboard_routes(core):
                             dashboard_preview_fingerprint(snapshot.definition.model_dump(mode='json'), task_repository),
                             preview['token'],
                         )
+                        cancellation['completed'] = index
                         warmed += 1
                     completed_check = True
                     if warmed:
@@ -3505,8 +3549,8 @@ def install_dashboard_routes(core):
             ), '')),
         }
 
-    def dashboard_status_payload(requested_definitions=None):
-        """Return preparation states without starting background work."""
+    def dashboard_status_payload(requested_definitions=None, username='system'):
+        """Return preparation states and keep every standard universe queued."""
         workspace = workspace_key()
         dashboards = read_dashboards(bound_repository())
         requested_definitions = requested_definitions or {}
@@ -3529,49 +3573,48 @@ def install_dashboard_routes(core):
                 continue
             try:
                 task_repository = Repository(Path(workspace), core.repository.global_db_path)
-                default_definition = DashboardDefinition.model_validate(
-                    runtime_dashboard_definition(raw_definition, task_repository),
+                definitions = dashboard_warmup_definitions(raw_definition, task_repository)
+                prepared_count = sum(
+                    restore_matching_preview_manifest(
+                        workspace, dashboard_id, definition, materialize=False,
+                    ) is not None
+                    for definition in definitions
                 )
-                requested = requested_definitions.get(dashboard_id)
-                definition = default_definition
-                if requested is not None:
-                    requested_definition = DashboardDefinition.model_validate(requested)
-                    persisted_requested = normalize_dashboard_filters(
-                        requested_definition.model_dump(mode='json'),
-                    )
-                    persisted_current = normalize_dashboard_filters(
-                        default_definition.model_dump(mode='json'),
-                    )
-                    # The session definition may intentionally carry an
-                    # applied, unsaved universe. Compare only the persisted
-                    # non-universe Dashboard fields before using it for the
-                    # status lookup.
-                    for field in ('scope', 'datasets', 'date_from', 'date_to'):
-                        persisted_requested.pop(field, None)
-                        persisted_current.pop(field, None)
-                    if persisted_requested == persisted_current:
-                        definition = requested_definition
-                prepared = restore_matching_preview_manifest(
-                    workspace, dashboard_id, definition, materialize=False,
-                ) is not None
             except (HTTPException, KeyError, OSError, sqlite3.Error, TypeError, ValueError):
-                prepared = False
-            result[dashboard_id] = (
-                {'state': 'ready', 'label': 'Ready'}
-                if prepared else {'state': 'not-cached', 'label': 'Open to prepare'}
-            )
+                definitions, prepared_count = [], 0
+            if definitions and prepared_count == len(definitions):
+                result[dashboard_id] = {'state': 'ready', 'label': 'Ready'}
+                continue
+            with lock:
+                warmup = dashboard_warmup_cancellations.get((workspace, dashboard_id))
+                warmup_active = bool(warmup and not warmup.get('requested'))
+            if definitions and not warmup_active:
+                schedule_dashboard_warmup(
+                    workspace, dashboard_id, raw_definition, username, force=True,
+                )
+                with lock:
+                    warmup = dashboard_warmup_cancellations.get((workspace, dashboard_id))
+            if definitions:
+                completed = int((warmup or {}).get('completed') or prepared_count)
+                total = int((warmup or {}).get('total') or len(definitions))
+                result[dashboard_id] = {
+                    'state': 'loading-data',
+                    'label': f'Preparing {completed}/{total}',
+                }
+            else:
+                result[dashboard_id] = {'state': 'data-needed', 'label': 'Data needed'}
         return JSONResponse(result, headers={'Cache-Control': 'no-store, max-age=0, must-revalidate'})
 
     @app.get('/api/e2e-dashboards/statuses')
     def dashboard_statuses(user=Depends(dashboard_user)):
-        return dashboard_status_payload()
+        return dashboard_status_payload(username=user.username)
 
     @app.post('/api/e2e-dashboards/statuses')
     def dashboard_statuses_for_session(
         definitions: dict[str, DashboardDefinition], user=Depends(dashboard_user),
     ):
         """Check the last session universe even when its Dashboard is closed."""
-        return dashboard_status_payload(definitions)
+        return dashboard_status_payload(definitions, username=user.username)
 
     def cancel_workspace_dashboard_tasks(workspace: str | Path) -> list:
         """Cancel explicitly requested Dashboard preparation for a workspace."""
