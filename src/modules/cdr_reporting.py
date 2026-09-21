@@ -46,10 +46,13 @@ TEMPLATE_NAMES = {
     "nsa": "Template_CDR_analysis.pptx",
     "sa": "Template_CDR_analysis.pptx",
 }
-CDR_REPORT_VERSION = "2026-08-31-v11"
+CDR_REPORT_VERSION = "2026-09-21-v12"
 REPORTING_KINDS = {"data", "voice", "speech"}
 COMMENT_HINTS = ("having ", "observed", "shows ", "similar performance", "worse ", "improvement", "degradation", "gap ")
-CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position")
+CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position", "Label", "Axis X Range", "Axis Y Range")
+# Templates created before configurable visual settings remain valid and
+# acquire empty Label/axis cells the next time they are saved in the editor.
+RANGELESS_CATALOG_HEADERS = CATALOG_HEADERS[:13]
 # Import the two immediately preceding schemas too, so existing templates remain
 # usable after the aggregation columns were renamed and the legend was repositioned.
 PREVIOUS_CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Legend", "Filters", "Grouping_Rows", "Grouping_Columns", "Legend Position")
@@ -60,6 +63,11 @@ CATALOG_SOURCE_KINDS = {"cdr-data": "data", "cdr-voice": "voice", "cdr-speech": 
 CHART_TYPES = {
     "100% stacked vertical bars", "count stacked horizontal bars", "cdf line", "multi kpi cdf lines", "scatter", "table", "dynamic table",
     "distribution stacked vertical bars", "threshold stacked vertical bars", "average vertical bars", "median vertical bars", "map",
+}
+BAR_CHART_TYPES = {
+    "100% stacked vertical bars", "count stacked horizontal bars",
+    "distribution stacked vertical bars", "threshold stacked vertical bars",
+    "average vertical bars", "median vertical bars",
 }
 STRUCTURAL_SLIDE_TYPES = {"title slide", "transition slide"}
 PRESERVED_CHART_TYPES = {"not automated (preserve)"}
@@ -249,6 +257,9 @@ CATALOG_HEADER_ALIASES = {
     "charttype": "Chart type",
     "legend": "Legend",
     "legendposition": "Legend Position",
+    "label": "Label",
+    "axisxrange": "Axis X Range",
+    "axisyrange": "Axis Y Range",
     "filter": "Filters",
     "filters": "Filters",
     "rowsaggregation": "Rows Aggregation",
@@ -343,6 +354,9 @@ class CatalogEntry:
     grouping_columns: str
     legend_position: str = "top"
     calculated_dimensions: tuple[CalculatedDimension, ...] = ()
+    axis_x_range: str = ""
+    axis_y_range: str = ""
+    label_position: str = ""
 
     @property
     def source_kind(self) -> str | None:
@@ -755,6 +769,46 @@ def parse_legend_position(value: str) -> str:
     return aliases[normalized]
 
 
+def parse_label_position(value: str) -> str:
+    """Return the canonical bar-label placement declared by a template row."""
+    normalized = value.strip().casefold()
+    if not normalized:
+        return ""
+    if normalized not in {"none", "top", "up", "middle", "down"}:
+        raise ValueError("Label must be None, Top, Up, Middle or Down.")
+    return normalized
+
+
+def parse_axis_range(value: str, axis: str) -> tuple[float | None, float | None]:
+    """Parse a template axis range such as ``[0.01,]`` or ``[,30]``."""
+    raw = value.strip()
+    if not raw:
+        return None, None
+    match = re.fullmatch(r"\[\s*([^,\]]*)\s*,\s*([^\]]*)\s*\]", raw)
+    if not match:
+        raise ValueError(f"Axis {axis.upper()} Range must use [min,max], [min,] or [,max].")
+    values: list[float | None] = []
+    for part in match.groups():
+        if not part.strip():
+            values.append(None)
+            continue
+        try:
+            number = float(part)
+        except ValueError as exc:
+            raise ValueError(f"Axis {axis.upper()} Range limits must be numbers.") from exc
+        if not math.isfinite(number):
+            raise ValueError(f"Axis {axis.upper()} Range limits must be finite numbers.")
+        values.append(number)
+    low, high = values
+    if low is None and high is None:
+        raise ValueError(f"Axis {axis.upper()} Range must define at least one limit.")
+    if low is not None and high is not None and low >= high:
+        raise ValueError(f"Axis {axis.upper()} Range minimum must be lower than its maximum.")
+    if axis.casefold() == "y" and any(limit is not None and not 0 <= limit <= 100 for limit in values):
+        raise ValueError("Axis Y Range limits must be cumulative percentages between 0 and 100.")
+    return low, high
+
+
 def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters: bool = True) -> list[CatalogEntry]:
     """Validate the editable report-template CSV and return its chart rows."""
     if technology not in TEMPLATE_NAMES:
@@ -770,7 +824,7 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
     fieldnames = tuple(reader.fieldnames or ())
     accepted_schemas = {
         _canonical_catalog_headers(schema)
-        for schema in (CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, OLDER_CATALOG_HEADERS, LEGACY_ROWS_COLUMNS_HEADERS, LEGACY_CATALOG_HEADERS)
+        for schema in (CATALOG_HEADERS, RANGELESS_CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, OLDER_CATALOG_HEADERS, LEGACY_ROWS_COLUMNS_HEADERS, LEGACY_CATALOG_HEADERS)
     }
     if _canonical_catalog_headers(fieldnames) not in accepted_schemas:
         raise ValueError("The report template must use exactly these columns: " + ", ".join(CATALOG_HEADERS))
@@ -805,6 +859,9 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
             filters=(row.get("Filters") or "").strip(),
             grouping_rows=((row.get("Rows Aggregation") or row.get("Grouping_Rows") or "").strip() or " × ".join(legacy_dimensions[:1])),
             grouping_columns=((row.get("Column Aggregation") or row.get("Grouping_Columns") or "").strip() or " × ".join(legacy_dimensions[1:])),
+            axis_x_range=(row.get("Axis X Range") or "").strip(),
+            axis_y_range=(row.get("Axis Y Range") or "").strip(),
+            label_position=parse_label_position(row.get("Label") or ""),
         )
         if entry.source_kind:
             chart_positions[entry.slide] += 1
@@ -817,6 +874,7 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
             structural_chart_fields = (
                 entry.chart_title, entry.cdr_source, entry.kpi, entry.legend,
                 entry.filters, entry.grouping_rows, entry.grouping_columns,
+                entry.axis_x_range, entry.axis_y_range, entry.label_position,
             )
             if any(value.strip() for value in structural_chart_fields):
                 raise ValueError(
@@ -845,6 +903,13 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
             parse_catalog_grouping(entry.grouping_rows)
             parse_catalog_grouping(entry.grouping_columns)
             parse_legend_position(entry.legend_position)
+            parse_label_position(entry.label_position)
+            parse_axis_range(entry.axis_x_range, "x")
+            parse_axis_range(entry.axis_y_range, "y")
+            if (entry.axis_x_range or entry.axis_y_range) and "cdf" not in entry.chart_type.casefold():
+                raise ValueError("Axis ranges are supported only by CDF charts.")
+            if entry.label_position and entry.chart_type.casefold() not in BAR_CHART_TYPES:
+                raise ValueError("Label is supported only by bar charts.")
         except ValueError as exc:
             raise ValueError(f"{editor_location} -> {exc}") from exc
         entries.append(entry)
@@ -967,6 +1032,9 @@ def catalogue_csv(entries: list[CatalogEntry]) -> bytes:
             "Column Aggregation": entry.grouping_columns,
             "Legend": entry.legend,
             "Legend Position": entry.legend_position.title(),
+            "Label": entry.label_position.title(),
+            "Axis X Range": entry.axis_x_range,
+            "Axis Y Range": entry.axis_y_range,
         })
     return output.getvalue().encode("utf-8")
 
@@ -2602,22 +2670,28 @@ def catalog_chart_hover_targets(
             ordered = sorted(subset[metric].tolist())
             if ordered:
                 series_values.append((key, ordered))
-        high = _cdf_terminal_x_maximum([ordered for _, ordered in series_values], low, observed_high)
-        high = high if high > low else low + 1
+        automatic_high = _cdf_terminal_x_maximum([ordered for _, ordered in series_values], low, observed_high)
+        automatic_high = automatic_high if automatic_high > low else low + 1
+        (low, high), (y_low, y_high) = _cdf_domains(
+            low, automatic_high, render_entry.axis_x_range, render_entry.axis_y_range,
+        )
         left, top, width, height = _cdf_plot_geometry(parse_legend_position(render_entry.legend_position))
         for key, ordered in series_values:
-            visible_values = [value for value in ordered if value <= high]
-            if not visible_values:
+            visible_points = [
+                point for point in _cdf_visible_points(ordered, low, high)
+                if y_low <= point[1] <= y_high
+            ]
+            if not visible_points:
                 continue
             series = caption(key, axes)
             # A CDF can contain millions of source samples. Its PNG is a
             # continuous line, so a bounded set of evenly spaced vertices is
             # sufficient for hit testing and avoids a huge delayed JSON reply.
-            sample_count = min(len(visible_values), MAX_CDF_HOVER_TARGETS_PER_SERIES)
-            indexes = range(len(visible_values)) if sample_count == len(visible_values) else sorted({round(index * (len(visible_values) - 1) / (sample_count - 1)) for index in range(sample_count)})
+            sample_count = min(len(visible_points), MAX_CDF_HOVER_TARGETS_PER_SERIES)
+            indexes = range(len(visible_points)) if sample_count == len(visible_points) else sorted({round(index * (len(visible_points) - 1) / (sample_count - 1)) for index in range(sample_count)})
             for index in indexes:
-                value = visible_values[index]
-                targets.append({'kind': 'line', 'series': '\x1f'.join(map(str, key)), 'x': left + (value - low) / (high - low) * width, 'y': top + height - ((index + 1) / len(ordered)) * height, 'label': metric.replace('_', ' '), 'legend': series, 'value': f'{value:.2f}', 'cumulative': f'{(index + 1) / len(ordered):.1%}'})
+                value, cumulative = visible_points[index]
+                targets.append({'kind': 'line', 'series': '\x1f'.join(map(str, key)), 'x': left + (value - low) / (high - low) * width, 'y': top + height - (cumulative - y_low) / (y_high - y_low) * height, 'label': metric.replace('_', ' '), 'legend': series, 'value': f'{value:.2f}', 'cumulative': f'{cumulative:.1%}'})
     return targets
 
 
@@ -3356,6 +3430,45 @@ def _draw_inside_bar_label(
     return False
 
 
+def _draw_configured_bar_label(
+    draw: ImageDraw.ImageDraw,
+    value: str,
+    *,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    colour: str,
+    font: ImageFont.ImageFont,
+    position: str,
+    horizontal: bool,
+    automatic: Callable[[], None],
+) -> None:
+    """Draw an explicit template label placement or retain legacy behaviour."""
+    placement = position.casefold()
+    if not placement:
+        automatic()
+        return
+    if placement == "none":
+        return
+    box = draw.textbbox((0, 0), value, font=font)
+    label_width, label_height = box[2] - box[0], box[3] - box[1]
+    if placement == "top":
+        point = (
+            (x + width + 5, y + (height - label_height) / 2 - box[1])
+            if horizontal else (x + (width - label_width) / 2, y - label_height - 4 - box[1])
+        )
+        draw.text(point, value, fill=colour, font=font)
+        return
+    if horizontal:
+        label_x = x + width - label_width - 4 if placement == "up" else (x + 4 if placement == "down" else x + (width - label_width) / 2)
+        label_y = y + (height - label_height) / 2 - box[1]
+    else:
+        label_x = x + (width - label_width) / 2
+        label_y = y + 4 - box[1] if placement == "up" else (y + height - label_height - 4 - box[1] if placement == "down" else y + (height - label_height) / 2 - box[1])
+    draw.text((label_x, label_y), value, fill="#FFFFFF", font=font)
+
+
 def _draw_dashed_vertical_line(
     draw: ImageDraw.ImageDraw,
     x: float,
@@ -3478,7 +3591,7 @@ def _status_chart_categories(
     return result, states, colours
 
 
-def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, period: str | None, quality: bool = False, threshold: float = 1.6, metric: str | None = None, legend_labels: tuple[str, ...] = (), legend_position: str = "top") -> BytesIO:
+def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, period: str | None, quality: bool = False, threshold: float = 1.6, metric: str | None = None, legend_labels: tuple[str, ...] = (), legend_position: str = "top", label_position: str = "") -> BytesIO:
     if frame.empty or not group or not period:
         return _empty_chart(title)
     image, draw = _canvas(title)
@@ -3498,7 +3611,7 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
     row_hierarchy = [column for column in hierarchy_columns if column.startswith("__catalog_row_")]
     column_hierarchy = [column for column in hierarchy_columns if column.startswith("__catalog_column_")]
     if column_hierarchy:
-        return _render_status_100_hierarchy(title, data, row_hierarchy, column_hierarchy, states, colours, legend_labels, legend_position)
+        return _render_status_100_hierarchy(title, data, row_hierarchy, column_hierarchy, states, colours, legend_labels, legend_position, label_position)
     if row_hierarchy:
         # A row-only hierarchy remains on the left. A synthetic single column
         # gives every row its own bar without moving row dimensions to the x axis.
@@ -3506,7 +3619,7 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
         data[single_column] = "(all)"
         return _render_status_100_hierarchy(
             title, data, row_hierarchy, [single_column], states, colours,
-            legend_labels, legend_position,
+            legend_labels, legend_position, label_position,
         )
     combos = [(str(g), str(p)) for g, p in data[[group, period]].drop_duplicates().itertuples(index=False)]
     if not combos:
@@ -3523,10 +3636,12 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
             y = chart_top + chart_height - running - height
             draw.rectangle((x, y, x + bar_width, y + height), fill=colour)
             value_label = f"{value:.1%}"
-            if value >= .08 and _draw_inside_bar_label(image, draw, value_label, x=x, y=y, width=bar_width, height=height, fill="white", font=_font(16, True)):
-                pass
-            elif value >= .005:
-                draw.text((x + bar_width + 3, max(chart_top, y - 7)), value_label, fill=colour, font=_font(12, True))
+            def automatic_label() -> None:
+                if value >= .08 and _draw_inside_bar_label(image, draw, value_label, x=x, y=y, width=bar_width, height=height, fill="white", font=_font(16, True)):
+                    return
+                if value >= .005:
+                    draw.text((x + bar_width + 3, max(chart_top, y - 7)), value_label, fill=colour, font=_font(12, True))
+            _draw_configured_bar_label(draw, value_label, x=x, y=y, width=bar_width, height=height, colour=colour, font=_font(16, True), position=label_position, horizontal=False, automatic=automatic_label)
             running += height
         label = _catalogue_display_label(g, p)[:24]
         label_font = _font(18, True)
@@ -3551,6 +3666,7 @@ def _render_status_100_hierarchy(
     colours: tuple[str, ...],
     legend_labels: tuple[str, ...] = (),
     legend_position: str = "top",
+    label_position: str = "",
 ) -> BytesIO:
     """Render template row groups as panes and column groups as nested headers."""
     row_keys = _hierarchical_unique_keys(data, row_hierarchy) if row_hierarchy else [()]
@@ -3653,12 +3769,14 @@ def _render_status_100_hierarchy(
                 y = pane_bottom - running - segment_height
                 draw.rectangle((x, y, x + bar_width, y + segment_height), fill=colour)
                 ratio_label = f"{ratio:.1%}"
-                if ratio >= 0.08 and _draw_inside_bar_label(image, draw, ratio_label, x=x, y=y, width=bar_width, height=segment_height, fill="white", font=_font(17, True)):
-                    pass
-                elif ratio >= 0.005:
-                    # Small failure rates still matter. Put their label beside
-                    # the narrow segment instead of suppressing it entirely.
-                    draw.text((x + bar_width + 3, max(pane_top, y - 7)), ratio_label, fill=colour, font=_font(12, True))
+                def automatic_label() -> None:
+                    if ratio >= 0.08 and _draw_inside_bar_label(image, draw, ratio_label, x=x, y=y, width=bar_width, height=segment_height, fill="white", font=_font(17, True)):
+                        return
+                    if ratio >= 0.005:
+                        # Small failure rates still matter. Put their label beside
+                        # the narrow segment instead of suppressing it entirely.
+                        draw.text((x + bar_width + 3, max(pane_top, y - 7)), ratio_label, fill=colour, font=_font(12, True))
+                _draw_configured_bar_label(draw, ratio_label, x=x, y=y, width=bar_width, height=segment_height, colour=colour, font=_font(17, True), position=label_position, horizontal=False, automatic=automatic_label)
                 running += segment_height
 
     if row_hierarchy:
@@ -3695,7 +3813,7 @@ def _render_status_100_hierarchy(
     return output
 
 
-def _render_failure_count(title: str, frame: pd.DataFrame, group: str | None, period: str | None, legend_labels: tuple[str, ...] = (), legend_position: str = "top") -> BytesIO:
+def _render_failure_count(title: str, frame: pd.DataFrame, group: str | None, period: str | None, legend_labels: tuple[str, ...] = (), legend_position: str = "top", label_position: str = "") -> BytesIO:
     if frame.empty or not group:
         return _empty_chart(title)
     status = _column(frame, ("Call_Status", "Test_Result", "status"))
@@ -3714,10 +3832,10 @@ def _render_failure_count(title: str, frame: pd.DataFrame, group: str | None, pe
     )
     if column_hierarchy:
         return _render_failure_count_hierarchy(
-            title, failed, row_hierarchy, column_hierarchy, legend_labels, legend_position, comparison_frame=frame,
+            title, failed, row_hierarchy, column_hierarchy, legend_labels, legend_position, label_position, comparison_frame=frame,
         )
     if len(row_hierarchy) > 1:
-        return _render_failure_count_hierarchy(title, failed, [], row_hierarchy, legend_labels, legend_position, comparison_frame=frame)
+        return _render_failure_count_hierarchy(title, failed, [], row_hierarchy, legend_labels, legend_position, label_position, comparison_frame=frame)
     has_series = bool(period) and not frame[period].fillna("(all)").astype(str).eq("(all)").all()
     fields = [group, period] if has_series else [group]
     counts = failed.groupby([*fields, "__catalog_failure_state"], dropna=False).size().unstack(fill_value=0)
@@ -3738,7 +3856,7 @@ def _render_failure_count(title: str, frame: pd.DataFrame, group: str | None, pe
             count = int(values.get(state, 0)); width = int(980 * count / maximum)
             if width:
                 draw.rectangle((x, y, x + width, y + 25), fill=colours[state])
-                _draw_inside_bar_label(image, draw, str(count), x=x, y=y, width=width, height=25, fill="white", font=_font(16, True))
+                _draw_configured_bar_label(draw, str(count), x=x, y=y, width=width, height=25, colour=colours[state], font=_font(16, True), position=label_position, horizontal=True, automatic=lambda: _draw_inside_bar_label(image, draw, str(count), x=x, y=y, width=width, height=25, fill="white", font=_font(16, True)))
             x += width
     _draw_chart_legend(draw, [(_legend_caption(legend_labels, index, state), colours[state], 2) for index, state in enumerate(("Failed", "Dropped"))], legend_position, font_size=13)
     draw.text((390, 820), "# of failed / dropped sessions", fill="#4E6271", font=_font(19, True))
@@ -3752,6 +3870,7 @@ def _render_failure_count_hierarchy(
     column_hierarchy: list[str],
     legend_labels: tuple[str, ...] = (),
     legend_position: str = "top",
+    label_position: str = "",
     comparison_frame: pd.DataFrame | None = None,
 ) -> BytesIO:
     """Render failure counts with template rows and columns as separate axes."""
@@ -3858,8 +3977,10 @@ def _render_failure_count_hierarchy(
                     draw.rectangle((x, y, x + segment_width, y + bar_height), fill=colours[state])
                     label = str(count)
                     label_width = _text_width(draw, label, count_font)
-                    if not _draw_inside_bar_label(image, draw, label, x=x, y=y, width=segment_width, height=bar_height, fill="white", font=count_font):
-                        outside_counts.append(label)
+                    def automatic_label() -> None:
+                        if not _draw_inside_bar_label(image, draw, label, x=x, y=y, width=segment_width, height=bar_height, fill="white", font=count_font):
+                            outside_counts.append(label)
+                    _draw_configured_bar_label(draw, label, x=x, y=y, width=segment_width, height=bar_height, colour=colours[state], font=count_font, position=label_position, horizontal=True, automatic=automatic_label)
                 x += segment_width
             if outside_counts:
                 # Keep labels visible even when an individual stacked segment
@@ -3956,7 +4077,7 @@ def _draw_hierarchical_axis_labels(
             draw.text((centre - text_width / 2, bottom + 11), text, fill="#62727E", font=font)
 
 
-def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | None, series: str | None, stack: str, legend_labels: tuple[str, ...] = (), legend_position: str = "top") -> BytesIO:
+def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | None, series: str | None, stack: str, legend_labels: tuple[str, ...] = (), legend_position: str = "top", label_position: str = "") -> BytesIO:
     if frame.empty or not group or not series or stack not in frame.columns:
         return _empty_chart(title)
     axis_columns = _chart_axis_hierarchy(frame, distribution=True) or [group, series]
@@ -3983,12 +4104,15 @@ def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | N
             label_font = _font(18, True)
             label_box = draw.textbbox((0, 0), value_label, font=label_font)
             label_height = label_box[3] - label_box[1]
-            if _text_width(draw, value_label, label_font) + 12 <= bar_width and label_height + 10 <= segment:
-                _draw_inside_bar_label(
-                    image, draw, value_label,
-                    x=x, y=y, width=bar_width, height=segment,
-                    fill="#FFFFFF", font=label_font,
-                )
+            def automatic_label() -> None:
+                if _text_width(draw, value_label, label_font) + 12 <= bar_width and label_height + 10 <= segment:
+                    _draw_inside_bar_label(
+                        image, draw, value_label,
+                        x=x, y=y, width=bar_width, height=segment,
+                        fill="#FFFFFF", font=label_font,
+                    )
+            colour = bucket_colours.get((bucket,), _colour(bucket, bucket_index))
+            _draw_configured_bar_label(draw, value_label, x=x, y=y, width=bar_width, height=segment, colour=colour, font=label_font, position=label_position, horizontal=False, automatic=automatic_label)
             running += segment
     _draw_top_column_group_separators(
         draw,
@@ -4092,6 +4216,54 @@ def _cdf_plot_geometry(legend_position: str) -> tuple[int, int, int, int]:
     return 100, 135, 1320, 590
 
 
+def _cdf_domains(
+    automatic_x_low: float,
+    automatic_x_high: float,
+    axis_x_range: str = "",
+    axis_y_range: str = "",
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Overlay optional template bounds on the existing automatic CDF domains."""
+    requested_x_low, requested_x_high = parse_axis_range(axis_x_range, "x")
+    requested_y_low, requested_y_high = parse_axis_range(axis_y_range, "y")
+    x_low = automatic_x_low if requested_x_low is None else requested_x_low
+    x_high = automatic_x_high if requested_x_high is None else requested_x_high
+    y_low = 0.0 if requested_y_low is None else requested_y_low / 100
+    y_high = 1.0 if requested_y_high is None else requested_y_high / 100
+    # A one-sided bound may lie beyond all observations. Keep a valid, empty
+    # viewport rather than failing the complete report.
+    if x_high <= x_low:
+        if requested_x_low is not None and requested_x_high is None:
+            x_high = x_low + 1
+        elif requested_x_high is not None and requested_x_low is None:
+            x_low = x_high - 1
+        else:
+            x_high = x_low + 1
+    return (x_low, x_high), (y_low, y_high)
+
+
+def _cdf_visible_points(values: list[float], low: float, high: float) -> list[tuple[float, float]]:
+    """Return a clipped CDF polyline, including exact viewport boundaries."""
+    if not values:
+        return []
+    total = len(values)
+    start = bisect_right(values, low)
+    end = bisect_right(values, high)
+    points = [(low, start / total)]
+    for index in range(start, end):
+        value = float(values[index])
+        cumulative = (index + 1) / total
+        if points[-1][0] == value:
+            points[-1] = (value, cumulative)
+        else:
+            points.append((value, cumulative))
+    terminal = end / total
+    if points[-1][0] == high:
+        points[-1] = (high, terminal)
+    else:
+        points.append((high, terminal))
+    return points
+
+
 def _render_cdf_line(
     title: str,
     frame: pd.DataFrame,
@@ -4101,6 +4273,8 @@ def _render_cdf_line(
     legend_labels: tuple[str, ...] = (),
     legend_position: str = "top",
     layout_legend_position: str | None = None,
+    axis_x_range: str = "",
+    axis_y_range: str = "",
 ) -> BytesIO:
     if frame.empty or not group or not metric: return _empty_chart(title)
     campaign_column = _period_column(frame)
@@ -4137,8 +4311,9 @@ def _render_cdf_line(
     low = float(data[metric].min())
     observed_high = float(data[metric].max())
     series_values = [values for _, _, values in series_data]
-    high = _cdf_terminal_x_maximum(series_values, low, observed_high)
-    high = high if high > low else low + 1
+    automatic_high = _cdf_terminal_x_maximum(series_values, low, observed_high)
+    automatic_high = automatic_high if automatic_high > low else low + 1
+    (low, high), (y_low, y_high) = _cdf_domains(low, automatic_high, axis_x_range, axis_y_range)
     image, draw = _canvas(title)
     layout_position = layout_legend_position or legend_position
     left, top, width, height = _cdf_plot_geometry(layout_position)
@@ -4158,17 +4333,26 @@ def _render_cdf_line(
     line_widths = _cdf_campaign_line_widths(series_campaigns, grouping_columns, data)
     legend_items: list[tuple[str, str, int]] = []
     for index, (combination, subset, values) in enumerate(series_data):
-        visible_values = [value for value in values if value <= high]
-        if not visible_values:
+        visible_points = _cdf_visible_points(values, low, high)
+        if not visible_points:
             continue
         label = _legend_key_caption(combination, grouping_columns, data, legend_labels)
-        points = [(left + (value - low) / (high - low) * width, top + height - ((n + 1) / len(values)) * height) for n, value in enumerate(visible_values)]
+        points = [
+            (
+                left + (value - low) / (high - low) * width,
+                top + height - (cumulative - y_low) / (y_high - y_low) * height,
+            )
+            for value, cumulative in visible_points if y_low <= cumulative <= y_high
+        ]
+        if not points:
+            continue
         line_width = line_widths.get(tuple(str(value) for value in combination), 4)
         colour = comparison_colours.get(combination, _colour(label, index))
         draw.line(points, fill=colour, width=line_width)
         legend_items.append((label, colour, line_width))
-    for tick in range(0, 101, 20):
-        y = top + height - tick / 100 * height; draw.line((left, y, left + width, y), fill="#E4E9ED", width=1); draw.text((left - 84, y - 10), f"{tick}%", fill="#4E6271", font=_font(18, True))
+    for tick in range(0, 6):
+        cumulative = y_low + (y_high - y_low) * tick / 5
+        y = top + height - tick / 5 * height; draw.line((left, y, left + width, y), fill="#E4E9ED", width=1); draw.text((left - 84, y - 10), f"{cumulative * 100:.0f}%", fill="#4E6271", font=_font(18, True))
     for tick in range(0, 6):
         value = low + (high - low) * tick / 5
         x = left + width * tick / 5
@@ -4355,6 +4539,7 @@ def _render_mean_column(
     aggregation: str = "mean",
     legend_dimensions: tuple[str, ...] = (),
     legend_position: str = "top",
+    label_position: str = "",
 ) -> BytesIO:
     if frame.empty or not group or not metric:
         return _empty_chart(title)
@@ -4379,11 +4564,12 @@ def _render_mean_column(
         value_label = f"{float(value):.2f}"
         draw.rectangle((x, y, x + bar_width, baseline), fill=colour)
         label_font = _font(20, True)
-        if height >= 42 and _draw_inside_bar_label(image, draw, value_label, x=x, y=y, width=bar_width, height=height, fill="white", font=label_font):
-            pass
-        else:
+        def automatic_label() -> None:
+            if height >= 42 and _draw_inside_bar_label(image, draw, value_label, x=x, y=y, width=bar_width, height=height, fill="white", font=label_font):
+                return
             label_width = _text_width(draw, value_label, label_font)
             draw.text((x + (bar_width - label_width) / 2, y - 25), value_label, fill=colour, font=label_font)
+        _draw_configured_bar_label(draw, value_label, x=x, y=y, width=bar_width, height=height, colour=colour, font=label_font, position=label_position, horizontal=False, automatic=automatic_label)
     _draw_top_column_group_separators(
         draw,
         keys,
@@ -4674,6 +4860,7 @@ def _chart_payload_base(
                 entry, frame, metric, fallback_legend, chart_type=chart_type, line_markers=line_markers,
             ) if show_legend else {"position": "right", "line_markers": False, "items": []}
         ),
+        "label_position": entry.label_position,
     }
 
 
@@ -4828,8 +5015,11 @@ def catalog_chart_payload(
             return None
         low = float(numeric[candidate_metric].min())
         observed_high = float(numeric[candidate_metric].max())
-        high = _cdf_terminal_x_maximum([values for _key, values, _campaigns in series_rows], low, observed_high)
-        high = high if high > low else low + 1
+        automatic_high = _cdf_terminal_x_maximum([values for _key, values, _campaigns in series_rows], low, observed_high)
+        automatic_high = automatic_high if automatic_high > low else low + 1
+        (low, high), (y_low, y_high) = _cdf_domains(
+            low, automatic_high, render_entry.axis_x_range, render_entry.axis_y_range,
+        )
         colours = _series_colours(combinations, grouping_columns, numeric, line_chart=True)
         line_widths = _cdf_campaign_line_widths(
             [(combination, campaigns) for combination, _values, campaigns in series_rows],
@@ -4840,10 +5030,10 @@ def catalog_chart_payload(
         fallback_legend = []
         requested_legend = _legend_dimensions(render_entry.legend)
         for index, (combination, values, campaigns) in enumerate(series_rows):
-            visible_values = [value for value in values if value <= high]
-            if not visible_values:
+            visible_points = _cdf_visible_points(values, low, high)
+            if not visible_points:
                 continue
-            sampled = _interactive_sample(visible_values, INTERACTIVE_CHART_POINTS_PER_SERIES)
+            sampled = _interactive_sample(visible_points, INTERACTIVE_CHART_POINTS_PER_SERIES)
             line_width = line_widths.get(tuple(str(value) for value in combination), 4)
             full_label = _legend_key_caption(combination, grouping_columns, numeric, ())
             # A CDF legend and tooltip identify a concrete curve. Retaining
@@ -4857,8 +5047,8 @@ def catalog_chart_payload(
                 "legend_name": full_label,
                 "colour": colour,
                 "width": line_width,
-                "x": [value for _source_index, value in sampled],
-                "y": [(source_index + 1) / len(values) for source_index, _value in sampled],
+                "x": [point[0] for _source_index, point in sampled],
+                "y": [point[1] for _source_index, point in sampled],
                 "samples": len(values),
             })
             fallback_legend.append((full_label, colour, line_width))
@@ -4868,7 +5058,7 @@ def catalog_chart_payload(
         )
         model.update({
             "metric": candidate_metric.replace("_", " "),
-            "domain": {"x": [low, high], "y": [0, 1]},
+            "domain": {"x": [low, high], "y": [y_low, y_high]},
             "series": payload_series,
         })
         return model
@@ -5452,11 +5642,11 @@ def _chart_for_catalog_entry(
     def finish(chart: BytesIO) -> BytesIO:
         return chart if legend_labels else _apply_resolved_legend(chart, entry, frame, metric, legend_position)
     if spec["kind"] == "status_100":
-        return finish(_render_status_100(chart_title, frame, group, period, metric=metric, legend_labels=legend_labels, legend_position=renderer_legend_position))
+        return finish(_render_status_100(chart_title, frame, group, period, metric=metric, legend_labels=legend_labels, legend_position=renderer_legend_position, label_position=entry.label_position))
     if spec["kind"] == "quality_100":
-        return finish(_render_status_100(chart_title, frame, group, period, True, spec.get("threshold", 1.6), metric, legend_labels, renderer_legend_position))
+        return finish(_render_status_100(chart_title, frame, group, period, True, spec.get("threshold", 1.6), metric, legend_labels, renderer_legend_position, entry.label_position))
     if spec["kind"] == "failure_count":
-        return finish(_render_failure_count(chart_title, frame, group, period, legend_labels, renderer_legend_position))
+        return finish(_render_failure_count(chart_title, frame, group, period, legend_labels, renderer_legend_position, entry.label_position))
     if spec["kind"] == "map":
         return finish(_render_map(chart_title, frame, group, period, metric, _column(frame, spec.get("x_metric", ())), legend_labels, renderer_legend_position))
     if spec["kind"] == "multi_cdf":
@@ -5467,10 +5657,11 @@ def _chart_for_catalog_entry(
                 charts.append(_render_cdf_line(
                     candidate, frame, group, period, resolved, legend_dimensions,
                     renderer_legend_position, layout_legend_position=legend_position,
+                    axis_x_range=entry.axis_x_range, axis_y_range=entry.axis_y_range,
                 ))
         return _combine_charts(chart_title, charts) if charts else _empty_chart(chart_title)
     if chart_type == "distribution stacked vertical bars":
-        return finish(_render_stacked_distribution(chart_title, frame, group, period, "__catalog_stack", legend_labels, renderer_legend_position))
+        return finish(_render_stacked_distribution(chart_title, frame, group, period, "__catalog_stack", legend_labels, renderer_legend_position, entry.label_position))
     # Non-stacked visuals have one visual series per row/column combination. A
     # rows-only chart remains a single category series rather than becoming the
     # misleading ``Operator · Operator`` label used by the earlier renderer.
@@ -5492,10 +5683,12 @@ def _chart_for_catalog_entry(
             aggregation=spec.get("aggregation") or ("median" if chart_type == "median vertical bars" else "mean"),
             legend_dimensions=() if not legend_labels else legend_dimensions,
             legend_position=renderer_legend_position,
+            label_position=entry.label_position,
         ))
     return finish(_render_cdf_line(
         chart_title, frame, group, period, metric, (), renderer_legend_position,
         layout_legend_position=legend_position,
+        axis_x_range=entry.axis_x_range, axis_y_range=entry.axis_y_range,
     ))
 
 

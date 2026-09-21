@@ -804,7 +804,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "else dashedVertical(context, cellLeft, lineTop, chartTop + chartHeight + 22);" in chart_script
     assert 'function drawOutsideBarLabel(context, value, x, y, colour, size = 12)' in chart_script
     assert "context.fillStyle = 'rgba(255, 255, 255, 0.94)'" in chart_script
-    assert "context.fillText(`${tick}%`, plot.left - 14, y - 10)" in chart_script
+    assert "context.fillText(`${(cumulative * 100).toFixed(0)}%`, plot.left - 14, y - 10)" in chart_script
+    assert 'function drawConfiguredBarLabel(' in chart_script
     assert 'Math.floor((layout.right - left) / Math.max(headers.length, 1))' in chart_script
     assert 'function selectionStartAllowed(canvas, event)' in chart_script
     assert 'return logicalY >= 90;' in chart_script

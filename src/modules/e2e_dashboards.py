@@ -22,6 +22,7 @@ from uuid import uuid4
 
 import pandas as pd
 from src.modules.column_names import column_identity
+from src.modules.cdr_reporting import BAR_CHART_TYPES
 from fastapi import BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
@@ -85,6 +86,9 @@ class DashboardChartFilterPreviewRequest(BaseModel):
     grouping_columns: str | None = None
     legend: str | None = None
     legend_position: str | None = None
+    axis_x_range: str | None = None
+    axis_y_range: str | None = None
+    label_position: str | None = None
 
 
 class DashboardComments(BaseModel):
@@ -1198,7 +1202,10 @@ def install_dashboard_routes(core):
             'dataset_ids': [str(value) for value in definition.datasets.get(entry.source_kind, [])],
             'filters': entry.filters, 'grouping_rows': entry.grouping_rows,
             'grouping_columns': entry.grouping_columns, 'legend': entry.legend,
-            'legend_position': entry.legend_position, 'template_available': template_available, 'datasets_by_source': datasets_by_source,
+            'legend_position': entry.legend_position,
+            'axis_x_range': entry.axis_x_range, 'axis_y_range': entry.axis_y_range,
+            'label_position': entry.label_position,
+            'template_available': template_available, 'datasets_by_source': datasets_by_source,
             'columns_by_source': columns_by_source, 'columns': columns,
         })
 
@@ -3194,7 +3201,10 @@ def install_dashboard_routes(core):
             'grouping_rows': entry.grouping_rows,
             'grouping_columns': entry.grouping_columns,
             'legend': entry.legend,
-            'legend_position': entry.legend_position, 'template_available': template_available,
+            'legend_position': entry.legend_position,
+            'axis_x_range': entry.axis_x_range, 'axis_y_range': entry.axis_y_range,
+            'label_position': entry.label_position,
+            'template_available': template_available,
             'datasets_by_source': datasets_by_source, 'columns_by_source': columns_by_source,
             'columns': columns_by_source.get(f'cdr-{entry.source_kind}', [str(column) for column in columns if identity(column) not in hidden]),
         })
@@ -3211,7 +3221,7 @@ def install_dashboard_routes(core):
             key: value for key, value in request.model_dump().items()
             if value is not None and key in {
                 'filters', 'chart_title', 'cdr_source', 'kpi', 'chart_type', 'grouping_rows',
-                'grouping_columns', 'legend', 'legend_position',
+                'grouping_columns', 'legend', 'legend_position', 'axis_x_range', 'axis_y_range', 'label_position',
             }
         }
         # The template owns these required chart attributes. Custom dropdowns
@@ -3220,7 +3230,21 @@ def install_dashboard_routes(core):
         for key in ('cdr_source', 'kpi', 'chart_type'):
             if not str(changes.get(key, '')).strip():
                 changes.pop(key, None)
+        if 'label_position' in changes:
+            try:
+                changes['label_position'] = core.parse_label_position(str(changes['label_position']))
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from exc
         preview_entry = replace(entry, **changes)
+        try:
+            core.parse_axis_range(preview_entry.axis_x_range, 'x')
+            core.parse_axis_range(preview_entry.axis_y_range, 'y')
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if (preview_entry.axis_x_range or preview_entry.axis_y_range) and 'cdf' not in preview_entry.chart_type.casefold():
+            raise HTTPException(400, 'Axis ranges are supported only by CDF charts.')
+        if preview_entry.label_position and preview_entry.chart_type.casefold() not in BAR_CHART_TYPES:
+            raise HTTPException(400, 'Label is supported only by bar charts.')
         if not preview_entry.source_kind:
             raise HTTPException(400, 'Select a valid CDR type.')
         task_repository = Repository(Path(snapshot.workspace), core.repository.global_db_path)
@@ -3390,13 +3414,27 @@ def install_dashboard_routes(core):
             key: value for key, value in request.model_dump().items()
             if value is not None and key in {
                 'filters', 'chart_title', 'cdr_source', 'kpi', 'chart_type', 'grouping_rows',
-                'grouping_columns', 'legend', 'legend_position',
+                'grouping_columns', 'legend', 'legend_position', 'axis_x_range', 'axis_y_range', 'label_position',
             }
         }
         for key in ('cdr_source', 'kpi', 'chart_type'):
             if not str(changes.get(key, '')).strip():
                 changes.pop(key, None)
+        if 'label_position' in changes:
+            try:
+                changes['label_position'] = core.parse_label_position(str(changes['label_position']))
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from exc
         updated_entry = replace(entries[index], **changes)
+        try:
+            core.parse_axis_range(updated_entry.axis_x_range, 'x')
+            core.parse_axis_range(updated_entry.axis_y_range, 'y')
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if (updated_entry.axis_x_range or updated_entry.axis_y_range) and 'cdf' not in updated_entry.chart_type.casefold():
+            raise HTTPException(400, 'Axis ranges are supported only by CDF charts.')
+        if updated_entry.label_position and updated_entry.chart_type.casefold() not in BAR_CHART_TYPES:
+            raise HTTPException(400, 'Label is supported only by bar charts.')
         entries[index] = updated_entry
         try:
             task_repository.set_report_template_content(technology, template_name, core.catalogue_csv(entries))

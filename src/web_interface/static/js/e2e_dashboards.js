@@ -2117,10 +2117,13 @@
         ['chart_type', 'Chart Type'], ['chart_title', 'Chart Title'], ['cdr_source', 'CDR Type'], ['dataset_ids', 'Datasets'],
         ['kpi', 'KPI'], ['filters', 'Filters'], ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'],
         ['legend', 'Legend'], ['legend_position', 'Legend Position'],
+        ['axis_x_range', 'Axis X Range'], ['axis_y_range', 'Axis Y Range'],
+        ['label_position', 'Label'],
       ],
       textFields: {chart_title: true}, editableGroupingInputs: true,
       chartTypes: ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Multi KPI CDF Lines', 'Scatter', 'Table', 'Dynamic Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'],
       legendPositions: ['', 'Top', 'Bottom', 'Left', 'Right'],
+      labelPositions: ['', 'None', 'Top', 'Up', 'Middle', 'Down'],
       menuContainer: expandedOverlayHost,
       onSourceChange: next => {
         const source = sourceKey(next.cdr_source);

@@ -101,6 +101,9 @@ This is the canonical authoring reference for templates used by both [E2E Dashbo
 | `Column Aggregation` | Comparison-series/table-column hierarchy. Separate dimensions with `×`. |
 | `Legend` | Optional field whose plotted or filtered values should be explained. Blank means no legend. |
 | `Legend Position` | `Top`, `Bottom`, `Left` or `Right`; blank defaults to `Top`. |
+| `Label` | Optional bar-value placement: `None`, `Top`, `Up`, `Middle` or `Down`. Blank retains automatic placement. |
+| `Axis X Range` | Optional CDF limits in KPI units: `[min,max]`, `[min,]` or `[,max]`. Blank keeps the automatic domain. |
+| `Axis Y Range` | Optional CDF cumulative-percentage limits from 0 to 100, using the same syntax. Blank keeps 0–100%. |
 
 For multi-chart slides, the editor visually groups `Slide`, `Slide Tittle`, `Slide Subtittle` and `Layout`; the CSV still stores them on every row.
 
@@ -143,6 +146,10 @@ Automated rows support:
 - `Threshold Stacked Vertical Bars`
 
 Choose a KPI and at least one Rows or Column Aggregation dimension. `CDF Line` creates one curve per complete aggregation combination. Count charts retain empty combinations where required so comparisons remain aligned.
+
+CDF ranges are visual settings, not data filters. For example, `Axis X Range: [0.01,]` starts the horizontal axis at `0.01` while retaining its automatically calculated maximum; `[,30]` retains the automatic minimum and fixes the maximum at `30`. Empty range cells preserve the existing automatic behaviour. The range columns must remain empty for non-CDF charts.
+
+`Label` overrides value-label placement only for bar charts. `None` hides values, `Top` places them outside the bar, and `Up`, `Middle` and `Down` place them inside near the leading edge, centre or origin edge. For horizontal bars those directions map respectively to outside-right, inside-right, centre and inside-left. An empty cell preserves each renderer's existing fit-aware behaviour.
 
 ### Chart recipes
 

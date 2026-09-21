@@ -234,6 +234,30 @@
     context.restore();
   }
 
+  function drawConfiguredBarLabel(context, value, x, y, width, height, colour, size, position, orientation, automatic) {
+    const placement = String(position || '').toLowerCase();
+    if (!placement) { automatic?.(); return; }
+    if (placement === 'none') return;
+    const horizontal = orientation === 'horizontal';
+    context.save(); font(context, size, true);
+    if (placement === 'top') {
+      if (horizontal) drawOutsideBarLabel(context, value, x + width + 5, y + Math.max(0, (height - size) / 2), colour, size);
+      else { context.fillStyle = colour; context.textAlign = 'center'; context.textBaseline = 'bottom'; context.fillText(String(value), x + width / 2, y - 4); }
+    } else {
+      context.fillStyle = '#FFFFFF'; context.textBaseline = 'middle';
+      if (horizontal) {
+        context.textAlign = placement === 'up' ? 'right' : (placement === 'down' ? 'left' : 'center');
+        const labelX = placement === 'up' ? x + width - 4 : (placement === 'down' ? x + 4 : x + width / 2);
+        context.fillText(String(value), labelX, y + height / 2);
+      } else {
+        context.textAlign = 'center';
+        const labelY = placement === 'up' ? y + size / 2 + 4 : (placement === 'down' ? y + height - size / 2 - 4 : y + height / 2);
+        context.fillText(String(value), x + width / 2, labelY);
+      }
+    }
+    context.restore();
+  }
+
   function dashedVertical(context, x, top, bottom) {
     context.save(); context.setLineDash([8, 6]); line(context, x, top, x, bottom, '#AEBBC4', 1); context.restore();
   }
@@ -363,8 +387,10 @@
           const ratio = Number(ratios[seriesIndex] || 0), segmentHeight = ratio * height, y = top + height - running - segmentHeight;
           context.fillStyle = series.colour; context.fillRect(x, y, barWidth, segmentHeight);
           const label = percent(ratio);
-          if (ratio >= .08 && drawInsideBarLabel(context, label, x, y, barWidth, segmentHeight, '#FFFFFF', 16)) {}
-          else if (ratio >= .005) drawOutsideBarLabel(context, label, x + barWidth + 5, Math.max(top, y - 7), series.colour);
+          drawConfiguredBarLabel(context, label, x, y, barWidth, segmentHeight, series.colour, 16, payload.label_position, 'vertical', () => {
+            if (ratio >= .08 && drawInsideBarLabel(context, label, x, y, barWidth, segmentHeight, '#FFFFFF', 16)) {}
+            else if (ratio >= .005) drawOutsideBarLabel(context, label, x + barWidth + 5, Math.max(top, y - 7), series.colour);
+          });
           if (segmentHeight > 0) pushRectangleHit(state, transform, {x, y, width: barWidth, height: segmentHeight}, {label: category, series: series.name, value: tooltipPercent(ratio)});
           running += segmentHeight;
         });
@@ -425,8 +451,10 @@
           const ratio = Number(ratios[seriesIndex] || 0), segmentHeight = ratio * rowHeight, y = paneBottom - running - segmentHeight;
           context.fillStyle = series.colour; context.fillRect(x, y, barWidth, segmentHeight);
           const label = percent(ratio);
-          if (ratio >= .08 && drawInsideBarLabel(context, label, x, y, barWidth, segmentHeight, '#FFFFFF', 17)) {}
-          else if (ratio >= .005) drawOutsideBarLabel(context, label, x + barWidth + 5, Math.max(paneTop, y - 7), series.colour);
+          drawConfiguredBarLabel(context, label, x, y, barWidth, segmentHeight, series.colour, 17, payload.label_position, 'vertical', () => {
+            if (ratio >= .08 && drawInsideBarLabel(context, label, x, y, barWidth, segmentHeight, '#FFFFFF', 17)) {}
+            else if (ratio >= .005) drawOutsideBarLabel(context, label, x + barWidth + 5, Math.max(paneTop, y - 7), series.colour);
+          });
           if (segmentHeight > 0) pushRectangleHit(state, transform, {x, y, width: barWidth, height: segmentHeight}, {label: displayKey([...rowKey, ...columnKey]), series: series.name, value: tooltipPercent(ratio)});
           running += segmentHeight;
         });
@@ -464,7 +492,7 @@
         context.fillStyle = '#263B4A'; context.textAlign = 'left'; font(context, 17, true); context.fillText(displayKey(row.key).slice(0, 42), rowOrigin, y + 4);
         states.forEach((series, seriesIndex) => {
           const value = Number(row.values?.[seriesIndex] || 0), width = maximumBarWidth * value / Math.max(payload.maximum, 1);
-          if (width) { context.fillStyle = series.colour; context.fillRect(x, y, width, 25); drawInsideBarLabel(context, String(value), x, y, width, 25, '#FFFFFF', 16); pushRectangleHit(state, transform, {x, y, width, height: 25}, {label: displayKey(row.key), series: series.name, value: String(value)}); }
+          if (width) { context.fillStyle = series.colour; context.fillRect(x, y, width, 25); drawConfiguredBarLabel(context, String(value), x, y, width, 25, series.colour, 16, payload.label_position, 'horizontal', () => drawInsideBarLabel(context, String(value), x, y, width, 25, '#FFFFFF', 16)); pushRectangleHit(state, transform, {x, y, width, height: 25}, {label: displayKey(row.key), series: series.name, value: String(value)}); }
           x += width;
         });
       });
@@ -518,7 +546,7 @@
       columnKeys.forEach((columnKey, columnIndex) => {
         const values = payload.cells[rowIndex]?.[columnIndex] || [], cellLeft = chartLeft + columnIndex * columnWidth, available = Math.max(columnWidth - 10, 1); let x = cellLeft + 4;
         const barHeight = Math.max(12, Math.min(22, rowHeight * .84)), y = rowTop + (rowHeight - barHeight) / 2, outside = [];
-        states.forEach((series, seriesIndex) => { const value = Number(values[seriesIndex] || 0), segmentWidth = available * value / Math.max(payload.maximum, 1); if (segmentWidth) { context.fillStyle = series.colour; context.fillRect(x, y, segmentWidth, barHeight); if (!drawInsideBarLabel(context, String(value), x, y, segmentWidth, barHeight, '#FFFFFF', 12)) outside.push(String(value)); pushRectangleHit(state, transform, {x, y, width: segmentWidth, height: barHeight}, {label: displayKey([...rowKey, ...columnKey]), series: series.name, value: String(value)}); } x += segmentWidth; });
+        states.forEach((series, seriesIndex) => { const value = Number(values[seriesIndex] || 0), segmentWidth = available * value / Math.max(payload.maximum, 1); if (segmentWidth) { context.fillStyle = series.colour; context.fillRect(x, y, segmentWidth, barHeight); drawConfiguredBarLabel(context, String(value), x, y, segmentWidth, barHeight, series.colour, 12, payload.label_position, 'horizontal', () => { if (!drawInsideBarLabel(context, String(value), x, y, segmentWidth, barHeight, '#FFFFFF', 12)) outside.push(String(value)); }); pushRectangleHit(state, transform, {x, y, width: segmentWidth, height: barHeight}, {label: displayKey([...rowKey, ...columnKey]), series: series.name, value: String(value)}); } x += segmentWidth; });
         if (outside.length) { context.fillStyle = '#34495A'; context.textAlign = 'left'; context.textBaseline = 'top'; font(context, 12, true); context.fillText(outside.join(' / '), x + 3, y + 1); }
       });
     });
@@ -539,10 +567,12 @@
         context.fillStyle = bucket.colour; context.fillRect(x, y, barWidth, segmentHeight);
         const label = percent(ratio); font(context, 18, true);
         const labelWidth = textWidth(context, label);
-        if (labelWidth + 12 <= barWidth && segmentHeight >= 28) {
-          context.fillStyle = '#FFFFFF'; context.textAlign = 'center'; context.textBaseline = 'middle';
-          context.fillText(label, x + barWidth / 2, y + segmentHeight / 2); context.textBaseline = 'top';
-        }
+        drawConfiguredBarLabel(context, label, x, y, barWidth, segmentHeight, bucket.colour, 18, payload.label_position, 'vertical', () => {
+          if (labelWidth + 12 <= barWidth && segmentHeight >= 28) {
+            context.fillStyle = '#FFFFFF'; context.textAlign = 'center'; context.textBaseline = 'middle';
+            context.fillText(label, x + barWidth / 2, y + segmentHeight / 2); context.textBaseline = 'top';
+          }
+        });
         if (segmentHeight > 0) pushRectangleHit(state, transform, {x, y, width: barWidth, height: segmentHeight}, {label: displayKey(key), series: bucket.name, value: tooltipPercent(ratio)});
         running += segmentHeight;
       });
@@ -558,11 +588,13 @@
 
   function drawCdf(context, payload, state, transform) {
     const plot = cdfGeometry(payload.legend), xLow = Number(payload.domain?.x?.[0] ?? 0), xHigh = Number(payload.domain?.x?.[1] ?? 1);
+    const yLow = Number(payload.domain?.y?.[0] ?? 0), yHigh = Number(payload.domain?.y?.[1] ?? 1);
+    context.save(); context.beginPath(); context.rect(plot.left, plot.top, plot.width, plot.height); context.clip();
     (payload.series || []).forEach(series => {
       const points = [];
       (series.x || []).forEach((value, index) => {
         const cumulative = Number(series.y?.[index]); if (!finite(value) || !finite(cumulative)) return;
-        points.push({x: plot.left + (Number(value) - xLow) / (xHigh - xLow || 1) * plot.width, y: plot.top + plot.height - cumulative * plot.height, value: Number(value), cumulative});
+        points.push({x: plot.left + (Number(value) - xLow) / (xHigh - xLow || 1) * plot.width, y: plot.top + plot.height - (cumulative - yLow) / (yHigh - yLow || 1) * plot.height, value: Number(value), cumulative});
       });
       if (points.length) {
         context.strokeStyle = series.colour; context.lineWidth = Number(series.width || 1); context.beginPath();
@@ -570,9 +602,11 @@
         pushLineHit(state, transform, points, {label: payload.metric, series: series.name || series.legend_name});
       }
     });
-    for (let tick = 0; tick <= 100; tick += 25) {
-      const y = plot.top + plot.height - tick / 100 * plot.height; line(context, plot.left, y, plot.left + plot.width, y, '#E4E9ED');
-      context.fillStyle = '#4E6271'; context.textAlign = 'right'; font(context, 18, true); context.fillText(`${tick}%`, plot.left - 14, y - 10);
+    context.restore();
+    for (let tick = 0; tick <= 4; tick += 1) {
+      const cumulative = yLow + (yHigh - yLow) * tick / 4;
+      const y = plot.top + plot.height - tick / 4 * plot.height; line(context, plot.left, y, plot.left + plot.width, y, '#E4E9ED');
+      context.fillStyle = '#4E6271'; context.textAlign = 'right'; font(context, 18, true); context.fillText(`${(cumulative * 100).toFixed(0)}%`, plot.left - 14, y - 10);
     }
     for (let tick = 0; tick <= 5; tick += 1) {
       const value = xLow + (xHigh - xLow) * tick / 5, x = plot.left + plot.width * tick / 5;
@@ -633,7 +667,7 @@
           const width = Math.max(14, Math.min(columnWidth * .68, 110)), x = cellLeft + (columnWidth - width) / 2, y = bottom - 10 - height;
           const colour = payload.cell_colours?.[rowIndex]?.[columnIndex] || '#4E79A7';
           context.fillStyle = colour; context.fillRect(x, y, width, height); const label = value.toFixed(2);
-          if (!(height >= 32 && drawInsideBarLabel(context, label, x, y, width, height, '#FFFFFF', 15))) { context.fillStyle = colour; context.textAlign = 'center'; font(context, 14, true); context.fillText(label, x + width / 2, Math.max(top + 2, y - 18)); }
+          drawConfiguredBarLabel(context, label, x, y, width, height, colour, 15, payload.label_position, 'vertical', () => { if (!(height >= 32 && drawInsideBarLabel(context, label, x, y, width, height, '#FFFFFF', 15))) { context.fillStyle = colour; context.textAlign = 'center'; font(context, 14, true); context.fillText(label, x + width / 2, Math.max(top + 2, y - 18)); } });
           pushRectangleHit(state, transform, {x, y, width, height}, {label: displayKey([...rowKey, ...columnKey]), series: payload.aggregation || 'mean', value: label});
           if (rowIndex === rowKeys.length - 1) { context.fillStyle = '#4E6271'; context.textAlign = 'center'; font(context, 22, true); context.fillText(fittedText(context, String(columnKey.at(-1) || ''), columnWidth - 8), cellLeft + columnWidth / 2, bottom + 3); }
         });
@@ -650,9 +684,11 @@
       const height = (baseline - top) * Number(bar.value) / Math.max(Number(payload.maximum), 1), x = left + (index + .5) * width / bars.length - barWidth / 2, y = baseline - height;
       context.fillStyle = bar.colour; context.fillRect(x, y, barWidth, height);
       const label = Number(bar.value).toFixed(2); font(context, 20, true);
-      if (height >= 42 && drawInsideBarLabel(context, label, x, y, barWidth, height, '#FFFFFF', 20)) {} else {
-        context.fillStyle = bar.colour; context.textAlign = 'center'; context.fillText(label, x + barWidth / 2, y - 25);
-      }
+      drawConfiguredBarLabel(context, label, x, y, barWidth, height, bar.colour, 20, payload.label_position, 'vertical', () => {
+        if (height >= 42 && drawInsideBarLabel(context, label, x, y, barWidth, height, '#FFFFFF', 20)) {} else {
+          context.fillStyle = bar.colour; context.textAlign = 'center'; context.fillText(label, x + barWidth / 2, y - 25);
+        }
+      });
       pushRectangleHit(state, transform, {x, y, width: barWidth, height}, {label: displayKey(bar.key), series: bar.legend, value: Number(bar.value).toFixed(2)});
     });
     drawTopColumnSeparators(context, keys, payload.axis_columns || [], left, width, top, baseline);

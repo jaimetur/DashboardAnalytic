@@ -16,7 +16,7 @@ from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _draw_chart_legend, _draw_inside_bar_label, _draw_top_column_group_separators, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_caption_spans, _hierarchy_group_colours, _hierarchy_spans, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_map, _render_mean_column, _render_stacked_distribution, _render_status_100, _render_table, _resolved_legend_items, _series_colours, _status_chart_categories, assign_cdr_vendors, catalog_chart_hover_targets, catalog_chart_payload, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, load_catalog_csv, normalise_operator_aliases, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_kpi_expression, parse_legend_position, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _draw_chart_legend, _draw_inside_bar_label, _draw_top_column_group_separators, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_caption_spans, _hierarchy_group_colours, _hierarchy_spans, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_map, _render_mean_column, _render_stacked_distribution, _render_status_100, _render_table, _resolved_legend_items, _series_colours, _status_chart_categories, assign_cdr_vendors, catalog_chart_hover_targets, catalog_chart_payload, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, load_catalog_csv, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_kpi_expression, parse_label_position, parse_legend_position, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
 
 
 def test_kpi_expression_supports_explicit_aggregation_aliases() -> None:
@@ -567,6 +567,67 @@ def test_catalogue_parses_legend_position_and_accepts_prior_schema() -> None:
     assert parse_catalog_csv(previous, 'nsa')[0].legend_position == ''
     two_columns = ','.join(CATALOG_HEADERS) + '\n8,Quality,,Title and 2 columns + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,\n'
     assert parse_catalog_csv(two_columns, 'nsa')[0].legend_position == ''
+
+
+def test_catalogue_cdf_axis_ranges_are_optional_and_backward_compatible() -> None:
+    rangeless = (
+        'Slide,Slide Tittle,Slide Subtittle,Layout,Chart Tittle,CDR source,KPI,Chart type,Filters,Rows Aggregation,Column Aggregation,Legend,Legend Position\n'
+        '8,Quality,,Title and 1 column + Comments,Quality,CDR-Speech,LQ,CDF Line,,Operator,,,Top\n'
+    )
+    legacy_entry = parse_catalog_csv(rangeless, 'nsa')[0]
+    assert legacy_entry.axis_x_range == ''
+    assert legacy_entry.axis_y_range == ''
+
+    current = (
+        ','.join(CATALOG_HEADERS)
+        + '\n8,Quality,,Title and 1 column + Comments,Quality,CDR-Speech,LQ,CDF Line,,Operator,,,Top,,"[0.01,]","[75,100]"\n'
+    )
+    entry = parse_catalog_csv(current, 'nsa')[0]
+    assert parse_axis_range(entry.axis_x_range, 'x') == (0.01, None)
+    assert parse_axis_range(entry.axis_y_range, 'y') == (75.0, 100.0)
+    assert b'Label,Axis X Range,Axis Y Range' in catalogue_csv([entry])
+
+
+def test_catalogue_bar_label_position_is_validated_and_serialised() -> None:
+    assert parse_label_position('Middle') == 'middle'
+    with pytest.raises(ValueError, match='Label'):
+        parse_label_position('Centre')
+    content = (
+        ','.join(CATALOG_HEADERS)
+        + '\n8,Failures,,Title and 1 column + Comments,Failures,CDR-Voice,Call_Status,Count Stacked Horizontal Bars,,Operator,,,Top,Down,,\n'
+    )
+    entry = parse_catalog_csv(content, 'nsa')[0]
+    assert entry.label_position == 'down'
+    assert b',Down,,' in catalogue_csv([entry])
+
+
+def test_chart_payload_applies_cdf_ranges_and_bar_label_override() -> None:
+    frame = pd.DataFrame({'Operator': ['A'] * 4, 'Metric': [0.0, 1.0, 2.0, 3.0]})
+    base = dict(
+        slide=1, slide_title='Chart', slide_subtitle='', layout='Layout', chart_title='Chart',
+        cdr_source='CDR-Data', kpi='Metric', legend='', filters='',
+        grouping_rows='Operator', grouping_columns='',
+    )
+    cdf = catalog_chart_payload(
+        frame,
+        CatalogEntry(chart_type='CDF Line', axis_x_range='[0.01,]', axis_y_range='[50,100]', **base),
+        prefiltered=True,
+    )
+    bars = catalog_chart_payload(
+        frame,
+        CatalogEntry(chart_type='Average Vertical Bars', label_position='down', **base),
+        prefiltered=True,
+    )
+
+    assert cdf['domain'] == {'x': [0.01, 3.0], 'y': [0.5, 1.0]}
+    assert cdf['series'][0]['x'][0] == 0.01
+    assert bars['label_position'] == 'down'
+
+
+@pytest.mark.parametrize('value', ['0,1', '[,]', '[2,1]', '[nan,3]'])
+def test_catalogue_rejects_invalid_axis_ranges(value: str) -> None:
+    with pytest.raises(ValueError, match='Axis X Range'):
+        parse_axis_range(value, 'x')
 
 
 def test_legend_parser_supports_manual_captions_and_dimension_selection() -> None:
@@ -3002,8 +3063,8 @@ def test_chart_preview_focus_row_matches_the_editors_sorted_row(client) -> None:
     client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
     content = (
         ','.join(CATALOG_HEADERS)
-        + '\n2,Second slide,,Title and 1 column + Comments,Second chart,CDR-Data,Mean_Data_Rate,Average Vertical Bars,,Operator,,,,Top'
-        + '\n1,First slide,,Title and 1 column + Comments,First chart,CDR-Data,Mean_Data_Rate,Average Vertical Bars,,Operator,,,,Top\n'
+        + '\n2,Second slide,,Title and 1 column + Comments,Second chart,CDR-Data,Mean_Data_Rate,Average Vertical Bars,,Operator,,,,,'
+        + '\n1,First slide,,Title and 1 column + Comments,First chart,CDR-Data,Mean_Data_Rate,Average Vertical Bars,,Operator,,,,,\n'
     ).encode()
     imported = client.post(
         '/admin/report-templates/nsa', data={'catalogue_name': 'Out of order'},

@@ -2146,7 +2146,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   const catalogueHeaders = Array.from(table.querySelectorAll('thead th[data-catalogue-field]'))
     .map((cell) => cell.dataset.catalogueField);
   const fieldColumns = new Set(['Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend']);
-  const assistedFields = new Set(['Layout', 'CDR source', 'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position']);
+  const assistedFields = new Set(['Layout', 'CDR source', 'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position', 'Label', 'Axis X Range', 'Axis Y Range']);
   const groupingColumns = new Set(['Rows Aggregation', 'Column Aggregation']);
   const validationAlert = document.querySelector('[data-catalogue-validation-alert]');
   const validationMessage = validationAlert?.querySelector('[data-catalogue-validation-message]');
@@ -2234,6 +2234,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (field === 'Layout') return suggestions.layouts || [];
     if (field === 'Chart type') return suggestions.chart_types || [];
     if (field === 'Legend Position') return suggestions.legend_positions || [];
+    if (field === 'Label') return suggestions.label_positions || [];
     if (field === 'CDR source') return Object.keys(suggestions.columns || {}).map((source) => source.replace(/^cdr-/, 'CDR-').replace(/(^|-)\w/g, (letter) => letter.toUpperCase()));
     if (fieldColumns.has(field) || field === 'KPI') {
       const row = cell.closest('tr');
@@ -2249,6 +2250,9 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (field === 'KPI') return 'Choose a processed field and, optionally, an explicit aggregation. COUNT counts non-empty rows; COUNTD counts distinct values.';
     if (field === 'Legend') return 'Select one or more CDR fields to use as the displayed legend labels. Values are stored as a comma-separated list.';
     if (field === 'Legend Position') return 'Leave this empty when the chart has no legend, or choose where the legend is drawn.';
+    if (field === 'Label') return 'Override bar value labels: None hides them; Top places them outside; Up, Middle and Down place them inside the bar. Leave empty to retain automatic placement.';
+    if (field === 'Axis X Range') return 'Optional CDF range in KPI units: [min,max], [min,] or [,max]. Leave empty to keep automatic limits.';
+    if (field === 'Axis Y Range') return 'Optional CDF cumulative percentage range from 0 to 100: [min,max], [min,] or [,max]. Leave empty to keep 0–100%.';
     if (field === 'Filters') return 'Build complete conditions from a processed CDR field, operator and real observed value. Conditions are joined with semicolons (AND), and the cell remains manually editable.';
     if (field === 'Rows Aggregation') return 'Select one or more dimensions for the chart category axis or table rows. They are appended with ×.';
     if (field === 'Column Aggregation') return 'Select one or more dimensions for comparison series or table columns. They are appended with ×.';
@@ -2476,7 +2480,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
         ...values.filter((value) => !hasExistingValue(value)),
       ];
       orderedValues.forEach((value) => options.add(new Option(
-        field === 'Legend Position' && !value ? 'No legend position' : value,
+        field === 'Legend Position' && !value ? 'No legend position' : (field === 'Label' && !value ? 'Automatic' : value),
         value, false, hasExistingValue(value),
       )));
       // Explicitly assign the matching value as well as marking its option.
@@ -2792,6 +2796,8 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     chart_type: rowValue(row, 'Chart type'), chart_title: rowValue(row, 'Chart Tittle'), cdr_source: rowValue(row, 'CDR source'),
     kpi: rowValue(row, 'KPI'), filters: rowValue(row, 'Filters'), grouping_rows: rowValue(row, 'Rows Aggregation'),
     grouping_columns: rowValue(row, 'Column Aggregation'), legend: rowValue(row, 'Legend'), legend_position: rowValue(row, 'Legend Position'),
+    axis_x_range: rowValue(row, 'Axis X Range'), axis_y_range: rowValue(row, 'Axis Y Range'),
+    label_position: rowValue(row, 'Label'),
   });
   const renderChartPreviewSandbox = (row, definition = null) => {
     if (!chartPreviewSandbox || !chartPreviewFields) return;
@@ -2806,12 +2812,15 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       fields: [
         ['chart_type', 'Chart Type'], ['chart_title', 'Chart Tittle'], ['cdr_source', 'CDR Source'], ['kpi', 'KPI'], ['filters', 'Filters'],
         ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
+        ['axis_x_range', 'Axis X Range'], ['axis_y_range', 'Axis Y Range'],
+        ['label_position', 'Label'],
       ],
       textFields: {chart_title: true},
       // Keep these option sets identical to the persisted Chart Viewer.
       chartTypes: ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Multi KPI CDF Lines', 'Scatter', 'Table', 'Dynamic Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'],
       cdrSources: ['CDR-Data', 'CDR-Voice', 'CDR-Speech'],
       legendPositions: ['', 'Top', 'Bottom', 'Left', 'Right'],
+      labelPositions: ['', 'None', 'Top', 'Up', 'Middle', 'Down'],
       onChange: regenerate,
       onSourceChange: (next) => {
         renderChartPreviewSandbox(row, next);
@@ -2873,7 +2882,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       {title: 'Update Template?', confirmLabel: 'Update Template', tone: 'warning'},
     );
     if (!accepted) return;
-    const mapping = {chart_title: 'Chart Tittle', chart_type: 'Chart type', cdr_source: 'CDR source', kpi: 'KPI', filters: 'Filters', grouping_rows: 'Rows Aggregation', grouping_columns: 'Column Aggregation', legend: 'Legend', legend_position: 'Legend Position'};
+    const mapping = {chart_title: 'Chart Tittle', chart_type: 'Chart type', cdr_source: 'CDR source', kpi: 'KPI', filters: 'Filters', grouping_rows: 'Rows Aggregation', grouping_columns: 'Column Aggregation', legend: 'Legend', legend_position: 'Legend Position', label_position: 'Label', axis_x_range: 'Axis X Range', axis_y_range: 'Axis Y Range'};
     Object.entries(previewDefinition()).forEach(([key, value]) => {
       const cell = Array.from(chartPreviewRow.querySelectorAll('[data-catalogue-field]')).find((item) => item.dataset.catalogueField === mapping[key]);
       if (!cell) return;
@@ -3269,12 +3278,12 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (!activeCell) return;
     const field = activeCell.dataset.catalogueField || '';
     const selected = Array.from(options.selectedOptions).map((option) => option.value);
-    if (!selected.length || (field !== 'Legend Position' && !selected.some(Boolean))) return;
+    if (!selected.length || (!['Legend Position', 'Label'].includes(field) && !selected.some(Boolean))) return;
     const current = activeCell.textContent.trim();
     if (field === 'KPI') {
       const operation = kpiAggregation?.value || '';
       activeCell.textContent = operation ? `${operation}(${selected[0]})` : selected[0];
-    } else if (field === 'Layout' || field === 'CDR source' || field === 'Legend Position') {
+    } else if (field === 'Layout' || field === 'CDR source' || field === 'Legend Position' || field === 'Label') {
       activeCell.textContent = selected[0];
     } else if (field === 'Chart type') {
       activeCell.textContent = displayChartType(selected[0]);
@@ -3488,7 +3497,7 @@ document.querySelectorAll('[data-catalogue-import-form]').forEach((form) => {
   try { templateLibrary = JSON.parse(form.dataset.catalogueTemplateLibrary || '{}'); } catch (_error) { templateLibrary = {}; }
   const currentHeaders = [
     'Slide', 'Slide Tittle', 'Slide Subtittle', 'Layout', 'Chart Tittle', 'CDR source',
-    'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position',
+    'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position', 'Label', 'Axis X Range', 'Axis Y Range',
   ];
   const normalizedHeader = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
   const hasCurrentSchema = async (selected) => {
@@ -4937,6 +4946,8 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
   const fields = options.fields || [
     ['chart_type', 'Chart Type'], ['cdr_source', 'CDR Source'], ['kpi', 'KPI'], ['filters', 'Filters'],
     ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
+    ['axis_x_range', 'Axis X Range'], ['axis_y_range', 'Axis Y Range'],
+    ['label_position', 'Label'],
   ];
   const multiFields = new Set(['dataset_ids', 'grouping_rows', 'grouping_columns', 'legend']);
   const parseKpiDefinition = (value) => {
@@ -5063,7 +5074,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
   });
   fieldsElement.replaceChildren(...fields.map(([key, label]) => {
     const field = document.createElement('label'); field.dataset.previewField = key; field.textContent = label;
-    if (options.textFields?.[key]) {
+    if (options.textFields?.[key] || key === 'axis_x_range' || key === 'axis_y_range') {
       const control = document.createElement('input');
       control.type = 'text'; control.name = key; control.value = definition[key] || ''; control.setAttribute('aria-label', label);
       field.append(control); return field;
@@ -5108,6 +5119,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
       (options.datasetsBySource?.[sourceKey(definition.cdr_source)] || []).forEach((dataset) => control.add(new Option(dataset.label, String(dataset.value), false, selected.has(String(dataset.value)))));
     }
     else if (key === 'legend_position') (options.legendPositions || ['', 'Top', 'Bottom', 'Left', 'Right']).forEach((value) => control.add(new Option(value || 'No legend position', value, false, normalisePreviewValue(value) === normalisePreviewValue(definition[key]))));
+    else if (key === 'label_position') (options.labelPositions || ['', 'None', 'Top', 'Up', 'Middle', 'Down']).forEach((value) => control.add(new Option(value || 'Automatic', value, false, normalisePreviewValue(value) === normalisePreviewValue(definition[key]))));
     else {
       const available = columnsFor(definition.cdr_source);
       const definitionValue = key === 'kpi' ? kpiDefinition.field : definition[key];
