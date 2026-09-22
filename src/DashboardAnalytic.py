@@ -7530,7 +7530,17 @@ def start_transfer_job(
     }
     with TRANSFER_LOCK:
         TRANSFER_JOBS[job_id] = job
-    submit_background_task(_run_transfer_job, job_id)
+    # A server-to-server transfer is initiated by a foreground user action.
+    # Keep its offer, archive stream and remote status polling out of the
+    # shared background queue, whose workers may be occupied by CDR work.
+    # The dedicated thread still lets the HTTP response return promptly while
+    # the destination super-admin reviews the offer.
+    Thread(
+        target=_run_transfer_job,
+        args=(job_id,),
+        name=f'server-transfer-{job_id[:8]}',
+        daemon=True,
+    ).start()
     return job
 
 
