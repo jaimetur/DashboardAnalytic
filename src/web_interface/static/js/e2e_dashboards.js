@@ -2132,6 +2132,7 @@
   let expandedChartFilterIndex = -1;
   let expandedChartFilterContextPath = '';
   let expandedChartFilterLoadRequest = 0;
+  let expandedChartAppliedDefinition = null;
   const expandedTemplateUpdate = node('button', 'Update Template', 'danger-button');
   expandedTemplateUpdate.id = 'ds-chart-filter-update';
   expandedTemplateUpdate.hidden = true;
@@ -2150,7 +2151,7 @@
         setExpandedChartFiltersOpen(false);
         $('ds-chart-filter-toggle').focus();
       }
-    }, 5000);
+    }, 10000);
   };
   $('ds-chart-filter-panel').addEventListener('pointerenter', () => clearTimeout(expandedFiltersCloseTimer));
   $('ds-chart-filter-panel').addEventListener('pointerleave', scheduleExpandedChartFiltersClose);
@@ -2180,7 +2181,7 @@
         ['kpi', 'KPI'], ['filters', 'Filters'], ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'],
         ['legend', 'Legend'], ['legend_position', 'Legend Position'],
         ['axis_x_range', 'Axis X Range'], ['axis_y_range', 'Axis Y Range'],
-        ['label_position', 'Label'], ['exclude_null_empty', 'Exclude Null/Empty'], ['exclude_zero', 'Exclude Zero'],
+        ['label_position', 'Label Position'], ['label_format', 'Label Format'], ['exclude_null_empty', 'Exclude Null/Empty'], ['exclude_zero', 'Exclude Zero'],
       ],
       textFields: {chart_title: true}, editableGroupingInputs: true,
       chartTypes: ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Multi KPI CDF Lines', 'Scatter', 'Table', 'Dynamic Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'],
@@ -2193,6 +2194,23 @@
       },
     });
   };
+  const labelFormatPayload = value => {
+    let tokens = [];
+    try { tokens = JSON.parse(String(value || '') || '[]'); } catch (_error) { tokens = []; }
+    if (!Array.isArray(tokens)) tokens = [];
+    const fonts = ['Arial', 'Helvetica', 'Verdana', 'Tahoma', 'Georgia', 'Times New Roman', 'Courier New'];
+    const size = tokens.find((token) => ['Small', 'Medium', 'Large'].includes(token));
+    return {
+      color: tokens.find((token) => /^#[0-9a-f]{6}$/i.test(token)) || '',
+      font: tokens.find((token) => fonts.includes(token)) || 'Arial',
+      bold: tokens.includes('Bold'), italic: tokens.includes('Italic'), underline: tokens.includes('Underline'),
+      size: size || 'Medium', has_size: Boolean(size),
+    };
+  };
+  const isVisualFormatOnlyChange = definition => (
+    Boolean(expandedChartAppliedDefinition)
+    && Object.keys(definition).every((key) => key === 'label_format' || definition[key] === expandedChartAppliedDefinition[key])
+  );
   const loadExpandedChartFilters = async () => {
     const fields = $('ds-chart-filter-fields');
     if ((!prepared?.token && expandedChartMode !== 'ppt') || !expandedChart) return;
@@ -2207,6 +2225,7 @@
     expandedChartFilterToken = String(context.token || prepared?.token || '');
     expandedChartFilterIndex = Number.isInteger(context.chart_index) ? context.chart_index : chart.index;
     expandedChartFilterControls = createExpandedChartFilterControls(context);
+    expandedChartAppliedDefinition = expandedChartFilterControls.definition();
     expandedTemplateUpdate.hidden = !context.template_available;
   };
   $('ds-chart-filter-toggle').onclick = safe(async () => {
@@ -2220,6 +2239,7 @@
     expandedChartFilterToken = '';
     expandedChartFilterIndex = -1;
     expandedChartFilterContextPath = '';
+    expandedChartAppliedDefinition = null;
     $('ds-chart-filter-fields').replaceChildren();
     expandedTemplateUpdate.hidden = true;
     setExpandedChartFiltersOpen(false);
@@ -2243,10 +2263,18 @@
         expandedChartFilterIndex = Number(preparedContext.chart_index);
       }
       if (!expandedChartFilterToken) throw new Error('The chart dataset could not be restored.');
-      let payload = await api(`/chart/${encodeURIComponent(expandedChartFilterToken)}/${expandedChartFilterIndex}/filter-preview?background=true`, 'POST', previewDefinition);
-      while (payload?.state === 'processing' && payload.job_id) {
-        await new Promise(resolve => window.setTimeout(resolve, 400));
-        payload = await api(`/chart-preview-jobs/${encodeURIComponent(payload.job_id)}`);
+      let payload;
+      if (isVisualFormatOnlyChange(previewDefinition)) {
+        // Typography changes only affect Canvas paint. Reuse the existing
+        // data model instead of rebuilding and filtering CDR records.
+        payload = JSON.parse(JSON.stringify(await loadChartPayload(chart)));
+        payload.label_format = labelFormatPayload(previewDefinition.label_format);
+      } else {
+        payload = await api(`/chart/${encodeURIComponent(expandedChartFilterToken)}/${expandedChartFilterIndex}/filter-preview?background=true`, 'POST', previewDefinition);
+        while (payload?.state === 'processing' && payload.job_id) {
+          await new Promise(resolve => window.setTimeout(resolve, 400));
+          payload = await api(`/chart-preview-jobs/${encodeURIComponent(payload.job_id)}`);
+        }
       }
       if (chart !== expandedChart) return null;
       setExpandedChartHeader({...chart, chart_type: previewDefinition.chart_type, cdr_source: previewDefinition.cdr_source}, payload.title);
@@ -2262,6 +2290,7 @@
       chart.title = payload.title || previewDefinition.chart_title || chart.title;
       chart.chart_type = previewDefinition.chart_type || chart.chart_type;
       chart.cdr_source = previewDefinition.cdr_source || chart.cdr_source;
+      expandedChartAppliedDefinition = {...previewDefinition};
       if (expandedChartSlide(chart) === prepared?.slides[slideIndex]) renderSlide();
       if (closePanel) setExpandedChartFiltersOpen(false);
       return {previewDefinition, payload};
@@ -2285,7 +2314,6 @@
       expandedTemplateUpdate.textContent = 'Updating…';
       const updated = await api(`/chart/${encodeURIComponent(expandedChartFilterToken)}/${expandedChartFilterIndex}/update-template`, 'POST', rendered.previewDefinition);
       refreshEmbeddedTemplateEditor(updated, expandedChart?.focus_row);
-      setExpandedChartFiltersOpen(false);
       window.showInfoDialog('The current Chart Definition values were saved to the Report Template.', {title: 'Template updated'});
     } finally {
       expandedTemplateUpdate.disabled = false;
@@ -2299,7 +2327,7 @@
     button.disabled = true;
     button.textContent = 'Applying…';
     try {
-      await renderExpandedChartDefinition();
+      await renderExpandedChartDefinition({closePanel: false});
     } finally {
       button.disabled = false;
       button.textContent = 'Apply';
@@ -2533,6 +2561,7 @@
     expandedChartFilterToken = '';
     expandedChartFilterIndex = -1;
     expandedChartFilterContextPath = '';
+    expandedChartAppliedDefinition = null;
     $('ds-chart-filter-fields').replaceChildren();
     expandedTemplateUpdate.hidden = true;
     setExpandedChartFiltersOpen(false);

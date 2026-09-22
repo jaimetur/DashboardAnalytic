@@ -69,7 +69,8 @@ def test_template_visual_controls_are_available_for_every_chart_type():
     assert 'const syncConditionalVisualCells = (row, {clear = true} = {}) =>' in app_script
     assert "'Axis X Range': true" in app_script
     assert "'Axis Y Range': true" in app_script
-    assert "Label: true" in app_script
+    assert "'Label Position': true" in app_script
+    assert "'Label Format': true" in app_script
     assert "cell.contentEditable = enabled ? 'true' : 'false';" in app_script
     assert "if (!enabled && clear && cell.textContent.trim()) cell.textContent = '';" in app_script
     assert 'const syncConditionalVisualControls = () =>' in app_script
@@ -78,7 +79,8 @@ def test_template_visual_controls_are_available_for_every_chart_type():
     assert "label_position: true" in app_script
     assert "if (control.name === 'chart_type') syncConditionalVisualControls();" in app_script
     assert "['axis_x_range', 'Axis X Range']" in reporting_template
-    assert "['label_position', 'Label']" in reporting_template
+    assert "['label_position', 'Label Position']" in reporting_template
+    assert "['label_format', 'Label Format']" in reporting_template
     assert "['exclude_null_empty', 'Exclude Null/Empty']" in app_script
     assert "['exclude_zero', 'Exclude Zero']" in app_script
     assert 'function drawConfiguredPointLabel(' in chart_script

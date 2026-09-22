@@ -31,7 +31,7 @@ from typing import Callable, Iterable, Mapping
 import pandas as pd
 from src.modules.column_names import MAIN_CDR_FIELDS, column_identity, compact_campaign_value, resolve_column_name, vendor_only_value
 import certifi
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageColor, ImageDraw, ImageFont
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE_TYPE
@@ -47,14 +47,16 @@ TEMPLATE_NAMES = {
     "nsa": "Template_CDR_analysis.pptx",
     "sa": "Template_CDR_analysis.pptx",
 }
-CDR_REPORT_VERSION = "2026-09-21-v12"
+CDR_REPORT_VERSION = "2026-09-22-v14"
 REPORTING_KINDS = {"data", "voice", "speech"}
 COMMENT_HINTS = ("having ", "observed", "shows ", "similar performance", "worse ", "improvement", "degradation", "gap ")
-VISUAL_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position", "Label", "Axis X Range", "Axis Y Range")
+VISUAL_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position", "Label Position", "Label Format", "Axis X Range", "Axis Y Range")
 CATALOG_HEADERS = (*VISUAL_CATALOG_HEADERS, "Exclude Null/Empty", "Exclude Zero")
 # Templates created before configurable visual settings remain valid and
 # acquire empty Label/axis cells the next time they are saved in the editor.
 RANGELESS_CATALOG_HEADERS = CATALOG_HEADERS[:13]
+PRE_LABEL_COLOR_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position", "Label", "Axis X Range", "Axis Y Range", "Exclude Null/Empty", "Exclude Zero")
+PRE_LABEL_FORMAT_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position", "Label", "Label Color", "Axis X Range", "Axis Y Range", "Exclude Null/Empty", "Exclude Zero")
 # Import the two immediately preceding schemas too, so existing templates remain
 # usable after the aggregation columns were renamed and the legend was repositioned.
 PREVIOUS_CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Legend", "Filters", "Grouping_Rows", "Grouping_Columns", "Legend Position")
@@ -89,6 +91,10 @@ OSM_TLS_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 REPORT_CHART_RENDERER_ENV = "DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER"
 _DASHBOARD_CANVAS_RENDERER = None
 _DASHBOARD_CANVAS_RENDERER_LOCK = threading.RLock()
+# The browser worker keeps a copy of dashboard_charts.js in memory. Bump this
+# whenever rendering semantics change so a live server does not keep painting
+# previews with an older script after a hot reload.
+DASHBOARD_CANVAS_RENDERER_VERSION = 4
 
 
 def _node_executable() -> str:
@@ -117,6 +123,7 @@ class _DashboardCanvasRenderer:
             self.close()
             raise RuntimeError(ready.get("error") or "Unable to start the Dashboard Canvas renderer.")
         self.request_id = 0
+        self.renderer_version = DASHBOARD_CANVAS_RENDERER_VERSION
 
     def render(
         self, payload: dict[str, object], *, width: int = 1600, height: int = 900,
@@ -153,7 +160,13 @@ def _render_dashboard_payload(
 ) -> tuple[bytes, list[dict[str, object]]]:
     global _DASHBOARD_CANVAS_RENDERER
     with _DASHBOARD_CANVAS_RENDERER_LOCK:
-        if _DASHBOARD_CANVAS_RENDERER is None or _DASHBOARD_CANVAS_RENDERER.process.poll() is not None:
+        if (
+            _DASHBOARD_CANVAS_RENDERER is None
+            or _DASHBOARD_CANVAS_RENDERER.process.poll() is not None
+            or getattr(_DASHBOARD_CANVAS_RENDERER, "renderer_version", None) != DASHBOARD_CANVAS_RENDERER_VERSION
+        ):
+            if _DASHBOARD_CANVAS_RENDERER is not None:
+                _DASHBOARD_CANVAS_RENDERER.close()
             _DASHBOARD_CANVAS_RENDERER = _DashboardCanvasRenderer()
         return _DASHBOARD_CANVAS_RENDERER.render(payload, width=width, height=height)
 
@@ -266,7 +279,10 @@ CATALOG_HEADER_ALIASES = {
     "charttype": "Chart type",
     "legend": "Legend",
     "legendposition": "Legend Position",
-    "label": "Label",
+    "label": "Label Position",
+    "labelposition": "Label Position",
+    "labelcolor": "Label Format",
+    "labelformat": "Label Format",
     "axisxrange": "Axis X Range",
     "axisyrange": "Axis Y Range",
     "excludenullempty": "Exclude Null/Empty",
@@ -380,6 +396,7 @@ class CatalogEntry:
     axis_x_range: str = ""
     axis_y_range: str = ""
     label_position: str = ""
+    label_format: str = ""
     exclude_null_empty: bool = False
     exclude_zero: bool = False
 
@@ -799,8 +816,58 @@ def parse_label_position(value: str) -> str:
     if not normalized:
         return ""
     if normalized not in {"none", "top", "up", "middle", "down"}:
-        raise ValueError("Label must be None, Top, Up, Middle or Down.")
+        raise ValueError("Label Position must be None, Top, Up, Middle or Down.")
     return normalized
+
+
+def parse_label_format(value: str) -> str:
+    """Validate optional JSON label-format tokens and return their canonical list."""
+    normalized = value.strip()
+    if not normalized:
+        return ""
+    try:
+        tokens = json.loads(normalized)
+    except json.JSONDecodeError:
+        # Preserve the one-value Label Color format used by the preceding schema.
+        tokens = [normalized]
+    if not isinstance(tokens, list) or not all(isinstance(token, str) for token in tokens):
+        raise ValueError('Label Format must be a list such as ["#1A2B3C", "Arial", "Bold"].')
+    permitted_fonts = {"Arial", "Helvetica", "Verdana", "Tahoma", "Georgia", "Times New Roman", "Courier New"}
+    permitted_styles = {"Bold", "Italic", "Underline", "Small", "Medium", "Large"}
+    canonical: list[str] = []
+    for token in tokens:
+        item = token.strip()
+        if not item:
+            continue
+        if re.fullmatch(r"#[0-9A-Fa-f]{6}", item):
+            canonical.append(item.upper())
+        elif item.casefold() in {font.casefold() for font in permitted_fonts}:
+            canonical.append(next(font for font in permitted_fonts if font.casefold() == item.casefold()))
+        elif item.casefold() in {style.casefold() for style in permitted_styles}:
+            canonical.append(next(style for style in permitted_styles if style.casefold() == item.casefold()))
+        else:
+            raise ValueError(f"Label Format contains unsupported value '{item}'.")
+    colors = [item for item in canonical if item.startswith("#")]
+    fonts = [item for item in canonical if item in permitted_fonts]
+    sizes = [item for item in canonical if item in {"Small", "Medium", "Large"}]
+    if len(colors) > 1 or len(fonts) > 1 or len(sizes) > 1:
+        raise ValueError("Label Format can define only one color, font and size.")
+    return json.dumps(list(dict.fromkeys(canonical)), separators=(",", ":"))
+
+
+def label_format_options(value: str) -> dict[str, object]:
+    """Return normalized rendering options from the persisted Label Format list."""
+    tokens = json.loads(parse_label_format(value) or "[]")
+    fonts = {"Arial", "Helvetica", "Verdana", "Tahoma", "Georgia", "Times New Roman", "Courier New"}
+    return {
+        "color": next((token for token in tokens if token.startswith("#")), ""),
+        "font": next((token for token in tokens if token in fonts), "Arial"),
+        "bold": "Bold" in tokens,
+        "italic": "Italic" in tokens,
+        "underline": "Underline" in tokens,
+        "size": next((token for token in ("Small", "Medium", "Large") if token in tokens), "Medium"),
+        "has_size": any(token in {"Small", "Medium", "Large"} for token in tokens),
+    }
 
 
 def parse_template_boolean(value: object, field: str) -> bool:
@@ -858,7 +925,7 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
     fieldnames = tuple(reader.fieldnames or ())
     accepted_schemas = {
         _canonical_catalog_headers(schema)
-        for schema in (CATALOG_HEADERS, VISUAL_CATALOG_HEADERS, RANGELESS_CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, OLDER_CATALOG_HEADERS, LEGACY_ROWS_COLUMNS_HEADERS, LEGACY_CATALOG_HEADERS)
+        for schema in (CATALOG_HEADERS, PRE_LABEL_FORMAT_CATALOG_HEADERS, PRE_LABEL_COLOR_CATALOG_HEADERS, VISUAL_CATALOG_HEADERS, RANGELESS_CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, OLDER_CATALOG_HEADERS, LEGACY_ROWS_COLUMNS_HEADERS, LEGACY_CATALOG_HEADERS)
     }
     if _canonical_catalog_headers(fieldnames) not in accepted_schemas:
         raise ValueError("The report template must use exactly these columns: " + ", ".join(CATALOG_HEADERS))
@@ -895,7 +962,8 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
             grouping_columns=((row.get("Column Aggregation") or row.get("Grouping_Columns") or "").strip() or " × ".join(legacy_dimensions[1:])),
             axis_x_range=(row.get("Axis X Range") or "").strip(),
             axis_y_range=(row.get("Axis Y Range") or "").strip(),
-            label_position=parse_label_position(row.get("Label") or ""),
+            label_position=parse_label_position(row.get("Label Position") or ""),
+            label_format=parse_label_format(row.get("Label Format") or ""),
             exclude_null_empty=parse_template_boolean(row.get("Exclude Null/Empty") or "", "Exclude Null/Empty"),
             exclude_zero=parse_template_boolean(row.get("Exclude Zero") or "", "Exclude Zero"),
         )
@@ -910,7 +978,7 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
             structural_chart_fields = (
                 entry.chart_title, entry.cdr_source, entry.kpi, entry.legend,
                 entry.filters, entry.grouping_rows, entry.grouping_columns,
-                entry.axis_x_range, entry.axis_y_range, entry.label_position,
+                entry.axis_x_range, entry.axis_y_range, entry.label_position, entry.label_format,
             )
             if any(value.strip() for value in structural_chart_fields) or entry.exclude_null_empty or entry.exclude_zero:
                 raise ValueError(
@@ -940,6 +1008,7 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
             parse_catalog_grouping(entry.grouping_columns)
             parse_legend_position(entry.legend_position)
             parse_label_position(entry.label_position)
+            parse_label_format(entry.label_format)
             parse_axis_range(entry.axis_x_range, "x")
             parse_axis_range(entry.axis_y_range, "y")
         except ValueError as exc:
@@ -1064,7 +1133,8 @@ def catalogue_csv(entries: list[CatalogEntry]) -> bytes:
             "Column Aggregation": entry.grouping_columns,
             "Legend": entry.legend,
             "Legend Position": entry.legend_position.title(),
-            "Label": entry.label_position.title(),
+            "Label Position": entry.label_position.title(),
+            "Label Format": entry.label_format,
             "Axis X Range": entry.axis_x_range,
             "Axis Y Range": entry.axis_y_range,
             "Exclude Null/Empty": "Yes" if entry.exclude_null_empty else "",
@@ -3727,12 +3797,30 @@ def _draw_inside_bar_label(
     label_box = draw.textbbox((0, 0), value, font=font)
     label_height = label_box[3] - label_box[1]
     if label_width + 8 <= width and label_height + 8 <= height:
+        font = _expanded_bar_label_font(draw, value, width, height, font)
+        label_width = _text_width(draw, value, font)
+        label_box = draw.textbbox((0, 0), value, font=font)
+        label_height = label_box[3] - label_box[1]
         draw.text((x + (width - label_width) / 2, y + (height - label_height) / 2 - label_box[1]), value, fill=fill, font=font)
         return True
     if label_height + 8 <= width and label_width + 8 <= height:
         _draw_vertical_label(image, value, centre_x=x + width / 2, centre_y=y + height / 2, fill=fill, font=font)
         return True
     return False
+
+
+def _expanded_bar_label_font(
+    draw: ImageDraw.ImageDraw, value: str, width: float, height: float, font: ImageFont.ImageFont,
+    maximum: int = 26,
+) -> ImageFont.ImageFont:
+    """Scale a value label up only when its complete bar has room for it."""
+    base_size = int(getattr(font, 'size', 12) or 12)
+    label_width = _text_width(draw, value, font)
+    box = draw.textbbox((0, 0), value, font=font)
+    label_height = box[3] - box[1]
+    scale = min((width - 8) / max(label_width, 1), (height - 8) / max(label_height, 1))
+    size = min(maximum, int(base_size * scale)) if scale > 1 else base_size
+    return _font(size, True) if size > base_size else font
 
 
 def _draw_inside_horizontal_bar_label(
@@ -3752,8 +3840,24 @@ def _draw_inside_horizontal_bar_label(
     label_height = box[3] - box[1]
     if label_width + 8 > width or label_height + 8 > height:
         return False
+    font = _expanded_bar_label_font(draw, value, width, height, font)
+    label_width = _text_width(draw, value, font)
+    box = draw.textbbox((0, 0), value, font=font)
+    label_height = box[3] - box[1]
     draw.text((x + (width - label_width) / 2, y + (height - label_height) / 2 - box[1]), value, fill=fill, font=font)
     return True
+
+
+def _stacked_chart_label_fill(colours: list[str], weights: list[float]) -> str:
+    """Use one readable in-bar label colour for an entire stacked chart."""
+    if not colours:
+        return '#FFFFFF'
+    dominant = colours[max(range(len(colours)), key=lambda index: weights[index] if index < len(weights) else 0)]
+    try:
+        red, green, blue = ImageColor.getrgb(dominant)[:3]
+    except ValueError:
+        return '#FFFFFF'
+    return '#111111' if (red * 299 + green * 587 + blue * 114) / 1000 > 156 else '#FFFFFF'
 
 
 def _draw_adjacent_stacked_bar_label(
@@ -3774,6 +3878,12 @@ def _draw_adjacent_stacked_bar_label(
     """Place a tiny segment label beside its bar only when it has clear space."""
     box = draw.textbbox((0, 0), value, font=font)
     label_width, label_height = box[2] - box[0], box[3] - box[1]
+    base_size = int(getattr(font, 'size', 10) or 10)
+    enlarged_size = min(16, max(base_size, int(base_size * (side_space - 6) / max(label_width, 1))))
+    if enlarged_size > base_size:
+        font = _font(enlarged_size, True)
+        box = draw.textbbox((0, 0), value, font=font)
+        label_width, label_height = box[2] - box[0], box[3] - box[1]
     centre_y = max(bar_top + label_height / 2, min(bar_bottom - label_height / 2, y + height / 2))
     occupied = occupied if occupied is not None else []
     if label_width + 6 > side_space or any(abs(existing - centre_y) < label_height + 3 for existing in occupied):
@@ -3975,6 +4085,7 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
     )
     data = frame[[group, period, state_column, *hierarchy_columns]].copy()
     data, states, colours = _status_chart_categories(data, state_column, quality=quality, threshold=threshold)
+    stack_label_fill = _stacked_chart_label_fill(list(colours), [float(data['state'].eq(state).sum()) for state in states])
     data = data.dropna(subset=[group, period])
     row_hierarchy = [column for column in hierarchy_columns if column.startswith("__catalog_row_")]
     column_hierarchy = [column for column in hierarchy_columns if column.startswith("__catalog_column_")]
@@ -4006,8 +4117,7 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
             draw.rectangle((x, y, x + bar_width, y + height), fill=colour)
             value_label = f"{value:.2%}"
             def automatic_label() -> None:
-                if value >= .08:
-                    _draw_inside_horizontal_bar_label(draw, value_label, x=x, y=y, width=bar_width, height=height, fill="white", font=_font(15, True))
+                if _draw_inside_horizontal_bar_label(draw, value_label, x=x, y=y, width=bar_width, height=height, fill=stack_label_fill, font=_font(15, True)):
                     return
                 if value > 0:
                     _draw_adjacent_stacked_bar_label(
@@ -4048,6 +4158,8 @@ def _render_status_100_hierarchy(
     column_keys = _hierarchical_unique_keys(data, column_hierarchy)
     if not row_keys or not column_keys:
         return _empty_chart(title)
+
+    stack_label_fill = _stacked_chart_label_fill(list(colours), [float(data['state'].eq(state).sum()) for state in states])
 
     image, draw = _canvas(title)
     # Reserve a dedicated header band below the chart title.  Rotated vendor /
@@ -4146,8 +4258,7 @@ def _render_status_100_hierarchy(
                 draw.rectangle((x, y, x + bar_width, y + segment_height), fill=colour)
                 ratio_label = f"{ratio:.2%}"
                 def automatic_label() -> None:
-                    if ratio >= 0.08:
-                        _draw_inside_horizontal_bar_label(draw, ratio_label, x=x, y=y, width=bar_width, height=segment_height, fill="white", font=_font(15, True))
+                    if _draw_inside_horizontal_bar_label(draw, ratio_label, x=x, y=y, width=bar_width, height=segment_height, fill=stack_label_fill, font=_font(15, True)):
                         return
                     if ratio > 0:
                         _draw_adjacent_stacked_bar_label(
@@ -4472,6 +4583,10 @@ def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | N
     image, draw = _canvas(title); left, top, width, height = 125, 260, 1260, 475
     bar_width = max(20, min(96, width // max(len(combinations) * 2, 1)))
     bucket_colours = _distribution_bucket_colours(buckets, data)
+    stack_label_fill = _stacked_chart_label_fill(
+        [bucket_colours.get((bucket,), _colour(bucket, index)) for index, bucket in enumerate(buckets)],
+        [float(data[stack].eq(bucket).sum()) for bucket in buckets],
+    )
     for tick in range(6):
         value = tick * 20
         y = top + height - tick / 5 * height
@@ -4494,13 +4609,13 @@ def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | N
             label_box = draw.textbbox((0, 0), value_label, font=label_font)
             label_height = label_box[3] - label_box[1]
             def automatic_label() -> None:
-                if value >= .08:
-                    _draw_inside_horizontal_bar_label(
-                        draw, value_label,
-                        x=x, y=y, width=bar_width, height=segment,
-                        fill="#FFFFFF", font=_font(14, True),
-                    )
-                elif value > 0:
+                if _draw_inside_horizontal_bar_label(
+                    draw, value_label,
+                    x=x, y=y, width=bar_width, height=segment,
+                        fill=stack_label_fill, font=_font(14, True),
+                ):
+                    return
+                if value > 0:
                     _draw_adjacent_stacked_bar_label(
                         draw, value_label, x=x, y=y, width=bar_width, height=segment,
                         bar_top=top, bar_bottom=top + height,
@@ -5313,6 +5428,7 @@ def _chart_payload_base(
             ) if show_legend else {"position": "right", "line_markers": False, "items": []}
         ),
         "label_position": entry.label_position,
+        "label_format": label_format_options(entry.label_format),
         "axis_ranges": {"x": list(x_range), "y": list(y_range)},
     }
 

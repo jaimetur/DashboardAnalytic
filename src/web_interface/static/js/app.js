@@ -2007,6 +2007,15 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   const copy = editor.querySelector('[data-catalogue-editor-copy]');
   const optionsLabel = editor.querySelector('[data-catalogue-editor-options-label]');
   const options = editor.querySelector('[data-catalogue-editor-options]');
+  const labelFormatControl = editor.querySelector('[data-catalogue-editor-label-format]');
+  const labelFormatColor = editor.querySelector('[data-catalogue-editor-label-format-color]');
+  const labelFormatColorValue = editor.querySelector('[data-catalogue-editor-label-format-colour-value]');
+  const labelFormatFont = editor.querySelector('[data-catalogue-editor-label-format-font]');
+  const labelFormatSize = editor.querySelector('[data-catalogue-editor-label-format-size]');
+  const labelFormatBold = editor.querySelector('[data-catalogue-editor-label-format-bold]');
+  const labelFormatItalic = editor.querySelector('[data-catalogue-editor-label-format-italic]');
+  const labelFormatUnderline = editor.querySelector('[data-catalogue-editor-label-format-underline]');
+  const labelFormatAutomatic = editor.querySelector('[data-catalogue-editor-label-format-automatic]');
   const kpiAggregationLabel = editor.querySelector('[data-catalogue-editor-kpi-aggregation-label]');
   const kpiAggregation = editor.querySelector('[data-catalogue-editor-kpi-aggregation]');
   const apply = editor.querySelector('[data-catalogue-editor-apply]');
@@ -2403,7 +2412,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   const catalogueHeaders = Array.from(table.querySelectorAll('thead th[data-catalogue-field]'))
     .map((cell) => cell.dataset.catalogueField);
   const fieldColumns = new Set(['Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend']);
-  const assistedFields = new Set(['Layout', 'CDR source', 'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position', 'Label', 'Axis X Range', 'Axis Y Range', 'Exclude Null/Empty', 'Exclude Zero']);
+  const assistedFields = new Set(['Layout', 'CDR source', 'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position', 'Label Position', 'Label Format', 'Axis X Range', 'Axis Y Range', 'Exclude Null/Empty', 'Exclude Zero']);
   const groupingColumns = new Set(['Rows Aggregation', 'Column Aggregation']);
   const validationAlert = document.querySelector('[data-catalogue-validation-alert]');
   const validationMessage = validationAlert?.querySelector('[data-catalogue-validation-message]');
@@ -2491,7 +2500,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (field === 'Layout') return suggestions.layouts || [];
     if (field === 'Chart type') return suggestions.chart_types || [];
     if (field === 'Legend Position') return suggestions.legend_positions || [];
-    if (field === 'Label') return suggestions.label_positions || [];
+    if (field === 'Label Position') return suggestions.label_positions || [];
     if (field === 'Exclude Null/Empty' || field === 'Exclude Zero') return suggestions.boolean_values || ['', 'Yes'];
     if (field === 'CDR source') return Object.keys(suggestions.columns || {}).map((source) => source.replace(/^cdr-/, 'CDR-').replace(/(^|-)\w/g, (letter) => letter.toUpperCase()));
     if (fieldColumns.has(field) || field === 'KPI') {
@@ -2508,7 +2517,8 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (field === 'KPI') return 'Choose a processed field and, optionally, an explicit aggregation. COUNT counts non-empty rows; COUNTD counts distinct values.';
     if (field === 'Legend') return 'Select one or more CDR fields to use as the displayed legend labels. Values are stored as a comma-separated list.';
     if (field === 'Legend Position') return 'Leave this empty when the chart has no legend, or choose where the legend is drawn.';
-    if (field === 'Label') return 'Override value-label placement for any chart: None hides labels; Top, Up, Middle and Down select their chart-aware position. Leave empty to retain automatic placement.';
+    if (field === 'Label Position') return 'Override value-label placement for any chart: None hides labels; Top, Up, Middle and Down select their chart-aware position. Leave empty to retain automatic placement.';
+    if (field === 'Label Format') return 'Choose a color, font and styles. They are stored as a JSON list; leave the cell empty to retain automatic formatting. Tiny labels beside stacked segments retain their segment colour.';
     if (field === 'Axis X Range') return 'Optional horizontal-axis range in chart units: [min,max], [min,] or [,max]. Leave empty to keep automatic limits.';
     if (field === 'Axis Y Range') return 'Optional vertical-axis range in chart units: [min,max], [min,] or [,max]. Percentage charts use values from 0 to 100.';
     if (field === 'Exclude Null/Empty') return 'Choose Yes to exclude rows whose plotted value is null or empty. Leave empty to keep them.';
@@ -2718,6 +2728,18 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     helper.dataset.catalogueAssistanceField = field;
     heading.textContent = field || 'Selected cell';
     copy.textContent = helperCopy(field);
+    if (labelFormatControl) labelFormatControl.hidden = field !== 'Label Format';
+    if (field === 'Label Format') {
+      let tokens = [];
+      try { tokens = JSON.parse(cell.textContent.trim() || '[]'); } catch (_error) { tokens = []; }
+      if (labelFormatColor) labelFormatColor.value = tokens.find((token) => /^#[0-9a-f]{6}$/i.test(token)) || '#FFFFFF';
+      if (labelFormatColorValue) labelFormatColorValue.textContent = labelFormatColor?.value.toUpperCase() || '#FFFFFF';
+      if (labelFormatFont) labelFormatFont.value = tokens.find((token) => labelFormatFont.querySelector(`option[value="${CSS.escape(token)}"]`)) || 'Arial';
+      if (labelFormatSize) labelFormatSize.value = tokens.find((token) => ['Small', 'Medium', 'Large'].includes(token)) || 'Medium';
+      if (labelFormatBold) labelFormatBold.checked = tokens.includes('Bold');
+      if (labelFormatItalic) labelFormatItalic.checked = tokens.includes('Italic');
+      if (labelFormatUnderline) labelFormatUnderline.checked = tokens.includes('Underline');
+    }
     const kpiExpression = cell.textContent.trim().match(/^\s*(SUM|COUNTD|COUNT|AVERAGE|AVG|MEAN|MAX|MIN|MEDIAN)\s*\(\s*(.+?)\s*\)\s*$/i);
     if (kpiAggregationLabel) kpiAggregationLabel.hidden = field !== 'KPI';
     if (kpiAggregation) kpiAggregation.value = field === 'KPI' && kpiExpression
@@ -2746,7 +2768,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
         ...values.filter((value) => !hasExistingValue(value)),
       ];
       orderedValues.forEach((value) => options.add(new Option(
-        field === 'Legend Position' && !value ? 'No legend position' : (field === 'Label' && !value ? 'Automatic' : value),
+        field === 'Legend Position' && !value ? 'No legend position' : (field === 'Label Position' && !value ? 'Automatic' : value),
         value, false, hasExistingValue(value),
       )));
       // Explicitly assign the matching value as well as marking its option.
@@ -2759,7 +2781,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       options.add(new Option('No contextual values are defined for this field. Edit it manually.', '', true, false));
       options.options[0].disabled = true;
     }
-    optionsLabel.hidden = false;
+    optionsLabel.hidden = field === 'Label Format';
     apply.hidden = values.length === 0;
     if (field === 'Filters') {
       optionsLabel.hidden = true;
@@ -2782,6 +2804,19 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     }
     positionCellAssistance(cell);
   };
+  const applyLabelFormat = () => {
+    if (!activeCell || activeCell.dataset.catalogueField !== 'Label Format') return;
+    if (labelFormatColorValue) labelFormatColorValue.textContent = labelFormatColor?.value.toUpperCase() || '#FFFFFF';
+    const tokens = [labelFormatColor?.value.toUpperCase(), labelFormatFont?.value, labelFormatSize?.value, labelFormatBold?.checked && 'Bold', labelFormatItalic?.checked && 'Italic', labelFormatUnderline?.checked && 'Underline'].filter(Boolean);
+    activeCell.textContent = JSON.stringify(tokens);
+    refreshCellEditedState(activeCell);
+  };
+  [labelFormatColor, labelFormatFont, labelFormatSize, labelFormatBold, labelFormatItalic, labelFormatUnderline].forEach((control) => control?.addEventListener('input', applyLabelFormat));
+  labelFormatAutomatic?.addEventListener('click', () => {
+    if (!activeCell || activeCell.dataset.catalogueField !== 'Label Format') return;
+    activeCell.textContent = '';
+    refreshCellEditedState(activeCell);
+  });
   const selectedCellFromEvent = (event) => {
     const cell = event.target.closest?.('[data-catalogue-field]');
     if (!cell) return null;
@@ -2843,7 +2878,8 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     const applicability = {
       'Axis X Range': true,
       'Axis Y Range': true,
-      Label: true,
+      'Label Position': true,
+      'Label Format': true,
     };
     Object.entries(applicability).forEach(([field, enabled]) => {
       const cell = row.querySelector(`[data-catalogue-field="${field}"]`);
@@ -3082,7 +3118,8 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     kpi: rowValue(row, 'KPI'), filters: rowValue(row, 'Filters'), grouping_rows: rowValue(row, 'Rows Aggregation'),
     grouping_columns: rowValue(row, 'Column Aggregation'), legend: rowValue(row, 'Legend'), legend_position: rowValue(row, 'Legend Position'),
     axis_x_range: rowValue(row, 'Axis X Range'), axis_y_range: rowValue(row, 'Axis Y Range'),
-    label_position: rowValue(row, 'Label'),
+    label_position: rowValue(row, 'Label Position'),
+    label_format: rowValue(row, 'Label Format'),
     exclude_null_empty: rowValue(row, 'Exclude Null/Empty'), exclude_zero: rowValue(row, 'Exclude Zero'),
   });
   const renderChartPreviewSandbox = (row, definition = null) => {
@@ -3099,7 +3136,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
         ['chart_type', 'Chart Type'], ['chart_title', 'Chart Tittle'], ['cdr_source', 'CDR Source'], ['kpi', 'KPI'], ['filters', 'Filters'],
         ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
         ['axis_x_range', 'Axis X Range'], ['axis_y_range', 'Axis Y Range'],
-        ['label_position', 'Label'], ['exclude_null_empty', 'Exclude Null/Empty'], ['exclude_zero', 'Exclude Zero'],
+        ['label_position', 'Label Position'], ['label_format', 'Label Format'], ['exclude_null_empty', 'Exclude Null/Empty'], ['exclude_zero', 'Exclude Zero'],
       ],
       textFields: {chart_title: true},
       // Keep these option sets identical to the persisted Chart Viewer.
@@ -3168,7 +3205,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       {title: 'Update Template?', confirmLabel: 'Update Template', tone: 'warning'},
     );
     if (!accepted) return;
-    const mapping = {chart_title: 'Chart Tittle', chart_type: 'Chart type', cdr_source: 'CDR source', kpi: 'KPI', filters: 'Filters', grouping_rows: 'Rows Aggregation', grouping_columns: 'Column Aggregation', legend: 'Legend', legend_position: 'Legend Position', label_position: 'Label', axis_x_range: 'Axis X Range', axis_y_range: 'Axis Y Range', exclude_null_empty: 'Exclude Null/Empty', exclude_zero: 'Exclude Zero'};
+    const mapping = {chart_title: 'Chart Tittle', chart_type: 'Chart type', cdr_source: 'CDR source', kpi: 'KPI', filters: 'Filters', grouping_rows: 'Rows Aggregation', grouping_columns: 'Column Aggregation', legend: 'Legend', legend_position: 'Legend Position', label_position: 'Label Position', label_format: 'Label Format', axis_x_range: 'Axis X Range', axis_y_range: 'Axis Y Range', exclude_null_empty: 'Exclude Null/Empty', exclude_zero: 'Exclude Zero'};
     Object.entries(previewDefinition()).forEach(([key, value]) => {
       const cell = Array.from(chartPreviewRow.querySelectorAll('[data-catalogue-field]')).find((item) => item.dataset.catalogueField === mapping[key]);
       if (!cell) return;
@@ -3566,12 +3603,12 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (!activeCell) return;
     const field = activeCell.dataset.catalogueField || '';
     const selected = Array.from(options.selectedOptions).map((option) => option.value);
-    if (!selected.length || (!['Legend Position', 'Label', 'Exclude Null/Empty', 'Exclude Zero'].includes(field) && !selected.some(Boolean))) return;
+    if (!selected.length || (!['Legend Position', 'Label Position', 'Label Format', 'Exclude Null/Empty', 'Exclude Zero'].includes(field) && !selected.some(Boolean))) return;
     const current = activeCell.textContent.trim();
     if (field === 'KPI') {
       const operation = kpiAggregation?.value || '';
       activeCell.textContent = operation ? `${operation}(${selected[0]})` : selected[0];
-    } else if (field === 'Layout' || field === 'CDR source' || field === 'Legend Position' || field === 'Label' || field === 'Exclude Null/Empty' || field === 'Exclude Zero') {
+    } else if (field === 'Layout' || field === 'CDR source' || field === 'Legend Position' || field === 'Label Position' || field === 'Label Format' || field === 'Exclude Null/Empty' || field === 'Exclude Zero') {
       activeCell.textContent = selected[0];
     } else if (field === 'Chart type') {
       activeCell.textContent = displayChartType(selected[0]);
@@ -3786,7 +3823,7 @@ document.querySelectorAll('[data-catalogue-import-form]').forEach((form) => {
   try { templateLibrary = JSON.parse(form.dataset.catalogueTemplateLibrary || '{}'); } catch (_error) { templateLibrary = {}; }
   const currentHeaders = [
     'Slide', 'Slide Tittle', 'Slide Subtittle', 'Layout', 'Chart Tittle', 'CDR source',
-    'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position', 'Label', 'Axis X Range', 'Axis Y Range',
+    'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position', 'Label Position', 'Label Format', 'Axis X Range', 'Axis Y Range',
   ];
   const normalizedHeader = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
   const hasCurrentSchema = async (selected) => {
@@ -5236,7 +5273,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
     ['chart_type', 'Chart Type'], ['cdr_source', 'CDR Source'], ['kpi', 'KPI'], ['filters', 'Filters'],
     ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
     ['axis_x_range', 'Axis X Range'], ['axis_y_range', 'Axis Y Range'],
-    ['label_position', 'Label'], ['exclude_null_empty', 'Exclude Null/Empty'], ['exclude_zero', 'Exclude Zero'],
+    ['label_position', 'Label Position'], ['label_format', 'Label Format'], ['exclude_null_empty', 'Exclude Null/Empty'], ['exclude_zero', 'Exclude Zero'],
   ];
   const multiFields = new Set(['dataset_ids', 'grouping_rows', 'grouping_columns', 'legend']);
   const parseKpiDefinition = (value) => {
@@ -5267,6 +5304,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
     return order;
   };
   const currentDefinition = () => Object.fromEntries(Array.from(fieldsElement.querySelectorAll('[name]')).map((control) => {
+    if (control.name === 'label_format' && fieldsElement.querySelector('[data-preview-label-format-automatic]')?.checked) return [control.name, ''];
     if (options.editableGroupingInputs && ['grouping_rows', 'grouping_columns'].includes(control.name)) {
       const editor = control.parentElement?.querySelector('[data-preview-grouping-text]');
       if (editor) return [control.name, editor.value.trim()];
@@ -5399,6 +5437,50 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
       hidden.value = String(definition.filters || ''); parsedField.value = hidden.value;
       return field;
     }
+    if (key === 'label_format') {
+      const control = document.createElement('input');
+      control.type = 'hidden'; control.name = key; control.value = String(definition[key] || '');
+      const opener = document.createElement('button'); opener.type = 'button'; opener.className = 'report-chart-label-format-trigger';
+      const assistance = document.createElement('fieldset'); assistance.className = 'report-chart-label-format-assistance'; assistance.hidden = true;
+      const legend = document.createElement('legend'); legend.textContent = 'Label format';
+      const color = document.createElement('input'); color.type = 'color'; color.value = '#FFFFFF'; color.setAttribute('aria-label', 'Label format color');
+      const colorValue = document.createElement('output');
+      const colorRow = document.createElement('span'); colorRow.className = 'catalogue-label-format-colour-row'; colorRow.append(color, colorValue);
+      const colorLabel = document.createElement('label'); colorLabel.textContent = 'Color'; colorLabel.append(colorRow);
+      const fontChoice = document.createElement('select'); ['Arial', 'Helvetica', 'Verdana', 'Tahoma', 'Georgia', 'Times New Roman', 'Courier New'].forEach((value) => fontChoice.add(new Option(value)));
+      const fontLabel = document.createElement('label'); fontLabel.textContent = 'Font'; fontLabel.append(fontChoice);
+      const sizeChoice = document.createElement('select'); ['Small', 'Medium', 'Large'].forEach((value) => sizeChoice.add(new Option(value)));
+      const sizeLabel = document.createElement('label'); sizeLabel.textContent = 'Size'; sizeLabel.append(sizeChoice);
+      const styles = document.createElement('div'); styles.className = 'catalogue-label-format-styles'; styles.setAttribute('role', 'group'); styles.setAttribute('aria-label', 'Text styles');
+      const styleControls = {};
+      ['Bold', 'Italic', 'Underline'].forEach((style) => {
+        const choice = document.createElement('input'); choice.type = 'checkbox';
+        const styleLabel = document.createElement('label'); const text = document.createElement('span'); text.textContent = style;
+        styleLabel.append(choice, text); styles.append(styleLabel); styleControls[style] = choice;
+      });
+      const automatic = document.createElement('button'); automatic.type = 'button'; automatic.className = 'report-chart-label-format-automatic'; automatic.textContent = 'Use automatic format';
+      const parseTokens = () => {
+        try { const parsed = JSON.parse(control.value || '[]'); return Array.isArray(parsed) ? parsed : []; } catch (_error) { return []; }
+      };
+      const hydrate = () => {
+        const tokens = parseTokens(); const configured = tokens.length > 0;
+        color.value = tokens.find((value) => /^#[0-9a-f]{6}$/i.test(value)) || '#FFFFFF';
+        colorValue.textContent = color.value.toUpperCase();
+        fontChoice.value = tokens.find((value) => Array.from(fontChoice.options).some((option) => option.value === value)) || 'Arial';
+        sizeChoice.value = tokens.find((value) => ['Small', 'Medium', 'Large'].includes(value)) || 'Medium';
+        Object.entries(styleControls).forEach(([style, choice]) => { choice.checked = tokens.includes(style); });
+        opener.textContent = configured ? [color.value.toUpperCase(), fontChoice.value, sizeChoice.value, ...Object.entries(styleControls).filter(([, choice]) => choice.checked).map(([style]) => style)].join(' · ') : 'Automatic format';
+      };
+      const applyFormat = () => {
+        control.value = JSON.stringify([color.value.toUpperCase(), fontChoice.value, sizeChoice.value, ...Object.entries(styleControls).filter(([, choice]) => choice.checked).map(([style]) => style)]);
+        hydrate(); control.dispatchEvent(new Event('input'));
+      };
+      [color, fontChoice, sizeChoice, ...Object.values(styleControls)].forEach((choice) => choice.addEventListener('input', applyFormat));
+      automatic.addEventListener('click', () => { control.value = ''; hydrate(); control.dispatchEvent(new Event('input')); });
+      opener.addEventListener('click', () => { assistance.hidden = !assistance.hidden; if (!assistance.hidden) color.focus(); });
+      assistance.append(legend, colorLabel, fontLabel, sizeLabel, styles, automatic);
+      field.append(control, opener, assistance); hydrate(); return field;
+    }
     const control = document.createElement('select');
     if (key === 'chart_type') (options.chartTypes || []).forEach((value) => control.add(new Option(value, value, false, normalisePreviewValue(value) === normalisePreviewValue(definition[key]))));
     else if (key === 'cdr_source') (options.cdrSources || ['CDR-Data', 'CDR-Voice', 'CDR-Speech']).forEach((value) => control.add(new Option(value, value, false, sourceKey(value) === sourceKey(definition[key]))));
@@ -5432,13 +5514,13 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
       const requested = key === 'dataset_ids'
         ? new Set(Array.isArray(definition[key]) ? definition[key].map(String) : String(definition[key] || '').split(',').map((value) => value.trim()).filter(Boolean))
         : valuesFor(definition[key], key);
-      Array.from(control.options).forEach((option) => {
+      Array.from(control.options || []).forEach((option) => {
         option.selected = Array.from(requested).some((value) => normalisePreviewValue(value) === normalisePreviewValue(option.value));
       });
     } else {
       const definitionValue = key === 'kpi' ? kpiDefinition.field : definition[key];
       const requested = key === 'cdr_source' ? sourceKey(definitionValue) : normalisePreviewValue(definitionValue);
-      const matching = Array.from(control.options).find((option) => (
+      const matching = Array.from(control.options || []).find((option) => (
         key === 'cdr_source' ? sourceKey(option.value) === requested : normalisePreviewValue(option.value) === requested
       ));
       if (matching) control.value = matching.value;
@@ -5447,7 +5529,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
       const requestedOrder = key === 'dataset_ids'
         ? (Array.isArray(definition[key]) ? definition[key].map(String) : String(definition[key] || '').split(',').map((value) => value.trim()).filter(Boolean))
         : Array.from(valuesFor(definition[key], key));
-      control.dataset.previewSelectionOrder = JSON.stringify(requestedOrder.map((value) => matchingPreviewValue(value, Array.from(control.options).map((option) => option.value))));
+      control.dataset.previewSelectionOrder = JSON.stringify(requestedOrder.map((value) => matchingPreviewValue(value, Array.from(control.options || []).map((option) => option.value))));
     }
     const definitionValue = key === 'kpi' ? kpiDefinition.field : definition[key];
     control.name = key; control.dataset.previewDisplay = String(definitionValue || ''); control.setAttribute('aria-label', label); field.append(control);

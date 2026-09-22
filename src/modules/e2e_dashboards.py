@@ -90,6 +90,7 @@ class DashboardChartFilterPreviewRequest(BaseModel):
     axis_x_range: str | None = None
     axis_y_range: str | None = None
     label_position: str | None = None
+    label_format: str | None = None
     exclude_null_empty: str | bool | None = None
     exclude_zero: str | bool | None = None
 
@@ -122,7 +123,7 @@ FILTER_COLUMNS = {
 ADAPTATIVE_FILTER_FIELDS = (
     'Market', 'Operator', 'Vendor', 'Region', 'City', 'Campaign', 'RAT', 'Session Type', 'Call Status',
 )
-DASHBOARD_RENDER_CACHE_VERSION = 9
+DASHBOARD_RENDER_CACHE_VERSION = 16
 DASHBOARD_SELECTION_CACHE_VERSION = 11
 DASHBOARD_SELECTION_CACHE_LIMIT = 128
 DASHBOARD_PROFILE_SELECTION_THRESHOLD = 100_000
@@ -1229,6 +1230,7 @@ def install_dashboard_routes(core):
             'legend_position': entry.legend_position,
             'axis_x_range': entry.axis_x_range, 'axis_y_range': entry.axis_y_range,
             'label_position': entry.label_position,
+            'label_format': entry.label_format,
             'exclude_null_empty': entry.exclude_null_empty, 'exclude_zero': entry.exclude_zero,
             'template_available': template_available, 'datasets_by_source': datasets_by_source,
             'columns_by_source': columns_by_source, 'columns': columns,
@@ -3275,6 +3277,7 @@ def install_dashboard_routes(core):
             'legend_position': entry.legend_position,
             'axis_x_range': entry.axis_x_range, 'axis_y_range': entry.axis_y_range,
             'label_position': entry.label_position,
+            'label_format': entry.label_format,
             'exclude_null_empty': entry.exclude_null_empty, 'exclude_zero': entry.exclude_zero,
             'template_available': template_available,
             'datasets_by_source': datasets_by_source, 'columns_by_source': columns_by_source,
@@ -3293,7 +3296,7 @@ def install_dashboard_routes(core):
             key: value for key, value in request.model_dump().items()
             if value is not None and key in {
                 'filters', 'chart_title', 'cdr_source', 'kpi', 'chart_type', 'grouping_rows',
-                'grouping_columns', 'legend', 'legend_position', 'axis_x_range', 'axis_y_range', 'label_position', 'exclude_null_empty', 'exclude_zero',
+                'grouping_columns', 'legend', 'legend_position', 'axis_x_range', 'axis_y_range', 'label_position', 'label_format', 'exclude_null_empty', 'exclude_zero',
             }
         }
         # The template owns these required chart attributes. Custom dropdowns
@@ -3305,6 +3308,11 @@ def install_dashboard_routes(core):
         if 'label_position' in changes:
             try:
                 changes['label_position'] = core.parse_label_position(str(changes['label_position']))
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from exc
+        if 'label_format' in changes:
+            try:
+                changes['label_format'] = core.parse_label_format(str(changes['label_format']))
             except ValueError as exc:
                 raise HTTPException(400, str(exc)) from exc
         for key, label in (('exclude_null_empty', 'Exclude Null/Empty'), ('exclude_zero', 'Exclude Zero')):
@@ -3489,7 +3497,7 @@ def install_dashboard_routes(core):
             key: value for key, value in request.model_dump().items()
             if value is not None and key in {
                 'filters', 'chart_title', 'cdr_source', 'kpi', 'chart_type', 'grouping_rows',
-                'grouping_columns', 'legend', 'legend_position', 'axis_x_range', 'axis_y_range', 'label_position', 'exclude_null_empty', 'exclude_zero',
+                'grouping_columns', 'legend', 'legend_position', 'axis_x_range', 'axis_y_range', 'label_position', 'label_format', 'exclude_null_empty', 'exclude_zero',
             }
         }
         for key in ('cdr_source', 'kpi', 'chart_type'):
@@ -3498,6 +3506,11 @@ def install_dashboard_routes(core):
         if 'label_position' in changes:
             try:
                 changes['label_position'] = core.parse_label_position(str(changes['label_position']))
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from exc
+        if 'label_format' in changes:
+            try:
+                changes['label_format'] = core.parse_label_format(str(changes['label_format']))
             except ValueError as exc:
                 raise HTTPException(400, str(exc)) from exc
         for key, label in (('exclude_null_empty', 'Exclude Null/Empty'), ('exclude_zero', 'Exclude Zero')):
@@ -3683,9 +3696,39 @@ def install_dashboard_routes(core):
                     stopped = True
         return stopped
 
+    def rename_template_dashboards(technology: str, previous_template: str, template: str, username: str) -> int:
+        """Keep Dashboard template references and display names aligned after a template rename."""
+        workspace = workspace_key()
+        changed: list[tuple[str, dict]] = []
+        with lock:
+            task_repository = bound_repository()
+            dashboards = read_dashboards(task_repository)
+            for dashboard_id, raw_definition in dashboards.items():
+                if not isinstance(raw_definition, dict):
+                    continue
+                dashboard_technology = str(raw_definition.get('template_technology') or raw_definition.get('technology') or '').casefold()
+                if dashboard_technology != technology or str(raw_definition.get('template') or '') != previous_template:
+                    continue
+                updated = dict(raw_definition)
+                updated['template'] = template
+                name = str(updated.get('name') or '')
+                updated['name'] = re.sub(re.escape(previous_template), template, name, flags=re.IGNORECASE)
+                dashboards[dashboard_id] = updated
+                changed.append((dashboard_id, updated))
+            if changed:
+                task_repository.set_workspace_state(STATE_KEY, json.dumps(dashboards))
+                task_repository.add_log(username, 'rename_dashboard_template_references', json.dumps({
+                    'technology': technology, 'previous_template': previous_template,
+                    'template': template, 'dashboards': len(changed),
+                }))
+        for dashboard_id, definition in changed:
+            schedule_dashboard_warmup(workspace, dashboard_id, definition, username, force=True)
+        return len(changed)
+
     core.e2e_dashboard_tasks = dashboard_task_payloads
     core.e2e_dashboard_cancel_workspace_tasks = cancel_workspace_dashboard_tasks
     core.e2e_dashboard_stop_task = stop_dashboard_task
+    core.e2e_dashboard_rename_template_references = rename_template_dashboards
 
     @app.get('/api/e2e-dashboards/preview/{token}/{index}.png')
     def chart(token: str, index: int, user=Depends(dashboard_user)):

@@ -204,7 +204,7 @@
     <form class="catalogue-new-template-form" action="/admin/slides-templates/new" method="post">
       <button type="submit" class="catalogue-new-template-button">New Template</button>
     </form>
-    <p class="form-note">Required columns: Slide, Slide Tittle, Slide Subtittle, Layout, Chart Tittle, CDR source, KPI, Chart type, Filters, Rows Aggregation, Column Aggregation, Legend, Legend Position, Label, Axis X Range and Axis Y Range. Legend Position may be empty, or use Top, Bottom, Left or Right. Label applies to every chart family and may be empty for automatic behaviour, or use None, Top, Up, Middle or Down. Numeric axis ranges apply to every chart family: use [min,max], [min,] or [,max]; percentage axes use values from 0 to 100. Each slide number creates a new slide from its named layout. Use Title Slide or Transition Slide for structural rows without KPI/chart fields. Rows Aggregation defines chart categories/table rows; Column Aggregation defines comparison series/table columns. Chart layouts need one image placeholder per CDR row and keep analyst comments blank.</p>
+    <p class="form-note">Required columns: Slide, Slide Tittle, Slide Subtittle, Layout, Chart Tittle, CDR source, KPI, Chart type, Filters, Rows Aggregation, Column Aggregation, Legend, Legend Position, Label Position, Label Format, Axis X Range and Axis Y Range. Label Position may be empty, or use None, Top, Up, Middle or Down. Label Format is an optional list such as [&quot;#1A2B3C&quot;,&quot;Arial&quot;,&quot;Bold&quot;,&quot;Italic&quot;,&quot;Large&quot;]; it can define one hexadecimal colour, one font, styles and one size: Small, Medium or Large. Empty format retains automatic normal-weight rendering. Numeric axis ranges apply to every chart family: use [min,max], [min,] or [,max]; percentage axes use values from 0 to 100. Each slide number creates a new slide from its named layout. Use Title Slide or Transition Slide for structural rows without KPI/chart fields. Rows Aggregation defines chart categories/table rows; Column Aggregation defines comparison series/table columns. Chart layouts need one image placeholder per CDR row and keep analyst comments blank.</p>
     </div>
   </details>
 
@@ -368,6 +368,20 @@
             </optgroup>
           </select>
         </label>
+        <fieldset data-catalogue-editor-label-format hidden>
+          <legend>Label format</legend>
+          <label>Color
+            <span class="catalogue-label-format-colour-row"><input type="color" value="#FFFFFF" data-catalogue-editor-label-format-color aria-label="Label format color"><output data-catalogue-editor-label-format-colour-value>#FFFFFF</output></span>
+          </label>
+          <label>Font <select data-catalogue-editor-label-format-font aria-label="Label format font"><option>Arial</option><option>Helvetica</option><option>Verdana</option><option>Tahoma</option><option>Georgia</option><option>Times New Roman</option><option>Courier New</option></select></label>
+          <label>Size <select data-catalogue-editor-label-format-size aria-label="Label format size"><option>Small</option><option selected>Medium</option><option>Large</option></select></label>
+          <div class="catalogue-label-format-styles" role="group" aria-label="Text styles">
+            <label><input type="checkbox" data-catalogue-editor-label-format-bold> <span>Bold</span></label>
+            <label><input type="checkbox" data-catalogue-editor-label-format-italic> <span>Italic</span></label>
+            <label><input type="checkbox" data-catalogue-editor-label-format-underline> <span>Underline</span></label>
+          </div>
+          <button type="button" data-catalogue-editor-label-format-automatic>Use automatic format</button>
+        </fieldset>
         <label data-catalogue-editor-kpi-aggregation-label hidden>KPI operation
           <select data-catalogue-editor-kpi-aggregation aria-label="KPI operation">
             <option value="">Chart default</option>

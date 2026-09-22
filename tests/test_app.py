@@ -795,6 +795,7 @@ def test_workspace_calculated_dimensions_panel_exports_and_imports_json(client) 
         follow_redirects=False,
     )
     assert imported.status_code == 303
+
     assert any(item.name == 'Imported Group' for item in app_module.load_workspace_calculated_dimensions())
     assert not list(app_module.settings.slides_templates_dir.rglob('*.dimensions.json'))
 
@@ -6722,6 +6723,13 @@ def test_admin_renaming_named_catalogue_renames_its_csv_file(client) -> None:
     )
     assert imported.status_code == 303
 
+    app_module.repository.set_workspace_state('e2e_dashboards_v2', json.dumps({
+        'template-rename-dashboard': {
+            'name': 'Original catalogue · Validation', 'template': 'Original catalogue',
+            'technology': 'nsa', 'template_technology': 'nsa',
+        },
+    }))
+
     replacement = client.post(
         '/admin/report-templates/nsa',
         data={'catalogue_name': 'Replacement template'},
@@ -6741,6 +6749,9 @@ def test_admin_renaming_named_catalogue_renames_its_csv_file(client) -> None:
     assert all(str(row['name']) != 'Original catalogue' for row in app_module.repository.list_report_templates('nsa'))
     assert app_module.repository.report_template_content('nsa', 'Renamed catalogue') == content
     assert not next(item for item in app_module.report_catalogue_options('nsa') if item['identifier'] == 'Renamed catalogue')['active']
+    renamed_dashboard = json.loads(app_module.repository.get_workspace_state('e2e_dashboards_v2'))['template-rename-dashboard']
+    assert renamed_dashboard['template'] == 'Renamed catalogue'
+    assert renamed_dashboard['name'] == 'Renamed catalogue · Validation'
 
 
 def test_admin_duplicates_template_using_the_source_template_name(client) -> None:
