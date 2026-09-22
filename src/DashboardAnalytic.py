@@ -14668,6 +14668,7 @@ def save_report_catalogue(
             raise FileNotFoundError('Report Template not found.')
         template_name = str(metadata['name'])
         is_default = bool(metadata['is_default'])
+        previous_entries = parse_catalog_csv(bytes(metadata['content'] or b''), technology, validate_filters=False)
         entries = [entry for _index, entry in sorted(enumerate(parse_catalog_csv(catalogue_content, technology)), key=lambda item: (item[1].slide, item[0]))]
         content = catalogue_csv(entries)
         # The lock only covers the short atomic replacements. Expensive
@@ -14675,6 +14676,9 @@ def save_report_catalogue(
         persist_report_template_for_request(
             technology, template_name, content, is_default=is_default,
         )
+        reconcile_comments = getattr(sys.modules[__name__], 'e2e_dashboard_reconcile_template_slide_comments', None)
+        if callable(reconcile_comments):
+            reconcile_comments(technology, template_name, previous_entries, entries)
     except ValueError as exc:
         if wants_json:
             return JSONResponse({'detail': str(exc)}, status_code=400)

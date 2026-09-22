@@ -620,7 +620,9 @@ def install_dashboard_routes(core):
                     return
                 slide_entries = grouped[slide_number]
                 header = slide_entries[0][1]
-                comments = snapshot.definition.slide_comments.get(str(slide_number), ())
+                _comment_key, comments = dashboard_slide_comments(
+                    snapshot.definition, [entry for _index, entry in slide_entries],
+                )
                 if header.structural_type:
                     layout = _named_slide_layout(presentation, header.layout or 'Title Page')
                     if layout is None:
@@ -768,6 +770,67 @@ def install_dashboard_routes(core):
         if reset_defaults:
             task_repository.set_workspace_state(DEFAULT_FILTERS_MIGRATION_KEY, '1')
         return migrated
+
+    def dashboard_slide_comment_key(entries) -> str:
+        """Return a position-independent identity for one template slide."""
+        signature = [
+            {
+                'title': entry.slide_title,
+                'subtitle': entry.slide_subtitle,
+                'layout': entry.layout,
+                'structural_type': entry.structural_type or '',
+                'chart_title': entry.chart_title,
+            }
+            for entry in entries
+        ]
+        encoded = json.dumps(signature, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+        return f"slide:{sha256(encoded.encode('utf-8')).hexdigest()[:24]}"
+
+    def dashboard_slide_comments(definition: DashboardDefinition, entries) -> tuple[str, list[str]]:
+        """Read stable comments while retaining numeric keys from older Dashboards."""
+        key = dashboard_slide_comment_key(entries)
+        legacy_key = str(entries[0].slide) if entries else ''
+        comments = definition.slide_comments.get(key, definition.slide_comments.get(legacy_key, []))
+        return key, list(comments or [])
+
+    def reconcile_template_slide_comments(technology: str, template_name: str, old_entries, new_entries) -> int:
+        """Move comments from legacy/numeric keys to matching stable slide keys."""
+        old_slides: dict[str, list] = defaultdict(list)
+        new_slides: dict[str, list] = defaultdict(list)
+        for entry in old_entries:
+            old_slides[str(entry.slide)].append(entry)
+        for entry in new_entries:
+            new_slides[str(entry.slide)].append(entry)
+        available_keys = {dashboard_slide_comment_key(entries) for entries in new_slides.values()}
+        if not old_slides:
+            return 0
+        changed = 0
+        with lock:
+            task_repository = bound_repository()
+            dashboards = read_dashboards(task_repository)
+            for raw_definition in dashboards.values():
+                if (
+                    str(raw_definition.get('template_technology') or raw_definition.get('technology') or 'nsa').casefold() != technology
+                    or str(raw_definition.get('template') or '') != template_name
+                ):
+                    continue
+                original = raw_definition.get('slide_comments') or {}
+                migrated = {
+                    key: list(values)
+                    for key, values in original.items()
+                    if key.startswith('slide:') and key in available_keys and values
+                }
+                for legacy_number, entries in old_slides.items():
+                    key = dashboard_slide_comment_key(entries)
+                    values = original.get(key, original.get(legacy_number, []))
+                    if key in available_keys and values:
+                        migrated[key] = list(values)
+                if migrated != original:
+                    raw_definition['slide_comments'] = migrated
+                    changed += 1
+            if changed:
+                task_repository.set_workspace_state(STATE_KEY, json.dumps(dashboards))
+        return changed
 
     def normalize_dashboard_filters(definition, *, reset_defaults=False):
         """Migrate retired filters and apply the current defaults once per workspace."""
@@ -2155,10 +2218,14 @@ def install_dashboard_routes(core):
         )
         report(82, 'Preparing the Dashboard slide structure and chart positions')
         slides = OrderedDict()
+        slide_entries_by_number: dict[int, list] = defaultdict(list)
+        for entry in entries:
+            slide_entries_by_number[entry.slide].append(entry)
         deck = Presentation(core.settings.ppt_templates_dir / 'Template_CDR_analysis.pptx')
         for editor_index, (index, entry) in enumerate(sorted(enumerate(entries), key=lambda item: (item[1].slide, item[0]))):
             slide = slides.setdefault(entry.slide, {
                 'number': entry.slide,
+                'comment_key': dashboard_slide_comment_key(slide_entries_by_number[entry.slide]),
                 'title': entry.slide_title,
                 'subtitle': entry.slide_subtitle,
                 'layout': entry.layout,
@@ -3751,6 +3818,7 @@ def install_dashboard_routes(core):
     core.e2e_dashboard_cancel_workspace_tasks = cancel_workspace_dashboard_tasks
     core.e2e_dashboard_stop_task = stop_dashboard_task
     core.e2e_dashboard_rename_template_references = rename_template_dashboards
+    core.e2e_dashboard_reconcile_template_slide_comments = reconcile_template_slide_comments
 
     @app.get('/api/e2e-dashboards/preview/{token}/{index}.png')
     def chart(token: str, index: int, user=Depends(dashboard_user)):

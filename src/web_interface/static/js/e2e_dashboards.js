@@ -1272,7 +1272,14 @@
     select.value = selected?.identifier || '';
     return selected;
   }
+  function syncNewDashboardNameFromTemplate() {
+    if (definition) return;
+    const technology = $('ds-nr-mode').value;
+    const selected = (config.templates[technology] || []).find(row => row.identifier === $('ds-template').value);
+    if (selected) $('ds-name').value = selected.name;
+  }
   templateOptions($('ds-nr-mode').value);
+  syncNewDashboardNameFromTemplate();
   function setTemplate(value) {
     const technology = $('ds-nr-mode').value;
     const selected = (config.templates[technology] || []).find(row => row.identifier === value);
@@ -1757,7 +1764,9 @@
     const technology = $('ds-nr-mode').value;
     const selected = (config.templates[technology] || []).find(row => row.identifier === $('ds-template').value);
     if (!selected) throw new Error('Choose a template for the selected NR Mode.');
-    const item = {name:$('ds-name').value.trim(),template_technology:technology,template:selected.name,technology,scope:'single',datasets:latestDatasetsForScope('single'),filters:{},custom_fields:[],date_from:'Oldest',date_to:'Newest'};
+    const name = $('ds-name').value.trim() || selected.name;
+    $('ds-name').value = name;
+    const item = {name,template_technology:technology,template:selected.name,technology,scope:'single',datasets:latestDatasetsForScope('single'),filters:{},custom_fields:[],date_from:'Oldest',date_to:'Newest'};
     status(`Creating “${item.name}”…`); $('ds-create').disabled = true;
     try { const id = dashboardId(), result = await api(`/${id}`,'PUT',item); dashboards[id] = result.definition; await openDashboard(id); }
     finally { $('ds-create').disabled = !$('ds-template').options.length; }
@@ -1800,13 +1809,17 @@
   }
   bind('ds-import',() => $('ds-import-file').click());
   $('ds-import-file').onchange = safe(async () => { const file = $('ds-import-file').files[0]; if (!file) return; const payload = JSON.parse(await file.text()); const legacy = payload.format === 'dashboard-analytic-dashboard-set' && payload.version === 1; if (!legacy && (payload.format !== 'dashboard-analytic-dashboard' || payload.version !== 2)) throw new Error('Unsupported Dashboard file.'); if (!await confirmDiscard()) return; payload.definition.name = nextName(payload.definition.name); const id = dashboardId(), result = await api(`/${id}`,'PUT',payload.definition); dashboards[id] = result.definition; await openDashboard(id); $('ds-import-file').value = ''; });
-  function closeDashboard() { delete $('ds-viewer-export-ppt').dataset.dashboardPptId; $('ds-viewer-export-ppt').disabled = true; clearTimeout(facetsRefreshTimer); dismissPreparationStatus(); stopPresentation(); rememberOpen(''); rememberFiltersOpen(false); ++sequence; clearTimeout(timer); controller?.abort(); preparing = null; activeId = ''; dashboardFiltersOpen = false; definition = null; savedDefinition = ''; appliedFilterState = ''; appliedSelectionState = ''; appliedDashboardDefinition = null; prepared = null; dirty = false; updateUnsavedFiltersBadge(); setViewEnabled(false); setPreparationState('hidden'); $('ds-filter-panel').hidden = true; document.dispatchEvent(new CustomEvent('page-panel-navigation:update')); setActiveDashboardHeading(''); $('ds-name').value = ''; setNrMode('nsa'); library(); status('Dashboard closed.'); }
+  function closeDashboard() { delete $('ds-viewer-export-ppt').dataset.dashboardPptId; $('ds-viewer-export-ppt').disabled = true; clearTimeout(facetsRefreshTimer); dismissPreparationStatus(); stopPresentation(); rememberOpen(''); rememberFiltersOpen(false); ++sequence; clearTimeout(timer); controller?.abort(); preparing = null; activeId = ''; dashboardFiltersOpen = false; definition = null; savedDefinition = ''; appliedFilterState = ''; appliedSelectionState = ''; appliedDashboardDefinition = null; prepared = null; dirty = false; updateUnsavedFiltersBadge(); setViewEnabled(false); setPreparationState('hidden'); $('ds-filter-panel').hidden = true; document.dispatchEvent(new CustomEvent('page-panel-navigation:update')); setActiveDashboardHeading(''); $('ds-name').value = ''; setNrMode('nsa'); syncNewDashboardNameFromTemplate(); library(); status('Dashboard closed.'); }
   $('ds-name').oninput = () => { if (definition) { definition.name = $('ds-name').value; updateDirtyState(); } };
   $('ds-nr-mode').onchange = () => {
     const selected = setNrMode($('ds-nr-mode').value);
     if (definition && selected) { definition.template_technology = definition.technology = $('ds-nr-mode').value; definition.template = selected.name; changed(); }
+    else syncNewDashboardNameFromTemplate();
   };
-  $('ds-template').onchange = () => { if (definition) { setTemplate($('ds-template').value); changed(); } };
+  $('ds-template').onchange = () => {
+    if (definition) { setTemplate($('ds-template').value); changed(); }
+    else syncNewDashboardNameFromTemplate();
+  };
   $('ds-scope').onchange = safe(async () => {
     if (!definition) return;
     const selectedScope = $('ds-scope').value;
@@ -2609,13 +2622,23 @@
       throw error;
     }
   }
-  const currentSlideCommentKey = () => String(prepared?.slides[slideIndex]?.number ?? slideIndex + 1);
+  const currentSlideCommentKey = () => String(prepared?.slides[slideIndex]?.comment_key || prepared?.slides[slideIndex]?.number || slideIndex + 1);
+  const currentSlideLegacyCommentKey = () => String(prepared?.slides[slideIndex]?.number || slideIndex + 1);
+  const currentSlideComments = viewer => {
+    viewer.slide_comments ||= {};
+    const key = currentSlideCommentKey();
+    const legacyKey = currentSlideLegacyCommentKey();
+    if (!pptDashboardViewer && !viewer.slide_comments[key] && key !== legacyKey && viewer.slide_comments[legacyKey]) {
+      viewer.slide_comments[key] = viewer.slide_comments[legacyKey];
+      delete viewer.slide_comments[legacyKey];
+    }
+    return viewer.slide_comments[key] || [];
+  };
   function renderComments() {
     const list = $('ds-comments-list');
     const viewer = viewerDefinition();
     if (!list || !viewer) return;
-    viewer.slide_comments ||= {};
-    const comments = viewer.slide_comments[currentSlideCommentKey()] || [];
+    const comments = currentSlideComments(viewer);
     const panel = list.closest('.ds-slide-comments');
     panel?.classList.toggle('ds-has-comments', comments.length > 0);
     if (panel && presentation.active) panel.open = presentation.showComments && comments.length > 0;
