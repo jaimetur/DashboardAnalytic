@@ -89,6 +89,7 @@ class DashboardChartFilterPreviewRequest(BaseModel):
     grouping_columns: str | None = None
     legend: str | None = None
     legend_position: str | None = None
+    legend_format: str | None = None
     axis_x_range: str | None = None
     axis_y_range: str | None = None
     label_position: str | None = None
@@ -1313,6 +1314,7 @@ def install_dashboard_routes(core):
             'filters': entry.filters, 'grouping_rows': entry.grouping_rows,
             'grouping_columns': entry.grouping_columns, 'legend': entry.legend,
             'legend_position': entry.legend_position,
+            'legend_format': entry.legend_format,
             'axis_x_range': entry.axis_x_range, 'axis_y_range': entry.axis_y_range,
             'label_position': entry.label_position,
             'label_format': entry.label_format,
@@ -3364,6 +3366,7 @@ def install_dashboard_routes(core):
             'grouping_columns': entry.grouping_columns,
             'legend': entry.legend,
             'legend_position': entry.legend_position,
+            'legend_format': entry.legend_format,
             'axis_x_range': entry.axis_x_range, 'axis_y_range': entry.axis_y_range,
             'label_position': entry.label_position,
             'label_format': entry.label_format,
@@ -3385,7 +3388,7 @@ def install_dashboard_routes(core):
             key: value for key, value in request.model_dump().items()
             if value is not None and key in {
                 'filters', 'chart_title', 'cdr_source', 'kpi', 'chart_type', 'grouping_rows',
-                'grouping_columns', 'legend', 'legend_position', 'axis_x_range', 'axis_y_range', 'label_position', 'label_format', 'exclude_null_empty', 'exclude_zero',
+                'grouping_columns', 'legend', 'legend_position', 'legend_format', 'axis_x_range', 'axis_y_range', 'label_position', 'label_format', 'exclude_null_empty', 'exclude_zero',
             }
         }
         # The template owns these required chart attributes. Custom dropdowns
@@ -3402,6 +3405,11 @@ def install_dashboard_routes(core):
         if 'label_format' in changes:
             try:
                 changes['label_format'] = core.parse_label_format(str(changes['label_format']))
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from exc
+        if 'legend_format' in changes:
+            try:
+                changes['legend_format'] = core.parse_label_format(str(changes['legend_format']))
             except ValueError as exc:
                 raise HTTPException(400, str(exc)) from exc
         for key, label in (('exclude_null_empty', 'Exclude Null/Empty'), ('exclude_zero', 'Exclude Zero')):
@@ -3586,7 +3594,7 @@ def install_dashboard_routes(core):
             key: value for key, value in request.model_dump().items()
             if value is not None and key in {
                 'filters', 'chart_title', 'cdr_source', 'kpi', 'chart_type', 'grouping_rows',
-                'grouping_columns', 'legend', 'legend_position', 'axis_x_range', 'axis_y_range', 'label_position', 'label_format', 'exclude_null_empty', 'exclude_zero',
+                'grouping_columns', 'legend', 'legend_position', 'legend_format', 'axis_x_range', 'axis_y_range', 'label_position', 'label_format', 'exclude_null_empty', 'exclude_zero',
             }
         }
         for key in ('cdr_source', 'kpi', 'chart_type'):
@@ -3600,6 +3608,11 @@ def install_dashboard_routes(core):
         if 'label_format' in changes:
             try:
                 changes['label_format'] = core.parse_label_format(str(changes['label_format']))
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from exc
+        if 'legend_format' in changes:
+            try:
+                changes['legend_format'] = core.parse_label_format(str(changes['legend_format']))
             except ValueError as exc:
                 raise HTTPException(400, str(exc)) from exc
         for key, label in (('exclude_null_empty', 'Exclude Null/Empty'), ('exclude_zero', 'Exclude Zero')):
@@ -3744,6 +3757,23 @@ def install_dashboard_routes(core):
                 snapshots.pop(token, None)
         return []
 
+    def invalidate_workspace_chart_models(workspace: str | Path) -> None:
+        """Rebuild open Dashboard charts after a mapping colour/order change."""
+        database_path = str(Path(workspace).resolve())
+        with lock:
+            for snapshot in snapshots.values():
+                if snapshot.workspace != database_path:
+                    continue
+                # Raw/filtered frames retain the mapping aliases and their
+                # grouping order. Keep the prepared selection and slide token,
+                # but rebuild all mapping-dependent chart data and Canvas
+                # payloads on the next request.
+                snapshot.frames.clear()
+                snapshot.filtered_frames.clear()
+                snapshot.chart_frames.clear()
+                snapshot.chart_payloads.clear()
+                snapshot.frame_locks.clear()
+
     def dashboard_task_payloads(workspace):
         database_path = str(workspace.database_path.resolve())
         with lock:
@@ -3816,6 +3846,7 @@ def install_dashboard_routes(core):
 
     core.e2e_dashboard_tasks = dashboard_task_payloads
     core.e2e_dashboard_cancel_workspace_tasks = cancel_workspace_dashboard_tasks
+    core.e2e_dashboard_invalidate_chart_models = invalidate_workspace_chart_models
     core.e2e_dashboard_stop_task = stop_dashboard_task
     core.e2e_dashboard_rename_template_references = rename_template_dashboards
     core.e2e_dashboard_reconcile_template_slide_comments = reconcile_template_slide_comments

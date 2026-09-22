@@ -141,6 +141,37 @@ def test_dynamic_table_uses_operator_mapping_order_by_default() -> None:
     assert column_model['column_keys'] == [['3'], ['EE'], ['O2'], ['VF_UK'], ['VF_SA']]
 
 
+def test_failure_count_hierarchy_uses_operator_mapping_order() -> None:
+    frame = chart_frame({
+        'Operator': ['VF_SA', 'VF_UK', 'O2', 'EE', '3'],
+        'Campaign': ['2026-Q2'] * 5,
+        'Session_Type': ['VoLTE'] * 5,
+        'City': ['London'] * 5,
+        'Call_Status': ['Failed'] * 5,
+        'Test_ID': ['A', 'B', 'C', 'D', 'E'],
+    })
+    frame.attrs['operator_mapping_groups'] = [
+        {'canonical': '3', 'aliases': [], 'position': 0, 'color': '#F28E2B'},
+        {'canonical': 'EE', 'aliases': [], 'position': 1, 'color': '#76B7B2'},
+        {'canonical': 'O2', 'aliases': [], 'position': 2, 'color': '#4E79A7'},
+        {'canonical': 'VF_UK', 'aliases': [], 'position': 3, 'color': '#E15759'},
+        {'canonical': 'VF_SA', 'aliases': [], 'position': 4, 'color': '#8000FF'},
+    ]
+    entry = CatalogEntry(
+        slide=3, slide_title='Validation', slide_subtitle='', layout='', chart_title='Failures',
+        cdr_source='CDR-Voice', kpi='COUNT(Test_ID)', chart_type='Count Stacked Horizontal Bars',
+        legend='Call Status', filters='', grouping_rows='Session Type × City',
+        grouping_columns='Operator × Campaign', legend_position='Right',
+    )
+
+    model = catalog_chart_payload(frame, entry, prefiltered=True)
+
+    assert model['column_keys'] == [
+        ['3', '2026-Q2'], ['EE', '2026-Q2'], ['O2', '2026-Q2'],
+        ['VF_UK', '2026-Q2'], ['VF_SA', '2026-Q2'],
+    ]
+
+
 def test_multivendor_dynamic_table_places_operator_only_identities_after_vendors() -> None:
     frame = chart_frame({
         'vendor': ['EE', 'O2', 'VF_SA', '3_Huawei', '3_Ericsson', 'VF_Ericsson'],
@@ -675,12 +706,12 @@ def test_catalogue_cdf_axis_ranges_are_optional_and_backward_compatible() -> Non
 
     current = (
         ','.join(CATALOG_HEADERS)
-        + '\n8,Quality,,Title and 1 column + Comments,Quality,CDR-Speech,LQ,CDF Line,,Operator,,,Top,,,"[0.01,]","[75,100]"\n'
+        + '\n8,Quality,,Title and 1 column + Comments,Quality,CDR-Speech,LQ,CDF Line,,Operator,,,Top,,,,"[0.01,]","[75,100]"\n'
     )
     entry = parse_catalog_csv(current, 'nsa')[0]
     assert parse_axis_range(entry.axis_x_range, 'x') == (0.01, None)
     assert parse_axis_range(entry.axis_y_range, 'y') == (75.0, 100.0)
-    assert b'Label Position,Label Format,Axis X Range,Axis Y Range' in catalogue_csv([entry])
+    assert b'Legend Position,Legend Format,Label Position,Label Format,Axis X Range,Axis Y Range' in catalogue_csv([entry])
 
 
 def test_catalogue_bar_label_position_is_validated_and_serialised() -> None:
@@ -689,7 +720,7 @@ def test_catalogue_bar_label_position_is_validated_and_serialised() -> None:
         parse_label_position('Centre')
     content = (
         ','.join(CATALOG_HEADERS)
-        + '\n8,Failures,,Title and 1 column + Comments,Failures,CDR-Voice,Call_Status,Count Stacked Horizontal Bars,,Operator,,,Top,Down,,,\n'
+        + '\n8,Failures,,Title and 1 column + Comments,Failures,CDR-Voice,Call_Status,Count Stacked Horizontal Bars,,Operator,,,Top,,Down,,,\n'
     )
     entry = parse_catalog_csv(content, 'nsa')[0]
     assert entry.label_position == 'down'
@@ -717,6 +748,24 @@ def test_catalogue_label_format_is_validated_and_serialised() -> None:
     assert b'#1A2B3C' in catalogue_csv([entry])
 
 
+def test_catalogue_legend_format_is_validated_and_serialised() -> None:
+    row = {
+        'Slide': '8', 'Slide Tittle': 'Failures', 'Slide Subtittle': '', 'Layout': 'Title and 1 column + Comments',
+        'Chart Tittle': 'Failures', 'CDR source': 'CDR-Voice', 'KPI': 'Call_Status',
+        'Chart type': 'Count Stacked Horizontal Bars', 'Filters': '', 'Rows Aggregation': 'Operator',
+        'Column Aggregation': '', 'Legend': '', 'Legend Position': 'Top',
+        'Legend Format': '["#1a2b3c", "Verdana", "Large", "Bold"]', 'Label Position': '', 'Label Format': '',
+        'Axis X Range': '', 'Axis Y Range': '', 'Exclude Null/Empty': '', 'Exclude Zero': '',
+    }
+    buffer = StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=CATALOG_HEADERS)
+    writer.writeheader()
+    writer.writerow(row)
+    entry = parse_catalog_csv(buffer.getvalue(), 'nsa')[0]
+    assert entry.legend_format == '["#1A2B3C","Verdana","Large","Bold"]'
+    assert b'Legend Format' in catalogue_csv([entry])
+
+
 def test_catalogue_null_and_zero_exclusions_are_independent_and_backward_compatible() -> None:
     assert parse_template_boolean('', 'Exclude Zero') is False
     assert parse_template_boolean('Yes', 'Exclude Zero') is True
@@ -733,7 +782,7 @@ def test_catalogue_null_and_zero_exclusions_are_independent_and_backward_compati
 
     content = (
         ','.join(CATALOG_HEADERS)
-        + '\n8,Quality,,Layout,Quality,CDR-Data,Metric,CDF Line,,Operator,,,Top,,,,Yes,Yes\n'
+        + '\n8,Quality,,Layout,Quality,CDR-Data,Metric,CDF Line,,Operator,,,Top,,,,,,Yes,Yes\n'
     )
     entry = parse_catalog_csv(content, 'nsa')[0]
     assert entry.exclude_null_empty is True
@@ -787,14 +836,14 @@ def test_null_and_zero_exclusions_filter_plotted_values_independently() -> None:
 def test_catalogue_accepts_axis_ranges_and_labels_for_every_chart_type() -> None:
     non_cdf_range = (
         ','.join(CATALOG_HEADERS)
-        + '\n8,Quality,,Title and 1 column + Comments,Quality,CDR-Data,Metric,Average Vertical Bars,,Operator,,,Top,,"[0.01,]",\n'
+        + '\n8,Quality,,Title and 1 column + Comments,Quality,CDR-Data,Metric,Average Vertical Bars,,Operator,,,Top,,,,"[0.01,]",\n'
     )
     bar_entry = parse_catalog_csv(non_cdf_range, 'nsa')[0]
     assert bar_entry.axis_x_range == '[0.01,]'
 
     non_bar_label = (
         ','.join(CATALOG_HEADERS)
-        + '\n8,Quality,,Title and 1 column + Comments,Quality,CDR-Data,Metric,CDF Line,,Operator,,,Top,Down,,,\n'
+        + '\n8,Quality,,Title and 1 column + Comments,Quality,CDR-Data,Metric,CDF Line,,Operator,,,Top,,Down,,,\n'
     )
     cdf_entry = parse_catalog_csv(non_bar_label, 'nsa')[0]
     assert cdf_entry.label_position == 'down'
@@ -1969,9 +2018,9 @@ def test_outcome_series_colours_use_green_for_success_and_red_for_failure() -> N
 
     assert colours == {
         ('Success',): '#2C9A62',
-        ('Failure',): '#C83E4D',
+        ('Failure',): '#E15759',
         ('Completed',): '#197A4A',
-        ('Dropped',): '#D8555F',
+        ('Dropped',): '#F28E2B',
     }
 
 
@@ -1984,8 +2033,8 @@ def test_status_categories_colour_failure_and_success_outcomes_semantically() ->
 
     palette = dict(zip(states, colours, strict=True))
     assert palette['Success'] == '#2C9A62'
-    assert palette['Dropped'] == '#C83E4D'
-    assert palette['Failure'] == '#D8555F'
+    assert palette['Dropped'] == '#F28E2B'
+    assert palette['Failed'] == '#E15759'
 
 
 def test_operator_vendor_column_groups_keep_campaign_bars_in_their_operator_palette() -> None:
@@ -2436,8 +2485,8 @@ def test_catalogue_call_family_uses_documented_netcheck_session_values() -> None
     filtered = _apply_catalog_filters(frame, entry, False, 'Call_Status')
     grouped, primary, series = _apply_catalog_grouping(filtered, entry, False, 'Call_Status')
 
-    assert grouped[primary].tolist() == ['VoLTE', 'MultiRAB', 'WhatsApp']
-    assert grouped['__catalog_row_0'].tolist() == ['VoLTE', 'MultiRAB', 'WhatsApp']
+    assert grouped[primary].tolist() == ['MultiRAB', 'VoLTE', 'WhatsApp']
+    assert grouped['__catalog_row_0'].tolist() == ['MultiRAB', 'VoLTE', 'WhatsApp']
     assert grouped['__catalog_column_0'].tolist() == ['EE', 'EE', 'EE']
     assert grouped['__catalog_column_1'].tolist() == ['Q1', 'Q1', 'Q1']
 
@@ -2853,7 +2902,9 @@ def test_failure_hierarchy_reserves_a_right_legend_lane() -> None:
             legend_position='right',
         )
 
-    assert draw_legend.call_args.kwargs['side_x'] == 1289
+    # A short right-side legend receives only the lane it needs, allowing the
+    # failure matrix to use the otherwise blank portion of the canvas.
+    assert draw_legend.call_args.kwargs['side_x'] > 1289
 
 
 def test_failure_hierarchy_uses_dashed_child_boundaries_within_one_operator() -> None:

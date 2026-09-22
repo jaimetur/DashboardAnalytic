@@ -33,13 +33,14 @@ const formatCalculatedDimensionAliases = (value) => String(value || '')
 const formatCalculatedDimensionRuleAliases = (value) => String(value || '')
   .split(';')
   .map((clause) => {
+    if (/\b(?:AND|OR)\b|[()]/i.test(clause)) return clause.trim();
     const match = clause.trim().match(/^(.+?)\s+(NOT\s+CONTAINS|NOT\s+IN|CONTAINS|IN|>=|<=|!=|=|>|<)\s+(.+)$/i);
     return match
       ? `${formatCalculatedDimensionAliases(match[1])} ${match[2]} ${match[3].trim()}`
       : clause.trim();
   })
   .filter(Boolean)
-  .join('; ');
+  .join(' AND ');
 
 function configureCalculatedDimensionFieldAutocomplete(input, getColumns) {
   const ownerDocument = input.ownerDocument;
@@ -688,7 +689,7 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
         updateSourceSummary();
         fieldAutocompleteControllers.forEach((controller) => controller.refresh());
       }); configureCalculatedDimensionSourceMenu(sourceMenu, overlay); updateSourceSummary(); sources.append(sourcesLabel, sourceMenu); form.append(sources);
-      const rulesLabel = document.createElement('label'); rulesLabel.className = 'calculated-dimension-rules'; rulesLabel.textContent = 'Rules';
+      const rulesLabel = document.createElement('label'); rulesLabel.className = 'calculated-dimension-rules'; rulesLabel.textContent = 'Rules or Expression';
       const rules = document.createElement('textarea'); rules.placeholder = "[Test_Result] IN (Completed, Visible Completed) => Success\n\nor\n\nIF ([Mean Data Rate] < 1) THEN 'below1'\nELSE 'Above'\nEND";
       rules.value = current.expression || (current.rules || []).map((rule) => `${rule.when} => ${rule.value}`).join('\n'); rulesLabel.append(rules); form.append(rulesLabel);
       const selectedColumns = () => Array.from(sourceChoices.querySelectorAll('input:checked'))
@@ -2008,6 +2009,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   const optionsLabel = editor.querySelector('[data-catalogue-editor-options-label]');
   const options = editor.querySelector('[data-catalogue-editor-options]');
   const labelFormatControl = editor.querySelector('[data-catalogue-editor-label-format]');
+  const labelFormatTitle = editor.querySelector('[data-catalogue-editor-format-title]');
   const labelFormatColor = editor.querySelector('[data-catalogue-editor-label-format-color]');
   const labelFormatColorValue = editor.querySelector('[data-catalogue-editor-label-format-colour-value]');
   const labelFormatFont = editor.querySelector('[data-catalogue-editor-label-format-font]');
@@ -2259,7 +2261,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
         updateSourceSummary();
         fieldAutocompleteControllers.forEach((controller) => controller.refresh());
       }); configureCalculatedDimensionSourceMenu(sourceMenu, overlay); updateSourceSummary(); sources.append(sourcesLabel, sourceMenu); form.append(sources);
-      const rulesLabel = document.createElement('label'); rulesLabel.className = 'calculated-dimension-rules'; rulesLabel.textContent = 'Rules';
+      const rulesLabel = document.createElement('label'); rulesLabel.className = 'calculated-dimension-rules'; rulesLabel.textContent = 'Rules or Expression';
       const rules = document.createElement('textarea'); rules.placeholder = "[Test_Result] IN (Completed, Visible Completed) => Success\n\nor\n\nIF ([Mean Data Rate] < 1) THEN 'below1'\nELSE 'Above'\nEND";
       rules.value = current.expression || (current.rules || []).map((rule) => `${rule.when} => ${rule.value}`).join('\n'); rulesLabel.append(rules); form.append(rulesLabel);
       const selectedColumns = () => Array.from(sourceChoices.querySelectorAll('input:checked'))
@@ -2412,7 +2414,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   const catalogueHeaders = Array.from(table.querySelectorAll('thead th[data-catalogue-field]'))
     .map((cell) => cell.dataset.catalogueField);
   const fieldColumns = new Set(['Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend']);
-  const assistedFields = new Set(['Layout', 'CDR source', 'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position', 'Label Position', 'Label Format', 'Axis X Range', 'Axis Y Range', 'Exclude Null/Empty', 'Exclude Zero']);
+  const assistedFields = new Set(['Layout', 'CDR source', 'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position', 'Legend Format', 'Label Position', 'Label Format', 'Axis X Range', 'Axis Y Range', 'Exclude Null/Empty', 'Exclude Zero']);
   const groupingColumns = new Set(['Rows Aggregation', 'Column Aggregation']);
   const validationAlert = document.querySelector('[data-catalogue-validation-alert]');
   const validationMessage = validationAlert?.querySelector('[data-catalogue-validation-message]');
@@ -2519,6 +2521,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (field === 'Legend Position') return 'Leave this empty when the chart has no legend, or choose where the legend is drawn.';
     if (field === 'Label Position') return 'Override value-label placement for any chart: None hides labels; Top, Up, Middle and Down select their chart-aware position. Leave empty to retain automatic placement.';
     if (field === 'Label Format') return 'Choose a color, font and styles. They are stored as a JSON list; leave the cell empty to retain automatic formatting. Tiny labels beside stacked segments retain their segment colour.';
+    if (field === 'Legend Format') return 'Choose a color, font and styles for legend captions and aggregation titles. They are stored as a JSON list; leave the cell empty to retain the standard chart format.';
     if (field === 'Axis X Range') return 'Optional horizontal-axis range in chart units: [min,max], [min,] or [,max]. Leave empty to keep automatic limits.';
     if (field === 'Axis Y Range') return 'Optional vertical-axis range in chart units: [min,max], [min,] or [,max]. Percentage charts use values from 0 to 100.';
     if (field === 'Exclude Null/Empty') return 'Choose Yes to exclude rows whose plotted value is null or empty. Leave empty to keep them.';
@@ -2728,8 +2731,9 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     helper.dataset.catalogueAssistanceField = field;
     heading.textContent = field || 'Selected cell';
     copy.textContent = helperCopy(field);
-    if (labelFormatControl) labelFormatControl.hidden = field !== 'Label Format';
-    if (field === 'Label Format') {
+    if (labelFormatControl) labelFormatControl.hidden = !['Label Format', 'Legend Format'].includes(field);
+    if (labelFormatTitle) labelFormatTitle.textContent = field === 'Legend Format' ? 'Legend format' : 'Label format';
+    if (['Label Format', 'Legend Format'].includes(field)) {
       let tokens = [];
       try { tokens = JSON.parse(cell.textContent.trim() || '[]'); } catch (_error) { tokens = []; }
       if (labelFormatColor) labelFormatColor.value = tokens.find((token) => /^#[0-9a-f]{6}$/i.test(token)) || '#FFFFFF';
@@ -2781,7 +2785,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       options.add(new Option('No contextual values are defined for this field. Edit it manually.', '', true, false));
       options.options[0].disabled = true;
     }
-    optionsLabel.hidden = field === 'Label Format';
+    optionsLabel.hidden = ['Label Format', 'Legend Format'].includes(field);
     apply.hidden = values.length === 0;
     if (field === 'Filters') {
       optionsLabel.hidden = true;
@@ -2805,7 +2809,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     positionCellAssistance(cell);
   };
   const applyLabelFormat = () => {
-    if (!activeCell || activeCell.dataset.catalogueField !== 'Label Format') return;
+    if (!activeCell || !['Label Format', 'Legend Format'].includes(activeCell.dataset.catalogueField)) return;
     if (labelFormatColorValue) labelFormatColorValue.textContent = labelFormatColor?.value.toUpperCase() || '#FFFFFF';
     const tokens = [labelFormatColor?.value.toUpperCase(), labelFormatFont?.value, labelFormatSize?.value, labelFormatBold?.checked && 'Bold', labelFormatItalic?.checked && 'Italic', labelFormatUnderline?.checked && 'Underline'].filter(Boolean);
     activeCell.textContent = JSON.stringify(tokens);
@@ -2813,7 +2817,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   };
   [labelFormatColor, labelFormatFont, labelFormatSize, labelFormatBold, labelFormatItalic, labelFormatUnderline].forEach((control) => control?.addEventListener('input', applyLabelFormat));
   labelFormatAutomatic?.addEventListener('click', () => {
-    if (!activeCell || activeCell.dataset.catalogueField !== 'Label Format') return;
+    if (!activeCell || !['Label Format', 'Legend Format'].includes(activeCell.dataset.catalogueField)) return;
     activeCell.textContent = '';
     refreshCellEditedState(activeCell);
   });
@@ -2880,6 +2884,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       'Axis Y Range': true,
       'Label Position': true,
       'Label Format': true,
+      'Legend Format': true,
     };
     Object.entries(applicability).forEach(([field, enabled]) => {
       const cell = row.querySelector(`[data-catalogue-field="${field}"]`);
@@ -3116,7 +3121,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   const previewDefinitionFromRow = (row) => ({
     chart_type: rowValue(row, 'Chart type'), chart_title: rowValue(row, 'Chart Tittle'), cdr_source: rowValue(row, 'CDR source'),
     kpi: rowValue(row, 'KPI'), filters: rowValue(row, 'Filters'), grouping_rows: rowValue(row, 'Rows Aggregation'),
-    grouping_columns: rowValue(row, 'Column Aggregation'), legend: rowValue(row, 'Legend'), legend_position: rowValue(row, 'Legend Position'),
+    grouping_columns: rowValue(row, 'Column Aggregation'), legend: rowValue(row, 'Legend'), legend_position: rowValue(row, 'Legend Position'), legend_format: rowValue(row, 'Legend Format'),
     axis_x_range: rowValue(row, 'Axis X Range'), axis_y_range: rowValue(row, 'Axis Y Range'),
     label_position: rowValue(row, 'Label Position'),
     label_format: rowValue(row, 'Label Format'),
@@ -3134,7 +3139,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       columnsBySource: suggestions.columns,
       fields: [
         ['chart_type', 'Chart Type'], ['chart_title', 'Chart Tittle'], ['cdr_source', 'CDR Source'], ['kpi', 'KPI'], ['filters', 'Filters'],
-        ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
+        ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'], ['legend_format', 'Legend Format'],
         ['axis_x_range', 'Axis X Range'], ['axis_y_range', 'Axis Y Range'],
         ['label_position', 'Label Position'], ['label_format', 'Label Format'], ['exclude_null_empty', 'Exclude Null/Empty'], ['exclude_zero', 'Exclude Zero'],
       ],
@@ -3603,12 +3608,12 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (!activeCell) return;
     const field = activeCell.dataset.catalogueField || '';
     const selected = Array.from(options.selectedOptions).map((option) => option.value);
-    if (!selected.length || (!['Legend Position', 'Label Position', 'Label Format', 'Exclude Null/Empty', 'Exclude Zero'].includes(field) && !selected.some(Boolean))) return;
+    if (!selected.length || (!['Legend Position', 'Legend Format', 'Label Position', 'Label Format', 'Exclude Null/Empty', 'Exclude Zero'].includes(field) && !selected.some(Boolean))) return;
     const current = activeCell.textContent.trim();
     if (field === 'KPI') {
       const operation = kpiAggregation?.value || '';
       activeCell.textContent = operation ? `${operation}(${selected[0]})` : selected[0];
-    } else if (field === 'Layout' || field === 'CDR source' || field === 'Legend Position' || field === 'Label Position' || field === 'Label Format' || field === 'Exclude Null/Empty' || field === 'Exclude Zero') {
+    } else if (field === 'Layout' || field === 'CDR source' || field === 'Legend Position' || field === 'Legend Format' || field === 'Label Position' || field === 'Label Format' || field === 'Exclude Null/Empty' || field === 'Exclude Zero') {
       activeCell.textContent = selected[0];
     } else if (field === 'Chart type') {
       activeCell.textContent = displayChartType(selected[0]);
@@ -3823,7 +3828,7 @@ document.querySelectorAll('[data-catalogue-import-form]').forEach((form) => {
   try { templateLibrary = JSON.parse(form.dataset.catalogueTemplateLibrary || '{}'); } catch (_error) { templateLibrary = {}; }
   const currentHeaders = [
     'Slide', 'Slide Tittle', 'Slide Subtittle', 'Layout', 'Chart Tittle', 'CDR source',
-    'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position', 'Label Position', 'Label Format', 'Axis X Range', 'Axis Y Range',
+    'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position', 'Legend Format', 'Label Position', 'Label Format', 'Axis X Range', 'Axis Y Range',
   ];
   const normalizedHeader = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
   const hasCurrentSchema = async (selected) => {
@@ -5282,7 +5287,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
   if (!fieldsElement) return {definition: () => ({})};
   const fields = options.fields || [
     ['chart_type', 'Chart Type'], ['cdr_source', 'CDR Source'], ['kpi', 'KPI'], ['filters', 'Filters'],
-    ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
+    ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'], ['legend_format', 'Legend Format'],
     ['axis_x_range', 'Axis X Range'], ['axis_y_range', 'Axis Y Range'],
     ['label_position', 'Label Position'], ['label_format', 'Label Format'], ['exclude_null_empty', 'Exclude Null/Empty'], ['exclude_zero', 'Exclude Zero'],
   ];
@@ -5315,7 +5320,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
     return order;
   };
   const currentDefinition = () => Object.fromEntries(Array.from(fieldsElement.querySelectorAll('[name]')).map((control) => {
-    if (control.name === 'label_format' && fieldsElement.querySelector('[data-preview-label-format-automatic]')?.checked) return [control.name, ''];
+    if (['label_format', 'legend_format'].includes(control.name) && fieldsElement.querySelector(`[data-preview-${control.name.replace('_', '-')}-automatic]`)?.checked) return [control.name, ''];
     if (options.editableGroupingInputs && ['grouping_rows', 'grouping_columns'].includes(control.name)) {
       const editor = control.parentElement?.querySelector('[data-preview-grouping-text]');
       if (editor) return [control.name, editor.value.trim()];
@@ -5448,12 +5453,12 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
       hidden.value = String(definition.filters || ''); parsedField.value = hidden.value;
       return field;
     }
-    if (key === 'label_format') {
+    if (key === 'label_format' || key === 'legend_format') {
       const control = document.createElement('input');
       control.type = 'hidden'; control.name = key; control.value = String(definition[key] || '');
       const opener = document.createElement('button'); opener.type = 'button'; opener.className = 'report-chart-label-format-trigger';
       const assistance = document.createElement('fieldset'); assistance.className = 'report-chart-label-format-assistance'; assistance.hidden = true;
-      const legend = document.createElement('legend'); legend.textContent = 'Label format';
+      const legend = document.createElement('legend'); legend.textContent = key === 'legend_format' ? 'Legend format' : 'Label format';
       const color = document.createElement('input'); color.type = 'color'; color.value = '#FFFFFF'; color.setAttribute('aria-label', 'Label format color');
       const colorValue = document.createElement('output');
       const colorRow = document.createElement('span'); colorRow.className = 'catalogue-label-format-colour-row'; colorRow.append(color, colorValue);
@@ -5469,7 +5474,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
         const styleLabel = document.createElement('label'); const text = document.createElement('span'); text.textContent = style;
         styleLabel.append(choice, text); styles.append(styleLabel); styleControls[style] = choice;
       });
-      const automatic = document.createElement('button'); automatic.type = 'button'; automatic.className = 'report-chart-label-format-automatic'; automatic.textContent = 'Use automatic format';
+      const automatic = document.createElement('button'); automatic.type = 'button'; automatic.className = 'report-chart-label-format-automatic'; automatic.dataset.previewLabelFormatAutomatic = ''; if (key === 'legend_format') { delete automatic.dataset.previewLabelFormatAutomatic; automatic.dataset.previewLegendFormatAutomatic = ''; } automatic.textContent = 'Use automatic format';
       const parseTokens = () => {
         try { const parsed = JSON.parse(control.value || '[]'); return Array.isArray(parsed) ? parsed : []; } catch (_error) { return []; }
       };

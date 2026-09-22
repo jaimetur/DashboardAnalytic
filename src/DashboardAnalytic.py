@@ -868,15 +868,16 @@ def _auto_field_sql_expression(
         clauses: list[str] = []
         parameters: list[Any] = []
         for branch in expression.branches:
-            compiled = [condition_sql(condition) for condition in branch.conditions]
-            if any(item is None for item in compiled):
-                continue
-            conditions = [item for item in compiled if item is not None]
             result_sql, result_parameters = compile_result(branch.result)
-            clauses.append(f"WHEN {' AND '.join(item[0] for item in conditions)} THEN {result_sql}")
-            for _sql, values in conditions:
-                parameters.extend(values)
-            parameters.extend(result_parameters)
+            for alternative in branch.conditions:
+                compiled = [condition_sql(condition) for condition in alternative]
+                if any(item is None for item in compiled):
+                    continue
+                conditions = [item for item in compiled if item is not None]
+                clauses.append(f"WHEN {' AND '.join(item[0] for item in conditions)} THEN {result_sql}")
+                for _sql, values in conditions:
+                    parameters.extend(values)
+                parameters.extend(result_parameters)
         otherwise_sql = 'NULL'
         if expression.otherwise is not None:
             otherwise_sql, otherwise_parameters = compile_result(expression.otherwise)
@@ -2035,7 +2036,7 @@ def catalogue_editor_payload(technology: str | None, catalogue_id: str | None) -
             'Rows Aggregation': entry.grouping_rows,
             'Column Aggregation': entry.grouping_columns,
             'Legend': entry.legend,
-            'Legend Position': entry.legend_position.title(),
+            'Legend Position': entry.legend_position.title(), 'Legend Format': entry.legend_format,
             'Label Position': entry.label_position.title(),
             'Label Format': entry.label_format,
             'Axis X Range': entry.axis_x_range,
@@ -10018,6 +10019,14 @@ def _clear_chart_preview_caches() -> None:
         CHART_PREVIEW_FRAME_CACHE.clear()
         CHART_PREVIEW_FILTER_CACHE.clear()
         CHART_PREVIEW_DATA_CACHE.clear()
+    # An open Dashboard keeps its rendered Canvas models in an E2E snapshot.
+    # Mapping-order changes do not alter the selected CDR universe, but they do
+    # alter its hierarchy order. Invalidate only those inexpensive derived
+    # models so the current Dashboard token remains usable and repaints with
+    # the newly saved Operator/Vendor order.
+    invalidate_dashboard_models = globals().get('e2e_dashboard_invalidate_chart_models')
+    if active_workspace and callable(invalidate_dashboard_models):
+        invalidate_dashboard_models(active_workspace.database_path)
 
 
 def _chart_preview_cache_key(scope: str, material: dict[str, Any]) -> str:
@@ -10254,7 +10263,7 @@ def _temporary_chart_definition_changes(editable: dict[str, Any]) -> dict[str, A
     """Normalise editable values shared by every Interactive Preview entry point."""
     allowed = {
         'chart_title', 'cdr_source', 'kpi', 'chart_type', 'filters',
-        'grouping_rows', 'grouping_columns', 'legend', 'legend_position',
+        'grouping_rows', 'grouping_columns', 'legend', 'legend_position', 'legend_format',
         'axis_x_range', 'axis_y_range',
         'label_position', 'label_format', 'exclude_null_empty', 'exclude_zero',
     }
@@ -10270,6 +10279,8 @@ def _temporary_chart_definition_changes(editable: dict[str, Any]) -> dict[str, A
         changes['label_position'] = parse_label_position(changes['label_position'])
     if 'label_format' in changes:
         changes['label_format'] = parse_label_format(changes['label_format'])
+    if 'legend_format' in changes:
+        changes['legend_format'] = parse_label_format(changes['legend_format'])
     for key, label in (('exclude_null_empty', 'Exclude Null/Empty'), ('exclude_zero', 'Exclude Zero')):
         if key in changes:
             changes[key] = parse_template_boolean(changes[key], label)
@@ -10320,7 +10331,7 @@ def temporary_chart_preview_context(source: str, identifier: str, chart_index: i
         'datasets_by_source': datasets_by_source,
         'kpi': entry.kpi, 'chart_type': entry.chart_type, 'filters': entry.filters,
         'grouping_rows': entry.grouping_rows, 'grouping_columns': entry.grouping_columns,
-        'legend': entry.legend, 'legend_position': entry.legend_position,
+        'legend': entry.legend, 'legend_position': entry.legend_position, 'legend_format': entry.legend_format,
         'axis_x_range': entry.axis_x_range, 'axis_y_range': entry.axis_y_range,
         'label_position': entry.label_position,
         'label_format': entry.label_format,
@@ -10938,6 +10949,7 @@ def _chart_builder_context(payload: dict[str, Any]) -> tuple[pd.DataFrame, Catal
         axis_y_range=str(definition.get('axis_y_range') or '').strip(),
         label_position=parse_label_position(str(definition.get('label_position') or '')),
         label_format=parse_label_format(str(definition.get('label_format') or '')),
+        legend_format=parse_label_format(str(definition.get('legend_format') or '')),
         exclude_null_empty=parse_template_boolean(definition.get('exclude_null_empty'), 'Exclude Null/Empty'),
         exclude_zero=parse_template_boolean(definition.get('exclude_zero'), 'Exclude Zero'),
     )

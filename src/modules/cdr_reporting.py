@@ -50,12 +50,14 @@ TEMPLATE_NAMES = {
 CDR_REPORT_VERSION = "2026-09-22-v14"
 REPORTING_KINDS = {"data", "voice", "speech"}
 COMMENT_HINTS = ("having ", "observed", "shows ", "similar performance", "worse ", "improvement", "degradation", "gap ")
-VISUAL_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position", "Label Position", "Label Format", "Axis X Range", "Axis Y Range")
+VISUAL_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position", "Legend Format", "Label Position", "Label Format", "Axis X Range", "Axis Y Range")
 CATALOG_HEADERS = (*VISUAL_CATALOG_HEADERS, "Exclude Null/Empty", "Exclude Zero")
 # Templates created before configurable visual settings remain valid and
 # acquire empty Label/axis cells the next time they are saved in the editor.
 RANGELESS_CATALOG_HEADERS = CATALOG_HEADERS[:13]
+PRE_LEGEND_FORMAT_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position", "Label Position", "Label Format", "Axis X Range", "Axis Y Range", "Exclude Null/Empty", "Exclude Zero")
 PRE_LABEL_COLOR_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position", "Label", "Axis X Range", "Axis Y Range", "Exclude Null/Empty", "Exclude Zero")
+PRE_LABEL_COLOR_RANGELESS_CATALOG_HEADERS = PRE_LABEL_COLOR_CATALOG_HEADERS[:16]
 PRE_LABEL_FORMAT_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position", "Label", "Label Color", "Axis X Range", "Axis Y Range", "Exclude Null/Empty", "Exclude Zero")
 # Import the two immediately preceding schemas too, so existing templates remain
 # usable after the aggregation columns were renamed and the legend was repositioned.
@@ -94,7 +96,7 @@ _DASHBOARD_CANVAS_RENDERER_LOCK = threading.RLock()
 # The browser worker keeps a copy of dashboard_charts.js in memory. Bump this
 # whenever rendering semantics change so a live server does not keep painting
 # previews with an older script after a hot reload.
-DASHBOARD_CANVAS_RENDERER_VERSION = 4
+DASHBOARD_CANVAS_RENDERER_VERSION = 5
 
 
 def _node_executable() -> str:
@@ -279,6 +281,7 @@ CATALOG_HEADER_ALIASES = {
     "charttype": "Chart type",
     "legend": "Legend",
     "legendposition": "Legend Position",
+    "legendformat": "Legend Format",
     "label": "Label Position",
     "labelposition": "Label Position",
     "labelcolor": "Label Format",
@@ -344,7 +347,7 @@ class CalculatedDimensionRule:
 
 @dataclass(frozen=True)
 class CalculatedDimensionExpressionBranch:
-    conditions: tuple[FilterCondition, ...]
+    conditions: tuple[tuple[FilterCondition, ...], ...]
     result: str | CalculatedDimensionExpression
 
 
@@ -392,6 +395,7 @@ class CatalogEntry:
     grouping_rows: str
     grouping_columns: str
     legend_position: str = "top"
+    legend_format: str = ""
     calculated_dimensions: tuple[CalculatedDimension, ...] = ()
     axis_x_range: str = ""
     axis_y_range: str = ""
@@ -582,25 +586,142 @@ def _parse_calculated_expression_condition(
     return FilterCondition(tokens[0].value, operator, (remaining[0].value,))
 
 
+class _CalculatedBooleanConditionParser:
+    """Parse AND/OR condition groups and normalise them into DNF rule branches."""
+
+    def __init__(self, tokens: tuple[_CalculatedExpressionToken, ...]) -> None:
+        self.tokens = tokens
+        self.cursor = 0
+
+    def _keyword(self, value: str) -> bool:
+        return self.cursor < len(self.tokens) and self.tokens[self.cursor].kind == 'WORD' and self.tokens[self.cursor].value.upper() == value
+
+    def _expect(self, kind: str) -> _CalculatedExpressionToken:
+        if self.cursor >= len(self.tokens) or self.tokens[self.cursor].kind != kind:
+            found = self.tokens[self.cursor].value if self.cursor < len(self.tokens) else 'end of expression'
+            raise ValueError(f"Invalid condition: expected {kind}, found '{found}'.")
+        token = self.tokens[self.cursor]
+        self.cursor += 1
+        return token
+
+    def _condition(self) -> FilterCondition:
+        first = self._expect('FIELD')
+        fields = [first.value]
+        probe = self.cursor
+        while (
+            probe + 1 < len(self.tokens)
+            and self.tokens[probe].kind == 'WORD' and self.tokens[probe].value.upper() == 'OR'
+            and self.tokens[probe + 1].kind == 'FIELD'
+        ):
+            fields.append(self.tokens[probe + 1].value)
+            probe += 2
+        # Preserve the concise legacy form: [A] OR [B] CONTAINS value.
+        if probe < len(self.tokens) and (
+            self.tokens[probe].kind == 'OP'
+            or (self.tokens[probe].kind == 'WORD' and self.tokens[probe].value.upper() in {'IN', 'CONTAINS', 'NOT'})
+        ):
+            self.cursor = probe
+        else:
+            fields = [first.value]
+        if self.cursor >= len(self.tokens):
+            raise ValueError('Invalid condition: expected a comparison operator after the source field.')
+        if self.tokens[self.cursor].kind == 'OP':
+            operator = '!=' if self.tokens[self.cursor].value == '<>' else self.tokens[self.cursor].value
+            self.cursor += 1
+        elif self.tokens[self.cursor].kind == 'WORD':
+            operator = self.tokens[self.cursor].value.upper()
+            self.cursor += 1
+            if operator == 'NOT' and self._keyword('IN') or operator == 'NOT' and self._keyword('CONTAINS'):
+                operator = f"NOT {self.tokens[self.cursor].value.upper()}"
+                self.cursor += 1
+        else:
+            raise ValueError('Invalid condition: expected a comparison operator after the source field.')
+        if operator not in {'=', '!=', '>', '>=', '<', '<=', 'IN', 'NOT IN', 'CONTAINS', 'NOT CONTAINS'}:
+            raise ValueError(f"Invalid condition: unsupported operator '{operator}'.")
+        if operator in {'IN', 'NOT IN'}:
+            self._expect('LPAREN')
+            values: list[str] = []
+            value_tokens: list[str] = []
+            while self.cursor < len(self.tokens) and self.tokens[self.cursor].kind != 'RPAREN':
+                token = self.tokens[self.cursor]
+                if token.kind in {'VALUE', 'WORD'}:
+                    value_tokens.append(token.value)
+                elif token.kind == 'COMMA' and value_tokens:
+                    values.append(' '.join(value_tokens)); value_tokens = []
+                else:
+                    raise ValueError('Invalid condition: IN values must be separated by commas.')
+                self.cursor += 1
+            self._expect('RPAREN')
+            if value_tokens:
+                values.append(' '.join(value_tokens))
+            if not values:
+                raise ValueError('Invalid condition: IN requires at least one value.')
+        else:
+            if self.cursor >= len(self.tokens) or self.tokens[self.cursor].kind not in {'VALUE', 'WORD'}:
+                raise ValueError('Invalid condition: comparisons require one quoted, numeric or single-word value.')
+            values = [self.tokens[self.cursor].value]
+            self.cursor += 1
+        return FilterCondition(' OR '.join(fields), operator, tuple(values))
+
+    @staticmethod
+    def _and(left: tuple[tuple[FilterCondition, ...], ...], right: tuple[tuple[FilterCondition, ...], ...]) -> tuple[tuple[FilterCondition, ...], ...]:
+        return tuple((*first, *second) for first in left for second in right)
+
+    def _primary(self) -> tuple[tuple[FilterCondition, ...], ...]:
+        if self.cursor < len(self.tokens) and self.tokens[self.cursor].kind == 'LPAREN':
+            self.cursor += 1
+            nested = self._or()
+            self._expect('RPAREN')
+            return nested
+        return ((self._condition(),),)
+
+    def _and_expression(self) -> tuple[tuple[FilterCondition, ...], ...]:
+        result = self._primary()
+        while self._keyword('AND'):
+            self.cursor += 1
+            result = self._and(result, self._primary())
+        return result
+
+    def _or(self) -> tuple[tuple[FilterCondition, ...], ...]:
+        result = self._and_expression()
+        while self._keyword('OR'):
+            self.cursor += 1
+            result = (*result, *self._and_expression())
+        return result
+
+    def parse(self) -> tuple[tuple[FilterCondition, ...], ...]:
+        result = self._or()
+        if self.cursor != len(self.tokens):
+            found = self.tokens[self.cursor].value
+            raise ValueError(f"Invalid condition: unexpected token '{found}'.")
+        if len(result) > 128:
+            raise ValueError('Invalid condition: too many OR alternatives (maximum 128).')
+        return result
+
+
+def parse_calculated_boolean_conditions(value: str) -> tuple[tuple[FilterCondition, ...], ...]:
+    """Parse parenthesised AND/OR rule conditions into equivalent AND-only branches."""
+    text = re.sub(r';|[\r\n]+', ' AND ', str(value or '')).strip()
+    if not text:
+        raise ValueError('A rule condition is required.')
+    # Saved workspace defaults from before bracketed fields used a pipe-delimited
+    # alias list (for example ``Call_Status|status IN (...)``). Treat that
+    # complete list as one field reference so old configurations stay valid.
+    legacy_alias = re.match(
+        r"^([^\[\]()]+\|[^\[\]()]+?)\s+(?=(?:NOT\s+)?(?:IN|CONTAINS)\b|[=!<>])",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if legacy_alias:
+        field = legacy_alias.group(1).strip()
+        text = f"[{field}] {text[legacy_alias.end():]}"
+    return _CalculatedBooleanConditionParser(_calculated_expression_tokens(text)).parse()
+
+
 def _parse_calculated_expression_conditions(
     tokens: tuple[_CalculatedExpressionToken, ...],
-) -> tuple[FilterCondition, ...]:
-    tokens = _strip_calculated_condition_parentheses(tokens)
-    groups: list[tuple[_CalculatedExpressionToken, ...]] = []
-    start = 0
-    depth = 0
-    for index, token in enumerate(tokens):
-        if token.kind == "LPAREN":
-            depth += 1
-        elif token.kind == "RPAREN":
-            depth -= 1
-        elif depth == 0 and token.kind == "WORD" and token.value.upper() == "AND":
-            groups.append(tokens[start:index])
-            start = index + 1
-    groups.append(tokens[start:])
-    if depth != 0 or any(not group for group in groups):
-        raise ValueError("Invalid IF condition: unbalanced parentheses or incomplete AND condition.")
-    return tuple(_parse_calculated_expression_condition(group) for group in groups)
+) -> tuple[tuple[FilterCondition, ...], ...]:
+    return _CalculatedBooleanConditionParser(tokens).parse()
 
 
 class _CalculatedExpressionParser:
@@ -682,20 +803,20 @@ def parse_calculated_dimension_expression(value: str) -> CalculatedDimensionExpr
 
 def _flatten_calculated_expression(
     expression: CalculatedDimensionExpression,
-    inherited: tuple[FilterCondition, ...] = (),
+    inherited: tuple[tuple[FilterCondition, ...], ...] = ((),),
 ) -> tuple[CalculatedDimensionRule, ...]:
     rules: list[CalculatedDimensionRule] = []
     for branch in expression.branches:
-        conditions = (*inherited, *branch.conditions)
+        conditions = tuple((*parent, *child) for parent in inherited for child in branch.conditions)
         if isinstance(branch.result, CalculatedDimensionExpression):
             rules.extend(_flatten_calculated_expression(branch.result, conditions))
         else:
-            rules.append(CalculatedDimensionRule(conditions, branch.result))
+            rules.extend(CalculatedDimensionRule(item, branch.result) for item in conditions)
     if expression.otherwise is not None:
         if isinstance(expression.otherwise, CalculatedDimensionExpression):
             rules.extend(_flatten_calculated_expression(expression.otherwise, inherited))
         else:
-            rules.append(CalculatedDimensionRule(inherited, expression.otherwise))
+            rules.extend(CalculatedDimensionRule(item, expression.otherwise) for item in inherited)
     return tuple(rules)
 
 
@@ -738,7 +859,7 @@ def parse_calculated_dimensions(payload: object) -> tuple[CalculatedDimension, .
             value = str(rule.get("value") or "").strip()
             if not when or not value:
                 raise ValueError(f"Rule {rule_index} of auto-calculated field '{name}' requires a condition and result.")
-            rules.append(CalculatedDimensionRule(parse_catalog_filters(when), value))
+            rules.extend(CalculatedDimensionRule(conditions, value) for conditions in parse_calculated_boolean_conditions(when))
         if expression is not None:
             rules = list(_flatten_calculated_expression(expression))
         default_from = split_calculated_dimension_aliases(item.get("default_from"))
@@ -777,7 +898,7 @@ def calculated_dimensions_json(dimensions: Iterable[CalculatedDimension]) -> lis
             "default_from": compact_column_aliases("|".join(dimension.default_from)),
             "expression": dimension.expression_text,
             "rules": [
-                {"when": "; ".join(condition_text(condition) for condition in rule.conditions), "value": rule.value}
+                {"when": " AND ".join(condition_text(condition) for condition in rule.conditions), "value": rule.value}
                 for rule in dimension.rules
             ],
         }
@@ -860,6 +981,7 @@ def label_format_options(value: str) -> dict[str, object]:
     tokens = json.loads(parse_label_format(value) or "[]")
     fonts = {"Arial", "Helvetica", "Verdana", "Tahoma", "Georgia", "Times New Roman", "Courier New"}
     return {
+        "configured": bool(tokens),
         "color": next((token for token in tokens if token.startswith("#")), ""),
         "font": next((token for token in tokens if token in fonts), "Arial"),
         "bold": "Bold" in tokens,
@@ -925,7 +1047,7 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
     fieldnames = tuple(reader.fieldnames or ())
     accepted_schemas = {
         _canonical_catalog_headers(schema)
-        for schema in (CATALOG_HEADERS, PRE_LABEL_FORMAT_CATALOG_HEADERS, PRE_LABEL_COLOR_CATALOG_HEADERS, VISUAL_CATALOG_HEADERS, RANGELESS_CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, OLDER_CATALOG_HEADERS, LEGACY_ROWS_COLUMNS_HEADERS, LEGACY_CATALOG_HEADERS)
+        for schema in (CATALOG_HEADERS, PRE_LEGEND_FORMAT_CATALOG_HEADERS, PRE_LABEL_FORMAT_CATALOG_HEADERS, PRE_LABEL_COLOR_CATALOG_HEADERS, PRE_LABEL_COLOR_RANGELESS_CATALOG_HEADERS, VISUAL_CATALOG_HEADERS, RANGELESS_CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, OLDER_CATALOG_HEADERS, LEGACY_ROWS_COLUMNS_HEADERS, LEGACY_CATALOG_HEADERS)
     }
     if _canonical_catalog_headers(fieldnames) not in accepted_schemas:
         raise ValueError("The report template must use exactly these columns: " + ", ".join(CATALOG_HEADERS))
@@ -957,6 +1079,7 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
             # Keep an intentionally empty editor cell empty. Renderers still
             # interpret it as their default position if a legend exists.
             legend_position=(row.get("Legend Position") or "").strip().casefold(),
+            legend_format=parse_label_format(row.get("Legend Format") or ""),
             filters=(row.get("Filters") or "").strip(),
             grouping_rows=((row.get("Rows Aggregation") or row.get("Grouping_Rows") or "").strip() or " × ".join(legacy_dimensions[:1])),
             grouping_columns=((row.get("Column Aggregation") or row.get("Grouping_Columns") or "").strip() or " × ".join(legacy_dimensions[1:])),
@@ -978,7 +1101,7 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
             structural_chart_fields = (
                 entry.chart_title, entry.cdr_source, entry.kpi, entry.legend,
                 entry.filters, entry.grouping_rows, entry.grouping_columns,
-                entry.axis_x_range, entry.axis_y_range, entry.label_position, entry.label_format,
+                entry.axis_x_range, entry.axis_y_range, entry.legend_format, entry.label_position, entry.label_format,
             )
             if any(value.strip() for value in structural_chart_fields) or entry.exclude_null_empty or entry.exclude_zero:
                 raise ValueError(
@@ -1007,6 +1130,7 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
             parse_catalog_grouping(entry.grouping_rows)
             parse_catalog_grouping(entry.grouping_columns)
             parse_legend_position(entry.legend_position)
+            parse_label_format(entry.legend_format)
             parse_label_position(entry.label_position)
             parse_label_format(entry.label_format)
             parse_axis_range(entry.axis_x_range, "x")
@@ -1133,6 +1257,7 @@ def catalogue_csv(entries: list[CatalogEntry]) -> bytes:
             "Column Aggregation": entry.grouping_columns,
             "Legend": entry.legend,
             "Legend Position": entry.legend_position.title(),
+            "Legend Format": entry.legend_format,
             "Label Position": entry.label_position.title(),
             "Label Format": entry.label_format,
             "Axis X Range": entry.axis_x_range,
@@ -1659,6 +1784,13 @@ def _font(size: int, bold: bool = False) -> ImageFont.ImageFont:
     return load_image_font(size, bold)
 
 
+# The browser canvas and the server/PPT renderer share a 1600px logical
+# canvas. Keep chart furniture on one common scale in both renderers.
+AGGREGATION_TITLE_FONT_SIZE = 26
+LEGEND_TEXT_FONT_SIZE = 26
+LEGEND_MARKER_SIZE = 30
+
+
 def _column(frame: pd.DataFrame, candidates: Iterable[str]) -> str | None:
     return _first_existing(frame, candidates)
 
@@ -1712,13 +1844,27 @@ def _calculated_conditions_mask(
     return mask
 
 
+def _calculated_condition_alternatives_mask(
+    frame: pd.DataFrame, alternatives: Iterable[Iterable[FilterCondition]],
+) -> pd.Series | None:
+    mask = pd.Series(False, index=frame.index)
+    valid = False
+    for conditions in alternatives:
+        condition_mask = _calculated_conditions_mask(frame, conditions)
+        if condition_mask is None:
+            continue
+        mask |= condition_mask
+        valid = True
+    return mask if valid else None
+
+
 def _calculated_expression_values(
     frame: pd.DataFrame, expression: CalculatedDimensionExpression,
 ) -> pd.Series:
     output = pd.Series(pd.NA, index=frame.index, dtype="string")
     remaining = pd.Series(True, index=frame.index)
     for branch in expression.branches:
-        mask = _calculated_conditions_mask(frame, branch.conditions)
+        mask = _calculated_condition_alternatives_mask(frame, branch.conditions)
         if mask is None:
             continue
         selected = remaining & mask
@@ -2364,14 +2510,6 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
         *zip(row_display_columns, row_spec.dimensions, strict=True),
         *zip(column_display_columns, column_spec.dimensions, strict=True),
     ]
-    campaign_columns = [
-        column for column, dimension in hierarchy
-        if _normalise_catalog_name(dimension) == "campaign"
-    ]
-    vendor_columns = [
-        column for column, dimension in hierarchy
-        if _normalise_catalog_name(dimension) == "vendor"
-    ]
     split_vendor_hierarchy = multivendor and any(
         _normalise_catalog_name(dimension) == "operator" for _column_name, dimension in hierarchy
     )
@@ -2381,40 +2519,34 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
             return _multivendor_vendor_sort_key(value, frame)
         return _vendor_display_sort_key(value, frame)
 
-    operator_columns = [
-        column for column, dimension in hierarchy
-        if _normalise_catalog_name(dimension) in {"operator", "subscriber"}
-    ]
-    needs_campaign_sort = any(
-        (observed := frame[column].drop_duplicates().tolist()) != sorted(observed, key=_campaign_sort_key)
-        for column in campaign_columns
-    ) if not frame.empty else False
-    needs_vendor_sort = any(
-        (observed := frame[column].drop_duplicates().tolist()) != sorted(observed, key=vendor_sort_key)
-        for column in vendor_columns
-    ) if not frame.empty else False
-    needs_operator_sort = any(
-        (observed := frame[column].drop_duplicates().tolist()) != sorted(
-            observed, key=lambda value: _operator_display_sort_key(value, frame),
-        )
-        for column in operator_columns
-    ) if not frame.empty else False
+    def dimension_sort_key(dimension: str, value: object) -> tuple[object, ...]:
+        """Order ordinary aggregation values alphabetically and mapped identities by rank."""
+        normalized_dimension = _normalise_catalog_name(dimension)
+        if normalized_dimension == "campaign":
+            return _campaign_sort_key(value)
+        if normalized_dimension == "vendor":
+            return vendor_sort_key(value)
+        if normalized_dimension in {"operator", "subscriber"}:
+            return _operator_display_sort_key(value, frame)
+        return (str(value).casefold(),)
+
     # Individually sorted Vendor and Operator domains can still be interleaved
     # in the source rows (for example Ericsson/VF, Huawei/VF, Ericsson/O2).
     # A multivendor hierarchy must therefore always receive the full stable
     # multi-column sort so Vendor remains the outer group in every renderer.
-    if needs_campaign_sort or needs_vendor_sort or needs_operator_sort or split_vendor_hierarchy:
+    if hierarchy:
         sort_columns: list[str] = []
         for index, (column, dimension) in enumerate(hierarchy):
             values = frame[column].drop_duplicates().tolist()
-            normalized_dimension = _normalise_catalog_name(dimension)
-            if normalized_dimension == "campaign":
-                values = sorted(values, key=_campaign_sort_key)
-            elif normalized_dimension == "vendor":
-                values = sorted(values, key=vendor_sort_key)
-            elif normalized_dimension in {"operator", "subscriber"}:
-                values = sorted(values, key=lambda value: _operator_display_sort_key(value, frame))
-            configured_dimension_values[column] = list(values)
+            values = sorted(values, key=lambda value, dimension=dimension: dimension_sort_key(dimension, value))
+            configured = configured_dimension_values.get(column)
+            if configured:
+                configured_dimension_values[column] = sorted(
+                    dict.fromkeys(configured),
+                    key=lambda value, dimension=dimension: dimension_sort_key(dimension, value),
+                )
+            else:
+                configured_dimension_values[column] = list(values)
             ranks = {value: rank for rank, value in enumerate(values)}
             sort_column = f"__catalog_sort_{index}"
             frame[sort_column] = frame[column].map(ranks)
@@ -2728,7 +2860,7 @@ def catalog_chart_hover_targets(
             if not rows or not columns:
                 return []
             canvas, draw = _canvas('')
-            row_label_font = _font(18, True)
+            row_label_font = _font(AGGREGATION_TITLE_FONT_SIZE, True)
             row_label_widths = [
                 max((_text_width(draw, str(key[level])[:24], row_label_font) for key in rows), default=0) + 18
                 for level in range(len(render_rows))
@@ -2930,6 +3062,20 @@ OUTCOME_COLOUR_VARIANTS = {
     "failure": ("#C83E4D", "#D8555F", "#E26A70", "#AE2F42", "#F08A8F", "#8F2035"),
 }
 
+# Tableau's familiar failure-count palette keeps the two session outcomes
+# visually distinct: failed sessions are coral and dropped sessions orange.
+FAILURE_COUNT_COLOURS = {"Failed": "#E15759", "Dropped": "#F28E2B"}
+
+
+def _named_failure_colour(value: object) -> str | None:
+    """Keep named failure states consistent across every chart grammar."""
+    text = str(value or "").strip().casefold()
+    if re.search(r"\bdrop(?:ped|s)?\b", text):
+        return FAILURE_COUNT_COLOURS["Dropped"]
+    if re.search(r"\bfail(?:ed|ure|ures)?\b", text):
+        return FAILURE_COUNT_COLOURS["Failed"]
+    return None
+
 
 def _outcome_kind(value: object) -> str | None:
     """Classify a result label as a success or failure without fixing its shade."""
@@ -2949,6 +3095,9 @@ def _outcome_kind(value: object) -> str | None:
 
 def _outcome_colour(value: object) -> str | None:
     """Return the primary conventional colour for a semantic outcome label."""
+    named_colour = _named_failure_colour(value)
+    if named_colour:
+        return named_colour
     kind = _outcome_kind(value)
     return OUTCOME_COLOUR_VARIANTS[kind][0] if kind else None
 
@@ -3114,9 +3263,13 @@ def _series_colours(
             kind, label = outcome
             identity = (kind, label.casefold())
             if identity not in assigned:
-                variants = OUTCOME_COLOUR_VARIANTS[kind]
-                assigned[identity] = variants[offsets[kind] % len(variants)]
-                offsets[kind] += 1
+                named_colour = _named_failure_colour(label)
+                if named_colour:
+                    assigned[identity] = named_colour
+                else:
+                    variants = OUTCOME_COLOUR_VARIANTS[kind]
+                    assigned[identity] = variants[offsets[kind] % len(variants)]
+                    offsets[kind] += 1
             colours[key] = assigned[identity]
         return colours
     roles = _dimension_roles(frame, axis_columns)
@@ -3556,7 +3709,7 @@ def _draw_chart_legend(
     items: list[tuple[str, str, int] | tuple[str, str, int, tuple[int, ...]]],
     position: str,
     *,
-    font_size: int = 15,
+    font_size: int = LEGEND_TEXT_FONT_SIZE,
     line_markers: bool = False,
     side_x: int | None = None,
 ) -> None:
@@ -3567,8 +3720,8 @@ def _draw_chart_legend(
     # Legends are part of the chart, not ancillary metadata. Enforce a
     # readable minimum because the 1600px PNG is normally scaled down in the
     # report and preview viewers.
-    font_size = max(font_size, 17)
-    marker_size = 22
+    font_size = max(font_size, LEGEND_TEXT_FONT_SIZE)
+    marker_size = LEGEND_MARKER_SIZE
     def legend_line_width(series_width: int) -> int:
         # CDF charts are commonly scaled down in previews and PowerPoint. A
         # one-pixel difference (3px vs 4px) is then almost invisible, so
@@ -4032,7 +4185,8 @@ def _status_chart_categories(
         result["state"] = numeric.loc[result.index].map(lambda value: "< 1.6" if value < threshold else "≥ 1.6")
         return result, ("< 1.6", "≥ 1.6"), ("#C83E4D", "#2C9A62")
     canonical_labels = {
-        "completed": "Completed", "drop": "Dropped", "dropped": "Dropped", "failed": "Failed", "cutoff": "Cutoff",
+        "completed": "Completed", "drop": "Dropped", "drops": "Dropped", "dropped": "Dropped",
+        "failed": "Failed", "failure": "Failed", "failures": "Failed", "cutoff": "Cutoff",
     }
     # Status columns contain only a handful of distinct labels even when a
     # chart has hundreds of thousands of rows. Normalise and classify every
@@ -4059,9 +4213,13 @@ def _status_chart_categories(
     for state in states:
         kind = _outcome_kind(state)
         if kind:
-            variants = OUTCOME_COLOUR_VARIANTS[kind]
-            colours_list.append(variants[offsets[kind] % len(variants)])
-            offsets[kind] += 1
+            named_colour = _named_failure_colour(state)
+            if named_colour:
+                colours_list.append(named_colour)
+            else:
+                variants = OUTCOME_COLOUR_VARIANTS[kind]
+                colours_list.append(variants[offsets[kind] % len(variants)])
+                offsets[kind] += 1
         else:
             colours_list.append(_colour(state, neutral_index))
             neutral_index += 1
@@ -4129,7 +4287,7 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
             _draw_configured_bar_label(image, draw, value_label, x=x, y=y, width=bar_width, height=height, colour=colour, font=_font(20, True), position=label_position, horizontal=False, automatic=automatic_label)
             running += height
         label = _catalogue_display_label(g, p)[:24]
-        label_font = _font(18, True)
+        label_font = _font(AGGREGATION_TITLE_FONT_SIZE, True)
         if _text_width(draw, label, label_font) > chart_width / len(combos) - 8:
             _draw_rotated_label(image, label, centre_x=x + bar_width / 2, bottom_y=chart_top + chart_height + 75, fill="#5A6B78", font=label_font)
         else:
@@ -4164,7 +4322,7 @@ def _render_status_100_hierarchy(
     image, draw = _canvas(title)
     # Reserve a dedicated header band below the chart title.  Rotated vendor /
     # operator captions can be tall, so they must never share the title area.
-    row_label_font = _font(18, True)
+    row_label_font = _font(AGGREGATION_TITLE_FONT_SIZE, True)
     row_label_widths = [
         max((_text_width(draw, str(key[level])[:24], row_label_font) for key in row_keys), default=0) + 18
         for level in range(len(row_hierarchy))
@@ -4193,7 +4351,7 @@ def _render_status_100_hierarchy(
     row_label_scale = min((chart_left - 92) / total_label_width, 1.0)
     def nested_row_start(level: int) -> float:
         return 24 + sum(row_label_widths[:level]) * row_label_scale
-    header_font = _font(15, True)
+    header_font = _font(AGGREGATION_TITLE_FONT_SIZE, True)
     for level in range(upper_levels):
         band_top = header_top + level * header_band_height
         for start, end, value in _hierarchy_caption_spans(column_keys, level):
@@ -4284,7 +4442,7 @@ def _render_status_100_hierarchy(
 
     hide_single_column = column_hierarchy == ["__catalog_single_column"]
     lower_captions = ["" if hide_single_column else str(key[-1]) for key in column_keys]
-    lower_font = _font(16, True)
+    lower_font = _font(AGGREGATION_TITLE_FONT_SIZE, True)
     rotate_axis_captions = any(
         _text_width(draw, caption, lower_font) + 8 > column_width
         for caption in lower_captions
@@ -4338,7 +4496,7 @@ def _render_failure_count(title: str, frame: pd.DataFrame, group: str | None, pe
     counts = counts.reindex(comparison_index, fill_value=0)
     counts = counts.head(16)
     image, draw = _canvas(title); maximum = max(int(counts.sum(axis=1).max()), 1)
-    colours = {"Failed": "#C83E4D", "Dropped": "#D8555F"}
+    colours = FAILURE_COUNT_COLOURS
     for index, (labels, values) in enumerate(counts.iterrows()):
         labels = labels if isinstance(labels, tuple) else (labels,)
         y = 120 + index * 42; x = 390
@@ -4386,27 +4544,38 @@ def _render_failure_count_hierarchy(
     # A right-side legend needs its own canvas lane. Without reserving it, the
     # diagonal outer column captions extend into the legend area on dense
     # hierarchy charts (for example Operator × Campaign failure matrices).
-    chart_width = 980 if legend_position == "right" else 1250
+    if legend_position == "right":
+        legend_captions = [
+            _legend_caption(legend_labels, index, state)
+            for index, state in enumerate(("Failed", "Dropped"))
+        ]
+        legend_width = max((_text_width(draw, caption, _font(LEGEND_TEXT_FONT_SIZE, True)) for caption in legend_captions), default=0)
+        legend_lane = min(420, max(190, legend_width + 92))
+        chart_width = max(760, 1600 - chart_left - legend_lane - 20)
+    else:
+        chart_width = 1250
     upper_levels = max(len(column_keys[0]) - 1, 0)
     header_band_height = min(34, 120 / upper_levels) if upper_levels else 0
     header_top = chart_top - upper_levels * header_band_height - 8
     leaf_label_y = chart_top - 10
     row_height = chart_height / len(row_keys)
     column_width = chart_width / len(column_keys)
-    colours = {"Failed": "#C83E4D", "Dropped": "#D8555F"}
+    colours = FAILURE_COUNT_COLOURS
     for level in range(upper_levels):
         y = header_top + level * header_band_height
         for start, end, caption in _hierarchy_caption_spans(column_keys, level):
             centre = chart_left + ((start + end) / 2) * column_width
             caption = caption[:20]
-            font = _font(17, True)
+            font = _font(AGGREGATION_TITLE_FONT_SIZE, True)
             draw.text((centre - min(_text_width(draw, caption, font) / 2, (end - start) * column_width / 2 - 4), y), caption, fill="#566A78", font=font)
             draw.line((chart_left + start * column_width, y + header_band_height - 4, chart_left + end * column_width, y + header_band_height - 4), fill="#C8D2D9", width=1)
 
     for column_index, column_key in enumerate(column_keys):
         lower_caption = str(column_key[-1])
         centre = chart_left + (column_index + 0.5) * column_width
-        draw.text((centre - min(len(lower_caption) * 4, 68), leaf_label_y), lower_caption[:18], fill="#4E6271", font=_font(15, True))
+        leaf_font = _font(AGGREGATION_TITLE_FONT_SIZE, True)
+        leaf_caption = _fit_text(draw, lower_caption, leaf_font, column_width - 8)
+        draw.text((centre - _text_width(draw, leaf_caption, leaf_font) / 2, leaf_label_y), leaf_caption, fill="#4E6271", font=leaf_font)
         cell_left = chart_left + column_index * column_width
         if column_index:
             changed = next((level for level, value in enumerate(column_key) if value != column_keys[column_index - 1][level]), len(column_key) - 1)
@@ -4432,7 +4601,9 @@ def _render_failure_count_hierarchy(
                 end += 1
             centre_y = chart_top + ((start + end) / 2) * row_height
             x = 20 + level * label_width
-            draw.text((x, centre_y - 9), values[start][:22], fill="#405765", font=_font(14, True))
+            row_font = _font(AGGREGATION_TITLE_FONT_SIZE, True)
+            caption = _fit_text(draw, values[start], row_font, label_width - 8)
+            draw.text((x, centre_y - 13), caption, fill="#405765", font=row_font)
             start = end
 
     for row_index, row_key in enumerate(row_keys):
@@ -4475,9 +4646,11 @@ def _render_failure_count_hierarchy(
                 x += segment_width
             if outside_counts:
                 # Keep labels visible even when an individual stacked segment
-                # is too narrow. The ordered values still follow Failed,
-                # Dropped as documented by the legend.
-                draw.text((x + 3, y + 1), " / ".join(outside_counts), fill="#34495A", font=count_font)
+                # is too narrow. Place the combined values against the end of
+                # their own bar rather than at the far edge of the cell.
+                label = " / ".join(outside_counts)
+                if x + 3 + _text_width(draw, label, count_font) <= cell_left + column_width - 3:
+                    draw.text((x + 3, y + 1), label, fill="#34495A", font=count_font)
 
     draw.line((chart_left + chart_width, header_top, chart_left + chart_width, chart_top + chart_height + 25), fill="#AEBBC4", width=2)
     _draw_chart_legend(
@@ -4548,7 +4721,7 @@ def _draw_hierarchical_axis_labels(
             centre = left + ((start + end) / 2) * item_width
             text = str(keys[start][level])[:20]
             y = top - 30 * (levels - level)
-            font = _font(18, True)
+            font = _font(AGGREGATION_TITLE_FONT_SIZE, True)
             angle = label_angle(text, (end - start) * item_width, font)
             if angle:
                 _draw_rotated_label(image, text, centre_x=centre, bottom_y=y + 24, fill="#566A78", font=font, angle=angle)
@@ -4559,7 +4732,7 @@ def _draw_hierarchical_axis_labels(
     for index, key in enumerate(keys):
         text = str(key[-1])[:18]
         centre = left + (index + .5) * item_width
-        font = _font(16, True)
+        font = _font(AGGREGATION_TITLE_FONT_SIZE, True)
         angle = label_angle(text, item_width, font)
         if angle:
             _draw_rotated_label(image, text, centre_x=centre, bottom_y=bottom + (78 if angle == 45 else 106), fill="#62727E", font=font, angle=angle)
@@ -5394,6 +5567,7 @@ def _chart_payload_legend(
         items = _group_vendor_legend_items(list(items), frame)
     return {
         "position": parse_legend_position(entry.legend_position),
+        "format": label_format_options(entry.legend_format),
         "line_markers": line_markers,
         "items": [
             {"label": str(label), "colour": colour, "width": int(width)}
@@ -5429,6 +5603,7 @@ def _chart_payload_base(
         ),
         "label_position": entry.label_position,
         "label_format": label_format_options(entry.label_format),
+        "legend_format": label_format_options(entry.legend_format),
         "axis_ranges": {"x": list(x_range), "y": list(y_range)},
     }
 
@@ -5793,7 +5968,7 @@ def catalog_chart_payload(
         failed["__catalog_failure_state"] = failed[status].astype(str).map(
             lambda value: "Dropped" if "drop" in value.casefold() else "Failed"
         )
-        state_colours = {"Failed": "#C83E4D", "Dropped": "#D8555F"}
+        state_colours = FAILURE_COUNT_COLOURS
         fallback = [
             (_legend_caption(_legend_labels(render_entry.legend), index, state), state_colours[state], 2)
             for index, state in enumerate(("Failed", "Dropped"))
