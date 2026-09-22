@@ -33,8 +33,11 @@ CDR_IGNORED_SHEET_KEYS = frozenset(name.strip().casefold() for name in CDR_IGNOR
 # XLSX parsing is implemented largely in Python by openpyxl.  A short pause at
 # predictable intervals releases the GIL to keep the web server responsive
 # while a large CDR is being processed in the background.
-EXCEL_READ_YIELD_EVERY_ROWS = 250
-EXCEL_READ_YIELD_SECONDS = 0.003
+# Prioritize an interactive server over finishing a background CDR import a
+# few seconds sooner.  Large workbooks otherwise keep the interpreter busy
+# enough that every browser request feels stalled.
+EXCEL_READ_YIELD_EVERY_ROWS = 100
+EXCEL_READ_YIELD_SECONDS = 0.01
 
 
 @dataclass(slots=True)

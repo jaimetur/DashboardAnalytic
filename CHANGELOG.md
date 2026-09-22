@@ -17,7 +17,7 @@
 
 #### 🐛 Bug fixes:
 
-- Workspace configuration exports and server transfers now read Auto-calculated Field definitions directly without triggering CDR materialization; progress estimates no longer include the application database for workspace-only packages. Background XLSX parsing also yields regularly so a large resumed CDR does not monopolize the web interface.
+- Workspace configuration exports and server transfers now read Auto-calculated Field definitions directly without triggering CDR materialization; progress estimates no longer include the application database for workspace-only packages. Export packages use a dedicated worker queue and can be stopped immediately even if a source read is stalled. Automatic combined-table recreation and calculated-field materialization wait until all individual CDR processing completes, while large CDR source files run one at a time in an isolated, lower-priority worker process so they cannot monopolize the web interface.
 
 #### 📚 Documentation:
 

@@ -18,6 +18,7 @@ import hashlib
 import ipaddress
 import shutil
 import sqlite3
+import subprocess
 import warnings
 import tempfile
 import time as time_module
@@ -79,6 +80,9 @@ CHART_PREVIEW_LOAD_LOCKS: dict[tuple[int, str], Lock] = {}
 STOP_REQUESTS: set[tuple[str, int]] = set()
 STOP_REQUESTS_LOCK = Lock()
 BACKGROUND_TASK_SCHEDULER = BackgroundTaskScheduler(max_workers=1)
+# Export packages are configuration I/O and must remain usable when a CDR
+# worker or a calculated-field pass is still winding down in the main queue.
+EXPORT_TASK_SCHEDULER = BackgroundTaskScheduler(max_workers=1)
 HEAVY_DATASET_PROCESSING_THRESHOLD_BYTES = 256 * 1024 * 1024
 HEAVY_DATASET_PROCESSING_LOCKS: dict[str, Lock] = {}
 HEAVY_DATASET_PROCESSING_LOCKS_GUARD = Lock()
@@ -1103,6 +1107,10 @@ def _incremental_auto_field_table_update(
                     [*parameters, lower_bound, upper_bound],
                 )
             lower_bound = upper_bound
+            # Let request handlers acquire the interpreter and SQLite writer
+            # between materialization batches instead of treating the entire
+            # CDR pass as one uninterrupted background task.
+            sleep(0.01)
             if row_progress:
                 processed_in_group = min(max(lower_bound - first_row + 1, 0), row_span)
                 row_progress(group_index * row_span + processed_in_group, total_row_operations)
@@ -1669,10 +1677,30 @@ def _run_combined_cdr_recreation_job(job_id: str, workspace: Workspace, kind: st
         }))
 
 
+def workspace_has_pending_cdr_processing(workspace: Workspace) -> bool:
+    """Return whether any individual CDR must finish before derived tables run."""
+    task_repository = Repository(
+        workspace.database_path,
+        global_db_path=repository.global_db_path,
+        workspace_registry_db_path=workspace_registry.registry_path,
+    )
+    return any(
+        str(dataset['status'] or '').casefold() in {'queued', 'processing'}
+        and str(dataset['dataset_kind'] or '').casefold() in CDR_DATASET_KINDS
+        for dataset in task_repository.list_datasets()
+    )
+
+
 def start_combined_cdr_recreation_job(
     workspace: Workspace, kind: str, username: str, *, background: bool = True,
 ) -> dict[str, Any]:
     """Restart one combined-table rebuild in the shared materialization progress UI."""
+    if workspace_has_pending_cdr_processing(workspace):
+        return {
+            'workspace_id': workspace.id, 'operation': 'combined_recreation',
+            'combined_kind': kind, 'status': 'deferred',
+            'message': 'Waiting for all individual CDR processing to finish',
+        }
     clear_persisted_auto_field_stops(workspace.id)
     job_id = uuid4().hex
     job = {
@@ -1728,6 +1756,17 @@ def start_combined_cdr_recreation_job(
 
 def queue_workspace_dimension_materialization(workspace: Workspace) -> None:
     """Reconcile calculated fields and template KPIs without blocking workspace use."""
+    task_repository = Repository(
+        workspace.database_path,
+        global_db_path=repository.global_db_path,
+        workspace_registry_db_path=workspace_registry.registry_path,
+    )
+    # Mapping/reprocessing changes the source tables. Starting a calculated
+    # field pass before every selected CDR is ready duplicates the expensive
+    # work and races the final mapped rows. The last CDR completion queues the
+    # pass again, so this is a defer rather than a skipped materialization.
+    if workspace_has_pending_cdr_processing(workspace):
+        return
     dimensions_pending = repository.get_workspace_state('calculated_dimensions_need_materialization') in {'1', 'processing'}
     template_signature = combined_reporting_template_columns_signature(repository)
     templates_pending = repository.get_workspace_state('combined_reporting_template_columns_signature') != template_signature
@@ -1746,12 +1785,6 @@ def queue_workspace_dimension_materialization(workspace: Workspace) -> None:
     if dimensions_pending:
         repository.set_workspace_state('calculated_dimensions_need_materialization', 'processing')
 
-    task_repository = Repository(
-        workspace.database_path,
-        global_db_path=repository.global_db_path,
-        workspace_registry_db_path=workspace_registry.registry_path,
-    )
-
     def run() -> None:
         task_repository.try_add_log('system', 'automatic_workspace_materialization_started', json.dumps({
             'workspace': workspace.id,
@@ -1760,29 +1793,28 @@ def queue_workspace_dimension_materialization(workspace: Workspace) -> None:
             'executed_by': 'system',
         }))
         try:
-            with _dataset_processing_lock(task_repository):
-                dimensions = parse_calculated_dimensions(task_repository.list_calculated_dimensions())
-                if dimensions_pending:
-                    materialize_workspace_auto_fields_incrementally(
-                        (), dimensions, {}, task_repository,
-                        {'cdr-data', 'cdr-voice', 'cdr-speech'},
-                    )
-                else:
-                    materialize_workspace_combined_columns(task_repository, dimensions)
-                processed_signature = template_signature
-                task_repository.set_workspace_state('combined_reporting_template_columns_signature', processed_signature)
-                # A template can be saved while this background pass is scanning
-                # large CDRs. Repeat only when its KPI contract changed mid-run so
-                # the stored signature never claims columns that were not copied.
-                while True:
-                    current_signature = combined_reporting_template_columns_signature(task_repository)
-                    if current_signature == processed_signature:
-                        break
-                    processed_signature = current_signature
-                    materialize_workspace_combined_columns(task_repository, dimensions)
-                    task_repository.set_workspace_state(
-                        'combined_reporting_template_columns_signature', processed_signature,
-                    )
+            dimensions = parse_calculated_dimensions(task_repository.list_calculated_dimensions())
+            if dimensions_pending:
+                materialize_workspace_auto_fields_incrementally(
+                    (), dimensions, {}, task_repository,
+                    {'cdr-data', 'cdr-voice', 'cdr-speech'},
+                )
+            else:
+                materialize_workspace_combined_columns(task_repository, dimensions)
+            processed_signature = template_signature
+            task_repository.set_workspace_state('combined_reporting_template_columns_signature', processed_signature)
+            # A template can be saved while this background pass is scanning
+            # large CDRs. Repeat only when its KPI contract changed mid-run so
+            # the stored signature never claims columns that were not copied.
+            while True:
+                current_signature = combined_reporting_template_columns_signature(task_repository)
+                if current_signature == processed_signature:
+                    break
+                processed_signature = current_signature
+                materialize_workspace_combined_columns(task_repository, dimensions)
+                task_repository.set_workspace_state(
+                    'combined_reporting_template_columns_signature', processed_signature,
+                )
             task_repository.try_add_log('system', 'automatic_workspace_materialization_completed', json.dumps({
                 'workspace': workspace.id,
                 'dimensions_pending': dimensions_pending,
@@ -2370,6 +2402,7 @@ async def lifespan(_: FastAPI):
             )
     yield
     BACKGROUND_TASK_SCHEDULER.shutdown(wait=True)
+    EXPORT_TASK_SCHEDULER.shutdown(wait=True)
 
 
 app = FastAPI(title=__app_name__, version=__version__, lifespan=lifespan)
@@ -3055,6 +3088,32 @@ def process_dataset(
         _unregister_dataset_processing(dataset_id, task_repository)
 
 
+def _run_large_dataset_in_worker(
+    dataset_id: int, dataset_path: Path, username: str,
+    vodafone_mapping_dataset_id: int | None, three_mapping_dataset_id: int | None,
+    region_mapping_dataset_id: int | None, task_repository: Repository, operation: str = 'process',
+) -> None:
+    """Move a large CDR parse out of the web-server interpreter."""
+    command = [
+        sys.executable, '-m', 'src.dataset_worker',
+        '--dataset-id', str(dataset_id), '--dataset-path', str(dataset_path),
+        '--username', username, '--workspace-db', str(task_repository.db_path), '--operation', operation,
+    ]
+    for option, value in (
+        ('--vodafone-mapping-dataset-id', vodafone_mapping_dataset_id),
+        ('--three-mapping-dataset-id', three_mapping_dataset_id),
+        ('--region-mapping-dataset-id', region_mapping_dataset_id),
+    ):
+        if value is not None:
+            command.extend((option, str(value)))
+    worker = subprocess.Popen(command, cwd=PROJECT_ROOT, start_new_session=True)
+    if worker.wait() != 0:
+        task_repository.update_dataset_profile(
+            dataset_id, status='failed', progress=100,
+            last_error='The isolated CDR worker stopped unexpectedly.', processed_at=now_iso(),
+        )
+
+
 def enqueue_dataset_processing(
     background_tasks: BackgroundTasks,
     dataset_id: int,
@@ -3096,6 +3155,24 @@ def enqueue_dataset_processing(
         None,
     )
     try:
+        if dataset_path.stat().st_size >= HEAVY_DATASET_PROCESSING_THRESHOLD_BYTES:
+            def wait_for_large_dataset_worker() -> None:
+                try:
+                    _run_large_dataset_in_worker(
+                        dataset_id, dataset_path, username,
+                        vodafone_mapping_dataset_id, three_mapping_dataset_id,
+                        region_mapping_dataset_id, task_repository,
+                    )
+                finally:
+                    _unregister_dataset_processing(dataset_id, task_repository)
+
+            # Serialize heavy worker launches. The scheduler thread waits on
+            # the child process, not on CPU work, so the web server remains
+            # responsive while every large CDR still runs one at a time.
+            future = _dataset_processing_executor(task_repository).submit(wait_for_large_dataset_worker)
+            background_tasks.add_task(future.result)
+            return future
+
         def process_after_dependencies() -> None:
             processing_started = False
             try:
@@ -3457,7 +3534,16 @@ def enqueue_region_mapping(background_tasks: BackgroundTasks, dataset_id: int, u
     task_repository.update_dataset_profile(dataset_id, status='queued', progress=0, last_error=None, processing_queued_at=now_iso(), processing_started_at=None, processed_at=None,
         processing_options_json=json.dumps(options))
     _register_dataset_processing(dataset_id, task_repository)
-    future = _dataset_processing_executor(task_repository).submit(process_region_mapping, dataset_id, username, mapping_dataset_id, task_repository)
+    dataset_path = Path(str(row['stored_path'] or '')) if row else Path()
+    def run_in_worker() -> None:
+        try:
+            _run_large_dataset_in_worker(
+                dataset_id, dataset_path, username, None, None, mapping_dataset_id,
+                task_repository, operation='region-mapping',
+            )
+        finally:
+            _unregister_dataset_processing(dataset_id, task_repository)
+    future = _dataset_processing_executor(task_repository).submit(run_in_worker)
     background_tasks.add_task(future.result)
 
 
@@ -3578,14 +3664,17 @@ def enqueue_vendor_mapping(
         }),
     )
     _register_dataset_processing(dataset_id, task_repository)
-    future = _dataset_processing_executor(task_repository).submit(
-        process_vendor_mapping,
-        dataset_id,
-        username,
-        vodafone_mapping_dataset_id,
-        three_mapping_dataset_id,
-        task_repository,
-    )
+    row = task_repository.get_dataset(dataset_id)
+    dataset_path = Path(str(row['stored_path'] or '')) if row else Path()
+    def run_in_worker() -> None:
+        try:
+            _run_large_dataset_in_worker(
+                dataset_id, dataset_path, username, vodafone_mapping_dataset_id,
+                three_mapping_dataset_id, None, task_repository, operation='vendor-mapping',
+            )
+        finally:
+            _unregister_dataset_processing(dataset_id, task_repository)
+    future = _dataset_processing_executor(task_repository).submit(run_in_worker)
     background_tasks.add_task(future.result)
 
 
@@ -5687,7 +5776,7 @@ def _cleanup_expired_export_packages() -> None:
         for job in EXPORT_JOBS.values():
             if job.get('status') in {'queued', 'processing'}:
                 active_paths.add(Path(str(job['path'])))
-        stale_jobs = [job_id for job_id, job in EXPORT_JOBS.items() if job.get('status') in {'ready', 'failed'} and float(job.get('finished_at', 0)) < cutoff]
+        stale_jobs = [job_id for job_id, job in EXPORT_JOBS.items() if job.get('status') in {'ready', 'failed', 'cancelled'} and float(job.get('finished_at', 0)) < cutoff]
         for job_id in stale_jobs:
             EXPORT_JOBS.pop(job_id, None)
     with IMPORT_JOBS_LOCK:
@@ -5929,7 +6018,7 @@ def start_export_job(
     }
     with EXPORT_JOBS_LOCK:
         EXPORT_JOBS[job_id] = job
-    submit_background_task(_run_export_job, job_id, targets, selected_workspace_ids, include_generated_outputs)
+    EXPORT_TASK_SCHEDULER.submit(_run_export_job, job_id, targets, selected_workspace_ids, include_generated_outputs)
     return job
 
 
@@ -8619,7 +8708,14 @@ def stop_background_task(
             job = EXPORT_JOBS.get(raw_identifier)
             if not job or workspace_id not in {str(item) for item in (job.get('workspace_ids') or [])} or job.get('status') not in {'queued', 'processing'}:
                 raise HTTPException(status_code=409, detail='This export task can no longer be stopped.')
-            job.update(cancel_requested=True, status='processing', phase='stopping export')
+            # ZIP preparation can be blocked in a database read before it
+            # reaches its next cooperative cancellation checkpoint. Finish
+            # the visible task immediately; the worker holds the same flag
+            # and will discard its partial file as soon as that read returns.
+            job.update(
+                cancel_requested=True, status='cancelled', phase='export stopped',
+                error='Export stopped by user.', finished_at=datetime.now(timezone.utc).timestamp(),
+            )
     elif prefix == 'import':
         with IMPORT_JOBS_LOCK:
             job = IMPORT_JOBS.get(raw_identifier)
@@ -13774,7 +13870,7 @@ def list_pending_transfer_offers(user: SessionUser = Depends(super_admin_user)) 
     with TRANSFER_LOCK:
         _refresh_persisted_transfer_offers()
         offers = [
-            {key: offer.get(key) for key in ('id', 'source', 'source_address', 'kind', 'targets', 'content', 'workspaces', 'created_at', 'requires_destination_workspaces')}
+            {key: offer.get(key) for key in ('id', 'source', 'source_address', 'kind', 'targets', 'components', 'workspace_components', 'content', 'workspaces', 'created_at', 'requires_destination_workspaces')}
             for offer in TRANSFER_OFFERS.values()
             if offer.get('status') == 'pending'
         ]

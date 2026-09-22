@@ -6466,6 +6466,30 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       // the confirmation dialog while this tab is in the background.
       showPendingOfferReminder(offer);
       reviewingOffer = true;
+      const transferContentLabels = {
+        config: 'App Config',
+        'config-with-templates': 'App Config and Report Templates',
+        workspace: 'Full Workspace',
+        'full-environment': 'Full Environment',
+        dashboards: 'Dashboards',
+        'slides-templates': 'Report Templates',
+        'operator-mappings': 'Operator/Vendor Mappings & Colors',
+        'auto-calculated-fields': 'Auto-calculated Fields',
+        workspace_database: 'Workspace database',
+        input: 'Input CDR files',
+        output: 'Generated outputs',
+        report_templates: 'Report Templates',
+        operator_mappings: 'Operator/Vendor Mappings & Colors',
+        auto_calculated_fields: 'Auto-calculated Fields',
+      };
+      const describeTransferItem = (item) => transferContentLabels[String(item)] || String(item).replaceAll('-', ' ');
+      const targetItems = Array.isArray(offer.targets) && offer.targets.length ? offer.targets : [offer.kind];
+      const workspaceItems = Array.isArray(offer.workspace_components) ? offer.workspace_components : [];
+      const packageContents = [
+        'Package includes:',
+        ...targetItems.map((item) => `• ${describeTransferItem(item)}`),
+        ...(workspaceItems.length ? [`Workspace contents: ${workspaceItems.map(describeTransferItem).join(', ')}`] : []),
+      ].join('\n');
       const workspaceCopy = Array.isArray(offer.workspaces) && offer.workspaces.length
         ? `\nWorkspaces: ${offer.workspaces.join(', ')}`
         : '';
@@ -6483,7 +6507,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
               ? 'Next, choose the destination workspaces. Their complete Operator/Vendor aliases, order and theme colors will be replaced without modifying stored CDR values.'
           : 'After the complete package is received, it will be imported automatically and may overwrite matching configuration or workspaces.';
         accepted = await showConfirmDialog(
-          `${offer.source}${sourceAddress} wants to transfer “${offer.content}” to this server.${workspaceCopy}\n\n${importEffect}`,
+          `${offer.source}${sourceAddress} wants to transfer “${offer.content}” to this server.${workspaceCopy}\n\n${packageContents}\n\n${importEffect}`,
           {title: 'Incoming server transfer', confirmLabel: 'Accept transfer', cancelLabel: 'Reject'},
         );
       } finally {
