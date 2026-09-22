@@ -13,8 +13,11 @@
 #### 🚀 Enhancements:
 
 - Dashboard PowerPoint exports from the Dashboard library now request Regions and Cities in the Dataset Universe panel whenever multiple values are available. Both searchable multiselects appear immediately with a loading state, then populate through one combined CDR scan; every value is selected by default and filters the export. Cities also offer a `7 Main Cities` shortcut for Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield. Selected Regions appear in yellow above Scope on the title slide and before Scope in the generated filename.
+- Incoming server-transfer offers now poll sequentially at a visibility-aware cadence, retry immediately after focus or network recovery, and leave a persistent review reminder until they are accepted or rejected.
 
 #### 🐛 Bug fixes:
+
+- Workspace configuration exports and server transfers now read Auto-calculated Field definitions directly without triggering CDR materialization; progress estimates no longer include the application database for workspace-only packages. Background XLSX parsing also yields regularly so a large resumed CDR does not monopolize the web interface.
 
 #### 📚 Documentation:
 

@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from time import sleep
 from typing import Callable, Iterable
 
 import pandas as pd
@@ -28,6 +29,12 @@ CDR_IGNORED_SHEETS = {
     'TMP_CLIPBOARD',
 }
 CDR_IGNORED_SHEET_KEYS = frozenset(name.strip().casefold() for name in CDR_IGNORED_SHEETS)
+
+# XLSX parsing is implemented largely in Python by openpyxl.  A short pause at
+# predictable intervals releases the GIL to keep the web server responsive
+# while a large CDR is being processed in the background.
+EXCEL_READ_YIELD_EVERY_ROWS = 250
+EXCEL_READ_YIELD_SECONDS = 0.003
 
 
 @dataclass(slots=True)
@@ -428,6 +435,8 @@ def _read_openxml_sheet(worksheet, progress_callback: Callable[[int], None] | No
 
     def advance_progress() -> None:
         progress_state['processed_rows'] += 1
+        if progress_state['processed_rows'] % EXCEL_READ_YIELD_EVERY_ROWS == 0:
+            sleep(EXCEL_READ_YIELD_SECONDS)
         if not progress_callback or total_rows <= 0:
             return
         progress = min(55, 14 + int((progress_state['processed_rows'] / total_rows) * 41))

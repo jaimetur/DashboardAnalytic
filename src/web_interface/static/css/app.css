@@ -277,6 +277,8 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .admin-stack .server-transfer-fields label { color: #7d2731; }
 .admin-stack .server-transfer-fields input { width: 100%; box-sizing: border-box; background: #fff; }
 .server-transfer-error { margin-top: 0.75rem !important; color: #a3313d !important; font-weight: 700; }
+.incoming-transfer-reminder { position: fixed; right: 1rem; bottom: 1rem; z-index: 10003; max-width: min(30rem, calc(100vw - 2rem)); padding: .8rem 1rem; border: 1px solid #9a2a34; border-radius: .7rem; background: #a92e38; color: #fff; font: inherit; font-weight: 800; box-shadow: 0 12px 30px rgba(77, 18, 24, .28); cursor: pointer; }
+.incoming-transfer-reminder:hover, .incoming-transfer-reminder:focus-visible { background: #8b222c; border-color: #711820; }
 .admin-stack .server-transfer-dialog [data-server-transfer-connect] { background: linear-gradient(135deg, #8f2932, #c24a4d); border-color: rgba(126, 31, 39, 0.60); color: #fff; }
 .admin-stack .server-transfer-dialog [data-server-transfer-connect]:hover:not(:disabled) { background: linear-gradient(135deg, #752029, #a93a40); }
 .admin-stack .server-transfer-dialog [data-server-transfer-cancel] { background: #edf1f3; border-color: rgba(68, 81, 93, 0.24); color: #36505f; box-shadow: none; }

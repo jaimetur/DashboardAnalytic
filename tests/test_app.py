@@ -115,6 +115,32 @@ def test_repository_reads_remain_available_while_a_background_writer_is_active(t
         writer.close()
 
 
+def test_large_excel_ingestion_cooperatively_yields_to_the_web_server(monkeypatch) -> None:
+    from src.modules import ingestion
+
+    class Worksheet:
+        def iter_rows(self, values_only: bool = True):
+            assert values_only is True
+            yield ('market', 'score')
+            yield ('UK', 91)
+            yield ('ES', 88)
+            yield ('DE', 86)
+
+    pauses: list[float] = []
+    monkeypatch.setattr(ingestion, 'EXCEL_READ_YIELD_EVERY_ROWS', 2)
+    monkeypatch.setattr(ingestion, 'EXCEL_READ_YIELD_SECONDS', 0.003)
+    monkeypatch.setattr(ingestion, 'sleep', pauses.append)
+
+    frame = ingestion._read_openxml_sheet(Worksheet(), None, {'processed_rows': 0, 'last_progress': 14}, 4)
+
+    assert frame.to_dict('records') == [
+        {'market': 'UK', 'score': 91},
+        {'market': 'ES', 'score': 88},
+        {'market': 'DE', 'score': 86},
+    ]
+    assert pauses == [0.003, 0.003]
+
+
 def test_report_template_timestamp_migration_does_not_rewrite_complete_rows(tmp_path: Path) -> None:
     from src.modules.repository import Repository
 
@@ -1334,6 +1360,24 @@ def test_multi_selection_export_applies_containment_rules_and_builds_importable_
     assert import_status['notice'] == 'Import selection completed (2 packages).'
 
 
+def test_auto_calculated_fields_export_does_not_materialize_active_cdrs(client, tmp_path, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login_super(client)
+
+    def unexpected_materialization() -> None:
+        raise AssertionError('Export must not load or materialize CDR tables.')
+
+    monkeypatch.setattr(app_module, 'load_workspace_calculated_dimensions', unexpected_materialization)
+    package_path = tmp_path / 'auto-calculated-fields.zip'
+    app_module.build_export_archive_file('auto-calculated-fields', package_path)
+
+    with zipfile.ZipFile(package_path) as archive:
+        manifest = json.loads(archive.read('manifest.json'))
+        assert manifest['kind'] == 'auto-calculated-fields'
+        assert json.loads(archive.read(manifest['archive_path']))
+
+
 def test_operator_mappings_export_and_import_replace_the_selected_workspace_groups(client) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -1732,6 +1776,15 @@ def test_incoming_server_transfer_requires_acceptance_and_imports_after_upload(c
         time.sleep(0.01)
     assert payload['status'] == 'ready'
     assert 'Configuration imported successfully' in payload['notice']
+
+
+def test_server_transfer_listener_keeps_a_persistent_pending_offer_reminder() -> None:
+    script = (Path(__file__).parents[1] / 'src' / 'web_interface' / 'static' / 'js' / 'app.js').read_text(encoding='utf-8')
+
+    assert "pendingOfferReminder.className = 'incoming-transfer-reminder'" in script
+    assert 'window.addEventListener(\'online\', () => scheduleIncomingOfferPoll(0));' in script
+    assert 'document.addEventListener(\'visibilitychange\', () => { if (!document.hidden) scheduleIncomingOfferPoll(0); });' in script
+    assert 'window.setInterval(pollIncomingTransferOffers, 3000);' not in script
 
 
 def test_incoming_transfer_offer_survives_process_memory_loss(client, monkeypatch, tmp_path) -> None:

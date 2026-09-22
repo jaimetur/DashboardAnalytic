@@ -5272,6 +5272,20 @@ def _dashboard_archive_payload(workspace: Workspace) -> bytes:
         dashboards = {}
     return json.dumps({'format': 'dashboard-analytic-dashboards', 'version': 1, 'dashboards': dashboards}, ensure_ascii=False, indent=2).encode('utf-8')
 
+
+def _exported_calculated_dimensions(workspace: Workspace) -> list[dict[str, object]]:
+    """Read field definitions for an archive without scheduling CDR materialization."""
+    source_repository = Repository(
+        workspace.database_path,
+        global_db_path=repository.global_db_path,
+        workspace_registry_db_path=workspace_registry.registry_path,
+    )
+    payload = source_repository.list_calculated_dimensions()
+    if not payload and source_repository.get_workspace_state('calculated_dimensions_initialized') != '1':
+        return calculated_dimensions_json(parse_calculated_dimensions(default_calculated_dimensions()))
+    return calculated_dimensions_json(parse_calculated_dimensions(payload))
+
+
 def _archive_workspace_dashboards(archive: zipfile.ZipFile, workspace: Workspace, archive_prefix: str, progress_callback: Callable[[int], None] | None = None) -> None:
     payload = _dashboard_archive_payload(workspace)
     archive.writestr(f'{archive_prefix}/dashboards/dashboards.json', payload)
@@ -5458,16 +5472,7 @@ def _build_single_export_archive_file(
             source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
             if not source_workspace:
                 raise ValueError('Open a workspace before exporting auto-calculated fields.')
-            source_repository = Repository(
-                source_workspace.database_path,
-                global_db_path=repository.global_db_path,
-                workspace_registry_db_path=workspace_registry.registry_path,
-            )
-            definitions = calculated_dimensions_json(
-                load_workspace_calculated_dimensions()
-                if active_workspace and source_workspace.id == active_workspace.id
-                else parse_calculated_dimensions(source_repository.list_calculated_dimensions())
-            )
+            definitions = _exported_calculated_dimensions(source_workspace)
             payload = json.dumps(definitions, indent=2, ensure_ascii=False).encode('utf-8')
             manifest = archive_manifest(
                 'auto-calculated-fields', source_workspace={'id': source_workspace.id, 'name': source_workspace.name},
@@ -5620,8 +5625,9 @@ def estimate_export_bytes(
             for selected_target in targets
         )
     target = targets[0]
-    total = _file_size(application_config_dir / 'application.db')
+    total = 0
     if target in {'config', 'config-with-templates', 'full-environment'}:
+        total = _file_size(application_config_dir / 'application.db')
         for path in application_config_dir.iterdir():
             if path.is_file() and path.name not in {'application.db', workspace_registry.registry_path.name} and not path.name.endswith(('-wal', '-shm')):
                 total += _file_size(path)
@@ -5630,18 +5636,26 @@ def estimate_export_bytes(
     elif target == 'slides-templates':
         source_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
         source_workspace = workspace_registry.get(source_id) if source_id else None
-        total = _tree_size(source_workspace.slides_templates_dir) if source_workspace else 0
-    elif target == 'auto-calculated-fields':
-        source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
-        source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
         if source_workspace:
             source_repository = Repository(
                 source_workspace.database_path,
                 global_db_path=repository.global_db_path,
                 workspace_registry_db_path=workspace_registry.registry_path,
             )
-            definitions = parse_calculated_dimensions(source_repository.list_calculated_dimensions())
-            total = len(json.dumps(calculated_dimensions_json(definitions)).encode('utf-8'))
+            total = sum(
+                len(_template_row_content(row)) * (2 if row['is_default'] else 1)
+                for technology in TEMPLATE_NAMES
+                for row in source_repository.list_report_templates(technology)
+            )
+    elif target == 'dashboards':
+        source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
+        source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
+        total = len(_dashboard_archive_payload(source_workspace)) if source_workspace else 0
+    elif target == 'auto-calculated-fields':
+        source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
+        source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
+        if source_workspace:
+            total = len(json.dumps(_exported_calculated_dimensions(source_workspace)).encode('utf-8'))
     elif target == 'operator-mappings':
         source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
         source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
@@ -5893,8 +5907,6 @@ def start_export_job(
     if any(selected_target in WORKSPACE_ELEMENT_EXPORT_TARGETS for selected_target in targets):
         if not active_workspace:
             raise ValueError('Open a workspace before exporting workspace templates or fields.')
-        if 'auto-calculated-fields' in targets:
-            load_workspace_calculated_dimensions()
         selected_workspace_ids = [active_workspace.id]
     elif any(selected_target.startswith('workspace:') for selected_target in targets):
         selected_workspace_ids = [
@@ -7034,8 +7046,6 @@ def start_transfer_job(
     if any(selected_target in WORKSPACE_ELEMENT_EXPORT_TARGETS for selected_target in targets):
         if not active_workspace:
             raise ValueError('Open a workspace before transferring workspace templates or fields.')
-        if 'auto-calculated-fields' in targets:
-            load_workspace_calculated_dimensions()
         selected_workspace_ids = [active_workspace.id]
     elif any(selected_target.startswith('workspace:') for selected_target in targets):
         selected_workspace_ids = [

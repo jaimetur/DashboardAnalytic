@@ -6393,6 +6393,27 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
   if (document.body.dataset.authenticatedRole !== 'super-admin') return;
   let reviewingOffer = false;
   let pollingOffers = false;
+  let incomingOfferTimer = 0;
+  let pendingOfferReminder = null;
+  const showPendingOfferReminder = (offer) => {
+    if (!pendingOfferReminder) {
+      pendingOfferReminder = document.createElement('button');
+      pendingOfferReminder.type = 'button';
+      pendingOfferReminder.className = 'incoming-transfer-reminder';
+      pendingOfferReminder.addEventListener('click', () => { void pollIncomingTransferOffers(); });
+      document.body.append(pendingOfferReminder);
+    }
+    pendingOfferReminder.textContent = `Incoming transfer pending from ${offer.source || 'another server'} — review now`;
+    pendingOfferReminder.hidden = false;
+  };
+  const hidePendingOfferReminder = () => { if (pendingOfferReminder) pendingOfferReminder.hidden = true; };
+  const nextIncomingOfferPollDelay = () => document.hidden ? 5000 : 1000;
+  const scheduleIncomingOfferPoll = (delay = nextIncomingOfferPollDelay()) => {
+    window.clearTimeout(incomingOfferTimer);
+    incomingOfferTimer = window.setTimeout(() => {
+      pollIncomingTransferOffers().finally(() => scheduleIncomingOfferPoll());
+    }, delay);
+  };
   const pollAcceptedTransfer = async (offerId) => {
     const response = await fetch(`/admin/import-export/transfers/offers/${encodeURIComponent(offerId)}`, {
       credentials: 'same-origin', headers: {Accept: 'application/json'}, cache: 'no-store',
@@ -6440,7 +6461,10 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       if (!response.ok) return;
       const payload = await response.json().catch(() => ({}));
       const offer = Array.isArray(payload.offers) ? payload.offers[0] : null;
-      if (!offer) return;
+      if (!offer) { hidePendingOfferReminder(); return; }
+      // Keep a visible, durable reminder even if a browser blocks or delays
+      // the confirmation dialog while this tab is in the background.
+      showPendingOfferReminder(offer);
       reviewingOffer = true;
       const workspaceCopy = Array.isArray(offer.workspaces) && offer.workspaces.length
         ? `\nWorkspaces: ${offer.workspaces.join(', ')}`
@@ -6485,6 +6509,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
         const error = await decision.json().catch(() => ({}));
         showInfoDialog(error.detail || 'The transfer decision could not be saved.', {title: 'Incoming Transfer Error'});
       } else if (accepted) {
+        hidePendingOfferReminder();
         if (offer.kind === 'auto-calculated-fields') {
           hideLoadingOverlay();
           showInfoDialog(
@@ -6498,6 +6523,8 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
           hideLoadingOverlay();
           showInfoDialog(error instanceof Error ? error.message : 'The incoming transfer could not be completed.', {title: 'Incoming Transfer Error', tone: 'error'});
         });
+      } else {
+        hidePendingOfferReminder();
       }
     } catch (_error) {
       // A transient polling failure should not interrupt the Admin page.
@@ -6551,10 +6578,11 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       }
     });
   });
-  window.setInterval(pollIncomingTransferOffers, 3000);
-  window.addEventListener('focus', pollIncomingTransferOffers);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) pollIncomingTransferOffers(); });
-  pollIncomingTransferOffers();
+  window.addEventListener('focus', () => scheduleIncomingOfferPoll(0));
+  window.addEventListener('online', () => scheduleIncomingOfferPoll(0));
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) scheduleIncomingOfferPoll(0); });
+  window.addEventListener('pagehide', () => window.clearTimeout(incomingOfferTimer));
+  scheduleIncomingOfferPoll(0);
 })();
 
 // The transfer itself is server-side, so a page reload should restore its
