@@ -5867,7 +5867,7 @@ function importWarningDetails(payload) {
   if (kind === 'auto-calculated-fields') {
     return {
       title: 'Import Auto-calculated Fields?',
-      message: 'Choose the destination workspaces next. Existing fields with the same name will be updated, new fields will be added, and applicable CDR tables will be materialized in the background without creating duplicate columns.',
+      message: 'Choose the destination workspaces next. Their complete Auto-calculated Fields collection will be replaced by the package, and applicable CDR tables will be materialized in the background.',
     };
   }
   if (kind === 'workspace') {
@@ -5891,6 +5891,21 @@ function importWarningDetails(payload) {
   };
 }
 
+function importPackageContents(payload) {
+  const labels = {
+    config: 'App Config', workspace: 'Full Workspace', 'full-environment': 'Full Environment',
+    dashboards: 'Dashboards', 'slides-templates': 'Report Templates',
+    'operator-mappings': 'Operator/Vendor Mappings & Colors', 'auto-calculated-fields': 'Auto-calculated Fields',
+  };
+  const targets = Array.isArray(payload.targets) && payload.targets.length ? payload.targets : [payload.kind];
+  const workspaceTargets = new Set(['dashboards', 'slides-templates', 'operator-mappings', 'auto-calculated-fields']);
+  const workspaceContents = targets.length && targets.every((item) => workspaceTargets.has(String(item)));
+  return [
+    workspaceContents ? 'Workspace contents:' : 'Package includes:',
+    ...targets.map((item) => `• ${labels[String(item)] || String(item).replaceAll('-', ' ')}`),
+  ].join('\n');
+}
+
 function selectAutoCalculatedFieldWorkspaces(workspaces, kind = 'auto-calculated-fields', selectedIds = []) {
   if (!Array.isArray(workspaces) || !workspaces.length) {
     showInfoDialog('There are no destination workspaces available.', {title: 'Auto-calculated Fields', tone: 'error'});
@@ -5908,7 +5923,7 @@ function selectAutoCalculatedFieldWorkspaces(workspaces, kind = 'auto-calculated
         ? 'The complete Operator/Vendor mapping and color configuration will replace aliases, order and theme colors in every selected workspace. Stored CDR values will remain unchanged.'
       : kind === 'bundle'
         ? 'Workspace elements in the selection will be imported into every selected workspace. Full Workspace packages keep their own workspace identity.'
-        : 'The original workspace is preselected when present. Fields will be merged into every selected workspace; matching field names will be replaced.';
+        : 'The original workspace is preselected when present. The complete Auto-calculated Fields collection in every selected workspace will be replaced.';
   const toolbar = document.createElement('div'); toolbar.className = 'full-environment-workspace-toolbar';
   const selectAll = document.createElement('button'); selectAll.type = 'button'; selectAll.className = 'ghost-link'; selectAll.textContent = 'Select all';
   const selectNone = document.createElement('button'); selectNone.type = 'button'; selectNone.className = 'ghost-link'; selectNone.textContent = 'Select none'; toolbar.append(selectAll, selectNone);
@@ -6005,7 +6020,7 @@ document.querySelectorAll('[data-import-package-form]').forEach((form) => {
       if (loadingCopy) loadingCopy.textContent = 'Upload complete. Inspecting the package…';
       const warning = importWarningDetails(payload);
       hideLoadingOverlay();
-      const accepted = await showConfirmDialog(warning.message, {
+      const accepted = await showConfirmDialog(`${warning.message}\n\n${importPackageContents(payload)}`, {
         title: warning.title,
         confirmLabel: 'Import and overwrite',
       });
@@ -6485,11 +6500,19 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       const describeTransferItem = (item) => transferContentLabels[String(item)] || String(item).replaceAll('-', ' ');
       const targetItems = Array.isArray(offer.targets) && offer.targets.length ? offer.targets : [offer.kind];
       const workspaceItems = Array.isArray(offer.workspace_components) ? offer.workspace_components : [];
+      const workspaceContentTargets = new Set([
+        'dashboards', 'slides-templates', 'operator-mappings', 'auto-calculated-fields',
+      ]);
+      const isWorkspaceContentsSelection = targetItems.length > 0
+        && targetItems.every((item) => workspaceContentTargets.has(String(item)));
       const packageContents = [
-        'Package includes:',
+        isWorkspaceContentsSelection ? 'Workspace contents:' : 'Package includes:',
         ...targetItems.map((item) => `• ${describeTransferItem(item)}`),
-        ...(workspaceItems.length ? [`Workspace contents: ${workspaceItems.map(describeTransferItem).join(', ')}`] : []),
+        ...(!isWorkspaceContentsSelection && workspaceItems.length
+          ? [`Workspace contents: ${workspaceItems.map(describeTransferItem).join(', ')}`]
+          : []),
       ].join('\n');
+      const transferLabel = isWorkspaceContentsSelection ? 'Workspace contents' : offer.content;
       const workspaceCopy = Array.isArray(offer.workspaces) && offer.workspaces.length
         ? `\nWorkspaces: ${offer.workspaces.join(', ')}`
         : '';
@@ -6507,7 +6530,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
               ? 'Next, choose the destination workspaces. Their complete Operator/Vendor aliases, order and theme colors will be replaced without modifying stored CDR values.'
           : 'After the complete package is received, it will be imported automatically and may overwrite matching configuration or workspaces.';
         accepted = await showConfirmDialog(
-          `${offer.source}${sourceAddress} wants to transfer “${offer.content}” to this server.${workspaceCopy}\n\n${packageContents}\n\n${importEffect}`,
+          `${offer.source}${sourceAddress} wants to transfer “${transferLabel}” to this server.${workspaceCopy}\n\n${packageContents}\n\n${importEffect}`,
           {title: 'Incoming server transfer', confirmLabel: 'Accept transfer', cancelLabel: 'Reject'},
         );
       } finally {

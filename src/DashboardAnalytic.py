@@ -6403,7 +6403,7 @@ def import_auto_calculated_fields(
     progress_callback: Callable[[str, float], None] | None = None,
     parent_task_id: str = '',
 ) -> tuple[int, int]:
-    """Merge fields by normalized name and materialize each selected workspace once."""
+    """Replace field definitions and materialize each selected workspace once."""
     imported = parse_calculated_dimensions(payload)
     available = {workspace.id: workspace for workspace in workspace_registry.list()}
     selected_ids = list(dict.fromkeys(str(workspace_id) for workspace_id in destination_workspace_ids))
@@ -6419,10 +6419,7 @@ def import_auto_calculated_fields(
             workspace_registry_db_path=workspace_registry.registry_path,
         )
         previous = parse_calculated_dimensions(task_repository.list_calculated_dimensions())
-        merged = {_normalise_catalogue_dimension_name(item.name): item for item in previous}
-        for item in imported:
-            merged[_normalise_catalogue_dimension_name(item.name)] = item
-        saved = parse_calculated_dimensions(calculated_dimensions_json(merged.values()))
+        saved = parse_calculated_dimensions(calculated_dimensions_json(imported))
         affected_sources = affected_calculated_dimension_sources(previous, saved)
         task_repository.replace_calculated_dimensions(calculated_dimensions_json(saved))
         if affected_sources:
@@ -14170,6 +14167,8 @@ def _retain_import_upload(upload_id: str, package_path: Path, user: SessionUser)
         }
     response_payload = {
         'kind': kind,
+        'targets': manifest.get('targets') if isinstance(manifest.get('targets'), list) else [kind],
+        'workspace_components': archive_workspace_components(manifest),
         'includes_slides_templates': bool(manifest.get('includes_slides_templates')),
         'workspace_collisions': import_workspace_collisions(manifest),
     }
@@ -15768,7 +15767,7 @@ async def import_workspace_calculated_dimensions(
         payload = json.loads((await dimensions_file.read()).decode('utf-8-sig'))
         imported = parse_calculated_dimensions(payload)
         previous = list(load_workspace_calculated_dimensions())
-        merged = { _normalise_catalogue_dimension_name(item.name): item for item in previous }
+        merged = {_normalise_catalogue_dimension_name(item.name): item for item in previous}
         for item in imported:
             merged[_normalise_catalogue_dimension_name(item.name)] = item
         saved = write_workspace_calculated_dimensions(calculated_dimensions_json(merged.values()))
