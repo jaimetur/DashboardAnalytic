@@ -1470,7 +1470,7 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypa
     output_path = Path(row['output_path'])
     charts_dir = output_path.parent / 'dashboard-charts'
     assert output_path.is_file()
-    assert re.fullmatch(r'\d{8}_\d{6}  - Comparison\.pptx', output_path.name)
+    assert re.fullmatch(r'\d{8}_\d{6} - Vendor Comparison - Comparison\.pptx', output_path.name)
     assert output_path.parent.name == output_path.stem
     assert output_path.parent.parent == Path(core.repository.db_path).parent / 'output' / 'dashboards'
     assert len(list(charts_dir.glob('*.png'))) == 3

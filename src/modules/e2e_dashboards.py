@@ -27,6 +27,8 @@ from fastapi import BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 from pptx import Presentation
+from pptx.dml.color import RGBColor
+from pptx.util import Inches, Pt
 from starlette.background import BackgroundTask
 
 from src.modules.cdr_reporting import (
@@ -449,6 +451,23 @@ def install_dashboard_routes(core):
             return min(4096, max(320, round(900 * frame_ratio))), 900
         return 1600, min(4096, max(240, round(1600 / frame_ratio)))
 
+    def dashboard_ppt_scope_label(scope: str) -> str:
+        """Return the human-readable scope used on Dashboard PPT covers."""
+        return 'Vendor Comparison' if str(scope).casefold() == 'multivendor' else 'Operator Comparison'
+
+    def add_dashboard_ppt_cover_scope(slide, scope: str, slide_height: int) -> None:
+        """Add the export scope below the subtitle at the lower-left of a title slide."""
+        scope_box = slide.shapes.add_textbox(
+            Inches(0.7), slide_height - Inches(0.72),
+            Inches(5.5), Inches(0.3),
+        )
+        scope_box.name = 'dashboard-ppt-scope'
+        paragraph = scope_box.text_frame.paragraphs[0]
+        paragraph.text = dashboard_ppt_scope_label(scope)
+        paragraph.font.size = Pt(14)
+        paragraph.font.bold = True
+        paragraph.font.color.rgb = RGBColor(36, 90, 150)
+
     def add_dashboard_chart_picture(slide, png: bytes, placement) -> None:
         """Fill a same-ratio chart placeholder without PowerPoint cropping or distortion."""
         left, top, width, height = placement
@@ -608,6 +627,8 @@ def install_dashboard_routes(core):
                         raise ValueError(f"Slide {slide_number}: layout '{header.layout}' is unavailable.")
                     slide = presentation.slides.add_slide(layout)
                     _set_structural_slide_text(slide, header.slide_title, header.slide_subtitle)
+                    if header.structural_type == 'title slide':
+                        add_dashboard_ppt_cover_scope(slide, snapshot.definition.scope, presentation.slide_height)
                     _set_commentary(slide, comments)
                     continue
                 chart_entries = [
@@ -967,7 +988,8 @@ def install_dashboard_routes(core):
         filters_json = json.dumps(dashboard_filter_lines(raw_definition, task_repository), ensure_ascii=False)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         safe_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', dashboard_name).strip() or 'Dashboard'
-        output_file = f'{timestamp}  - {safe_name}.pptx'
+        safe_scope = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', dashboard_ppt_scope_label(raw_definition.get('scope') or 'single'))
+        output_file = f'{timestamp} - {safe_scope} - {safe_name}.pptx'
         job_dir = Path(task_repository.db_path).parent / 'output' / 'dashboards' / Path(output_file).stem
         destination = job_dir / output_file
         ensure_dashboard_ppt_jobs(task_repository)

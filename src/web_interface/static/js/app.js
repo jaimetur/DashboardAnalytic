@@ -5001,11 +5001,22 @@ function setupPagePanelNavigator() {
       const parentPanel = panel.parentElement?.closest('article.panel, details.panel, section.panel');
       return !parentPanel;
     });
-    return topLevelPanels.filter((panel) => (
+    const visiblePanels = topLevelPanels.filter((panel) => (
       panelIsVisible(panel)
       && panel.dataset.pagePanelNavigation !== 'exclude'
       && !panel.closest('.confirm-overlay, .dataset-preview-overlay, [role="dialog"]')
     ));
+    if (navigator.dataset.theme !== 'admin') return visiblePanels;
+    // Admin deliberately uses CSS `order` to bring package controls directly
+    // below its overview. Mirror that rendered order in Sections.
+    return visiblePanels
+      .map((panel, index) => ({
+        panel,
+        index,
+        order: Number.parseInt(window.getComputedStyle(panel).order, 10) || 0,
+      }))
+      .sort((left, right) => left.order - right.order || left.index - right.index)
+      .map(({panel}) => panel);
   };
   const markActive = (panel) => {
     list.querySelectorAll('[data-page-panel-target]').forEach((button) => {
