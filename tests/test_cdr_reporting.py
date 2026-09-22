@@ -172,6 +172,38 @@ def test_failure_count_hierarchy_uses_operator_mapping_order() -> None:
     ]
 
 
+def test_failure_count_hierarchy_keeps_operator_mapping_order_when_city_rows_are_sparse() -> None:
+    """Column order must not depend on the first operator present in a city."""
+    frame = chart_frame({
+        'Operator': ['VF_SA', '3', 'O2', 'EE', 'VF_UK'],
+        'Campaign': ['2026-Q2'] * 5,
+        'Session_Type': ['MultiRAB', 'MultiRAB', 'VoLTE', 'VoLTE', 'VoLTE'],
+        'City': ['Belfast', 'Belfast', 'Bristol', 'Bristol', 'London'],
+        'Call_Status': ['Failed'] * 5,
+        'Test_ID': ['A', 'B', 'C', 'D', 'E'],
+    })
+    frame.attrs['operator_mapping_groups'] = [
+        {'canonical': '3', 'aliases': [], 'position': 0, 'color': '#F28E2B'},
+        {'canonical': 'EE', 'aliases': [], 'position': 1, 'color': '#76B7B2'},
+        {'canonical': 'O2', 'aliases': [], 'position': 2, 'color': '#4E79A7'},
+        {'canonical': 'VF_UK', 'aliases': [], 'position': 3, 'color': '#E15759'},
+        {'canonical': 'VF_SA', 'aliases': [], 'position': 4, 'color': '#8000FF'},
+    ]
+    entry = CatalogEntry(
+        slide=3, slide_title='Validation', slide_subtitle='', layout='', chart_title='Failures',
+        cdr_source='CDR-Voice', kpi='COUNT(Test_ID)', chart_type='Count Stacked Horizontal Bars',
+        legend='Call Status', filters='', grouping_rows='Session Type × City',
+        grouping_columns='Operator × Campaign', legend_position='Right',
+    )
+
+    model = catalog_chart_payload(frame, entry, prefiltered=True)
+
+    assert model['column_keys'] == [
+        ['3', '2026-Q2'], ['EE', '2026-Q2'], ['O2', '2026-Q2'],
+        ['VF_UK', '2026-Q2'], ['VF_SA', '2026-Q2'],
+    ]
+
+
 def test_multivendor_dynamic_table_places_operator_only_identities_after_vendors() -> None:
     frame = chart_frame({
         'vendor': ['EE', 'O2', 'VF_SA', '3_Huawei', '3_Ericsson', 'VF_Ericsson'],

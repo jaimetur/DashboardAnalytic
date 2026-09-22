@@ -126,11 +126,11 @@ FILTER_COLUMNS = {
 ADAPTATIVE_FILTER_FIELDS = (
     'Market', 'Operator', 'Vendor', 'Region', 'City', 'Campaign', 'RAT', 'Session Type', 'Call Status',
 )
-DASHBOARD_RENDER_CACHE_VERSION = 16
+DASHBOARD_RENDER_CACHE_VERSION = 17
 DASHBOARD_SELECTION_CACHE_VERSION = 11
 DASHBOARD_SELECTION_CACHE_LIMIT = 128
 DASHBOARD_PROFILE_SELECTION_THRESHOLD = 100_000
-DASHBOARD_CHART_MODEL_CACHE_VERSION = 13
+DASHBOARD_CHART_MODEL_CACHE_VERSION = 14
 DASHBOARD_CHART_MODEL_DISK_LIMIT = 500
 DASHBOARD_CHART_RENDER_WORKERS = 3
 DASHBOARD_PREVIEW_MANIFEST_VERSION = 8
@@ -3236,6 +3236,13 @@ def install_dashboard_routes(core):
                 # only the Canvas payload would immediately rebuild it from
                 # that stale frame after an Admin mapping change.
                 snapshot.chart_frames.pop(index, None)
+                # Refresh is also the user's explicit request to re-read
+                # workspace mapping order and colours.  Filtered/raw frames
+                # are mapping-dependent, so retaining them can make a forced
+                # render paint an older operator order despite a new model.
+                snapshot.frames.clear()
+                snapshot.filtered_frames.clear()
+                snapshot.frame_locks.clear()
             model_path.unlink(missing_ok=True)
         with lock:
             payload = snapshot.chart_payloads.get(index)
@@ -3899,7 +3906,10 @@ def install_dashboard_routes(core):
                     stale.unlink(missing_ok=True)
             except OSError:
                 pass
-        return Response(png, media_type='image/png', headers={'Cache-Control': 'private, max-age=3600'})
+        # The same Dashboard token can be explicitly refreshed. Never let a
+        # browser keep a previously rendered chart image for an hour after the
+        # server has rebuilt its model or mapping-dependent frame.
+        return Response(png, media_type='image/png', headers={'Cache-Control': 'no-store, max-age=0, must-revalidate'})
 
     @app.get('/api/e2e-dashboards/data/{token}/{index}')
     def chart_data(

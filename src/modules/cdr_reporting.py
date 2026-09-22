@@ -96,7 +96,7 @@ _DASHBOARD_CANVAS_RENDERER_LOCK = threading.RLock()
 # The browser worker keeps a copy of dashboard_charts.js in memory. Bump this
 # whenever rendering semantics change so a live server does not keep painting
 # previews with an older script after a hot reload.
-DASHBOARD_CANVAS_RENDERER_VERSION = 5
+DASHBOARD_CANVAS_RENDERER_VERSION = 6
 
 
 def _node_executable() -> str:
@@ -1789,6 +1789,25 @@ def _font(size: int, bold: bool = False) -> ImageFont.ImageFont:
 AGGREGATION_TITLE_FONT_SIZE = 26
 LEGEND_TEXT_FONT_SIZE = 26
 LEGEND_MARKER_SIZE = 30
+
+
+def _format_size(size: int, format_value: str, *, level: int = 0) -> int:
+    """Scale shared legend/axis typography from its template format."""
+    options = label_format_options(format_value)
+    scale = {"Small": 0.82, "Medium": 1.08, "Large": 1.28}.get(str(options["size"]), 1.0)
+    return max(10, round(size * scale) - max(0, level) * 2)
+
+
+def _format_font(size: int, format_value: str, *, level: int = 0, default_bold: bool = True) -> ImageFont.ImageFont:
+    """Return the static-renderer equivalent of the Canvas format font."""
+    options = label_format_options(format_value)
+    bold = bool(options["bold"]) if options["configured"] else default_bold
+    return _font(_format_size(size, format_value, level=level), bold)
+
+
+def _format_colour(format_value: str, fallback: str) -> str:
+    options = label_format_options(format_value)
+    return str(options["color"] or fallback) if options["configured"] else fallback
 
 
 def _column(frame: pd.DataFrame, candidates: Iterable[str]) -> str | None:
@@ -3712,6 +3731,7 @@ def _draw_chart_legend(
     font_size: int = LEGEND_TEXT_FONT_SIZE,
     line_markers: bool = False,
     side_x: int | None = None,
+    legend_format: str = "",
 ) -> None:
     """Draw a template legend in a row (top/bottom) or column (left/right)."""
     if position == "none" or not items:
@@ -3720,7 +3740,10 @@ def _draw_chart_legend(
     # Legends are part of the chart, not ancillary metadata. Enforce a
     # readable minimum because the 1600px PNG is normally scaled down in the
     # report and preview viewers.
-    font_size = max(font_size, LEGEND_TEXT_FONT_SIZE)
+    format_options = label_format_options(legend_format)
+    font_size = _format_size(font_size, legend_format) if format_options["configured"] else max(font_size, LEGEND_TEXT_FONT_SIZE)
+    legend_font = _font(font_size, bool(format_options["bold"])) if format_options["configured"] else _font(font_size, True)
+    legend_fill = _format_colour(legend_format, "#263B4A")
     marker_size = LEGEND_MARKER_SIZE
     def legend_line_width(series_width: int) -> int:
         # CDF charts are commonly scaled down in previews and PowerPoint. A
@@ -3755,7 +3778,7 @@ def _draw_chart_legend(
                 )
             elif not text_only:
                 draw.rectangle((x, y, x + marker_size, y + marker_size), fill=colour)
-            draw.text((x if text_only else x + (43 if line_markers else 32), y - 1), caption[:28], fill="#263B4A", font=_font(font_size, True))
+            draw.text((x if text_only else x + (43 if line_markers else 32), y - 1), caption[:28], fill=legend_fill, font=legend_font)
         return
     x, start_y = (side_x if side_x is not None else (26 if position == "left" else 1380)), 112
     for index, item in enumerate(items):
@@ -3769,7 +3792,7 @@ def _draw_chart_legend(
             )
         elif not text_only:
             draw.rectangle((x, y, x + marker_size, y + marker_size), fill=colour)
-        draw.text((x if text_only else x + (43 if line_markers else 32), y - 1), caption[:24], fill="#263B4A", font=_font(font_size, True))
+        draw.text((x if text_only else x + (43 if line_markers else 32), y - 1), caption[:24], fill=legend_fill, font=legend_font)
 
 
 def _catalogue_display_label(category: object, series: object) -> str:
@@ -3821,6 +3844,27 @@ def _hierarchical_complete_keys(frame: pd.DataFrame, columns: list[str]) -> list
     observed = list(frame[columns].drop_duplicates().itertuples(index=False, name=None))
     if not observed:
         return []
+    # ``frame`` is primarily sorted by its row hierarchy.  Using its
+    # first-seen order to construct the *column* hierarchy can therefore put
+    # an operator that happens to occur in the first city ahead of earlier
+    # mapped operators.  Reapply every dimension's configured domain here so
+    # both axes honour operator/vendor positions and all other dimensions use
+    # their alphabetical/campaign order independently of source-row layout.
+    configured_ranks = {
+        column: {value: rank for rank, value in enumerate(configured_values.get(column) or ())}
+        for column in columns
+    }
+
+    def observed_key(key: tuple[object, ...]) -> tuple[tuple[int, str], ...]:
+        return tuple(
+            (
+                configured_ranks[column].get(value, len(configured_ranks[column])),
+                str(value).casefold(),
+            )
+            for column, value in zip(columns, key, strict=True)
+        )
+
+    observed.sort(key=observed_key)
     keys: list[tuple[object, ...]] = []
 
     def children(prefix: tuple[object, ...], level: int) -> list[object]:
@@ -4227,7 +4271,7 @@ def _status_chart_categories(
     return result, states, colours
 
 
-def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, period: str | None, quality: bool = False, threshold: float = 1.6, metric: str | None = None, legend_labels: tuple[str, ...] = (), legend_position: str = "top", label_position: str = "") -> BytesIO:
+def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, period: str | None, quality: bool = False, threshold: float = 1.6, metric: str | None = None, legend_labels: tuple[str, ...] = (), legend_position: str = "top", label_position: str = "", legend_format: str = "") -> BytesIO:
     if frame.empty or not group or not period:
         return _empty_chart(title)
     image, draw = _canvas(title)
@@ -4248,7 +4292,7 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
     row_hierarchy = [column for column in hierarchy_columns if column.startswith("__catalog_row_")]
     column_hierarchy = [column for column in hierarchy_columns if column.startswith("__catalog_column_")]
     if column_hierarchy:
-        return _render_status_100_hierarchy(title, data, row_hierarchy, column_hierarchy, states, colours, legend_labels, legend_position, label_position)
+        return _render_status_100_hierarchy(title, data, row_hierarchy, column_hierarchy, states, colours, legend_labels, legend_position, label_position, legend_format)
     if row_hierarchy:
         # A row-only hierarchy remains on the left. A synthetic single column
         # gives every row its own bar without moving row dimensions to the x axis.
@@ -4256,7 +4300,7 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
         data[single_column] = "(all)"
         return _render_status_100_hierarchy(
             title, data, row_hierarchy, [single_column], states, colours,
-            legend_labels, legend_position, label_position,
+            legend_labels, legend_position, label_position, legend_format,
         )
     combos = [(str(g), str(p)) for g, p in data[[group, period]].drop_duplicates().itertuples(index=False)]
     if not combos:
@@ -4296,7 +4340,7 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
         value_y = chart_top + chart_height - (y / 100 * chart_height)
         draw.line((chart_left - 20, value_y, chart_left + chart_width, value_y), fill="#E4E9ED", width=1)
         draw.text((64, value_y - 10), f"{y}%", fill="#4E6271", font=_font(18, True))
-    _draw_chart_legend(draw, [(_legend_caption(legend_labels, index, state), colour, 2) for index, (state, colour) in enumerate(zip(states, colours, strict=True))], legend_position, font_size=16)
+    _draw_chart_legend(draw, [(_legend_caption(legend_labels, index, state), colour, 2) for index, (state, colour) in enumerate(zip(states, colours, strict=True))], legend_position, font_size=16, legend_format=legend_format)
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0); return output
 
 
@@ -4310,6 +4354,7 @@ def _render_status_100_hierarchy(
     legend_labels: tuple[str, ...] = (),
     legend_position: str = "top",
     label_position: str = "",
+    legend_format: str = "",
 ) -> BytesIO:
     """Render template row groups as panes and column groups as nested headers."""
     row_keys = _hierarchical_unique_keys(data, row_hierarchy) if row_hierarchy else [()]
@@ -4322,7 +4367,7 @@ def _render_status_100_hierarchy(
     image, draw = _canvas(title)
     # Reserve a dedicated header band below the chart title.  Rotated vendor /
     # operator captions can be tall, so they must never share the title area.
-    row_label_font = _font(AGGREGATION_TITLE_FONT_SIZE, True)
+    row_label_font = _format_font(AGGREGATION_TITLE_FONT_SIZE, legend_format)
     row_label_widths = [
         max((_text_width(draw, str(key[level])[:24], row_label_font) for key in row_keys), default=0) + 18
         for level in range(len(row_hierarchy))
@@ -4351,8 +4396,8 @@ def _render_status_100_hierarchy(
     row_label_scale = min((chart_left - 92) / total_label_width, 1.0)
     def nested_row_start(level: int) -> float:
         return 24 + sum(row_label_widths[:level]) * row_label_scale
-    header_font = _font(AGGREGATION_TITLE_FONT_SIZE, True)
     for level in range(upper_levels):
+        header_font = _format_font(AGGREGATION_TITLE_FONT_SIZE, legend_format, level=level)
         band_top = header_top + level * header_band_height
         for start, end, value in _hierarchy_caption_spans(column_keys, level):
             left = chart_left + start * column_width
@@ -4435,14 +4480,15 @@ def _render_status_100_hierarchy(
             visible_width = width * scale
             for start, end, value in _hierarchy_caption_spans(row_keys, level):
                 centre_y = chart_top + ((start + end) / 2) * row_height
-                caption = _fit_text(draw, value, row_label_font, visible_width - 8)
-                draw.text((x + 4, centre_y - 10), caption, fill="#405765", font=row_label_font)
+                row_font = _format_font(AGGREGATION_TITLE_FONT_SIZE, legend_format, level=level)
+                caption = _fit_text(draw, value, row_font, visible_width - 8)
+                draw.text((x + 4, centre_y - _format_size(AGGREGATION_TITLE_FONT_SIZE, legend_format, level=level) / 2), caption, fill=_format_colour(legend_format, "#405765"), font=row_font)
             x += visible_width
             draw.line((x, chart_top, x, chart_top + chart_height), fill="#D7DEE3", width=1)
 
     hide_single_column = column_hierarchy == ["__catalog_single_column"]
     lower_captions = ["" if hide_single_column else str(key[-1]) for key in column_keys]
-    lower_font = _font(AGGREGATION_TITLE_FONT_SIZE, True)
+    lower_font = _format_font(AGGREGATION_TITLE_FONT_SIZE, legend_format)
     rotate_axis_captions = any(
         _text_width(draw, caption, lower_font) + 8 > column_width
         for caption in lower_captions
@@ -4457,12 +4503,12 @@ def _render_status_100_hierarchy(
             caption = _fit_text(draw, lower_caption, lower_font, column_width - 8)
             draw.text((centre - _text_width(draw, caption, lower_font) / 2, chart_top + chart_height + 10), caption, fill="#4E6271", font=lower_font)
 
-    _draw_chart_legend(draw, [(_legend_caption(legend_labels, index, state), colour, 2) for index, (state, colour) in enumerate(zip(states, colours, strict=True))], legend_position)
+    _draw_chart_legend(draw, [(_legend_caption(legend_labels, index, state), colour, 2) for index, (state, colour) in enumerate(zip(states, colours, strict=True))], legend_position, legend_format=legend_format)
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0)
     return output
 
 
-def _render_failure_count(title: str, frame: pd.DataFrame, group: str | None, period: str | None, legend_labels: tuple[str, ...] = (), legend_position: str = "top", label_position: str = "") -> BytesIO:
+def _render_failure_count(title: str, frame: pd.DataFrame, group: str | None, period: str | None, legend_labels: tuple[str, ...] = (), legend_position: str = "top", label_position: str = "", legend_format: str = "") -> BytesIO:
     if frame.empty or not group:
         return _empty_chart(title)
     status = _column(frame, ("Call_Status", "Test_Result", "status"))
@@ -4481,10 +4527,10 @@ def _render_failure_count(title: str, frame: pd.DataFrame, group: str | None, pe
     )
     if column_hierarchy:
         return _render_failure_count_hierarchy(
-            title, failed, row_hierarchy, column_hierarchy, legend_labels, legend_position, label_position, comparison_frame=frame,
+            title, failed, row_hierarchy, column_hierarchy, legend_labels, legend_position, label_position, comparison_frame=frame, legend_format=legend_format,
         )
     if len(row_hierarchy) > 1:
-        return _render_failure_count_hierarchy(title, failed, [], row_hierarchy, legend_labels, legend_position, label_position, comparison_frame=frame)
+        return _render_failure_count_hierarchy(title, failed, [], row_hierarchy, legend_labels, legend_position, label_position, comparison_frame=frame, legend_format=legend_format)
     has_series = bool(period) and not frame[period].fillna("(all)").astype(str).eq("(all)").all()
     fields = [group, period] if has_series else [group]
     counts = failed.groupby([*fields, "__catalog_failure_state"], dropna=False).size().unstack(fill_value=0)
@@ -4507,7 +4553,7 @@ def _render_failure_count(title: str, frame: pd.DataFrame, group: str | None, pe
                 draw.rectangle((x, y, x + width, y + 30), fill=colours[state])
                 _draw_configured_bar_label(image, draw, str(count), x=x, y=y, width=width, height=30, colour=colours[state], font=_font(20, True), position=label_position, horizontal=True, automatic=lambda: _draw_inside_bar_label(image, draw, str(count), x=x, y=y, width=width, height=30, fill="white", font=_font(20, True)))
             x += width
-    _draw_chart_legend(draw, [(_legend_caption(legend_labels, index, state), colours[state], 2) for index, state in enumerate(("Failed", "Dropped"))], legend_position, font_size=13)
+    _draw_chart_legend(draw, [(_legend_caption(legend_labels, index, state), colours[state], 2) for index, state in enumerate(("Failed", "Dropped"))], legend_position, font_size=13, legend_format=legend_format)
     draw.text((390, 820), "# of failed / dropped sessions", fill="#4E6271", font=_font(19, True))
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0); return output
 
@@ -4521,6 +4567,7 @@ def _render_failure_count_hierarchy(
     legend_position: str = "top",
     label_position: str = "",
     comparison_frame: pd.DataFrame | None = None,
+    legend_format: str = "",
 ) -> BytesIO:
     """Render failure counts with template rows and columns as separate axes."""
     comparison = comparison_frame if comparison_frame is not None else failed
@@ -4549,7 +4596,7 @@ def _render_failure_count_hierarchy(
             _legend_caption(legend_labels, index, state)
             for index, state in enumerate(("Failed", "Dropped"))
         ]
-        legend_width = max((_text_width(draw, caption, _font(LEGEND_TEXT_FONT_SIZE, True)) for caption in legend_captions), default=0)
+        legend_width = max((_text_width(draw, caption, _format_font(LEGEND_TEXT_FONT_SIZE, legend_format)) for caption in legend_captions), default=0)
         legend_lane = min(420, max(190, legend_width + 92))
         chart_width = max(760, 1600 - chart_left - legend_lane - 20)
     else:
@@ -4566,16 +4613,16 @@ def _render_failure_count_hierarchy(
         for start, end, caption in _hierarchy_caption_spans(column_keys, level):
             centre = chart_left + ((start + end) / 2) * column_width
             caption = caption[:20]
-            font = _font(AGGREGATION_TITLE_FONT_SIZE, True)
-            draw.text((centre - min(_text_width(draw, caption, font) / 2, (end - start) * column_width / 2 - 4), y), caption, fill="#566A78", font=font)
+            font = _format_font(AGGREGATION_TITLE_FONT_SIZE, legend_format, level=level)
+            draw.text((centre - min(_text_width(draw, caption, font) / 2, (end - start) * column_width / 2 - 4), y), caption, fill=_format_colour(legend_format, "#566A78"), font=font)
             draw.line((chart_left + start * column_width, y + header_band_height - 4, chart_left + end * column_width, y + header_band_height - 4), fill="#C8D2D9", width=1)
 
     for column_index, column_key in enumerate(column_keys):
         lower_caption = str(column_key[-1])
         centre = chart_left + (column_index + 0.5) * column_width
-        leaf_font = _font(AGGREGATION_TITLE_FONT_SIZE, True)
+        leaf_font = _format_font(AGGREGATION_TITLE_FONT_SIZE, legend_format)
         leaf_caption = _fit_text(draw, lower_caption, leaf_font, column_width - 8)
-        draw.text((centre - _text_width(draw, leaf_caption, leaf_font) / 2, leaf_label_y), leaf_caption, fill="#4E6271", font=leaf_font)
+        draw.text((centre - _text_width(draw, leaf_caption, leaf_font) / 2, leaf_label_y), leaf_caption, fill=_format_colour(legend_format, "#4E6271"), font=leaf_font)
         cell_left = chart_left + column_index * column_width
         if column_index:
             changed = next((level for level, value in enumerate(column_key) if value != column_keys[column_index - 1][level]), len(column_key) - 1)
@@ -4601,9 +4648,9 @@ def _render_failure_count_hierarchy(
                 end += 1
             centre_y = chart_top + ((start + end) / 2) * row_height
             x = 20 + level * label_width
-            row_font = _font(AGGREGATION_TITLE_FONT_SIZE, True)
+            row_font = _format_font(AGGREGATION_TITLE_FONT_SIZE, legend_format, level=level)
             caption = _fit_text(draw, values[start], row_font, label_width - 8)
-            draw.text((x, centre_y - 13), caption, fill="#405765", font=row_font)
+            draw.text((x, centre_y - _format_size(AGGREGATION_TITLE_FONT_SIZE, legend_format, level=level) / 2), caption, fill=_format_colour(legend_format, "#405765"), font=row_font)
             start = end
 
     for row_index, row_key in enumerate(row_keys):
@@ -4659,6 +4706,7 @@ def _render_failure_count_hierarchy(
         legend_position,
         font_size=13,
         side_x=int(chart_left + chart_width + 24) if legend_position == "right" else None,
+        legend_format=legend_format,
     )
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0)
     return output
@@ -6480,11 +6528,11 @@ def _chart_for_catalog_entry(
     def finish(chart: BytesIO) -> BytesIO:
         return chart if legend_labels else _apply_resolved_legend(chart, entry, frame, metric, legend_position)
     if spec["kind"] == "status_100":
-        return finish(_render_status_100(chart_title, frame, group, period, metric=metric, legend_labels=legend_labels, legend_position=renderer_legend_position, label_position=entry.label_position))
+        return finish(_render_status_100(chart_title, frame, group, period, metric=metric, legend_labels=legend_labels, legend_position=renderer_legend_position, label_position=entry.label_position, legend_format=entry.legend_format))
     if spec["kind"] == "quality_100":
-        return finish(_render_status_100(chart_title, frame, group, period, True, spec.get("threshold", 1.6), metric, legend_labels, renderer_legend_position, entry.label_position))
+        return finish(_render_status_100(chart_title, frame, group, period, True, spec.get("threshold", 1.6), metric, legend_labels, renderer_legend_position, entry.label_position, entry.legend_format))
     if spec["kind"] == "failure_count":
-        return finish(_render_failure_count(chart_title, frame, group, period, legend_labels, renderer_legend_position, entry.label_position))
+        return finish(_render_failure_count(chart_title, frame, group, period, legend_labels, renderer_legend_position, entry.label_position, entry.legend_format))
     if spec["kind"] == "map":
         return finish(_render_map(chart_title, frame, group, period, metric, _column(frame, spec.get("x_metric", ())), legend_labels, renderer_legend_position))
     if spec["kind"] == "multi_cdf":
