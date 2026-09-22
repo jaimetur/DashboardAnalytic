@@ -58,6 +58,7 @@ from src.modules.column_names import MAIN_CDR_FIELDS, PREVIEW_METADATA_FIELDS, V
 from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalog_chart_payload, catalog_kpi_fields, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, materialize_calculated_dimensions, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_label_format, parse_label_position, parse_legend_position, parse_template_boolean, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_catalog_chart_preview_with_hover, render_cdr_report, render_unavailable_source_chart, report_chart_renderer_name, reset_dashboard_canvas_renderer, split_calculated_dimension_aliases
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column, add_vfuk_gcid_column, apply_operator_mappings, ensure_fixed_cdr_fields, get_dataset_source_columns, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
+from src.modules.geospatial import assign_regions, validate_region_mapping
 from src.modules.repository import Repository, WORKSPACE_REGISTRY_TABLE, workspace_write_lock
 from src.modules.runtime_config import IGNORE_EVENT_TIME_FILTERING_ENV, env_flag, ignore_event_time_filtering
 from src.runtime_logs import execution_log_entries
@@ -255,10 +256,11 @@ INPUT_KIND_LABELS = {
     'data': 'CDR-Data',
     'mapping_vodafone': 'Multivendor Mapping — Vodafone UK (VFUK)',
     'mapping_three': 'Multivendor Mapping — Three UK (3UK)',
+    'mapping_region': 'Region Mapping — Geospatial',
     'smart_orchestrator_logs': 'Smart Orchestrator Logs',
     'generic': 'Other',
 }
-UPLOAD_DATASET_KINDS = frozenset({'data', 'voice', 'speech', 'mapping_vodafone', 'mapping_three', 'smart_orchestrator_logs', 'generic'})
+UPLOAD_DATASET_KINDS = frozenset({'data', 'voice', 'speech', 'mapping_vodafone', 'mapping_three', 'mapping_region', 'smart_orchestrator_logs', 'generic'})
 CDR_DATASET_KINDS = frozenset({'data', 'voice', 'speech'})
 CDR_PREVIEW_FILTER_DEFINITIONS = (
     ('cdr_operator', 'Operator', ('operator', 'Operator')),
@@ -2628,6 +2630,7 @@ def serialize_dataset_row(row) -> dict[str, Any]:
     item['normalization_version'] = int(item.get('normalization_version') or 1)
     item['vendor_mapping_applied'] = bool(item.get('vendor_mapping_applied'))
     item['vendor_values_complete'] = bool(item.get('vendor_values_complete'))
+    item['region_mapping_applied'] = bool(item.get('region_mapping_applied'))
     item['is_ready'] = item.get('status') == 'ready'
     dataset_path = Path(item.get('stored_path') or '')
     item['source_exists'] = dataset_path.is_file()
@@ -2659,6 +2662,28 @@ def add_workspace_vendor_capabilities(datasets: list[dict[str, Any]]) -> None:
             and dataset.get('dataset_kind') in CDR_DATASET_KINDS
             and vendor_mapping_applied
         )
+
+
+def add_workspace_region_capabilities(datasets: list[dict[str, Any]]) -> None:
+    """Materialise Region mapping actions for the Workspace and its live queue."""
+    has_region_mappings = any(
+        dataset.get('is_ready') and dataset.get('dataset_kind') == 'mapping_region'
+        for dataset in datasets
+    )
+    for dataset in datasets:
+        mapped = bool(dataset.get('region_mapping_applied'))
+        dataset['can_map_regions'] = has_region_mappings and dataset.get('is_ready') and dataset.get('dataset_kind') in CDR_DATASET_KINDS and not mapped
+        dataset['can_clear_regions'] = dataset.get('is_ready') and dataset.get('dataset_kind') in CDR_DATASET_KINDS and mapped
+
+
+def add_workspace_mapping_capabilities(datasets: list[dict[str, Any]]) -> None:
+    """Expose the single Workspace mapping actions for Vendor and Region."""
+    add_workspace_vendor_capabilities(datasets)
+    add_workspace_region_capabilities(datasets)
+    for dataset in datasets:
+        is_cdr = dataset.get('is_ready') and dataset.get('dataset_kind') in CDR_DATASET_KINDS
+        dataset['can_map_mappings'] = bool(is_cdr and (dataset.get('can_map_vendors') or dataset.get('can_map_regions')))
+        dataset['can_clear_mappings'] = bool(is_cdr and (dataset.get('can_clear_vendors') or dataset.get('can_clear_regions')))
 
 
 def derive_runtime_available_metrics(dataset: dict[str, Any]) -> list[str]:
@@ -2907,6 +2932,7 @@ def _process_dataset(
     three_mapping_dataset_id: int | None = None,
     task_repository: Repository | None = None,
     workspace: Workspace | None = None,
+    region_mapping_dataset_id: int | None = None,
 ) -> str | None:
     task_repository = task_repository or repository
     combined_kind_to_recreate: str | None = None
@@ -2947,6 +2973,7 @@ def _process_dataset(
                 forced_dataset_kind=forced_dataset_kind,
                 vodafone_mapping_dataset_id=vodafone_mapping_dataset_id,
                 three_mapping_dataset_id=three_mapping_dataset_id,
+                region_mapping_dataset_id=region_mapping_dataset_id,
                 task_repository=task_repository,
                 update_combined_reporting=False,
             )
@@ -2962,6 +2989,7 @@ def _process_dataset(
                 'status': 'ready',
                 'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
                 'three_mapping_dataset_id': three_mapping_dataset_id,
+                'region_mapping_dataset_id': region_mapping_dataset_id,
             }))
             dataset_kind = str(rebuild_result.get('dataset_kind') or '').casefold()
             if workspace and dataset_kind in CDR_DATASET_KINDS:
@@ -3008,6 +3036,7 @@ def process_dataset(
     three_mapping_dataset_id: int | None = None,
     task_repository: Repository | None = None,
     workspace: Workspace | None = None,
+    region_mapping_dataset_id: int | None = None,
 ) -> None:
     """Run a dataset worker independently from sessions and active Workspace changes."""
     task_repository = task_repository or repository
@@ -3016,7 +3045,7 @@ def process_dataset(
         combined_kind = _process_dataset(
             dataset_id, dataset_path, username,
             vodafone_mapping_dataset_id, three_mapping_dataset_id,
-            task_repository, workspace,
+            task_repository, workspace, region_mapping_dataset_id,
         )
         if workspace and combined_kind:
             start_combined_cdr_recreation_job(
@@ -3033,6 +3062,7 @@ def enqueue_dataset_processing(
     username: str,
     vodafone_mapping_dataset_id: int | None = None,
     three_mapping_dataset_id: int | None = None,
+    region_mapping_dataset_id: int | None = None,
     persist_queued_state: bool = True,
     dependencies: Iterable[Future[Any]] = (),
 ) -> Future[Any] | None:
@@ -3054,8 +3084,8 @@ def enqueue_dataset_processing(
                 dataset_id, status='queued', progress=0, last_error=None,
                 processing_queued_at=now_iso(), processing_started_at=None, processed_at=None,
                 processing_options_json=json.dumps({
-                    'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
-                    'three_mapping_dataset_id': three_mapping_dataset_id,
+                    **{'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id, 'three_mapping_dataset_id': three_mapping_dataset_id},
+                    **({'region_mapping_dataset_id': region_mapping_dataset_id} if region_mapping_dataset_id else {}),
                 }),
             )
     except Exception:
@@ -3080,6 +3110,7 @@ def enqueue_dataset_processing(
                     three_mapping_dataset_id,
                     task_repository,
                     task_workspace,
+                    region_mapping_dataset_id,
                 )
             except Exception as exc:
                 if not processing_started:
@@ -3146,6 +3177,7 @@ def resume_interrupted_dataset_processing(workspace: Workspace) -> list[int]:
                 options.get('three_mapping_dataset_id'),
                 task_repository,
                 workspace,
+                options.get('region_mapping_dataset_id'),
             ),
         )
         resumed.append(dataset_id)
@@ -3159,15 +3191,21 @@ def rebuild_dataset_artifacts(
     forced_dataset_kind: str | None = None,
     vodafone_mapping_dataset_id: int | None = None,
     three_mapping_dataset_id: int | None = None,
+    region_mapping_dataset_id: int | None = None,
     task_repository: Repository | None = None,
     update_combined_reporting: bool = True,
 ) -> dict[str, Any]:
     task_repository = task_repository or repository
     workspace_dimensions = load_repository_calculated_dimensions(task_repository)
     source_columns: list[str] = []
-    df = load_dataset(
-        dataset_path, progress_callback=progress_callback, source_columns=source_columns,
-    )
+    if forced_dataset_kind == 'mapping_region':
+        region_field = validate_region_mapping(dataset_path)
+        df = pd.DataFrame([{'Region_Field': region_field, 'dataset_kind': 'mapping_region', 'source_file': dataset_path.name}])
+        source_columns.append(region_field)
+        if progress_callback:
+            progress_callback(55)
+    else:
+        df = load_dataset(dataset_path, progress_callback=progress_callback, source_columns=source_columns)
     task_repository.replace_dataset_source_columns(dataset_id, source_columns)
     if forced_dataset_kind in UPLOAD_DATASET_KINDS:
         df['dataset_kind'] = forced_dataset_kind
@@ -3178,6 +3216,8 @@ def rebuild_dataset_artifacts(
     dataset_kind = df['dataset_kind'].iloc[0] if 'dataset_kind' in df.columns and not df.empty else (forced_dataset_kind or infer_dataset_kind(df, dataset_path.name))
     auto_vendor_mapping_applied = False
     auto_vendor_mapping_error: str | None = None
+    auto_region_mapping_applied = False
+    auto_region_mapping_error: str | None = None
     if dataset_kind in CDR_DATASET_KINDS and (vodafone_mapping_dataset_id or three_mapping_dataset_id):
         if progress_callback:
             progress_callback(52)
@@ -3200,6 +3240,15 @@ def rebuild_dataset_artifacts(
             # Mapping is optional during import. A mapping issue must not make
             # an otherwise valid CDR unusable in Workspace or Datasets Analysis.
             auto_vendor_mapping_error = str(exc)
+    if dataset_kind in CDR_DATASET_KINDS and region_mapping_dataset_id:
+        if progress_callback:
+            progress_callback(57)
+        try:
+            region_mapping = _reporting_dataset(region_mapping_dataset_id, 'mapping_region', task_repository)
+            df = assign_regions(df, dataset_kind, Path(str(region_mapping['stored_path'])))
+            auto_region_mapping_applied = True
+        except Exception as exc:
+            auto_region_mapping_error = str(exc)
     if dataset_kind in CDR_DATASET_KINDS:
         df = materialize_cdr_derived_columns(df, dataset_kind, workspace_dimensions)
     store_cached_dataset_frame(dataset_path, df)
@@ -3217,6 +3266,25 @@ def rebuild_dataset_artifacts(
         progress_callback(62)
     task_repository.update_dataset_profile(dataset_id, progress=62, dataset_kind=dataset_kind)
     summary = summarise_dataset(df)
+    if dataset_kind == 'mapping_region':
+        # A polygon mapping is a configuration asset, not a CDR. It has no
+        # numeric KPI to analyse, so mark it ready after validation/storage.
+        task_repository.update_dataset_profile(
+            dataset_id, status='ready', progress=100,
+            normalization_version=DATASET_NORMALIZATION_VERSION,
+            dataset_kind=dataset_kind, row_count=summary.rows,
+            column_count=len(summary.columns), default_metric='',
+            default_aggregation='all', available_metrics_json='[]',
+            available_aggregations_json='[]', filter_options_json='{}',
+            summary_json=json.dumps(asdict(summary)), kpis_json='{}',
+            processed_at=now_iso(), last_error=None,
+        )
+        return {
+            'df': df, 'summary': summary, 'analysis': None,
+            'filter_options': {}, 'vendor_mapping_error': None,
+            'region_mapping_error': None, 'vendor_values_complete': False,
+            'dataset_kind': dataset_kind,
+        }
     if progress_callback:
         progress_callback(72)
     task_repository.update_dataset_profile(dataset_id, progress=72)
@@ -3244,6 +3312,8 @@ def rebuild_dataset_artifacts(
         progress=100,
         normalization_version=DATASET_NORMALIZATION_VERSION,
         vendor_mapping_applied=auto_vendor_mapping_applied,
+        region_mapping_applied=auto_region_mapping_applied,
+        region_mapping_dataset_id=region_mapping_dataset_id if auto_region_mapping_applied else None,
         vendor_values_complete=vendor_values_complete,
         dataset_kind=dataset_kind,
         row_count=summary.rows,
@@ -3264,6 +3334,7 @@ def rebuild_dataset_artifacts(
         'analysis': analysis,
         'filter_options': filter_options,
         'vendor_mapping_error': auto_vendor_mapping_error,
+        'region_mapping_error': auto_region_mapping_error,
         'vendor_values_complete': vendor_values_complete,
         'dataset_kind': dataset_kind,
     }
@@ -3337,6 +3408,57 @@ def persist_mapped_cdr_frame(
         processed_at=now_iso(),
         last_error=None,
     )
+
+
+def persist_region_mapped_cdr_frame(dataset: dict[str, Any], frame: pd.DataFrame, mapping_id: int, task_repository: Repository | None = None) -> None:
+    """Persist a spatial Region enrichment without changing Vendor provenance."""
+    task_repository = task_repository or repository
+    vendor_applied = bool(dataset.get('vendor_mapping_applied'))
+    vendor_complete = bool(dataset.get('vendor_values_complete'))
+    persist_mapped_cdr_frame(dataset, frame, task_repository)
+    task_repository.update_dataset_profile(
+        int(dataset['id']), vendor_mapping_applied=vendor_applied,
+        vendor_values_complete=vendor_complete, region_mapping_applied=True,
+        region_mapping_dataset_id=mapping_id,
+    )
+
+
+def process_region_mapping(dataset_id: int, username: str, mapping_dataset_id: int, task_repository: Repository | None = None) -> None:
+    task_repository = task_repository or repository
+    try:
+        row = task_repository.get_dataset(dataset_id)
+        if not row:
+            return
+        dataset = serialize_dataset_row(row)
+        task_repository.update_dataset_profile(dataset_id, status='processing', progress=10, last_error=None, processing_started_at=now_iso(), processed_at=None)
+        mapping = _reporting_dataset(mapping_dataset_id, 'mapping_region', task_repository)
+        frame = assign_regions(_reporting_frame(dataset_id, task_repository), str(dataset['dataset_kind']), Path(str(mapping['stored_path'])))
+        task_repository.update_dataset_profile(dataset_id, progress=75)
+        persist_region_mapped_cdr_frame(dataset, frame, mapping_dataset_id, task_repository)
+        clear_dataset_analysis_cache(Path(str(dataset['stored_path'])))
+        task_repository.update_dataset_profile(dataset_id, status='ready', progress=100, last_error=None, processed_at=now_iso())
+        task_repository.add_log(username, 'map_dataset_regions', json.dumps({'dataset_id': dataset_id, 'region_mapping_dataset_id': mapping_dataset_id}))
+    except Exception as exc:
+        task_repository.update_dataset_profile(dataset_id, status='ready', progress=100, last_error=None, processed_at=now_iso())
+        task_repository.add_log(username, 'map_dataset_regions_failed', json.dumps({'dataset_id': dataset_id, 'error': str(exc)}))
+    finally:
+        clear_stop_request(dataset_id, task_repository)
+        _unregister_dataset_processing(dataset_id, task_repository)
+
+
+def enqueue_region_mapping(background_tasks: BackgroundTasks, dataset_id: int, username: str, mapping_dataset_id: int) -> None:
+    task_repository = Repository(Path(repository.db_path))
+    row = task_repository.get_dataset(dataset_id)
+    try:
+        options = json.loads(str(row['processing_options_json'] or '{}')) if row else {}
+    except (TypeError, json.JSONDecodeError):
+        options = {}
+    options['region_mapping_dataset_id'] = mapping_dataset_id
+    task_repository.update_dataset_profile(dataset_id, status='queued', progress=0, last_error=None, processing_queued_at=now_iso(), processing_started_at=None, processed_at=None,
+        processing_options_json=json.dumps(options))
+    _register_dataset_processing(dataset_id, task_repository)
+    future = _dataset_processing_executor(task_repository).submit(process_region_mapping, dataset_id, username, mapping_dataset_id, task_repository)
+    background_tasks.add_task(future.result)
 
 
 def process_vendor_mapping(
@@ -7712,8 +7834,8 @@ def workspace(
             {
                 'user': user, 'datasets': [], 'ready_datasets': [], 'selected_dataset': None,
                 'input_kind': None, 'input_kind_options': [], 'workspace_logs': [], 'error': None,
-                'has_processing': False, 'vodafone_mapping_datasets': [], 'three_mapping_datasets': [],
-                'mappable_cdr_datasets': [], 'clearable_cdr_datasets': [],
+                'has_processing': False, 'vodafone_mapping_datasets': [], 'three_mapping_datasets': [], 'region_mapping_datasets': [],
+                'mappable_cdr_datasets': [], 'clearable_cdr_datasets': [], 'mappable_region_cdr_datasets': [], 'clearable_region_cdr_datasets': [],
                 'calculated_dimensions': [], 'combined_tables': [],
                 'workspaces': workspaces, 'workspace_access': workspace_access, 'workspace_sizes': workspace_sizes, 'workspace_cache_sizes': workspace_cache_sizes, 'workspace_statuses': workspace_statuses, 'workspace_users': workspace_users, 'workspace_notice': request.query_params.get('workspace_notice'),
                 'workspace_warning': request.query_params.get('workspace_warning'),
@@ -7728,9 +7850,12 @@ def workspace(
     has_processing = any(dataset['status'] in {'queued', 'processing'} for dataset in datasets)
     vodafone_mapping_datasets = [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'mapping_vodafone']
     three_mapping_datasets = [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'mapping_three']
-    add_workspace_vendor_capabilities(datasets)
-    mappable_cdr_datasets = [dataset for dataset in datasets if dataset.get('can_map_vendors')]
-    clearable_cdr_datasets = [dataset for dataset in datasets if dataset.get('can_clear_vendors')]
+    region_mapping_datasets = [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'mapping_region']
+    add_workspace_mapping_capabilities(datasets)
+    mappable_cdr_datasets = [dataset for dataset in datasets if dataset.get('can_map_mappings')]
+    clearable_cdr_datasets = [dataset for dataset in datasets if dataset.get('can_clear_mappings')]
+    mappable_region_cdr_datasets = []
+    clearable_region_cdr_datasets = []
     calculated_dimensions = calculated_dimensions_json(load_workspace_calculated_dimensions())
     combined_tables = workspace_combined_tables(workspace_id=active_workspace.id)
     queue_workspace_dimension_materialization(active_workspace)
@@ -7750,8 +7875,11 @@ def workspace(
             'has_processing': has_processing,
             'vodafone_mapping_datasets': vodafone_mapping_datasets,
             'three_mapping_datasets': three_mapping_datasets,
+            'region_mapping_datasets': region_mapping_datasets,
             'mappable_cdr_datasets': mappable_cdr_datasets,
             'clearable_cdr_datasets': clearable_cdr_datasets,
+            'mappable_region_cdr_datasets': mappable_region_cdr_datasets,
+            'clearable_region_cdr_datasets': clearable_region_cdr_datasets,
             'calculated_dimensions': calculated_dimensions,
             'combined_tables': combined_tables,
             'workspaces': workspaces,
@@ -12020,7 +12148,7 @@ def legacy_reporting_redirect(request: Request, legacy_path: str = '') -> Redire
 @app.get('/api/datasets/status')
 def dataset_status(user: SessionUser = Depends(current_user)) -> dict[str, Any]:
     datasets = [serialize_dataset_row(row) for row in repository.list_datasets()]
-    add_workspace_vendor_capabilities(datasets)
+    add_workspace_mapping_capabilities(datasets)
     combined_tables: list[dict[str, Any]] = []
     if active_workspace:
         require_workspace_access(user, active_workspace.id)
@@ -12037,6 +12165,7 @@ async def upload_dataset(
     dataset_kinds: Annotated[list[str] | None, Form()] = None,
     vodafone_mapping_dataset_ids: Annotated[list[str] | None, Form()] = None,
     three_mapping_dataset_ids: Annotated[list[str] | None, Form()] = None,
+    region_mapping_dataset_ids: Annotated[list[str] | None, Form()] = None,
     user: SessionUser = Depends(current_user),
 ) -> Response:
     if not dataset_files:
@@ -12099,6 +12228,11 @@ async def upload_dataset(
 
     selected_vodafone_mappings = parse_mapping_selection(vodafone_mapping_dataset_ids, 'VFUK mapping')
     selected_three_mappings = parse_mapping_selection(three_mapping_dataset_ids, '3UK mapping')
+    selected_region_mappings = parse_mapping_selection(region_mapping_dataset_ids, 'Region mapping')
+    if region_mapping_dataset_ids is None and selected_kinds:
+        latest_region = next((row for row in repository.list_datasets() if row['status'] == 'ready' and row['dataset_kind'] == 'mapping_region'), None)
+        if latest_region:
+            selected_region_mappings = [str(latest_region['id']) if kind in CDR_DATASET_KINDS else None for kind in selected_kinds]
 
     def validate_mapping_selection(selection: str | None, expected_kind: str, label: str) -> None:
         if not selection:
@@ -12122,6 +12256,7 @@ async def upload_dataset(
         if selected_kind in CDR_DATASET_KINDS:
             validate_mapping_selection(selected_vodafone_mappings[index], 'mapping_vodafone', 'VFUK mapping')
             validate_mapping_selection(selected_three_mappings[index], 'mapping_three', '3UK mapping')
+            validate_mapping_selection(selected_region_mappings[index], 'mapping_region', 'Region mapping')
 
     queued_dataset_ids: list[int] = []
     uploaded_datasets: list[dict[str, Any]] = []
@@ -12142,6 +12277,7 @@ async def upload_dataset(
             'created': created,
             'vodafone_mapping_selection': selected_vodafone_mappings[index],
             'three_mapping_selection': selected_three_mappings[index],
+            'region_mapping_selection': selected_region_mappings[index],
         })
         queued_dataset_ids.append(dataset_id)
 
@@ -12172,7 +12308,7 @@ async def upload_dataset(
     batch_mapping_futures: list[Future[Any]] = []
     for uploaded in sorted(
         uploaded_datasets,
-        key=lambda item: 0 if item['dataset_kind'] in {'mapping_vodafone', 'mapping_three'} else 1,
+        key=lambda item: 0 if item['dataset_kind'] in {'mapping_vodafone', 'mapping_three', 'mapping_region'} else 1,
     ):
         dataset_kind = uploaded['dataset_kind']
         vodafone_mapping_dataset_id = (
@@ -12183,12 +12319,17 @@ async def upload_dataset(
             resolve_mapping_selection(uploaded['three_mapping_selection'], 'mapping_three', '3UK mapping')
             if dataset_kind in CDR_DATASET_KINDS else None
         )
+        region_mapping_dataset_id = (
+            resolve_mapping_selection(uploaded['region_mapping_selection'], 'mapping_region', 'Region mapping')
+            if dataset_kind in CDR_DATASET_KINDS else None
+        )
         repository.add_log(user.username, 'upload_dataset' if uploaded['created'] else 'reprocess_dataset', json.dumps({
             'file': uploaded['destination'].name,
             'dataset_kind': dataset_kind or 'auto-detected',
             'dataset_id': uploaded['dataset_id'],
             'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
             'three_mapping_dataset_id': three_mapping_dataset_id,
+            'region_mapping_dataset_id': region_mapping_dataset_id,
         }))
         dependencies = list(batch_mapping_futures) if dataset_kind in CDR_DATASET_KINDS else []
         future = enqueue_dataset_processing(
@@ -12198,10 +12339,11 @@ async def upload_dataset(
             user.username,
             vodafone_mapping_dataset_id,
             three_mapping_dataset_id,
+            region_mapping_dataset_id,
             dependencies=dependencies,
         )
         if future is not None:
-            if dataset_kind in {'mapping_vodafone', 'mapping_three'}:
+            if dataset_kind in {'mapping_vodafone', 'mapping_three', 'mapping_region'}:
                 batch_mapping_futures.append(future)
 
     if not queued_dataset_ids:
@@ -12560,7 +12702,7 @@ def reprocess_workspace_datasets(
     queued_ids: list[int] = []
     for dataset in sorted(
         selected_datasets,
-        key=lambda item: 0 if item.get('dataset_kind') in {'mapping_vodafone', 'mapping_three'} else 1,
+        key=lambda item: 0 if item.get('dataset_kind') in {'mapping_vodafone', 'mapping_three', 'mapping_region'} else 1,
     ):
         try:
             processing_options = json.loads(str(dataset.get('processing_options_json') or '{}'))
@@ -12568,6 +12710,7 @@ def reprocess_workspace_datasets(
             processing_options = {}
         vodafone_mapping_dataset_id = processing_options.get('vodafone_mapping_dataset_id')
         three_mapping_dataset_id = processing_options.get('three_mapping_dataset_id')
+        region_mapping_dataset_id = processing_options.get('region_mapping_dataset_id')
         dependencies = list(mapping_futures) if dataset.get('dataset_kind') in CDR_DATASET_KINDS else []
         future = enqueue_dataset_processing(
             background_tasks,
@@ -12576,12 +12719,13 @@ def reprocess_workspace_datasets(
             user.username,
             vodafone_mapping_dataset_id,
             three_mapping_dataset_id,
+            region_mapping_dataset_id,
             dependencies=dependencies,
         )
         if future is None:
             continue
         dataset_id = int(dataset['id'])
-        if dataset.get('dataset_kind') in {'mapping_vodafone', 'mapping_three'}:
+        if dataset.get('dataset_kind') in {'mapping_vodafone', 'mapping_three', 'mapping_region'}:
             mapping_futures.append(future)
         queued_ids.append(dataset_id)
         repository.add_log(user.username, 'reprocess_dataset', json.dumps({
@@ -12695,6 +12839,102 @@ def clear_vendor_datasets(
     repository.add_log(user.username, 'queue_vendor_clearing', json.dumps({'dataset_ids': selected_ids}))
     destination = '/admin' if return_to == 'admin' else f'/workspace?dataset_id={selected_ids[0]}'
     return RedirectResponse(destination, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/workspace/map-regions')
+def map_dataset_regions(
+    background_tasks: BackgroundTasks,
+    cdr_dataset_ids: Annotated[list[int] | None, Form()] = None,
+    cdr_dataset_id: int | None = Form(default=None),
+    region_mapping_dataset_id: int | None = Form(default=None),
+    user: SessionUser = Depends(current_user),
+) -> Response:
+    selected_ids = list(dict.fromkeys(cdr_dataset_ids or ([] if cdr_dataset_id is None else [cdr_dataset_id])))
+    if not selected_ids or not region_mapping_dataset_id:
+        raise HTTPException(status_code=400, detail='Select CDRs and a processed Region Mapping.')
+    _reporting_dataset(region_mapping_dataset_id, 'mapping_region')
+    for dataset_id in selected_ids:
+        dataset = serialize_dataset_row(repository.get_dataset(dataset_id)) if repository.get_dataset(dataset_id) else None
+        if not dataset or not dataset.get('is_ready') or dataset.get('dataset_kind') not in CDR_DATASET_KINDS or dataset.get('region_mapping_applied'):
+            raise HTTPException(status_code=400, detail='Region mapping is only available for eligible processed CDRs.')
+        enqueue_region_mapping(background_tasks, dataset_id, user.username, region_mapping_dataset_id)
+    repository.add_log(user.username, 'queue_region_mapping', json.dumps({'dataset_ids': selected_ids, 'region_mapping_dataset_id': region_mapping_dataset_id}))
+    return RedirectResponse(f'/workspace?dataset_id={selected_ids[0]}', status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/workspace/map-mappings')
+def map_dataset_mappings(
+    background_tasks: BackgroundTasks,
+    cdr_dataset_ids: Annotated[list[int] | None, Form()] = None,
+    vodafone_mapping_dataset_id: int | None = Form(default=None),
+    three_mapping_dataset_id: int | None = Form(default=None),
+    region_mapping_dataset_id: int | None = Form(default=None),
+    user: SessionUser = Depends(current_user),
+) -> Response:
+    selected_ids = list(dict.fromkeys(cdr_dataset_ids or []))
+    if not selected_ids or not any((vodafone_mapping_dataset_id, three_mapping_dataset_id, region_mapping_dataset_id)):
+        raise HTTPException(status_code=400, detail='Select CDRs and at least one Vendor or Region Mapping.')
+    if vodafone_mapping_dataset_id:
+        _reporting_dataset(vodafone_mapping_dataset_id, 'mapping_vodafone')
+    if three_mapping_dataset_id:
+        _reporting_dataset(three_mapping_dataset_id, 'mapping_three')
+    if region_mapping_dataset_id:
+        _reporting_dataset(region_mapping_dataset_id, 'mapping_region')
+    for dataset_id in selected_ids:
+        row = repository.get_dataset(dataset_id)
+        dataset = serialize_dataset_row(row) if row else None
+        if not dataset or not dataset.get('is_ready') or dataset.get('dataset_kind') not in CDR_DATASET_KINDS:
+            raise HTTPException(status_code=400, detail='Mapping is only available for processed NetCheck CDR datasets.')
+        enqueue_dataset_processing(
+            background_tasks, dataset_id, Path(str(dataset['stored_path'])), user.username,
+            vodafone_mapping_dataset_id, three_mapping_dataset_id, region_mapping_dataset_id,
+        )
+    repository.add_log(user.username, 'queue_dataset_mappings', json.dumps({'dataset_ids': selected_ids, 'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id, 'three_mapping_dataset_id': three_mapping_dataset_id, 'region_mapping_dataset_id': region_mapping_dataset_id}))
+    return RedirectResponse(f'/workspace?dataset_id={selected_ids[0]}', status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/workspace/clear-mappings')
+def clear_dataset_mappings(
+    background_tasks: BackgroundTasks,
+    cdr_dataset_ids: Annotated[list[int] | None, Form()] = None,
+    user: SessionUser = Depends(current_user),
+) -> Response:
+    selected_ids = list(dict.fromkeys(cdr_dataset_ids or []))
+    if not selected_ids:
+        raise HTTPException(status_code=400, detail='Select at least one mapped CDR.')
+    for dataset_id in selected_ids:
+        row = repository.get_dataset(dataset_id)
+        dataset = serialize_dataset_row(row) if row else None
+        if not dataset or not dataset.get('is_ready') or dataset.get('dataset_kind') not in CDR_DATASET_KINDS or not (dataset.get('vendor_mapping_applied') or dataset.get('region_mapping_applied')):
+            raise HTTPException(status_code=400, detail='Clearing is only available for CDRs with a tool-applied mapping.')
+        enqueue_dataset_processing(background_tasks, dataset_id, Path(str(dataset['stored_path'])), user.username)
+    repository.add_log(user.username, 'queue_dataset_mappings_clearing', json.dumps({'dataset_ids': selected_ids}))
+    return RedirectResponse(f'/workspace?dataset_id={selected_ids[0]}', status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/workspace/clear-regions')
+def clear_region_datasets(
+    background_tasks: BackgroundTasks,
+    cdr_dataset_ids: Annotated[list[int] | None, Form()] = None,
+    cdr_dataset_id: int | None = Form(default=None),
+    user: SessionUser = Depends(current_user),
+) -> Response:
+    selected_ids = list(dict.fromkeys(cdr_dataset_ids or ([] if cdr_dataset_id is None else [cdr_dataset_id])))
+    if not selected_ids:
+        raise HTTPException(status_code=400, detail='Select at least one CDR with a Region mapping to clear.')
+    for dataset_id in selected_ids:
+        row = repository.get_dataset(dataset_id)
+        dataset = serialize_dataset_row(row) if row else None
+        if not dataset or not dataset.get('is_ready') or dataset.get('dataset_kind') not in CDR_DATASET_KINDS or not dataset.get('region_mapping_applied'):
+            raise HTTPException(status_code=400, detail='Region clearing is only available for CDRs with a tool-applied Region mapping.')
+        try:
+            options = json.loads(str(dataset.get('processing_options_json') or '{}'))
+        except (TypeError, json.JSONDecodeError):
+            options = {}
+        enqueue_dataset_processing(background_tasks, dataset_id, Path(str(dataset['stored_path'])), user.username,
+            options.get('vodafone_mapping_dataset_id'), options.get('three_mapping_dataset_id'), None)
+    repository.add_log(user.username, 'queue_region_clearing', json.dumps({'dataset_ids': selected_ids}))
+    return RedirectResponse(f'/workspace?dataset_id={selected_ids[0]}', status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post('/workspace/clear-vendors/{dataset_id}')

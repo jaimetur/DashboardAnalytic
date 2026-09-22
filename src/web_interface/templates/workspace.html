@@ -138,14 +138,14 @@
     </summary>
     <div class="upload-panel-content">
       <p class="lede">Bring the source files that feed every product workflow into one managed workspace: NetCheck CDR workbooks (Data, Voice and Speech), Smart Orchestrator Logs, and Vodafone UK (VFUK) or Three UK (3UK) Multivendor Mappings. Workspace proposes a type from each filename, lets you confirm it per file and, for CDRs, can apply an existing mapping or one uploaded in the same batch. Batch mappings are processed before their selected CDRs.</p>
-      <form class="upload-dropzone" action="/datasets-analysis/upload" method="post" enctype="multipart/form-data" data-background-upload data-workspace-id="{{ active_workspace.id }}" data-workspace-name="{{ active_workspace.name }}" data-upload-type-form data-vodafone-mapping-options='{{ vodafone_mapping_datasets | default([]) | tojson }}' data-three-mapping-options='{{ three_mapping_datasets | default([]) | tojson }}'>
+      <form class="upload-dropzone" action="/datasets-analysis/upload" method="post" enctype="multipart/form-data" data-background-upload data-workspace-id="{{ active_workspace.id }}" data-workspace-name="{{ active_workspace.name }}" data-upload-type-form data-vodafone-mapping-options='{{ vodafone_mapping_datasets | default([]) | tojson }}' data-three-mapping-options='{{ three_mapping_datasets | default([]) | tojson }}' data-region-mapping-options='{{ region_mapping_datasets | default([]) | tojson }}'>
       <label class="dropzone-field" data-upload-dropzone>
         <span class="dropzone-title">Drop workbooks or browse</span>
-        <span class="dropzone-copy">Accepted: CSV, XLS, XLSX, XLSM</span>
+        <span class="dropzone-copy">Accepted: CSV, XLS, XLSX, XLSM, GeoJSON, JSON, ZIP (shapefile)</span>
         <span class="file-picker-shell">
           <span class="file-picker-button">Select files</span>
           <span class="file-picker-text" data-file-picker-text>No files selected</span>
-          <input type="file" name="dataset_files" accept=".csv,.xlsx,.xls,.xlsm" multiple required data-file-picker-input>
+          <input type="file" name="dataset_files" accept=".csv,.xlsx,.xls,.xlsm,.geojson,.json,.zip" multiple required data-file-picker-input>
         </span>
       </label>
       <section class="upload-type-list" data-upload-type-list hidden aria-live="polite">
@@ -180,6 +180,7 @@
             ('voice', 'CDR-Voice'),
             ('mapping_three', 'Multivendor Mapping — Three UK (3UK)'),
             ('mapping_vodafone', 'Multivendor Mapping — Vodafone UK (VFUK)'),
+            ('mapping_region', 'Region Mapping — Geospatial'),
             ('generic', 'Other supported dataset'),
             ('smart_orchestrator_logs', 'Smart Orchestrator Logs')
           ] %}
@@ -190,8 +191,8 @@
       </label>
       {% set stoppable_datasets = (datasets | selectattr('status', 'equalto', 'queued') | list) + (datasets | selectattr('status', 'equalto', 'processing') | list) %}
       <div class="queue-bulk-actions" role="group" aria-label="Bulk dataset actions">
-        <button type="button" class="queue-map-all" data-vendor-map-all-open title="Assign Vendor Mapping to all eligible CDR datasets" aria-label="Assign Vendor Mapping to all eligible CDR datasets"{% if not mappable_cdr_datasets %} disabled{% endif %}>Map All</button>
-        <button type="button" class="queue-clear-all" data-vendor-clear-all-open title="Clear Vendor Mapping from all mapped CDR datasets" aria-label="Clear Vendor Mapping from all mapped CDR datasets"{% if not clearable_cdr_datasets %} disabled{% endif %}>Clear All</button>
+        <button type="button" class="queue-map-all" data-mapping-map-all-open title="Map Vendor & Region" aria-label="Map Vendor & Region"{% if not mappable_cdr_datasets %} disabled{% endif %}>Map Vendor & Region</button>
+        <button type="button" class="queue-clear-all" data-mapping-clear-all-open title="Clear Vendor & Region Mapping" aria-label="Clear Vendor & Region Mapping"{% if not clearable_cdr_datasets %} disabled{% endif %}>Clear Vendor & Region Mapping</button>
         <button type="button" class="queue-reprocess-all" data-reprocess-all-open title="Reprocess all available datasets from their original source files" aria-label="Reprocess all available datasets from their original source files"{% if not datasets | selectattr('can_reprocess') | list %} disabled{% endif %}>Reprocess All</button>
         <form method="post" action="/workspace/stop-datasets" data-confirm="Stop every dataset that is currently queued or processing?" data-confirm-title="Stop all queued and processing datasets" data-confirm-label="Stop All">
           <button type="submit" class="queue-stop-all" title="Stop all queued and processing datasets" aria-label="Stop all queued and processing datasets"{% if not stoppable_datasets %} disabled{% endif %}>Stop All</button>
@@ -270,21 +271,21 @@
                 {% else %}
                 <button type="button" class="ghost-link action-link-primary" disabled title="Analysis is only available for ready CDR datasets" aria-label="Analysis unavailable">Show Analysis</button>
                 {% endif %}
-                {% if dataset.can_map_vendors %}
+                {% if dataset.can_map_mappings %}
                 <button
                   type="button"
                   class="ghost-link action-link-map-vendors"
-                  data-vendor-map-open
+                  data-mapping-map-open
                   data-dataset-id="{{ dataset.id }}"
                   data-dataset-name="{{ dataset.file_name }}"
-                >Map Vendors</button>
+                title="Map Vendor & Region">Map</button>
                 {% else %}
-                <button type="button" class="ghost-link action-link-map-vendors" disabled title="Vendor mapping is not available for this dataset" aria-label="Map vendors unavailable">Map Vendors</button>
+                <button type="button" class="ghost-link action-link-map-vendors" disabled title="Map Vendor & Region is not available for this dataset">Map</button>
                 {% endif %}
-                {% if dataset.can_clear_vendors %}
-                <button type="button" class="action-link-clear-vendors" data-vendor-clear-open data-dataset-id="{{ dataset.id }}" title="Clear vendor mapping" aria-label="Clear vendor mapping">Clear Vendors</button>
+                {% if dataset.can_clear_mappings %}
+                <button type="button" class="action-link-clear-vendors" data-mapping-clear-open data-dataset-id="{{ dataset.id }}" title="Clear Vendor & Region Mapping">Clear</button>
                 {% else %}
-                <button type="button" class="action-link-clear-vendors" disabled title="No tool-applied vendor mapping is available to clear" aria-label="Clear vendor mapping unavailable">Clear Vendors</button>
+                <button type="button" class="action-link-clear-vendors" disabled title="No Vendor & Region Mapping is available">Clear</button>
                 {% endif %}
                 {% if dataset.status == 'processing' %}
                 <form method="post" action="/datasets-analysis/stop/{{ dataset.id }}" data-confirm="Stop processing for '{{ dataset.file_name }}'?" data-confirm-title="Stop processing" data-confirm-label="Stop processing">
@@ -486,11 +487,11 @@
   <dialog class="vendor-mapping-dialog" data-vendor-mapping-dialog aria-labelledby="vendor-mapping-title">
     <form
       method="post"
-      action="/workspace/map-vendors"
+      action="/workspace/map-mappings"
     >
       <p class="eyebrow">NetCheck CDR</p>
-      <h3 id="vendor-mapping-title">Map Vendors</h3>
-      <p class="lede">Choose one or more processed CDRs and the Multivendor Mappings to queue Vendor assignment in the background. You can continue working while each selected CDR progresses through the Workspace queue.</p>
+      <h3 id="vendor-mapping-title">Map CDR fields</h3>
+      <p class="lede">Choose one or more processed CDRs and the Vendor and/or Region Mappings to apply in the background.</p>
       <fieldset class="vendor-mapping-cdr-list">
         <legend>CDRs to map</legend>
         {% for dataset in mappable_cdr_datasets %}
@@ -535,19 +536,27 @@
         {% else %}
         <p class="form-note">No processed 3UK Multivendor Mapping is currently available.</p>
         {% endif %}
+        {% if region_mapping_datasets %}
+        <label>Region Mapping
+          <select name="region_mapping_dataset_id">
+            <option value="">No Region mapping</option>
+            {% for mapping in region_mapping_datasets %}<option value="{{ mapping.id }}"{% if loop.first %} selected{% endif %}>{{ mapping.file_name }}</option>{% endfor %}
+          </select>
+        </label>
+        {% endif %}
       </div>
       <div class="vendor-mapping-actions">
         <button type="button" class="ghost-link" data-vendor-map-cancel>Cancel</button>
-        <button type="submit" class="action-link-map-vendors">Map Vendors</button>
+        <button type="submit" class="action-link-map-vendors">Map</button>
       </div>
     </form>
   </dialog>
 
   <dialog class="vendor-mapping-dialog" data-vendor-clearing-dialog aria-labelledby="vendor-clearing-title">
-    <form method="post" action="/workspace/clear-vendors">
+    <form method="post" action="/workspace/clear-mappings">
       <p class="eyebrow">NetCheck CDR</p>
-      <h3 id="vendor-clearing-title">Clear Vendors</h3>
-      <p class="lede">Choose one or more mapped CDRs. Clearing is queued in the background and restores each selected CDR to its processed source data without the tool-applied Vendor fields.</p>
+      <h3 id="vendor-clearing-title">Clear Mappings</h3>
+      <p class="lede">Choose one or more mapped CDRs. Clearing restores each selected CDR to its processed source data without tool-applied Vendor or Region values.</p>
       <fieldset class="vendor-mapping-cdr-list">
         <legend>CDRs to clear</legend>
         {% for dataset in clearable_cdr_datasets %}
@@ -559,10 +568,11 @@
       </fieldset>
       <div class="vendor-mapping-actions">
         <button type="button" class="ghost-link" data-vendor-clear-cancel>Cancel</button>
-        <button type="submit" class="action-link-clear-vendors">Clear Vendors</button>
+        <button type="submit" class="action-link-clear-vendors">Clear</button>
       </div>
     </form>
   </dialog>
+
 
   {% endif %}
 </section>
@@ -621,6 +631,7 @@
     ['smart_orchestrator_logs', 'Smart Orchestrator Logs'],
     ['mapping_vodafone', 'Multivendor Mapping — Vodafone UK (VFUK)'],
     ['mapping_three', 'Multivendor Mapping — Three UK (3UK)'],
+    ['mapping_region', 'Region Mapping — Geospatial'],
     ['generic', 'Other supported dataset'],
   ];
   const cdrTypes = new Set(['data', 'voice', 'speech']);
@@ -629,12 +640,14 @@
   };
   const vodafoneMappings = parseMappingOptions('vodafoneMappingOptions');
   const threeMappings = parseMappingOptions('threeMappingOptions');
+  const regionMappings = parseMappingOptions('regionMappingOptions');
   let uploadInProgress = false;
 
   function inferType(fileName) {
     const normalized = String(fileName || '').toLowerCase().replace(/[_-]+/g, ' ');
     if (normalized.includes('vfuk') || normalized.includes('vodafone uk') || normalized.includes('vodafone')) return 'mapping_vodafone';
     if (normalized.includes('3uk') || normalized.includes('three uk') || normalized.includes('three')) return 'mapping_three';
+    if (normalized.includes('region') || normalized.includes('vendor split') || normalized.endsWith('.geojson') || normalized.endsWith('.json')) return 'mapping_region';
     if (normalized.includes('smart orchestrator') || (normalized.includes('smart') && normalized.includes('log')) || normalized.includes('orchestrator log')) return 'smart_orchestrator_logs';
     if (normalized.includes('speech')) return 'speech';
     if (normalized.includes('voice')) return 'voice';
@@ -658,7 +671,7 @@
           value: `upload:${candidate.index}`,
           label: candidate.file.name,
         }));
-      const processedMappings = (kind === 'mapping_vodafone' ? vodafoneMappings : threeMappings)
+      const processedMappings = (kind === 'mapping_vodafone' ? vodafoneMappings : kind === 'mapping_three' ? threeMappings : regionMappings)
         .map((mapping) => ({
           value: String(mapping.id),
           label: `${mapping.file_name} · ${mapping.row_count || 0} rows`,
@@ -671,7 +684,7 @@
         for (const [kind, field, mappingSelect] of entry.mappingSelectors) {
           const previous = mappingSelect.value;
           const choices = mappingChoices(kind, entry);
-          mappingSelect.replaceChildren(new Option('No Map Vendor Column', ''));
+          mappingSelect.replaceChildren(new Option(kind === 'mapping_region' ? 'No Region mapping' : 'No Map Vendor Column', ''));
           choices.forEach((choice) => mappingSelect.add(new Option(choice.label, choice.value)));
           mappingSelect.value = choices.some((choice) => choice.value === previous)
             ? previous : choices[0]?.value || '';
@@ -711,6 +724,7 @@
       };
       addMappingSelector('mapping_vodafone', 'VFUK mapping', 'vodafone_mapping_dataset_ids');
       addMappingSelector('mapping_three', '3UK mapping', 'three_mapping_dataset_ids');
+      addMappingSelector('mapping_region', 'Region mapping', 'region_mapping_dataset_ids');
       select.addEventListener('change', refreshMappingChoices);
       item.append(name, select, mappings);
       items.append(item);
@@ -884,15 +898,15 @@
 <script>
 (() => {
   const dialog = document.querySelector('[data-vendor-mapping-dialog]');
-  const mappingForm = dialog?.querySelector('form[action="/workspace/map-vendors"]');
+  const mappingForm = dialog?.querySelector('form[action="/workspace/map-mappings"]');
   const cdrChoices = dialog?.querySelectorAll('[data-vendor-mapping-cdr-choice]');
   if (!dialog || !cdrChoices?.length) return;
 
   document.addEventListener('click', (event) => {
-    const button = event.target.closest?.('[data-vendor-map-open],[data-vendor-map-all-open]');
+    const button = event.target.closest?.('[data-mapping-map-open],[data-mapping-map-all-open]');
     if (!button) return;
     const selectedId = button.dataset.datasetId || '';
-    cdrChoices.forEach((choice) => { choice.checked = button.hasAttribute('data-vendor-map-all-open') || choice.value === selectedId; });
+    cdrChoices.forEach((choice) => { choice.checked = button.hasAttribute('data-mapping-map-all-open') || choice.value === selectedId; });
     dialog.showModal();
   });
   dialog.querySelector('[data-vendor-map-cancel]')?.addEventListener('click', (event) => {
@@ -916,15 +930,15 @@
 <script>
 (() => {
   const dialog = document.querySelector('[data-vendor-clearing-dialog]');
-  const clearForm = dialog?.querySelector('form[action="/workspace/clear-vendors"]');
+  const clearForm = dialog?.querySelector('form[action="/workspace/clear-mappings"]');
   const cdrChoices = dialog?.querySelectorAll('[data-vendor-clearing-cdr-choice]');
   if (!dialog || !cdrChoices?.length) return;
 
   document.addEventListener('click', (event) => {
-    const button = event.target.closest?.('[data-vendor-clear-open],[data-vendor-clear-all-open]');
+    const button = event.target.closest?.('[data-mapping-clear-open],[data-mapping-clear-all-open]');
     if (!button) return;
     const selectedId = button.dataset.datasetId || '';
-    cdrChoices.forEach((choice) => { choice.checked = button.hasAttribute('data-vendor-clear-all-open') || choice.value === selectedId; });
+    cdrChoices.forEach((choice) => { choice.checked = button.hasAttribute('data-mapping-clear-all-open') || choice.value === selectedId; });
     dialog.showModal();
   });
   dialog.querySelector('[data-vendor-clear-cancel]')?.addEventListener('click', (event) => {

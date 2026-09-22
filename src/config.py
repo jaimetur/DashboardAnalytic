@@ -63,7 +63,7 @@ class Settings:
     secret_key: str = os.getenv("APP_SECRET_KEY", "change-me-dashoboard-analytic")
     template_dir: Path = project_path("APP_TEMPLATE_DIR", "src/web_interface/templates")
     static_dir: Path = project_path("APP_STATIC_DIR", "src/web_interface/static")
-    allowed_extensions: tuple[str, ...] = (".csv", ".xlsx", ".xls", ".xlsm")
+    allowed_extensions: tuple[str, ...] = (".csv", ".xlsx", ".xls", ".xlsm", ".geojson", ".json", ".zip")
 
     # These three roots are the only storage-path settings. All application
     # databases, templates and workspace directories derive from them.

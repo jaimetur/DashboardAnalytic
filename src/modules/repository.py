@@ -151,6 +151,8 @@ CREATE TABLE IF NOT EXISTS dataset_profiles (
     normalization_version INTEGER NOT NULL DEFAULT 1,
     vendor_mapping_applied INTEGER NOT NULL DEFAULT 0,
     vendor_values_complete INTEGER NOT NULL DEFAULT 0,
+    region_mapping_applied INTEGER NOT NULL DEFAULT 0,
+    region_mapping_dataset_id INTEGER,
     dataset_kind TEXT,
     row_count INTEGER,
     column_count INTEGER,
@@ -713,6 +715,10 @@ class Repository:
             conn.execute("ALTER TABLE dataset_profiles ADD COLUMN vendor_mapping_applied INTEGER NOT NULL DEFAULT 0")
         if 'vendor_values_complete' not in existing_columns:
             conn.execute("ALTER TABLE dataset_profiles ADD COLUMN vendor_values_complete INTEGER NOT NULL DEFAULT 0")
+        if 'region_mapping_applied' not in existing_columns:
+            conn.execute("ALTER TABLE dataset_profiles ADD COLUMN region_mapping_applied INTEGER NOT NULL DEFAULT 0")
+        if 'region_mapping_dataset_id' not in existing_columns:
+            conn.execute("ALTER TABLE dataset_profiles ADD COLUMN region_mapping_dataset_id INTEGER")
         if 'processing_started_at' not in existing_columns:
             conn.execute("ALTER TABLE dataset_profiles ADD COLUMN processing_started_at TEXT")
         if 'processing_queued_at' not in existing_columns:
@@ -2724,7 +2730,7 @@ class Repository:
             return conn.execute(
                 """
                 SELECT d.id, d.file_name, d.stored_path, d.uploaded_by, d.uploaded_at,
-                       p.status, p.progress, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.dataset_kind, p.row_count, p.column_count,
+                       p.status, p.progress, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.region_mapping_applied, p.region_mapping_dataset_id, p.dataset_kind, p.row_count, p.column_count,
                        p.default_metric, p.default_aggregation, p.available_metrics_json,
                        p.available_aggregations_json, p.filter_options_json, p.summary_json,
                        p.kpis_json, p.last_error, p.processing_started_at, p.processed_at,
@@ -2742,7 +2748,7 @@ class Repository:
                 conn.execute(
                     """
                     SELECT d.id, d.file_name, d.stored_path, d.uploaded_by, d.uploaded_at,
-                           p.status, p.progress, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.dataset_kind, p.row_count, p.column_count,
+                           p.status, p.progress, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.region_mapping_applied, p.region_mapping_dataset_id, p.dataset_kind, p.row_count, p.column_count,
                            p.default_metric, p.default_aggregation, p.available_metrics_json,
                            p.available_aggregations_json, p.filter_options_json, p.summary_json,
                            p.kpis_json, p.last_error, p.processing_started_at, p.processed_at,

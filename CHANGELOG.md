@@ -8,6 +8,7 @@
 #### ⚠️ Breaking Changes:
 
 #### 🌟 New Features:
+- Added workspace-scoped Geospatial Region Mappings. GeoJSON and zipped shapefiles can be selected during CDR import (the newest mapping is preselected), populate blank `Region` values from Data, Voice or Speech coordinates, and can be assigned or cleared per CDR or in bulk from the Dataset queue.
 
 #### 🚀 Enhancements:
 
