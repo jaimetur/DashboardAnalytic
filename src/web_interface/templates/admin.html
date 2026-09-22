@@ -707,7 +707,6 @@
       <button type="button" class="queue-map-all" data-admin-vendor-map-all-open title="Assign Vendor Mapping to all eligible CDR datasets" aria-label="Assign Vendor Mapping to all eligible CDR datasets"{% if not mappable_admin_datasets %} disabled{% endif %}>Map All</button>
       <button type="button" class="queue-clear-all" data-admin-vendor-clear-all-open title="Clear Vendor Mapping from all mapped CDR datasets" aria-label="Clear Vendor Mapping from all mapped CDR datasets"{% if not clearable_admin_datasets %} disabled{% endif %}>Clear All</button>
       <button type="button" class="queue-reprocess-all" data-admin-reprocess-all-open title="Reprocess all available datasets from their original source files" aria-label="Reprocess all available datasets from their original source files"{% if not reprocessable_admin_datasets %} disabled{% endif %}>Reprocess All</button>
-      <button type="button" class="queue-reprocess-all" data-admin-dataset-apply-changes title="Apply staged dataset names and order in the background" aria-label="Apply staged dataset names and order" disabled>Apply Changes</button>
       <form method="post" action="/workspace/stop-datasets" data-confirm="Stop every dataset that is currently queued or processing?" data-confirm-title="Stop all queued and processing datasets" data-confirm-label="Stop All">
         <input type="hidden" name="return_to" value="admin">
         <button type="submit" class="queue-stop-all" title="Stop all queued and processing datasets" aria-label="Stop all queued and processing datasets"{% if not stoppable_admin_datasets %} disabled{% endif %}>Stop All</button>
@@ -716,6 +715,13 @@
         <input type="hidden" name="return_to" value="admin">
         <button type="submit" class="queue-remove-all" title="Remove all datasets" aria-label="Remove all datasets"{% if not datasets or datasets | selectattr('status', 'equalto', 'processing') | list %} disabled{% endif %}>Remove All</button>
       </form>
+    </div>
+    <div class="admin-dataset-draft-toolbar" data-admin-dataset-draft-toolbar>
+      <div class="admin-dataset-draft-summary">
+        <strong>Dataset changes</strong>
+        <span data-admin-dataset-draft-status>No changes pending</span>
+      </div>
+      <button type="button" class="admin-dataset-apply-changes" data-admin-dataset-apply-changes title="Apply staged dataset names and order in the background" aria-label="Apply staged dataset names and order" disabled>Apply Changes</button>
     </div>
     <div class="table-wrap">
       <table class="admin-datasets-table" data-admin-dataset-reordering-blocked="{{ '1' if dataset_reordering_blocked else '0' }}">

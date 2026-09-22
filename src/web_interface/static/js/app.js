@@ -7111,6 +7111,7 @@ function setupAdminDatasetChangeDraft() {
   const table = document.querySelector('.admin-datasets-table');
   const body = table?.querySelector('[data-admin-dataset-draft-body]');
   const apply = document.querySelector('[data-admin-dataset-apply-changes]');
+  const draftStatus = document.querySelector('[data-admin-dataset-draft-status]');
   if (!(table instanceof HTMLTableElement) || !(body instanceof HTMLTableSectionElement) || !(apply instanceof HTMLButtonElement)) return;
 
   const originalOrder = Array.from(body.querySelectorAll('tr[data-admin-dataset-id]'), (row) => String(row.dataset.adminDatasetId));
@@ -7130,8 +7131,16 @@ function setupAdminDatasetChangeDraft() {
   };
   const sync = () => {
     const current = draft();
-    const changed = current.order.some((id, index) => id !== originalOrder[index]) || Object.keys(current.names).length > 0;
+    const orderChanged = current.order.some((id, index) => id !== originalOrder[index]);
+    const renamedCount = Object.keys(current.names).length;
+    const changed = orderChanged || renamedCount > 0;
     apply.disabled = submitting || !changed;
+    if (draftStatus instanceof HTMLElement) {
+      const details = [];
+      if (renamedCount > 0) details.push(`${renamedCount} name change${renamedCount === 1 ? '' : 's'}`);
+      if (orderChanged) details.push('row order changed');
+      draftStatus.textContent = submitting ? 'Changes are being queued…' : (details.join(' · ') || 'No changes pending');
+    }
     rows().forEach((row, index, collection) => {
       row.querySelectorAll('[data-admin-dataset-move]').forEach((button) => {
         if (!(button instanceof HTMLButtonElement)) return;
@@ -7168,6 +7177,7 @@ function setupAdminDatasetChangeDraft() {
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.detail || 'The dataset changes could not be queued.');
       apply.textContent = 'Changes queued';
+      if (draftStatus instanceof HTMLElement) draftStatus.textContent = 'Changes are running in the background';
       showInfoDialog('Dataset changes are being applied in the background. You can follow progress or stop the task from the floating task panel.', {
         title: 'Dataset changes queued', tone: 'success',
       });
