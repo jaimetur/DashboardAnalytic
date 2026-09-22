@@ -466,7 +466,7 @@ def install_dashboard_routes(core):
         paragraph.text = dashboard_ppt_scope_label(scope)
         paragraph.font.size = Pt(14)
         paragraph.font.bold = True
-        paragraph.font.color.rgb = RGBColor(36, 90, 150)
+        paragraph.font.color.rgb = RGBColor(255, 255, 255)
 
     def add_dashboard_chart_picture(slide, png: bytes, placement) -> None:
         """Fill a same-ratio chart placeholder without PowerPoint cropping or distortion."""
