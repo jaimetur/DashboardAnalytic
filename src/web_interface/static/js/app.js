@@ -4823,6 +4823,27 @@ function setupCustomMultiSelects() {
 
     if (!singleChoice) actionButton.addEventListener('click', selectAllOrNone);
 
+    const presetValues = String(select.dataset.multiselectPresetValues || '')
+      .split('|').map((value) => value.trim()).filter(Boolean);
+    if (!singleChoice && presetValues.length) {
+      const presetButton = document.createElement('button');
+      presetButton.type = 'button';
+      presetButton.className = 'multiselect-action';
+      presetButton.textContent = select.dataset.multiselectPresetLabel || 'Apply preset';
+      presetButton.addEventListener('click', () => {
+        cancelAutoClose();
+        const selectedValues = new Set(presetValues);
+        Array.from(select.options).forEach((option) => {
+          option.selected = !option.disabled && selectedValues.has(option.value);
+        });
+        Array.from(menu.querySelectorAll('input[type="checkbox"][data-option-value]')).forEach((checkbox) => {
+          checkbox.checked = selectedValues.has(checkbox.getAttribute('data-option-value'));
+        });
+        dispatchNativeChange();
+      });
+      menu.appendChild(presetButton);
+    }
+
     const groupedOptions = select.dataset.multiselectGroups === 'true';
     let previousGroup = '';
     Array.from(select.options).forEach((option) => {

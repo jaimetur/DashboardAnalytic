@@ -3177,6 +3177,12 @@ def test_dashboard_library_ppt_export_selects_scope_cdrs_explicitly() -> None:
     assert 'id="ds-ppt-dataset-overlay"' in template
     assert 'id="ds-ppt-dataset-choices"' in template
     assert 'id="ds-ppt-dataset-scope"' in template
+    assert 'id="ds-ppt-region-section"' in template
+    assert 'id="ds-ppt-dataset-region"' in template
+    assert 'aria-label="PowerPoint regions"' in template
+    assert 'id="ds-ppt-city-section"' in template
+    assert 'id="ds-ppt-dataset-city"' in template
+    assert 'data-multiselect-preset-label="7 Main Cities"' in template
     assert '>Select Dashboard Datasets Universe<' in template
     assert 'id="ds-ppt-date-from"' in template
     assert 'id="ds-ppt-date-to"' in template
@@ -3187,6 +3193,10 @@ def test_dashboard_library_ppt_export_selects_scope_cdrs_explicitly() -> None:
     assert "const savedDateFrom = String(dashboard?.date_from || 'Oldest');" in script
     assert "const savedDateTo = String(dashboard?.date_to || 'Newest');" in script
     assert 'const universeChoice = await chooseDashboardPptUniverse(item);' in script
+    assert "['Region', 'City']" in script
+    assert 'const withPptSelection = (dashboard, selectionField, values)' in script
+    assert "withPptSelection(exportDefinition, 'City', selectedCities);" in script
+    assert 'selected_regions: selectedRegions' in script
     assert 'exportDefinition.scope = universeChoice.scope;' in script
     assert 'exportDefinition.datasets = universeChoice.datasets;' in script
     assert 'exportDefinition.date_from = universeChoice.date_from;' in script

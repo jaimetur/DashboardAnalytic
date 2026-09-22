@@ -71,6 +71,7 @@ class DashboardDefinition(BaseModel):
 class DashboardPptExportRequest(BaseModel):
     definition: DashboardDefinition | None = None
     preparation_token: str | None = None
+    selected_regions: list[str] = Field(default_factory=list)
 
 
 class DashboardFilterOptionsRequest(BaseModel):
@@ -280,6 +281,7 @@ def install_dashboard_routes(core):
                 template_name TEXT NOT NULL,
                 nr_mode TEXT NOT NULL DEFAULT 'nsa',
                 scope TEXT NOT NULL DEFAULT 'single',
+                regions_json TEXT NOT NULL DEFAULT '[]',
                 filters_json TEXT NOT NULL DEFAULT '[]',
                 output_file TEXT NOT NULL,
                 output_path TEXT NOT NULL,
@@ -307,6 +309,10 @@ def install_dashboard_routes(core):
             if 'filters_json' not in columns:
                 connection.execute(
                     f"ALTER TABLE {DASHBOARD_PPT_JOBS_TABLE} ADD COLUMN filters_json TEXT NOT NULL DEFAULT '[]'"
+                )
+            if 'regions_json' not in columns:
+                connection.execute(
+                    f"ALTER TABLE {DASHBOARD_PPT_JOBS_TABLE} ADD COLUMN regions_json TEXT NOT NULL DEFAULT '[]'"
                 )
             if 'started_at' not in columns:
                 connection.execute(
@@ -459,7 +465,7 @@ def install_dashboard_routes(core):
     def add_dashboard_ppt_cover_scope(slide, scope: str, slide_height: int) -> None:
         """Add the export scope below the subtitle at the lower-left of a title slide."""
         scope_box = slide.shapes.add_textbox(
-            Inches(0.7), slide_height - Inches(0.72),
+            Inches(0.7), slide_height - Inches(0.62),
             Inches(5.5), Inches(0.3),
         )
         scope_box.name = 'dashboard-ppt-scope'
@@ -469,6 +475,21 @@ def install_dashboard_routes(core):
         paragraph.font.bold = True
         paragraph.font.color.rgb = RGBColor(255, 255, 255)
 
+    def add_dashboard_ppt_cover_region(slide, regions: list[str], slide_height: int) -> None:
+        """Add the selected Regions above the scope on a Dashboard title slide."""
+        if not regions:
+            return
+        region_box = slide.shapes.add_textbox(
+            Inches(0.7), slide_height - Inches(0.94),
+            Inches(5.5), Inches(0.3),
+        )
+        region_box.name = 'dashboard-ppt-region'
+        paragraph = region_box.text_frame.paragraphs[0]
+        paragraph.text = ', '.join(regions)
+        paragraph.font.size = Pt(14)
+        paragraph.font.bold = True
+        paragraph.font.color.rgb = RGBColor(255, 214, 0)
+
     def add_dashboard_chart_picture(slide, png: bytes, placement) -> None:
         """Fill a same-ratio chart placeholder without PowerPoint cropping or distortion."""
         left, top, width, height = placement
@@ -476,7 +497,7 @@ def install_dashboard_routes(core):
 
     def render_dashboard_ppt_job(
         job_id, run_token, task_repository, snapshot, definition, user,
-        destination, dashboard_id, preview_fingerprint,
+        destination, dashboard_id, preview_fingerprint, selected_regions,
     ):
         run_key = (str(Path(task_repository.db_path).resolve()), job_id)
 
@@ -631,6 +652,9 @@ def install_dashboard_routes(core):
                     slide = presentation.slides.add_slide(layout)
                     _set_structural_slide_text(slide, header.slide_title, header.slide_subtitle)
                     if header.structural_type == 'title slide':
+                        add_dashboard_ppt_cover_region(
+                            slide, selected_regions, presentation.slide_height,
+                        )
                         add_dashboard_ppt_cover_scope(slide, snapshot.definition.scope, presentation.slide_height)
                     _set_commentary(slide, comments)
                     continue
@@ -1009,7 +1033,7 @@ def install_dashboard_routes(core):
 
     def queue_dashboard_ppt_export(
         dashboard_id, user, *, reuse_job_id=None, export_definition: DashboardDefinition | None = None,
-        preparation_token: str | None = None,
+        preparation_token: str | None = None, selected_regions: list[str] | None = None,
     ):
         task_repository = bound_repository()
         workspace = workspace_key()
@@ -1029,6 +1053,9 @@ def install_dashboard_routes(core):
             raw_definition.pop('datasets', None)
             raw_definition = runtime_dashboard_definition(raw_definition, task_repository)
         snapshot_definition = DashboardDefinition.model_validate(raw_definition)
+        selected_regions = list(dict.fromkeys(
+            str(region).strip() for region in selected_regions or [] if str(region).strip()
+        ))
         # Inserting the export job must remain quick.  A valid active snapshot
         # is reused when supplied, but cache discovery and preparation for a
         # closed Dashboard belong to the queued worker, never this request.
@@ -1053,7 +1080,8 @@ def install_dashboard_routes(core):
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         safe_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', dashboard_name).strip() or 'Dashboard'
         safe_scope = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', dashboard_ppt_scope_label(raw_definition.get('scope') or 'single'))
-        output_file = f'{timestamp} - {safe_scope} - {safe_name}.pptx'
+        safe_region = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', ', '.join(selected_regions)).strip()
+        output_file = ' - '.join(part for part in (timestamp, safe_region, safe_scope, safe_name) if part) + '.pptx'
         job_dir = Path(task_repository.db_path).parent / 'output' / 'dashboards' / Path(output_file).stem
         destination = job_dir / output_file
         ensure_dashboard_ppt_jobs(task_repository)
@@ -1061,13 +1089,13 @@ def install_dashboard_routes(core):
             with task_repository.connection() as connection:
                 cursor = connection.execute(
                     f'''INSERT INTO {DASHBOARD_PPT_JOBS_TABLE} (
-                        dashboard_id, dashboard_name, template_name, nr_mode, scope, filters_json, output_file, output_path,
+                        dashboard_id, dashboard_name, template_name, nr_mode, scope, regions_json, filters_json, output_file, output_path,
                         created_by, created_at, status, progress
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0)''',
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0)''',
                     (
                         dashboard_id, dashboard_name, str(raw_definition.get('template') or ''),
                         str(raw_definition.get('technology') or raw_definition.get('template_technology') or 'nsa'),
-                        str(raw_definition.get('scope') or 'single'), filters_json,
+                        str(raw_definition.get('scope') or 'single'), json.dumps(selected_regions, ensure_ascii=False), filters_json,
                         output_file, str(destination), user.username,
                         datetime.now(timezone.utc).isoformat(),
                     ),
@@ -1080,7 +1108,7 @@ def install_dashboard_routes(core):
                 task_repository, job_id, dashboard_name=dashboard_name,
                 template_name=str(raw_definition.get('template') or ''),
                 nr_mode=str(raw_definition.get('technology') or raw_definition.get('template_technology') or 'nsa'),
-                scope=str(raw_definition.get('scope') or 'single'), filters_json=filters_json,
+                scope=str(raw_definition.get('scope') or 'single'), regions_json=json.dumps(selected_regions, ensure_ascii=False), filters_json=filters_json,
                 output_file=output_file, output_path=str(destination), created_at=datetime.now(timezone.utc).isoformat(),
                 status='queued', progress=0, slide_count=0, chart_count=0,
                 last_error='', started_at=None, finished_at=None,
@@ -1094,7 +1122,7 @@ def install_dashboard_routes(core):
         core.submit_background_task(
             render_dashboard_ppt_job,
             job_id, run_token, task_repository, snapshot, snapshot_definition, user, destination,
-            dashboard_id, preview_fingerprint,
+            dashboard_id, preview_fingerprint, selected_regions,
         )
         task_repository.add_log(user.username, 'export_dashboard_ppt', json.dumps({
             'dashboard_id': dashboard_id, 'job_id': job_id, 'output': str(destination),
@@ -1110,6 +1138,7 @@ def install_dashboard_routes(core):
             dashboard_id, user,
             export_definition=request.definition if request else None,
             preparation_token=request.preparation_token if request else None,
+            selected_regions=request.selected_regions if request else None,
         )
         return JSONResponse({'job_id': job_id, 'status': 'queued'}, status_code=202)
 
@@ -1476,9 +1505,14 @@ def install_dashboard_routes(core):
             retry_definition = DashboardDefinition.model_validate(
                 runtime_dashboard_definition(raw_definition, task_repository)
             )
+        try:
+            selected_regions = json.loads(str(row['regions_json'] or '[]'))
+        except (TypeError, json.JSONDecodeError):
+            selected_regions = []
         queue_dashboard_ppt_export(
             str(row['dashboard_id']), user, reuse_job_id=job_id,
             export_definition=retry_definition,
+            selected_regions=selected_regions,
         )
         return JSONResponse({'job_id': job_id, 'status': 'queued'}, status_code=202)
 

@@ -521,11 +521,26 @@
     if (needsPreparation) await prepare();
     if (prepared?.slides.length) renderSlide();
   };
+  const withPptSelection = (dashboard, selectionField, values) => {
+    if (!values.length) return dashboard;
+    dashboard.filters ||= {};
+    for (const filterField of Object.keys(dashboard.filters)) {
+      if (identity(filterField) === identity(selectionField)) delete dashboard.filters[filterField];
+    }
+    dashboard.filters[selectionField] = values;
+    return dashboard;
+  };
   const chooseDashboardPptUniverse = dashboard => new Promise(resolve => {
     const scopeControl = $('ds-ppt-dataset-scope');
     scopeControl.value = 'single';
     const choices = $('ds-ppt-dataset-choices'); choices.replaceChildren();
     const confirm = $('ds-ppt-dataset-confirm');
+    const regionSection = $('ds-ppt-region-section');
+    const regionControl = $('ds-ppt-dataset-region');
+    const regionCopy = $('ds-ppt-region-copy');
+    const citySection = $('ds-ppt-city-section');
+    const cityControl = $('ds-ppt-dataset-city');
+    const cityCopy = $('ds-ppt-city-copy');
     const dateFrom = $('ds-ppt-date-from'), dateTo = $('ds-ppt-date-to');
     const automaticFrom = $('ds-ppt-date-from-auto'), automaticTo = $('ds-ppt-date-to-auto');
     const dateStatus = $('ds-ppt-date-status');
@@ -534,19 +549,74 @@
     automaticFrom.checked = savedDateFrom === 'Oldest'; automaticTo.checked = savedDateTo === 'Newest';
     dateFrom.value = /^\d{4}-\d{2}-\d{2}$/.test(savedDateFrom) ? savedDateFrom : '';
     dateTo.value = /^\d{4}-\d{2}-\d{2}$/.test(savedDateTo) ? savedDateTo : '';
+    let geographyLoading = false;
+    let geographyRequest = 0;
+    const selectedDatasets = () => Object.fromEntries(['data', 'voice', 'speech'].map(kind => [kind,
+      [...choices.querySelectorAll(`input[data-kind="${kind}"]:checked`)].map(input => Number(input.value)),
+    ]));
+    const selectedRegions = () => [...regionControl.selectedOptions].map(option => option.value);
+    const selectedCities = () => [...cityControl.selectedOptions].map(option => option.value);
+    const exportUniverse = () => ({
+      ...structuredClone(dashboard), scope: scopeControl.value, datasets: selectedDatasets(),
+      date_from: automaticFrom.checked ? 'Oldest' : dateFrom.value,
+      date_to: automaticTo.checked ? 'Newest' : dateTo.value,
+      // Region availability belongs to the Dataset Universe, independently
+      // from any saved adaptive Dashboard filters.
+      filters: {},
+    });
     const updateConfirmState = () => {
       let dateError = '';
       if (!automaticFrom.checked && !dateFrom.value) dateError = 'Choose a start date or use the oldest available date.';
       else if (!automaticTo.checked && !dateTo.value) dateError = 'Choose an end date or use the newest available date.';
       else if (!automaticFrom.checked && !automaticTo.checked && dateFrom.value > dateTo.value) dateError = 'Date from must not be later than Date to.';
       dateStatus.textContent = dateError;
-      confirm.disabled = !choices.querySelector('input:checked') || Boolean(dateError);
+      confirm.disabled = !choices.querySelector('input:checked') || Boolean(dateError)
+        || geographyLoading || (!regionSection.hidden && !selectedRegions().length)
+        || (!citySection.hidden && !selectedCities().length);
+    };
+    const refreshGeography = async () => {
+      const request = ++geographyRequest;
+      geographyLoading = true;
+      for (const {section, control} of [
+        {section: regionSection, control: regionControl}, {section: citySection, control: cityControl},
+      ]) { section.hidden = true; control.replaceChildren(); control.dispatchEvent(new Event('multiselect:options-updated')); }
+      updateConfirmState();
+      try {
+        const result = await Promise.all(['Region', 'City'].map(async field => {
+          try {
+            return {field, values: (await api('/filter-options', 'POST', {definition: exportUniverse(), field})).values || []};
+          } catch (error) { return {field, error}; }
+        }));
+        if (request !== geographyRequest) return;
+        for (const {field, values: rawValues, error} of result) {
+          if (error) {
+            if (!String(error.message || '').includes(`do not contain the ${field} field`)) dateStatus.textContent = error.message;
+            continue;
+          }
+          const values = rawValues.map(String).map(value => value.trim()).filter(Boolean);
+          if (values.length <= 1) continue;
+          const isRegion = field === 'Region';
+          const section = isRegion ? regionSection : citySection;
+          const control = isRegion ? regionControl : cityControl;
+          const copy = isRegion ? regionCopy : cityCopy;
+          const selected = new Set(values);
+          control.append(...values.map(value => {
+            const entry = option(value, value); entry.selected = selected.has(value); return entry;
+          }));
+          control.dispatchEvent(new Event('multiselect:options-updated'));
+          copy.textContent = `Select one or more ${field === 'Region' ? 'Regions' : 'Cities'} to include in this PowerPoint export.`;
+          section.hidden = false;
+        }
+      } finally {
+        if (request === geographyRequest) { geographyLoading = false; updateConfirmState(); }
+      }
     };
     const syncDateControls = () => {
       dateFrom.disabled = automaticFrom.checked; dateTo.disabled = automaticTo.checked;
       dateFrom.max = automaticTo.checked ? '' : dateTo.value;
       dateTo.min = automaticFrom.checked ? '' : dateFrom.value;
       updateConfirmState();
+      void refreshGeography();
     };
     const renderChoices = () => {
       const scope = scopeControl.value;
@@ -578,17 +648,21 @@
       finished = true; overlay('ds-ppt-dataset-overlay', false); resolve(value);
     };
     $('ds-ppt-dataset-cancel').onclick = () => finish(null);
-    choices.onchange = updateConfirmState;
-    scopeControl.onchange = renderChoices;
-    automaticFrom.onchange = syncDateControls; automaticTo.onchange = syncDateControls;
-    dateFrom.oninput = syncDateControls; dateTo.oninput = syncDateControls;
+    choices.onchange = () => { updateConfirmState(); void refreshGeography(); };
+    scopeControl.onchange = () => { renderChoices(); void refreshGeography(); };
+    regionControl.onchange = updateConfirmState;
+    cityControl.onchange = updateConfirmState;
+    automaticFrom.onchange = syncDateControls;
+    automaticTo.onchange = syncDateControls;
+    dateFrom.oninput = syncDateControls;
+    dateTo.oninput = syncDateControls;
     confirm.onclick = () => finish({
       scope: scopeControl.value,
-      datasets: Object.fromEntries(['data', 'voice', 'speech'].map(kind => [kind,
-        [...choices.querySelectorAll(`input[data-kind="${kind}"]:checked`)].map(input => Number(input.value)),
-      ])),
+      datasets: selectedDatasets(),
       date_from: automaticFrom.checked ? 'Oldest' : dateFrom.value,
       date_to: automaticTo.checked ? 'Newest' : dateTo.value,
+      regions: selectedRegions(),
+      cities: selectedCities(),
     });
     renderChoices();
     syncDateControls();
@@ -599,6 +673,8 @@
     let exportDefinition = item;
     let preparationToken = null;
     let filterDecision = 'unchanged';
+    let selectedRegions = [];
+    let selectedCities = [];
     if (chooseScope) {
       const universeChoice = await chooseDashboardPptUniverse(item);
       if (!universeChoice) return;
@@ -610,6 +686,10 @@
       exportDefinition.datasets = universeChoice.datasets;
       exportDefinition.date_from = universeChoice.date_from;
       exportDefinition.date_to = universeChoice.date_to;
+      selectedRegions = universeChoice.regions;
+      selectedCities = universeChoice.cities;
+      withPptSelection(exportDefinition, 'Region', selectedRegions);
+      withPptSelection(exportDefinition, 'City', selectedCities);
     } else {
       filterDecision = id === activeId ? await resolveUnappliedFilterChanges() : 'unchanged';
       if (!filterDecision) return;
@@ -650,6 +730,7 @@
     await api(`/${encodeURIComponent(id)}/export-ppt`, 'POST', {
       definition: exportDefinition,
       preparation_token: preparationToken,
+      selected_regions: selectedRegions,
     });
     status(`Dashboard PPT export queued for “${exportDefinition.name}”.`);
     await refreshDashboardPptJobs();
