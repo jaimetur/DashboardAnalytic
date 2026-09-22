@@ -707,6 +707,7 @@
       <button type="button" class="queue-map-all" data-admin-vendor-map-all-open title="Assign Vendor Mapping to all eligible CDR datasets" aria-label="Assign Vendor Mapping to all eligible CDR datasets"{% if not mappable_admin_datasets %} disabled{% endif %}>Map All</button>
       <button type="button" class="queue-clear-all" data-admin-vendor-clear-all-open title="Clear Vendor Mapping from all mapped CDR datasets" aria-label="Clear Vendor Mapping from all mapped CDR datasets"{% if not clearable_admin_datasets %} disabled{% endif %}>Clear All</button>
       <button type="button" class="queue-reprocess-all" data-admin-reprocess-all-open title="Reprocess all available datasets from their original source files" aria-label="Reprocess all available datasets from their original source files"{% if not reprocessable_admin_datasets %} disabled{% endif %}>Reprocess All</button>
+      <button type="button" class="queue-reprocess-all" data-admin-dataset-apply-changes title="Apply staged dataset names and order in the background" aria-label="Apply staged dataset names and order" disabled>Apply Changes</button>
       <form method="post" action="/workspace/stop-datasets" data-confirm="Stop every dataset that is currently queued or processing?" data-confirm-title="Stop all queued and processing datasets" data-confirm-label="Stop All">
         <input type="hidden" name="return_to" value="admin">
         <button type="submit" class="queue-stop-all" title="Stop all queued and processing datasets" aria-label="Stop all queued and processing datasets"{% if not stoppable_admin_datasets %} disabled{% endif %}>Stop All</button>
@@ -717,32 +718,23 @@
       </form>
     </div>
     <div class="table-wrap">
-      <table class="admin-datasets-table">
+      <table class="admin-datasets-table" data-admin-dataset-reordering-blocked="{{ '1' if dataset_reordering_blocked else '0' }}">
         <colgroup>
           <col data-admin-dataset-order-column><col><col data-admin-dataset-name-column><col data-admin-dataset-path-column><col><col><col><col>
         </colgroup>
         <thead><tr><th>Order</th><th>ID</th><th>Name</th><th>Path</th><th>User</th><th>Uploaded</th><th>Updated</th><th>Actions</th></tr></thead>
-        <tbody>
+        <tbody data-admin-dataset-draft-body>
           {% for row in datasets %}
-          <tr>
+          <tr data-admin-dataset-id="{{ row.id }}">
             <td data-label="Order">
               <div class="admin-dataset-order-actions">
-                <form method="post" action="/admin/datasets/{{ row.id }}/move" data-admin-dataset-move-form data-loading-label="Reordering datasets" data-loading-copy="Please wait while dataset IDs and all stored references are updated.">
-                  <input type="hidden" name="direction" value="up">
-                  <button type="submit" class="admin-dataset-move admin-dataset-move-up icon-action" aria-label="Move dataset up" title="Move dataset up and renumber dataset IDs"{% if loop.first or dataset_reordering_blocked %} disabled{% endif %}>Move Up</button>
-                </form>
-                <form method="post" action="/admin/datasets/{{ row.id }}/move" data-admin-dataset-move-form data-loading-label="Reordering datasets" data-loading-copy="Please wait while dataset IDs and all stored references are updated.">
-                  <input type="hidden" name="direction" value="down">
-                  <button type="submit" class="admin-dataset-move admin-dataset-move-down icon-action" aria-label="Move dataset down" title="Move dataset down and renumber dataset IDs"{% if loop.last or dataset_reordering_blocked %} disabled{% endif %}>Move Down</button>
-                </form>
+                <button type="button" class="admin-dataset-move admin-dataset-move-up icon-action" data-admin-dataset-move="up" aria-label="Move dataset up" title="Stage dataset move up"{% if loop.first or dataset_reordering_blocked %} disabled{% endif %}>Move Up</button>
+                <button type="button" class="admin-dataset-move admin-dataset-move-down icon-action" data-admin-dataset-move="down" aria-label="Move dataset down" title="Stage dataset move down"{% if loop.last or dataset_reordering_blocked %} disabled{% endif %}>Move Down</button>
               </div>
             </td>
             <td data-label="ID">{{ row.id }}</td>
             <td data-label="Name">
-              <form id="dataset-rename-{{ row.id }}" action="/admin/datasets/{{ row.id }}/rename" method="post" class="admin-dataset-rename-form" data-admin-dataset-rename-form data-loading-label="Renaming dataset" data-loading-copy="Please wait while the dataset file, path and materialised references are updated.">
-                <input class="table-input" type="text" name="file_name" value="{{ row.file_name }}" size="{{ row.file_name | length }}" required data-admin-dataset-name-input {% if row.status in ['queued', 'processing'] %}disabled title="A dataset cannot be renamed while it is queued or processing."{% endif %}>
-                <button type="submit" class="admin-dataset-rename-save" data-admin-dataset-rename-save aria-label="Save dataset name" title="Save dataset name" hidden>✓</button>
-              </form>
+              <input class="table-input" type="text" name="file_name" value="{{ row.file_name }}" size="{{ row.file_name | length }}" required data-admin-dataset-name-input data-admin-dataset-original-name="{{ row.file_name }}" {% if row.status in ['queued', 'processing'] %}disabled title="A dataset cannot be renamed while it is queued or processing."{% endif %}>
             </td>
             <td data-label="Path">{{ row.stored_path }}</td>
             <td data-label="User">{{ row.uploaded_by }}</td>

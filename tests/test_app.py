@@ -2378,11 +2378,11 @@ def test_admin_dataset_rows_can_be_reordered_in_descending_order_and_all_ids_are
     assert json.loads(job['dataset_ids_json']) == {'data': [2, 3]}
     assert int(sequence['seq']) == 3
     admin_page = client.get('/admin')
-    dataset_table = admin_page.text.split('<table class="admin-datasets-table">', 1)[1].split('</table>', 1)[0]
+    dataset_table = admin_page.text.split('<table class="admin-datasets-table"', 1)[1].split('</table>', 1)[0]
     assert dataset_table.index('data-label="ID">3<') < dataset_table.index('data-label="ID">2<') < dataset_table.index('data-label="ID">1<')
-    assert dataset_table.count('data-loading-label="Reordering datasets"') == 6
-    assert dataset_table.count('data-admin-dataset-move-form') == 6
-    assert 'data-loading-copy="Please wait while dataset IDs and all stored references are updated."' in dataset_table
+    assert dataset_table.count('data-admin-dataset-move=') == 6
+    assert 'data-admin-dataset-apply-changes' in admin_page.text
+    assert 'data-admin-dataset-draft-body' in dataset_table
     individual_tables = admin_page.text.split('<optgroup label="Individual Datasets">', 1)[1].split('</optgroup>', 1)[0]
     assert individual_tables.index('value="dataset_rows_3"') < individual_tables.index('value="dataset_rows_2"') < individual_tables.index('value="dataset_rows_1"')
     assert 'Individual dataset rows' not in admin_page.text
@@ -4617,10 +4617,8 @@ def test_admin_dataset_management_renames_dataset_file_and_materialised_source_l
     assert '<th>Uploaded</th>' in admin.text
     assert '<th>Updated</th>' in admin.text
     assert admin.text.index('<th>Uploaded</th>') < admin.text.index('<th>Updated</th>')
-    assert 'dataset-rename-1' in admin.text
-    assert 'data-admin-dataset-rename-save' in admin.text
-    assert 'data-loading-label="Renaming dataset"' in admin.text
-    assert 'data-loading-copy="Please wait while the dataset file, path and materialised references are updated."' in admin.text
+    assert 'data-admin-dataset-original-name="renamed-cdr.csv"' in admin.text
+    assert 'data-admin-dataset-apply-changes' in admin.text
     assert 'Save name' not in admin.text
     assert 'Show Analysis' in admin.text
     assert 'Preview' in admin.text
@@ -4649,6 +4647,38 @@ def test_admin_dataset_management_rename_returns_compact_json_for_interactive_ta
     assert renamed.json()['file_name'] == 'renamed-cdr.csv'
     assert Path(renamed.json()['stored_path']).name == 'renamed-cdr.csv'
     assert app_module.repository.get_dataset(1)['file_name'] == 'renamed-cdr.csv'
+
+
+def test_admin_dataset_management_applies_staged_names_and_order_in_background(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    for name in ('first.csv', 'second.csv'):
+        response = client.post(
+            '/datasets-analysis/upload', data={'dataset_kinds': 'data'},
+            files={'dataset_files': (name, BytesIO(b'market,score\nES,91\n'), 'text/csv')},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+    queued = client.post('/admin/datasets/apply-changes', json={
+        'order': [1, 2],
+        'names': {'1': 'renamed-first.csv'},
+    })
+    assert queued.status_code == 202, queued.text
+    job_id = queued.json()['job_id']
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        job = json.loads(app_module.repository.get_workspace_state('admin_dataset_management_job_v1') or '{}')
+        if job.get('status') in {'ready', 'failed', 'stopped'}:
+            break
+        time.sleep(0.02)
+    assert job['id'] == job_id
+    assert job['status'] == 'ready', job
+    rows = sorted(app_module.repository.list_datasets(), key=lambda row: int(row['id']))
+    assert [(int(row['id']), row['file_name']) for row in rows] == [
+        (1, 'second.csv'), (2, 'renamed-first.csv'),
+    ]
 
 
 def test_dashboard_upload_accepts_multiple_files(client) -> None:

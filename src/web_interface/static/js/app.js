@@ -7107,6 +7107,83 @@ document.addEventListener('submit', async (event) => {
   }
 });
 
+function setupAdminDatasetChangeDraft() {
+  const table = document.querySelector('.admin-datasets-table');
+  const body = table?.querySelector('[data-admin-dataset-draft-body]');
+  const apply = document.querySelector('[data-admin-dataset-apply-changes]');
+  if (!(table instanceof HTMLTableElement) || !(body instanceof HTMLTableSectionElement) || !(apply instanceof HTMLButtonElement)) return;
+
+  const originalOrder = Array.from(body.querySelectorAll('tr[data-admin-dataset-id]'), (row) => String(row.dataset.adminDatasetId));
+  const reorderingBlocked = table.dataset.adminDatasetReorderingBlocked === '1';
+  let submitting = false;
+  const rows = () => Array.from(body.querySelectorAll('tr[data-admin-dataset-id]'));
+  const draft = () => {
+    const order = rows().map((row) => String(row.dataset.adminDatasetId));
+    const names = {};
+    body.querySelectorAll('[data-admin-dataset-name-input]').forEach((input) => {
+      if (!(input instanceof HTMLInputElement)) return;
+      const row = input.closest('tr[data-admin-dataset-id]');
+      const original = String(input.dataset.adminDatasetOriginalName || '');
+      if (row?.dataset.adminDatasetId && input.value !== original) names[row.dataset.adminDatasetId] = input.value;
+    });
+    return {order, names};
+  };
+  const sync = () => {
+    const current = draft();
+    const changed = current.order.some((id, index) => id !== originalOrder[index]) || Object.keys(current.names).length > 0;
+    apply.disabled = submitting || !changed;
+    rows().forEach((row, index, collection) => {
+      row.querySelectorAll('[data-admin-dataset-move]').forEach((button) => {
+        if (!(button instanceof HTMLButtonElement)) return;
+        button.disabled = reorderingBlocked
+          || (button.dataset.adminDatasetMove === 'up' && index === 0)
+          || (button.dataset.adminDatasetMove === 'down' && index === collection.length - 1);
+      });
+    });
+    sizeAdminDatasetNameColumn(table.closest('[data-panel-state-key="admin:datasets"]'));
+  };
+  body.addEventListener('click', (event) => {
+    const button = event.target instanceof Element ? event.target.closest('[data-admin-dataset-move]') : null;
+    if (!(button instanceof HTMLButtonElement) || button.disabled || submitting) return;
+    const row = button.closest('tr[data-admin-dataset-id]');
+    if (!row) return;
+    if (button.dataset.adminDatasetMove === 'up' && row.previousElementSibling) body.insertBefore(row, row.previousElementSibling);
+    if (button.dataset.adminDatasetMove === 'down' && row.nextElementSibling) body.insertBefore(row.nextElementSibling, row);
+    sync();
+  });
+  body.addEventListener('input', (event) => {
+    if (event.target instanceof HTMLInputElement && event.target.matches('[data-admin-dataset-name-input]')) sync();
+  });
+  apply.addEventListener('click', async () => {
+    const changes = draft();
+    if (apply.disabled || submitting) return;
+    submitting = true;
+    sync();
+    try {
+      const response = await fetch('/admin/datasets/apply-changes', {
+        method: 'POST', credentials: 'same-origin',
+        headers: {'Content-Type': 'application/json', Accept: 'application/json'},
+        body: JSON.stringify(changes),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || 'The dataset changes could not be queued.');
+      apply.textContent = 'Changes queued';
+      showInfoDialog('Dataset changes are being applied in the background. You can follow progress or stop the task from the floating task panel.', {
+        title: 'Dataset changes queued', tone: 'success',
+      });
+    } catch (error) {
+      submitting = false;
+      sync();
+      showInfoDialog(error instanceof Error ? error.message : 'The dataset changes could not be queued.', {
+        title: 'Dataset changes failed', tone: 'error',
+      });
+    }
+  });
+  sync();
+}
+
+setupAdminDatasetChangeDraft();
+
 document.querySelectorAll('[data-file-picker-input]').forEach((filePickerInput) => {
   const filePickerText = filePickerInput.closest('.file-picker-shell')?.querySelector('[data-file-picker-text]');
   if (!(filePickerInput instanceof HTMLInputElement) || !(filePickerText instanceof HTMLElement)) return;

@@ -126,6 +126,8 @@ DEFAULT_SLIDES_TEMPLATES_DIR = settings.slides_templates_dir
 application_config_dir = settings.database_path.parent
 application_data_dir = settings.data_dir
 RUNTIME_CONFIGURATION_STATE_KEY = 'runtime_configuration_v1'
+DATASET_MANAGEMENT_JOB_STATE_KEY = 'admin_dataset_management_job_v1'
+DATASET_MANAGEMENT_STOP_STATE_KEY = 'admin_dataset_management_stop_v1'
 
 
 def configured_background_task_limit(value: object) -> int:
@@ -8072,6 +8074,31 @@ def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
                             'stop_task_id': f'auto-fields-state:{workspace.id}',
                             'stop_url': f'/api/background-tasks/{workspace.id}/stop',
                         })
+                dataset_management_raw = connection.execute(
+                    "SELECT value FROM workspace_state WHERE key = ?",
+                    (DATASET_MANAGEMENT_JOB_STATE_KEY,),
+                ).fetchone()
+                if dataset_management_raw:
+                    try:
+                        dataset_management_job = json.loads(str(dataset_management_raw['value'] or '{}'))
+                    except (TypeError, json.JSONDecodeError):
+                        dataset_management_job = {}
+                    if isinstance(dataset_management_job, dict) and dataset_management_job.get('status') in {'queued', 'processing'}:
+                        stop_row = connection.execute(
+                            "SELECT value FROM workspace_state WHERE key = ?",
+                            (DATASET_MANAGEMENT_STOP_STATE_KEY,),
+                        ).fetchone()
+                        stopping = bool(stop_row and str(stop_row['value'] or '') == str(dataset_management_job.get('id') or ''))
+                        tasks.append({
+                            'id': f'dataset-management:{dataset_management_job.get("id")}',
+                            'label': 'Applying Dataset Management changes',
+                            'detail': 'Stopping background job' if stopping else str(dataset_management_job.get('message') or 'Processing changes'),
+                            'status': 'stopping' if stopping else str(dataset_management_job.get('status') or 'processing'),
+                            'progress': max(0, min(100, int(dataset_management_job.get('progress') or 0))),
+                            **_background_task_timing(dataset_management_job),
+                            'stop_task_id': f'dataset-management:{dataset_management_job.get("id")}',
+                            'stop_url': f'/api/background-tasks/{workspace.id}/stop',
+                        })
     except sqlite3.Error:
         # A worker may briefly hold the database while publishing a progress
         # update. The next browser poll will retry without disrupting the page.
@@ -8439,6 +8466,15 @@ def stop_background_task(
         task_repository.try_add_log(
             user.username, 'interrupt_dashboard_preparation', json.dumps({'task_id': raw_identifier}),
         )
+    elif prefix == 'dataset-management':
+        job = _read_dataset_management_job(task_repository)
+        if str(job.get('id') or '') != raw_identifier or job.get('status') not in {'queued', 'processing'}:
+            raise HTTPException(status_code=409, detail='This Dataset Management task can no longer be stopped.')
+        if not task_repository.try_set_workspace_state(
+            DATASET_MANAGEMENT_STOP_STATE_KEY, raw_identifier, timeout_seconds=0.1,
+        ):
+            raise HTTPException(status_code=409, detail='Dataset identifiers are being updated and can no longer be stopped safely.')
+        task_repository.try_add_log(user.username, 'stop_dataset_management_changes', json.dumps({'job_id': raw_identifier}))
     elif prefix == 'export':
         with EXPORT_JOBS_LOCK:
             job = EXPORT_JOBS.get(raw_identifier)
@@ -12165,6 +12201,156 @@ async def upload_dataset(
             status_code=status.HTTP_202_ACCEPTED,
         )
     return RedirectResponse(redirect_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+def _read_dataset_management_job(task_repository: Repository) -> dict[str, Any]:
+    try:
+        value = json.loads(task_repository.get_workspace_state(DATASET_MANAGEMENT_JOB_STATE_KEY) or '{}')
+    except (json.JSONDecodeError, sqlite3.Error):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _update_dataset_management_job(task_repository: Repository, job: dict[str, Any], **changes: Any) -> dict[str, Any]:
+    updated = dict(job)
+    updated.update(changes)
+    task_repository.set_workspace_state(DATASET_MANAGEMENT_JOB_STATE_KEY, json.dumps(updated, ensure_ascii=False, separators=(',', ':')))
+    return updated
+
+
+def _dataset_management_stop_requested(task_repository: Repository, job_id: str) -> bool:
+    try:
+        return task_repository.get_workspace_state(DATASET_MANAGEMENT_STOP_STATE_KEY) == job_id
+    except sqlite3.Error:
+        return False
+
+
+def _run_dataset_management_changes(task_repository: Repository, job: dict[str, Any], ordered_ids: list[int], renamed_files: dict[int, str]) -> None:
+    """Apply an already-validated Admin dataset draft without holding the HTTP request."""
+    job_id = str(job['id'])
+    total_steps = len(renamed_files) + (1 if ordered_ids != job['original_order'] else 0)
+    completed_steps = 0
+
+    def publish(progress: int, message: str, **changes: Any) -> None:
+        nonlocal job
+        job = _update_dataset_management_job(task_repository, job, status='processing', progress=progress, message=message, **changes)
+
+    def ensure_not_stopped() -> None:
+        if _dataset_management_stop_requested(task_repository, job_id):
+            raise ProcessingStopped()
+
+    try:
+        publish(2, 'Validating staged dataset changes', started_at=datetime.now(timezone.utc).isoformat())
+        ensure_not_stopped()
+        for original_id in ordered_ids:
+            new_name = renamed_files.get(original_id)
+            if new_name is None:
+                continue
+            dataset = task_repository.get_dataset(original_id)
+            if not dataset:
+                raise ValueError(f'Dataset {original_id} no longer exists.')
+            if str(dataset['status'] or '') in {'queued', 'processing'}:
+                raise ValueError(f'Dataset {dataset["file_name"]} is currently processing.')
+            old_path = Path(str(dataset['stored_path']))
+            new_path = old_path.with_name(new_name)
+            publish(max(3, min(88, 3 + round(completed_steps * 76 / max(total_steps, 1)))), f'Renaming dataset {completed_steps + 1} of {len(renamed_files)}: {new_name}')
+            ensure_not_stopped()
+            old_path.rename(new_path)
+            try:
+                task_repository.rename_dataset_file(original_id, new_name, str(new_path))
+            except Exception:
+                new_path.rename(old_path)
+                raise
+            completed_steps += 1
+            ensure_not_stopped()
+        if ordered_ids != job['original_order']:
+            publish(82, 'Updating dataset identifiers and stored references')
+            ensure_not_stopped()
+            # Dataset Management is displayed highest ID first; the repository stores lowest ID first.
+            id_mapping = task_repository.reorder_dataset_ids(list(reversed(ordered_ids)))
+        else:
+            id_mapping = {}
+        ensure_not_stopped()
+        workspace_key = str(task_repository.db_path.resolve())
+        with STOP_REQUESTS_LOCK:
+            STOP_REQUESTS.difference_update(key for key in STOP_REQUESTS if key[0] == workspace_key)
+        ANALYSIS_CACHE.clear()
+        DATAFRAME_CACHE.clear()
+        _clear_chart_preview_caches()
+        invalidate_workspace_size_cache()
+        task_repository.add_log(job['owner'], 'apply_dataset_management_changes', json.dumps({'job_id': job_id, 'renamed_dataset_ids': sorted(renamed_files), 'id_mapping': {str(old_id): new_id for old_id, new_id in id_mapping.items()}}))
+        _update_dataset_management_job(task_repository, job, status='ready', progress=100, message='Dataset changes applied', finished_at=datetime.now(timezone.utc).isoformat(), id_mapping=id_mapping)
+    except ProcessingStopped:
+        _update_dataset_management_job(task_repository, job, status='stopped', message='Dataset changes stopped by user', finished_at=datetime.now(timezone.utc).isoformat())
+    except Exception as exc:
+        _update_dataset_management_job(task_repository, job, status='failed', progress=100, message=str(exc), finished_at=datetime.now(timezone.utc).isoformat())
+        task_repository.try_add_log(job['owner'], 'apply_dataset_management_changes_failed', json.dumps({'job_id': job_id, 'error': str(exc)}))
+    finally:
+        task_repository.try_set_workspace_state(DATASET_MANAGEMENT_STOP_STATE_KEY, '', timeout_seconds=0.1)
+
+
+@app.post('/admin/datasets/apply-changes')
+async def apply_admin_dataset_changes(request: Request, user: SessionUser = Depends(admin_user)) -> JSONResponse:
+    """Queue a staged Dataset Management rename/reorder operation."""
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail='Dataset changes must be valid JSON.') from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail='Dataset changes must be an object.')
+    current_rows = sorted(repository.list_datasets(), key=lambda row: int(row['id']), reverse=True)
+    current_ids = [int(row['id']) for row in current_rows]
+    raw_order = payload.get('order')
+    if not isinstance(raw_order, list):
+        raise HTTPException(status_code=400, detail='Dataset order must list every dataset.')
+    try:
+        ordered_ids = [int(value) for value in raw_order]
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail='Dataset order contains an invalid ID.') from exc
+    if len(ordered_ids) != len(set(ordered_ids)) or set(ordered_ids) != set(current_ids):
+        raise HTTPException(status_code=400, detail='Dataset order must contain every current dataset exactly once.')
+    raw_names = payload.get('names') or {}
+    if not isinstance(raw_names, dict):
+        raise HTTPException(status_code=400, detail='Dataset names must be an object.')
+    datasets_by_id = {int(row['id']): row for row in current_rows}
+    renamed_files: dict[int, str] = {}
+    for raw_id, raw_name in raw_names.items():
+        try:
+            dataset_id = int(raw_id)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail='Dataset names contain an invalid ID.') from exc
+        dataset = datasets_by_id.get(dataset_id)
+        if dataset is None:
+            raise HTTPException(status_code=400, detail=f'Dataset {dataset_id} no longer exists.')
+        if str(dataset['status'] or '') in {'queued', 'processing'}:
+            raise HTTPException(status_code=400, detail=f'Dataset {dataset["file_name"]} is currently processing.')
+        new_name = str(raw_name or '').strip()
+        old_path = Path(str(dataset['stored_path']))
+        if not new_name or new_name in {'.', '..'} or '/' in new_name or '\\' in new_name or Path(new_name).name != new_name:
+            raise HTTPException(status_code=400, detail='Enter dataset file names without folders or path separators.')
+        if Path(new_name).suffix.lower() != old_path.suffix.lower():
+            raise HTTPException(status_code=400, detail=f'Keep the original extension for {dataset["file_name"]}.')
+        if new_name != str(dataset['file_name']):
+            if not old_path.exists():
+                raise HTTPException(status_code=400, detail=f'The source file for {dataset["file_name"]} is missing.')
+            renamed_files[dataset_id] = new_name
+    final_names = [renamed_files.get(dataset_id, str(dataset['file_name'])).casefold() for dataset_id, dataset in datasets_by_id.items()]
+    if len(final_names) != len(set(final_names)):
+        raise HTTPException(status_code=400, detail='Dataset names must be unique.')
+    for dataset_id, new_name in renamed_files.items():
+        target = Path(str(datasets_by_id[dataset_id]['stored_path'])).with_name(new_name)
+        if target.exists():
+            raise HTTPException(status_code=400, detail=f'A file named {new_name} already exists in this workspace.')
+    if not renamed_files and ordered_ids == current_ids:
+        raise HTTPException(status_code=400, detail='There are no Dataset Management changes to apply.')
+    previous = _read_dataset_management_job(repository)
+    if previous.get('status') in {'queued', 'processing'}:
+        raise HTTPException(status_code=409, detail='Dataset Management changes are already running.')
+    job = {'id': uuid4().hex, 'owner': user.username, 'status': 'queued', 'progress': 0, 'message': 'Waiting for a background worker', 'queued_at': datetime.now(timezone.utc).isoformat(), 'original_order': current_ids}
+    _update_dataset_management_job(repository, job)
+    repository.set_workspace_state(DATASET_MANAGEMENT_STOP_STATE_KEY, '')
+    submit_background_task(_run_dataset_management_changes, repository, job, ordered_ids, renamed_files)
+    return JSONResponse({'job_id': job['id'], 'status': 'queued'}, status_code=status.HTTP_202_ACCEPTED)
 
 
 @app.post('/admin/datasets/{dataset_id}/rename')
