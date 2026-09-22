@@ -37,11 +37,17 @@
     const actualSize = applyScale ? labelSize(size, format) : size;
     context.font = `${format.italic ? 'italic ' : ''}${weight}${actualSize}px ${format.font || FONT_FAMILY}`;
   };
+  // Legend Format controls aggregation and legend furniture independently of
+  // Label Format. Medium intentionally preserves the historical default;
+  // Small and Large are relative choices around that baseline.
+  const legendFormatSize = (size, format = {}, level = 0) => {
+    const base = size * ({Small: .82, Medium: 1, Large: 1.20}[format.size] || 1);
+    return Math.max(10, Math.round(base * ((5 / 6) ** Math.max(0, Number(level) || 0))));
+  };
   // Aggregation headers and members must remain legible after a chart is
   // reduced into a multi-chart Dashboard slide.
   const aggregationSize = (format = {}, level = 0) => {
-    const base = format.configured ? labelSize(AGGREGATION_TITLE_SIZE, format) : AGGREGATION_TITLE_SIZE;
-    return Math.max(10, base - Math.max(0, Number(level) || 0) * 2);
+    return legendFormatSize(AGGREGATION_TITLE_SIZE, format, level);
   };
   const aggregationFont = (context, format = {}, level = 0) => {
     const size = aggregationSize(format, level);
@@ -432,7 +438,7 @@
     let position = items.length ? String(legend?.position || 'none').toLowerCase() : 'none';
     if (!['none', 'top', 'bottom', 'left', 'right'].includes(position)) position = 'top';
     const format = legend?.format || {};
-    const size = format.configured ? labelSize(LEGEND_TEXT_SIZE, format) : Math.max(Number(fontSize || LEGEND_TEXT_SIZE), LEGEND_TEXT_SIZE);
+    const size = format.configured ? legendFormatSize(LEGEND_TEXT_SIZE, format) : Math.max(Number(fontSize || LEGEND_TEXT_SIZE), LEGEND_TEXT_SIZE);
     const lineMarkers = Boolean(legend?.line_markers);
     const markerWidth = lineMarkers ? 43 : 32;
     const longestLabel = items.reduce((length, item) => Math.max(length, String(item?.label || '').slice(0, 28).length), 0);

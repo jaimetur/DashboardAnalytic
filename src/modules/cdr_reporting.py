@@ -96,7 +96,7 @@ _DASHBOARD_CANVAS_RENDERER_LOCK = threading.RLock()
 # The browser worker keeps a copy of dashboard_charts.js in memory. Bump this
 # whenever rendering semantics change so a live server does not keep painting
 # previews with an older script after a hot reload.
-DASHBOARD_CANVAS_RENDERER_VERSION = 6
+DASHBOARD_CANVAS_RENDERER_VERSION = 8
 
 
 def _node_executable() -> str:
@@ -1794,8 +1794,14 @@ LEGEND_MARKER_SIZE = 30
 def _format_size(size: int, format_value: str, *, level: int = 0) -> int:
     """Scale shared legend/axis typography from its template format."""
     options = label_format_options(format_value)
-    scale = {"Small": 0.82, "Medium": 1.08, "Large": 1.28}.get(str(options["size"]), 1.0)
-    return max(10, round(size * scale) - max(0, level) * 2)
+    scale = (
+        {"Small": 0.82, "Medium": 1.0, "Large": 1.20}.get(str(options["size"]), 1.0)
+        if options["configured"] else 1.0
+    )
+    # Match the Canvas renderer's typographic 12pt → 10pt → 8pt hierarchy.
+    # The static/PPT renderer has a larger logical pixel canvas, so subtracting
+    # two raw pixels did not produce a two-point visual difference.
+    return max(10, round(size * scale * ((5 / 6) ** max(0, level))))
 
 
 def _format_font(size: int, format_value: str, *, level: int = 0, default_bold: bool = True) -> ImageFont.ImageFont:
