@@ -8864,6 +8864,18 @@ def _global_background_tasks(user: SessionUser, accessible_ids: set[str]) -> lis
         append_job(job, 'transfer', f'Transferring {str(job.get("target") or "package").replace("-", " ").title()}')
     if user.role == 'super-admin':
         for offer in incoming_transfers:
+            if offer.get('status') == 'pending':
+                tasks.append({
+                    'id': f'incoming-transfer-review:{offer.get("id")}',
+                    'workspace_id': '__server__',
+                    'label': f'Incoming server transfer: {offer.get("content") or "package"}',
+                    'detail': f'Approval required from {offer.get("source") or "another server"}',
+                    **_background_task_timing(offer),
+                    'status': 'queued',
+                    'progress': 0,
+                    'review_transfer_offer_id': str(offer.get('id') or ''),
+                })
+                continue
             if offer.get('status') not in {'receiving', 'received', 'importing'}:
                 continue
             label = 'Importing transferred package' if offer.get('status') == 'importing' else 'Receiving server transfer'

@@ -6459,7 +6459,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       showInfoDialog(error instanceof Error ? error.message : 'The incoming transfer could not be completed.', {title: 'Incoming Transfer Error', tone: 'error'});
     }); }, 1200);
   };
-  const pollIncomingTransferOffers = async () => {
+  const pollIncomingTransferOffers = async (preferredOfferId = '') => {
     if (reviewingOffer || pollingOffers) return;
     pollingOffers = true;
     try {
@@ -6475,7 +6475,8 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       }
       if (!response.ok) return;
       const payload = await response.json().catch(() => ({}));
-      const offer = Array.isArray(payload.offers) ? payload.offers[0] : null;
+      const offers = Array.isArray(payload.offers) ? payload.offers : [];
+      const offer = offers.find((candidate) => String(candidate?.id || '') === String(preferredOfferId)) || offers[0] || null;
       if (!offer) { hidePendingOfferReminder(); return; }
       // Keep a visible, durable reminder even if a browser blocks or delays
       // the confirmation dialog while this tab is in the background.
@@ -6580,6 +6581,16 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       pollingOffers = false;
     }
   };
+  window.addEventListener('dashboard-analytic:review-incoming-transfer', (event) => {
+    // The System tasks card is a durable fallback for browsers which delayed
+    // the automatic prompt while the page was in the background.
+    const offerId = String(event?.detail?.offerId || '');
+    if (reviewingOffer || pollingOffers) {
+      scheduleIncomingOfferPoll(0);
+      return;
+    }
+    void pollIncomingTransferOffers(offerId);
+  });
   document.querySelectorAll('[data-recovered-transfer-import]').forEach((button) => {
     button.addEventListener('click', async () => {
       const offerId = button.dataset.recoveredTransferImport;
@@ -8450,6 +8461,19 @@ if (queueNode) {
         ? `Dashboard “${dashboardName}”: ${String(task.label || 'Background task')}`
         : String(task.label || 'Background task');
       taskHead.append(label);
+      if (task.review_transfer_offer_id) {
+        const review = document.createElement('button');
+        review.type = 'button';
+        review.className = 'ghost-link background-task-review-transfer-button';
+        review.textContent = 'Review transfer';
+        review.title = 'Review and accept or reject the incoming server transfer';
+        review.addEventListener('click', () => {
+          window.dispatchEvent(new CustomEvent('dashboard-analytic:review-incoming-transfer', {
+            detail: {offerId: String(task.review_transfer_offer_id)},
+          }));
+        });
+        taskHead.append(review);
+      }
       if (taskCanStop(task)) {
         const stop = document.createElement('button');
         stop.type = 'button';
