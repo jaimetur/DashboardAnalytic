@@ -1,19 +1,32 @@
-"""FIFO scheduler shared by application-owned background work."""
+"""Priority-aware scheduler shared by application-owned background work."""
 
 from __future__ import annotations
 
-from collections import deque
 from concurrent.futures import Future
+from dataclasses import dataclass, field
 from threading import Condition, Thread
 from typing import Any, Callable
 
 
+@dataclass
+class _ScheduledTask:
+    future: Future[Any]
+    callback: Callable[..., Any]
+    args: tuple[Any, ...]
+    kwargs: dict[str, Any]
+    workspace_key: str | None = None
+    priority: tuple[int, int] = (0, 0)
+    sequence: int = field(default=0)
+
+
 class BackgroundTaskScheduler:
-    """Run queued callables in submission order with a configurable concurrency cap."""
+    """Run generic work FIFO and Workspace work by phase and dataset ID."""
 
     def __init__(self, max_workers: int = 1, thread_name_prefix: str = 'background-task') -> None:
         self._condition = Condition()
-        self._pending: deque[tuple[Future[Any], Callable[..., Any], tuple[Any, ...], dict[str, Any]]] = deque()
+        self._pending: list[_ScheduledTask] = []
+        self._active_workspaces: set[str] = set()
+        self._sequence = 0
         self._active = 0
         self._max_workers = max(1, int(max_workers))
         self._thread_name_prefix = thread_name_prefix
@@ -34,11 +47,22 @@ class BackgroundTaskScheduler:
             return self._closed
 
     def submit(self, callback: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Future[Any]:
+        return self.submit_ordered(callback, *args, **kwargs)
+
+    def submit_ordered(
+        self, callback: Callable[..., Any], /, *args: Any,
+        workspace_key: str | None = None, priority: tuple[int, int] = (0, 0),
+        **kwargs: Any,
+    ) -> Future[Any]:
+        """Order workspace jobs by phase and ID while preserving FIFO ties."""
         future: Future[Any] = Future()
         with self._condition:
             if self._closed:
                 raise RuntimeError('The background task scheduler has been shut down.')
-            self._pending.append((future, callback, args, kwargs))
+            self._sequence += 1
+            self._pending.append(_ScheduledTask(
+                future, callback, args, kwargs, workspace_key, priority, self._sequence,
+            ))
             self._condition.notify_all()
         return future
 
@@ -47,7 +71,7 @@ class BackgroundTaskScheduler:
             self._closed = True
             if cancel_futures:
                 while self._pending:
-                    self._pending.popleft()[0].cancel()
+                    self._pending.pop().future.cancel()
             self._condition.notify_all()
             workers = list(self._workers)
         if wait:
@@ -65,19 +89,30 @@ class BackgroundTaskScheduler:
     def _run(self) -> None:
         while True:
             with self._condition:
-                while not self._closed and (not self._pending or self._active >= self._max_workers):
+                while True:
+                    available = [
+                        task for task in self._pending
+                        if task.workspace_key is None or task.workspace_key not in self._active_workspaces
+                    ]
+                    if available and self._active < self._max_workers:
+                        break
+                    if self._closed and not self._pending:
+                        return
                     self._condition.wait()
-                if self._closed and not self._pending:
-                    return
-                future, callback, args, kwargs = self._pending.popleft()
-                if not future.set_running_or_notify_cancel():
+                task = min(available, key=lambda item: (*item.priority, item.sequence))
+                self._pending.remove(task)
+                if not task.future.set_running_or_notify_cancel():
                     continue
                 self._active += 1
+                if task.workspace_key is not None:
+                    self._active_workspaces.add(task.workspace_key)
             try:
-                future.set_result(callback(*args, **kwargs))
+                task.future.set_result(task.callback(*task.args, **task.kwargs))
             except BaseException as exc:
-                future.set_exception(exc)
+                task.future.set_exception(exc)
             finally:
                 with self._condition:
                     self._active -= 1
+                    if task.workspace_key is not None:
+                        self._active_workspaces.discard(task.workspace_key)
                     self._condition.notify_all()

@@ -735,12 +735,11 @@ def test_starting_auto_field_job_does_not_repeat_pending_state_write(tmp_path: P
     submitted = []
     events = []
 
-    class Scheduler:
-        def submit(self, callback, *args):
-            events.append('submit')
-            submitted.append((callback, args))
+    def capture_submit(_repository, callback, *args, **_kwargs):
+        events.append('submit')
+        submitted.append((callback, args))
 
-    monkeypatch.setattr(app_module, '_dataset_processing_executor', lambda _repository: Scheduler())
+    monkeypatch.setattr(app_module, '_submit_workspace_job', capture_submit)
     monkeypatch.setattr(
         Repository, 'set_workspace_state',
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError('redundant pending-state write')),
@@ -2264,7 +2263,7 @@ def test_workspace_bulk_dataset_actions_reprocess_in_dependency_order(client, mo
     page = client.get('/workspace')
     assert page.status_code == 200
     toolbar = page.text.split('<div class="queue-bulk-actions"', 1)[1].split('</div>', 1)[0]
-    assert toolbar.index('>Map All<') < toolbar.index('>Clear All<') < toolbar.index('>Reprocess All<') < toolbar.index('>Stop All<') < toolbar.index('>Remove All<')
+    assert toolbar.index('>Map Vendor & Region<') < toolbar.index('>Clear Vendor & Region Mapping<') < toolbar.index('>Reprocess All<') < toolbar.index('>Stop All<') < toolbar.index('>Remove All<')
     assert 'data-dataset-reprocess-dialog' in page.text
     assert 'name="dataset_ids" value="1" data-reprocess-dataset-choice checked' in page.text
     assert 'name="dataset_ids" value="2" data-reprocess-dataset-choice checked' in page.text
@@ -2275,6 +2274,7 @@ def test_workspace_bulk_dataset_actions_reprocess_in_dependency_order(client, mo
     def capture_enqueue(
         _background_tasks, dataset_id, dataset_path, _username,
         vodafone_mapping_dataset_id=None, three_mapping_dataset_id=None,
+        region_mapping_dataset_id=None,
         *, dependencies=(), **_kwargs,
     ):
         token = object()
@@ -2283,6 +2283,7 @@ def test_workspace_bulk_dataset_actions_reprocess_in_dependency_order(client, mo
             'path': dataset_path,
             'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
             'three_mapping_dataset_id': three_mapping_dataset_id,
+            'region_mapping_dataset_id': region_mapping_dataset_id,
             'dependencies': list(dependencies),
             'token': token,
         })
@@ -2400,15 +2401,19 @@ def test_admin_dataset_rows_can_be_reordered_in_descending_order_and_all_ids_are
         'vodafone_mapping_dataset_id': 3,
     }
     reprocessing_calls = []
-    monkeypatch.setattr(
-        app_module,
-        'enqueue_dataset_processing',
-        lambda _tasks, dataset_id, _path, _username, vodafone_mapping_dataset_id, three_mapping_dataset_id: reprocessing_calls.append({
+    def record_reprocessing(
+        _tasks, dataset_id, _path, _username,
+        vodafone_mapping_dataset_id, three_mapping_dataset_id, region_mapping_dataset_id,
+    ):
+        reprocessing_calls.append({
             'dataset_id': dataset_id,
             'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
             'three_mapping_dataset_id': three_mapping_dataset_id,
-        }),
-    )
+            'region_mapping_dataset_id': region_mapping_dataset_id,
+        })
+        return object()
+
+    monkeypatch.setattr(app_module, 'enqueue_dataset_processing', record_reprocessing)
     reprocess = client.post(
         '/datasets-analysis/retry/2', data={'return_to': 'admin'}, follow_redirects=False,
     )
@@ -2417,6 +2422,7 @@ def test_admin_dataset_rows_can_be_reordered_in_descending_order_and_all_ids_are
         'dataset_id': 2,
         'vodafone_mapping_dataset_id': 3,
         'three_mapping_dataset_id': None,
+        'region_mapping_dataset_id': None,
     }]
     dashboard_state = json.loads(app_module.repository.get_workspace_state('e2e_dashboards_v2'))
     assert dashboard_state['dashboard']['datasets']['data'] == [2, 3]
@@ -2491,6 +2497,59 @@ def test_workspace_stop_all_stops_queued_and_processing_datasets(client) -> None
     stopped_page = client.get(response.headers['location'])
     assert stopped_page.text.count('All 2 queued or processing datasets have been stopped.') == 1
     assert 'Processing stopped by user.' not in stopped_page.text
+
+
+def test_queued_dataset_can_be_stopped_individually_across_worker_memory(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    dataset_id, _ = app_module.repository.add_dataset(
+        'queued-stop.csv', str(app_module.settings.input_dir / 'queued-stop.csv'), 'admin',
+    )
+    app_module.repository.update_dataset_profile(dataset_id, status='queued', progress=0)
+    page = client.get('/workspace')
+    assert f'action="/datasets-analysis/stop/{dataset_id}"' in page.text
+
+    response = client.post(f'/datasets-analysis/stop/{dataset_id}', follow_redirects=False)
+    assert response.status_code == 303
+    assert app_module.repository.get_dataset(dataset_id)['status'] == 'stopped'
+    with app_module.STOP_REQUESTS_LOCK:
+        app_module.STOP_REQUESTS.clear()
+    try:
+        assert app_module.stop_requested(dataset_id)
+    finally:
+        app_module.clear_stop_request(dataset_id)
+
+
+def test_stopping_isolated_dataset_worker_terminates_its_process(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    class StoppableProcess:
+        terminated = False
+
+        def wait(self, timeout=None):
+            if not self.terminated:
+                raise app_module.subprocess.TimeoutExpired('dataset worker', timeout)
+            return -15
+
+        def terminate(self):
+            self.terminated = True
+
+    process = StoppableProcess()
+    launched = []
+    monkeypatch.setattr(
+        app_module.subprocess, 'Popen',
+        lambda *_args, **kwargs: launched.append(kwargs) or process,
+    )
+    dataset_id = 123
+    app_module.request_stop(dataset_id)
+    app_module._run_dataset_in_worker(
+        dataset_id, Path('/tmp/stopped-dataset.csv'), 'admin',
+        None, None, None, app_module.repository,
+    )
+    assert process.terminated is True
+    assert launched[0]['env']['OPENBLAS_NUM_THREADS'] == '1'
+    assert app_module.stop_requested(dataset_id) is False
 
 
 def test_workspace_remove_all_deletes_every_non_processing_dataset(client) -> None:
@@ -3095,6 +3154,97 @@ def test_interrupted_dataset_processing_is_resumed_instead_of_failed(client) -> 
     assert completed['last_error'] in {None, ''}
 
 
+def test_ready_dataset_progress_cannot_be_replaced_by_a_late_worker_update(client, tmp_path: Path) -> None:
+    import src.DashboardAnalytic as app_module
+
+    workspace = app_module.active_workspace
+    assert workspace is not None
+    source = workspace.input_dir / 'late-progress.csv'
+    source.write_text('market,score\nES,91\n', encoding='utf-8')
+    dataset_id, _ = app_module.repository.add_dataset(source.name, str(source), 'admin')
+    app_module.repository.update_dataset_profile(dataset_id, status='ready', progress=100)
+
+    app_module.repository.update_dataset_profile(dataset_id, progress=55)
+
+    row = app_module.repository.get_dataset(dataset_id)
+    assert row['status'] == 'ready'
+    assert row['progress'] == 100
+
+
+def test_inconsistent_ready_dataset_pauses_recovered_queue_until_retry(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    workspace = app_module.active_workspace
+    assert workspace is not None
+    source = workspace.input_dir / 'inconsistent-progress.csv'
+    source.write_text('market,score\nES,91\n', encoding='utf-8')
+    failed_id, _ = app_module.repository.add_dataset(source.name, str(source), 'admin')
+    app_module.repository.update_dataset_profile(failed_id, status='ready', progress=55, dataset_kind='data')
+    queued_source = workspace.input_dir / 'queued-after-inconsistent.csv'
+    queued_source.write_text('market,score\nES,92\n', encoding='utf-8')
+    queued_id, _ = app_module.repository.add_dataset(queued_source.name, str(queued_source), 'admin')
+    app_module.repository.update_dataset_profile(queued_id, status='queued', progress=0, dataset_kind='data')
+
+    assert app_module.repository.fail_inconsistent_ready_datasets() == [failed_id]
+    assert app_module.resume_interrupted_dataset_processing(workspace) == []
+    queued_task = next(
+        task for task in app_module._workspace_background_tasks(workspace)
+        if task['dataset_id'] == queued_id
+    )
+    assert queued_task['detail'] == f'Waiting for interrupted dataset #{failed_id} to be retried'
+    assert app_module.repository.get_dataset(failed_id)['status'] == 'failed'
+
+
+def test_background_card_uses_the_dataset_worker_step(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    workspace = app_module.active_workspace
+    assert workspace is not None
+    source = workspace.input_dir / 'step-progress.csv'
+    source.write_text('market,score\nES,91\n', encoding='utf-8')
+    dataset_id, _ = app_module.repository.add_dataset(source.name, str(source), 'admin')
+    app_module.repository.update_dataset_profile(
+        dataset_id, status='processing', progress=62,
+        processing_step='Writing dataset rows', dataset_kind='data',
+    )
+
+    task = next(
+        task for task in app_module._workspace_background_tasks(workspace)
+        if task['dataset_id'] == dataset_id
+    )
+    assert task['detail'] == 'Writing dataset rows'
+    assert task['progress'] == 62
+
+
+def test_queued_dataset_message_tracks_its_current_blocker(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    workspace = app_module.active_workspace
+    assert workspace is not None
+    active_id = None
+    for name, kind, status in (
+        ('mapping.csv', 'mapping_three', 'ready'),
+        ('active.csv', 'data', 'processing'),
+        ('waiting.csv', 'speech', 'queued'),
+    ):
+        source = workspace.input_dir / name
+        source.write_text('market,score\nES,91\n', encoding='utf-8')
+        dataset_id, _ = app_module.repository.add_dataset(name, str(source), 'admin')
+        if status == 'processing':
+            active_id = dataset_id
+        app_module.repository.update_dataset_profile(
+            dataset_id, dataset_kind=kind, status=status,
+            progress=100 if status == 'ready' else 10 if status == 'processing' else 0,
+        )
+
+    waiting = next(
+        task for task in app_module._workspace_background_tasks(workspace)
+        if task['label'] == 'Processing dataset: waiting.csv'
+    )
+    assert waiting['detail'] == f'Waiting for dataset #{active_id} to finish'
+
+
 def test_legacy_vendor_recovery_queues_without_writing_in_workspace_request(client, monkeypatch) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -3121,7 +3271,7 @@ def test_legacy_vendor_recovery_queues_without_writing_in_workspace_request(clie
     class CapturingExecutor:
         submitted = False
 
-        def submit(self, *_args, **_kwargs):
+        def submit_ordered(self, *_args, **_kwargs):
             self.submitted = True
             return DeferredFuture()
 
@@ -3175,6 +3325,75 @@ def test_background_task_scheduler_starts_queued_work_in_fifo_order() -> None:
         assert order == ['first', 'second', 'third']
     finally:
         scheduler.shutdown()
+
+
+def test_background_task_scheduler_orders_workspace_phases_and_dataset_ids() -> None:
+    from src.modules.background_scheduler import BackgroundTaskScheduler
+
+    scheduler = BackgroundTaskScheduler(max_workers=2, thread_name_prefix='test-workspace-order')
+    started = Event()
+    release = Event()
+    order: list[str] = []
+
+    def task(name: str, block: bool = False) -> None:
+        order.append(name)
+        if block:
+            started.set()
+            assert release.wait(timeout=2)
+
+    try:
+        first = scheduler.submit_ordered(
+            task, 'active', True, workspace_key='workspace', priority=(1, 8),
+        )
+        assert started.wait(timeout=2)
+        combined = scheduler.submit_ordered(task, 'combined', workspace_key='workspace', priority=(2, 0))
+        dataset_high = scheduler.submit_ordered(task, 'dataset-7', workspace_key='workspace', priority=(1, 7))
+        mapping = scheduler.submit_ordered(task, 'mapping', workspace_key='workspace', priority=(0, 10))
+        dataset_low = scheduler.submit_ordered(task, 'dataset-3', workspace_key='workspace', priority=(1, 3))
+        materialization = scheduler.submit_ordered(task, 'materialization', workspace_key='workspace', priority=(3, 0))
+        assert order == ['active']
+        release.set()
+        for future in (first, mapping, dataset_low, dataset_high, combined, materialization):
+            future.result(timeout=2)
+        assert order == ['active', 'mapping', 'dataset-3', 'dataset-7', 'combined', 'materialization']
+    finally:
+        scheduler.shutdown()
+
+
+def test_combined_recreation_is_queued_while_cdr_processing_is_pending(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    workspace = app_module.active_workspace
+    assert workspace is not None
+    dataset_id, _ = app_module.repository.add_dataset(
+        'pending-cdr.csv', str(workspace.input_dir / 'pending-cdr.csv'), 'admin',
+    )
+    app_module.repository.update_dataset_profile(dataset_id, dataset_kind='data', status='queued')
+    submitted = []
+    monkeypatch.setattr(
+        app_module, '_submit_workspace_job',
+        lambda _repository, _callback, *_args, **kwargs: submitted.append(kwargs),
+    )
+
+    job = app_module.start_combined_cdr_recreation_job(workspace, 'data', 'admin')
+    try:
+        assert job['status'] == 'queued'
+        assert submitted == [{'phase': 2}]
+    finally:
+        with app_module.AUTO_CALCULATED_FIELD_JOBS_LOCK:
+            app_module.AUTO_CALCULATED_FIELD_JOBS.pop(job['id'], None)
+
+
+def test_opening_workspace_page_does_not_enqueue_materialization(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    monkeypatch.setattr(
+        app_module, 'queue_workspace_dimension_materialization',
+        lambda _workspace: (_ for _ in ()).throw(AssertionError('Workspace page started background work')),
+    )
+    assert client.get('/workspace').status_code == 200
 
 
 def test_cancelled_backup_removes_its_partial_archive(client, tmp_path: Path) -> None:
@@ -3519,8 +3738,11 @@ def test_global_background_tasks_groups_active_and_other_workspaces(client) -> N
     completed_groups = {
         group['workspace_id']: group for group in client.get('/api/background-tasks').json()['groups']
     }
-    assert active.id not in completed_groups
-    assert other.id not in completed_groups
+    assert not any(
+        task['id'].startswith('generated:')
+        for workspace_id in (active.id, other.id)
+        for task in completed_groups.get(workspace_id, {}).get('tasks', [])
+    )
 
 
 def test_background_task_poll_closes_workspace_database_connection(client, monkeypatch) -> None:
@@ -3561,9 +3783,10 @@ def test_background_task_poll_closes_workspace_database_connection(client, monke
     app_module._workspace_background_tasks(app_module.active_workspace)
 
     assert closed_connections == [True]
-    assert connection_calls[0][0][0].startswith('file:')
-    assert connection_calls[0][0][0].endswith('?mode=ro')
-    assert connection_calls[0][1]['uri'] is True
+    read_only_calls = [call for call in connection_calls if str(call[0][0]).startswith('file:')]
+    assert read_only_calls
+    assert read_only_calls[0][0][0].endswith('?mode=ro')
+    assert read_only_calls[0][1]['uri'] is True
 
 
 def test_dataset_background_task_reports_running_and_completed_duration(client) -> None:
@@ -3596,7 +3819,7 @@ def test_dataset_background_task_reports_running_and_completed_duration(client) 
             break
         time.sleep(0.01)
     assert running is not None
-    assert running['detail'] == 'Processing'
+    assert running['detail'] == 'Reading and normalizing source data'
     assert running['progress'] == 45
     assert running['duration_seconds'] >= 65
 
@@ -3819,7 +4042,7 @@ def test_orphaned_auto_field_materialization_can_be_stopped_from_background_pane
     )
 
 
-def test_incoming_transfer_uses_server_stop_and_stops_child_materialization(client, monkeypatch) -> None:
+def test_incoming_transfer_cannot_stop_after_import_begins(client, monkeypatch) -> None:
     import src.DashboardAnalytic as app_module
 
     login_super(client)
@@ -3847,14 +4070,50 @@ def test_incoming_transfer_uses_server_stop_and_stops_child_materialization(clie
         task for group in groups for task in group['tasks']
         if task['id'] == f'incoming-transfer:{offer_id}'
     )
-    assert task['stop_url'] == '/api/server-background-tasks/stop'
+    assert 'stop_url' not in task
 
-    response = client.post(task['stop_url'], data={'task_id': task['stop_task_id']})
+    response = client.post('/api/server-background-tasks/stop', data={'task_id': f'incoming-transfer:{offer_id}'})
 
-    assert response.status_code == 200
-    assert app_module.TRANSFER_OFFERS[offer_id]['cancel_requested'] is True
-    assert app_module.AUTO_CALCULATED_FIELD_JOBS['child-materialization']['cancel_requested'] is True
-    assert app_module.persisted_auto_field_stop_requested(workspace.id) is True
+    assert response.status_code == 409
+    assert not app_module.TRANSFER_OFFERS[offer_id].get('cancel_requested')
+    assert not app_module.AUTO_CALCULATED_FIELD_JOBS['child-materialization'].get('cancel_requested')
+
+
+def test_import_can_stop_while_queued_but_not_while_replacing_data(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    workspace = app_module.active_workspace
+    assert workspace is not None
+    monkeypatch.setattr(app_module, 'IMPORT_JOBS', {
+        'pending-import': {
+            'id': 'pending-import', 'owner': 'admin', 'status': 'queued',
+            'destination_workspace_ids': [workspace.id], 'created_at': time.time(),
+        },
+        'active-import': {
+            'id': 'active-import', 'owner': 'admin', 'status': 'processing',
+            'destination_workspace_ids': [workspace.id], 'created_at': time.time(),
+        },
+    })
+
+    tasks = [
+        task for group in client.get('/api/background-tasks').json()['groups']
+        for task in group['tasks'] if task['id'].startswith('import:')
+    ]
+    assert next(task for task in tasks if task['id'] == 'import:pending-import')['stop_task_id'] == 'import:pending-import'
+    assert 'stop_task_id' not in next(task for task in tasks if task['id'] == 'import:active-import')
+
+    active_response = client.post(
+        f'/api/background-tasks/{workspace.id}/stop', data={'task_id': 'import:active-import'},
+    )
+    queued_response = client.post(
+        f'/api/background-tasks/{workspace.id}/stop', data={'task_id': 'import:pending-import'},
+    )
+
+    assert active_response.status_code == 409
+    assert queued_response.status_code == 200
+    assert not app_module.IMPORT_JOBS['active-import'].get('cancel_requested')
+    assert app_module.IMPORT_JOBS['pending-import']['cancel_requested'] is True
 
 
 def test_persisted_materialization_stop_is_observed_across_workers(client, monkeypatch) -> None:
@@ -4519,9 +4778,15 @@ def test_operator_mapping_backup_supports_selective_restore(client, tmp_path: Pa
 
     app_module.repository.delete_operator_mapping_group('Backup Carrier')
     app_module.repository.delete_vendor_mapping_group('Backup Vendor')
-    app_module.restore_database_backup(archive_path, ['operator_mappings'])
+    progress_steps = []
+    app_module.restore_database_backup(
+        archive_path, ['operator_mappings'],
+        lambda message, completed, total: progress_steps.append((message, completed, total)),
+    )
 
     assert app_module.repository.list_operator_mappings()['backup alias'] == 'Backup Carrier'
+    assert progress_steps[-1][1:] == (1, 1)
+    assert 'Operator Mappings restored' in progress_steps[-1][0]
     restored_vendor = next(
         group for group in app_module.repository.list_vendor_mapping_groups()
         if group['canonical'] == 'Backup Vendor'
@@ -5102,17 +5367,16 @@ def test_recreating_the_same_combined_kind_stops_the_previous_job_before_queuein
     assert workspace is not None
     submitted: list[tuple[object, tuple[object, ...]]] = []
 
-    class CapturingExecutor:
-        def submit(self, callback, *args):
-            submitted.append((callback, args))
-
     previous_id = 'existing-voice-recreation'
     with app_module.AUTO_CALCULATED_FIELD_JOBS_LOCK:
         app_module.AUTO_CALCULATED_FIELD_JOBS[previous_id] = {
             'id': previous_id, 'workspace_id': workspace.id, 'workspace_name': workspace.name,
             'operation': 'combined_recreation', 'combined_kind': 'voice', 'status': 'processing',
         }
-    monkeypatch.setattr(app_module, '_combined_cdr_recreation_executor', lambda _repository: CapturingExecutor())
+    monkeypatch.setattr(
+        app_module, '_submit_workspace_job',
+        lambda _repository, callback, *args, **_kwargs: submitted.append((callback, args)),
+    )
 
     replacement = app_module.start_combined_cdr_recreation_job(workspace, 'voice', 'admin')
 
@@ -5157,10 +5421,10 @@ def test_queued_dataset_actions_remain_compact_icons_during_live_updates(client)
     assert 'class="ghost-link action-link-preview" disabled' in page.text
     assert 'aria-label="Preview unavailable"' in page.text
     assert 'class="action-link-clear-vendors" disabled' in page.text
-    assert 'class="warning-button icon-action action-link-reprocess" aria-label="Reprocess dataset" title="Reprocess dataset" disabled' in page.text
+    assert 'class="warning-button icon-action action-link-stop" aria-label="Stop processing" title="Stop processing"' in page.text
     assert 'class="danger-button icon-action" aria-label="Delete dataset"' in page.text
     actions = page.text.split('<div class="queue-actions">', 1)[1].split('</div>', 1)[0]
-    assert actions.index('action-link-clear-vendors') < actions.index('action-link-reprocess') < actions.index('danger-button')
+    assert actions.index('action-link-clear-vendors') < actions.index('action-link-stop') < actions.index('danger-button')
 
     script = client.get('/static/js/app.js')
     assert 'class="ghost-link action-link-preview" disabled' in script.text

@@ -244,6 +244,7 @@
                   <span class="queue-progress-separator" data-queue-progress-separator{% if not dataset.elapsed_label %} hidden{% endif %} aria-hidden="true">·</span>
                   <span data-queue-elapsed{% if not dataset.elapsed_label %} hidden{% endif %}>{{ dataset.elapsed_label }}</span>
                 </span>
+                <span class="queue-progress-step" data-queue-progress-step{% if dataset.status != 'processing' or not dataset.processing_step %} hidden{% endif %}>{{ dataset.processing_step if dataset.status == 'processing' else '' }}</span>
                 {% if dataset.last_error and dataset.status in ['failed', 'stopped'] %}
                 <p class="dataset-error" data-queue-error>{{ dataset.last_error }}</p>
                 {% endif %}
@@ -287,13 +288,13 @@
                 {% else %}
                 <button type="button" class="action-link-clear-vendors" disabled title="No Vendor & Region Mapping is available">Clear</button>
                 {% endif %}
-                {% if dataset.status == 'processing' %}
+                {% if dataset.status in ['queued', 'processing'] %}
                 <form method="post" action="/datasets-analysis/stop/{{ dataset.id }}" data-confirm="Stop processing for '{{ dataset.file_name }}'?" data-confirm-title="Stop processing" data-confirm-label="Stop processing">
                   <button type="submit" class="warning-button icon-action action-link-stop" aria-label="Stop processing" title="Stop processing">Stop Processing</button>
                 </form>
                 {% else %}
                 <form method="post" action="/datasets-analysis/retry/{{ dataset.id }}" data-confirm="Reprocess dataset '{{ dataset.file_name }}' from its source file?" data-confirm-title="Reprocess dataset" data-confirm-label="Reprocess dataset" data-loading-label="Reprocessing dataset">
-                  <button type="submit" class="warning-button icon-action action-link-reprocess" aria-label="Reprocess dataset" title="Reprocess dataset"{% if dataset.status not in ['ready', 'failed', 'stopped'] %} disabled{% endif %}>Reprocess Dataset</button>
+                  <button type="submit" class="warning-button icon-action action-link-reprocess" aria-label="Reprocess dataset" title="Reprocess dataset"{% if not dataset.can_reprocess %} disabled{% endif %}>Reprocess Dataset</button>
                 </form>
                 {% endif %}
                 <form method="post" action="/datasets-analysis/delete/{{ dataset.id }}" data-confirm="Delete dataset '{{ dataset.file_name }}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">

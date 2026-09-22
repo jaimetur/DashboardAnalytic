@@ -605,8 +605,24 @@ class _CalculatedBooleanConditionParser:
         return token
 
     def _condition(self) -> FilterCondition:
-        first = self._expect('FIELD')
-        fields = [first.value]
+        # Older stored rules use single-word fields without brackets. Keep
+        # accepting them so background reconciliation can read those rules.
+        if self.cursor < len(self.tokens) and self.tokens[self.cursor].kind == 'WORD':
+            first = self._expect('WORD')
+            legacy_field_parts = [first.value]
+            while self.cursor < len(self.tokens):
+                token = self.tokens[self.cursor]
+                if token.kind not in {'WORD', 'VALUE'} or (
+                    token.kind == 'WORD' and token.value.upper() in {'IN', 'CONTAINS', 'NOT', 'AND', 'OR'}
+                ):
+                    break
+                legacy_field_parts.append(token.value)
+                self.cursor += 1
+            field_name = ' '.join(legacy_field_parts)
+        else:
+            first = self._expect('FIELD')
+            field_name = first.value
+        fields = [field_name]
         probe = self.cursor
         while (
             probe + 1 < len(self.tokens)
@@ -622,7 +638,7 @@ class _CalculatedBooleanConditionParser:
         ):
             self.cursor = probe
         else:
-            fields = [first.value]
+            fields = [field_name]
         if self.cursor >= len(self.tokens):
             raise ValueError('Invalid condition: expected a comparison operator after the source field.')
         if self.tokens[self.cursor].kind == 'OP':

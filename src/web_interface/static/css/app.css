@@ -1888,6 +1888,7 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .queue-progress-cell { min-width: 190px; display: grid; gap: 0.3rem; }
 .queue-progress-label { display: flex; align-items: center; justify-content: flex-start; gap: 0.35rem; color: var(--muted); font-size: 0.8rem; font-weight: 700; white-space: nowrap; }
 .queue-progress-label [data-queue-progress-percent] { color: var(--ink); }
+.queue-progress-step { color: var(--muted); font-size: 0.72rem; line-height: 1.2; overflow-wrap: anywhere; }
 .queue-progress-separator { color: var(--line-strong); }
 .progress-shell { height: 10px; border-radius: 999px; background: rgba(16, 49, 74, 0.08); overflow: hidden; }
 .visual-progress-shell { height: 14px; background: linear-gradient(180deg, rgba(16,49,74,0.08), rgba(16,49,74,0.03)); box-shadow: inset 0 1px 2px rgba(16,49,74,0.06); }

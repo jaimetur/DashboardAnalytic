@@ -6,6 +6,7 @@ import calendar
 import io
 import os
 import errno
+import fcntl
 import gc
 import sys
 try:
@@ -28,7 +29,7 @@ from contextlib import asynccontextmanager, closing, nullcontext
 from dataclasses import asdict, fields, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
-from threading import Lock, Thread, current_thread
+from threading import Event, Lock, Thread
 from time import monotonic, sleep
 from typing import Annotated
 from typing import Any, Iterable
@@ -88,6 +89,10 @@ HEAVY_DATASET_PROCESSING_LOCKS: dict[str, Lock] = {}
 HEAVY_DATASET_PROCESSING_LOCKS_GUARD = Lock()
 ACTIVE_DATASET_PROCESSING: set[tuple[str, int]] = set()
 ACTIVE_DATASET_PROCESSING_LOCK = Lock()
+QUEUED_DATASET_FUTURES: dict[tuple[str, int], Future[Any]] = {}
+ACTIVE_DATASET_WORKERS: set[subprocess.Popen[Any]] = set()
+ACTIVE_DATASET_WORKERS_LOCK = Lock()
+APP_SHUTTING_DOWN = Event()
 REPORT_CHART_JOB_LOCKS: dict[str, Lock] = {}
 REPORT_CHART_JOB_LOCKS_LOCK = Lock()
 TEMPLATE_SAVE_LOCK = Lock()
@@ -194,7 +199,8 @@ def apply_runtime_configuration(values: dict[str, Any]) -> None:
     )
     max_background_tasks = configured_background_task_limit(values.get('max_background_tasks'))
     os.environ['DASHBOARD_ANALYTIC_MAX_BACKGROUND_TASKS'] = str(max_background_tasks)
-    BACKGROUND_TASK_SCHEDULER.configure(max_background_tasks)
+    # Keep at least one logical CPU available for interactive requests.
+    BACKGROUND_TASK_SCHEDULER.configure(min(max_background_tasks, max(1, (os.cpu_count() or 2) - 1), 4))
 
 
 def _reporting_memory_mb() -> float:
@@ -1197,14 +1203,23 @@ def combined_reporting_template_columns_signature(task_repository: Repository) -
 
 def materialize_workspace_combined_columns(
     task_repository: Repository, dimensions: Iterable[Any],
+    progress_callback: Callable[[int, int, str], None] | None = None,
+    stop_callback: Callable[[], None] | None = None,
 ) -> int:
     """Backfill every fixed, calculated and saved-template KPI column once per CDR."""
     changed_kinds: set[str] = set()
     updated_datasets = 0
-    for dataset in task_repository.list_datasets():
+    datasets = [
+        row for row in task_repository.list_datasets()
+        if row['status'] == 'ready' and str(row['dataset_kind'] or '').casefold() in CDR_DATASET_KINDS
+    ]
+    datasets.sort(key=lambda row: int(row['id']))
+    for position, dataset in enumerate(datasets, start=1):
+        if stop_callback:
+            stop_callback()
         kind = str(dataset['dataset_kind'] or '').casefold()
-        if dataset['status'] != 'ready' or kind not in CDR_DATASET_KINDS:
-            continue
+        if progress_callback:
+            progress_callback(position - 1, len(datasets), f'Updating combined CDR-{kind.upper()} from dataset {dataset["id"]}')
         changed = task_repository.copy_dataset_rows_to_reporting(
             int(dataset['id']), kind,
             combined_reporting_required_columns(dimensions, kind, task_repository),
@@ -1212,6 +1227,8 @@ def materialize_workspace_combined_columns(
         if changed:
             changed_kinds.add(kind)
             updated_datasets += 1
+        if progress_callback:
+            progress_callback(position, len(datasets), f'Updated dataset {dataset["id"]} of {len(datasets)}')
     for kind in changed_kinds:
         task_repository.set_workspace_state(f'combined_reporting_updated_{kind}', now_iso())
     return updated_datasets
@@ -1393,15 +1410,6 @@ def request_persisted_auto_field_stop(workspace_id: str, job_id: str = 'all') ->
     temporary.replace(marker)
 
 
-def clear_persisted_auto_field_stops(workspace_id: str) -> None:
-    marker_root = settings.output_dir.parent / '.background-stop-requests'
-    workspace_key = hashlib.sha256(str(workspace_id).encode()).hexdigest()[:24]
-    if not marker_root.is_dir():
-        return
-    for marker in marker_root.glob(f'auto-fields-{workspace_key}-*.stop'):
-        marker.unlink(missing_ok=True)
-
-
 def persisted_auto_field_stop_requested(
     workspace_id: str, job_id: str = 'all', *, created_at: float = 0,
 ) -> bool:
@@ -1420,9 +1428,23 @@ def persisted_auto_field_stop_requested(
 
 def any_persisted_auto_field_stop_requested(workspace_id: str) -> bool:
     """Return whether any materialization job in the workspace is stopping."""
-    marker_root = settings.output_dir.parent / '.background-stop-requests'
-    workspace_key = hashlib.sha256(str(workspace_id).encode()).hexdigest()[:24]
-    return marker_root.is_dir() and any(marker_root.glob(f'auto-fields-{workspace_key}-*.stop'))
+    with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+        active_jobs = [
+            dict(job) for job in AUTO_CALCULATED_FIELD_JOBS.values()
+            if str(job.get('workspace_id') or '') == str(workspace_id)
+            and job.get('status') in {'queued', 'processing'}
+        ]
+    if not active_jobs:
+        persisted = read_persisted_auto_field_progress(workspace_id)
+        if persisted.get('status') in {'queued', 'processing'}:
+            active_jobs = [persisted]
+    return any(
+        persisted_auto_field_stop_requested(
+            workspace_id, str(job.get('id') or 'all'),
+            created_at=float(job.get('created_at') or 0),
+        )
+        for job in active_jobs
+    )
 
 
 def ensure_auto_calculated_field_job_not_stopped(job_id: str) -> None:
@@ -1488,7 +1510,9 @@ def _run_auto_calculated_field_job(job_id: str, workspace: Workspace) -> None:
 
     try:
         with _auto_calculated_field_workspace_lock(workspace.id):
-            with _dataset_processing_lock(task_repository):
+            # Repository writes are committed in bounded batches. Holding the
+            # workspace writer for the whole job would block foreground saves.
+            with nullcontext():
                 ensure_auto_calculated_field_job_not_stopped(job_id)
                 task_repository.set_workspace_state('calculated_dimensions_need_materialization', 'processing')
                 current = parse_calculated_dimensions(task_repository.list_calculated_dimensions())
@@ -1548,7 +1572,6 @@ def start_auto_calculated_field_job(
     parent_task_id: str = '',
 ) -> dict[str, Any]:
     """Queue materialization so the web request and UI remain responsive."""
-    clear_persisted_auto_field_stops(workspace.id)
     job_id = uuid4().hex
     previous_items = tuple(previous)
     current_items = tuple(current)
@@ -1597,10 +1620,11 @@ def start_auto_calculated_field_job(
         global_db_path=repository.global_db_path,
         workspace_registry_db_path=workspace_registry.registry_path,
     )
+    pending_repository.try_add_log(username, 'materialize_auto_calculated_fields_queued', json.dumps({
+        'job_id': job_id, 'workspace': workspace.id, 'executed_by': 'system',
+    }))
     if background:
-        _dataset_processing_executor(pending_repository).submit(
-            _run_auto_calculated_field_job, job_id, workspace,
-        )
+        _submit_workspace_job(pending_repository, _run_auto_calculated_field_job, job_id, workspace, phase=3)
     else:
         _run_auto_calculated_field_job(job_id, workspace)
     return job
@@ -1652,6 +1676,7 @@ def _run_combined_cdr_recreation_job(job_id: str, workspace: Workspace, kind: st
             'job_id': job_id, 'workspace': workspace.id, 'kind': kind,
             'rows': stats['rows'], 'executed_by': 'system',
         }))
+        queue_workspace_dimension_materialization(workspace)
     except ProcessingStopped as exc:
         task_repository.set_workspace_state('calculated_dimensions_need_materialization', 'stopped')
         with AUTO_CALCULATED_FIELD_JOBS_LOCK:
@@ -1695,13 +1720,6 @@ def start_combined_cdr_recreation_job(
     workspace: Workspace, kind: str, username: str, *, background: bool = True,
 ) -> dict[str, Any]:
     """Restart one combined-table rebuild in the shared materialization progress UI."""
-    if workspace_has_pending_cdr_processing(workspace):
-        return {
-            'workspace_id': workspace.id, 'operation': 'combined_recreation',
-            'combined_kind': kind, 'status': 'deferred',
-            'message': 'Waiting for all individual CDR processing to finish',
-        }
-    clear_persisted_auto_field_stops(workspace.id)
     job_id = uuid4().hex
     job = {
         'id': job_id, 'workspace_id': workspace.id, 'workspace_name': workspace.name,
@@ -1720,6 +1738,8 @@ def start_combined_cdr_recreation_job(
                 and str(existing.get('combined_kind') or '').casefold() == kind
                 and existing.get('status') in {'queued', 'processing'}
             ):
+                if existing.get('status') == 'queued':
+                    return existing
                 existing.update(
                     cancel_requested=True,
                     message=f'Stopping this CDR-{kind.upper()} recreation before restarting it',
@@ -1738,17 +1758,11 @@ def start_combined_cdr_recreation_job(
         workspace_registry_db_path=workspace_registry.registry_path,
     )
     task_repository.set_workspace_state('calculated_dimensions_need_materialization', '1')
-    if background and current_thread().name.startswith('dataset-processing'):
-        # Ingestion already runs in the background queue. Complete the related
-        # combined-table job in that worker so the next writer cannot overtake
-        # it and application shutdown can wait for the complete operation.
-        _run_combined_cdr_recreation_job(job_id, workspace, kind)
-    elif background:
-        # This serial queue cannot be starved by file ingestion or Vendor
-        # mapping workers; the worker still owns the workspace write lock.
-        _combined_cdr_recreation_executor(task_repository).submit(
-            _run_combined_cdr_recreation_job, job_id, workspace, kind,
-        )
+    task_repository.try_add_log(username, 'recreate_combined_cdr_table_queued', json.dumps({
+        'job_id': job_id, 'workspace': workspace.id, 'kind': kind, 'executed_by': 'system',
+    }))
+    if background:
+        _submit_workspace_job(task_repository, _run_combined_cdr_recreation_job, job_id, workspace, kind, phase=2)
     else:
         _run_combined_cdr_recreation_job(job_id, workspace, kind)
     return job
@@ -1767,9 +1781,9 @@ def queue_workspace_dimension_materialization(workspace: Workspace) -> None:
     # pass again, so this is a defer rather than a skipped materialization.
     if workspace_has_pending_cdr_processing(workspace):
         return
-    dimensions_pending = repository.get_workspace_state('calculated_dimensions_need_materialization') in {'1', 'processing'}
-    template_signature = combined_reporting_template_columns_signature(repository)
-    templates_pending = repository.get_workspace_state('combined_reporting_template_columns_signature') != template_signature
+    dimensions_pending = task_repository.get_workspace_state('calculated_dimensions_need_materialization') in {'1', 'processing'}
+    template_signature = combined_reporting_template_columns_signature(task_repository)
+    templates_pending = task_repository.get_workspace_state('combined_reporting_template_columns_signature') != template_signature
     if not dimensions_pending and not templates_pending:
         return
     with AUTO_CALCULATED_FIELD_JOBS_LOCK:
@@ -1782,10 +1796,29 @@ def queue_workspace_dimension_materialization(workspace: Workspace) -> None:
         if workspace.id in WORKSPACE_DIMENSION_MATERIALIZATION_THREADS:
             return
         WORKSPACE_DIMENSION_MATERIALIZATION_THREADS.add(workspace.id)
+    job_id = uuid4().hex
+    automatic_job = {
+        'id': job_id, 'workspace_id': workspace.id, 'workspace_name': workspace.name,
+        'operation': 'automatic_materialization', 'status': 'queued',
+        'completed': 0, 'total': 0, 'message': 'Waiting to reconcile CDR tables',
+        'username': 'system', 'created_at': datetime.now(timezone.utc).timestamp(),
+    }
+    with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+        AUTO_CALCULATED_FIELD_JOBS[job_id] = automatic_job
+        persist_auto_field_progress(automatic_job)
+    task_repository.try_add_log('system', 'automatic_workspace_materialization_queued', json.dumps({
+        'workspace': workspace.id, 'job_id': job_id, 'executed_by': 'system',
+    }))
     if dimensions_pending:
-        repository.set_workspace_state('calculated_dimensions_need_materialization', 'processing')
+        task_repository.set_workspace_state('calculated_dimensions_need_materialization', 'processing')
 
     def run() -> None:
+        with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+            automatic_job.update(
+                status='processing', message='Preparing CDR tables',
+                started_at=datetime.now(timezone.utc).timestamp(),
+            )
+            persist_auto_field_progress(automatic_job)
         task_repository.try_add_log('system', 'automatic_workspace_materialization_started', json.dumps({
             'workspace': workspace.id,
             'dimensions_pending': dimensions_pending,
@@ -1793,14 +1826,27 @@ def queue_workspace_dimension_materialization(workspace: Workspace) -> None:
             'executed_by': 'system',
         }))
         try:
+            def update_progress(completed: int, total: int, message: str) -> None:
+                ensure_auto_calculated_field_job_not_stopped(job_id)
+                with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+                    automatic_job.update(completed=completed, total=total, message=message)
+                    persist_auto_field_progress(automatic_job)
+
+            ensure_auto_calculated_field_job_not_stopped(job_id)
             dimensions = parse_calculated_dimensions(task_repository.list_calculated_dimensions())
             if dimensions_pending:
                 materialize_workspace_auto_fields_incrementally(
                     (), dimensions, {}, task_repository,
                     {'cdr-data', 'cdr-voice', 'cdr-speech'},
+                    progress_callback=update_progress,
+                    stop_callback=lambda: ensure_auto_calculated_field_job_not_stopped(job_id),
                 )
             else:
-                materialize_workspace_combined_columns(task_repository, dimensions)
+                materialize_workspace_combined_columns(
+                    task_repository, dimensions, update_progress,
+                    lambda: ensure_auto_calculated_field_job_not_stopped(job_id),
+                )
+            ensure_auto_calculated_field_job_not_stopped(job_id)
             processed_signature = template_signature
             task_repository.set_workspace_state('combined_reporting_template_columns_signature', processed_signature)
             # A template can be saved while this background pass is scanning
@@ -1811,17 +1857,47 @@ def queue_workspace_dimension_materialization(workspace: Workspace) -> None:
                 if current_signature == processed_signature:
                     break
                 processed_signature = current_signature
-                materialize_workspace_combined_columns(task_repository, dimensions)
+                materialize_workspace_combined_columns(
+                    task_repository, dimensions, update_progress,
+                    lambda: ensure_auto_calculated_field_job_not_stopped(job_id),
+                )
                 task_repository.set_workspace_state(
                     'combined_reporting_template_columns_signature', processed_signature,
                 )
+                ensure_auto_calculated_field_job_not_stopped(job_id)
+            with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+                automatic_job.update(
+                    status='ready', completed=max(int(automatic_job.get('total') or 0), 1),
+                    total=max(int(automatic_job.get('total') or 0), 1),
+                    message='CDR tables reconciled',
+                    finished_at=datetime.now(timezone.utc).timestamp(),
+                )
+                persist_auto_field_progress(automatic_job)
             task_repository.try_add_log('system', 'automatic_workspace_materialization_completed', json.dumps({
                 'workspace': workspace.id,
                 'dimensions_pending': dimensions_pending,
                 'template_columns_pending': templates_pending,
                 'executed_by': 'system',
             }))
+        except ProcessingStopped as exc:
+            if dimensions_pending:
+                task_repository.set_workspace_state('calculated_dimensions_need_materialization', 'stopped')
+            with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+                automatic_job.update(
+                    status='stopped', error=str(exc), message='Automatic materialization stopped by user',
+                    finished_at=datetime.now(timezone.utc).timestamp(),
+                )
+                persist_auto_field_progress(automatic_job)
+            task_repository.try_add_log('system', 'automatic_workspace_materialization_stopped', json.dumps({
+                'workspace': workspace.id, 'job_id': job_id, 'executed_by': 'system',
+            }))
         except Exception as exc:
+            with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+                automatic_job.update(
+                    status='failed', error=str(exc), message='Automatic materialization failed',
+                    finished_at=datetime.now(timezone.utc).timestamp(),
+                )
+                persist_auto_field_progress(automatic_job)
             if dimensions_pending:
                 try:
                     task_repository.set_workspace_state('calculated_dimensions_need_materialization', '1')
@@ -1836,7 +1912,7 @@ def queue_workspace_dimension_materialization(workspace: Workspace) -> None:
             with WORKSPACE_DIMENSION_MATERIALIZATION_THREADS_LOCK:
                 WORKSPACE_DIMENSION_MATERIALIZATION_THREADS.discard(workspace.id)
 
-    _dataset_processing_executor(task_repository).submit(run)
+    _submit_workspace_job(task_repository, run, phase=3)
 
 
 def named_catalogue_path(technology: str, identifier: str, template_name: str | None = None) -> Path:
@@ -2133,7 +2209,8 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
             active_workspace = workspace
             clear_outdated_workspace_caches(workspace)
             resume_interrupted_dataset_processing(workspace)
-            queue_workspace_dimension_materialization(workspace)
+            if repository.get_workspace_state('calculated_dimensions_need_materialization') in {'1', 'processing'}:
+                queue_workspace_dimension_materialization(workspace)
             return workspace
 
         # Authentication remains global; template files and metadata are workspace-owned.
@@ -2170,8 +2247,12 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
             # exact columns it needs lazily in ``_combined_reporting_frame``.
             for technology in TEMPLATE_NAMES:
                 synchronize_template_file_names(technology)
+        inconsistent_ids = repository.fail_inconsistent_ready_datasets()
+        if inconsistent_ids:
+            repository.try_add_log('system', 'recover_inconsistent_datasets', json.dumps({'dataset_ids': inconsistent_ids}))
         resume_interrupted_dataset_processing(workspace)
-        queue_workspace_dimension_materialization(workspace)
+        if repository.get_workspace_state('calculated_dimensions_need_materialization') in {'1', 'processing'}:
+            queue_workspace_dimension_materialization(workspace)
         return workspace
 
 
@@ -2348,6 +2429,7 @@ def format_workspace_size(size_bytes: int) -> str:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    APP_SHUTTING_DOWN.clear()
     ensure_directories([
         settings.database_path.parent,
         settings.template_dir,
@@ -2357,9 +2439,13 @@ async def lifespan(_: FastAPI):
     # Capture the configured legacy paths once, then retain them as the
     # original workspace while every newly-created workspace gets its own DB
     # and data directories.
-    global workspace_registry, application_config_dir, BACKGROUND_TASK_SCHEDULER
+    global workspace_registry, application_config_dir, BACKGROUND_TASK_SCHEDULER, EXPORT_TASK_SCHEDULER
     if BACKGROUND_TASK_SCHEDULER.closed:
         BACKGROUND_TASK_SCHEDULER = BackgroundTaskScheduler(max_workers=1)
+    if EXPORT_TASK_SCHEDULER.closed:
+        EXPORT_TASK_SCHEDULER = BackgroundTaskScheduler(max_workers=1)
+    with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+        AUTO_CALCULATED_FIELD_JOBS.clear()
     application_config_dir = settings.database_path.parent
     workspace_registry = WorkspaceRegistry(
         settings.input_dir.parent / 'workspaces' / 'workspace-registry.db',
@@ -2383,7 +2469,12 @@ async def lifespan(_: FastAPI):
     # checkpoints every SQLite database, which can leave startup blocked for
     # minutes on installations with large reporting-row stores.
     export_package_dir().mkdir(parents=True, exist_ok=True)
-    Thread(target=recurring_backup_scheduler_loop, name='recurring-backup-scheduler', daemon=True).start()
+    backup_scheduler_stop = Event()
+    backup_scheduler_thread = Thread(
+        target=recurring_backup_scheduler_loop, args=(backup_scheduler_stop,),
+        name='recurring-backup-scheduler', daemon=True,
+    )
+    backup_scheduler_thread.start()
     _recover_unimported_transfer_packages()
     _cleanup_expired_export_packages()
     if (workspace_id := workspace_registry.active_id()):
@@ -2401,6 +2492,21 @@ async def lifespan(_: FastAPI):
                 }),
             )
     yield
+    APP_SHUTTING_DOWN.set()
+    backup_scheduler_stop.set()
+    backup_scheduler_thread.join(timeout=1)
+    BACKGROUND_TASK_SCHEDULER.shutdown(wait=False, cancel_futures=True)
+    with ACTIVE_DATASET_WORKERS_LOCK:
+        active_workers = list(ACTIVE_DATASET_WORKERS)
+    for worker in active_workers:
+        if worker.poll() is None:
+            worker.terminate()
+    for worker in active_workers:
+        try:
+            worker.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            worker.kill()
+            worker.wait()
     BACKGROUND_TASK_SCHEDULER.shutdown(wait=True)
     EXPORT_TASK_SCHEDULER.shutdown(wait=True)
 
@@ -2788,14 +2894,20 @@ def _dataset_processing_executor(task_repository: Repository) -> BackgroundTaskS
     return BACKGROUND_TASK_SCHEDULER
 
 
+def _submit_workspace_job(
+    task_repository: Repository, callback: Callable[..., Any], /, *args: Any,
+    phase: int, dataset_id: int = 0,
+) -> Future[Any]:
+    """Run one heavy Workspace job at a time in dependency and dataset ID order."""
+    return _dataset_processing_executor(task_repository).submit_ordered(
+        callback, *args, workspace_key=str(task_repository.db_path.resolve()),
+        priority=(phase, dataset_id),
+    )
+
+
 def submit_background_task(callback: Callable[..., Any], /, *args: Any) -> Future[Any]:
     """Submit application work to the shared FIFO background scheduler."""
     return BACKGROUND_TASK_SCHEDULER.submit(callback, *args)
-
-
-def _combined_cdr_recreation_executor(task_repository: Repository) -> BackgroundTaskScheduler:
-    """Queue combined-table work behind the same global background limit."""
-    return _dataset_processing_executor(task_repository)
 
 
 def _dataset_processing_lock(task_repository: Repository):
@@ -2818,22 +2930,56 @@ def _dataset_resource_slot(task_repository: Repository, dataset_path: Path):
 
 def _unregister_dataset_processing(dataset_id: int, task_repository: Repository) -> None:
     with ACTIVE_DATASET_PROCESSING_LOCK:
-        ACTIVE_DATASET_PROCESSING.discard(_dataset_stop_key(dataset_id, task_repository))
+        key = _dataset_stop_key(dataset_id, task_repository)
+        ACTIVE_DATASET_PROCESSING.discard(key)
+        QUEUED_DATASET_FUTURES.pop(key, None)
+
+
+def _track_dataset_future(dataset_id: int, task_repository: Repository, future: Future[Any]) -> Future[Any]:
+    key = _dataset_stop_key(dataset_id, task_repository)
+    with ACTIVE_DATASET_PROCESSING_LOCK:
+        QUEUED_DATASET_FUTURES[key] = future
+    def forget_finished(completed: Future[Any]) -> None:
+        with ACTIVE_DATASET_PROCESSING_LOCK:
+            if QUEUED_DATASET_FUTURES.get(key) is completed:
+                QUEUED_DATASET_FUTURES.pop(key, None)
+                if completed.cancelled():
+                    ACTIVE_DATASET_PROCESSING.discard(key)
+    future.add_done_callback(forget_finished)
+    if stop_requested(dataset_id, task_repository) and future.cancel():
+        _unregister_dataset_processing(dataset_id, task_repository)
+    return future
 
 
 def request_stop(dataset_id: int, task_repository: Repository | None = None) -> None:
+    task_repository = task_repository or repository
     with STOP_REQUESTS_LOCK:
         STOP_REQUESTS.add(_dataset_stop_key(dataset_id, task_repository))
+    marker = _dataset_stop_marker_path(dataset_id, task_repository)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(str(datetime.now(timezone.utc).timestamp()), encoding='utf-8')
+    with ACTIVE_DATASET_PROCESSING_LOCK:
+        future = QUEUED_DATASET_FUTURES.get(_dataset_stop_key(dataset_id, task_repository))
+    if future is not None and future.cancel():
+        _unregister_dataset_processing(dataset_id, task_repository)
+
+
+def _dataset_stop_marker_path(dataset_id: int, task_repository: Repository | None = None) -> Path:
+    task_repository = task_repository or repository
+    workspace_key = hashlib.sha256(_dataset_stop_key(dataset_id, task_repository)[0].encode()).hexdigest()[:24]
+    return task_repository.db_path.parent / '.background-stop-requests' / f'dataset-{workspace_key}-{dataset_id}.stop'
 
 
 def clear_stop_request(dataset_id: int, task_repository: Repository | None = None) -> None:
     with STOP_REQUESTS_LOCK:
         STOP_REQUESTS.discard(_dataset_stop_key(dataset_id, task_repository))
+    _dataset_stop_marker_path(dataset_id, task_repository).unlink(missing_ok=True)
 
 
 def stop_requested(dataset_id: int, task_repository: Repository | None = None) -> bool:
     with STOP_REQUESTS_LOCK:
-        return _dataset_stop_key(dataset_id, task_repository) in STOP_REQUESTS
+        requested_in_memory = _dataset_stop_key(dataset_id, task_repository) in STOP_REQUESTS
+    return requested_in_memory or _dataset_stop_marker_path(dataset_id, task_repository).is_file()
 
 
 def ensure_not_stopped(dataset_id: int, task_repository: Repository | None = None) -> None:
@@ -2979,7 +3125,7 @@ def _process_dataset(
                 task_repository.update_dataset_profile(
                     dataset_id,
                     status='failed',
-                    progress=100,
+                    processing_step='Failed',
                     last_error='The source file is missing. Reupload the dataset before retrying.',
                     processed_at=now_iso(),
                 )
@@ -2988,14 +3134,19 @@ def _process_dataset(
         if str(dataset['status'] or '').casefold() == 'stopped':
             clear_stop_request(dataset_id, task_repository)
             return
-        clear_stop_request(dataset_id, task_repository)
         task_repository.update_dataset_profile(
-            dataset_id, status='processing', progress=10, last_error=None, processing_started_at=now_iso(), processed_at=None,
+            dataset_id, status='processing', progress=10, processing_step='Reading source rows',
+            last_error=None, processing_started_at=now_iso(), processed_at=None,
         )
         try:
             def progress_update(value: int) -> None:
                 ensure_not_stopped(dataset_id, task_repository)
-                task_repository.update_dataset_profile(dataset_id, progress=max(10, min(95, int(value))))
+                progress_fields = {'progress': max(10, min(95, int(value)))}
+                if int(value) <= 55:
+                    progress_fields['processing_step'] = (
+                        'Reading source rows' if int(value) < 55 else 'Normalizing source fields'
+                    )
+                task_repository.update_dataset_profile(dataset_id, **progress_fields)
 
             selected_kind = str(dataset['dataset_kind'] or '').strip().lower()
             forced_dataset_kind = selected_kind if selected_kind in UPLOAD_DATASET_KINDS else None
@@ -3010,6 +3161,7 @@ def _process_dataset(
                 task_repository=task_repository,
                 update_combined_reporting=False,
             )
+            ensure_not_stopped(dataset_id, task_repository)
             if vodafone_mapping_dataset_id or three_mapping_dataset_id:
                 mapping_error = str(rebuild_result.get('vendor_mapping_error') or '').strip()
                 if mapping_error:
@@ -3044,13 +3196,14 @@ def _process_dataset(
             task_repository.update_dataset_profile(
                 dataset_id,
                 status='stopped',
+                processing_step='Stopped',
                 progress=max(0, min(99, progress)),
                 last_error=None if stopped_by_batch else str(exc),
                 processed_at=now_iso(),
             )
             task_repository.add_log(username, 'stop_dataset', json.dumps({'dataset_id': dataset_id, 'file': dataset_path.name}))
         except Exception as exc:
-            task_repository.update_dataset_profile(dataset_id, status='failed', progress=100, last_error=str(exc), processed_at=now_iso())
+            task_repository.update_dataset_profile(dataset_id, status='failed', processing_step='Failed', last_error=str(exc), processed_at=now_iso())
             task_repository.add_log(username, 'process_dataset_failed', json.dumps({'dataset_id': dataset_id, 'file': dataset_path.name, 'error': str(exc)}))
         finally:
             clear_stop_request(dataset_id, task_repository)
@@ -3084,20 +3237,25 @@ def process_dataset(
             start_combined_cdr_recreation_job(
                 workspace, combined_kind, username, background=True,
             )
+        elif workspace:
+            queue_workspace_dimension_materialization(workspace)
     finally:
         _unregister_dataset_processing(dataset_id, task_repository)
 
 
-def _run_large_dataset_in_worker(
+def _run_dataset_in_worker(
     dataset_id: int, dataset_path: Path, username: str,
     vodafone_mapping_dataset_id: int | None, three_mapping_dataset_id: int | None,
     region_mapping_dataset_id: int | None, task_repository: Repository, operation: str = 'process',
 ) -> None:
     """Move a large CDR parse out of the web-server interpreter."""
+    if APP_SHUTTING_DOWN.is_set():
+        return
     command = [
         sys.executable, '-m', 'src.dataset_worker',
         '--dataset-id', str(dataset_id), '--dataset-path', str(dataset_path),
         '--username', username, '--workspace-db', str(task_repository.db_path), '--operation', operation,
+        '--parent-pid', str(os.getpid()),
     ]
     for option, value in (
         ('--vodafone-mapping-dataset-id', vodafone_mapping_dataset_id),
@@ -3106,10 +3264,61 @@ def _run_large_dataset_in_worker(
     ):
         if value is not None:
             command.extend((option, str(value)))
-    worker = subprocess.Popen(command, cwd=PROJECT_ROOT, start_new_session=True)
-    if worker.wait() != 0:
+    worker_environment = os.environ.copy()
+    for variable in ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS'):
+        worker_environment[variable] = '1'
+    worker = subprocess.Popen(
+        command, cwd=PROJECT_ROOT, env=worker_environment, start_new_session=True,
+    )
+    with ACTIVE_DATASET_WORKERS_LOCK:
+        ACTIVE_DATASET_WORKERS.add(worker)
+    try:
+        if APP_SHUTTING_DOWN.is_set() and worker.poll() is None:
+            worker.terminate()
+        while True:
+            try:
+                exit_code = worker.wait(timeout=0.25)
+                break
+            except subprocess.TimeoutExpired:
+                if not stop_requested(dataset_id, task_repository):
+                    continue
+                worker.terminate()
+                try:
+                    worker.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    worker.kill()
+                    worker.wait()
+                clear_stop_request(dataset_id, task_repository)
+                return
+    finally:
+        with ACTIVE_DATASET_WORKERS_LOCK:
+            ACTIVE_DATASET_WORKERS.discard(worker)
+    if APP_SHUTTING_DOWN.is_set():
+        return
+    if exit_code == 75:
+        # An orphan from the previous server still owns this dataset. Keep the
+        # Workspace slot until that worker releases its cross-process lock.
+        lock_path = task_repository.db_path.parent / f'.dataset-worker-{dataset_id}.lock'
+        with lock_path.open('a+b') as lock_file:
+            while not APP_SHUTTING_DOWN.is_set():
+                try:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    sleep(0.25)
+            else:
+                return
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        completed = task_repository.get_dataset(dataset_id)
+        if completed and str(completed['status']) in {'queued', 'processing'}:
+            task_repository.update_dataset_profile(
+                dataset_id, status='failed', last_error='The previous dataset worker stopped before completing. Retry processing.',
+                processed_at=now_iso(),
+            )
+        return
+    if exit_code != 0 and str((task_repository.get_dataset(dataset_id) or {})['status'] or '') != 'stopped':
         task_repository.update_dataset_profile(
-            dataset_id, status='failed', progress=100,
+            dataset_id, status='failed', processing_step='Failed',
             last_error='The isolated CDR worker stopped unexpectedly.', processed_at=now_iso(),
         )
 
@@ -3140,7 +3349,7 @@ def enqueue_dataset_processing(
     try:
         if persist_queued_state:
             repository.update_dataset_profile(
-                dataset_id, status='queued', progress=0, last_error=None,
+                dataset_id, status='queued', progress=0, processing_step='', last_error=None,
                 processing_queued_at=now_iso(), processing_started_at=None, processed_at=None,
                 processing_options_json=json.dumps({
                     **{'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id, 'three_mapping_dataset_id': three_mapping_dataset_id},
@@ -3155,23 +3364,40 @@ def enqueue_dataset_processing(
         None,
     )
     try:
-        if dataset_path.stat().st_size >= HEAVY_DATASET_PROCESSING_THRESHOLD_BYTES:
-            def wait_for_large_dataset_worker() -> None:
+        if dataset_path.is_file():
+            def wait_for_dataset_worker() -> None:
                 try:
-                    _run_large_dataset_in_worker(
+                    for dependency in dependencies:
+                        dependency.result()
+                    _run_dataset_in_worker(
                         dataset_id, dataset_path, username,
                         vodafone_mapping_dataset_id, three_mapping_dataset_id,
                         region_mapping_dataset_id, task_repository,
                     )
+                    completed = task_repository.get_dataset(dataset_id)
+                    completed_kind = str(completed['dataset_kind'] or '').casefold() if completed else ''
+                    if (
+                        task_workspace and completed and str(completed['status']) == 'ready'
+                        and completed_kind in CDR_DATASET_KINDS
+                    ):
+                        start_combined_cdr_recreation_job(task_workspace, completed_kind, username)
+                except Exception as exc:
+                    task_repository.update_dataset_profile(
+                        dataset_id, status='failed',
+                        last_error=f'Dataset worker could not start: {exc}', processed_at=now_iso(),
+                    )
+                    raise
                 finally:
                     _unregister_dataset_processing(dataset_id, task_repository)
 
-            # Serialize heavy worker launches. The scheduler thread waits on
-            # the child process, not on CPU work, so the web server remains
-            # responsive while every large CDR still runs one at a time.
-            future = _dataset_processing_executor(task_repository).submit(wait_for_large_dataset_worker)
-            background_tasks.add_task(future.result)
-            return future
+            # Parse every source outside the web process. The scheduler thread
+            # waits on the child without consuming an interactive CPU core.
+            future = _submit_workspace_job(
+                task_repository, wait_for_dataset_worker,
+                phase=0 if str((task_repository.get_dataset(dataset_id) or {})['dataset_kind'] or '') in {'mapping_vodafone', 'mapping_three', 'mapping_region'} else 1,
+                dataset_id=dataset_id,
+            )
+            return _track_dataset_future(dataset_id, task_repository, future)
 
         def process_after_dependencies() -> None:
             processing_started = False
@@ -3192,7 +3418,7 @@ def enqueue_dataset_processing(
             except Exception as exc:
                 if not processing_started:
                     task_repository.update_dataset_profile(
-                        dataset_id, status='failed', progress=100,
+                        dataset_id, status='failed', processing_step='Failed',
                         last_error=f'Dependent dataset processing failed: {exc}', processed_at=now_iso(),
                     )
                 raise
@@ -3200,17 +3426,18 @@ def enqueue_dataset_processing(
                 if not processing_started:
                     _unregister_dataset_processing(dataset_id, task_repository)
 
-        future = _dataset_processing_executor(task_repository).submit(
-            process_after_dependencies,
+        queued_dataset = task_repository.get_dataset(dataset_id)
+        is_mapping = bool(queued_dataset and str(queued_dataset['dataset_kind'] or '') in {'mapping_vodafone', 'mapping_three', 'mapping_region'})
+        future = _submit_workspace_job(
+            task_repository, process_after_dependencies,
+            phase=0 if is_mapping else 1, dataset_id=dataset_id,
         )
     except Exception:
         _unregister_dataset_processing(dataset_id, task_repository)
         raise
-    # Keep Starlette aware of the work for graceful request/application
-    # shutdown, while the independent worker survives browser navigation,
-    # logout and Workspace changes.
-    background_tasks.add_task(future.result)
-    return future
+    # The scheduler owns the job. Waiting for its Future in Starlette would
+    # keep the HTTP request and graceful shutdown blocked until it finishes.
+    return _track_dataset_future(dataset_id, task_repository, future)
 
 
 def resume_interrupted_dataset_processing(workspace: Workspace) -> list[int]:
@@ -3221,7 +3448,20 @@ def resume_interrupted_dataset_processing(workspace: Workspace) -> list[int]:
         workspace_registry_db_path=workspace_registry.registry_path,
     )
     resumed: list[int] = []
-    for row in task_repository.list_datasets():
+    dataset_rows = task_repository.list_datasets()
+    if any(
+        str(row['status'] or '') == 'failed'
+        and str(row['last_error'] or '').startswith('Processing state was inconsistent after an interrupted worker.')
+        for row in dataset_rows
+    ):
+        return resumed
+    for row in sorted(
+        dataset_rows,
+        key=lambda item: (
+            0 if str(item['dataset_kind'] or '') in {'mapping_vodafone', 'mapping_three', 'mapping_region'} else 1,
+            int(item['id']),
+        ),
+    ):
         if str(row['status'] or '').casefold() not in {'queued', 'processing'}:
             continue
         dataset_id = int(row['id'])
@@ -3231,7 +3471,7 @@ def resume_interrupted_dataset_processing(workspace: Workspace) -> list[int]:
         if not dataset_path.is_file():
             _unregister_dataset_processing(dataset_id, task_repository)
             task_repository.update_dataset_profile(
-                dataset_id, status='failed', progress=100,
+                dataset_id, status='failed', processing_step='Failed',
                 last_error='The source file is missing. Reupload the dataset before retrying.',
                 processed_at=now_iso(),
             )
@@ -3241,24 +3481,48 @@ def resume_interrupted_dataset_processing(workspace: Workspace) -> list[int]:
         except (json.JSONDecodeError, TypeError):
             options = {}
         task_repository.update_dataset_profile(
-            dataset_id, status='queued', last_error=None, processing_queued_at=now_iso(),
+            dataset_id, status='queued', progress=0, processing_step='', last_error=None, processing_queued_at=now_iso(),
             processing_started_at=None, processed_at=None,
         )
-        _dataset_processing_executor(task_repository).submit(
-            process_dataset,
-            *(
-                dataset_id,
-                dataset_path,
-                str(row['uploaded_by'] or 'system'),
-                options.get('vodafone_mapping_dataset_id'),
-                options.get('three_mapping_dataset_id'),
-                task_repository,
-                workspace,
-                options.get('region_mapping_dataset_id'),
-            ),
+        username = str(row['uploaded_by'] or 'system')
+        vodafone_mapping_id = options.get('vodafone_mapping_dataset_id')
+        three_mapping_id = options.get('three_mapping_dataset_id')
+        region_mapping_id = options.get('region_mapping_dataset_id')
+        future = _submit_workspace_job(
+            task_repository, _resume_dataset_in_worker,
+            dataset_id, dataset_path, username,
+            vodafone_mapping_id, three_mapping_id,
+            task_repository, workspace, region_mapping_id,
+            phase=0 if str(row['dataset_kind'] or '') in {'mapping_vodafone', 'mapping_three', 'mapping_region'} else 1,
+            dataset_id=dataset_id,
         )
+        _track_dataset_future(dataset_id, task_repository, future)
+        task_repository.try_add_log('system', 'resume_interrupted_dataset', json.dumps({
+            'dataset_id': dataset_id, 'file': dataset_path.name, 'executed_by': 'system',
+        }))
         resumed.append(dataset_id)
     return resumed
+
+
+def _resume_dataset_in_worker(
+    dataset_id: int, dataset_path: Path, username: str,
+    vodafone_mapping_dataset_id: int | None, three_mapping_dataset_id: int | None,
+    task_repository: Repository, workspace: Workspace,
+    region_mapping_dataset_id: int | None,
+) -> None:
+    try:
+        _run_dataset_in_worker(
+            dataset_id, dataset_path, username,
+            vodafone_mapping_dataset_id, three_mapping_dataset_id,
+            region_mapping_dataset_id, task_repository,
+        )
+        completed = task_repository.get_dataset(dataset_id)
+        if completed and str(completed['status']) == 'ready':
+            completed_kind = str(completed['dataset_kind'] or '').casefold()
+            if completed_kind in CDR_DATASET_KINDS:
+                start_combined_cdr_recreation_job(workspace, completed_kind, username)
+    finally:
+        _unregister_dataset_processing(dataset_id, task_repository)
 
 
 def rebuild_dataset_artifacts(
@@ -3283,6 +3547,7 @@ def rebuild_dataset_artifacts(
             progress_callback(55)
     else:
         df = load_dataset(dataset_path, progress_callback=progress_callback, source_columns=source_columns)
+    task_repository.update_dataset_profile(dataset_id, processing_step='Registering source columns')
     task_repository.replace_dataset_source_columns(dataset_id, source_columns)
     if forced_dataset_kind in UPLOAD_DATASET_KINDS:
         df['dataset_kind'] = forced_dataset_kind
@@ -3296,8 +3561,9 @@ def rebuild_dataset_artifacts(
     auto_region_mapping_applied = False
     auto_region_mapping_error: str | None = None
     if dataset_kind in CDR_DATASET_KINDS and (vodafone_mapping_dataset_id or three_mapping_dataset_id):
+        task_repository.update_dataset_profile(dataset_id, processing_step='Applying Vendor Mapping')
         if progress_callback:
-            progress_callback(52)
+            progress_callback(56)
         vodafone_mapping = (
             _reporting_dataset(vodafone_mapping_dataset_id, 'mapping_vodafone', task_repository)
             if vodafone_mapping_dataset_id else None
@@ -3318,6 +3584,7 @@ def rebuild_dataset_artifacts(
             # an otherwise valid CDR unusable in Workspace or Datasets Analysis.
             auto_vendor_mapping_error = str(exc)
     if dataset_kind in CDR_DATASET_KINDS and region_mapping_dataset_id:
+        task_repository.update_dataset_profile(dataset_id, processing_step='Applying Region Mapping')
         if progress_callback:
             progress_callback(57)
         try:
@@ -3327,10 +3594,13 @@ def rebuild_dataset_artifacts(
         except Exception as exc:
             auto_region_mapping_error = str(exc)
     if dataset_kind in CDR_DATASET_KINDS:
+        task_repository.update_dataset_profile(dataset_id, processing_step='Calculating CDR-derived fields')
         df = materialize_cdr_derived_columns(df, dataset_kind, workspace_dimensions)
+    task_repository.update_dataset_profile(dataset_id, processing_step='Caching normalized dataset')
     store_cached_dataset_frame(dataset_path, df)
     # Keep the related per-dataset and combined-table mutations together while
     # allowing the expensive file parsing above to run in parallel.
+    task_repository.update_dataset_profile(dataset_id, processing_step='Writing dataset rows')
     with workspace_write_lock(task_repository.db_path):
         task_repository.replace_dataset_rows(dataset_id, df)
         if dataset_kind in CDR_DATASET_KINDS and update_combined_reporting:
@@ -3341,13 +3611,13 @@ def rebuild_dataset_artifacts(
             )
     if progress_callback:
         progress_callback(62)
-    task_repository.update_dataset_profile(dataset_id, progress=62, dataset_kind=dataset_kind)
+    task_repository.update_dataset_profile(dataset_id, progress=62, dataset_kind=dataset_kind, processing_step='Summarizing dataset')
     summary = summarise_dataset(df)
     if dataset_kind == 'mapping_region':
         # A polygon mapping is a configuration asset, not a CDR. It has no
         # numeric KPI to analyse, so mark it ready after validation/storage.
         task_repository.update_dataset_profile(
-            dataset_id, status='ready', progress=100,
+            dataset_id, status='ready', progress=100, processing_step='Completed',
             normalization_version=DATASET_NORMALIZATION_VERSION,
             dataset_kind=dataset_kind, row_count=summary.rows,
             column_count=len(summary.columns), default_metric='',
@@ -3364,12 +3634,12 @@ def rebuild_dataset_artifacts(
         }
     if progress_callback:
         progress_callback(72)
-    task_repository.update_dataset_profile(dataset_id, progress=72)
+    task_repository.update_dataset_profile(dataset_id, progress=72, processing_step='Calculating metrics')
     available_metrics = derive_available_metrics(df)
     analysis = build_analysis(df, {'aggregation': 'all', 'extra_filters': {}}, '')
     if progress_callback:
         progress_callback(84)
-    task_repository.update_dataset_profile(dataset_id, progress=84)
+    task_repository.update_dataset_profile(dataset_id, progress=84, processing_step='Preparing analysis filters')
     profile_df = restrict_frame_to_metric(df, analysis.selected_metric)
     filter_options = derive_filter_options(profile_df)
     available_aggregations = derive_available_aggregations(filter_options)
@@ -3378,6 +3648,7 @@ def rebuild_dataset_artifacts(
         default_aggregation = available_aggregations[0]
     if progress_callback:
         progress_callback(94)
+    task_repository.update_dataset_profile(dataset_id, processing_step='Finalizing dataset profile')
     vendor_values_complete = bool(
         'vendor' in df.columns
         and not df.empty
@@ -3387,6 +3658,7 @@ def rebuild_dataset_artifacts(
         dataset_id,
         status='ready',
         progress=100,
+        processing_step='Completed',
         normalization_version=DATASET_NORMALIZATION_VERSION,
         vendor_mapping_applied=auto_vendor_mapping_applied,
         region_mapping_applied=auto_region_mapping_applied,
@@ -3506,17 +3778,25 @@ def process_region_mapping(dataset_id: int, username: str, mapping_dataset_id: i
         row = task_repository.get_dataset(dataset_id)
         if not row:
             return
+        if str(row['status'] or '') == 'stopped':
+            return
+        ensure_not_stopped(dataset_id, task_repository)
         dataset = serialize_dataset_row(row)
-        task_repository.update_dataset_profile(dataset_id, status='processing', progress=10, last_error=None, processing_started_at=now_iso(), processed_at=None)
+        task_repository.update_dataset_profile(dataset_id, status='processing', progress=10, processing_step='Loading Region Mapping', last_error=None, processing_started_at=now_iso(), processed_at=None)
         mapping = _reporting_dataset(mapping_dataset_id, 'mapping_region', task_repository)
         frame = assign_regions(_reporting_frame(dataset_id, task_repository), str(dataset['dataset_kind']), Path(str(mapping['stored_path'])))
-        task_repository.update_dataset_profile(dataset_id, progress=75)
+        ensure_not_stopped(dataset_id, task_repository)
+        task_repository.update_dataset_profile(dataset_id, progress=75, processing_step='Writing mapped CDR rows')
         persist_region_mapped_cdr_frame(dataset, frame, mapping_dataset_id, task_repository)
+        ensure_not_stopped(dataset_id, task_repository)
         clear_dataset_analysis_cache(Path(str(dataset['stored_path'])))
-        task_repository.update_dataset_profile(dataset_id, status='ready', progress=100, last_error=None, processed_at=now_iso())
+        task_repository.update_dataset_profile(dataset_id, status='ready', progress=100, processing_step='Completed', last_error=None, processed_at=now_iso())
         task_repository.add_log(username, 'map_dataset_regions', json.dumps({'dataset_id': dataset_id, 'region_mapping_dataset_id': mapping_dataset_id}))
+    except ProcessingStopped as exc:
+        task_repository.update_dataset_profile(dataset_id, status='stopped', progress=75, processing_step='Stopped', last_error=str(exc), processed_at=now_iso())
+        task_repository.try_add_log(username, 'stop_region_mapping', json.dumps({'dataset_id': dataset_id}))
     except Exception as exc:
-        task_repository.update_dataset_profile(dataset_id, status='ready', progress=100, last_error=None, processed_at=now_iso())
+        task_repository.update_dataset_profile(dataset_id, status='ready', progress=100, processing_step='Completed', last_error=None, processed_at=now_iso())
         task_repository.add_log(username, 'map_dataset_regions_failed', json.dumps({'dataset_id': dataset_id, 'error': str(exc)}))
     finally:
         clear_stop_request(dataset_id, task_repository)
@@ -3525,26 +3805,27 @@ def process_region_mapping(dataset_id: int, username: str, mapping_dataset_id: i
 
 def enqueue_region_mapping(background_tasks: BackgroundTasks, dataset_id: int, username: str, mapping_dataset_id: int) -> None:
     task_repository = Repository(Path(repository.db_path))
+    clear_stop_request(dataset_id, task_repository)
     row = task_repository.get_dataset(dataset_id)
     try:
         options = json.loads(str(row['processing_options_json'] or '{}')) if row else {}
     except (TypeError, json.JSONDecodeError):
         options = {}
     options['region_mapping_dataset_id'] = mapping_dataset_id
-    task_repository.update_dataset_profile(dataset_id, status='queued', progress=0, last_error=None, processing_queued_at=now_iso(), processing_started_at=None, processed_at=None,
+    task_repository.update_dataset_profile(dataset_id, status='queued', progress=0, processing_step='', last_error=None, processing_queued_at=now_iso(), processing_started_at=None, processed_at=None,
         processing_options_json=json.dumps(options))
     _register_dataset_processing(dataset_id, task_repository)
     dataset_path = Path(str(row['stored_path'] or '')) if row else Path()
     def run_in_worker() -> None:
         try:
-            _run_large_dataset_in_worker(
+            _run_dataset_in_worker(
                 dataset_id, dataset_path, username, None, None, mapping_dataset_id,
                 task_repository, operation='region-mapping',
             )
         finally:
             _unregister_dataset_processing(dataset_id, task_repository)
-    future = _dataset_processing_executor(task_repository).submit(run_in_worker)
-    background_tasks.add_task(future.result)
+    future = _submit_workspace_job(task_repository, run_in_worker, phase=1, dataset_id=dataset_id)
+    _track_dataset_future(dataset_id, task_repository, future)
 
 
 def process_vendor_mapping(
@@ -3563,10 +3844,12 @@ def process_vendor_mapping(
             dataset_row = task_repository.get_dataset(dataset_id)
             if not dataset_row:
                 return
+            if str(dataset_row['status'] or '') == 'stopped':
+                return
             dataset = serialize_dataset_row(dataset_row)
             dataset_path = Path(dataset['stored_path'])
             task_repository.update_dataset_profile(
-                dataset_id, status='processing', progress=10, last_error=None,
+                dataset_id, status='processing', progress=10, processing_step='Loading Vendor Mappings', last_error=None,
                 processing_started_at=now_iso(), processed_at=None,
             )
             try:
@@ -3579,7 +3862,7 @@ def process_vendor_mapping(
                     _reporting_dataset(three_mapping_dataset_id, 'mapping_three', task_repository)
                     if three_mapping_dataset_id else None
                 )
-                task_repository.update_dataset_profile(dataset_id, progress=35)
+                task_repository.update_dataset_profile(dataset_id, progress=35, processing_step='Applying Vendor Mapping')
                 ensure_not_stopped(dataset_id, task_repository)
                 dataset_path = Path(str(dataset.get('stored_path') or ''))
                 needs_source_operator_recovery = (
@@ -3596,6 +3879,10 @@ def process_vendor_mapping(
                         vodafone_mapping_dataset_id=vodafone_mapping_dataset_id,
                         three_mapping_dataset_id=three_mapping_dataset_id,
                         task_repository=task_repository,
+                        progress_callback=lambda progress: (
+                            ensure_not_stopped(dataset_id, task_repository),
+                            task_repository.update_dataset_profile(dataset_id, progress=max(10, min(95, int(progress)))),
+                        ),
                     )
                     if rebuild_result.get('vendor_mapping_error'):
                         raise ValueError(str(rebuild_result['vendor_mapping_error']))
@@ -3612,12 +3899,12 @@ def process_vendor_mapping(
                     _reporting_frame(vodafone_mapping['id'], task_repository) if vodafone_mapping else None,
                     _reporting_frame(three_mapping['id'], task_repository) if three_mapping else None,
                 )
-                task_repository.update_dataset_profile(dataset_id, progress=75)
+                task_repository.update_dataset_profile(dataset_id, progress=75, processing_step='Writing mapped CDR rows')
                 ensure_not_stopped(dataset_id, task_repository)
                 persist_mapped_cdr_frame(dataset, mapped_frame, task_repository)
                 clear_dataset_analysis_cache(dataset_path)
                 task_repository.update_dataset_profile(
-                    dataset_id, status='ready', progress=100, last_error=None, processed_at=now_iso(),
+                    dataset_id, status='ready', progress=100, processing_step='Completed', last_error=None, processed_at=now_iso(),
                 )
                 task_repository.add_log(username, 'map_dataset_vendors', json.dumps({
                     'dataset_id': dataset_id,
@@ -3627,14 +3914,14 @@ def process_vendor_mapping(
                 }))
             except ProcessingStopped as exc:
                 task_repository.update_dataset_profile(
-                    dataset_id, status='stopped', progress=99, last_error=str(exc), processed_at=now_iso(),
+                    dataset_id, status='stopped', progress=99, processing_step='Stopped', last_error=str(exc), processed_at=now_iso(),
                 )
                 task_repository.add_log(username, 'stop_vendor_mapping', json.dumps({'dataset_id': dataset_id}))
             except Exception as exc:
                 # Mapping reads and enriches an already materialised CDR. Until
                 # the final persistence succeeds, keep that CDR available.
                 task_repository.update_dataset_profile(
-                    dataset_id, status='ready', progress=100, last_error=None, processed_at=now_iso(),
+                    dataset_id, status='ready', progress=100, processing_step='Completed', last_error=None, processed_at=now_iso(),
                 )
                 task_repository.add_log(
                     username, 'map_dataset_vendors_failed',
@@ -3656,7 +3943,7 @@ def enqueue_vendor_mapping(
     task_repository = Repository(Path(repository.db_path))
     clear_stop_request(dataset_id, task_repository)
     task_repository.update_dataset_profile(
-        dataset_id, status='queued', progress=0, last_error=None, processing_queued_at=now_iso(),
+        dataset_id, status='queued', progress=0, processing_step='', last_error=None, processing_queued_at=now_iso(),
         processing_started_at=None, processed_at=None,
         processing_options_json=json.dumps({
             'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
@@ -3668,14 +3955,14 @@ def enqueue_vendor_mapping(
     dataset_path = Path(str(row['stored_path'] or '')) if row else Path()
     def run_in_worker() -> None:
         try:
-            _run_large_dataset_in_worker(
+            _run_dataset_in_worker(
                 dataset_id, dataset_path, username, vodafone_mapping_dataset_id,
                 three_mapping_dataset_id, None, task_repository, operation='vendor-mapping',
             )
         finally:
             _unregister_dataset_processing(dataset_id, task_repository)
-    future = _dataset_processing_executor(task_repository).submit(run_in_worker)
-    background_tasks.add_task(future.result)
+    future = _submit_workspace_job(task_repository, run_in_worker, phase=1, dataset_id=dataset_id)
+    _track_dataset_future(dataset_id, task_repository, future)
 
 
 def queue_legacy_vendor_mapping_recovery(
@@ -3723,10 +4010,12 @@ def process_vendor_clearing(
             dataset_row = task_repository.get_dataset(dataset_id)
             if not dataset_row:
                 return
+            if str(dataset_row['status'] or '') == 'stopped':
+                return
             dataset = serialize_dataset_row(dataset_row)
             dataset_path = Path(dataset['stored_path'])
             task_repository.update_dataset_profile(
-                dataset_id, status='processing', progress=10, last_error=None,
+                dataset_id, status='processing', progress=10, processing_step='Reading source data', last_error=None,
                 processing_started_at=now_iso(), processed_at=None,
             )
             try:
@@ -3735,26 +4024,27 @@ def process_vendor_clearing(
                     dataset_id,
                     dataset_path,
                     forced_dataset_kind=dataset['dataset_kind'],
-                    progress_callback=lambda progress: task_repository.update_dataset_profile(
-                        dataset_id, progress=max(10, min(95, int(progress)))
+                    progress_callback=lambda progress: (
+                        ensure_not_stopped(dataset_id, task_repository),
+                        task_repository.update_dataset_profile(dataset_id, progress=max(10, min(95, int(progress)))),
                     ),
                     task_repository=task_repository,
                 )
                 clear_dataset_analysis_cache(dataset_path)
                 task_repository.update_dataset_profile(
-                    dataset_id, status='ready', progress=100, last_error=None, processed_at=now_iso(),
+                    dataset_id, status='ready', progress=100, processing_step='Completed', last_error=None, processed_at=now_iso(),
                 )
                 task_repository.add_log(
                     username, 'clear_dataset_vendors', json.dumps({'dataset_id': dataset_id, 'status': 'ready'}),
                 )
             except ProcessingStopped as exc:
                 task_repository.update_dataset_profile(
-                    dataset_id, status='stopped', progress=99, last_error=str(exc), processed_at=now_iso(),
+                    dataset_id, status='stopped', progress=99, processing_step='Stopped', last_error=str(exc), processed_at=now_iso(),
                 )
                 task_repository.add_log(username, 'stop_vendor_clearing', json.dumps({'dataset_id': dataset_id}))
             except Exception as exc:
                 task_repository.update_dataset_profile(
-                    dataset_id, status='failed', progress=100, last_error=str(exc), processed_at=now_iso(),
+                    dataset_id, status='failed', processing_step='Failed', last_error=str(exc), processed_at=now_iso(),
                 )
                 task_repository.add_log(
                     username, 'clear_dataset_vendors_failed', json.dumps({'dataset_id': dataset_id, 'error': str(exc)}),
@@ -3769,15 +4059,26 @@ def enqueue_vendor_clearing(background_tasks: BackgroundTasks, dataset_id: int, 
     task_repository = Repository(Path(repository.db_path))
     clear_stop_request(dataset_id, task_repository)
     task_repository.update_dataset_profile(
-        dataset_id, status='queued', progress=0, last_error=None, processing_queued_at=now_iso(),
+        dataset_id, status='queued', progress=0, processing_step='', last_error=None, processing_queued_at=now_iso(),
         processing_started_at=None, processed_at=None,
         processing_options_json='{}',
     )
     _register_dataset_processing(dataset_id, task_repository)
-    future = _dataset_processing_executor(task_repository).submit(
-        process_vendor_clearing, dataset_id, username, task_repository,
+    row = task_repository.get_dataset(dataset_id)
+    dataset_path = Path(str(row['stored_path'] or '')) if row else Path()
+    def run_in_worker() -> None:
+        try:
+            _run_dataset_in_worker(
+                dataset_id, dataset_path, username, None, None, None,
+                task_repository, operation='vendor-clearing',
+            )
+        finally:
+            _unregister_dataset_processing(dataset_id, task_repository)
+    future = _submit_workspace_job(
+        task_repository, run_in_worker,
+        phase=1, dataset_id=dataset_id,
     )
-    background_tasks.add_task(future.result)
+    _track_dataset_future(dataset_id, task_repository, future)
 
 
 def clear_dataset_analysis_cache(dataset_path: Path) -> None:
@@ -5143,7 +5444,10 @@ def _backup_archive_file(backup_path: str, filename: str) -> Path:
     return candidate
 
 
-def restore_database_backup(archive_path: Path, components: Iterable[str]) -> None:
+def restore_database_backup(
+    archive_path: Path, components: Iterable[str],
+    progress_callback: Callable[[str, int, int], None] | None = None,
+) -> None:
     """Restore selected backup parts after the UI has confirmed overwriting data."""
     manifest = read_import_manifest(archive_path)
     is_database_backup = manifest.get('kind') == 'database-backup' or manifest.get('format') == 'database-backup'
@@ -5160,34 +5464,74 @@ def restore_database_backup(archive_path: Path, components: Iterable[str]) -> No
     with zipfile.ZipFile(archive_path) as archive, tempfile.TemporaryDirectory(prefix='dashboard-analytic-restore-') as temporary_dir:
         staging = Path(temporary_dir)
         names = [member.filename for member in archive.infolist() if not member.is_dir()]
+        name_set = set(names)
+        workspaces_by_name = {workspace.name: workspace for workspace in workspace_registry.list()}
+        total_steps = int('app_database' in selected)
+        for workspace_name in workspaces_by_name:
+            prefix = f'workspaces/{workspace_name}/'
+            for component, member in (
+                ('workspace_database', f'{prefix}database.sqlite'),
+                ('dashboards', f'{prefix}dashboards/dashboards.json'),
+                ('operator_mappings', f'{prefix}operator-mappings/operator-mappings.json'),
+            ):
+                total_steps += int(component in selected and member in name_set)
+            if 'report_templates' in selected:
+                total_steps += sum(name.startswith(f'{prefix}report-templates/') for name in names)
+            if 'auto_calculated_fields' in selected:
+                total_steps += int(any(candidate in name_set for candidate in (
+                    f'{prefix}auto-calculated-fields/auto-calculated-fields.json',
+                    f'{prefix}auto-calculated-fields/definitions.json',
+                    f'{prefix}auto-calculated-fields.json',
+                )))
+            for component in ('input', 'output'):
+                if component in selected:
+                    total_steps += sum(name.startswith(f'{prefix}{component}/') for name in names)
+        completed_steps = 0
+
+        def advance(message: str) -> None:
+            nonlocal completed_steps
+            completed_steps += 1
+            if progress_callback:
+                progress_callback(message, completed_steps, total_steps)
+
         if 'app_database' in selected:
+            if progress_callback:
+                progress_callback('Restoring application database', completed_steps, total_steps)
             payload = staging / 'application.db'
             with archive.open('application/application.db') as source, payload.open('wb') as target:
                 shutil.copyfileobj(source, target)
             repository.replace_global_database_snapshot(payload)
             repository.initialize()
-        workspaces_by_name = {workspace.name: workspace for workspace in workspace_registry.list()}
+            advance('Application database restored')
         for workspace_name, workspace in workspaces_by_name.items():
             prefix = f'workspaces/{workspace_name}/'
             if 'workspace_database' in selected:
                 database_member = f'{prefix}database.sqlite'
                 if database_member in names:
+                    if progress_callback:
+                        progress_callback(f'Restoring database for {workspace_name}', completed_steps, total_steps)
                     payload = staging / f'{workspace.id}-database.sqlite'
                     with archive.open(database_member) as source, payload.open('wb') as target:
                         shutil.copyfileobj(source, target)
                     for sidecar in (workspace.database_path, workspace.database_path.with_name(f'{workspace.database_path.name}-wal'), workspace.database_path.with_name(f'{workspace.database_path.name}-shm')):
                         sidecar.unlink(missing_ok=True)
                     shutil.copy2(payload, workspace.database_path)
+                    advance(f'Database restored for {workspace_name}')
             if 'dashboards' in selected:
                 member = f'{prefix}dashboards/dashboards.json'
                 if member in names:
+                    if progress_callback:
+                        progress_callback(f'Restoring Dashboards for {workspace_name}', completed_steps, total_steps)
                     _restore_workspace_dashboards(workspace, archive.read(member))
+                    advance(f'Dashboards restored for {workspace_name}')
             if 'report_templates' in selected:
                 template_members = [name for name in names if name.startswith(f'{prefix}report-templates/')]
                 if template_members:
                     task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
                     task_repository.initialize_template_registry()
                     for name in template_members:
+                        if progress_callback:
+                            progress_callback(f'Restoring Report Template for {workspace_name}: {Path(name).name}', completed_steps, total_steps)
                         relative = PurePosixPath(name).relative_to(PurePosixPath(f'{prefix}report-templates'))
                         if len(relative.parts) != 3 or relative.parts[0] not in {'library', 'default'} or relative.parts[1] not in TEMPLATE_NAMES:
                             raise ValueError(f'Backup Report Templates for "{workspace_name}" have an invalid path.')
@@ -5201,12 +5545,16 @@ def restore_database_backup(archive_path: Path, components: Iterable[str]) -> No
                             task_repository.add_report_template(technology, template_name, content, is_default=False)
                         if relative.parts[0] == 'default':
                             task_repository.set_default_report_template(technology, template_name)
+                        advance(f'Report Template restored for {workspace_name}: {Path(name).name}')
                     shutil.rmtree(workspace.slides_templates_dir, ignore_errors=True)
                 shutil.rmtree(workspace.database_path.parent / 'slides-templates', ignore_errors=True)
             if 'operator_mappings' in selected:
                 member = f'{prefix}operator-mappings/operator-mappings.json'
                 if member in names:
+                    if progress_callback:
+                        progress_callback(f'Restoring Operator Mappings for {workspace_name}', completed_steps, total_steps)
                     _restore_workspace_operator_mappings(workspace, archive.read(member))
+                    advance(f'Operator Mappings restored for {workspace_name}')
             if 'auto_calculated_fields' in selected:
                 member = next((candidate for candidate in (
                     f'{prefix}auto-calculated-fields/auto-calculated-fields.json',
@@ -5214,6 +5562,8 @@ def restore_database_backup(archive_path: Path, components: Iterable[str]) -> No
                     f'{prefix}auto-calculated-fields.json',
                 ) if candidate in names), None)
                 if member in names:
+                    if progress_callback:
+                        progress_callback(f'Restoring Auto-calculated Fields for {workspace_name}', completed_steps, total_steps)
                     try:
                         definitions = json.loads(archive.read(member).decode('utf-8'))
                         parsed = parse_calculated_dimensions(definitions)
@@ -5222,6 +5572,7 @@ def restore_database_backup(archive_path: Path, components: Iterable[str]) -> No
                     task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
                     task_repository.replace_calculated_dimensions(calculated_dimensions_json(parsed))
                     task_repository.set_workspace_state('calculated_dimensions_need_materialization', '1')
+                    advance(f'Auto-calculated Fields restored for {workspace_name}')
             for component, destination in (('input', workspace.input_dir), ('output', workspace.output_dir)):
                 if component not in selected:
                     continue
@@ -5230,11 +5581,14 @@ def restore_database_backup(archive_path: Path, components: Iterable[str]) -> No
                     continue
                 shutil.rmtree(destination, ignore_errors=True)
                 for name in members:
+                    if progress_callback:
+                        progress_callback(f'Restoring {component} file for {workspace_name}: {Path(name).name}', completed_steps, total_steps)
                     relative = PurePosixPath(name).relative_to(PurePosixPath(f'{prefix}{component}'))
                     target = destination.joinpath(*relative.parts)
                     target.parent.mkdir(parents=True, exist_ok=True)
                     with archive.open(name) as source, target.open('wb') as output:
                         shutil.copyfileobj(source, output)
+                    advance(f'{component.title()} file restored for {workspace_name}: {Path(name).name}')
         _clear_chart_preview_caches()
 
 
@@ -5255,26 +5609,34 @@ def start_manual_database_restore(archive_path: Path, components: Iterable[str],
                     )
                     return
                 job.update(
-                    status='processing', message='Restoring selected backup data', progress=15,
+                    status='processing', message='Inspecting selected backup data', progress=0,
                     started_at=datetime.now(timezone.utc).timestamp(),
                 )
-            restore_database_backup(archive_path, components)
+            repository.try_add_log(username, 'manual_database_restore_started', json.dumps({'job_id': job_id}))
+
+            def report_progress(message: str, completed: int, total: int) -> None:
+                with MANUAL_RESTORE_JOBS_LOCK:
+                    job.update(message=message, progress=min(99, round(completed * 100 / total, 1)) if total else 0)
+
+            restore_database_backup(archive_path, components, report_progress)
             with MANUAL_RESTORE_JOBS_LOCK:
                 job.update(status='ready', message='Backup restored', progress=100, finished_at=datetime.now(timezone.utc).timestamp())
+            repository.try_add_log(username, 'manual_database_restore_completed', json.dumps({'job_id': job_id}))
         except Exception as exc:
             with MANUAL_RESTORE_JOBS_LOCK:
-                job.update(status='failed', message='Backup restore failed', error=str(exc), progress=100, finished_at=datetime.now(timezone.utc).timestamp())
+                job.update(status='failed', message='Backup restore failed', error=str(exc), finished_at=datetime.now(timezone.utc).timestamp())
+            repository.try_add_log(username, 'manual_database_restore_failed', json.dumps({'job_id': job_id, 'error': str(exc)}))
     submit_background_task(run)
     return job
 
 
-def recurring_backup_scheduler_loop() -> None:
-    while True:
+def recurring_backup_scheduler_loop(stop_event: Event) -> None:
+    while not stop_event.is_set():
         try:
             run_recurring_backup_scheduler()
         except Exception:
             pass
-        sleep(20)
+        stop_event.wait(20)
 
 
 def _workspace_archive_metadata(workspace: Workspace) -> dict[str, Any]:
@@ -6641,6 +7003,7 @@ def _run_import_job(job_id: str) -> None:
         job.update(status='processing', started_at=datetime.now(timezone.utc).timestamp())
         package_path = Path(str(job['path']))
         manifest = dict(job['manifest'])
+    repository.try_add_log(job['owner'], 'import_package_started', json.dumps({'job_id': job_id, 'kind': manifest.get('kind')}))
 
     def stop_if_cancelled() -> None:
         with IMPORT_JOBS_LOCK:
@@ -6652,7 +7015,7 @@ def _run_import_job(job_id: str) -> None:
         with IMPORT_JOBS_LOCK:
             current = IMPORT_JOBS.get(job_id)
             if current:
-                current.update({'phase': phase, 'progress': round(min(100.0, max(0.0, progress)), 1)})
+                current.update({'phase': phase, 'progress': round(min(99.0, max(0.0, progress)), 1)})
 
     try:
         stop_if_cancelled()
@@ -6662,13 +7025,16 @@ def _run_import_job(job_id: str) -> None:
             parent_task_id=f'import:{job_id}',
         )
         with IMPORT_JOBS_LOCK:
-            job.update({'status': 'ready', 'notice': notice, 'finished_at': datetime.now(timezone.utc).timestamp()})
+            job.update({'status': 'ready', 'progress': 100.0, 'notice': notice, 'finished_at': datetime.now(timezone.utc).timestamp()})
+        repository.try_add_log(job['owner'], 'import_package_completed', json.dumps({'job_id': job_id, 'kind': manifest.get('kind')}))
     except InterruptedError as exc:
         with IMPORT_JOBS_LOCK:
             job.update({'status': 'cancelled', 'error': str(exc), 'finished_at': datetime.now(timezone.utc).timestamp()})
+        repository.try_add_log(job['owner'], 'import_package_stopped', json.dumps({'job_id': job_id}))
     except Exception as exc:
         with IMPORT_JOBS_LOCK:
             job.update({'status': 'failed', 'error': str(exc), 'finished_at': datetime.now(timezone.utc).timestamp()})
+        repository.try_add_log(job['owner'], 'import_package_failed', json.dumps({'job_id': job_id, 'error': str(exc)}))
     finally:
         package_path.unlink(missing_ok=True)
         with IMPORT_JOBS_LOCK:
@@ -6697,6 +7063,7 @@ def start_import_job(
             'created_at': datetime.now(timezone.utc).timestamp(),
         }
         IMPORT_JOBS[job_id] = job
+    repository.try_add_log(user.username, 'import_package_queued', json.dumps({'job_id': job_id, 'kind': job['manifest'].get('kind')}))
     submit_background_task(_run_import_job, job_id)
     return job
 
@@ -6875,6 +7242,7 @@ def _run_received_transfer(offer_id: str) -> None:
         manifest = dict(offer['manifest'])
         offer.update({'status': 'importing', 'phase': 'validating', 'progress': 0.0})
         _save_transfer_offer(offer)
+    repository.try_add_log('system', 'incoming_transfer_import_started', json.dumps({'offer_id': offer_id, 'content': offer.get('content')}))
 
     def update_progress(phase: str, progress: float) -> None:
         with TRANSFER_LOCK:
@@ -6882,7 +7250,7 @@ def _run_received_transfer(offer_id: str) -> None:
             if current_offer:
                 if current_offer.get('cancel_requested'):
                     raise InterruptedError('Incoming transfer stopped by user.')
-                current_offer.update({'phase': phase, 'progress': round(min(100.0, max(0.0, progress)), 1)})
+                current_offer.update({'phase': phase, 'progress': round(min(99.0, max(0.0, progress)), 1)})
     try:
         notice = _apply_import_archive(
             package_path, manifest, update_progress,
@@ -6892,14 +7260,17 @@ def _run_received_transfer(offer_id: str) -> None:
         with TRANSFER_LOCK:
             offer.update({'status': 'ready', 'phase': 'complete', 'progress': 100.0, 'notice': notice, 'finished_at': datetime.now(timezone.utc).timestamp()})
             _save_transfer_offer(offer)
+        repository.try_add_log('system', 'incoming_transfer_import_completed', json.dumps({'offer_id': offer_id, 'content': offer.get('content')}))
     except InterruptedError as exc:
         with TRANSFER_LOCK:
             offer.update({'status': 'cancelled', 'phase': 'cancelled', 'error': str(exc), 'finished_at': datetime.now(timezone.utc).timestamp()})
             _save_transfer_offer(offer)
+        repository.try_add_log('system', 'incoming_transfer_import_stopped', json.dumps({'offer_id': offer_id}))
     except Exception as exc:
         with TRANSFER_LOCK:
             offer.update({'status': 'failed', 'error': str(exc), 'finished_at': datetime.now(timezone.utc).timestamp()})
             _save_transfer_offer(offer)
+        repository.try_add_log('system', 'incoming_transfer_import_failed', json.dumps({'offer_id': offer_id, 'error': str(exc)}))
     finally:
         package_path.unlink(missing_ok=True)
 
@@ -7954,7 +8325,6 @@ def workspace(
     clearable_region_cdr_datasets = []
     calculated_dimensions = calculated_dimensions_json(load_workspace_calculated_dimensions())
     combined_tables = workspace_combined_tables(workspace_id=active_workspace.id)
-    queue_workspace_dimension_materialization(active_workspace)
 
     return render_template(
         request,
@@ -8127,6 +8497,26 @@ def _background_task_timing(job: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _dataset_progress_detail(status_value: str, progress_value: int, queue_blocker: str = '') -> str:
+    if status_value == 'queued':
+        return queue_blocker or 'Waiting for a background worker slot'
+    if status_value == 'ready':
+        return 'Completed'
+    if progress_value <= 50:
+        return 'Reading and normalizing source data'
+    if progress_value <= 57:
+        return 'Applying selected mappings'
+    if progress_value <= 62:
+        return 'Writing dataset rows'
+    if progress_value <= 72:
+        return 'Summarizing dataset'
+    if progress_value <= 84:
+        return 'Calculating metrics'
+    if progress_value <= 94:
+        return 'Building analysis profile'
+    return 'Finalizing dataset'
+
+
 def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
     """Read lightweight job progress without activating the workspace."""
     tasks: list[dict[str, Any]] = []
@@ -8158,7 +8548,7 @@ def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
             if {'datasets', 'dataset_profiles'} <= tables:
                 completed_cutoff = (datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat()
                 rows = connection.execute(
-                    """SELECT d.id, d.file_name, p.status, p.progress,
+                    """SELECT d.id, d.file_name, p.dataset_kind, p.status, p.progress, p.processing_step,
                               p.processing_started_at, p.processed_at,
                               COALESCE(p.processing_queued_at, p.processing_started_at, p.updated_at) AS queued_at
                        FROM datasets d
@@ -8166,9 +8556,24 @@ def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
                        WHERE p.status IN ('queued', 'processing')
                           OR (p.status = 'ready' AND p.processed_at IS NOT NULL
                               AND datetime(p.processed_at) >= datetime(?))
-                       ORDER BY queued_at, d.id"""
+                       ORDER BY CASE WHEN p.dataset_kind IN ('mapping_vodafone', 'mapping_three', 'mapping_region') THEN 0 ELSE 1 END,
+                                d.id"""
                     , (completed_cutoff,)
                 ).fetchall()
+                active_mapping_ids = [
+                    int(row['id']) for row in rows
+                    if str(row['status'] or '').casefold() in {'queued', 'processing'}
+                    and str(row['dataset_kind'] or '') in {'mapping_vodafone', 'mapping_three', 'mapping_region'}
+                ]
+                active_dataset_ids = [
+                    int(row['id']) for row in rows
+                    if str(row['status'] or '').casefold() == 'processing'
+                ]
+                interrupted_row = connection.execute(
+                    "SELECT dataset_id FROM dataset_profiles WHERE status = 'failed' "
+                    "AND last_error LIKE 'Processing state was inconsistent after an interrupted worker.%' "
+                    "ORDER BY dataset_id LIMIT 1"
+                ).fetchone()
                 for row in rows:
                     raw_status = str(row['status'] or 'queued').casefold()
                     ready = raw_status == 'ready'
@@ -8176,13 +8581,30 @@ def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
                     started_at = parse_dataset_timestamp(row['processing_started_at'])
                     completed_at = parse_dataset_timestamp(row['processed_at']) if ready else None
                     duration_seconds = None
+                    queue_blocker = ''
+                    if raw_status == 'queued':
+                        is_mapping = str(row['dataset_kind'] or '') in {'mapping_vodafone', 'mapping_three', 'mapping_region'}
+                        pending_mappings = [mapping_id for mapping_id in active_mapping_ids if mapping_id != int(row['id'])]
+                        if pending_mappings and not is_mapping:
+                            count = len(pending_mappings)
+                            queue_blocker = f'Waiting for {count} mapping dataset{"s" if count != 1 else ""}'
+                        elif interrupted_row:
+                            queue_blocker = f'Waiting for interrupted dataset #{interrupted_row["dataset_id"]} to be retried'
+                        elif active_dataset_ids:
+                            queue_blocker = f'Waiting for dataset #{active_dataset_ids[0]} to finish'
                     if started_at:
                         duration_end = completed_at or datetime.now(started_at.tzinfo)
                         duration_seconds = max(0, (duration_end - started_at).total_seconds())
                     tasks.append({
                         'id': f'dataset:{workspace.id}:{row["id"]}',
+                        'dataset_id': int(row['id']),
+                        'queue_phase': 0 if str(row['dataset_kind'] or '') in {'mapping_vodafone', 'mapping_three', 'mapping_region'} else 1,
                         'label': f'Processing dataset: {row["file_name"]}',
-                        'detail': 'Completed' if ready else raw_status.title(),
+                        'detail': (
+                            (queue_blocker or _dataset_progress_detail(raw_status, 0)) if raw_status == 'queued' else
+                            (str(row['processing_step'] or '').strip() or _dataset_progress_detail(raw_status, int(row['progress'] or 0)))
+                            if raw_status == 'processing' else _dataset_progress_detail(raw_status, int(row['progress'] or 0))
+                        ),
                         'status': raw_status,
                         'progress': max(0, min(100, int(row['progress'] or 0))),
                         'queued_at': queued_at.timestamp() if queued_at else None,
@@ -8351,7 +8773,14 @@ def _global_background_tasks(user: SessionUser, accessible_ids: set[str]) -> lis
             'progress': progress,
             **_background_task_timing(job),
         }
-        if prefix in {'export', 'import', 'transfer', 'incoming-transfer'}:
+        can_stop = prefix == 'export' or (
+            prefix == 'transfer' and job.get('status') != 'remote_importing'
+        ) or (
+            prefix == 'import' and job.get('status') == 'queued'
+        ) or (
+            prefix == 'incoming-transfer' and job.get('status') in {'receiving', 'received'}
+        )
+        if can_stop:
             task['stop_task_id'] = f'{prefix}:{job.get("id")}'
             task['stop_url'] = (
                 '/api/server-background-tasks/stop'
@@ -8435,7 +8864,7 @@ def _global_background_tasks(user: SessionUser, accessible_ids: set[str]) -> lis
         append_job(job, 'transfer', f'Transferring {str(job.get("target") or "package").replace("-", " ").title()}')
     if user.role == 'super-admin':
         for offer in incoming_transfers:
-            if offer.get('status') not in {'receiving', 'importing'}:
+            if offer.get('status') not in {'receiving', 'received', 'importing'}:
                 continue
             label = 'Importing transferred package' if offer.get('status') == 'importing' else 'Receiving server transfer'
             append_job(
@@ -8526,6 +8955,7 @@ def background_tasks_status(user: SessionUser = Depends(current_user)) -> JSONRe
         ]
         group['tasks'].append({
             'id': job_task_id,
+            'queue_phase': 2 if job.get('operation') == 'combined_recreation' else 3,
             'label': 'Recreating combined CDR table' if job.get('operation') == 'combined_recreation' else 'Materializing Auto-calculated Fields',
             'detail': str(job.get('message') or 'Processing'),
             'status': str(job.get('status') or 'queued').casefold(),
@@ -8718,18 +9148,9 @@ def stop_background_task(
             job = IMPORT_JOBS.get(raw_identifier)
             if not job or workspace_id not in {str(item) for item in (job.get('destination_workspace_ids') or [])}:
                 raise HTTPException(status_code=404, detail='Import task not found.')
-            if job.get('status') not in {'queued', 'processing'}:
-                raise HTTPException(status_code=409, detail='This import task can no longer be stopped.')
+            if job.get('status') != 'queued':
+                raise HTTPException(status_code=409, detail='An import can only be stopped before it starts replacing data.')
             job.update(cancel_requested=True, phase='stopping import')
-        with AUTO_CALCULATED_FIELD_JOBS_LOCK:
-            for child_job in AUTO_CALCULATED_FIELD_JOBS.values():
-                if (
-                    child_job.get('parent_task_id') == f'import:{raw_identifier}'
-                    and child_job.get('status') in {'queued', 'processing'}
-                ):
-                    child_job.update(cancel_requested=True, message='Stopping with parent import')
-        for destination_workspace_id in job.get('destination_workspace_ids') or []:
-            request_persisted_auto_field_stop(str(destination_workspace_id))
     elif prefix == 'transfer':
         with TRANSFER_LOCK:
             job = TRANSFER_JOBS.get(raw_identifier)
@@ -8737,8 +9158,8 @@ def stop_background_task(
                 raise HTTPException(status_code=404, detail='Transfer task not found.')
             if workspace_id not in {str(item) for item in (job.get('workspace_ids') or [])}:
                 raise HTTPException(status_code=404, detail='Transfer task not found.')
-            if job.get('status') in {'ready', 'failed', 'cancelled'}:
-                raise HTTPException(status_code=409, detail='This transfer task can no longer be stopped.')
+            if job.get('status') in {'ready', 'failed', 'cancelled', 'remote_importing'}:
+                raise HTTPException(status_code=409, detail='A transfer can only be stopped before the destination starts importing data.')
             job.update(cancel_requested=True, status='cancelling', phase='cancellation requested')
     elif prefix in {'workspace-delete', 'workspace-cache-clear'}:
         operation = 'delete' if prefix == 'workspace-delete' else 'cache-clear'
@@ -8794,8 +9215,8 @@ def stop_server_background_task(task_id: str = Form(...), user: SessionUser = De
     if prefix == 'transfer':
         with TRANSFER_LOCK:
             job = TRANSFER_JOBS.get(job_id)
-            if not job or job.get('owner') != user.username or job.get('status') in {'ready', 'failed', 'cancelled'}:
-                raise HTTPException(status_code=409, detail='This transfer task can no longer be stopped.')
+            if not job or job.get('owner') != user.username or job.get('status') in {'ready', 'failed', 'cancelled', 'remote_importing'}:
+                raise HTTPException(status_code=409, detail='A transfer can only be stopped before the destination starts importing data.')
             job.update(cancel_requested=True, status='cancelling', phase='cancellation requested')
         return JSONResponse({'stopping': task_id})
     if prefix == 'incoming-transfer':
@@ -8804,20 +9225,10 @@ def stop_server_background_task(task_id: str = Form(...), user: SessionUser = De
         with TRANSFER_LOCK:
             _refresh_persisted_transfer_offers()
             offer = TRANSFER_OFFERS.get(job_id)
-            if not offer or offer.get('status') not in {'receiving', 'importing'}:
+            if not offer or offer.get('status') not in {'receiving', 'received'}:
                 raise HTTPException(status_code=409, detail='This incoming transfer can no longer be stopped.')
             offer.update(cancel_requested=True, status='cancelling', phase='cancellation requested')
             _save_transfer_offer(offer)
-            destination_workspace_ids = [str(value) for value in offer.get('destination_workspace_ids') or []]
-        for destination_workspace_id in destination_workspace_ids:
-            request_persisted_auto_field_stop(destination_workspace_id)
-        with AUTO_CALCULATED_FIELD_JOBS_LOCK:
-            for child_job in AUTO_CALCULATED_FIELD_JOBS.values():
-                if (
-                    child_job.get('parent_task_id') == f'incoming-transfer:{job_id}'
-                    and child_job.get('status') in {'queued', 'processing'}
-                ):
-                    child_job.update(cancel_requested=True, message='Stopping with incoming transfer')
         return JSONResponse({'stopping': task_id})
     with MANUAL_BACKUP_JOBS_LOCK:
         job = MANUAL_BACKUP_JOBS.get(job_id)
@@ -12411,7 +12822,10 @@ async def upload_dataset(
     batch_mapping_futures: list[Future[Any]] = []
     for uploaded in sorted(
         uploaded_datasets,
-        key=lambda item: 0 if item['dataset_kind'] in {'mapping_vodafone', 'mapping_three', 'mapping_region'} else 1,
+        key=lambda item: (
+            0 if item['dataset_kind'] in {'mapping_vodafone', 'mapping_three', 'mapping_region'} else 1,
+            int(item['dataset_id']),
+        ),
     ):
         dataset_kind = uploaded['dataset_kind']
         vodafone_mapping_dataset_id = (
@@ -12754,16 +13168,23 @@ def retry_dataset(
         processing_options = {}
     vodafone_mapping_dataset_id = processing_options.get('vodafone_mapping_dataset_id')
     three_mapping_dataset_id = processing_options.get('three_mapping_dataset_id')
-    enqueue_dataset_processing(
+    region_mapping_dataset_id = processing_options.get('region_mapping_dataset_id')
+    future = enqueue_dataset_processing(
         background_tasks, dataset_id, dataset_path, user.username,
         vodafone_mapping_dataset_id, three_mapping_dataset_id,
+        region_mapping_dataset_id,
     )
+    if future is None:
+        raise HTTPException(status_code=409, detail='This dataset is already queued or processing.')
+    if active_workspace:
+        resume_interrupted_dataset_processing(active_workspace)
     repository.add_log(user.username, 'reprocess_dataset' if previous_status == 'ready' else 'retry_dataset', json.dumps({
         'dataset_id': dataset_id,
         'file': dataset_payload['file_name'],
         'previous_status': previous_status,
         'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
         'three_mapping_dataset_id': three_mapping_dataset_id,
+        'region_mapping_dataset_id': region_mapping_dataset_id,
     }))
     redirect_url = '/admin' if return_to == 'admin' else f'/workspace?dataset_id={dataset_id}'
     return RedirectResponse(redirect_url, status_code=status.HTTP_303_SEE_OTHER)
@@ -12805,7 +13226,10 @@ def reprocess_workspace_datasets(
     queued_ids: list[int] = []
     for dataset in sorted(
         selected_datasets,
-        key=lambda item: 0 if item.get('dataset_kind') in {'mapping_vodafone', 'mapping_three', 'mapping_region'} else 1,
+        key=lambda item: (
+            0 if item.get('dataset_kind') in {'mapping_vodafone', 'mapping_three', 'mapping_region'} else 1,
+            int(item['id']),
+        ),
     ):
         try:
             processing_options = json.loads(str(dataset.get('processing_options_json') or '{}'))
@@ -13060,8 +13484,8 @@ def stop_dataset(
     if not dataset:
         raise HTTPException(status_code=404, detail='Dataset not found')
     dataset_payload = serialize_dataset_row(dataset)
-    if dataset_payload['status'] != 'processing':
-        raise HTTPException(status_code=400, detail='Only processing datasets can be stopped')
+    if dataset_payload['status'] not in {'queued', 'processing'}:
+        raise HTTPException(status_code=400, detail='Only queued or processing datasets can be stopped')
     request_stop(dataset_id)
     repository.update_dataset_profile(
         dataset_id,
@@ -13795,6 +14219,8 @@ def cancel_transfer_offer(offer_id: str, request: Request) -> JSONResponse:
         offer = TRANSFER_OFFERS.get(offer_id)
         if not offer or not _transfer_offer_secret_matches(offer, secret):
             raise HTTPException(status_code=404, detail='The transfer offer does not exist.')
+        if offer.get('status') == 'importing':
+            raise HTTPException(status_code=409, detail='The destination has started importing data and cannot be stopped safely.')
         if offer.get('status') not in {'ready', 'failed', 'rejected', 'expired', 'cancelled'}:
             offer.update({'status': 'cancelled', 'phase': 'cancelled by source', 'error': 'The source server cancelled the transfer.', 'finished_at': datetime.now(timezone.utc).timestamp()})
             _save_transfer_offer(offer)

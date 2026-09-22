@@ -37,6 +37,8 @@ Floating cards group live tasks by execution context and keep their label, detai
 
 Dashboard cards also group preparation and chart-model work under the Dashboard name and distinguish the active item from its queued position. An **Interrupt task** action appears when the job supports cancellation. Cards can be minimized without interrupting their tasks, retain that state while moving between modules or reloading the page, refresh automatically, and retain a completed task briefly so its final state is visible before the card disappears. Persistent generation jobs remain available in their module table after the floating notification closes.
 
+Workspace data jobs run on the server in this order: Vendor and Region mapping datasets by ID, other datasets by ID, combined CDR table recreation, then Auto-calculated Field materialization. One data job runs per Workspace at a time. The server also caps total background concurrency to leave an interactive CPU available. Queued and processing datasets can be stopped individually or with **Stop All**; large CDR workers run in lower-priority processes and respond to the same Stop request.
+
 ## Workspace
 
 Workspace is the entry point for data and storage management.

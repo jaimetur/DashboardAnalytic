@@ -148,6 +148,7 @@ CREATE TABLE IF NOT EXISTS dataset_profiles (
     dataset_id INTEGER PRIMARY KEY,
     status TEXT NOT NULL DEFAULT 'queued',
     progress INTEGER NOT NULL DEFAULT 0,
+    processing_step TEXT NOT NULL DEFAULT '',
     normalization_version INTEGER NOT NULL DEFAULT 1,
     vendor_mapping_applied INTEGER NOT NULL DEFAULT 0,
     vendor_values_complete INTEGER NOT NULL DEFAULT 0,
@@ -725,6 +726,8 @@ class Repository:
             conn.execute("ALTER TABLE dataset_profiles ADD COLUMN processing_queued_at TEXT")
         if 'processing_options_json' not in existing_columns:
             conn.execute("ALTER TABLE dataset_profiles ADD COLUMN processing_options_json TEXT NOT NULL DEFAULT '{}'")
+        if 'processing_step' not in existing_columns:
+            conn.execute("ALTER TABLE dataset_profiles ADD COLUMN processing_step TEXT NOT NULL DEFAULT ''")
 
     def _migrate_legacy_vendor_mapping_profiles(self, conn: sqlite3.Connection) -> None:
         """Mark pre-profile mappings once, without reopening source CDR files."""
@@ -2690,13 +2693,20 @@ class Repository:
     def update_dataset_profile(self, dataset_id: int, **fields: Any) -> None:
         if not fields:
             return
+        progress_only = (
+            'progress' in fields and 'status' not in fields
+            and fields['progress'] is not None and int(fields['progress']) < 100
+        )
+        completing = fields.get('status') == 'ready'
         assignments = ', '.join(f"{column} = ?" for column in fields)
         values = list(fields.values())
         assignments += ', updated_at = ?'
         values.append(local_now_iso())
         with self.connection() as conn:
             conn.execute(
-                f"UPDATE dataset_profiles SET {assignments} WHERE dataset_id = ?",
+                f"UPDATE dataset_profiles SET {assignments} WHERE dataset_id = ?"
+                + (" AND status IN ('queued', 'processing')" if progress_only else '')
+                + (" AND status <> 'stopped'" if completing else ''),
                 (*values, dataset_id),
             )
 
@@ -2730,7 +2740,7 @@ class Repository:
             return conn.execute(
                 """
                 SELECT d.id, d.file_name, d.stored_path, d.uploaded_by, d.uploaded_at,
-                       p.status, p.progress, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.region_mapping_applied, p.region_mapping_dataset_id, p.dataset_kind, p.row_count, p.column_count,
+                       p.status, p.progress, p.processing_step, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.region_mapping_applied, p.region_mapping_dataset_id, p.dataset_kind, p.row_count, p.column_count,
                        p.default_metric, p.default_aggregation, p.available_metrics_json,
                        p.available_aggregations_json, p.filter_options_json, p.summary_json,
                        p.kpis_json, p.last_error, p.processing_started_at, p.processed_at,
@@ -2748,7 +2758,7 @@ class Repository:
                 conn.execute(
                     """
                     SELECT d.id, d.file_name, d.stored_path, d.uploaded_by, d.uploaded_at,
-                           p.status, p.progress, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.region_mapping_applied, p.region_mapping_dataset_id, p.dataset_kind, p.row_count, p.column_count,
+                           p.status, p.progress, p.processing_step, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.region_mapping_applied, p.region_mapping_dataset_id, p.dataset_kind, p.row_count, p.column_count,
                            p.default_metric, p.default_aggregation, p.available_metrics_json,
                            p.available_aggregations_json, p.filter_options_json, p.summary_json,
                            p.kpis_json, p.last_error, p.processing_started_at, p.processed_at,
@@ -3118,18 +3128,34 @@ class Repository:
             if dataset_ids:
                 placeholders = ','.join('?' for _ in dataset_ids)
                 conn.execute(
-                    f"UPDATE dataset_profiles SET status = 'failed', progress = 100, last_error = ?, processed_at = ?, updated_at = ? "
+                    f"UPDATE dataset_profiles SET status = 'failed', last_error = ?, processed_at = ?, updated_at = ? "
                     f"WHERE dataset_id IN ({placeholders})",
                     (message, now, now, *dataset_ids),
                 )
             if report_ids:
                 placeholders = ','.join('?' for _ in report_ids)
                 conn.execute(
-                    f"UPDATE generated_jobs SET status = 'failed', progress = 100, last_error = ?, updated_at = ?, finished_at = ? "
+                    f"UPDATE generated_jobs SET status = 'failed', last_error = ?, updated_at = ?, finished_at = ? "
                     f"WHERE id IN ({placeholders})",
                     (message, now, now, *report_ids),
                 )
         return dataset_ids, report_ids
+
+    def fail_inconsistent_ready_datasets(self) -> list[int]:
+        """Make incomplete ready profiles retryable instead of displaying false success."""
+        with self.connection() as conn:
+            rows = conn.execute(
+                "SELECT dataset_id FROM dataset_profiles WHERE status = 'ready' AND progress < 100"
+            ).fetchall()
+            dataset_ids = [int(row['dataset_id']) for row in rows]
+            if dataset_ids:
+                conn.execute(
+                    "UPDATE dataset_profiles SET status = 'failed', "
+                    "last_error = 'Processing state was inconsistent after an interrupted worker. Retry this dataset.', "
+                    "updated_at = ? WHERE status = 'ready' AND progress < 100",
+                    (local_now_iso(),),
+                )
+        return dataset_ids
 
     def get_report_run(self, report_id: int) -> sqlite3.Row | None:
         with self.connection() as conn:
@@ -3260,7 +3286,7 @@ class Repository:
             if job_ids:
                 placeholders = ','.join('?' for _ in job_ids)
                 conn.execute(
-                    f"UPDATE generated_jobs SET status = 'failed', progress = 100, last_error = ?, updated_at = ?, finished_at = ? "
+                    f"UPDATE generated_jobs SET status = 'failed', last_error = ?, updated_at = ?, finished_at = ? "
                     f"WHERE id IN ({placeholders})",
                     (message, now, now, *job_ids),
                 )

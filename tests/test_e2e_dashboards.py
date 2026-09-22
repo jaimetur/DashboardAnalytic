@@ -1159,7 +1159,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'def materialize_selection(' in dashboard_module
     assert 'use_profile_options=False, known_full_row_counts=None, progress=None,' in dashboard_module
     assert 'use_profile_options=use_profile_options,' in dashboard_module
-    assert 'DASHBOARD_CHART_RENDER_WORKERS = 3' in dashboard_module
+    assert 'DASHBOARD_CHART_RENDER_WORKERS = max(1, min(2, (os.cpu_count() or 2) - 1))' in dashboard_module
     assert 'DASHBOARD_PREVIEW_MANIFEST_VERSION = 8' in dashboard_module
     assert "thread_name_prefix='e2e-dashboard-chart'," not in dashboard_module
     assert 'def schedule_next_prefetch() -> None:' not in dashboard_module

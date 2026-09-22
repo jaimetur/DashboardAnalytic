@@ -7816,6 +7816,7 @@ if (queueNode) {
     const progressBar = row.querySelector('[data-queue-progress-bar]');
     const progressLabel = row.querySelector('[data-queue-progress-label]');
     const progressPercent = row.querySelector('[data-queue-progress-percent]');
+    const progressStep = row.querySelector('[data-queue-progress-step]');
     const progressSeparator = row.querySelector('[data-queue-progress-separator]');
     const elapsed = row.querySelector('[data-queue-elapsed]');
     const uploaded = row.querySelector('[data-queue-uploaded]');
@@ -7848,6 +7849,10 @@ if (queueNode) {
     }
     if (progressPercent) progressPercent.textContent = `${dataset.progress || 0}%`;
     else if (progressLabel) progressLabel.textContent = `${dataset.progress || 0}%`;
+    if (progressStep) {
+      progressStep.textContent = dataset.status === 'processing' ? String(dataset.processing_step || '') : '';
+      progressStep.hidden = !progressStep.textContent;
+    }
     if (elapsed) {
       elapsed.textContent = dataset.elapsed_seconds === null || dataset.elapsed_seconds === undefined
         ? '' : formatQueueElapsed(dataset.elapsed_seconds);
@@ -7888,17 +7893,32 @@ if (queueNode) {
       }
       const openHref = `/datasets-analysis?${openParams.toString()}`;
       const isCdr = ['data', 'voice', 'speech'].includes(datasetKind);
-      const hadMapMappings = Boolean(actions.querySelector('[data-mapping-map-open]'));
-      const hadClearMappings = Boolean(actions.querySelector('[data-mapping-clear-open]'));
-      // Preserve already available Vendor actions during live polling. New
-      // actions still come directly from the persisted API capabilities.
-      const canMapMappings = Boolean(dataset.can_map_mappings) || hadMapMappings;
-      const canClearMappings = Boolean(dataset.can_clear_mappings) || hadClearMappings;
+      const canMapMappings = Boolean(dataset.can_map_mappings);
+      const canClearMappings = Boolean(dataset.can_clear_mappings);
       const fileName = String(dataset.file_name || 'dataset')
         .replace(/&/g, '&amp;').replace(/'/g, '&#39;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       const isReady = dataset.status === 'ready';
-      const canReprocess = ['ready', 'failed', 'stopped'].includes(dataset.status);
-      const canStop = dataset.status === 'processing';
+      const canReprocess = Boolean(dataset.can_reprocess);
+      const canStop = ['queued', 'processing'].includes(dataset.status);
+      const actionState = JSON.stringify([
+        dataset.id, dataset.status, datasetKind, canMapMappings, canClearMappings,
+        canReprocess, String(dataset.file_name || ''), Boolean(dataset.source_exists),
+      ]);
+      if (actions.dataset.actionState === actionState) return;
+      if (!actions.dataset.actionState) {
+        const currentActionsMatch =
+          Boolean(actions.querySelector('a.action-link-preview')) === isReady
+          && Boolean(actions.querySelector('a.action-link-primary')) === (isReady && isCdr)
+          && Boolean(actions.querySelector('[data-mapping-map-open]')) === canMapMappings
+          && Boolean(actions.querySelector('[data-mapping-clear-open]')) === canClearMappings
+          && Boolean(actions.querySelector('.action-link-stop')) === canStop
+          && Boolean(actions.querySelector('.action-link-reprocess:not(:disabled)')) === canReprocess;
+        if (currentActionsMatch) {
+          actions.dataset.actionState = actionState;
+          return;
+        }
+      }
+      actions.dataset.actionState = actionState;
       actions.innerHTML = `
         ${isReady
           ? `<a class="ghost-link action-link-preview" href="/workspace/preview/${dataset.id}" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview" title="Preview dataset" aria-label="Preview dataset">Preview</a>`
@@ -7928,6 +7948,10 @@ if (queueNode) {
             confirmLabel: form.dataset.confirmLabel || 'Confirm',
           });
           if (accepted) {
+            if (!form.isConnected) {
+              showInfoDialog('The dataset state changed. Review its current actions and try again.', {title: 'Dataset updated'});
+              return;
+            }
             form.submit();
           }
         });
@@ -7995,9 +8019,7 @@ if (queueNode) {
       applyQueueSort();
       applyQueueTypeFilter();
       if (refreshWorkspaceAfterCompletion) {
-        if (suppressReload) {
-          refreshWorkspaceAfterCompletion = false;
-        } else {
+        if (!suppressReload) {
           // A complete reload obtains the final server-rendered action set,
           // including Map/Clear Vendors, after background processing finishes.
           window.location.reload();
@@ -8338,6 +8360,16 @@ if (queueNode) {
     const tasks = (Array.isArray(group.tasks) ? group.tasks : [])
       .map((task, index) => ({task, index}))
       .sort((left, right) => {
+        if (taskIsQueued(left.task) && taskIsQueued(right.task)
+            && left.task.queue_phase != null && right.task.queue_phase != null) {
+          const phaseDifference = Number(left.task.queue_phase) - Number(right.task.queue_phase);
+          if (phaseDifference) return phaseDifference;
+        }
+        if (Number.isInteger(Number(left.task.dataset_id)) && Number.isInteger(Number(right.task.dataset_id))
+            && left.task.dataset_id != null && right.task.dataset_id != null) {
+          const phaseDifference = Number(left.task.queue_phase ?? 1) - Number(right.task.queue_phase ?? 1);
+          return phaseDifference || Number(left.task.dataset_id) - Number(right.task.dataset_id);
+        }
         const leftTime = Number(left.task.queued_at ?? left.task.started_at ?? left.task.completed_at);
         const rightTime = Number(right.task.queued_at ?? right.task.started_at ?? right.task.completed_at);
         if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) return leftTime - rightTime;
@@ -8451,7 +8483,9 @@ if (queueNode) {
       const hasProgress = !queued && task.progress !== null && task.progress !== undefined && Number.isFinite(numericProgress);
       const duration = Number(task.duration_seconds);
       const queuedLabel = queued ? formatQueuedAge(task.queued_at) : '';
-      const taskDetail = queuedLabel || String(task.detail || 'Processing');
+      const taskDetail = queued
+        ? `${String(task.detail || 'Queued')} · ${queuedLabel || 'Queued'}`
+        : String(task.detail || 'Processing');
       detail.textContent = `${taskDetail}${hasProgress ? ` · ${Math.round(Math.max(0, Math.min(100, numericProgress)))}%` : ''}${!queuedLabel && formatTaskDuration(duration) ? ` · ${formatTaskDuration(duration)}` : ''}`;
       item.append(detail);
 
@@ -8462,8 +8496,12 @@ if (queueNode) {
       const bar = document.createElement('div');
       bar.className = 'background-task-progress-bar';
       if (queued) {
-        progress.hidden = true;
+        progress.setAttribute('aria-valuemin', '0');
+        progress.setAttribute('aria-valuemax', '100');
+        progress.setAttribute('aria-valuenow', '0');
         progress.setAttribute('aria-valuetext', 'Queued');
+        bar.style.width = '0%';
+        bar.style.minWidth = '0';
       } else if (!hasProgress) {
         progress.classList.add('is-indeterminate');
         progress.setAttribute('aria-valuetext', 'In progress');

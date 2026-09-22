@@ -59,7 +59,7 @@
         <div class="configuration-card-head"><p class="eyebrow">Background Work</p><h3>Parallel Tasks</h3></div>
         <label>Maximum simultaneous tasks
           <input type="number" name="max_background_tasks" value="{{ configuration.max_background_tasks }}" min="1" max="32" step="1" required>
-          <span class="table-help">Tasks run FIFO. Set 1 to run one background task at a time across the application.</span>
+          <span class="table-help">Workspace data jobs run one at a time: mappings first, datasets by ID, then combined tables and materialization. The effective server limit is at most 4 tasks and reserves one logical CPU for interactive requests.</span>
         </label>
       </section>
 
