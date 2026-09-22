@@ -2190,13 +2190,14 @@
     return globalThis.createInteractiveChartPreviewControls($('ds-chart-filter-fields'), context, {
       columnsBySource, datasetsBySource: context.datasets_by_source || {},
       fields: [
-        ['chart_type', 'Chart Type'], ['chart_title', 'Chart Title'], ['cdr_source', 'CDR Type'], ['dataset_ids', 'Datasets'],
-        ['kpi', 'KPI'], ['filters', 'Filters'], ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'],
-        ['legend', 'Legend'], ['legend_position', 'Legend Position'],
-        ['axis_x_range', 'Axis X Range'], ['axis_y_range', 'Axis Y Range'],
-        ['label_position', 'Label Position'], ['label_format', 'Label Format'], ['exclude_null_empty', 'Exclude Null/Empty'], ['exclude_zero', 'Exclude Zero'],
+        // Keep this sequence aligned with the editable Report Template columns.
+        ['chart_title', 'Chart Title'], ['cdr_source', 'CDR Type'], ['dataset_ids', 'Datasets'], ['kpi', 'KPI'], ['chart_type', 'Chart Type'],
+        ['filters', 'Filters'], ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
+        ['legend_format', 'Legend Format'], ['label_position', 'Label Position'], ['label_format', 'Label Format'],
+        ['axis_x_range', 'Axis X Range'], ['axis_y_range', 'Axis Y Range'], ['exclude_null_empty', 'Exclude Null/Empty'], ['exclude_zero', 'Exclude Zero'],
       ],
       textFields: {chart_title: true}, editableGroupingInputs: true,
+      formatPanelToggleOnFieldClick: true,
       chartTypes: ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Multi KPI CDF Lines', 'Scatter', 'Table', 'Dynamic Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'],
       legendPositions: ['', 'Top', 'Bottom', 'Left', 'Right'],
       labelPositions: ['', 'None', 'Top', 'Up', 'Middle', 'Down'],

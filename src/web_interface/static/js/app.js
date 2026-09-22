@@ -3138,10 +3138,11 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     createInteractiveChartPreviewControls(chartPreviewFields, current, {
       columnsBySource: suggestions.columns,
       fields: [
-        ['chart_type', 'Chart Type'], ['chart_title', 'Chart Tittle'], ['cdr_source', 'CDR Source'], ['kpi', 'KPI'], ['filters', 'Filters'],
-        ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'], ['legend_format', 'Legend Format'],
-        ['axis_x_range', 'Axis X Range'], ['axis_y_range', 'Axis Y Range'],
-        ['label_position', 'Label Position'], ['label_format', 'Label Format'], ['exclude_null_empty', 'Exclude Null/Empty'], ['exclude_zero', 'Exclude Zero'],
+        // Keep this sequence aligned with the editable Report Template columns.
+        ['chart_title', 'Chart Tittle'], ['cdr_source', 'CDR Source'], ['kpi', 'KPI'], ['chart_type', 'Chart Type'],
+        ['filters', 'Filters'], ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
+        ['legend_format', 'Legend Format'], ['label_position', 'Label Position'], ['label_format', 'Label Format'],
+        ['axis_x_range', 'Axis X Range'], ['axis_y_range', 'Axis Y Range'], ['exclude_null_empty', 'Exclude Null/Empty'], ['exclude_zero', 'Exclude Zero'],
       ],
       textFields: {chart_title: true},
       // Keep these option sets identical to the persisted Chart Viewer.
@@ -3210,7 +3211,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       {title: 'Update Template?', confirmLabel: 'Update Template', tone: 'warning'},
     );
     if (!accepted) return;
-    const mapping = {chart_title: 'Chart Tittle', chart_type: 'Chart type', cdr_source: 'CDR source', kpi: 'KPI', filters: 'Filters', grouping_rows: 'Rows Aggregation', grouping_columns: 'Column Aggregation', legend: 'Legend', legend_position: 'Legend Position', label_position: 'Label Position', label_format: 'Label Format', axis_x_range: 'Axis X Range', axis_y_range: 'Axis Y Range', exclude_null_empty: 'Exclude Null/Empty', exclude_zero: 'Exclude Zero'};
+    const mapping = {chart_title: 'Chart Tittle', chart_type: 'Chart type', cdr_source: 'CDR source', kpi: 'KPI', filters: 'Filters', grouping_rows: 'Rows Aggregation', grouping_columns: 'Column Aggregation', legend: 'Legend', legend_position: 'Legend Position', legend_format: 'Legend Format', label_position: 'Label Position', label_format: 'Label Format', axis_x_range: 'Axis X Range', axis_y_range: 'Axis Y Range', exclude_null_empty: 'Exclude Null/Empty', exclude_zero: 'Exclude Zero'};
     Object.entries(previewDefinition()).forEach(([key, value]) => {
       const cell = Array.from(chartPreviewRow.querySelectorAll('[data-catalogue-field]')).find((item) => item.dataset.catalogueField === mapping[key]);
       if (!cell) return;
@@ -5286,10 +5287,10 @@ function setupEdgeNavigatorReveal() {
 function createInteractiveChartPreviewControls(fieldsElement, definition, options = {}) {
   if (!fieldsElement) return {definition: () => ({})};
   const fields = options.fields || [
-    ['chart_type', 'Chart Type'], ['cdr_source', 'CDR Source'], ['kpi', 'KPI'], ['filters', 'Filters'],
+    ['cdr_source', 'CDR Source'], ['kpi', 'KPI'], ['chart_type', 'Chart Type'], ['filters', 'Filters'],
     ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'], ['legend_format', 'Legend Format'],
-    ['axis_x_range', 'Axis X Range'], ['axis_y_range', 'Axis Y Range'],
-    ['label_position', 'Label Position'], ['label_format', 'Label Format'], ['exclude_null_empty', 'Exclude Null/Empty'], ['exclude_zero', 'Exclude Zero'],
+    ['label_position', 'Label Position'], ['label_format', 'Label Format'], ['axis_x_range', 'Axis X Range'], ['axis_y_range', 'Axis Y Range'],
+    ['exclude_null_empty', 'Exclude Null/Empty'], ['exclude_zero', 'Exclude Zero'],
   ];
   const multiFields = new Set(['dataset_ids', 'grouping_rows', 'grouping_columns', 'legend']);
   const parseKpiDefinition = (value) => {
@@ -5458,6 +5459,10 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
       control.type = 'hidden'; control.name = key; control.value = String(definition[key] || '');
       const opener = document.createElement('button'); opener.type = 'button'; opener.className = 'report-chart-label-format-trigger';
       const assistance = document.createElement('fieldset'); assistance.className = 'report-chart-label-format-assistance'; assistance.hidden = true;
+      const assistanceId = `preview-${key.replace('_', '-')}-assistance`;
+      assistance.id = assistanceId;
+      opener.setAttribute('aria-controls', assistanceId);
+      opener.setAttribute('aria-expanded', 'false');
       const legend = document.createElement('legend'); legend.textContent = key === 'legend_format' ? 'Legend format' : 'Label format';
       const color = document.createElement('input'); color.type = 'color'; color.value = '#FFFFFF'; color.setAttribute('aria-label', 'Label format color');
       const colorValue = document.createElement('output');
@@ -5493,7 +5498,19 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
       };
       [color, fontChoice, sizeChoice, ...Object.values(styleControls)].forEach((choice) => choice.addEventListener('input', applyFormat));
       automatic.addEventListener('click', () => { control.value = ''; hydrate(); control.dispatchEvent(new Event('input')); });
-      opener.addEventListener('click', () => { assistance.hidden = !assistance.hidden; if (!assistance.hidden) color.focus(); });
+      const toggleAssistance = () => {
+        assistance.hidden = !assistance.hidden;
+        opener.setAttribute('aria-expanded', String(!assistance.hidden));
+        if (!assistance.hidden) color.focus();
+      };
+      opener.addEventListener('click', toggleAssistance);
+      if (options.formatPanelToggleOnFieldClick) {
+        field.classList.add('report-chart-label-format-field-toggle');
+        field.title = 'Click the field heading to expand or collapse the format controls.';
+        field.addEventListener('click', (event) => {
+          if (event.target === field) toggleAssistance();
+        });
+      }
       assistance.append(legend, colorLabel, fontLabel, sizeLabel, styles, automatic);
       field.append(control, opener, assistance); hydrate(); return field;
     }

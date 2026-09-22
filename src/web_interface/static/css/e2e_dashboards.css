@@ -396,8 +396,10 @@
   box-shadow: 0 0 0 3px rgba(119, 81, 185, .1);
 }
 .e2e-dashboards .ds-chart-filter-panel .report-chart-label-format-trigger { display: block; width: 100%; min-height: 2rem; padding: .38rem .55rem; border: 1px solid #d2c5e2; border-radius: .48rem; background: #fff; color: #352747; font: inherit; font-size: .75rem; font-weight: 550; text-align: left; cursor: pointer; box-shadow: 0 1px 2px rgba(45, 30, 62, .04); }
+.e2e-dashboards .ds-chart-filter-panel .report-chart-label-format-field-toggle { cursor: pointer; }
 .e2e-dashboards .ds-chart-filter-panel .report-chart-label-format-trigger:hover, .e2e-dashboards .ds-chart-filter-panel .report-chart-label-format-trigger:focus-visible { border-color: #9574bd; background: #fbf8ff; box-shadow: 0 0 0 3px rgba(119, 81, 185, .1); }
 .e2e-dashboards .ds-chart-filter-panel .report-chart-label-format-assistance { display: grid; gap: .6rem; margin: .45rem 0 0; padding: .7rem; border: 1px solid #d8cbe7; border-radius: .55rem; background: #fff; }
+.e2e-dashboards .ds-chart-filter-panel .report-chart-label-format-assistance[hidden] { display: none !important; }
 .e2e-dashboards .ds-chart-filter-panel .report-chart-label-format-assistance legend { padding: 0 .25rem; color: #4d376b; font-size: .72rem; font-weight: 700; }
 .e2e-dashboards .ds-chart-filter-panel .report-chart-label-format-assistance label { display: grid; gap: .25rem; color: #4d376b; font-size: .68rem; font-weight: 700; }
 .e2e-dashboards .ds-chart-filter-panel .report-chart-label-format-assistance select { width: 100%; min-height: 2rem; border: 1px solid #d2c5e2; border-radius: .48rem; background: #fff; color: #352747; font: inherit; font-size: .75rem; }

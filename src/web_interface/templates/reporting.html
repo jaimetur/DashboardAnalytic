@@ -1419,8 +1419,10 @@
       reportChartHoverTooltip.hidden = false;
     });
     const sandboxFields = [
-      ['chart_type', 'Chart Type'], ['cdr_source', 'CDR Source'], ['kpi', 'KPI'], ['filters', 'Filters'],
+      ['cdr_source', 'CDR Source'], ['kpi', 'KPI'], ['chart_type', 'Chart Type'], ['filters', 'Filters'],
       ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
+      ['legend_format', 'Legend Format'], ['label_position', 'Label Position'], ['label_format', 'Label Format'],
+      ['axis_x_range', 'Axis X Range'], ['axis_y_range', 'Axis Y Range'], ['exclude_null_empty', 'Exclude Null/Empty'], ['exclude_zero', 'Exclude Zero'],
     ];
     const previewSourceKey = (source) => {
       const normalized = String(source || '').trim().toLowerCase();
@@ -1636,10 +1638,11 @@
         columnsBySource: definition.columns_by_source,
         datasetsBySource: definition.datasets_by_source,
         fields: [
-          ['chart_type', 'Chart Type'], ['chart_title', 'Chart Tittle'], ['cdr_source', 'CDR Type'], ['dataset_ids', 'Datasets'],
-          ['kpi', 'KPI'], ['filters', 'Filters'], ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'],
-          ['legend', 'Legend'], ['legend_position', 'Legend Position'], ['legend_format', 'Legend Format'], ['axis_x_range', 'Axis X Range'],
-          ['axis_y_range', 'Axis Y Range'], ['label_position', 'Label Position'], ['label_format', 'Label Format'], ['exclude_null_empty', 'Exclude Null/Empty'],
+          // Keep this sequence aligned with the editable Report Template columns.
+          ['chart_title', 'Chart Tittle'], ['cdr_source', 'CDR Type'], ['dataset_ids', 'Datasets'], ['kpi', 'KPI'], ['chart_type', 'Chart Type'],
+          ['filters', 'Filters'], ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
+          ['legend_format', 'Legend Format'], ['label_position', 'Label Position'], ['label_format', 'Label Format'], ['axis_x_range', 'Axis X Range'],
+          ['axis_y_range', 'Axis Y Range'], ['exclude_null_empty', 'Exclude Null/Empty'],
           ['exclude_zero', 'Exclude Zero'],
         ],
         textFields: {chart_title: true},
