@@ -12,7 +12,7 @@
 
 #### 🚀 Enhancements:
 
-- Dashboard PowerPoint exports from the Dashboard library now request Regions and Cities in the Dataset Universe panel whenever multiple values are available. Both searchable multiselects select every value by default and filter the export; Cities also offer a `7 Main Cities` shortcut for Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield. Selected Regions appear in yellow above Scope on the title slide and before Scope in the generated filename.
+- Dashboard PowerPoint exports from the Dashboard library now request Regions and Cities in the Dataset Universe panel whenever multiple values are available. Both searchable multiselects appear immediately with a loading state, then populate through one combined CDR scan; every value is selected by default and filters the export. Cities also offer a `7 Main Cities` shortcut for Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield. Selected Regions appear in yellow above Scope on the title slide and before Scope in the generated filename.
 
 #### 🐛 Bug fixes:
 

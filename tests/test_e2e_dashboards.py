@@ -442,6 +442,15 @@ def test_dashboard_library_ppt_scope_builds_its_automatic_dataset_universe(clien
     assert prepared.json()['date_bounds'] == {'min': '2026-09-01', 'max': '2026-09-03'}
 
 
+def test_dashboard_library_geography_options_are_loaded_in_one_request(client):
+    payload = setup_dashboard(client)
+
+    response = client.post('/api/e2e-dashboards/geography-options', json=payload)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {'regions': [], 'cities': ['Leeds', 'London']}
+
+
 def test_expanded_dashboard_chart_apply_builds_a_new_temporary_model(client):
     payload = setup_dashboard(client)
     prepared = client.post('/api/e2e-dashboards/prepare', json=payload)

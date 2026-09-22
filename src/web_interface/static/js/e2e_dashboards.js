@@ -577,36 +577,43 @@
     const refreshGeography = async () => {
       const request = ++geographyRequest;
       geographyLoading = true;
-      for (const {section, control} of [
-        {section: regionSection, control: regionControl}, {section: citySection, control: cityControl},
-      ]) { section.hidden = true; control.replaceChildren(); control.dispatchEvent(new Event('multiselect:options-updated')); }
+      for (const {section, control, copy, label} of [
+        {section: regionSection, control: regionControl, copy: regionCopy, label: 'Regions'},
+        {section: citySection, control: cityControl, copy: cityCopy, label: 'Cities'},
+      ]) {
+        section.hidden = false;
+        copy.textContent = `Loading available ${label.toLocaleLowerCase()}…`;
+        control.disabled = true;
+        control.replaceChildren(option('', 'Loading available values…'));
+        control.dispatchEvent(new Event('multiselect:options-updated'));
+      }
       updateConfirmState();
       try {
-        const result = await Promise.all(['Region', 'City'].map(async field => {
-          try {
-            return {field, values: (await api('/filter-options', 'POST', {definition: exportUniverse(), field})).values || []};
-          } catch (error) { return {field, error}; }
-        }));
+        const geography = await api('/geography-options', 'POST', exportUniverse());
         if (request !== geographyRequest) return;
-        for (const {field, values: rawValues, error} of result) {
-          if (error) {
-            if (!String(error.message || '').includes(`do not contain the ${field} field`)) dateStatus.textContent = error.message;
-            continue;
-          }
+        for (const [field, rawValues] of [
+          ['Region', geography.regions || []], ['City', geography.cities || []],
+        ]) {
           const values = rawValues.map(String).map(value => value.trim()).filter(Boolean);
-          if (values.length <= 1) continue;
           const isRegion = field === 'Region';
           const section = isRegion ? regionSection : citySection;
           const control = isRegion ? regionControl : cityControl;
           const copy = isRegion ? regionCopy : cityCopy;
+          if (values.length <= 1) { section.hidden = true; continue; }
           const selected = new Set(values);
+          control.disabled = false;
+          control.replaceChildren();
           control.append(...values.map(value => {
             const entry = option(value, value); entry.selected = selected.has(value); return entry;
           }));
           control.dispatchEvent(new Event('multiselect:options-updated'));
           copy.textContent = `Select one or more ${field === 'Region' ? 'Regions' : 'Cities'} to include in this PowerPoint export.`;
-          section.hidden = false;
         }
+      } catch (error) {
+        if (request !== geographyRequest) return;
+        regionSection.hidden = true;
+        citySection.hidden = true;
+        dateStatus.textContent = error.message;
       } finally {
         if (request === geographyRequest) { geographyLoading = false; updateConfirmState(); }
       }

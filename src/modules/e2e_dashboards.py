@@ -2204,6 +2204,25 @@ def install_dashboard_routes(core):
             raise HTTPException(400, f'The selected CDRs do not contain the {field_name} field.')
         return sorted(values, key=str.casefold)
 
+    def load_dashboard_geography_options(definition, task_repository) -> dict[str, list[str]]:
+        """Load Region and City catalogues with one combined scan per CDR kind."""
+        validate(definition, task_repository)
+        dimensions = core.load_repository_calculated_dimensions(task_repository)
+        selected_by_kind = selected_sources(definition, task_repository)
+        requested_definition = definition.model_copy(deep=True)
+        ensure_combined_filter_columns(requested_definition, task_repository, dimensions, selected_by_kind)
+        apply_selected_date_bounds(requested_definition, selected_date_bounds(task_repository, selected_by_kind))
+        with task_repository.connection() as connection:
+            options = combined_filter_options(
+                requested_definition, selected_by_kind, ('Region', 'City'), task_repository, connection,
+            )
+        def non_blank(field: str) -> list[str]:
+            return [str(value).strip() for value in options.get(field, []) if str(value).strip()]
+        return {
+            'regions': non_blank('Region'),
+            'cities': non_blank('City'),
+        }
+
     def build_preview(definition, user, *, workspace: str | None = None, cancelled=None, progress=None):
         def ensure_not_cancelled():
             if callable(cancelled) and cancelled():
@@ -2719,6 +2738,13 @@ def install_dashboard_routes(core):
             task_repository = bound_repository()
             values = load_filter_options(request.definition, request.field, task_repository)
             return {'field': request.field.strip(), 'values': values}
+        except (ValueError, KeyError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post('/api/e2e-dashboards/geography-options')
+    def geography_options(definition: DashboardDefinition, user=Depends(dashboard_user)):
+        try:
+            return load_dashboard_geography_options(definition, bound_repository())
         except (ValueError, KeyError) as exc:
             raise HTTPException(400, str(exc)) from exc
 

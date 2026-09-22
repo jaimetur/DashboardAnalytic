@@ -3193,7 +3193,7 @@ def test_dashboard_library_ppt_export_selects_scope_cdrs_explicitly() -> None:
     assert "const savedDateFrom = String(dashboard?.date_from || 'Oldest');" in script
     assert "const savedDateTo = String(dashboard?.date_to || 'Newest');" in script
     assert 'const universeChoice = await chooseDashboardPptUniverse(item);' in script
-    assert "['Region', 'City']" in script
+    assert "api('/geography-options', 'POST', exportUniverse())" in script
     assert 'const withPptSelection = (dashboard, selectionField, values)' in script
     assert "withPptSelection(exportDefinition, 'City', selectedCities);" in script
     assert 'selected_regions: selectedRegions' in script
