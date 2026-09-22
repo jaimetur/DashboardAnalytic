@@ -6323,7 +6323,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
           awaiting_acceptance: 'Waiting for a super-admin on the destination server to accept the transfer.',
           exporting: `The destination accepted the transfer. Creating the selected export package${transfer.progress ? ` — ${transfer.progress}%` : ''}.`,
           transferring: `Sending the package to the destination server${transfer.progress ? ` — ${transfer.progress}%` : ''}.`,
-          remote_importing: `Package received. The destination server is ${transfer.remote_phase || 'importing it'}${transfer.progress ? ` — ${transfer.progress}%` : ''}.`,
+          remote_importing: `Importing the received package${transfer.remote_phase ? `: ${transfer.remote_phase}` : ''}${transfer.progress ? ` — ${transfer.progress}%` : ''}.`,
         };
         if (loadingCopy) loadingCopy.textContent = copies[transfer.status] || 'The server transfer is in progress.';
         window.setTimeout(() => { pollTransfer().catch(handleTransferError); }, 1500);
@@ -6663,7 +6663,12 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       showInfoDialog(transfer.notice || 'The server transfer completed successfully.', {title: 'Server Transfer Complete', tone: 'info'});
       return;
     }
-    showLoadingOverlay('Resuming server transfer', transfer.status === 'remote_importing' ? 'The destination server is importing the package.' : 'The server transfer is still in progress.');
+    showLoadingOverlay(
+      'Resuming server transfer',
+      transfer.status === 'remote_importing'
+        ? `Importing the received package${transfer.remote_phase ? `: ${transfer.remote_phase}` : ''}${transfer.progress ? ` — ${transfer.progress}%` : ''}.`
+        : 'The server transfer is still in progress.',
+    );
     setLoadingProgress(transfer.progress);
     window.setTimeout(() => { poll().catch(() => {}); }, 1500);
   };

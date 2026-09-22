@@ -7229,6 +7229,16 @@ def _save_transfer_offer(offer: dict[str, Any]) -> None:
     _persist_transfer_offer(offer)
 
 
+def _start_received_transfer(offer_id: str) -> None:
+    """Start an accepted incoming transfer independently of the job queue."""
+    Thread(
+        target=_run_received_transfer,
+        args=(offer_id,),
+        name=f'incoming-transfer-{offer_id[:8]}',
+        daemon=True,
+    ).start()
+
+
 def _run_received_transfer(offer_id: str) -> None:
     with TRANSFER_LOCK:
         offer = TRANSFER_OFFERS.get(offer_id)
@@ -14285,10 +14295,13 @@ async def receive_transfer_package(offer_id: str, request: Request) -> JSONRespo
         if str(manifest.get('kind') or '') != str(offer['kind']):
             raise ValueError('The received package type does not match the accepted transfer offer.')
         with TRANSFER_LOCK:
-            offer.update({'path': str(package_path), 'manifest': manifest, 'status': 'received', 'phase': 'package received', 'progress': 100.0})
+            offer.update({
+                'path': str(package_path), 'manifest': manifest,
+                'status': 'importing', 'phase': 'validating', 'progress': 0.0,
+            })
             _save_transfer_offer(offer)
-        submit_background_task(_run_received_transfer, offer_id)
-        return JSONResponse({'offer_id': offer_id, 'status': 'received'})
+        _start_received_transfer(offer_id)
+        return JSONResponse({'offer_id': offer_id, 'status': 'importing'})
     except (OSError, ValueError, zipfile.BadZipFile) as exc:
         package_path.unlink(missing_ok=True)
         with TRANSFER_LOCK:
@@ -14358,9 +14371,10 @@ def import_recovered_transfer_package(offer_id: str, user: SessionUser = Depends
             TRANSFER_OFFERS.pop(offer_id, None)
             repository.delete_transfer_offer(offer_id)
             raise HTTPException(status_code=404, detail='The recovered transfer package is no longer available.')
-        offer.update({'status': 'received', 'phase': 'starting recovered import', 'progress': 100.0, 'accepted_by': user.username})
-    submit_background_task(_run_received_transfer, offer_id)
-    return JSONResponse({'offer_id': offer_id, 'status': 'received'})
+        offer.update({'status': 'importing', 'phase': 'validating', 'progress': 0.0, 'accepted_by': user.username})
+        _save_transfer_offer(offer)
+    _start_received_transfer(offer_id)
+    return JSONResponse({'offer_id': offer_id, 'status': 'importing'})
 
 
 @app.post('/admin/import-export/transfers/recoveries/{offer_id}/delete')
