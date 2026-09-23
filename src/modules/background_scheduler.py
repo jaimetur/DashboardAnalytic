@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import Future
 from dataclasses import dataclass, field
+from contextlib import contextmanager
 from threading import Condition, Thread
 from typing import Any, Callable
 
@@ -15,7 +16,7 @@ class _ScheduledTask:
     args: tuple[Any, ...]
     kwargs: dict[str, Any]
     workspace_key: str | None = None
-    priority: tuple[int, int] = (0, 0)
+    priority: tuple[int, ...] = (0, 0)
     sequence: int = field(default=0)
 
 
@@ -28,6 +29,7 @@ class BackgroundTaskScheduler:
         self._active_workspaces: set[str] = set()
         self._sequence = 0
         self._active = 0
+        self._dispatch_holds = 0
         self._max_workers = max(1, int(max_workers))
         self._thread_name_prefix = thread_name_prefix
         self._workers: list[Thread] = []
@@ -46,12 +48,18 @@ class BackgroundTaskScheduler:
         with self._condition:
             return self._closed
 
+    @property
+    def is_idle(self) -> bool:
+        """Whether the scheduler has neither running nor queued work."""
+        with self._condition:
+            return self._active == 0 and not self._pending
+
     def submit(self, callback: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Future[Any]:
         return self.submit_ordered(callback, *args, **kwargs)
 
     def submit_ordered(
         self, callback: Callable[..., Any], /, *args: Any,
-        workspace_key: str | None = None, priority: tuple[int, int] = (0, 0),
+        workspace_key: str | None = None, priority: tuple[int, ...] = (0, 0),
         **kwargs: Any,
     ) -> Future[Any]:
         """Order workspace jobs by phase and ID while preserving FIFO ties."""
@@ -65,6 +73,18 @@ class BackgroundTaskScheduler:
             ))
             self._condition.notify_all()
         return future
+
+    @contextmanager
+    def defer_dispatch(self):
+        """Queue a related batch atomically before a worker can start it."""
+        with self._condition:
+            self._dispatch_holds += 1
+        try:
+            yield
+        finally:
+            with self._condition:
+                self._dispatch_holds -= 1
+                self._condition.notify_all()
 
     def shutdown(self, wait: bool = True, cancel_futures: bool = False) -> None:
         with self._condition:
@@ -94,7 +114,7 @@ class BackgroundTaskScheduler:
                         task for task in self._pending
                         if task.workspace_key is None or task.workspace_key not in self._active_workspaces
                     ]
-                    if available and self._active < self._max_workers:
+                    if available and self._active < self._max_workers and not self._dispatch_holds:
                         break
                     if self._closed and not self._pending:
                         return

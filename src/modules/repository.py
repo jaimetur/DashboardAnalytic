@@ -182,6 +182,15 @@ CREATE TABLE IF NOT EXISTS dataset_source_columns (
     FOREIGN KEY(dataset_id) REFERENCES datasets(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS cdr_catalogues (
+    dataset_id INTEGER PRIMARY KEY,
+    vendors_json TEXT NOT NULL DEFAULT '[]',
+    regions_json TEXT NOT NULL DEFAULT '[]',
+    cities_json TEXT NOT NULL DEFAULT '[]',
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(dataset_id) REFERENCES datasets(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_dataset_source_columns_identity
 ON dataset_source_columns(dataset_id, column_identity);
 
@@ -728,6 +737,58 @@ class Repository:
             conn.execute("ALTER TABLE dataset_profiles ADD COLUMN processing_options_json TEXT NOT NULL DEFAULT '{}'")
         if 'processing_step' not in existing_columns:
             conn.execute("ALTER TABLE dataset_profiles ADD COLUMN processing_step TEXT NOT NULL DEFAULT ''")
+
+    def replace_cdr_catalogue(
+        self, dataset_id: int, *, vendors: Iterable[str], regions: Iterable[str], cities: Iterable[str],
+    ) -> None:
+        """Persist the lightweight universe catalogues derived from one CDR."""
+        def normalized(values: Iterable[str]) -> str:
+            return json.dumps(sorted({str(value).strip() for value in values if str(value).strip()}, key=str.casefold))
+        with self.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO cdr_catalogues (dataset_id, vendors_json, regions_json, cities_json, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(dataset_id) DO UPDATE SET
+                    vendors_json = excluded.vendors_json,
+                    regions_json = excluded.regions_json,
+                    cities_json = excluded.cities_json,
+                    updated_at = excluded.updated_at
+                """,
+                (dataset_id, normalized(vendors), normalized(regions), normalized(cities), local_now_iso()),
+            )
+
+    def cdr_catalogue_values(self, dataset_ids: Iterable[int] | None = None) -> dict[str, list[str]]:
+        """Return de-duplicated cached Vendor, Region and City values for CDRs."""
+        ids = [int(dataset_id) for dataset_id in (dataset_ids or [])]
+        with self.connection() as conn:
+            sql = 'SELECT vendors_json, regions_json, cities_json FROM cdr_catalogues'
+            params: list[Any] = []
+            if ids:
+                sql += f" WHERE dataset_id IN ({','.join('?' for _ in ids)})"
+                params = ids
+            rows = conn.execute(sql, params).fetchall()
+        values = {'vendors': set(), 'regions': set(), 'cities': set()}
+        for row in rows:
+            for key, column in (('vendors', 'vendors_json'), ('regions', 'regions_json'), ('cities', 'cities_json')):
+                try:
+                    values[key].update(str(value).strip() for value in json.loads(row[column] or '[]') if str(value).strip())
+                except (TypeError, json.JSONDecodeError):
+                    continue
+        return {key: sorted(items, key=str.casefold) for key, items in values.items()}
+
+    def missing_cdr_catalogue_ids(self, dataset_ids: Iterable[int]) -> list[int]:
+        """Identify CDRs created before catalogue persistence was introduced."""
+        ids = [int(dataset_id) for dataset_id in dataset_ids]
+        if not ids:
+            return []
+        with self.connection() as conn:
+            rows = conn.execute(
+                f"SELECT dataset_id FROM cdr_catalogues WHERE dataset_id IN ({','.join('?' for _ in ids)})",
+                ids,
+            ).fetchall()
+        known = {int(row['dataset_id']) for row in rows}
+        return [dataset_id for dataset_id in ids if dataset_id not in known]
 
     def _migrate_legacy_vendor_mapping_profiles(self, conn: sqlite3.Connection) -> None:
         """Mark pre-profile mappings once, without reopening source CDR files."""

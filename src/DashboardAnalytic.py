@@ -25,7 +25,7 @@ import tempfile
 import time as time_module
 import zipfile
 from concurrent.futures import Future, ThreadPoolExecutor
-from contextlib import asynccontextmanager, closing, nullcontext
+from contextlib import asynccontextmanager, closing, contextmanager, nullcontext
 from dataclasses import asdict, fields, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
@@ -2427,6 +2427,53 @@ def format_workspace_size(size_bytes: int) -> str:
     return f'{formatted} {unit}'
 
 
+IDLE_DASHBOARD_WARMUP_SECONDS = 5 * 60
+IDLE_DASHBOARD_WARMUP_POLL_SECONDS = 30
+APPLICATION_ACTIVITY_LOCK = Lock()
+LAST_INTERACTIVE_APPLICATION_ACTIVITY = monotonic()
+LAST_IDLE_DASHBOARD_WARMUP_ACTIVITY = 0.0
+IDLE_DASHBOARD_WARMUP_CALLBACK: Callable[[], None] | None = None
+PASSIVE_APPLICATION_REQUEST_PATHS = {
+    '/api/background-tasks', '/api/workspaces/sizes',
+    '/api/e2e-dashboards/statuses', '/api/e2e-dashboards/ppt-jobs',
+    '/api/e2e-reporting/jobs', '/api/e2e-reporting/chart-jobs',
+}
+
+
+def register_idle_dashboard_warmup(callback: Callable[[], None]) -> None:
+    """Register the Dashboard module's low-priority idle warm-up callback."""
+    global IDLE_DASHBOARD_WARMUP_CALLBACK
+    with APPLICATION_ACTIVITY_LOCK:
+        IDLE_DASHBOARD_WARMUP_CALLBACK = callback
+
+
+def idle_dashboard_warmup_loop(stop_event: Event) -> None:
+    """Warm Dashboard caches after five quiet minutes with no queued work."""
+    global LAST_IDLE_DASHBOARD_WARMUP_ACTIVITY
+    while not stop_event.wait(IDLE_DASHBOARD_WARMUP_POLL_SECONDS):
+        with APPLICATION_ACTIVITY_LOCK:
+            activity_at = LAST_INTERACTIVE_APPLICATION_ACTIVITY
+            callback = IDLE_DASHBOARD_WARMUP_CALLBACK
+            already_warmed = LAST_IDLE_DASHBOARD_WARMUP_ACTIVITY >= activity_at
+        if (
+            callback is None
+            or already_warmed
+            or monotonic() - activity_at < IDLE_DASHBOARD_WARMUP_SECONDS
+            or not BACKGROUND_TASK_SCHEDULER.is_idle
+            or not EXPORT_TASK_SCHEDULER.is_idle
+        ):
+            continue
+        with APPLICATION_ACTIVITY_LOCK:
+            if LAST_IDLE_DASHBOARD_WARMUP_ACTIVITY >= activity_at:
+                continue
+            LAST_IDLE_DASHBOARD_WARMUP_ACTIVITY = activity_at
+        try:
+            callback()
+        except Exception:
+            # Idle cache work is optional and must never stop the monitor.
+            continue
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     APP_SHUTTING_DOWN.clear()
@@ -2475,6 +2522,12 @@ async def lifespan(_: FastAPI):
         name='recurring-backup-scheduler', daemon=True,
     )
     backup_scheduler_thread.start()
+    idle_dashboard_warmup_stop = Event()
+    idle_dashboard_warmup_thread = Thread(
+        target=idle_dashboard_warmup_loop, args=(idle_dashboard_warmup_stop,),
+        name='idle-dashboard-warmup', daemon=True,
+    )
+    idle_dashboard_warmup_thread.start()
     _recover_unimported_transfer_packages()
     _cleanup_expired_export_packages()
     if (workspace_id := workspace_registry.active_id()):
@@ -2494,7 +2547,9 @@ async def lifespan(_: FastAPI):
     yield
     APP_SHUTTING_DOWN.set()
     backup_scheduler_stop.set()
+    idle_dashboard_warmup_stop.set()
     backup_scheduler_thread.join(timeout=1)
+    idle_dashboard_warmup_thread.join(timeout=1)
     BACKGROUND_TASK_SCHEDULER.shutdown(wait=False, cancel_futures=True)
     with ACTIVE_DATASET_WORKERS_LOCK:
         active_workers = list(ACTIVE_DATASET_WORKERS)
@@ -2527,6 +2582,10 @@ async def track_interactive_application_requests(request: Request, call_next):
             else {'authenticated': False, 'active_workspace_id': None, 'sizes': {}, 'cache_sizes': {}}
         )
         return JSONResponse(payload, headers={'Cache-Control': 'no-store'})
+    if request.url.path not in PASSIVE_APPLICATION_REQUEST_PATHS:
+        with APPLICATION_ACTIVITY_LOCK:
+            global LAST_INTERACTIVE_APPLICATION_ACTIVITY
+            LAST_INTERACTIVE_APPLICATION_ACTIVITY = monotonic()
     return await call_next(request)
 
 
@@ -2894,14 +2953,28 @@ def _dataset_processing_executor(task_repository: Repository) -> BackgroundTaskS
     return BACKGROUND_TASK_SCHEDULER
 
 
+def workspace_dataset_job_priority(phase: int, dataset_id: int, dataset_kind: str = '') -> tuple[int, int, int]:
+    """Keep mapping assets first and process CDRs from the newest ID down."""
+    normalized_kind = str(dataset_kind or '').casefold()
+    mapping_rank = 0 if normalized_kind == 'mapping_region' else 1
+    return (phase, mapping_rank if phase == 0 else 0, -int(dataset_id))
+
+
+@contextmanager
+def defer_workspace_dataset_dispatch(task_repository: Repository):
+    """Submit a Workspace batch before its first item may start running."""
+    with _dataset_processing_executor(task_repository).defer_dispatch():
+        yield
+
+
 def _submit_workspace_job(
     task_repository: Repository, callback: Callable[..., Any], /, *args: Any,
-    phase: int, dataset_id: int = 0,
+    phase: int, dataset_id: int = 0, dataset_kind: str = '',
 ) -> Future[Any]:
     """Run one heavy Workspace job at a time in dependency and dataset ID order."""
     return _dataset_processing_executor(task_repository).submit_ordered(
         callback, *args, workspace_key=str(task_repository.db_path.resolve()),
-        priority=(phase, dataset_id),
+        priority=workspace_dataset_job_priority(phase, dataset_id, dataset_kind),
     )
 
 
@@ -3396,6 +3469,7 @@ def enqueue_dataset_processing(
                 task_repository, wait_for_dataset_worker,
                 phase=0 if str((task_repository.get_dataset(dataset_id) or {})['dataset_kind'] or '') in {'mapping_vodafone', 'mapping_three', 'mapping_region'} else 1,
                 dataset_id=dataset_id,
+                dataset_kind=str((task_repository.get_dataset(dataset_id) or {})['dataset_kind'] or ''),
             )
             return _track_dataset_future(dataset_id, task_repository, future)
 
@@ -3431,6 +3505,7 @@ def enqueue_dataset_processing(
         future = _submit_workspace_job(
             task_repository, process_after_dependencies,
             phase=0 if is_mapping else 1, dataset_id=dataset_id,
+            dataset_kind=str((queued_dataset or {})['dataset_kind'] or ''),
         )
     except Exception:
         _unregister_dataset_processing(dataset_id, task_repository)
@@ -3494,7 +3569,7 @@ def resume_interrupted_dataset_processing(workspace: Workspace) -> list[int]:
             vodafone_mapping_id, three_mapping_id,
             task_repository, workspace, region_mapping_id,
             phase=0 if str(row['dataset_kind'] or '') in {'mapping_vodafone', 'mapping_three', 'mapping_region'} else 1,
-            dataset_id=dataset_id,
+            dataset_id=dataset_id, dataset_kind=str(row['dataset_kind'] or ''),
         )
         _track_dataset_future(dataset_id, task_repository, future)
         task_repository.try_add_log('system', 'resume_interrupted_dataset', json.dumps({
@@ -3609,6 +3684,8 @@ def rebuild_dataset_artifacts(
                 dataset_id, dataset_kind,
                 combined_reporting_required_columns(workspace_dimensions, dataset_kind, task_repository),
             )
+    if dataset_kind in CDR_DATASET_KINDS:
+        cache_cdr_catalogue(dataset_id, df, task_repository)
     if progress_callback:
         progress_callback(62)
     task_repository.update_dataset_profile(dataset_id, progress=62, dataset_kind=dataset_kind, processing_step='Summarizing dataset')
@@ -3709,6 +3786,61 @@ def ensure_mapping_gcid(dataset: dict[str, Any]) -> dict[str, Any]:
     return serialize_dataset_row(refreshed) if refreshed else dataset
 
 
+def cache_cdr_catalogue(dataset_id: int, frame: pd.DataFrame, task_repository: Repository | None = None) -> None:
+    """Store CDR universe values once, avoiding later scans of combined rows."""
+    task_repository = task_repository or repository
+    columns = {column_identity(column): str(column) for column in frame.columns}
+
+    def values(*aliases: str) -> list[str]:
+        column = next((columns.get(column_identity(alias)) for alias in aliases if columns.get(column_identity(alias))), None)
+        if not column:
+            return []
+        series = frame[column].dropna().astype(str).str.strip()
+        return series[series.ne('')].tolist()
+
+    task_repository.replace_cdr_catalogue(
+        dataset_id,
+        vendors=values('vendor'),
+        regions=values('region', 'g_level_2', 'g level 2'),
+        cities=values('city', 'g_level_4', 'g level 4'),
+    )
+
+
+def backfill_cdr_catalogues(dataset_ids: Iterable[int], task_repository: Repository | None = None) -> None:
+    """Populate catalogue rows once for CDRs processed before catalogue caching."""
+    task_repository = task_repository or repository
+    for dataset_id in task_repository.missing_cdr_catalogue_ids(dataset_ids):
+        if not task_repository.dataset_rows_table_exists(dataset_id):
+            continue
+        columns = set(task_repository.list_dataset_row_columns(dataset_id))
+
+        def distinct_values(*aliases: str) -> list[str]:
+            column = next(
+                (task_repository._resolve_dataset_row_column_name(columns, alias) for alias in aliases
+                 if task_repository._resolve_dataset_row_column_name(columns, alias)),
+                None,
+            )
+            if not column:
+                return []
+            quoted_table = task_repository._quote_identifier(task_repository.dataset_rows_table_name(dataset_id))
+            quoted_column = task_repository._quote_identifier(column)
+            with task_repository.connection() as connection:
+                rows = connection.execute(
+                    f'''SELECT DISTINCT TRIM(CAST({quoted_column} AS TEXT)) AS value
+                        FROM {quoted_table}
+                        WHERE {quoted_column} IS NOT NULL AND TRIM(CAST({quoted_column} AS TEXT)) <> ''
+                        ORDER BY LOWER(TRIM(CAST({quoted_column} AS TEXT)))''',
+                ).fetchall()
+            return [str(row['value']).strip() for row in rows]
+
+        task_repository.replace_cdr_catalogue(
+            dataset_id,
+            vendors=distinct_values('vendor'),
+            regions=distinct_values('region', 'g_level_2', 'g level 2'),
+            cities=distinct_values('city', 'g_level_4', 'g level 4'),
+        )
+
+
 def persist_mapped_cdr_frame(
     dataset: dict[str, Any], frame: pd.DataFrame, task_repository: Repository | None = None,
 ) -> None:
@@ -3728,6 +3860,8 @@ def persist_mapped_cdr_frame(
                 dataset_id, dataset_kind,
                 combined_reporting_required_columns(workspace_dimensions, dataset_kind, task_repository),
             )
+    if dataset_kind in CDR_DATASET_KINDS:
+        cache_cdr_catalogue(dataset_id, frame, task_repository)
     summary = summarise_dataset(frame)
     available_metrics = derive_available_metrics(frame)
     analysis = build_analysis(frame, {'aggregation': 'all', 'extra_filters': {}}, '')
@@ -7693,6 +7827,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         'audit_logs': 'Audit log',
         'dashboard_filter_selections': 'Dashboard filter selections',
         'dashboard_ppt_jobs': 'Dashboard PPT jobs',
+        'cdr_catalogues': 'CDR Vendor, Region and City catalogues',
         'dataset_profiles': 'Dataset profiles',
         'dataset_source_columns': 'Dataset source columns',
         'datasets': 'Datasets',
@@ -8576,8 +8711,12 @@ def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
                        WHERE p.status IN ('queued', 'processing')
                           OR (p.status = 'ready' AND p.processed_at IS NOT NULL
                               AND datetime(p.processed_at) >= datetime(?))
-                       ORDER BY CASE WHEN p.dataset_kind IN ('mapping_vodafone', 'mapping_three', 'mapping_region') THEN 0 ELSE 1 END,
-                                d.id"""
+                       ORDER BY CASE
+                                    WHEN p.dataset_kind = 'mapping_region' THEN 0
+                                    WHEN p.dataset_kind IN ('mapping_vodafone', 'mapping_three') THEN 1
+                                    ELSE 2
+                                END,
+                                d.id DESC"""
                     , (completed_cutoff,)
                 ).fetchall()
                 active_mapping_ids = [
@@ -13259,8 +13398,8 @@ def reprocess_workspace_datasets(
     for dataset in sorted(
         selected_datasets,
         key=lambda item: (
-            0 if item.get('dataset_kind') in {'mapping_vodafone', 'mapping_three', 'mapping_region'} else 1,
-            int(item['id']),
+            0 if item.get('dataset_kind') == 'mapping_region' else 1 if item.get('dataset_kind') in {'mapping_vodafone', 'mapping_three'} else 2,
+            -int(item['id']),
         ),
     ):
         try:
@@ -13349,14 +13488,15 @@ def map_dataset_vendors(
             raise HTTPException(status_code=400, detail=f"{cdr_dataset['file_name']} already has a Vendor mapping. Clear it before mapping again.")
         selected_datasets.append(cdr_dataset)
 
-    for cdr_dataset in selected_datasets:
-        enqueue_vendor_mapping(
-            background_tasks,
-            int(cdr_dataset['id']),
-            user.username,
-            vodafone_mapping['id'] if vodafone_mapping else None,
-            three_mapping['id'] if three_mapping else None,
-        )
+    with defer_workspace_dataset_dispatch(repository):
+        for cdr_dataset in sorted(selected_datasets, key=lambda item: -int(item['id'])):
+            enqueue_vendor_mapping(
+                background_tasks,
+                int(cdr_dataset['id']),
+                user.username,
+                vodafone_mapping['id'] if vodafone_mapping else None,
+                three_mapping['id'] if three_mapping else None,
+            )
     repository.add_log(user.username, 'queue_vendor_mapping', json.dumps({
         'dataset_ids': selected_ids,
         'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
@@ -13412,11 +13552,15 @@ def map_dataset_regions(
     if not selected_ids or not region_mapping_dataset_id:
         raise HTTPException(status_code=400, detail='Select CDRs and a processed Region Mapping.')
     _reporting_dataset(region_mapping_dataset_id, 'mapping_region')
+    selected_datasets: list[dict[str, Any]] = []
     for dataset_id in selected_ids:
         dataset = serialize_dataset_row(repository.get_dataset(dataset_id)) if repository.get_dataset(dataset_id) else None
         if not dataset or not dataset.get('is_ready') or dataset.get('dataset_kind') not in CDR_DATASET_KINDS or dataset.get('region_mapping_applied'):
             raise HTTPException(status_code=400, detail='Region mapping is only available for eligible processed CDRs.')
-        enqueue_region_mapping(background_tasks, dataset_id, user.username, region_mapping_dataset_id)
+        selected_datasets.append(dataset)
+    with defer_workspace_dataset_dispatch(repository):
+        for dataset in sorted(selected_datasets, key=lambda item: -int(item['id'])):
+            enqueue_region_mapping(background_tasks, int(dataset['id']), user.username, region_mapping_dataset_id)
     repository.add_log(user.username, 'queue_region_mapping', json.dumps({'dataset_ids': selected_ids, 'region_mapping_dataset_id': region_mapping_dataset_id}))
     return RedirectResponse(f'/workspace?dataset_id={selected_ids[0]}', status_code=status.HTTP_303_SEE_OTHER)
 
@@ -13439,15 +13583,21 @@ def map_dataset_mappings(
         _reporting_dataset(three_mapping_dataset_id, 'mapping_three')
     if region_mapping_dataset_id:
         _reporting_dataset(region_mapping_dataset_id, 'mapping_region')
+    selected_datasets: list[dict[str, Any]] = []
     for dataset_id in selected_ids:
         row = repository.get_dataset(dataset_id)
         dataset = serialize_dataset_row(row) if row else None
         if not dataset or not dataset.get('is_ready') or dataset.get('dataset_kind') not in CDR_DATASET_KINDS:
             raise HTTPException(status_code=400, detail='Mapping is only available for processed NetCheck CDR datasets.')
-        enqueue_dataset_processing(
-            background_tasks, dataset_id, Path(str(dataset['stored_path'])), user.username,
-            vodafone_mapping_dataset_id, three_mapping_dataset_id, region_mapping_dataset_id,
-        )
+        selected_datasets.append(dataset)
+    # Keep every selected CDR pending until the complete batch is known, so
+    # priority rather than browser checkbox order chooses the first worker.
+    with defer_workspace_dataset_dispatch(repository):
+        for dataset in sorted(selected_datasets, key=lambda item: -int(item['id'])):
+            enqueue_dataset_processing(
+                background_tasks, int(dataset['id']), Path(str(dataset['stored_path'])), user.username,
+                vodafone_mapping_dataset_id, three_mapping_dataset_id, region_mapping_dataset_id,
+            )
     repository.add_log(user.username, 'queue_dataset_mappings', json.dumps({'dataset_ids': selected_ids, 'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id, 'three_mapping_dataset_id': three_mapping_dataset_id, 'region_mapping_dataset_id': region_mapping_dataset_id}))
     return RedirectResponse(f'/workspace?dataset_id={selected_ids[0]}', status_code=status.HTTP_303_SEE_OTHER)
 

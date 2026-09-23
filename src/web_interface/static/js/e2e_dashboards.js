@@ -134,6 +134,15 @@
       .slice(0, scope === 'multivendor' ? 1 : 2)
       .map(row => Number(row.id)),
   ]));
+  const multivendorAvailable = Boolean(config.multivendor_available);
+  const syncMultivendorAvailability = () => {
+    for (const id of ['ds-scope', 'ds-ppt-dataset-scope']) {
+      const control = $(id);
+      const choice = control?.querySelector('option[value="multivendor"]');
+      if (choice) choice.disabled = !multivendorAvailable;
+    }
+  };
+  syncMultivendorAvailability();
   const canonicalDashboardDefinition = value => {
     const definitionValue = structuredClone(value || {});
     definitionValue.datasets ||= {};
@@ -522,19 +531,22 @@
     if (prepared?.slides.length) renderSlide();
   };
   const withPptSelection = (dashboard, selectionField, values) => {
-    if (!values.length) return dashboard;
     dashboard.filters ||= {};
     for (const filterField of Object.keys(dashboard.filters)) {
       if (identity(filterField) === identity(selectionField)) delete dashboard.filters[filterField];
     }
-    dashboard.filters[selectionField] = values;
+    if (values.length) dashboard.filters[selectionField] = values;
     return dashboard;
   };
   const chooseDashboardPptUniverse = dashboard => new Promise(resolve => {
     const scopeControl = $('ds-ppt-dataset-scope');
+    syncMultivendorAvailability();
     scopeControl.value = 'single';
     const choices = $('ds-ppt-dataset-choices'); choices.replaceChildren();
     const confirm = $('ds-ppt-dataset-confirm');
+    const vendorSection = $('ds-ppt-vendor-section');
+    const vendorControl = $('ds-ppt-dataset-vendor');
+    const vendorCopy = $('ds-ppt-vendor-copy');
     const regionSection = $('ds-ppt-region-section');
     const regionControl = $('ds-ppt-dataset-region');
     const regionCopy = $('ds-ppt-region-copy');
@@ -554,6 +566,7 @@
     const selectedDatasets = () => Object.fromEntries(['data', 'voice', 'speech'].map(kind => [kind,
       [...choices.querySelectorAll(`input[data-kind="${kind}"]:checked`)].map(input => Number(input.value)),
     ]));
+    const selectedVendors = () => [...vendorControl.selectedOptions].map(option => option.value);
     const selectedRegions = () => [...regionControl.selectedOptions].map(option => option.value);
     const selectedCities = () => [...cityControl.selectedOptions].map(option => option.value);
     const exportUniverse = () => ({
@@ -571,13 +584,13 @@
       else if (!automaticFrom.checked && !automaticTo.checked && dateFrom.value > dateTo.value) dateError = 'Date from must not be later than Date to.';
       dateStatus.textContent = dateError;
       confirm.disabled = !choices.querySelector('input:checked') || Boolean(dateError)
-        || geographyLoading || (!regionSection.hidden && !selectedRegions().length)
-        || (!citySection.hidden && !selectedCities().length);
+        || geographyLoading;
     };
     const refreshGeography = async () => {
       const request = ++geographyRequest;
       geographyLoading = true;
       for (const {section, control, copy, label} of [
+        {section: vendorSection, control: vendorControl, copy: vendorCopy, label: 'Vendors'},
         {section: regionSection, control: regionControl, copy: regionCopy, label: 'Regions'},
         {section: citySection, control: cityControl, copy: cityCopy, label: 'Cities'},
       ]) {
@@ -592,14 +605,30 @@
         const geography = await api('/geography-options', 'POST', exportUniverse());
         if (request !== geographyRequest) return;
         for (const [field, rawValues] of [
+          ['Vendor', geography.vendors || []],
           ['Region', geography.regions || []], ['City', geography.cities || []],
         ]) {
           const values = rawValues.map(String).map(value => value.trim()).filter(Boolean);
+          const isVendor = field === 'Vendor';
           const isRegion = field === 'Region';
-          const section = isRegion ? regionSection : citySection;
-          const control = isRegion ? regionControl : cityControl;
-          const copy = isRegion ? regionCopy : cityCopy;
-          if (values.length <= 1) { section.hidden = true; continue; }
+          const section = isVendor ? vendorSection : isRegion ? regionSection : citySection;
+          const control = isVendor ? vendorControl : isRegion ? regionControl : cityControl;
+          const copy = isVendor ? vendorCopy : isRegion ? regionCopy : cityCopy;
+          if (values.length <= 1) {
+            const label = field === 'Vendor' ? 'Vendor' : field === 'Region' ? 'Region' : 'City';
+            section.hidden = false;
+            control.disabled = true;
+            control.replaceChildren();
+            if (values.length === 1) {
+              control.append(option(values[0], values[0]));
+              copy.textContent = `This workspace has only one available ${label}; it cannot be filtered.`;
+            } else {
+              control.append(option('', `No ${label.toLocaleLowerCase()} values are available.`));
+              copy.textContent = `This workspace has no available ${label.toLocaleLowerCase()} values to filter.`;
+            }
+            control.dispatchEvent(new Event('multiselect:options-updated'));
+            continue;
+          }
           const selected = new Set(values);
           control.disabled = false;
           control.replaceChildren();
@@ -607,10 +636,11 @@
             const entry = option(value, value); entry.selected = selected.has(value); return entry;
           }));
           control.dispatchEvent(new Event('multiselect:options-updated'));
-          copy.textContent = `Select one or more ${field === 'Region' ? 'Regions' : 'Cities'} to include in this PowerPoint export.`;
+          copy.textContent = `Select one or more ${field === 'Vendor' ? 'Vendors' : field === 'Region' ? 'Regions' : 'Cities'} to include in this PowerPoint export.`;
         }
       } catch (error) {
         if (request !== geographyRequest) return;
+        vendorSection.hidden = true;
         regionSection.hidden = true;
         citySection.hidden = true;
         dateStatus.textContent = error.message;
@@ -657,6 +687,7 @@
     $('ds-ppt-dataset-cancel').onclick = () => finish(null);
     choices.onchange = () => { updateConfirmState(); void refreshGeography(); };
     scopeControl.onchange = () => { renderChoices(); void refreshGeography(); };
+    vendorControl.onchange = updateConfirmState;
     regionControl.onchange = updateConfirmState;
     cityControl.onchange = updateConfirmState;
     automaticFrom.onchange = syncDateControls;
@@ -668,6 +699,7 @@
       datasets: selectedDatasets(),
       date_from: automaticFrom.checked ? 'Oldest' : dateFrom.value,
       date_to: automaticTo.checked ? 'Newest' : dateTo.value,
+      vendors: selectedVendors(),
       regions: selectedRegions(),
       cities: selectedCities(),
     });
@@ -680,6 +712,7 @@
     let exportDefinition = item;
     let preparationToken = null;
     let filterDecision = 'unchanged';
+    let selectedVendors = [];
     let selectedRegions = [];
     let selectedCities = [];
     if (chooseScope) {
@@ -693,8 +726,10 @@
       exportDefinition.datasets = universeChoice.datasets;
       exportDefinition.date_from = universeChoice.date_from;
       exportDefinition.date_to = universeChoice.date_to;
+      selectedVendors = universeChoice.vendors;
       selectedRegions = universeChoice.regions;
       selectedCities = universeChoice.cities;
+      withPptSelection(exportDefinition, 'Vendor', selectedVendors);
       withPptSelection(exportDefinition, 'Region', selectedRegions);
       withPptSelection(exportDefinition, 'City', selectedCities);
     } else {

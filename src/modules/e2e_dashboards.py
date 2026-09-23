@@ -966,8 +966,19 @@ def install_dashboard_routes(core):
 
     @app.get('/e2e-dashboards', response_class=HTMLResponse)
     def page(request: Request, user=Depends(dashboard_user)):
-        workspace_key()
+        workspace = workspace_key()
+        with lock:
+            dashboards = read_dashboards(bound_repository())
+        # Start cache preparation as soon as the E2E Dashboards module opens.
+        # It must not depend on the browser opening a Dashboard or its filters.
+        for dashboard_id, raw_definition in dashboards.items():
+            if isinstance(raw_definition, dict):
+                schedule_dashboard_warmup(workspace, dashboard_id, raw_definition, user.username)
         ready = [core.serialize_dataset_row(row) for row in core.repository.list_datasets() if row['status'] == 'ready']
+        core.backfill_cdr_catalogues(row['id'] for row in ready if row.get('dataset_kind') in KINDS)
+        catalogue = core.repository.cdr_catalogue_values(
+            row['id'] for row in ready if row.get('dataset_kind') in KINDS
+        )
         options = {tech: core.report_catalogue_options(tech) for tech in ('nsa', 'sa')}
         return core.render_template(request, 'e2e_dashboards.html', {
             'user': user, 'dashboard_datasets': {kind: [row for row in ready if row.get('dataset_kind') == kind] for kind in KINDS},
@@ -979,6 +990,7 @@ def install_dashboard_routes(core):
                 field: list(aliases) for field, aliases in FILTER_COLUMNS.items() if len(aliases) > 1
             },
             'dashboard_ignore_event_time_filtering': ignore_event_time_filtering(),
+            'dashboard_multivendor_available': len(catalogue['vendors']) >= 2,
         })
 
     @app.get('/api/e2e-dashboards')
@@ -1652,6 +1664,10 @@ def install_dashboard_routes(core):
                 selected_by_kind[kind] = selected
         if not selected_by_kind:
             raise HTTPException(400, 'Select at least one CDR dataset.')
+        if definition.scope == 'multivendor':
+            selected_ids = [int(row['id']) for rows in selected_by_kind.values() for row in rows]
+            if len(task_repository.cdr_catalogue_values(selected_ids)['vendors']) < 2:
+                raise HTTPException(400, 'Vendor Comparison requires at least two distinct Vendors in the selected CDRs.')
         return selected_by_kind
 
     def is_complete_unfiltered_universe(definition, selected_by_kind, task_repository, date_bounds):
@@ -2206,22 +2222,16 @@ def install_dashboard_routes(core):
         return sorted(values, key=str.casefold)
 
     def load_dashboard_geography_options(definition, task_repository) -> dict[str, list[str]]:
-        """Load Region and City catalogues with one combined scan per CDR kind."""
+        """Load Vendor and geography catalogues from the per-CDR persisted cache."""
         validate(definition, task_repository)
-        dimensions = core.load_repository_calculated_dimensions(task_repository)
         selected_by_kind = selected_sources(definition, task_repository)
-        requested_definition = definition.model_copy(deep=True)
-        ensure_combined_filter_columns(requested_definition, task_repository, dimensions, selected_by_kind)
-        apply_selected_date_bounds(requested_definition, selected_date_bounds(task_repository, selected_by_kind))
-        with task_repository.connection() as connection:
-            options = combined_filter_options(
-                requested_definition, selected_by_kind, ('Region', 'City'), task_repository, connection,
-            )
-        def non_blank(field: str) -> list[str]:
-            return [str(value).strip() for value in options.get(field, []) if str(value).strip()]
+        selected_ids = [int(row['id']) for rows in selected_by_kind.values() for row in rows]
+        core.backfill_cdr_catalogues(selected_ids, task_repository)
+        options = task_repository.cdr_catalogue_values(selected_ids)
         return {
-            'regions': non_blank('Region'),
-            'cities': non_blank('City'),
+            'vendors': options['vendors'],
+            'regions': options['regions'],
+            'cities': options['cities'],
         }
 
     def build_preview(definition, user, *, workspace: str | None = None, cancelled=None, progress=None):
@@ -2640,6 +2650,17 @@ def install_dashboard_routes(core):
                     retry_later()
 
         core.submit_background_task(run)
+
+    def warm_idle_dashboard_caches() -> None:
+        """Queue pending Dashboard warm-ups after a quiet application period."""
+        workspace = workspace_key()
+        with lock:
+            dashboards = read_dashboards(bound_repository())
+        for dashboard_id, raw_definition in dashboards.items():
+            if isinstance(raw_definition, dict):
+                schedule_dashboard_warmup(workspace, dashboard_id, raw_definition, 'system')
+
+    core.register_idle_dashboard_warmup(warm_idle_dashboard_caches)
 
     @app.post('/api/e2e-dashboards/prepare')
     def prepare(
