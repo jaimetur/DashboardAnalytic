@@ -8376,15 +8376,18 @@ if (queueNode) {
     const tasks = (Array.isArray(group.tasks) ? group.tasks : [])
       .map((task, index) => ({task, index}))
       .sort((left, right) => {
-        if (taskIsQueued(left.task) && taskIsQueued(right.task)
-            && left.task.queue_phase != null && right.task.queue_phase != null) {
+        if (left.task.queue_phase != null && right.task.queue_phase != null) {
           const phaseDifference = Number(left.task.queue_phase) - Number(right.task.queue_phase);
           if (phaseDifference) return phaseDifference;
+          const mappingRankDifference = Number(left.task.queue_mapping_rank ?? 1) - Number(right.task.queue_mapping_rank ?? 1);
+          if (mappingRankDifference) return mappingRankDifference;
         }
         if (Number.isInteger(Number(left.task.dataset_id)) && Number.isInteger(Number(right.task.dataset_id))
             && left.task.dataset_id != null && right.task.dataset_id != null) {
-          const phaseDifference = Number(left.task.queue_phase ?? 1) - Number(right.task.queue_phase ?? 1);
-          return phaseDifference || Number(left.task.dataset_id) - Number(right.task.dataset_id);
+          const leftBatch = left.task.queue_batch_priority === true;
+          const rightBatch = right.task.queue_batch_priority === true;
+          if (leftBatch !== rightBatch) return leftBatch ? -1 : 1;
+          if (leftBatch) return Number(right.task.dataset_id) - Number(left.task.dataset_id);
         }
         const leftTime = Number(left.task.queued_at ?? left.task.started_at ?? left.task.completed_at);
         const rightTime = Number(right.task.queued_at ?? right.task.started_at ?? right.task.completed_at);

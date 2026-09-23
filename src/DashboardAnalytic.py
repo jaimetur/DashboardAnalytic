@@ -2953,11 +2953,13 @@ def _dataset_processing_executor(task_repository: Repository) -> BackgroundTaskS
     return BACKGROUND_TASK_SCHEDULER
 
 
-def workspace_dataset_job_priority(phase: int, dataset_id: int, dataset_kind: str = '') -> tuple[int, int, int]:
-    """Keep mapping assets first and process CDRs from the newest ID down."""
+def workspace_dataset_job_priority(
+    phase: int, dataset_id: int, dataset_kind: str = '', batch_priority: bool = False,
+) -> tuple[int, int, int]:
+    """Keep mapping assets first; use descending IDs only inside one submitted batch."""
     normalized_kind = str(dataset_kind or '').casefold()
     mapping_rank = 0 if normalized_kind == 'mapping_region' else 1
-    return (phase, mapping_rank if phase == 0 else 0, -int(dataset_id))
+    return (phase, mapping_rank if phase == 0 else 0, -int(dataset_id) if batch_priority else 0)
 
 
 @contextmanager
@@ -2969,12 +2971,12 @@ def defer_workspace_dataset_dispatch(task_repository: Repository):
 
 def _submit_workspace_job(
     task_repository: Repository, callback: Callable[..., Any], /, *args: Any,
-    phase: int, dataset_id: int = 0, dataset_kind: str = '',
+    phase: int, dataset_id: int = 0, dataset_kind: str = '', batch_priority: bool = False,
 ) -> Future[Any]:
-    """Run one heavy Workspace job at a time in dependency and dataset ID order."""
+    """Run one heavy Workspace job at a time, preserving FIFO outside explicit batches."""
     return _dataset_processing_executor(task_repository).submit_ordered(
         callback, *args, workspace_key=str(task_repository.db_path.resolve()),
-        priority=workspace_dataset_job_priority(phase, dataset_id, dataset_kind),
+        priority=workspace_dataset_job_priority(phase, dataset_id, dataset_kind, batch_priority),
     )
 
 
@@ -3406,6 +3408,7 @@ def enqueue_dataset_processing(
     region_mapping_dataset_id: int | None = None,
     persist_queued_state: bool = True,
     dependencies: Iterable[Future[Any]] = (),
+    batch_priority: bool = False,
 ) -> Future[Any] | None:
     clear_stop_request(dataset_id)
     stale_keys = [key for key in ANALYSIS_CACHE if str(dataset_path.resolve()) in key]
@@ -3427,6 +3430,7 @@ def enqueue_dataset_processing(
                 processing_options_json=json.dumps({
                     **{'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id, 'three_mapping_dataset_id': three_mapping_dataset_id},
                     **({'region_mapping_dataset_id': region_mapping_dataset_id} if region_mapping_dataset_id else {}),
+                    **({'batch_priority': True} if batch_priority else {}),
                 }),
             )
     except Exception:
@@ -3470,6 +3474,7 @@ def enqueue_dataset_processing(
                 phase=0 if str((task_repository.get_dataset(dataset_id) or {})['dataset_kind'] or '') in {'mapping_vodafone', 'mapping_three', 'mapping_region'} else 1,
                 dataset_id=dataset_id,
                 dataset_kind=str((task_repository.get_dataset(dataset_id) or {})['dataset_kind'] or ''),
+                batch_priority=batch_priority,
             )
             return _track_dataset_future(dataset_id, task_repository, future)
 
@@ -3506,6 +3511,7 @@ def enqueue_dataset_processing(
             task_repository, process_after_dependencies,
             phase=0 if is_mapping else 1, dataset_id=dataset_id,
             dataset_kind=str((queued_dataset or {})['dataset_kind'] or ''),
+            batch_priority=batch_priority,
         )
     except Exception:
         _unregister_dataset_processing(dataset_id, task_repository)
@@ -3937,7 +3943,10 @@ def process_region_mapping(dataset_id: int, username: str, mapping_dataset_id: i
         _unregister_dataset_processing(dataset_id, task_repository)
 
 
-def enqueue_region_mapping(background_tasks: BackgroundTasks, dataset_id: int, username: str, mapping_dataset_id: int) -> None:
+def enqueue_region_mapping(
+    background_tasks: BackgroundTasks, dataset_id: int, username: str, mapping_dataset_id: int,
+    batch_priority: bool = False,
+) -> None:
     task_repository = Repository(Path(repository.db_path))
     clear_stop_request(dataset_id, task_repository)
     row = task_repository.get_dataset(dataset_id)
@@ -3946,6 +3955,10 @@ def enqueue_region_mapping(background_tasks: BackgroundTasks, dataset_id: int, u
     except (TypeError, json.JSONDecodeError):
         options = {}
     options['region_mapping_dataset_id'] = mapping_dataset_id
+    if batch_priority:
+        options['batch_priority'] = True
+    else:
+        options.pop('batch_priority', None)
     task_repository.update_dataset_profile(dataset_id, status='queued', progress=0, processing_step='', last_error=None, processing_queued_at=now_iso(), processing_started_at=None, processed_at=None,
         processing_options_json=json.dumps(options))
     _register_dataset_processing(dataset_id, task_repository)
@@ -3958,7 +3971,9 @@ def enqueue_region_mapping(background_tasks: BackgroundTasks, dataset_id: int, u
             )
         finally:
             _unregister_dataset_processing(dataset_id, task_repository)
-    future = _submit_workspace_job(task_repository, run_in_worker, phase=1, dataset_id=dataset_id)
+    future = _submit_workspace_job(
+        task_repository, run_in_worker, phase=1, dataset_id=dataset_id, batch_priority=batch_priority,
+    )
     _track_dataset_future(dataset_id, task_repository, future)
 
 
@@ -4072,6 +4087,7 @@ def enqueue_vendor_mapping(
     username: str,
     vodafone_mapping_dataset_id: int | None,
     three_mapping_dataset_id: int | None,
+    batch_priority: bool = False,
 ) -> None:
     """Queue one CDR mapping without blocking the Workspace request."""
     task_repository = Repository(Path(repository.db_path))
@@ -4082,6 +4098,7 @@ def enqueue_vendor_mapping(
         processing_options_json=json.dumps({
             'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
             'three_mapping_dataset_id': three_mapping_dataset_id,
+            **({'batch_priority': True} if batch_priority else {}),
         }),
     )
     _register_dataset_processing(dataset_id, task_repository)
@@ -4095,7 +4112,9 @@ def enqueue_vendor_mapping(
             )
         finally:
             _unregister_dataset_processing(dataset_id, task_repository)
-    future = _submit_workspace_job(task_repository, run_in_worker, phase=1, dataset_id=dataset_id)
+    future = _submit_workspace_job(
+        task_repository, run_in_worker, phase=1, dataset_id=dataset_id, batch_priority=batch_priority,
+    )
     _track_dataset_future(dataset_id, task_repository, future)
 
 
@@ -8705,6 +8724,7 @@ def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
                 rows = connection.execute(
                     """SELECT d.id, d.file_name, p.dataset_kind, p.status, p.progress, p.processing_step,
                               p.processing_started_at, p.processed_at,
+                              p.processing_options_json,
                               COALESCE(p.processing_queued_at, p.processing_started_at, p.updated_at) AS queued_at
                        FROM datasets d
                        JOIN dataset_profiles p ON p.dataset_id = d.id
@@ -8758,6 +8778,8 @@ def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
                         'id': f'dataset:{workspace.id}:{row["id"]}',
                         'dataset_id': int(row['id']),
                         'queue_phase': 0 if str(row['dataset_kind'] or '') in {'mapping_vodafone', 'mapping_three', 'mapping_region'} else 1,
+                        'queue_mapping_rank': 0 if str(row['dataset_kind'] or '') == 'mapping_region' else 1,
+                        'queue_batch_priority': '"batch_priority": true' in str(row['processing_options_json'] or '').casefold(),
                         'label': f'Processing dataset: {row["file_name"]}',
                         'detail': (
                             (queue_blocker or _dataset_progress_detail(raw_status, 0)) if raw_status == 'queued' else
@@ -13029,6 +13051,7 @@ async def upload_dataset(
             three_mapping_dataset_id,
             region_mapping_dataset_id,
             dependencies=dependencies,
+            batch_priority=len(uploaded_datasets) > 1,
         )
         if future is not None:
             if dataset_kind in {'mapping_vodafone', 'mapping_three', 'mapping_region'}:
@@ -13419,6 +13442,7 @@ def reprocess_workspace_datasets(
             three_mapping_dataset_id,
             region_mapping_dataset_id,
             dependencies=dependencies,
+            batch_priority=True,
         )
         if future is None:
             continue
@@ -13496,6 +13520,7 @@ def map_dataset_vendors(
                 user.username,
                 vodafone_mapping['id'] if vodafone_mapping else None,
                 three_mapping['id'] if three_mapping else None,
+                batch_priority=True,
             )
     repository.add_log(user.username, 'queue_vendor_mapping', json.dumps({
         'dataset_ids': selected_ids,
@@ -13560,7 +13585,9 @@ def map_dataset_regions(
         selected_datasets.append(dataset)
     with defer_workspace_dataset_dispatch(repository):
         for dataset in sorted(selected_datasets, key=lambda item: -int(item['id'])):
-            enqueue_region_mapping(background_tasks, int(dataset['id']), user.username, region_mapping_dataset_id)
+            enqueue_region_mapping(
+                background_tasks, int(dataset['id']), user.username, region_mapping_dataset_id, batch_priority=True,
+            )
     repository.add_log(user.username, 'queue_region_mapping', json.dumps({'dataset_ids': selected_ids, 'region_mapping_dataset_id': region_mapping_dataset_id}))
     return RedirectResponse(f'/workspace?dataset_id={selected_ids[0]}', status_code=status.HTTP_303_SEE_OTHER)
 
@@ -13597,6 +13624,7 @@ def map_dataset_mappings(
             enqueue_dataset_processing(
                 background_tasks, int(dataset['id']), Path(str(dataset['stored_path'])), user.username,
                 vodafone_mapping_dataset_id, three_mapping_dataset_id, region_mapping_dataset_id,
+                batch_priority=True,
             )
     repository.add_log(user.username, 'queue_dataset_mappings', json.dumps({'dataset_ids': selected_ids, 'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id, 'three_mapping_dataset_id': three_mapping_dataset_id, 'region_mapping_dataset_id': region_mapping_dataset_id}))
     return RedirectResponse(f'/workspace?dataset_id={selected_ids[0]}', status_code=status.HTTP_303_SEE_OTHER)

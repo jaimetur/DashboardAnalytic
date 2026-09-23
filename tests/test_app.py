@@ -3360,6 +3360,15 @@ def test_background_task_scheduler_orders_workspace_phases_and_dataset_ids() -> 
         scheduler.shutdown()
 
 
+def test_workspace_dataset_priority_uses_fifo_for_individual_cdrs_and_descending_ids_for_batches() -> None:
+    import src.DashboardAnalytic as app_module
+
+    assert app_module.workspace_dataset_job_priority(1, 8, 'data') == (1, 0, 0)
+    assert app_module.workspace_dataset_job_priority(1, 3, 'speech') == (1, 0, 0)
+    assert app_module.workspace_dataset_job_priority(1, 8, 'data', batch_priority=True) == (1, 0, -8)
+    assert app_module.workspace_dataset_job_priority(1, 3, 'speech', batch_priority=True) == (1, 0, -3)
+
+
 def test_combined_recreation_is_queued_while_cdr_processing_is_pending(client, monkeypatch) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -3722,6 +3731,8 @@ def test_global_background_tasks_groups_active_and_other_workspaces(client) -> N
     assert 'overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; touch-action: pan-y;' in app_css
     assert "!event.target.closest('.background-task-panel-header')" in app_script
     assert "taskCount.textContent = `${tasks.length} task${tasks.length === 1 ? '' : 's'}`;" in app_script
+    assert 'const leftBatch = left.task.queue_batch_priority === true;' in app_script
+    assert 'if (leftBatch) return Number(right.task.dataset_id) - Number(left.task.dataset_id);' in app_script
     assert 'return leftTime - rightTime;' in app_script
     assert "if (panelKey && list) panelScrollPositions.set(panelKey, list.scrollTop);" in app_script
     assert "list.dataset.restoreScrollTop = String(panelScrollPositions.get(panelStateKey) || 0);" in app_script
