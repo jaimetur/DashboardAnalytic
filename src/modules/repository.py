@@ -207,6 +207,17 @@ CREATE TABLE IF NOT EXISTS workspace_state (
     value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS saved_query_builder_queries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    query_sql TEXT NOT NULL,
+    dataset_ids_json TEXT NOT NULL DEFAULT '[]',
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS dashboard_filter_selections (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     cache_key TEXT NOT NULL UNIQUE,
@@ -353,6 +364,36 @@ class Repository:
     def set_workspace_registry_database(self, path: Path) -> None:
         self.workspace_registry_db_path = path
         self.workspace_registry_db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def list_query_builder_queries(self) -> list[sqlite3.Row]:
+        with self.connection() as conn:
+            return conn.execute(
+                'SELECT * FROM saved_query_builder_queries ORDER BY updated_at DESC, name COLLATE NOCASE'
+            ).fetchall()
+
+    def save_query_builder_query(self, name: str, description: str, query_sql: str, dataset_ids: list[int], username: str) -> None:
+        with self.connection() as conn:
+            conn.execute(
+                '''INSERT INTO saved_query_builder_queries (name, description, query_sql, dataset_ids_json, created_by, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(name) DO UPDATE SET description=excluded.description, query_sql=excluded.query_sql,
+                       dataset_ids_json=excluded.dataset_ids_json, created_by=excluded.created_by, updated_at=excluded.updated_at''',
+                (name, description, query_sql, json.dumps(dataset_ids), username, local_now_iso(), local_now_iso()),
+            )
+
+    def get_query_builder_query(self, query_id: int) -> sqlite3.Row | None:
+        with self.connection() as conn:
+            return conn.execute('SELECT * FROM saved_query_builder_queries WHERE id = ?', (query_id,)).fetchone()
+
+    def update_query_builder_query(self, query_id: int, name: str, description: str, query_sql: str, dataset_ids: list[int], username: str) -> bool:
+        with self.connection() as conn:
+            result = conn.execute(
+                '''UPDATE saved_query_builder_queries
+                   SET name = ?, description = ?, query_sql = ?, dataset_ids_json = ?, created_by = ?, updated_at = ?
+                   WHERE id = ?''',
+                (name, description, query_sql, json.dumps(dataset_ids), username, local_now_iso(), query_id),
+            )
+            return result.rowcount == 1
 
     @contextmanager
     def workspace_registry_connection(self) -> Iterator[sqlite3.Connection]:

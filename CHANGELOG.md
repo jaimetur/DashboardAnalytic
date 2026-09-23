@@ -9,6 +9,7 @@
 
 #### 🌟 New Features:
 - Added workspace-scoped Geospatial Region Mappings. GeoJSON and zipped shapefiles can be selected during CDR import (the newest mapping is preselected), populate blank `Region` values from Data, Voice or Speech coordinates, and can be assigned or cleared per CDR or in bulk from the Dataset queue.
+- Added a workspace-scoped **Query Builder** module for safe read-only analysis over one or more selected individual Data, Voice and Speech CDRs. It exposes temporary `selected_data`, `selected_voice` and `selected_speech` views with original CDR fields and source identifiers, supports saved reusable queries and CSV export, and includes Angelo's Q1/Q2 FDTT throughput comparison for Vodafone–Three sessions with and without overlapping n78/ARFCN intervals.
 
 #### 🚀 Enhancements:
 
@@ -18,6 +19,8 @@
 - Dataset bulk operations now submit their complete batch atomically before dispatch, so Map Vendor & Region follows the displayed priority instead of racing the browser submission order. Region mapping assets precede Vendor mapping assets, while CDRs inside the same bulk batch run in descending numeric ID order; individually enqueued CDRs preserve FIFO order. Restart recovery restores those same saved batch and FIFO priorities, and the floating task card mirrors the effective queue rules. The Map CDR fields dialog is wider and now presents a concise green Region mapping rule alongside the Vendor mapping explanation.
 - Export-package jobs now appear in their own green floating `Export tasks` card in the active Workspace task dock, stacked above the yellow Workspace card whenever both queues have work, making the independent export scheduler queue visible separately from Workspace work.
 - Server-to-server transfers now start their offer, package stream and remote-progress polling on a dedicated connection thread instead of waiting behind the shared CDR background queue. Incoming offers poll sequentially at a visibility-aware cadence, retry immediately after focus or network recovery, and leave a persistent review reminder plus a System Tasks review action until they are accepted or rejected.
+
+- Query Builder now shares Chart Builder's orange pastel palette across its hero, active tab, editor and actions. Saving and loading use separate subpanels; query runs show a cancellable progress dialog and results offer CSV export; saved queries can be selected through **Load Saved Query** or loaded from their row, restore their associated CDR sources, display source filenames instead of internal IDs, be edited in place, export individually as JSON, and the library refreshes immediately after saving. Admin exports and the isolated Backup component can package a workspace's queries as JSON, they are included in Full Environment exports, and Database Management labels their physical table as **Saved Queries**.
 
 #### 🐛 Bug fixes:
 

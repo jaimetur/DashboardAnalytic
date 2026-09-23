@@ -4,6 +4,7 @@ import asyncio
 import json
 import calendar
 import io
+import csv
 import os
 import errno
 import fcntl
@@ -63,6 +64,7 @@ from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column,
 from src.modules.geospatial import assign_regions, validate_region_mapping
 from src.modules.repository import Repository, WORKSPACE_REGISTRY_TABLE, workspace_write_lock
 from src.modules.runtime_config import IGNORE_EVENT_TIME_FILTERING_ENV, env_flag, ignore_event_time_filtering
+from src.modules.query_builder import ANGELO_OVERLAP_QUERY, MAX_EXPORT_ROWS, MAX_PREVIEW_ROWS, execute_query
 from src.runtime_logs import execution_log_entries
 from src.modules.workspaces import Workspace, WorkspaceRegistry
 from src.version import __app_name__, __release_date__, __version__
@@ -80,6 +82,8 @@ CHART_PREVIEW_CACHE_LOCK = Lock()
 CHART_PREVIEW_LOAD_LOCKS: dict[tuple[int, str], Lock] = {}
 STOP_REQUESTS: set[tuple[str, int]] = set()
 STOP_REQUESTS_LOCK = Lock()
+QUERY_BUILDER_EXECUTIONS: dict[str, Event] = {}
+QUERY_BUILDER_EXECUTIONS_LOCK = Lock()
 BACKGROUND_TASK_SCHEDULER = BackgroundTaskScheduler(max_workers=1)
 # Export packages are configuration I/O and must remain usable when a CDR
 # worker or a calculated-field pass is still winding down in the main queue.
@@ -4873,7 +4877,7 @@ ARCHIVE_COMPONENTS = frozenset({
 })
 WORKSPACE_ARCHIVE_COMPONENTS = frozenset({
     'workspace_database', 'input', 'output', 'dashboards', 'report_templates', 'operator_mappings',
-    'auto_calculated_fields',
+    'auto_calculated_fields', 'query_builder_queries',
 })
 ARCHIVE_KIND_COMPONENTS = {
     'config': ('app_database',),
@@ -4886,7 +4890,7 @@ ARCHIVE_KIND_COMPONENTS = {
     'bundle': (),
 }
 WORKSPACE_ELEMENT_EXPORT_TARGETS = frozenset({
-    'slides-templates', 'auto-calculated-fields', 'dashboards', 'operator-mappings',
+    'slides-templates', 'auto-calculated-fields', 'dashboards', 'operator-mappings', 'query-builder-queries',
 })
 STATIC_EXPORT_TARGETS = frozenset({'config', 'config-with-templates', 'full-environment'})
 UNCOMPRESSED_ARCHIVE_SUFFIXES = frozenset({
@@ -4937,6 +4941,7 @@ def archive_workspace_components(manifest: dict[str, Any]) -> list[str]:
         'auto-calculated-fields': ('auto_calculated_fields',),
         'dashboards': ('dashboards',),
         'operator-mappings': ('operator_mappings',),
+        'query-builder-queries': ('query_builder_queries',),
     }
     return list(fallback.get(str(manifest.get('kind') or ''), ()))
 
@@ -4996,7 +5001,7 @@ def full_workspace_archive_components(*, include_input_files: bool = True, inclu
         components.append('input')
     if include_generated_outputs:
         components.append('output')
-    return [*components, 'dashboards', 'report_templates', 'operator_mappings', 'auto_calculated_fields']
+    return [*components, 'dashboards', 'report_templates', 'operator_mappings', 'auto_calculated_fields', 'query_builder_queries']
 
 
 def archive_workspace_components_for_target(target: str, *, include_generated_outputs: bool = True) -> list[str]:
@@ -5009,6 +5014,8 @@ def archive_workspace_components_for_target(target: str, *, include_generated_ou
         return ['dashboards']
     if target == 'operator-mappings':
         return ['operator_mappings']
+    if target == 'query-builder-queries':
+        return ['query_builder_queries']
     if target.startswith('workspace:') or target in {'workspace', 'full-environment'}:
         return full_workspace_archive_components(include_generated_outputs=include_generated_outputs)
     return []
@@ -5230,7 +5237,7 @@ def create_recurring_database_backup(
     workspace_manifest_components = [
         component for component in (
             'workspace_database', 'dashboards', 'input', 'output', 'report_templates',
-            'operator_mappings', 'auto_calculated_fields',
+            'operator_mappings', 'auto_calculated_fields', 'query_builder_queries',
         )
         if component in components
     ]
@@ -5263,6 +5270,8 @@ def create_recurring_database_backup(
             )
         if 'operator_mappings' in components:
             total_bytes += len(_operator_mappings_archive_payload(workspace))
+        if 'query_builder_queries' in components:
+            total_bytes += len(json.dumps(_query_builder_queries_payload(workspace), ensure_ascii=False).encode('utf-8'))
         if 'input' in components:
             total_bytes += source_tree_size(workspace.input_dir)
         if 'output' in components:
@@ -5313,6 +5322,9 @@ def create_recurring_database_backup(
                         f'{archive_workspace_root}/auto-calculated-fields/auto-calculated-fields.json',
                         json.dumps(task_repository.list_calculated_dimensions(), ensure_ascii=False, indent=2),
                     )
+                if 'query_builder_queries' in components:
+                    report_progress(f'Exporting Saved Queries for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
+                    _archive_workspace_query_builder_queries(archive, workspace, archive_workspace_root, archived_bytes)
                 if 'input' in components:
                     report_progress(f'Archiving input files for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                     _archive_tree(archive, workspace.input_dir, f'{archive_workspace_root}/input', progress_callback=archived_bytes, cancel_callback=ensure_not_cancelled)
@@ -5590,6 +5602,8 @@ def _backup_archive_components(archive_path: Path) -> list[str]:
         components.append('operator_mappings')
     if any(name.startswith('workspaces/') and '/auto-calculated-fields/' in name and name.endswith('.json') for name in names):
         components.append('auto_calculated_fields')
+    if any(name.startswith('workspaces/') and '/query-builder-queries/query-builder-queries.json' in name for name in names):
+        components.append('query_builder_queries')
     if any(name.startswith('workspaces/') and '/input/' in name for name in names):
         components.append('input')
     if any(name.startswith('workspaces/') and '/output/' in name for name in names):
@@ -5659,6 +5673,8 @@ def restore_database_backup(
                     f'{prefix}auto-calculated-fields/definitions.json',
                     f'{prefix}auto-calculated-fields.json',
                 )))
+            if 'query_builder_queries' in selected:
+                total_steps += int(f'{prefix}query-builder-queries/query-builder-queries.json' in name_set)
             for component in ('input', 'output'):
                 if component in selected:
                     total_steps += sum(name.startswith(f'{prefix}{component}/') for name in names)
@@ -5749,6 +5765,13 @@ def restore_database_backup(
                     task_repository.replace_calculated_dimensions(calculated_dimensions_json(parsed))
                     task_repository.set_workspace_state('calculated_dimensions_need_materialization', '1')
                     advance(f'Auto-calculated Fields restored for {workspace_name}')
+            if 'query_builder_queries' in selected:
+                member = f'{prefix}query-builder-queries/query-builder-queries.json'
+                if member in names:
+                    if progress_callback:
+                        progress_callback(f'Restoring Saved Queries for {workspace_name}', completed_steps, total_steps)
+                    _restore_workspace_query_builder_queries(workspace, archive.read(member))
+                    advance(f'Saved Queries restored for {workspace_name}')
             for component, destination in (('input', workspace.input_dir), ('output', workspace.output_dir)):
                 if component not in selected:
                     continue
@@ -5933,6 +5956,67 @@ def _restore_workspace_dashboards(workspace: Workspace, payload: bytes) -> None:
     task_repository.set_workspace_state(DASHBOARD_STATE_KEY, json.dumps(dashboards, ensure_ascii=False))
 
 
+def _query_builder_queries_payload(workspace: Workspace) -> dict[str, Any]:
+    """Build a portable Query Builder library, retaining source names for remapping."""
+    task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
+    try:
+        dataset_names = {int(row['id']): str(row['file_name']) for row in task_repository.list_datasets()}
+        saved_queries = task_repository.list_query_builder_queries()
+    except sqlite3.OperationalError:
+        return {'format': 'dashboard-analytic-query-builder-queries', 'version': 1, 'queries': []}
+    queries = []
+    for row in saved_queries:
+        try:
+            dataset_ids = [int(value) for value in json.loads(str(row['dataset_ids_json'] or '[]'))]
+        except (TypeError, ValueError, json.JSONDecodeError):
+            dataset_ids = []
+        queries.append({
+            'name': str(row['name']), 'description': str(row['description']),
+            'query_sql': str(row['query_sql']), 'dataset_ids': dataset_ids,
+            'dataset_names': [dataset_names.get(dataset_id, f'Dataset {dataset_id}') for dataset_id in dataset_ids],
+            'created_by': str(row['created_by']),
+        })
+    return {'format': 'dashboard-analytic-query-builder-queries', 'version': 1, 'queries': queries}
+
+
+def _archive_workspace_query_builder_queries(
+    archive: zipfile.ZipFile, workspace: Workspace, archive_prefix: str,
+    progress_callback: Callable[[int], None] | None = None,
+) -> None:
+    payload = json.dumps(_query_builder_queries_payload(workspace), ensure_ascii=False, indent=2).encode('utf-8')
+    archive.writestr(f'{archive_prefix}/query-builder-queries/query-builder-queries.json', payload)
+    if progress_callback:
+        progress_callback(len(payload))
+
+
+def _restore_workspace_query_builder_queries(workspace: Workspace, payload: bytes) -> int:
+    try:
+        document = json.loads(payload.decode('utf-8'))
+        queries = document.get('queries') if isinstance(document, dict) else None
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f'Query Builder queries for "{workspace.name}" are invalid.') from exc
+    if not isinstance(queries, list):
+        raise ValueError(f'Query Builder queries for "{workspace.name}" are invalid.')
+    task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
+    datasets_by_name = {str(row['file_name']): int(row['id']) for row in task_repository.list_datasets()}
+    imported = 0
+    for item in queries:
+        if not isinstance(item, dict):
+            raise ValueError('The Query Builder queries package contains an invalid query.')
+        name = str(item.get('name') or '').strip()
+        query_sql = str(item.get('query_sql') or '').strip()
+        source_names = item.get('dataset_names')
+        if not name or not query_sql or not isinstance(source_names, list):
+            raise ValueError('The Query Builder queries package contains an invalid query.')
+        dataset_ids = [datasets_by_name[name] for name in source_names if isinstance(name, str) and name in datasets_by_name]
+        task_repository.save_query_builder_query(
+            name, str(item.get('description') or ''), query_sql, dataset_ids,
+            str(item.get('created_by') or 'import'),
+        )
+        imported += 1
+    return imported
+
+
 def _archive_workspace(
     archive: zipfile.ZipFile, workspace: Workspace, archive_prefix: str, scratch_dir: Path | None = None,
     progress_callback: Callable[[int], None] | None = None, include_generated_outputs: bool = True,
@@ -5954,6 +6038,7 @@ def _archive_workspace(
         f'{archive_prefix}/auto-calculated-fields/auto-calculated-fields.json',
         json.dumps(task_repository.list_calculated_dimensions(), ensure_ascii=False, indent=2),
     )
+    _archive_workspace_query_builder_queries(archive, workspace, archive_prefix, progress_callback)
     if include_input_files:
         _archive_tree(archive, workspace.input_dir, f'{archive_prefix}/input', progress_callback=progress_callback)
     if include_generated_outputs:
@@ -5982,6 +6067,9 @@ def export_archive_filename(target: str | Iterable[str]) -> str:
     if target == 'operator-mappings':
         workspace_name = active_workspace.name if active_workspace else 'workspace'
         return f'{workspace_name}_operator-mappings_{generated_at}.zip'
+    if target == 'query-builder-queries':
+        workspace_name = active_workspace.name if active_workspace else 'workspace'
+        return f'{workspace_name}_query-builder-queries_{generated_at}.zip'
     if target == 'config-with-templates':
         return f'dashboard-analytic-config-with-slides-templates_{generated_at}.zip'
     if target == 'full-environment':
@@ -6111,6 +6199,18 @@ def _build_single_export_archive_file(
             archive.writestr(str(manifest['archive_path']), payload)
             if progress_callback:
                 progress_callback(len(payload))
+        elif target == 'query-builder-queries':
+            source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
+            source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
+            if not source_workspace:
+                raise ValueError('Open a workspace before exporting Query Builder queries.')
+            archive_path = f'workspaces/{source_workspace.name}/query-builder-queries/query-builder-queries.json'
+            manifest = archive_manifest(
+                'query-builder-queries', source_workspace={'id': source_workspace.id, 'name': source_workspace.name},
+                workspace_components=archive_workspace_components_for_target(target), archive_path=archive_path,
+            )
+            archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
+            _archive_workspace_query_builder_queries(archive, source_workspace, f'workspaces/{source_workspace.name}', progress_callback)
         elif target.startswith('workspace:'):
             workspace = workspace_registry.get(target.removeprefix('workspace:'))
             if not workspace:
@@ -6387,6 +6487,10 @@ def _recovered_transfer_details(manifest: dict[str, Any]) -> tuple[str, list[str
         source = manifest.get('source_workspace')
         name = str(source.get('name') or '') if isinstance(source, dict) else ''
         return ('Operator/Vendor Mappings & Colors', [name] if name else [])
+    if kind == 'query-builder-queries':
+        source = manifest.get('source_workspace')
+        name = str(source.get('name') or '') if isinstance(source, dict) else ''
+        return ('Query Builder Queries', [name] if name else [])
     if kind == 'workspace':
         workspace = manifest.get('workspace')
         name = str(workspace.get('name') or '') if isinstance(workspace, dict) else ''
@@ -6424,7 +6528,7 @@ def _recover_unimported_transfer_packages() -> None:
             kind = str(manifest.get('kind') or '')
             if kind not in {
                 'config', 'workspace', 'full-environment', 'slides-templates',
-                'auto-calculated-fields', 'dashboards', 'operator-mappings', 'database-backup', 'bundle',
+                'auto-calculated-fields', 'dashboards', 'operator-mappings', 'query-builder-queries', 'database-backup', 'bundle',
             }:
                 raise ValueError('Unsupported transfer package.')
         except (OSError, ValueError, zipfile.BadZipFile):
@@ -7136,6 +7240,25 @@ def _apply_import_archive(
                 definitions, destination_workspace_ids, progress_callback, parent_task_id,
             )
             return f'Imported {imported_count} auto-calculated fields into {workspace_count} workspaces.'
+        if kind == 'query-builder-queries':
+            member = str(manifest.get('archive_path') or '')
+            if (
+                member not in archive.namelist()
+                or not re.fullmatch(r'workspaces/[^/]+/query-builder-queries/query-builder-queries\.json', member)
+            ):
+                raise ValueError('The package does not contain valid Query Builder queries.')
+            destinations = [workspace_registry.get(workspace_id) for workspace_id in destination_workspace_ids]
+            destinations = [workspace for workspace in destinations if workspace]
+            if not destinations:
+                source = manifest.get('source_workspace')
+                if isinstance(source, dict) and source.get('id'):
+                    candidate = workspace_registry.get(str(source['id']))
+                    destinations = [candidate] if candidate else []
+            if not destinations:
+                raise ValueError('Select at least one destination workspace.')
+            payload = archive.read(member)
+            imported_count = sum(_restore_workspace_query_builder_queries(workspace, payload) for workspace in destinations)
+            return f'Imported {imported_count} Query Builder queries into {len(destinations)} workspaces.'
         if kind == 'full-environment':
             _safe_extract_archive_prefix(archive, staging_root, 'config', extracted)
             if progress_callback:
@@ -7361,6 +7484,7 @@ def _transfer_content_label(target: str | Iterable[str]) -> str:
         'auto-calculated-fields': 'Auto-calculated Fields',
         'dashboards': 'Dashboards',
         'operator-mappings': 'Operator/Vendor Mappings & Colors',
+        'query-builder-queries': 'Query Builder Queries',
     }
     if target.startswith('workspace:'):
         workspace = workspace_registry.get(target.removeprefix('workspace:'))
@@ -7743,7 +7867,7 @@ def transfer_job_payload(job_id: str, user: SessionUser) -> dict[str, Any] | Non
 def require_import_export_permission(user: SessionUser, target: str) -> None:
     """Authorize imports; admins may restore templates and fields into accessible workspaces."""
     if user.role == 'super-admin' or target in {
-        'slides-templates', 'auto-calculated-fields', 'dashboards', 'operator-mappings',
+        'slides-templates', 'auto-calculated-fields', 'dashboards', 'operator-mappings', 'query-builder-queries',
     }:
         return
     raise HTTPException(
@@ -7777,7 +7901,7 @@ def require_export_permission(user: SessionUser, target: str) -> None:
     """Authorize exports and transfers without exposing other workspaces."""
     if user.role == 'super-admin':
         return
-    if target in {'auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings'}:
+    if target in {'auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings', 'query-builder-queries'}:
         if active_workspace and repository.user_has_workspace_access(user.username, active_workspace.id):
             return
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Open a workspace you can access first.')
@@ -7878,6 +8002,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         'operator_mappings': 'Operator Mappings',
         'vendor_mappings': 'Vendor Mappings',
         'report_templates': 'Report Templates',
+        'saved_query_builder_queries': 'Saved Queries',
         'workspace_state': 'Workspace State',
         'transfer_offers': 'Server transfer offers',
         'users': 'Users',
@@ -7916,7 +8041,8 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         {'value': 'slides-templates', 'label': 'Report Templates (from active workspace)', 'disabled': not active_workspace},
         {'value': 'operator-mappings', 'label': 'Operator/Vendor Mappings & Colors (from active workspace)', 'disabled': not active_workspace},
         {'value': 'auto-calculated-fields', 'label': 'Auto-calculated Fields (from active workspace)', 'disabled': not active_workspace},
-        {'value': 'full-environment', 'label': 'Full Environment (App Config + Dashboards + Report Templates + Operator/Vendor Mappings & Colors + Auto-calculated Fields + Selected Workspaces)'},
+        {'value': 'query-builder-queries', 'label': 'Query Builder Queries (from active workspace)', 'disabled': not active_workspace},
+        {'value': 'full-environment', 'label': 'Full Environment (App Config + Dashboards + Report Templates + Operator/Vendor Mappings & Colors + Auto-calculated Fields + Query Builder Queries + Selected Workspaces)'},
         *[
             {'value': f'workspace:{workspace.id}', 'label': f'Full Workspace: {workspace.name}'}
             for workspace in accessible_workspaces(user)
@@ -7936,7 +8062,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         ('Configuration Content', [option for option in export_options if option['value'] == 'config']),
         ('Workspace Content', [
             option for option in export_options
-            if option['value'] in {'dashboards', 'slides-templates', 'operator-mappings', 'auto-calculated-fields'}
+            if option['value'] in {'dashboards', 'slides-templates', 'operator-mappings', 'auto-calculated-fields', 'query-builder-queries'}
         ]),
         ('Full Workspace', [option for option in export_options if option['value'].startswith('workspace:')]),
         ('Full Environment', [option for option in export_options if option['value'] == 'full-environment']),
@@ -11857,6 +11983,196 @@ def chart_builder(request: Request, user: SessionUser = Depends(current_user)) -
     return render_template(request, 'chart_builder.html', {'user': user, 'datasets': datasets})
 
 
+def _query_builder_datasets(dataset_ids: Iterable[object]) -> list[dict[str, Any]]:
+    selected = {int(value) for value in dataset_ids if str(value).isdigit()}
+    result: list[dict[str, Any]] = []
+    for row in repository.list_datasets():
+        if int(row['id']) not in selected or row['status'] != 'ready' or row['dataset_kind'] not in {'data', 'voice', 'speech'}:
+            continue
+        result.append({'id': int(row['id']), 'name': str(row['file_name']), 'kind': str(row['dataset_kind'])})
+    return result
+
+
+@app.get('/query-builder', response_class=HTMLResponse)
+def query_builder(request: Request, user: SessionUser = Depends(current_user)) -> HTMLResponse:
+    if not active_workspace:
+        return RedirectResponse('/workspace?workspace_warning=Open+a+workspace+before+using+Query+Builder.', status_code=status.HTTP_303_SEE_OTHER)
+    datasets = [
+        {'id': int(row['id']), 'name': str(row['file_name']), 'kind': str(row['dataset_kind'])}
+        for row in repository.list_datasets()
+        if row['status'] == 'ready' and row['dataset_kind'] in {'data', 'voice', 'speech'}
+    ]
+    angelo_dataset_ids = [
+        item['id'] for item in datasets
+        if item['kind'] == 'data' and re.search(r'Q[12]', item['name'], flags=re.I) and not re.search(r'_SA\b', item['name'], flags=re.I)
+    ]
+    if angelo_dataset_ids:
+        repository.save_query_builder_query(
+            'Angelo — Q1/Q2 VF-Three FDTT overlap',
+            'Compare FDTT throughput for n78 sessions with and without a Vodafone–Three overlap on the same NR-ARFCN.',
+            ANGELO_OVERLAP_QUERY, angelo_dataset_ids, 'system',
+        )
+    dataset_names_by_id = {item['id']: item['name'] for item in datasets}
+    saved = []
+    for row in repository.list_query_builder_queries():
+        try:
+            ids = [int(value) for value in json.loads(str(row['dataset_ids_json'] or '[]'))]
+        except (TypeError, ValueError, json.JSONDecodeError):
+            ids = []
+        saved.append({
+            **dict(row), 'dataset_ids': ids,
+            'dataset_names': [dataset_names_by_id.get(dataset_id, f'Dataset {dataset_id}') for dataset_id in ids],
+        })
+    return render_template(request, 'query_builder.html', {
+        'user': user, 'datasets': datasets, 'saved_queries': saved,
+    })
+
+
+def _query_builder_payload(payload: Any) -> tuple[list[dict[str, Any]], str]:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail='Invalid Query Builder payload.')
+    datasets = _query_builder_datasets(payload.get('dataset_ids') or [])
+    return datasets, str(payload.get('query_sql') or '')
+
+
+@app.post('/api/query-builder/run')
+async def run_query_builder(request: Request, user: SessionUser = Depends(current_user)) -> JSONResponse:
+    if not active_workspace:
+        raise HTTPException(status_code=400, detail='Open a workspace before running Query Builder.')
+    payload = await request.json()
+    datasets, query_sql = _query_builder_payload(payload)
+    execution_id = str(payload.get('execution_id') or '').strip()
+    if not re.fullmatch(r'[A-Za-z0-9_-]{8,80}', execution_id):
+        raise HTTPException(status_code=400, detail='Invalid Query Builder execution id.')
+    cancellation = Event()
+    with QUERY_BUILDER_EXECUTIONS_LOCK:
+        QUERY_BUILDER_EXECUTIONS[execution_id] = cancellation
+    try:
+        columns, rows, truncated, views = await run_in_threadpool(
+            execute_query, active_workspace.database_path, datasets, query_sql, MAX_PREVIEW_ROWS,
+            cancellation.is_set,
+        )
+    except (ValueError, sqlite3.Error) as exc:
+        if cancellation.is_set():
+            raise HTTPException(status_code=409, detail='Query cancelled.') from exc
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        with QUERY_BUILDER_EXECUTIONS_LOCK:
+            QUERY_BUILDER_EXECUTIONS.pop(execution_id, None)
+    repository.add_log(user.username, 'run_query_builder', json.dumps({'dataset_ids': [item['id'] for item in datasets], 'rows': len(rows)}))
+    return JSONResponse({'columns': columns, 'rows': rows, 'truncated': truncated, 'views': views})
+
+
+@app.post('/api/query-builder/run/{execution_id}/cancel')
+def cancel_query_builder_run(execution_id: str, user: SessionUser = Depends(current_user)) -> JSONResponse:
+    with QUERY_BUILDER_EXECUTIONS_LOCK:
+        cancellation = QUERY_BUILDER_EXECUTIONS.get(execution_id)
+    if not cancellation:
+        raise HTTPException(status_code=404, detail='Query execution is no longer active.')
+    cancellation.set()
+    return JSONResponse({'cancelling': True})
+
+
+@app.post('/api/query-builder/save')
+async def save_query_builder(request: Request, user: SessionUser = Depends(current_user)) -> JSONResponse:
+    payload = await request.json()
+    datasets, query_sql = _query_builder_payload(payload)
+    name = str(payload.get('name') or '').strip()
+    if not name:
+        raise HTTPException(status_code=400, detail='Enter a name before saving the query.')
+    try:
+        # Validation is deliberately performed before persistence.
+        execute_query(active_workspace.database_path, datasets, query_sql, row_limit=1)
+        repository.save_query_builder_query(name, str(payload.get('description') or '').strip(), query_sql, [item['id'] for item in datasets], user.username)
+    except (ValueError, sqlite3.Error) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    repository.add_log(user.username, 'save_query_builder', json.dumps({'name': name, 'dataset_ids': [item['id'] for item in datasets]}))
+    return JSONResponse({'saved': True})
+
+
+@app.post('/api/query-builder/saved/{query_id}')
+async def update_saved_query_builder_query(query_id: int, request: Request, user: SessionUser = Depends(current_user)) -> JSONResponse:
+    if not active_workspace:
+        raise HTTPException(status_code=400, detail='Open a workspace before editing a saved query.')
+    payload = await request.json()
+    existing = repository.get_query_builder_query(query_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail='Saved query not found.')
+    datasets = _query_builder_datasets(payload.get('dataset_ids') or [])
+    name = str(payload.get('name') or '').strip()
+    if not name:
+        raise HTTPException(status_code=400, detail='Enter a name before saving the query.')
+    query_sql = str(existing['query_sql'])
+    try:
+        execute_query(active_workspace.database_path, datasets, query_sql, row_limit=1)
+        if not repository.update_query_builder_query(
+            query_id, name, str(payload.get('description') or '').strip(), query_sql,
+            [item['id'] for item in datasets], user.username,
+        ):
+            raise HTTPException(status_code=404, detail='Saved query not found.')
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(status_code=400, detail='A saved query already uses that name.') from exc
+    except (ValueError, sqlite3.Error) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    repository.add_log(user.username, 'update_query_builder', json.dumps({'query_id': query_id, 'dataset_ids': [item['id'] for item in datasets]}))
+    return JSONResponse({'updated': True})
+
+
+@app.post('/api/query-builder/export')
+async def export_query_builder(request: Request, user: SessionUser = Depends(current_user)) -> StreamingResponse:
+    if not active_workspace:
+        raise HTTPException(status_code=400, detail='Open a workspace before exporting Query Builder results.')
+    datasets, query_sql = _query_builder_payload(await request.json())
+    try:
+        columns, rows, truncated, _views = execute_query(active_workspace.database_path, datasets, query_sql, row_limit=MAX_EXPORT_ROWS)
+    except (ValueError, sqlite3.Error) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    output = io.StringIO(newline='')
+    writer = csv.writer(output)
+    writer.writerow(columns)
+    writer.writerows(rows)
+    repository.add_log(user.username, 'export_query_builder_csv', json.dumps({'dataset_ids': [item['id'] for item in datasets], 'rows': len(rows), 'truncated': truncated}))
+    suffix = '-truncated' if truncated else ''
+    return StreamingResponse(iter([output.getvalue()]), media_type='text/csv', headers={
+        'Content-Disposition': f'attachment; filename="query-builder-results{suffix}.csv"',
+    })
+
+
+@app.get('/api/query-builder/saved/{query_id}/export')
+def export_saved_query_builder_query(query_id: int, user: SessionUser = Depends(current_user)) -> Response:
+    if not active_workspace:
+        raise HTTPException(status_code=400, detail='Open a workspace before exporting a saved query.')
+    query = repository.get_query_builder_query(query_id)
+    if not query:
+        raise HTTPException(status_code=404, detail='Saved query not found.')
+    try:
+        dataset_ids = [int(value) for value in json.loads(str(query['dataset_ids_json'] or '[]'))]
+    except (TypeError, ValueError, json.JSONDecodeError):
+        dataset_ids = []
+    dataset_names = {
+        int(dataset['id']): str(dataset['file_name'])
+        for dataset in repository.list_datasets()
+    }
+    payload = {
+        'format': 'dashboard-analytic-query-builder-query',
+        'version': 1,
+        'query': {
+            'name': str(query['name']),
+            'description': str(query['description']),
+            'query_sql': str(query['query_sql']),
+            'dataset_ids': dataset_ids,
+            'dataset_names': [dataset_names.get(dataset_id, f'Dataset {dataset_id}') for dataset_id in dataset_ids],
+            'created_by': str(query['created_by']),
+        },
+    }
+    filename = re.sub(r'[^A-Za-z0-9._-]+', '-', str(query['name']).strip()).strip('-') or 'saved-query'
+    repository.add_log(user.username, 'export_query_builder_json', json.dumps({'query_id': query_id}))
+    return Response(
+        content=json.dumps(payload, ensure_ascii=False, indent=2), media_type='application/json',
+        headers={'Content-Disposition': f'attachment; filename="{filename}.json"'},
+    )
+
+
 @app.post('/api/chart-builder/preview')
 async def chart_builder_preview(request: Request, user: SessionUser = Depends(current_user)) -> Response:
     payload = await request.json()
@@ -14319,7 +14635,7 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
     kind = str(payload.get('kind') or '')
     if kind not in {
         'config', 'workspace', 'full-environment', 'slides-templates',
-        'auto-calculated-fields', 'dashboards', 'operator-mappings', 'database-backup', 'bundle',
+        'auto-calculated-fields', 'dashboards', 'operator-mappings', 'query-builder-queries', 'database-backup', 'bundle',
     }:
         raise HTTPException(status_code=400, detail='The offered export type is not supported.')
     if payload.get('archive_version') != ARCHIVE_VERSION:
@@ -14826,7 +15142,7 @@ def _retain_import_upload(upload_id: str, package_path: Path, user: SessionUser)
     kind = str(manifest.get('kind') or '')
     if kind not in {
         'config', 'workspace', 'full-environment', 'slides-templates',
-        'auto-calculated-fields', 'dashboards', 'operator-mappings', 'database-backup', 'bundle',
+        'auto-calculated-fields', 'dashboards', 'operator-mappings', 'query-builder-queries', 'database-backup', 'bundle',
     }:
         raise ValueError('The export package type is not supported.')
     require_import_manifest_permission(user, manifest)

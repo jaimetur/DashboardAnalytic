@@ -1,0 +1,69 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="dashboard-stack spacious-stack query-builder-stack">
+  <article class="panel hero-panel chart-builder-hero query-builder-hero">
+    <p class="eyebrow">Query Builder</p><h2>CDR direct analysis</h2>
+    <p class="lede">Run read-only SQL over one or more selected CDRs, save reusable queries and export the result to CSV.</p>
+  </article>
+  <article class="panel" data-page-panel-label="Query editor">
+    <div class="section-head"><div><p class="eyebrow">Sources</p><h2>Selected CDR tables</h2></div></div>
+    <label>CDR sources <span class="form-label-hint">Select one or more ready CDRs</span>
+      <select data-sql-datasets multiple size="8">{% for dataset in datasets %}<option value="{{ dataset.id }}">{{ dataset.kind | upper }} · {{ dataset.name }}</option>{% endfor %}</select>
+    </label>
+    <p class="form-note">The query can use <code>selected_data</code>, <code>selected_voice</code> and <code>selected_speech</code>. Each view adds <code>source_dataset_id</code>, <code>source_dataset_name</code> and <code>source_row_id</code>; all source CDR columns remain available.</p>
+    <label>SQL <textarea data-sql-editor rows="17" spellcheck="false" placeholder="SELECT * FROM selected_data LIMIT 100"></textarea></label>
+    <div class="inline-actions query-builder-actions"><button type="button" class="query-builder-primary-action" data-sql-run>Run query</button></div>
+    <section class="query-builder-subpanel query-builder-save-subpanel"><p class="query-builder-subpanel-title">Save query</p><div class="inline-actions query-builder-save-actions"><input data-sql-name placeholder="Query name"><input data-sql-description placeholder="Optional description"><button type="button" class="query-builder-secondary-action" data-sql-save>Save query</button></div></section>
+    <section class="query-builder-subpanel query-builder-load-subpanel"><p class="query-builder-subpanel-title">Load saved query</p><div class="inline-actions query-builder-load-actions"><select data-sql-saved-picker aria-label="Saved query"><option value="">Choose saved query…</option>{% for query in saved_queries %}<option value="{{ query.id }}" data-query='{{ query.query_sql | tojson }}' data-dataset-ids='{{ query.dataset_ids | tojson }}'>{{ query.name }}</option>{% endfor %}</select><button type="button" class="query-builder-secondary-action" data-sql-load-saved>Load Saved Query</button></div></section>
+    <p class="form-note" data-sql-status aria-live="polite">Only one SELECT query is allowed. Preview is limited to 5,000 rows; CSV export to 100,000 rows.</p>
+  </article>
+  <article class="panel" data-page-panel-label="Saved queries">
+    <div class="section-head"><div><p class="eyebrow">Library</p><h2>Saved queries</h2></div></div>
+    {% if saved_queries %}<div class="table-wrap"><table><thead><tr><th>Name</th><th>Description</th><th>Sources</th><th>Actions</th></tr></thead><tbody>{% for query in saved_queries %}<tr><td>{{ query.name }}</td><td>{{ query.description }}</td><td>{{ query.dataset_names | join(', ') }}</td><td><div class="query-builder-row-actions"><button type="button" class="query-builder-load-action" data-sql-load data-query='{{ query.query_sql | tojson }}' data-dataset-ids='{{ query.dataset_ids | tojson }}'>Use query</button><button type="button" class="query-builder-edit-action" data-sql-edit data-query-id="{{ query.id }}" data-query-name="{{ query.name }}" data-query-description="{{ query.description }}" data-query-dataset-ids='{{ query.dataset_ids | tojson }}' title="Edit saved query" aria-label="Edit {{ query.name }}">✎</button><a class="query-builder-export-json-action" href="/api/query-builder/saved/{{ query.id }}/export" title="Export query as JSON" aria-label="Export {{ query.name }} as JSON" download><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11m0 0 4-4m-4 4-4-4M5 17v3h14v-3"/></svg></a></div></td></tr>{% endfor %}</tbody></table></div>{% else %}<p class="empty-state">No saved queries yet.</p>{% endif %}
+  </article>
+  <article class="panel" data-page-panel-label="Results">
+    <div class="section-head"><div><p class="eyebrow">Results</p><h2>Query output</h2></div><button type="button" class="query-builder-secondary-action" data-sql-export disabled>Export CSV</button></div>
+    <div class="table-wrap" data-sql-results><p class="empty-state">Run a query to see its results.</p></div>
+  </article>
+  <div class="confirm-overlay query-builder-running-overlay" data-sql-running-overlay hidden>
+    <div class="confirm-panel query-builder-running-dialog" role="dialog" aria-modal="true" aria-labelledby="query-builder-running-title">
+      <div class="query-builder-running-spinner" aria-hidden="true"></div>
+      <p class="eyebrow">Query Builder</p><h3 id="query-builder-running-title">Query is running</h3>
+      <p>Please wait while the selected CDR data is analysed.</p>
+      <div class="confirm-actions"><button type="button" class="danger-button" data-sql-cancel-run>Cancel query</button></div>
+    </div>
+  </div>
+  <div class="confirm-overlay query-builder-edit-overlay" data-sql-edit-overlay hidden>
+    <div class="confirm-panel query-builder-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="query-builder-edit-title">
+      <p class="eyebrow">Saved query</p><h3 id="query-builder-edit-title">Edit saved query</h3>
+      <label>Name <input data-sql-edit-name></label>
+      <label>Description <input data-sql-edit-description></label>
+      <label>CDR sources <select data-sql-edit-sources multiple size="7">{% for dataset in datasets %}<option value="{{ dataset.id }}">{{ dataset.kind | upper }} · {{ dataset.name }}</option>{% endfor %}</select></label>
+      <p class="form-note" data-sql-edit-status aria-live="polite"></p>
+      <div class="confirm-actions"><button type="button" class="ghost-link" data-sql-edit-cancel>Cancel</button><button type="button" class="query-builder-primary-action" data-sql-edit-save>Save changes</button></div>
+    </div>
+  </div>
+</section>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+(() => {
+  const sources = document.querySelector('[data-sql-datasets]'); const editor = document.querySelector('[data-sql-editor]'); const status = document.querySelector('[data-sql-status]'); const results = document.querySelector('[data-sql-results]'); const runningOverlay = document.querySelector('[data-sql-running-overlay]'); const runButton = document.querySelector('[data-sql-run]'); const exportButton = document.querySelector('[data-sql-export]'); const cancelRunButton = document.querySelector('[data-sql-cancel-run]'); let activeExecutionId = '';
+  const escape = (value) => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  const payload = () => ({dataset_ids: [...sources.selectedOptions].map(item => Number(item.value)), query_sql: editor.value});
+  const request = async (url, extra = {}) => { const response = await fetch(url, {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body:JSON.stringify({...payload(), ...extra})}); const body = response.headers.get('content-type')?.includes('application/json') ? await response.json() : null; if (!response.ok) throw new Error(body?.detail || 'Query Builder failed.'); return {response, body}; };
+  const render = (body) => { if (!body.columns.length) { results.innerHTML = '<p class="empty-state">The query returned no columns.</p>'; return; } results.innerHTML = `<table><thead><tr>${body.columns.map(column => `<th>${escape(column)}</th>`).join('')}</tr></thead><tbody>${body.rows.map(row => `<tr>${row.map(value => `<td>${escape(value)}</td>`).join('')}</tr>`).join('')}</tbody></table>`; status.textContent = `${body.rows.length.toLocaleString()} rows returned${body.truncated ? ' (preview limit reached)' : ''}. Available views: ${body.views.join(', ')}.`; };
+  document.querySelector('[data-sql-run]').addEventListener('click', async () => { activeExecutionId=`query-${Date.now()}-${Math.random().toString(36).slice(2)}`; status.textContent='Running query…'; runningOverlay.hidden=false; runButton.disabled=true; exportButton.disabled=true; cancelRunButton.disabled=false; try { render((await request('/api/query-builder/run', {execution_id:activeExecutionId})).body); exportButton.disabled=false; } catch (error) { status.textContent=error.message; } finally { activeExecutionId=''; runningOverlay.hidden=true; runButton.disabled=false; } });
+  cancelRunButton.addEventListener('click', async () => { if (!activeExecutionId) return; cancelRunButton.disabled=true; status.textContent='Cancelling query…'; try { await fetch(`/api/query-builder/run/${activeExecutionId}/cancel`, {method:'POST', credentials:'same-origin'}); } catch (_error) { status.textContent='The query could not be cancelled.'; cancelRunButton.disabled=false; } });
+  exportButton.addEventListener('click', async () => { status.textContent='Preparing CSV…'; exportButton.disabled=true; try { const {response} = await request('/api/query-builder/export'); const url=URL.createObjectURL(await response.blob()); const link=document.createElement('a'); link.href=url; link.download='query-builder-results.csv'; link.click(); URL.revokeObjectURL(url); status.textContent='CSV exported.'; } catch (error) { status.textContent=error.message; } finally { exportButton.disabled=false; } });
+  document.querySelector('[data-sql-save]').addEventListener('click', async () => { try { await request('/api/query-builder/save', {name:document.querySelector('[data-sql-name]').value, description:document.querySelector('[data-sql-description]').value}); window.location.reload(); } catch (error) { status.textContent=error.message; } });
+  const loadSavedQuery = (control) => { if (!control?.dataset.query) { status.textContent='Choose a saved query first.'; return; } editor.value=JSON.parse(control.dataset.query); const selected=new Set(JSON.parse(control.dataset.datasetIds)); [...sources.options].forEach(option => option.selected=selected.has(Number(option.value))); sources.dispatchEvent(new Event('change', {bubbles:true})); status.textContent='Saved query loaded.'; };
+  document.querySelector('[data-sql-load-saved]').addEventListener('click', () => loadSavedQuery(document.querySelector('[data-sql-saved-picker]')?.selectedOptions[0]));
+  document.querySelectorAll('[data-sql-load]').forEach(button => button.addEventListener('click', () => loadSavedQuery(button)));
+  const editOverlay = document.querySelector('[data-sql-edit-overlay]'); const editName = document.querySelector('[data-sql-edit-name]'); const editDescription = document.querySelector('[data-sql-edit-description]'); const editSources = document.querySelector('[data-sql-edit-sources]'); const editStatus = document.querySelector('[data-sql-edit-status]'); let editingQueryId = null;
+  document.querySelectorAll('[data-sql-edit]').forEach(button => button.addEventListener('click', () => { editingQueryId=Number(button.dataset.queryId); editName.value=button.dataset.queryName; editDescription.value=button.dataset.queryDescription; const selected=new Set(JSON.parse(button.dataset.queryDatasetIds)); [...editSources.options].forEach(option => option.selected=selected.has(Number(option.value))); editSources.dispatchEvent(new Event('change', {bubbles:true})); editStatus.textContent=''; editOverlay.hidden=false; }));
+  document.querySelector('[data-sql-edit-cancel]').addEventListener('click', () => { editOverlay.hidden=true; });
+  document.querySelector('[data-sql-edit-save]').addEventListener('click', async () => { if (!editingQueryId) return; editStatus.textContent='Saving changes…'; try { const response=await fetch(`/api/query-builder/saved/${editingQueryId}`, {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:editName.value, description:editDescription.value, dataset_ids:[...editSources.selectedOptions].map(item => Number(item.value))})}); const body=response.headers.get('content-type')?.includes('application/json') ? await response.json() : null; if (!response.ok) throw new Error(body?.detail || 'Saved query could not be updated.'); window.location.reload(); } catch (error) { editStatus.textContent=error.message; } });
+})();
+</script>
+{% endblock %}

@@ -482,7 +482,7 @@
             {% set export_selection = namespace(selected=false) %}{% for group_label, options in export_option_groups %}<optgroup label="{{ group_label }}">{% for option in options %}<option value="{{ option.value }}" {% if option.disabled | default(false) %}disabled{% elif not export_selection.selected %}selected{% set export_selection.selected = true %}{% endif %}>{{ option.label }}</option>{% endfor %}</optgroup>{% endfor %}
           </select>
         </label>
-        <p class="form-note">{% if user.role == 'super-admin' %}Choose one or more items. Full Workspace includes its workspace elements; Full Environment includes every workspace and Config.{% else %}Choose one or more workspace elements or accessible Full Workspaces. Full Workspace includes its workspace elements.{% endif %}</p>
+        <p class="form-note">{% if user.role == 'super-admin' %}Choose one or more items. Full Workspace includes its workspace elements; Full Environment includes every workspace, Config and Query Builder Queries.{% else %}Choose one or more workspace elements or accessible Full Workspaces. Full Workspace includes its workspace elements.{% endif %}</p>
         <div class="import-export-actions">
           <button type="submit" class="import-export-action">Export ZIP</button>
           <button type="button" class="server-transfer-action" data-server-transfer>Transfer to other server</button>
@@ -526,7 +526,7 @@
       <div class="confirm-icon info-icon" aria-hidden="true">⇩</div>
       <p class="eyebrow">Full Environment export</p>
       <h3 id="full-environment-workspace-title">Select workspaces</h3>
-      <p>App Config is always included. Each selected workspace includes its database, input files, Dashboard definitions, Report Templates and Auto-calculated Fields.</p>
+      <p>App Config is always included. Each selected workspace includes its database, input files, Dashboard definitions, Report Templates, Auto-calculated Fields and Query Builder Queries.</p>
       <div class="full-environment-workspace-toolbar">
         <button type="button" class="ghost-link" data-full-environment-select-all>Select all</button>
         <button type="button" class="ghost-link" data-full-environment-select-none>Select none</button>
@@ -599,7 +599,7 @@
             <div class="database-backup-immediate-grid">
               <section class="database-backup-operation-panel"><h5>Backup</h5>
                 <label class="database-backup-components">Backup content
-                  <select name="components" multiple data-backup-components data-multiselect-groups="true" data-multiselect-auto-close="1000"><optgroup label="Configuration Content"><option value="app_database" {% if 'app_database' in recurring_backup.components %}selected{% endif %}>Application database</option></optgroup><optgroup label="Workspace Content">{% for value, label in [('workspace_database', 'Workspace Database'), ('dashboards', 'Dashboards (one JSON file with all Dashboard definitions)'), ('report_templates', 'Report Templates (one CSV file per Report Template)'), ('operator_mappings', 'Operator/Vendor Mappings & Colors (aliases, order and theme colors)'), ('auto_calculated_fields', 'Auto-calculated Fields (one JSON file with all definitions)'), ('input', 'Input (includes all raw datasets files)'), ('output', 'Output (includes all generated reports, chart sets and Dashboard PPT jobs)')] %}<option value="{{ value }}" {% if value in recurring_backup.components %}selected{% endif %}>{{ label }}</option>{% endfor %}</optgroup></select>
+                  <select name="components" multiple data-backup-components data-multiselect-groups="true" data-multiselect-auto-close="1000"><optgroup label="Configuration Content"><option value="app_database" {% if 'app_database' in recurring_backup.components %}selected{% endif %}>Application database</option></optgroup><optgroup label="Workspace Content">{% for value, label in [('workspace_database', 'Workspace Database'), ('dashboards', 'Dashboards (one JSON file with all Dashboard definitions)'), ('report_templates', 'Report Templates (one CSV file per Report Template)'), ('operator_mappings', 'Operator/Vendor Mappings & Colors (aliases, order and theme colors)'), ('auto_calculated_fields', 'Auto-calculated Fields (one JSON file with all definitions)'), ('query_builder_queries', 'Saved Queries (one JSON file with all saved queries)'), ('input', 'Input (includes all raw datasets files)'), ('output', 'Output (includes all generated reports, chart sets and Dashboard PPT jobs)')] %}<option value="{{ value }}" {% if value in recurring_backup.components %}selected{% endif %}>{{ label }}</option>{% endfor %}</optgroup></select>
                 </label>
                 <label class="database-backup-workspaces" data-backup-workspaces hidden>Workspaces to include
                   <select name="workspace_ids" multiple>{% for workspace in backup_workspaces %}<option value="{{ workspace.id }}" {% if not recurring_backup.workspace_ids or workspace.id in recurring_backup.workspace_ids %}selected{% endif %}>{{ workspace.name }}</option>{% endfor %}</select>
@@ -928,7 +928,7 @@
   const refresh = () => { settings.hidden = !enabled.checked; };
   const refreshBackupWorkspaces = () => {
     if (!backupComponents || !backupWorkspaces) return;
-    const needsWorkspaces = [...backupComponents.selectedOptions].some((option) => ['workspace_database', 'dashboards', 'report_templates', 'operator_mappings', 'auto_calculated_fields', 'input', 'output'].includes(option.value));
+    const needsWorkspaces = [...backupComponents.selectedOptions].some((option) => ['workspace_database', 'dashboards', 'report_templates', 'operator_mappings', 'auto_calculated_fields', 'query_builder_queries', 'input', 'output'].includes(option.value));
     backupWorkspaces.hidden = !needsWorkspaces;
   };
   const refreshRecurrence = () => {
@@ -1017,10 +1017,10 @@
       const response = await fetch('/api/admin/backup-files/inspect', {method: 'POST', credentials: 'same-origin', body: new URLSearchParams({backup_path: restorePath.value, backup_file: restoreFile.value})});
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.detail || 'Unable to inspect the backup.');
-      const labels = {app_database: 'Application database', workspace_database: 'Workspace Database', dashboards: 'Dashboards', report_templates: 'Report Templates', operator_mappings: 'Operator/Vendor Mappings & Colors', auto_calculated_fields: 'Auto-calculated Fields', input: 'Input', output: 'Output'};
+      const labels = {app_database: 'Application database', workspace_database: 'Workspace Database', dashboards: 'Dashboards', report_templates: 'Report Templates', operator_mappings: 'Operator/Vendor Mappings & Colors', auto_calculated_fields: 'Auto-calculated Fields', query_builder_queries: 'Saved Queries', input: 'Input', output: 'Output'};
       const componentGroups = [
         ['Configuration Content', ['app_database']],
-        ['Workspace Content', ['workspace_database', 'dashboards', 'report_templates', 'operator_mappings', 'auto_calculated_fields', 'input', 'output']],
+        ['Workspace Content', ['workspace_database', 'dashboards', 'report_templates', 'operator_mappings', 'auto_calculated_fields', 'query_builder_queries', 'input', 'output']],
       ];
       restoreComponents.innerHTML = componentGroups.map(([title, values]) => {
         const available = values.filter((value) => payload.components.includes(value));
