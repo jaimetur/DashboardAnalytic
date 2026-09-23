@@ -512,6 +512,14 @@
         <p><strong>3UK:</strong> the same non-empty Vendor at both endpoints returns <code>3_&lt;Vendor&gt;</code>. Any different or missing endpoint Vendor returns <code>3_Mixed Vendor</code>.</p>
         <p><strong>O2 and EE:</strong> no Vendor is assigned; they remain Operator comparison groups only.</p>
       </details>
+      <details class="vendor-mapping-rule region-mapping-rule" open>
+        <summary>Region mapping rule</summary>
+        <ol>
+          <li>The selected GeoJSON or Shapefile provides the Region polygons and their Region or WP labels.</li>
+          <li>For each CDR sample with usable latitude and longitude, the mapping assigns the label of the polygon that contains its coordinates.</li>
+        </ol>
+        <p>Existing non-empty <code>Region</code> values are retained. Samples without valid coordinates, or outside every mapped polygon, remain unchanged.</p>
+      </details>
       <div class="vendor-mapping-fields">
         {% if vodafone_mapping_datasets %}
         <label>VFUK Multivendor Mapping
