@@ -112,27 +112,26 @@ ANGELO_OVERLAP_QUERY = """WITH fdtt AS MATERIALIZED (
     AND (NR_DL_PCell_Band LIKE '%78%' OR CAST(NR_B78_Total_Time AS REAL) > 0)
     AND NR_DL_PCell_ARFCN IS NOT NULL
     AND (lower(Operator) LIKE 'vodafone%' OR lower(Operator) IN ('3', 'three uk', 'three'))
+), overlapping_sessions AS MATERIALIZED (
+  SELECT DISTINCT f.source_dataset_id, f.source_row_id
+  FROM fdtt f
+  JOIN fdtt o
+    ON o.quarter = f.quarter
+   AND o.NR_DL_PCell_ARFCN = f.NR_DL_PCell_ARFCN
+   AND o.Test_Start_Time < f.Test_End_Time
+   AND o.Test_End_Time > f.Test_Start_Time
+   AND (
+     (lower(f.Operator) LIKE 'vodafone%' AND lower(o.Operator) IN ('3', 'three uk', 'three'))
+     OR (lower(f.Operator) IN ('3', 'three uk', 'three') AND lower(o.Operator) LIKE 'vodafone%')
+   )
 ), classified AS (
   SELECT f.*,
-    CASE WHEN EXISTS (
-      SELECT 1 FROM fdtt o
-      WHERE o.quarter = f.quarter
-        AND lower(o.Operator) IN ('3', 'three uk', 'three')
-        AND lower(f.Operator) LIKE 'vodafone%'
-        AND o.NR_DL_PCell_ARFCN = f.NR_DL_PCell_ARFCN
-        AND o.Test_Start_Time < f.Test_End_Time
-        AND o.Test_End_Time > f.Test_Start_Time
-    ) OR EXISTS (
-      SELECT 1 FROM fdtt o
-      WHERE o.quarter = f.quarter
-        AND lower(f.Operator) IN ('3', 'three uk', 'three')
-        AND lower(o.Operator) LIKE 'vodafone%'
-        AND o.NR_DL_PCell_ARFCN = f.NR_DL_PCell_ARFCN
-        AND o.Test_Start_Time < f.Test_End_Time
-        AND o.Test_End_Time > f.Test_Start_Time
-    ) THEN 'Overlapping VF-Three' ELSE 'No VF-Three overlap' END AS overlap_status
+    CASE WHEN overlapping_sessions.source_row_id IS NOT NULL THEN 'Overlapping VF-Three'
+         ELSE 'No VF-Three overlap' END AS overlap_status
   FROM fdtt f
-  WHERE lower(f.Operator) LIKE 'vodafone%' OR lower(f.Operator) IN ('3', 'three uk', 'three')
+  LEFT JOIN overlapping_sessions
+    ON overlapping_sessions.source_dataset_id = f.source_dataset_id
+   AND overlapping_sessions.source_row_id = f.source_row_id
 )
 SELECT quarter, Operator AS operator, Test_Name AS test_name,
        SUM(CASE WHEN overlap_status = 'Overlapping VF-Three' THEN 1 ELSE 0 END) AS overlap_sessions,
