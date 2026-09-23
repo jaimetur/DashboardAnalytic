@@ -8077,7 +8077,8 @@ if (queueNode) {
   const activeDock = root.querySelector('[data-background-task-dock="active"]');
   const otherDock = root.querySelector('[data-background-task-dock="other"]');
   const systemDock = root.querySelector('[data-background-task-dock="system"]');
-  if (!(activeDock instanceof HTMLElement) || !(otherDock instanceof HTMLElement) || !(systemDock instanceof HTMLElement)) return;
+  if (!(activeDock instanceof HTMLElement) || !(otherDock instanceof HTMLElement)
+      || !(systemDock instanceof HTMLElement)) return;
   let polling = false;
   let pollingStopped = false;
   let pollingInterval = null;
@@ -8279,7 +8280,7 @@ if (queueNode) {
 
   const createTaskPanel = (group) => {
     const panel = document.createElement('section');
-    const panelKind = group.workspace_id === '__server__' ? 'system' : (group.is_active ? 'active' : 'other');
+    const panelKind = group.dock === 'export' ? 'export' : (group.workspace_id === '__server__' ? 'system' : (group.is_active ? 'active' : 'other'));
     panel.className = `background-task-panel background-task-panel-${panelKind}`;
     panel.setAttribute('aria-label', `Background tasks for ${group.workspace_name || 'workspace'}`);
 
@@ -8578,9 +8579,10 @@ if (queueNode) {
       if (panelKey && list) panelScrollPositions.set(panelKey, list.scrollTop);
       if (panelKey) existingPanels.set(panelKey, panel);
     });
-    const activeGroups = normalized.filter((group) => String(group.workspace_id) !== '__server__' && (Boolean(group.is_active) || group.dock === 'right'));
+    const activeGroups = normalized.filter((group) => String(group.workspace_id) !== '__server__' && group.dock !== 'export' && (Boolean(group.is_active) || group.dock === 'right'));
     const systemGroups = normalized.filter((group) => String(group.workspace_id) === '__server__');
-    const otherGroups = normalized.filter((group) => !group.is_active && group.dock !== 'right' && String(group.workspace_id) !== '__server__');
+    const exportGroups = normalized.filter((group) => group.dock === 'export');
+    const otherGroups = normalized.filter((group) => !group.is_active && group.dock !== 'right' && group.dock !== 'export' && String(group.workspace_id) !== '__server__');
     const refreshPanel = (group) => {
       const panelKey = String(group.workspace_id);
       const replacement = createTaskPanel(group);
@@ -8605,7 +8607,7 @@ if (queueNode) {
       panel.setAttribute('aria-label', replacement.getAttribute('aria-label') || 'Background tasks');
       return panel;
     };
-    activeDock.replaceChildren(...activeGroups.map(refreshPanel));
+    activeDock.replaceChildren(...activeGroups.map(refreshPanel), ...exportGroups.map(refreshPanel));
     otherDock.replaceChildren(...otherGroups.map(refreshPanel));
     systemDock.replaceChildren(...systemGroups.map(refreshPanel));
     root.querySelectorAll('[data-restore-scroll-top]').forEach((list) => {

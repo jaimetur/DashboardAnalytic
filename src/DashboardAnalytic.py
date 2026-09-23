@@ -8972,6 +8972,7 @@ def _global_background_tasks(user: SessionUser, accessible_ids: set[str]) -> lis
         task = {
             'id': f'{prefix}:{job.get("id")}',
             'workspace_id': workspace_id,
+            **({'scheduler': 'export'} if prefix == 'export' else {}),
             'label': label,
             'detail': str(job.get('phase') or job.get('status') or 'processing').replace('_', ' ').title(),
             'progress': progress,
@@ -9213,6 +9214,15 @@ def background_tasks_status(user: SessionUser = Depends(current_user)) -> JSONRe
     global_tasks = _global_background_tasks(user, accessible_ids)
     for task in global_tasks:
         workspace_id = str(task.pop('workspace_id'))
+        scheduler = str(task.pop('scheduler', ''))
+        if scheduler == 'export':
+            workspace_id = '__export__'
+            group = grouped.setdefault('__export__', {
+                'workspace_id': '__export__', 'workspace_name': 'Export tasks',
+                'is_active': False, 'dock': 'export', 'tasks': [],
+            })
+            group['tasks'].append(task)
+            continue
         if workspace_id == '__server__':
             group = grouped.setdefault('__server__', {
                 'workspace_id': '__server__', 'workspace_name': 'Server tasks',

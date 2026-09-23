@@ -1541,6 +1541,27 @@ def test_admin_export_job_creates_a_disk_backed_download(client) -> None:
         assert json.loads(archive.read('manifest.json'))['kind'] == 'config'
 
 
+def test_export_scheduler_tasks_use_the_dedicated_background_task_panel(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    job_id = 'export-panel-test'
+    with app_module.EXPORT_JOBS_LOCK:
+        app_module.EXPORT_JOBS[job_id] = {
+            'id': job_id, 'owner': 'admin', 'target': 'config', 'status': 'queued',
+            'created_at': datetime.now(timezone.utc).timestamp(), 'workspace_ids': None,
+        }
+    try:
+        groups = client.get('/api/background-tasks').json()['groups']
+        export_group = next(group for group in groups if group['workspace_id'] == '__export__')
+        assert export_group['workspace_name'] == 'Export tasks'
+        assert export_group['dock'] == 'export'
+        assert export_group['tasks'][0]['id'] == f'export:{job_id}'
+    finally:
+        with app_module.EXPORT_JOBS_LOCK:
+            app_module.EXPORT_JOBS.pop(job_id, None)
+
+
 def test_full_environment_export_job_uses_selected_workspaces(client) -> None:
     login_super(client)
     started = client.post(
@@ -1600,7 +1621,8 @@ def test_full_environment_selector_offers_generated_outputs_by_default(client) -
     workspace_page = client.get('/workspace')
     assert 'Also duplicate generated dashboards, reports and chart sets.' in workspace_page.text
     app_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
-    assert "String(group.workspace_id) !== '__server__' && (Boolean(group.is_active) || group.dock === 'right')" in app_script
+    assert "String(group.workspace_id) !== '__server__' && group.dock !== 'export' && (Boolean(group.is_active) || group.dock === 'right')" in app_script
+    assert 'activeDock.replaceChildren(...activeGroups.map(refreshPanel), ...exportGroups.map(refreshPanel));' in app_script
     assert "exportTarget?.addEventListener('change'" not in app_script
     assert 'selectedFullEnvironment' not in app_script
     assert app_script.count('const selection = await selectFullEnvironmentWorkspaces();') == 2
