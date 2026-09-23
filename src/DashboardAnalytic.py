@@ -3536,12 +3536,33 @@ def resume_interrupted_dataset_processing(workspace: Workspace) -> list[int]:
         for row in dataset_rows
     ):
         return resumed
+
+    def recovery_queue_order(row: sqlite3.Row) -> tuple[int, int, int, float, int]:
+        try:
+            options = json.loads(str(row['processing_options_json'] or '{}'))
+        except (json.JSONDecodeError, TypeError):
+            options = {}
+        dataset_kind = str(row['dataset_kind'] or '')
+        phase = 0 if dataset_kind in {'mapping_vodafone', 'mapping_three', 'mapping_region'} else 1
+        mapping_rank = 0 if dataset_kind == 'mapping_region' else 1
+        batch_priority = bool(options.get('batch_priority'))
+        row_keys = set(row.keys())
+        queue_timestamp = next(
+            (row[column] for column in ('processing_queued_at', 'processing_started_at', 'updated_at') if column in row_keys),
+            None,
+        )
+        queued_at = parse_dataset_timestamp(queue_timestamp)
+        return (
+            phase,
+            mapping_rank if phase == 0 else 0,
+            0 if batch_priority else 1,
+            -float(row['id']) if batch_priority else (queued_at.timestamp() if queued_at else float('inf')),
+            int(row['id']),
+        )
+
     for row in sorted(
         dataset_rows,
-        key=lambda item: (
-            0 if str(item['dataset_kind'] or '') in {'mapping_vodafone', 'mapping_three', 'mapping_region'} else 1,
-            int(item['id']),
-        ),
+        key=recovery_queue_order,
     ):
         if str(row['status'] or '').casefold() not in {'queued', 'processing'}:
             continue
@@ -3569,6 +3590,7 @@ def resume_interrupted_dataset_processing(workspace: Workspace) -> list[int]:
         vodafone_mapping_id = options.get('vodafone_mapping_dataset_id')
         three_mapping_id = options.get('three_mapping_dataset_id')
         region_mapping_id = options.get('region_mapping_dataset_id')
+        batch_priority = bool(options.get('batch_priority'))
         future = _submit_workspace_job(
             task_repository, _resume_dataset_in_worker,
             dataset_id, dataset_path, username,
@@ -3576,6 +3598,7 @@ def resume_interrupted_dataset_processing(workspace: Workspace) -> list[int]:
             task_repository, workspace, region_mapping_id,
             phase=0 if str(row['dataset_kind'] or '') in {'mapping_vodafone', 'mapping_three', 'mapping_region'} else 1,
             dataset_id=dataset_id, dataset_kind=str(row['dataset_kind'] or ''),
+            batch_priority=batch_priority,
         )
         _track_dataset_future(dataset_id, task_repository, future)
         task_repository.try_add_log('system', 'resume_interrupted_dataset', json.dumps({

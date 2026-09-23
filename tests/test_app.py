@@ -12,6 +12,7 @@ from threading import Event
 from urllib.parse import quote
 import warnings
 import zipfile
+from concurrent.futures import Future
 
 import pandas as pd
 import pytest
@@ -3152,6 +3153,39 @@ def test_interrupted_dataset_processing_is_resumed_instead_of_failed(client) -> 
     assert completed['status'] == 'ready'
     assert completed['progress'] == 100
     assert completed['last_error'] in {None, ''}
+
+
+def test_restart_recovery_preserves_descending_order_for_a_saved_cdr_batch(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    workspace = app_module.active_workspace
+    assert workspace is not None
+    low_source = workspace.input_dir / 'resume-low.csv'
+    high_source = workspace.input_dir / 'resume-high.csv'
+    low_source.write_text('market,score\nES,91\n', encoding='utf-8')
+    high_source.write_text('market,score\nES,92\n', encoding='utf-8')
+    low_id, _ = app_module.repository.add_dataset(low_source.name, str(low_source), 'admin')
+    high_id, _ = app_module.repository.add_dataset(high_source.name, str(high_source), 'admin')
+    for dataset_id in (low_id, high_id):
+        app_module.repository.update_dataset_profile(
+            dataset_id, status='queued', dataset_kind='data',
+            processing_options_json=json.dumps({'batch_priority': True}),
+        )
+
+    submissions = []
+    monkeypatch.setattr(
+        app_module, '_submit_workspace_job',
+        lambda _repository, _callback, *args, **kwargs: submissions.append((args[0], kwargs['batch_priority'])) or Future(),
+    )
+    monkeypatch.setattr(app_module, '_track_dataset_future', lambda *_args: None)
+
+    try:
+        assert app_module.resume_interrupted_dataset_processing(workspace) == [high_id, low_id]
+        assert submissions == [(high_id, True), (low_id, True)]
+    finally:
+        app_module._unregister_dataset_processing(low_id, app_module.repository)
+        app_module._unregister_dataset_processing(high_id, app_module.repository)
 
 
 def test_ready_dataset_progress_cannot_be_replaced_by_a_late_worker_update(client, tmp_path: Path) -> None:
