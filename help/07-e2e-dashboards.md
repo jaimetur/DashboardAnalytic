@@ -144,7 +144,7 @@ Every column provides an Excel-style value filter across the complete chart data
 
 Generate PPT appears immediately before View Dashboard in the dataset/filter actions and immediately before Refresh Dashboard in the viewer's upper action row. It uses the exact prepared CDRs, dates, scope and applied filters, even if they have not been saved as Dashboard defaults.
 
-The job renders the template into `Template_CDR_analysis.pptx`, preserving slides, layouts, chart placeholder proportions, titles, legends and saved comments. It writes the PPT plus chart PNG, tooltip and Canvas-model assets under `output/dashboards`. Folder and PPT names begin with `yyyymmdd_HHMMSS - Dashboard Name`.
+The job renders the template into `Template_CDR_analysis.pptx`, preserving slides, layouts, chart placeholder proportions, titles, legends and saved comments. It writes the PPT plus chart PNG, tooltip and Canvas-model assets under `output/dashboards`. Folder and PPT names begin with `yyyymmdd_HHMMSS`; selected Regions and Cities precede the scope and Dashboard name. When every available Region or City is selected, the corresponding name segment is `All Regions` or `All Cities`.
 
 Template authoring details for the exported presentation are centralized in [Administration → Report Template reference](11-administration.md#report-template-reference).
 

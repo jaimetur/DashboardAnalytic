@@ -385,6 +385,11 @@ class Repository:
         with self.connection() as conn:
             return conn.execute('SELECT * FROM saved_query_builder_queries WHERE id = ?', (query_id,)).fetchone()
 
+    def delete_query_builder_query(self, query_id: int) -> bool:
+        with self.connection() as conn:
+            result = conn.execute('DELETE FROM saved_query_builder_queries WHERE id = ?', (query_id,))
+            return result.rowcount == 1
+
     def update_query_builder_query(self, query_id: int, name: str, description: str, query_sql: str, dataset_ids: list[int], username: str) -> bool:
         with self.connection() as conn:
             result = conn.execute(

@@ -176,6 +176,7 @@ Legend Position: Right
 #### Count Stacked Horizontal Bars
 
 Use for event or failure counts. Rows form horizontal categories and the KPI normally supplies statuses or causes.
+Column hierarchy headers keep complete aggregation values in both the Dashboard canvas and exported PowerPoint chart. Their font shrinks to fit narrow columns, and the final header row has its own space above the data.
 
 ```text
 CDR source: CDR-Data

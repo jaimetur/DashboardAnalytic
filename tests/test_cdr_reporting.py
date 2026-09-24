@@ -2939,6 +2939,45 @@ def test_failure_hierarchy_reserves_a_right_legend_lane() -> None:
     assert draw_legend.call_args.kwargs['side_x'] > 1289
 
 
+def test_failure_hierarchy_keeps_complete_column_headers() -> None:
+    frame = chart_frame({
+        '__catalog_row_0': ['VoLTE'],
+        '__catalog_column_0': ['Very Long Operator Name'],
+        '__catalog_column_1': ['2026-09-24 Campaign Full Name'],
+        '__catalog_failure_state': ['Failed'],
+    })
+
+    with patch('src.modules.cdr_reporting._draw_fitted_aggregation_header') as draw_header:
+        _render_failure_count_hierarchy(
+            'Voice failures', frame,
+            ['__catalog_row_0'], ['__catalog_column_0', '__catalog_column_1'],
+        )
+
+    assert [call.args[2] for call in draw_header.call_args_list] == [
+        'Very Long Operator Name', '2026-09-24 Campaign Full Name',
+    ]
+
+
+def test_failure_hierarchy_reserves_space_below_column_headers() -> None:
+    frame = chart_frame({
+        '__catalog_row_0': [f'Row {index:02d}' for index in range(21)],
+        '__catalog_column_0': ['VF'] * 21,
+        '__catalog_column_1': ['2026-Q2'] * 21,
+        '__catalog_failure_state': ['Failed'] * 21,
+    })
+
+    with patch('src.modules.cdr_reporting._draw_fitted_aggregation_header') as draw_header:
+        with patch('src.modules.cdr_reporting._draw_configured_bar_label') as draw_bar_label:
+            _render_failure_count_hierarchy(
+                'Voice failures', frame,
+                ['__catalog_row_0'], ['__catalog_column_0', '__catalog_column_1'],
+            )
+
+    leaf_header = next(call for call in draw_header.call_args_list if call.args[2] == '2026-Q2')
+    first_bar_y = min(call.kwargs['y'] for call in draw_bar_label.call_args_list)
+    assert leaf_header.kwargs['y'] + 26 + 8 < first_bar_y
+
+
 def test_failure_hierarchy_uses_dashed_child_boundaries_within_one_operator() -> None:
     frame = chart_frame({
         '__catalog_row_0': ['VoLTE', 'VoLTE'],

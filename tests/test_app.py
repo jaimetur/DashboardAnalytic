@@ -29,6 +29,26 @@ def login(client) -> None:
     assert response.status_code == 303
 
 
+def test_query_builder_saved_query_can_be_deleted(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    app_module.repository.save_query_builder_query('Temporary query', '', 'SELECT 1', [], 'admin')
+    saved = app_module.repository.list_query_builder_queries()
+    query_id = int(saved[0]['id'])
+
+    page = client.get('/query-builder')
+    assert page.status_code == 200
+    assert f'data-sql-delete data-query-id="{query_id}"' in page.text
+
+    response = client.delete(f'/api/query-builder/saved/{query_id}')
+    assert response.status_code == 200
+    assert response.json() == {'deleted': True}
+    assert app_module.repository.get_query_builder_query(query_id) is None
+    assert 'Temporary query' not in client.get('/query-builder').text
+    assert client.delete(f'/api/query-builder/saved/{query_id}').status_code == 404
+
+
 def test_query_builder_assistant_uses_ready_source_columns(client, monkeypatch) -> None:
     import src.DashboardAnalytic as app_module
 

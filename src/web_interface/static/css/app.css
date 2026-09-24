@@ -205,6 +205,9 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .query-builder-stack .query-builder-export-json-action { display: inline-grid; place-items: center; width: 2.1rem; min-width: 2.1rem; height: 2.1rem; border: 1px solid rgba(159, 76, 23, .48); border-radius: 999px; background: linear-gradient(135deg, #fff5e9, #f8ddb9); color: #884116; font-size: 1.08rem; font-weight: 900; text-decoration: none; }
 .query-builder-stack .query-builder-export-json-action:hover { background: linear-gradient(135deg, #fbe8ce, #f2c78d); color: #6d310c; }
 .query-builder-stack .query-builder-export-json-action svg { width: 1.1rem; height: 1.1rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.query-builder-stack .query-builder-delete-action { display: inline-grid; place-items: center; width: 2.1rem; min-width: 2.1rem; height: 2.1rem; padding: 0; border: 1px solid rgba(159, 76, 23, .48); border-radius: 999px; background: linear-gradient(135deg, #fff5e9, #f8ddb9); color: #884116; }
+.query-builder-stack .query-builder-delete-action:hover { background: #f9ded7; color: #9e2f1f; }
+.query-builder-stack .query-builder-delete-action svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .query-builder-running-overlay { z-index: 260; }
 .confirm-panel.query-builder-running-dialog { width: min(25rem, calc(100vw - 2rem)); text-align: center; }
 .confirm-panel.query-builder-edit-dialog { width: min(38rem, calc(100vw - 2rem)); }

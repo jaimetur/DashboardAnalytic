@@ -773,6 +773,7 @@
       definition: exportDefinition,
       preparation_token: preparationToken,
       selected_regions: selectedRegions,
+      selected_cities: selectedCities,
     });
     status(`Dashboard PPT export queued for “${exportDefinition.name}”.`);
     await refreshDashboardPptJobs();

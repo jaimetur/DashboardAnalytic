@@ -451,6 +451,46 @@ def test_dashboard_library_geography_options_are_loaded_in_one_request(client):
     assert response.json() == {'regions': [], 'cities': ['Leeds', 'London']}
 
 
+def test_dashboard_ppt_filename_summarizes_complete_geography_selections(client, monkeypatch):
+    payload = setup_dashboard(client)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if core.repository.get_dataset(1)['status'] == 'ready':
+            break
+        time.sleep(0.05)
+    assert core.repository.get_dataset(1)['status'] == 'ready'
+    dashboard_id = 'geography-ppt-name'
+    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+    core.repository.replace_cdr_catalogue(
+        1, vendors=[], regions=['North', 'South'], cities=['Leeds', 'London'],
+    )
+    monkeypatch.setattr(core, 'submit_background_task', lambda *args, **kwargs: None)
+
+    def queued_name(regions, cities):
+        export_definition = {**payload, 'filters': {'Region': regions, 'City': cities}}
+        response = client.post(f'/api/e2e-dashboards/{dashboard_id}/export-ppt', json={
+            'definition': export_definition,
+            'selected_regions': regions,
+            'selected_cities': cities,
+        })
+        assert response.status_code == 202, response.text
+        with core.repository.connection() as connection:
+            row = connection.execute(
+                'SELECT output_file FROM dashboard_ppt_jobs WHERE id = ?',
+                (response.json()['job_id'],),
+            ).fetchone()
+        return row['output_file']
+
+    assert re.fullmatch(
+        r'\d{8}_\d{6} - All Regions - All Cities - Operator Comparison - Comparison\.pptx',
+        queued_name(['South', 'North'], ['London', 'Leeds']),
+    )
+    assert re.fullmatch(
+        r'\d{8}_\d{6} - North - London - Operator Comparison - Comparison\.pptx',
+        queued_name(['North'], ['London']),
+    )
+
+
 def test_expanded_dashboard_chart_apply_builds_a_new_temporary_model(client):
     payload = setup_dashboard(client)
     prepared = client.post('/api/e2e-dashboards/prepare', json=payload)

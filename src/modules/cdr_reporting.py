@@ -3944,6 +3944,33 @@ def _fit_text(draw: ImageDraw.ImageDraw, value: str, font: ImageFont.ImageFont, 
     return fitted.rstrip() + suffix if fitted else suffix
 
 
+def _draw_fitted_aggregation_header(
+    image: Image.Image, draw: ImageDraw.ImageDraw, value: str, *, centre: float,
+    y: float, width: float, format_value: str, level: int, fill: str,
+) -> None:
+    """Keep a hierarchy caption complete within its column or group."""
+    caption = str(value)
+    if not caption:
+        return
+    available = max(int(width - 8), 1)
+    options = label_format_options(format_value)
+    bold = bool(options["bold"]) if options["configured"] else True
+    size = _format_size(AGGREGATION_TITLE_FONT_SIZE, format_value, level=level)
+    font = _font(size, bold)
+    while size > 11 and _text_width(draw, caption, font) > available:
+        size -= 1
+        font = _font(size, bold)
+    measured = _text_width(draw, caption, font)
+    if measured <= available:
+        draw.text((centre - measured / 2, y), caption, fill=fill, font=font)
+        return
+    bbox = draw.textbbox((0, 0), caption, font=font)
+    label = Image.new("RGBA", (bbox[2] - bbox[0] + 4, bbox[3] - bbox[1] + 4), (0, 0, 0, 0))
+    ImageDraw.Draw(label).text((2 - bbox[0], 2 - bbox[1]), caption, fill=fill, font=font)
+    label = label.resize((available, label.height), Image.Resampling.LANCZOS)
+    image.paste(label, (round(centre - available / 2), round(y + bbox[1] - 2)), label)
+
+
 def _canvas(title: str) -> tuple[Image.Image, ImageDraw.ImageDraw]:
     image = Image.new("RGB", (1600, 900), "white")
     draw = ImageDraw.Draw(image)
@@ -4609,7 +4636,7 @@ def _render_failure_count_hierarchy(
     image, draw = _canvas(title)
     # See the status renderer above: hierarchy captions use the space between
     # the title and the plot, not the title itself.
-    chart_left, chart_top, chart_height = 285, 245, 510
+    chart_left, base_chart_top, base_chart_height = 285, 245, 510
     # A right-side legend needs its own canvas lane. Without reserving it, the
     # diagonal outer column captions extend into the legend area on dense
     # hierarchy charts (for example Operator × Campaign failure matrices).
@@ -4625,8 +4652,11 @@ def _render_failure_count_hierarchy(
         chart_width = 1250
     upper_levels = max(len(column_keys[0]) - 1, 0)
     header_band_height = min(34, 120 / upper_levels) if upper_levels else 0
-    header_top = chart_top - upper_levels * header_band_height - 8
-    leaf_label_y = chart_top - 10
+    leaf_header_height = max(34, _format_size(AGGREGATION_TITLE_FONT_SIZE, legend_format) + 8)
+    chart_top = base_chart_top + leaf_header_height
+    chart_height = base_chart_height - leaf_header_height
+    header_top = base_chart_top - upper_levels * header_band_height - 8
+    leaf_label_y = base_chart_top - 10
     row_height = chart_height / len(row_keys)
     column_width = chart_width / len(column_keys)
     colours = FAILURE_COUNT_COLOURS
@@ -4634,17 +4664,19 @@ def _render_failure_count_hierarchy(
         y = header_top + level * header_band_height
         for start, end, caption in _hierarchy_caption_spans(column_keys, level):
             centre = chart_left + ((start + end) / 2) * column_width
-            caption = caption[:20]
-            font = _format_font(AGGREGATION_TITLE_FONT_SIZE, legend_format, level=level)
-            draw.text((centre - min(_text_width(draw, caption, font) / 2, (end - start) * column_width / 2 - 4), y), caption, fill=_format_colour(legend_format, "#566A78"), font=font)
+            _draw_fitted_aggregation_header(
+                image, draw, caption, centre=centre, y=y, width=(end - start) * column_width,
+                format_value=legend_format, level=level, fill=_format_colour(legend_format, "#566A78"),
+            )
             draw.line((chart_left + start * column_width, y + header_band_height - 4, chart_left + end * column_width, y + header_band_height - 4), fill="#C8D2D9", width=1)
 
     for column_index, column_key in enumerate(column_keys):
         lower_caption = str(column_key[-1])
         centre = chart_left + (column_index + 0.5) * column_width
-        leaf_font = _format_font(AGGREGATION_TITLE_FONT_SIZE, legend_format)
-        leaf_caption = _fit_text(draw, lower_caption, leaf_font, column_width - 8)
-        draw.text((centre - _text_width(draw, leaf_caption, leaf_font) / 2, leaf_label_y), leaf_caption, fill=_format_colour(legend_format, "#4E6271"), font=leaf_font)
+        _draw_fitted_aggregation_header(
+            image, draw, lower_caption, centre=centre, y=leaf_label_y, width=column_width,
+            format_value=legend_format, level=0, fill=_format_colour(legend_format, "#4E6271"),
+        )
         cell_left = chart_left + column_index * column_width
         if column_index:
             changed = next((level for level, value in enumerate(column_key) if value != column_keys[column_index - 1][level]), len(column_key) - 1)

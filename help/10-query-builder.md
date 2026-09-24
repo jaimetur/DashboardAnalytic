@@ -37,5 +37,6 @@ Runs and page changes continue in the background while Query Builder checks thei
 - Saving checks the SQL and selected source columns without executing the full query. Run it separately to inspect results.
 - Loading a saved query restores its SQL and source selections. Generated SQL that matches the Assisted controls also restores those controls; custom or unsupported SQL remains in **Write SQL**.
 - Saved queries retain SQL and source references, so queries saved before Assisted mode remain available in the same editor.
+- Use the delete button in the Saved queries library to remove a query after confirmation. The library and load picker refresh after deletion.
 - Export an individual saved query as JSON for inspection or archiving. Use a Query Builder Queries package or workspace backup/export ZIP to import saved queries into another workspace.
 - Workspace query packages match source datasets by file name, or by source file content and CDR type when names differ. A transfer reports unmatched or ambiguous sources instead of saving a query with missing selections. SQL conditions that inspect `source_dataset_name` still use the destination's file name, so review them after renaming a dataset.

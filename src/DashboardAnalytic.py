@@ -12366,6 +12366,16 @@ async def update_saved_query_builder_query(query_id: int, request: Request, user
     return JSONResponse({'updated': True})
 
 
+@app.delete('/api/query-builder/saved/{query_id}')
+def delete_saved_query_builder_query(query_id: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
+    if not active_workspace:
+        raise HTTPException(status_code=400, detail='Open a workspace before deleting a saved query.')
+    if not repository.delete_query_builder_query(query_id):
+        raise HTTPException(status_code=404, detail='Saved query not found.')
+    repository.add_log(user.username, 'delete_query_builder', json.dumps({'query_id': query_id}))
+    return JSONResponse({'deleted': True})
+
+
 @app.post('/api/query-builder/export')
 async def export_query_builder(request: Request, user: SessionUser = Depends(current_user)) -> StreamingResponse:
     if not active_workspace:

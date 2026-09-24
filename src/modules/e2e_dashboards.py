@@ -73,6 +73,7 @@ class DashboardPptExportRequest(BaseModel):
     definition: DashboardDefinition | None = None
     preparation_token: str | None = None
     selected_regions: list[str] = Field(default_factory=list)
+    selected_cities: list[str] = Field(default_factory=list)
 
 
 class DashboardFilterOptionsRequest(BaseModel):
@@ -1047,6 +1048,7 @@ def install_dashboard_routes(core):
     def queue_dashboard_ppt_export(
         dashboard_id, user, *, reuse_job_id=None, export_definition: DashboardDefinition | None = None,
         preparation_token: str | None = None, selected_regions: list[str] | None = None,
+        selected_cities: list[str] | None = None,
     ):
         task_repository = bound_repository()
         workspace = workspace_key()
@@ -1068,6 +1070,9 @@ def install_dashboard_routes(core):
         snapshot_definition = DashboardDefinition.model_validate(raw_definition)
         selected_regions = list(dict.fromkeys(
             str(region).strip() for region in selected_regions or [] if str(region).strip()
+        ))
+        selected_cities = list(dict.fromkeys(
+            str(city).strip() for city in selected_cities or [] if str(city).strip()
         ))
         # Inserting the export job must remain quick.  A valid active snapshot
         # is reused when supplied, but cache discovery and preparation for a
@@ -1093,8 +1098,16 @@ def install_dashboard_routes(core):
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         safe_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', dashboard_name).strip() or 'Dashboard'
         safe_scope = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', dashboard_ppt_scope_label(raw_definition.get('scope') or 'single'))
-        safe_region = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', ', '.join(selected_regions)).strip()
-        output_file = ' - '.join(part for part in (timestamp, safe_region, safe_scope, safe_name) if part) + '.pptx'
+        catalogue = {'regions': [], 'cities': []}
+        if selected_regions or selected_cities:
+            selected_ids = [dataset_id for ids in (raw_definition.get('datasets') or {}).values() for dataset_id in ids]
+            if selected_ids:
+                catalogue = task_repository.cdr_catalogue_values(selected_ids)
+        region_label = 'All Regions' if selected_regions and set(selected_regions) == set(catalogue['regions']) else ', '.join(selected_regions)
+        city_label = 'All Cities' if selected_cities and set(selected_cities) == set(catalogue['cities']) else ', '.join(selected_cities)
+        safe_region = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', region_label).strip()
+        safe_city = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', city_label).strip()
+        output_file = ' - '.join(part for part in (timestamp, safe_region, safe_city, safe_scope, safe_name) if part) + '.pptx'
         job_dir = Path(task_repository.db_path).parent / 'output' / 'dashboards' / Path(output_file).stem
         destination = job_dir / output_file
         ensure_dashboard_ppt_jobs(task_repository)
@@ -1152,6 +1165,7 @@ def install_dashboard_routes(core):
             export_definition=request.definition if request else None,
             preparation_token=request.preparation_token if request else None,
             selected_regions=request.selected_regions if request else None,
+            selected_cities=request.selected_cities if request else None,
         )
         return JSONResponse({'job_id': job_id, 'status': 'queued'}, status_code=202)
 
