@@ -1,8 +1,8 @@
 # Workspace Config
 
-Workspace Config is a dedicated page that brings together the three workspace-owned management panels previously shown in Admin: Report Templates Management, Operator Mappings and Vendor Mappings. It does not introduce a second settings store: templates and mapping groups remain in the active workspace database and keep their existing import, export, transfer, backup and restore formats.
+Workspace Config is a dedicated page for four settings owned by the active workspace: Report Templates Management, Operator Mappings, Vendor Mappings and Main Cities. These settings remain workspace-scoped and are included in the applicable import, export, transfer, backup and restore workflows.
 
-Open **Config → Workspace Config** from the main navigation at `/workspace-config`. Template and mapping actions use routes below `/workspace-config/`. The page uses the same teal/navy palette as Application Config and its Page Sections navigator links to the three panels.
+Open **Config → Workspace Config** from the main navigation at `/workspace-config`. Template, mapping and Main Cities actions use routes below `/workspace-config/`. The page uses the same teal/navy palette as Application Config and its Page Sections navigator links to the panels.
 
 ## Access and active workspace
 
@@ -357,8 +357,14 @@ The Vendor table has the same **Order**, **Canonical label**, **Mapped source la
 
 Vendor order determines the chart sequence for Vendor dimensions and the Vendor portion of combined `Operator_Vendor` categories. The selected colour gives a Vendor a consistent chart identity, with related shades where multiple series need distinction. Aliases reconcile different source spellings for chart display and filters; they do not alter materialized CDR values. Group changes refresh chart caches without rematerializing source data.
 
+## Main Cities
+
+The Main Cities panel lists cities found in ready CDR datasets for the active workspace. Use the center buttons to move selected or all cities between the available list and the selected list, then choose **Save Main Cities**. The setting belongs to this workspace.
+
+Dashboard's Default Filters City multiselect and the PowerPoint export City selector provide a **Main Cities** preset. Applying it selects the configured cities that are available in the current Dashboard or export dataset selection.
+
 ## Portable operations
 
-Workspace Config does not create a new export component. Administrators use Admin's existing **Import / Export / Transfer** and **Backup Protection** controls to move or restore Report Templates and Operator/Vendor Mappings with the workspace. The portable mapping component includes both mapping types, aliases, order and colours.
+Administrators use Admin's existing **Import / Export / Transfer** and **Backup Protection** controls to move or restore workspace settings. Main Cities is a portable component alongside Report Templates and Operator/Vendor Mappings; full-workspace packages and database backups also retain the setting.
 
 For global runtime settings, see [Application Config](app-config.md). Admin's [Database Viewer](administrator-config.md#database-viewer) documents the underlying Operator and Vendor mapping tables.

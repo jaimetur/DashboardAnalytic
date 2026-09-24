@@ -50,7 +50,7 @@ The ready summary distinguishes:
 
 ### Default filters and aliases
 
-Default filters appear in this order: `Market`, `Operator`, `Vendor`, `Region`, `City`, `Campaign`, `RAT`, `Session Type`, `Call Status`. Technology is not an adaptive Dashboard filter because NR Mode is selected on the Dashboard definition.
+Default filters appear in this order: `Market`, `Region`, `City`, `Campaign`, `Operator`, `Vendor`, `RAT`, `Session Type`, `Call Status`. With the three-column layout, the first two rows contain Market / Region / City and Campaign / Operator / Vendor. Technology is not an adaptive Dashboard filter because NR Mode is selected on the Dashboard definition.
 
 | Visible filter | Supported columns in priority order |
 | --- | --- |
@@ -62,7 +62,7 @@ Default filters appear in this order: `Market`, `Operator`, `Vendor`, `Region`, 
 
 Aliases resolve per row: an empty higher-priority value falls back to the next column. Hover or keyboard-focus an aliased filter to see its complete priority list.
 
-Each multiselect provides search, **All**, **None** and individual values. All removes the restriction; None deliberately produces zero rows. Menus stay open while values are selected and close after pointer exit. Choices normally come from persisted dataset profiles; missing fields are read from combined CDR tables.
+Each multiselect provides search, **All values** and individual values. The City filter also provides **Main Cities**, which selects the cities configured in Workspace Config that are available in the current Dashboard dataset selection. **All values** removes the restriction even when the current universe has only one value; newly added CDRs then contribute all their values automatically. Selecting every available value has the same effect, while deselecting every value deliberately produces zero rows. Applying or saving a changed Dataset Universe reloads the filter choices from its selected CDRs. Menus stay open while values are selected and close after pointer exit. Choices include every distinct value in the selected CDRs; older profiles saved with a truncated catalogue are completed from source rows.
 
 ### Additional Filters
 
@@ -144,7 +144,9 @@ Every column provides an Excel-style value filter across the complete chart data
 
 Generate PPT appears immediately before View Dashboard in the dataset/filter actions and immediately before Refresh Dashboard in the viewer's upper action row. It uses the exact prepared CDRs, dates, scope and applied filters, even if they have not been saved as Dashboard defaults.
 
-The job renders the template into `Template_CDR_analysis.pptx`, preserving slides, layouts, chart placeholder proportions, titles, legends and saved comments. It writes the PPT plus chart PNG, tooltip and Canvas-model assets under `output/dashboards`. Folder and PPT names begin with `yyyymmdd_HHMMSS`; selected Regions and Cities precede the scope and Dashboard name. When every available Region or City is selected, the corresponding name segment is `All Regions` or `All Cities`.
+When choosing an export universe, the Operators, Vendors, Regions and Cities selectors load values from the selected CDRs and start with all available values selected. The City selector also offers the **Main Cities** preset from Workspace Config. Their selections control the generated PPT and its job Filters column, taking precedence over the Dashboard's saved values for those four fields. The dialog remembers its last Scope, CDRs, dates and four selector choices per Dashboard and user in this browser. Changing CDRs or dates keeps any selected values still available; an All selection includes new values.
+
+The job renders the template as a PPTX, preserving slides, layouts, chart placeholder proportions, titles, legends and saved comments. On a title cover slide, its subtitle uses the report Scope and its lower area shows Regions and Cities in aligned accent colours. It writes the PPT plus chart PNG, tooltip and Canvas-model assets under `output/dashboards`. Folder and PPT names begin with `yyyymmdd_HHMMSS`, followed by the Dashboard name and the Scope, Operator, Vendor, Region and City selections. When every available value in a segment is selected, that segment uses its `All ...` label in the filename and job Filters column.
 
 Template authoring details for the exported presentation are centralized in [Workspace Config → Report Template reference](workspace-config.md#report-template-reference).
 
@@ -152,7 +154,7 @@ Template authoring details for the exported presentation are centralized in [Wor
 
 Jobs continue on the server after leaving the page. The table records ID, creator, local date/time, NR Mode, Dashboard, scope, filter snapshot, slides, charts, status and elapsed progress.
 
-Depending on state, actions download the PPT, open/download charts, stop work, retry/relaunch or delete the job and files. The filter action groups CDRs as Data, Voice and Speech and shows exact dates and adaptive filters in a tooltip or dialog. Excel-style header filters search every job column. Administrators can use **Delete All PPTs**.
+Depending on state, actions download the PPT, open/download charts, stop work, retry/relaunch or delete the job and files. The filter action groups CDRs as Data, Voice and Speech and shows exact dates and adaptive filters in a tooltip or dialog. Excel-style header filters search every job column. `user-editor`, `admin` and `super-admin` can delete individual jobs or use **Delete All PPTs**.
 
 ## Charts Panel
 
@@ -171,6 +173,6 @@ Dashboard export uses a versioned ZIP accepted by Admin Import. It contains the 
 - **View Dashboard or Generate PPT is disabled**: inspect the status badge and floating preparation task.
 - **A filter has no values**: verify its field/aliases exist and other filters leave matching rows.
 - **A chart says that no CDR dataset is selected**: select at least one CDR of the type required by that chart. The chart remains intentionally empty when its source type is absent from the Dataset Universe.
-- **A chart is empty**: compare Dataset Universe, Filtered Universe and chart rows; then check NR Mode and the template row in Administrator Config.
+- **A chart is empty**: compare Dataset Universe, Filtered Universe and chart rows; then check NR Mode and the template row in Workspace Config.
 - **Multivendor is unavailable**: persist Vendor mapping for every selected CDR.
 - **Preparation is failed or remains queued**: inspect App Logs, retry and clear only the workspace Dashboard cache if derived data is invalid.

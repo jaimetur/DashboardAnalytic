@@ -2830,7 +2830,7 @@ def parse_json_field(value: Any, fallback: Any) -> Any:
 
 def unique_values(series) -> list[str]:
     values = sorted({str(value).strip() for value in series.dropna().tolist() if str(value).strip()})
-    return values[:50]
+    return values
 
 
 def restrict_frame_to_metric(df, metric: str):
@@ -4481,7 +4481,7 @@ def refresh_selected_dataset_if_stale(
         filter_options = {
             dimension: values
             for dimension in FILTER_DIMENSIONS
-            if (values := task_repository.list_distinct_dataset_row_values(dataset_id, dimension))
+            if (values := task_repository.list_distinct_dataset_row_values(dataset_id, dimension, limit=None))
         }
         available_aggregations = derive_available_aggregations(filter_options)
 
@@ -5008,7 +5008,7 @@ ARCHIVE_COMPONENTS = frozenset({
 })
 WORKSPACE_ARCHIVE_COMPONENTS = frozenset({
     'workspace_database', 'input', 'output', 'dashboards', 'report_templates', 'operator_mappings',
-    'auto_calculated_fields', 'query_builder_queries',
+    'auto_calculated_fields', 'query_builder_queries', 'main_cities',
 })
 ARCHIVE_KIND_COMPONENTS = {
     'config': ('app_database',),
@@ -5018,10 +5018,12 @@ ARCHIVE_KIND_COMPONENTS = {
     'auto-calculated-fields': ('workspace_components',),
     'dashboards': ('workspace_components',),
     'operator-mappings': ('workspace_components',),
+    'main-cities': ('workspace_components',),
     'bundle': (),
 }
 WORKSPACE_ELEMENT_EXPORT_TARGETS = frozenset({
     'slides-templates', 'auto-calculated-fields', 'dashboards', 'operator-mappings', 'query-builder-queries',
+    'main-cities',
 })
 STATIC_EXPORT_TARGETS = frozenset({'config', 'config-with-templates', 'full-environment'})
 UNCOMPRESSED_ARCHIVE_SUFFIXES = frozenset({
@@ -5072,6 +5074,7 @@ def archive_workspace_components(manifest: dict[str, Any]) -> list[str]:
         'auto-calculated-fields': ('auto_calculated_fields',),
         'dashboards': ('dashboards',),
         'operator-mappings': ('operator_mappings',),
+        'main-cities': ('main_cities',),
         'query-builder-queries': ('query_builder_queries',),
     }
     return list(fallback.get(str(manifest.get('kind') or ''), ()))
@@ -5132,7 +5135,7 @@ def full_workspace_archive_components(*, include_input_files: bool = True, inclu
         components.append('input')
     if include_generated_outputs:
         components.append('output')
-    return [*components, 'dashboards', 'report_templates', 'operator_mappings', 'auto_calculated_fields', 'query_builder_queries']
+    return [*components, 'dashboards', 'report_templates', 'operator_mappings', 'auto_calculated_fields', 'query_builder_queries', 'main_cities']
 
 
 def archive_workspace_components_for_target(target: str, *, include_generated_outputs: bool = True) -> list[str]:
@@ -5145,6 +5148,8 @@ def archive_workspace_components_for_target(target: str, *, include_generated_ou
         return ['dashboards']
     if target == 'operator-mappings':
         return ['operator_mappings']
+    if target == 'main-cities':
+        return ['main_cities']
     if target == 'query-builder-queries':
         return ['query_builder_queries']
     if target.startswith('workspace:') or target in {'workspace', 'full-environment'}:
@@ -5234,7 +5239,7 @@ def recurring_backup_settings() -> dict[str, Any]:
         'enabled': False,
         'components': [
             'app_database', 'workspace_database', 'dashboards', 'report_templates',
-            'operator_mappings', 'auto_calculated_fields',
+            'operator_mappings', 'main_cities', 'auto_calculated_fields',
         ],
         'workspace_ids': [],
         'recurrence': 'daily', 'execution_time': '02:00', 'weekly_day': 0, 'monthly_day': 1, 'max_backups': 30,
@@ -5254,7 +5259,7 @@ def recurring_backup_settings() -> dict[str, Any]:
             ('auto_calculated_fields', 'include_auto_calculated_fields'),
         ) if saved.get(legacy_key, True)]
     legacy_components = {
-        'full_workspaces': ('workspace_database', 'report_templates', 'operator_mappings', 'auto_calculated_fields'),
+        'full_workspaces': ('workspace_database', 'report_templates', 'operator_mappings', 'main_cities', 'auto_calculated_fields'),
         'slides_templates': ('report_templates',),
     }
     migrated_components: list[str] = []
@@ -5368,7 +5373,7 @@ def create_recurring_database_backup(
     workspace_manifest_components = [
         component for component in (
             'workspace_database', 'dashboards', 'input', 'output', 'report_templates',
-            'operator_mappings', 'auto_calculated_fields', 'query_builder_queries',
+            'operator_mappings', 'main_cities', 'auto_calculated_fields', 'query_builder_queries',
         )
         if component in components
     ]
@@ -5401,6 +5406,8 @@ def create_recurring_database_backup(
             )
         if 'operator_mappings' in components:
             total_bytes += len(_operator_mappings_archive_payload(workspace))
+        if 'main_cities' in components:
+            total_bytes += len(_main_cities_archive_payload(workspace))
         if 'query_builder_queries' in components:
             total_bytes += len(json.dumps(_query_builder_queries_payload(workspace), ensure_ascii=False).encode('utf-8'))
         if 'input' in components:
@@ -5446,6 +5453,9 @@ def create_recurring_database_backup(
                 if 'operator_mappings' in components:
                     report_progress(f'Exporting Operator/Vendor Mappings & Colors for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                     _archive_workspace_operator_mappings(archive, workspace, archive_workspace_root, archived_bytes)
+                if 'main_cities' in components:
+                    report_progress(f'Exporting Main Cities for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
+                    _archive_workspace_main_cities(archive, workspace, archive_workspace_root, archived_bytes)
                 if 'auto_calculated_fields' in components:
                     report_progress(f'Exporting Auto-calculated Fields for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                     task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
@@ -5731,6 +5741,8 @@ def _backup_archive_components(archive_path: Path) -> list[str]:
         components.append('report_templates')
     if any(name.startswith('workspaces/') and '/operator-mappings/operator-mappings.json' in name for name in names):
         components.append('operator_mappings')
+    if any(name.startswith('workspaces/') and '/main-cities/main-cities.json' in name for name in names):
+        components.append('main_cities')
     if any(name.startswith('workspaces/') and '/auto-calculated-fields/' in name and name.endswith('.json') for name in names):
         components.append('auto_calculated_fields')
     if any(name.startswith('workspaces/') and '/query-builder-queries/query-builder-queries.json' in name for name in names):
@@ -5794,6 +5806,7 @@ def restore_database_backup(
                 ('workspace_database', f'{prefix}database.sqlite'),
                 ('dashboards', f'{prefix}dashboards/dashboards.json'),
                 ('operator_mappings', f'{prefix}operator-mappings/operator-mappings.json'),
+                ('main_cities', f'{prefix}main-cities/main-cities.json'),
             ):
                 total_steps += int(component in selected and member in name_set)
             if 'report_templates' in selected:
@@ -5878,6 +5891,13 @@ def restore_database_backup(
                         progress_callback(f'Restoring Operator Mappings for {workspace_name}', completed_steps, total_steps)
                     _restore_workspace_operator_mappings(workspace, archive.read(member))
                     advance(f'Operator Mappings restored for {workspace_name}')
+            if 'main_cities' in selected:
+                member = f'{prefix}main-cities/main-cities.json'
+                if member in names:
+                    if progress_callback:
+                        progress_callback(f'Restoring Main Cities for {workspace_name}', completed_steps, total_steps)
+                    _restore_workspace_main_cities(workspace, archive.read(member))
+                    advance(f'Main Cities restored for {workspace_name}')
             if 'auto_calculated_fields' in selected:
                 member = next((candidate for candidate in (
                     f'{prefix}auto-calculated-fields/auto-calculated-fields.json',
@@ -6040,6 +6060,50 @@ def _restore_workspace_operator_mappings(workspace: Workspace, payload: bytes) -
         ANALYSIS_CACHE.clear()
         DATAFRAME_CACHE.clear()
         _clear_chart_preview_caches()
+
+
+def _main_cities_archive_payload(workspace: Workspace) -> bytes:
+    """Serialize the workspace's configured Main Cities."""
+    task_repository = Repository(
+        workspace.database_path, repository.global_db_path, workspace_registry.registry_path,
+    )
+    return json.dumps({
+        'format': 'dashboard-analytic-main-cities',
+        'version': 1,
+        'cities': task_repository.list_main_cities(),
+    }, ensure_ascii=False, indent=2).encode('utf-8')
+
+
+def _archive_workspace_main_cities(
+    archive: zipfile.ZipFile,
+    workspace: Workspace,
+    archive_prefix: str,
+    progress_callback: Callable[[int], None] | None = None,
+) -> None:
+    payload = _main_cities_archive_payload(workspace)
+    archive.writestr(f'{archive_prefix}/main-cities/main-cities.json', payload)
+    if progress_callback:
+        progress_callback(len(payload))
+
+
+def _restore_workspace_main_cities(workspace: Workspace, payload: bytes) -> None:
+    try:
+        document = json.loads(payload.decode('utf-8'))
+        cities = document.get('cities') if isinstance(document, dict) else None
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f'Main Cities for "{workspace.name}" are invalid.') from exc
+    if (
+        not isinstance(document, dict)
+        or document.get('format') != 'dashboard-analytic-main-cities'
+        or document.get('version') != 1
+        or not isinstance(cities, list)
+        or any(not isinstance(city, str) for city in cities)
+    ):
+        raise ValueError(f'Main Cities for "{workspace.name}" are invalid.')
+    task_repository = Repository(
+        workspace.database_path, repository.global_db_path, workspace_registry.registry_path,
+    )
+    task_repository.set_main_cities(cities)
 
 def _dashboard_archive_payload(workspace: Workspace) -> bytes:
     """Serialize saved Dashboard definitions only; generated chart caches are excluded."""
@@ -6266,6 +6330,7 @@ def _archive_workspace(
     _archive_workspace_dashboards(archive, workspace, archive_prefix, progress_callback)
     _archive_workspace_report_templates(archive, workspace, f'{archive_prefix}/report-templates', progress_callback)
     _archive_workspace_operator_mappings(archive, workspace, archive_prefix, progress_callback)
+    _archive_workspace_main_cities(archive, workspace, archive_prefix, progress_callback)
     archive.writestr(
         f'{archive_prefix}/auto-calculated-fields/auto-calculated-fields.json',
         json.dumps(task_repository.list_calculated_dimensions(), ensure_ascii=False, indent=2),
@@ -6299,6 +6364,9 @@ def export_archive_filename(target: str | Iterable[str]) -> str:
     if target == 'operator-mappings':
         workspace_name = active_workspace.name if active_workspace else 'workspace'
         return f'{workspace_name}_operator-mappings_{generated_at}.zip'
+    if target == 'main-cities':
+        workspace_name = active_workspace.name if active_workspace else 'workspace'
+        return f'{workspace_name}_main-cities_{generated_at}.zip'
     if target == 'query-builder-queries':
         workspace_name = active_workspace.name if active_workspace else 'workspace'
         return f'{workspace_name}_query-builder-queries_{generated_at}.zip'
@@ -6412,6 +6480,22 @@ def _build_single_export_archive_file(
             )
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
             _archive_workspace_operator_mappings(
+                archive, source_workspace, f'workspaces/{source_workspace.name}', progress_callback,
+            )
+        elif target == 'main-cities':
+            source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
+            source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
+            if not source_workspace:
+                raise ValueError('Open a workspace before exporting Main Cities.')
+            archive_path = f'workspaces/{source_workspace.name}/main-cities/main-cities.json'
+            manifest = archive_manifest(
+                'main-cities',
+                source_workspace={'id': source_workspace.id, 'name': source_workspace.name},
+                workspace_components=archive_workspace_components_for_target(target),
+                archive_path=archive_path,
+            )
+            archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
+            _archive_workspace_main_cities(
                 archive, source_workspace, f'workspaces/{source_workspace.name}', progress_callback,
             )
         elif target == 'auto-calculated-fields':
@@ -6619,6 +6703,10 @@ def estimate_export_bytes(
         source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
         source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
         total = len(_operator_mappings_archive_payload(source_workspace)) if source_workspace else 0
+    elif target == 'main-cities':
+        source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
+        source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
+        total = len(_main_cities_archive_payload(source_workspace)) if source_workspace else 0
     elif target.startswith('workspace:'):
         workspace = workspace_registry.get(target.removeprefix('workspace:'))
         if workspace:
@@ -6719,6 +6807,10 @@ def _recovered_transfer_details(manifest: dict[str, Any]) -> tuple[str, list[str
         source = manifest.get('source_workspace')
         name = str(source.get('name') or '') if isinstance(source, dict) else ''
         return ('Operator/Vendor Mappings & Colors', [name] if name else [])
+    if kind == 'main-cities':
+        source = manifest.get('source_workspace')
+        name = str(source.get('name') or '') if isinstance(source, dict) else ''
+        return ('Main Cities', [name] if name else [])
     if kind == 'query-builder-queries':
         source = manifest.get('source_workspace')
         name = str(source.get('name') or '') if isinstance(source, dict) else ''
@@ -6760,7 +6852,8 @@ def _recover_unimported_transfer_packages() -> None:
             kind = str(manifest.get('kind') or '')
             if kind not in {
                 'config', 'workspace', 'full-environment', 'slides-templates',
-                'auto-calculated-fields', 'dashboards', 'operator-mappings', 'query-builder-queries', 'database-backup', 'bundle',
+                'auto-calculated-fields', 'dashboards', 'operator-mappings', 'main-cities',
+                'query-builder-queries', 'database-backup', 'bundle',
             }:
                 raise ValueError('Unsupported transfer package.')
         except (OSError, ValueError, zipfile.BadZipFile):
@@ -7455,6 +7548,26 @@ def _apply_import_archive(
             for workspace in destinations:
                 _restore_workspace_operator_mappings(workspace, payload)
             return f'Imported Operator/Vendor Mappings & Colors into {len(destinations)} workspaces.'
+        if kind == 'main-cities':
+            member = str(manifest.get('archive_path') or '')
+            if (
+                member not in archive.namelist()
+                or not re.fullmatch(r'workspaces/[^/]+/main-cities/main-cities\.json', member)
+            ):
+                raise ValueError('The package does not contain valid Main Cities.')
+            destinations = [workspace_registry.get(workspace_id) for workspace_id in destination_workspace_ids]
+            destinations = [workspace for workspace in destinations if workspace]
+            if not destinations:
+                source = manifest.get('source_workspace')
+                if isinstance(source, dict) and source.get('id'):
+                    candidate = workspace_registry.get(str(source['id']))
+                    destinations = [candidate] if candidate else []
+            if not destinations:
+                raise ValueError('Select at least one destination workspace.')
+            payload = archive.read(member)
+            for workspace in destinations:
+                _restore_workspace_main_cities(workspace, payload)
+            return f'Imported Main Cities into {len(destinations)} workspaces.'
         if kind == 'auto-calculated-fields':
             try:
                 member = next((candidate for candidate in (
@@ -7716,6 +7829,7 @@ def _transfer_content_label(target: str | Iterable[str]) -> str:
         'auto-calculated-fields': 'Auto-calculated Fields',
         'dashboards': 'Dashboards',
         'operator-mappings': 'Operator/Vendor Mappings & Colors',
+        'main-cities': 'Main Cities',
         'query-builder-queries': 'Query Builder Queries',
     }
     if target.startswith('workspace:'):
@@ -8099,7 +8213,8 @@ def transfer_job_payload(job_id: str, user: SessionUser) -> dict[str, Any] | Non
 def require_import_export_permission(user: SessionUser, target: str) -> None:
     """Authorize imports; admins may restore templates and fields into accessible workspaces."""
     if user.role == 'super-admin' or target in {
-        'slides-templates', 'auto-calculated-fields', 'dashboards', 'operator-mappings', 'query-builder-queries',
+        'slides-templates', 'auto-calculated-fields', 'dashboards', 'operator-mappings', 'main-cities',
+        'query-builder-queries',
     }:
         return
     raise HTTPException(
@@ -8133,7 +8248,7 @@ def require_export_permission(user: SessionUser, target: str) -> None:
     """Authorize exports and transfers without exposing other workspaces."""
     if user.role == 'super-admin':
         return
-    if target in {'auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings', 'query-builder-queries'}:
+    if target in {'auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings', 'main-cities', 'query-builder-queries'}:
         if active_workspace and repository.user_has_workspace_access(user.username, active_workspace.id):
             return
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Open a workspace you can access first.')
@@ -8214,6 +8329,16 @@ def render_admin_template(
     ) if active_workspace else []
     add_workspace_vendor_capabilities(admin_datasets)
     ready_admin_datasets = [dataset for dataset in admin_datasets if dataset['is_ready']]
+    main_city_dataset_ids = [
+        int(dataset['id']) for dataset in ready_admin_datasets
+        if str(dataset.get('dataset_kind') or '').casefold() in CDR_DATASET_KINDS
+    ]
+    if main_city_dataset_ids:
+        backfill_cdr_catalogues(main_city_dataset_ids, repository)
+        all_main_cities = repository.cdr_catalogue_values(main_city_dataset_ids)['cities']
+    else:
+        all_main_cities = []
+    selected_main_cities = repository.list_main_cities() if active_workspace else []
     dataset_names = {
         int(dataset['id']): str(dataset['file_name'])
         for dataset in admin_datasets
@@ -8275,9 +8400,10 @@ def render_admin_template(
         {'value': 'dashboards', 'label': 'Dashboards (from active workspace)', 'disabled': not active_workspace},
         {'value': 'slides-templates', 'label': 'Report Templates (from active workspace)', 'disabled': not active_workspace},
         {'value': 'operator-mappings', 'label': 'Operator/Vendor Mappings & Colors (from active workspace)', 'disabled': not active_workspace},
+        {'value': 'main-cities', 'label': 'Main Cities (from active workspace)', 'disabled': not active_workspace},
         {'value': 'auto-calculated-fields', 'label': 'Auto-calculated Fields (from active workspace)', 'disabled': not active_workspace},
         {'value': 'query-builder-queries', 'label': 'Query Builder Queries (from active workspace)', 'disabled': not active_workspace},
-        {'value': 'full-environment', 'label': 'Full Environment (Application Config + Dashboards + Report Templates + Operator/Vendor Mappings & Colors + Auto-calculated Fields + Query Builder Queries + Selected Workspaces)'},
+        {'value': 'full-environment', 'label': 'Full Environment (Application Config + Dashboards + Report Templates + Operator/Vendor Mappings & Colors + Main Cities + Auto-calculated Fields + Query Builder Queries + Selected Workspaces)'},
         *[
             {'value': f'workspace:{workspace.id}', 'label': f'Full Workspace: {workspace.name}'}
             for workspace in accessible_workspaces(user)
@@ -8290,14 +8416,14 @@ def render_admin_template(
         export_options = [
             option for option in export_options
             if option['value'] in {
-                'slides-templates', 'auto-calculated-fields', 'dashboards', 'operator-mappings',
+                'slides-templates', 'auto-calculated-fields', 'dashboards', 'operator-mappings', 'main-cities',
             } or option['value'].startswith('workspace:')
         ]
     export_option_groups = [
         ('Configuration Content', [option for option in export_options if option['value'] == 'config']),
         ('Workspace Content', [
             option for option in export_options
-            if option['value'] in {'dashboards', 'slides-templates', 'operator-mappings', 'auto-calculated-fields', 'query-builder-queries'}
+            if option['value'] in {'dashboards', 'slides-templates', 'operator-mappings', 'main-cities', 'auto-calculated-fields', 'query-builder-queries'}
         ]),
         ('Full Workspace', [option for option in export_options if option['value'].startswith('workspace:')]),
         ('Full Environment', [option for option in export_options if option['value'] == 'full-environment']),
@@ -8332,6 +8458,10 @@ def render_admin_template(
             'operator_mapping_groups': repository.list_operator_mapping_groups() if active_workspace else [],
             'operator_mapping_notice': request.query_params.get('operator_mapping_notice') or None,
             'operator_mapping_error': request.query_params.get('operator_mapping_error') or None,
+            'all_main_cities': all_main_cities,
+            'selected_main_cities': selected_main_cities,
+            'main_cities_notice': request.query_params.get('main_cities_notice') or None,
+            'main_cities_error': request.query_params.get('main_cities_error') or None,
             'vendor_mapping_groups': repository.list_vendor_mapping_groups() if active_workspace else [],
             'vendor_mapping_notice': request.query_params.get('vendor_mapping_notice') or None,
             'vendor_mapping_error': request.query_params.get('vendor_mapping_error') or None,
@@ -14791,6 +14921,28 @@ def workspace_configuration_panel(
     return render_admin_template(request, user, workspace_config_page=True)
 
 
+@app.post('/workspace-config/main-cities/save')
+def save_workspace_main_cities(
+    selected_cities: list[str] = Form(default=[]),
+    user: SessionUser = Depends(config_editor_user),
+) -> Response:
+    if not active_workspace:
+        return RedirectResponse(
+            f'/workspace-config?{urlencode({"main_cities_error": "Open a workspace before editing Main Cities."})}',
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    saved_cities = repository.set_main_cities(selected_cities)
+    repository.add_log(user.username, 'main_cities_save', json.dumps({
+        'city_count': len(saved_cities),
+        'cities': saved_cities,
+    }, ensure_ascii=False))
+    notice = f'Main Cities saved ({len(saved_cities)} selected).'
+    return RedirectResponse(
+        f'/workspace-config?{urlencode({"main_cities_notice": notice})}',
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
 @app.post('/admin/database/backups')
 def save_recurring_backup_settings(
     request: Request,
@@ -15050,7 +15202,8 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
     kind = str(payload.get('kind') or '')
     if kind not in {
         'config', 'workspace', 'full-environment', 'slides-templates',
-        'auto-calculated-fields', 'dashboards', 'operator-mappings', 'query-builder-queries', 'database-backup', 'bundle',
+        'auto-calculated-fields', 'dashboards', 'operator-mappings', 'main-cities',
+        'query-builder-queries', 'database-backup', 'bundle',
     }:
         raise HTTPException(status_code=400, detail='The offered export type is not supported.')
     if payload.get('archive_version') != ARCHIVE_VERSION:
@@ -15557,7 +15710,8 @@ def _retain_import_upload(upload_id: str, package_path: Path, user: SessionUser)
     kind = str(manifest.get('kind') or '')
     if kind not in {
         'config', 'workspace', 'full-environment', 'slides-templates',
-        'auto-calculated-fields', 'dashboards', 'operator-mappings', 'query-builder-queries', 'database-backup', 'bundle',
+        'auto-calculated-fields', 'dashboards', 'operator-mappings', 'main-cities',
+        'query-builder-queries', 'database-backup', 'bundle',
     }:
         raise ValueError('The export package type is not supported.')
     require_import_manifest_permission(user, manifest)

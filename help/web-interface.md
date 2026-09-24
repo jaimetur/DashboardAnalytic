@@ -25,7 +25,7 @@ Open **Builders** to choose **Chart Builder** or **Query Builder**. The Modules 
 
 Move the pointer near a viewport edge to reveal a collapsed Modules, Sections, Navigation or Releases tab. An invisible hover area beside each tab responds even while background tasks are running; task cards leave that edge clear. The tabs recede when the pointer leaves, and keyboard focus also reveals them. Modules uses nearly the full viewport height when needed and scrolls if the window is too short for every entry. In Help, Sections lists the current document's headings.
 
-Open **Config** and choose **Application Config** for application-wide runtime settings or **Workspace Config** for Report Templates Management, Operator Mappings and Vendor Mappings in the active workspace. Workspace Config's Page Sections navigator jumps between the three panels.
+Open **Config** and choose **Application Config** for application-wide runtime settings or **Workspace Config** for Report Templates Management, Operator Mappings, Vendor Mappings and Main Cities in the active workspace. Workspace Config's Page Sections navigator jumps between the panels.
 
 Help Navigation lists unnumbered documents under General, Main Modules, Administrative Modules and Reference. Docker Deployment follows Deployment Configuration in General. App Logs is the first administrative document and Administrator Config is the last. Readme and Changelog open Reference before Project Structure and Roadmap. The Help Home link stays above the groups. Documents outside a user's access are omitted.
 

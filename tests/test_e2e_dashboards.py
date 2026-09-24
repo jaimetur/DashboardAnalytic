@@ -9,6 +9,7 @@ from threading import Event, Thread
 import pandas as pd
 from PIL import Image
 from pptx import Presentation
+from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 import src.DashboardAnalytic as core
@@ -352,6 +353,47 @@ def test_dashboard_persists_dataset_universe_separately_from_filters(client):
     assert prepared.json()['rows']['data'] == 3
 
 
+def test_dashboard_all_values_expands_when_saved_universe_gains_a_new_value(client):
+    payload = setup_dashboard(client)
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline and core.repository.get_dataset(1)['status'] != 'ready':
+        time.sleep(0.05)
+    assert core.repository.get_dataset(1)['status'] == 'ready'
+    payload['custom_fields'] = ['Test_Name']
+    payload['filters'] = {}
+    dashboard_id = 'expand-all-values'
+    saved = client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload)
+    assert saved.status_code == 200, saved.text
+    assert 'Test_Name' not in saved.json()['definition']['filters']
+
+    initial = client.post('/api/e2e-dashboards/prepare', json=payload)
+    assert initial.status_code == 200, initial.text
+    assert initial.json()['options']['Test_Name'] == ['HTTP DL']
+    assert initial.json()['rows']['data'] == 3
+
+    uploaded = client.post('/datasets-analysis/upload', data={'dataset_kinds': 'data'}, files={
+        'dataset_files': ('new-test.csv', BytesIO(
+            b'Operator,City,Mean_Data_Rate,Test_Name,Test_Start_Time\n'
+            b'C,Bristol,40,HTTP UL,2026-09-04\n'
+        ), 'text/csv'),
+    })
+    assert uploaded.status_code == 200, uploaded.text
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline and core.repository.get_dataset(2)['status'] != 'ready':
+        time.sleep(0.05)
+    assert core.repository.get_dataset(2)['status'] == 'ready'
+
+    expanded = client.get('/api/e2e-dashboards').json()[dashboard_id]
+    expanded['datasets']['data'] = [1, 2]
+    updated = client.put(f'/api/e2e-dashboards/{dashboard_id}', json=expanded)
+    assert updated.status_code == 200, updated.text
+    assert 'Test_Name' not in updated.json()['definition']['filters']
+    prepared = client.post('/api/e2e-dashboards/prepare', json=updated.json()['definition'])
+    assert prepared.status_code == 200, prepared.text
+    assert prepared.json()['options']['Test_Name'] == ['HTTP DL', 'HTTP UL']
+    assert prepared.json()['rows']['data'] == 4
+
+
 def test_dashboard_background_warmup_prepares_the_four_automatic_date_universes(client):
     payload = setup_dashboard(client)
     for index in (2, 3):
@@ -429,6 +471,16 @@ def test_dashboard_template_change_preserves_saved_universe_and_filters(client):
 
 def test_dashboard_library_ppt_scope_builds_its_automatic_dataset_universe(client):
     payload = setup_dashboard(client)
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline and core.repository.get_dataset(1)['status'] != 'ready':
+        time.sleep(0.05)
+    assert core.repository.get_dataset(1)['status'] == 'ready'
+    core.repository.replace_reporting_rows(1, 'data', pd.DataFrame({
+        'Operator': ['A', 'B', 'A'], 'City': ['London', 'Leeds', 'London'],
+        'Mean_Data_Rate': [10, 20, 30], 'Test_Name': ['HTTP DL'] * 3,
+        'Test_Start_Time': ['2026-09-01', '2026-09-02', '2026-09-03'],
+        'Event_Start_Time': ['2026-09-01', '2026-09-02', '2026-09-03'],
+    }))
     dashboard_id = 'library-ppt-scope'
     assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
 
@@ -444,11 +496,56 @@ def test_dashboard_library_ppt_scope_builds_its_automatic_dataset_universe(clien
 
 def test_dashboard_library_geography_options_are_loaded_in_one_request(client):
     payload = setup_dashboard(client)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and core.repository.get_dataset(1)['status'] != 'ready':
+        time.sleep(0.05)
+    assert core.repository.get_dataset(1)['status'] == 'ready'
 
     response = client.post('/api/e2e-dashboards/geography-options', json=payload)
 
     assert response.status_code == 200, response.text
-    assert response.json() == {'regions': [], 'cities': ['Leeds', 'London']}
+    assert response.json() == {
+        'operators': ['A', 'B'], 'vendors': [], 'regions': [], 'cities': ['Leeds', 'London'],
+    }
+
+
+def test_dashboard_filter_catalogue_includes_values_beyond_legacy_profile_limit(client, monkeypatch):
+    setup_dashboard(client)
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline and core.repository.get_dataset(1)['status'] != 'ready':
+        time.sleep(0.05)
+    assert core.repository.get_dataset(1)['status'] == 'ready'
+    cities = [f'City {index:03d}' for index in range(225)]
+    rows = '\n'.join(
+        f'A,{city},{index + 1},HTTP DL,2026-09-01'
+        for index, city in enumerate(cities)
+    )
+    csv_content = ('Operator,City,Mean_Data_Rate,Test_Name,Test_Start_Time\n' + rows + '\n').encode()
+    uploaded = client.post('/datasets-analysis/upload', data={'dataset_kinds': 'data'}, files={
+        'dataset_files': ('many-cities.csv', BytesIO(csv_content), 'text/csv'),
+    })
+    assert uploaded.status_code == 200
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline and core.repository.get_dataset(2)['status'] != 'ready':
+        time.sleep(0.05)
+    assert core.repository.get_dataset(2)['status'] == 'ready'
+    processed_options = json.loads(core.repository.get_dataset(2)['filter_options_json'])
+    assert len(processed_options['city']) == 225
+    assert core.repository.list_distinct_dataset_row_values(2, 'City', limit=None) == cities
+    core.repository.replace_reporting_rows(2, 'data', pd.read_csv(BytesIO(csv_content)))
+    with core.repository.connection() as connection:
+        connection.execute(
+            'UPDATE dataset_profiles SET filter_options_json = ? WHERE dataset_id = 2',
+            (json.dumps({'city': cities[:50]}),),
+        )
+    monkeypatch.setattr('src.modules.e2e_dashboards.DASHBOARD_PROFILE_SELECTION_THRESHOLD', 1)
+    payload = definition().model_dump(mode='json')
+    payload['datasets'] = {'data': [2]}
+
+    prepared = client.post('/api/e2e-dashboards/prepare', json=payload)
+
+    assert prepared.status_code == 200, prepared.text
+    assert prepared.json()['options']['City'] == cities
 
 
 def test_dashboard_ppt_filename_summarizes_complete_geography_selections(client, monkeypatch):
@@ -462,12 +559,15 @@ def test_dashboard_ppt_filename_summarizes_complete_geography_selections(client,
     dashboard_id = 'geography-ppt-name'
     assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
     core.repository.replace_cdr_catalogue(
-        1, vendors=[], regions=['North', 'South'], cities=['Leeds', 'London'],
+        1, vendors=['Vendor A', 'Vendor B'], regions=['North', 'South'], cities=['Leeds', 'London'],
     )
     monkeypatch.setattr(core, 'submit_background_task', lambda *args, **kwargs: None)
 
-    def queued_name(regions, cities):
-        export_definition = {**payload, 'filters': {'Region': regions, 'City': cities}}
+    def queued_name(regions, cities, operators=None):
+        filters = {'Region': regions, 'City': cities}
+        if operators is not None:
+            filters['Operator'] = operators
+        export_definition = {**payload, 'filters': filters}
         response = client.post(f'/api/e2e-dashboards/{dashboard_id}/export-ppt', json={
             'definition': export_definition,
             'selected_regions': regions,
@@ -482,13 +582,102 @@ def test_dashboard_ppt_filename_summarizes_complete_geography_selections(client,
         return row['output_file']
 
     assert re.fullmatch(
-        r'\d{8}_\d{6} - All Regions - All Cities - Operator Comparison - Comparison\.pptx',
+        r'\d{8}_\d{6} - Comparison - Operator Comparison - All Operators - All Vendors - All Regions - All Cities\.pptx',
         queued_name(['South', 'North'], ['London', 'Leeds']),
     )
     assert re.fullmatch(
-        r'\d{8}_\d{6} - North - London - Operator Comparison - Comparison\.pptx',
+        r'\d{8}_\d{6} - Comparison - Operator Comparison - All Operators - All Vendors - North - London\.pptx',
         queued_name(['North'], ['London']),
     )
+    assert re.fullmatch(
+        r'\d{8}_\d{6} - Comparison - Operator Comparison - A - All Vendors - North - London\.pptx',
+        queued_name(['North'], ['London'], ['A']),
+    )
+
+
+def test_dashboard_ppt_dialog_selections_override_saved_dashboard_filters(client, monkeypatch):
+    payload = setup_dashboard(client)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and core.repository.get_dataset(1)['status'] != 'ready':
+        time.sleep(0.05)
+    assert core.repository.get_dataset(1)['status'] == 'ready'
+    dashboard_id = 'dialog-ppt-filters'
+    payload['filters'] = {
+        'Operator': ['A'], 'Vendor': ['Vendor A'],
+        'Region': ['North'], 'City': ['London'],
+    }
+    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+    core.repository.replace_cdr_catalogue(
+        1, vendors=['Vendor A', 'Vendor B'], regions=['North', 'South'], cities=['Leeds', 'London'],
+    )
+    submitted = []
+    monkeypatch.setattr(core, 'submit_background_task', lambda *args, **kwargs: submitted.append(args))
+
+    queued = client.post(f'/api/e2e-dashboards/{dashboard_id}/export-ppt', json={
+        'definition': payload,
+        'selected_operators': ['B'],
+        'selected_vendors': ['Vendor B'],
+        'selected_regions': ['South'],
+        'selected_cities': ['Leeds'],
+    })
+
+    assert queued.status_code == 202, queued.text
+    job = next(item for item in client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs'] if item['id'] == queued.json()['job_id'])
+    assert job['filters'][-4:] == [
+        'Operator: B', 'Vendor: Vendor B', 'Region: South', 'City: Leeds',
+    ]
+    assert ' - B - Vendor B - South - Leeds.pptx' in submitted[0][7].name
+    assert submitted[0][5].filters == {
+        'Operator': ['B'], 'Vendor': ['Vendor B'], 'Region': ['South'], 'City': ['Leeds'],
+    }
+    assert client.get('/api/e2e-dashboards').json()[dashboard_id]['filters'] == payload['filters']
+
+
+def test_dashboard_ppt_cover_uses_scope_and_catalogue_geography(client):
+    payload = setup_dashboard(client)
+    core.repository.add_report_template('nsa', 'Structural dashboard', (
+        'Slide,Slide tittle,Slide Subtittle,Layout,Chart Tittle,CDR source,KPI,Chart type,Filters,Rows Aggregation,Column Aggregation,Legend,Legend Position\n'
+        '1,Quarterly review,Template subtitle,Title Page,,,,Title Slide,,,,,Top\n'
+    ).encode(), is_default=False)
+    payload['template'] = 'Structural dashboard'
+    dashboard_id = 'structural-ppt-cover'
+    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline and core.repository.get_dataset(1)['status'] != 'ready':
+        time.sleep(0.05)
+    assert core.repository.get_dataset(1)['status'] == 'ready'
+    core.repository.replace_cdr_catalogue(
+        1, vendors=['Vendor A', 'Vendor B'], regions=['North', 'South'], cities=['Leeds', 'London'],
+    )
+
+    queued = client.post(f'/api/e2e-dashboards/{dashboard_id}/export-ppt', json={'definition': payload})
+    assert queued.status_code == 202, queued.text
+    job_id = queued.json()['job_id']
+    while time.monotonic() < deadline:
+        job = next(item for item in client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
+        if job['status'] in {'ready', 'failed'}:
+            break
+        time.sleep(0.05)
+    assert job['status'] == 'ready', job
+    assert 'Operator: All Operators' in job['filters']
+    assert 'Vendor: All Vendors' in job['filters']
+    assert 'Region: All Regions' in job['filters']
+    assert 'City: All Cities' in job['filters']
+    with core.repository.connection() as connection:
+        row = connection.execute('SELECT output_path FROM dashboard_ppt_jobs WHERE id = ?', (job_id,)).fetchone()
+    slide = Presentation(row['output_path']).slides[0]
+    placeholders = {shape.placeholder_format.type: shape for shape in slide.placeholders}
+    title = placeholders.get(1) or placeholders[3]
+    assert title.text == 'Quarterly review'
+    assert placeholders[4].text == 'Operator Comparison'
+    details = {shape.name: shape for shape in slide.shapes if shape.name.startswith('dashboard-ppt-')}
+    assert details['dashboard-ppt-region'].text == 'All Regions'
+    assert details['dashboard-ppt-city'].text == 'All Cities'
+    assert details['dashboard-ppt-region'].left == title.left
+    assert details['dashboard-ppt-city'].left == title.left
+    assert details['dashboard-ppt-region'].text_frame.paragraphs[0].font.color.rgb not in {
+        RGBColor(255, 255, 255), RGBColor(255, 255, 0),
+    }
 
 
 def test_expanded_dashboard_chart_apply_builds_a_new_temporary_model(client):
@@ -570,6 +759,16 @@ def test_expanded_dashboard_chart_apply_can_render_outside_the_proxy_request(cli
 
 def test_update_template_synchronizes_chart_definition_across_live_snapshots(client):
     payload = setup_dashboard(client)
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline and core.repository.get_dataset(1)['status'] != 'ready':
+        time.sleep(0.05)
+    assert core.repository.get_dataset(1)['status'] == 'ready'
+    core.repository.replace_reporting_rows(1, 'data', pd.DataFrame({
+        'Operator': ['A', 'B', 'A'], 'City': ['London', 'Leeds', 'London'],
+        'Mean_Data_Rate': [10, 20, 30], 'Test_Name': ['HTTP DL'] * 3,
+        'Test_Start_Time': ['2026-09-01', '2026-09-02', '2026-09-03'],
+        'Event_Start_Time': ['2026-09-01', '2026-09-02', '2026-09-03'],
+    }))
     first = client.post('/api/e2e-dashboards/prepare', json=payload)
     second = client.post('/api/e2e-dashboards/prepare', json=payload)
     assert first.status_code == second.status_code == 200
@@ -663,6 +862,14 @@ def test_dashboard_editing_controls_match_workspace_editor_roles(client):
         assert page.status_code == 200
         for control in controls:
             assert (control in page.text) == (role != 'user-viewer')
+        assert ('id="ds-ppt-jobs-delete-all"' in page.text) == (role != 'user-viewer')
+        assert ('"can_manage": true' in page.text) == (role != 'user-viewer')
+        expected_status = 403 if role == 'user-viewer' else 404
+        assert client.post('/api/e2e-dashboards/ppt-jobs/999999/delete').status_code == expected_status
+        expected_chart_status = 403 if role == 'user-viewer' else 410
+        assert client.post('/api/e2e-dashboards/chart/missing/0/update-template', json={}).status_code == expected_chart_status
+        if role != 'user-viewer':
+            assert client.post('/api/e2e-dashboards/ppt-jobs/delete-all').status_code == 200
 
 
 def test_dashboards_lifecycle_and_layout(client):
@@ -1434,7 +1641,7 @@ def test_dashboards_lifecycle_and_layout(client):
     result = client.post('/api/e2e-dashboards/prepare', json=payload)
     assert result.status_code == 200, result.text
     preview = result.json()
-    assert preview['filter_fields'] == ['Market', 'Operator', 'Vendor', 'Region', 'City', 'Campaign', 'RAT', 'Session Type', 'Call Status']
+    assert preview['filter_fields'] == ['Market', 'Region', 'City', 'Campaign', 'Operator', 'Vendor', 'RAT', 'Session Type', 'Call Status']
     assert 'Technology' not in preview['options']
     assert preview['options']['Operator'] == ['A', 'B']
     assert preview['options']['City'] == ['Leeds', 'London']
@@ -1509,12 +1716,26 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypa
     assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
 
     deadline = time.monotonic() + 15
+    while time.monotonic() < deadline and core.repository.get_dataset(1)['status'] != 'ready':
+        time.sleep(0.05)
+    assert core.repository.get_dataset(1)['status'] == 'ready'
     initial_status = client.get('/api/e2e-dashboards/statuses').json()[dashboard_id]
     assert initial_status['state'] in {'loading-data', 'ready'}
     assert initial_status['label'] == 'Ready' or initial_status['label'].startswith('Preparing ')
 
     with core.repository.connection() as connection:
         connection.execute('UPDATE dataset_profiles SET vendor_mapping_applied = 1')
+    core.repository.replace_cdr_catalogue(
+        1, vendors=['Vendor A', 'Vendor B'], regions=[], cities=['Leeds', 'London'],
+    )
+    core.repository.replace_reporting_rows(1, 'data', pd.DataFrame({
+        'Operator': ['A', 'B', 'A'],
+        'Vendor': ['Vendor A', 'Vendor B', 'Vendor A'],
+        'City': ['London', 'Leeds', 'London'],
+        'Mean_Data_Rate': [10, 20, 30],
+        'Test_Name': ['HTTP DL'] * 3,
+        'Test_Start_Time': ['2026-09-01', '2026-09-02', '2026-09-03'],
+    }))
     export_payload = json.loads(json.dumps(payload))
     export_payload['scope'] = 'multivendor'
     prepared = client.post(
@@ -1549,7 +1770,8 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypa
     assert job['template'] == 'Dashboard test'
     assert re.fullmatch(r'\d{8}_\d{6}', job['timestamp'])
     assert job['filters'] == [
-        'CDR Data: sample.csv', 'Date: 2026-09-01 to 2026-09-03', 'City: London',
+        'CDR Data: sample.csv', 'Date: Oldest to Newest',
+        'Operator: All Operators', 'Vendor: All Vendors', 'City: London',
     ]
     assert job['duration_seconds'] is not None
     background_groups = client.get('/api/background-tasks').json()['groups']
@@ -1567,7 +1789,10 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypa
     output_path = Path(row['output_path'])
     charts_dir = output_path.parent / 'dashboard-charts'
     assert output_path.is_file()
-    assert re.fullmatch(r'\d{8}_\d{6} - Vendor Comparison - Comparison\.pptx', output_path.name)
+    assert re.fullmatch(
+        r'\d{8}_\d{6} - Comparison - Multivendor Comparison - All Operators - All Vendors - London\.pptx',
+        output_path.name,
+    )
     assert output_path.parent.name == output_path.stem
     assert output_path.parent.parent == Path(core.repository.db_path).parent / 'output' / 'dashboards'
     assert len(list(charts_dir.glob('*.png'))) == 3
@@ -1662,10 +1887,22 @@ def test_relaunching_dashboard_ppt_uses_the_modified_report_template(client):
     dashboard_id = 'updated-template-ppt'
     assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
 
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline and core.repository.get_dataset(1)['status'] != 'ready':
+        time.sleep(0.05)
+    assert core.repository.get_dataset(1)['status'] == 'ready'
     with core.repository.connection() as connection:
         connection.execute('UPDATE dataset_profiles SET vendor_mapping_applied = 1')
+    core.repository.replace_cdr_catalogue(
+        1, vendors=['Vendor A', 'Vendor B'], regions=[], cities=['Leeds', 'London'],
+    )
+    core.repository.replace_reporting_rows(1, 'data', pd.DataFrame({
+        'Operator': ['A', 'B', 'A'], 'Vendor': ['Vendor A', 'Vendor B', 'Vendor A'],
+        'City': ['London', 'Leeds', 'London'], 'Mean_Data_Rate': [10, 20, 30],
+        'Test_Name': ['HTTP DL'] * 3,
+        'Test_Start_Time': ['2026-09-01', '2026-09-02', '2026-09-03'],
+    }))
     export_payload = {**payload, 'scope': 'multivendor'}
-    deadline = time.monotonic() + 15
     prepared = client.post(
         f'/api/e2e-dashboards/prepare?dashboard_id={dashboard_id}', json=export_payload,
     )

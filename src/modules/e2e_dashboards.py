@@ -29,6 +29,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 from pptx import Presentation
 from pptx.dml.color import RGBColor
+from pptx.enum.text import MSO_AUTO_SIZE
 from pptx.util import Inches, Pt
 from starlette.background import BackgroundTask
 
@@ -72,8 +73,10 @@ class DashboardDefinition(BaseModel):
 class DashboardPptExportRequest(BaseModel):
     definition: DashboardDefinition | None = None
     preparation_token: str | None = None
-    selected_regions: list[str] = Field(default_factory=list)
-    selected_cities: list[str] = Field(default_factory=list)
+    selected_operators: list[str] | None = None
+    selected_vendors: list[str] | None = None
+    selected_regions: list[str] | None = None
+    selected_cities: list[str] | None = None
 
 
 class DashboardFilterOptionsRequest(BaseModel):
@@ -127,10 +130,10 @@ FILTER_COLUMNS = {
     'Call Status': ('Call_Status', 'call_status', 'status'),
 }
 ADAPTATIVE_FILTER_FIELDS = (
-    'Market', 'Operator', 'Vendor', 'Region', 'City', 'Campaign', 'RAT', 'Session Type', 'Call Status',
+    'Market', 'Region', 'City', 'Campaign', 'Operator', 'Vendor', 'RAT', 'Session Type', 'Call Status',
 )
 DASHBOARD_RENDER_CACHE_VERSION = 17
-DASHBOARD_SELECTION_CACHE_VERSION = 11
+DASHBOARD_SELECTION_CACHE_VERSION = 12
 DASHBOARD_SELECTION_CACHE_LIMIT = 128
 DASHBOARD_PROFILE_SELECTION_THRESHOLD = 100_000
 DASHBOARD_CHART_MODEL_CACHE_VERSION = 14
@@ -262,9 +265,9 @@ def install_dashboard_routes(core):
             raise HTTPException(403, 'You do not have access to the active workspace.')
         return user
 
-    def dashboard_admin_user(user=Depends(dashboard_user)):
-        if user.role not in {'admin', 'super-admin'}:
-            raise HTTPException(403, 'Admin access required.')
+    def dashboard_editor_user(user=Depends(dashboard_user)):
+        if user.role not in {'user-editor', 'admin', 'super-admin'}:
+            raise HTTPException(403, 'Editor access required.')
         return user
 
     def bound_repository():
@@ -284,6 +287,7 @@ def install_dashboard_routes(core):
                 nr_mode TEXT NOT NULL DEFAULT 'nsa',
                 scope TEXT NOT NULL DEFAULT 'single',
                 regions_json TEXT NOT NULL DEFAULT '[]',
+                selections_json TEXT NOT NULL DEFAULT '{{}}',
                 filters_json TEXT NOT NULL DEFAULT '[]',
                 output_file TEXT NOT NULL,
                 output_path TEXT NOT NULL,
@@ -316,6 +320,10 @@ def install_dashboard_routes(core):
                 connection.execute(
                     f"ALTER TABLE {DASHBOARD_PPT_JOBS_TABLE} ADD COLUMN regions_json TEXT NOT NULL DEFAULT '[]'"
                 )
+            if 'selections_json' not in columns:
+                connection.execute(
+                    f"ALTER TABLE {DASHBOARD_PPT_JOBS_TABLE} ADD COLUMN selections_json TEXT NOT NULL DEFAULT '{{}}'"
+                )
             if 'started_at' not in columns:
                 connection.execute(
                     f"ALTER TABLE {DASHBOARD_PPT_JOBS_TABLE} ADD COLUMN started_at TEXT"
@@ -347,7 +355,7 @@ def install_dashboard_routes(core):
                 (*changes.values(), job_id),
             )
 
-    def dashboard_filter_lines(definition: dict, task_repository) -> list[str]:
+    def dashboard_filter_lines(definition: dict, task_repository, selection_labels: dict[str, str] | None = None) -> list[str]:
         lines = []
         for kind in KINDS:
             datasets = core._optional_reporting_datasets(definition.get('datasets', {}).get(kind, []), kind, task_repository)
@@ -364,8 +372,14 @@ def install_dashboard_routes(core):
             lines.append(f'Date to: {date_to}')
         filters = definition.get('filters')
         if not isinstance(filters, dict):
-            return lines
+            filters = {}
+        if selection_labels is not None:
+            for field in ('Operator', 'Vendor', 'Region', 'City'):
+                if selection_labels.get(field):
+                    lines.append(f'{field}: {selection_labels[field]}')
         for field, values in filters.items():
+            if selection_labels is not None and identity(field) in {'operator', 'vendor', 'region', 'city'}:
+                continue
             if isinstance(values, (list, tuple, set)):
                 selected = [str(value).strip() for value in values if str(value).strip()]
             elif str(values).strip():
@@ -462,35 +476,55 @@ def install_dashboard_routes(core):
 
     def dashboard_ppt_scope_label(scope: str) -> str:
         """Return the human-readable scope used on Dashboard PPT covers."""
-        return 'Vendor Comparison' if str(scope).casefold() == 'multivendor' else 'Operator Comparison'
+        return 'Multivendor Comparison' if str(scope).casefold() == 'multivendor' else 'Operator Comparison'
 
-    def add_dashboard_ppt_cover_scope(slide, scope: str, slide_height: int) -> None:
-        """Add the export scope below the subtitle at the lower-left of a title slide."""
-        scope_box = slide.shapes.add_textbox(
-            Inches(0.7), slide_height - Inches(0.62),
-            Inches(5.5), Inches(0.3),
-        )
-        scope_box.name = 'dashboard-ppt-scope'
-        paragraph = scope_box.text_frame.paragraphs[0]
-        paragraph.text = dashboard_ppt_scope_label(scope)
-        paragraph.font.size = Pt(14)
-        paragraph.font.bold = True
-        paragraph.font.color.rgb = RGBColor(255, 255, 255)
+    def dashboard_ppt_selection_values(
+        filters: dict, field: str, requested: list[str], available: list[str],
+    ) -> list[str]:
+        configured = next((values for key, values in filters.items() if identity(key) == identity(field)), None)
+        values = configured if configured is not None else requested or available
+        if isinstance(values, (list, tuple, set)):
+            return list(dict.fromkeys(str(value).strip() for value in values if str(value).strip()))
+        return [str(values).strip()] if str(values).strip() else []
 
-    def add_dashboard_ppt_cover_region(slide, regions: list[str], slide_height: int) -> None:
-        """Add the selected Regions above the scope on a Dashboard title slide."""
-        if not regions:
-            return
-        region_box = slide.shapes.add_textbox(
-            Inches(0.7), slide_height - Inches(0.94),
-            Inches(5.5), Inches(0.3),
-        )
-        region_box.name = 'dashboard-ppt-region'
-        paragraph = region_box.text_frame.paragraphs[0]
-        paragraph.text = ', '.join(regions)
-        paragraph.font.size = Pt(14)
-        paragraph.font.bold = True
-        paragraph.font.color.rgb = RGBColor(255, 214, 0)
+    def dashboard_ppt_selection_label(field: str, values: list[str], available: list[str]) -> str:
+        if available and set(values) == set(available):
+            return {'Operator': 'All Operators', 'Vendor': 'All Vendors', 'Region': 'All Regions', 'City': 'All Cities'}[field]
+        return ', '.join(values)
+
+    def dashboard_ppt_cover_label(field: str, label: str, count: int) -> str:
+        if not label or label.startswith('All '):
+            return label
+        singular, plural = {'Region': ('Region', 'Regions'), 'City': ('City', 'Cities')}[field]
+        return f'{singular if count == 1 else plural}: {label}'
+
+    def add_dashboard_ppt_cover_geography(slide, regions: str, cities: str, slide_height: int) -> None:
+        """Place selected geography below the title subtitle using the title alignment."""
+        title = next((shape for shape in slide.placeholders if shape.placeholder_format.type in {1, 3}), None)
+        left = title.left if title is not None else Inches(0.52)
+        width = title.width if title is not None else Inches(11)
+        margin_left = title.text_frame.margin_left if title is not None else 0
+        details = [
+            (name, value, color)
+            for name, value, color in (
+                ('region', regions, RGBColor(82, 221, 240)),
+                ('city', cities, RGBColor(255, 166, 203)),
+            )
+            if value
+        ]
+        for index, (name, value, color) in enumerate(details):
+            box = slide.shapes.add_textbox(left, slide_height - Inches(1.15) + Inches(0.4 * index), width, Inches(0.34))
+            box.name = f'dashboard-ppt-{name}'
+            box.text_frame.margin_left = margin_left
+            box.text_frame.margin_top = 0
+            box.text_frame.margin_bottom = 0
+            box.text_frame.word_wrap = True
+            box.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+            paragraph = box.text_frame.paragraphs[0]
+            paragraph.text = value
+            paragraph.font.size = Pt(16)
+            paragraph.font.bold = True
+            paragraph.font.color.rgb = color
 
     def add_dashboard_chart_picture(slide, png: bytes, placement) -> None:
         """Fill a same-ratio chart placeholder without PowerPoint cropping or distortion."""
@@ -499,7 +533,7 @@ def install_dashboard_routes(core):
 
     def render_dashboard_ppt_job(
         job_id, run_token, task_repository, snapshot, definition, user,
-        destination, dashboard_id, preview_fingerprint, selected_regions,
+        destination, dashboard_id, preview_fingerprint, cover_regions, cover_cities,
     ):
         run_key = (str(Path(task_repository.db_path).resolve()), job_id)
 
@@ -652,12 +686,11 @@ def install_dashboard_routes(core):
                     if layout is None:
                         raise ValueError(f"Slide {slide_number}: layout '{header.layout}' is unavailable.")
                     slide = presentation.slides.add_slide(layout)
-                    _set_structural_slide_text(slide, header.slide_title, header.slide_subtitle)
-                    if header.structural_type == 'title slide':
-                        add_dashboard_ppt_cover_region(
-                            slide, selected_regions, presentation.slide_height,
-                        )
-                        add_dashboard_ppt_cover_scope(slide, snapshot.definition.scope, presentation.slide_height)
+                    is_cover = header.structural_type == 'title slide' and slide_number == min(grouped)
+                    subtitle = dashboard_ppt_scope_label(snapshot.definition.scope) if is_cover else header.slide_subtitle
+                    _set_structural_slide_text(slide, header.slide_title, subtitle)
+                    if is_cover:
+                        add_dashboard_ppt_cover_geography(slide, cover_regions, cover_cities, presentation.slide_height)
                     _set_commentary(slide, comments)
                     continue
                 chart_entries = [
@@ -992,6 +1025,7 @@ def install_dashboard_routes(core):
             },
             'dashboard_ignore_event_time_filtering': ignore_event_time_filtering(),
             'dashboard_multivendor_available': len(catalogue['vendors']) >= 2,
+            'dashboard_main_cities': core.repository.list_main_cities(),
         })
 
     @app.get('/api/e2e-dashboards')
@@ -1047,7 +1081,8 @@ def install_dashboard_routes(core):
 
     def queue_dashboard_ppt_export(
         dashboard_id, user, *, reuse_job_id=None, export_definition: DashboardDefinition | None = None,
-        preparation_token: str | None = None, selected_regions: list[str] | None = None,
+        preparation_token: str | None = None, selected_operators: list[str] | None = None,
+        selected_vendors: list[str] | None = None, selected_regions: list[str] | None = None,
         selected_cities: list[str] | None = None,
     ):
         task_repository = bound_repository()
@@ -1067,18 +1102,29 @@ def install_dashboard_routes(core):
         if not any((raw_definition.get('datasets') or {}).values()):
             raw_definition.pop('datasets', None)
             raw_definition = runtime_dashboard_definition(raw_definition, task_repository)
+        explicit_selections = {
+            field: list(dict.fromkeys(str(value).strip() for value in selected if str(value).strip()))
+            for field, selected in (
+                ('Operator', selected_operators), ('Vendor', selected_vendors),
+                ('Region', selected_regions), ('City', selected_cities),
+            ) if selected is not None
+        }
+        if explicit_selections:
+            raw_definition = dict(raw_definition)
+            raw_filters = dict(raw_definition.get('filters') or {})
+            for field, selected in explicit_selections.items():
+                for existing in list(raw_filters):
+                    if identity(existing) == identity(field):
+                        del raw_filters[existing]
+                if selected:
+                    raw_filters[field] = selected
+            raw_definition['filters'] = raw_filters
         snapshot_definition = DashboardDefinition.model_validate(raw_definition)
-        selected_regions = list(dict.fromkeys(
-            str(region).strip() for region in selected_regions or [] if str(region).strip()
-        ))
-        selected_cities = list(dict.fromkeys(
-            str(city).strip() for city in selected_cities or [] if str(city).strip()
-        ))
         # Inserting the export job must remain quick.  A valid active snapshot
         # is reused when supplied, but cache discovery and preparation for a
         # closed Dashboard belong to the queued worker, never this request.
         snapshot = None
-        if preparation_token:
+        if preparation_token and not explicit_selections:
             with lock:
                 candidate = snapshots.get(preparation_token)
             if (
@@ -1094,20 +1140,35 @@ def install_dashboard_routes(core):
                     snapshot = None
         dashboard_name = str(raw_definition.get('name') or dashboard_id)
         preview_fingerprint = dashboard_preview_fingerprint(raw_definition, task_repository)
-        filters_json = json.dumps(dashboard_filter_lines(raw_definition, task_repository), ensure_ascii=False)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         safe_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', dashboard_name).strip() or 'Dashboard'
         safe_scope = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', dashboard_ppt_scope_label(raw_definition.get('scope') or 'single'))
-        catalogue = {'regions': [], 'cities': []}
-        if selected_regions or selected_cities:
-            selected_ids = [dataset_id for ids in (raw_definition.get('datasets') or {}).values() for dataset_id in ids]
-            if selected_ids:
-                catalogue = task_repository.cdr_catalogue_values(selected_ids)
-        region_label = 'All Regions' if selected_regions and set(selected_regions) == set(catalogue['regions']) else ', '.join(selected_regions)
-        city_label = 'All Cities' if selected_cities and set(selected_cities) == set(catalogue['cities']) else ', '.join(selected_cities)
+        selected_ids = [dataset_id for ids in (raw_definition.get('datasets') or {}).values() for dataset_id in ids]
+        catalogue = task_repository.cdr_catalogue_values(selected_ids) if selected_ids else {'vendors': [], 'regions': [], 'cities': []}
+        selected_by_kind = selected_sources(snapshot_definition, task_repository)
+        operators = profile_filter_options(snapshot_definition, [], selected_by_kind, ['Operator'], task_repository)['Operator']
+        available = {'Operator': operators, 'Vendor': catalogue['vendors'], 'Region': catalogue['regions'], 'City': catalogue['cities']}
+        requested = {field: explicit_selections.get(field, []) for field in ('Operator', 'Vendor', 'Region', 'City')}
+        filters = raw_definition.get('filters') or {}
+        selections = {
+            field: dashboard_ppt_selection_values(filters, field, requested[field], values)
+            for field, values in available.items()
+        }
+        selection_labels = {
+            field: dashboard_ppt_selection_label(field, selections[field], values)
+            for field, values in available.items()
+        }
+        filters_json = json.dumps(dashboard_filter_lines(raw_definition, task_repository, selection_labels), ensure_ascii=False)
+        selected_regions, selected_cities = selections['Region'], selections['City']
+        operator_label, vendor_label = selection_labels['Operator'], selection_labels['Vendor']
+        region_label, city_label = selection_labels['Region'], selection_labels['City']
+        cover_regions = dashboard_ppt_cover_label('Region', region_label, len(selected_regions))
+        cover_cities = dashboard_ppt_cover_label('City', city_label, len(selected_cities))
+        safe_operator = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', operator_label).strip()
+        safe_vendor = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', vendor_label).strip()
         safe_region = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', region_label).strip()
         safe_city = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', city_label).strip()
-        output_file = ' - '.join(part for part in (timestamp, safe_region, safe_city, safe_scope, safe_name) if part) + '.pptx'
+        output_file = ' - '.join(part for part in (timestamp, safe_name, safe_scope, safe_operator, safe_vendor, safe_region, safe_city) if part) + '.pptx'
         job_dir = Path(task_repository.db_path).parent / 'output' / 'dashboards' / Path(output_file).stem
         destination = job_dir / output_file
         ensure_dashboard_ppt_jobs(task_repository)
@@ -1115,13 +1176,14 @@ def install_dashboard_routes(core):
             with task_repository.connection() as connection:
                 cursor = connection.execute(
                     f'''INSERT INTO {DASHBOARD_PPT_JOBS_TABLE} (
-                        dashboard_id, dashboard_name, template_name, nr_mode, scope, regions_json, filters_json, output_file, output_path,
+                        dashboard_id, dashboard_name, template_name, nr_mode, scope, regions_json, selections_json, filters_json, output_file, output_path,
                         created_by, created_at, status, progress
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0)''',
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0)''',
                     (
                         dashboard_id, dashboard_name, str(raw_definition.get('template') or ''),
                         str(raw_definition.get('technology') or raw_definition.get('template_technology') or 'nsa'),
-                        str(raw_definition.get('scope') or 'single'), json.dumps(selected_regions, ensure_ascii=False), filters_json,
+                        str(raw_definition.get('scope') or 'single'), json.dumps(selected_regions, ensure_ascii=False),
+                        json.dumps(selections, ensure_ascii=False), filters_json,
                         output_file, str(destination), user.username,
                         datetime.now(timezone.utc).isoformat(),
                     ),
@@ -1134,7 +1196,8 @@ def install_dashboard_routes(core):
                 task_repository, job_id, dashboard_name=dashboard_name,
                 template_name=str(raw_definition.get('template') or ''),
                 nr_mode=str(raw_definition.get('technology') or raw_definition.get('template_technology') or 'nsa'),
-                scope=str(raw_definition.get('scope') or 'single'), regions_json=json.dumps(selected_regions, ensure_ascii=False), filters_json=filters_json,
+                scope=str(raw_definition.get('scope') or 'single'), regions_json=json.dumps(selected_regions, ensure_ascii=False),
+                selections_json=json.dumps(selections, ensure_ascii=False), filters_json=filters_json,
                 output_file=output_file, output_path=str(destination), created_at=datetime.now(timezone.utc).isoformat(),
                 status='queued', progress=0, slide_count=0, chart_count=0,
                 last_error='', started_at=None, finished_at=None,
@@ -1148,7 +1211,7 @@ def install_dashboard_routes(core):
         core.submit_background_task(
             render_dashboard_ppt_job,
             job_id, run_token, task_repository, snapshot, snapshot_definition, user, destination,
-            dashboard_id, preview_fingerprint, selected_regions,
+            dashboard_id, preview_fingerprint, cover_regions, cover_cities,
         )
         task_repository.add_log(user.username, 'export_dashboard_ppt', json.dumps({
             'dashboard_id': dashboard_id, 'job_id': job_id, 'output': str(destination),
@@ -1164,6 +1227,8 @@ def install_dashboard_routes(core):
             dashboard_id, user,
             export_definition=request.definition if request else None,
             preparation_token=request.preparation_token if request else None,
+            selected_operators=request.selected_operators if request else None,
+            selected_vendors=request.selected_vendors if request else None,
             selected_regions=request.selected_regions if request else None,
             selected_cities=request.selected_cities if request else None,
         )
@@ -1359,7 +1424,7 @@ def install_dashboard_routes(core):
                 column for column in source_columns if identity(column) not in hidden
             }, key=str.casefold)
         columns = columns_by_source.get(f'cdr-{entry.source_kind}', [])
-        template_available = user.role in {'admin', 'super-admin'} and any(
+        template_available = user.role in {'user-editor', 'admin', 'super-admin'} and any(
             str(item['name']) == definition.template
             for item in task_repository.list_report_templates(definition.template_technology)
         )
@@ -1515,6 +1580,12 @@ def install_dashboard_routes(core):
         if row is None or str(row['status']) not in {'ready', 'failed', 'stopped'}:
             raise HTTPException(409, 'This Dashboard export cannot be relaunched.')
         try:
+            saved_selections = json.loads(str(row['selections_json'] or '{}'))
+        except (TypeError, json.JSONDecodeError):
+            saved_selections = {}
+        if not isinstance(saved_selections, dict):
+            saved_selections = {}
+        try:
             manifest_path = Path(str(row['output_path'])).parent / 'dashboard-charts' / 'manifest.json'
             manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
             retry_definition = DashboardDefinition.model_validate(manifest['definition'])
@@ -1529,6 +1600,11 @@ def install_dashboard_routes(core):
             raw_definition['scope'] = (
                 'multivendor' if str(row['scope'] or '').casefold() == 'multivendor' else 'single'
             )
+            if saved_selections:
+                raw_definition['filters'] = {
+                    **(raw_definition.get('filters') or {}),
+                    **{field: values for field, values in saved_selections.items() if isinstance(values, list)},
+                }
             retry_definition = DashboardDefinition.model_validate(
                 runtime_dashboard_definition(raw_definition, task_repository)
             )
@@ -1539,12 +1615,15 @@ def install_dashboard_routes(core):
         queue_dashboard_ppt_export(
             str(row['dashboard_id']), user, reuse_job_id=job_id,
             export_definition=retry_definition,
-            selected_regions=selected_regions,
+            selected_operators=saved_selections.get('Operator') if isinstance(saved_selections.get('Operator'), list) else None,
+            selected_vendors=saved_selections.get('Vendor') if isinstance(saved_selections.get('Vendor'), list) else None,
+            selected_regions=saved_selections.get('Region') if isinstance(saved_selections.get('Region'), list) else selected_regions,
+            selected_cities=saved_selections.get('City') if isinstance(saved_selections.get('City'), list) else None,
         )
         return JSONResponse({'job_id': job_id, 'status': 'queued'}, status_code=202)
 
     @app.post('/api/e2e-dashboards/ppt-jobs/delete-all')
-    def delete_all_dashboard_ppts(user=Depends(dashboard_admin_user)):
+    def delete_all_dashboard_ppts(user=Depends(dashboard_editor_user)):
         task_repository = bound_repository()
         ensure_dashboard_ppt_jobs(task_repository)
         with task_repository.connection() as connection:
@@ -1562,7 +1641,7 @@ def install_dashboard_routes(core):
         return {'deleted': len(rows)}
 
     @app.post('/api/e2e-dashboards/ppt-jobs/{job_id}/delete')
-    def delete_dashboard_ppt(job_id: int, user=Depends(dashboard_admin_user)):
+    def delete_dashboard_ppt(job_id: int, user=Depends(dashboard_editor_user)):
         task_repository = bound_repository()
         row = dashboard_ppt_job(task_repository, job_id)
         if row is None:
@@ -2075,6 +2154,10 @@ def install_dashboard_routes(core):
                     if not isinstance(values, list):
                         incomplete_fields.add(field_name)
                         continue
+                    if len(values) >= 50:
+                        values = task_repository.list_distinct_dataset_row_values(
+                            int(dataset['id']), resolved, limit=None,
+                        )
                     options[field_name].update(str(value) for value in values if value is not None)
         dimensions_by_name = {identity(dimension.name): dimension for dimension in dimensions}
         for field_name in fields:
@@ -2242,7 +2325,9 @@ def install_dashboard_routes(core):
         selected_ids = [int(row['id']) for rows in selected_by_kind.values() for row in rows]
         core.backfill_cdr_catalogues(selected_ids, task_repository)
         options = task_repository.cdr_catalogue_values(selected_ids)
+        operators = profile_filter_options(definition, [], selected_by_kind, ['Operator'], task_repository)['Operator']
         return {
+            'operators': operators,
             'vendors': options['vendors'],
             'regions': options['regions'],
             'cities': options['cities'],
@@ -3454,7 +3539,7 @@ def install_dashboard_routes(core):
             columns_by_source[source] = sorted({
                 column for column in source_columns if identity(column) not in hidden
             }, key=str.casefold)
-        template_available = user.role in {'admin', 'super-admin'} and any(
+        template_available = user.role in {'user-editor', 'admin', 'super-admin'} and any(
             str(row['name']) == snapshot.definition.template
             for row in task_repository.list_report_templates(snapshot.definition.template_technology)
         )
@@ -3678,7 +3763,7 @@ def install_dashboard_routes(core):
         token: str,
         index: int,
         request: DashboardChartFilterPreviewRequest,
-        user=Depends(dashboard_admin_user),
+        user=Depends(dashboard_editor_user),
     ):
         """Persist the expanded Chart Definition into its source template row."""
         snapshot, _entry, _ = snapshot_chart(token, index, user, include_frame=False)

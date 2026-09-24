@@ -1453,6 +1453,17 @@ body[data-embedded-template-editor] .slides-templates-editor-table-wrap .form-ac
 .module-hero-workspace-config .eyebrow, .module-hero-workspace-config .lede { color: rgba(255,255,255,.76); }
 .module-hero-workspace-config .pill { background: rgba(255,255,255,.88); border-color: rgba(255,255,255,.46); color: #263d50; }
 .workspace-config-stack .operator-mappings-panel, .workspace-config-stack .report-catalogue-panel { border-color: rgba(11, 122, 117, .22); background: linear-gradient(135deg, rgba(238, 249, 247, .94), rgba(255, 255, 255, .96)); }
+.workspace-config-stack .main-cities-panel { border-color: rgba(11, 122, 117, .22); background: linear-gradient(135deg, rgba(238, 249, 247, .94), rgba(255, 255, 255, .96)); }
+.workspace-config-stack .main-cities-panel .main-cities-form { display: grid !important; gap: .9rem !important; }
+.workspace-config-stack .main-cities-panel .main-cities-transfer { display: grid !important; grid-template-columns: minmax(13rem, 1fr) 3.1rem minmax(13rem, 1fr) !important; gap: .75rem !important; align-items: center !important; width: 100% !important; max-width: 100% !important; min-width: 0 !important; overflow-x: auto !important; padding: .2rem .1rem .55rem !important; }
+.workspace-config-stack .main-cities-panel .main-cities-column { display: grid !important; grid-template-columns: minmax(0, 1fr) !important; gap: .45rem !important; min-width: 13rem !important; color: #173f4c !important; font-weight: 750 !important; }
+.workspace-config-stack .main-cities-panel .main-cities-column select { box-sizing: border-box !important; display: block !important; width: 100% !important; min-width: 13rem !important; min-height: 17rem !important; padding: .55rem !important; border: 1px solid rgba(16,49,74,.2) !important; border-radius: 12px !important; background: rgba(255,255,255,.92) !important; color: var(--text) !important; font: inherit !important; font-weight: 500 !important; }
+.main-cities-column select option { padding: .3rem .4rem; }
+.main-cities-column select option:checked { background: #d8eeea linear-gradient(0deg, #d8eeea 0%, #d8eeea 100%); color: #10314a; }
+.main-cities-column small { color: var(--muted); font-weight: 500; }
+.workspace-config-stack .main-cities-panel .main-cities-transfer-actions { display: grid !important; grid-template-columns: minmax(0, 1fr) !important; gap: .55rem !important; justify-items: center !important; min-width: 3.1rem !important; }
+.workspace-config-stack .main-cities-panel .main-cities-transfer-actions button { box-sizing: border-box !important; display: inline-grid !important; place-items: center !important; width: 2.65rem !important; min-width: 2.65rem !important; max-width: 2.65rem !important; height: 2.65rem !important; min-height: 2.65rem !important; padding: 0 !important; border-radius: 50% !important; }
+.workspace-config-stack .main-cities-panel .main-cities-transfer-actions button svg { display: block; width: 1.15rem; height: 1.15rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .configuration-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.1rem; }
 .configuration-field-wide { grid-column: 1 / -1; }
 .configuration-card { display: grid; align-content: start; gap: 1rem; min-width: 0; padding: 1.1rem; border: 1px solid rgba(16,49,74,.16); border-radius: 16px; background: linear-gradient(145deg, rgba(255,255,255,.82), rgba(231,243,242,.64)); box-shadow: 0 8px 20px rgba(18,32,43,.05); }

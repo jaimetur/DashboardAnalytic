@@ -1301,6 +1301,7 @@ def test_configuration_access_matches_editor_and_viewer_roles(client) -> None:
     assert client.get('/application-config').status_code == 403
     assert client.get('/workspace-config').status_code == 403
     assert client.post('/workspace-config/operator-mappings/save', data={'canonical_value': 'No Access'}).status_code == 403
+    assert client.post('/workspace-config/main-cities/save', data={'selected_cities': ['London']}).status_code == 403
 
     app_module.SESSIONS['editor-config-access'] = app_module.SessionUser(username='editor', role='user-editor')
     client.cookies.set(app_module.SESSION_COOKIE, 'editor-config-access')
@@ -1328,6 +1329,10 @@ def test_configuration_access_matches_editor_and_viewer_roles(client) -> None:
     assert client.post('/workspace-config/operator-mappings/save', data={
         'canonical_value': 'Editor Carrier', 'aliases': 'EC',
     }, follow_redirects=False).headers['location'].startswith('/workspace-config')
+    assert client.post('/workspace-config/main-cities/save', data={
+        'selected_cities': ['London', 'Leeds'],
+    }, follow_redirects=False).status_code == 303
+    assert app_module.repository.list_main_cities() == ['London', 'Leeds']
     assert app_module.repository.list_operator_mappings()['ec'] == 'Editor Carrier'
     assert client.post('/admin/operator-mappings/save', data={'canonical_value': 'Old Route'}).status_code == 404
     assert client.get('/admin/report-templates/nsa/export').status_code == 404
@@ -2363,7 +2368,7 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     assert admin_response.text.index('<optgroup label="Full Workspace">') < admin_response.text.index('<optgroup label="Full Environment">')
     assert 'Config</option>' in admin_response.text
     assert 'Operator/Vendor Mappings &amp; Colors (from active workspace)' in admin_response.text
-    assert 'Full Environment (Application Config + Dashboards + Report Templates + Operator/Vendor Mappings &amp; Colors + Auto-calculated Fields + Query Builder Queries + Selected Workspaces)' in admin_response.text
+    assert 'Full Environment (Application Config + Dashboards + Report Templates + Operator/Vendor Mappings &amp; Colors + Main Cities + Auto-calculated Fields + Query Builder Queries + Selected Workspaces)' in admin_response.text
     assert 'Workspace: Default' in admin_response.text
     stylesheet = app_module.PROJECT_ROOT.joinpath('src/web_interface/static/css/app.css').read_text(encoding='utf-8')
     assert '.multiselect-shell { position: relative; min-width: 0; max-width: 100%; }' in stylesheet
@@ -2424,11 +2429,12 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
         '/admin/import-export/inspect',
         files={'package': ('default-workspace.zip', BytesIO(workspace_response.content), 'application/zip')},
     )
-    assert inspection_response.json() == {
-        'kind': 'workspace',
-        'includes_slides_templates': False,
-        'workspace_collisions': ['Default'],
-    }
+    workspace_inspection = inspection_response.json()
+    assert workspace_inspection['kind'] == 'workspace'
+    assert workspace_inspection['targets'] == ['workspace']
+    assert workspace_inspection['includes_slides_templates'] is False
+    assert workspace_inspection['workspace_collisions'] == ['Default']
+    assert 'main_cities' in workspace_inspection['workspace_components']
     close_response = client.post('/workspace/close', data={'workspace_id': 'default'}, follow_redirects=False)
     assert close_response.status_code == 303
     imported_response = client.post(
@@ -2444,6 +2450,7 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     app_module.repository.set_workspace_state('e2e_dashboards_v2', json.dumps({
         'exported-dashboard': {'name': 'Exported Dashboard'},
     }))
+    app_module.repository.set_main_cities(['London', 'Leeds'])
     full_response = client.get('/admin/import-export/export?export_target=full-environment')
     assert full_response.status_code == 200
     with zipfile.ZipFile(BytesIO(full_response.content)) as archive:
@@ -2454,6 +2461,7 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
         assert {'super', 'admin', 'demo'} <= set(full_manifest['workspaces'][0]['access_usernames'])
         assert 'dashboards' in full_manifest['workspace_components']
         assert 'operator_mappings' in full_manifest['workspace_components']
+        assert 'main_cities' in full_manifest['workspace_components']
         exported_dashboards = json.loads(archive.read('workspaces/Default/dashboards/dashboards.json'))
         assert exported_dashboards['dashboards']['exported-dashboard']['name'] == 'Exported Dashboard'
         exported_mappings = json.loads(archive.read('workspaces/Default/operator-mappings/operator-mappings.json'))
@@ -2462,6 +2470,8 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
         assert exported_mappings['mappings'][0]['color'] == '#E15759'
         assert exported_mappings['vendor_mappings'][0]['canonical'] == 'Ericsson'
         assert exported_mappings['vendor_mappings'][0]['color'] == '#2E8B57'
+        exported_main_cities = json.loads(archive.read('workspaces/Default/main-cities/main-cities.json'))
+        assert exported_main_cities['cities'] == ['London', 'Leeds']
         assert 'config/workspace-registry.db' not in archive.namelist()
     full_import_response = client.post(
         '/admin/import-export/import',
@@ -2585,6 +2595,77 @@ def test_operator_mappings_export_and_import_replace_the_selected_workspace_grou
     assert status_payload['status'] == 'ready'
     assert app_module.repository.list_operator_mappings()['portable alias'] == 'Portable Carrier'
     assert app_module.repository.list_vendor_mappings()['pv'] == 'Portable Vendor'
+
+
+def test_main_cities_workspace_config_save_deduplicates_case_insensitively(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    saved = client.post('/workspace-config/main-cities/save', data={
+        'selected_cities': ['London', 'Leeds', ' london ', ''],
+    }, follow_redirects=False)
+
+    assert saved.status_code == 303
+    assert 'main_cities_notice=' in saved.headers['location']
+    assert app_module.repository.list_main_cities() == ['London', 'Leeds']
+
+
+def test_main_cities_export_import_restores_selected_workspace(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login_super(client)
+    app_module.repository.set_main_cities(['London', 'Leeds'])
+
+    exported = client.get('/admin/import-export/export?export_target=main-cities')
+
+    assert exported.status_code == 200
+    with zipfile.ZipFile(BytesIO(exported.content)) as archive:
+        manifest = json.loads(archive.read('manifest.json'))
+        payload = json.loads(archive.read(manifest['archive_path']))
+    assert manifest['kind'] == 'main-cities'
+    assert manifest['workspace_components'] == ['main_cities']
+    assert manifest['archive_path'] == 'workspaces/Default/main-cities/main-cities.json'
+    assert payload == {
+        'format': 'dashboard-analytic-main-cities', 'version': 1, 'cities': ['London', 'Leeds'],
+    }
+    assert app_module.manifest_requires_destination_workspaces(manifest)
+
+    app_module.repository.set_main_cities([])
+    inspected = client.post(
+        '/admin/import-export/inspect',
+        files={'package': ('main-cities.zip', BytesIO(exported.content), 'application/zip')},
+    )
+    assert inspected.status_code == 200
+    started = client.post('/admin/import-export/import/jobs', data={
+        'upload_id': inspected.headers['X-Import-Upload-Id'],
+        'confirmed_import': 'true',
+        'workspace_ids': 'default',
+    })
+    assert started.status_code == 200
+    for _attempt in range(100):
+        status_payload = client.get(started.json()['status_url']).json()
+        if status_payload['status'] in {'ready', 'failed'}:
+            break
+        time.sleep(0.01)
+    assert status_payload['status'] == 'ready'
+    assert app_module.repository.list_main_cities() == ['London', 'Leeds']
+
+
+def test_main_cities_restore_rejects_invalid_payloads(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    app_module.repository.set_main_cities(['London'])
+
+    for payload in (
+        b'{"format":"dashboard-analytic-main-cities","version":2,"cities":["Leeds"]}',
+        b'{"format":"dashboard-analytic-main-cities","version":1,"cities":["Leeds",4]}',
+        b'not-json',
+    ):
+        with pytest.raises(ValueError, match='Main Cities'):
+            app_module._restore_workspace_main_cities(app_module.active_workspace, payload)
+
+    assert app_module.repository.list_main_cities() == ['London']
 
 
 def test_full_environment_import_remaps_permissions_to_replaced_workspace_id(client, tmp_path: Path) -> None:
@@ -3204,6 +3285,7 @@ def test_admin_export_and_transfer_are_limited_to_templates_and_accessible_works
     assert panel.status_code == 200
     assert 'data-panel-state-key="admin:import-export"' in panel.text
     assert 'Report Templates (from active workspace)</option>' in panel.text
+    assert 'Main Cities (from active workspace)</option>' in panel.text
     assert 'Transfer to other server' in panel.text
     assert 'value="config"' not in panel.text
     assert 'value="workspace:default"' in panel.text
@@ -3220,6 +3302,11 @@ def test_admin_export_and_transfer_are_limited_to_templates_and_accessible_works
         assert manifest['kind'] == 'slides-templates'
         assert manifest['archive_path'].endswith('/report-templates')
 
+    main_cities_export = client.get('/admin/import-export/export?export_target=main-cities')
+    assert main_cities_export.status_code == 200
+    with zipfile.ZipFile(BytesIO(main_cities_export.content)) as archive:
+        assert json.loads(archive.read('manifest.json'))['kind'] == 'main-cities'
+
     workspace_export = client.get('/admin/import-export/export?export_target=workspace:default')
     assert workspace_export.status_code == 200
     assert client.get(f'/admin/import-export/export?export_target=workspace:{restricted.id}').status_code == 403
@@ -3230,6 +3317,11 @@ def test_admin_export_and_transfer_are_limited_to_templates_and_accessible_works
         'export_target': 'workspace:default',
     })
     assert transfer.status_code == 200
+    main_cities_transfer = client.post('/admin/import-export/transfers/jobs', data={
+        'destination_url': 'destination.example', 'destination_port': '7278',
+        'export_target': 'main-cities',
+    })
+    assert main_cities_transfer.status_code == 200
     blocked_transfer = client.post('/admin/import-export/transfers/jobs', data={
         'destination_url': 'destination.example', 'destination_port': '7278',
         'export_target': 'config',
@@ -4678,9 +4770,14 @@ def test_dashboard_library_ppt_export_selects_scope_cdrs_explicitly() -> None:
     assert 'id="ds-ppt-region-section"' in template
     assert 'id="ds-ppt-dataset-region"' in template
     assert 'aria-label="PowerPoint regions"' in template
+    assert 'id="ds-ppt-operator-section"' in template
+    assert 'id="ds-ppt-dataset-operator"' in template
+    assert 'aria-label="PowerPoint operators"' in template
     assert 'id="ds-ppt-city-section"' in template
     assert 'id="ds-ppt-dataset-city"' in template
-    assert 'data-multiselect-preset-label="7 Main Cities"' in template
+    assert 'data-multiselect-preset-label="Main Cities"' in template
+    assert 'data-multiselect-preset-values' not in template
+    assert "'main_cities': dashboard_main_cities | default([])" in template
     assert '>Select Dashboard Datasets Universe<' in template
     assert 'id="ds-ppt-date-from"' in template
     assert 'id="ds-ppt-date-to"' in template
@@ -4692,8 +4789,13 @@ def test_dashboard_library_ppt_export_selects_scope_cdrs_explicitly() -> None:
     assert "const savedDateTo = String(dashboard?.date_to || 'Newest');" in script
     assert 'const universeChoice = await chooseDashboardPptUniverse(item);' in script
     assert "api('/geography-options', 'POST', exportUniverse())" in script
+    assert "['Operator', geography.operators || []]" in script
+    assert "withPptSelection(exportDefinition, 'Operator', selectedOperators);" in script
     assert 'const withPptSelection = (dashboard, selectionField, values)' in script
     assert "withPptSelection(exportDefinition, 'City', selectedCities);" in script
+    assert "values.dataset.multiselectPresetLabel = 'Main Cities';" in script
+    assert "values.dataset.multiselectPresetValues = mainCities.join('|');" in script
+    assert "pptCityControl.dataset.multiselectPresetValues = mainCities.join('|');" in script
     assert 'selected_regions: selectedRegions' in script
     assert 'exportDefinition.scope = universeChoice.scope;' in script
     assert 'exportDefinition.datasets = universeChoice.datasets;' in script
@@ -6022,6 +6124,36 @@ def test_operator_mapping_backup_supports_selective_restore(client, tmp_path: Pa
     )
     assert app_module.repository.list_vendor_mappings()['backup vendor alias'] == 'Backup Vendor'
     assert restored_vendor['color'] == '#654321'
+
+
+def test_main_cities_backup_supports_selective_restore(client, tmp_path: Path) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    app_module.repository.set_main_cities(['London', 'Leeds'])
+    archive_path = app_module.create_recurring_database_backup({
+        'components': ['main_cities'],
+        'backup_path': str(tmp_path / 'backups'),
+        'max_backups': 30,
+        'workspace_ids': ['default'],
+    })
+
+    with zipfile.ZipFile(archive_path) as archive:
+        manifest = json.loads(archive.read('manifest.json'))
+        assert 'workspaces/Default/main-cities/main-cities.json' in archive.namelist()
+    assert manifest['workspace_components'] == ['main_cities']
+    assert app_module._backup_archive_components(archive_path) == ['main_cities']
+
+    app_module.repository.set_main_cities(['Cardiff'])
+    progress_steps = []
+    app_module.restore_database_backup(
+        archive_path, ['main_cities'],
+        lambda message, completed, total: progress_steps.append((message, completed, total)),
+    )
+
+    assert app_module.repository.list_main_cities() == ['London', 'Leeds']
+    assert progress_steps[-1][1:] == (1, 1)
+    assert 'Main Cities restored' in progress_steps[-1][0]
 
 
 def test_login_and_admin_remain_available_after_closing_the_active_workspace(client) -> None:

@@ -4713,7 +4713,7 @@ function normalizeExportTargetSelection(select) {
 }
 
 function setupCustomMultiSelects() {
-  document.querySelectorAll('select[multiple]').forEach((select) => {
+  document.querySelectorAll('select[multiple]:not([data-native-multiselect])').forEach((select) => {
     if (select.dataset.multiselectReady === '1') return;
     select.dataset.multiselectReady = '1';
     select.classList.add('multiselect-native');
@@ -4776,7 +4776,8 @@ function setupCustomMultiSelects() {
       // it cannot inherit the strong primary-reporting button treatment.
       actionButton.classList.add('reporting-multiselect-action');
     }
-    actionButton.textContent = 'Select All / None';
+    const dynamicAll = select.dataset.multiselectDynamicAll === 'true';
+    actionButton.textContent = dynamicAll ? 'All values' : 'Select All / None';
     if (!singleChoice) menu.appendChild(actionButton);
 
     const syncTrigger = () => {
@@ -4787,6 +4788,8 @@ function setupCustomMultiSelects() {
         triggerLabel.textContent = 'No values';
       } else if (selectedOptions.length === 0) {
         triggerLabel.textContent = 'None Selected';
+      } else if (dynamicAll && selectedOptions.length === totalEnabled) {
+        triggerLabel.textContent = 'All values';
       } else if (selectedOptions.length === 1) {
         // A one-item Reporting source selector is already fully selected, but
         // its file name is more useful than the generic "All values" summary.
@@ -4808,10 +4811,11 @@ function setupCustomMultiSelects() {
     const selectAllOrNone = () => {
       cancelAutoClose();
       const options = Array.from(select.options).filter((option) => !option.disabled);
-      const shouldSelectAll = options.some((option) => !option.selected);
+      const shouldSelectAll = dynamicAll || options.some((option) => !option.selected);
       options.forEach((option) => {
         option.selected = shouldSelectAll;
       });
+      if (dynamicAll) select.dataset.multiselectDynamicAllSelected = 'true';
       normalizeExportTargetSelection(select);
       Array.from(menu.querySelectorAll('input[type="checkbox"][data-option-value]')).forEach((checkbox) => {
         if (!checkbox.disabled) {
@@ -4975,6 +4979,58 @@ function setupCustomMultiSelects() {
     shell.appendChild(menu);
     syncCheckboxes();
   });
+}
+
+function setupMainCitiesTransfer() {
+  const form = document.querySelector('[data-main-cities-form]');
+  if (!form || form.dataset.ready === '1') return;
+  const available = form.querySelector('#main-cities-available');
+  const selected = form.querySelector('#main-cities-selected');
+  const availableEmpty = form.querySelector('[data-main-cities-available-empty]');
+  const status = form.querySelector('[data-main-cities-status]');
+  if (!available || !selected) return;
+  form.dataset.ready = '1';
+
+  const actionButtons = Object.fromEntries(
+    Array.from(form.querySelectorAll('[data-main-cities-action]'))
+      .map((button) => [button.dataset.mainCitiesAction, button]),
+  );
+  const sortOptions = (list) => Array.from(list.options)
+    .sort((left, right) => left.textContent.localeCompare(right.textContent, undefined, {sensitivity: 'base'}))
+    .forEach((option) => list.append(option));
+  const updateState = () => {
+    if (availableEmpty) availableEmpty.hidden = available.options.length > 0;
+    if (status) {
+      const count = selected.options.length;
+      status.textContent = `${count} Main ${count === 1 ? 'City' : 'Cities'} selected for this workspace.`;
+    }
+    if (actionButtons['add-selected']) actionButtons['add-selected'].disabled = available.selectedOptions.length === 0;
+    if (actionButtons['add-all']) actionButtons['add-all'].disabled = available.options.length === 0;
+    if (actionButtons['remove-selected']) actionButtons['remove-selected'].disabled = selected.selectedOptions.length === 0;
+    if (actionButtons['remove-all']) actionButtons['remove-all'].disabled = selected.options.length === 0;
+  };
+  const move = (source, destination, moveAll) => {
+    const choices = moveAll ? Array.from(source.options) : Array.from(source.selectedOptions);
+    choices.forEach((option) => {
+      option.selected = false;
+      destination.append(option);
+    });
+    sortOptions(source);
+    sortOptions(destination);
+    updateState();
+  };
+
+  actionButtons['add-selected']?.addEventListener('click', () => move(available, selected, false));
+  actionButtons['add-all']?.addEventListener('click', () => move(available, selected, true));
+  actionButtons['remove-selected']?.addEventListener('click', () => move(selected, available, false));
+  actionButtons['remove-all']?.addEventListener('click', () => move(selected, available, true));
+  available.addEventListener('change', updateState);
+  selected.addEventListener('change', updateState);
+  form.addEventListener('submit', () => {
+    // The right-hand list represents membership; selectedness is only used to choose rows to remove.
+    Array.from(selected.options).forEach((option) => { option.selected = true; });
+  });
+  updateState();
 }
 
 function setupPagePanelNavigator() {
@@ -5786,6 +5842,7 @@ setupPersistentControls();
 setupPersistentPanelState();
 setupWorkspaceUserPickers();
 setupCustomMultiSelects();
+setupMainCitiesTransfer();
 setupPagePanelNavigator();
 setupModuleNavigator();
 setupEdgeNavigatorReveal();

@@ -3,6 +3,14 @@
   'use strict';
   const $ = id => document.getElementById(id);
   const config = JSON.parse($('ds-config').textContent);
+  const mainCities = [...new Set((Array.isArray(config.main_cities) ? config.main_cities : [])
+    .map(value => String(value).trim()).filter(Boolean))];
+  const pptCityControl = $('ds-ppt-dataset-city');
+  if (pptCityControl) {
+    pptCityControl.dataset.multiselectPresetLabel = 'Main Cities';
+    pptCityControl.dataset.multiselectPresetValues = mainCities.join('|');
+    if (mainCities.length) pptCityControl.dispatchEvent(new Event('multiselect:options-updated'));
+  }
   const eventTimeFilteringDisabled = Boolean(config.ignore_event_time_filtering);
   const eventTimeFilteringDisabledReason = 'Date filters are disabled because Ignore event time filtering is enabled in Config.';
   const filterAliases = config.filter_aliases || {};
@@ -538,12 +546,19 @@
     if (values.length) dashboard.filters[selectionField] = values;
     return dashboard;
   };
-  const chooseDashboardPptUniverse = dashboard => new Promise(resolve => {
+  const pptDialogStorageKey = dashboardId => `dashboard-analytic:e2e-dashboards:${config.workspace}:ppt-dialog:${config.username || authenticatedSession}:${dashboardId}`;
+  const chooseDashboardPptUniverse = (dashboard, dashboardId) => new Promise(resolve => {
+    let remembered = null;
+    try { remembered = JSON.parse(localStorage.getItem(pptDialogStorageKey(dashboardId)) || 'null'); }
+    catch (_) { /* Local storage is optional. */ }
     const scopeControl = $('ds-ppt-dataset-scope');
     syncMultivendorAvailability();
-    scopeControl.value = 'single';
+    scopeControl.value = remembered?.scope === 'multivendor' && !$('ds-ppt-dataset-scope').querySelector('option[value="multivendor"]').disabled ? 'multivendor' : 'single';
     const choices = $('ds-ppt-dataset-choices'); choices.replaceChildren();
     const confirm = $('ds-ppt-dataset-confirm');
+    const operatorSection = $('ds-ppt-operator-section');
+    const operatorControl = $('ds-ppt-dataset-operator');
+    const operatorCopy = $('ds-ppt-operator-copy');
     const vendorSection = $('ds-ppt-vendor-section');
     const vendorControl = $('ds-ppt-dataset-vendor');
     const vendorCopy = $('ds-ppt-vendor-copy');
@@ -556,8 +571,8 @@
     const dateFrom = $('ds-ppt-date-from'), dateTo = $('ds-ppt-date-to');
     const automaticFrom = $('ds-ppt-date-from-auto'), automaticTo = $('ds-ppt-date-to-auto');
     const dateStatus = $('ds-ppt-date-status');
-    const savedDateFrom = String(dashboard?.date_from || 'Oldest');
-    const savedDateTo = String(dashboard?.date_to || 'Newest');
+    const savedDateFrom = String(remembered?.date_from || dashboard?.date_from || 'Oldest');
+    const savedDateTo = String(remembered?.date_to || dashboard?.date_to || 'Newest');
     automaticFrom.checked = savedDateFrom === 'Oldest'; automaticTo.checked = savedDateTo === 'Newest';
     dateFrom.value = /^\d{4}-\d{2}-\d{2}$/.test(savedDateFrom) ? savedDateFrom : '';
     dateTo.value = /^\d{4}-\d{2}-\d{2}$/.test(savedDateTo) ? savedDateTo : '';
@@ -566,9 +581,38 @@
     const selectedDatasets = () => Object.fromEntries(['data', 'voice', 'speech'].map(kind => [kind,
       [...choices.querySelectorAll(`input[data-kind="${kind}"]:checked`)].map(input => Number(input.value)),
     ]));
-    const selectedVendors = () => [...vendorControl.selectedOptions].map(option => option.value);
-    const selectedRegions = () => [...regionControl.selectedOptions].map(option => option.value);
-    const selectedCities = () => [...cityControl.selectedOptions].map(option => option.value);
+    const selectedOperators = () => [...selectionState.operators.values];
+    const selectedVendors = () => [...selectionState.vendors.values];
+    const selectedRegions = () => [...selectionState.regions.values];
+    const selectedCities = () => [...selectionState.cities.values];
+    const selectionControls = {
+      operators: operatorControl, vendors: vendorControl, regions: regionControl, cities: cityControl,
+    };
+    const selectionState = Object.fromEntries(Object.keys(selectionControls).map(key => {
+      const values = Array.isArray(remembered?.[key]) ? remembered[key].map(String) : [];
+      return [key, {values, all: !Array.isArray(remembered?.[key]) || remembered?.[`${key}_all`] === true}];
+    }));
+    const rememberDialog = () => {
+      const choice = {
+        scope: scopeControl.value, datasets: selectedDatasets(),
+        date_from: automaticFrom.checked ? 'Oldest' : dateFrom.value,
+        date_to: automaticTo.checked ? 'Newest' : dateTo.value,
+      };
+      for (const [key, state] of Object.entries(selectionState)) {
+        choice[key] = state.values;
+        choice[`${key}_all`] = state.all;
+      }
+      try { localStorage.setItem(pptDialogStorageKey(dashboardId), JSON.stringify(choice)); }
+      catch (_) { /* Local storage is optional. */ }
+    };
+    const rememberSelection = key => {
+      const control = selectionControls[key];
+      const available = [...control.options].filter(item => !item.disabled && item.value);
+      const values = [...control.selectedOptions].map(item => item.value).filter(Boolean);
+      selectionState[key] = {values, all: available.length === values.length};
+      rememberDialog();
+      updateConfirmState();
+    };
     const exportUniverse = () => ({
       ...structuredClone(dashboard), scope: scopeControl.value, datasets: selectedDatasets(),
       date_from: automaticFrom.checked ? 'Oldest' : dateFrom.value,
@@ -590,6 +634,7 @@
       const request = ++geographyRequest;
       geographyLoading = true;
       for (const {section, control, copy, label} of [
+        {section: operatorSection, control: operatorControl, copy: operatorCopy, label: 'Operators'},
         {section: vendorSection, control: vendorControl, copy: vendorCopy, label: 'Vendors'},
         {section: regionSection, control: regionControl, copy: regionCopy, label: 'Regions'},
         {section: citySection, control: cityControl, copy: cityCopy, label: 'Cities'},
@@ -604,42 +649,50 @@
       try {
         const geography = await api('/geography-options', 'POST', exportUniverse());
         if (request !== geographyRequest) return;
-        for (const [field, rawValues] of [
-          ['Vendor', geography.vendors || []],
-          ['Region', geography.regions || []], ['City', geography.cities || []],
+        for (const [field, key, rawValues] of [
+          ['Operator', 'operators', geography.operators || []],
+          ['Vendor', 'vendors', geography.vendors || []],
+          ['Region', 'regions', geography.regions || []], ['City', 'cities', geography.cities || []],
         ]) {
           const values = rawValues.map(String).map(value => value.trim()).filter(Boolean);
+          const isOperator = field === 'Operator';
           const isVendor = field === 'Vendor';
           const isRegion = field === 'Region';
-          const section = isVendor ? vendorSection : isRegion ? regionSection : citySection;
-          const control = isVendor ? vendorControl : isRegion ? regionControl : cityControl;
-          const copy = isVendor ? vendorCopy : isRegion ? regionCopy : cityCopy;
+          const section = isOperator ? operatorSection : isVendor ? vendorSection : isRegion ? regionSection : citySection;
+          const control = isOperator ? operatorControl : isVendor ? vendorControl : isRegion ? regionControl : cityControl;
+          const copy = isOperator ? operatorCopy : isVendor ? vendorCopy : isRegion ? regionCopy : cityCopy;
+          const previous = selectionState[key];
           if (values.length <= 1) {
-            const label = field === 'Vendor' ? 'Vendor' : field === 'Region' ? 'Region' : 'City';
+            const label = field === 'Operator' ? 'Operator' : field === 'Vendor' ? 'Vendor' : field === 'Region' ? 'Region' : 'City';
             section.hidden = false;
             control.disabled = true;
             control.replaceChildren();
             if (values.length === 1) {
-              control.append(option(values[0], values[0]));
+              const onlyValue = option(values[0], values[0]); onlyValue.selected = true; control.append(onlyValue);
               copy.textContent = `This workspace has only one available ${label}; it cannot be filtered.`;
             } else {
               control.append(option('', `No ${label.toLocaleLowerCase()} values are available.`));
               copy.textContent = `This workspace has no available ${label.toLocaleLowerCase()} values to filter.`;
             }
             control.dispatchEvent(new Event('multiselect:options-updated'));
+            selectionState[key] = {values, all: true};
             continue;
           }
-          const selected = new Set(values);
+          const retained = values.filter(value => previous.values.includes(value));
+          const selected = new Set(previous.all || !retained.length ? values : retained);
           control.disabled = false;
           control.replaceChildren();
           control.append(...values.map(value => {
             const entry = option(value, value); entry.selected = selected.has(value); return entry;
           }));
           control.dispatchEvent(new Event('multiselect:options-updated'));
-          copy.textContent = `Select one or more ${field === 'Vendor' ? 'Vendors' : field === 'Region' ? 'Regions' : 'Cities'} to include in this PowerPoint export.`;
+          selectionState[key] = {values: [...selected], all: selected.size === values.length};
+          copy.textContent = `Select one or more ${field === 'Operator' ? 'Operators' : field === 'Vendor' ? 'Vendors' : field === 'Region' ? 'Regions' : 'Cities'} to include in this PowerPoint export.`;
         }
+        rememberDialog();
       } catch (error) {
         if (request !== geographyRequest) return;
+        operatorSection.hidden = true;
         vendorSection.hidden = true;
         regionSection.hidden = true;
         citySection.hidden = true;
@@ -655,7 +708,7 @@
       updateConfirmState();
       void refreshGeography();
     };
-    const renderChoices = () => {
+    const renderChoices = (restoreDatasets = false) => {
       const scope = scopeControl.value;
       const defaultDatasets = latestDatasetsForScope(scope);
       $('ds-ppt-dataset-copy').textContent = scope === 'multivendor'
@@ -666,9 +719,12 @@
         const group = node('section', undefined, 'ds-multivendor-group');
         group.append(node('h3', `CDR ${kind[0].toUpperCase()}${kind.slice(1)}`));
         const options = node('div', undefined, 'ds-multivendor-options');
-        const selected = new Set(defaultDatasets[kind].map(Number));
+        const rememberedIds = restoreDatasets && Array.isArray(remembered?.datasets?.[kind])
+          ? remembered.datasets[kind].map(Number) : defaultDatasets[kind].map(Number);
         const rows = [...(config.datasets[kind] || [])]
           .sort((left, right) => datasetRecency(right) - datasetRecency(left) || Number(right.id) - Number(left.id));
+        const selected = new Set(rememberedIds.some(id => rows.some(row => Number(row.id) === id))
+          ? rememberedIds : defaultDatasets[kind].map(Number));
         if (!rows.length) options.append(node('p', 'No ready CDRs are available.', 'form-note'));
         for (const row of rows) {
           const label = node('label', undefined, 'ds-multivendor-option');
@@ -685,25 +741,27 @@
       finished = true; overlay('ds-ppt-dataset-overlay', false); resolve(value);
     };
     $('ds-ppt-dataset-cancel').onclick = () => finish(null);
-    choices.onchange = () => { updateConfirmState(); void refreshGeography(); };
-    scopeControl.onchange = () => { renderChoices(); void refreshGeography(); };
-    vendorControl.onchange = updateConfirmState;
-    regionControl.onchange = updateConfirmState;
-    cityControl.onchange = updateConfirmState;
-    automaticFrom.onchange = syncDateControls;
-    automaticTo.onchange = syncDateControls;
-    dateFrom.oninput = syncDateControls;
-    dateTo.oninput = syncDateControls;
-    confirm.onclick = () => finish({
+    choices.onchange = () => { rememberDialog(); updateConfirmState(); void refreshGeography(); };
+    scopeControl.onchange = () => { renderChoices(); rememberDialog(); void refreshGeography(); };
+    operatorControl.onchange = () => rememberSelection('operators');
+    vendorControl.onchange = () => rememberSelection('vendors');
+    regionControl.onchange = () => rememberSelection('regions');
+    cityControl.onchange = () => rememberSelection('cities');
+    automaticFrom.onchange = () => { syncDateControls(); rememberDialog(); };
+    automaticTo.onchange = () => { syncDateControls(); rememberDialog(); };
+    dateFrom.oninput = () => { syncDateControls(); rememberDialog(); };
+    dateTo.oninput = () => { syncDateControls(); rememberDialog(); };
+    confirm.onclick = () => { for (const key of Object.keys(selectionControls)) rememberSelection(key); finish({
       scope: scopeControl.value,
       datasets: selectedDatasets(),
       date_from: automaticFrom.checked ? 'Oldest' : dateFrom.value,
       date_to: automaticTo.checked ? 'Newest' : dateTo.value,
+      operators: selectedOperators(),
       vendors: selectedVendors(),
       regions: selectedRegions(),
       cities: selectedCities(),
-    });
-    renderChoices();
+    }); };
+    renderChoices(true);
     syncDateControls();
     $('ds-ppt-dataset-overlay').querySelector('[role=dialog]').onkeydown = event => { if (event.key === 'Escape') finish(null); };
     overlay('ds-ppt-dataset-overlay', true);
@@ -712,11 +770,12 @@
     let exportDefinition = item;
     let preparationToken = null;
     let filterDecision = 'unchanged';
+    let selectedOperators = [];
     let selectedVendors = [];
     let selectedRegions = [];
     let selectedCities = [];
     if (chooseScope) {
-      const universeChoice = await chooseDashboardPptUniverse(item);
+      const universeChoice = await chooseDashboardPptUniverse(item, id);
       if (!universeChoice) return;
       exportDefinition = JSON.parse(JSON.stringify(item));
       exportDefinition.scope = universeChoice.scope;
@@ -726,9 +785,11 @@
       exportDefinition.datasets = universeChoice.datasets;
       exportDefinition.date_from = universeChoice.date_from;
       exportDefinition.date_to = universeChoice.date_to;
+      selectedOperators = universeChoice.operators;
       selectedVendors = universeChoice.vendors;
       selectedRegions = universeChoice.regions;
       selectedCities = universeChoice.cities;
+      withPptSelection(exportDefinition, 'Operator', selectedOperators);
       withPptSelection(exportDefinition, 'Vendor', selectedVendors);
       withPptSelection(exportDefinition, 'Region', selectedRegions);
       withPptSelection(exportDefinition, 'City', selectedCities);
@@ -772,8 +833,12 @@
     await api(`/${encodeURIComponent(id)}/export-ppt`, 'POST', {
       definition: exportDefinition,
       preparation_token: preparationToken,
-      selected_regions: selectedRegions,
-      selected_cities: selectedCities,
+      ...(chooseScope ? {
+        selected_operators: selectedOperators,
+        selected_vendors: selectedVendors,
+        selected_regions: selectedRegions,
+        selected_cities: selectedCities,
+      } : {}),
     });
     status(`Dashboard PPT export queued for “${exportDefinition.name}”.`);
     await refreshDashboardPptJobs();
@@ -1561,6 +1626,11 @@
       });
       head.append(remove); facet.append(head);
       const values = document.createElement('select'); values.multiple = true; values.size = 1; values.dataset.multiselectAutoClose = '1000'; values.setAttribute('aria-label', `${label} filter`);
+      values.dataset.multiselectDynamicAll = 'true';
+      if (!custom && identity(field) === identity('City')) {
+        values.dataset.multiselectPresetLabel = 'Main Cities';
+        values.dataset.multiselectPresetValues = mainCities.join('|');
+      }
       const available = [...new Set([...(facetOptions[field] || []), ...selected].map(value => String(value)))];
       for (const value of available) {
         const item = option(value, value || '(Empty)'); item.selected = !hasStoredSelection || selected.includes(value); values.append(item);
@@ -1569,6 +1639,15 @@
       values.onchange = () => {
         const next = [...values.selectedOptions].map(item => item.value).filter(Boolean);
         const current = (hasStoredSelection ? selected : available).filter(Boolean);
+        const selectable = [...values.options].filter(item => !item.disabled && item.value);
+        if (values.dataset.multiselectDynamicAllSelected === 'true' || (selectable.length > 0 && next.length === selectable.length)) {
+          delete values.dataset.multiselectDynamicAllSelected;
+          if (!hasStoredSelection) return;
+          delete definition.filters[field];
+          updateFilterControlState(facet, filterState(field));
+          filterChanged();
+          return;
+        }
         if (next.length === current.length && next.every(value => current.includes(value))) return;
         definition.filters[field] = next;
         updateFilterControlState(facet, filterState(field));

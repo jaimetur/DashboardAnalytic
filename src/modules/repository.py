@@ -24,6 +24,7 @@ from src.modules.runtime_config import ignore_event_time_filtering
 
 DATABASE_BLANK_FILTER = '__database_blank__'
 WORKSPACE_REGISTRY_TABLE = '__workspace_registry__'
+MAIN_CITIES_STATE_KEY = 'dashboard_main_cities'
 
 _WORKSPACE_WRITE_LOCKS: dict[str, RLock] = {}
 _WORKSPACE_WRITE_LOCKS_GUARD = Lock()
@@ -1629,6 +1630,38 @@ class Repository:
                 (key, value),
             )
 
+    def list_main_cities(self) -> list[str]:
+        """Return the configured Main Cities for this workspace."""
+        raw = self.get_workspace_state(MAIN_CITIES_STATE_KEY)
+        try:
+            values = json.loads(raw) if raw else []
+        except (TypeError, json.JSONDecodeError):
+            return []
+        if not isinstance(values, list):
+            return []
+        result: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            city = str(value).strip()
+            key = city.casefold()
+            if city and key not in seen:
+                result.append(city)
+                seen.add(key)
+        return result
+
+    def set_main_cities(self, cities: Iterable[object]) -> list[str]:
+        """Persist a de-duplicated, ordered Main Cities selection."""
+        result: list[str] = []
+        seen: set[str] = set()
+        for value in cities:
+            city = str(value).strip()
+            key = city.casefold()
+            if city and key not in seen:
+                result.append(city)
+                seen.add(key)
+        self.set_workspace_state(MAIN_CITIES_STATE_KEY, json.dumps(result, ensure_ascii=False))
+        return result
+
     def try_set_workspace_state(self, key: str, value: str, *, timeout_seconds: float = 0.25) -> bool:
         """Best-effort state update that never waits behind a long Workspace writer."""
         try:
@@ -2640,7 +2673,7 @@ class Repository:
             return None
         return self._resolve_dataset_row_column_name(existing_columns, requested)
 
-    def list_distinct_dataset_row_values(self, dataset_id: int, column: str, limit: int = 200) -> list[str]:
+    def list_distinct_dataset_row_values(self, dataset_id: int, column: str, limit: int | None = 200) -> list[str]:
         table_name = self.dataset_rows_table_name(dataset_id)
         existing_columns = set(self.list_dataset_row_columns(dataset_id))
         resolved = self._resolve_dataset_row_column_name(existing_columns, column)
@@ -2653,10 +2686,13 @@ class Repository:
             FROM {quoted_table}
             WHERE {quoted_column} IS NOT NULL AND TRIM(CAST({quoted_column} AS TEXT)) <> ''
             ORDER BY LOWER(TRIM(CAST({quoted_column} AS TEXT)))
-            LIMIT ?
         """
+        params: tuple[int, ...] = ()
+        if limit is not None:
+            query += ' LIMIT ?'
+            params = (int(limit),)
         with self.connection() as conn:
-            rows = conn.execute(query, (int(limit),)).fetchall()
+            rows = conn.execute(query, params).fetchall()
         return [str(row['value']).strip() for row in rows if str(row['value']).strip()]
 
     def refresh_dataset_row_normalized_dimensions(self, dataset_id: int) -> bool:

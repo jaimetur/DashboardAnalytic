@@ -158,6 +158,47 @@
     </div>
   </details>
 
+  <details class="panel collapsible-panel main-cities-panel" open data-panel-state-key="workspace-config:main-cities">
+    <summary class="collapsible-summary">
+      <div><p class="eyebrow">Dashboard filters</p><h2>Main Cities</h2></div>
+      <span class="collapse-chip">Collapse</span>
+    </summary>
+    <div class="collapsible-panel-body">
+      {% if active_workspace %}
+      <p class="lede">Choose the cities for the Main Cities preset in Dashboard filters and PowerPoint exports for <strong>"{{ active_workspace.name }}"</strong>.</p>
+      {% if main_cities_notice %}<div class="alert alert-success">{{ main_cities_notice }}</div>{% endif %}
+      {% if main_cities_error %}<div class="alert alert-error">{{ main_cities_error }}</div>{% endif %}
+      <form class="main-cities-form" action="/workspace-config/main-cities/save" method="post" data-main-cities-form>
+        <div class="main-cities-transfer" data-main-cities-transfer>
+          <label class="main-cities-column">
+            <span>Available Cities</span>
+            <select id="main-cities-available" multiple size="12" data-native-multiselect aria-label="Available Cities">
+              {% for city in all_main_cities if city not in selected_main_cities %}<option value="{{ city }}">{{ city }}</option>{% endfor %}
+            </select>
+            <small data-main-cities-available-empty hidden>No available cities remain.</small>
+          </label>
+          <div class="main-cities-transfer-actions" aria-label="Move cities between lists">
+            <button type="button" data-main-cities-action="add-selected" aria-label="Add selected cities" title="Add selected cities"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>
+            <button type="button" data-main-cities-action="add-all" aria-label="Add all cities" title="Add all cities"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 5 7 7-7 7m7-14 7 7-7 7"/></svg></button>
+            <button type="button" data-main-cities-action="remove-selected" aria-label="Remove selected cities" title="Remove selected cities"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg></button>
+            <button type="button" data-main-cities-action="remove-all" aria-label="Remove all cities" title="Remove all cities"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m19 5-7 7 7 7m-7-14-7 7 7 7"/></svg></button>
+          </div>
+          <label class="main-cities-column">
+            <span>Selected Main Cities</span>
+            <select id="main-cities-selected" name="selected_cities" multiple size="12" data-native-multiselect aria-label="Selected Main Cities">
+              {% for city in selected_main_cities %}<option value="{{ city }}">{{ city }}</option>{% endfor %}
+            </select>
+          </label>
+        </div>
+        <p class="form-note" data-main-cities-status role="status" aria-live="polite"></p>
+        <div class="form-actions"><button type="submit">Save Main Cities</button></div>
+      </form>
+      {% else %}
+      <p class="form-note">Open a workspace before configuring Main Cities.</p>
+      {% endif %}
+    </div>
+  </details>
+
   <div class="confirm-overlay report-template-editor-overlay" data-admin-template-editor hidden>
     <section class="confirm-panel report-template-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="admin-template-editor-title">
       <header class="report-chart-viewer-header"><div><p class="eyebrow">PowerPoint reporting</p><h3 id="admin-template-editor-title" data-admin-template-editor-title>Edit Report Template</h3></div><button type="button" class="report-chart-viewer-close" data-admin-template-editor-close aria-label="Close template editor">×</button></header>
