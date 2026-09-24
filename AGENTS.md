@@ -28,7 +28,6 @@
 - Whenever implementing or modifying a feature, review all documentation related to that feature.
 - Update any documentation that is no longer accurate after the change.
 - Documentation must describe the final supported behavior, not intermediate implementation attempts or temporary states.
-- Whenever your add a new section in the /help documentation, make sure that the number is coherent with the position on the tool, and make sure that docker-deployment, project-structure and roadmap are always the last three sections.
 
 ## Import, Export, Transfers, Backup and Restore
 
