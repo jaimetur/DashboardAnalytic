@@ -582,17 +582,89 @@ def test_dashboard_ppt_filename_summarizes_complete_geography_selections(client,
         return row['output_file']
 
     assert re.fullmatch(
-        r'\d{8}_\d{6} - Comparison - Operator Comparison - All Operators - All Vendors - All Regions - All Cities\.pptx',
+        r'\d{8}_\d{6} - Comparison - Operator Comparison - All Regions\.pptx',
         queued_name(['South', 'North'], ['London', 'Leeds']),
     )
+    first_north_export = queued_name(['North'], ['London'])
     assert re.fullmatch(
-        r'\d{8}_\d{6} - Comparison - Operator Comparison - All Operators - All Vendors - North - London\.pptx',
-        queued_name(['North'], ['London']),
+        r'\d{8}_\d{6} - Comparison - Operator Comparison - North\.pptx',
+        first_north_export,
     )
+    second_north_export = queued_name(['North'], ['London'], ['A'])
     assert re.fullmatch(
-        r'\d{8}_\d{6} - Comparison - Operator Comparison - A - All Vendors - North - London\.pptx',
-        queued_name(['North'], ['London'], ['A']),
+        r'\d{8}_\d{6} - Comparison - Operator Comparison - North\.pptx',
+        second_north_export,
     )
+    assert second_north_export != first_north_export
+
+
+def test_dashboard_ppt_filename_summarizes_partial_selections_and_fits_filesystem(client, monkeypatch):
+    payload = setup_dashboard(client)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and core.repository.get_dataset(1)['status'] != 'ready':
+        time.sleep(0.05)
+    assert core.repository.get_dataset(1)['status'] == 'ready'
+    payload['name'] = 'Validation Dashboard ' + 'Long Name ' * 9
+    dashboard_id = 'compact-ppt-name'
+    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+    core.repository.replace_cdr_catalogue(
+        1,
+        vendors=['Vendor A', 'Vendor B', 'Vendor C'],
+        regions=['North', 'South', 'East'],
+        cities=['Belfast', 'Bristol', 'Cardiff', 'Edinburgh', 'Leeds', 'London', 'Sheffield', 'York'],
+    )
+    monkeypatch.setattr(core, 'submit_background_task', lambda *args, **kwargs: None)
+    selections = {
+        'selected_operators': ['A'],
+        'selected_vendors': ['Vendor A', 'Vendor B'],
+        'selected_regions': ['North', 'South'],
+        'selected_cities': ['Belfast', 'Bristol', 'Cardiff', 'Edinburgh', 'Leeds', 'London', 'Sheffield'],
+    }
+    queued = client.post(f'/api/e2e-dashboards/{dashboard_id}/export-ppt', json={
+        'definition': payload, **selections,
+    })
+    assert queued.status_code == 202, queued.text
+    job_id = queued.json()['job_id']
+    with core.repository.connection() as connection:
+        row = connection.execute(
+            'SELECT output_file, output_path, filters_json FROM dashboard_ppt_jobs WHERE id = ?', (job_id,),
+        ).fetchone()
+    output_path = Path(row['output_path'])
+    assert row['output_file'].endswith(
+        ' - Operator Comparison - North + South.pptx'
+    )
+    assert len(output_path.parent.name.encode('utf-8')) <= 240
+    assert len(output_path.name.encode('utf-8')) <= 255
+    output_path.parent.mkdir(parents=True)
+    assert 'Vendor: Vendor A, Vendor B' in json.loads(row['filters_json'])
+    assert 'Region: North, South' in json.loads(row['filters_json'])
+    assert 'City: Belfast, Bristol, Cardiff, Edinburgh, Leeds, London, Sheffield' in json.loads(row['filters_json'])
+
+    with core.repository.connection() as connection:
+        connection.execute('UPDATE dashboard_ppt_jobs SET status = ? WHERE id = ?', ('failed', job_id))
+    relaunched = client.post(f'/api/e2e-dashboards/ppt-jobs/{job_id}/retry')
+    assert relaunched.status_code == 202, relaunched.text
+    with core.repository.connection() as connection:
+        retried = connection.execute(
+            'SELECT output_file, filters_json FROM dashboard_ppt_jobs WHERE id = ?', (job_id,),
+        ).fetchone()
+    assert retried['output_file'].endswith(
+        ' - Operator Comparison - North + South.pptx'
+    )
+    assert 'City: Belfast, Bristol, Cardiff, Edinburgh, Leeds, London, Sheffield' in json.loads(retried['filters_json'])
+
+    unicode_definition = {**payload, 'name': 'É' * 120}
+    unicode_job = client.post(f'/api/e2e-dashboards/{dashboard_id}/export-ppt', json={
+        'definition': unicode_definition, **selections,
+    })
+    assert unicode_job.status_code == 202, unicode_job.text
+    with core.repository.connection() as connection:
+        unicode_row = connection.execute(
+            'SELECT output_path FROM dashboard_ppt_jobs WHERE id = ?', (unicode_job.json()['job_id'],),
+        ).fetchone()
+    unicode_path = Path(unicode_row['output_path'])
+    assert len(unicode_path.parent.name.encode('utf-8')) <= 240
+    unicode_path.parent.mkdir(parents=True)
 
 
 def test_dashboard_ppt_dialog_selections_override_saved_dashboard_filters(client, monkeypatch):
@@ -626,7 +698,7 @@ def test_dashboard_ppt_dialog_selections_override_saved_dashboard_filters(client
     assert job['filters'][-4:] == [
         'Operator: B', 'Vendor: Vendor B', 'Region: South', 'City: Leeds',
     ]
-    assert ' - B - Vendor B - South - Leeds.pptx' in submitted[0][7].name
+    assert submitted[0][7].name.endswith(' - Operator Comparison - South.pptx')
     assert submitted[0][5].filters == {
         'Operator': ['B'], 'Vendor': ['Vendor B'], 'Region': ['South'], 'City': ['Leeds'],
     }
@@ -1790,7 +1862,7 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypa
     charts_dir = output_path.parent / 'dashboard-charts'
     assert output_path.is_file()
     assert re.fullmatch(
-        r'\d{8}_\d{6} - Comparison - Multivendor Comparison - All Operators - All Vendors - London\.pptx',
+        r'\d{8}_\d{6} - Comparison - Multivendor Comparison\.pptx',
         output_path.name,
     )
     assert output_path.parent.name == output_path.stem

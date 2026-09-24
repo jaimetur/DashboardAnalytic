@@ -492,6 +492,13 @@ def install_dashboard_routes(core):
             return {'Operator': 'All Operators', 'Vendor': 'All Vendors', 'Region': 'All Regions', 'City': 'All Cities'}[field]
         return ', '.join(values)
 
+    def dashboard_ppt_filename_part(value: str, max_bytes: int) -> str:
+        safe = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', str(value)).strip(' .')
+        if len(safe.encode('utf-8')) <= max_bytes:
+            return safe
+        clipped = safe.encode('utf-8')[:max_bytes - 3].decode('utf-8', errors='ignore').rstrip(' .,_-&')
+        return f'{clipped}…' if clipped else '…'
+
     def dashboard_ppt_cover_label(field: str, label: str, count: int) -> str:
         if not label or label.startswith('All '):
             return label
@@ -1140,9 +1147,8 @@ def install_dashboard_routes(core):
                     snapshot = None
         dashboard_name = str(raw_definition.get('name') or dashboard_id)
         preview_fingerprint = dashboard_preview_fingerprint(raw_definition, task_repository)
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        safe_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', dashboard_name).strip() or 'Dashboard'
-        safe_scope = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', dashboard_ppt_scope_label(raw_definition.get('scope') or 'single'))
+        export_time = datetime.now()
+        safe_scope = dashboard_ppt_filename_part(dashboard_ppt_scope_label(raw_definition.get('scope') or 'single'), 40)
         selected_ids = [dataset_id for ids in (raw_definition.get('datasets') or {}).values() for dataset_id in ids]
         catalogue = task_repository.cdr_catalogue_values(selected_ids) if selected_ids else {'vendors': [], 'regions': [], 'cities': []}
         selected_by_kind = selected_sources(snapshot_definition, task_repository)
@@ -1160,18 +1166,32 @@ def install_dashboard_routes(core):
         }
         filters_json = json.dumps(dashboard_filter_lines(raw_definition, task_repository, selection_labels), ensure_ascii=False)
         selected_regions, selected_cities = selections['Region'], selections['City']
-        operator_label, vendor_label = selection_labels['Operator'], selection_labels['Vendor']
         region_label, city_label = selection_labels['Region'], selection_labels['City']
         cover_regions = dashboard_ppt_cover_label('Region', region_label, len(selected_regions))
         cover_cities = dashboard_ppt_cover_label('City', city_label, len(selected_cities))
-        safe_operator = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', operator_label).strip()
-        safe_vendor = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', vendor_label).strip()
-        safe_region = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', region_label).strip()
-        safe_city = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', city_label).strip()
-        output_file = ' - '.join(part for part in (timestamp, safe_name, safe_scope, safe_operator, safe_vendor, safe_region, safe_city) if part) + '.pptx'
-        job_dir = Path(task_repository.db_path).parent / 'output' / 'dashboards' / Path(output_file).stem
-        destination = job_dir / output_file
+        zone_label = region_label if region_label == 'All Regions' else ' + '.join(selected_regions)
+        max_stem_bytes = 240
+        fixed_bytes = len(f'{export_time:%Y%m%d_%H%M%S} -  -  - {safe_scope}'.encode('utf-8'))
+        zone_budget = max_stem_bytes - fixed_bytes - 4
+        safe_zone = dashboard_ppt_filename_part(zone_label, zone_budget) if zone_label else ''
+        suffix_parts = [part for part in (safe_scope, safe_zone) if part]
+        name_budget = max(4, max_stem_bytes - len(f'{export_time:%Y%m%d_%H%M%S} -  - {" - ".join(suffix_parts)}'.encode('utf-8')))
+        safe_name = dashboard_ppt_filename_part(dashboard_name, name_budget) or dashboard_ppt_filename_part('Dashboard', name_budget)
         ensure_dashboard_ppt_jobs(task_repository)
+        for offset in range(60):
+            timestamp = (export_time + timedelta(seconds=offset)).strftime('%Y%m%d_%H%M%S')
+            output_file = ' - '.join((timestamp, safe_name, *suffix_parts)) + '.pptx'
+            job_dir = Path(task_repository.db_path).parent / 'output' / 'dashboards' / Path(output_file).stem
+            with task_repository.connection() as connection:
+                already_queued = connection.execute(
+                    f'SELECT 1 FROM {DASHBOARD_PPT_JOBS_TABLE} WHERE output_file = ? LIMIT 1',
+                    (output_file,),
+                ).fetchone()
+            if not already_queued and not job_dir.exists():
+                break
+        else:
+            raise HTTPException(503, 'No unique PowerPoint filename is available for this export.')
+        destination = job_dir / output_file
         if reuse_job_id is None:
             with task_repository.connection() as connection:
                 cursor = connection.execute(
