@@ -446,6 +446,7 @@ class Repository:
             try:
                 shutil.copy2(source, temporary)
                 with closing(sqlite3.connect(temporary)) as imported, imported:
+                    self._migrate_user_roles(imported)
                     imported.execute(
                         """
                         CREATE TABLE IF NOT EXISTS transfer_offers (
@@ -553,6 +554,7 @@ class Repository:
             self._configure_database_journal(conn)
             conn.executescript(GLOBAL_SCHEMA)
             self._ensure_user_workspace_columns(conn)
+            self._migrate_user_roles(conn)
             # Seed the three local accounts exactly once, for a brand-new
             # empty application database.  Later starts must never recreate
             # deleted or renamed accounts, nor reset roles or passwords.
@@ -564,12 +566,13 @@ class Repository:
                 for username, password, role in (
                     ('super', 'super123', 'super-admin'),
                     ('admin', 'admin123', 'admin'),
-                    ('demo', 'demo123', 'user'),
+                    ('demo', 'demo123', 'user-viewer'),
                 ):
                     conn.execute(
                         "INSERT INTO users (username, password_hash, role, active, created_at) VALUES (?, ?, ?, 1, ?)",
                         (username, hash_password(password), role, local_now_iso()),
                     )
+
             if not bootstrap_done:
                 conn.execute(
                     "INSERT INTO application_state (key, value) VALUES ('bootstrap_users_created', '1')"
@@ -590,6 +593,13 @@ class Repository:
                         'UPDATE users SET workspace_ids_json = ? WHERE id = ?',
                         (self._workspace_ids_json(workspace_ids), int(row['id'])),
                     )
+
+    @staticmethod
+    def _migrate_user_roles(conn: sqlite3.Connection) -> None:
+        """Rename the legacy user role while preserving existing accounts."""
+        columns = {str(row[1]) for row in conn.execute('PRAGMA table_info(users)').fetchall()}
+        if 'role' in columns:
+            conn.execute("UPDATE users SET role = 'user-viewer' WHERE role = 'user'")
 
     @staticmethod
     def _ensure_chart_mapping_groups(conn: sqlite3.Connection) -> None:

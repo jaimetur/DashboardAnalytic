@@ -3737,7 +3737,7 @@ def test_chart_preview_focus_row_matches_the_editors_sorted_row(client) -> None:
         + '\n1,First slide,,Title and 1 column + Comments,First chart,CDR-Data,Mean_Data_Rate,Average Vertical Bars,,Operator,,,,,\n'
     ).encode()
     imported = client.post(
-        '/admin/report-templates/nsa', data={'catalogue_name': 'Out of order'},
+        '/workspace-config/report-templates/nsa', data={'catalogue_name': 'Out of order'},
         files={'catalogue_file': ('out-of-order.csv', BytesIO(content), 'text/csv')},
         follow_redirects=False,
     )
@@ -3766,7 +3766,7 @@ def test_template_chart_image_preview_uses_combined_reporting_rows(client, monke
         + '\n1,Preview slide,,Title and 1 column + Comments,Preview chart,CDR-Data,Mean_Data_Rate,Average Vertical Bars,,Operator,Campaign,,Top\n'
     )
     created = client.post(
-        '/admin/report-templates/nsa', data={'catalogue_name': 'Combined Preview'},
+        '/workspace-config/report-templates/nsa', data={'catalogue_name': 'Combined Preview'},
         files={'catalogue_file': ('combined-preview.csv', BytesIO(catalogue_content.encode()), 'text/csv')},
         follow_redirects=False,
     )
@@ -3796,16 +3796,16 @@ def test_template_chart_image_preview_uses_combined_reporting_rows(client, monke
     )
 
     data_preview = client.post(
-        '/admin/report-templates/nsa/Combined%20Preview/chart-preview',
+        '/workspace-config/report-templates/nsa/Combined%20Preview/chart-preview',
         json={'catalogue_content': catalogue_content, 'row_index': 0},
     )
     data_export = client.post(
-        '/admin/report-templates/nsa/Combined%20Preview/chart-preview',
+        '/workspace-config/report-templates/nsa/Combined%20Preview/chart-preview',
         json={'catalogue_content': catalogue_content, 'row_index': 0, 'download': True},
     )
 
     preview = client.post(
-        '/admin/report-templates/nsa/Combined%20Preview/chart-image-preview',
+        '/workspace-config/report-templates/nsa/Combined%20Preview/chart-image-preview',
         json={'catalogue_content': catalogue_content, 'row_index': 0},
     )
 

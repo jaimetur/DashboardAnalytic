@@ -2540,7 +2540,7 @@
     }
   };
   const templateEditorBaseUrl = (sourceDefinition = definition) => sourceDefinition
-    ? `/admin/report-templates/${encodeURIComponent(sourceDefinition.template_technology)}/${encodeURIComponent(sourceDefinition.template)}/editor`
+    ? `/workspace-config/report-templates/${encodeURIComponent(sourceDefinition.template_technology)}/${encodeURIComponent(sourceDefinition.template)}/editor`
     : '';
   function refreshEmbeddedTemplateEditor(updatedTemplate, focusRow) {
     const sourceDefinition = {

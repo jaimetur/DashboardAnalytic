@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="dashboard-stack spacious-stack workspace-config-stack">
+  <article class="panel dataset-summary-panel module-hero-workspace-config workspace-config-overview-panel">
+    <div class="section-head tight-head">
+      <div>
+        <p class="eyebrow">Workspace Configuration</p>
+        <h2>Workspace Config</h2>
+      </div>
+      {% if active_workspace %}<span class="pill">{{ active_workspace.name }}</span>{% endif %}
+    </div>
+    {% if active_workspace %}<p class="lede">Manage Report Templates and the Operator and Vendor mappings used by this workspace.</p>
+    {% else %}<p class="lede">Open a workspace to manage its Report Templates and mappings.</p>{% endif %}
+  </article>
+  {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+  {% include 'workspace_config_panels.html' %}
+</section>
+{% endblock %}

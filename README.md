@@ -6,7 +6,7 @@
 
 Dashboard Analytic is a multi-user web application for processing CDR datasets, exploring KPI performance, building charts and generating template-driven PowerPoint reports. Every workspace keeps its datasets, database, generated output and Report Templates isolated; users and access permissions remain global application configuration.
 
-After login, the application opens the **Readme** tab by default.
+After login, the application opens **Help Home** by default.
 
 ## Capabilities
 
@@ -20,6 +20,7 @@ After login, the application opens the **Readme** tab by default.
 - Generate NSA/SA PowerPoint reports and standalone Chart Sets.
 - Create workspace-owned Auto-calculated Fields and apply them asynchronously to the applicable CDR tables.
 - Edit workspace-owned Report Templates with validation, assistance and chart previews.
+- Configure application-wide runtime overrides in Application Config, or manage workspace-owned Report Templates and chart mappings in Workspace Config.
 - Track meaningful user/system events in App Logs.
 - Follow workspace-scoped background work from floating task cards and stop eligible jobs safely.
 - Export, import or transfer configuration, templates and workspaces.
@@ -48,7 +49,7 @@ Datasets Analysis analyses one ready Data, Voice or Speech CDR.
 
 ### E2E Dashboards
 
-Create, save, duplicate, import and export workspace Dashboards from an NSA/SA Report Template. The editor separates **Select Dataset Universe** from **Select Dataset Filters**: Scope, CDRs and dates can be applied temporarily or saved as the Dashboard universe, while default, aliased and custom Auto-calculated Field filters can be applied, saved, reloaded or discarded independently. Switching scope automatically selects the newest CDR per type for Multivendor or the two newest per type for Operator Comparison. View Dashboard opens immediately and shows centred preparation progress until its navigable 16:9 slides and live Canvas charts are ready. Generate PPT uses the same prepared definition and waits for pending filter decisions. Dashboard queries read the workspace's combined CDR tables directly; reusable selection manifests and chart models avoid recalculating unchanged work without any automatic background warm-up. See [E2E Dashboards Help](help/07-e2e-dashboards.md) for the operational workflow and [Administration → Report Template reference](help/11-administration.md#report-template-reference) for template authoring, supported chart types and examples.
+Create, save, duplicate, import and export workspace Dashboards from an NSA/SA Report Template. The editor separates **Select Dataset Universe** from **Select Dataset Filters**: Scope, CDRs and dates can be applied temporarily or saved as the Dashboard universe, while default, aliased and custom Auto-calculated Field filters can be applied, saved, reloaded or discarded independently. Switching scope automatically selects the newest CDR per type for Multivendor or the two newest per type for Operator Comparison. View Dashboard opens immediately and shows centred preparation progress until its navigable 16:9 slides and live Canvas charts are ready. Generate PPT uses the same prepared definition and waits for pending filter decisions. Dashboard queries read the workspace's combined CDR tables directly; reusable selection manifests and chart models avoid recalculating unchanged work without any automatic background warm-up. See [E2E Dashboards Help](help/e2e-dashboards.md) for the operational workflow and [Workspace Config → Report Template reference](help/workspace-config.md#report-template-reference) for template authoring, supported chart types and examples.
 
 ### E2E Reporting
 
@@ -61,7 +62,7 @@ E2E Reporting combines ready CDRs with a Report Template from the active workspa
 
 ### Chart Builder
 
-Chart Builder is the ad-hoc chart editor immediately after E2E Reporting in Help. It reuses Interactive Preview, filters sources by CDR Type, supports multiple processed datasets and creates temporary charts without modifying templates. See [Chart Builder Help](help/09-chart-builder.md) for examples.
+Chart Builder is the ad-hoc chart editor immediately after E2E Reporting in Help. It reuses Interactive Preview, filters sources by CDR Type, supports multiple processed datasets and creates temporary charts without modifying templates. See [Chart Builder Help](help/chart-builder.md) for examples.
 
 Chart Builder reuses the shared Interactive Preview for ad-hoc analysis.
 
@@ -76,15 +77,19 @@ Chart Builder reuses the shared Interactive Preview for ad-hoc analysis.
 - Distinguish the initiating user from automatic `system` execution.
 - Refresh manually or automatically every five seconds.
 - Review authentication, ingestion, processing, generation and administration events.
+- Read the active workspace's App Events and the live Execution Log for the running server.
 
-### Admin
+### Application Config and Workspace Config
+
+- **Application Config** stores runtime settings that apply across all workspaces. `user-editor`, `admin` and `super-admin` can use Config → Application Config; `user-viewer` cannot.
+- **Workspace Config** is selected from the Config dropdown and groups Report Templates Management, Operator Mappings and Vendor Mappings for the active workspace. Its Help chapter contains the Report Template Editor guide and complete Report Template reference. It uses Application Config's teal/navy palette and a Page Sections navigator. `user-editor`, `admin` and `super-admin` can manage these panels when a workspace is open; `user-viewer` cannot.
+- These scopes remain separate: Application Config values are global, while templates and chart mappings stay with their workspace and use the existing portable package formats.
+
+### Administrator Config (Admin tab)
 
 - **Create user / Users**: account, role, password, status and workspace access management.
-- **Report Templates Management**: create, import, duplicate, rename, export, delete and set defaults within the active workspace.
-- **Report Template Editor**: validated grid editing, cell assistance, Filter Builder and shared Chart Preview.
-- **Report Template reference**: canonical schema, structural slides, supported chart types, recipes, filters, aggregations, legends, multi-chart layouts and colours.
 - **Import / Export / Transfer**: portable ZIP jobs, Full Environment workspace selection, server-to-server transfer and recovered packages.
-- **Database Management**: **Backup Protection** for granular on-demand/scheduled backups and overwrite-confirmed restore, plus **Database Viewer** for grouped application, workspace and combined-CDR tables with server-side filters, editing and cleanup.
+- **Database Management**: **Backup Protection** for granular on-demand/scheduled backups and overwrite-confirmed restore, plus **Database Viewer** for grouped application, workspace and combined-CDR tables, including the Operator Mappings, Vendor Mappings and Chart mapping groups tables, with server-side filters, editing and cleanup.
 - **Datasets Management**: inspect and rename workspace datasets.
 
 ### Documentation tabs
@@ -93,7 +98,7 @@ Chart Builder reuses the shared Interactive Preview for ad-hoc analysis.
 - **Changelog**: versioned release notes.
 - **Help**: detailed task and technical documentation.
 
-See [Product overview](help/01-overview.md) for a detailed tour of every module and [Technical considerations](help/02-technical-considerations.md) for calculation, normalisation, mapping, filtering, storage and performance rules. The detailed Workspace guide is [Workspace Management](help/05-workspace-management.md), including its Data Ingestion section.
+See [Product overview](help/overview.md) for a detailed tour of every module and [Technical considerations](help/technical-considerations.md) for calculation, normalisation, mapping, filtering, storage and performance rules. The detailed Workspace guide is [Workspace Management](help/workspace-management.md), including its Data Ingestion section.
 
 ## Quick workflow
 
@@ -306,18 +311,21 @@ DashboardAnalytic/
 
 ## More documentation
 
-- [Help home](help/00-help.md)
-- [Product overview](help/01-overview.md)
-- [Technical considerations](help/02-technical-considerations.md)
-- [Configuration](help/03-configuration.md)
-- [Web interface](help/04-web-interface.md)
-- [Workspace Management](help/05-workspace-management.md)
-- [Datasets Analysis](help/06-datasets-analysis.md)
-- [E2E Dashboards](help/07-e2e-dashboards.md)
-- [E2E Reporting](help/08-e2e-reporting.md)
-- [Chart Builder](help/09-chart-builder.md)
-- [Query Builder](help/10-query-builder.md)
-- [Administration](help/11-administration.md)
-- [Docker deployment](help/12-docker-deployment.md)
-- [Project structure](help/13-project-structure.md)
-- [Roadmap](help/14-roadmap.md)
+- [Help home](help/help.md)
+- [Product overview](help/overview.md)
+- [Technical considerations](help/technical-considerations.md)
+- [Deployment Configuration](help/configuration.md)
+- [Docker deployment](help/docker-deployment.md)
+- [Web Interfaces](help/web-interface.md)
+- [Workspace Management](help/workspace-management.md)
+- [Datasets Analysis](help/datasets-analysis.md)
+- [E2E Dashboards](help/e2e-dashboards.md)
+- [E2E Reporting](help/e2e-reporting.md)
+- [Chart Builder](help/chart-builder.md)
+- [Query Builder](help/query-builder.md)
+- [App Logs](help/app-logs.md)
+- [Application Config](help/app-config.md)
+- [Workspace Config](help/workspace-config.md)
+- [Administrator Config](help/administrator-config.md)
+- [Project structure](help/project-structure.md)
+- [Roadmap](help/roadmap.md)

@@ -1,6 +1,6 @@
-# Web interface
+# Web Interfaces
 
-The UI uses a shared header, module tabs, panels, dialogs and tables. Read [Product Overview](01-overview.md) for the purpose of each module.
+The UI uses a shared header, module tabs, panels, dialogs and tables. Read [Product Overview](overview.md) for the purpose of each module.
 
 ## Navigation
 
@@ -8,19 +8,26 @@ Primary tabs:
 
 - Workspace
 - Datasets Analysis
+- E2E Dashboards
 - E2E Reporting
-- Chart Builder
-- Query Builder
+- Builders (dropdown with Chart Builder and Query Builder)
 
-Utility tabs:
+Other tabs:
 
-- Readme
-- Changelog
 - Help
 - App Logs
-- Admin, when authorised
+- Config (dropdown with Application Config and Workspace Config), for `user-editor`, `admin` and `super-admin` roles
+- Admin, for `admin` and `super-admin` roles
 
-Readme opens by default after login. Dashboard, Reporting, Chart Builder and Query Builder require an open workspace.
+Help Home opens by default after login. Dashboard, Reporting, Chart Builder and Query Builder require an open workspace.
+
+Open **Builders** to choose **Chart Builder** or **Query Builder**. The Modules sidebar links to each builder directly. Within its Administrative Modules group, Application Logs is first and Administrator Config is last. The top tab for Administrator Config remains **Admin**.
+
+Move the pointer near a viewport edge to reveal a collapsed Modules, Sections, Navigation or Releases tab. An invisible hover area beside each tab responds even while background tasks are running; task cards leave that edge clear. The tabs recede when the pointer leaves, and keyboard focus also reveals them. Modules uses nearly the full viewport height when needed and scrolls if the window is too short for every entry. In Help, Sections lists the current document's headings.
+
+Open **Config** and choose **Application Config** for application-wide runtime settings or **Workspace Config** for Report Templates Management, Operator Mappings and Vendor Mappings in the active workspace. Workspace Config's Page Sections navigator jumps between the three panels.
+
+Help Navigation lists unnumbered documents under General, Main Modules, Administrative Modules and Reference. Docker Deployment follows Deployment Configuration in General. App Logs is the first administrative document and Administrator Config is the last. Readme and Changelog open Reference before Project Structure and Roadmap. The Help Home link stays above the groups. Documents outside a user's access are omitted.
 
 ## Header controls
 
@@ -95,4 +102,6 @@ On a phone, use portrait orientation for forms and landscape orientation when in
 
 ## Dashboard navigation and overlays
 
-The analytical tabs are ordered **Datasets Analysis → E2E Dashboards → E2E Reporting**. Datasets Analysis uses blue, E2E Dashboards uses muted violet, and Reporting uses brighter purple. The dashboard viewer groups charts by Slide and opens the same Dashboard Filters controls in a floating panel. Its dataset dialog provides pagination and CSV export.
+The analytical tabs are ordered **Datasets Analysis → E2E Dashboards → E2E Reporting** for users with access. Datasets Analysis uses blue, E2E Dashboards uses muted violet, and Reporting uses brighter purple. E2E Reporting is shown only to super-admins and the EJAITUR user when a workspace is active; other users do not see it in the top navigation or Modules menu. The dashboard viewer groups charts by Slide and opens the same Dashboard Filters controls in a floating panel. Its dataset dialog provides pagination and CSV export.
+
+App Logs is available from the utility navigation and includes App Events for the active workspace plus the live Execution Log for the running server. See [App Logs](app-logs.md).

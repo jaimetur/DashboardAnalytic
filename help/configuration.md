@@ -1,4 +1,4 @@
-# Configuration
+# Deployment Configuration
 
 Dashboard Analytic separates application settings, storage roots and Docker deployment variables. Source installations can set the three storage roots in `storage-paths.conf`; real environment variables take precedence. Docker deployments normally keep all settings in `docker/.env`.
 
@@ -16,14 +16,17 @@ Dashboard Analytic separates application settings, storage roots and Docker depl
 | `TZ` | IANA timezone used by Docker and displayed/persisted timestamps. | `Europe/Madrid` |
 | `IGNORE_EVENT_TIME_FILTERING` | When true, ignores date and template filters based on Event_Start_Time or Event_End_Time. | `false` |
 
-## Config page
+## Application Config page
 
-Administrators can use the **Config** tab beside Admin to persist runtime settings in the application database. Values saved there take precedence over Docker and environment variables, and apply to every workspace.
+`user-editor`, `admin` and `super-admin` accounts can choose **Config → Application Config** to persist runtime settings in the application database. Values saved there take precedence over Docker and environment variables, and apply to every workspace.
 
 - **Timezone** accepts an IANA name such as `Europe/Madrid`. It controls displayed timestamps and newly stored local timestamps.
 - **Report Chart Renderer** selects `dashboard-canvas` or the legacy `pil` renderer.
 - **Chromium Executable** accepts an absolute executable path. Saving it restarts the shared Canvas renderer, so the next chart uses the selected browser.
 - **Ignore event time filtering** ignores Dashboard, Dataset Analysis and template conditions based on `Event_Start_Time` or `Event_End_Time`. Use it when source timestamps are incomplete and must not exclude valid rows.
+- **Maximum simultaneous tasks** sets the requested background concurrency from 1 to 32; the effective server limit is capped at four to preserve interactive capacity.
+
+See [Application Config](app-config.md) for the complete in-app workflow. Workspace-owned Report Templates and chart mappings are managed separately in [Workspace Config](workspace-config.md) and require an active workspace.
 
 `0.0.0.0` is a server bind address, not a browser destination. When the application binds to it locally, open `http://127.0.0.1:7278` or `http://localhost:7278`. From another computer, use the server's reachable hostname or IP address and the published host port.
 
@@ -74,7 +77,7 @@ These values are consumed by Compose rather than by the Python application:
 
 Production maps `${APP_PORT}:7278`; development maps `${APP_DEV_PORT}:7278`. The application inside the container always listens on `0.0.0.0:7278`. `APP_ASSETS_DIR=/app/assets` points to assets bundled in the image, so the standard Compose files persist only config and data.
 
-Use a pinned `IMAGE_TAG` when a production deployment must be reproducible. See [Docker Deployment](12-docker-deployment.md) for complete commands and upgrade checks.
+Use a pinned `IMAGE_TAG` when a production deployment must be reproducible. See [Docker Deployment](docker-deployment.md) for complete commands and upgrade checks.
 
 ## Persistence layout
 
@@ -101,7 +104,7 @@ Report Templates are records in each workspace database. CSV files appear in exp
 
 The starter Auto-calculated Field definitions remain a code asset at `assets/default-calculated-dimensions.json`; changing `APP_ASSETS_DIR` currently relocates the PowerPoint master lookup only.
 
-For the complete workspace, output and cache tree, see [Project Structure → Persistent data layout](13-project-structure.md#persistent-data-layout).
+For the complete workspace, output and cache tree, see [Project Structure → Persistent data layout](project-structure.md#persistent-data-layout).
 
 ## Bootstrap accounts
 

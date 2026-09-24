@@ -11,7 +11,7 @@
       <select data-sql-datasets multiple size="8">{% for dataset in datasets %}<option value="{{ dataset.id }}">{{ dataset.kind | upper }} · {{ dataset.name }}</option>{% endfor %}</select>
     </label>
     <p class="form-note">The query can use <code>selected_data</code>, <code>selected_voice</code> and <code>selected_speech</code>. Each view adds <code>source_dataset_id</code>, <code>source_dataset_name</code> and <code>source_row_id</code>; all source CDR columns remain available.</p>
-    <div class="query-builder-mode" role="group" aria-label="Query editor mode"><button type="button" data-sql-mode="assisted" aria-pressed="true">Assisted</button><button type="button" data-sql-mode="sql" aria-pressed="false">Write SQL</button></div>
+    <div class="query-builder-mode" role="group" aria-label="Query editor mode"><button type="button" data-sql-mode="assisted" aria-pressed="true">Assistance Mode</button><button type="button" data-sql-mode="sql" aria-pressed="false">SQL Mode</button></div>
     <div class="query-builder-assistant" data-sql-assistant>
       <p class="form-note">Select CDR sources above, then choose what to show. The SQL preview updates as you build the query.</p>
       <div class="query-builder-assistant-grid">
@@ -204,10 +204,10 @@
   function buildAssistedSql() {
     if (mode !== 'assisted') return;
     const kinds = selectedKinds();
-    if (!kinds.length) { editor.value = '-- Select at least one CDR source to preview SQL.'; lastGeneratedSql = ''; assistantValid = false; assistantStatus.textContent = 'Select at least one CDR source to begin.'; syncActionAvailability(); return; }
+    if (!kinds.length) { editor.value = '-- Select at least one CDR source to preview SQL.'; lastGeneratedSql = editor.value; assistantValid = false; assistantStatus.textContent = 'Select at least one CDR source to begin.'; syncActionAvailability(); return; }
     const columns = availableColumns();
     const chosen = allFields.checked ? [] : [...fieldsPicker.selectedOptions].map(option => option.value);
-    if (!allFields.checked && !chosen.length) { editor.value = '-- Select at least one field to generate SQL.'; lastGeneratedSql = ''; assistantValid = false; assistantStatus.textContent = 'Select at least one field to show.'; syncActionAvailability(); return; }
+    if (!allFields.checked && !chosen.length) { editor.value = '-- Select at least one field to generate SQL.'; lastGeneratedSql = editor.value; assistantValid = false; assistantStatus.textContent = 'Select at least one field to show.'; syncActionAvailability(); return; }
     const maxRows = Number(limit.value);
     const validLimit = allRows.checked || (Number.isInteger(maxRows) && maxRows >= 1 && maxRows <= 100000);
     const clauses = [];
@@ -258,17 +258,17 @@
       ? 'At least one CDR type must remain selected. The previous selection was restored.'
       : pendingMessages.length
       ? `Preview updated with completed filters only. Finish ${pendingMessages.join(' and ')} before Run, Save, or Export.`
-      : 'Query ready. Run it, save it, or switch to Write SQL for advanced changes.';
+      : 'Query ready. Run it, save it, or switch to SQL Mode for advanced changes.';
     typeSelectionNotice = false;
     syncActionAvailability();
   }
   const setMode = (nextMode) => {
     if (nextMode === 'assisted' && mode === 'sql' && editor.value.trim() && editor.value !== lastGeneratedSql) {
-      status.textContent = 'This SQL cannot be represented by Assisted controls. Use Write SQL or Clear Query to start a new assisted query.';
+      status.textContent = 'This SQL cannot be represented by Assistance Mode controls. Use SQL Mode or Clear Query to start a new assisted query.';
       return;
     }
     mode = nextMode;
-    assistant.hidden = mode !== 'assisted'; editor.readOnly = mode === 'assisted'; editorLabel.textContent = mode === 'assisted' ? 'SQL preview' : 'SQL';
+    assistant.hidden = mode !== 'assisted'; editor.readOnly = mode === 'assisted'; editorLabel.textContent = mode === 'assisted' ? 'SQL preview' : 'SQL Query';
     modeButtons.forEach(button => button.setAttribute('aria-pressed', String(button.dataset.sqlMode === mode)));
     if (mode === 'assisted') buildAssistedSql();
     else syncActionAvailability();
@@ -652,8 +652,8 @@
     sources.dispatchEvent(new Event('change', {bubbles:true}));
     editor.value = savedSql;
     status.textContent = restoreAssistedQuery(savedSql)
-      ? 'Saved query loaded in Assisted mode. Its SQL is available in Write SQL.'
-      : 'Saved query loaded in the SQL editor. This query cannot be shown in Assisted mode.';
+      ? 'Saved query loaded in Assistance Mode. Its SQL is available in SQL Mode.'
+      : 'Saved query loaded in SQL Mode. This query cannot be shown in Assistance Mode.';
   };
   document.querySelector('[data-sql-load-saved]').addEventListener('click', () => loadSavedQuery(document.querySelector('[data-sql-saved-picker]')?.selectedOptions[0]));
   document.querySelectorAll('[data-sql-load]').forEach(button => button.addEventListener('click', () => loadSavedQuery(button)));

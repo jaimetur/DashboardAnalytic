@@ -112,6 +112,65 @@ def test_workspace_accesses_are_consolidated_into_users_table(tmp_path: Path) ->
         ).fetchone() is None
 
 
+def test_initialize_migrates_legacy_user_role_and_seeds_viewer_role(tmp_path: Path) -> None:
+    application_db = tmp_path / 'application.db'
+    with sqlite3.connect(application_db) as conn:
+        conn.executescript(
+            '''
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL
+            );
+            INSERT INTO users (username, password_hash, role, active, created_at)
+            VALUES ('legacy-viewer', 'hash', 'user', 1, '2026-01-01');
+            '''
+        )
+
+    repository = Repository(tmp_path / 'workspace.db', application_db)
+    repository.initialize()
+    repository.initialize()
+
+    assert repository.get_user('legacy-viewer').role == 'user-viewer'
+
+
+def test_new_database_seeds_demo_as_user_viewer(tmp_path: Path) -> None:
+    application_db = tmp_path / 'application.db'
+    repository = Repository(tmp_path / 'workspace.db', application_db)
+
+    repository.initialize()
+
+    assert repository.get_user('demo').role == 'user-viewer'
+
+
+def test_global_database_replacement_migrates_legacy_user_role(tmp_path: Path) -> None:
+    application_db = tmp_path / 'application.db'
+    snapshot_db = tmp_path / 'imported-application.db'
+    with sqlite3.connect(snapshot_db) as conn:
+        conn.executescript(
+            '''
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL
+            );
+            INSERT INTO users (username, password_hash, role, active, created_at)
+            VALUES ('imported-viewer', 'hash', 'user', 1, '2026-01-01');
+            '''
+        )
+
+    repository = Repository(tmp_path / 'workspace.db', application_db)
+    repository.replace_global_database_snapshot(snapshot_db)
+
+    assert repository.get_user('imported-viewer').role == 'user-viewer'
+
+
 def test_global_database_replacement_preserves_local_transfer_offers(tmp_path: Path) -> None:
     application_db = tmp_path / 'application.db'
     snapshot_db = tmp_path / 'imported-application.db'

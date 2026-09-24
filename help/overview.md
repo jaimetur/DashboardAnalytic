@@ -19,11 +19,17 @@ The header is available throughout the authenticated application.
 - **Workspace badge** shows the active workspace and its current disk usage.
 - **Workspace selector** switches directly to another accessible workspace.
 - **Username button** opens the password-change dialog.
-- **Readme** is the default tab after login.
+- **Help Home** is the default page after login.
 - **Changelog** shows release history.
 - **Help** opens this detailed guide.
 - **App Logs** opens operational events for the active workspace.
-- **Admin** is visible to administrators and super-admins.
+- **Config** opens application-wide runtime settings for `user-editor`, `admin` and `super-admin`.
+- **Workspace Config** opens workspace-owned templates and mapping panels for authorised roles.
+- **Admin** opens user, portability, database and dataset administration tools according to the signed-in role.
+
+## Application and workspace configuration
+
+**Application Config** controls runtime settings shared by every workspace. The dedicated **Workspace Config** page groups Report Templates Management, Operator Mappings and Vendor Mappings for the active workspace. These are separate scopes: changing a workspace template or chart mapping does not change application runtime settings. See [Application Config](app-config.md) and [Workspace Config](workspace-config.md).
 
 ## Background tasks and floating cards
 
@@ -143,7 +149,7 @@ Status cards distinguish data loading, queued data, chart rendering, queued char
 
 **Generate PPT** uses the exact applied definition and continues as a background job. Completed jobs retain their CDRs, dates, scope, filter snapshot, comments, PPTX, PNGs, tooltips and Canvas models under `output/dashboards`. **PowerPoint Generation Jobs** supports download, chart access, stop, retry, relaunch and deletion. **Charts Panel** filters completed jobs and reopens their charts in the same expanded viewer, including the historical chart dataset.
 
-The operational guide is [E2E Dashboards](07-e2e-dashboards.md). Template creation, columns, structural slides, supported chart types, filters, aggregations, legends, layouts and colours are documented once in [Administration → Report Template reference](11-administration.md#report-template-reference).
+The operational guide is [E2E Dashboards](e2e-dashboards.md). Template creation, columns, structural slides, supported chart types, filters, aggregations, legends, layouts and colours are documented once in [Workspace Config → Report Template reference](workspace-config.md#report-template-reference).
 
 ## E2E Reporting
 
@@ -204,20 +210,24 @@ Columns: Campaign
 Legend: Campaign
 ```
 
+## Query Builder
+
+Query Builder runs read-only SQL against selected, processed Data, Voice and Speech CDRs in the active workspace. Open it from **Builders → Query Builder**.
+
+- Use **Assistance Mode** to select sources, output fields, filters, sorting and a row limit; the SQL preview updates as you work.
+- Use **SQL Mode** to write a custom statement against the selected CDR views. You can return to Assistance Mode when the SQL matches its supported controls.
+- Run the query to inspect paginated results, filter result columns, copy the visible page or export all filtered rows as CSV.
+- Save and reopen reusable queries. **Clear Query** resets the current editor and results without deleting saved queries.
+
+For the full workflow and SQL rules, see [Query Builder](query-builder.md).
+
 ## App Logs
 
-App Logs presents meaningful user and system events rather than every UI click. Background and automatic work records its lifecycle—including scheduled and manual backups, automatic workspace reconciliation, materialization, combined-table recreation, workspace duplication and cache cleanup—and distinguishes the requesting user from the `system` executor.
+App Logs displays workspace events and live output from the running server. It separates the person associated with an event from the user or system that executed it. See [App Logs](app-logs.md) for filters and scope.
 
-- Filter by **User**, **Executed by**, date, type and action.
-- User names are matched case-insensitively and displayed in lowercase.
-- **User** identifies the person associated with the workflow.
-- **Executed by** identifies who performed the step; automatic steps use `system`.
-- Login details state whether authentication succeeded or failed.
-- The page refreshes automatically every five seconds and also provides manual Refresh.
+## Administrator Config
 
-## Admin
-
-Admin is available to `admin` and `super-admin` roles, with permission-sensitive actions.
+The **Admin** tab opens Administrator Config for `admin` and `super-admin` roles, with permission-sensitive actions.
 
 ### User management
 
@@ -225,14 +235,13 @@ Admin is available to `admin` and `super-admin` roles, with permission-sensitive
 - Reset passwords.
 - Assign roles and workspace access where permitted.
 
-### Report Templates Management
+### Workspace Config
 
-- Create, import, rename, duplicate, export and delete templates in the active workspace.
-- Change NSA/SA type.
-- Set the default template for each technology.
-- Open the editor in a large dialog tied to the selected template.
+- Manage workspace Report Templates, Operator Mappings and Vendor Mappings on the dedicated Workspace Config page.
+- Use its Page Sections navigator to jump between the three panels.
+- Open a workspace to manage its templates and chart mappings.
 
-Templates belong to their workspace and live in its `report_templates` database table. A new workspace starts without templates; portable operations represent selected templates as CSV files inside their ZIP package.
+See [Workspace Config](workspace-config.md) for panel operations and portability.
 
 ### Report Template Editor
 
@@ -243,7 +252,7 @@ Templates belong to their workspace and live in its `report_templates` database 
 - Apply temporary preview values back to the in-memory row with **Update Template**.
 - Save atomically; saved cells then clear their change highlighting.
 
-The complete authoring specification, examples and supported chart catalogue are in [Administration → Report Template reference](11-administration.md#report-template-reference).
+The complete authoring specification, examples and supported chart catalogue are in [Workspace Config → Report Template reference](workspace-config.md#report-template-reference).
 
 ### Import / Export / Transfer
 
@@ -273,8 +282,9 @@ The complete authoring specification, examples and supported chart catalogue are
 
 | Role | Typical permissions |
 | --- | --- |
-| `user` | Use accessible workspaces, Datasets Analysis, E2E Dashboards, Reporting, Chart Builder and App Logs. |
-| `admin` | User operations allowed by policy, Report Templates, accessible-workspace export/transfer and database administration. |
-| `super-admin` | Full account/workspace access management, configuration/full-environment portability and incoming transfer approval. |
+| `user-viewer` | Use permitted workspace features and App Logs; cannot open Application Config or Workspace Config. |
+| `user-editor` | Use permitted workspace features and App Logs; edit Application Config and Workspace Config when a workspace is open. |
+| `admin` | Manage users within policy, edit Application Config and Workspace Config, and use accessible-workspace portability and database administration. |
+| `super-admin` | Full account/workspace access management, Application Config and Workspace Config, full-environment portability and incoming transfer approval. |
 
-For the detailed Workspace/Data Ingestion workflow, continue with [Workspace Management](05-workspace-management.md). For storage rules, calculated fields, filter syntax, reporting semantics and migration behaviour, continue with [Technical considerations](02-technical-considerations.md).
+For the detailed Workspace/Data Ingestion workflow, continue with [Workspace Management](workspace-management.md). For storage rules, calculated fields, filter syntax, reporting semantics and migration behaviour, continue with [Technical considerations](technical-considerations.md).

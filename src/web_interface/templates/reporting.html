@@ -1170,7 +1170,7 @@
     const openTemplateEditor = (templateRowIndex = null) => {
       if (!activeChartSetTemplate || !reportTemplateEditor || !reportTemplateEditorFrame) return;
       const editorUrl = new URL(
-        `/admin/report-templates/${encodeURIComponent(activeChartSetTechnology || 'auto')}/${encodeURIComponent(activeChartSetTemplate)}/editor`,
+        `/workspace-config/report-templates/${encodeURIComponent(activeChartSetTechnology || 'auto')}/${encodeURIComponent(activeChartSetTemplate)}/editor`,
         window.location.origin,
       );
       if (Number.isInteger(templateRowIndex) && templateRowIndex >= 0) editorUrl.searchParams.set('focus_row', String(templateRowIndex));

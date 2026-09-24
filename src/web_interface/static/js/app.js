@@ -2602,7 +2602,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
           technology: editor.dataset.templateTechnology,
           catalogue_id: editor.dataset.templateIdentifier,
         });
-        const response = await fetch(`/admin/catalogue-filter-values?${query.toString()}`, { credentials: 'same-origin' });
+        const response = await fetch(`/workspace-config/catalogue-filter-values?${query.toString()}`, { credentials: 'same-origin' });
         const payload = response.ok ? await response.json() : { values: [] };
         if (request !== valueRequest) return;
         const available = Array.isArray(payload.values) ? payload.values : [];
@@ -3694,13 +3694,13 @@ document.querySelectorAll('[data-catalogue-auto-rename]').forEach((input) => {
   const updateCatalogueIdentifier = (previousIdentifier, identifier) => {
     if (!previousIdentifier || !identifier || previousIdentifier === identifier) return;
     const row = input.closest('tr');
-    const technology = input.form?.action.match(/\/admin\/report-templates\/([^/]+)\//)?.[1];
+    const technology = input.form?.action.match(/\/workspace-config\/report-templates\/([^/]+)\//)?.[1];
     if (!row || !technology) return;
     const previousName = decodeURIComponent(previousIdentifier);
-    const oldSegment = `/admin/report-templates/${technology}/${encodeURIComponent(previousName)}/`;
-    const newSegment = `/admin/report-templates/${technology}/${encodeURIComponent(identifier)}/`;
-    const rawOldSegment = `/admin/report-templates/${technology}/${previousName}/`;
-    const rawNewSegment = `/admin/report-templates/${technology}/${identifier}/`;
+    const oldSegment = `/workspace-config/report-templates/${technology}/${encodeURIComponent(previousName)}/`;
+    const newSegment = `/workspace-config/report-templates/${technology}/${encodeURIComponent(identifier)}/`;
+    const rawOldSegment = `/workspace-config/report-templates/${technology}/${previousName}/`;
+    const rawNewSegment = `/workspace-config/report-templates/${technology}/${identifier}/`;
     row.querySelectorAll('form[action], a[href]').forEach((element) => {
       const attribute = element.tagName === 'A' ? 'href' : 'action';
       const value = element.getAttribute(attribute);
@@ -3742,7 +3742,7 @@ document.querySelectorAll('[data-catalogue-auto-rename]').forEach((input) => {
       savedValue = String(payload.name || name).trim();
       input.value = savedValue;
       input.setAttribute('aria-label', `Name for ${savedValue}`);
-      const previousIdentifier = input.form.action.match(/\/admin\/report-templates\/[^/]+\/([^/]+)\/rename$/)?.[1];
+      const previousIdentifier = input.form.action.match(/\/workspace-config\/report-templates\/[^/]+\/([^/]+)\/rename$/)?.[1];
       updateCatalogueIdentifier(previousIdentifier, payload.identifier);
     } catch (error) {
       input.value = savedValue;
@@ -3815,7 +3815,7 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && adminTemplateEditor && !adminTemplateEditor.hidden) closeAdminTemplateEditor();
 });
 
-document.querySelectorAll('form[action*="/admin/report-templates/"]').forEach((form) => {
+document.querySelectorAll('form[action*="/workspace-config/report-templates/"]').forEach((form) => {
   if (form.classList.contains('catalogue-rename-form')) return;
   form.addEventListener('submit', () => preserveAdminScrollPosition());
 });
@@ -5016,6 +5016,7 @@ function setupPagePanelNavigator() {
     return style.display !== 'none' && style.visibility !== 'hidden' && panel.getClientRects().length > 0;
   };
   const panelLabel = (panel, index) => {
+    if (panel.matches('h2')) return panel.textContent.trim();
     const summary = panel.matches('details') ? panel.querySelector(':scope > summary') : null;
     const heading = summary?.querySelector('h1,h2,h3,h4') || panel.querySelector('h1,h2,h3,h4');
     const eyebrow = summary?.querySelector('.eyebrow') || panel.querySelector('.eyebrow');
@@ -5033,6 +5034,10 @@ function setupPagePanelNavigator() {
       && panel.dataset.pagePanelNavigation !== 'exclude'
       && !panel.closest('.confirm-overlay, .dataset-preview-overlay, [role="dialog"]')
     ));
+    if (window.location.pathname.startsWith('/documents/view/help')) {
+      const headings = Array.from(main.querySelectorAll('#doc-content h2')).filter(panelIsVisible);
+      return [...visiblePanels, ...headings];
+    }
     if (navigator.dataset.theme !== 'admin') return visiblePanels;
     // Admin deliberately uses CSS `order` to bring package controls directly
     // below its overview. Mirror that rendered order in Sections.
@@ -5270,8 +5275,8 @@ function setupEdgeNavigatorReveal() {
     }).observe(navigator, {attributes: true, attributeFilter: ['class']});
   });
 
-  document.addEventListener('pointermove', (event) => {
-    if (event.pointerType !== 'mouse') return;
+  const revealNearEdge = (event) => {
+    if (event.pointerType && event.pointerType !== 'mouse') return;
     lastInteraction = 'mouse';
     const activationWidth = 44;
     if (event.clientX <= activationWidth) {
@@ -5282,7 +5287,9 @@ function setupEdgeNavigatorReveal() {
       scheduleConceal('left');
       scheduleConceal('right');
     }
-  }, {passive: true});
+  };
+  window.addEventListener('pointermove', revealNearEdge, {capture: true, passive: true});
+  window.addEventListener('pointerover', revealNearEdge, {capture: true, passive: true});
 
   document.addEventListener('pointerdown', (event) => {
     lastInteraction = event.pointerType || 'mouse';
@@ -5893,7 +5900,7 @@ function importWarningDetails(payload) {
 
 function importPackageContents(payload) {
   const labels = {
-    config: 'App Config', workspace: 'Full Workspace', 'full-environment': 'Full Environment',
+    config: 'Application Config', workspace: 'Full Workspace', 'full-environment': 'Full Environment',
     dashboards: 'Dashboards', 'slides-templates': 'Report Templates',
     'operator-mappings': 'Operator/Vendor Mappings & Colors', 'auto-calculated-fields': 'Auto-calculated Fields',
   };
@@ -6483,8 +6490,8 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       showPendingOfferReminder(offer);
       reviewingOffer = true;
       const transferContentLabels = {
-        config: 'App Config',
-        'config-with-templates': 'App Config and Report Templates',
+        config: 'Application Config',
+        'config-with-templates': 'Application Config and Report Templates',
         workspace: 'Full Workspace',
         'full-environment': 'Full Environment',
         dashboards: 'Dashboards',
@@ -7002,7 +7009,7 @@ function bindConfirmForm(form) {
       if (form.dataset.confirmLoadingLabel) {
         showLoadingOverlay(form.dataset.confirmLoadingLabel, form.dataset.confirmLoadingCopy);
       }
-      if (form.action.includes('/admin/report-templates/')) {
+      if (form.action.includes('/workspace-config/report-templates/')) {
         preserveAdminScrollPosition();
       }
       if (isChartMappingForm(form)) await submitChartMappingForm(form);
@@ -8326,7 +8333,10 @@ if (queueNode) {
     const applyPosition = (position) => {
       if (!position || !Number.isFinite(position.left) || !Number.isFinite(position.top)) return restorePosition();
       panel.classList.add('is-detached');
-      panel.style.left = `${position.left}px`;
+      const edgeGutter = 3.25 * parseFloat(window.getComputedStyle(document.documentElement).fontSize);
+      const panelWidth = panel.getBoundingClientRect().width;
+      const left = Math.max(edgeGutter, Math.min(position.left, window.innerWidth - panelWidth - edgeGutter));
+      panel.style.left = `${left}px`;
       panel.style.top = `${position.top}px`;
       pin.disabled = false;
       pin.title = 'Return panel to its default position';
@@ -8356,7 +8366,8 @@ if (queueNode) {
     panel.addEventListener('pointermove', (event) => {
       if (!dragging) return;
       const bounds = panel.getBoundingClientRect();
-      const left = Math.max(8, Math.min(event.clientX - dragging.offsetX, window.innerWidth - bounds.width - 8));
+      const edgeGutter = 3.25 * parseFloat(window.getComputedStyle(document.documentElement).fontSize);
+      const left = Math.max(edgeGutter, Math.min(event.clientX - dragging.offsetX, window.innerWidth - bounds.width - edgeGutter));
       const top = Math.max(8, Math.min(event.clientY - dragging.offsetY, window.innerHeight - bounds.height - 8));
       applyPosition({left, top});
       try { localStorage.setItem(positionKey, JSON.stringify({left, top})); } catch (_error) { /* Ignore unavailable local storage. */ }
@@ -8786,3 +8797,30 @@ window.enableExcelColumnFilters = (table, {onChange, excludeLastColumn = true} =
   document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeMenu(); });
   return controller;
 };
+
+for (const [triggerSelector, optionsSelector] of [
+  ['[data-module-config-trigger]', '[data-module-config-options]'],
+  ['[data-module-builders-trigger]', '[data-module-builders-options]'],
+]) {
+  const trigger = document.querySelector(triggerSelector);
+  const options = document.querySelector(optionsSelector);
+  if (!trigger || !options) continue;
+  const positionOptions = () => {
+    if (!options.matches(':popover-open')) return;
+    const triggerBounds = trigger.getBoundingClientRect();
+    const menuBounds = options.getBoundingClientRect();
+    const left = Math.max(8, Math.min(triggerBounds.right - menuBounds.width, window.innerWidth - menuBounds.width - 8));
+    const below = triggerBounds.bottom + 5;
+    const top = below + menuBounds.height <= window.innerHeight - 8
+      ? below : Math.max(8, triggerBounds.top - menuBounds.height - 5);
+    options.style.left = `${left}px`;
+    options.style.top = `${top}px`;
+  };
+  options.addEventListener('toggle', () => {
+    const open = options.matches(':popover-open');
+    trigger.setAttribute('aria-expanded', String(open));
+    if (open) positionOptions();
+  });
+  window.addEventListener('resize', positionOptions);
+  window.addEventListener('scroll', positionOptions, true);
+}

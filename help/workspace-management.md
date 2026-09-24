@@ -165,7 +165,7 @@ Vendor mapping is required only for Vendor Comparison.
 
 Use **Clear Vendors** before remapping with a newer file.
 
-The detailed GCID formulas and first/last-cell resolution rules are documented in [Technical Considerations](02-technical-considerations.md#multivendor-calculation-and-remapping).
+The detailed GCID formulas and first/last-cell resolution rules are documented in [Technical Considerations](technical-considerations.md#multivendor-calculation-and-remapping).
 
 ## Dataset Inspection and Enrichment
 

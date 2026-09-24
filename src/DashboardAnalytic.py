@@ -324,44 +324,153 @@ def materialize_cdr_derived_columns(
             f'cdr-{dataset_kind}',
         )
     return result
-HELP_HOME_DOCUMENT = '00-help.md'
+HELP_HOME_DOCUMENT = 'help.md'
 HELP_NAVIGATION_DOCUMENTS = (
     HELP_HOME_DOCUMENT,
-    '01-overview.md',
-    '02-technical-considerations.md',
-    '03-configuration.md',
-    '04-web-interface.md',
-    '05-workspace-management.md',
-    '06-datasets-analysis.md',
-    '07-e2e-dashboards.md',
-    '08-e2e-reporting.md',
-    '09-chart-builder.md',
-    '10-query-builder.md',
-    '11-administration.md',
-    '12-docker-deployment.md',
-    '13-project-structure.md',
-    '14-roadmap.md',
+    'overview.md',
+    'technical-considerations.md',
+    'configuration.md',
+    'docker-deployment.md',
+    'web-interface.md',
+    'workspace-management.md',
+    'datasets-analysis.md',
+    'e2e-dashboards.md',
+    'e2e-reporting.md',
+    'chart-builder.md',
+    'query-builder.md',
+    'app-logs.md',
+    'app-config.md',
+    'workspace-config.md',
+    'administrator-config.md',
+    'project-structure.md',
+    'roadmap.md',
 )
 HELP_DOCUMENT_LABELS = {
-    '01-overview.md': 'Product Overview',
-    '02-technical-considerations.md': 'Technical Considerations',
-    '06-datasets-analysis.md': 'Datasets Analysis',
-    '07-e2e-dashboards.md': 'E2E Dashboards',
-    '08-e2e-reporting.md': 'E2E Reporting',
-    '09-chart-builder.md': 'Chart Builder',
-    '10-query-builder.md': 'Query Builder',
-    '05-workspace-management.md': 'Workspace Management',
+    'overview.md': 'Product Overview',
+    'technical-considerations.md': 'Technical Considerations',
+    'datasets-analysis.md': 'Datasets Analysis',
+    'e2e-dashboards.md': 'E2E Dashboards',
+    'e2e-reporting.md': 'E2E Reporting',
+    'chart-builder.md': 'Chart Builder',
+    'query-builder.md': 'Query Builder',
+    'workspace-management.md': 'Workspace Management',
+    'configuration.md': 'Deployment Configuration',
+    'web-interface.md': 'Web Interfaces',
+    'app-config.md': 'Application Config',
+    'workspace-config.md': 'Workspace Config',
+    'app-logs.md': 'App Logs',
 }
 
 
-def help_document_number(relative_path: str) -> str | None:
-    match = re.match(r'^(\d+)[-_]', Path(relative_path).name)
-    return match.group(1) if match else None
-
-
 def help_document_label(relative_path: str) -> str:
-    stem = re.sub(r'^\d+[-_\s]*', '', Path(relative_path).stem)
+    stem = Path(relative_path).stem
     return stem.replace('-', ' ').replace('_', ' ').title()
+
+
+def can_access_e2e_reporting(user: SessionUser) -> bool:
+    return user.role == 'super-admin' or user.username.casefold() == 'ejaitur'
+
+
+def filter_e2e_reporting_help_content(content: str, document_name: str) -> str:
+    """Hide E2E Reporting help references from users without module access."""
+    normalized_name = Path(document_name).name.casefold()
+    lines = content.splitlines()
+
+    if normalized_name == HELP_HOME_DOCUMENT:
+        return '\n'.join(
+            line for line in lines
+            if 'e2e-reporting.md' not in line.casefold() and 'e2e reporting' not in line.casefold()
+        )
+
+    if normalized_name == 'overview.md':
+        filtered = []
+        skipping_reporting_section = False
+        for line in lines:
+            if re.match(r'^## E2E Reporting\s*$', line):
+                skipping_reporting_section = True
+                continue
+            if skipping_reporting_section:
+                if line.startswith('## '):
+                    skipping_reporting_section = False
+                else:
+                    continue
+            line = line.replace(
+                ', or **E2E Reporting** for the classic report and Chart Set workflow',
+                '',
+            )
+            line = line.replace('**E2E Dashboards**, Reporting, Chart Builder', '**E2E Dashboards**, Chart Builder')
+            filtered.append(line)
+        lines = filtered
+    elif normalized_name == 'readme.md':
+        filtered = []
+        skipping_reporting_section = False
+        for line in lines:
+            if re.match(r'^#{2,3} E2E Reporting\s*$', line):
+                skipping_reporting_section = True
+                continue
+            if skipping_reporting_section:
+                if re.match(r'^#{1,3} ', line):
+                    skipping_reporting_section = False
+                else:
+                    continue
+            if 'e2e-reporting.md' in line.casefold():
+                continue
+            line = line.replace(' immediately after E2E Reporting in Help', ' in Help')
+            filtered.append(line)
+        lines = filtered
+
+    # Remove links to the restricted chapter and adjust nearby module lists.
+    content = '\n'.join(lines)
+    if normalized_name == 'web-interface.md':
+        content = content.replace('- E2E Reporting\n', '')
+        content = content.replace(
+            'The analytical tabs are ordered **Datasets Analysis → E2E Dashboards → E2E Reporting**. '
+            'Datasets Analysis uses blue, E2E Dashboards uses muted violet, and Reporting uses brighter purple. '
+            'E2E Reporting is enabled only for super-admins and the EJAITUR user when a workspace is active; '
+            'other users see it disabled in the top navigation and Modules menu. ',
+            'The analytical tabs include Datasets Analysis and E2E Dashboards. '
+            'Datasets Analysis uses blue and E2E Dashboards uses muted violet. ',
+        )
+        content = content.replace(
+            'The analytical tabs are ordered **Datasets Analysis → E2E Dashboards → E2E Reporting** for users with access. '
+            'Datasets Analysis uses blue, E2E Dashboards uses muted violet, and Reporting uses brighter purple. '
+            'E2E Reporting is shown only to super-admins and the EJAITUR user when a workspace is active; '
+            'other users do not see it in the top navigation or Modules menu. ',
+            'The analytical tabs include Datasets Analysis and E2E Dashboards. '
+            'Datasets Analysis uses blue and E2E Dashboards uses muted violet. ',
+        )
+        content = content.replace('Chart Builder, E2E Reporting Chart Preview and', 'Chart Builder and')
+        content = content.replace('Chart Builder, E2E Reporting Chart Preview', 'Chart Builder')
+    elif normalized_name == 'workspace-management.md':
+        content = content.replace(
+            ' E2E Reporting also uses these normalized metrics as fallbacks for heterogeneous CDR layouts.',
+            '',
+        )
+    elif normalized_name == 'datasets-analysis.md':
+        content = content.replace('- Template-driven reports belong to E2E Reporting instead.\n', '')
+    elif normalized_name == 'chart-builder.md':
+        content = content.replace(
+            'Use E2E Reporting for persistent Chart Sets and Report Template Editor for reusable definitions.',
+            'Use Report Template Editor for reusable definitions.',
+        )
+    elif normalized_name == 'workspace-config.md':
+        content = content.replace(
+            'This is the canonical authoring reference for templates used by both '
+            '[E2E Dashboards](e2e-dashboards.md) and [E2E Reporting](e2e-reporting.md).',
+            'This is the canonical authoring reference for templates used by '
+            '[E2E Dashboards](e2e-dashboards.md).',
+        )
+        content = re.sub(r'\[[^\]]*\]\([^)]*e2e-reporting\.md[^)]*\)', '', content, flags=re.IGNORECASE)
+    elif normalized_name == 'technical-considerations.md':
+        content = content.replace('E2E Dashboards, E2E Reporting, Chart Builder', 'E2E Dashboards and Chart Builder')
+        content = content.replace('E2E Reporting, Chart Builder', 'Chart Builder')
+    elif normalized_name == 'project-structure.md':
+        content = content.replace('E2E Dashboards, E2E Reporting, Chart Builder', 'E2E Dashboards, Chart Builder')
+
+    # Remove any other explicit link to the restricted chapter in help files.
+    if normalized_name.endswith('.md') and normalized_name != 'readme.md':
+        content = re.sub(r'\[[^\]]*\]\([^)]*e2e-reporting\.md[^)]*\)', '', content, flags=re.IGNORECASE)
+    return content
 
 
 def default_report_slides_template_path(
@@ -2585,6 +2694,13 @@ app = FastAPI(title=__app_name__, version=__version__, lifespan=lifespan)
 @app.middleware('http')
 async def track_interactive_application_requests(request: Request, call_next):
     """Return lightweight unauthenticated responses for passive polling."""
+    if request.url.path.startswith(('/e2e-reporting', '/api/e2e-reporting')):
+        user = session_user(request.cookies.get(SESSION_COOKIE))
+        if user and not can_access_e2e_reporting(user):
+            detail = 'E2E Reporting access required.'
+            if request.url.path.startswith('/api/'):
+                return JSONResponse({'detail': detail}, status_code=status.HTTP_403_FORBIDDEN)
+            return HTMLResponse(detail, status_code=status.HTTP_403_FORBIDDEN)
     if (
         request.url.path in {'/api/background-tasks', '/api/workspaces/sizes'}
         and session_user(request.cookies.get(SESSION_COOKIE)) is None
@@ -4442,6 +4558,12 @@ def admin_user(user: SessionUser = Depends(current_user)) -> SessionUser:
     return user
 
 
+def config_editor_user(user: SessionUser = Depends(current_user)) -> SessionUser:
+    if user.role not in {'user-editor', 'admin', 'super-admin'}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Configuration access required')
+    return user
+
+
 def super_admin_user(user: SessionUser = Depends(current_user)) -> SessionUser:
     if user.role != 'super-admin':
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Super-admin access required')
@@ -5653,7 +5775,7 @@ def restore_database_backup(
     if not is_database_backup:
         # Portable Import/Export packages share the same Restore picker.  The
         # import implementation already validates their manifest and applies
-        # their own safe workspace/configuration semantics.
+        # their own safe workspace/application-configuration semantics.
         _apply_import_archive(archive_path, manifest)
         return
     selected = set(components)
@@ -8045,7 +8167,10 @@ def would_remove_required_super_admin(target_user, normalized_role: str, will_be
     return removing_active_super_admin and repository.count_super_admin_users(active_only=True) <= 1
 
 
-def render_admin_template(request: Request, user: SessionUser, error: str | None = None, status_code: int = 200) -> HTMLResponse:
+def render_admin_template(
+    request: Request, user: SessionUser, error: str | None = None, status_code: int = 200,
+    workspace_config_page: bool = False,
+) -> HTMLResponse:
     embedded_template_editor = request.query_params.get('embedded_template_editor') == '1'
     selected_technology = request.query_params.get('catalogue_technology') or None
     selected_catalogue = request.query_params.get('catalogue_id') or None
@@ -8146,13 +8271,13 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         reverse=True,
     )
     export_options = [
-        {'value': 'config', 'label': 'App Config'},
+        {'value': 'config', 'label': 'Application Config'},
         {'value': 'dashboards', 'label': 'Dashboards (from active workspace)', 'disabled': not active_workspace},
         {'value': 'slides-templates', 'label': 'Report Templates (from active workspace)', 'disabled': not active_workspace},
         {'value': 'operator-mappings', 'label': 'Operator/Vendor Mappings & Colors (from active workspace)', 'disabled': not active_workspace},
         {'value': 'auto-calculated-fields', 'label': 'Auto-calculated Fields (from active workspace)', 'disabled': not active_workspace},
         {'value': 'query-builder-queries', 'label': 'Query Builder Queries (from active workspace)', 'disabled': not active_workspace},
-        {'value': 'full-environment', 'label': 'Full Environment (App Config + Dashboards + Report Templates + Operator/Vendor Mappings & Colors + Auto-calculated Fields + Query Builder Queries + Selected Workspaces)'},
+        {'value': 'full-environment', 'label': 'Full Environment (Application Config + Dashboards + Report Templates + Operator/Vendor Mappings & Colors + Auto-calculated Fields + Query Builder Queries + Selected Workspaces)'},
         *[
             {'value': f'workspace:{workspace.id}', 'label': f'Full Workspace: {workspace.name}'}
             for workspace in accessible_workspaces(user)
@@ -8189,9 +8314,10 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         database_notice = None
     return render_template(
         request,
-        'admin.html',
+        'workspace_configuration.html' if workspace_config_page else 'admin.html',
         {
             'user': user,
+            'workspace_config_page': workspace_config_page,
             'embedded_template_editor': embedded_template_editor,
             'users': admin_users,
             'workspaces': workspace_registry.list(),
@@ -8225,6 +8351,12 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         },
         status_code=status_code,
     )
+
+
+def render_workspace_config_template(
+    request: Request, user: SessionUser, error: str | None = None, status_code: int = 200,
+) -> HTMLResponse:
+    return render_admin_template(request, user, error, status_code, workspace_config_page=True)
 
 
 def describe_workspace_log_entry(log: dict[str, Any]) -> str:
@@ -8479,7 +8611,7 @@ def healthz() -> dict[str, str]:
 @app.get('/', response_class=HTMLResponse)
 def index(request: Request) -> HTMLResponse:
     if session_user(request.cookies.get(SESSION_COOKIE)):
-        return RedirectResponse('/documents/view/readme', status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse('/documents/view/help', status_code=status.HTTP_303_SEE_OTHER)
     return RedirectResponse('/login', status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -8556,7 +8688,7 @@ def login(
             }, status_code=503 if database_busy else 400)
 
     user = SessionUser(username=record.username, role=record.role)
-    response = RedirectResponse('/documents/view/readme', status_code=status.HTTP_303_SEE_OTHER)
+    response = RedirectResponse('/documents/view/help', status_code=status.HTTP_303_SEE_OTHER)
     create_session(response, user)
     repository.try_add_log(record.username, 'login', json.dumps({
         'success': True, 'result': 'successful', 'role': record.role,
@@ -8603,6 +8735,8 @@ def documents_view(request: Request, doc_name: str, user: SessionUser = Depends(
 @app.get('/documents/view/help/{doc_file:path}', response_class=HTMLResponse)
 def help_document_view(request: Request, doc_file: str, user: SessionUser = Depends(current_user)) -> HTMLResponse:
     path = resolve_help_doc_path(doc_file)
+    if path.name.casefold() == 'e2e-reporting.md' and not can_access_e2e_reporting(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='E2E Reporting access required.')
     return render_template(
         request,
         'doc_view.html',
@@ -8624,13 +8758,14 @@ def get_help_documents_index(user: SessionUser = Depends(current_user)) -> dict[
     help_root = (PROJECT_ROOT / 'help').resolve()
     documents: list[dict[str, str]] = []
     for relative_path in HELP_NAVIGATION_DOCUMENTS:
+        if relative_path == 'e2e-reporting.md' and not can_access_e2e_reporting(user):
+            continue
         file_path = (help_root / relative_path).resolve()
         if not file_path.exists() or not file_path.is_file():
             continue
         documents.append({
             'name': file_path.name,
             'relative_path': relative_path,
-            'number': help_document_number(relative_path),
             'label': HELP_DOCUMENT_LABELS.get(
                 relative_path,
                 help_document_label(relative_path),
@@ -8653,20 +8788,28 @@ def get_changelog_index(user: SessionUser = Depends(current_user)) -> dict[str, 
 @app.get('/api/documents/help/{doc_file:path}')
 def get_help_markdown_document(doc_file: str, user: SessionUser = Depends(current_user)) -> dict[str, Any]:
     path = resolve_help_doc_path(doc_file)
+    if path.name.casefold() == 'e2e-reporting.md' and not can_access_e2e_reporting(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='E2E Reporting access required.')
+    content = path.read_text(encoding='utf-8', errors='replace')
+    if not can_access_e2e_reporting(user):
+        content = filter_e2e_reporting_help_content(content, path.name)
     return {
         'name': path.name,
         'path': str(path),
-        'content': path.read_text(encoding='utf-8', errors='replace'),
+        'content': content,
     }
 
 
 @app.get('/api/documents/{doc_name}')
 def get_markdown_document(doc_name: str, user: SessionUser = Depends(current_user)) -> dict[str, Any]:
     path = resolve_doc_path(doc_name)
+    content = path.read_text(encoding='utf-8', errors='replace')
+    if not can_access_e2e_reporting(user) and path.name.casefold() in {'readme.md', HELP_HOME_DOCUMENT}:
+        content = filter_e2e_reporting_help_content(content, path.name)
     return {
         'name': path.name,
         'path': str(path),
-        'content': path.read_text(encoding='utf-8', errors='replace'),
+        'content': content,
     }
 
 
@@ -14580,8 +14723,8 @@ def export_report(
     return FileResponse(destination, filename=download_name, media_type=media_type)
 
 
-@app.get('/config', response_class=HTMLResponse)
-def configuration_panel(request: Request, user: SessionUser = Depends(admin_user)) -> HTMLResponse:
+@app.get('/application-config', response_class=HTMLResponse)
+def configuration_panel(request: Request, user: SessionUser = Depends(config_editor_user)) -> HTMLResponse:
     return render_template(request, 'configuration.html', {
         'user': user,
         'configuration': runtime_configuration(),
@@ -14590,14 +14733,14 @@ def configuration_panel(request: Request, user: SessionUser = Depends(admin_user
     })
 
 
-@app.post('/config')
+@app.post('/application-config')
 def save_configuration(
     timezone_name: str = Form(...),
     report_chart_renderer: str = Form(...),
     chromium_path: str = Form(''),
     ignore_event_time_filtering_value: bool = Form(False, alias='ignore_event_time_filtering'),
     max_background_tasks: int = Form(1),
-    user: SessionUser = Depends(admin_user),
+    user: SessionUser = Depends(config_editor_user),
 ) -> RedirectResponse:
     timezone_name = timezone_name.strip()
     try:
@@ -14633,12 +14776,19 @@ def save_configuration(
         'ignore_event_time_filtering': bool(ignore_event_time_filtering_value),
         'max_background_tasks': max_background_tasks,
     }))
-    return RedirectResponse('/config?notice=Configuration+saved.', status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse('/application-config?notice=Configuration+saved.', status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.get('/admin', response_class=HTMLResponse)
 def admin_panel(request: Request, user: SessionUser = Depends(admin_user)) -> HTMLResponse:
     return render_admin_template(request, user)
+
+
+@app.get('/workspace-config', response_class=HTMLResponse)
+def workspace_configuration_panel(
+    request: Request, user: SessionUser = Depends(config_editor_user),
+) -> HTMLResponse:
+    return render_admin_template(request, user, workspace_config_page=True)
 
 
 @app.post('/admin/database/backups')
@@ -14857,12 +15007,12 @@ def create_backup_directory(
     return JSONResponse({'path': str(created.resolve())})
 
 
-@app.get('/admin/report-templates/{technology}/{catalogue_id}/editor', response_class=HTMLResponse)
+@app.get('/workspace-config/report-templates/{technology}/{catalogue_id}/editor', response_class=HTMLResponse)
 def embedded_report_template_editor(
     request: Request,
     technology: str,
     catalogue_id: str,
-    user: SessionUser = Depends(admin_user),
+    user: SessionUser = Depends(config_editor_user),
 ) -> HTMLResponse:
     """Render only the selected Report Template editor for modal iframes."""
     technology = technology.strip().lower()
@@ -15675,17 +15825,17 @@ async def update_admin_database_table(request: Request, user: SessionUser = Depe
     return JSONResponse({'ok': True, 'message': 'Row saved.'})
 
 
-@app.post('/admin/operator-mappings/save')
+@app.post('/workspace-config/operator-mappings/save')
 def save_admin_operator_mapping_group(
     original_canonical: str = Form(''),
     canonical_value: str = Form(...),
     aliases: str = Form(''),
     color: str = Form(''),
-    user: SessionUser = Depends(admin_user),
+    user: SessionUser = Depends(config_editor_user),
 ) -> Response:
     if not active_workspace:
         return RedirectResponse(
-            f'/admin?{urlencode({"operator_mapping_error": "Open a workspace before editing Operator Mappings."})}',
+            f'/workspace-config?{urlencode({"operator_mapping_error": "Open a workspace before editing Operator Mappings."})}',
             status_code=status.HTTP_303_SEE_OTHER,
         )
     parsed_aliases = [
@@ -15715,7 +15865,7 @@ def save_admin_operator_mapping_group(
             )
     except (ValueError, sqlite3.IntegrityError) as exc:
         return RedirectResponse(
-            f'/admin?{urlencode({"operator_mapping_error": str(exc)})}',
+            f'/workspace-config?{urlencode({"operator_mapping_error": str(exc)})}',
             status_code=status.HTTP_303_SEE_OTHER,
         )
     ANALYSIS_CACHE.clear()
@@ -15732,22 +15882,22 @@ def save_admin_operator_mapping_group(
     if renamed_templates or renamed_dashboards:
         notice += f' Updated {renamed_templates} Report Template(s) and {renamed_dashboards} Dashboard(s).'
     return RedirectResponse(
-        f'/admin?{urlencode({"operator_mapping_notice": notice})}',
+        f'/workspace-config?{urlencode({"operator_mapping_notice": notice})}',
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
 
-@app.post('/admin/vendor-mappings/save')
+@app.post('/workspace-config/vendor-mappings/save')
 def save_admin_vendor_mapping_group(
     original_canonical: str = Form(''),
     canonical_value: str = Form(...),
     aliases: str = Form(''),
     color: str = Form(''),
-    user: SessionUser = Depends(admin_user),
+    user: SessionUser = Depends(config_editor_user),
 ) -> Response:
     if not active_workspace:
         return RedirectResponse(
-            f'/admin?{urlencode({"vendor_mapping_error": "Open a workspace before editing Vendor Mappings."})}',
+            f'/workspace-config?{urlencode({"vendor_mapping_error": "Open a workspace before editing Vendor Mappings."})}',
             status_code=status.HTTP_303_SEE_OTHER,
         )
     parsed_aliases = [value.strip() for value in re.split(r'[\n,;]+', aliases) if value.strip()]
@@ -15775,7 +15925,7 @@ def save_admin_vendor_mapping_group(
             )
     except (ValueError, sqlite3.IntegrityError) as exc:
         return RedirectResponse(
-            f'/admin?{urlencode({"vendor_mapping_error": str(exc)})}',
+            f'/workspace-config?{urlencode({"vendor_mapping_error": str(exc)})}',
             status_code=status.HTTP_303_SEE_OTHER,
         )
     ANALYSIS_CACHE.clear()
@@ -15790,26 +15940,26 @@ def save_admin_vendor_mapping_group(
     if renamed_templates or renamed_dashboards:
         notice += f' Updated {renamed_templates} Report Template(s) and {renamed_dashboards} Dashboard(s).'
     return RedirectResponse(
-        f'/admin?{urlencode({"vendor_mapping_notice": notice})}',
+        f'/workspace-config?{urlencode({"vendor_mapping_notice": notice})}',
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
 
-@app.post('/admin/operator-mappings/delete')
+@app.post('/workspace-config/operator-mappings/delete')
 def delete_admin_operator_mapping_group(
     canonical_value: str = Form(...),
-    user: SessionUser = Depends(admin_user),
+    user: SessionUser = Depends(config_editor_user),
 ) -> Response:
     if not active_workspace:
         return RedirectResponse(
-            f'/admin?{urlencode({"operator_mapping_error": "Open a workspace before editing Operator Mappings."})}',
+            f'/workspace-config?{urlencode({"operator_mapping_error": "Open a workspace before editing Operator Mappings."})}',
             status_code=status.HTTP_303_SEE_OTHER,
         )
     try:
         repository.delete_operator_mapping_group(canonical_value)
     except ValueError as exc:
         return RedirectResponse(
-            f'/admin?{urlencode({"operator_mapping_error": str(exc)})}',
+            f'/workspace-config?{urlencode({"operator_mapping_error": str(exc)})}',
             status_code=status.HTTP_303_SEE_OTHER,
         )
     ANALYSIS_CACHE.clear()
@@ -15817,26 +15967,26 @@ def delete_admin_operator_mapping_group(
     _clear_chart_preview_caches()
     repository.add_log(user.username, 'operator_mapping_group_delete', canonical_value.strip())
     return RedirectResponse(
-        f'/admin?{urlencode({"operator_mapping_notice": "Operator Mapping deleted."})}',
+        f'/workspace-config?{urlencode({"operator_mapping_notice": "Operator Mapping deleted."})}',
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
 
-@app.post('/admin/vendor-mappings/delete')
+@app.post('/workspace-config/vendor-mappings/delete')
 def delete_admin_vendor_mapping_group(
     canonical_value: str = Form(...),
-    user: SessionUser = Depends(admin_user),
+    user: SessionUser = Depends(config_editor_user),
 ) -> Response:
     if not active_workspace:
         return RedirectResponse(
-            f'/admin?{urlencode({"vendor_mapping_error": "Open a workspace before editing Vendor Mappings."})}',
+            f'/workspace-config?{urlencode({"vendor_mapping_error": "Open a workspace before editing Vendor Mappings."})}',
             status_code=status.HTTP_303_SEE_OTHER,
         )
     try:
         repository.delete_vendor_mapping_group(canonical_value)
     except ValueError as exc:
         return RedirectResponse(
-            f'/admin?{urlencode({"vendor_mapping_error": str(exc)})}',
+            f'/workspace-config?{urlencode({"vendor_mapping_error": str(exc)})}',
             status_code=status.HTTP_303_SEE_OTHER,
         )
     ANALYSIS_CACHE.clear()
@@ -15844,17 +15994,17 @@ def delete_admin_vendor_mapping_group(
     _clear_chart_preview_caches()
     repository.add_log(user.username, 'vendor_mapping_group_delete', canonical_value.strip())
     return RedirectResponse(
-        f'/admin?{urlencode({"vendor_mapping_notice": "Vendor Mapping deleted."})}',
+        f'/workspace-config?{urlencode({"vendor_mapping_notice": "Vendor Mapping deleted."})}',
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
 
-@app.post('/admin/{mapping_type}-mappings/move')
+@app.post('/workspace-config/{mapping_type}-mappings/move')
 def move_admin_chart_mapping_group(
     mapping_type: str,
     canonical_value: str = Form(...),
     direction: str = Form(...),
-    user: SessionUser = Depends(admin_user),
+    user: SessionUser = Depends(config_editor_user),
 ) -> Response:
     if mapping_type not in {'operator', 'vendor'}:
         raise HTTPException(status_code=404, detail='Unknown mapping type.')
@@ -15863,7 +16013,7 @@ def move_admin_chart_mapping_group(
     except ValueError as exc:
         parameter = f'{mapping_type}_mapping_error'
         return RedirectResponse(
-            f'/admin?{urlencode({parameter: str(exc)})}', status_code=status.HTTP_303_SEE_OTHER,
+            f'/workspace-config?{urlencode({parameter: str(exc)})}', status_code=status.HTTP_303_SEE_OTHER,
         )
     ANALYSIS_CACHE.clear()
     DATAFRAME_CACHE.clear()
@@ -15873,7 +16023,7 @@ def move_admin_chart_mapping_group(
     }))
     parameter = f'{mapping_type}_mapping_notice'
     return RedirectResponse(
-        f'/admin?{urlencode({parameter: f"{mapping_type.title()} Mapping order updated."})}',
+        f'/workspace-config?{urlencode({parameter: f"{mapping_type.title()} Mapping order updated."})}',
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -15907,13 +16057,13 @@ async def delete_admin_database_table_row(request: Request, user: SessionUser = 
     return JSONResponse({'ok': True, 'message': 'Row deleted.'})
 
 
-@app.get('/admin/catalogue-filter-values')
+@app.get('/workspace-config/catalogue-filter-values')
 def catalogue_filter_values(
     source: str,
     column: str,
     technology: str = '',
     catalogue_id: str = '',
-    user: SessionUser = Depends(admin_user),
+    user: SessionUser = Depends(config_editor_user),
 ) -> JSONResponse:
     """Return values only for the field currently being configured in the editor."""
     normalized_source = source.strip().casefold()
@@ -15960,7 +16110,7 @@ def _import_report_catalogue(
         raise HTTPException(status_code=404, detail='Report technology not found')
     if not catalogue_file or not catalogue_file.filename or Path(catalogue_file.filename).suffix.lower() != '.csv':
         query = urlencode({'catalogue_error': 'Select a CSV Report Template.'})
-        return RedirectResponse(f'/admin?{query}', status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(f'/workspace-config?{query}', status_code=status.HTTP_303_SEE_OTHER)
     try:
         # Preserve meaningful hyphens in the uploaded filename; only turn
         # underscores into spaces when deriving a display name automatically.
@@ -16007,7 +16157,7 @@ def _import_report_catalogue(
             'error': str(exc),
         }))
         query = urlencode({'catalogue_error': str(exc)})
-        return RedirectResponse(f'/admin?{query}', status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(f'/workspace-config?{query}', status_code=status.HTTP_303_SEE_OTHER)
     repository.add_log(user.username, 'import_report_template', json.dumps({
         'technology': technology,
         'template_name': catalogue_name,
@@ -16016,10 +16166,10 @@ def _import_report_catalogue(
     }))
     action = 'Overwrote' if existing_template else 'Imported'
     query = urlencode({'catalogue_notice': f"{action} {catalogue_name} ({technology.upper()})."})
-    return RedirectResponse(f'/admin?{query}', status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(f'/workspace-config?{query}', status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post('/admin/report-templates/{technology}', response_class=HTMLResponse)
+@app.post('/workspace-config/report-templates/{technology}', response_class=HTMLResponse)
 def import_report_catalogue(
     request: Request,
     technology: str,
@@ -16027,13 +16177,13 @@ def import_report_catalogue(
     catalogue_name: str = Form(''),
     convert_catalogue: bool = Form(False),
     overwrite_existing: bool = Form(False),
-    user: SessionUser = Depends(admin_user),
+    user: SessionUser = Depends(config_editor_user),
 ) -> HTMLResponse:
     """Compatibility endpoint for existing NSA/SA-specific imports."""
     return _import_report_catalogue(request, technology, catalogue_file, catalogue_name, convert_catalogue, overwrite_existing, user)
 
 
-@app.post('/admin/slides-templates/import', response_class=HTMLResponse)
+@app.post('/workspace-config/slides-templates/import', response_class=HTMLResponse)
 def import_slides_template(
     request: Request,
     template_type: str = Form('nsa'),
@@ -16041,55 +16191,55 @@ def import_slides_template(
     catalogue_name: str = Form(''),
     convert_catalogue: bool = Form(False),
     overwrite_existing: bool = Form(False),
-    user: SessionUser = Depends(admin_user),
+    user: SessionUser = Depends(config_editor_user),
 ) -> HTMLResponse:
     """Import one Report Template after the user has selected its NSA/SA type."""
     return _import_report_catalogue(request, template_type, catalogue_file, catalogue_name, convert_catalogue, overwrite_existing, user)
 
 
-@app.post('/admin/report-templates/{technology}/{catalogue_id}/activate', response_class=HTMLResponse)
+@app.post('/workspace-config/report-templates/{technology}/{catalogue_id}/activate', response_class=HTMLResponse)
 def activate_report_catalogue(
     request: Request,
     technology: str,
     catalogue_id: str,
-    user: SessionUser = Depends(admin_user),
+    user: SessionUser = Depends(config_editor_user),
 ) -> HTMLResponse:
     technology = technology.strip().lower()
     if technology not in TEMPLATE_NAMES:
         raise HTTPException(status_code=404, detail='Report technology not found')
     available = {option['identifier']: option for option in report_catalogue_options(technology)}
     if catalogue_id not in available:
-        return render_admin_template(request, user, error='Report Template not found.', status_code=404)
+        return render_workspace_config_template(request, user, error='Report Template not found.', status_code=404)
     promote_report_template_to_default(technology, catalogue_id)
     repository.add_log(user.username, 'activate_report_template', json.dumps({
         'technology': technology,
         'template': available[catalogue_id]['name'],
     }))
-    return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse('/workspace-config', status_code=status.HTTP_303_SEE_OTHER)
 
 
 def _named_catalogue(technology: str, catalogue_id: str) -> dict[str, Any] | None:
     return next((item for item in report_catalogue_options(technology) if item['identifier'] == catalogue_id), None)
 
 
-@app.post('/admin/report-templates/{technology}/{catalogue_id}/type', response_class=HTMLResponse)
+@app.post('/workspace-config/report-templates/{technology}/{catalogue_id}/type', response_class=HTMLResponse)
 def change_report_catalogue_type(
     request: Request,
     technology: str,
     catalogue_id: str,
     template_type: str = Form(...),
-    user: SessionUser = Depends(admin_user),
+    user: SessionUser = Depends(config_editor_user),
 ) -> HTMLResponse:
     """Move a non-default Report Template between the NSA and SA libraries."""
     technology = technology.strip().lower()
     target_technology = template_type.strip().lower()
     catalogue = _named_catalogue(technology, catalogue_id) if technology in TEMPLATE_NAMES else None
     if not catalogue or target_technology not in TEMPLATE_NAMES:
-        return render_admin_template(request, user, error='Report Template or target type was not found.', status_code=404)
+        return render_workspace_config_template(request, user, error='Report Template or target type was not found.', status_code=404)
     if target_technology == technology:
-        return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse('/workspace-config', status_code=status.HTTP_303_SEE_OTHER)
     if catalogue['active']:
-        return render_admin_template(
+        return render_workspace_config_template(
             request,
             user,
             error='Set another template as default before changing the type of the current default template.',
@@ -16110,29 +16260,29 @@ def change_report_catalogue_type(
         repository.move_report_template(technology, catalogue_id, target_technology)
         repository.set_report_template_content(target_technology, catalogue_id, content)
     except ValueError as exc:
-        return render_admin_template(request, user, error=str(exc), status_code=400)
+        return render_workspace_config_template(request, user, error=str(exc), status_code=400)
     repository.add_log(user.username, 'change_report_template_type', json.dumps({
         'source_type': technology,
         'target_type': target_technology,
         'template': name,
     }))
-    return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse('/workspace-config', status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post('/admin/report-templates/{technology}/{catalogue_id}/rename', response_class=HTMLResponse)
+@app.post('/workspace-config/report-templates/{technology}/{catalogue_id}/rename', response_class=HTMLResponse)
 def rename_report_catalogue(
     request: Request,
     technology: str,
     catalogue_id: str,
     catalogue_name: str = Form(...),
-    user: SessionUser = Depends(admin_user),
+    user: SessionUser = Depends(config_editor_user),
 ) -> HTMLResponse:
     technology = technology.strip().lower()
     catalogue = _named_catalogue(technology, catalogue_id) if technology in TEMPLATE_NAMES else None
     if not catalogue:
         if 'application/json' in request.headers.get('accept', ''):
             return JSONResponse({'error': 'Report Template not found.'}, status_code=404)
-        return render_admin_template(request, user, error='Report Template not found.', status_code=404)
+        return render_workspace_config_template(request, user, error='Report Template not found.', status_code=404)
     try:
         name = catalogue_name.strip()
         if not name:
@@ -16154,24 +16304,24 @@ def rename_report_catalogue(
     except ValueError as exc:
         if 'application/json' in request.headers.get('accept', ''):
             return JSONResponse({'error': str(exc)}, status_code=400)
-        return render_admin_template(request, user, error=str(exc), status_code=400)
+        return render_workspace_config_template(request, user, error=str(exc), status_code=400)
     repository.add_log(user.username, 'rename_report_template', json.dumps({'technology': technology, 'template': catalogue_id, 'name': name}))
     if 'application/json' in request.headers.get('accept', ''):
         return JSONResponse({'name': name, 'identifier': catalogue_id})
-    return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse('/workspace-config', status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post('/admin/report-templates/{technology}/{catalogue_id}/duplicate', response_class=HTMLResponse)
+@app.post('/workspace-config/report-templates/{technology}/{catalogue_id}/duplicate', response_class=HTMLResponse)
 def duplicate_report_catalogue(
     request: Request,
     technology: str,
     catalogue_id: str,
-    user: SessionUser = Depends(admin_user),
+    user: SessionUser = Depends(config_editor_user),
 ) -> HTMLResponse:
     technology = technology.strip().lower()
     catalogue = _named_catalogue(technology, catalogue_id) if technology in TEMPLATE_NAMES else None
     if not catalogue:
-        return render_admin_template(request, user, error='Report Template not found.', status_code=404)
+        return render_workspace_config_template(request, user, error='Report Template not found.', status_code=404)
     names = {str(row['name']) for row in repository.list_report_templates(technology)}
     # The physical CSV name is the canonical template name.  Deriving the
     # duplicate label from it prevents a stale/default registry label from
@@ -16187,12 +16337,12 @@ def duplicate_report_catalogue(
         suffix += 1
     repository.add_report_template(technology, identifier, bytes(catalogue['content']))
     repository.add_log(user.username, 'duplicate_report_template', json.dumps({'technology': technology, 'source': catalogue_id, 'template': name}))
-    return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse('/workspace-config', status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post('/admin/slides-templates/new', response_class=HTMLResponse)
+@app.post('/workspace-config/slides-templates/new', response_class=HTMLResponse)
 def create_empty_report_catalogue(
-    user: SessionUser = Depends(admin_user),
+    user: SessionUser = Depends(config_editor_user),
 ) -> HTMLResponse:
     """Create a blank NSA template that can immediately be renamed or edited."""
     technology = 'nsa'
@@ -16210,27 +16360,27 @@ def create_empty_report_catalogue(
         'template': name,
     }))
     query = urlencode({'catalogue_technology': technology, 'catalogue_id': name})
-    return RedirectResponse(f'/admin?{query}#catalogue-editor', status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(f'/workspace-config?{query}#catalogue-editor', status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post('/admin/report-templates/{technology}/{catalogue_id}/delete', response_class=HTMLResponse)
+@app.post('/workspace-config/report-templates/{technology}/{catalogue_id}/delete', response_class=HTMLResponse)
 def delete_report_catalogue(
     request: Request,
     technology: str,
     catalogue_id: str,
-    user: SessionUser = Depends(admin_user),
+    user: SessionUser = Depends(config_editor_user),
 ) -> HTMLResponse:
     technology = technology.strip().lower()
     if technology not in TEMPLATE_NAMES:
         raise HTTPException(status_code=404, detail='Report technology not found')
     catalogue = _named_catalogue(technology, catalogue_id)
     if not catalogue:
-        return render_admin_template(request, user, error='Report Template not found.', status_code=404)
+        return render_workspace_config_template(request, user, error='Report Template not found.', status_code=404)
     if catalogue['active']:
-        return render_admin_template(request, user, error='The default template cannot be deleted.', status_code=400)
+        return render_workspace_config_template(request, user, error='The default template cannot be deleted.', status_code=400)
     repository.delete_report_template(technology, catalogue_id)
     repository.add_log(user.username, 'delete_report_template', json.dumps({'technology': technology, 'template': catalogue['name']}))
-    return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse('/workspace-config', status_code=status.HTTP_303_SEE_OTHER)
 
 
 def finalize_template_save(
@@ -16260,14 +16410,14 @@ def finalize_template_save(
         warnings.warn(f'Unable to log Report Template save: {exc}', RuntimeWarning)
 
 
-@app.post('/admin/report-templates/{technology}/{catalogue_id}/save')
+@app.post('/workspace-config/report-templates/{technology}/{catalogue_id}/save')
 def save_report_catalogue(
     request: Request,
     background_tasks: BackgroundTasks,
     technology: str,
     catalogue_id: str,
     catalogue_content: str = Form(...),
-    user: SessionUser = Depends(admin_user),
+    user: SessionUser = Depends(config_editor_user),
 ) -> Response:
     wants_json = 'application/json' in request.headers.get('accept', '')
     technology = technology.strip().lower()
@@ -16293,16 +16443,16 @@ def save_report_catalogue(
     except ValueError as exc:
         if wants_json:
             return JSONResponse({'detail': str(exc)}, status_code=400)
-        return render_admin_template(request, user, error=str(exc), status_code=400)
+        return render_workspace_config_template(request, user, error=str(exc), status_code=400)
     except TimeoutError as exc:
         if wants_json:
             return JSONResponse({'detail': str(exc)}, status_code=status.HTTP_409_CONFLICT)
-        return render_admin_template(request, user, error=str(exc), status_code=status.HTTP_409_CONFLICT)
+        return render_workspace_config_template(request, user, error=str(exc), status_code=status.HTTP_409_CONFLICT)
     except (FileNotFoundError, OSError, sqlite3.Error) as exc:
         detail = f'Unable to save the Report Template: {exc}'
         if wants_json:
             return JSONResponse({'detail': detail}, status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
-        return render_admin_template(request, user, error=detail, status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return render_workspace_config_template(request, user, error=detail, status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
     chart_rows = sum(1 for entry in entries if entry.source_kind)
     task_repository = Repository(Path(repository.db_path), Path(repository.global_db_path))
     background_tasks.add_task(finalize_template_save, task_repository, user.username, technology, template_name, chart_rows)
@@ -16313,15 +16463,15 @@ def save_report_catalogue(
             'chart_rows': chart_rows,
         })
     query = urlencode({'catalogue_technology': technology, 'catalogue_id': catalogue_id})
-    return RedirectResponse(f'/admin?{query}', status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(f'/workspace-config?{query}', status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post('/admin/report-templates/{technology}/{catalogue_id}/chart-preview')
+@app.post('/workspace-config/report-templates/{technology}/{catalogue_id}/chart-preview')
 async def preview_report_template_chart(
     request: Request,
     technology: str,
     catalogue_id: str,
-    user: SessionUser = Depends(admin_user),
+    user: SessionUser = Depends(config_editor_user),
 ) -> Response:
     """Preview one unsaved editor chart against ready CDRs in this workspace."""
     if not active_workspace:
@@ -16432,12 +16582,12 @@ async def preview_report_template_chart(
     })
 
 
-@app.post('/admin/report-templates/{technology}/{catalogue_id}/chart-image-preview')
+@app.post('/workspace-config/report-templates/{technology}/{catalogue_id}/chart-image-preview')
 async def preview_report_template_chart_image(
     request: Request,
     technology: str,
     catalogue_id: str,
-    user: SessionUser = Depends(admin_user),
+    user: SessionUser = Depends(config_editor_user),
 ) -> Response:
     """Render one unsaved editor chart using the regular report renderer."""
     if not active_workspace:
@@ -16484,8 +16634,8 @@ async def preview_report_template_chart_image(
     return Response(content=image, media_type='image/png')
 
 
-@app.get('/admin/report-templates/{technology}/export')
-def export_report_catalogue(technology: str, user: SessionUser = Depends(admin_user)) -> Response:
+@app.get('/workspace-config/report-templates/{technology}/export')
+def export_report_catalogue(technology: str, user: SessionUser = Depends(config_editor_user)) -> Response:
     technology = technology.strip().lower()
     if technology not in TEMPLATE_NAMES:
         raise HTTPException(status_code=404, detail='Report technology not found')
@@ -16503,10 +16653,10 @@ def export_report_catalogue(technology: str, user: SessionUser = Depends(admin_u
     )
 
 
-@app.get('/admin/report-templates/export-selected')
+@app.get('/workspace-config/report-templates/export-selected')
 def export_selected_report_catalogue(
     catalogue_selection: str,
-    user: SessionUser = Depends(admin_user),
+    user: SessionUser = Depends(config_editor_user),
 ) -> Response:
     if ':' not in catalogue_selection:
         raise HTTPException(status_code=400, detail='Select a Report Template to export.')
@@ -16524,8 +16674,8 @@ def export_selected_report_catalogue(
     )
 
 
-@app.get('/admin/report-templates/{technology}/{catalogue_id}/export')
-def export_named_report_catalogue(technology: str, catalogue_id: str, user: SessionUser = Depends(admin_user)) -> Response:
+@app.get('/workspace-config/report-templates/{technology}/{catalogue_id}/export')
+def export_named_report_catalogue(technology: str, catalogue_id: str, user: SessionUser = Depends(config_editor_user)) -> Response:
     technology = technology.strip().lower()
     if technology not in TEMPLATE_NAMES:
         raise HTTPException(status_code=404, detail='Report technology not found')
@@ -16552,9 +16702,11 @@ def create_user(
 ) -> HTMLResponse:
     try:
         normalized_role = role.strip().lower()
-        if normalized_role not in {'admin', 'user', 'super-admin'}:
+        if normalized_role == 'user':
+            normalized_role = 'user-viewer'
+        if normalized_role not in {'user-viewer', 'user-editor', 'admin', 'super-admin'}:
             raise ValueError('Unsupported role')
-        if user.role != 'super-admin' and normalized_role not in {'admin', 'user'}:
+        if user.role != 'super-admin' and normalized_role == 'super-admin':
             raise ValueError('Only super-admins can create super-admin users.')
         repository.create_user(username, password, normalized_role)
         created = repository.get_user_by_id(max(int(row['id']) for row in repository.list_users() if row['username'] == username.strip()))
@@ -16599,13 +16751,15 @@ def update_user_account(
         return render_admin_template(request, user, error=message, status_code=status_code)
 
     normalized_role = role.strip().lower()
+    if normalized_role == 'user':
+        normalized_role = 'user-viewer'
     target_user = repository.get_user_by_id(target_user_id)
     if not target_user:
         return failure('User not found', 404)
     normalized_username = username.strip() if not edited_field or edited_field == 'username' else str(target_user['username'])
     if not normalized_username:
         return failure('Username cannot be empty', 400, target_user)
-    if normalized_role not in {'admin', 'user', 'super-admin'}:
+    if normalized_role not in {'user-viewer', 'user-editor', 'admin', 'super-admin'}:
         return failure('Unsupported role', 400, target_user)
     if user.role != 'super-admin' and (
         target_user['role'] == 'super-admin' or normalized_role == 'super-admin'
@@ -16734,8 +16888,8 @@ def _catalogue_slide_blocks(entries: list[CatalogEntry]) -> list[list[CatalogEnt
     return blocks
 
 
-@app.get('/api/admin/report-templates/copy-options')
-def report_catalogue_copy_options(user: SessionUser = Depends(admin_user)) -> JSONResponse:
+@app.get('/api/workspace-config/report-templates/copy-options')
+def report_catalogue_copy_options(user: SessionUser = Depends(config_editor_user)) -> JSONResponse:
     templates: list[dict[str, Any]] = []
     for technology in TEMPLATE_NAMES:
         for catalogue in report_catalogue_options(technology):
@@ -16857,10 +17011,10 @@ def get_workspace_calculated_dimensions(
     }, headers={'Cache-Control': 'no-store'})
 
 
-@app.put('/api/admin/report-templates/{technology}/{catalogue_id}/calculated-dimensions')
+@app.put('/api/workspace-config/report-templates/{technology}/{catalogue_id}/calculated-dimensions')
 async def save_report_template_calculated_dimensions(
     request: Request, technology: str, catalogue_id: str,
-    user: SessionUser = Depends(admin_user),
+    user: SessionUser = Depends(config_editor_user),
 ) -> JSONResponse:
     """Backward-compatible editor endpoint backed by the active workspace."""
     return await _save_workspace_dimensions(request, user)
@@ -17046,12 +17200,12 @@ async def import_workspace_calculated_dimensions(
     return RedirectResponse(f'/workspace?{query}#calculated-dimensions', status_code=303)
 
 
-@app.post('/admin/report-templates/{technology}/{catalogue_id}/copy-items')
+@app.post('/workspace-config/report-templates/{technology}/{catalogue_id}/copy-items')
 async def copy_report_catalogue_items(
     request: Request,
     technology: str,
     catalogue_id: str,
-    user: SessionUser = Depends(admin_user),
+    user: SessionUser = Depends(config_editor_user),
 ) -> JSONResponse:
     try:
         payload = await request.json()

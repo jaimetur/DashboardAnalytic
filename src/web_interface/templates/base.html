@@ -59,14 +59,17 @@
           {% if active_workspace %}
           <a class="module-tab module-tab-datasets-analysis{% if request.url.path == '/datasets-analysis' %} active{% endif %}" href="/datasets-analysis" title="Open Datasets Analysis"><span class="module-tab-label-desktop">Datasets Analysis</span><span class="module-tab-label-mobile">Analysis</span></a>
           <a class="module-tab module-tab-e2e-dashboards{% if request.url.path == '/e2e-dashboards' %} active{% endif %}" href="/e2e-dashboards" title="Open E2E Dashboards"><span class="module-tab-label-desktop">E2E Dashboards</span><span class="module-tab-label-mobile">Dashboards</span></a>
-          <a class="module-tab module-tab-reporting{% if request.url.path == '/e2e-reporting' %} active{% endif %}" href="/e2e-reporting" title="Open E2E Reporting"><span class="module-tab-label-desktop">E2E Reporting</span><span class="module-tab-label-mobile">Reporting</span></a>
-          <a class="module-tab module-tab-chart-builder{% if request.url.path == '/chart-builder' %} active{% endif %}" href="/chart-builder" title="Build an ad-hoc chart"><span class="module-tab-label-desktop">Chart Builder</span><span class="module-tab-label-mobile">Builder</span></a>
-          <a class="module-tab module-tab-chart-builder{% if request.url.path == '/query-builder' %} active{% endif %}" href="/query-builder" title="Build read-only CDR queries"><span class="module-tab-label-desktop">Query Builder</span><span class="module-tab-label-mobile">Query</span></a>
+          {% if user.role == 'super-admin' or user.username|upper == 'EJAITUR' %}<a class="module-tab module-tab-reporting{% if request.url.path == '/e2e-reporting' %} active{% endif %}" href="/e2e-reporting" title="Open E2E Reporting"><span class="module-tab-label-desktop">E2E Reporting</span><span class="module-tab-label-mobile">Reporting</span></a>{% endif %}
+          <button type="button" class="module-tab module-tab-chart-builder{% if request.url.path in ['/chart-builder', '/query-builder'] %} active{% endif %}" popovertarget="module-builders-options" aria-haspopup="true" aria-expanded="false" aria-label="Choose builder" data-module-builders-trigger>Builders <span aria-hidden="true">▾</span></button>
+          <nav id="module-builders-options" class="module-builders-options" aria-label="Builders" popover data-module-builders-options>
+            <a href="/chart-builder"{% if request.url.path == '/chart-builder' %} class="is-active" aria-current="page"{% endif %}>Chart Builder</a>
+            <a href="/query-builder"{% if request.url.path == '/query-builder' %} class="is-active" aria-current="page"{% endif %}>Query Builder</a>
+          </nav>
           {% else %}
           <span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use Datasets Analysis"><span class="module-tab-label-desktop">Datasets Analysis</span><span class="module-tab-label-mobile">Analysis</span></span>
           <span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use E2E Dashboards"><span class="module-tab-label-desktop">E2E Dashboards</span><span class="module-tab-label-mobile">Dashboards</span></span>
-          <span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use E2E Reporting"><span class="module-tab-label-desktop">E2E Reporting</span><span class="module-tab-label-mobile">Reporting</span></span>
-          <span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use Chart Builder"><span class="module-tab-label-desktop">Chart Builder</span><span class="module-tab-label-mobile">Builder</span></span>
+          {% if user.role == 'super-admin' or user.username|upper == 'EJAITUR' %}<span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use E2E Reporting"><span class="module-tab-label-desktop">E2E Reporting</span><span class="module-tab-label-mobile">Reporting</span></span>{% endif %}
+          <span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use Builders">Builders</span>
           {% endif %}
         </div>
         <div class="module-tabs-secondary" aria-label="Documentation and administration">
@@ -74,7 +77,13 @@
           <a class="module-tab module-tab-utility{% if request.url.path == '/documents/view/changelog' %} active{% endif %}" href="/documents/view/changelog" title="Open Changelog">Changelog</a>
           <a class="module-tab module-tab-utility{% if request.url.path.startswith('/documents/view/help') %} active{% endif %}" href="/documents/view/help" title="Open Help">Help</a>
           <a class="module-tab module-tab-app-logs{% if request.url.path == '/app-logs' %} active{% endif %}" href="/app-logs" title="Open App Logs">App Logs</a>
-          {% if user.role in ['admin', 'super-admin'] %}<a class="module-tab module-tab-config{% if request.url.path == '/config' %} active{% endif %}" href="/config" title="Open application configuration">Config</a>{% endif %}
+          {% if user.role in ['user-editor', 'admin', 'super-admin'] %}
+          <button type="button" class="module-tab module-tab-config{% if request.url.path in ['/application-config', '/workspace-config'] %} active{% endif %}" popovertarget="module-config-options" aria-haspopup="true" aria-expanded="false" aria-label="Choose configuration page" data-module-config-trigger>Config <span aria-hidden="true">▾</span></button>
+          <nav id="module-config-options" class="module-config-options" aria-label="Configuration pages" popover data-module-config-options>
+            <a href="/application-config"{% if request.url.path == '/application-config' %} class="is-active" aria-current="page"{% endif %}>Application Config</a>
+            <a href="/workspace-config"{% if request.url.path == '/workspace-config' %} class="is-active" aria-current="page"{% endif %}>Workspace Config</a>
+          </nav>
+          {% endif %}
           {% if user.role in ['admin', 'super-admin'] %}<a class="module-tab module-tab-admin{% if request.url.path == '/admin' %} active{% endif %}" href="/admin" title="Open Admin">Admin</a>{% endif %}
         </div>
       </nav>
@@ -89,6 +98,7 @@
         <p data-page-panel-navigator-empty hidden>No panels available.</p>
       </div>
       <button type="button" class="page-panel-navigator-tab" data-page-panel-navigator-toggle aria-expanded="false" aria-controls="page-panel-navigator" title="Navigate page sections"><span>Sections</span></button>
+      <span class="edge-navigator-hover-target" aria-hidden="true"></span>
     </aside>
     <aside class="page-panel-navigator module-navigator" id="module-navigator" aria-label="Application modules" data-module-navigator>
       <div class="page-panel-navigator-drawer">
@@ -101,13 +111,13 @@
               {% if active_workspace %}
               <a href="/datasets-analysis"{% if request.url.path == '/datasets-analysis' %} class="is-active" aria-current="page"{% endif %}>Dataset Analysis</a>
               <a href="/e2e-dashboards"{% if request.url.path == '/e2e-dashboards' %} class="is-active" aria-current="page"{% endif %}>E2E Dashboard</a>
-              <a href="/e2e-reporting"{% if request.url.path == '/e2e-reporting' %} class="is-active" aria-current="page"{% endif %}>E2E Reporting</a>
+              {% if user.role == 'super-admin' or user.username|upper == 'EJAITUR' %}<a href="/e2e-reporting"{% if request.url.path == '/e2e-reporting' %} class="is-active" aria-current="page"{% endif %}>E2E Reporting</a>{% endif %}
               <a href="/chart-builder"{% if request.url.path == '/chart-builder' %} class="is-active" aria-current="page"{% endif %}>Chart Builder</a>
               <a href="/query-builder"{% if request.url.path == '/query-builder' %} class="is-active" aria-current="page"{% endif %}>Query Builder</a>
               {% else %}
               <span class="is-disabled" aria-disabled="true">Dataset Analysis</span>
               <span class="is-disabled" aria-disabled="true">E2E Dashboard</span>
-              <span class="is-disabled" aria-disabled="true">E2E Reporting</span>
+              {% if user.role == 'super-admin' or user.username|upper == 'EJAITUR' %}<span class="is-disabled" aria-disabled="true">E2E Reporting</span>{% endif %}
               <span class="is-disabled" aria-disabled="true">Chart Builder</span>
               {% endif %}
             </nav>
@@ -115,14 +125,12 @@
           <section class="module-navigator-category" aria-labelledby="module-navigator-administration-title">
             <h4 id="module-navigator-administration-title">Administrative Modules</h4>
             <nav aria-label="Administrative modules">
-              {% if user.role in ['admin', 'super-admin'] %}
-              <a href="/admin"{% if request.url.path == '/admin' %} class="is-active" aria-current="page"{% endif %}>Administrator Panel</a>
-              <a href="/config"{% if request.url.path == '/config' %} class="is-active" aria-current="page"{% endif %}>Configuration Panel</a>
-              {% else %}
-              <span class="is-disabled" aria-disabled="true">Administrator Panel</span>
-              <span class="is-disabled" aria-disabled="true">Configuration Panel</span>
-              {% endif %}
               <a href="/app-logs"{% if request.url.path == '/app-logs' %} class="is-active" aria-current="page"{% endif %}>Application Logs</a>
+              {% if user.role in ['user-editor', 'admin', 'super-admin'] %}
+              <a href="/application-config"{% if request.url.path == '/application-config' %} class="is-active" aria-current="page"{% endif %}>Application Config</a>
+              <a href="/workspace-config"{% if request.url.path == '/workspace-config' %} class="is-active" aria-current="page"{% endif %}>Workspace Config</a>
+              {% endif %}
+              {% if user.role in ['admin', 'super-admin'] %}<a href="/admin"{% if request.url.path == '/admin' %} class="is-active" aria-current="page"{% endif %}>Administrator Config</a>{% endif %}
             </nav>
           </section>
           <section class="module-navigator-category" aria-labelledby="module-navigator-documentation-title">
@@ -136,6 +144,7 @@
         </div>
       </div>
       <button type="button" class="page-panel-navigator-tab" data-module-navigator-toggle aria-expanded="false" aria-controls="module-navigator" title="Navigate application modules"><span>Modules</span></button>
+      <span class="edge-navigator-hover-target" aria-hidden="true"></span>
     </aside>
     {% endif %}
   </div>

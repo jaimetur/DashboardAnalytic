@@ -1455,6 +1455,31 @@ def test_dashboards_lifecycle_and_layout(client):
     assert client.get('/api/e2e-dashboards').json() == {}
 
 
+def test_e2e_reporting_is_restricted_to_super_admins_and_ejaitur(client):
+    client.post('/login', data={'username': 'admin', 'password': 'admin123'})
+    workspace_page = client.get('/workspace')
+    assert workspace_page.status_code == 200
+    assert 'href="/e2e-reporting"' not in workspace_page.text
+    assert 'E2E Reporting' not in workspace_page.text
+    assert client.get('/e2e-reporting').status_code == 403
+    assert client.get('/api/e2e-reporting/jobs').status_code == 403
+
+    super_admin_token = 'e2e-reporting-super-admin'
+    core.SESSIONS[super_admin_token] = core.SessionUser(username='someone', role='super-admin')
+    client.cookies.set(core.SESSION_COOKIE, super_admin_token)
+    super_admin_page = client.get('/e2e-reporting')
+    assert super_admin_page.status_code == 200
+    assert 'href="/e2e-reporting"' in super_admin_page.text
+
+    token = 'e2e-reporting-allowed-user'
+    core.SESSIONS[token] = core.SessionUser(username='EJAITUR', role='user')
+    client.cookies.set(core.SESSION_COOKIE, token)
+    allowed_page = client.get('/e2e-reporting')
+    assert allowed_page.status_code == 200
+    assert 'href="/e2e-reporting"' in allowed_page.text
+    assert client.get('/api/e2e-reporting/jobs').status_code == 200
+
+
 def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypatch):
     payload = setup_dashboard(client)
     payload['slide_comments'] = {'1': ['Review city outliers', 'Validate campaign coverage']}

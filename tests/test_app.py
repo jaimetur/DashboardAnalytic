@@ -546,6 +546,70 @@ process.stdout.write(JSON.stringify(result));
     assert result['unrepresentableQuery'] is None
 
 
+def test_query_builder_mode_switch_accepts_generated_guidance_but_rejects_manual_sql() -> None:
+    node_binary = shutil.which('node')
+    if node_binary is None:
+        pytest.skip('Node.js is required to exercise Query Builder mode switching.')
+
+    template = (Path(__file__).resolve().parents[1] / 'src/web_interface/templates/query_builder.html').read_text(encoding='utf-8')
+    assert '>Assistance Mode</button>' in template
+    assert '>SQL Mode</button>' in template
+
+    def extract(start_marker: str, end_marker: str) -> str:
+        start = template.index(start_marker)
+        return template[start:template.index(end_marker, start)].strip()
+
+    script_data = {
+        'build_sql': extract('  function buildAssistedSql() {', '\n  const setMode'),
+        'set_mode': extract('  const setMode = ', '\n  modeButtons.forEach'),
+    }
+    node_harness = r"""
+const fs = require('node:fs');
+const vm = require('node:vm');
+const source = JSON.parse(fs.readFileSync(0, 'utf8'));
+const context = {
+  mode: 'assisted', lastGeneratedSql: '', assistantValid: false,
+  editor: {value: '', readOnly: true}, editorLabel: {textContent: ''},
+  assistant: {hidden: false}, assistantStatus: {textContent: ''}, status: {textContent: ''},
+  modeButtons: [{dataset: {sqlMode: 'assisted'}, setAttribute() {}}, {dataset: {sqlMode: 'sql'}, setAttribute() {}}],
+  selectedKinds: () => [], availableColumns: () => ['cdr_type'],
+  allFields: {checked: false}, fieldsPicker: {selectedOptions: []},
+  syncActionAvailability() {},
+};
+const script = `${source.build_sql}
+${source.set_mode}
+buildAssistedSql();
+const initialPreview = editor.value;
+setMode('sql');
+const sqlLabel = editorLabel.textContent;
+setMode('assisted');
+const initialReturn = {mode, preview: editor.value, status: status.textContent};
+setMode('sql');
+editor.value = 'SELECT * FROM selected_data';
+setMode('assisted');
+const manualReturn = {mode, sql: editor.value, status: status.textContent};
+editor.value = initialPreview;
+setMode('assisted');
+JSON.stringify({initialReturn, manualReturn, restoredMode: mode, sqlLabel});`;
+process.stdout.write(vm.runInNewContext(script, context));
+"""
+    completed = subprocess.run(
+        [node_binary, '-e', node_harness],
+        input=json.dumps(script_data),
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    result = json.loads(completed.stdout)
+    assert result['initialReturn']['mode'] == 'assisted'
+    assert result['initialReturn']['preview'] == '-- Select at least one CDR source to preview SQL.'
+    assert result['initialReturn']['status'] == ''
+    assert result['sqlLabel'] == 'SQL Query'
+    assert result['manualReturn']['mode'] == 'sql'
+    assert 'cannot be represented' in result['manualReturn']['status']
+    assert result['restoredMode'] == 'assisted'
+
+
 def test_query_builder_saved_query_restores_assisted_controls_or_keeps_manual_sql() -> None:
     node_binary = shutil.which('node')
     if node_binary is None:
@@ -641,10 +705,10 @@ FROM "selected_data"
 ) AS "combined_cdr"
 LIMIT 100'''
     assert result['assisted']['fields'] == ['source_dataset_name', 'cdr_type']
-    assert 'Saved query loaded in Assisted mode' in result['assisted']['status']
+    assert 'Saved query loaded in Assistance Mode' in result['assisted']['status']
     assert result['manual']['mode'] == 'sql'
     assert result['manual']['editorSql'] == 'SELECT * FROM selected_data LIMIT 100'
-    assert 'cannot be shown in Assisted mode' in result['manual']['status']
+    assert 'cannot be shown in Assistance Mode' in result['manual']['status']
 
 
 def test_query_builder_result_pages_and_copy_cover_only_visible_page() -> None:
@@ -1225,21 +1289,67 @@ def test_catalogue_editor_offers_declarative_distribution_bucket_fields(client) 
     assert {'Buckets', 'Rate Bucket'} <= set(columns['cdr-data'])
 
 
+def test_configuration_access_matches_editor_and_viewer_roles(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    app_module.SESSIONS['viewer-config-access'] = app_module.SessionUser(username='viewer', role='user-viewer')
+    client.cookies.set(app_module.SESSION_COOKIE, 'viewer-config-access')
+    viewer_page = client.get('/workspace')
+    assert 'data-module-config-trigger' not in viewer_page.text
+    assert 'href="/application-config"' not in viewer_page.text
+    assert 'href="/workspace-config"' not in viewer_page.text
+    assert client.get('/application-config').status_code == 403
+    assert client.get('/workspace-config').status_code == 403
+    assert client.post('/workspace-config/operator-mappings/save', data={'canonical_value': 'No Access'}).status_code == 403
+
+    app_module.SESSIONS['editor-config-access'] = app_module.SessionUser(username='editor', role='user-editor')
+    client.cookies.set(app_module.SESSION_COOKIE, 'editor-config-access')
+    app_page = client.get('/application-config')
+    workspace_page = client.get('/workspace-config')
+    assert app_page.status_code == workspace_page.status_code == 200
+    assert 'Application Config' in app_page.text
+    assert 'data-module-config-trigger' in app_page.text
+    assert 'popovertarget="module-config-options"' in app_page.text
+    assert 'data-module-config-options' in app_page.text
+    assert 'class="module-tab module-tab-config active"' in app_page.text
+    assert 'href="/application-config"' in workspace_page.text
+    assert 'href="/workspace-config"' in workspace_page.text
+    assert 'class="module-tab module-tab-config active"' in workspace_page.text
+    assert '<h2>Report Templates Management</h2>' in workspace_page.text
+    assert '<h2>Operator Mappings</h2>' in workspace_page.text
+    assert '<h2>Vendor Mappings</h2>' in workspace_page.text
+    assert client.get('/admin').status_code == 403
+    saved_app_config = client.post('/application-config', data={
+        'timezone_name': 'UTC', 'report_chart_renderer': 'dashboard-canvas',
+        'max_background_tasks': '1',
+    }, follow_redirects=False)
+    assert saved_app_config.status_code == 303
+    assert saved_app_config.headers['location'].startswith('/application-config?notice=')
+    assert client.post('/workspace-config/operator-mappings/save', data={
+        'canonical_value': 'Editor Carrier', 'aliases': 'EC',
+    }, follow_redirects=False).headers['location'].startswith('/workspace-config')
+    assert app_module.repository.list_operator_mappings()['ec'] == 'Editor Carrier'
+    assert client.post('/admin/operator-mappings/save', data={'canonical_value': 'Old Route'}).status_code == 404
+    assert client.get('/admin/report-templates/nsa/export').status_code == 404
+    assert client.get('/config').status_code == 404
+    assert client.get('/app-config').status_code == 404
+
+
 def test_config_page_persists_runtime_overrides(client, monkeypatch) -> None:
     monkeypatch.setenv('DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER', 'dashboard-canvas')
     monkeypatch.setenv('IGNORE_EVENT_TIME_FILTERING', 'false')
     login(client)
-    page = client.get('/config')
+    page = client.get('/application-config')
     assert page.status_code == 200
     assert 'Application Runtime' in page.text
-    assert 'href="/config"' in page.text
+    assert 'href="/application-config"' in page.text
     assert 'data-configuration-timezone-picker' in page.text
     assert 'data-timezone="Europe/Madrid"' in page.text
     assert page.text.count('data-configuration-card') == 4
     assert 'name="max_background_tasks" value="1" min="1" max="32"' in page.text
     assert '<section class="configuration-card configuration-field-wide" data-configuration-card>' not in page.text
 
-    response = client.post('/config', data={
+    response = client.post('/application-config', data={
         'timezone_name': 'UTC',
         'report_chart_renderer': 'pil',
         'chromium_path': '',
@@ -2070,23 +2180,26 @@ def test_login_page_loads(client) -> None:
     assert "Default Access:" in response.text
     assert "<strong class=\"login-default-role login-default-role-super-admin\">Role: super-admin</strong>" in response.text
     assert "<strong class=\"login-default-role login-default-role-admin\">Role: admin</strong>" in response.text
-    assert "<strong class=\"login-default-role login-default-role-user\">Role: user</strong>" in response.text
+    assert "<strong class=\"login-default-role login-default-role-user-viewer\">Role: user-viewer</strong>" in response.text
     assert 'class="login-workspace-field">Workspace' in response.text
     assert 'data-login-password-toggle' in response.text
     assert '<span class="login-password-editor">' in response.text
     assert 'Default' in response.text
 
 
-def test_successful_login_and_authenticated_root_open_readme(client) -> None:
+def test_successful_login_and_authenticated_root_open_help_home(client) -> None:
     response = client.post(
         '/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False,
     )
     assert response.status_code == 303
-    assert response.headers['location'] == '/documents/view/readme'
+    assert response.headers['location'] == '/documents/view/help'
 
     root = client.get('/', follow_redirects=False)
     assert root.status_code == 303
-    assert root.headers['location'] == '/documents/view/readme'
+    assert root.headers['location'] == '/documents/view/help'
+    help_home = client.get(root.headers['location'])
+    assert help_home.status_code == 200
+    assert '/api/documents/help' in help_home.text
 
 
 def test_new_environment_creates_the_three_bootstrap_roles(client) -> None:
@@ -2095,7 +2208,24 @@ def test_new_environment_creates_the_three_bootstrap_roles(client) -> None:
     roles = {row['username']: row['role'] for row in app_module.repository.list_users()}
     assert roles['super'] == 'super-admin'
     assert roles['admin'] == 'admin'
-    assert roles['demo'] == 'user'
+    assert roles['demo'] == 'user-viewer'
+
+
+def test_admin_can_create_user_editor_and_legacy_user_becomes_viewer(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    created = client.post('/admin/users', data={
+        'username': 'config-editor', 'password': 'editor-password', 'role': 'user-editor',
+    }, follow_redirects=False)
+    assert created.status_code == 303
+    assert app_module.repository.get_user('config-editor').role == 'user-editor'
+
+    legacy = client.post('/admin/users', data={
+        'username': 'legacy-viewer', 'password': 'viewer-password', 'role': 'user',
+    }, follow_redirects=False)
+    assert legacy.status_code == 303
+    assert app_module.repository.get_user('legacy-viewer').role == 'user-viewer'
 
 
 def test_bootstrap_users_are_not_recreated_after_the_first_start(client) -> None:
@@ -2233,7 +2363,7 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     assert admin_response.text.index('<optgroup label="Full Workspace">') < admin_response.text.index('<optgroup label="Full Environment">')
     assert 'Config</option>' in admin_response.text
     assert 'Operator/Vendor Mappings &amp; Colors (from active workspace)' in admin_response.text
-    assert 'Full Environment (App Config + Dashboards + Report Templates + Operator/Vendor Mappings &amp; Colors + Auto-calculated Fields + Selected Workspaces)' in admin_response.text
+    assert 'Full Environment (Application Config + Dashboards + Report Templates + Operator/Vendor Mappings &amp; Colors + Auto-calculated Fields + Query Builder Queries + Selected Workspaces)' in admin_response.text
     assert 'Workspace: Default' in admin_response.text
     stylesheet = app_module.PROJECT_ROOT.joinpath('src/web_interface/static/css/app.css').read_text(encoding='utf-8')
     assert '.multiselect-shell { position: relative; min-width: 0; max-width: 100%; }' in stylesheet
@@ -5264,7 +5394,7 @@ def test_interactive_template_save_fails_fast_while_workspace_writer_is_busy(cli
 
     monkeypatch.setattr(app_module, 'workspace_write_lock', lambda _path: BusyWorkspaceLock())
     response = client.post(
-        f'/admin/report-templates/nsa/{quote(template["identifier"], safe="")}/save',
+        f'/workspace-config/report-templates/nsa/{quote(template["identifier"], safe="")}/save',
         data={'catalogue_content': bytes(template['content']).decode('utf-8')},
         headers={'accept': 'application/json'},
     )
@@ -5461,7 +5591,7 @@ def test_admin_panel_is_available_for_admin(client) -> None:
     login(client)
     response = client.get("/admin")
     assert response.status_code == 200
-    assert "Admin panel" in response.text
+    assert "Administrator Config" in response.text
     assert '<span class="table-input user-role-locked" aria-label="Role for super: super-admin"' in response.text
     assert '<span class="user-role-full-label">super-admin</span>' in response.text
     assert '<span class="user-role-compact-label" aria-hidden="true">super</span>' in response.text
@@ -5493,8 +5623,9 @@ def test_admin_operator_mapping_panel_groups_and_edits_aliases(client) -> None:
     app_module.repository.replace_operator_mapping_group(
         None, 'Legacy Carrier', ['Legacy A', 'Legacy B'],
     )
-    page = client.get('/admin')
+    page = client.get('/workspace-config')
     assert page.status_code == 200
+    assert '<h2>Report Templates Management</h2>' not in client.get('/admin').text
     assert 'data-panel-state-key="admin:operator-mappings"' in page.text
     assert '<h2>Operator Mappings</h2>' in page.text
     assert '<h2>Vendor Mappings</h2>' in page.text
@@ -5505,7 +5636,7 @@ def test_admin_operator_mapping_panel_groups_and_edits_aliases(client) -> None:
     assert 'Add operator mapping' not in page.text
     assert 'data-add-operator-mapping' not in page.text
 
-    created = client.post('/admin/operator-mappings/save', data={
+    created = client.post('/workspace-config/operator-mappings/save', data={
         'canonical_value': 'Example Mobile',
         'aliases': 'Example\nEX; Example Telecom',
     }, follow_redirects=False)
@@ -5515,7 +5646,7 @@ def test_admin_operator_mapping_panel_groups_and_edits_aliases(client) -> None:
     assert app_module.repository.list_operator_mappings()['example telecom'] == 'Example Mobile'
     assert app_module.repository.list_operator_mappings()['example mobile'] == 'Example Mobile'
 
-    updated = client.post('/admin/operator-mappings/save', data={
+    updated = client.post('/workspace-config/operator-mappings/save', data={
         'original_canonical': 'Example Mobile',
         'canonical_value': 'Example Wireless',
         'aliases': 'Example\nEW',
@@ -5528,7 +5659,7 @@ def test_admin_operator_mapping_panel_groups_and_edits_aliases(client) -> None:
     assert 'ex' not in mappings
     assert 'example mobile' not in mappings
 
-    deleted = client.post('/admin/operator-mappings/delete', data={
+    deleted = client.post('/workspace-config/operator-mappings/delete', data={
         'canonical_value': 'Example Wireless',
     }, follow_redirects=False)
     assert deleted.status_code == 303
@@ -5543,24 +5674,24 @@ def test_admin_vendor_mappings_support_aliases_colours_and_reordering(client) ->
     assert [group['canonical'] for group in groups[:4]] == ['Ericsson', 'Huawei', 'Samsung', 'NSN']
     assert [group['color'] for group in groups[:4]] == ['#2E8B57', '#E15759', '#7B3FB5', '#4E79A7']
 
-    created = client.post('/admin/vendor-mappings/save', data={
+    created = client.post('/workspace-config/vendor-mappings/save', data={
         'canonical_value': 'Nokia', 'aliases': 'Nokia Networks', 'color': '#123456',
     }, follow_redirects=False)
     assert created.status_code == 303
     assert app_module.repository.list_vendor_mappings()['nokia networks'] == 'Nokia'
     assert app_module.repository.list_vendor_mapping_groups()[-1]['color'] == '#123456'
 
-    moved = client.post('/admin/vendor-mappings/move', data={
+    moved = client.post('/workspace-config/vendor-mappings/move', data={
         'canonical_value': 'Nokia', 'direction': 'up',
     }, follow_redirects=False)
     assert moved.status_code == 303
     reordered = app_module.repository.list_vendor_mapping_groups()
     assert [group['canonical'] for group in reordered][-2:] == ['Nokia', '(blank)']
 
-    page = client.get('/admin')
+    page = client.get('/workspace-config')
     assert 'data-panel-state-key="admin:vendor-mappings"' in page.text
     assert 'name="color" value="#123456"' in page.text
-    assert 'action="/admin/vendor-mappings/move"' in page.text
+    assert 'action="/workspace-config/vendor-mappings/move"' in page.text
     script = app_module.PROJECT_ROOT.joinpath('src/web_interface/static/js/app.js').read_text(encoding='utf-8')
     assert 'async function submitChartMappingForm(form)' in script
     assert 'currentBody.replaceWith(freshBody);' in script
@@ -5603,7 +5734,7 @@ def test_canonical_mapping_renames_update_all_templates_and_dashboards_exactly(c
         },
     }))
 
-    operator_rename = client.post('/admin/operator-mappings/save', data={
+    operator_rename = client.post('/workspace-config/operator-mappings/save', data={
         'original_canonical': 'VF',
         'canonical_value': 'VF_UK',
         'aliases': 'Vodafone\nVodafone UK\nVFUK',
@@ -5627,7 +5758,7 @@ def test_canonical_mapping_renames_update_all_templates_and_dashboards_exactly(c
     assert dashboard['filters']['Operator'] == ['VF_UK', 'VF_SA']
     assert dashboard['filters']['Vendor'] == ['VF_UK_Ericsson', 'VF_SA_Ericsson', 'Ericsson']
 
-    vendor_rename = client.post('/admin/vendor-mappings/save', data={
+    vendor_rename = client.post('/workspace-config/vendor-mappings/save', data={
         'original_canonical': 'Ericsson',
         'canonical_value': 'ERI',
         'aliases': '',
@@ -5647,7 +5778,7 @@ def test_canonical_mapping_renames_update_all_templates_and_dashboards_exactly(c
     dashboard = json.loads(app_module.repository.get_workspace_state('e2e_dashboards_v2'))['mapping-dashboard']
     assert dashboard['filters']['Vendor'] == ['VF_UK_ERI', 'VF_SA_ERI', 'ERI']
 
-    duplicate = client.post('/admin/operator-mappings/save', data={
+    duplicate = client.post('/workspace-config/operator-mappings/save', data={
         'original_canonical': 'VF_UK', 'canonical_value': '3', 'aliases': '',
     }, follow_redirects=False)
     assert duplicate.status_code == 303
@@ -5656,7 +5787,7 @@ def test_canonical_mapping_renames_update_all_templates_and_dashboards_exactly(c
     assert any(group['canonical'] == 'VF_UK' for group in groups)
     assert sum(group['canonical'] == '3' for group in groups) == 1
 
-    duplicate_vendor = client.post('/admin/vendor-mappings/save', data={
+    duplicate_vendor = client.post('/workspace-config/vendor-mappings/save', data={
         'original_canonical': 'ERI', 'canonical_value': 'Huawei', 'aliases': '',
     }, follow_redirects=False)
     assert duplicate_vendor.status_code == 303
@@ -7764,22 +7895,36 @@ def test_top_navigation_shows_document_links(client) -> None:
     assert '>Workspace Management</a>' in response.text
     assert '>Dataset Analysis</a>' in response.text
     assert '>E2E Dashboard</a>' in response.text
-    assert '>E2E Reporting</a>' in response.text
+    assert 'E2E Reporting' not in response.text
     assert '>Chart Builder</a>' in response.text
-    assert '>Administrator Panel</a>' in response.text
-    assert '>Configuration Panel</a>' in response.text
+    assert '>Query Builder</a>' in response.text
+    assert 'data-module-builders-trigger>Builders' in response.text
+    assert 'popovertarget="module-builders-options"' in response.text
+    assert 'data-module-builders-options' in response.text
+    assert '>Admin</a>' in response.text
+    assert '>Administrator Config</a>' in response.text
+    assert '>Application Config</a>' in response.text
+    assert '>Workspace Config</a>' in response.text
+    assert 'data-module-config-trigger>Config' in response.text
     assert '>Application Logs</a>' in response.text
+    administrative_modules = response.text.split('<nav aria-label="Administrative modules">', 1)[1].split('</nav>', 1)[0]
+    assert administrative_modules.index('>Application Logs</a>') < administrative_modules.index('>Application Config</a>')
+    assert administrative_modules.index('>Workspace Config</a>') < administrative_modules.index('>Administrator Config</a>')
     assert '>Help</a>' in response.text
     assert '>Readme</a>' in response.text
     assert '>Changelog</a>' in response.text
     assert 'module-hero-datasets-analysis' not in response.text
     assert 'class="module-tab module-tab-workspace active" href="/workspace"' in response.text
-    assert '<span class="module-tab-label-desktop">E2E Reporting</span>' in response.text
     assert 'title="Open Changelog"' in response.text
-    assert '<span class="module-tab-label-mobile">Reporting</span>' in response.text
     assert '<span class="module-tab-label-mobile">Analysis</span>' in response.text
     assert 'href="/logout"' in response.text
     assert '<span class="topnav-link topnav-user-badge topnav-user-badge-admin">User: admin (admin)</span>' in response.text
+
+    for route in ('/chart-builder', '/query-builder'):
+        builder_page = client.get(route)
+        assert builder_page.status_code == 200
+        assert 'class="module-tab module-tab-chart-builder active"' in builder_page.text
+        assert f'href="{route}" class="is-active" aria-current="page"' in builder_page.text
 
     dashboard = client.get("/datasets-analysis")
     assert dashboard.status_code == 200
@@ -7787,9 +7932,7 @@ def test_top_navigation_shows_document_links(client) -> None:
     assert 'linear-gradient(135deg, #0c4c8c, #68b8ff)' in dashboard.text
 
     reporting = client.get("/reporting")
-    assert reporting.status_code == 200
-    assert 'module-hero-reporting' in reporting.text
-    assert 'linear-gradient(135deg, #4b208a, #bd90ff)' in reporting.text
+    assert reporting.status_code == 403
 
     admin = client.get("/admin")
     assert admin.status_code == 200
@@ -7801,10 +7944,14 @@ def test_collapsed_side_navigators_reveal_near_viewport_edges() -> None:
     root = Path(__file__).parents[1]
     app_script = (root / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
     app_styles = (root / 'src/web_interface/static/css/app.css').read_text(encoding='utf-8')
+    base_template = (root / 'src/web_interface/templates/base.html').read_text(encoding='utf-8')
+    doc_template = (root / 'src/web_interface/templates/doc_view.html').read_text(encoding='utf-8')
 
     assert 'function setupEdgeNavigatorReveal() {' in app_script
     assert "'.page-panel-navigator, .help-navigator, .release-navigator'" in app_script
-    assert "event.pointerType !== 'mouse'" in app_script
+    assert "event.pointerType && event.pointerType !== 'mouse'" in app_script
+    assert "window.addEventListener('pointermove', revealNearEdge, {capture: true, passive: true});" in app_script
+    assert "window.addEventListener('pointerover', revealNearEdge, {capture: true, passive: true});" in app_script
     assert "['touch', 'pen'].includes(event.pointerType)" in app_script
     assert "navigator.classList.add('is-edge-revealed')" in app_script
     assert 'const autoHideDelay = 5000;' in app_script
@@ -7815,9 +7962,15 @@ def test_collapsed_side_navigators_reveal_near_viewport_edges() -> None:
     assert "lastInteraction === 'mouse' && navigator.matches(':hover')" in app_script
     assert 'if (navigator.classList.contains(\'is-open\')) scheduleClose(navigator);' in app_script
     assert 'setupEdgeNavigatorReveal();' in app_script
-    assert ':not(.is-edge-revealed):not(:has(:focus-visible)) .page-panel-navigator-tab {' in app_styles
+    assert ':not(.is-edge-revealed):not(:has(:focus-visible)):not(:hover) .page-panel-navigator-tab {' in app_styles
+    assert 'max-height:min(96dvh,84rem)' in app_styles
+    assert base_template.count('class="edge-navigator-hover-target"') == 2
+    assert doc_template.count('class="edge-navigator-hover-target"') == 2
+    assert '.page-panel-navigator .edge-navigator-hover-target { left:100%; }' in app_styles
+    assert ':is(.help-navigator,.release-navigator) .edge-navigator-hover-target { right:100%; }' in app_styles
     assert 'transform:translate(calc(-100% + .32rem),-50%);' in app_styles
     assert 'transform:translate(calc(100% - .32rem),-50%);' in app_styles
+    assert ':not(:hover) .page-panel-navigator-tab {\n  opacity:.52;\n  pointer-events:none;\n  transform:' in app_styles
     assert '.is-edge-revealed :is(.page-panel-navigator-tab,.help-navigator-tab,.release-navigator-tab)' in app_styles
     assert ':has(:focus-visible) :is(.page-panel-navigator-tab,.help-navigator-tab,.release-navigator-tab)' in app_styles
 
@@ -7834,8 +7987,8 @@ def test_non_admin_navigation_hides_admin_tab(client) -> None:
     assert 'href="/documents/view/help"' in workspace.text
     assert 'href="/admin"' not in workspace.text
     assert 'data-module-navigator' in workspace.text
-    assert '>Administrator Panel</span>' in workspace.text
-    assert '>Configuration Panel</span>' in workspace.text
+    assert 'href="/application-config"' not in workspace.text
+    assert 'href="/workspace-config"' not in workspace.text
     assert 'User: demo' in workspace.text
 
 
@@ -7850,7 +8003,7 @@ def test_admin_imports_report_catalogue(client) -> None:
     ).encode('utf-8')
 
     response = client.post(
-        '/admin/report-templates/nsa',
+        '/workspace-config/report-templates/nsa',
         data={'catalogue_name': 'Test baseline'},
         files={'catalogue_file': ('nsa-slides-template.csv', BytesIO(content), 'text/csv')},
         follow_redirects=False,
@@ -7859,7 +8012,7 @@ def test_admin_imports_report_catalogue(client) -> None:
     assert response.status_code == 303
     assert app_module.reporting_catalog_content('nsa') == content
 
-    exported = client.get('/admin/report-templates/nsa/export')
+    exported = client.get('/workspace-config/report-templates/nsa/export')
     assert exported.status_code == 200
     assert exported.content == content
 
@@ -7879,7 +8032,7 @@ def test_admin_import_preserves_hyphens_in_uploaded_template_name(client) -> Non
         + '\n1,Imported template,,Title and 1 column + Comments,,,,Title Slide,,,,,\n'
     ).encode('utf-8')
     response = client.post(
-        '/admin/slides-templates/import', data={'template_type': 'nsa', 'catalogue_name': ''},
+        '/workspace-config/slides-templates/import', data={'template_type': 'nsa', 'catalogue_name': ''},
         files={'catalogue_file': ('NSA Slide Template - Gabriele.csv', BytesIO(content), 'text/csv')},
         follow_redirects=False,
     )
@@ -7896,13 +8049,13 @@ def test_importing_an_existing_template_requires_explicit_overwrite(client) -> N
     original = (','.join(CATALOG_HEADERS) + '\n' + ','.join(['1', 'Original', '', 'Title and 1 column + Comments', '', '', '', 'Title Slide', '', '', '', '', '']) + '\n').encode('utf-8')
     replacement = (','.join(CATALOG_HEADERS) + '\n' + ','.join(['1', 'Replacement', '', 'Title and 1 column + Comments', '', '', '', 'Title Slide', '', '', '', '', '']) + '\n').encode('utf-8')
     created = client.post(
-        '/admin/slides-templates/import', data={'template_type': 'nsa', 'catalogue_name': 'Shared Template'},
+        '/workspace-config/slides-templates/import', data={'template_type': 'nsa', 'catalogue_name': 'Shared Template'},
         files={'catalogue_file': ('Shared Template.csv', BytesIO(original), 'text/csv')}, follow_redirects=False,
     )
     assert created.status_code == 303
 
     blocked = client.post(
-        '/admin/slides-templates/import', data={'template_type': 'nsa', 'catalogue_name': 'shared template'},
+        '/workspace-config/slides-templates/import', data={'template_type': 'nsa', 'catalogue_name': 'shared template'},
         files={'catalogue_file': ('shared template.csv', BytesIO(replacement), 'text/csv')}, follow_redirects=False,
     )
     assert blocked.status_code == 303
@@ -7910,7 +8063,7 @@ def test_importing_an_existing_template_requires_explicit_overwrite(client) -> N
     assert b'Original' in app_module.repository.report_template_content('nsa', 'Shared Template')
 
     overwritten = client.post(
-        '/admin/slides-templates/import',
+        '/workspace-config/slides-templates/import',
         data={'template_type': 'nsa', 'catalogue_name': 'shared template', 'overwrite_existing': 'true'},
         files={'catalogue_file': ('shared template.csv', BytesIO(replacement), 'text/csv')}, follow_redirects=False,
     )
@@ -7930,7 +8083,7 @@ def test_admin_import_converts_a_legacy_catalogue_when_requested(client) -> None
     ).encode('utf-8')
 
     response = client.post(
-        '/admin/report-templates/nsa',
+        '/workspace-config/report-templates/nsa',
         data={'catalogue_name': 'Legacy baseline', 'convert_catalogue': '1'},
         files={'catalogue_file': ('legacy.csv', BytesIO(legacy), 'text/csv')},
         follow_redirects=False,
@@ -7952,39 +8105,40 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
 
     for name, content in [('Baseline Q4', first), ('Updated Q4', second)]:
         response = client.post(
-            '/admin/report-templates/nsa',
+            '/workspace-config/report-templates/nsa',
             data={'catalogue_name': name},
             files={'catalogue_file': ('nsa.csv', BytesIO(content), 'text/csv')},
             follow_redirects=False,
         )
         assert response.status_code == 303
 
-    admin = client.get('/admin')
+    admin = client.get('/workspace-config')
     assert 'Baseline Q4' in admin.text
     assert 'Updated Q4' in admin.text
     assert 'name="catalogue_selection"' not in admin.text
     assert 'data-admin-template-editor' in admin.text
-    assert 'data-open-template-editor="/admin/report-templates/nsa/Baseline%20Q4/editor"' in admin.text
+    assert 'data-open-template-editor="/workspace-config/report-templates/nsa/Baseline%20Q4/editor"' in admin.text
     assert 'data-catalogue-editor-table' not in admin.text
     assert '<th>Default</th>' in admin.text
     assert 'catalogue-default-mark is-default' in admin.text
-    assert '/admin/report-templates/nsa/Baseline Q4/export' in admin.text
+    assert '/workspace-config/report-templates/nsa/Baseline Q4/export' in admin.text
     assert app_module.reporting_catalog_entries('nsa')[0].slide_title == 'Second'
     assert next(item['identifier'] for item in app_module.report_catalogue_options('nsa') if item['active']) == 'Updated Q4'
     assert app_module.repository.report_template_content('nsa', 'Baseline Q4') == first
 
+    login_super(client)
     reporting = client.get('/reporting')
     assert 'value="nsa:Updated Q4" data-catalogue-technology="nsa" data-catalogue-active="true" selected' in reporting.text
     assert 'data-report-charts-edit-template' in reporting.text
     assert 'data-report-chart-viewer-edit-template' in reporting.text
     assert 'data-report-template-editor-frame' in reporting.text
 
-    editor = client.get('/admin?catalogue_technology=nsa&catalogue_id=Baseline%20Q4')
+    editor = client.get('/workspace-config?catalogue_technology=nsa&catalogue_id=Baseline%20Q4')
     assert editor.status_code == 200
     assert 'data-catalogue-editor-table' not in editor.text
     assert 'data-admin-template-editor' in editor.text
 
-    embedded_editor = client.get('/admin/report-templates/nsa/Baseline%20Q4/editor')
+    embedded_editor = client.get('/workspace-config/report-templates/nsa/Baseline%20Q4/editor')
     assert embedded_editor.status_code == 200
     assert 'data-embedded-template-editor' in embedded_editor.text
     assert 'data-catalogue-editor-table' in embedded_editor.text
@@ -8019,7 +8173,7 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert 'progressJobList.replaceChildren();' not in app_script
     assert 'Math.max(previousPercent, computedPercent)' in app_script
 
-    copy_options = client.get('/api/admin/report-templates/copy-options')
+    copy_options = client.get('/api/workspace-config/report-templates/copy-options')
     assert copy_options.status_code == 200
     assert {(item['technology'], item['identifier']) for item in copy_options.json()['templates']} >= {
         ('nsa', 'Baseline Q4'), ('nsa', 'Updated Q4'),
@@ -8030,13 +8184,13 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
         'rules': [{'when': 'Test_Result IN (Completed)', 'value': 'Success'}],
     })
     saved_dimensions = client.put(
-        '/api/admin/report-templates/nsa/Baseline%20Q4/calculated-dimensions',
+        '/api/workspace-config/report-templates/nsa/Baseline%20Q4/calculated-dimensions',
         json={'dimensions': dimensions},
     )
     assert saved_dimensions.status_code == 200
     assert any(item['name'] == 'Network Result' for item in saved_dimensions.json()['dimensions'])
     filter_values = client.get(
-        '/admin/catalogue-filter-values',
+        '/workspace-config/catalogue-filter-values',
         params={'source': 'cdr-data', 'column': 'Network Result', 'technology': 'nsa', 'catalogue_id': 'Baseline Q4'},
     )
     assert filter_values.status_code == 200
@@ -8045,14 +8199,14 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
         item.name == 'Network Result'
         for item in app_module.load_workspace_calculated_dimensions()
     )
-    copied_chart = client.post('/admin/report-templates/nsa/Baseline%20Q4/copy-items', json={
+    copied_chart = client.post('/workspace-config/report-templates/nsa/Baseline%20Q4/copy-items', json={
         'kind': 'chart', 'catalogue_content': first.decode(), 'source_row_index': 0,
         'target_technology': 'nsa', 'target_identifier': 'Updated Q4',
         'target_slide_index': 0, 'chart_position': 1,
     })
     assert copied_chart.status_code == 200
     assert len(app_module.load_template_catalogue(app_module.repository.report_template_content('nsa', 'Updated Q4'), 'nsa')) == 2
-    copied_slide = client.post('/admin/report-templates/nsa/Baseline%20Q4/copy-items', json={
+    copied_slide = client.post('/workspace-config/report-templates/nsa/Baseline%20Q4/copy-items', json={
         'kind': 'slide', 'catalogue_content': first.decode(), 'source_row_index': 0,
         'target_technology': 'nsa', 'target_identifier': 'Updated Q4', 'slide_position': 1,
     })
@@ -8066,14 +8220,14 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
         + '\n9,Late,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,Right\n'
         + '\n8,Edited,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,Right\n'
     )
-    saved = client.post('/admin/report-templates/nsa/Baseline%20Q4/save', data={'catalogue_content': edited}, follow_redirects=False)
+    saved = client.post('/workspace-config/report-templates/nsa/Baseline%20Q4/save', data={'catalogue_content': edited}, follow_redirects=False)
     assert saved.status_code == 303
-    saved_editor = client.get('/admin/report-templates/nsa/Baseline%20Q4/editor')
+    saved_editor = client.get('/workspace-config/report-templates/nsa/Baseline%20Q4/editor')
     assert '>Edited</td>' in saved_editor.text
     assert saved_editor.text.index('>Edited</td>') < saved_editor.text.index('>Late</td>')
 
     saved_in_background = client.post(
-        '/admin/report-templates/nsa/Baseline%20Q4/save',
+        '/workspace-config/report-templates/nsa/Baseline%20Q4/save',
         data={'catalogue_content': edited},
         headers={'accept': 'application/json'},
     )
@@ -8084,25 +8238,25 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
         'chart_rows': 2,
     }
 
-    activated = client.post('/admin/report-templates/nsa/Baseline%20Q4/activate', follow_redirects=False)
+    activated = client.post('/workspace-config/report-templates/nsa/Baseline%20Q4/activate', follow_redirects=False)
     assert activated.status_code == 303
     assert app_module.reporting_catalog_entries('nsa')[0].slide_title == 'Edited'
     assert next(item['identifier'] for item in app_module.report_catalogue_options('nsa') if item['active']) == 'Baseline Q4'
     assert app_module.repository.report_template_content('nsa', 'Updated Q4')
 
-    protected_delete = client.post('/admin/report-templates/nsa/Baseline%20Q4/delete')
+    protected_delete = client.post('/workspace-config/report-templates/nsa/Baseline%20Q4/delete')
     assert protected_delete.status_code == 400
     assert 'The default template cannot be deleted.' in protected_delete.text
 
     reporting_after_activation = client.get('/reporting')
     assert 'value="nsa:Baseline Q4" data-catalogue-technology="nsa" data-catalogue-active="true" selected' in reporting_after_activation.text
 
-    exported = client.get('/admin/report-templates/nsa/Updated%20Q4/export')
+    exported = client.get('/workspace-config/report-templates/nsa/Updated%20Q4/export')
     assert exported.status_code == 200
     assert b'Second' in exported.content
     assert 'filename="Updated Q4.csv"' in exported.headers['content-disposition']
 
-    selected_export = client.get('/admin/report-templates/export-selected?catalogue_selection=nsa:Updated%20Q4')
+    selected_export = client.get('/workspace-config/report-templates/export-selected?catalogue_selection=nsa:Updated%20Q4')
     assert selected_export.status_code == 200
     assert 'filename="Updated Q4.csv"' in selected_export.headers['content-disposition']
 
@@ -8151,7 +8305,7 @@ def test_admin_catalogue_rename_supports_background_json_save(client) -> None:
     login(client)
     default_name = next(item['identifier'] for item in app_module.report_catalogue_options('nsa') if item['active'])
     response = client.post(
-        f'/admin/report-templates/nsa/{quote(default_name)}/rename',
+        f'/workspace-config/report-templates/nsa/{quote(default_name)}/rename',
         data={'catalogue_name': 'Renamed default'},
         headers={'accept': 'application/json'},
     )
@@ -8171,7 +8325,7 @@ def test_admin_renaming_named_catalogue_renames_its_csv_file(client) -> None:
         + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,\n'
     ).encode('utf-8')
     imported = client.post(
-        '/admin/report-templates/nsa',
+        '/workspace-config/report-templates/nsa',
         data={'catalogue_name': 'Original catalogue'},
         files={'catalogue_file': ('nsa.csv', BytesIO(content), 'text/csv')},
         follow_redirects=False,
@@ -8186,7 +8340,7 @@ def test_admin_renaming_named_catalogue_renames_its_csv_file(client) -> None:
     }))
 
     replacement = client.post(
-        '/admin/report-templates/nsa',
+        '/workspace-config/report-templates/nsa',
         data={'catalogue_name': 'Replacement template'},
         files={'catalogue_file': ('replacement.csv', BytesIO(content), 'text/csv')},
         follow_redirects=False,
@@ -8194,7 +8348,7 @@ def test_admin_renaming_named_catalogue_renames_its_csv_file(client) -> None:
     assert replacement.status_code == 303
 
     response = client.post(
-        '/admin/report-templates/nsa/Original%20catalogue/rename',
+        '/workspace-config/report-templates/nsa/Original%20catalogue/rename',
         data={'catalogue_name': 'Renamed catalogue'},
         headers={'accept': 'application/json'},
     )
@@ -8219,14 +8373,14 @@ def test_admin_duplicates_template_using_the_source_template_name(client) -> Non
         + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,\n'
     ).encode('utf-8')
     imported = client.post(
-        '/admin/report-templates/nsa',
+        '/workspace-config/report-templates/nsa',
         data={'catalogue_name': 'Regional NSA Template'},
         files={'catalogue_file': ('nsa.csv', BytesIO(content), 'text/csv')},
         follow_redirects=False,
     )
     assert imported.status_code == 303
 
-    duplicated = client.post('/admin/report-templates/nsa/Regional%20NSA%20Template/duplicate', follow_redirects=False)
+    duplicated = client.post('/workspace-config/report-templates/nsa/Regional%20NSA%20Template/duplicate', follow_redirects=False)
 
     assert duplicated.status_code == 303
     copied = next(item for item in app_module.report_catalogue_options('nsa') if item['identifier'] == 'Regional NSA Template - Copy')
@@ -8273,7 +8427,7 @@ def test_admin_importer_selects_template_type_and_moves_a_named_template(client)
         + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,\n'
     ).encode('utf-8')
     imported_sa = client.post(
-        '/admin/slides-templates/import',
+        '/workspace-config/slides-templates/import',
         data={'template_type': 'sa', 'catalogue_name': 'SA imported template'},
         files={'catalogue_file': ('sa.csv', BytesIO(content), 'text/csv')},
         follow_redirects=False,
@@ -8285,14 +8439,14 @@ def test_admin_importer_selects_template_type_and_moves_a_named_template(client)
     # a movable library item.
     for name in ('Move me', 'NSA default replacement'):
         response = client.post(
-            '/admin/report-templates/nsa',
+            '/workspace-config/report-templates/nsa',
             data={'catalogue_name': name},
             files={'catalogue_file': ('nsa.csv', BytesIO(content), 'text/csv')},
             follow_redirects=False,
         )
         assert response.status_code == 303
     moved = client.post(
-        '/admin/report-templates/nsa/Move%20me/type',
+        '/workspace-config/report-templates/nsa/Move%20me/type',
         data={'template_type': 'sa'},
         follow_redirects=False,
     )
@@ -8334,61 +8488,122 @@ def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
 
     help_api = client.get("/api/documents/help")
     assert help_api.status_code == 200
-    assert help_api.json()["name"] == "00-help.md"
+    assert help_api.json()["name"] == "help.md"
 
     help_index = client.get("/api/documents/help-index")
     assert help_index.status_code == 200
     help_documents = help_index.json()["documents"]
-    assert help_documents[0]["relative_path"] == "00-help.md"
-    assert help_documents[0]["number"] == "00"
+    assert help_documents[0]["relative_path"] == "help.md"
+    assert all('number' not in document for document in help_documents)
     assert help_documents[1]["label"] == "Product Overview"
     assert help_documents[2]["label"] == "Technical Considerations"
-    assert any(item["relative_path"] == "04-web-interface.md" for item in help_documents)
+    assert help_documents[3]["label"] == "Deployment Configuration"
+    assert help_documents[4]["label"] == "Docker Deployment"
+    assert help_documents[5]["label"] == "Web Interfaces"
+    assert any(item["relative_path"] == "web-interface.md" for item in help_documents)
     assert any(
-        item["relative_path"] == "06-datasets-analysis.md"
+        item["relative_path"] == "datasets-analysis.md"
         and item["label"] == "Datasets Analysis"
         for item in help_documents
     )
+    assert not any(item["relative_path"] == "e2e-reporting.md" for item in help_documents)
     assert any(
-        item["relative_path"] == "08-e2e-reporting.md"
-        and item["label"] == "E2E Reporting"
-        for item in help_documents
-    )
-    assert any(
-        item["relative_path"] == "09-chart-builder.md"
+        item["relative_path"] == "chart-builder.md"
         and item["label"] == "Chart Builder"
         for item in help_documents
     )
     assert any(
-        item["relative_path"] == "10-query-builder.md"
+        item["relative_path"] == "query-builder.md"
         and item["label"] == "Query Builder"
         for item in help_documents
     )
     assert [item['relative_path'] for item in help_documents[9:]] == [
-        '09-chart-builder.md',
-        '10-query-builder.md',
-        '11-administration.md',
-        '12-docker-deployment.md',
-        '13-project-structure.md',
-        '14-roadmap.md',
+        'chart-builder.md',
+        'query-builder.md',
+        'app-logs.md',
+        'app-config.md',
+        'workspace-config.md',
+        'administrator-config.md',
+        'project-structure.md',
+        'roadmap.md',
     ]
+    assert any(item['relative_path'] == 'administrator-config.md' and item['label'] == 'Administrator Config' for item in help_documents)
+    assert client.get('/documents/view/help/administrator-config.md').status_code == 200
+    assert client.get('/documents/view/help/administration.md').status_code == 404
+    assert not list((Path(__file__).resolve().parents[1] / 'help').glob('[0-9][0-9]-*.md'))
+    assert 'E2E Reporting' not in help_api.json()['content']
+    assert '- [Chart Builder](chart-builder.md)' in help_api.json()['content']
+    assert '- [Roadmap](roadmap.md)' in help_api.json()['content']
+    assert client.get('/api/documents/help/12-docker-deployment.md').status_code == 404
+    assert client.get('/documents/view/help/e2e-reporting.md').status_code == 403
+    assert client.get('/api/documents/help/e2e-reporting.md').status_code == 403
+    assert 'e2e-reporting.md' not in client.get('/api/documents/readme').json()['content']
+    overview = client.get('/api/documents/help/overview.md').json()['content']
+    assert '## E2E Reporting' not in overview
+    assert '## Query Builder' in overview
+    assert '[Query Builder](query-builder.md)' in overview
+    for document in help_documents[1:]:
+        article = client.get(f"/api/documents/help/{document['relative_path']}")
+        assert article.status_code == 200
+        assert 'e2e-reporting.md' not in article.json()['content']
+        assert 'E2E Reporting' not in article.json()['content']
     excluded_help_documents = {
-        "02-arguments-description.md",
-        "02-arguments-description-short.md",
-        "05-word-reporting.md",
-        "09-github-actions.md",
-        "10-testing.md",
+        "arguments-description.md",
+        "arguments-description-short.md",
+        "word-reporting.md",
+        "github-actions.md",
+        "testing.md",
     }
     assert not excluded_help_documents.intersection(item["relative_path"] for item in help_documents)
 
-    help_article = client.get("/documents/view/help/04-web-interface.md")
+    help_article = client.get("/documents/view/help/web-interface.md")
     assert help_article.status_code == 200
     assert 'id="help-nav-list"' in help_article.text
-    assert "/api/documents/help/04-web-interface.md" in help_article.text
-    assert "`${number}. ${label}`" in help_article.text
+    assert "/api/documents/help/web-interface.md" in help_article.text
+    assert "link.textContent = position === 0 ? `${label} 🏠` : label;" in help_article.text
     assert "includeHeadingIds: true" in help_article.text
     assert "const fragment = hashIndex >= 0 ? raw.slice(hashIndex) : '';" in help_article.text
     assert "document.getElementById(targetId)?.scrollIntoView" in help_article.text
+
+
+def test_reporting_help_is_available_to_super_admins_and_ejaitur(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    for username, role in [('someone', 'super-admin'), ('EJAITUR', 'user-viewer')]:
+        token = f'help-reporting-{role}'
+        app_module.SESSIONS[token] = app_module.SessionUser(username=username, role=role)
+        client.cookies.set(app_module.SESSION_COOKIE, token)
+
+        index = client.get('/api/documents/help-index').json()['documents']
+        assert index[9]['relative_path'] == 'e2e-reporting.md'
+        assert index[10]['relative_path'] == 'chart-builder.md'
+        assert client.get('/documents/view/help/e2e-reporting.md').status_code == 200
+        assert client.get('/api/documents/help/e2e-reporting.md').status_code == 200
+        home = client.get('/api/documents/help').json()['content']
+        assert '- [E2E Reporting](e2e-reporting.md)' in home
+        assert '- [Chart Builder](chart-builder.md)' in home
+        assert 'e2e-reporting.md' in client.get('/api/documents/readme').json()['content']
+
+
+def test_help_navigation_groups_unnumbered_documents() -> None:
+    node_binary = shutil.which('node')
+    if node_binary is None:
+        pytest.skip('Node.js is required to exercise Help navigation grouping.')
+
+    template = (Path(__file__).resolve().parents[1] / 'src/web_interface/templates/doc_view.html').read_text(encoding='utf-8')
+    start = template.index('  function helpDocumentGroup(relativePath) {')
+    end = template.index('\n  if (helpNavLists.length)', start)
+    script = template[start:end] + "\nconsole.log(JSON.stringify(['overview.md', 'configuration.md', 'docker-deployment.md', 'workspace-management.md', 'e2e-reporting.md', 'query-builder.md', 'administrator-config.md', 'app-config.md', 'workspace-config.md', 'app-logs.md', 'project-structure.md'].map(helpDocumentGroup)));"
+    result = subprocess.run([node_binary, '-e', script], text=True, capture_output=True, check=True)
+    assert json.loads(result.stdout) == [
+        'General', 'General', 'General', 'Main Modules', 'Main Modules', 'Main Modules',
+        'Administrative Modules', 'Administrative Modules', 'Administrative Modules',
+        'Administrative Modules', 'Reference',
+    ]
+    assert "groupItem.className = 'help-nav-group'" in template
+    assert "groupList.className = 'help-nav-sublist'" in template
+    assert "link.textContent = position === 0 ? `${label} 🏠` : label;" in template
+    assert "if (group === 'Reference') relatedDocuments.forEach" in template
 
 
 def test_dashboard_analysis_reuses_cached_result_on_reload(client, monkeypatch) -> None:

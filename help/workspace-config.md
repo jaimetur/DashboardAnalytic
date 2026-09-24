@@ -1,33 +1,18 @@
-# Administration
+# Workspace Config
 
-Admin centralises global configuration and active-workspace maintenance. The available actions depend on the signed-in role.
+Workspace Config is a dedicated page that brings together the three workspace-owned management panels previously shown in Admin: Report Templates Management, Operator Mappings and Vendor Mappings. It does not introduce a second settings store: templates and mapping groups remain in the active workspace database and keep their existing import, export, transfer, backup and restore formats.
 
-## Roles
+Open **Config → Workspace Config** from the main navigation at `/workspace-config`. Template and mapping actions use routes below `/workspace-config/`. The page uses the same teal/navy palette as Application Config and its Page Sections navigator links to the three panels.
 
-- `admin`: create and manage ordinary users/admins, manage active-workspace templates and datasets, and export/import/transfer Dashboards, templates, fields and accessible workspaces.
-- `super-admin`: create or modify super-admin accounts, assign workspace access, export App Config or Full Environment, and approve incoming server transfers.
+## Access and active workspace
 
-An admin cannot modify a super-admin account or assign the super-admin role. The signed-in account cannot delete itself, and at least one active super-admin must remain.
-
-## Create user and Users
-
-Administrators can:
-
-- create accounts;
-- rename users;
-- change or reset passwords;
-- enable or disable accounts;
-- assign permitted roles;
-- manage workspace access where authorised;
-- delete eligible accounts.
-
-Only a super-admin can change workspace access. Leave a password field empty when an edit should preserve the current password. **Reset password** restores `super123`, `admin123` or `demo123` for the three bootstrap names and uses `Ericsson123` for another account; the dialog displays the resulting password so it can be changed or communicated securely.
+The Workspace Config section is available to `user-editor`, `admin` and `super-admin` accounts. `user-viewer` accounts do not have access. Open a workspace before using its configuration panels; their contents and changes belong only to that workspace.
 
 ## Report Templates Management
 
 Templates belong to the active workspace and are stored in that workspace database's `report_templates` table. Import, export, backup and transfer packages serialize them as portable CSV files, but those files are package artifacts rather than the live source of record. Obsolete `slides-templates` directories are removed by the current migration and portability flows.
 
-The **Operator Mappings** and **Vendor Mappings** panels appear immediately below Report Templates Management. Each canonical identity includes editable aliases, an explicit chart order and a thematic colour. Both tables travel together in the portable **Operator/Vendor Mappings & Colors** JSON component.
+Report Templates Management supports NSA and SA templates, one default for each technology, and the editor described below.
 
 Available actions:
 
@@ -47,7 +32,7 @@ One template can be default for each technology within a workspace. Reporting in
 
 ## Report Template Editor
 
-**Edit** opens the selected template in a large dialog. The template selector and duplicate Admin heading are intentionally omitted from the embedded editor.
+**Edit** opens the selected template in a large dialog. The surrounding page controls are omitted from the embedded editor.
 
 ### Grid behaviour
 
@@ -82,7 +67,7 @@ One template can be default for each technology within a workspace. Reporting in
 
 ## Report Template reference
 
-This is the canonical authoring reference for templates used by both [E2E Dashboards](07-e2e-dashboards.md) and [E2E Reporting](08-e2e-reporting.md). The common `assets/ppt-templates/Template_CDR_analysis.pptx` supplies the masters, named layouts and placeholders. Each distinct `Slide` value creates one slide; chart rows sharing that value fill its chart placeholders in row order.
+This is the canonical authoring reference for templates used by both [E2E Dashboards](e2e-dashboards.md) and [E2E Reporting](e2e-reporting.md). The common `assets/ppt-templates/Template_CDR_analysis.pptx` supplies the masters, named layouts and placeholders. Each distinct `Slide` value creates one slide; chart rows sharing that value fill its chart placeholders in row order.
 
 ### Template columns
 
@@ -101,7 +86,9 @@ This is the canonical authoring reference for templates used by both [E2E Dashbo
 | `Column Aggregation` | Comparison-series/table-column hierarchy. Separate dimensions with `×`. |
 | `Legend` | Optional field whose plotted or filtered values should be explained. Blank means no legend. |
 | `Legend Position` | `Top`, `Bottom`, `Left` or `Right`; blank defaults to `Top`. |
-| `Label` | Optional bar-value placement: `None`, `Top`, `Up`, `Middle` or `Down`. Blank retains automatic placement. |
+| `Legend Format` | Optional list defining legend colour, font, styles and relative size. Blank retains automatic formatting. |
+| `Label Position` | Optional value placement: `None`, `Top`, `Up`, `Middle` or `Down`. Blank retains automatic placement. |
+| `Label Format` | Optional list defining label colour, font, styles and relative size. Blank retains automatic formatting. |
 | `Axis X Range` | Optional CDF limits in KPI units: `[min,max]`, `[min,]` or `[,max]`. Blank keeps the automatic domain. |
 | `Axis Y Range` | Optional CDF cumulative-percentage limits from 0 to 100, using the same syntax. Blank keeps 0–100%. |
 | `Exclude Null/Empty` | `Yes` removes rows whose plotted value is null or empty before chart calculations. Blank keeps them. |
@@ -354,133 +341,24 @@ Top/Bottom produces a compact horizontal legend; Left/Right produces a vertical 
 
 Rows sharing a `Slide` number create separate charts on one slide. They must share `Slide Tittle`, `Slide Subtittle` and `Layout`, may use different sources, KPIs, filters and chart types, and require at least as many placeholders as chart rows.
 
-Operator and Vendor aliases resolve to the canonical values configured in Admin without changing the source workbook. Their table order controls Operator, Subscriber, Vendor and combined Operator_Vendor chart dimensions. Each canonical row defines its chart theme colour; multiple campaigns or operators using one identity receive contrasting shades derived from that colour.
+Operator and Vendor aliases resolve to the canonical values configured in Workspace Config without changing the source workbook. Their table order controls Operator, Subscriber, Vendor and combined Operator_Vendor chart dimensions. Each canonical row defines its chart theme colour; multiple campaigns or operators using one identity receive contrasting shades derived from that colour.
 
-## Import / Export / Transfer
+## Operator Mappings
 
-### Export targets
+The table groups raw Operator labels under one canonical identity for charts. Each row shows **Order**, **Canonical label**, **Mapped source labels**, **Colour** and **Actions**. Enter source aliases one per line; comma and semicolon separators are accepted too. The canonical label also maps to itself automatically, so it need not be repeated among the aliases. An alias cannot belong to two canonical groups.
 
-- App Config
-- Dashboards from the active workspace
-- Report Templates from the active workspace
-- Operator/Vendor Mappings & Colors from the active workspace
-- Auto-calculated Fields from the active workspace
-- An accessible workspace
-- Full Environment with selected workspaces
+Use **Add canonical mapping** to create a group. Change its label, aliases or colour and press **Save** to update it. **Move up** and **Move down** set its position in Operator charts and in Subscriber dimensions; the first and last rows cannot move beyond the table. **Delete** removes the entire group, including its aliases, after confirmation. Canonical renames update exact matching references in Report Templates and saved Dashboards.
 
-Admins can export/transfer the active workspace's Dashboards, Report Templates, Operator/Vendor Mappings & Colors and Auto-calculated Fields, plus complete workspaces they can access. Super-admins can also export App Config and a Full Environment. Dashboard, template, mapping and field packages preselect a destination workspace with the same name as their source, where available, and allow one or more accessible destinations to be selected.
+The colour picker sets the group's chart theme colour; charts can derive related shades to distinguish campaigns or series. Order and colour are presentation choices, while aliases make source labels such as `Vodafone UK` resolve to the intended canonical Operator. These settings affect chart grouping, legends and template filters. They do not rewrite source workbooks, stored CDR rows or combined CDR tables. Saving, moving or deleting a group clears chart caches so later views use the new settings.
 
-A Full Environment always contains App Config and the complete database/input content, Dashboard definitions, Report Templates, Operator/Vendor Mappings & Colors and Auto-calculated Fields for every selected workspace. Selecting Full Environment only chooses the package type; the workspace picker opens when **Export ZIP** or **Transfer to other server** is pressed. **Include generated Reports, Chart Sets and Dashboard PPT jobs** controls whether their `output/` trees are included. At least one workspace is required.
+## Vendor Mappings
 
-Exports run as disk-backed jobs and show estimated progress. The ZIP download starts when package creation finishes.
+The Vendor table has the same **Order**, **Canonical label**, **Mapped source labels**, **Colour** and **Actions** controls. Use **Add canonical mapping**, **Save**, **Move up**, **Move down** or confirmed **Delete** to manage a Vendor and all its aliases. Alias matching is case-insensitive, the canonical label maps to itself, and an alias cannot belong to two Vendor groups. Renaming a canonical Vendor updates exact matching Report Template and saved Dashboard references.
 
-### Import workflow
+Vendor order determines the chart sequence for Vendor dimensions and the Vendor portion of combined `Operator_Vendor` categories. The selected colour gives a Vendor a consistent chart identity, with related shades where multiple series need distinction. Aliases reconcile different source spellings for chart display and filters; they do not alter materialized CDR values. Group changes refresh chart caches without rematerializing source data.
 
-1. Select a Dashboard Analytic ZIP and wait for its disk-backed upload.
-2. Review the manifest-detected content, affected workspaces and overwrite warnings.
-3. For Dashboard, Report Template, Operator/Vendor Mappings & Colors or Auto-calculated Field packages, choose one or more accessible destination workspaces; a matching source name is preselected when available.
-4. Confirm import.
-5. Follow the background import in the floating task card.
+## Portable operations
 
-Workspace replacement is automatic: the application closes the target when required, imports the replacement, and removes obsolete old files only after success.
+Workspace Config does not create a new export component. Administrators use Admin's existing **Import / Export / Transfer** and **Backup Protection** controls to move or restore Report Templates and Operator/Vendor Mappings with the workspace. The portable mapping component includes both mapping types, aliases, order and colours.
 
-### Transfer to other server
-
-1. Choose **Content to export/transfer**.
-2. Enter destination URL/IP and port; the default port is `7278`.
-3. Press Enter or select **Connect and request approval**.
-4. A destination super-admin accepts or rejects the offer.
-5. Follow export creation and transmission at source.
-6. Follow reception and automatic import at destination.
-
-The dialog remembers the last destination. Active state is restored after page reload, resumable reception tolerates temporary connection cuts and contacting can be cancelled.
-
-Literal private IP destinations such as `192.168.1.17` are contacted directly, bypassing proxy variables inherited by Docker. The receiving application must listen on `0.0.0.0` rather than only `127.0.0.1`, and its host firewall must allow inbound TCP traffic on the selected port. When the destination is the Docker host itself, use `host.docker.internal`; a different computer on the LAN should use that computer's LAN IP.
-
-For super-admins, complete unimported packages appear in **Recovered transfer packages** with content, workspaces, creation time, size, Import and Delete actions. Incomplete remnants are removed automatically.
-
-## Database Management
-
-Database Management has two clearly separated subsections: **Backup Protection** and **Database Viewer**.
-
-### Backup Protection
-
-**Admin → Database Management → Backup Protection** separates **On demand backup** from **Scheduled backups**. On demand backup contains side-by-side **Backup** and **Restore** panels.
-
-In **Backup**, select one or more content types:
-
-- **Configuration Content: Application database** stores the shared application configuration.
-- **Workspace Content: Workspace Database** stores the selected workspace SQLite databases.
-- **Workspace Content: Dashboards** stores one JSON file with every Dashboard definition and its comments for each selected workspace.
-- **Workspace Content: Report Templates** stores one CSV file for each Report Template.
-- **Workspace Content: Operator/Vendor Mappings & Colors** stores one JSON file containing every canonical Operator and Vendor, alias, row position and thematic colour.
-- **Workspace Content: Auto-calculated Fields** stores one JSON file containing every selected workspace definition.
-- **Workspace Content: Input** stores raw dataset files when explicitly selected.
-- **Workspace Content: Output** stores generated Reports, Chart Sets and Dashboard PowerPoint jobs when explicitly selected.
-
-Application database, Workspace Database, Dashboards, Report Templates, Operator/Vendor Mappings & Colors and Auto-calculated Fields are selected by default. Input and Output are opt-in. Selecting any workspace content reveals **Workspaces to include**, containing only workspaces you can access. Dashboard, template and mapping JSON/CSV files use dedicated paths below `workspaces/<workspace name>/` in Backup and Export ZIPs; these portable paths are independent from the application's internal workspace folder name. Use **Backup folder** and **Browse** to choose the server-visible destination, then use **Backup Now** to create a ZIP in the background from the current content and workspace selection. Content, workspace and folder selections are saved for the scheduler without enabling it; the job appears in the floating background-task card and keeps the Admin panel in place.
-
-In **Restore**, choose a server-visible **Backup folder** and one of its ZIP files. The application reads the selected backup's manifest to detect its granular content and affected workspace names, with a structural fallback for older ZIPs, then shows a structured overwrite confirmation grouped into **Configuration Content** and **Workspace Content**. Choose the individual parts to restore only after reviewing that existing data will be replaced. Restore work also runs in the floating background-task card. The ZIP selector refreshes after an immediate backup and periodically while Admin remains open, so completed scheduled backups appear without a page reload.
-
-Enable the schedule to select hourly, daily, weekly or monthly execution. Weekly schedules expose a weekday selector and monthly schedules expose a day-of-month selector.
-
-Set **Retention backups** to keep a maximum number of ZIPs; the scheduler removes the oldest successful backups after creating a newer one. The default storage directory is `APP_DATA_DIR/scheduled-backups`. **Browse** opens a server-side directory picker limited to `APP_DATA_DIR`, so it reflects directories visible to the host or Docker container rather than the browser's computer. It can create a folder before selecting it.
-
-The status line reports the stored backup count and size, the most recent successful backup and the next scheduled run. Scheduled backups use the same chosen content and workspace selection as the Backup panel. Select Input and/or Output when raw datasets, Reports, Chart Sets or Dashboard PPT jobs must be included. Scheduled backups complement infrastructure backups and portable Export packages.
-
-### Database Viewer
-
-**Database Viewer** covers Application and Workspace Databases. It exposes global application-configuration tables, the active workspace database and the materialised combined CDR tables used to accelerate reporting; it is therefore broader than the active workspace alone.
-
-Tables are grouped by ownership:
-
-- **Config Tables**: global application configuration.
-- **Workspace Tables**: templates, datasets, profiles, logs, workspace state, Dashboard selections, Dashboard selected rows, Dashboard PPT jobs and unified classic generated jobs.
-- **Individual dataset rows**: one materialised table per dataset.
-- **Combined CDR rows**: reporting acceleration tables by CDR type.
-
-The **Generated jobs** table contains Report and Chart Set rows, distinguished by `job_type`. Dashboard PowerPoint history is stored separately in **Dashboard PPT jobs** because each row retains its Dashboard definition and applied filter snapshot.
-
-The **Report Templates** table is the active workspace's `report_templates` table. It stores each template name, technology, default flag, timestamps and CSV content. Existing CSV templates are migrated automatically when their workspace is opened; compatibility CSV copies are generated only for portable packages.
-
-The dedicated **Operator Mappings** and **Vendor Mappings** panels load the active workspace's canonical identities in their chart order. Each row provides Move Up/Move Down controls, the canonical label, one editable source alias per line, a thematic colour picker, Save and Delete. Adding, saving, deleting or moving a row refreshes only that panel, retaining its open state and the current page position. The canonical label maps to itself automatically. Operator order also governs Subscriber dimensions; Vendor order applies both to standalone Vendor values and to the Vendor portion of combined Operator_Vendor values. Charts derive related shades from the selected colour when several campaigns need to remain distinguishable. Individual and combined CDR tables and Dataset Preview retain exact source values; changing these settings invalidates chart caches without rematerializing CDRs.
-
-Capabilities:
-
-- 100-row server-side pagination with First/Previous/Next/Last;
-- Excel-style distinct-value filters;
-- active-filter chips;
-- row editing and deletion;
-- orphaned materialisation cleanup.
-
-Saving or deleting a row clears analysis caches so later Dashboard and Reporting requests use the new value. Database edits affect the active workspace immediately. Use Export first when changing production data manually.
-
-## Datasets Management
-
-- Review dataset ID, editable name, stored path, uploader, upload time and last update.
-- Rename a dataset inline; queued and processing rows remain locked until their current work finishes.
-- Preview any Ready dataset in a separate tab.
-- Open Ready Data, Voice or Speech CDRs in Datasets Analysis.
-- Apply available VFUK/3UK mappings to an eligible CDR or clear its persisted Vendor mapping.
-- Delete a dataset after confirmation whenever it is not processing; stop active processing from Workspace first.
-
-Datasets Management appears below Database Management in Admin.
-
-## App Logs
-
-App Logs is a separate tab but supports administration and incident analysis.
-
-- User filtering is case-insensitive.
-- Usernames display in lowercase.
-- **Executed by** distinguishes user steps from `system` steps.
-- Login events include success/failure details.
-- Only meaningful actions are recorded, not every click.
-
-## Operational checklist
-
-1. Replace bootstrap passwords.
-2. Review workspace access periodically.
-3. Back up configuration and data roots.
-4. Test restoration with a non-production package.
-5. Review App Logs after failures or permission changes.
-6. Avoid manual Database Management edits unless the impact is understood.
+For global runtime settings, see [Application Config](app-config.md). Admin's [Database Viewer](administrator-config.md#database-viewer) documents the underlying Operator and Vendor mapping tables.

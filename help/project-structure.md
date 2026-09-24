@@ -128,15 +128,15 @@ Report Templates become CSV files only inside portable export, transfer and back
 
 - `assets/ppt-templates/Template_CDR_analysis.pptx` supplies slide masters, named layouts and placeholders.
 - `assets/default-calculated-dimensions.json` supplies initial Auto-calculated Field definitions where applicable.
-- Workspace Report Templates supply slide/chart definitions and are documented in [Administration → Report Template reference](11-administration.md#report-template-reference).
+- Workspace Report Templates supply slide/chart definitions and are documented in [Workspace Config → Report Template reference](workspace-config.md#report-template-reference).
 
 ## Documentation
 
 - `README.md`: product summary, source quick start and deployment overview.
 - `CHANGELOG.md`: versioned release history.
-- `help/00-help.md`: in-app Help index.
-- `help/01-overview.md`: product and module tour.
-- `help/02-technical-considerations.md`: data interpretation, persistence, caching and job semantics.
+- `help/help.md`: in-app Help index.
+- `help/overview.md`: product and module tour.
+- `help/technical-considerations.md`: data interpretation, persistence, caching and job semantics.
 - Remaining numbered Help files: focused operational and deployment guides.
 
 The Help navigation order and labels are curated in `src/DashboardAnalytic.py`. Renaming an article requires updating that list, incoming links and related tests.

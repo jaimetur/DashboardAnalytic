@@ -3,10 +3,13 @@
 ## Available now
 
 - Named, access-controlled workspaces.
-- CDR ingestion, profiling, preview and vendor mapping.
+- CDR ingestion, profiling, preview
+- Vendor mapping datasets support.
+- Region mapping polygon shapes support.
 - Datasets Analysis analysis and exports.
 - Ad-hoc Chart Builder.
-- Template-driven NSA/SA Reports and Chart Sets.
+- Ad-hoc Query Builder.
+- Template-driven NSA/SA Dashboards and PPT Reports.
 - Shared Interactive Preview and filtered-data viewer.
 - Report Template management and validation.
 - Unified background jobs.
@@ -16,10 +19,11 @@
 
 ## Planned product work
 
-- Smart Orchestrator Logs Reports.
 - Approved scoring and GAP-analysis automation.
+- Non-qualified calls Analysis module.
+- Configuration datasets injestion to enrich CDR dataset and combine them to extract combined info using SQL Queries or Report Templates.
 - Additional validated KPI/chart contracts.
-- Richer anonymised examples for supported source schemas.
+- Smart Orchestrator Logs Reports.
 
 ## Architecture considerations
 

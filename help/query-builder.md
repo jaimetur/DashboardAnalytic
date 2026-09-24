@@ -1,8 +1,8 @@
 # Query Builder
 
-Query Builder runs read-only SQL against selected, processed Data, Voice and Speech CDRs in the active workspace. Use **Assisted** to assemble common queries with form controls, or **Write SQL** to edit SQL directly.
+Query Builder runs read-only SQL against selected, processed Data, Voice and Speech CDRs in the active workspace. Use **Assistance Mode** to assemble common queries with form controls, or **SQL Mode** to edit SQL directly.
 
-## Assisted mode
+## Assistance Mode
 
 1. Open **Query Builder** with a workspace active.
 2. Select one or more ready source datasets and one or more **CDR types to use** represented by those sources.
@@ -19,15 +19,15 @@ The result panel reports the current page's row count and columns, plus the tota
 
 For a `source_dataset_name` filter using **Is** or **Is not**, choose a name from the selected source datasets that match the selected CDR types. Other comparisons use a text value.
 
-When multiple CDR types are selected, Assisted mode combines their results with `UNION ALL` and includes a `cdr_type` column to identify each row's source type. Each type contributes its own `SELECT` against the corresponding temporary view (`selected_data`, `selected_voice` or `selected_speech`); selected output fields remain aligned across the combined results, with unavailable fields returned as `NULL`. Filters apply to the combined results. Choose **AND** or **OR** for each condition after the first; mixed connectors are evaluated from top to bottom and grouped with parentheses.
+When multiple CDR types are selected, Assistance Mode combines their results with `UNION ALL` and includes a `cdr_type` column to identify each row's source type. Each type contributes its own `SELECT` against the corresponding temporary view (`selected_data`, `selected_voice` or `selected_speech`); selected output fields remain aligned across the combined results, with unavailable fields returned as `NULL`. Filters apply to the combined results. Choose **AND** or **OR** for each condition after the first; mixed connectors are evaluated from top to bottom and grouped with parentheses.
 
-Assisted mode shows the generated SQL in a read-only preview. Switch to **Write SQL** to adjust the statement or create joins, common table expressions, aggregates or other SQL that the guided controls do not represent. When loading a saved query, SQL that matches the Assisted controls is restored in **Assisted** mode; custom or unsupported SQL remains in **Write SQL**.
+Assistance Mode shows the generated SQL in a read-only preview. You can switch to **SQL Mode** and back while the preview still contains its initial guidance. Switch to **SQL Mode** to adjust the statement or create joins, common table expressions, aggregates or other SQL that the guided controls do not represent. When loading a saved query, SQL that matches the Assistance Mode controls is restored in **Assistance Mode**; custom or unsupported SQL remains in **SQL Mode**.
 
-## Write SQL
+## SQL Mode
 
-Manual queries may use the temporary views `selected_data`, `selected_voice` and `selected_speech` for the selected source datasets. Each view includes original source columns plus `source_dataset_id`, `source_dataset_name` and `source_row_id`. A query must be a single read-only `SELECT` statement, optionally beginning with `WITH`.
+Enter manual SQL in the **SQL Query** editor. Queries may use the temporary views `selected_data`, `selected_voice` and `selected_speech` for the selected source datasets. Each view includes original source columns plus `source_dataset_id`, `source_dataset_name` and `source_row_id`. A query must be a single read-only `SELECT` statement, optionally beginning with `WITH`.
 
-Write SQL follows the same 50-row pages, total result count, navigation above and below the table, **Copy** and CSV export behavior. Select at least one ready source dataset before running or saving a query.
+SQL Mode follows the same 50-row pages, total result count, navigation above and below the table, **Copy** and CSV export behavior. Select at least one ready source dataset before running or saving a query.
 
 Runs and page changes continue in the background while Query Builder checks their status, so a long query does not need to hold one HTTP request open. Use **Cancel** in the running dialog to stop the current query. Only one Query Builder run can be active at a time across the server.
 
@@ -35,8 +35,8 @@ Runs and page changes continue in the background while Query Builder checks thei
 
 - Give the query a name and optional description to save it in the active workspace database. Query Builder loads the saved library from that database and does not automatically recreate removed or built-in examples.
 - Saving checks the SQL and selected source columns without executing the full query. Run it separately to inspect results.
-- Loading a saved query restores its SQL and source selections. Generated SQL that matches the Assisted controls also restores those controls; custom or unsupported SQL remains in **Write SQL**.
-- Saved queries retain SQL and source references, so queries saved before Assisted mode remain available in the same editor.
+- Loading a saved query restores its SQL and source selections. Generated SQL that matches the Assistance Mode controls also restores those controls; custom or unsupported SQL remains in **SQL Mode**.
+- Saved queries retain SQL and source references, so queries saved before Assistance Mode remain available in the same editor.
 - Use the delete button in the Saved queries library to remove a query after confirmation. The library and load picker refresh after deletion.
 - Export an individual saved query as JSON for inspection or archiving. Use a Query Builder Queries package or workspace backup/export ZIP to import saved queries into another workspace.
 - Workspace query packages match source datasets by file name, or by source file content and CDR type when names differ. A transfer reports unmatched or ambiguous sources instead of saving a query with missing selections. SQL conditions that inspect `source_dataset_name` still use the destination's file name, so review them after renaming a dataset.
