@@ -516,6 +516,23 @@
   const escape = (value) => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const payload = () => ({dataset_ids: [...sources.selectedOptions].map(item => Number(item.value)), query_sql: editor.value});
   const request = async (url, extra = {}) => { const response = await fetch(url, {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body:JSON.stringify({...payload(), ...extra})}); const body = response.headers.get('content-type')?.includes('application/json') ? await response.json() : null; if (!response.ok) throw new Error(body?.detail || `Query Builder request failed (HTTP ${response.status}).`); return {response, body}; };
+  const requestExecutionResult = async (executionId, executedSignature, extra) => {
+    const {body:started} = await request('/api/query-builder/run', {execution_id:executionId, background:true, ...extra});
+    if (started?.status !== 'running' || started.execution_id !== executionId) throw new Error('The query could not be started.');
+    while (activeExecutionId === executionId && querySignature() === executedSignature) {
+      await new Promise(resolve => window.setTimeout(resolve, 1000));
+      if (activeExecutionId !== executionId || querySignature() !== executedSignature) break;
+      const response = await fetch(`/api/query-builder/run/${encodeURIComponent(executionId)}`, {credentials:'same-origin'});
+      const body = response.headers.get('content-type')?.includes('application/json') ? await response.json() : null;
+      if (!response.ok) throw new Error(body?.detail || `Query Builder request failed (HTTP ${response.status}).`);
+      if (body?.status === 'running') continue;
+      if (body?.status === 'completed' && body.result) return body.result;
+      if (body?.status === 'failed' || body?.status === 'cancelled') throw new Error(body.detail || (body.status === 'cancelled' ? 'Query cancelled.' : 'Query Builder request failed.'));
+      throw new Error('The query returned an unexpected execution status.');
+    }
+    if (activeExecutionId === executionId) fetch(`/api/query-builder/run/${encodeURIComponent(executionId)}/cancel`, {method:'POST', credentials:'same-origin'}).catch(() => {});
+    throw new Error('Query cancelled.');
+  };
   const render = (body) => {
     totalRows = Number.isInteger(body.total_rows) && body.total_rows >= 0 ? body.total_rows : body.rows.length;
     if (!body.columns.length) { results.innerHTML = '<p class="empty-state">The query returned no columns.</p>'; resultCount.textContent = '0 rows · 0 columns'; nextOffset = null; totalRows = 0; currentOffset = 0; return; }
@@ -535,7 +552,7 @@
     activeExecutionId = executionId; status.textContent = 'Running query…'; runningOverlay.hidden = false; syncActionAvailability(); cancelRunButton.disabled = false;
     try {
       columnFilters.clear(); closeColumnFilterMenu(); updateFilterHeaderStates();
-      const {body} = await request('/api/query-builder/run', {execution_id:executionId, offset:0, column_filters:serializeColumnFilters()});
+      const body = await requestExecutionResult(executionId, executedSignature, {offset:0, column_filters:serializeColumnFilters()});
       if (querySignature() === executedSignature && activeExecutionId === executionId) { render(body); hasCurrentResults = true; }
       else if (activeExecutionId === executionId) status.textContent = 'The query or sources changed while it was running. Run the query again to refresh the results.';
     } catch (error) {
@@ -552,7 +569,7 @@
     const executedSignature = querySignature(); const executionId = `query-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     activeExecutionId = executionId; status.textContent = requestedOffset > currentOffset ? 'Loading next page…' : requestedOffset < currentOffset ? 'Loading previous page…' : 'Loading results…'; runningOverlay.hidden = false; syncActionAvailability(); cancelRunButton.disabled = false;
     try {
-      const {body} = await request('/api/query-builder/run', {execution_id:executionId, offset:requestedOffset, column_filters:serializeColumnFilters()});
+      const body = await requestExecutionResult(executionId, executedSignature, {offset:requestedOffset, column_filters:serializeColumnFilters()});
       if (querySignature() === executedSignature && activeExecutionId === executionId) {
         currentOffset = requestedOffset; render(body); hasCurrentResults = true;
       }

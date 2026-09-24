@@ -4,6 +4,8 @@ import sqlite3
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 
 def _database_with_query_rows(database_path: Path) -> None:
     with sqlite3.connect(database_path) as connection:
@@ -35,6 +37,20 @@ def test_query_builder_reads_committed_wal_rows(tmp_path: Path) -> None:
         assert query_column_values(database_path, datasets, query_sql, 0) == (['visible'], False)
     finally:
         writer.close()
+
+
+def test_query_builder_save_validation_checks_columns_without_running_query(tmp_path: Path) -> None:
+    from src.modules.query_builder import validate_query
+
+    database_path = tmp_path / 'query-builder-validation.sqlite'
+    _database_with_query_rows(database_path)
+    datasets = [{'id': 1, 'name': 'data.csv', 'kind': 'data'}]
+    large_aggregate = 'SELECT COUNT(*) AS total FROM ' + ', '.join(
+        f'selected_data AS source_{index}' for index in range(12)
+    )
+    assert validate_query(database_path, datasets, large_aggregate) == ['total']
+    with pytest.raises(sqlite3.OperationalError, match='no such column'):
+        validate_query(database_path, datasets, 'SELECT Missing_Field FROM selected_data')
 
 
 def test_query_builder_column_filters_apply_before_pagination_and_csv(tmp_path: Path) -> None:

@@ -29,9 +29,12 @@ Manual queries may use the temporary views `selected_data`, `selected_voice` and
 
 Write SQL follows the same 50-row pages, total result count, navigation above and below the table, **Copy** and CSV export behavior. Select at least one ready source dataset before running or saving a query.
 
+Runs and page changes continue in the background while Query Builder checks their status, so a long query does not need to hold one HTTP request open. Use **Cancel** in the running dialog to stop the current query. Only one Query Builder run can be active at a time across the server.
+
 ## Saved queries
 
 - Give the query a name and optional description to save it in the active workspace database. Query Builder loads the saved library from that database and does not automatically recreate removed or built-in examples.
+- Saving checks the SQL and selected source columns without executing the full query. Run it separately to inspect results.
 - Loading a saved query restores its SQL and source selections. Generated SQL that matches the Assisted controls also restores those controls; custom or unsupported SQL remains in **Write SQL**.
 - Saved queries retain SQL and source references, so queries saved before Assisted mode remain available in the same editor.
 - Export an individual saved query as JSON for inspection or archiving. Use a Query Builder Queries package or workspace backup/export ZIP to import saved queries into another workspace.

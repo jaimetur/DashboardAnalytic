@@ -84,6 +84,20 @@ def _result_columns(connection: sqlite3.Connection, query: str) -> list[str]:
     return [str(item[0]) for item in cursor.description or []]
 
 
+def validate_query(database_path: Path, datasets: list[dict[str, Any]], query: str) -> list[str]:
+    """Check a saved query's read-only SQL and source columns without running it."""
+    query = normalize_query(query)
+    if not datasets:
+        raise ValueError('Select at least one ready CDR source.')
+    connection = sqlite3.connect(f'file:{database_path.resolve()}?mode=ro', uri=True, timeout=30.0)
+    try:
+        _selected_views(connection, datasets)
+        connection.set_authorizer(_read_only_authorizer)
+        return _result_columns(connection, query)
+    finally:
+        connection.close()
+
+
 def _normalize_column_filters(
     column_filters: Any,
     columns: list[str],

@@ -57,6 +57,98 @@ def test_query_builder_assistant_uses_ready_source_columns(client, monkeypatch) 
     ]
 
 
+def test_query_builder_background_run_and_cancel(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+    from threading import Event
+
+    login(client)
+    monkeypatch.setattr(app_module.repository, 'list_datasets', lambda: [
+        {'id': 7, 'file_name': 'sample.csv', 'dataset_kind': 'data', 'status': 'ready'},
+    ])
+    started = Event()
+    release = Event()
+
+    def slow_query(*_args):
+        started.set()
+        assert release.wait(3)
+        return ['Value'], [('visible',)], False, ['selected_data'], 1
+
+    monkeypatch.setattr(app_module, 'execute_query', slow_query)
+    request_payload = {
+        'dataset_ids': [7], 'query_sql': 'SELECT Value FROM selected_data',
+        'offset': 0, 'background': True,
+    }
+    response = client.post('/api/query-builder/run', json={**request_payload, 'execution_id': 'background-cancel'})
+    assert response.status_code == 202
+    assert response.json() == {'execution_id': 'background-cancel', 'status': 'running'}
+    assert started.wait(1)
+    assert client.get('/api/query-builder/run/background-cancel').json() == {'status': 'running'}
+    assert client.post('/api/query-builder/run', json={
+        **request_payload, 'execution_id': 'background-parallel',
+    }).status_code == 409
+    job = app_module.QUERY_BUILDER_JOBS['background-cancel']
+    session_marker = job['session_marker']
+    job['session_marker'] = 'another-session'
+    assert client.get('/api/query-builder/run/background-cancel').status_code == 404
+    assert client.post('/api/query-builder/run/background-cancel/cancel').status_code == 404
+    job['session_marker'] = session_marker
+    assert client.post('/api/query-builder/run/background-cancel/cancel').json() == {'cancelling': True}
+    release.set()
+    for _ in range(100):
+        cancelled = client.get('/api/query-builder/run/background-cancel').json()
+        if cancelled['status'] == 'cancelled':
+            break
+        time.sleep(0.01)
+    assert cancelled == {'status': 'cancelled', 'detail': 'Query cancelled.'}
+
+    monkeypatch.setattr(app_module, 'execute_query', lambda *_args: (
+        ['Value'], [('visible',)], False, ['selected_data'], 1,
+    ))
+    response = client.post('/api/query-builder/run', json={**request_payload, 'execution_id': 'background-success'})
+    assert response.status_code == 202
+    for _ in range(100):
+        completed = client.get('/api/query-builder/run/background-success').json()
+        if completed['status'] == 'completed':
+            break
+        time.sleep(0.01)
+    assert completed == {'status': 'completed', 'result': {
+        'columns': ['Value'], 'rows': [['visible']], 'truncated': False,
+        'views': ['selected_data'], 'next_offset': None, 'total_rows': 1,
+    }}
+
+
+def test_query_builder_browser_polls_background_result() -> None:
+    node_binary = shutil.which('node')
+    if node_binary is None:
+        pytest.skip('Node.js is required to exercise Query Builder browser polling.')
+    template = (Path(__file__).resolve().parents[1] / 'src/web_interface/templates/query_builder.html').read_text(encoding='utf-8')
+    start = template.index('  const requestExecutionResult = async ')
+    end = template.index('\n  const render = ', start)
+    helper = template[start:end]
+    harness = r"""
+const fs = require('node:fs');
+const vm = require('node:vm');
+const helper = fs.readFileSync(0, 'utf8');
+const calls = [];
+const expected = {columns:['Value'], rows:[[1]], total_rows:1};
+const context = {
+  activeExecutionId:'background-test', querySignature:() => 'same-query',
+  window:{setTimeout:resolve => resolve()},
+  request:async (_url, extra) => {calls.push(['start', extra]); return {body:{execution_id:extra.execution_id,status:'running'}};},
+  fetch:async url => {calls.push(['poll', url]); return {ok:true,headers:{get:() => 'application/json'},json:async () => ({status:'completed',result:expected})};},
+  encodeURIComponent,
+};
+vm.runInNewContext(`${helper}\nrequestExecutionResult('background-test','same-query',{offset:50})`, context)
+  .then(result => process.stdout.write(JSON.stringify({result,calls})));
+"""
+    completed = subprocess.run([node_binary, '-e', harness], input=helper, text=True, capture_output=True, check=False)
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout)
+    assert result['result'] == {'columns': ['Value'], 'rows': [[1]], 'total_rows': 1}
+    assert result['calls'][0] == ['start', {'execution_id': 'background-test', 'background': True, 'offset': 50}]
+    assert result['calls'][1] == ['poll', '/api/query-builder/run/background-test']
+
+
 def test_query_builder_dataset_restore_matches_exact_name_then_unique_kind_and_hash(tmp_path: Path, monkeypatch) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -603,7 +695,7 @@ const context = {
   status: { textContent: '' }, runningOverlay: { hidden: true }, cancelRunButton: { disabled: false },
   querySignature: () => 'same-query',
   serializeColumnFilters: () => [],
-  request: async (_url, extra) => { requestOffsets.push(extra.offset); return { body: pages[extra.offset] }; },
+  requestExecutionResult: async (_id, _signature, extra) => { requestOffsets.push(extra.offset); return pages[extra.offset]; },
   navigator: { clipboard: { text: '', writeText: async function(value) { this.text = value; } } },
   setTimeout,
 };

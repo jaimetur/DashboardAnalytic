@@ -63,7 +63,7 @@ from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column,
 from src.modules.geospatial import assign_regions, validate_region_mapping
 from src.modules.repository import Repository, WORKSPACE_REGISTRY_TABLE, workspace_write_lock
 from src.modules.runtime_config import IGNORE_EVENT_TIME_FILTERING_ENV, env_flag, ignore_event_time_filtering
-from src.modules.query_builder import MAX_PREVIEW_ROWS, execute_query, iter_query_csv, query_column_values
+from src.modules.query_builder import MAX_PREVIEW_ROWS, execute_query, iter_query_csv, query_column_values, validate_query
 from src.runtime_logs import execution_log_entries
 from src.modules.workspaces import Workspace, WorkspaceRegistry
 from src.version import __app_name__, __release_date__, __version__
@@ -83,6 +83,9 @@ STOP_REQUESTS: set[tuple[str, int]] = set()
 STOP_REQUESTS_LOCK = Lock()
 QUERY_BUILDER_EXECUTIONS: dict[str, Event] = {}
 QUERY_BUILDER_EXECUTIONS_LOCK = Lock()
+QUERY_BUILDER_JOBS: dict[str, dict[str, Any]] = {}
+QUERY_BUILDER_JOB_TTL_SECONDS = 600
+MAX_QUERY_BUILDER_JOBS = 50
 BACKGROUND_TASK_SCHEDULER = BackgroundTaskScheduler(max_workers=1)
 # Export packages are configuration I/O and must remain usable when a CDR
 # worker or a calculated-field pass is still winding down in the main queue.
@@ -2482,6 +2485,8 @@ def idle_dashboard_warmup_loop(stop_event: Event) -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     APP_SHUTTING_DOWN.clear()
+    with QUERY_BUILDER_EXECUTIONS_LOCK:
+        QUERY_BUILDER_JOBS.clear()
     ensure_directories([
         settings.database_path.parent,
         settings.template_dir,
@@ -2551,6 +2556,9 @@ async def lifespan(_: FastAPI):
             )
     yield
     APP_SHUTTING_DOWN.set()
+    with QUERY_BUILDER_EXECUTIONS_LOCK:
+        for cancellation in QUERY_BUILDER_EXECUTIONS.values():
+            cancellation.set()
     backup_scheduler_stop.set()
     idle_dashboard_warmup_stop.set()
     backup_scheduler_thread.join(timeout=1)
@@ -12132,9 +12140,77 @@ def _query_builder_payload(payload: Any) -> tuple[list[dict[str, Any]], str]:
     return datasets, str(payload.get('query_sql') or '')
 
 
+def _query_builder_result_payload(
+    columns: list[str], rows: list[tuple[Any, ...]], truncated: bool,
+    views: list[str], total_rows: int, offset: int,
+) -> dict[str, Any]:
+    return {
+        'columns': columns, 'rows': rows, 'truncated': truncated, 'views': views,
+        'next_offset': offset + len(rows) if truncated else None,
+        'total_rows': total_rows,
+    }
+
+
+def _prune_query_builder_jobs() -> None:
+    cutoff = monotonic() - QUERY_BUILDER_JOB_TTL_SECONDS
+    for execution_id, job in list(QUERY_BUILDER_JOBS.items()):
+        if job.get('finished_at') is not None and job['finished_at'] < cutoff:
+            QUERY_BUILDER_JOBS.pop(execution_id, None)
+    finished = sorted(
+        ((job['finished_at'], execution_id) for execution_id, job in QUERY_BUILDER_JOBS.items()
+         if job.get('finished_at') is not None),
+    )
+    for _, execution_id in finished[:max(0, len(QUERY_BUILDER_JOBS) - MAX_QUERY_BUILDER_JOBS)]:
+        QUERY_BUILDER_JOBS.pop(execution_id, None)
+
+
+def _run_query_builder_job(
+    execution_id: str, database_path: Path, datasets: list[dict[str, Any]],
+    query_sql: str, offset: int, column_filters: Any, username: str,
+) -> None:
+    with QUERY_BUILDER_EXECUTIONS_LOCK:
+        job = QUERY_BUILDER_JOBS.get(execution_id)
+        if not job:
+            return
+        cancellation: Event = job['cancellation']
+    try:
+        columns, rows, truncated, views, total_rows = execute_query(
+            database_path, datasets, query_sql, MAX_PREVIEW_ROWS,
+            cancellation.is_set, offset, True, column_filters,
+        )
+        result = _query_builder_result_payload(columns, rows, truncated, views, total_rows, offset)
+        result_status = 'completed'
+        detail = None
+    except (ValueError, sqlite3.Error) as exc:
+        result = None
+        result_status = 'failed'
+        detail = str(exc)
+    except Exception:
+        result = None
+        result_status = 'failed'
+        detail = 'Query execution failed.'
+    if result_status == 'completed' and not cancellation.is_set():
+        try:
+            task_repository = Repository(database_path, repository.global_db_path, workspace_registry.registry_path)
+            task_repository.add_log(username, 'run_query_builder', json.dumps({
+                'dataset_ids': [item['id'] for item in datasets], 'rows': len(rows),
+            }))
+        except Exception:
+            pass
+    with QUERY_BUILDER_EXECUTIONS_LOCK:
+        job = QUERY_BUILDER_JOBS.get(execution_id)
+        if job:
+            job['status'] = 'cancelled' if cancellation.is_set() else result_status
+            job['result'] = result if job['status'] == 'completed' else None
+            job['detail'] = 'Query cancelled.' if job['status'] == 'cancelled' else detail
+            job['finished_at'] = monotonic()
+        QUERY_BUILDER_EXECUTIONS.pop(execution_id, None)
+
+
 @app.post('/api/query-builder/run')
 async def run_query_builder(request: Request, user: SessionUser = Depends(current_user)) -> JSONResponse:
-    if not active_workspace:
+    workspace = active_workspace
+    if not workspace:
         raise HTTPException(status_code=400, detail='Open a workspace before running Query Builder.')
     payload = await request.json()
     datasets, query_sql = _query_builder_payload(payload)
@@ -12145,12 +12221,38 @@ async def run_query_builder(request: Request, user: SessionUser = Depends(curren
     execution_id = str(payload.get('execution_id') or '').strip()
     if not re.fullmatch(r'[A-Za-z0-9_-]{8,80}', execution_id):
         raise HTTPException(status_code=400, detail='Invalid Query Builder execution id.')
+    if payload.get('background') is True:
+        with QUERY_BUILDER_EXECUTIONS_LOCK:
+            _prune_query_builder_jobs()
+            if execution_id in QUERY_BUILDER_EXECUTIONS or execution_id in QUERY_BUILDER_JOBS:
+                raise HTTPException(status_code=409, detail='Query execution id is already in use.')
+            if QUERY_BUILDER_EXECUTIONS:
+                raise HTTPException(status_code=409, detail='Another Query Builder query is running. Wait or cancel it.')
+            cancellation = Event()
+            QUERY_BUILDER_EXECUTIONS[execution_id] = cancellation
+            QUERY_BUILDER_JOBS[execution_id] = {
+                'status': 'running', 'cancellation': cancellation,
+                'session_marker': user.session_marker, 'workspace_id': workspace.id,
+                'result': None, 'detail': None, 'finished_at': None,
+            }
+        worker = Thread(
+            target=_run_query_builder_job,
+            args=(execution_id, workspace.database_path, datasets, query_sql,
+                  offset, column_filters, user.username),
+            name='query-builder-run', daemon=True,
+        )
+        worker.start()
+        return JSONResponse({'execution_id': execution_id, 'status': 'running'}, status_code=202)
     cancellation = Event()
     with QUERY_BUILDER_EXECUTIONS_LOCK:
+        if execution_id in QUERY_BUILDER_EXECUTIONS or execution_id in QUERY_BUILDER_JOBS:
+            raise HTTPException(status_code=409, detail='Query execution id is already in use.')
+        if QUERY_BUILDER_EXECUTIONS:
+            raise HTTPException(status_code=409, detail='Another Query Builder query is running. Wait or cancel it.')
         QUERY_BUILDER_EXECUTIONS[execution_id] = cancellation
     try:
         columns, rows, truncated, views, total_rows = await run_in_threadpool(
-            execute_query, active_workspace.database_path, datasets, query_sql, MAX_PREVIEW_ROWS,
+            execute_query, workspace.database_path, datasets, query_sql, MAX_PREVIEW_ROWS,
             cancellation.is_set, offset, True, column_filters,
         )
     except (ValueError, sqlite3.Error) as exc:
@@ -12161,11 +12263,22 @@ async def run_query_builder(request: Request, user: SessionUser = Depends(curren
         with QUERY_BUILDER_EXECUTIONS_LOCK:
             QUERY_BUILDER_EXECUTIONS.pop(execution_id, None)
     repository.add_log(user.username, 'run_query_builder', json.dumps({'dataset_ids': [item['id'] for item in datasets], 'rows': len(rows)}))
-    return JSONResponse({
-        'columns': columns, 'rows': rows, 'truncated': truncated, 'views': views,
-        'next_offset': offset + len(rows) if truncated else None,
-        'total_rows': total_rows,
-    })
+    return JSONResponse(_query_builder_result_payload(columns, rows, truncated, views, total_rows, offset))
+
+
+@app.get('/api/query-builder/run/{execution_id}')
+def query_builder_run_status(execution_id: str, user: SessionUser = Depends(current_user)) -> JSONResponse:
+    with QUERY_BUILDER_EXECUTIONS_LOCK:
+        _prune_query_builder_jobs()
+        job = QUERY_BUILDER_JOBS.get(execution_id)
+        if not job or job['session_marker'] != user.session_marker or not active_workspace or job['workspace_id'] != active_workspace.id:
+            raise HTTPException(status_code=404, detail='Query execution not found.')
+        payload = {'status': job['status']}
+        if job['status'] == 'completed':
+            payload['result'] = job['result']
+        elif job['status'] in {'failed', 'cancelled'}:
+            payload['detail'] = job['detail']
+    return JSONResponse(payload)
 
 
 @app.post('/api/query-builder/filter-values')
@@ -12196,9 +12309,16 @@ async def query_builder_filter_values(request: Request, user: SessionUser = Depe
 def cancel_query_builder_run(execution_id: str, user: SessionUser = Depends(current_user)) -> JSONResponse:
     with QUERY_BUILDER_EXECUTIONS_LOCK:
         cancellation = QUERY_BUILDER_EXECUTIONS.get(execution_id)
-    if not cancellation:
-        raise HTTPException(status_code=404, detail='Query execution is no longer active.')
-    cancellation.set()
+        job = QUERY_BUILDER_JOBS.get(execution_id)
+        if job and (
+            job['session_marker'] != user.session_marker
+            or not active_workspace
+            or job['workspace_id'] != active_workspace.id
+        ):
+            raise HTTPException(status_code=404, detail='Query execution is no longer active.')
+        if not cancellation:
+            raise HTTPException(status_code=404, detail='Query execution is no longer active.')
+        cancellation.set()
     return JSONResponse({'cancelling': True})
 
 
@@ -12210,8 +12330,7 @@ async def save_query_builder(request: Request, user: SessionUser = Depends(curre
     if not name:
         raise HTTPException(status_code=400, detail='Enter a name before saving the query.')
     try:
-        # Validation is deliberately performed before persistence.
-        execute_query(active_workspace.database_path, datasets, query_sql, row_limit=1)
+        validate_query(active_workspace.database_path, datasets, query_sql)
         repository.save_query_builder_query(name, str(payload.get('description') or '').strip(), query_sql, [item['id'] for item in datasets], user.username)
     except (ValueError, sqlite3.Error) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -12233,7 +12352,7 @@ async def update_saved_query_builder_query(query_id: int, request: Request, user
         raise HTTPException(status_code=400, detail='Enter a name before saving the query.')
     query_sql = str(existing['query_sql'])
     try:
-        execute_query(active_workspace.database_path, datasets, query_sql, row_limit=1)
+        validate_query(active_workspace.database_path, datasets, query_sql)
         if not repository.update_query_builder_query(
             query_id, name, str(payload.get('description') or '').strip(), query_sql,
             [item['id'] for item in datasets], user.username,
