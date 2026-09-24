@@ -281,6 +281,12 @@
   transition: transform .22s ease, opacity .18s ease, visibility 0s linear .22s;
   filter: drop-shadow(0 10px 24px rgba(42, 28, 68, .16));
 }
+.ds-chart-filter-panel.ds-live-chart-filter-panel { z-index: 20; top: 0; bottom: 0; }
+.ds-live-chart-filter-panel .ds-chart-filter-toggle { display: none; }
+.e2e-dashboards .ds-chart-definition-toggle { position: absolute; z-index: 6; right: 0; bottom: 0; width: auto; min-width: 0; height: 1.7rem; min-height: 0; padding: .25rem .55rem!important; border: 1px solid #60408f; border-right: 0; border-bottom: 0; border-radius: .55rem 0 0 0; background: #60408f; color: #fff; font-size: .68rem; font-weight: 750; white-space: nowrap; cursor: pointer; opacity: 0; visibility: hidden; pointer-events: none; }
+.ds-chart.ds-hover .ds-chart-definition-toggle,.ds-chart:focus-within .ds-chart-definition-toggle { opacity: 1; visibility: visible; pointer-events: auto; }
+.e2e-dashboards .ds-chart-definition-toggle:disabled { display: none; }
+#ds-viewer.ds-presentation-active .ds-chart-definition-toggle { display: none; }
 .ds-chart-expanded-canvas.ds-hover .ds-chart-filter-panel,
 .ds-chart-expanded-canvas:focus-within .ds-chart-filter-panel,
 .ds-chart-filter-panel.is-open {
@@ -1532,6 +1538,8 @@
     transform:none!important;
     pointer-events:auto!important;
   }
+  .ds-chart .ds-chart-definition-toggle { opacity:0!important; visibility:hidden!important; pointer-events:none!important; }
+  .ds-chart.ds-touch-controls-visible .ds-chart-definition-toggle { opacity:1!important; visibility:visible!important; pointer-events:auto!important; }
   .ds-chart-expanded-canvas .ds-chart-filter-panel:not(.is-open) {
     opacity:0;
     visibility:hidden;

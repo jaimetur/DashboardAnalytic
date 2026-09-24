@@ -8,8 +8,8 @@ Each Dashboard stores its name, NR mode, Report Template, adaptive and additiona
 
 1. Open a workspace and process the required CDR-Data, CDR-Voice or CDR-Speech datasets.
 2. Persist Vendor mappings before using Multivendor Comparison.
-3. Create or import an NSA/SA Report Template in Admin.
-4. Open E2E Dashboards. Any user with workspace access can manage Dashboard definitions; Template Editor and Auto-calculated Field management require administrator access.
+3. Create or import an NSA/SA Report Template in Workspace Config.
+4. Open E2E Dashboards. Any user with workspace access can manage Dashboard definitions; `user-editor`, `admin` and `super-admin` can open Edit Template and Auto-Calculated Fields from the Dashboard viewer and expanded chart viewer.
 
 Dashboard uses the same Report Template schema and renderer as Reporting. This guide covers how the template is selected and used by a Dashboard. For template columns, structural slides, supported chart types, recipes, template filters, aggregations, legends, layouts and colours, see [Workspace Config → Report Template reference](workspace-config.md#report-template-reference).
 
@@ -115,13 +115,13 @@ After the visible slide finishes loading, the browser silently caches the remain
 
 ### Live and expanded chart controls
 
-Hover or focus a chart to reveal Dataset, Expand, Refresh and Zoom controls. They hide shortly after pointer exit and remain accessible on touch devices.
+Hover or focus a chart to reveal Dataset, Expand, Refresh, Zoom and its Chart Definition tab. They hide shortly after pointer exit and remain accessible on touch devices. The tab opens the same editor used in expanded view for that chart; Apply changes the current preview, while Update Template saves the definition to its Report Template row.
 
 - Zoom from 100% to 400% with `−`, `+` and `1:1` reset.
 - At 100%, drag a rectangle over the plot to zoom into it; drag a zoomed chart to pan.
 - Double-click or use Expand to open the focused chart.
 - View Dashboard and its expanded viewer stay above background-task cards and share Reporting's red Close control. The expanded viewer follows Reporting's full-screen card layout, with a descriptive header and an inset chart canvas, while retaining the purple Dashboard palette and floating Chart Definition panel. Both live and expanded charts show boundary-aware left, right, up and down arrows whenever zoom is active; these move the Canvas camera and disable at their respective limits. The expanded viewer's purple First/Previous/Next/Last controls use the same icons and spacing as Reporting. On compact screens, the viewer reduces its header and combines playback and navigation controls into one row. Landscape also places Dashboard selection and actions on one row, while portrait compacts editing actions, fits every navigation button and expands the proportionally positioned chart composition through all remaining viewport height instead of stacking oversized charts or leaving unused space. The collapsible Comments drawer remains fixed to the visible bottom edge in landscape, including the device safe area, independently of overflowing slide content.
-- Dashboard Filters, Auto-calculated Fields and Edit Template remain available in expanded view when permitted.
+- Dashboard Filters remain available in expanded view. Auto-Calculated Fields and Edit Template are also available there for `user-editor`, `admin` and `super-admin`.
 - Edit Template focuses the exact template row for the chart. Saving refreshes the Dashboard; closing unchanged retains the current preparation.
 
 For the complete definition of a chart row, see [Workspace Config → Report Template reference](workspace-config.md#report-template-reference).
@@ -137,7 +137,7 @@ Every column provides an Excel-style value filter across the complete chart data
 - Add, edit or remove slide comments; Enter or leaving an edit saves immediately.
 - **Presentation** supports 3, 5, 10 or 15 seconds with Fade, Slide or no transition. Presentation mode keeps separate floating Pause/Resume and Stop controls available. Manual navigation stops it. On compact landscape screens, its settings dialog stays within the visible viewport and scrolls vertically while keeping its header and actions accessible.
 - **Dashboard Filters** moves the same panel into a floating dialog; edits refresh visible charts without automatically saving defaults. View Dashboard and Generate PPT are omitted because the parent viewer already provides those actions.
-- **Auto-Calculated Fields** opens the shared workspace manager for administrators.
+- **Auto-Calculated Fields** opens the shared workspace manager for `user-editor`, `admin` and `super-admin`.
 - Backdrop/Escape closes unchanged dialogs and returns focus. Unsaved Filters, Template Editor or calculated-field changes request a decision first.
 
 ## Generate PPT
@@ -160,7 +160,7 @@ Charts Panel browses completed Dashboard PPT charts. Filter by NR Mode, Dashboar
 
 Cards fill equal template frames and repaint stored Canvas models with the current renderer. Legacy jobs without models retain their PNG. Open any card in the same expanded viewer and Filtered Chart Dataset used by the live Dashboard.
 
-Historical previews retain the job's exact template and selection. **View Filters** opens that snapshot. Administrators can open the generating template and Auto-calculated Fields. Dashboard Filters are hidden because a completed export is immutable.
+Historical previews retain the job's exact template and selection. **View Filters** opens that snapshot. `user-editor`, `admin` and `super-admin` can open the generating template and Auto-calculated Fields. Dashboard Filters are hidden because a completed export is immutable.
 
 ## Portability and maintenance
 

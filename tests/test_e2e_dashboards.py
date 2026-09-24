@@ -644,6 +644,27 @@ def test_dashboard_refresh_rebuilds_all_models_and_chart_refresh_rebuilds_only_o
     assert len(calls) == len(indexes)
 
 
+def test_dashboard_editing_controls_match_workspace_editor_roles(client):
+    controls = (
+        'id="ds-edit"',
+        'data-workspace-manage-calculated-dimensions>Auto-Calculated Fields',
+        'id="ds-chart-expanded-edit"',
+        'id="ds-chart-expanded-auto-fields"',
+    )
+    for role in ('user-viewer', 'user-editor', 'admin', 'super-admin'):
+        session_id = f'dashboard-controls-{role}'
+        if role != 'super-admin':
+            core.repository.create_user(session_id, 'test-password', role)
+            account = next(row for row in core.repository.list_users() if row['username'] == session_id)
+            core.repository.set_user_workspace_access(int(account['id']), [core.active_workspace.id])
+        core.SESSIONS[session_id] = core.SessionUser(username=session_id, role=role)
+        client.cookies.set(core.SESSION_COOKIE, session_id)
+        page = client.get('/e2e-dashboards')
+        assert page.status_code == 200
+        for control in controls:
+            assert (control in page.text) == (role != 'user-viewer')
+
+
 def test_dashboards_lifecycle_and_layout(client):
     payload = setup_dashboard(client)
     page = client.get('/e2e-dashboards')

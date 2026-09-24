@@ -1,6 +1,6 @@
 # Administrator Config
 
-Administrator Config centralises user, portability, database and dataset administration. Application-wide runtime settings are in Application Config; workspace-owned templates and chart mappings are on the separate Workspace Config page. Available actions depend on the signed-in role.
+Administrator Config centralises user, portability, database and dataset administration. Application-wide runtime settings are in Application Config; workspace-owned templates and chart mappings are on the separate Workspace Config page. Available actions depend on the signed-in role. Only visible for `admin` and `super-admin` roles.
 
 ## Roles
 

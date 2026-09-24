@@ -2270,6 +2270,12 @@
   let expandedChartFilterContextPath = '';
   let expandedChartFilterLoadRequest = 0;
   let expandedChartAppliedDefinition = null;
+  const chartFilterPanel = $('ds-chart-filter-panel');
+  const expandedChartFilterHome = chartFilterPanel.parentElement;
+  let liveChartFilterToggle = null;
+  let liveChartCanvas = null;
+  let liveChartMessage = null;
+  let liveChartRender = null;
   const expandedTemplateUpdate = node('button', 'Update Template', 'danger-button');
   expandedTemplateUpdate.id = 'ds-chart-filter-update';
   expandedTemplateUpdate.hidden = true;
@@ -2279,6 +2285,7 @@
     expandedFiltersCloseTimer = null;
     $('ds-chart-filter-panel').classList.toggle('is-open', open);
     $('ds-chart-filter-toggle').setAttribute('aria-expanded', String(open));
+    liveChartFilterToggle?.setAttribute('aria-expanded', String(open));
     if (open) $('ds-chart-filter-fields').querySelector('input,select,button')?.focus();
   };
   const scheduleExpandedChartFiltersClose = () => {
@@ -2298,7 +2305,7 @@
   // a click outside the panel remains an immediate close below.
   document.addEventListener('pointerdown', event => {
     const panel = $('ds-chart-filter-panel');
-    if (!panel.classList.contains('is-open') || panel.contains(event.target)) return;
+    if (!panel.classList.contains('is-open') || panel.contains(event.target) || event.target === liveChartFilterToggle) return;
     // Searchable selector menus are temporarily mounted in the overlay, not
     // inside the panel, and must remain interactive until a choice is made.
     if (event.target.closest('.report-chart-preview-select-menu')) return;
@@ -2325,7 +2332,7 @@
       chartTypes: ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Multi KPI CDF Lines', 'Scatter', 'Table', 'Dynamic Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'],
       legendPositions: ['', 'Top', 'Bottom', 'Left', 'Right'],
       labelPositions: ['', 'None', 'Top', 'Up', 'Middle', 'Down'],
-      menuContainer: expandedOverlayHost,
+      menuContainer: chartFilterPanel.closest('.ds-overlay') || expandedOverlayHost,
       onSourceChange: next => {
         const source = sourceKey(next.cdr_source);
         expandedChartFilterControls = createExpandedChartFilterControls({...context, ...next, columns: columnsBySource[source] || []});
@@ -2372,6 +2379,12 @@
     if (open && !expandedChartFilterControls) await loadExpandedChartFilters();
   });
   const discardExpandedChartDefinitionDraft = () => {
+    if (liveChartFilterToggle) {
+      const toggle = liveChartFilterToggle;
+      resetChartDefinitionSurface();
+      toggle.focus();
+      return;
+    }
     expandedChartFilterLoadRequest += 1;
     expandedChartFilterControls = null;
     expandedChartFilterToken = '';
@@ -2383,15 +2396,52 @@
     setExpandedChartFiltersOpen(false);
     $('ds-chart-filter-toggle').focus();
   };
+  const resetChartDefinitionSurface = () => {
+    expandedChartFilterLoadRequest += 1;
+    expandedChartFilterControls = null;
+    expandedChartFilterToken = '';
+    expandedChartFilterIndex = -1;
+    expandedChartFilterContextPath = '';
+    expandedChartAppliedDefinition = null;
+    $('ds-chart-filter-fields').replaceChildren();
+    expandedTemplateUpdate.hidden = true;
+    setExpandedChartFiltersOpen(false);
+    chartFilterPanel.classList.remove('ds-live-chart-filter-panel');
+    expandedChartFilterHome.append(chartFilterPanel);
+    liveChartFilterToggle = null;
+    liveChartCanvas = null;
+    liveChartMessage = null;
+    liveChartRender = null;
+  };
+  const openLiveChartDefinition = async (chart, card, toggle, canvas, message, render) => {
+    if (liveChartFilterToggle === toggle) {
+      setExpandedChartFiltersOpen(!chartFilterPanel.classList.contains('is-open'));
+      return;
+    }
+    resetChartDefinitionSurface();
+    expandedChart = chart;
+    expandedChartMode = pptDashboardViewer ? 'ppt' : 'dashboard';
+    liveChartFilterToggle = toggle;
+    liveChartCanvas = canvas;
+    liveChartMessage = message;
+    liveChartRender = render;
+    chartFilterPanel.classList.add('ds-live-chart-filter-panel');
+    $('ds-slide-content').append(chartFilterPanel);
+    setExpandedChartFiltersOpen(true);
+    await loadExpandedChartFilters();
+    if (!card.isConnected) resetChartDefinitionSurface();
+  };
   // An explicit Close means discard. Automatic/click-outside collapsing uses
   // setExpandedChartFiltersOpen(false) directly and retains the draft.
   $('ds-chart-filter-close').onclick = discardExpandedChartDefinitionDraft;
   const renderExpandedChartDefinition = async ({closePanel = true} = {}) => {
     const chart = expandedChart;
     if (!chart || !expandedChartFilterControls) return null;
-    const canvas = $('ds-chart-expanded-canvas');
-    const message = $('ds-chart-expanded-message');
+    const live = Boolean(liveChartCanvas);
+    const canvas = live ? liveChartCanvas : $('ds-chart-expanded-canvas');
+    const message = live ? liveChartMessage : $('ds-chart-expanded-message');
     const previewDefinition = expandedChartFilterControls.definition();
+    if (live && !message.isConnected) canvas.before(message);
     message.textContent = 'Rendering chart preview…';
     message.hidden = false;
     try {
@@ -2414,11 +2464,14 @@
           payload = await api(`/chart-preview-jobs/${encodeURIComponent(payload.job_id)}`);
         }
       }
-      if (chart !== expandedChart) return null;
-      setExpandedChartHeader({...chart, chart_type: previewDefinition.chart_type, cdr_source: previewDefinition.cdr_source}, payload.title);
-      expandedZoom.reset();
+      if (chart !== expandedChart || !canvas.isConnected) return null;
+      if (!live) {
+        setExpandedChartHeader({...chart, chart_type: previewDefinition.chart_type, cdr_source: previewDefinition.cdr_source}, payload.title);
+        expandedZoom.reset();
+      }
       canvas.hidden = false;
       globalThis.renderDashboardChart(canvas, payload);
+      if (live) liveChartRender(payload);
       message.hidden = true;
       // Applying a temporary Chart Definition changes the current viewer
       // session, not only the enlarged canvas. Reuse that exact payload for
@@ -2429,7 +2482,7 @@
       chart.chart_type = previewDefinition.chart_type || chart.chart_type;
       chart.cdr_source = previewDefinition.cdr_source || chart.cdr_source;
       expandedChartAppliedDefinition = {...previewDefinition};
-      if (expandedChartSlide(chart) === prepared?.slides[slideIndex]) renderSlide();
+      if (!live && expandedChartSlide(chart) === prepared?.slides[slideIndex]) renderSlide();
       if (closePanel) setExpandedChartFiltersOpen(false);
       return {previewDefinition, payload};
     } catch (error) {
@@ -2688,21 +2741,13 @@
   });
   async function openExpandedChart(chart, renderedPayload = null, mode = 'dashboard', {preserveFocus = false} = {}) {
     stopPresentation();
+    resetChartDefinitionSurface();
     const request = ++expandedChartRequest;
     const contextKey = mode === 'ppt' ? dashboardPptChartsJobId : prepared?.token;
     const canvas = $('ds-chart-expanded-canvas');
     const message = $('ds-chart-expanded-message');
     expandedChart = chart;
     expandedChartMode = mode;
-    expandedChartFilterLoadRequest += 1;
-    expandedChartFilterControls = null;
-    expandedChartFilterToken = '';
-    expandedChartFilterIndex = -1;
-    expandedChartFilterContextPath = '';
-    expandedChartAppliedDefinition = null;
-    $('ds-chart-filter-fields').replaceChildren();
-    expandedTemplateUpdate.hidden = true;
-    setExpandedChartFiltersOpen(false);
     syncExpandedChartNavigation();
     const historical = mode === 'ppt';
     $('ds-chart-expanded-data').disabled = historical ? !chart.data_url : false;
@@ -2891,6 +2936,7 @@
   }
   function renderSlide() {
     if (!prepared) return; slideIndex = Math.max(0,Math.min(slideIndex,prepared.slides.length-1));
+    if (liveChartFilterToggle) resetChartDefinitionSurface();
     const slide = prepared.slides[slideIndex]; if (!slide) return;
     const preloadToken = prepared.token;
     const preloadOrigin = slideIndex;
@@ -2948,11 +2994,25 @@
         : 'No compatible CDR dataset has been selected for this chart.';
       const data = node('button','', 'ds-chart-data'); data.type = 'button'; data.title = 'View dataset'; data.setAttribute('aria-label', 'View dataset'); data.disabled = !chart.available || (Boolean(pptDashboardViewer) && !chart.data_url); data.onclick = safe(async () => { await openChartDataset(chart); });
       const expand = node('button', '', 'ds-chart-expand'); expand.type = 'button'; expand.title = 'Expand chart'; expand.setAttribute('aria-label', 'Expand chart'); expand.disabled = !chart.available; expand.onclick = safe(async event => { event.stopPropagation(); await openExpandedChart(chart, renderedPayload, pptDashboardViewer ? 'ppt' : 'dashboard'); });
+      const definitionToggle = node('button', 'Chart Definition', 'ds-chart-definition-toggle');
+      definitionToggle.type = 'button';
+      definitionToggle.title = 'Chart Definition';
+      definitionToggle.setAttribute('aria-label', `Chart Definition for ${chart.title || 'chart'}`);
+      definitionToggle.setAttribute('aria-controls', 'ds-chart-filter-panel');
+      definitionToggle.setAttribute('aria-expanded', 'false');
+      definitionToggle.disabled = !chart.available;
+      definitionToggle.onclick = safe(async event => {
+        event.stopPropagation();
+        await openLiveChartDefinition(chart, card, definitionToggle, canvas, message, payload => {
+          renderedPayload = payload;
+          zoom.reset();
+        });
+      });
       card.ondblclick = safe(async event => {
         if (!chart.available || event.target.closest('button, a, input, select, label')) return;
         await openExpandedChart(chart, renderedPayload, pptDashboardViewer ? 'ppt' : 'dashboard');
       });
-      const controls = node('div', undefined, 'ds-chart-controls'); controls.append(data, expand, zoom); card.append(controls);
+      const controls = node('div', undefined, 'ds-chart-controls'); controls.append(data, expand, zoom); card.append(controls, definitionToggle);
       let hideTimer;
       let touchControlsTimer;
       const showControls = () => { clearTimeout(hideTimer); hideTimer = null; card.classList.add('ds-hover'); };
