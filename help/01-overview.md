@@ -8,7 +8,7 @@ Dashboard Analytic turns processed CDR datasets into interactive KPI analysis, r
 2. Upload Data, Voice or Speech CDRs from **Workspace**.
 3. Confirm the detected input type and wait for processing to finish.
 4. Optionally map Vodafone and Three vendor information.
-5. Create or open a saved **E2E Dashboard** to analyse a complete template interactively, reuse prepared selections and generate its PowerPoint. Use **Datasets Analysis** or **Chart Builder** for focused exploration, or **E2E Reporting** for the classic report and Chart Set workflow.
+5. Create or open a saved **E2E Dashboard** to analyse a complete template interactively, reuse prepared selections and generate its PowerPoint. Use **Datasets Analysis**, **Chart Builder** or **Query Builder** for focused exploration, or **E2E Reporting** for the classic report and Chart Set workflow.
 6. Follow Dashboard preparation and generation in the floating task cards, **PowerPoint Generation Jobs** and **Reports and Charts Jobs**.
 7. Use **App Logs** for traceability and **Admin** for shared configuration.
 
@@ -143,7 +143,7 @@ Status cards distinguish data loading, queued data, chart rendering, queued char
 
 **Generate PPT** uses the exact applied definition and continues as a background job. Completed jobs retain their CDRs, dates, scope, filter snapshot, comments, PPTX, PNGs, tooltips and Canvas models under `output/dashboards`. **PowerPoint Generation Jobs** supports download, chart access, stop, retry, relaunch and deletion. **Charts Panel** filters completed jobs and reopens their charts in the same expanded viewer, including the historical chart dataset.
 
-The operational guide is [E2E Dashboards](07-e2e-dashboards.md). Template creation, columns, structural slides, supported chart types, filters, aggregations, legends, layouts and colours are documented once in [Administration → Report Template reference](10-administration.md#report-template-reference).
+The operational guide is [E2E Dashboards](07-e2e-dashboards.md). Template creation, columns, structural slides, supported chart types, filters, aggregations, legends, layouts and colours are documented once in [Administration → Report Template reference](11-administration.md#report-template-reference).
 
 ## E2E Reporting
 
@@ -243,7 +243,7 @@ Templates belong to their workspace and live in its `report_templates` database 
 - Apply temporary preview values back to the in-memory row with **Update Template**.
 - Save atomically; saved cells then clear their change highlighting.
 
-The complete authoring specification, examples and supported chart catalogue are in [Administration → Report Template reference](10-administration.md#report-template-reference).
+The complete authoring specification, examples and supported chart catalogue are in [Administration → Report Template reference](11-administration.md#report-template-reference).
 
 ### Import / Export / Transfer
 

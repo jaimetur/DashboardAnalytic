@@ -11,19 +11,34 @@
       <select data-sql-datasets multiple size="8">{% for dataset in datasets %}<option value="{{ dataset.id }}">{{ dataset.kind | upper }} · {{ dataset.name }}</option>{% endfor %}</select>
     </label>
     <p class="form-note">The query can use <code>selected_data</code>, <code>selected_voice</code> and <code>selected_speech</code>. Each view adds <code>source_dataset_id</code>, <code>source_dataset_name</code> and <code>source_row_id</code>; all source CDR columns remain available.</p>
-    <label>SQL <textarea data-sql-editor rows="17" spellcheck="false" placeholder="SELECT * FROM selected_data LIMIT 100"></textarea></label>
-    <div class="inline-actions query-builder-actions"><button type="button" class="query-builder-primary-action" data-sql-run>Run query</button></div>
+    <div class="query-builder-mode" role="group" aria-label="Query editor mode"><button type="button" data-sql-mode="assisted" aria-pressed="true">Assisted</button><button type="button" data-sql-mode="sql" aria-pressed="false">Write SQL</button></div>
+    <div class="query-builder-assistant" data-sql-assistant>
+      <p class="form-note">Select CDR sources above, then choose what to show. The SQL preview updates as you build the query.</p>
+      <div class="query-builder-assistant-grid">
+        <fieldset class="query-builder-type-picker"><legend>CDR types to use</legend><div data-sql-types></div><span class="form-label-hint">Select one or more types. Results include a cdr_type field.</span></fieldset>
+        <div class="inline-actions query-builder-row-limit-actions"><label>Maximum rows <input data-sql-limit type="number" min="1" max="100000" value="100"></label><label class="query-builder-all-fields"><input data-sql-all-rows type="checkbox"> All rows</label></div>
+      </div>
+      <label class="query-builder-all-fields"><input data-sql-all-fields type="checkbox"> Show all fields</label>
+      <label data-sql-fields-wrap>Fields to show <span class="form-label-hint">Select one or more fields (Ctrl/Cmd for multiple). Include cdr_type to distinguish rows from different types.</span><select data-sql-fields multiple size="8"></select></label>
+      <div class="query-builder-assistant-section"><div class="section-head"><h3>Filters</h3><button type="button" class="query-builder-secondary-action" data-sql-add-filter>Add filter</button></div><div data-sql-filters></div><p class="form-note">Choose AND or OR between filters. Mixed connectors are applied from top to bottom with explicit parentheses. Text matching is case insensitive.</p></div>
+      <div class="query-builder-assistant-grid"><label>Sort by <select data-sql-sort-field><option value="">No sorting</option></select></label><label>Direction <select data-sql-sort-direction><option value="ASC">Ascending</option><option value="DESC">Descending</option></select></label></div>
+      <p class="form-note" data-sql-assistant-status aria-live="polite"></p>
+    </div>
+    <label><span data-sql-editor-label>SQL preview</span> <textarea data-sql-editor rows="17" spellcheck="false" placeholder="SELECT * FROM selected_data LIMIT 100" readonly></textarea></label>
+    <div class="inline-actions query-builder-actions"><button type="button" class="query-builder-primary-action" data-sql-run>Run query</button><button type="button" class="query-builder-secondary-action" data-sql-clear>Clear Query</button></div>
     <section class="query-builder-subpanel query-builder-save-subpanel"><p class="query-builder-subpanel-title">Save query</p><div class="inline-actions query-builder-save-actions"><input data-sql-name placeholder="Query name"><input data-sql-description placeholder="Optional description"><button type="button" class="query-builder-secondary-action" data-sql-save>Save query</button></div></section>
     <section class="query-builder-subpanel query-builder-load-subpanel"><p class="query-builder-subpanel-title">Load saved query</p><div class="inline-actions query-builder-load-actions"><select data-sql-saved-picker aria-label="Saved query"><option value="">Choose saved query…</option>{% for query in saved_queries %}<option value="{{ query.id }}" data-query='{{ query.query_sql | tojson }}' data-dataset-ids='{{ query.dataset_ids | tojson }}'>{{ query.name }}</option>{% endfor %}</select><button type="button" class="query-builder-secondary-action" data-sql-load-saved>Load Saved Query</button></div></section>
-    <p class="form-note" data-sql-status aria-live="polite">Only one SELECT query is allowed. Preview is limited to 5,000 rows; CSV export to 100,000 rows.</p>
+    <p class="form-note" data-sql-status aria-live="polite">Results load in pages of up to 50 rows; CSV export includes every result row and column.</p>
   </article>
   <article class="panel" data-page-panel-label="Saved queries">
     <div class="section-head"><div><p class="eyebrow">Library</p><h2>Saved queries</h2></div></div>
     {% if saved_queries %}<div class="table-wrap"><table><thead><tr><th>Name</th><th>Description</th><th>Sources</th><th>Actions</th></tr></thead><tbody>{% for query in saved_queries %}<tr><td>{{ query.name }}</td><td>{{ query.description }}</td><td>{{ query.dataset_names | join(', ') }}</td><td><div class="query-builder-row-actions"><button type="button" class="query-builder-load-action" data-sql-load data-query='{{ query.query_sql | tojson }}' data-dataset-ids='{{ query.dataset_ids | tojson }}'>Use query</button><button type="button" class="query-builder-edit-action" data-sql-edit data-query-id="{{ query.id }}" data-query-name="{{ query.name }}" data-query-description="{{ query.description }}" data-query-dataset-ids='{{ query.dataset_ids | tojson }}' title="Edit saved query" aria-label="Edit {{ query.name }}">✎</button><a class="query-builder-export-json-action" href="/api/query-builder/saved/{{ query.id }}/export" title="Export query as JSON" aria-label="Export {{ query.name }} as JSON" download><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11m0 0 4-4m-4 4-4-4M5 17v3h14v-3"/></svg></a></div></td></tr>{% endfor %}</tbody></table></div>{% else %}<p class="empty-state">No saved queries yet.</p>{% endif %}
   </article>
   <article class="panel" data-page-panel-label="Results">
-    <div class="section-head"><div><p class="eyebrow">Results</p><h2>Query output</h2></div><button type="button" class="query-builder-secondary-action" data-sql-export disabled>Export CSV</button></div>
+    <div class="section-head"><div><p class="eyebrow">Results</p><h2>Query output</h2><p class="form-note" data-sql-result-count>0 rows · 0 columns</p></div><div class="inline-actions query-builder-result-actions"><button type="button" class="query-builder-secondary-action" data-sql-copy disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-3M5 8h9a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2Z"/></svg>Copy</button><button type="button" class="query-builder-secondary-action" data-sql-export disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 17v4h14v-4"/></svg>Export CSV</button></div></div>
+    <div class="inline-actions query-builder-pagination" data-sql-pagination hidden><button type="button" class="query-builder-secondary-action" data-sql-first aria-label="First page" title="First page" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5H5v14h6M19 5l-8 7 8 7"/></svg></button><button type="button" class="query-builder-secondary-action" data-sql-previous aria-label="Previous page" title="Previous page" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-8 7 8 7"/></svg></button><span class="form-note" data-sql-page>Page 1 of 1</span><button type="button" class="query-builder-secondary-action" data-sql-next aria-label="Next page" title="Next page" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 8 7-8 7"/></svg></button><button type="button" class="query-builder-secondary-action" data-sql-last aria-label="Last page" title="Last page" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 5h6v14h-6M5 5l8 7-8 7"/></svg></button></div>
     <div class="table-wrap" data-sql-results><p class="empty-state">Run a query to see its results.</p></div>
+    <div class="inline-actions query-builder-pagination" data-sql-pagination hidden><button type="button" class="query-builder-secondary-action" data-sql-first aria-label="First page" title="First page" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5H5v14h6M19 5l-8 7 8 7"/></svg></button><button type="button" class="query-builder-secondary-action" data-sql-previous aria-label="Previous page" title="Previous page" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-8 7 8 7"/></svg></button><span class="form-note" data-sql-page>Page 1 of 1</span><button type="button" class="query-builder-secondary-action" data-sql-next aria-label="Next page" title="Next page" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 8 7-8 7"/></svg></button><button type="button" class="query-builder-secondary-action" data-sql-last aria-label="Last page" title="Last page" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 5h6v14h-6M5 5l8 7-8 7"/></svg></button></div>
   </article>
   <div class="confirm-overlay query-builder-running-overlay" data-sql-running-overlay hidden>
     <div class="confirm-panel query-builder-running-dialog" role="dialog" aria-modal="true" aria-labelledby="query-builder-running-title">
@@ -46,18 +61,580 @@
 </section>
 {% endblock %}
 {% block extra_scripts %}
+<script src="{{ static_path('js/query_builder_assistant_state.js') }}?v={{ asset_version('js/query_builder_assistant_state.js') }}"></script>
 <script>
 (() => {
-  const sources = document.querySelector('[data-sql-datasets]'); const editor = document.querySelector('[data-sql-editor]'); const status = document.querySelector('[data-sql-status]'); const results = document.querySelector('[data-sql-results]'); const runningOverlay = document.querySelector('[data-sql-running-overlay]'); const runButton = document.querySelector('[data-sql-run]'); const exportButton = document.querySelector('[data-sql-export]'); const cancelRunButton = document.querySelector('[data-sql-cancel-run]'); let activeExecutionId = '';
+  const sources = document.querySelector('[data-sql-datasets]'); const editor = document.querySelector('[data-sql-editor]'); const status = document.querySelector('[data-sql-status]'); const results = document.querySelector('[data-sql-results]'); const resultCount = document.querySelector('[data-sql-result-count]'); const paginationGroups = [...document.querySelectorAll('[data-sql-pagination]')]; const pageLabels = [...document.querySelectorAll('[data-sql-page]')]; const firstButtons = [...document.querySelectorAll('[data-sql-first]')]; const previousButtons = [...document.querySelectorAll('[data-sql-previous]')]; const nextButtons = [...document.querySelectorAll('[data-sql-next]')]; const lastButtons = [...document.querySelectorAll('[data-sql-last]')]; const runningOverlay = document.querySelector('[data-sql-running-overlay]'); const runButton = document.querySelector('[data-sql-run]'); const clearButton = document.querySelector('[data-sql-clear]'); const saveButton = document.querySelector('[data-sql-save]'); const copyButton = document.querySelector('[data-sql-copy]'); const exportButton = document.querySelector('[data-sql-export]'); const cancelRunButton = document.querySelector('[data-sql-cancel-run]'); let activeExecutionId = ''; let activeExportToken = 0; let nextOffset = null; let totalRows = 0; let currentOffset = 0; const pageSize = 50;
+  const datasetColumns = {{ datasets | tojson }};
+  const assistant = document.querySelector('[data-sql-assistant]');
+  const editorLabel = document.querySelector('[data-sql-editor-label]');
+  const assistantStatus = document.querySelector('[data-sql-assistant-status]');
+  const typePicker = document.querySelector('[data-sql-types]');
+  const allFields = document.querySelector('[data-sql-all-fields]');
+  const allRows = document.querySelector('[data-sql-all-rows]');
+  const fieldsWrap = document.querySelector('[data-sql-fields-wrap]');
+  const fieldsPicker = document.querySelector('[data-sql-fields]');
+  const filters = document.querySelector('[data-sql-filters]');
+  const sortField = document.querySelector('[data-sql-sort-field]');
+  const sortDirection = document.querySelector('[data-sql-sort-direction]');
+  const limit = document.querySelector('[data-sql-limit]');
+  const modeButtons = [...document.querySelectorAll('[data-sql-mode]')];
+  const sourceFields = ['source_dataset_id', 'source_dataset_name', 'source_row_id'];
+  let mode = 'assisted'; let lastGeneratedSql = ''; let assistantValid = false; let hasCurrentResults = false; let isExporting = false; let typeSelectionNotice = false;
+  const columnFilters = new Map(); let activeColumnFilterMenu = null;
+  const querySignature = () => JSON.stringify({dataset_ids:[...sources.selectedOptions].map(item => Number(item.value)).sort((left, right) => left - right), query_sql:editor.value});
+  const resultSignature = () => JSON.stringify({query:querySignature(), column_filters:serializeColumnFilters()});
+  const lastPageOffset = () => totalRows > 0 ? Math.floor((totalRows - 1) / pageSize) * pageSize : 0;
+  const syncPaginationControls = () => {
+    const queryRunning = Boolean(activeExecutionId); const totalPages = Math.max(1, Math.ceil(totalRows / pageSize)); const currentPage = Math.floor(currentOffset / pageSize) + 1;
+    const showPagination = hasCurrentResults && Boolean(results.querySelector('table'));
+    paginationGroups.forEach(group => { group.hidden = !showPagination; });
+    firstButtons.forEach(button => { button.disabled = queryRunning || !hasCurrentResults || currentOffset === 0; });
+    previousButtons.forEach(button => { button.disabled = queryRunning || !hasCurrentResults || currentOffset === 0; });
+    nextButtons.forEach(button => { button.disabled = queryRunning || !hasCurrentResults || nextOffset === null; });
+    lastButtons.forEach(button => { button.disabled = queryRunning || !hasCurrentResults || currentOffset >= lastPageOffset(); });
+    pageLabels.forEach(label => { label.textContent = `Page ${currentPage} of ${totalPages}`; });
+  };
+  const syncActionAvailability = () => {
+    const assistedIncomplete = mode === 'assisted' && !assistantValid;
+    const queryRunning = Boolean(activeExecutionId);
+    runButton.disabled = assistedIncomplete || queryRunning;
+    saveButton.disabled = assistedIncomplete;
+    exportButton.disabled = assistedIncomplete || queryRunning || isExporting || !hasCurrentResults;
+    copyButton.disabled = assistedIncomplete || queryRunning || !hasCurrentResults || !results.querySelector('table');
+    updateFilterHeaderStates();
+    syncPaginationControls();
+  };
+  const invalidateQueryResults = () => { closeColumnFilterMenu(); columnFilters.clear(); hasCurrentResults = false; nextOffset = null; totalRows = 0; currentOffset = 0; resultCount.textContent = '0 rows · 0 columns'; syncActionAvailability(); };
+  const quoteIdentifier = (value) => `"${String(value).replace(/"/g, '""')}"`;
+  const quoteValue = (value) => `'${String(value).replace(/'/g, "''")}'`;
+  const setOptions = (select, values, placeholder = '') => {
+    const previous = new Set([...select.selectedOptions].map(option => option.value));
+    select.replaceChildren();
+    if (placeholder) select.add(new Option(placeholder, ''));
+    values.forEach(value => { const option = new Option(value, value); option.selected = previous.has(value); select.add(option); });
+    if (select.multiple && select.dataset.multiselectReady === '1') select.dispatchEvent(new Event('multiselect:options-updated'));
+  };
+  const selectedKinds = () => [...typePicker.querySelectorAll('input:checked')].map(input => input.value);
+  const selectedDatasetIds = () => new Set([...sources.selectedOptions].map(option => Number(option.value)));
+  const selectedDatasetNames = () => {
+    const selectedIds = selectedDatasetIds(); const kinds = new Set(selectedKinds());
+    return [...new Set(datasetColumns.filter(dataset => selectedIds.has(dataset.id) && kinds.has(String(dataset.kind).toLowerCase())).map(dataset => String(dataset.name)).filter(name => name))];
+  };
+  const filterValueControl = (row) => row.querySelector('[data-sql-filter-dataset-value]:not([hidden])') || row.querySelector('[data-sql-filter-value]');
+  const updateFilterValueControl = (row) => {
+    const input = row.querySelector('[data-sql-filter-value]'); const picker = row.querySelector('[data-sql-filter-dataset-value]');
+    const field = row.querySelector('[data-sql-filter-field]').value; const operator = row.querySelector('[data-sql-filter-operator]').value;
+    const previousField = row.dataset.filterField ?? field; const previousOperator = row.dataset.filterOperator ?? operator;
+    const sameField = previousField === field;
+    const useDatasetPicker = field === 'source_dataset_name' && ['eq', 'ne'].includes(operator);
+    const currentValue = picker.hidden ? input.value : picker.value;
+    const valueToPreserve = sameField ? currentValue : '';
+    if (!sameField) input.value = '';
+    if (useDatasetPicker) {
+      setOptions(picker, selectedDatasetNames(), 'Choose dataset');
+      if (valueToPreserve && [...picker.options].some(option => option.value === valueToPreserve)) picker.value = valueToPreserve;
+      else picker.value = '';
+      picker.hidden = false; input.hidden = true;
+    } else {
+      if (!picker.hidden && sameField && field === 'source_dataset_name' && ['eq', 'ne'].includes(previousOperator)) input.value = picker.value;
+      picker.hidden = true; input.hidden = false;
+    }
+    input.disabled = ['empty', 'not_empty'].includes(operator);
+    picker.disabled = ['empty', 'not_empty'].includes(operator) || !selectedDatasetNames().length;
+    row.dataset.filterField = field; row.dataset.filterOperator = operator;
+  };
+  const columnsForKind = (kind) => {
+    const selectedIds = selectedDatasetIds();
+    const columns = new Set(sourceFields);
+    datasetColumns.filter(dataset => selectedIds.has(dataset.id) && String(dataset.kind).toLowerCase() === kind).forEach(dataset => dataset.columns.forEach(column => columns.add(column)));
+    return columns;
+  };
+  const availableColumns = () => {
+    const columns = new Set(sourceFields);
+    columns.add('cdr_type');
+    selectedKinds().forEach(kind => columnsForKind(kind).forEach(column => columns.add(column)));
+    return [...columns];
+  };
+  const refreshFields = () => {
+    const columns = availableColumns();
+    setOptions(fieldsPicker, columns);
+    setOptions(sortField, columns, 'No sorting');
+    filters.querySelectorAll('[data-sql-filter-field]').forEach(select => setOptions(select, columns, 'Choose field'));
+    filters.querySelectorAll('.query-builder-filter').forEach(updateFilterValueControl);
+    if (!allFields.checked && !fieldsPicker.selectedOptions.length) selectDefaultFields();
+    buildAssistedSql();
+  };
+  function selectDefaultFields() {
+    const defaults = new Set(['source_dataset_name', 'cdr_type']);
+    [...fieldsPicker.options].forEach(option => { option.selected = defaults.has(option.value); });
+    fieldsPicker.dispatchEvent(new Event('change', {bubbles:true}));
+  }
+  const refreshTypes = () => {
+    const selectedIds = selectedDatasetIds();
+    const kinds = [...new Set(datasetColumns.filter(dataset => selectedIds.has(dataset.id)).map(dataset => String(dataset.kind).toLowerCase()).filter(kind => ['data', 'voice', 'speech'].includes(kind)))];
+    const previous = new Set(selectedKinds());
+    const keepPrevious = kinds.some(kind => previous.has(kind));
+    typePicker.replaceChildren();
+    kinds.forEach(kind => {
+      const label = document.createElement('label'); label.className = 'query-builder-type-option';
+      const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.value = kind; checkbox.checked = keepPrevious ? previous.has(kind) : true;
+      checkbox.addEventListener('change', () => {
+        if (!selectedKinds().length) { checkbox.checked = true; typeSelectionNotice = true; }
+        else typeSelectionNotice = false;
+        invalidateQueryResults(); refreshFields();
+      });
+      label.append(checkbox, document.createTextNode(kind.toUpperCase())); typePicker.append(label);
+    });
+    refreshFields();
+  };
+  const refreshFilterConnectors = () => [...filters.children].forEach((row, index) => { row.querySelector('[data-sql-filter-connector]').hidden = index === 0; });
+  const addFilter = () => {
+    const row = document.createElement('div'); row.className = 'query-builder-filter';
+    row.innerHTML = '<select data-sql-filter-connector aria-label="Connect with previous filter"><option value="AND">AND</option><option value="OR">OR</option></select><select data-sql-filter-field aria-label="Filter field"></select><select data-sql-filter-operator aria-label="Filter comparison"><option value="eq">Is</option><option value="ne">Is not</option><option value="contains">Contains</option><option value="starts">Starts with</option><option value="gt">Greater than (number)</option><option value="lt">Less than (number)</option><option value="empty">Is empty</option><option value="not_empty">Is not empty</option></select><input data-sql-filter-value aria-label="Filter value" placeholder="Value"><select data-sql-filter-dataset-value aria-label="Dataset name" hidden><option value="">Choose dataset</option></select><button type="button" class="query-builder-secondary-action" data-sql-remove-filter aria-label="Remove filter">Remove</button>';
+    filters.append(row);
+    refreshFilterConnectors();
+    setOptions(row.querySelector('[data-sql-filter-field]'), availableColumns(), 'Choose field');
+    updateFilterValueControl(row);
+    row.querySelector('[data-sql-remove-filter]').addEventListener('click', () => { invalidateQueryResults(); row.remove(); refreshFilterConnectors(); buildAssistedSql(); });
+    row.addEventListener('input', () => { updateFilterValueControl(row); invalidateQueryResults(); buildAssistedSql(); }); row.addEventListener('change', () => { updateFilterValueControl(row); invalidateQueryResults(); buildAssistedSql(); });
+    invalidateQueryResults();
+    buildAssistedSql();
+  };
+  function buildAssistedSql() {
+    if (mode !== 'assisted') return;
+    const kinds = selectedKinds();
+    if (!kinds.length) { editor.value = '-- Select at least one CDR source to preview SQL.'; lastGeneratedSql = ''; assistantValid = false; assistantStatus.textContent = 'Select at least one CDR source to begin.'; syncActionAvailability(); return; }
+    const columns = availableColumns();
+    const chosen = allFields.checked ? [] : [...fieldsPicker.selectedOptions].map(option => option.value);
+    if (!allFields.checked && !chosen.length) { editor.value = '-- Select at least one field to generate SQL.'; lastGeneratedSql = ''; assistantValid = false; assistantStatus.textContent = 'Select at least one field to show.'; syncActionAvailability(); return; }
+    const maxRows = Number(limit.value);
+    const validLimit = allRows.checked || (Number.isInteger(maxRows) && maxRows >= 1 && maxRows <= 100000);
+    const clauses = [];
+    const filterFields = new Set();
+    let pendingFilters = 0;
+    for (const row of filters.children) {
+      const field = row.querySelector('[data-sql-filter-field]').value;
+      const operator = row.querySelector('[data-sql-filter-operator]').value;
+      const value = filterValueControl(row).value;
+      if (!columns.includes(field)) { pendingFilters += 1; continue; }
+      const column = quoteIdentifier(field);
+      let clause = '';
+      if (operator === 'empty') clause = `(${column} IS NULL OR ${column} = '')`;
+      else if (operator === 'not_empty') clause = `(${column} IS NOT NULL AND ${column} <> '')`;
+      else if (!value.trim()) { pendingFilters += 1; continue; }
+      else if (operator === 'eq') clause = `${column} = ${quoteValue(value)} COLLATE NOCASE`;
+      else if (operator === 'ne') clause = `${column} <> ${quoteValue(value)} COLLATE NOCASE`;
+      else if (operator === 'contains') clause = `INSTR(LOWER(CAST(${column} AS TEXT)), LOWER(${quoteValue(value)})) > 0`;
+      else if (operator === 'starts') clause = `SUBSTR(LOWER(CAST(${column} AS TEXT)), 1, LENGTH(${quoteValue(value)})) = LOWER(${quoteValue(value)})`;
+      else if (operator === 'gt' || operator === 'lt') {
+        const number = Number(value);
+        if (!Number.isFinite(number)) { pendingFilters += 1; continue; }
+        clause = `CAST(${column} AS REAL) ${operator === 'gt' ? '>' : '<'} ${number}`;
+      }
+      if (!clause) { pendingFilters += 1; continue; }
+      filterFields.add(field);
+      clauses.push({sql:clause, connector:row.querySelector('[data-sql-filter-connector]').value});
+    }
+    const outputFields = allFields.checked ? columns : chosen;
+    const projectedFields = [...new Set([...outputFields, ...filterFields, sortField.value].filter(field => field && field !== 'cdr_type'))];
+    const branches = kinds.map(kind => {
+      const kindColumns = columnsForKind(kind);
+      const projection = [...projectedFields.map(field => kindColumns.has(field) ? quoteIdentifier(field) : `NULL AS ${quoteIdentifier(field)}`), `${quoteValue(kind.toUpperCase())} AS ${quoteIdentifier('cdr_type')}`];
+      return `SELECT ${projection.join(', ')}\nFROM ${quoteIdentifier(`selected_${kind}`)}`;
+    });
+    let whereExpression = '';
+    clauses.forEach((clause, index) => { whereExpression = index === 0 ? clause.sql : `(${whereExpression} ${clause.connector} ${clause.sql})`; });
+    const where = whereExpression ? `\nWHERE ${whereExpression}` : '';
+    const selectedFields = outputFields.map(quoteIdentifier).join(', ');
+    const order = sortField.value && columns.includes(sortField.value) ? `\nORDER BY ${quoteIdentifier(sortField.value)} ${sortDirection.value}` : '';
+    editor.value = `SELECT ${selectedFields}\nFROM (\n  ${branches.join('\n  UNION ALL\n  ')}\n) AS ${quoteIdentifier('combined_cdr')}${where}${order}${allRows.checked ? '' : validLimit ? `\nLIMIT ${maxRows}` : ''}`;
+    lastGeneratedSql = editor.value;
+    assistantValid = pendingFilters === 0 && validLimit;
+    const pendingMessages = [];
+    if (pendingFilters) pendingMessages.push(`${pendingFilters} incomplete filter${pendingFilters === 1 ? '' : 's'}`);
+    if (!validLimit) pendingMessages.push('a maximum row value between 1 and 100,000');
+    assistantStatus.textContent = typeSelectionNotice
+      ? 'At least one CDR type must remain selected. The previous selection was restored.'
+      : pendingMessages.length
+      ? `Preview updated with completed filters only. Finish ${pendingMessages.join(' and ')} before Run, Save, or Export.`
+      : 'Query ready. Run it, save it, or switch to Write SQL for advanced changes.';
+    typeSelectionNotice = false;
+    syncActionAvailability();
+  }
+  const setMode = (nextMode) => {
+    if (nextMode === 'assisted' && mode === 'sql' && editor.value.trim() && editor.value !== lastGeneratedSql) {
+      status.textContent = 'This SQL cannot be represented by Assisted controls. Use Write SQL or Clear Query to start a new assisted query.';
+      return;
+    }
+    mode = nextMode;
+    assistant.hidden = mode !== 'assisted'; editor.readOnly = mode === 'assisted'; editorLabel.textContent = mode === 'assisted' ? 'SQL preview' : 'SQL';
+    modeButtons.forEach(button => button.setAttribute('aria-pressed', String(button.dataset.sqlMode === mode)));
+    if (mode === 'assisted') buildAssistedSql();
+    else syncActionAvailability();
+  };
+  modeButtons.forEach(button => button.addEventListener('click', () => setMode(button.dataset.sqlMode)));
+  sources.addEventListener('change', () => { invalidateQueryResults(); refreshTypes(); });
+  const assistedControlChanged = () => { invalidateQueryResults(); buildAssistedSql(); };
+  [fieldsPicker, sortField, sortDirection, limit, allRows].forEach(control => { control.addEventListener('input', assistedControlChanged); control.addEventListener('change', assistedControlChanged); });
+  allRows.addEventListener('change', () => { limit.disabled = allRows.checked; });
+  editor.addEventListener('input', () => { if (mode === 'sql') invalidateQueryResults(); });
+  allFields.addEventListener('change', () => { fieldsWrap.hidden = allFields.checked; if (!allFields.checked && !fieldsPicker.selectedOptions.length) selectDefaultFields(); assistedControlChanged(); });
+  clearButton.addEventListener('click', async () => {
+    const accepted = await showConfirmDialog('Clear the current query and reset all builder settings? Saved queries will not be deleted.', {title:'Clear Query', confirmLabel:'Clear Query', tone:'danger'});
+    if (!accepted) return;
+    const executionId = activeExecutionId;
+    activeExecutionId = '';
+    if (executionId) fetch(`/api/query-builder/run/${executionId}/cancel`, {method:'POST', credentials:'same-origin'}).catch(() => {});
+    runningOverlay.hidden = true; cancelRunButton.disabled = true;
+    mode = 'assisted'; assistant.hidden = false; editor.readOnly = true; editorLabel.textContent = 'SQL preview';
+    modeButtons.forEach(button => button.setAttribute('aria-pressed', String(button.dataset.sqlMode === mode)));
+    editor.value = ''; lastGeneratedSql = ''; assistantValid = false;
+    allFields.checked = false; fieldsWrap.hidden = false;
+    limit.value = '100'; limit.disabled = false; allRows.checked = false; sortDirection.value = 'ASC';
+    filters.replaceChildren();
+    [...fieldsPicker.options].forEach(option => { option.selected = false; });
+    fieldsPicker.dispatchEvent(new Event('change', {bubbles:true}));
+    [...sources.options].forEach(option => { option.selected = false; });
+    sources.dispatchEvent(new Event('change', {bubbles:true}));
+    sortField.value = '';
+    document.querySelector('[data-sql-name]').value = ''; document.querySelector('[data-sql-description]').value = '';
+    hasCurrentResults = false; nextOffset = null; totalRows = 0; currentOffset = 0; activeExportToken += 1; isExporting = false;
+    results.innerHTML = '<p class="empty-state">Run a query to see its results.</p>';
+    status.textContent = 'Results load in pages of up to 50 rows; CSV export includes every result row and column.';
+    syncActionAvailability();
+  });
+  document.querySelector('[data-sql-add-filter]').addEventListener('click', addFilter);
+  fieldsWrap.hidden = allFields.checked;
+  refreshTypes();
+  syncActionAvailability();
+  function scalarKey(value) { return JSON.stringify(value); }
+  function serializeColumnFilters(excludedIndex = null) {
+    return [...columnFilters.entries()]
+      .filter(([index]) => index !== excludedIndex)
+      .sort(([left], [right]) => left - right)
+      .map(([index, values]) => ({index, values: [...values]}));
+  }
+  function updateFilterHeaderStates() {
+    results.querySelectorAll('[data-sql-column-filter-trigger]').forEach(trigger => {
+      const index = Number(trigger.dataset.columnIndex);
+      const active = columnFilters.has(index);
+      trigger.classList.toggle('is-active', active);
+      trigger.setAttribute('aria-pressed', String(active));
+      trigger.disabled = Boolean(activeExecutionId) || !hasCurrentResults;
+    });
+  }
+  function closeColumnFilterMenu() {
+    if (!activeColumnFilterMenu) return;
+    const {menu, positionHandler} = activeColumnFilterMenu;
+    window.removeEventListener('resize', positionHandler);
+    document.removeEventListener('scroll', positionHandler, true);
+    menu.remove();
+    activeColumnFilterMenu = null;
+  }
+  function positionActiveColumnFilterMenu() {
+    const state = activeColumnFilterMenu;
+    if (!state || !state.trigger.isConnected) { closeColumnFilterMenu(); return; }
+    const margin = 8;
+    const menu = state.menu;
+    menu.style.width = `${Math.max(0, Math.min(340, window.innerWidth - margin * 2))}px`;
+    const triggerRect = state.trigger.getBoundingClientRect();
+    const menuRect = menu.getBoundingClientRect();
+    let left = Math.min(triggerRect.left, window.innerWidth - menuRect.width - margin);
+    left = Math.max(margin, left);
+    let top = triggerRect.bottom + 5;
+    if (top + menuRect.height > window.innerHeight - margin && triggerRect.top > menuRect.height + margin) top = triggerRect.top - menuRect.height - 5;
+    top = Math.max(margin, Math.min(top, window.innerHeight - menuRect.height - margin));
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+  }
+  function scalarLabel(value) {
+    if (value === null) return '(Blanks)';
+    if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
+    return String(value);
+  }
+  function renderColumnFilterOptions(state) {
+    state.options.replaceChildren();
+    const seen = new Set();
+    for (const value of state.values) {
+      const key = scalarKey(value);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const label = document.createElement('label');
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.value = key;
+      checkbox.checked = state.allValuesSelected || state.selectedValues.has(key);
+      const text = document.createElement('span');
+      text.textContent = scalarLabel(value);
+      checkbox.addEventListener('change', () => {
+        if (state.allValuesSelected) {
+          state.allValuesSelected = false;
+          state.selectedValues = new Set(state.values.map(scalarKey));
+        }
+        state.selectionModified = true;
+        if (checkbox.checked) state.selectedValues.add(key);
+        else state.selectedValues.delete(key);
+        renderColumnFilterOptions(state);
+      });
+      label.append(checkbox, text);
+      state.options.append(label);
+    }
+    const selectedOnPage = state.values.reduce((count, value) => count + (state.selectedValues.has(scalarKey(value)) ? 1 : 0), 0);
+    state.status.textContent = state.allValuesSelected
+      ? 'All values are selected; this column will have no filter.'
+      : `${state.selectedValues.size.toLocaleString()} value${state.selectedValues.size === 1 ? '' : 's'} selected`;
+    const unlisted = state.allValuesSelected ? 0 : [...state.selectedValues].filter(key => !seen.has(key)).length;
+    const notes = [];
+    if (state.truncated) notes.push(state.search ? `Showing the first ${state.values.length.toLocaleString()} matches. Refine the search to find more.` : `Showing the first ${state.values.length.toLocaleString()} values. Search to find more.`);
+    if (state.truncated && state.selectionModified && !state.allValuesSelected) notes.push('Applying this changed selection includes only loaded values; search first to include more.');
+    if (unlisted) notes.push(`${unlisted.toLocaleString()} selected value${unlisted === 1 ? ' is' : 's are'} outside this list or search.`);
+    state.note.textContent = notes.join(' ');
+    state.note.hidden = !notes.length;
+    state.empty.hidden = Boolean(state.values.length);
+    state.empty.textContent = state.search ? 'No values match this search.' : 'No values are available for this column.';
+    state.options.hidden = !state.values.length;
+    state.options.setAttribute('aria-label', `${selectedOnPage.toLocaleString()} visible values selected`);
+  }
+  async function loadColumnFilterValues(state, search) {
+    if (activeColumnFilterMenu !== state) return;
+    const requestToken = ++state.requestToken;
+    state.search = search;
+    state.controls.forEach(control => { control.disabled = true; });
+    state.status.textContent = 'Loading values…';
+    state.options.replaceChildren();
+    state.options.hidden = true;
+    state.empty.hidden = true;
+    state.note.hidden = true;
+    try {
+      const extra = {column_index:state.index, column_filters:serializeColumnFilters(state.index)};
+      if (search) extra.search = search;
+      const {body} = await request('/api/query-builder/filter-values', extra);
+      if (activeColumnFilterMenu !== state || requestToken !== state.requestToken) return;
+      state.values = Array.isArray(body?.values) ? body.values : [];
+      state.truncated = Boolean(body?.truncated);
+      renderColumnFilterOptions(state);
+      state.controls.forEach(control => { control.disabled = control === state.controls[2] && !columnFilters.has(state.index); });
+    } catch (error) {
+      if (activeColumnFilterMenu === state && requestToken === state.requestToken) {
+        state.status.textContent = error.message;
+        state.controls.forEach(control => { control.disabled = control === state.controls[2] && !columnFilters.has(state.index); });
+      }
+    }
+  }
+  function openColumnFilterMenu(index, column, trigger) {
+    if (activeColumnFilterMenu?.trigger === trigger) { closeColumnFilterMenu(); return; }
+    closeColumnFilterMenu();
+    const menu = document.createElement('section');
+    menu.className = 'query-builder-column-filter-menu';
+    menu.setAttribute('role', 'dialog');
+    menu.setAttribute('aria-label', `Filter ${column}`);
+    const heading = document.createElement('div'); heading.className = 'query-builder-column-filter-heading';
+    const title = document.createElement('strong'); title.textContent = `Filter: ${column}`;
+    const closeButton = document.createElement('button'); closeButton.type = 'button'; closeButton.className = 'query-builder-column-filter-close'; closeButton.setAttribute('aria-label', 'Close filter'); closeButton.textContent = '×';
+    closeButton.addEventListener('click', closeColumnFilterMenu);
+    heading.append(title, closeButton);
+    const search = document.createElement('input'); search.type = 'search'; search.placeholder = 'Search values'; search.setAttribute('aria-label', `Search values in ${column}`);
+    const toolbar = document.createElement('div'); toolbar.className = 'query-builder-column-filter-toolbar';
+    const selectAll = document.createElement('button'); selectAll.type = 'button'; selectAll.textContent = 'Select all';
+    const clearSelection = document.createElement('button'); clearSelection.type = 'button'; clearSelection.textContent = 'Clear';
+    toolbar.append(selectAll, clearSelection);
+    const statusText = document.createElement('p'); statusText.className = 'query-builder-column-filter-status'; statusText.setAttribute('aria-live', 'polite');
+    const note = document.createElement('p'); note.className = 'query-builder-column-filter-note'; note.hidden = true;
+    const options = document.createElement('div'); options.className = 'query-builder-column-filter-options'; options.setAttribute('role', 'group');
+    const empty = document.createElement('p'); empty.className = 'query-builder-column-filter-empty'; empty.hidden = true;
+    const footer = document.createElement('div'); footer.className = 'query-builder-column-filter-footer';
+    const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Remove filter'; remove.disabled = !columnFilters.has(index);
+    const apply = document.createElement('button'); apply.type = 'button'; apply.className = 'query-builder-column-filter-apply'; apply.textContent = 'Apply';
+    footer.append(remove, apply);
+    menu.append(heading, search, toolbar, statusText, note, options, empty, footer);
+    document.body.append(menu);
+    const appliedValues = columnFilters.get(index) || [];
+    const state = {
+      index, trigger, menu, search, options, status:statusText, note, empty,
+      values:[], truncated:false, search:'', requestToken:0,
+      allValuesSelected:!columnFilters.has(index), selectionModified:false,
+      selectedValues:new Set(appliedValues.map(scalarKey)),
+      controls:[selectAll, clearSelection, remove, apply],
+      positionHandler:null
+    };
+    state.positionHandler = positionActiveColumnFilterMenu;
+    activeColumnFilterMenu = state;
+    search.addEventListener('input', () => {
+      state.search = search.value.trim();
+      state.controls.forEach(control => { control.disabled = true; });
+      state.status.textContent = 'Searching values…';
+      window.clearTimeout(state.searchTimer);
+      state.searchTimer = window.setTimeout(() => loadColumnFilterValues(state, search.value.trim()), 220);
+    });
+    selectAll.addEventListener('click', () => {
+      state.selectionModified = true;
+      if (state.search) {
+        state.allValuesSelected = false;
+        state.values.forEach(value => state.selectedValues.add(scalarKey(value)));
+      } else {
+        state.allValuesSelected = true;
+        state.selectedValues.clear();
+      }
+      renderColumnFilterOptions(state);
+    });
+    clearSelection.addEventListener('click', () => {
+      state.selectionModified = true;
+      state.allValuesSelected = false;
+      state.selectedValues.clear();
+      renderColumnFilterOptions(state);
+    });
+    remove.addEventListener('click', () => {
+      columnFilters.delete(index);
+      closeColumnFilterMenu();
+      restartResultsWithColumnFilters();
+    });
+    apply.addEventListener('click', () => {
+      if (state.allValuesSelected) columnFilters.delete(index);
+      else columnFilters.set(index, [...state.selectedValues].map(key => JSON.parse(key)));
+      closeColumnFilterMenu();
+      restartResultsWithColumnFilters();
+    });
+    window.addEventListener('resize', state.positionHandler);
+    document.addEventListener('scroll', state.positionHandler, true);
+    positionActiveColumnFilterMenu();
+    loadColumnFilterValues(state, '');
+    search.focus({preventScroll:true});
+  }
+  function restartResultsWithColumnFilters() {
+    currentOffset = 0; totalRows = 0; nextOffset = null; hasCurrentResults = false;
+    const loadingMessage = columnFilters.size ? 'Loading filtered results…' : 'Loading results…';
+    resultCount.textContent = loadingMessage;
+    results.innerHTML = `<p class="empty-state">${loadingMessage}</p>`;
+    syncActionAvailability();
+    loadPage(0, true);
+  }
+  document.addEventListener('pointerdown', event => {
+    if (activeColumnFilterMenu && !activeColumnFilterMenu.menu.contains(event.target) && !activeColumnFilterMenu.trigger.contains(event.target)) closeColumnFilterMenu();
+  });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape' && activeColumnFilterMenu) closeColumnFilterMenu(); });
   const escape = (value) => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const payload = () => ({dataset_ids: [...sources.selectedOptions].map(item => Number(item.value)), query_sql: editor.value});
   const request = async (url, extra = {}) => { const response = await fetch(url, {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body:JSON.stringify({...payload(), ...extra})}); const body = response.headers.get('content-type')?.includes('application/json') ? await response.json() : null; if (!response.ok) throw new Error(body?.detail || 'Query Builder failed.'); return {response, body}; };
-  const render = (body) => { if (!body.columns.length) { results.innerHTML = '<p class="empty-state">The query returned no columns.</p>'; return; } results.innerHTML = `<table><thead><tr>${body.columns.map(column => `<th>${escape(column)}</th>`).join('')}</tr></thead><tbody>${body.rows.map(row => `<tr>${row.map(value => `<td>${escape(value)}</td>`).join('')}</tr>`).join('')}</tbody></table>`; status.textContent = `${body.rows.length.toLocaleString()} rows returned${body.truncated ? ' (preview limit reached)' : ''}. Available views: ${body.views.join(', ')}.`; };
-  document.querySelector('[data-sql-run]').addEventListener('click', async () => { activeExecutionId=`query-${Date.now()}-${Math.random().toString(36).slice(2)}`; status.textContent='Running query…'; runningOverlay.hidden=false; runButton.disabled=true; exportButton.disabled=true; cancelRunButton.disabled=false; try { render((await request('/api/query-builder/run', {execution_id:activeExecutionId})).body); exportButton.disabled=false; } catch (error) { status.textContent=error.message; if (error.message === 'Query cancelled.') results.innerHTML='<p class="empty-state">The query was cancelled before results were available.</p>'; } finally { activeExecutionId=''; runningOverlay.hidden=true; runButton.disabled=false; } });
+  const render = (body) => {
+    totalRows = Number.isInteger(body.total_rows) && body.total_rows >= 0 ? body.total_rows : body.rows.length;
+    if (!body.columns.length) { results.innerHTML = '<p class="empty-state">The query returned no columns.</p>'; resultCount.textContent = '0 rows · 0 columns'; nextOffset = null; totalRows = 0; currentOffset = 0; return; }
+    const rowMarkup = body.rows.map(row => `<tr>${row.map(value => `<td>${escape(value)}</td>`).join('')}</tr>`).join('');
+    const headerMarkup = body.columns.map((column, index) => `<th><div class="query-builder-column-heading"><span>${escape(column)}</span><button type="button" class="query-builder-column-filter-trigger" data-sql-column-filter-trigger data-column-index="${index}" aria-label="Filter ${escape(column)}" aria-pressed="${columnFilters.has(index)}" title="Filter ${escape(column)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16l-6.2 7.1v5.3l-3.6 1.8v-7.1L4 5Z"/></svg></button></div></th>`).join('');
+    results.innerHTML = `<table><thead><tr>${headerMarkup}</tr></thead><tbody>${rowMarkup}</tbody></table>`;
+    results.querySelectorAll('[data-sql-column-filter-trigger]').forEach(trigger => trigger.addEventListener('click', () => openColumnFilterMenu(Number(trigger.dataset.columnIndex), body.columns[Number(trigger.dataset.columnIndex)], trigger)));
+    nextOffset = Number.isInteger(body.next_offset) && body.next_offset >= 0 ? body.next_offset : null;
+    const totalPages = Math.max(1, Math.ceil(totalRows / pageSize)); const currentPage = Math.floor(currentOffset / pageSize) + 1;
+    resultCount.textContent = `${body.rows.length.toLocaleString()} rows on this page · ${body.columns.length.toLocaleString()} columns · ${totalRows.toLocaleString()} total rows`;
+    status.textContent = `Page ${currentPage} of ${totalPages} loaded · ${body.rows.length.toLocaleString()} rows. Available views: ${body.views.join(', ')}.`;
+  };
+  runButton.addEventListener('click', async () => {
+    if (mode === 'assisted' && !assistantValid) return;
+    const executedSignature = querySignature(); const executionId = `query-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    hasCurrentResults = false; nextOffset = null; totalRows = 0; currentOffset = 0; resultCount.textContent = '0 rows · 0 columns';
+    activeExecutionId = executionId; status.textContent = 'Running query…'; runningOverlay.hidden = false; syncActionAvailability(); cancelRunButton.disabled = false;
+    try {
+      columnFilters.clear(); closeColumnFilterMenu(); updateFilterHeaderStates();
+      const {body} = await request('/api/query-builder/run', {execution_id:executionId, offset:0, column_filters:serializeColumnFilters()});
+      if (querySignature() === executedSignature && activeExecutionId === executionId) { render(body); hasCurrentResults = true; }
+      else if (activeExecutionId === executionId) status.textContent = 'The query or sources changed while it was running. Run the query again to refresh the results.';
+    } catch (error) {
+      if (querySignature() === executedSignature && activeExecutionId === executionId) { status.textContent = error.message; if (error.message === 'Query cancelled.') results.innerHTML = '<p class="empty-state">The query was cancelled before results were available.</p>'; }
+    } finally {
+      if (activeExecutionId === executionId) { activeExecutionId = ''; runningOverlay.hidden = true; syncActionAvailability(); }
+    }
+  });
+  const loadPage = async (requestedOffset, allowWithoutCurrentResults = false) => {
+    if ((!hasCurrentResults && !(allowWithoutCurrentResults && requestedOffset === 0)) || activeExecutionId) return;
+    const executedSignature = querySignature(); const executionId = `query-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    activeExecutionId = executionId; status.textContent = requestedOffset > currentOffset ? 'Loading next page…' : requestedOffset < currentOffset ? 'Loading previous page…' : 'Loading results…'; runningOverlay.hidden = false; syncActionAvailability(); cancelRunButton.disabled = false;
+    try {
+      const {body} = await request('/api/query-builder/run', {execution_id:executionId, offset:requestedOffset, column_filters:serializeColumnFilters()});
+      if (querySignature() === executedSignature && activeExecutionId === executionId) {
+        currentOffset = requestedOffset; render(body); hasCurrentResults = true;
+      }
+      else if (activeExecutionId === executionId) status.textContent = 'The query or sources changed while results were loading. Run the query again to refresh the results.';
+    } catch (error) {
+      if (querySignature() === executedSignature && activeExecutionId === executionId) {
+        status.textContent = error.message;
+        if (!hasCurrentResults && requestedOffset === 0) {
+          const message = columnFilters.size ? 'Filtered results could not be loaded.' : 'Results could not be loaded.';
+          const retryLabel = columnFilters.size ? 'Retry filtered results' : 'Retry query';
+          results.innerHTML = `<div class="query-builder-filter-retry"><p class="empty-state">${message}</p><button type="button" data-sql-retry-filtered-results>${retryLabel}</button></div>`;
+          results.querySelector('[data-sql-retry-filtered-results]').addEventListener('click', restartResultsWithColumnFilters);
+          resultCount.textContent = '0 rows · 0 columns';
+        }
+      }
+    } finally {
+      if (activeExecutionId === executionId) { activeExecutionId = ''; runningOverlay.hidden = true; syncActionAvailability(); }
+    }
+  };
+  firstButtons.forEach(button => button.addEventListener('click', () => loadPage(0)));
+  previousButtons.forEach(button => button.addEventListener('click', () => { if (currentOffset > 0) loadPage(Math.max(0, currentOffset - pageSize)); }));
+  nextButtons.forEach(button => button.addEventListener('click', () => { if (nextOffset !== null) loadPage(nextOffset); }));
+  lastButtons.forEach(button => button.addEventListener('click', () => loadPage(lastPageOffset())));
+  copyButton.addEventListener('click', async () => {
+    const table = results.querySelector('table');
+    if (!hasCurrentResults || !table) return;
+    const copiedSignature = querySignature();
+    const tsv = [...table.querySelectorAll('tr')].map(row => [...row.querySelectorAll('th, td')].map(cell => cell.textContent.replace(/[\t\r\n]+/g, ' ')).join('\t')).join('\n');
+    try { await navigator.clipboard.writeText(tsv); if (querySignature() === copiedSignature) status.textContent = 'Current page copied to clipboard.'; }
+    catch (_error) { if (querySignature() === copiedSignature) status.textContent = 'Could not copy results to the clipboard. Check browser clipboard permissions and try again.'; }
+  });
   cancelRunButton.addEventListener('click', async () => { if (!activeExecutionId) return; cancelRunButton.disabled=true; status.textContent='Cancelling query…'; try { await fetch(`/api/query-builder/run/${activeExecutionId}/cancel`, {method:'POST', credentials:'same-origin'}); } catch (_error) { status.textContent='The query could not be cancelled.'; cancelRunButton.disabled=false; } });
-  exportButton.addEventListener('click', async () => { status.textContent='Preparing CSV…'; exportButton.disabled=true; try { const {response} = await request('/api/query-builder/export'); const url=URL.createObjectURL(await response.blob()); const link=document.createElement('a'); link.href=url; link.download='query-builder-results.csv'; link.click(); URL.revokeObjectURL(url); status.textContent='CSV exported.'; } catch (error) { status.textContent=error.message; } finally { exportButton.disabled=false; } });
-  document.querySelector('[data-sql-save]').addEventListener('click', async () => { try { await request('/api/query-builder/save', {name:document.querySelector('[data-sql-name]').value, description:document.querySelector('[data-sql-description]').value}); window.location.reload(); } catch (error) { status.textContent=error.message; } });
-  const loadSavedQuery = (control) => { if (!control?.dataset.query) { status.textContent='Choose a saved query first.'; return; } editor.value=JSON.parse(control.dataset.query); const selected=new Set(JSON.parse(control.dataset.datasetIds)); [...sources.options].forEach(option => option.selected=selected.has(Number(option.value))); sources.dispatchEvent(new Event('change', {bubbles:true})); status.textContent='Saved query loaded.'; };
+  exportButton.addEventListener('click', async () => { if ((mode === 'assisted' && !assistantValid) || !hasCurrentResults) return; const exportSignature=resultSignature(); const exportToken=++activeExportToken; status.textContent='Preparing CSV…'; isExporting=true; syncActionAvailability(); try { const {response} = await request('/api/query-builder/export', {column_filters:serializeColumnFilters()}); if (resultSignature() !== exportSignature || activeExportToken !== exportToken) return; const blob=await response.blob(); if (resultSignature() !== exportSignature || activeExportToken !== exportToken) return; const url=URL.createObjectURL(blob); const link=document.createElement('a'); link.href=url; link.download='query-builder-results.csv'; link.click(); URL.revokeObjectURL(url); status.textContent='CSV exported.'; } catch (error) { if (resultSignature() === exportSignature && activeExportToken === exportToken) status.textContent=error.message; } finally { if (activeExportToken === exportToken) { isExporting=false; syncActionAvailability(); } } });
+  saveButton.addEventListener('click', async () => { if (mode === 'assisted' && !assistantValid) return; try { await request('/api/query-builder/save', {name:document.querySelector('[data-sql-name]').value, description:document.querySelector('[data-sql-description]').value}); window.location.reload(); } catch (error) { status.textContent=error.message; } });
+  const restoreAssistedQuery = (savedSql) => {
+    const state = globalThis.QueryBuilderAssistantState?.parseGeneratedSql(savedSql);
+    if (!state) return false;
+    if (state.kinds.some(kind => ![...typePicker.querySelectorAll('input')].some(input => input.value === kind))) return false;
+    typePicker.querySelectorAll('input').forEach(input => { input.checked = state.kinds.includes(input.value); });
+    refreshFields();
+    const columns = availableColumns();
+    if (state.fields.some(field => !columns.includes(field)) || state.filters.some(filter => !columns.includes(filter.field))) return false;
+    if (state.sortField && !columns.includes(state.sortField)) return false;
+    allFields.checked = state.fields.length === columns.length && state.fields.every((field, index) => field === columns[index]);
+    fieldsWrap.hidden = allFields.checked;
+    [...fieldsPicker.options].forEach(option => { option.selected = state.fields.includes(option.value); });
+    fieldsPicker.dispatchEvent(new Event('change', {bubbles:true}));
+    allRows.checked = state.limit === null;
+    limit.disabled = allRows.checked;
+    if (state.limit !== null) limit.value = String(state.limit);
+    sortField.value = state.sortField;
+    sortDirection.value = state.sortDirection;
+    filters.replaceChildren();
+    for (const filter of state.filters) {
+      addFilter();
+      const row = filters.lastElementChild;
+      row.querySelector('[data-sql-filter-connector]').value = filter.connector;
+      row.querySelector('[data-sql-filter-field]').value = filter.field;
+      row.querySelector('[data-sql-filter-operator]').value = filter.operator;
+      updateFilterValueControl(row);
+      const valueControl = filterValueControl(row);
+      if (valueControl.tagName === 'SELECT' && ![...valueControl.options].some(option => option.value === filter.value)) return false;
+      valueControl.value = filter.value;
+    }
+    lastGeneratedSql = savedSql;
+    setMode('assisted');
+    if (editor.value.trim() !== savedSql.trim() || !assistantValid) {
+      setMode('sql');
+      editor.value = savedSql;
+      return false;
+    }
+    return true;
+  };
+  const loadSavedQuery = (control) => {
+    if (!control?.dataset.query) { status.textContent = 'Choose a saved query first.'; return; }
+    const savedSql = JSON.parse(control.dataset.query);
+    const selected = new Set(JSON.parse(control.dataset.datasetIds));
+    setMode('sql');
+    [...sources.options].forEach(option => { option.selected = selected.has(Number(option.value)); });
+    sources.dispatchEvent(new Event('change', {bubbles:true}));
+    editor.value = savedSql;
+    status.textContent = restoreAssistedQuery(savedSql)
+      ? 'Saved query loaded in Assisted mode. Its SQL is available in Write SQL.'
+      : 'Saved query loaded in the SQL editor. This query cannot be shown in Assisted mode.';
+  };
   document.querySelector('[data-sql-load-saved]').addEventListener('click', () => loadSavedQuery(document.querySelector('[data-sql-saved-picker]')?.selectedOptions[0]));
   document.querySelectorAll('[data-sql-load]').forEach(button => button.addEventListener('click', () => loadSavedQuery(button)));
   const editOverlay = document.querySelector('[data-sql-edit-overlay]'); const editName = document.querySelector('[data-sql-edit-name]'); const editDescription = document.querySelector('[data-sql-edit-description]'); const editSources = document.querySelector('[data-sql-edit-sources]'); const editStatus = document.querySelector('[data-sql-edit-status]'); let editingQueryId = null;

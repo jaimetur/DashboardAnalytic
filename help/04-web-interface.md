@@ -10,6 +10,7 @@ Primary tabs:
 - Datasets Analysis
 - E2E Reporting
 - Chart Builder
+- Query Builder
 
 Utility tabs:
 
@@ -19,7 +20,7 @@ Utility tabs:
 - App Logs
 - Admin, when authorised
 
-Readme opens by default after login. Dashboard, Reporting and Chart Builder require an open workspace.
+Readme opens by default after login. Dashboard, Reporting, Chart Builder and Query Builder require an open workspace.
 
 ## Header controls
 

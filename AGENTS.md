@@ -21,12 +21,14 @@
 - Within the same current/unreleased version, do not create multiple changelog bullets for incremental changes, fixes, or refinements to the same functionality.
 - If an existing changelog bullet already describes the same functionality, update or rewrite that bullet so it reflects the final behavior.
 - Do not add changelog entries for internal implementation changes that have no relevant user-facing or developer-facing impact.
+- Do not create blank lines between bullets on the same section.
 
 ## Documentation
 
 - Whenever implementing or modifying a feature, review all documentation related to that feature.
 - Update any documentation that is no longer accurate after the change.
 - Documentation must describe the final supported behavior, not intermediate implementation attempts or temporary states.
+- Whenever your add a new section in the /help documentation, make sure that the number is coherent with the position on the tool, and make sure that docker-deployment, project-structure and roadmap are always the last three sections.
 
 ## Import, Export, Transfers, Backup and Restore
 

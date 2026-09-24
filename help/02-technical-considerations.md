@@ -26,7 +26,7 @@ Stored below `APP_DATA_DIR/workspaces/<workspace>/`:
 
 Application-level derived data lives below `APP_DATA_DIR`: `transfer-packages/` holds temporary/recoverable portability archives, `scheduled-backups/` is the default Admin backup destination and `.map-tiles-cache/openstreetmap/` stores regenerable map tiles.
 
-The workspace registry is local to the deployment. Full Environment imports rebuild it from the imported workspaces instead of retaining source-server absolute paths. Report Template import, export, backup and transfer packages use CSV as a portable representation; the live templates remain database-backed and current flows remove obsolete `slides-templates` directories. See [Project Structure → Persistent data layout](12-project-structure.md#persistent-data-layout) for the complete ownership tree.
+The workspace registry is local to the deployment. Full Environment imports rebuild it from the imported workspaces instead of retaining source-server absolute paths. Report Template import, export, backup and transfer packages use CSV as a portable representation; the live templates remain database-backed and current flows remove obsolete `slides-templates` directories. See [Project Structure → Persistent data layout](13-project-structure.md#persistent-data-layout) for the complete ownership tree.
 
 ## Processed and derived columns
 
@@ -101,7 +101,7 @@ Example:
 
 Template filters are parsed as ordered, semicolon-terminated conditions joined with logical AND. Rows and Columns are ordered dimensions, so reversing their selection changes the grouping hierarchy. Legends derive their content from the chosen dimension, filter, threshold or bucket rule, and side legends reserve plot space.
 
-These contracts are shared by E2E Dashboards, E2E Reporting, Chart Builder and Template Editor so a saved definition has the same meaning in previews and generated output. The authoring syntax, operators, examples, aggregation behaviour and legend rules are centralized in [Administration → Report Template reference](10-administration.md#report-template-reference).
+These contracts are shared by E2E Dashboards, E2E Reporting, Chart Builder and Template Editor so a saved definition has the same meaning in previews and generated output. The authoring syntax, operators, examples, aggregation behaviour and legend rules are centralized in [Administration → Report Template reference](11-administration.md#report-template-reference).
 
 ## Multivendor calculation and remapping
 

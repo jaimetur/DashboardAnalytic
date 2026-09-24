@@ -4,7 +4,6 @@ import asyncio
 import json
 import calendar
 import io
-import csv
 import os
 import errno
 import fcntl
@@ -64,7 +63,7 @@ from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column,
 from src.modules.geospatial import assign_regions, validate_region_mapping
 from src.modules.repository import Repository, WORKSPACE_REGISTRY_TABLE, workspace_write_lock
 from src.modules.runtime_config import IGNORE_EVENT_TIME_FILTERING_ENV, env_flag, ignore_event_time_filtering
-from src.modules.query_builder import ANGELO_OVERLAP_QUERY, MAX_EXPORT_ROWS, MAX_PREVIEW_ROWS, execute_query
+from src.modules.query_builder import ANGELO_OVERLAP_QUERY, MAX_PREVIEW_ROWS, execute_query, iter_query_csv, query_column_values
 from src.runtime_logs import execution_log_entries
 from src.modules.workspaces import Workspace, WorkspaceRegistry
 from src.version import __app_name__, __release_date__, __version__
@@ -334,10 +333,11 @@ HELP_NAVIGATION_DOCUMENTS = (
     '07-e2e-dashboards.md',
     '08-e2e-reporting.md',
     '09-chart-builder.md',
-    '10-administration.md',
-    '11-docker-deployment.md',
-    '12-project-structure.md',
-    '13-roadmap.md',
+    '10-query-builder.md',
+    '11-administration.md',
+    '12-docker-deployment.md',
+    '13-project-structure.md',
+    '14-roadmap.md',
 )
 HELP_DOCUMENT_LABELS = {
     '01-overview.md': 'Product Overview',
@@ -346,6 +346,7 @@ HELP_DOCUMENT_LABELS = {
     '07-e2e-dashboards.md': 'E2E Dashboards',
     '08-e2e-reporting.md': 'E2E Reporting',
     '09-chart-builder.md': 'Chart Builder',
+    '10-query-builder.md': 'Query Builder',
     '05-workspace-management.md': 'Workspace Management',
 }
 
@@ -11998,7 +11999,12 @@ def query_builder(request: Request, user: SessionUser = Depends(current_user)) -
     if not active_workspace:
         return RedirectResponse('/workspace?workspace_warning=Open+a+workspace+before+using+Query+Builder.', status_code=status.HTTP_303_SEE_OTHER)
     datasets = [
-        {'id': int(row['id']), 'name': str(row['file_name']), 'kind': str(row['dataset_kind'])}
+        {
+            'id': int(row['id']),
+            'name': str(row['file_name']),
+            'kind': str(row['dataset_kind']),
+            'columns': repository.list_dataset_row_columns(int(row['id'])),
+        }
         for row in repository.list_datasets()
         if row['status'] == 'ready' and row['dataset_kind'] in {'data', 'voice', 'speech'}
     ]
@@ -12041,6 +12047,10 @@ async def run_query_builder(request: Request, user: SessionUser = Depends(curren
         raise HTTPException(status_code=400, detail='Open a workspace before running Query Builder.')
     payload = await request.json()
     datasets, query_sql = _query_builder_payload(payload)
+    column_filters = payload.get('column_filters')
+    offset = payload.get('offset', 0)
+    if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+        raise HTTPException(status_code=400, detail='Invalid Query Builder offset.')
     execution_id = str(payload.get('execution_id') or '').strip()
     if not re.fullmatch(r'[A-Za-z0-9_-]{8,80}', execution_id):
         raise HTTPException(status_code=400, detail='Invalid Query Builder execution id.')
@@ -12048,9 +12058,9 @@ async def run_query_builder(request: Request, user: SessionUser = Depends(curren
     with QUERY_BUILDER_EXECUTIONS_LOCK:
         QUERY_BUILDER_EXECUTIONS[execution_id] = cancellation
     try:
-        columns, rows, truncated, views = await run_in_threadpool(
+        columns, rows, truncated, views, total_rows = await run_in_threadpool(
             execute_query, active_workspace.database_path, datasets, query_sql, MAX_PREVIEW_ROWS,
-            cancellation.is_set,
+            cancellation.is_set, offset, True, column_filters,
         )
     except (ValueError, sqlite3.Error) as exc:
         if cancellation.is_set():
@@ -12060,7 +12070,35 @@ async def run_query_builder(request: Request, user: SessionUser = Depends(curren
         with QUERY_BUILDER_EXECUTIONS_LOCK:
             QUERY_BUILDER_EXECUTIONS.pop(execution_id, None)
     repository.add_log(user.username, 'run_query_builder', json.dumps({'dataset_ids': [item['id'] for item in datasets], 'rows': len(rows)}))
-    return JSONResponse({'columns': columns, 'rows': rows, 'truncated': truncated, 'views': views})
+    return JSONResponse({
+        'columns': columns, 'rows': rows, 'truncated': truncated, 'views': views,
+        'next_offset': offset + len(rows) if truncated else None,
+        'total_rows': total_rows,
+    })
+
+
+@app.post('/api/query-builder/filter-values')
+async def query_builder_filter_values(request: Request, user: SessionUser = Depends(current_user)) -> JSONResponse:
+    if not active_workspace:
+        raise HTTPException(status_code=400, detail='Open a workspace before filtering Query Builder results.')
+    payload = await request.json()
+    datasets, query_sql = _query_builder_payload(payload)
+    column_index = payload.get('column_index')
+    if isinstance(column_index, bool) or not isinstance(column_index, int) or column_index < 0:
+        raise HTTPException(status_code=400, detail='Select a valid result column.')
+    try:
+        values, truncated = await run_in_threadpool(
+            query_column_values,
+            active_workspace.database_path,
+            datasets,
+            query_sql,
+            column_index,
+            payload.get('column_filters'),
+            payload.get('search', ''),
+        )
+    except (ValueError, sqlite3.Error) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse({'values': values, 'truncated': truncated})
 
 
 @app.post('/api/query-builder/run/{execution_id}/cancel')
@@ -12122,19 +12160,22 @@ async def update_saved_query_builder_query(query_id: int, request: Request, user
 async def export_query_builder(request: Request, user: SessionUser = Depends(current_user)) -> StreamingResponse:
     if not active_workspace:
         raise HTTPException(status_code=400, detail='Open a workspace before exporting Query Builder results.')
-    datasets, query_sql = _query_builder_payload(await request.json())
+    payload = await request.json()
+    datasets, query_sql = _query_builder_payload(payload)
+    column_filters = payload.get('column_filters')
     try:
-        columns, rows, truncated, _views = execute_query(active_workspace.database_path, datasets, query_sql, row_limit=MAX_EXPORT_ROWS)
+        await run_in_threadpool(execute_query, active_workspace.database_path, datasets, query_sql, 1, None, 0, False, column_filters)
     except (ValueError, sqlite3.Error) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    output = io.StringIO(newline='')
-    writer = csv.writer(output)
-    writer.writerow(columns)
-    writer.writerows(rows)
-    repository.add_log(user.username, 'export_query_builder_csv', json.dumps({'dataset_ids': [item['id'] for item in datasets], 'rows': len(rows), 'truncated': truncated}))
-    suffix = '-truncated' if truncated else ''
-    return StreamingResponse(iter([output.getvalue()]), media_type='text/csv', headers={
-        'Content-Disposition': f'attachment; filename="query-builder-results{suffix}.csv"',
+    dataset_ids = [item['id'] for item in datasets]
+    def log_export(row_count: int) -> None:
+        repository.add_log(user.username, 'export_query_builder_csv', json.dumps({
+            'dataset_ids': dataset_ids, 'rows': row_count, 'truncated': False,
+        }))
+    return StreamingResponse(iter_query_csv(
+        active_workspace.database_path, datasets, query_sql, on_complete=log_export, column_filters=column_filters,
+    ), media_type='text/csv', headers={
+        'Content-Disposition': 'attachment; filename="query-builder-results.csv"',
     })
 
 

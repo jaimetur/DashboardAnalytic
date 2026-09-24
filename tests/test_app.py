@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import sqlite3
+import subprocess
 import time
+from collections import Counter
 from dataclasses import replace
 from datetime import datetime, timezone
 from io import BytesIO
@@ -24,6 +27,831 @@ from src.version import __release_date__, __version__
 def login(client) -> None:
     response = client.post("/login", data={"username": "admin", "password": "admin123"}, follow_redirects=False)
     assert response.status_code == 303
+
+
+def test_query_builder_assistant_uses_ready_source_columns(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    monkeypatch.setattr(app_module.repository, 'list_datasets', lambda: [
+        {'id': 7, 'file_name': 'sample.csv', 'dataset_kind': 'data', 'status': 'ready'},
+        {'id': 8, 'file_name': 'pending.csv', 'dataset_kind': 'voice', 'status': 'pending'},
+    ])
+    monkeypatch.setattr(app_module.repository, 'list_dataset_row_columns', lambda dataset_id: ['Operator', 'Test_Result'] if dataset_id == 7 else [])
+    monkeypatch.setattr(app_module.repository, 'list_query_builder_queries', lambda: [])
+
+    response = client.get('/query-builder')
+
+    assert response.status_code == 200
+    assert 'data-sql-mode="assisted"' in response.text
+    assert 'data-sql-types' in response.text
+    assert '<legend>CDR types to use</legend>' in response.text
+    all_fields_input = re.search(r'<input data-sql-all-fields type="checkbox"([^>]*)>', response.text)
+    assert all_fields_input is not None and 'checked' not in all_fields_input.group(1)
+    assert 'data-sql-filter-field' in response.text
+    assert 'data-sql-filter-connector' in response.text
+    match = re.search(r'const datasetColumns = (\[.*?\]);', response.text)
+    assert match is not None
+    assert json.loads(match.group(1)) == [
+        {'id': 7, 'name': 'sample.csv', 'kind': 'data', 'columns': ['Operator', 'Test_Result']},
+    ]
+
+
+def test_query_builder_preview_updates_completed_filter_while_another_is_incomplete() -> None:
+    node_binary = shutil.which('node')
+    if node_binary is None:
+        pytest.skip('Node.js is required to exercise the Query Builder browser-side SQL generator.')
+
+    template_path = Path(__file__).resolve().parents[1] / 'src/web_interface/templates/query_builder.html'
+    template = template_path.read_text(encoding='utf-8')
+
+    def extract(start_marker: str, end_marker: str) -> str:
+        start = template.index(start_marker)
+        end = template.index(end_marker, start)
+        return template[start:end].strip()
+
+    script_data = {
+        'sync_action_availability': extract(
+            '  const syncActionAvailability = () => {',
+            '\n  const invalidateQueryResults',
+        ),
+        'filter_value_control': extract(
+            '  const filterValueControl = ',
+            '\n  const updateFilterValueControl',
+        ),
+        'build_assisted_sql': extract(
+            '  function buildAssistedSql() {',
+            '\n  const setMode',
+        ),
+    }
+    node_harness = r"""
+const fs = require('node:fs');
+const vm = require('node:vm');
+const source = JSON.parse(fs.readFileSync(0, 'utf8'));
+const makeFilter = ({ field, value, connector = 'AND' }) => {
+  const controls = new Map([
+    ['[data-sql-filter-field]', { value: field }],
+    ['[data-sql-filter-operator]', { value: 'eq' }],
+    ['[data-sql-filter-value]', { value }],
+    ['[data-sql-filter-connector]', { value: connector }],
+  ]);
+  return { querySelector: selector => controls.get(selector) };
+};
+const context = {
+  mode: 'assisted',
+  editor: { value: '' },
+  assistantStatus: { textContent: '' },
+  results: { querySelector: selector => selector === 'table' ? {} : null },
+  selectedKinds: () => ['data'],
+  availableColumns: () => ['cdr_type', 'Operator'],
+  columnsForKind: () => new Set(['Operator']),
+  allFields: { checked: true },
+  allRows: { checked: false },
+  fieldsPicker: { selectedOptions: [] },
+  limit: { value: '100' },
+  filters: { children: [
+    makeFilter({ field: 'Operator', value: 'before' }),
+    makeFilter({ field: '', value: '' }),
+  ] },
+  sortField: { value: '' },
+  sortDirection: { value: 'ASC' },
+  quoteIdentifier: value => `"${String(value).replaceAll('"', '""')}"`,
+  quoteValue: value => `'${String(value).replaceAll("'", "''")}'`,
+  runButton: { disabled: false },
+  saveButton: { disabled: false },
+  exportButton: { disabled: false },
+  copyButton: { disabled: false },
+  previousButton: { disabled: false },
+  nextButton: { disabled: false },
+  pagination: { hidden: false },
+  pageLabel: { textContent: '' },
+  resultCount: { textContent: '' },
+  currentPageIndex: 0,
+  nextOffset: null,
+  activeExecutionId: '',
+  isExporting: false,
+  hasCurrentResults: true,
+  typeSelectionNotice: false,
+  syncPaginationControls() {},
+  updateFilterHeaderStates() {},
+};
+const script = `${source.sync_action_availability}\n${source.filter_value_control}\n${source.build_assisted_sql}\nbuildAssistedSql();\nconst initialPreview = editor.value;\nfilters.children[0].querySelector('[data-sql-filter-value]').value = 'after';\nbuildAssistedSql();\nJSON.stringify({ initialPreview, preview: editor.value, status: assistantStatus.textContent, runDisabled: runButton.disabled, saveDisabled: saveButton.disabled, exportDisabled: exportButton.disabled });`;
+process.stdout.write(vm.runInNewContext(script, context));
+"""
+    completed = subprocess.run(
+        [node_binary, '-e', node_harness],
+        input=json.dumps(script_data),
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    result = json.loads(completed.stdout)
+
+    assert result['preview'] != result['initialPreview']
+    assert 'WHERE "Operator" = \'after\' COLLATE NOCASE' in result['preview']
+    assert "'before'" not in result['preview']
+    assert '1 incomplete filter' in result['status']
+    assert all(result[action] for action in ('runDisabled', 'saveDisabled', 'exportDisabled'))
+
+
+def test_query_builder_assistant_preview_and_dataset_name_filter_controls() -> None:
+    node_binary = shutil.which('node')
+    if node_binary is None:
+        pytest.skip('Node.js is required to exercise the Query Builder browser-side SQL generator.')
+
+    template_path = Path(__file__).resolve().parents[1] / 'src/web_interface/templates/query_builder.html'
+    template = template_path.read_text(encoding='utf-8')
+
+    def extract(start_marker: str, end_marker: str) -> str:
+        start = template.index(start_marker)
+        end = template.index(end_marker, start)
+        return template[start:end].strip()
+
+    script_data = {
+        'set_options': extract('  const setOptions = ', '\n  const selectedKinds'),
+        'dataset_helpers': extract('  const selectedKinds = ', '\n  const columnsForKind'),
+        'column_helpers': extract('  const columnsForKind = ', '\n  const refreshFields'),
+        'refresh_fields': extract('  const refreshFields = ', '\n  function selectDefaultFields'),
+        'default_fields': extract('  function selectDefaultFields()', '\n  const refreshTypes'),
+        'refresh_types': extract('  const refreshTypes = ', '\n  const refreshFilterConnectors'),
+        'build_assisted_sql': extract('  function buildAssistedSql() {', '\n  const setMode'),
+        'parser_path': str(Path(__file__).resolve().parents[1] / 'src/web_interface/static/js/query_builder_assistant_state.js'),
+    }
+    node_harness = r"""
+const fs = require('node:fs');
+const vm = require('node:vm');
+const source = JSON.parse(fs.readFileSync(0, 'utf8'));
+class FakeSelect {
+  constructor(value = '') { this.options = []; this._value = value; this.hidden = false; this.disabled = false; }
+  get value() { return this._value; }
+  set value(value) { this._value = value; this.options.forEach(option => { option.selected = option.value === value; }); }
+  get selectedOptions() { return this.options.filter(option => option.selected); }
+  replaceChildren() { this.options = []; this._value = ''; }
+  add(option) { this.options.push(option); if (option.selected) this._value = option.value; }
+  dispatchEvent() { return true; }
+}
+const makeInput = () => ({ checked: false, listeners: {}, addEventListener(name, callback) { this.listeners[name] = callback; } });
+const typePicker = {
+  children: [],
+  replaceChildren() { this.children = []; },
+  append(label) { this.children.push(label); },
+  querySelectorAll(selector) { return selector === 'input:checked' ? this.children.map(label => label.input).filter(input => input.checked) : []; },
+};
+const datasets = [
+  { id: 1, name: 'Data with a long source name.csv', kind: 'data', columns: ['Operator'] },
+  { id: 2, name: 'Voice with a long source name.csv', kind: 'voice', columns: ['Operator'] },
+  { id: 3, name: 'Unselected source.csv', kind: 'data', columns: ['Operator'] },
+  { id: 4, name: 'Second selected data source.csv', kind: 'data', columns: ['Operator'] },
+];
+const sources = { selectedOptions: [] };
+const fieldsPicker = new FakeSelect();
+const sortField = new FakeSelect();
+const filters = { children: [], querySelectorAll(selector) {
+  if (selector === '[data-sql-filter-field]') return this.children.map(row => row.controls.field);
+  if (selector === '.query-builder-filter') return this.children;
+  return [];
+} };
+const context = {
+  mode: 'assisted', editor: { value: '' }, assistantStatus: { textContent: '' },
+  datasetColumns: datasets, sources, typePicker, allFields: { checked: false }, allRows: { checked: false },
+  fieldsPicker, sortField, sortDirection: { value: 'ASC' }, limit: { value: '100' }, filters,
+  runButton: { disabled: false }, saveButton: { disabled: false }, exportButton: { disabled: false },
+  activeExecutionId: '', isExporting: false, hasCurrentResults: false,
+  sourceFields: ['source_dataset_id', 'source_dataset_name', 'source_row_id'],
+  typeSelectionNotice: false, assistantValid: false,
+  FakeSelect,
+  syncActionAvailability() {}, invalidateQueryResults() {},
+  quoteIdentifier: value => `"${String(value).replaceAll('"', '""')}"`,
+  quoteValue: value => `'${String(value).replaceAll("'", "''")}'`,
+  Option: function (label, value) { return { label, value, selected: false }; },
+  Event: function (type, options) { return { type, ...options }; },
+  document: {
+    createElement(tag) {
+      if (tag === 'input') return makeInput();
+      return { append(input) { this.input = input; } };
+    },
+    createTextNode(value) { return value; },
+  },
+};
+const chunks = [source.set_options, source.dataset_helpers, source.column_helpers, source.refresh_fields,
+  source.default_fields, source.refresh_types, source.build_assisted_sql].join('\n');
+const run = `${chunks}
+refreshTypes();
+const initialPreview = editor.value;
+const initialDefaultFields = fieldsPicker.selectedOptions.map(option => option.value).sort();
+sources.selectedOptions = [{ value: '1' }, { value: '2' }, { value: '4' }];
+refreshTypes();
+const kinds = typePicker.children.map(label => label.input);
+const [dataType, voiceType] = kinds;
+voiceType.checked = false;
+voiceType.listeners.change();
+const singleTypePreview = editor.value;
+dataType.checked = false;
+dataType.listeners.change();
+const lastTypeWasRestored = dataType.checked && editor.value === singleTypePreview
+  && assistantStatus.textContent.includes('At least one CDR type must remain selected');
+allFields.checked = false;
+selectDefaultFields();
+const defaultFields = fieldsPicker.selectedOptions.map(option => option.value).sort();
+buildAssistedSql();
+const previewWithDefaults = editor.value;
+const fieldSelect = new FakeSelect('source_dataset_name');
+fieldSelect.add({ label: 'source_dataset_name', value: 'source_dataset_name', selected: true });
+const operatorSelect = { value: 'eq' };
+const textInput = { value: '', hidden: false, disabled: false };
+const datasetPicker = new FakeSelect();
+datasetPicker.hidden = true;
+const row = { className: 'query-builder-filter', dataset: {}, controls: {
+  field: fieldSelect, operator: operatorSelect, text: textInput, dataset: datasetPicker,
+  connector: { value: 'AND', hidden: true },
+}, querySelector(selector) {
+  if (selector === '[data-sql-filter-field]') return this.controls.field;
+  if (selector === '[data-sql-filter-operator]') return this.controls.operator;
+  if (selector === '[data-sql-filter-value]') return this.controls.text;
+  if (selector === '[data-sql-filter-dataset-value]') return this.controls.dataset;
+  if (selector === '[data-sql-filter-dataset-value]:not([hidden])') return this.controls.dataset.hidden ? null : this.controls.dataset;
+  if (selector === '[data-sql-filter-connector]') return this.controls.connector;
+  return null;
+} };
+updateFilterValueControl(row);
+const datasetOptions = datasetPicker.options.map(option => option.value).filter(Boolean);
+const datasetPickerShown = !datasetPicker.hidden && textInput.hidden;
+datasetPicker.value = 'Data with a long source name.csv';
+filters.children = [row];
+buildAssistedSql();
+const isSql = editor.value;
+operatorSelect.value = 'ne';
+updateFilterValueControl(row);
+const datasetPickerShownForIsNot = !datasetPicker.hidden && textInput.hidden;
+buildAssistedSql();
+const isNotSql = editor.value;
+operatorSelect.value = 'contains';
+updateFilterValueControl(row);
+const textInputShownForOtherComparisons = datasetPicker.hidden && !textInput.hidden;
+filters.children = [];
+voiceType.checked = true;
+refreshFields();
+allFields.checked = true;
+buildAssistedSql();
+const limitedSql = editor.value;
+allRows.checked = true;
+buildAssistedSql();
+const allRowsSql = editor.value;
+JSON.stringify({ singleTypePreview, lastTypeWasRestored, status: assistantStatus.textContent,
+  initialPreview, initialDefaultFields, defaultFields, previewWithDefaults, datasetOptions, datasetPickerShown, datasetPickerShownForIsNot,
+  textInputShownForOtherComparisons, isSql, isNotSql, unfilteredSql: limitedSql, allRowsSql });`;
+const result = JSON.parse(vm.runInNewContext(run, context));
+require(source.parser_path);
+result.parsedFilterQuery = globalThis.QueryBuilderAssistantState.parseGeneratedSql(result.isSql);
+result.parsedAllRowsQuery = globalThis.QueryBuilderAssistantState.parseGeneratedSql(result.allRowsSql);
+result.unrepresentableQuery = globalThis.QueryBuilderAssistantState.parseGeneratedSql('SELECT * FROM selected_data LIMIT 100');
+process.stdout.write(JSON.stringify(result));
+"""
+    completed = subprocess.run(
+        [node_binary, '-e', node_harness],
+        input=json.dumps(script_data),
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    result = json.loads(completed.stdout)
+
+    assert 'Select at least one CDR source' in result['initialPreview']
+    assert result['initialDefaultFields'] == ['cdr_type', 'source_dataset_name']
+    assert 'FROM "selected_data"' in result['singleTypePreview']
+    assert result['lastTypeWasRestored']
+    assert result['defaultFields'] == ['cdr_type', 'source_dataset_name']
+    assert 'SELECT "source_dataset_name", "cdr_type"' in result['previewWithDefaults']
+    assert result['datasetOptions'] == ['Data with a long source name.csv', 'Second selected data source.csv']
+    assert result['datasetPickerShown']
+    assert result['datasetPickerShownForIsNot']
+    assert result['textInputShownForOtherComparisons']
+    assert 'WHERE "source_dataset_name" = \'Data with a long source name.csv\' COLLATE NOCASE' in result['isSql']
+    assert 'WHERE "source_dataset_name" <> \'Data with a long source name.csv\' COLLATE NOCASE' in result['isNotSql']
+    assert 'WHERE' not in result['unfilteredSql']
+    assert 'FROM "selected_data"' in result['unfilteredSql']
+    assert 'FROM "selected_voice"' in result['unfilteredSql']
+    assert result['unfilteredSql'].endswith('LIMIT 100')
+    assert 'LIMIT' not in result['allRowsSql']
+    assert result['parsedFilterQuery']['kinds'] == ['data']
+    assert result['parsedFilterQuery']['fields'] == ['source_dataset_name', 'cdr_type']
+    assert result['parsedFilterQuery']['filters'] == [{
+        'field': 'source_dataset_name', 'operator': 'eq', 'value': 'Data with a long source name.csv', 'connector': 'AND',
+    }]
+    assert result['parsedFilterQuery']['limit'] == 100
+    assert result['parsedAllRowsQuery']['limit'] is None
+    assert result['unrepresentableQuery'] is None
+
+
+def test_query_builder_saved_query_restores_assisted_controls_or_keeps_manual_sql() -> None:
+    node_binary = shutil.which('node')
+    if node_binary is None:
+        pytest.skip('Node.js is required to exercise Query Builder saved-query restoration.')
+
+    template_path = Path(__file__).resolve().parents[1] / 'src/web_interface/templates/query_builder.html'
+    template = template_path.read_text(encoding='utf-8')
+
+    def extract(start_marker: str, end_marker: str) -> str:
+        start = template.index(start_marker)
+        end = template.index(end_marker, start)
+        return template[start:end].strip()
+
+    script_data = {
+        'availability': extract('  const syncActionAvailability = () => {', '\n  const invalidateQueryResults'),
+        'build_sql': extract('  function buildAssistedSql() {', '\n  const setMode'),
+        'set_mode': extract('  const setMode = ', '\n  modeButtons.forEach'),
+        'restore': extract('  const restoreAssistedQuery = ', '\n  const loadSavedQuery'),
+        'load_saved': extract('  const loadSavedQuery = ', "\n  document.querySelector('[data-sql-load-saved]')"),
+        'parser_path': str(Path(__file__).resolve().parents[1] / 'src/web_interface/static/js/query_builder_assistant_state.js'),
+    }
+    node_harness = r"""
+const fs = require('node:fs');
+const vm = require('node:vm');
+const source = JSON.parse(fs.readFileSync(0, 'utf8'));
+require(source.parser_path);
+const representableSql = `SELECT "source_dataset_name", "cdr_type"
+FROM (
+  SELECT "source_dataset_name", 'DATA' AS "cdr_type"
+FROM "selected_data"
+) AS "combined_cdr"
+LIMIT 100`;
+const manualSql = 'SELECT * FROM selected_data LIMIT 100';
+const dataType = {value: 'data', checked: true};
+const typePicker = {querySelectorAll: selector => selector === 'input' ? [dataType] : []};
+const fieldsPicker = {
+  options: ['source_dataset_name', 'cdr_type'].map(value => ({value, selected: false})),
+  get selectedOptions() { return this.options.filter(option => option.selected); },
+  dispatchEvent() {},
+};
+const sources = {options: [{value: '1', selected: false}], dispatchEvent() {}};
+const filters = {children: [], replaceChildren() { this.children = []; }};
+const button = () => ({disabled: false});
+const context = {
+  QueryBuilderAssistantState: globalThis.QueryBuilderAssistantState,
+  representableSql, manualSql,
+  mode: 'assisted', lastGeneratedSql: '', assistantValid: false, hasCurrentResults: false,
+  activeExecutionId: '', isExporting: false, typeSelectionNotice: false,
+  editor: {value: '', readOnly: true}, editorLabel: {textContent: ''}, assistant: {hidden: false}, status: {textContent: ''},
+  modeButtons: [], sources, typePicker, fieldsPicker, fieldsWrap: {hidden: false}, filters,
+  allFields: {checked: false}, allRows: {checked: false}, limit: {value: '100', disabled: false},
+  sortField: {value: ''}, sortDirection: {value: 'ASC'}, assistantStatus: {textContent: ''},
+  runButton: button(), saveButton: button(), exportButton: button(), copyButton: button(),
+  previousButton: button(), nextButton: button(), pagination: {hidden: true}, pageLabel: {textContent: ''},
+  results: {querySelector: () => null}, currentPageIndex: 0, nextOffset: null,
+  sourceFields: ['source_dataset_id', 'source_dataset_name', 'source_row_id'],
+  syncPaginationControls() {},
+  updateFilterHeaderStates() {},
+  selectedKinds: () => ['data'], availableColumns: () => ['source_dataset_name', 'cdr_type'],
+  columnsForKind: () => new Set(['source_dataset_name']),
+  refreshFields() {}, addFilter() {}, updateFilterValueControl() {}, filterValueControl() {},
+  quoteIdentifier: value => `"${String(value).replaceAll('"', '""')}"`,
+  quoteValue: value => `'${String(value).replaceAll("'", "''")}'`,
+  Event: function(type, options) { return {type, ...options}; },
+};
+const script = `${source.availability}
+${source.build_sql}
+${source.set_mode}
+${source.restore}
+${source.load_saved}
+const load = sql => loadSavedQuery({dataset: {query: JSON.stringify(sql), datasetIds: '[1]'}});
+load(representableSql);
+const assisted = {mode, editorSql: editor.value, status: status.textContent, fields: fieldsPicker.selectedOptions.map(option => option.value)};
+load(manualSql);
+JSON.stringify({assisted, manual: {mode, editorSql: editor.value, status: status.textContent}});`;
+process.stdout.write(vm.runInNewContext(script, context));
+"""
+    completed = subprocess.run(
+        [node_binary, '-e', node_harness],
+        input=json.dumps(script_data),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout)
+
+    assert result['assisted']['mode'] == 'assisted', result
+    assert result['assisted']['editorSql'] == '''SELECT "source_dataset_name", "cdr_type"
+FROM (
+  SELECT "source_dataset_name", 'DATA' AS "cdr_type"
+FROM "selected_data"
+) AS "combined_cdr"
+LIMIT 100'''
+    assert result['assisted']['fields'] == ['source_dataset_name', 'cdr_type']
+    assert 'Saved query loaded in Assisted mode' in result['assisted']['status']
+    assert result['manual']['mode'] == 'sql'
+    assert result['manual']['editorSql'] == 'SELECT * FROM selected_data LIMIT 100'
+    assert 'cannot be shown in Assisted mode' in result['manual']['status']
+
+
+def test_query_builder_result_pages_and_copy_cover_only_visible_page() -> None:
+    node_binary = shutil.which('node')
+    if node_binary is None:
+        pytest.skip('Node.js is required to exercise the Query Builder browser-side result controls.')
+
+    template_path = Path(__file__).resolve().parents[1] / 'src/web_interface/templates/query_builder.html'
+    template = template_path.read_text(encoding='utf-8')
+
+    def extract(start_marker: str, end_marker: str) -> str:
+        start = template.index(start_marker)
+        end = template.index(end_marker, start)
+        return template[start:end].strip()
+
+    script_data = {
+        'pagination_controls': extract('  const lastPageOffset = ', '\n  const syncActionAvailability'),
+        'availability': extract('  const syncActionAvailability = () => {', '\n  const invalidateQueryResults'),
+        'escape': extract('  const escape = (value) => ', '\n  const payload'),
+        'render': extract('  const render = (body) => {', '\n  const loadPage = async'),
+        'page_handlers': extract('  const loadPage = async ', '\n  copyButton.addEventListener'),
+        'copy_handler': extract('  copyButton.addEventListener(', '\n  cancelRunButton.addEventListener'),
+    }
+    node_harness = r"""
+const fs = require('node:fs');
+const vm = require('node:vm');
+const source = JSON.parse(fs.readFileSync(0, 'utf8'));
+class FakeResults {
+  set innerHTML(markup) {
+    this.markup = markup;
+    const tableMarkup = markup.match(/<table>([\s\S]*?)<\/table>/)?.[1];
+    this.table = tableMarkup ? {
+      querySelectorAll: selector => selector === 'tr' ? [...tableMarkup.matchAll(/<tr>([\s\S]*?)<\/tr>/g)].map(match => ({
+        querySelectorAll: cellsSelector => cellsSelector === 'th, td'
+          ? [...match[1].matchAll(/<(?:th|td)>([\s\S]*?)<\/(?:th|td)>/g)].map(cell => ({ textContent: cell[1].replace(/<[^>]*>/g, '') }))
+          : [],
+      })) : [],
+    } : null;
+  }
+  querySelector(selector) { return selector === 'table' ? this.table : null; }
+  querySelectorAll() { return []; }
+  hasColumnFilterButtons() { return Boolean(this.markup?.includes('data-sql-column-filter-trigger')); }
+}
+const makeButton = () => ({ disabled: false, listeners: {}, addEventListener(name, callback) { this.listeners[name] = callback; } });
+const makePage = (offset, count, totalRows) => ({
+  columns: ['Value'],
+  rows: Array.from({length: count}, (_unused, index) => [offset + index + 1]),
+  next_offset: offset + count < totalRows ? offset + count : null,
+  total_rows: totalRows,
+  views: ['selected_data'],
+});
+const pages = {0: makePage(0, 50, 117), 50: makePage(50, 50, 117), 100: makePage(100, 17, 117)};
+const requestOffsets = [];
+const context = {
+  pages,
+  requestOffsets,
+  columnFilters: new Map(),
+  pageSize: 50, totalRows: 0, currentOffset: 0,
+  mode: 'sql', assistantValid: true, activeExecutionId: '', isExporting: false, hasCurrentResults: false,
+  nextOffset: null,
+  results: new FakeResults(), resultCount: { textContent: '' },
+  paginationGroups: [{hidden: true}, {hidden: true}], pageLabels: [{textContent: ''}, {textContent: ''}],
+  runButton: makeButton(), saveButton: makeButton(), copyButton: makeButton(), exportButton: makeButton(),
+  firstButtons: [makeButton(), makeButton()], previousButtons: [makeButton(), makeButton()],
+  nextButtons: [makeButton(), makeButton()], lastButtons: [makeButton(), makeButton()],
+  updateFilterHeaderStates() {},
+  serializeColumnFilters: () => [],
+  status: { textContent: '' }, runningOverlay: { hidden: true }, cancelRunButton: { disabled: false },
+  querySignature: () => 'same-query',
+  serializeColumnFilters: () => [],
+  request: async (_url, extra) => { requestOffsets.push(extra.offset); return { body: pages[extra.offset] }; },
+  navigator: { clipboard: { text: '', writeText: async function(value) { this.text = value; } } },
+  setTimeout,
+};
+const run = `(async () => {
+${source.pagination_controls}
+${source.availability}
+const escape = value => String(value ?? '').replace(/[&<>"']/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
+${source.render}
+${source.page_handlers}
+${source.copy_handler}
+const snapshot = () => ({labels: pageLabels.map(label => label.textContent), groupsHidden: paginationGroups.map(group => group.hidden),
+  firstDisabled: firstButtons.map(button => button.disabled), previousDisabled: previousButtons.map(button => button.disabled),
+  nextDisabled: nextButtons.map(button => button.disabled), lastDisabled: lastButtons.map(button => button.disabled),
+  count: resultCount.textContent, hasColumnFilterButtons: results.hasColumnFilterButtons()});
+const clickAndWait = async button => { button.listeners.click(); while (activeExecutionId) await new Promise(resolve => setTimeout(resolve, 0)); };
+render(pages[0]); hasCurrentResults = true; syncActionAvailability();
+const firstPage = snapshot();
+await clickAndWait(lastButtons[0]);
+const lastPage = snapshot();
+await copyButton.listeners.click();
+const lastPageCopy = navigator.clipboard.text;
+const lastPageCopyStatus = status.textContent;
+await clickAndWait(firstButtons[1]);
+const returnedToFirstPage = snapshot();
+await clickAndWait(nextButtons[1]);
+const middlePage = snapshot();
+await clickAndWait(previousButtons[0]);
+const finalPage = snapshot();
+render({columns: ['Value'], rows: [[1]], next_offset: null, total_rows: 1, views: ['selected_data']});
+hasCurrentResults = true; syncActionAvailability();
+const singlePage = snapshot();
+return JSON.stringify({firstPage, lastPage, returnedToFirstPage, middlePage, finalPage, singlePage, lastPageCopy,
+  requestOffsets, copyStatus: lastPageCopyStatus});
+})()`;
+vm.runInNewContext(run, context).then(value => process.stdout.write(value));
+"""
+    completed = subprocess.run(
+        [node_binary, '-e', node_harness],
+        input=json.dumps(script_data),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout)
+
+    assert result['firstPage'] == {
+        'labels': ['Page 1 of 3', 'Page 1 of 3'],
+        'groupsHidden': [False, False],
+        'firstDisabled': [True, True],
+        'previousDisabled': [True, True],
+        'nextDisabled': [False, False],
+        'lastDisabled': [False, False],
+        'count': '50 rows on this page · 1 columns · 117 total rows',
+        'hasColumnFilterButtons': True,
+    }
+    assert result['lastPage'] == {
+        'labels': ['Page 3 of 3', 'Page 3 of 3'],
+        'groupsHidden': [False, False],
+        'firstDisabled': [False, False],
+        'previousDisabled': [False, False],
+        'nextDisabled': [True, True],
+        'lastDisabled': [True, True],
+        'count': '17 rows on this page · 1 columns · 117 total rows',
+        'hasColumnFilterButtons': True,
+    }
+    assert result['returnedToFirstPage'] == result['firstPage']
+    assert result['middlePage']['labels'] == ['Page 2 of 3', 'Page 2 of 3']
+    assert result['middlePage']['firstDisabled'] == [False, False]
+    assert result['middlePage']['previousDisabled'] == [False, False]
+    assert result['middlePage']['nextDisabled'] == [False, False]
+    assert result['middlePage']['lastDisabled'] == [False, False]
+    assert result['finalPage'] == result['firstPage']
+    assert result['singlePage'] == {
+        'labels': ['Page 1 of 1', 'Page 1 of 1'],
+        'groupsHidden': [False, False],
+        'firstDisabled': [True, True],
+        'previousDisabled': [True, True],
+        'nextDisabled': [True, True],
+        'lastDisabled': [True, True],
+        'count': '1 rows on this page · 1 columns · 1 total rows',
+        'hasColumnFilterButtons': True,
+    }
+    assert result['lastPageCopy'].splitlines()[0] == 'Value'
+    assert result['lastPageCopy'].splitlines()[1:] == [str(value) for value in range(101, 118)]
+    assert result['requestOffsets'] == [100, 0, 50, 0]
+    assert result['copyStatus'] == 'Current page copied to clipboard.'
+
+
+def test_query_builder_executes_union_all_with_disjoint_columns_and_grouped_filters(tmp_path: Path) -> None:
+    from src.modules.query_builder import execute_query
+
+    database_path = tmp_path / 'query-builder.sqlite'
+    with sqlite3.connect(database_path) as connection:
+        connection.execute('CREATE TABLE dataset_rows_1 (Status TEXT, Alpha INTEGER)')
+        connection.executemany(
+            'INSERT INTO dataset_rows_1 VALUES (?, ?)',
+            [('keep', 0), ('keep', 2), ('also', 3), ('skip', 4)],
+        )
+        connection.execute('CREATE TABLE dataset_rows_2 (Status TEXT, Beta TEXT)')
+        connection.executemany(
+            'INSERT INTO dataset_rows_2 VALUES (?, ?)',
+            [('keep', 'x'), ('keep', 'x'), ('also', 'x'), ('also', 'y')],
+        )
+
+    datasets = [
+        {'id': 1, 'name': 'data.csv', 'kind': 'data'},
+        {'id': 2, 'name': 'voice.csv', 'kind': 'voice'},
+    ]
+    query_sql = """
+        SELECT "Status", "Alpha", "Beta", "cdr_type"
+        FROM (
+          SELECT "Status", "Alpha", NULL AS "Beta", 'DATA' AS "cdr_type"
+          FROM "selected_data"
+          UNION ALL
+          SELECT "Status", NULL AS "Alpha", "Beta", 'VOICE' AS "cdr_type"
+          FROM "selected_voice"
+        ) AS "combined_cdr"
+        WHERE (("Status" = 'keep' COLLATE NOCASE AND CAST("Alpha" AS REAL) > 1)
+          OR "Beta" = 'x' COLLATE NOCASE)
+        ORDER BY "Status" ASC
+        LIMIT 100
+    """
+
+    columns, rows, truncated, views = execute_query(database_path, datasets, query_sql)
+
+    assert columns == ['Status', 'Alpha', 'Beta', 'cdr_type']
+    assert Counter(rows) == Counter([
+        ('also', None, 'x', 'VOICE'),
+        ('keep', 2, None, 'DATA'),
+        ('keep', None, 'x', 'VOICE'),
+        ('keep', None, 'x', 'VOICE'),
+    ])
+    assert not truncated
+    assert views == ['selected_data', 'selected_voice']
+
+
+def test_query_builder_run_returns_offset_pages_and_rejects_invalid_offsets(client, monkeypatch, tmp_path: Path) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    monkeypatch.setattr(app_module.repository, 'list_datasets', lambda: [
+        {'id': 1, 'file_name': 'paged.csv', 'dataset_kind': 'data', 'status': 'ready'},
+    ])
+    monkeypatch.setattr(app_module, 'MAX_PREVIEW_ROWS', 2)
+    database_path = tmp_path / 'query-builder-api.sqlite'
+    monkeypatch.setattr(app_module, 'active_workspace', replace(app_module.active_workspace, database_path=database_path))
+    with sqlite3.connect(database_path) as connection:
+        connection.execute('CREATE TABLE dataset_rows_1 (Value INTEGER)')
+        connection.executemany('INSERT INTO dataset_rows_1 VALUES (?)', [(1,), (2,), (3,), (4,), (5,)])
+
+    payload = {
+        'dataset_ids': [1],
+        'query_sql': 'SELECT "Value" FROM "selected_data" ORDER BY "Value" ASC',
+    }
+    first_page = client.post('/api/query-builder/run', json={**payload, 'execution_id': 'page-0001', 'offset': 0})
+    second_page = client.post('/api/query-builder/run', json={**payload, 'execution_id': 'page-0002', 'offset': 2})
+    final_page = client.post('/api/query-builder/run', json={**payload, 'execution_id': 'page-0003', 'offset': 4})
+
+    assert first_page.status_code == second_page.status_code == final_page.status_code == 200, [
+        first_page.text, second_page.text, final_page.text,
+    ]
+    assert first_page.json()['rows'] == [[1], [2]]
+    assert first_page.json()['next_offset'] == 2
+    assert first_page.json()['total_rows'] == 5
+    assert second_page.json()['rows'] == [[3], [4]]
+    assert second_page.json()['next_offset'] == 4
+    assert second_page.json()['total_rows'] == 5
+    assert final_page.json()['rows'] == [[5]]
+    assert final_page.json()['next_offset'] is None
+    assert final_page.json()['total_rows'] == 5
+
+    limited_page = client.post('/api/query-builder/run', json={
+        **payload,
+        'query_sql': 'SELECT "Value" FROM "selected_data" ORDER BY "Value" ASC LIMIT 3',
+        'execution_id': 'page-limit',
+        'offset': 2,
+    })
+    assert limited_page.status_code == 200
+    assert limited_page.json()['rows'] == [[3]]
+    assert limited_page.json()['next_offset'] is None
+    assert limited_page.json()['total_rows'] == 3
+
+    for invalid_offset in (True, -1, 1.5, '1'):
+        response = client.post(
+            '/api/query-builder/run',
+            json={**payload, 'execution_id': 'page-invalid', 'offset': invalid_offset},
+        )
+        assert response.status_code == 400
+
+
+def test_query_builder_column_filters_cover_complete_results_pages_and_csv(client, monkeypatch, tmp_path: Path) -> None:
+    import csv
+    import io
+
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    monkeypatch.setattr(app_module.repository, 'list_datasets', lambda: [
+        {'id': 1, 'file_name': 'filterable.csv', 'dataset_kind': 'data', 'status': 'ready'},
+    ])
+    monkeypatch.setattr(app_module, 'MAX_PREVIEW_ROWS', 2)
+    database_path = tmp_path / 'query-builder-column-filters.sqlite'
+    monkeypatch.setattr(app_module, 'active_workspace', replace(app_module.active_workspace, database_path=database_path))
+    with sqlite3.connect(database_path) as connection:
+        connection.execute('CREATE TABLE dataset_rows_1 (Category TEXT, Score INTEGER)')
+        connection.executemany(
+            'INSERT INTO dataset_rows_1 VALUES (?, ?)',
+            [('north', 1), ('other', 2), ('other', 3), ('target', 4), ('target', 5), ('target', 6)],
+        )
+
+    payload = {
+        'dataset_ids': [1],
+        'query_sql': 'SELECT "Category", "Score" FROM "selected_data" ORDER BY "Score" ASC',
+        'column_filters': [{'index': 0, 'values': ['target']}],
+    }
+    first_page = client.post('/api/query-builder/run', json={
+        **payload, 'execution_id': 'filter-page-01', 'offset': 0,
+    })
+    second_page = client.post('/api/query-builder/run', json={
+        **payload, 'execution_id': 'filter-page-02', 'offset': 2,
+    })
+
+    assert first_page.status_code == second_page.status_code == 200, [first_page.text, second_page.text]
+    assert first_page.json()['rows'] == [['target', 4], ['target', 5]]
+    assert first_page.json()['next_offset'] == 2
+    assert first_page.json()['total_rows'] == 3
+    assert second_page.json()['rows'] == [['target', 6]]
+    assert second_page.json()['next_offset'] is None
+    assert second_page.json()['total_rows'] == 3
+
+    no_matches = client.post('/api/query-builder/run', json={
+        **payload,
+        'column_filters': [{'index': 0, 'values': []}],
+        'execution_id': 'filter-empty-01',
+        'offset': 0,
+    })
+    assert no_matches.status_code == 200
+    assert no_matches.json()['rows'] == []
+    assert no_matches.json()['total_rows'] == 0
+
+    exported = client.post('/api/query-builder/export', json=payload)
+    assert exported.status_code == 200
+    assert list(csv.reader(io.StringIO(exported.text))) == [
+        ['Category', 'Score'], ['target', '4'], ['target', '5'], ['target', '6'],
+    ]
+
+
+def test_query_builder_filter_values_are_distinct_faceted_searchable_and_typed(client, monkeypatch, tmp_path: Path) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    monkeypatch.setattr(app_module.repository, 'list_datasets', lambda: [
+        {'id': 1, 'file_name': 'filter-values.csv', 'dataset_kind': 'data', 'status': 'ready'},
+    ])
+    database_path = tmp_path / 'query-builder-filter-values.sqlite'
+    monkeypatch.setattr(app_module, 'active_workspace', replace(app_module.active_workspace, database_path=database_path))
+    with sqlite3.connect(database_path) as connection:
+        connection.execute('CREATE TABLE dataset_rows_1 (Region TEXT, Score INTEGER)')
+        connection.executemany(
+            'INSERT INTO dataset_rows_1 VALUES (?, ?)',
+            [('North', 1), ('South', 2), ('West', 3), ('North', 4), ('South', 5)]
+            + [(f'Region {index}', index + 6) for index in range(200)],
+        )
+
+    payload = {
+        'dataset_ids': [1],
+        'query_sql': 'SELECT "Region", "Score" FROM "selected_data"',
+        'column_index': 0,
+        'column_filters': [
+            {'index': 0, 'values': ['West']},
+            {'index': 1, 'values': [1, 2, 3, 4]},
+        ],
+        'search': 'or',
+    }
+    faceted_values = client.post('/api/query-builder/filter-values', json=payload)
+
+    assert faceted_values.status_code == 200, faceted_values.text
+    assert faceted_values.json() == {'values': ['North'], 'truncated': False}
+
+    typed_values = client.post('/api/query-builder/filter-values', json={
+        **payload,
+        'column_index': 1,
+        'column_filters': [{'index': 0, 'values': ['North']}],
+        'search': '',
+    })
+    assert typed_values.status_code == 200, typed_values.text
+    assert typed_values.json() == {'values': [1, 4], 'truncated': False}
+    assert all(isinstance(value, int) for value in typed_values.json()['values'])
+
+    capped_values = client.post('/api/query-builder/filter-values', json={
+        **payload,
+        'column_index': 1,
+        'column_filters': [],
+        'search': '',
+    })
+    assert capped_values.status_code == 200, capped_values.text
+    assert len(capped_values.json()['values']) == 200
+    assert all(isinstance(value, int) for value in capped_values.json()['values'])
+    assert capped_values.json()['truncated'] is True
+
+
+def test_query_builder_csv_stream_includes_more_than_one_hundred_thousand_rows(tmp_path: Path) -> None:
+    from src.modules.query_builder import iter_query_csv
+
+    database_path = tmp_path / 'query-builder-csv.sqlite'
+    with sqlite3.connect(database_path) as connection:
+        connection.execute('CREATE TABLE dataset_rows_1 (Value INTEGER, Detail TEXT)')
+        connection.execute('''
+            WITH RECURSIVE values_to_insert(value) AS (
+                VALUES (1)
+                UNION ALL
+                SELECT value + 1 FROM values_to_insert WHERE value < 100001
+            )
+            INSERT INTO dataset_rows_1 SELECT value, 'detail-' || value FROM values_to_insert
+        ''')
+
+    completed_rows: list[int] = []
+    chunks = iter_query_csv(
+        database_path,
+        [{'id': 1, 'name': 'all-rows.csv', 'kind': 'data'}],
+        'SELECT "Value", "Detail" FROM "selected_data" ORDER BY "Value" ASC',
+        on_complete=completed_rows.append,
+    )
+
+    header = next(chunks)
+    exported_line_count = 0
+    first_chunk = ''
+    last_chunk = ''
+    for chunk in chunks:
+        first_chunk = first_chunk or chunk
+        last_chunk = chunk
+        exported_line_count += chunk.count('\n')
+
+    assert header == 'Value,Detail\r\n'
+    assert first_chunk.startswith('1,detail-1\r\n')
+    assert last_chunk.endswith('100001,detail-100001\r\n')
+    assert exported_line_count == 100001
+    assert completed_rows == [100001]
 
 
 def test_login_does_not_reinitialize_the_active_workspace(client, monkeypatch) -> None:
@@ -7328,6 +8156,19 @@ def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
         and item["label"] == "Chart Builder"
         for item in help_documents
     )
+    assert any(
+        item["relative_path"] == "10-query-builder.md"
+        and item["label"] == "Query Builder"
+        for item in help_documents
+    )
+    assert [item['relative_path'] for item in help_documents[9:]] == [
+        '09-chart-builder.md',
+        '10-query-builder.md',
+        '11-administration.md',
+        '12-docker-deployment.md',
+        '13-project-structure.md',
+        '14-roadmap.md',
+    ]
     excluded_help_documents = {
         "02-arguments-description.md",
         "02-arguments-description-short.md",

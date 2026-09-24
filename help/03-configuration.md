@@ -74,7 +74,7 @@ These values are consumed by Compose rather than by the Python application:
 
 Production maps `${APP_PORT}:7278`; development maps `${APP_DEV_PORT}:7278`. The application inside the container always listens on `0.0.0.0:7278`. `APP_ASSETS_DIR=/app/assets` points to assets bundled in the image, so the standard Compose files persist only config and data.
 
-Use a pinned `IMAGE_TAG` when a production deployment must be reproducible. See [Docker Deployment](11-docker-deployment.md) for complete commands and upgrade checks.
+Use a pinned `IMAGE_TAG` when a production deployment must be reproducible. See [Docker Deployment](12-docker-deployment.md) for complete commands and upgrade checks.
 
 ## Persistence layout
 
@@ -101,7 +101,7 @@ Report Templates are records in each workspace database. CSV files appear in exp
 
 The starter Auto-calculated Field definitions remain a code asset at `assets/default-calculated-dimensions.json`; changing `APP_ASSETS_DIR` currently relocates the PowerPoint master lookup only.
 
-For the complete workspace, output and cache tree, see [Project Structure → Persistent data layout](12-project-structure.md#persistent-data-layout).
+For the complete workspace, output and cache tree, see [Project Structure → Persistent data layout](13-project-structure.md#persistent-data-layout).
 
 ## Bootstrap accounts
 

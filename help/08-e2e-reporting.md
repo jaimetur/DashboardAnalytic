@@ -29,7 +29,7 @@ Operator Comparison initially selects the two newest CDRs of each type, or the o
 
 Choose an NSA/SA Report Template from the active workspace. Each template controls slides, layouts, CDR sources, chart types, KPIs, filters, aggregations and legends. Administrators manage and edit templates in Admin; new workspaces have none until a template is created or imported.
 
-For the complete schema, supported chart types, examples, Filter Builder language, aggregations, legends, multi-chart slides and colour rules, see [Administration → Report Template reference](10-administration.md#report-template-reference).
+For the complete schema, supported chart types, examples, Filter Builder language, aggregations, legends, multi-chart slides and colour rules, see [Administration → Report Template reference](11-administration.md#report-template-reference).
 
 ## Generate PowerPoint Report
 
@@ -75,6 +75,6 @@ Reports, Chart Sets, Dashboard exports and interactive previews share the Dashbo
 
 - Missing CDR: verify the active workspace, dataset type and Processed status.
 - Multivendor unavailable: persist Vendor mapping for every selected CDR.
-- Empty chart: inspect the filtered dataset and the template row referenced in [Administration → Report Template reference](10-administration.md#report-template-reference).
+- Empty chart: inspect the filtered dataset and the template row referenced in [Administration → Report Template reference](11-administration.md#report-template-reference).
 - Invalid template: use the editor's `Slide: n - Chart: n` validation message.
 - Failed or interrupted job: inspect App Logs, then retry the existing job.

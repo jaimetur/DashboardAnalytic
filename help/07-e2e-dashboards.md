@@ -11,7 +11,7 @@ Each Dashboard stores its name, NR mode, Report Template, adaptive and additiona
 3. Create or import an NSA/SA Report Template in Admin.
 4. Open E2E Dashboards. Any user with workspace access can manage Dashboard definitions; Template Editor and Auto-calculated Field management require administrator access.
 
-Dashboard uses the same Report Template schema and renderer as Reporting. This guide covers how the template is selected and used by a Dashboard. For template columns, structural slides, supported chart types, recipes, template filters, aggregations, legends, layouts and colours, see [Administration → Report Template reference](10-administration.md#report-template-reference).
+Dashboard uses the same Report Template schema and renderer as Reporting. This guide covers how the template is selected and used by a Dashboard. For template columns, structural slides, supported chart types, recipes, template filters, aggregations, legends, layouts and colours, see [Administration → Report Template reference](11-administration.md#report-template-reference).
 
 ## Manage Dashboards
 
@@ -124,7 +124,7 @@ Hover or focus a chart to reveal Dataset, Expand, Refresh and Zoom controls. The
 - Dashboard Filters, Auto-calculated Fields and Edit Template remain available in expanded view when permitted.
 - Edit Template focuses the exact template row for the chart. Saving refreshes the Dashboard; closing unchanged retains the current preparation.
 
-For the complete definition of a chart row, see [Administration → Report Template reference](10-administration.md#report-template-reference).
+For the complete definition of a chart row, see [Administration → Report Template reference](11-administration.md#report-template-reference).
 
 ### Filtered Chart Dataset
 
@@ -146,7 +146,7 @@ Generate PPT appears immediately before View Dashboard in the dataset/filter act
 
 The job renders the template into `Template_CDR_analysis.pptx`, preserving slides, layouts, chart placeholder proportions, titles, legends and saved comments. It writes the PPT plus chart PNG, tooltip and Canvas-model assets under `output/dashboards`. Folder and PPT names begin with `yyyymmdd_HHMMSS - Dashboard Name`.
 
-Template authoring details for the exported presentation are centralized in [Administration → Report Template reference](10-administration.md#report-template-reference).
+Template authoring details for the exported presentation are centralized in [Administration → Report Template reference](11-administration.md#report-template-reference).
 
 ## PowerPoint Generation Jobs
 

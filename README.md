@@ -48,7 +48,7 @@ Datasets Analysis analyses one ready Data, Voice or Speech CDR.
 
 ### E2E Dashboards
 
-Create, save, duplicate, import and export workspace Dashboards from an NSA/SA Report Template. The editor separates **Select Dataset Universe** from **Select Dataset Filters**: Scope, CDRs and dates can be applied temporarily or saved as the Dashboard universe, while default, aliased and custom Auto-calculated Field filters can be applied, saved, reloaded or discarded independently. Switching scope automatically selects the newest CDR per type for Multivendor or the two newest per type for Operator Comparison. View Dashboard opens immediately and shows centred preparation progress until its navigable 16:9 slides and live Canvas charts are ready. Generate PPT uses the same prepared definition and waits for pending filter decisions. Dashboard queries read the workspace's combined CDR tables directly; reusable selection manifests and chart models avoid recalculating unchanged work without any automatic background warm-up. See [E2E Dashboards Help](help/07-e2e-dashboards.md) for the operational workflow and [Administration → Report Template reference](help/10-administration.md#report-template-reference) for template authoring, supported chart types and examples.
+Create, save, duplicate, import and export workspace Dashboards from an NSA/SA Report Template. The editor separates **Select Dataset Universe** from **Select Dataset Filters**: Scope, CDRs and dates can be applied temporarily or saved as the Dashboard universe, while default, aliased and custom Auto-calculated Field filters can be applied, saved, reloaded or discarded independently. Switching scope automatically selects the newest CDR per type for Multivendor or the two newest per type for Operator Comparison. View Dashboard opens immediately and shows centred preparation progress until its navigable 16:9 slides and live Canvas charts are ready. Generate PPT uses the same prepared definition and waits for pending filter decisions. Dashboard queries read the workspace's combined CDR tables directly; reusable selection manifests and chart models avoid recalculating unchanged work without any automatic background warm-up. See [E2E Dashboards Help](help/07-e2e-dashboards.md) for the operational workflow and [Administration → Report Template reference](help/11-administration.md#report-template-reference) for template authoring, supported chart types and examples.
 
 ### E2E Reporting
 
@@ -316,7 +316,8 @@ DashboardAnalytic/
 - [E2E Dashboards](help/07-e2e-dashboards.md)
 - [E2E Reporting](help/08-e2e-reporting.md)
 - [Chart Builder](help/09-chart-builder.md)
-- [Administration](help/10-administration.md)
-- [Docker deployment](help/11-docker-deployment.md)
-- [Project structure](help/12-project-structure.md)
-- [Roadmap](help/13-roadmap.md)
+- [Query Builder](help/10-query-builder.md)
+- [Administration](help/11-administration.md)
+- [Docker deployment](help/12-docker-deployment.md)
+- [Project structure](help/13-project-structure.md)
+- [Roadmap](help/14-roadmap.md)

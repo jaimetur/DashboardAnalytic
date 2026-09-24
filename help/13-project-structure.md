@@ -128,7 +128,7 @@ Report Templates become CSV files only inside portable export, transfer and back
 
 - `assets/ppt-templates/Template_CDR_analysis.pptx` supplies slide masters, named layouts and placeholders.
 - `assets/default-calculated-dimensions.json` supplies initial Auto-calculated Field definitions where applicable.
-- Workspace Report Templates supply slide/chart definitions and are documented in [Administration → Report Template reference](10-administration.md#report-template-reference).
+- Workspace Report Templates supply slide/chart definitions and are documented in [Administration → Report Template reference](11-administration.md#report-template-reference).
 
 ## Documentation
 
