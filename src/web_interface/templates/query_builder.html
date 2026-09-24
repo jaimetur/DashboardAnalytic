@@ -515,7 +515,7 @@
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && activeColumnFilterMenu) closeColumnFilterMenu(); });
   const escape = (value) => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const payload = () => ({dataset_ids: [...sources.selectedOptions].map(item => Number(item.value)), query_sql: editor.value});
-  const request = async (url, extra = {}) => { const response = await fetch(url, {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body:JSON.stringify({...payload(), ...extra})}); const body = response.headers.get('content-type')?.includes('application/json') ? await response.json() : null; if (!response.ok) throw new Error(body?.detail || 'Query Builder failed.'); return {response, body}; };
+  const request = async (url, extra = {}) => { const response = await fetch(url, {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body:JSON.stringify({...payload(), ...extra})}); const body = response.headers.get('content-type')?.includes('application/json') ? await response.json() : null; if (!response.ok) throw new Error(body?.detail || `Query Builder request failed (HTTP ${response.status}).`); return {response, body}; };
   const render = (body) => {
     totalRows = Number.isInteger(body.total_rows) && body.total_rows >= 0 ? body.total_rows : body.rows.length;
     if (!body.columns.length) { results.innerHTML = '<p class="empty-state">The query returned no columns.</p>'; resultCount.textContent = '0 rows · 0 columns'; nextOffset = null; totalRows = 0; currentOffset = 0; return; }
