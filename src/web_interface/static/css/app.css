@@ -1454,6 +1454,11 @@ body[data-embedded-template-editor] .slides-templates-editor-table-wrap .form-ac
 .module-hero-workspace-config .pill { background: rgba(255,255,255,.88); border-color: rgba(255,255,255,.46); color: #263d50; }
 .workspace-config-stack .operator-mappings-panel, .workspace-config-stack .report-catalogue-panel { border-color: rgba(11, 122, 117, .22); background: linear-gradient(135deg, rgba(238, 249, 247, .94), rgba(255, 255, 255, .96)); }
 .workspace-config-stack .main-cities-panel { border-color: rgba(11, 122, 117, .22); background: linear-gradient(135deg, rgba(238, 249, 247, .94), rgba(255, 255, 255, .96)); }
+.workspace-config-stack .collapsible-panel > .collapsible-summary { background: linear-gradient(135deg, #10314a, #0b6664); color: #fff; }
+.workspace-config-stack .collapsible-summary h2 { color: #fff; }
+.workspace-config-stack .collapsible-summary .eyebrow { color: #bcebe3; }
+.workspace-config-stack .collapsible-panel[open] > .collapsible-summary { border-bottom-color: #075450; }
+.workspace-config-stack .catalogue-workspace-table thead th, .workspace-config-stack .operator-mappings-table thead th { z-index: 1; border-bottom-color: #075450; background: #0b6664; color: #fff; font-weight: 700; }
 .workspace-config-stack .main-cities-panel .main-cities-form { display: grid !important; gap: .9rem !important; }
 .workspace-config-stack .main-cities-panel .main-cities-transfer { display: grid !important; grid-template-columns: minmax(13rem, 1fr) 3.1rem minmax(13rem, 1fr) !important; gap: .75rem !important; align-items: center !important; width: 100% !important; max-width: 100% !important; min-width: 0 !important; overflow-x: auto !important; padding: .2rem .1rem .55rem !important; }
 .workspace-config-stack .main-cities-panel .main-cities-column { display: grid !important; grid-template-columns: minmax(0, 1fr) !important; gap: .45rem !important; min-width: 13rem !important; color: #173f4c !important; font-weight: 750 !important; }

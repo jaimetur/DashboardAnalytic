@@ -39,6 +39,7 @@
 - Collapsed side navigation tabs leave only a subtle edge shadow and reveal through an invisible CSS hover area, which stays responsive while background tasks run. Task cards leave that edge clear, and Help Sections lists the current document headings.
 - The `user-editor` role can access Edit Template and Auto-Calculated Fields in both Dashboard viewers, save Chart Definition changes to the Report Template, and delete individual or all generated Dashboard PPT jobs.
 - Dashboard filter selectors now expose every distinct value in selected CDRs, including values beyond the former 50 and 200 item profile limits. Existing truncated profiles are completed from source rows and stale filter-selection caches are refreshed.
+- Workspace Config panel and table headers use dark teal backgrounds with light text so they remain distinct from the light panel content.
 
 #### 📚 Documentation:
 - Product Overview now includes Query Builder and links to its detailed guide.
