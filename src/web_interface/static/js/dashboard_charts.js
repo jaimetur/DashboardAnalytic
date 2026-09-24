@@ -236,19 +236,20 @@
     context.save(); context.translate(x, y); context.scale(width / measured, 1); context.fillText(label, 0, 0); context.restore();
   }
 
-  function drawFittedAggregationHeader(context, value, centre, y, width, format = {}, level = 0) {
+  function drawFittedAggregationHeader(context, value, centre, y, width, format = {}, level = 0, maximumSize = Infinity) {
     const label = String(value ?? '');
     const available = Math.max(width - 8, 1);
-    let size = aggregationSize(format, level);
+    let size = Math.min(aggregationSize(format, level), maximumSize);
     const setFont = () => {
       if (format.configured) labelFont(context, size, format, false, false);
       else context.font = `800 ${size}px ${FONT_FAMILY}`;
     };
     setFont();
-    while (size > 11 && textWidth(context, label) > available) { size -= 1; setFont(); }
+    while (size > 9 && textWidth(context, label) > available) { size -= 1; setFont(); }
     const measured = textWidth(context, label);
-    if (measured <= available) { context.fillText(label, centre, y); return; }
+    if (measured <= available) { context.fillText(label, centre, y); return size; }
     context.save(); context.translate(centre, y); context.scale(available / measured, 1); context.fillText(label, 0, 0); context.restore();
+    return size;
   }
 
   function rotatedLabel(context, value, centreX, bottomY, colour, size, bold = true, angle = 45, format = {}) {
@@ -667,17 +668,22 @@
     const chartHeight = Math.max(180, layout.bottom - chartTop - 40), chartWidth = layout.right - chartLeft - 10;
     const xDomain = expandedDomain(payload.domain?.x), xSpan = xDomain[1] - xDomain[0];
     const leafLabelY = baseChartTop - 10, rowHeight = chartHeight / rowKeys.length, columnWidth = chartWidth / columnKeys.length;
+    const parentHeaderSizes = Array(columnKeys.length).fill(Infinity);
     for (let level = 0; level < upperLevels; level += 1) {
       const y = headerTop + level * headerBandHeight;
       hierarchySpans(columnKeys, level).forEach(([start, end, value]) => {
         const centre = chartLeft + (start + end) / 2 * columnWidth;
-        context.fillStyle = payload.legend_format?.configured && payload.legend_format.color ? payload.legend_format.color : '#566A78'; context.textAlign = 'center'; drawFittedAggregationHeader(context, value, centre, y, (end - start) * columnWidth, payload.legend_format, level);
+        const maximumSize = Math.min(...parentHeaderSizes.slice(start, end)) - 1;
+        context.fillStyle = payload.legend_format?.configured && payload.legend_format.color ? payload.legend_format.color : '#566A78'; context.textAlign = 'center';
+        const size = drawFittedAggregationHeader(context, value, centre, y, (end - start) * columnWidth, payload.legend_format, level, maximumSize);
+        parentHeaderSizes.fill(size, start, end);
         line(context, chartLeft + start * columnWidth, y + headerBandHeight - 4, chartLeft + end * columnWidth, y + headerBandHeight - 4, '#C8D2D9');
       });
     }
     columnKeys.forEach((key, index) => {
       const centre = chartLeft + (index + .5) * columnWidth, cellLeft = chartLeft + index * columnWidth;
-      context.fillStyle = payload.legend_format?.configured && payload.legend_format.color ? payload.legend_format.color : '#4E6271'; context.textAlign = 'center'; drawFittedAggregationHeader(context, key.at(-1), centre, leafLabelY, columnWidth, payload.legend_format);
+      context.fillStyle = payload.legend_format?.configured && payload.legend_format.color ? payload.legend_format.color : '#4E6271'; context.textAlign = 'center';
+      drawFittedAggregationHeader(context, key.at(-1), centre, leafLabelY, columnWidth, payload.legend_format, upperLevels, parentHeaderSizes[index] - 1);
       if (index) { let changed = columnKeys[index - 1].findIndex((value, level) => value !== key[level]); if (changed < 0) changed = key.length - 1; const lineTop = changed === 0 ? headerTop : headerTop + Math.min(changed, upperLevels) * headerBandHeight; if (changed === 0) line(context, cellLeft, lineTop, cellLeft, chartTop + chartHeight + 25, '#AEBBC4', 2); else dashedVertical(context, cellLeft, lineTop, chartTop + chartHeight + 25); } else line(context, cellLeft, headerTop, cellLeft, chartTop + chartHeight + 25, '#AEBBC4', 2);
       context.fillStyle = '#566A78'; context.textAlign = 'left'; font(context, 13, true); context.fillText(numericLabel(xDomain[0]), cellLeft + 3, chartTop + chartHeight + 7); context.textAlign = 'right'; context.fillText(numericLabel(xDomain[1]), cellLeft + columnWidth - 3, chartTop + chartHeight + 7);
     });

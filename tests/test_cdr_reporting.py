@@ -18,6 +18,7 @@ from pptx import Presentation
 from pptx.dml.color import RGBColor
 
 from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_campaign_line_widths, _cdf_plot_geometry, _cdf_terminal_x_maximum, _cdf_visible_points, _draw_adjacent_stacked_bar_label, _draw_chart_legend, _draw_configured_bar_label, _draw_inside_bar_label, _draw_top_column_group_separators, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_caption_spans, _hierarchy_group_colours, _hierarchy_spans, _horizontal_legend_columns, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_map, _render_mean_column, _render_stacked_distribution, _render_status_100, _render_table, _resolved_legend_items, _series_colours, _series_line_dashes, _status_chart_categories, assign_cdr_vendors, catalog_chart_hover_targets, catalog_chart_payload, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, load_catalog_csv, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_kpi_expression, parse_label_format, parse_label_position, parse_legend_position, parse_template_boolean, prepare_catalog_chart_preview_frame, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import _draw_fitted_aggregation_header
 
 
 CHART_MAPPING_ATTRS = {
@@ -2947,7 +2948,7 @@ def test_failure_hierarchy_keeps_complete_column_headers() -> None:
         '__catalog_failure_state': ['Failed'],
     })
 
-    with patch('src.modules.cdr_reporting._draw_fitted_aggregation_header') as draw_header:
+    with patch('src.modules.cdr_reporting._draw_fitted_aggregation_header', return_value=20) as draw_header:
         _render_failure_count_hierarchy(
             'Voice failures', frame,
             ['__catalog_row_0'], ['__catalog_column_0', '__catalog_column_1'],
@@ -2956,6 +2957,33 @@ def test_failure_hierarchy_keeps_complete_column_headers() -> None:
     assert [call.args[2] for call in draw_header.call_args_list] == [
         'Very Long Operator Name', '2026-09-24 Campaign Full Name',
     ]
+    assert [call.kwargs['level'] for call in draw_header.call_args_list] == [0, 1]
+
+
+def test_failure_hierarchy_header_fonts_decrease_at_each_column_level() -> None:
+    frame = chart_frame({
+        '__catalog_row_0': ['VoLTE'],
+        '__catalog_column_0': ['Ericsson'],
+        '__catalog_column_1': ['VF_UK'],
+        '__catalog_column_2': ['2026-Q2'],
+        '__catalog_failure_state': ['Failed'],
+    })
+    sizes = []
+
+    def record_header(*args, **kwargs):
+        size = _draw_fitted_aggregation_header(*args, **kwargs)
+        sizes.append((kwargs['level'], size))
+        return size
+
+    with patch('src.modules.cdr_reporting._draw_fitted_aggregation_header', side_effect=record_header):
+        _render_failure_count_hierarchy(
+            'Voice failures', frame,
+            ['__catalog_row_0'],
+            ['__catalog_column_0', '__catalog_column_1', '__catalog_column_2'],
+        )
+
+    assert [level for level, _size in sizes] == [0, 1, 2]
+    assert sizes[0][1] > sizes[1][1] > sizes[2][1]
 
 
 def test_failure_hierarchy_reserves_space_below_column_headers() -> None:
@@ -2966,7 +2994,7 @@ def test_failure_hierarchy_reserves_space_below_column_headers() -> None:
         '__catalog_failure_state': ['Failed'] * 21,
     })
 
-    with patch('src.modules.cdr_reporting._draw_fitted_aggregation_header') as draw_header:
+    with patch('src.modules.cdr_reporting._draw_fitted_aggregation_header', return_value=20) as draw_header:
         with patch('src.modules.cdr_reporting._draw_configured_bar_label') as draw_bar_label:
             _render_failure_count_hierarchy(
                 'Voice failures', frame,

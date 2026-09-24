@@ -3947,28 +3947,30 @@ def _fit_text(draw: ImageDraw.ImageDraw, value: str, font: ImageFont.ImageFont, 
 def _draw_fitted_aggregation_header(
     image: Image.Image, draw: ImageDraw.ImageDraw, value: str, *, centre: float,
     y: float, width: float, format_value: str, level: int, fill: str,
-) -> None:
+    maximum_size: int | float = float('inf'),
+) -> int:
     """Keep a hierarchy caption complete within its column or group."""
     caption = str(value)
-    if not caption:
-        return
     available = max(int(width - 8), 1)
     options = label_format_options(format_value)
     bold = bool(options["bold"]) if options["configured"] else True
-    size = _format_size(AGGREGATION_TITLE_FONT_SIZE, format_value, level=level)
+    size = min(_format_size(AGGREGATION_TITLE_FONT_SIZE, format_value, level=level), maximum_size)
+    if not caption:
+        return size
     font = _font(size, bold)
-    while size > 11 and _text_width(draw, caption, font) > available:
+    while size > 9 and _text_width(draw, caption, font) > available:
         size -= 1
         font = _font(size, bold)
     measured = _text_width(draw, caption, font)
     if measured <= available:
         draw.text((centre - measured / 2, y), caption, fill=fill, font=font)
-        return
+        return size
     bbox = draw.textbbox((0, 0), caption, font=font)
     label = Image.new("RGBA", (bbox[2] - bbox[0] + 4, bbox[3] - bbox[1] + 4), (0, 0, 0, 0))
     ImageDraw.Draw(label).text((2 - bbox[0], 2 - bbox[1]), caption, fill=fill, font=font)
     label = label.resize((available, label.height), Image.Resampling.LANCZOS)
     image.paste(label, (round(centre - available / 2), round(y + bbox[1] - 2)), label)
+    return size
 
 
 def _canvas(title: str) -> tuple[Image.Image, ImageDraw.ImageDraw]:
@@ -4660,14 +4662,17 @@ def _render_failure_count_hierarchy(
     row_height = chart_height / len(row_keys)
     column_width = chart_width / len(column_keys)
     colours = FAILURE_COUNT_COLOURS
+    parent_header_sizes = [float('inf')] * len(column_keys)
     for level in range(upper_levels):
         y = header_top + level * header_band_height
         for start, end, caption in _hierarchy_caption_spans(column_keys, level):
             centre = chart_left + ((start + end) / 2) * column_width
-            _draw_fitted_aggregation_header(
+            size = _draw_fitted_aggregation_header(
                 image, draw, caption, centre=centre, y=y, width=(end - start) * column_width,
                 format_value=legend_format, level=level, fill=_format_colour(legend_format, "#566A78"),
+                maximum_size=min(parent_header_sizes[start:end]) - 1,
             )
+            parent_header_sizes[start:end] = [size] * (end - start)
             draw.line((chart_left + start * column_width, y + header_band_height - 4, chart_left + end * column_width, y + header_band_height - 4), fill="#C8D2D9", width=1)
 
     for column_index, column_key in enumerate(column_keys):
@@ -4675,7 +4680,8 @@ def _render_failure_count_hierarchy(
         centre = chart_left + (column_index + 0.5) * column_width
         _draw_fitted_aggregation_header(
             image, draw, lower_caption, centre=centre, y=leaf_label_y, width=column_width,
-            format_value=legend_format, level=0, fill=_format_colour(legend_format, "#4E6271"),
+            format_value=legend_format, level=upper_levels, fill=_format_colour(legend_format, "#4E6271"),
+            maximum_size=parent_header_sizes[column_index] - 1,
         )
         cell_left = chart_left + column_index * column_width
         if column_index:
