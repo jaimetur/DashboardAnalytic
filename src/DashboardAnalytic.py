@@ -63,7 +63,7 @@ from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column,
 from src.modules.geospatial import assign_regions, validate_region_mapping
 from src.modules.repository import Repository, WORKSPACE_REGISTRY_TABLE, workspace_write_lock
 from src.modules.runtime_config import IGNORE_EVENT_TIME_FILTERING_ENV, env_flag, ignore_event_time_filtering
-from src.modules.query_builder import ANGELO_OVERLAP_QUERY, MAX_PREVIEW_ROWS, execute_query, iter_query_csv, query_column_values
+from src.modules.query_builder import MAX_PREVIEW_ROWS, execute_query, iter_query_csv, query_column_values
 from src.runtime_logs import execution_log_entries
 from src.modules.workspaces import Workspace, WorkspaceRegistry
 from src.version import __app_name__, __release_date__, __version__
@@ -5958,26 +5958,125 @@ def _restore_workspace_dashboards(workspace: Workspace, payload: bytes) -> None:
 
 
 def _query_builder_queries_payload(workspace: Workspace) -> dict[str, Any]:
-    """Build a portable Query Builder library, retaining source names for remapping."""
+    """Build a portable library with source names and stable file descriptors."""
     task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
     try:
-        dataset_names = {int(row['id']): str(row['file_name']) for row in task_repository.list_datasets()}
+        dataset_rows = task_repository.list_datasets()
+        datasets_by_id = {int(row['id']): row for row in dataset_rows}
         saved_queries = task_repository.list_query_builder_queries()
     except sqlite3.OperationalError:
         return {'format': 'dashboard-analytic-query-builder-queries', 'version': 1, 'queries': []}
     queries = []
+    descriptors_by_id: dict[int, dict[str, Any]] = {}
     for row in saved_queries:
         try:
             dataset_ids = [int(value) for value in json.loads(str(row['dataset_ids_json'] or '[]'))]
         except (TypeError, ValueError, json.JSONDecodeError):
             dataset_ids = []
+        for dataset_id in dataset_ids:
+            if dataset_id not in descriptors_by_id:
+                dataset = datasets_by_id.get(dataset_id)
+                descriptors_by_id[dataset_id] = (
+                    _query_builder_dataset_descriptor(dataset)
+                    if dataset is not None
+                    else {'id': dataset_id, 'name': f'Dataset {dataset_id}', 'kind': '', 'sha256': None}
+                )
         queries.append({
             'name': str(row['name']), 'description': str(row['description']),
             'query_sql': str(row['query_sql']), 'dataset_ids': dataset_ids,
-            'dataset_names': [dataset_names.get(dataset_id, f'Dataset {dataset_id}') for dataset_id in dataset_ids],
+            'dataset_names': [descriptors_by_id[dataset_id]['name'] for dataset_id in dataset_ids],
+            'dataset_descriptors': [descriptors_by_id[dataset_id] for dataset_id in dataset_ids],
             'created_by': str(row['created_by']),
         })
     return {'format': 'dashboard-analytic-query-builder-queries', 'version': 1, 'queries': queries}
+
+
+def _query_builder_source_sha256(stored_path: object) -> str | None:
+    """Hash a source file incrementally so portable query exports use little memory."""
+    path = Path(str(stored_path or ''))
+    try:
+        if not path.is_file():
+            return None
+        digest = hashlib.sha256()
+        with path.open('rb') as source_file:
+            for chunk in iter(lambda: source_file.read(1024 * 1024), b''):
+                digest.update(chunk)
+    except OSError:
+        return None
+    return digest.hexdigest()
+
+
+def _query_builder_dataset_descriptor(dataset: Any) -> dict[str, Any]:
+    return {
+        'id': int(dataset['id']),
+        'name': str(dataset['file_name']),
+        'kind': str(dataset['dataset_kind'] or ''),
+        'sha256': _query_builder_source_sha256(dataset['stored_path']),
+    }
+
+
+def _resolve_query_builder_dataset_ids(
+    task_repository: Repository, item: dict[str, Any], query_name: str,
+    hash_cache: dict[int, str | None] | None = None,
+) -> list[int]:
+    local_datasets = task_repository.list_datasets()
+    by_name: dict[str, list[Any]] = {}
+    by_kind: dict[str, list[Any]] = {}
+    for dataset in local_datasets:
+        by_name.setdefault(str(dataset['file_name']), []).append(dataset)
+        kind = str(dataset['dataset_kind'] or '')
+        if kind:
+            by_kind.setdefault(kind, []).append(dataset)
+    if hash_cache is None:
+        hash_cache = {}
+
+    descriptors = item.get('dataset_descriptors')
+    source_names = item.get('dataset_names')
+    if isinstance(descriptors, list):
+        references = descriptors
+        if any(not isinstance(reference, dict) for reference in references):
+            raise ValueError(f'Saved query "{query_name}" contains an invalid dataset descriptor.')
+    elif isinstance(source_names, list):
+        references = [{'name': name} for name in source_names]
+    else:
+        raise ValueError(f'Saved query "{query_name}" does not include dataset references.')
+    if not references:
+        raise ValueError(f'Saved query "{query_name}" has no dataset sources to restore.')
+
+    resolved_ids: list[int] = []
+    for reference in references:
+        source_name = reference.get('name')
+        if not isinstance(source_name, str) or not source_name:
+            raise ValueError(f'Saved query "{query_name}" contains a dataset reference without a name.')
+        source_kind = reference.get('kind')
+        exact_matches = by_name.get(source_name, [])
+        if isinstance(source_kind, str) and source_kind:
+            exact_matches = [dataset for dataset in exact_matches if str(dataset['dataset_kind'] or '') == source_kind]
+        if len(exact_matches) == 1:
+            resolved_ids.append(int(exact_matches[0]['id']))
+            continue
+        if len(exact_matches) > 1:
+            raise ValueError(f'Saved query "{query_name}" dataset "{source_name}" matches multiple local datasets by name.')
+
+        source_hash = reference.get('sha256')
+        if isinstance(source_hash, str) and source_hash and isinstance(source_kind, str) and source_kind:
+            fingerprint_matches = []
+            for dataset in by_kind.get(source_kind, []):
+                dataset_id = int(dataset['id'])
+                if dataset_id not in hash_cache:
+                    try:
+                        hash_cache[dataset_id] = _query_builder_source_sha256(dataset['stored_path'])
+                    except OSError:
+                        hash_cache[dataset_id] = None
+                if hash_cache[dataset_id] == source_hash:
+                    fingerprint_matches.append(dataset)
+            if len(fingerprint_matches) == 1:
+                resolved_ids.append(int(fingerprint_matches[0]['id']))
+                continue
+            if len(fingerprint_matches) > 1:
+                raise ValueError(f'Saved query "{query_name}" dataset "{source_name}" matches multiple local datasets by kind and file hash.')
+        raise ValueError(f'Saved query "{query_name}" dataset "{source_name}" could not be matched to a local dataset.')
+    return resolved_ids
 
 
 def _archive_workspace_query_builder_queries(
@@ -5999,17 +6098,19 @@ def _restore_workspace_query_builder_queries(workspace: Workspace, payload: byte
     if not isinstance(queries, list):
         raise ValueError(f'Query Builder queries for "{workspace.name}" are invalid.')
     task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
-    datasets_by_name = {str(row['file_name']): int(row['id']) for row in task_repository.list_datasets()}
     imported = 0
+    resolved_queries: list[tuple[dict[str, Any], str, str, list[int]]] = []
+    dataset_hash_cache: dict[int, str | None] = {}
     for item in queries:
         if not isinstance(item, dict):
             raise ValueError('The Query Builder queries package contains an invalid query.')
         name = str(item.get('name') or '').strip()
         query_sql = str(item.get('query_sql') or '').strip()
-        source_names = item.get('dataset_names')
-        if not name or not query_sql or not isinstance(source_names, list):
+        if not name or not query_sql:
             raise ValueError('The Query Builder queries package contains an invalid query.')
-        dataset_ids = [datasets_by_name[name] for name in source_names if isinstance(name, str) and name in datasets_by_name]
+        dataset_ids = _resolve_query_builder_dataset_ids(task_repository, item, name, dataset_hash_cache)
+        resolved_queries.append((item, name, query_sql, dataset_ids))
+    for item, name, query_sql, dataset_ids in resolved_queries:
         task_repository.save_query_builder_query(
             name, str(item.get('description') or ''), query_sql, dataset_ids,
             str(item.get('created_by') or 'import'),
@@ -12008,16 +12109,6 @@ def query_builder(request: Request, user: SessionUser = Depends(current_user)) -
         for row in repository.list_datasets()
         if row['status'] == 'ready' and row['dataset_kind'] in {'data', 'voice', 'speech'}
     ]
-    angelo_dataset_ids = [
-        item['id'] for item in datasets
-        if item['kind'] == 'data' and re.search(r'Q[12]', item['name'], flags=re.I) and not re.search(r'_SA\b', item['name'], flags=re.I)
-    ]
-    if angelo_dataset_ids:
-        repository.save_query_builder_query(
-            'Angelo — Q1/Q2 VF-Three FDTT overlap',
-            'Compare FDTT throughput for n78 sessions with and without a Vodafone–Three overlap on the same NR-ARFCN.',
-            ANGELO_OVERLAP_QUERY, angelo_dataset_ids, 'system',
-        )
     dataset_names_by_id = {item['id']: item['name'] for item in datasets}
     saved = []
     for row in repository.list_query_builder_queries():
@@ -12190,10 +12281,13 @@ def export_saved_query_builder_query(query_id: int, user: SessionUser = Depends(
         dataset_ids = [int(value) for value in json.loads(str(query['dataset_ids_json'] or '[]'))]
     except (TypeError, ValueError, json.JSONDecodeError):
         dataset_ids = []
-    dataset_names = {
-        int(dataset['id']): str(dataset['file_name'])
-        for dataset in repository.list_datasets()
-    }
+    datasets_by_id = {int(dataset['id']): dataset for dataset in repository.list_datasets()}
+    dataset_descriptors = [
+        _query_builder_dataset_descriptor(datasets_by_id[dataset_id])
+        if dataset_id in datasets_by_id
+        else {'id': dataset_id, 'name': f'Dataset {dataset_id}', 'kind': '', 'sha256': None}
+        for dataset_id in dataset_ids
+    ]
     payload = {
         'format': 'dashboard-analytic-query-builder-query',
         'version': 1,
@@ -12202,7 +12296,8 @@ def export_saved_query_builder_query(query_id: int, user: SessionUser = Depends(
             'description': str(query['description']),
             'query_sql': str(query['query_sql']),
             'dataset_ids': dataset_ids,
-            'dataset_names': [dataset_names.get(dataset_id, f'Dataset {dataset_id}') for dataset_id in dataset_ids],
+            'dataset_names': [descriptor['name'] for descriptor in dataset_descriptors],
+            'dataset_descriptors': dataset_descriptors,
             'created_by': str(query['created_by']),
         },
     }

@@ -14,6 +14,29 @@ def _database_with_query_rows(database_path: Path) -> None:
         )
 
 
+def test_query_builder_reads_committed_wal_rows(tmp_path: Path) -> None:
+    from src.modules.query_builder import execute_query, iter_query_csv, query_column_values
+
+    database_path = tmp_path / 'query-builder-wal.sqlite'
+    writer = sqlite3.connect(database_path)
+    try:
+        writer.execute('PRAGMA journal_mode=WAL')
+        writer.execute('PRAGMA wal_autocheckpoint=0')
+        writer.execute('CREATE TABLE dataset_rows_7 (Value TEXT)')
+        writer.execute("INSERT INTO dataset_rows_7 VALUES ('visible')")
+        writer.commit()
+        datasets = [{'id': 7, 'name': 'source.csv', 'kind': 'data'}]
+        query_sql = 'SELECT Value FROM selected_data'
+
+        assert execute_query(database_path, datasets, query_sql, include_total=True) == (
+            ['Value'], [('visible',)], False, ['selected_data'], 1,
+        )
+        assert ''.join(iter_query_csv(database_path, datasets, query_sql)) == 'Value\r\nvisible\r\n'
+        assert query_column_values(database_path, datasets, query_sql, 0) == (['visible'], False)
+    finally:
+        writer.close()
+
+
 def test_query_builder_column_filters_apply_before_pagination_and_csv(tmp_path: Path) -> None:
     from src.modules.query_builder import execute_query, iter_query_csv
 

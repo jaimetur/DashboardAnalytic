@@ -57,6 +57,97 @@ def test_query_builder_assistant_uses_ready_source_columns(client, monkeypatch) 
     ]
 
 
+def test_query_builder_dataset_restore_matches_exact_name_then_unique_kind_and_hash(tmp_path: Path, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    source_path = tmp_path / 'source.csv'
+    source_path.write_bytes(b'Operator,Value\nVodafone,1\n')
+    renamed_path = tmp_path / 'renamed.csv'
+    renamed_path.write_bytes(source_path.read_bytes())
+    other_path = tmp_path / 'other.csv'
+    other_path.write_bytes(b'Operator,Value\nThree,2\n')
+
+    source_descriptor = {
+        'name': 'source.csv', 'kind': 'data',
+        'sha256': app_module._query_builder_source_sha256(source_path),
+    }
+
+    class DatasetRepository:
+        def __init__(self, datasets):
+            self.datasets = datasets
+
+        def list_datasets(self):
+            return self.datasets
+
+    renamed_repo = DatasetRepository([
+        {'id': 41, 'file_name': 'renamed.csv', 'stored_path': str(renamed_path), 'dataset_kind': 'data'},
+    ])
+    assert app_module._resolve_query_builder_dataset_ids(
+        renamed_repo, {'dataset_descriptors': [source_descriptor]}, 'Portable query',
+    ) == [41]
+
+    exact_repo = DatasetRepository([
+        {'id': 42, 'file_name': 'source.csv', 'stored_path': str(other_path), 'dataset_kind': 'voice'},
+        {'id': 43, 'file_name': 'source.csv', 'stored_path': str(other_path), 'dataset_kind': 'data'},
+    ])
+    original_hash = app_module._query_builder_source_sha256
+    monkeypatch.setattr(app_module, '_query_builder_source_sha256', lambda _path: pytest.fail('Exact name and kind match should not hash files.'))
+    assert app_module._resolve_query_builder_dataset_ids(
+        exact_repo, {'dataset_descriptors': [source_descriptor]}, 'Portable query',
+    ) == [43]  # Exact name and kind take precedence without hashing.
+    monkeypatch.setattr(app_module, '_query_builder_source_sha256', original_hash)
+
+    ambiguous_repo = DatasetRepository([
+        {'id': 44, 'file_name': 'renamed-a.csv', 'stored_path': str(renamed_path), 'dataset_kind': 'data'},
+        {'id': 45, 'file_name': 'renamed-b.csv', 'stored_path': str(renamed_path), 'dataset_kind': 'data'},
+    ])
+    with pytest.raises(ValueError, match='matches multiple local datasets by kind and file hash'):
+        app_module._resolve_query_builder_dataset_ids(
+            ambiguous_repo, {'dataset_descriptors': [source_descriptor]}, 'Portable query',
+        )
+
+    with pytest.raises(ValueError, match='could not be matched to a local dataset'):
+        app_module._resolve_query_builder_dataset_ids(
+            DatasetRepository([]), {'dataset_descriptors': [source_descriptor]}, 'Portable query',
+        )
+
+
+def test_query_builder_restore_rejects_unresolved_sources_before_saving_any_queries(monkeypatch, tmp_path: Path) -> None:
+    import src.DashboardAnalytic as app_module
+
+    source_path = tmp_path / 'present.csv'
+    source_path.write_bytes(b'value\n1\n')
+    saved_queries = []
+
+    class DatasetRepository:
+        def __init__(self, *_args):
+            pass
+
+        def list_datasets(self):
+            return [{'id': 9, 'file_name': 'present.csv', 'stored_path': str(source_path), 'dataset_kind': 'data'}]
+
+        def save_query_builder_query(self, *args):
+            saved_queries.append(args)
+
+    class DestinationWorkspace:
+        name = 'Destination'
+        database_path = tmp_path / 'destination.db'
+
+    monkeypatch.setattr(app_module, 'Repository', DatasetRepository)
+    payload = json.dumps({'queries': [
+        {
+            'name': 'Resolvable', 'query_sql': 'SELECT 1', 'dataset_names': ['present.csv'],
+        },
+        {
+            'name': 'Missing', 'query_sql': 'SELECT 1', 'dataset_names': ['missing.csv'],
+        },
+    ]}).encode('utf-8')
+
+    with pytest.raises(ValueError, match='dataset "missing.csv" could not be matched'):
+        app_module._restore_workspace_query_builder_queries(DestinationWorkspace(), payload)
+    assert saved_queries == []
+
+
 def test_query_builder_preview_updates_completed_filter_while_another_is_incomplete() -> None:
     node_binary = shutil.which('node')
     if node_binary is None:

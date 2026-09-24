@@ -168,9 +168,8 @@ def execute_query(
         raise ValueError('Select at least one ready CDR source.')
     if offset < 0:
         raise ValueError('Query offset must be non-negative.')
-    # The workspace database is normally in WAL mode. Immutable read access
-    # avoids creating lock sidecars while an interactive query is running.
-    connection = sqlite3.connect(f'file:{database_path.resolve()}?mode=ro&immutable=1', uri=True, timeout=30.0)
+    # A read-only connection must observe committed WAL frames from CDR processing.
+    connection = sqlite3.connect(f'file:{database_path.resolve()}?mode=ro', uri=True, timeout=30.0)
     try:
         if cancel_requested:
             connection.set_progress_handler(lambda: 1 if cancel_requested() else 0, 1_000)
@@ -188,8 +187,11 @@ def execute_query(
         truncated = len(rows) > row_limit
         page = (columns, [tuple(row) for row in rows[:row_limit]], truncated, views)
         if include_total:
-            count_query = f'SELECT COUNT(*) FROM ({result_query})' if filters else f'SELECT COUNT(*) FROM ({query})'
-            total_rows = int(connection.execute(count_query, filter_parameters).fetchone()[0])
+            if not truncated and (rows or offset == 0):
+                total_rows = offset + len(rows)
+            else:
+                count_query = f'SELECT COUNT(*) FROM ({result_query})' if filters else f'SELECT COUNT(*) FROM ({query})'
+                total_rows = int(connection.execute(count_query, filter_parameters).fetchone()[0])
             return (*page, total_rows)
         return page
     finally:
@@ -205,7 +207,7 @@ def iter_query_csv(
     if not datasets:
         raise ValueError('Select at least one ready CDR source.')
     connection = sqlite3.connect(
-        f'file:{database_path.resolve()}?mode=ro&immutable=1', uri=True,
+        f'file:{database_path.resolve()}?mode=ro', uri=True,
         timeout=30.0, check_same_thread=False,
     )
     try:
@@ -253,7 +255,7 @@ def query_column_values(
         raise ValueError('Filter value search must be text.')
     if len(search) > 200:
         raise ValueError('Filter value search is too long.')
-    connection = sqlite3.connect(f'file:{database_path.resolve()}?mode=ro&immutable=1', uri=True, timeout=30.0)
+    connection = sqlite3.connect(f'file:{database_path.resolve()}?mode=ro', uri=True, timeout=30.0)
     try:
         _selected_views(connection, datasets)
         connection.create_function('casefold', 1, lambda value: str(value).casefold() if value is not None else None)
@@ -278,47 +280,3 @@ def query_column_values(
         return [row[0] for row in rows[:MAX_FILTER_OPTIONS]], len(rows) > MAX_FILTER_OPTIONS
     finally:
         connection.close()
-
-
-ANGELO_OVERLAP_QUERY = """WITH fdtt AS MATERIALIZED (
-  SELECT
-    CASE WHEN source_dataset_name LIKE '%Q1%' THEN 'Q1'
-         WHEN source_dataset_name LIKE '%Q2%' THEN 'Q2' ELSE source_dataset_name END AS quarter,
-    source_dataset_id, source_dataset_name, source_row_id,
-    Operator, Test_Name, Test_Start_Time, Test_End_Time,
-    Mean_Data_Rate, NR_DL_PCell_ARFCN, NR_DL_PCell_Band, Cell_ID
-  FROM selected_data
-  WHERE Test_Name IN ('FDTT http DL MT', 'FDTT UDP UL ST')
-    AND Test_Result = 'Completed'
-    AND (NR_DL_PCell_Band LIKE '%78%' OR CAST(NR_B78_Total_Time AS REAL) > 0)
-    AND NR_DL_PCell_ARFCN IS NOT NULL
-    AND (lower(Operator) LIKE 'vodafone%' OR lower(Operator) IN ('3', 'three uk', 'three'))
-), overlapping_sessions AS MATERIALIZED (
-  SELECT DISTINCT f.source_dataset_id, f.source_row_id
-  FROM fdtt f
-  JOIN fdtt o
-    ON o.quarter = f.quarter
-   AND o.NR_DL_PCell_ARFCN = f.NR_DL_PCell_ARFCN
-   AND o.Test_Start_Time < f.Test_End_Time
-   AND o.Test_End_Time > f.Test_Start_Time
-   AND (
-     (lower(f.Operator) LIKE 'vodafone%' AND lower(o.Operator) IN ('3', 'three uk', 'three'))
-     OR (lower(f.Operator) IN ('3', 'three uk', 'three') AND lower(o.Operator) LIKE 'vodafone%')
-   )
-), classified AS (
-  SELECT f.*,
-    CASE WHEN overlapping_sessions.source_row_id IS NOT NULL THEN 'Overlapping VF-Three'
-         ELSE 'No VF-Three overlap' END AS overlap_status
-  FROM fdtt f
-  LEFT JOIN overlapping_sessions
-    ON overlapping_sessions.source_dataset_id = f.source_dataset_id
-   AND overlapping_sessions.source_row_id = f.source_row_id
-)
-SELECT quarter, Operator AS operator, Test_Name AS test_name,
-       SUM(CASE WHEN overlap_status = 'Overlapping VF-Three' THEN 1 ELSE 0 END) AS overlap_sessions,
-       ROUND(AVG(CASE WHEN overlap_status = 'Overlapping VF-Three' THEN CAST(Mean_Data_Rate AS REAL) END), 2) AS overlap_avg_Mean_Data_Rate,
-       SUM(CASE WHEN overlap_status = 'No VF-Three overlap' THEN 1 ELSE 0 END) AS non_overlap_sessions,
-       ROUND(AVG(CASE WHEN overlap_status = 'No VF-Three overlap' THEN CAST(Mean_Data_Rate AS REAL) END), 2) AS non_overlap_avg_Mean_Data_Rate
-FROM classified
-GROUP BY quarter, Operator, Test_Name
-ORDER BY quarter, Operator, Test_Name"""

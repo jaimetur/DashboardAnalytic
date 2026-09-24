@@ -31,7 +31,8 @@ Write SQL follows the same 50-row pages, total result count, navigation above an
 
 ## Saved queries
 
-- Give the query a name and optional description to save it in the active workspace.
+- Give the query a name and optional description to save it in the active workspace database. Query Builder loads the saved library from that database and does not automatically recreate removed or built-in examples.
 - Loading a saved query restores its SQL and source selections. Generated SQL that matches the Assisted controls also restores those controls; custom or unsupported SQL remains in **Write SQL**.
 - Saved queries retain SQL and source references, so queries saved before Assisted mode remain available in the same editor.
-- Use the library's JSON export or the workspace backup/export options to transfer saved queries.
+- Export an individual saved query as JSON for inspection or archiving. Use a Query Builder Queries package or workspace backup/export ZIP to import saved queries into another workspace.
+- Workspace query packages match source datasets by file name, or by source file content and CDR type when names differ. A transfer reports unmatched or ambiguous sources instead of saving a query with missing selections. SQL conditions that inspect `source_dataset_name` still use the destination's file name, so review them after renaming a dataset.

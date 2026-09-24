@@ -9,7 +9,7 @@
 
 #### 🌟 New Features:
 - Added workspace-scoped Geospatial Region Mappings. GeoJSON and zipped shapefiles can be selected during CDR import (the newest mapping is preselected), populate blank `Region` values from Data, Voice or Speech coordinates, and can be assigned or cleared per CDR or in bulk from the Dataset queue.
-- Added a workspace-scoped **Query Builder** module for safe read-only analysis over one or more selected individual Data, Voice and Speech CDRs. It exposes temporary `selected_data`, `selected_voice` and `selected_speech` views with original CDR fields and source identifiers, supports saved reusable queries and CSV export, and includes Angelo's Q1/Q2 FDTT throughput comparison for Vodafone–Three sessions with and without overlapping n78/ARFCN intervals.
+- Added a workspace-scoped **Query Builder** module for safe read-only analysis over one or more selected individual Data, Voice and Speech CDRs. It exposes temporary `selected_data`, `selected_voice` and `selected_speech` views with original CDR fields and source identifiers, supports saved reusable queries and CSV export.
 
 #### 🚀 Enhancements:
 
@@ -30,6 +30,7 @@
 - Queued datasets can be stopped individually, released immediately for retry, and show an empty 0% progress track. Stop markers belong to the task's Workspace so workers in inactive Workspaces also receive them; late progress cannot overwrite a completed result, and a previously inconsistent completed profile becomes retryable while the remaining queue waits.
 - Automatic materialization now exposes progress, elapsed time, Stop, and App Event lifecycle entries, while opening the Workspace page no longer starts reconciliation. Dataset actions retain their live controls across polling, queued cards describe the current blocking task rather than always citing mappings, and active datasets publish their actual processing step in the card and Workspace table.
 - Database restores report completed archive components and files rather than a fixed percentage, and import and restore jobs record lifecycle App Events. The periodic backup scheduler stops with the server, and legacy unbracketed calculated-field rules remain readable during background reconciliation.
+- Query Builder no longer recreates or overwrites the hardcoded Angelo query when its page opens; its library comes from the active workspace database. Query imports match renamed sources by CDR type and file content, and report missing or ambiguous sources. Read-only execution, filter lookups and CSV exports now see committed SQLite WAL rows. Failed runs display their error in the results panel, and complete result pages avoid repeating the query solely to count rows.
 
 #### 📚 Documentation:
 

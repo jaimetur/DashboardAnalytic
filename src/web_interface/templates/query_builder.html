@@ -539,7 +539,10 @@
       if (querySignature() === executedSignature && activeExecutionId === executionId) { render(body); hasCurrentResults = true; }
       else if (activeExecutionId === executionId) status.textContent = 'The query or sources changed while it was running. Run the query again to refresh the results.';
     } catch (error) {
-      if (querySignature() === executedSignature && activeExecutionId === executionId) { status.textContent = error.message; if (error.message === 'Query cancelled.') results.innerHTML = '<p class="empty-state">The query was cancelled before results were available.</p>'; }
+      if (querySignature() === executedSignature && activeExecutionId === executionId) {
+        status.textContent = error.message;
+        results.innerHTML = `<p class="empty-state">${escape(error.message === 'Query cancelled.' ? 'The query was cancelled before results were available.' : `Query failed: ${error.message}`)}</p>`;
+      }
     } finally {
       if (activeExecutionId === executionId) { activeExecutionId = ''; runningOverlay.hidden = true; syncActionAvailability(); }
     }
