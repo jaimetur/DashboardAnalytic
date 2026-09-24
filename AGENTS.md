@@ -1,8 +1,42 @@
-# DashboardAnalytic instructions
+# DashboardAnalytic Instructions
 
-- Cuando edites el changelog, asegurate de editar siempre en la sección de la version actual de la herramienta.
-- Si una release contiene `Breaking Changes`, esta debe ser siempre la primera sección tras la fecha de la release.
-- También quiero que añadas las nuevas entradas siempre como ultimo bullet de la sección que le corresponda (new feature, enhancements, buhs, documentation etc…). 
-- Tambien quiero que intentes compactar el changelog no añadiendo una y otra vez items sobre la misma funcionalidad cada vez que se pida un pequeño cambio o arreglo de un cambio previo que no está funcionando correctamente. en estos casos prefiero que rehagas el bullet anterior que hablaba sobre el mismo temas.
-- Quiero que me respondas siempre en español mientras yo no te pida lo contrario en el chat.
-- Quiero que el código esté siempre en inglés (comentarios, variables, mensajes de dialógos, etc...).
+## Language
+
+- Always respond to me in Spanish unless I explicitly request another language in the chat.
+- All source code must be written in English, including:
+  - variable and function names;
+  - class and module names;
+  - comments and docstrings;
+  - UI labels and dialog messages;
+  - log messages;
+  - warnings and error messages;
+  - configuration keys and other developer-facing text.
+
+## Changelog
+
+- When editing the changelog, always update the section for the current version of the tool.
+- If a release contains `Breaking Changes`, that section must always be the first section immediately after the release date.
+- Add new changelog entries as the last bullet of the appropriate section, such as `New Features`, `Enhancements`, `Bug Fixes`, or `Documentation`.
+- Keep the changelog concise and describe the final state of the implementation rather than the sequence of intermediate changes.
+- Within the same current/unreleased version, do not create multiple changelog bullets for incremental changes, fixes, or refinements to the same functionality.
+- If an existing changelog bullet already describes the same functionality, update or rewrite that bullet so it reflects the final behavior.
+- Do not add changelog entries for internal implementation changes that have no relevant user-facing or developer-facing impact.
+
+## Documentation
+
+- Whenever implementing or modifying a feature, review all documentation related to that feature.
+- Update any documentation that is no longer accurate after the change.
+- Documentation must describe the final supported behavior, not intermediate implementation attempts or temporary states.
+
+## Import, Export, Transfers, Backup and Restore
+
+- Preserve compatibility with existing supported formats unless a breaking change is explicitly requested.
+- When modifying the behavior, consider both sides of the workflow and verify round-trip compatibility when applicable.
+- Do not silently change column names, field meanings, identifiers, data types, file structure, or exported semantics.
+- Whenever a new feature introduces persistent or user-configurable data that is reasonably transferable or exportable — such as templates, queries, vendor/operator mappings, or similar entities — integrate that data into the relevant import/export and transfer workflows, as well as backup and restore.
+- When extending an existing exportable data model, verify whether the corresponding importers, exporters, transfer mechanisms, backup, and restore logic also need to be updated.
+- New exportable data should not remain available only inside the local application state unless there is a deliberate and documented reason to exclude it from import/export, transfers, backup, or restore.
+
+## Database Management
+
+- When any new table is created, it has to be visible in the Database Management selector and the tittle should have the same format than the others (Uppercase the First Letter of each Word).
