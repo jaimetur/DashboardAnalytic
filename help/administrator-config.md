@@ -41,6 +41,8 @@ Only a super-admin can change workspace access. Leave a password field empty whe
 
 Admins can export/transfer the active workspace's Dashboards, Report Templates, Operator/Vendor Mappings & Colors and Auto-calculated Fields, plus complete workspaces they can access. Super-admins can also export Application Config and a Full Environment. Dashboard, template, mapping and field packages preselect a destination workspace with the same name as their source, where available, and allow one or more accessible destinations to be selected.
 
+Importing or transferring Report Templates synchronizes the destination library with the package. Templates absent from the package are removed unless a saved local Dashboard uses them. A template used by a local Dashboard keeps its local definition when the package contains a matching name; names are matched without case differences, so the import does not create a second copy. When the same package also includes Dashboards, its Report Templates replace the destination library because the Dashboard definitions are replaced too. Selective backup restore uses the same rule.
+
 A Full Environment always contains Application Config and the complete database/input content, Dashboard definitions, Report Templates, Operator/Vendor Mappings & Colors and Auto-calculated Fields for every selected workspace. Selecting Full Environment only chooses the package type; the workspace picker opens when **Export ZIP** or **Transfer to other server** is pressed. **Include generated Reports, Chart Sets and Dashboard PPT jobs** controls whether their `output/` trees are included. At least one workspace is required.
 
 Exports run as disk-backed jobs and show estimated progress. The ZIP download starts when package creation finishes.

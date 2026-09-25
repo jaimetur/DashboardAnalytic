@@ -860,7 +860,10 @@ def install_dashboard_routes(core):
         comments = definition.slide_comments.get(key, definition.slide_comments.get(legacy_key, []))
         return key, list(comments or [])
 
-    def reconcile_template_slide_comments(technology: str, template_name: str, old_entries, new_entries) -> int:
+    def reconcile_template_slide_comments(
+        technology: str, template_name: str, old_entries, new_entries,
+        task_repository=None,
+    ) -> int:
         """Move comments from legacy/numeric keys to matching stable slide keys."""
         old_slides: dict[str, list] = defaultdict(list)
         new_slides: dict[str, list] = defaultdict(list)
@@ -871,10 +874,16 @@ def install_dashboard_routes(core):
         available_keys = {dashboard_slide_comment_key(entries) for entries in new_slides.values()}
         if not old_slides:
             return 0
+        if {
+            slide: dashboard_slide_comment_key(entries) for slide, entries in old_slides.items()
+        } == {
+            slide: dashboard_slide_comment_key(entries) for slide, entries in new_slides.items()
+        }:
+            return 0
         changed = 0
         with lock:
-            task_repository = bound_repository()
-            dashboards = read_dashboards(task_repository)
+            source_repository = task_repository or bound_repository()
+            dashboards = read_dashboards(source_repository)
             for raw_definition in dashboards.values():
                 if (
                     str(raw_definition.get('template_technology') or raw_definition.get('technology') or 'nsa').casefold() != technology
@@ -896,7 +905,7 @@ def install_dashboard_routes(core):
                     raw_definition['slide_comments'] = migrated
                     changed += 1
             if changed:
-                task_repository.set_workspace_state(STATE_KEY, json.dumps(dashboards))
+                source_repository.set_workspace_state(STATE_KEY, json.dumps(dashboards))
         return changed
 
     def normalize_dashboard_filters(definition, *, reset_defaults=False):

@@ -92,6 +92,100 @@ def test_template_import_without_matching_workspace_requires_selection(client, t
         app_module.import_slides_templates_archive(staging, manifest={'source_workspace': {'name': 'Absent'}})
 
 
+def test_template_package_replaces_unreferenced_templates_without_duplicates(client, tmp_path):
+    workspace = app_module.workspace_registry.create('Template destination')
+    repo = Repository(workspace.database_path, app_module.repository.global_db_path)
+    repo.initialize()
+    repo.add_report_template('nsa', 'Old', b'old')
+    repo.add_report_template('nsa', 'Same', b'previous')
+    repo.add_report_template('nsa', 'Case Name', b'previous case')
+    repo.add_report_template('nsa', 'Used', b'keep this', is_default=True)
+    repo.set_workspace_state(app_module.DASHBOARD_STATE_KEY, json.dumps({
+        'dashboard-1': {'template_technology': 'nsa', 'template': 'Used'},
+    }))
+    staging = tmp_path / 'templates'
+    library = staging / 'report-templates/library/nsa'
+    library.mkdir(parents=True)
+    for name, content in (
+        ('Same', b'updated'), ('case name', b'updated case'),
+        ('used', b'imported but protected'), ('New', b'new'),
+    ):
+        (library / f'{name}.csv').write_bytes(content)
+
+    for _ in range(2):
+        assert app_module.import_slides_templates_archive(staging, [workspace.id]) == 1
+    rows = {str(row['name']): row for row in repo.list_report_templates('nsa')}
+    assert set(rows) == {'Same', 'case name', 'Used', 'New'}
+    assert bytes(rows['Same']['content']) == b'updated'
+    assert bytes(rows['case name']['content']) == b'updated case'
+    assert bytes(rows['Used']['content']) == b'keep this'
+    assert rows['Used']['is_default'] == 1
+
+
+def test_template_package_with_dashboards_replaces_referenced_templates(client, tmp_path):
+    workspace = app_module.workspace_registry.create('Bundle destination')
+    repo = Repository(workspace.database_path, app_module.repository.global_db_path)
+    repo.initialize()
+    repo.add_report_template('nsa', 'Used', b'old', is_default=True)
+    repo.set_workspace_state(app_module.DASHBOARD_STATE_KEY, json.dumps({
+        'dashboard-1': {'template_technology': 'nsa', 'template': 'Used'},
+    }))
+    staging = tmp_path / 'templates'
+    library = staging / 'report-templates/library/nsa'
+    library.mkdir(parents=True)
+    (library / 'Used.csv').write_bytes(b'new')
+
+    app_module.import_slides_templates_archive(staging, [workspace.id], includes_dashboards=True)
+    rows = repo.list_report_templates('nsa')
+    assert len(rows) == 1
+    assert bytes(rows[0]['content']) == b'new'
+
+
+def test_template_and_dashboard_bundle_replaces_referenced_template(client, tmp_path):
+    source = app_module.active_workspace
+    source_repo = Repository(source.database_path, app_module.repository.global_db_path)
+    source_repo.add_report_template('nsa', 'Bundle Used', b'imported')
+    destination = app_module.workspace_registry.create('Bundle destination')
+    destination_repo = Repository(destination.database_path, app_module.repository.global_db_path)
+    destination_repo.initialize()
+    destination_repo.add_report_template('nsa', 'Bundle Used', b'local')
+    destination_repo.set_workspace_state(app_module.DASHBOARD_STATE_KEY, json.dumps({
+        'local-dashboard': {'template_technology': 'nsa', 'template': 'Bundle Used'},
+    }))
+    package_path = tmp_path / 'bundle.zip'
+    app_module.build_export_archive_file(['slides-templates', 'dashboards'], package_path)
+
+    app_module._apply_import_archive(
+        package_path, app_module.read_import_manifest(package_path),
+        destination_workspace_ids=[destination.id],
+    )
+    rows = [row for row in destination_repo.list_report_templates('nsa') if str(row['name']) == 'Bundle Used']
+    assert len(rows) == 1
+    assert bytes(rows[0]['content']) == b'imported'
+    assert destination_repo.get_workspace_state(app_module.DASHBOARD_STATE_KEY) == '{}'
+
+
+def test_selective_template_restore_keeps_only_dashboard_references(client, tmp_path):
+    repo = app_module.repository
+    repo.add_report_template('nsa', 'Backup Template', b'archived')
+    archive_path = app_module.create_recurring_database_backup({
+        'components': ['report_templates'], 'backup_path': str(tmp_path / 'backups'),
+        'max_backups': 30, 'workspace_ids': [app_module.active_workspace.id],
+    })
+    repo.set_report_template_content('nsa', 'Backup Template', b'local edit')
+    repo.add_report_template('nsa', 'Old', b'remove')
+    repo.add_report_template('nsa', 'Used', b'preserve')
+    repo.set_workspace_state(app_module.DASHBOARD_STATE_KEY, json.dumps({
+        'local-dashboard': {'template_technology': 'nsa', 'template': 'Used'},
+    }))
+
+    app_module.restore_database_backup(archive_path, ['report_templates'])
+    rows = {str(row['name']): row for row in repo.list_report_templates('nsa')}
+    assert 'Old' not in rows
+    assert bytes(rows['Backup Template']['content']) == b'archived'
+    assert bytes(rows['Used']['content']) == b'preserve'
+
+
 def test_template_export_pins_source_when_active_workspace_changes(client, tmp_path):
     source = app_module.active_workspace
     other = app_module.workspace_registry.create('Other')

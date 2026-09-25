@@ -1070,6 +1070,8 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
     entries: list[CatalogEntry] = []
     chart_positions: defaultdict[int, int] = defaultdict(int)
     for line_number, row in enumerate(reader, start=2):
+        if None in row:
+            raise ValueError(f"Catalog row {line_number} has more values than the template header.")
         row = {
             CATALOG_HEADER_ALIASES.get(_catalogue_header_key(key), key): value
             for key, value in row.items()

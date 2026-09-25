@@ -102,6 +102,7 @@ APP_SHUTTING_DOWN = Event()
 REPORT_CHART_JOB_LOCKS: dict[str, Lock] = {}
 REPORT_CHART_JOB_LOCKS_LOCK = Lock()
 TEMPLATE_SAVE_LOCK = Lock()
+TEMPLATE_SAVE_DISPATCH_LOCK = Lock()
 TEMPLATE_SAVE_WAIT_SECONDS = 3.0
 WORKSPACE_ACTIVATION_LOCK = Lock()
 INITIALIZED_WORKSPACE_DATABASES: set[tuple[str, int | None]] = set()
@@ -292,7 +293,7 @@ LEGACY_VENDOR_MAPPING_FAILURE_MARKERS = (
     'database is locked',
 )
 DATASET_NORMALIZATION_VERSION = 13
-COMBINED_REPORTING_TEMPLATE_COLUMNS_VERSION = 2
+COMBINED_REPORTING_TEMPLATE_COLUMNS_VERSION = 3
 
 
 def format_preview_gcid(value: object) -> object:
@@ -1240,8 +1241,8 @@ def _incremental_auto_field_table_update(
     return True
 
 
-def workspace_template_kpi_columns(task_repository: Repository, kind: str) -> list[str]:
-    """Return every physical KPI field referenced by saved workspace templates."""
+def workspace_template_fields(task_repository: Repository, kind: str) -> list[str]:
+    """Return physical fields used by saved workspace template charts."""
     requested: list[str] = []
     for technology in TEMPLATE_NAMES:
         for template in task_repository.list_report_templates(technology):
@@ -1258,6 +1259,15 @@ def workspace_template_kpi_columns(task_repository: Repository, kind: str) -> li
                 if entry.source_kind != kind:
                     continue
                 requested.extend(catalog_kpi_fields(entry.kpi))
+                try:
+                    requested.extend(_legend_dimensions(entry.legend))
+                    requested.extend(parse_catalog_grouping(entry.grouping_rows).dimensions)
+                    requested.extend(parse_catalog_grouping(entry.grouping_columns).dimensions)
+                    requested.extend(condition.column for condition in parse_catalog_filters(entry.filters))
+                except (TypeError, ValueError):
+                    # Legacy invalid presentation fields must not block the
+                    # remaining templates from being materialized.
+                    continue
     return list(dict.fromkeys(requested))
 
 
@@ -1282,7 +1292,7 @@ def combined_reporting_required_columns(
         'RAT_A', 'RAT', 'Sample_RAT_A',
         'Call_Status', 'call_status', 'status',
         'attempt_count',
-        *workspace_template_kpi_columns(task_repository, kind),
+        *workspace_template_fields(task_repository, kind),
     ]
     requested.extend(
         candidate
@@ -1305,17 +1315,44 @@ def combined_reporting_required_columns(
 
 
 def combined_reporting_template_columns_signature(task_repository: Repository) -> str:
-    """Fingerprint the complete saved-template KPI contract for combined CDR tables."""
+    """Fingerprint the effective columns, including fields retained independently of templates."""
+    dimensions = parse_calculated_dimensions(task_repository.list_calculated_dimensions())
     material = {
         'version': COMBINED_REPORTING_TEMPLATE_COLUMNS_VERSION,
-        'kpis': {
+        'required': {
             kind: sorted(
-                {column_identity(column) for column in workspace_template_kpi_columns(task_repository, kind)},
+                {column_identity(column) for column in combined_reporting_required_columns(dimensions, kind, task_repository)},
             )
             for kind in sorted(CDR_DATASET_KINDS)
         },
     }
     return hashlib.sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()
+
+
+def missing_workspace_template_columns(task_repository: Repository) -> dict[str, list[str]]:
+    """Find source-backed template fields absent from existing combined CDR tables."""
+    missing: dict[str, list[str]] = {}
+    ready_datasets = [
+        item for item in task_repository.list_datasets()
+        if item['status'] == 'ready' and str(item['dataset_kind'] or '').casefold() in CDR_DATASET_KINDS
+    ]
+    for kind in sorted(CDR_DATASET_KINDS):
+        present = task_repository.list_reporting_row_columns(kind)
+        if not present:
+            continue
+        present_keys = {column_identity(column) for column in present}
+        source_keys = {
+            column_identity(column)
+            for dataset in ready_datasets if str(dataset['dataset_kind'] or '').casefold() == kind
+            for column in task_repository.list_dataset_row_columns(int(dataset['id']))
+        }
+        fields = [
+            field for field in workspace_template_fields(task_repository, kind)
+            if column_identity(field) in source_keys and column_identity(field) not in present_keys
+        ]
+        if fields:
+            missing[kind] = fields
+    return missing
 
 
 def materialize_workspace_combined_columns(
@@ -1901,6 +1938,11 @@ def queue_workspace_dimension_materialization(workspace: Workspace) -> None:
     dimensions_pending = task_repository.get_workspace_state('calculated_dimensions_need_materialization') in {'1', 'processing'}
     template_signature = combined_reporting_template_columns_signature(task_repository)
     templates_pending = task_repository.get_workspace_state('combined_reporting_template_columns_signature') != template_signature
+    if templates_pending and not missing_workspace_template_columns(task_repository):
+        # Removing or reusing a template field needs no CDR rewrite. Keep
+        # previously materialized columns available for future templates.
+        task_repository.set_workspace_state('combined_reporting_template_columns_signature', template_signature)
+        templates_pending = False
     if not dimensions_pending and not templates_pending:
         return
     with AUTO_CALCULATED_FIELD_JOBS_LOCK:
@@ -1972,6 +2014,11 @@ def queue_workspace_dimension_materialization(workspace: Workspace) -> None:
             while True:
                 current_signature = combined_reporting_template_columns_signature(task_repository)
                 if current_signature == processed_signature:
+                    break
+                if not missing_workspace_template_columns(task_repository):
+                    task_repository.set_workspace_state(
+                        'combined_reporting_template_columns_signature', current_signature,
+                    )
                     break
                 processed_signature = current_signature
                 materialize_workspace_combined_columns(
@@ -2053,9 +2100,9 @@ def persist_report_template(technology: str, name: str, content: bytes, *, is_de
 
 
 def persist_report_template_for_request(
-    technology: str, name: str, content: bytes, *, is_default: bool,
+    technology: str, name: str, content: bytes,
 ) -> None:
-    """Bound an interactive save instead of waiting indefinitely behind materialization."""
+    """Bound the database write without doing reconciliation under its lock."""
     if not TEMPLATE_SAVE_LOCK.acquire(timeout=TEMPLATE_SAVE_WAIT_SECONDS):
         raise TimeoutError('Another Report Template update is still finishing. Try again in a moment.')
     workspace_lock = workspace_write_lock(repository.db_path)
@@ -2066,7 +2113,7 @@ def persist_report_template_for_request(
             raise TimeoutError(
                 'The workspace is busy updating CDR tables. Stop or wait for the background task, then save again.'
             )
-        persist_report_template(technology, name, content, is_default=is_default)
+        repository.set_report_template_content(technology, name, content)
     finally:
         if workspace_acquired:
             workspace_lock.release()
@@ -5863,25 +5910,20 @@ def restore_database_backup(
             if 'report_templates' in selected:
                 template_members = [name for name in names if name.startswith(f'{prefix}report-templates/')]
                 if template_members:
-                    task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
-                    task_repository.initialize_template_registry()
+                    templates_staging = staging / f'{workspace.id}-templates'
                     for name in template_members:
                         if progress_callback:
                             progress_callback(f'Restoring Report Template for {workspace_name}: {Path(name).name}', completed_steps, total_steps)
                         relative = PurePosixPath(name).relative_to(PurePosixPath(f'{prefix}report-templates'))
                         if len(relative.parts) != 3 or relative.parts[0] not in {'library', 'default'} or relative.parts[1] not in TEMPLATE_NAMES:
                             raise ValueError(f'Backup Report Templates for "{workspace_name}" have an invalid path.')
-                        technology = relative.parts[1]
-                        template_name = catalogue_registry_key(relative.parts[2].removesuffix('.csv'))
-                        content = archive.read(name)
-                        existing = next((row for row in task_repository.list_report_templates(technology) if str(row['name']) == template_name), None)
-                        if existing:
-                            task_repository.set_report_template_content(technology, template_name, content)
-                        else:
-                            task_repository.add_report_template(technology, template_name, content, is_default=False)
-                        if relative.parts[0] == 'default':
-                            task_repository.set_default_report_template(technology, template_name)
+                        destination = templates_staging / 'report-templates' / Path(*relative.parts)
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        destination.write_bytes(archive.read(name))
                         advance(f'Report Template restored for {workspace_name}: {Path(name).name}')
+                    import_slides_templates_archive(
+                        templates_staging, [workspace.id], includes_dashboards='dashboards' in selected,
+                    )
                     shutil.rmtree(workspace.slides_templates_dir, ignore_errors=True)
                 shutil.rmtree(workspace.database_path.parent / 'slides-templates', ignore_errors=True)
             if 'operator_mappings' in selected:
@@ -7264,9 +7306,25 @@ def matching_template_workspaces(manifest: dict[str, Any], workspaces: Iterable[
     return [workspace.id for workspace in workspaces if name and workspace.name.casefold() == name]
 
 
+def _dashboard_template_references(task_repository: Repository) -> set[tuple[str, str]]:
+    """Find templates required by saved Dashboards in the destination workspace."""
+    try:
+        dashboards = json.loads(task_repository.get_workspace_state(DASHBOARD_STATE_KEY) or '{}')
+    except (TypeError, ValueError):
+        dashboards = {}
+    if not isinstance(dashboards, dict):
+        return set()
+    return {
+        (str(definition.get('template_technology') or definition.get('technology') or 'nsa').casefold(),
+         str(definition.get('template') or '').strip())
+        for definition in dashboards.values() if isinstance(definition, dict) and definition.get('template')
+    }
+
+
 def import_slides_templates_archive(
     staging_root: Path, destination_workspace_ids: Iterable[str] = (),
     manifest: dict[str, Any] | None = None,
+    *, includes_dashboards: bool = False,
 ) -> int:
     templates_payload = staging_root / 'report-templates'
     if not templates_payload.exists():
@@ -7279,25 +7337,59 @@ def import_slides_templates_archive(
     destinations = [workspace_registry.get(identifier) for identifier in selected]
     if any(workspace is None for workspace in destinations):
         raise ValueError('A destination workspace no longer exists.')
+    incoming: dict[tuple[str, str], dict[str, Any]] = {}
+    for path in sorted(templates_payload.rglob('*')):
+        if not path.is_file() or path.suffix.lower() != '.csv':
+            continue
+        relative = path.relative_to(templates_payload)
+        if len(relative.parts) != 3 or relative.parts[0] not in {'library', 'default'} or relative.parts[1] not in TEMPLATE_NAMES:
+            raise ValueError('The package contains an invalid Report Template path.')
+        technology = relative.parts[1]
+        name = catalogue_registry_key(path.stem)
+        key = (technology, name.casefold())
+        content = path.read_bytes()
+        previous = incoming.get(key)
+        if previous and (previous['name'] != name or previous['content'] != content):
+            raise ValueError(f'The package contains conflicting Report Templates named "{name}".')
+        incoming[key] = {
+            'name': name, 'content': content,
+            'is_default': relative.parts[0] == 'default' or bool(previous and previous['is_default']),
+        }
     for workspace in destinations:
         target_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
         target_repository.initialize_template_registry()
-        for path in templates_payload.rglob('*'):
-            if not path.is_file() or path.suffix.lower() != '.csv':
-                continue
-            relative = path.relative_to(templates_payload)
-            if len(relative.parts) != 3 or relative.parts[0] not in {'library', 'default'} or relative.parts[1] not in TEMPLATE_NAMES:
-                raise ValueError('The package contains an invalid Report Template path.')
-            technology = relative.parts[1]
-            name = catalogue_registry_key(path.stem)
-            content = path.read_bytes()
-            existing = next((row for row in target_repository.list_report_templates(technology) if str(row['name']) == name), None)
-            if existing:
-                target_repository.set_report_template_content(technology, name, content)
-            else:
-                target_repository.add_report_template(technology, name, content, is_default=False)
-            if relative.parts[0] == 'default':
-                target_repository.set_default_report_template(technology, name)
+        protected = set() if includes_dashboards else _dashboard_template_references(target_repository)
+        for technology in TEMPLATE_NAMES:
+            existing = target_repository.list_report_templates(technology)
+            by_key: dict[str, list[Any]] = {}
+            for row in existing:
+                by_key.setdefault(str(row['name']).casefold(), []).append(row)
+            for row in existing:
+                name = str(row['name'])
+                key = (technology, name.casefold())
+                if (technology, name) in protected:
+                    continue
+                replacement = incoming.get(key)
+                if replacement is None or replacement['name'] != name:
+                    target_repository.delete_report_template(technology, name)
+            for (source_technology, normalized_name), template in incoming.items():
+                if source_technology != technology:
+                    continue
+                protected_matches = [
+                    row for row in by_key.get(normalized_name, [])
+                    if (technology, str(row['name'])) in protected
+                ]
+                if protected_matches:
+                    # Keep the local definition used by a Dashboard. A matching
+                    # imported name must not create a second visible template.
+                    continue
+                name = str(template['name'])
+                if any(str(row['name']) == name for row in existing):
+                    target_repository.set_report_template_content(technology, name, template['content'])
+                else:
+                    target_repository.add_report_template(technology, name, template['content'], is_default=False)
+                if template['is_default']:
+                    target_repository.set_default_report_template(technology, name)
         shutil.rmtree(workspace.database_path.parent / 'slides-templates', ignore_errors=True)
     _clear_chart_preview_caches()
     return len(destinations)
@@ -7419,6 +7511,7 @@ def _apply_import_archive(
     progress_callback: Callable[[str, float], None] | None = None,
     destination_workspace_ids: Iterable[str] = (),
     parent_task_id: str = '',
+    includes_dashboards: bool = False,
 ) -> str:
     """Apply a disk-backed package and return its user-facing completion message."""
     with zipfile.ZipFile(package_path) as archive, tempfile.TemporaryDirectory(prefix='dashboard-analytic-import-') as temporary_dir:
@@ -7439,6 +7532,10 @@ def _apply_import_archive(
             packages = manifest.get('packages')
             if not isinstance(packages, list) or not packages:
                 raise ValueError('The selected bundle has no export packages.')
+            bundle_includes_dashboards = any(
+                isinstance(entry, dict) and entry.get('kind') == 'dashboards'
+                for entry in packages
+            )
             notices: list[str] = []
             for index, entry in enumerate(packages):
                 member = str(entry.get('archive_path') or '') if isinstance(entry, dict) else ''
@@ -7464,6 +7561,7 @@ def _apply_import_archive(
                     nested_path, nested_manifest, None,
                     destination_workspace_ids=destination_workspace_ids,
                     parent_task_id=parent_task_id,
+                    includes_dashboards=bundle_includes_dashboards,
                 ))
             if progress_callback:
                 progress_callback('finalising', 100.0)
@@ -7507,7 +7605,10 @@ def _apply_import_archive(
             _safe_extract_archive_prefix(archive, staging_root, archive_path, extracted)
             if progress_callback:
                 progress_callback('importing Report Templates', 90.0)
-            import_slides_templates_archive(staging_root if archive_path == 'report-templates' else staging_root / Path(archive_path).parent, destination_workspace_ids, manifest)
+            import_slides_templates_archive(
+                staging_root if archive_path == 'report-templates' else staging_root / Path(archive_path).parent,
+                destination_workspace_ids, manifest, includes_dashboards=includes_dashboards,
+            )
             if progress_callback:
                 progress_callback('finalising', 100.0)
             return 'Report Templates imported successfully.'
@@ -16379,6 +16480,7 @@ def _named_catalogue(technology: str, catalogue_id: str) -> dict[str, Any] | Non
 @app.post('/workspace-config/report-templates/{technology}/{catalogue_id}/type', response_class=HTMLResponse)
 def change_report_catalogue_type(
     request: Request,
+    background_tasks: BackgroundTasks,
     technology: str,
     catalogue_id: str,
     template_type: str = Form(...),
@@ -16420,6 +16522,8 @@ def change_report_catalogue_type(
         'target_type': target_technology,
         'template': name,
     }))
+    if active_workspace:
+        background_tasks.add_task(queue_workspace_dimension_materialization, active_workspace)
     return RedirectResponse('/workspace-config', status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -16520,6 +16624,7 @@ def create_empty_report_catalogue(
 @app.post('/workspace-config/report-templates/{technology}/{catalogue_id}/delete', response_class=HTMLResponse)
 def delete_report_catalogue(
     request: Request,
+    background_tasks: BackgroundTasks,
     technology: str,
     catalogue_id: str,
     user: SessionUser = Depends(config_editor_user),
@@ -16534,6 +16639,8 @@ def delete_report_catalogue(
         return render_workspace_config_template(request, user, error='The default template cannot be deleted.', status_code=400)
     repository.delete_report_template(technology, catalogue_id)
     repository.add_log(user.username, 'delete_report_template', json.dumps({'technology': technology, 'template': catalogue['name']}))
+    if active_workspace:
+        background_tasks.add_task(queue_workspace_dimension_materialization, active_workspace)
     return RedirectResponse('/workspace-config', status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -16564,10 +16671,43 @@ def finalize_template_save(
         warnings.warn(f'Unable to log Report Template save: {exc}', RuntimeWarning)
 
 
+def reconcile_saved_template_comments(
+    task_repository: Repository, technology: str, template_name: str,
+    previous_content: bytes, entries: list[CatalogEntry],
+) -> None:
+    """Update Dashboard slide comments after the template response has returned."""
+    reconcile_comments = getattr(sys.modules[__name__], 'e2e_dashboard_reconcile_template_slide_comments', None)
+    if not callable(reconcile_comments):
+        return
+    try:
+        previous_entries = parse_catalog_csv(previous_content, technology, validate_filters=False)
+        reconcile_comments(technology, template_name, previous_entries, entries, task_repository)
+    except Exception as exc:
+        task_repository.try_add_log('system', 'reconcile_report_template_comments_failed', json.dumps({
+            'technology': technology, 'template': template_name, 'error': str(exc),
+        }))
+
+
+@app.post('/api/workspace-config/report-templates/{technology}/validate')
+async def validate_report_catalogue_content(
+    request: Request,
+    technology: str,
+    user: SessionUser = Depends(config_editor_user),
+) -> JSONResponse:
+    """Validate edited CSV without waiting for a Workspace database write."""
+    del user
+    try:
+        payload = await request.json()
+        content = str(payload.get('catalogue_content') or '')
+        entries = parse_catalog_csv(content, technology.strip().lower())
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({'valid': False, 'detail': str(exc)})
+    return JSONResponse({'valid': True, 'rows': len(entries)})
+
+
 @app.post('/workspace-config/report-templates/{technology}/{catalogue_id}/save')
 def save_report_catalogue(
     request: Request,
-    background_tasks: BackgroundTasks,
     technology: str,
     catalogue_id: str,
     catalogue_content: str = Form(...),
@@ -16582,18 +16722,16 @@ def save_report_catalogue(
         if not metadata:
             raise FileNotFoundError('Report Template not found.')
         template_name = str(metadata['name'])
-        is_default = bool(metadata['is_default'])
-        previous_entries = parse_catalog_csv(bytes(metadata['content'] or b''), technology, validate_filters=False)
+        previous_content = bytes(metadata['content'] or b'')
         entries = [entry for _index, entry in sorted(enumerate(parse_catalog_csv(catalogue_content, technology)), key=lambda item: (item[1].slide, item[0]))]
         content = catalogue_csv(entries)
-        # The lock only covers the short atomic replacements. Expensive
-        # metadata and audit writes run after the response is sent.
-        persist_report_template_for_request(
-            technology, template_name, content, is_default=is_default,
-        )
-        reconcile_comments = getattr(sys.modules[__name__], 'e2e_dashboard_reconcile_template_slide_comments', None)
-        if callable(reconcile_comments):
-            reconcile_comments(technology, template_name, previous_entries, entries)
+        task_repository = Repository(Path(repository.db_path), Path(repository.global_db_path))
+        with TEMPLATE_SAVE_DISPATCH_LOCK:
+            persist_report_template_for_request(technology, template_name, content)
+            _submit_workspace_job(
+                task_repository, reconcile_saved_template_comments,
+                task_repository, technology, template_name, previous_content, entries, phase=3,
+            )
     except ValueError as exc:
         if wants_json:
             return JSONResponse({'detail': str(exc)}, status_code=400)
@@ -16608,8 +16746,9 @@ def save_report_catalogue(
             return JSONResponse({'detail': detail}, status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
         return render_workspace_config_template(request, user, error=detail, status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
     chart_rows = sum(1 for entry in entries if entry.source_kind)
-    task_repository = Repository(Path(repository.db_path), Path(repository.global_db_path))
-    background_tasks.add_task(finalize_template_save, task_repository, user.username, technology, template_name, chart_rows)
+    if active_workspace:
+        submit_background_task(queue_workspace_dimension_materialization, active_workspace)
+    submit_background_task(finalize_template_save, task_repository, user.username, technology, template_name, chart_rows)
     if wants_json:
         return JSONResponse({
             'template': template_name,

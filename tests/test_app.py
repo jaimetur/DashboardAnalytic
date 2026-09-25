@@ -1804,6 +1804,104 @@ def test_combined_tables_materialize_fixed_preview_fields_and_every_saved_templa
     assert {'Latitude', 'Longitude'} <= set(repository.list_reporting_row_columns('data'))
 
 
+def test_template_field_changes_add_combined_columns_and_keep_unused_fields(tmp_path: Path) -> None:
+    import src.DashboardAnalytic as app_module
+    from src.modules.column_names import column_identity
+    from src.modules.repository import Repository
+
+    repository = Repository(tmp_path / 'template-fields.db')
+    repository.initialize()
+    fixture = (app_module.PROJECT_ROOT / 'tests' / 'fixtures' / 'NSA Slide Template.csv').read_bytes()
+    entry = next(item for item in app_module.parse_catalog_csv(fixture, 'nsa') if item.source_kind == 'data')
+    configured = replace(
+        entry, kpi='Extra_Metric', grouping_rows='Extra_Group',
+        legend='Extra_Legend', filters='Extra_Filter = Example',
+    )
+    repository.add_report_template('nsa', 'Primary', app_module.catalogue_csv([configured]))
+    dataset_id, _created = repository.add_dataset('data.csv', str(tmp_path / 'data.csv'), 'admin')
+    repository.update_dataset_profile(dataset_id, status='ready', dataset_kind='data', row_count=1)
+    with repository.connection() as connection:
+        connection.execute(
+            f'CREATE TABLE dataset_rows_{dataset_id} ('
+            'Operator TEXT, Extra_Metric REAL, Extra_Group TEXT, Extra_Legend TEXT, Extra_Filter TEXT)'
+        )
+        connection.execute(
+            f'INSERT INTO dataset_rows_{dataset_id} VALUES (?, ?, ?, ?, ?)',
+            ('EE', 42, 'North', 'Series', 'Example'),
+        )
+
+    original_signature = app_module.combined_reporting_template_columns_signature(repository)
+    app_module.materialize_workspace_combined_columns(repository, ())
+    columns = set(repository.list_reporting_row_columns('data'))
+    assert {'Extra_Metric', 'Extra_Group', 'Extra_Legend', 'Extra_Filter'} <= columns
+
+    repository.set_report_template_content(
+        'nsa', 'Primary', app_module.catalogue_csv([replace(configured, chart_title='Renamed chart')]),
+    )
+    assert app_module.combined_reporting_template_columns_signature(repository) == original_signature
+
+    repository.add_report_template('nsa', 'Secondary', app_module.catalogue_csv([replace(entry, kpi='Extra_Metric')]))
+    repository.set_report_template_content('nsa', 'Primary', app_module.catalogue_csv([entry]))
+    assert 'Extra_Metric' in repository.list_reporting_row_columns('data')
+
+    repository.delete_report_template('nsa', 'Secondary')
+    assert app_module.combined_reporting_template_columns_signature(repository) != original_signature
+    remaining = {column_identity(column) for column in repository.list_reporting_row_columns('data')}
+    assert column_identity('Extra_Metric') in remaining
+    assert column_identity('Extra_Group') in remaining
+    assert column_identity('Operator') in remaining
+
+
+def test_template_column_reconciliation_is_queued_only_for_missing_fields(tmp_path: Path, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+    from src.modules.repository import Repository
+    from src.modules.workspaces import Workspace
+
+    database_path = tmp_path / 'template-queue.db'
+    repository = Repository(database_path)
+    repository.initialize()
+    fixture = (app_module.PROJECT_ROOT / 'tests' / 'fixtures' / 'NSA Slide Template.csv').read_bytes()
+    entry = next(item for item in app_module.parse_catalog_csv(fixture, 'nsa') if item.source_kind == 'data')
+    repository.add_report_template('nsa', 'Primary', app_module.catalogue_csv([entry]))
+    dataset_id, _created = repository.add_dataset('data.csv', str(tmp_path / 'data.csv'), 'admin')
+    repository.update_dataset_profile(dataset_id, status='ready', dataset_kind='data', row_count=1)
+    with repository.connection() as connection:
+        connection.execute(f'CREATE TABLE dataset_rows_{dataset_id} (Operator TEXT, New_Metric REAL)')
+        connection.execute(f'INSERT INTO dataset_rows_{dataset_id} VALUES (?, ?)', ('EE', 42))
+    repository.copy_dataset_rows_to_reporting(dataset_id, 'data', ['Operator'])
+    repository.set_workspace_state(
+        'combined_reporting_template_columns_signature',
+        app_module.combined_reporting_template_columns_signature(repository),
+    )
+    workspace = Workspace('template-queue', 'Template Queue', database_path, tmp_path, tmp_path, tmp_path, tmp_path, '', '')
+    scheduled = []
+    monkeypatch.setattr(app_module, 'workspace_has_pending_cdr_processing', lambda _workspace: False)
+    monkeypatch.setattr(app_module, '_submit_workspace_job', lambda *_args, **_kwargs: scheduled.append(True))
+    monkeypatch.setattr(app_module, 'persist_auto_field_progress', lambda _job: None)
+    monkeypatch.setattr(app_module, 'AUTO_CALCULATED_FIELD_JOBS', {})
+    monkeypatch.setattr(app_module, 'WORKSPACE_DIMENSION_MATERIALIZATION_THREADS', set())
+
+    repository.set_report_template_content('nsa', 'Primary', app_module.catalogue_csv([replace(entry, kpi='New_Metric')]))
+    assert app_module.missing_workspace_template_columns(repository) == {'data': ['New_Metric']}
+    app_module.queue_workspace_dimension_materialization(workspace)
+    assert scheduled == [True]
+
+    app_module.materialize_workspace_combined_columns(repository, ())
+    repository.set_workspace_state(
+        'combined_reporting_template_columns_signature',
+        app_module.combined_reporting_template_columns_signature(repository),
+    )
+    app_module.WORKSPACE_DIMENSION_MATERIALIZATION_THREADS.clear()
+    app_module.AUTO_CALCULATED_FIELD_JOBS.clear()
+    repository.set_report_template_content('nsa', 'Primary', app_module.catalogue_csv([entry]))
+    app_module.queue_workspace_dimension_materialization(workspace)
+    assert scheduled == [True]
+    assert repository.get_workspace_state('combined_reporting_template_columns_signature') == (
+        app_module.combined_reporting_template_columns_signature(repository)
+    )
+    assert 'New_Metric' in repository.list_reporting_row_columns('data')
+
+
 def test_recreate_combined_table_recovers_empty_source_rows_and_required_columns(tmp_path: Path) -> None:
     import src.DashboardAnalytic as app_module
     from src.modules.repository import Repository
@@ -5505,6 +5603,127 @@ def test_interactive_template_save_fails_fast_while_workspace_writer_is_busy(cli
     assert 'workspace is busy updating CDR tables' in response.json()['detail']
 
 
+def test_interactive_template_validation_rejects_invalid_content_before_save(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    template = app_module.report_catalogue_options('nsa')[0]
+    original = bytes(template['content'])
+    content = original.decode('utf-8')
+    valid = client.post('/api/workspace-config/report-templates/nsa/validate', json={'catalogue_content': content})
+    assert valid.status_code == 200
+    assert valid.json()['valid'] is True
+
+    malformed = content + '\n1,unexpected,extra,values,that,exceed,the,template,header,' + ','.join(['x'] * 50)
+    invalid = client.post('/api/workspace-config/report-templates/nsa/validate', json={'catalogue_content': malformed})
+    assert invalid.status_code == 200
+    assert invalid.json()['valid'] is False
+    assert 'more values than the template header' in invalid.json()['detail']
+
+    saved = client.post(
+        f'/workspace-config/report-templates/nsa/{quote(template["identifier"], safe="")}/save',
+        data={'catalogue_content': malformed}, headers={'accept': 'application/json'},
+    )
+    assert saved.status_code == 400
+    assert app_module.repository.report_template_content('nsa', template['identifier']) == original
+
+
+def test_interactive_template_save_schedules_materialization_after_releasing_workspace_writer(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    template = app_module.report_catalogue_options('nsa')[0]
+    content = bytes(template['content']).decode('utf-8')
+    calls = []
+    inside_write = False
+    original_write = app_module.persist_report_template_for_request
+
+    def checked_write(*args, **kwargs):
+        nonlocal inside_write
+        inside_write = True
+        try:
+            return original_write(*args, **kwargs)
+        finally:
+            inside_write = False
+
+    def check_materialization(workspace):
+        assert not inside_write
+        writer = app_module.workspace_write_lock(app_module.repository.db_path)
+        assert writer.acquire(blocking=False)
+        try:
+            assert workspace == app_module.active_workspace
+            assert app_module.repository.report_template_content('nsa', template['identifier'])
+            calls.append(workspace.id)
+        finally:
+            writer.release()
+
+    monkeypatch.setattr(app_module, 'persist_report_template_for_request', checked_write)
+    monkeypatch.setattr(app_module, 'queue_workspace_dimension_materialization', check_materialization)
+    scheduled = []
+    monkeypatch.setattr(app_module, 'submit_background_task', lambda callback, *args: scheduled.append((callback, args)))
+    response = client.post(
+        f'/workspace-config/report-templates/nsa/{quote(template["identifier"], safe="")}/save',
+        data={'catalogue_content': content},
+        headers={'accept': 'application/json'},
+    )
+
+    assert response.status_code == 200
+    assert calls == []
+    assert len(scheduled) == 2
+    scheduled[0][0](*scheduled[0][1])
+    assert calls == [app_module.active_workspace.id]
+
+
+def test_interactive_template_save_returns_before_dashboard_comment_reconciliation(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    template = app_module.report_catalogue_options('nsa')[0]
+    content = bytes(template['content']).decode('utf-8')
+    scheduled = []
+    reconciled = []
+
+    def queue_reconciliation(_repository, callback, *args, phase):
+        assert phase == 3
+        scheduled.append((callback, args))
+
+    monkeypatch.setattr(app_module, '_submit_workspace_job', queue_reconciliation)
+    monkeypatch.setattr(app_module, 'submit_background_task', lambda *_args: None)
+    monkeypatch.setattr(app_module, 'queue_workspace_dimension_materialization', lambda _workspace: None)
+    monkeypatch.setattr(
+        app_module, 'e2e_dashboard_reconcile_template_slide_comments',
+        lambda *_args: reconciled.append(True),
+    )
+    response = client.post(
+        f'/workspace-config/report-templates/nsa/{quote(template["identifier"], safe="")}/save',
+        data={'catalogue_content': content},
+        headers={'accept': 'application/json'},
+    )
+
+    assert response.status_code == 200
+    assert len(scheduled) == 1
+    assert not reconciled
+    callback, args = scheduled[0]
+    callback(*args)
+    assert reconciled == [True]
+
+
+def test_template_filter_only_edit_skips_dashboard_comment_scan() -> None:
+    import src.DashboardAnalytic as app_module
+
+    fixture = (app_module.PROJECT_ROOT / 'tests' / 'fixtures' / 'NSA Slide Template.csv').read_bytes()
+    entries = app_module.parse_catalog_csv(fixture, 'nsa')
+    edited = [replace(entry, filters='') for entry in entries]
+
+    class UnexpectedDashboardRead:
+        def get_workspace_state(self, _key):
+            raise AssertionError('Filter-only edits must not scan saved Dashboards.')
+
+    assert app_module.e2e_dashboard_reconcile_template_slide_comments(
+        'nsa', 'Template', entries, edited, UnexpectedDashboardRead(),
+    ) == 0
+
+
 def test_dashboard_interruption_succeeds_when_its_audit_log_is_locked(client, monkeypatch) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -8253,7 +8472,7 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert 'data-catalogue-editor-table' not in admin.text
     assert '<th>Default</th>' in admin.text
     assert 'catalogue-default-mark is-default' in admin.text
-    assert '/workspace-config/report-templates/nsa/Baseline Q4/export' in admin.text
+    assert '/workspace-config/report-templates/nsa/Baseline%20Q4/export' in admin.text
     assert app_module.reporting_catalog_entries('nsa')[0].slide_title == 'Second'
     assert next(item['identifier'] for item in app_module.report_catalogue_options('nsa') if item['active']) == 'Updated Q4'
     assert app_module.repository.report_template_content('nsa', 'Baseline Q4') == first
@@ -8445,6 +8664,26 @@ def test_admin_catalogue_rename_supports_background_json_save(client) -> None:
     assert response.status_code == 200
     assert response.json() == {'name': 'Renamed default', 'identifier': 'Renamed default'}
     assert next(item for item in app_module.report_catalogue_options('nsa') if item['identifier'] == 'Renamed default')['name'] == 'Renamed default'
+
+
+def test_report_template_rename_keeps_special_characters_in_action_urls(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    template = app_module.report_catalogue_options('nsa')[0]
+    new_name = 'North #1 & South'
+    response = client.post(
+        f'/workspace-config/report-templates/nsa/{quote(template["identifier"], safe="")}/rename',
+        data={'catalogue_name': new_name},
+        headers={'accept': 'application/json'},
+    )
+
+    assert response.status_code == 200
+    assert response.json()['identifier'] == new_name
+    workspace_config = client.get('/workspace-config')
+    assert workspace_config.status_code == 200
+    assert '/workspace-config/report-templates/nsa/North%20%231%20%26%20South/rename' in workspace_config.text
+    assert '/workspace-config/report-templates/nsa/North%20%231%20%26%20South/editor' in workspace_config.text
 
 
 def test_admin_renaming_named_catalogue_renames_its_csv_file(client) -> None:

@@ -3280,10 +3280,6 @@
     if (event.origin !== window.location.origin || event.source !== $('ds-editor-frame').contentWindow) return;
     if (event.data?.type === 'dashboard-analytic:template-saved') {
       templateEditorSaved = true;
-      if (expandedChartMode !== 'ppt') void safe(async () => {
-        await rebuildDashboardAfterTemplateSave();
-        templateEditorSaved = false;
-      })();
     }
     if (event.data?.type === 'dashboard-analytic:close-template-editor') void closeTemplateEditor();
   });

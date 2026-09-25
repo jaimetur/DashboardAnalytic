@@ -26,7 +26,7 @@ Available actions:
 - Export
 - Delete
 
-**New Template** creates a blank NSA definition and opens it for editing. Import accepts a CSV name or derives it from the filename, can convert a legacy catalogue when prompted and requires explicit overwrite confirmation for a case-insensitive name collision. Rename saves inline; duplicate creates `- Copy`; and a non-default template can move between NSA and SA when no same-name target exists.
+**New Template** creates a blank NSA definition and opens it for editing. Import accepts a CSV name or derives it from the filename, can convert a legacy catalogue when prompted and requires explicit overwrite confirmation for a case-insensitive name collision. Renaming saves when you leave the name field or press Enter; the field keeps its previous name and shows an error if the save fails. Duplicate creates `- Copy`; a non-default template can move between NSA and SA when no same-name target exists.
 
 One template can be default for each technology within a workspace. Reporting initially selects that default but does not change it when a user chooses another template for one job. A default template cannot change type or be deleted until another template becomes default. New workspaces start without templates. The row Export action downloads that individual CSV; portable ZIP export is available under Import / Export / Transfer.
 
@@ -47,7 +47,7 @@ One template can be default for each technology within a workspace. Reporting in
 
 ### Validation
 
-- Manual cell edits are validated immediately.
+- Manual cell edits are validated after a short pause and when leaving the cell. Save revalidates the complete grid and stops if a row or filter is malformed.
 - Filter errors identify `Slide: n - Chart: n`.
 - Fixing the invalid cell clears the error message.
 - Filter conditions render on separate lines with visual bullets; bullets are not stored in the cell.
@@ -63,7 +63,7 @@ One template can be default for each technology within a workspace. Reporting in
 - **Update Template** applies preview values to the in-memory row; it does not save to disk.
 - **Auto-calculated Fields** opens the shared active-workspace field manager.
 
-**Save Template** validates and persists the complete grid atomically. Close, Escape and backdrop actions preserve the editor when unsaved changes still require a decision.
+**Save Template** validates and persists the complete grid atomically. Dashboard comment reconciliation runs separately when slide identity changes; any required combined CDR update also runs after the save response. The Dashboard viewer refreshes the saved template when the editor closes. A combined CDR update is queued only when a template adds a source field missing from that CDR table. Removing the last template reference leaves the existing column available for future reuse. Close, Escape and backdrop actions preserve the editor when unsaved changes still require a decision.
 
 ## Report Template reference
 

@@ -2418,6 +2418,10 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   const groupingColumns = new Set(['Rows Aggregation', 'Column Aggregation']);
   const validationAlert = document.querySelector('[data-catalogue-validation-alert]');
   const validationMessage = validationAlert?.querySelector('[data-catalogue-validation-message]');
+  const showCatalogueValidation = (message) => {
+    if (validationMessage) validationMessage.textContent = message || '';
+    if (validationAlert) validationAlert.hidden = !message;
+  };
   const canonicalFilterValue = (value) => String(value || '')
     .replace(/\u00a0/g, ' ')
     .split(/\s*;\s*|\s*[\r\n]+\s*/)
@@ -2479,7 +2483,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     return '';
   };
   const refreshFilterValidationAlert = () => {
-    if (!validationAlert) return;
+    if (!validationAlert) return '';
     const rows = Array.from(table.querySelectorAll('tbody tr'));
     let invalid = null;
     for (const row of rows) {
@@ -2495,8 +2499,8 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       invalid = `Slide: ${slide} - Chart: ${chart} -> ${error}`;
       break;
     }
-    if (validationMessage) validationMessage.textContent = invalid || '';
-    validationAlert.hidden = !invalid;
+    showCatalogueValidation(invalid);
+    return invalid || '';
   };
   const optionList = (field, cell) => {
     if (field === 'Layout') return suggestions.layouts || [];
@@ -2560,6 +2564,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       renderFilterCell(activeCell, clauses.join('; '), activeCell.dataset.originalValue || '');
     }
     refreshFilterValidationAlert();
+    scheduleCatalogueValidation();
   };
   const addFilterCondition = (condition = {}) => {
     if (!filterConditions || !activeCell) return;
@@ -3042,7 +3047,8 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       const text = preserveLineBreaks ? String(value || '') : String(value || '').replace(/\r?\n/g, '\\n');
       return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
     };
-    normaliseCatalogueRows();
+    // Reading the grid must not rebuild every cell. This is also used by the
+    // unsaved-changes check when closing or switching templates.
     const rows = Array.from(table.querySelectorAll('tbody tr')).map((row) => (
       catalogueHeaders.map((header) => {
         const value = rowValue(row, header);
@@ -3050,6 +3056,33 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       }).join(',')
     ));
     return [catalogueHeaders.map(escapeCsv).join(','), ...rows].join('\n');
+  };
+  let validationTimer = null;
+  let validationRevision = 0;
+  const validateCatalogueContent = async (content, revision, showNetworkError = false) => {
+    try {
+      const response = await fetch(`/api/workspace-config/report-templates/${encodeURIComponent(editor.dataset.templateTechnology)}/validate`, {
+        method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({catalogue_content: content}),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (revision !== validationRevision) return false;
+      const error = response.ok && result.valid ? '' : (result.detail || 'Unable to validate the Report Template.');
+      showCatalogueValidation(error);
+      return !error;
+    } catch (error) {
+      if (revision !== validationRevision) return false;
+      if (showNetworkError) showCatalogueValidation('Unable to validate the Report Template. Please retry.');
+      return false;
+    }
+  };
+  const scheduleCatalogueValidation = (delay = 350) => {
+    window.clearTimeout(validationTimer);
+    const revision = ++validationRevision;
+    validationTimer = window.setTimeout(() => {
+      if (refreshFilterValidationAlert()) return;
+      void validateCatalogueContent(serialiseCatalogueContent(), revision);
+    }, delay);
   };
   let savedCatalogueContent = '';
   const hasUnsavedCatalogueChanges = () => serialiseCatalogueContent() !== savedCatalogueContent;
@@ -3163,12 +3196,8 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (!endpoint) return;
     const rowIndex = Array.from(table.querySelectorAll('tbody tr')).indexOf(row);
     if (rowIndex < 0) return;
-    // serialiseCatalogueContent normalises/rebuilds editor rows. Resolve the
-    // authoritative replacement row immediately afterwards, then initialise
-    // the preview from those values rather than the stale click target.
     const catalogueContent = serialiseCatalogueContent();
-    const resolvedRow = Array.from(table.querySelectorAll('tbody tr'))[rowIndex] || row;
-    const rowDefinition = {...previewDefinitionFromRow(resolvedRow), ...definition};
+    const rowDefinition = {...previewDefinitionFromRow(row), ...definition};
     const button = row.querySelector('[data-catalogue-chart-action="chart-preview"]');
     if (button) button.disabled = true;
     const requestId = ++chartPreviewRequest;
@@ -3416,6 +3445,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
         const copied = {slide: '', rows: sourceBlocks[sourceBlockIndex].rows.map(markCopiedRow)};
         sourceBlocks.splice(selection.slidePosition, 0, copied);
         renderCatalogueRows(renumberBlocks(sourceBlocks));
+        scheduleCatalogueValidation();
         return;
       }
       if (kind === 'chart' && selection.sameTemplate) {
@@ -3425,6 +3455,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
         sharedSlideFields.forEach((field) => { copied[field] = targetBlock.rows[0][field]; });
         targetBlock.rows.splice(selection.chartPosition, 0, copied);
         renderCatalogueRows(renumberBlocks(sourceBlocks));
+        scheduleCatalogueValidation();
         return;
       }
       showLoadingOverlay(`Copying ${kind}`, 'Please wait while the destination template is updated.');
@@ -3497,6 +3528,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     }
     if (!blocks.length) blocks.push({slide: '1', rows: [Object.fromEntries(catalogueHeaders.map((header) => [header, header === 'Slide' ? '1' : '']))]});
     renderCatalogueRows(renumberBlocks(blocks));
+    scheduleCatalogueValidation();
   });
   normaliseCatalogueRows();
   const focusCatalogueRow = (rowIndex) => {
@@ -3550,6 +3582,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       if (slideCell) { slideCell.textContent = reenumerated; refreshCellEditedState(slideCell); }
     });
     normaliseCatalogueRows();
+    scheduleCatalogueValidation();
   });
   table.addEventListener('focusin', (event) => {
     const cell = selectedCellFromEvent(event);
@@ -3564,6 +3597,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     refreshCellEditedState(cell);
     if (cell?.dataset.catalogueField === 'Chart type') syncConditionalVisualCells(cell.closest('tr'));
     if (cell?.dataset.catalogueField === 'Filters') refreshFilterValidationAlert();
+    if (cell) scheduleCatalogueValidation();
   });
   document.addEventListener('pointerdown', (event) => {
     if (!selectedCellFromEvent(event) && !helper.contains(event.target)) hideCellAssistance();
@@ -3585,6 +3619,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       if (editedCell.dataset.catalogueField === 'Filters') renderFilterCell(editedCell, value, editedCell.dataset.originalValue || '');
       else { editedCell.replaceChildren(); renderAddedText(editedCell, value, editedCell.dataset.originalValue || ''); }
       refreshCellEditedState(editedCell);
+      scheduleCatalogueValidation(0);
     }
     window.requestAnimationFrame(() => {
       const focused = document.activeElement;
@@ -3637,6 +3672,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       else { activeCell.replaceChildren(); renderAddedText(activeCell, value, activeCell.dataset.originalValue || ''); }
     }
     if (field === 'Filters') refreshFilterValidationAlert();
+    scheduleCatalogueValidation();
     activeCell.focus();
   });
   const saveCatalogueTemplate = async () => {
@@ -3644,8 +3680,11 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     const saveButton = saveForm.querySelector('button[type="submit"]');
     hideCellAssistance();
     if (saveButton) saveButton.disabled = true;
-    showLoadingOverlay('Saving Report Template', 'Please wait while the Report Template is being saved.');
     try {
+      window.clearTimeout(validationTimer);
+      const revision = ++validationRevision;
+      if (refreshFilterValidationAlert() || !await validateCatalogueContent(contentField.value, revision, true)) return false;
+      showLoadingOverlay('Saving Report Template', 'Please wait while the Report Template is being saved.');
       const response = await fetch(saveForm.action, {
         method: 'POST',
         body: new FormData(saveForm),
@@ -3667,8 +3706,8 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       return true;
     } catch (error) {
       hideLoadingOverlay();
-    showInfoDialog(error instanceof Error ? error.message : 'Unable to save the Report Template.', {
-      title: 'Report Template save failed',
+      showInfoDialog(error instanceof Error ? error.message : 'Unable to save the Report Template.', {
+        title: 'Report Template save failed',
         tone: 'error',
       });
       return false;
@@ -3691,6 +3730,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
 
 document.querySelectorAll('[data-catalogue-auto-rename]').forEach((input) => {
   let savedValue = input.value.trim();
+  let pendingRename = null;
   const updateCatalogueIdentifier = (previousIdentifier, identifier) => {
     if (!previousIdentifier || !identifier || previousIdentifier === identifier) return;
     const row = input.closest('tr');
@@ -3700,16 +3740,15 @@ document.querySelectorAll('[data-catalogue-auto-rename]').forEach((input) => {
     const oldSegment = `/workspace-config/report-templates/${technology}/${encodeURIComponent(previousName)}/`;
     const newSegment = `/workspace-config/report-templates/${technology}/${encodeURIComponent(identifier)}/`;
     const rawOldSegment = `/workspace-config/report-templates/${technology}/${previousName}/`;
-    const rawNewSegment = `/workspace-config/report-templates/${technology}/${identifier}/`;
     row.querySelectorAll('form[action], a[href]').forEach((element) => {
       const attribute = element.tagName === 'A' ? 'href' : 'action';
       const value = element.getAttribute(attribute);
-      if (value?.includes(rawOldSegment)) element.setAttribute(attribute, value.replace(rawOldSegment, rawNewSegment));
+      if (value?.includes(rawOldSegment)) element.setAttribute(attribute, value.replace(rawOldSegment, newSegment));
       else if (value?.includes(oldSegment)) element.setAttribute(attribute, value.replace(oldSegment, newSegment));
     });
     row.querySelectorAll('[data-open-template-editor]').forEach((element) => {
       const value = element.getAttribute('data-open-template-editor');
-      if (value?.includes(rawOldSegment)) element.setAttribute('data-open-template-editor', value.replace(rawOldSegment, rawNewSegment));
+      if (value?.includes(rawOldSegment)) element.setAttribute('data-open-template-editor', value.replace(rawOldSegment, newSegment));
       else if (value?.includes(oldSegment)) element.setAttribute('data-open-template-editor', value.replace(oldSegment, newSegment));
       element.setAttribute('data-template-name', input.value.trim());
     });
@@ -3725,33 +3764,49 @@ document.querySelectorAll('[data-catalogue-auto-rename]').forEach((input) => {
       window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`);
     }
   };
-  input.addEventListener('change', async () => {
+  const saveCatalogueName = async () => {
+    if (pendingRename) return pendingRename;
     const name = input.value.trim();
-    if (!name || name === savedValue || !input.form) return;
+    if (!name) {
+      input.value = savedValue;
+      showInfoDialog('Enter a template name.', {title: 'Template Rename Failed', tone: 'error'});
+      return;
+    }
+    if (name === savedValue || !input.form) return;
     const formData = new FormData(input.form);
     input.disabled = true;
-    try {
-      const response = await fetch(input.form.action, {
-        method: 'POST',
-        body: formData,
-        credentials: 'same-origin',
-        headers: {Accept: 'application/json'},
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || 'The template name could not be saved.');
-      savedValue = String(payload.name || name).trim();
-      input.value = savedValue;
-      input.setAttribute('aria-label', `Name for ${savedValue}`);
-      const previousIdentifier = input.form.action.match(/\/workspace-config\/report-templates\/[^/]+\/([^/]+)\/rename$/)?.[1];
-      updateCatalogueIdentifier(previousIdentifier, payload.identifier);
-    } catch (error) {
-      input.value = savedValue;
-      showInfoDialog(error instanceof Error ? error.message : 'The template name could not be saved.', {
-        title: 'Template Rename Failed',
-      });
-    } finally {
-      input.disabled = false;
-    }
+    pendingRename = (async () => {
+      try {
+        const response = await fetch(input.form.action, {
+          method: 'POST',
+          body: formData,
+          credentials: 'same-origin',
+          keepalive: true,
+          headers: {Accept: 'application/json'},
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || 'The template name could not be saved.');
+        savedValue = String(payload.name || name).trim();
+        input.value = savedValue;
+        input.setAttribute('aria-label', `Name for ${savedValue}`);
+        const previousIdentifier = input.form.action.match(/\/workspace-config\/report-templates\/[^/]+\/([^/]+)\/rename$/)?.[1];
+        updateCatalogueIdentifier(previousIdentifier, payload.identifier);
+      } catch (error) {
+        input.value = savedValue;
+        showInfoDialog(error instanceof Error ? error.message : 'The template name could not be saved.', {
+          title: 'Template Rename Failed', tone: 'error',
+        });
+      } finally {
+        input.disabled = false;
+        pendingRename = null;
+      }
+    })();
+    return pendingRename;
+  };
+  input.addEventListener('change', () => { void saveCatalogueName(); });
+  input.form?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    void saveCatalogueName();
   });
 });
 
