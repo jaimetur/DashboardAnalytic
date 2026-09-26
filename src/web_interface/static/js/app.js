@@ -4834,7 +4834,7 @@ function setupCustomMultiSelects() {
       actionButton.classList.add('reporting-multiselect-action');
     }
     const dynamicAll = select.dataset.multiselectDynamicAll === 'true';
-    actionButton.textContent = dynamicAll ? 'All values' : 'Select All / None';
+    actionButton.textContent = 'Select All / None';
     if (!singleChoice) menu.appendChild(actionButton);
 
     const syncTrigger = () => {
@@ -4868,11 +4868,15 @@ function setupCustomMultiSelects() {
     const selectAllOrNone = () => {
       cancelAutoClose();
       const options = Array.from(select.options).filter((option) => !option.disabled);
-      const shouldSelectAll = dynamicAll || options.some((option) => !option.selected);
+      // Toggle: select every value unless all are already selected, then none.
+      const shouldSelectAll = options.some((option) => !option.selected);
       options.forEach((option) => {
         option.selected = shouldSelectAll;
       });
-      if (dynamicAll) select.dataset.multiselectDynamicAllSelected = 'true';
+      // Selecting all in a dynamic list keeps an open selection that also
+      // includes values that appear later; selecting none clears it.
+      if (dynamicAll && shouldSelectAll) select.dataset.multiselectDynamicAllSelected = 'true';
+      else delete select.dataset.multiselectDynamicAllSelected;
       normalizeExportTargetSelection(select);
       Array.from(menu.querySelectorAll('input[type="checkbox"][data-option-value]')).forEach((checkbox) => {
         if (!checkbox.disabled) {

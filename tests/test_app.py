@@ -9834,3 +9834,12 @@ def test_existing_cdrs_receive_a_suggested_nr_mode_on_migration(client) -> None:
         connection.execute("UPDATE dataset_profiles SET dataset_kind = 'data', nr_mode = NULL WHERE dataset_id = ?", (dataset_id,))
         app_module.repository._backfill_dataset_nr_modes(connection)
     assert app_module.repository.get_dataset(dataset_id)['nr_mode'] == 'SA'
+
+
+def test_dashboard_filter_multiselect_action_toggles_select_all_and_none() -> None:
+    script = (Path(__file__).parents[1] / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
+
+    assert "actionButton.textContent = 'Select All / None';" in script
+    assert "dynamicAll ? 'All values' : 'Select All / None'" not in script
+    assert 'const shouldSelectAll = options.some((option) => !option.selected);' in script
+    assert "if (dynamicAll && shouldSelectAll) select.dataset.multiselectDynamicAllSelected = 'true';" in script
