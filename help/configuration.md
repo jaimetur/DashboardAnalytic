@@ -13,6 +13,7 @@ Dashboard Analytic separates application settings, storage roots and Docker depl
 | `APP_SECRET_KEY` | Signs authenticated session cookies. | A long private random value |
 | `DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER` | Renderer for Reports, Chart Sets, previews and Dashboard exports. | `dashboard-canvas`; use `pil` only for the legacy painter |
 | `DASHBOARD_ANALYTIC_CHROMIUM` | Optional explicit Chromium-family executable used by the server Canvas renderer. | Auto-detected supported browser |
+| `DASHBOARD_ANALYTIC_DASHBOARD_FRAME_CACHE_SNAPSHOTS` | Number of recently used Dashboard snapshots that keep their chart data frames in memory. Lower it on servers with little RAM. | `3` |
 | `TZ` | IANA timezone used by Docker and displayed/persisted timestamps. | `Europe/Madrid` |
 | `IGNORE_EVENT_TIME_FILTERING` | When true, ignores date and template filters based on Event_Start_Time or Event_End_Time. | `false` |
 

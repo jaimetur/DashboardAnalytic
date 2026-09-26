@@ -209,6 +209,7 @@
             <th aria-sort="descending"><button type="button" class="queue-sort-button" data-queue-sort-key="id" data-queue-sort-type="number">ID<span aria-hidden="true" data-queue-sort-indicator>↓</span></button></th>
             <th><button type="button" class="queue-sort-button" data-queue-sort-key="dataset" data-queue-sort-type="text">Dataset<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
             <th><button type="button" class="queue-sort-button" data-queue-sort-key="kind" data-queue-sort-type="text">Input Type<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="nr-mode" data-queue-sort-type="text">NR Mode<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
             <th><button type="button" class="queue-sort-button" data-queue-sort-key="rows" data-queue-sort-type="number">Rows<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
             <th><button type="button" class="queue-sort-button" data-queue-sort-key="columns" data-queue-sort-type="number">Columns<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
             <th><button type="button" class="queue-sort-button" data-queue-sort-key="size" data-queue-sort-type="number">Size<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
@@ -228,6 +229,13 @@
               <div class="queue-dataset-path" data-queue-file-path>{{ dataset.stored_path }}</div>
             </td>
             <td data-label="Input Type" data-queue-kind data-queue-sort-value="{{ dataset.input_kind_label }}" data-queue-sort-cell="kind">{{ dataset.input_kind_label }}</td>
+            <td data-label="NR Mode" data-queue-nr-mode data-queue-sort-value="{{ dataset.nr_mode or '' }}" data-queue-sort-cell="nr-mode">
+              {% if dataset.nr_mode %}
+              <select class="queue-nr-mode-select" data-dataset-nr-mode-select data-dataset-id="{{ dataset.id }}" data-update-url="/workspace/datasets/{{ dataset.id }}/nr-mode" aria-label="NR Mode for {{ dataset.file_name }}">
+                {% for mode in nr_modes %}<option value="{{ mode }}"{% if dataset.nr_mode == mode %} selected{% endif %}>{{ mode }}</option>{% endfor %}
+              </select>
+              {% else %}—{% endif %}
+            </td>
             <td data-label="Rows" data-queue-rows data-queue-sort-value="{{ dataset.row_count or 0 }}" data-queue-sort-cell="rows">{{ '{:,}'.format(dataset.row_count or 0) }}</td>
             <td data-label="Columns" data-queue-columns data-queue-sort-value="{{ dataset.column_count or 0 }}" data-queue-sort-cell="columns">{{ '{:,}'.format(dataset.column_count or 0) }}</td>
             <td data-label="Size" data-queue-size data-queue-sort-value="{{ dataset.size_bytes }}" data-queue-sort-cell="size">{{ dataset.size_mb_label }}</td>
@@ -306,13 +314,13 @@
           {% else %}
           {% if not combined_tables %}
           <tr>
-            <td colspan="11"><article class="empty-state-inline">No datasets available.</article></td>
+            <td colspan="12"><article class="empty-state-inline">No datasets available.</article></td>
           </tr>
           {% endif %}
           {% endfor %}
           {% if combined_tables %}
           <tr class="combined-dataset-section-row" data-combined-dataset-structure-row>
-            <td colspan="11">
+            <td colspan="12">
               <div class="combined-dataset-section-copy">
                 <strong>Combined CDR tables</strong>
                 <p>Read-only query sources generated from all ready individual CDRs of the same type. They are created automatically during CDR processing or rebuilt with Recreate; they cannot be uploaded or imported as separate datasets.</p>
@@ -323,6 +331,7 @@
             <th scope="col">ID</th>
             <th scope="col">Dataset</th>
             <th scope="col">Input Type</th>
+            <th scope="col">NR Mode</th>
             <th scope="col">Rows</th>
             <th scope="col">Columns</th>
             <th scope="col">Size</th>
@@ -342,6 +351,7 @@
               <div class="queue-dataset-path">SQLite table: {{ combined.table_name }}</div>
             </td>
             <td data-label="Input Type">CDR-{{ combined.kind|title }} (combined)</td>
+            <td data-label="NR Mode">—</td>
             <td data-label="Rows" data-combined-dataset-rows>{{ '{:,}'.format(combined.row_count) }}</td>
             <td data-label="Columns" data-combined-dataset-columns>{{ '{:,}'.format(combined.column_count) }}</td>
             <td data-label="Size">—</td>
@@ -664,6 +674,16 @@
     return '';
   }
 
+  // Mirrors src/modules/nr_mode.py: SA only when the name explicitly says so.
+  function inferNrMode(fileName) {
+    const stem = String(fileName || '').replace(/\.[^.]+$/, '');
+    const tokens = stem.replace(/([a-z0-9])(?=[A-Z])/g, '$1 ').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    const compact = tokens.join('');
+    if (compact.includes('nonstandalone') || tokens.some((token) => /^(?:5g|g)?nsa$/.test(token))) return 'NSA';
+    if (compact.includes('standalone') || tokens.some((token) => /^(?:5g|g)?sa$/.test(token))) return 'SA';
+    return 'NSA';
+  }
+
   picker.addEventListener('change', () => {
     items.replaceChildren();
     const files = Array.from(picker.files || []);
@@ -690,6 +710,7 @@
     const refreshMappingChoices = () => {
       entries.forEach((entry) => {
         const isCdr = cdrTypes.has(entry.select.value);
+        entry.nrModeField.hidden = !isCdr;
         for (const [kind, field, mappingSelect] of entry.mappingSelectors) {
           const previous = mappingSelect.value;
           const choices = mappingChoices(kind, entry);
@@ -717,10 +738,20 @@
       select.add(placeholder);
       types.forEach(([value, text]) => select.add(new Option(text, value)));
       select.value = inferType(file.name);
+      const nrModeField = document.createElement('label');
+      nrModeField.className = 'upload-nr-mode-field';
+      nrModeField.textContent = 'NR Mode';
+      const nrModeSelect = document.createElement('select');
+      nrModeSelect.name = 'nr_modes';
+      nrModeSelect.setAttribute('aria-label', `NR Mode for ${file.name}`);
+      ['NSA', 'SA'].forEach((mode) => nrModeSelect.add(new Option(mode, mode)));
+      nrModeSelect.value = inferNrMode(file.name);
+      nrModeField.append(nrModeSelect);
+      nrModeField.hidden = !cdrTypes.has(select.value);
       const mappings = document.createElement('div');
       mappings.className = 'upload-vendor-mapping-selectors';
       mappings.hidden = !cdrTypes.has(select.value);
-      const entry = {index, file, select, mappings, mappingSelectors: []};
+      const entry = {index, file, select, nrModeField, mappings, mappingSelectors: []};
       const addMappingSelector = (kind, labelText, fieldName) => {
         const field = document.createElement('label');
         field.textContent = labelText;
@@ -735,7 +766,7 @@
       addMappingSelector('mapping_three', '3UK mapping', 'three_mapping_dataset_ids');
       addMappingSelector('mapping_region', 'Region mapping', 'region_mapping_dataset_ids');
       select.addEventListener('change', refreshMappingChoices);
-      item.append(name, select, mappings);
+      item.append(name, select, nrModeField, mappings);
       items.append(item);
       entries.push(entry);
     });

@@ -42,6 +42,7 @@ import httpx
 import pandas as pd
 from PIL import Image
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, status
+from pydantic import BaseModel
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -61,6 +62,7 @@ from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, HOVER_TARGET
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column, add_vfuk_gcid_column, apply_operator_mappings, ensure_fixed_cdr_fields, get_dataset_source_columns, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.geospatial import assign_regions, validate_region_mapping
+from src.modules.nr_mode import NR_MODES, dataset_nr_mode, infer_nr_mode, normalize_nr_mode
 from src.modules.repository import Repository, WORKSPACE_REGISTRY_TABLE, workspace_write_lock
 from src.modules.runtime_config import IGNORE_EVENT_TIME_FILTERING_ENV, env_flag, ignore_event_time_filtering
 from src.modules.query_builder import MAX_PREVIEW_ROWS, execute_query, iter_query_csv, query_column_values, validate_query
@@ -1361,7 +1363,7 @@ def materialize_workspace_combined_columns(
     stop_callback: Callable[[], None] | None = None,
 ) -> int:
     """Backfill every fixed, calculated and saved-template KPI column once per CDR."""
-    changed_kinds: set[str] = set()
+    changed_kinds: dict[str, set[str]] = {}
     updated_datasets = 0
     datasets = [
         row for row in task_repository.list_datasets()
@@ -1379,13 +1381,33 @@ def materialize_workspace_combined_columns(
             combined_reporting_required_columns(dimensions, kind, task_repository),
         )
         if changed:
-            changed_kinds.add(kind)
+            changed_kinds.setdefault(kind, set()).add(str(changed))
             updated_datasets += 1
         if progress_callback:
             progress_callback(position, len(datasets), f'Updated dataset {dataset["id"]} of {len(datasets)}')
-    for kind in changed_kinds:
-        task_repository.set_workspace_state(f'combined_reporting_updated_{kind}', now_iso())
+    for kind, changes in changed_kinds.items():
+        mark_combined_reporting_updated(task_repository, kind, rows_changed='rows' in changes)
     return updated_datasets
+
+
+def mark_combined_reporting_updated(task_repository: Repository, kind: str, *, rows_changed: bool) -> None:
+    """Record a combined-table change.
+
+    Only row changes alter the data behind prepared Dashboard selections, so
+    only they advance the revision used by Dashboard cache keys. Adding or
+    filling columns records a separate timestamp and keeps every prepared
+    Dashboard universe valid.
+    """
+    key = f'combined_reporting_updated_{kind}' if rows_changed else f'combined_reporting_columns_updated_{kind}'
+    task_repository.set_workspace_state(key, now_iso())
+
+
+def combined_reporting_updated_at(task_repository: Repository, kind: str) -> str:
+    """Return the latest row or column change time of a combined CDR table."""
+    return max(
+        str(task_repository.get_workspace_state(f'combined_reporting_updated_{kind}') or ''),
+        str(task_repository.get_workspace_state(f'combined_reporting_columns_updated_{kind}') or ''),
+    )
 
 
 def materialize_workspace_auto_fields_incrementally(
@@ -2992,6 +3014,8 @@ def serialize_dataset_row(row) -> dict[str, Any]:
     item['kpis_snapshot'] = parse_json_field(item.get('kpis_json'), {})
     item['status_label'] = STATUS_LABELS.get(item.get('status') or 'queued', 'Queued')
     item['input_kind_label'] = INPUT_KIND_LABELS.get(item.get('dataset_kind') or 'generic', 'Other')
+    item['nr_mode'] = dataset_nr_mode(item.get('dataset_kind'), item.get('nr_mode'), item.get('file_name'))
+    item['nr_mode_label'] = item['nr_mode'] or '—'
     item['progress'] = int(item.get('progress') or 0)
     started_at = parse_dataset_timestamp(item.get('processing_started_at'))
     finished_at = parse_dataset_timestamp(item.get('processed_at'))
@@ -4641,6 +4665,7 @@ def render_template(request: Request, template_name: str, context: dict[str, Any
         'app_name': __app_name__,
         'app_version': __version__,
         'app_release_date': __release_date__,
+        'nr_modes': NR_MODES,
         'asset_version': asset_version,
         'static_path': lambda asset_path: str(request.app.url_path_for('static', path=asset_path)),
         'active_workspace': active_workspace,
@@ -4826,7 +4851,7 @@ def workspace_combined_tables(
                 f'SELECT COUNT(*) AS count FROM {task_repository._quote_identifier(table_name)}',
             ).fetchone()['count']
             column_count = len(task_repository._table_columns(connection, table_name))
-            updated_at = task_repository.get_workspace_state(f'combined_reporting_updated_{kind}')
+            updated_at = combined_reporting_updated_at(task_repository, kind)
             if not updated_at:
                 dataset_dates = [
                     str(dataset['updated_at'] or dataset['uploaded_at'] or '')
@@ -11158,7 +11183,7 @@ def preview_combined_dataset(
         normalized_kind, preview_columns, {}, 0, 100,
     )
     preview_rows = _preview_rows(preview_frame)
-    updated_at = repository.get_workspace_state(f'combined_reporting_updated_{normalized_kind}') or ''
+    updated_at = combined_reporting_updated_at(repository, normalized_kind)
     total_row_count = repository.reporting_row_count(normalized_kind)
     dataset = {
         'id': f'combined-{normalized_kind}',
@@ -13876,6 +13901,7 @@ async def upload_dataset(
     vodafone_mapping_dataset_ids: Annotated[list[str] | None, Form()] = None,
     three_mapping_dataset_ids: Annotated[list[str] | None, Form()] = None,
     region_mapping_dataset_ids: Annotated[list[str] | None, Form()] = None,
+    nr_modes: Annotated[list[str] | None, Form()] = None,
     user: SessionUser = Depends(current_user),
 ) -> Response:
     if not dataset_files:
@@ -13924,6 +13950,15 @@ async def upload_dataset(
         raise HTTPException(status_code=422, detail='Choose a file type for every uploaded file.')
     if any(kind not in UPLOAD_DATASET_KINDS for kind in selected_kinds):
         raise HTTPException(status_code=422, detail='Unsupported dataset type selection.')
+    # One NR Mode per uploaded file; values for non-CDR files are ignored. A
+    # missing or blank value keeps the NR Mode suggested by the file name.
+    if nr_modes and len(nr_modes) != len(dataset_files):
+        raise HTTPException(status_code=422, detail='Choose one NR Mode value for every uploaded file.')
+    selected_nr_modes: list[str | None] = []
+    for value in nr_modes or [None] * len(dataset_files):
+        if str(value or '').strip() and normalize_nr_mode(value) is None:
+            raise HTTPException(status_code=422, detail='Unsupported NR Mode selection.')
+        selected_nr_modes.append(normalize_nr_mode(value))
 
     def parse_mapping_selection(values: list[str] | None, label: str) -> list[str | None]:
         if not values:
@@ -13978,7 +14013,13 @@ async def upload_dataset(
         dataset_id, created = repository.add_dataset(dataset_file.filename or destination.name, str(destination), user.username)
         selected_kind = selected_kinds[index] if selected_kinds else None
         if selected_kind:
-            repository.update_dataset_profile(dataset_id, dataset_kind=selected_kind)
+            repository.update_dataset_profile(
+                dataset_id, dataset_kind=selected_kind,
+                nr_mode=(
+                    selected_nr_modes[index] or infer_nr_mode(dataset_file.filename or destination.name)
+                    if selected_kind in CDR_DATASET_KINDS else None
+                ),
+            )
         uploaded_datasets.append({
             'index': index,
             'dataset_id': dataset_id,
@@ -14342,6 +14383,35 @@ def move_admin_dataset(
 
 
 @app.post('/dashboard/retry/{dataset_id}', include_in_schema=False)
+class DatasetNrModeUpdate(BaseModel):
+    nr_mode: str
+
+
+@app.post('/workspace/datasets/{dataset_id}/nr-mode')
+def update_dataset_nr_mode(
+    dataset_id: int, payload: DatasetNrModeUpdate, user: SessionUser = Depends(current_user),
+) -> JSONResponse:
+    """Correct the NR Mode of one CDR without reprocessing it."""
+    if active_workspace:
+        require_workspace_access(user, active_workspace.id)
+    dataset = repository.get_dataset(dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail='Dataset not found')
+    if str(dataset['dataset_kind'] or '').casefold() not in CDR_DATASET_KINDS:
+        raise HTTPException(status_code=400, detail='NR Mode is only available for CDR datasets.')
+    nr_mode = normalize_nr_mode(payload.nr_mode)
+    if nr_mode is None:
+        raise HTTPException(status_code=422, detail='Choose NSA or SA.')
+    previous = dataset_nr_mode(dataset['dataset_kind'], dataset['nr_mode'], dataset['file_name'])
+    if previous != nr_mode:
+        repository.update_dataset_profile(dataset_id, nr_mode=nr_mode)
+        repository.add_log(user.username, 'update_dataset_nr_mode', json.dumps({
+            'dataset_id': dataset_id, 'file': dataset['file_name'],
+            'previous_nr_mode': previous, 'nr_mode': nr_mode,
+        }))
+    return JSONResponse({'dataset_id': dataset_id, 'nr_mode': nr_mode})
+
+
 @app.post('/datasets-analysis/retry/{dataset_id}')
 def retry_dataset(
     dataset_id: int,

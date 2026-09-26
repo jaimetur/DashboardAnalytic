@@ -176,7 +176,11 @@ E2E Dashboard persistence has additional layers:
 
 When a workspace opens, the application compares its saved cache signature with the current application and every Dashboard cache-format version. A mismatch deletes obsolete chart models, manifests and selection metadata, then records the current signature. Current-version artifacts remain available. The Workspace **Clear cache** action performs the same derived-data cleanup on demand without deleting definitions, datasets, combined CDR tables, templates or generated jobs.
 
-There is no Dashboard warm-up queue. Data preparation starts only for an explicit open, refresh or export operation, and chart models are generated when the corresponding chart is viewed or included in a requested PPT. Listing or saving Dashboards and opening or clearing a workspace do not schedule preparation.
+Dashboard pre-caching (the automatic warm-up of each Dashboard's standard universes, described in [E2E Dashboards](e2e-dashboards.md#preparation-lifecycle-and-cache)) runs on a dedicated low-priority thread, separate from the shared background scheduler used by datasets and exports. It shares one Dashboard work slot with foreground preparations and exports, always yields to them, and prefers Dashboards open in a browser. Chart models are generated only when the corresponding chart is viewed or included in a requested PPT.
+
+The combined-table revision in these cache keys advances only when rows are inserted or rebuilt. Adding or filling columns (for example when another Dashboard or template needs a new field) records a separate timestamp and keeps every prepared universe valid.
+
+Manage Dashboards status checks read each universe manifest directly from its fingerprint-derived path and are reused until datasets, combined rows, auto-calculated fields, mappings, templates or manifests change. Only the most recently used Dashboard snapshots keep their pandas chart frames in memory (3 by default, configurable with `DASHBOARD_ANALYTIC_DASHBOARD_FRAME_CACHE_SNAPSHOTS`); older snapshots rebuild them from the combined tables on demand, which bounds memory use on smaller servers.
 
 ## Filtered dataset preview
 

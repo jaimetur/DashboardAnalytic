@@ -136,8 +136,12 @@
     const uploadedAt = Date.parse(row.uploaded_at || row.updated_at || row.processed_at || row.created_at || '');
     return Number.isFinite(uploadedAt) ? uploadedAt : Number(row.id) || 0;
   };
-  const latestDatasetsForScope = scope => Object.fromEntries(['data', 'voice', 'speech'].map(kind => [kind,
-    [...(config.datasets[kind] || [])]
+  // A Dashboard only uses CDRs of its own NR Mode (NSA or SA).
+  const dashboardNrMode = value => String(value?.technology || value?.template_technology || 'nsa').toUpperCase() === 'SA' ? 'SA' : 'NSA';
+  const datasetsForNrMode = (kind, nrMode) => (config.datasets?.[kind] || [])
+    .filter(row => !row.nr_mode || String(row.nr_mode).toUpperCase() === nrMode);
+  const latestDatasetsForScope = (scope, nrMode = 'NSA') => Object.fromEntries(['data', 'voice', 'speech'].map(kind => [kind,
+    [...datasetsForNrMode(kind, nrMode)]
       .sort((left, right) => datasetRecency(right) - datasetRecency(left) || Number(right.id) - Number(left.id))
       .slice(0, scope === 'multivendor' ? 1 : 2)
       .map(row => Number(row.id)),
@@ -170,7 +174,7 @@
       const saved = stored?.[id];
       if (!saved || !['single', 'multivendor'].includes(saved.scope) || !saved.datasets) return null;
       const datasets = Object.fromEntries(['data', 'voice', 'speech'].map(kind => {
-        const available = new Set((config.datasets?.[kind] || []).map(row => Number(row.id)));
+        const available = new Set(datasetsForNrMode(kind, dashboardNrMode(dashboards?.[id])).map(row => Number(row.id)));
         return [kind, (saved.datasets[kind] || []).map(Number).filter(datasetId => available.has(datasetId))];
       }));
       return {
@@ -191,7 +195,7 @@
     const canonical = canonicalDashboardDefinition(value);
     if (hasStoredUniverse(value)) return canonical;
     return {
-      ...canonical, scope: 'single', datasets: latestDatasetsForScope('single'), date_from: 'Oldest', date_to: 'Newest',
+      ...canonical, scope: 'single', datasets: latestDatasetsForScope('single', dashboardNrMode(canonical)), date_from: 'Oldest', date_to: 'Newest',
     };
   };
   const runtimeDashboardDefinition = (value, id = '') => {
@@ -345,8 +349,15 @@
     // Some reverse proxies can return a transient, non-JSON 501 while the
     // preparation worker route is being refreshed. A single retry is safe:
     // a 501 response means the POST was rejected before Dashboard processing.
-    if (method === 'POST' && path.startsWith('/prepare') && response.status === 501 && !signal?.aborted) {
+    if (method === 'POST' && path.startsWith('/prepare?') && response.status === 501 && !signal?.aborted) {
       await new Promise(resolve => window.setTimeout(resolve, 250));
+      response = await request();
+    }
+    // Read-only requests are retried after transient gateway errors, which a
+    // busy server behind a reverse proxy can return while it catches up.
+    const readOnly = method === 'GET' || path.startsWith('/statuses');
+    for (let attempt = 1; readOnly && [502, 503, 504].includes(response.status) && attempt <= 2 && !signal?.aborted; attempt += 1) {
+      await new Promise(resolve => window.setTimeout(resolve, 750 * attempt));
       response = await request();
     }
     const contentType = String(response.headers.get('content-type') || '').toLocaleLowerCase();
@@ -356,7 +367,11 @@
         throw new Error('Your session has expired. Please sign in again.');
       }
       if (!payload) {
-        throw new Error(`The Dashboard API returned an unexpected ${response.status} response. Please reload the page and try again.`);
+        const error = new Error([502, 503, 504].includes(response.status)
+          ? `The server did not answer in time (${response.status}). It may be busy with background work; please try again in a moment.`
+          : `The Dashboard API returned an unexpected ${response.status} response. Please reload the page and try again.`);
+        error.status = response.status;
+        throw error;
       }
       const error = new Error(typeof payload.detail === 'string' ? payload.detail : JSON.stringify(payload.detail));
       error.status = response.status;
@@ -367,7 +382,9 @@
   };
   const safe = fn => async (...args) => { try { await fn(...args); } catch (error) { if (error.name !== 'AbortError') { status(error.message); if (window.showInfoDialog) window.showInfoDialog(error.message, {title:'E2E Dashboards',tone:'error'}); } } };
   const bind = (id, fn) => $(id).addEventListener('click', safe(fn));
-  const dashboardIsReady = id => Boolean(id && !dashboardPreparationTokens.has(id) && dashboardStatuses.get(id)?.state === 'ready');
+  // Pre-caching never blocks an export: the export job pre-caches the chosen
+  // universe itself. Only a Dashboard without usable CDRs cannot be exported.
+  const dashboardCanExport = id => Boolean(id && !['data-needed', 'error'].includes(dashboardStatuses.get(id)?.state));
   const setActiveDashboardHeading = name => {
     const heading = $('ds-active-dashboard-heading');
     heading.replaceChildren(document.createTextNode(name ? 'Dashboard Filters: ' : 'Dashboard Filters'));
@@ -375,7 +392,7 @@
   };
   const syncDashboardPptActions = () => {
     document.querySelectorAll('[data-dashboard-ppt-id]').forEach(button => {
-      button.disabled = !dashboardIsReady(button.dataset.dashboardPptId);
+      button.disabled = !dashboardCanExport(button.dataset.dashboardPptId);
     });
     // Status polling runs every two seconds.  Keep immutable PPT snapshots
     // read-only during those refreshes instead of letting the normal ready
@@ -385,7 +402,7 @@
       $('ds-viewer-export-ppt').disabled = true;
       return;
     }
-    const activePptReady = dashboardIsReady(activeId) && Boolean(prepared?.slides?.length);
+    const activePptReady = dashboardCanExport(activeId) && !dashboardPreparationTokens.has(activeId) && Boolean(prepared?.slides?.length);
     $('ds-generate-ppt').disabled = !activePptReady;
     $('ds-viewer-export-ppt').disabled = !activePptReady;
   };
@@ -451,6 +468,33 @@
     }
     $('ds-preparing-detail').textContent = detail;
     $('ds-viewer-preparing-detail').textContent = detail;
+  };
+  const awaitBackgroundPreparation = async (preparationId, signal) => {
+    let missingPolls = 0;
+    for (;;) {
+      if (signal?.aborted) throw new DOMException('The Dashboard preparation was superseded.', 'AbortError');
+      let progress = null;
+      try {
+        progress = await api(`/preparation-progress/${encodeURIComponent(preparationId)}`, 'GET', undefined, signal);
+        missingPolls = 0;
+      } catch (error) {
+        if (error.name === 'AbortError') throw error;
+        // A task can briefly be unregistered between its worker finishing and
+        // its result being recorded. Give up only if it stays unknown.
+        if (error.status === 404 && ++missingPolls > 40) {
+          throw new Error('Dashboard preparation is no longer active. Please try again.');
+        }
+      }
+      if (progress?.status === 'completed' && progress.token) {
+        return api(`/prepared/${encodeURIComponent(progress.token)}`, 'GET', undefined, signal);
+      }
+      if (progress?.status === 'failed') {
+        const error = new Error(progress.detail || 'Dashboard preparation failed.');
+        error.status = progress.code;
+        throw error;
+      }
+      await new Promise(resolve => window.setTimeout(resolve, 500));
+    }
   };
   const monitorPreparationProgress = token => {
     clearTimeout(preparationProgressTimer);
@@ -710,7 +754,9 @@
     };
     const renderChoices = (restoreDatasets = false) => {
       const scope = scopeControl.value;
-      const defaultDatasets = latestDatasetsForScope(scope);
+      const defaultDatasets = latestDatasetsForScope(scope, dashboardNrMode(dashboard));
+      // Only CDRs of the Dashboard's NR Mode are listed; say so in the title.
+      $('ds-ppt-cdr-title').textContent = `CDR datasets (${dashboardNrMode(dashboard)})`;
       $('ds-ppt-dataset-copy').textContent = scope === 'multivendor'
         ? 'The newest CDR of each type is selected by default. Choose the CDRs to include in this vendor comparison.'
         : 'The two newest CDRs of each type are selected by default. Choose the CDRs to include in this operator comparison.';
@@ -721,11 +767,11 @@
         const options = node('div', undefined, 'ds-multivendor-options');
         const rememberedIds = restoreDatasets && Array.isArray(remembered?.datasets?.[kind])
           ? remembered.datasets[kind].map(Number) : defaultDatasets[kind].map(Number);
-        const rows = [...(config.datasets[kind] || [])]
+        const rows = [...datasetsForNrMode(kind, dashboardNrMode(dashboard))]
           .sort((left, right) => datasetRecency(right) - datasetRecency(left) || Number(right.id) - Number(left.id));
         const selected = new Set(rememberedIds.some(id => rows.some(row => Number(row.id) === id))
           ? rememberedIds : defaultDatasets[kind].map(Number));
-        if (!rows.length) options.append(node('p', 'No ready CDRs are available.', 'form-note'));
+        if (!rows.length) options.append(node('p', `No ready ${dashboardNrMode(dashboard)} CDRs are available.`, 'form-note'));
         for (const row of rows) {
           const label = node('label', undefined, 'ds-multivendor-option');
           const input = document.createElement('input'); input.type = 'checkbox'; input.value = String(row.id); input.dataset.kind = kind; input.checked = selected.has(Number(row.id));
@@ -939,7 +985,7 @@
       technologyCell.append(technologySelect); templateCell.append(templateSelect);
       row.append(nameCell, technologyCell, templateCell);
       const statusCell = node('td'); statusCell.dataset.label = 'Status';
-      const dashboardStatus = dashboardStatuses.get(id) || {state: 'checking', label: 'Checking'};
+      const dashboardStatus = dashboardStatuses.get(id) || {state: 'checking', label: 'Checking Cache'};
       const statusBadge = node('span', dashboardStatus.label, `ds-dashboard-status ds-dashboard-status-${dashboardStatus.state}`);
       statusBadge.dataset.dashboardStatusId = id;
       statusBadge.title = dashboardStatus.detail || dashboardStatus.label;
@@ -995,7 +1041,7 @@
   }
   const renderDashboardStatuses = () => {
     document.querySelectorAll('[data-dashboard-status-id]').forEach(badge => {
-      const value = dashboardStatuses.get(badge.dataset.dashboardStatusId) || {state: 'checking', label: 'Checking'};
+      const value = dashboardStatuses.get(badge.dataset.dashboardStatusId) || {state: 'checking', label: 'Checking Cache'};
       badge.className = `ds-dashboard-status ds-dashboard-status-${value.state}`;
       badge.textContent = value.label;
       badge.title = value.detail || value.label;
@@ -1443,7 +1489,9 @@
       const statusDefinitions = Object.fromEntries(Object.entries(dashboards).map(
         ([id, item]) => [id, runtimeDashboardDefinition(item, id)],
       ));
-      const payload = await api('/statuses', 'POST', statusDefinitions);
+      // The open Dashboard is reported so its universes are pre-cached first.
+      const statusPath = activeId ? `/statuses?active_dashboard_id=${encodeURIComponent(activeId)}` : '/statuses';
+      const payload = await api(statusPath, 'POST', statusDefinitions);
       for (const [id, value] of Object.entries(payload || {})) {
         const activePrepared = id === activeId && Boolean(prepared?.slides?.length) && !dashboardNeedsRefresh();
         if (activePrepared) dashboardStatuses.set(id, {state: 'ready', label: 'Ready'});
@@ -1581,7 +1629,8 @@
   }
   function sources() {
     const host = $('ds-sources'); host.replaceChildren();
-    for (const kind of ['data','voice','speech']) host.append(selectControl(`CDR ${kind[0].toUpperCase()+kind.slice(1)}`, config.datasets[kind].map(row => [String(row.id), `${row.file_name} · ${row.row_count} rows`]), definition.datasets[kind] || [], values => {
+    const nrMode = dashboardNrMode(definition);
+    for (const kind of ['data','voice','speech']) host.append(selectControl(`CDR ${kind[0].toUpperCase()+kind.slice(1)} (${nrMode})`, datasetsForNrMode(kind, nrMode).map(row => [String(row.id), `${row.file_name} · ${row.row_count} rows`]), definition.datasets[kind] || [], values => {
       resetAutomaticDatesForDatasetChange();
       definition.datasets[kind] = values.map(Number);
     }, true, () => sourceState(kind)));
@@ -1868,14 +1917,12 @@
       if (activeId) params.set('dashboard_id', activeId);
       if (!needsDataPreparation) params.set('rendering_only', '1');
       params.set('preparation_id', preparationToken);
-      // Dispatch the main request before polling its task id. This prevents a
-      // progress request from occupying the connection while the preparation
-      // request is still waiting in the browser's network queue.
-      const preparationRequest = api(
-        `/prepare${params.size ? `?${params}` : ''}`,'POST',definition,controller.signal,
-      );
+      // The server prepares in the background and answers immediately, so a
+      // long preparation never outlives a reverse-proxy response timeout.
+      params.set('background', '1');
+      await api(`/prepare?${params}`, 'POST', definition, controller.signal);
       monitorPreparationProgress(preparationToken);
-      const payload = await preparationRequest;
+      const payload = await awaitBackgroundPreparation(preparationToken, controller.signal);
       if (current !== sequence) return;
       applyPreparedPayload(payload);
       window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));
@@ -1969,7 +2016,7 @@
     if (!selected) throw new Error('Choose a template for the selected NR Mode.');
     const name = $('ds-name').value.trim() || selected.name;
     $('ds-name').value = name;
-    const item = {name,template_technology:technology,template:selected.name,technology,scope:'single',datasets:latestDatasetsForScope('single'),filters:{},custom_fields:[],date_from:'Oldest',date_to:'Newest'};
+    const item = {name,template_technology:technology,template:selected.name,technology,scope:'single',datasets:latestDatasetsForScope('single', dashboardNrMode({technology})),filters:{},custom_fields:[],date_from:'Oldest',date_to:'Newest'};
     status(`Creating “${item.name}”…`); $('ds-create').disabled = true;
     try { const id = dashboardId(), result = await api(`/${id}`,'PUT',item); dashboards[id] = result.definition; await openDashboard(id); }
     finally { $('ds-create').disabled = !$('ds-template').options.length; }
@@ -2016,7 +2063,16 @@
   $('ds-name').oninput = () => { if (definition) { definition.name = $('ds-name').value; updateDirtyState(); } };
   $('ds-nr-mode').onchange = () => {
     const selected = setNrMode($('ds-nr-mode').value);
-    if (definition && selected) { definition.template_technology = definition.technology = $('ds-nr-mode').value; definition.template = selected.name; changed(); }
+    if (definition && selected) {
+      const previousNrMode = dashboardNrMode(definition);
+      definition.template_technology = definition.technology = $('ds-nr-mode').value; definition.template = selected.name;
+      // CDRs of the previous NR Mode no longer belong to this Dashboard.
+      if (dashboardNrMode(definition) !== previousNrMode) {
+        definition.datasets = latestDatasetsForScope(definition.scope || 'single', dashboardNrMode(definition));
+        sources();
+      }
+      changed();
+    }
     else syncNewDashboardNameFromTemplate();
   };
   $('ds-template').onchange = () => {
@@ -2027,7 +2083,7 @@
     if (!definition) return;
     const selectedScope = $('ds-scope').value;
     if (selectedScope !== definition.scope) {
-      definition.datasets = latestDatasetsForScope(selectedScope);
+      definition.datasets = latestDatasetsForScope(selectedScope, dashboardNrMode(definition));
       definition.date_from = 'Oldest';
       definition.date_to = 'Newest';
     }

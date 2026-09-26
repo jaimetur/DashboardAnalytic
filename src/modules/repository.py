@@ -13,12 +13,13 @@ import logging
 from pathlib import Path
 from threading import Lock, RLock
 from time import monotonic
-from typing import Any, Iterable, Iterator
+from typing import Any, Iterable, Iterator, Literal
 
 import pandas as pd
 
 from src.modules.auth import hash_password
 from src.modules.column_names import MAIN_CDR_FIELDS, clean_column_name, column_identity
+from src.modules.nr_mode import NR_MODE_DATASET_KINDS, infer_nr_mode, normalize_nr_mode
 from src.modules.runtime_config import ignore_event_time_filtering
 
 
@@ -156,6 +157,7 @@ CREATE TABLE IF NOT EXISTS dataset_profiles (
     region_mapping_applied INTEGER NOT NULL DEFAULT 0,
     region_mapping_dataset_id INTEGER,
     dataset_kind TEXT,
+    nr_mode TEXT,
     row_count INTEGER,
     column_count INTEGER,
     default_metric TEXT,
@@ -794,6 +796,37 @@ class Repository:
             conn.execute("ALTER TABLE dataset_profiles ADD COLUMN processing_options_json TEXT NOT NULL DEFAULT '{}'")
         if 'processing_step' not in existing_columns:
             conn.execute("ALTER TABLE dataset_profiles ADD COLUMN processing_step TEXT NOT NULL DEFAULT ''")
+        if 'nr_mode' not in existing_columns:
+            conn.execute("ALTER TABLE dataset_profiles ADD COLUMN nr_mode TEXT")
+        self._backfill_dataset_nr_modes(conn)
+
+    @staticmethod
+    def _backfill_dataset_nr_modes(conn: sqlite3.Connection, dataset_id: int | None = None) -> None:
+        """Suggest a missing CDR NR Mode from its file name and clear it for other files."""
+        kinds = tuple(sorted(NR_MODE_DATASET_KINDS))
+        placeholders = ', '.join('?' for _ in kinds)
+        scope = ' AND d.id = ?' if dataset_id is not None else ''
+        scope_parameters = (dataset_id,) if dataset_id is not None else ()
+        rows = conn.execute(
+            f"""
+            SELECT d.id, d.file_name FROM datasets d
+            JOIN dataset_profiles p ON p.dataset_id = d.id
+            WHERE LOWER(COALESCE(p.dataset_kind, '')) IN ({placeholders})
+              AND COALESCE(p.nr_mode, '') NOT IN ('NSA', 'SA'){scope}
+            """,
+            (*kinds, *scope_parameters),
+        ).fetchall()
+        conn.executemany(
+            'UPDATE dataset_profiles SET nr_mode = ? WHERE dataset_id = ?',
+            [(infer_nr_mode(row['file_name']), int(row['id'])) for row in rows],
+        )
+        conn.execute(
+            f"""
+            UPDATE dataset_profiles SET nr_mode = NULL
+            WHERE nr_mode IS NOT NULL AND LOWER(COALESCE(dataset_kind, '')) NOT IN ({placeholders})
+            """ + (' AND dataset_id = ?' if dataset_id is not None else ''),
+            (*kinds, *scope_parameters),
+        )
 
     def replace_cdr_catalogue(
         self, dataset_id: int, *, vendors: Iterable[str], regions: Iterable[str], cities: Iterable[str],
@@ -2439,8 +2472,15 @@ class Repository:
                 ).fetchone()
             return int(row['count'] or 0)
 
-    def copy_dataset_rows_to_reporting(self, dataset_id: int, dataset_kind: str, columns: list[str] | None = None) -> bool:
-        """Backfill a shared table entirely inside SQLite, without pandas RAM use."""
+    def copy_dataset_rows_to_reporting(
+        self, dataset_id: int, dataset_kind: str, columns: list[str] | None = None,
+    ) -> Literal['rows', 'columns', False]:
+        """Backfill a shared table entirely inside SQLite, without pandas RAM use.
+
+        Returns ``'rows'`` when the dataset's rows were (re)inserted,
+        ``'columns'`` when only newly requested or empty columns were filled on
+        existing rows, and ``False`` when nothing changed.
+        """
         source_table = self.dataset_rows_table_name(dataset_id)
         target_table = self.reporting_rows_table_name(dataset_kind)
         with self.connection() as conn:
@@ -2526,7 +2566,7 @@ class Repository:
                         (dataset_id,),
                     )
                 self._create_reporting_row_indexes(conn, target_table, target_columns)
-                return True
+                return 'columns'
             conn.execute('BEGIN IMMEDIATE')
             conn.execute(f"DELETE FROM {quoted_target} WHERE dataset_id = ?", (dataset_id,))
             insert_columns = ['dataset_id', 'source_row_id', *(column for column in target_columns if column not in {'dataset_id', 'source_row_id'})]
@@ -2542,7 +2582,7 @@ class Repository:
                 (dataset_id,),
             )
             self._create_reporting_row_indexes(conn, target_table, target_columns)
-            return True
+            return 'rows'
 
     def load_reporting_rows(self, dataset_kind: str, dataset_ids: list[int], columns: list[str]) -> pd.DataFrame:
         if not dataset_ids:
@@ -2851,6 +2891,8 @@ class Repository:
             and fields['progress'] is not None and int(fields['progress']) < 100
         )
         completing = fields.get('status') == 'ready'
+        if 'nr_mode' in fields:
+            fields['nr_mode'] = normalize_nr_mode(fields['nr_mode'])
         assignments = ', '.join(f"{column} = ?" for column in fields)
         values = list(fields.values())
         assignments += ', updated_at = ?'
@@ -2862,6 +2904,9 @@ class Repository:
                 + (" AND status <> 'stopped'" if completing else ''),
                 (*values, dataset_id),
             )
+            if 'dataset_kind' in fields or 'nr_mode' in fields:
+                # Every CDR has an NR Mode; other dataset types never do.
+                self._backfill_dataset_nr_modes(conn, dataset_id)
 
     def replace_dataset_source_columns(self, dataset_id: int, columns: Iterable[object]) -> None:
         """Persist the physical source headers captured during dataset ingestion."""
@@ -2893,7 +2938,7 @@ class Repository:
             return conn.execute(
                 """
                 SELECT d.id, d.file_name, d.stored_path, d.uploaded_by, d.uploaded_at,
-                       p.status, p.progress, p.processing_step, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.region_mapping_applied, p.region_mapping_dataset_id, p.dataset_kind, p.row_count, p.column_count,
+                       p.status, p.progress, p.processing_step, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.region_mapping_applied, p.region_mapping_dataset_id, p.dataset_kind, p.nr_mode, p.row_count, p.column_count,
                        p.default_metric, p.default_aggregation, p.available_metrics_json,
                        p.available_aggregations_json, p.filter_options_json, p.summary_json,
                        p.kpis_json, p.last_error, p.processing_started_at, p.processed_at,
@@ -2911,7 +2956,7 @@ class Repository:
                 conn.execute(
                     """
                     SELECT d.id, d.file_name, d.stored_path, d.uploaded_by, d.uploaded_at,
-                           p.status, p.progress, p.processing_step, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.region_mapping_applied, p.region_mapping_dataset_id, p.dataset_kind, p.row_count, p.column_count,
+                           p.status, p.progress, p.processing_step, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.region_mapping_applied, p.region_mapping_dataset_id, p.dataset_kind, p.nr_mode, p.row_count, p.column_count,
                            p.default_metric, p.default_aggregation, p.available_metrics_json,
                            p.available_aggregations_json, p.filter_options_json, p.summary_json,
                            p.kpis_json, p.last_error, p.processing_started_at, p.processed_at,

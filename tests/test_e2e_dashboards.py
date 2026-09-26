@@ -146,7 +146,7 @@ def test_dashboard_discard_restores_saved_filters_and_universe_before_navigation
 def test_dashboard_prepare_retries_one_transient_proxy_501_response():
     script = (Path(__file__).parents[1] / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
 
-    assert "path.startsWith('/prepare') && response.status === 501" in script
+    assert "path.startsWith('/prepare?') && response.status === 501" in script
     assert "await new Promise(resolve => window.setTimeout(resolve, 250));" in script
 
 
@@ -185,7 +185,7 @@ def test_auto_calculated_field_editor_uses_wide_content_aware_dialog_geometry():
     assert '.calculated-dimension-field-suggestions { position: fixed;' in stylesheet
     assert script.count('updateSaveActions();\n        });\n        moveDown.addEventListener') == 2
     assert ".auto-calculated-field-job:not([data-materialization-job-key])" in script
-    assert "if (status === 'ready') return 100;" in script
+    assert "if (!['processing', 'failed', 'stopped'].includes(status)) return 100;" in script
     assert '.calculated-dimension-order-actions { display: grid;' in stylesheet
     assert 'body: JSON.stringify({dimensions: next, renames, materialize}),' in script
     assert 'body: JSON.stringify({dimensions: calculatedDimensions, renames, materialize}),' in script
@@ -197,9 +197,13 @@ def test_dashboard_warmup_retries_contention_and_compact_panel_headers_stay_alig
     app_stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/app.css').read_text(encoding='utf-8')
     dashboard_stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
 
-    assert 'dashboard_warmup_pending: dict[tuple[str, str], tuple[dict, str]] = {}' in dashboard_module
-    assert 'def retry_later() -> None:' in dashboard_module
-    assert 'core.submit_background_task(delayed_retry)' in dashboard_module
+    # Pre-caching runs on its own thread and pauses for foreground work instead
+    # of re-submitting itself to the shared application scheduler.
+    assert 'dashboard_warmup_condition = Condition(lock)' in dashboard_module
+    assert "Thread(target=warmup_worker, name='dashboard-cache-warmup', daemon=True)" in dashboard_module
+    assert 'def foreground_dashboard_work(workspace: str):' in dashboard_module
+    assert 'core.submit_background_task(delayed_retry)' not in dashboard_module
+    assert 'core.submit_background_task(run)' not in dashboard_module
     assert '.collapsible-summary .collapse-chip {' in app_stylesheet
     assert 'position: absolute; top: .7rem; right: .75rem;' in app_stylesheet
     assert '.report-charts-panel .report-charts-chart-count .pill {' in app_stylesheet
@@ -394,9 +398,9 @@ def test_dashboard_all_values_expands_when_saved_universe_gains_a_new_value(clie
     assert prepared.json()['rows']['data'] == 4
 
 
-def test_dashboard_background_warmup_prepares_the_four_automatic_date_universes(client):
+def test_dashboard_background_warmup_prepares_the_five_automatic_date_universes(client):
     payload = setup_dashboard(client)
-    for index in (2, 3):
+    for index in (2, 3, 4, 5):
         response = client.post('/datasets-analysis/upload', data={'dataset_kinds': 'data'}, files={
             'dataset_files': (
                 f'sample-{index}.csv',
@@ -405,7 +409,17 @@ def test_dashboard_background_warmup_prepares_the_four_automatic_date_universes(
             ),
         })
         assert response.status_code == 200
-    dashboard_id = 'four-universes'
+    # A CDR of the other NR Mode is never part of an NSA Dashboard universe.
+    response = client.post('/datasets-analysis/upload', data={'dataset_kinds': 'data'}, files={
+        'dataset_files': (
+            'sample_SA.csv',
+            BytesIO(b'Operator,City,Mean_Data_Rate,Test_Name,Test_Start_Time\nA,London,9,HTTP DL,2026-09-09\n'),
+            'text/csv',
+        ),
+    })
+    assert response.status_code == 200
+    assert core.repository.get_dataset(6)['nr_mode'] == 'SA'
+    dashboard_id = 'five-universes'
     assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
 
     deadline = time.monotonic() + 15
@@ -415,7 +429,7 @@ def test_dashboard_background_warmup_prepares_the_four_automatic_date_universes(
         if dashboard_status['state'] == 'ready':
             break
         assert dashboard_status['state'] == 'loading-data'
-        assert dashboard_status['label'].startswith('Preparing ')
+        assert dashboard_status['label'].startswith('Pre-Caching Universe ')
         time.sleep(0.05)
 
     assert dashboard_status == {'state': 'ready', 'label': 'Ready'}
@@ -425,16 +439,17 @@ def test_dashboard_background_warmup_prepares_the_four_automatic_date_universes(
     ]
     definitions = [manifest['definition'] for manifest in manifests if manifest.get('dashboard_id') == dashboard_id]
     assert {tuple(definition['datasets']['data']) for definition in definitions} == {
-        (3, 2, 1), (3,), (3, 2), (3, 1),
+        (5, 4, 3, 2, 1), (5,), (5, 4), (5, 4, 3), (5, 4, 3, 2),
     }
     assert {
         tuple(definition['datasets']['data']): (definition['date_from'], definition['date_to'])
         for definition in definitions
     } == {
-        (3, 2, 1): ('2026-09-01', '2026-09-03'),
-        (3,): ('2026-09-03', '2026-09-03'),
-        (3, 2): ('2026-09-02', '2026-09-03'),
-        (3, 1): ('2026-09-01', '2026-09-03'),
+        (5, 4, 3, 2, 1): ('2026-09-01', '2026-09-05'),
+        (5,): ('2026-09-05', '2026-09-05'),
+        (5, 4): ('2026-09-04', '2026-09-05'),
+        (5, 4, 3): ('2026-09-03', '2026-09-05'),
+        (5, 4, 3, 2): ('2026-09-02', '2026-09-05'),
     }
 
 
@@ -465,8 +480,25 @@ def test_dashboard_template_change_preserves_saved_universe_and_filters(client):
     assert changed.json()['invalidated'] is True
     assert definition_payload['technology'] == definition_payload['template_technology'] == 'sa'
     assert definition_payload['template'] == 'Dashboard SA test'
-    for field in ('scope', 'datasets', 'filters', 'custom_fields', 'hidden_filters', 'date_from', 'date_to', 'slide_comments'):
+    for field in ('scope', 'filters', 'custom_fields', 'hidden_filters', 'date_from', 'date_to', 'slide_comments'):
         assert definition_payload[field] == saved_before_change[field]
+    # The NSA CDR does not belong to an SA Dashboard, and no SA CDR exists yet.
+    assert definition_payload['datasets'] == {'data': [], 'voice': [], 'speech': []}
+
+    core.repository.add_report_template('sa', 'Dashboard SA copy', core.repository.report_template_content(
+        'nsa', 'Dashboard test',
+    ), is_default=False)
+    core.repository.update_dataset_profile(1, nr_mode='SA')
+    reselected = client.patch('/api/e2e-dashboards/change-template/template', json={
+        'technology': 'sa', 'template': 'Dashboard SA test',
+    }).json()['definition']
+    assert reselected['datasets'] == {'data': [], 'voice': [], 'speech': []}
+    client.put('/api/e2e-dashboards/change-template', json={**reselected, 'datasets': {'data': [1], 'voice': [], 'speech': []}})
+    same_mode = client.patch('/api/e2e-dashboards/change-template/template', json={
+        'technology': 'sa', 'template': 'Dashboard SA copy',
+    }).json()['definition']
+    # Changing only the template keeps the saved universe.
+    assert same_mode['datasets'] == {'data': [1], 'voice': [], 'speech': []}
 
 
 def test_dashboard_library_ppt_scope_builds_its_automatic_dataset_universe(client):
@@ -1455,7 +1487,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "if (!hasUnappliedUniverseChanges()) return;" in dashboard_script
     assert "bind('ds-reload-universe', () => {" in dashboard_script
     assert "copyDefinitionFields(definition, savedDashboardDefinition(), universeDefinitionFields);" in dashboard_script
-    assert "`/prepare${params.size ? `?${params}` : ''}`,'POST',definition,controller.signal," in dashboard_script
+    assert "await api(`/prepare?${params}`, 'POST', definition, controller.signal);" in dashboard_script
     assert "window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));" in dashboard_script
     assert "title: 'Unsaved Dashboard filters'" in dashboard_script
     assert "confirmLabel: 'Save Filters'" in dashboard_script
@@ -1481,7 +1513,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "view.dataset.dashboardViewId = id;" in dashboard_script
     assert 'button.disabled = false;' in dashboard_script
     assert "const setViewEnabled = enabled => { $('ds-view').disabled = !definition; syncDashboardViewActions(); syncDashboardPptActions(); };" in dashboard_script
-    assert "const payload = await api('/statuses', 'POST', statusDefinitions);" in dashboard_script
+    assert "const payload = await api(statusPath, 'POST', statusDefinitions);" in dashboard_script
     assert "window.setInterval(refreshDashboardStatuses, 2000);" in dashboard_script
     assert "const dashboardName = String(task.dashboard_name || '');" in app_script
     assert "? `Dashboard “${dashboardName}”: ${String(task.label || 'Background task')}`" in app_script
@@ -1540,11 +1572,11 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "function resetAutomaticDatesForDatasetChange()" in dashboard_script
     assert "definition[key] = automaticValue;" in dashboard_script
     assert "input.value = dateInputDisplayValue(key, automaticValue);" in dashboard_script
-    assert "const latestDatasetsForScope = scope =>" in dashboard_script
+    assert "const latestDatasetsForScope = (scope, nrMode = 'NSA') =>" in dashboard_script
     assert ".slice(0, scope === 'multivendor' ? 1 : 2)" in dashboard_script
     assert "datasetRecency(right) - datasetRecency(left)" in dashboard_script
     assert "if (selectedScope !== definition.scope)" in dashboard_script
-    assert "definition.datasets = latestDatasetsForScope(selectedScope);" in dashboard_script
+    assert "definition.datasets = latestDatasetsForScope(selectedScope, dashboardNrMode(definition));" in dashboard_script
     assert "chooseScopeDatasets" not in dashboard_script
     assert 'async function restorePrepared(id) {' in dashboard_script
     assert 'const preparedPayloads = new Map();' in dashboard_script
@@ -1569,7 +1601,9 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "emitPreparationStatus(payload.status || 'processing', payload.detail, token, queued ? null : payload.progress);" in dashboard_script
     assert 'api(`/preparation-progress/${encodeURIComponent(token)}`)' in dashboard_script
     assert 'monitorPreparationProgress(preparationToken);' in dashboard_script
-    assert dashboard_script.index('const preparationRequest = api(') < dashboard_script.index('monitorPreparationProgress(preparationToken);')
+    # The preparation is registered (202) before its progress is polled.
+    assert dashboard_script.index("await api(`/prepare?${params}`, 'POST', definition, controller.signal);") < dashboard_script.index('monitorPreparationProgress(preparationToken);')
+    assert 'const payload = await awaitBackgroundPreparation(preparationToken, controller.signal);' in dashboard_script
     assert "dashboard_work_gate.acquire(timeout=0.2)" in dashboard_module
     assert "status(''); await prepare();" in dashboard_script
     assert "setPreparationState('preparing', needsDataPreparation ? 'data' : 'rendering');" in dashboard_script
@@ -1793,7 +1827,7 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypa
     assert core.repository.get_dataset(1)['status'] == 'ready'
     initial_status = client.get('/api/e2e-dashboards/statuses').json()[dashboard_id]
     assert initial_status['state'] in {'loading-data', 'ready'}
-    assert initial_status['label'] == 'Ready' or initial_status['label'].startswith('Preparing ')
+    assert initial_status['label'] == 'Ready' or initial_status['label'].startswith('Pre-Caching Universe ')
 
     with core.repository.connection() as connection:
         connection.execute('UPDATE dataset_profiles SET vendor_mapping_applied = 1')
@@ -2103,7 +2137,7 @@ def test_saving_dashboard_prepares_data_in_background_without_rendering_charts(c
     assert client.get(f'/api/e2e-dashboards/prefetched/{dashboard_id}').status_code == 409
     saved_status = client.get('/api/e2e-dashboards/statuses').json()[dashboard_id]
     assert saved_status['state'] in {'loading-data', 'ready'}
-    assert saved_status['label'] == 'Ready' or saved_status['label'].startswith('Preparing ')
+    assert saved_status['label'] == 'Ready' or saved_status['label'].startswith('Pre-Caching Universe ')
 
 
 def test_direct_dashboard_preparation_separates_queue_and_execution_timestamps(client, monkeypatch):
@@ -2488,6 +2522,9 @@ def test_dashboard_sql_selection_leaves_nr_mode_to_explicit_user_filters(client)
     assert nsa['rows']['voice'] == 4
     assert nsa['universe_rows']['voice'] == 4
     payload['technology'] = 'sa'
+    # An SA Dashboard only uses SA CDRs, but never filters rows by RAT.
+    assert client.post('/api/e2e-dashboards/prepare', json=payload).status_code == 400
+    core.repository.update_dataset_profile(1, nr_mode='SA')
     sa = client.post('/api/e2e-dashboards/prepare', json=payload).json()
     assert sa['rows']['voice'] == 4
     assert sa['universe_rows']['voice'] == 4
@@ -2659,3 +2696,39 @@ def test_dashboard_is_available_to_workspace_users(client):
     client.post('/login', data={'username': 'demo', 'password': 'demo123'})
     assert client.get('/e2e-dashboards').status_code == 200
     assert 'href="/e2e-dashboards"' in client.get('/datasets-analysis').text
+
+
+def test_dashboard_preparation_can_run_in_the_background(client):
+    payload = setup_dashboard(client)
+
+    queued = client.post(
+        '/api/e2e-dashboards/prepare?background=1&preparation_id=background-test', json=payload,
+    )
+
+    assert queued.status_code == 202
+    assert queued.json() == {'preparation_id': 'background-test', 'status': 'queued'}
+    deadline = time.monotonic() + 15
+    progress = {}
+    while time.monotonic() < deadline:
+        response = client.get('/api/e2e-dashboards/preparation-progress/background-test')
+        if response.status_code == 200:
+            progress = response.json()
+            if progress.get('status') in {'completed', 'failed'}:
+                break
+        time.sleep(0.05)
+    assert progress['status'] == 'completed', progress
+    prepared = client.get(f"/api/e2e-dashboards/prepared/{progress['token']}")
+    assert prepared.status_code == 200
+    assert prepared.json()['rows']['data'] == 3
+
+
+def test_adding_combined_columns_keeps_prepared_dashboard_caches_valid(client):
+    setup_dashboard(client)
+    before = core.repository.get_workspace_state('combined_reporting_updated_data')
+
+    core.mark_combined_reporting_updated(core.repository, 'data', rows_changed=False)
+
+    assert core.repository.get_workspace_state('combined_reporting_updated_data') == before
+    assert core.repository.get_workspace_state('combined_reporting_columns_updated_data')
+    core.mark_combined_reporting_updated(core.repository, 'data', rows_changed=True)
+    assert core.repository.get_workspace_state('combined_reporting_updated_data') != before

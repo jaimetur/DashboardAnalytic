@@ -1346,7 +1346,11 @@ body[data-embedded-template-editor] .slides-templates-editor-table-wrap .form-ac
 .upload-type-list[hidden] { display: none; }
 .upload-type-title { margin: 0; color: var(--brand-2); font-weight: 700; }
 [data-upload-type-items] { display: grid; gap: 0.65rem; margin-top: 0.35rem; }
-.upload-type-item { display: grid; grid-template-columns: minmax(0, 1fr) minmax(190px, 0.62fr) minmax(250px, 0.95fr); gap: 0.65rem; align-items: center; color: var(--ink); }
+.upload-type-item { display: grid; grid-template-columns: minmax(0, 1fr) minmax(190px, 0.62fr) minmax(86px, auto) minmax(250px, 0.95fr); gap: 0.65rem; align-items: center; color: var(--ink); }
+.upload-nr-mode-field { display: grid; gap: 0.2rem; color: var(--brand-2); font-size: 0.72rem; font-weight: 700; }
+/* Keep the grid slot when a non-CDR file hides its NR Mode selector. */
+.upload-nr-mode-field[hidden] { display: grid; visibility: hidden; }
+.upload-nr-mode-field select { min-width: 0; padding: 0.48rem 0.55rem; border-color: rgba(11, 122, 117, 0.28); background: rgba(255,255,255,0.94); color: #10314a; font-size: 0.76rem; font-weight: 700; }
 .upload-type-item > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .upload-vendor-mapping-selectors { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.45rem; }
 .upload-vendor-mapping-selectors[hidden] { display: none; }
@@ -2016,16 +2020,18 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .admin-dataset-actions .danger-button { font-size: 0 !important; }
 .active-row { background: rgba(11, 122, 117, 0.06); }
 .queue-table th:nth-child(1), .queue-table td:nth-child(1) { width: 60px; }
-.queue-table th:nth-child(2), .queue-table td:nth-child(2) { width: 360px; min-width: 360px; max-width: 360px; overflow-wrap: anywhere; }
-.queue-table th:nth-child(8), .queue-table td:nth-child(8) { width: 210px; }
-.queue-table th:nth-child(9), .queue-table td:nth-child(9),
-.queue-table th:nth-child(10), .queue-table td:nth-child(10) { width: 116px; }
+.queue-table th:nth-child(2), .queue-table td:nth-child(2) { width: 290px; min-width: 290px; max-width: 290px; overflow-wrap: anywhere; }
+.queue-table th:nth-child(4), .queue-table td:nth-child(4) { width: 84px; }
+.queue-table th:nth-child(9), .queue-table td:nth-child(9) { width: 170px; }
+.queue-table th:nth-child(10), .queue-table td:nth-child(10),
+.queue-table th:nth-child(11), .queue-table td:nth-child(11) { width: 116px; }
+.queue-nr-mode-select { min-width: 4.4rem; padding: 0.3rem 0.45rem; font-weight: 700; }
 .queue-table [data-queue-uploaded], .queue-table [data-queue-updated] { white-space: pre-line; overflow-wrap: normal; }
 .queue-table [data-queue-updated] { white-space: pre; }
 .queue-sort-button { display: inline-flex; align-items: center; justify-content: flex-start; gap: 0.32rem; width: 100%; min-width: 0; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; color: inherit; font: inherit; letter-spacing: inherit; text-align: left; text-transform: inherit; }
 .queue-sort-button:hover, .queue-sort-button:focus-visible { background: transparent; color: var(--brand); box-shadow: none; }
 .queue-sort-button [data-queue-sort-indicator] { flex: 0 0 auto; color: var(--brand); font-size: 0.9em; }
-.queue-progress-cell { min-width: 190px; display: grid; gap: 0.3rem; }
+.queue-progress-cell { min-width: 150px; display: grid; gap: 0.3rem; }
 .queue-progress-label { display: flex; align-items: center; justify-content: flex-start; gap: 0.35rem; color: var(--muted); font-size: 0.8rem; font-weight: 700; white-space: nowrap; }
 .queue-progress-label [data-queue-progress-percent] { color: var(--ink); }
 .queue-progress-step { color: var(--muted); font-size: 0.72rem; line-height: 1.2; overflow-wrap: anywhere; }
@@ -2306,6 +2312,7 @@ body:has(.release-navigator) .help-navigator{top:37%}
   .datasets-analysis-stack .analysis-filter-selection-help { display: none; }
   .vendor-mapping-actions { flex-direction: column-reverse; align-items: stretch; }
   .upload-type-item { grid-template-columns: minmax(0, 1fr); }
+  .upload-nr-mode-field[hidden] { display: none; }
   .upload-vendor-mapping-selectors { grid-template-columns: minmax(0, 1fr); }
 }
 

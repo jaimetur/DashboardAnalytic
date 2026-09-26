@@ -176,7 +176,9 @@ const materializationJobProgressPercent = (job) => {
   if (['queued', 'pending'].includes(status)) return 0;
   const total = Math.max(Number(job?.total) || 0, 0);
   const completed = Math.max(Number(job?.completed) || 0, 0);
-  if (status === 'ready') return 100;
+  // Only running, failed or stopped work reports partial progress. Completed
+  // jobs and the idle "up to date" state are always fully materialized.
+  if (!['processing', 'failed', 'stopped'].includes(status)) return 100;
   if (!total) return 0;
   const maximum = status === 'processing' ? 99 : 100;
   return Math.min(maximum, Math.max(0, Math.round(completed * 100 / total)));
@@ -7940,6 +7942,29 @@ if (queueNode) {
     return `${seconds}s`;
   };
 
+  const syncQueueNrModeCell = (cell, dataset) => {
+    if (!(cell instanceof HTMLElement)) return;
+    const mode = String(dataset.nr_mode || '');
+    cell.dataset.queueSortValue = mode;
+    let select = cell.querySelector('[data-dataset-nr-mode-select]');
+    if (!mode) {
+      if (select || cell.textContent.trim() !== '—') cell.textContent = '—';
+      return;
+    }
+    if (!(select instanceof HTMLSelectElement)) {
+      select = document.createElement('select');
+      select.className = 'queue-nr-mode-select';
+      select.dataset.datasetNrModeSelect = '';
+      select.dataset.datasetId = String(dataset.id);
+      select.dataset.updateUrl = `/workspace/datasets/${dataset.id}/nr-mode`;
+      select.setAttribute('aria-label', `NR Mode for ${dataset.file_name || 'dataset'}`);
+      ['NSA', 'SA'].forEach((value) => select.add(new Option(value, value)));
+      cell.replaceChildren(select);
+    }
+    // Never overwrite a choice the user is editing or saving.
+    if (document.activeElement !== select && !select.disabled) select.value = mode;
+  };
+
   const updateQueueRow = (dataset) => {
     const row = document.querySelector(`[data-dataset-row][data-dataset-id="${dataset.id}"]`);
     if (!row) return;
@@ -7963,6 +7988,7 @@ if (queueNode) {
 
     if (kind) kind.textContent = dataset.input_kind_label || 'Other';
     if (kind) kind.dataset.queueSortValue = dataset.input_kind_label || 'Other';
+    syncQueueNrModeCell(row.querySelector('[data-queue-nr-mode]'), dataset);
     if (rows) { rows.textContent = formatQueueCount(dataset.row_count); rows.dataset.queueSortValue = String(dataset.row_count || 0); }
     if (columns) { columns.textContent = formatQueueCount(dataset.column_count); columns.dataset.queueSortValue = String(dataset.column_count || 0); }
     if (size) { size.textContent = dataset.size_mb_label || '0.00 MB'; size.dataset.queueSortValue = String(dataset.size_bytes || 0); }
@@ -8936,3 +8962,28 @@ for (const [triggerSelector, optionsSelector] of [
   window.addEventListener('resize', positionOptions);
   window.addEventListener('scroll', positionOptions, true);
 }
+
+document.addEventListener('change', async (event) => {
+  const select = event.target instanceof HTMLSelectElement ? event.target.closest('[data-dataset-nr-mode-select]') : null;
+  if (!(select instanceof HTMLSelectElement) || !select.dataset.updateUrl) return;
+  const cell = select.closest('[data-queue-nr-mode]');
+  const previous = cell instanceof HTMLElement ? cell.dataset.queueSortValue || '' : '';
+  select.disabled = true;
+  try {
+    const response = await fetch(select.dataset.updateUrl, {
+      method: 'POST', credentials: 'same-origin',
+      headers: {'Content-Type': 'application/json', Accept: 'application/json'},
+      body: JSON.stringify({nr_mode: select.value}),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.detail || 'The NR Mode could not be updated.');
+    if (cell instanceof HTMLElement) cell.dataset.queueSortValue = String(payload.nr_mode || select.value);
+  } catch (error) {
+    if (previous) select.value = previous;
+    showInfoDialog(error instanceof Error ? error.message : 'The NR Mode could not be updated.', {
+      title: 'NR Mode update failed', tone: 'error',
+    });
+  } finally {
+    select.disabled = false;
+  }
+});

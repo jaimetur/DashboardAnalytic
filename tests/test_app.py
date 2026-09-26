@@ -4072,7 +4072,7 @@ def test_reupload_preserves_original_upload_date_for_dataset_ordering(client) ->
     assert 'data-queue-sort-key="updated"' in workspace.text
     assert workspace.text.index('data-queue-sort-key="uploaded"') < workspace.text.index('data-queue-sort-key="updated"')
     styles = client.get('/static/css/app.css').text
-    assert '.queue-table th:nth-child(2), .queue-table td:nth-child(2) { width: 360px; min-width: 360px; max-width: 360px; overflow-wrap: anywhere; }' in styles
+    assert '.queue-table th:nth-child(2), .queue-table td:nth-child(2) { width: 290px; min-width: 290px; max-width: 290px; overflow-wrap: anywhere; }' in styles
     assert '.queue-table [data-queue-updated] { white-space: pre; }' in styles
     assert 'Default (' in workspace.text
 
@@ -4881,6 +4881,7 @@ def test_dashboard_library_ppt_export_selects_scope_cdrs_explicitly() -> None:
     assert 'id="ds-ppt-date-from"' in template
     assert 'id="ds-ppt-date-to"' in template
     assert template.index('id="ds-ppt-scope-title"') < template.index('id="ds-ppt-cdr-title"') < template.index('id="ds-ppt-dates-title"')
+    assert "$('ds-ppt-cdr-title').textContent = `CDR datasets (${dashboardNrMode(dashboard)})`;" in script
     assert template.index('id="ds-ppt-dates-title"') < template.index('id="ds-ppt-dataset-cancel"') < template.index('id="ds-ppt-dataset-confirm"')
     assert "const chooseDashboardPptUniverse = (dashboard, dashboardId)" in script
     assert ".slice(0, scope === 'multivendor' ? 1 : 2)" in script
@@ -4949,14 +4950,16 @@ def test_dashboard_standard_universe_warmup_and_open_state_restoration_are_confi
     dashboard_source = (root / 'modules' / 'e2e_dashboards.py').read_text(encoding='utf-8')
     script = (root / 'web_interface' / 'static' / 'js' / 'e2e_dashboards.js').read_text(encoding='utf-8')
 
-    assert "('all-cdrs', {kind: [int(row['id']) for row in rows]" in dashboard_source
-    assert "('latest', {kind: [int(row['id']) for row in rows[:1]]" in dashboard_source
-    assert "('latest-two', {kind: [int(row['id']) for row in rows[:2]]" in dashboard_source
+    # Every CDR plus the latest 1..4 CDRs of each type, of the Dashboard's NR Mode.
+    assert "universes = [{kind: [int(row['id']) for row in rows] for kind, rows in ordered.items()}]" in dashboard_source
+    assert "for count in range(1, DASHBOARD_WARMUP_LATEST_COUNTS + 1)" in dashboard_source
+    assert 'DASHBOARD_WARMUP_LATEST_COUNTS = 4' in dashboard_source
+    assert 'ordered = ordered_ready_datasets(task_repository, base.technology)' in dashboard_source
     assert "definition.date_from = 'Oldest'" in dashboard_source
     assert "definition.date_to = 'Newest'" in dashboard_source
     assert 'schedule_dashboard_warmup(workspace, dashboard_id, saved_definition, user.username, force=True)' in dashboard_source
-    assert "cancellation = dashboard_warmup_cancellations[key] = {" in dashboard_source
-    assert "cancelled=lambda: bool(cancellation['requested'])" in dashboard_source
+    assert 'state = dashboard_warmup_cancellations.setdefault(key, {' in dashboard_source
+    assert 'cancelled=must_yield,' in dashboard_source
     assert "last = sessionStorage.getItem(openStorageKey) || '';" in script
     assert 'const restoreOpenDashboard = restorePageState;' not in script
 
@@ -4994,7 +4997,9 @@ def test_dashboard_ppt_job_is_queued_before_preparation_and_chart_rendering() ->
 def test_cold_dashboard_ppt_job_progress_covers_prepare_models_and_presentation() -> None:
     source = (Path(__file__).parents[1] / 'src' / 'modules' / 'e2e_dashboards.py').read_text(encoding='utf-8')
 
-    assert 'min(24, 1 + round(percent * 0.23))' in source
+    # Universe pre-caching owns 1-12% and the export's own preparation 12-24%.
+    assert 'progress=max(1, min(12, 1 + round(percent * 0.11))),' in source
+    assert 'progress=max(12, min(24, 12 + round(percent * 0.12))),' in source
     assert 'model_progress_start = 25 + round(position * 65 / max(len(indexes), 1))' in source
     assert 'progress=91 + round(rendered * 4 / max(chart_total, 1))' in source
     assert "progress=90, last_error=''" in source
@@ -9763,3 +9768,69 @@ def test_generic_button_click_audit_endpoint_is_not_exposed(client) -> None:
     })
 
     assert response.status_code == 404
+
+
+def test_nr_mode_is_suggested_from_the_cdr_file_name() -> None:
+    from src.modules.nr_mode import infer_nr_mode
+
+    assert infer_nr_mode('NetCheck_CDR_Data.csv') == 'NSA'
+    assert infer_nr_mode('UK_Q2_2026_NSA_Voice.xlsx') == 'NSA'
+    assert infer_nr_mode('UK_Q2_2026_SA_Data.xlsx') == 'SA'
+    assert infer_nr_mode('CDR DataSA.csv') == 'SA'
+    assert infer_nr_mode('5G SA speech.csv') == 'SA'
+    assert infer_nr_mode('Standalone campaign.csv') == 'SA'
+    assert infer_nr_mode('Non-Standalone campaign.csv') == 'NSA'
+    assert infer_nr_mode('Samsung_data.csv') == 'NSA'
+
+
+def test_uploaded_cdrs_store_the_selected_or_suggested_nr_mode(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    response = client.post(
+        '/datasets-analysis/upload',
+        data={
+            'dataset_kinds': ['data', 'voice', 'mapping_three'],
+            'nr_modes': ['', 'NSA', 'SA'],
+        },
+        files=[
+            ('dataset_files', ('UK_Q2_SA_Data.csv', BytesIO(b'operator,score\nEE,1\n'), 'text/csv')),
+            ('dataset_files', ('UK_Q2_SA_Voice.csv', BytesIO(b'operator,score\nEE,1\n'), 'text/csv')),
+            ('dataset_files', ('mapping.csv', BytesIO(b'Cid__ECI,Vendor\n200,Nokia\n'), 'text/csv')),
+        ],
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    by_name = {row['file_name']: app_module.serialize_dataset_row(row) for row in app_module.repository.list_datasets()}
+    # A blank selection keeps the file-name suggestion; an explicit choice wins.
+    assert by_name['UK_Q2_SA_Data.csv']['nr_mode'] == 'SA'
+    assert by_name['UK_Q2_SA_Voice.csv']['nr_mode'] == 'NSA'
+    # Non-CDR files never have an NR Mode.
+    assert by_name['mapping.csv']['nr_mode'] is None
+
+    page = client.get('/workspace')
+    assert '>NR Mode<' in page.text
+    assert 'data-dataset-nr-mode-select' in page.text
+    assert "nrModeSelect.name = 'nr_modes';" in page.text
+
+    data_id = by_name['UK_Q2_SA_Data.csv']['id']
+    updated = client.post(f'/workspace/datasets/{data_id}/nr-mode', json={'nr_mode': 'NSA'})
+    assert updated.status_code == 200
+    assert app_module.repository.get_dataset(data_id)['nr_mode'] == 'NSA'
+    assert client.post(f'/workspace/datasets/{data_id}/nr-mode', json={'nr_mode': 'LTE'}).status_code == 422
+    mapping_id = by_name['mapping.csv']['id']
+    assert client.post(f'/workspace/datasets/{mapping_id}/nr-mode', json={'nr_mode': 'SA'}).status_code == 400
+    assert any(row['action'] == 'update_dataset_nr_mode' for row in app_module.repository.list_logs())
+
+
+def test_existing_cdrs_receive_a_suggested_nr_mode_on_migration(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    source = app_module.settings.input_dir / 'Legacy_SA_Data.csv'
+    source.write_text('operator,score\nEE,1\n', encoding='utf-8')
+    dataset_id, _ = app_module.repository.add_dataset(source.name, str(source), 'admin')
+    with app_module.repository.connection() as connection:
+        connection.execute("UPDATE dataset_profiles SET dataset_kind = 'data', nr_mode = NULL WHERE dataset_id = ?", (dataset_id,))
+        app_module.repository._backfill_dataset_nr_modes(connection)
+    assert app_module.repository.get_dataset(dataset_id)['nr_mode'] == 'SA'

@@ -6,12 +6,16 @@
 ## Release: v0.4.1
 ### Release Date: 2026-09-26
 #### ⚠️ Breaking Changes:
+- E2E Dashboards only use CDRs whose NR Mode matches the Dashboard's NR Mode. Existing CDRs receive an NR Mode proposed from their file name (SA only when the name says SA/Standalone, otherwise NSA); review SA CDRs in the Workspace Datasets table, or SA Dashboards may show `Data needed`.
 
 #### 🌟 New Features:
+- CDR datasets have an NR Mode (NSA or SA). Uploads propose it from each file name and offer a per-file selector before processing starts, the Workspace Datasets table shows an editable **NR Mode** column after Input Type, and changes are logged. The value lives in `dataset_profiles`, so it is included in workspace exports, transfers, backups and restores.
 
 #### 🚀 Enhancements:
 - Distribution charts with explicit range buckets (for example `Buckets = 1,5,20`) now stack and list `<1`, `1-5`, `5-20` and `20+` in ascending numeric order instead of the order in which values first appear in the CDR rows.
 - `pyproject.toml` now reports the application version and lists every directly imported runtime dependency (`httpx`, `pillow` and `certifi` were missing or only listed for development); `requirements.txt` pins Pillow and certifi explicitly. The release helper also updates the `pyproject.toml` version, and the unused `tools/BuildBinary.py` script copied from another project was removed.
+- Dashboard Universe selectors, the PPT export universe dialog (whose title shows the NR Mode, for example `CDR datasets (NSA)`), default universes (latest two CDRs per type, or one for Multivendor) and pre-cached universes only consider CDRs of the Dashboard's NR Mode. Changing a Dashboard's NR Mode selects the newest CDRs of the new mode.
+- Dashboard pre-caching covers every CDR plus the newest one, two, three and four CDRs of each type, skipping duplicate or impossible universes. It runs on its own low-priority worker instead of the shared background scheduler: open Dashboards are pre-cached first, closed ones pause while an open Dashboard needs work, and foreground preparations and PPT exports pause it until they finish. PPT exports are no longer blocked by pre-caching; the export job pre-caches its chosen universe before applying its own selections. Manage Dashboards shows `Checking Cache` and `Pre-Caching Universe n/m` (with `· Waiting` while queued or paused).
 
 #### 🐛 Bug fixes:
 - Multivendor E2E Reporting chart-set jobs no longer fail on their first chart with an undefined `prepare_multivendor_catalog_entry` error.
@@ -21,10 +25,13 @@
 - E2E Reporting chart-set identifiers use the configured Application Config timezone, so they match the displayed generation time.
 - The Dashboard PPT job Filters column keeps the requested date range (for example `Oldest to Newest`) when an already prepared Dashboard snapshot is reused for the export.
 - Sign-in rejects a malformed stored password hash instead of raising a server error, and dataset workers no longer fail when their CDR is deleted while it is still processing.
+- A Dashboard marked Ready no longer returns to preparation after another Dashboard is opened: adding or filling combined-table columns keeps prepared universes valid, and only row changes invalidate them.
+- Reduced Dashboard timeouts (504) and memory pressure on smaller servers: Dashboard preparation runs in the background while the browser polls its progress, read-only requests retry transient gateway errors, status checks reuse their results and read universe manifests directly, identical cached universes share one snapshot, and only recently used snapshots keep chart frames in memory (`DASHBOARD_ANALYTIC_DASHBOARD_FRAME_CACHE_SNAPSHOTS`). A new preparation now only supersedes the same user's earlier request.
+- The Materialization status bar shows 100% when all fields are up to date instead of 0%.
 - The automated test suite passes again: tests wait for isolated dataset workers and combined CDR rebuilds, and reflect the E2E Reporting access rules, renamed mapping controls and current chart rendering contracts.
 
 #### 📚 Documentation:
-- README and Deployment Configuration list the `demo` bootstrap account with its current `user-viewer` role. Workspace Config documents the ascending order of explicit distribution ranges, and Project Structure describes how the test client waits for background dataset processing, the release helper and `pyproject.toml`.
+- README and Deployment Configuration list the `demo` bootstrap account with its current `user-viewer` role. Workspace Config documents the ascending order of explicit distribution ranges, and Project Structure describes how the test client waits for background dataset processing, the release helper and `pyproject.toml`. Workspace Management documents NR Mode, and E2E Dashboards and Technical Considerations describe NR-aware universes, background pre-caching priorities, status labels and the frame-cache setting.
 
 ---
 

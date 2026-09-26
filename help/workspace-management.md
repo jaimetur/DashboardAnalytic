@@ -28,7 +28,7 @@ Workspace accepts `CSV`, `XLS`, `XLSX` and `XLSM`. Only successfully processed d
 1. Open the target workspace.
 2. Select one or more files in **Data Ingestion**.
 3. Review the proposed type for every file.
-4. For CDRs, optionally choose ready VFUK/3UK mappings.
+4. For CDRs, review the proposed **NR Mode** (NSA or SA) and optionally choose ready VFUK/3UK mappings.
 5. Confirm the batch.
 6. Follow every item in **Queue and Status**.
 7. Continue only when the status is **Processed**.
@@ -38,6 +38,15 @@ Classification is proposed from filenames but remains reviewable. Examples:
 - `NetCheck_CDR_Data_2026_Q2.xlsx` → CDR-Data
 - `NetCheck_CDR_Voice_2026_Q2.xlsx` → CDR-Voice
 - `VFUK_Multivendor_Mapping.xlsx` → VFUK mapping
+
+### NR Mode
+
+Every CDR (Data, Voice or Speech) belongs to one NR Mode, **NSA** or **SA**; other dataset types have none. During upload the NR Mode is proposed from the filename and can be changed per file before processing starts:
+
+- `SA`, `5G SA`, `5GSA` or `Standalone` in the name (for example `UK_Q2_2026_SA_Data.xlsx`) → SA
+- `NSA`, `Non-Standalone` or no NR indication (for example `NetCheck_CDR_Data_2026_Q2.xlsx`) → NSA
+
+The **NR Mode** column follows Input Type in the Datasets table. Its selector corrects the NR Mode of an existing CDR without reprocessing it, and the change is recorded in App Logs. CDRs created before this column existed receive the filename proposal automatically. E2E Dashboards only use CDRs of their own NR Mode.
 
 ### Background Processing
 

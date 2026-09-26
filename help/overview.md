@@ -6,7 +6,7 @@ Dashboard Analytic turns processed CDR datasets into interactive KPI analysis, r
 
 1. Sign in and open a workspace.
 2. Upload Data, Voice or Speech CDRs from **Workspace**.
-3. Confirm the detected input type and wait for processing to finish.
+3. Confirm the detected input type (and, for CDRs, the NR Mode) and wait for processing to finish.
 4. Optionally map Vodafone and Three vendor information.
 5. Create or open a saved **E2E Dashboard** to analyse a complete template interactively, reuse prepared selections and generate its PowerPoint. Use **Datasets Analysis**, **Chart Builder** or **Query Builder** for focused exploration, or **E2E Reporting** for the classic report and Chart Set workflow.
 6. Follow Dashboard preparation and generation in the floating task cards, **PowerPoint Generation Jobs** and **Reports and Charts Jobs**.
