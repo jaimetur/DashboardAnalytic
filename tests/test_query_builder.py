@@ -39,6 +39,22 @@ def test_query_builder_reads_committed_wal_rows(tmp_path: Path) -> None:
         writer.close()
 
 
+def test_query_builder_source_names_with_quotes_are_sql_literals(tmp_path: Path) -> None:
+    from src.modules.query_builder import execute_query
+
+    database_path = tmp_path / 'query-builder-quotes.sqlite'
+    _database_with_query_rows(database_path)
+    name = 'O\'Neil "Q1".csv'
+    datasets = [{'id': 1, 'name': name, 'kind': 'data'}]
+
+    columns, rows, _truncated, _views, _total = execute_query(
+        database_path, datasets, 'SELECT DISTINCT source_dataset_name FROM selected_data', include_total=True,
+    )
+
+    assert columns == ['source_dataset_name']
+    assert rows == [(name,)]
+
+
 def test_query_builder_save_validation_checks_columns_without_running_query(tmp_path: Path) -> None:
     from src.modules.query_builder import validate_query
 

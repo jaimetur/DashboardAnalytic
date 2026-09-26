@@ -20,6 +20,9 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, stored_hash: str) -> bool:
-    salt, expected = stored_hash.split("$", maxsplit=1)
+    # A malformed stored hash can never match; reject it instead of raising.
+    salt, separator, expected = str(stored_hash or "").partition("$")
+    if not separator:
+        return False
     current = hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
     return hmac.compare_digest(current, expected)

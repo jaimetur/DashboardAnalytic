@@ -112,7 +112,7 @@ A brand-new empty `application.db` creates these accounts once:
 
 - `super / super123` — `super-admin`
 - `admin / admin123` — `admin`
-- `demo / demo123` — `user`
+- `demo / demo123` — `user-viewer`
 
 All three receive access to the `Default` workspace. Later restarts do not recreate deleted users, reset passwords or restore changed roles.
 

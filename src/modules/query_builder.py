@@ -22,6 +22,11 @@ def _quote(value: str) -> str:
     return '"' + value.replace('"', '""') + '"'
 
 
+def _string_literal(value: str) -> str:
+    """Return a SQLite string literal, escaping embedded single quotes."""
+    return "'" + value.replace("'", "''") + "'"
+
+
 def normalize_query(query: str) -> str:
     query = str(query or '').strip().rstrip(';').strip()
     if not query:
@@ -63,8 +68,8 @@ def _selected_views(connection: sqlite3.Connection, datasets: Iterable[dict[str,
             known = set(schemas[dataset_id])
             values = [
                 f'{dataset_id} AS source_dataset_id',
-                f'{repr(str(row["name"]))} AS source_dataset_name',
-                f'rowid AS source_row_id',
+                f'{_string_literal(str(row["name"]))} AS source_dataset_name',
+                'rowid AS source_row_id',
             ]
             values.extend(_quote(column) if column in known else f'NULL AS {_quote(column)}' for column in all_columns)
             selects.append(f"SELECT {', '.join(values)} FROM {_quote(table)}")

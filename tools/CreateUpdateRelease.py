@@ -15,6 +15,7 @@ from tkinter import messagebox
 ROOT = Path(__file__).resolve().parents[1]
 VERSION_PATH = ROOT / 'src' / 'version.py'
 CHANGELOG_PATH = ROOT / 'CHANGELOG.md'
+PYPROJECT_PATH = ROOT / 'pyproject.toml'
 VERSION_PATTERN = r'\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?'
 DATE_PATTERN = r'\d{4}-\d{2}-\d{2}'
 
@@ -91,6 +92,20 @@ def replace_version_metadata(content: str, version: str, release_date: str) -> s
     return content
 
 
+def replace_pyproject_version(content: str, version: str) -> str:
+    """Return pyproject content with the [project] version updated."""
+    content, version_count = re.subn(
+        r'^(version\s*=\s*")[^"]+("\s*)$',
+        rf'\g<1>{version}\g<2>',
+        content,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    if version_count != 1:
+        raise RuntimeError('Unable to update the project version in pyproject.toml.')
+    return content
+
+
 def replace_current_changelog_metadata(content: str, version: str, release_date: str) -> str:
     """Return changelog content with its current release header updated."""
     content, release_count = re.subn(
@@ -151,13 +166,20 @@ def release_file_contents(
 
 
 def write_release_files(version: str, release_date: str, *, create_changelog_release: bool) -> None:
-    """Update the version module and either create or update a changelog release."""
+    """Update the version module and pyproject, and create or update a changelog release."""
     version_content, changelog_content = release_file_contents(
         version, release_date, create_changelog_release=create_changelog_release
     )
 
+    pyproject_content = (
+        replace_pyproject_version(PYPROJECT_PATH.read_text(encoding='utf-8'), version)
+        if PYPROJECT_PATH.exists() else None
+    )
+
     VERSION_PATH.write_text(version_content, encoding='utf-8')
     CHANGELOG_PATH.write_text(changelog_content, encoding='utf-8')
+    if pyproject_content is not None:
+        PYPROJECT_PATH.write_text(pyproject_content, encoding='utf-8')
 
 
 def update_release_metadata(version: str, release_date: str) -> None:
@@ -338,7 +360,7 @@ def main() -> None:
         except Exception as exc:
             messagebox.showerror('Update failed', str(exc), parent=root)
             return
-        messagebox.showinfo('Release metadata updated', 'src/version.py and CHANGELOG.md were updated.', parent=root)
+        messagebox.showinfo('Release metadata updated', 'src/version.py, pyproject.toml and CHANGELOG.md were updated.', parent=root)
         root.destroy()
 
     def apply_create_release() -> None:

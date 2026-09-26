@@ -24,6 +24,8 @@ from fastapi import BackgroundTasks
 from src.modules.auth import hash_password
 from src.version import __release_date__, __version__
 
+from conftest import wait_for_background_dataset_work
+
 def login(client) -> None:
     response = client.post("/login", data={"username": "admin", "password": "admin123"}, follow_redirects=False)
     assert response.status_code == 303
@@ -2241,13 +2243,15 @@ def test_reporting_deletion_requires_admin(client) -> None:
         '/reporting/jobs/999999/delete',
         '/reporting/jobs/delete-all',
     ]
-    for username, password, allowed in [
-        ('demo', 'demo123', False),
-        ('admin', 'admin123', True),
-        ('super', 'super123', True),
+    # E2E Reporting is limited to super-admins and the EJAITUR user; deletion
+    # additionally requires an administrative role.
+    for token, username, role, allowed in [
+        ('reporting-viewer', 'EJAITUR', 'user-viewer', False),
+        ('reporting-admin', 'EJAITUR', 'admin', True),
+        ('reporting-super', 'super', 'super-admin', True),
     ]:
-        response = client.post('/login', data={'username': username, 'password': password}, follow_redirects=False)
-        assert response.status_code == 303
+        app_module.SESSIONS[token] = app_module.SessionUser(username=username, role=role)
+        client.cookies.set(app_module.SESSION_COOKIE, token)
         page = client.get('/reporting')
         assert page.status_code == 200
         assert ('data-report-chart-set-delete>Delete Selected' in page.text) == allowed
@@ -3671,7 +3675,8 @@ def test_workspace_bulk_dataset_actions_reprocess_in_dependency_order(client, mo
     )
 
     assert response.status_code == 303
-    assert [call['dataset_id'] for call in calls] == [1, 2, 3]
+    # Mapping assets run first; datasets in one bulk batch use descending IDs.
+    assert [call['dataset_id'] for call in calls] == [2, 1, 3]
     assert calls[2]['three_mapping_dataset_id'] == 1
     assert calls[2]['dependencies'] == [calls[0]['token'], calls[1]['token']]
 
@@ -4670,17 +4675,12 @@ def test_legacy_vendor_recovery_queues_without_writing_in_workspace_request(clie
     )
     dataset = app_module.serialize_dataset_row(app_module.repository.get_dataset(dataset_id))
 
-    class DeferredFuture:
-        @staticmethod
-        def result():
-            return None
-
     class CapturingExecutor:
         submitted = False
 
         def submit_ordered(self, *_args, **_kwargs):
             self.submitted = True
-            return DeferredFuture()
+            return Future()
 
     executor = CapturingExecutor()
     monkeypatch.setattr(app_module, '_dataset_processing_executor', lambda _repository: executor)
@@ -4697,7 +4697,8 @@ def test_legacy_vendor_recovery_queues_without_writing_in_workspace_request(clie
 
     assert queued is True
     assert executor.submitted is True
-    assert len(tasks.tasks) == 1
+    # Dataset recovery runs in the workspace scheduler, not in response tasks.
+    assert tasks.tasks == []
 
 
 def test_dataset_executor_defaults_to_one_fifo_background_worker(client) -> None:
@@ -4881,13 +4882,13 @@ def test_dashboard_library_ppt_export_selects_scope_cdrs_explicitly() -> None:
     assert 'id="ds-ppt-date-to"' in template
     assert template.index('id="ds-ppt-scope-title"') < template.index('id="ds-ppt-cdr-title"') < template.index('id="ds-ppt-dates-title"')
     assert template.index('id="ds-ppt-dates-title"') < template.index('id="ds-ppt-dataset-cancel"') < template.index('id="ds-ppt-dataset-confirm"')
-    assert "const chooseDashboardPptUniverse = dashboard" in script
+    assert "const chooseDashboardPptUniverse = (dashboard, dashboardId)" in script
     assert ".slice(0, scope === 'multivendor' ? 1 : 2)" in script
-    assert "const savedDateFrom = String(dashboard?.date_from || 'Oldest');" in script
-    assert "const savedDateTo = String(dashboard?.date_to || 'Newest');" in script
-    assert 'const universeChoice = await chooseDashboardPptUniverse(item);' in script
+    assert "const savedDateFrom = String(remembered?.date_from || dashboard?.date_from || 'Oldest');" in script
+    assert "const savedDateTo = String(remembered?.date_to || dashboard?.date_to || 'Newest');" in script
+    assert 'const universeChoice = await chooseDashboardPptUniverse(item, id);' in script
     assert "api('/geography-options', 'POST', exportUniverse())" in script
-    assert "['Operator', geography.operators || []]" in script
+    assert "['Operator', 'operators', geography.operators || []]" in script
     assert "withPptSelection(exportDefinition, 'Operator', selectedOperators);" in script
     assert 'const withPptSelection = (dashboard, selectionField, values)' in script
     assert "withPptSelection(exportDefinition, 'City', selectedCities);" in script
@@ -4948,13 +4949,13 @@ def test_dashboard_standard_universe_warmup_and_open_state_restoration_are_confi
     dashboard_source = (root / 'modules' / 'e2e_dashboards.py').read_text(encoding='utf-8')
     script = (root / 'web_interface' / 'static' / 'js' / 'e2e_dashboards.js').read_text(encoding='utf-8')
 
-    assert "('operator', 'single', {kind: [int(row['id']) for row in rows[:2]]" in dashboard_source
-    assert "('multivendor', 'multivendor', {kind: [int(row['id']) for row in rows[:1]]" in dashboard_source
-    assert "('all-cdrs', 'single', {kind: [int(row['id']) for row in rows]" in dashboard_source
+    assert "('all-cdrs', {kind: [int(row['id']) for row in rows]" in dashboard_source
+    assert "('latest', {kind: [int(row['id']) for row in rows[:1]]" in dashboard_source
+    assert "('latest-two', {kind: [int(row['id']) for row in rows[:2]]" in dashboard_source
     assert "definition.date_from = 'Oldest'" in dashboard_source
     assert "definition.date_to = 'Newest'" in dashboard_source
     assert 'schedule_dashboard_warmup(workspace, dashboard_id, saved_definition, user.username, force=True)' in dashboard_source
-    assert "dashboard_warmup_cancellations[key] = {'requested': False}" in dashboard_source
+    assert "cancellation = dashboard_warmup_cancellations[key] = {" in dashboard_source
     assert "cancelled=lambda: bool(cancellation['requested'])" in dashboard_source
     assert "last = sessionStorage.getItem(openStorageKey) || '';" in script
     assert 'const restoreOpenDashboard = restorePageState;' not in script
@@ -5754,8 +5755,8 @@ def test_queued_import_continues_after_its_workspace_is_closed(client) -> None:
     app_module.repository.update_dataset_profile(dataset_id, dataset_kind='data')
     workspace_database = app_module.repository.db_path
 
-    tasks = BackgroundTasks()
-    app_module.enqueue_dataset_processing(tasks, dataset_id, source_path, 'admin')
+    future = app_module.enqueue_dataset_processing(BackgroundTasks(), dataset_id, source_path, 'admin')
+    assert future is not None
     queued = app_module.repository.get_dataset(dataset_id)
     assert json.loads(queued['processing_options_json']) == {
         'vodafone_mapping_dataset_id': None,
@@ -5765,8 +5766,8 @@ def test_queued_import_continues_after_its_workspace_is_closed(client) -> None:
     assert closed.status_code == 303
     assert app_module.active_workspace is None
 
-    queued_task = tasks.tasks[0]
-    queued_task.func(*queued_task.args, **queued_task.kwargs)
+    # The workspace scheduler keeps processing the captured database.
+    future.result(timeout=30)
 
     completed = app_module.Repository(workspace_database).get_dataset(dataset_id)
     assert completed is not None
@@ -5854,7 +5855,7 @@ def test_workspace_import_replaces_an_open_workspace_and_removes_old_files(clien
 def test_workspace_import_keeps_chart_sets_visible_in_reporting(client, tmp_path: Path) -> None:
     import src.DashboardAnalytic as app_module
 
-    login(client)
+    login_super(client)
     source = app_module.active_workspace
     assert source is not None
     payload = tmp_path / 'workspace-import-chart-set'
@@ -5886,7 +5887,7 @@ def test_workspace_import_keeps_chart_sets_visible_in_reporting(client, tmp_path
 def test_delete_all_reports_removes_orphaned_output_directories(client) -> None:
     import src.DashboardAnalytic as app_module
 
-    login(client)
+    login_super(client)
     reports_root = Path(app_module.settings.output_dir) / 'reports'
     orphaned = reports_root / 'report-without-job' / 'report-charts'
     orphaned.mkdir(parents=True, exist_ok=True)
@@ -7306,7 +7307,7 @@ def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mappin
     )
 
     workspace = client.get('/workspace')
-    assert 'data-vendor-map-open' in workspace.text
+    assert 'data-mapping-map-open' in workspace.text
     assert 'data-queue-status="ready"' in workspace.text
     assert 'name="cdr_dataset_ids"' in workspace.text
     assert 'name="three_mapping_dataset_id"' in workspace.text
@@ -7334,17 +7335,17 @@ def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mappin
 
     workspace_after_mapping = client.get('/workspace').text.split('<table class="queue-table" data-queue-sortable-table>', 1)[1].split('</tbody>', 1)[0]
     assert 'data-dataset-id="1"' in workspace_after_mapping
-    assert 'data-vendor-map-open' not in workspace_after_mapping
-    assert 'data-vendor-clear-open' in workspace_after_mapping
-    assert 'action="/workspace/clear-vendors"' in workspace.text
+    assert 'data-mapping-map-open' not in workspace_after_mapping
+    assert 'data-mapping-clear-open' in workspace_after_mapping
+    assert 'action="/workspace/clear-mappings"' in workspace.text
     live_status_after_mapping = client.get('/api/datasets/status').json()['datasets']
     assert next(dataset for dataset in live_status_after_mapping if dataset['id'] == 1)['can_clear_vendors'] is True
 
     clear_response = client.post('/workspace/clear-vendors/1', follow_redirects=False)
     assert clear_response.status_code == 303
     workspace_after_clear = client.get('/workspace').text.split('<table class="queue-table" data-queue-sortable-table>', 1)[1].split('</tbody>', 1)[0]
-    assert 'data-vendor-map-open' in workspace_after_clear
-    assert 'data-vendor-clear-open' not in workspace_after_clear
+    assert 'data-mapping-map-open' in workspace_after_clear
+    assert 'data-mapping-clear-open' not in workspace_after_clear
 
 
 def test_workspace_queues_vendor_mapping_for_multiple_cdrs(client) -> None:
@@ -7425,6 +7426,8 @@ def test_workspace_recovers_legacy_vendor_mapping_failures(client) -> None:
     )
 
     response = client.get('/workspace')
+    # Opening the Workspace queues the recovery in the background scheduler.
+    wait_for_background_dataset_work()
     assert response.status_code == 200
     dataset = next(item for item in client.get('/api/datasets/status').json()['datasets'] if item['id'] == 1)
     assert dataset['status'] == 'ready'
@@ -7536,6 +7539,8 @@ def test_workspace_recovers_database_lock_failure_with_saved_vendor_mapping(clie
     )
 
     response = client.get('/workspace')
+    # Opening the Workspace queues the recovery in the background scheduler.
+    wait_for_background_dataset_work()
 
     assert response.status_code == 200
     recovered = app_module.serialize_dataset_row(app_module.repository.get_dataset(2))
@@ -7946,7 +7951,7 @@ def test_dashboard_ignores_non_ready_dataset_id_in_selector_flow(client) -> None
 
 
 def test_reporting_preselects_two_latest_ready_cdrs_of_each_type(client) -> None:
-    login(client)
+    login_super(client)
     uploads = [
         ('old-data.csv', 'data', b'Mean_Data_Rate,RAT_A\n10,ENDC\n'),
         ('voice.csv', 'voice', b'Call_Setup_Time,RAT_A\n1.2,ENDC\n'),
@@ -8350,7 +8355,7 @@ def test_admin_imports_report_catalogue(client) -> None:
     login(client)
     content = (
         ','.join(CATALOG_HEADERS)
-            + '\n8,Completed Call Ratio,Voice quality,Title and 1 column + Comments,Completed call ratio,CDR-Voice,Call_Status,100% Stacked Vertical Bars,Call Family = VoLTE,Operator,Campaign,Completed/Dropped/Failed,,,,\n'
+            + '\n8,Completed Call Ratio,Voice quality,Title and 1 column + Comments,Completed call ratio,CDR-Voice,Call_Status,100% Stacked Vertical Bars,Call Family = VoLTE,Operator,Campaign,Completed/Dropped/Failed,,,,,,,,\n'
     ).encode('utf-8')
 
     response = client.post(
@@ -8367,7 +8372,8 @@ def test_admin_imports_report_catalogue(client) -> None:
     assert exported.status_code == 200
     assert exported.content == content
 
-    confirmation = client.get('/admin?catalogue_notice=Imported%20Test%20baseline%20%28NSA%29.')
+    assert response.headers['location'].startswith('/workspace-config?catalogue_notice=')
+    confirmation = client.get(response.headers['location'])
     assert 'data-catalogue-import-notice' in confirmation.text
     assert 'catalogue-management-notice' not in confirmation.text
     assert 'id="info-overlay"' in confirmation.text
@@ -8615,7 +8621,7 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
 def test_reporting_chart_viewer_uses_hover_canvas_dataset_and_zoom_controls(client) -> None:
     import src.DashboardAnalytic as app_module
 
-    login(client)
+    login_super(client)
     reporting = client.get('/reporting')
     assert reporting.status_code == 200
     controls = reporting.text.split('data-report-chart-viewer-canvas-controls', 1)[1].split('</div>', 2)[0]

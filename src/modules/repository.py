@@ -1399,7 +1399,7 @@ class Repository:
                     (stored_path,),
                 ).fetchall()
             ]
-            keep_id = ids[0]
+            # Keep the newest row for this stored file and remove the rest.
             stale_ids = ids[1:]
             if stale_ids:
                 placeholders = ','.join('?' for _ in stale_ids)

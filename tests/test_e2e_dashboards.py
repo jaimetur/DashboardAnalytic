@@ -1118,7 +1118,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "'module-tab-e2e-dashboards': 'dashboards'" in app_script
     assert "panel.scrollIntoView({behavior: 'smooth', block: 'start'});" in app_script
     assert "const topLevelPanels = Array.from(main.querySelectorAll('article.panel, details.panel, section.panel'))" in app_script
-    assert 'return topLevelPanels.filter((panel) =>' in app_script
+    assert 'const visiblePanels = topLevelPanels.filter((panel) => (' in app_script
     assert "index === 0 ? eyebrow?.textContent || heading?.textContent" in app_script
     assert 'const explicitLabel = panel.dataset.pagePanelLabel;' in app_script
     assert 'panel.getClientRects().length > 0' in app_script
@@ -1229,7 +1229,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'preview.replaceChildren(cachedImage(chart))' in dashboard_script
     assert 'const rememberRenderedChartPayload = (chart, payload) =>' in dashboard_script
     assert 'rememberRenderedChartPayload(chart, payload);' in dashboard_script
-    assert 'if (expandedChartSlide(chart) === prepared?.slides[slideIndex]) renderSlide();' in dashboard_script
+    assert 'if (!live && expandedChartSlide(chart) === prepared?.slides[slideIndex]) renderSlide();' in dashboard_script
     assert "card.ondblclick = safe(async event =>" in dashboard_script
     assert "const syncExpandedChartNavigation" in dashboard_script
     assert 'const setExpandedChartHeader = (chart, title = \'\') =>' in dashboard_script
@@ -1265,7 +1265,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'request !== expandedChartFilterLoadRequest' in dashboard_script
     assert "expandedCanvasShell.classList.add('ds-hover')" in dashboard_script
     assert 'const scheduleExpandedChartFiltersClose = () =>' in dashboard_script
-    assert '}, 5000);' in dashboard_script
+    assert '}, 10000);' in dashboard_script
     assert "$('ds-chart-filter-panel').addEventListener('pointerleave', scheduleExpandedChartFiltersClose);" in dashboard_script
     assert "addEventListener('focusout', event =>" not in dashboard_script
     assert "document.addEventListener('pointerdown', event => {" in dashboard_script
@@ -1307,20 +1307,20 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "if (direction === 'up') camera.panY += LOGICAL_HEIGHT * 0.16;" in chart_script
     assert "if (direction === 'down') camera.panY -= LOGICAL_HEIGHT * 0.16;" in chart_script
     assert 'globalThis.panDashboardChart = panChart;' in chart_script
-    assert 'function legendLayout(legend, fontSize = 15)' in chart_script
+    assert 'function legendLayout(legend, fontSize = LEGEND_TEXT_SIZE)' in chart_script
     assert "position = items.length ? String(legend?.position || 'none').toLowerCase() : 'none';" in chart_script
-    assert "left: position === 'left' ? 300 : 70" in chart_script
-    assert "right: position === 'right' ? 1300 : 1540" in chart_script
+    assert "left: position === 'left' ? sideLegendWidth + 20 : 70" in chart_script
+    assert "right: position === 'right' ? LOGICAL_WIDTH - sideLegendWidth - 20 : 1540" in chart_script
     assert "top: position === 'top' ? 80 + rows * rowHeight + 18 : 82" in chart_script
     assert "bottom: position === 'bottom' ? 900 - rows * rowHeight - 22 : 860" in chart_script
     assert "function labelAngle(context, value, availableWidth, size)" in chart_script
     assert "function bottomAxisReserve(context, keys, width, size = 22)" in chart_script
-    assert "function hierarchyRowLabelSize(context, rowKeys, availableWidth" in chart_script
+    assert "function hierarchyRowLabelSize()" in chart_script
     assert "function drawFullHierarchyLabel(context, value, x, y, width, size" in chart_script
-    assert "const aggregationFont = (context, size) => { context.font = `800 ${size}px ${FONT_FAMILY}`; };" in chart_script
+    assert "const aggregationFont = (context, format = {}, level = 0) =>" in chart_script
     assert "bar.colour, 24, payload.label_position" in chart_script
     assert "series.colour, 21, payload.label_position" in chart_script
-    assert "bucket.colour, 22, payload.label_position" in chart_script
+    assert "bucket.colour, 17, payload.label_position" in chart_script
     assert "drawFullHierarchyLabel(context, value, x + 4" in chart_script
     assert "const rowLabelGap = rowLevels > 1 ? 20 : 0;" in chart_script
     assert "const rowLabelArea = rowLevels ? Math.min(440, Math.max(230" in chart_script
@@ -1328,20 +1328,20 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "const usableBottom = layout.position === 'bottom' ? layout.bottom : 884;" in chart_script
     assert 'Math.min(250, columnWidth * .72)' in chart_script
     assert "const colour = payload.cell_colours?.[rowIndex]?.[columnIndex] || '#4E79A7';" in chart_script
-    assert "context.textAlign = 'center'; aggregationFont(context, 22); context.fillText(fittedText(context, value" in chart_script
-    assert "aggregationFont(context, 22); context.fillText(fittedText(context, String(columnKey.at(-1)" in chart_script
+    assert "context.textAlign = 'center'; aggregationFont(context, payload.legend_format, level); context.fillText(fittedText(context, value" in chart_script
+    assert "aggregationFont(context, payload.legend_format); context.fillText(fittedText(context, String(columnKey.at(-1)" in chart_script
     assert "line(context, left, layout.top + (level + 1) * 28 - 3, right" in chart_script
     assert "const lineTop = layout.top + Math.min(changed, upperLevels) * 28;" in chart_script
     assert "else dashedVertical(context, cellLeft, lineTop, chartTop + chartHeight + 22);" in chart_script
-    assert 'function drawOutsideBarLabel(context, value, x, y, colour, size = 12)' in chart_script
+    assert 'function drawOutsideBarLabel(context, value, x, y, colour, size = 12, format = {})' in chart_script
     assert "context.fillStyle = 'rgba(255, 255, 255, 0.94)'" in chart_script
     assert "context.fillText(`${(cumulative * 100).toFixed(0)}%`, plot.left - 14, y - 10)" in chart_script
     assert 'function drawConfiguredBarLabel(' in chart_script
     assert 'labelWidth + 8 > width && size + 8 <= width && labelWidth + 8 <= height' in chart_script
-    assert "verticalLabel(context, value, x + width / 2, centreY, '#FFFFFF', size);" in chart_script
+    assert "verticalLabel(context, value, x + width / 2, centreY, format.color || '#FFFFFF', size, false, format);" in chart_script
     assert 'function drawAdjacentStackLabel(' in chart_script
     assert 'sideSpace, colour, occupied, size = 10' in chart_script
-    assert "else if (ratio > 0) drawAdjacentStackLabel(" in chart_script
+    assert "if (ratio > 0) drawAdjacentStackLabel(" in chart_script
     assert 'series.colour, sideLabels' in chart_script
     assert 'Math.floor((layout.right - left) / Math.max(headers.length, 1))' in chart_script
     assert 'function selectionStartAllowed(canvas, event)' in chart_script
@@ -1379,7 +1379,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "setPreparationState('preparing', needsDataPreparation ? 'data' : 'rendering');" in dashboard_script
     assert "bind('ds-view', openActiveDashboardViewer);" in dashboard_script
     assert "async function queueDashboardPptExport(id, item, {chooseScope = false} = {})" in dashboard_script
-    assert "const universeChoice = await chooseDashboardPptUniverse(item);" in dashboard_script
+    assert "const universeChoice = await chooseDashboardPptUniverse(item, id);" in dashboard_script
     assert "title: 'Choose PowerPoint Scope'" not in dashboard_script
     assert "const host = node('label', label, 'ds-source-filter')" in dashboard_script
     assert "updateFilterControlState(facet, filterState(field));" in dashboard_script
@@ -1490,7 +1490,7 @@ def test_dashboards_lifecycle_and_layout(client):
     selection_key_source = dashboard_module[dashboard_module.index('def persistent_selection_key'):dashboard_module.index('def selected_date_bounds')]
     assert "'scope': definition.scope," not in selection_key_source
     assert "'schema': DASHBOARD_SELECTION_CACHE_VERSION," in selection_key_source
-    assert 'DASHBOARD_SELECTION_CACHE_VERSION = 11' in dashboard_module
+    assert 'DASHBOARD_SELECTION_CACHE_VERSION = 12' in dashboard_module
     assert "kind: sorted([" in selection_key_source
     assert "kind: sorted(set(dataset_ids))" in selection_key_source
     assert "field: sorted(set(values))" in selection_key_source
@@ -1807,6 +1807,9 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypa
         'Mean_Data_Rate': [10, 20, 30],
         'Test_Name': ['HTTP DL'] * 3,
         'Test_Start_Time': ['2026-09-01', '2026-09-02', '2026-09-03'],
+        # Ingestion always normalizes this field; a reused snapshot filters
+        # its resolved calendar dates against it.
+        'event_start_time': ['2026-09-01', '2026-09-02', '2026-09-03'],
     }))
     export_payload = json.loads(json.dumps(payload))
     export_payload['scope'] = 'multivendor'

@@ -23,7 +23,6 @@ from uuid import uuid4
 
 import pandas as pd
 from src.modules.column_names import column_identity
-from src.modules.cdr_reporting import BAR_CHART_TYPES
 from fastapi import BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
@@ -997,7 +996,7 @@ def install_dashboard_routes(core):
             raise HTTPException(400, 'The selected template is no longer available.')
         try:
             return core.load_template_catalogue(bytes(row['content']), definition.template_technology, task_repository=task_repository)
-        except ValueError:
+        except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
     def validate(definition, task_repository=None):
@@ -1140,6 +1139,9 @@ def install_dashboard_routes(core):
         # is reused when supplied, but cache discovery and preparation for a
         # closed Dashboard belong to the queued worker, never this request.
         snapshot = None
+        # A reused snapshot carries resolved calendar dates; the job Filters
+        # column keeps the requested (possibly symbolic) range either way.
+        requested_dates = {key: raw_definition.get(key) for key in ('date_from', 'date_to')}
         if preparation_token and not explicit_selections:
             with lock:
                 candidate = snapshots.get(preparation_token)
@@ -1173,7 +1175,9 @@ def install_dashboard_routes(core):
             field: dashboard_ppt_selection_label(field, selections[field], values)
             for field, values in available.items()
         }
-        filters_json = json.dumps(dashboard_filter_lines(raw_definition, task_repository, selection_labels), ensure_ascii=False)
+        filters_json = json.dumps(dashboard_filter_lines(
+            {**raw_definition, **requested_dates}, task_repository, selection_labels,
+        ), ensure_ascii=False)
         selected_regions, selected_cities = selections['Region'], selections['City']
         region_label, city_label = selection_labels['Region'], selection_labels['City']
         cover_regions = dashboard_ppt_cover_label('Region', region_label, len(selected_regions))
@@ -2315,7 +2319,7 @@ def install_dashboard_routes(core):
     def load_filter_options(definition, field_name, task_repository):
         """Load one adaptive filter catalogue without preparing Dashboard charts."""
         field_name = field_name.strip()
-        entries = validate(definition, task_repository)
+        validate(definition, task_repository)
         dimensions = core.load_repository_calculated_dimensions(task_repository)
         selected_by_kind = selected_sources(definition, task_repository)
         requested_definition = definition.model_copy(deep=True)
@@ -2461,7 +2465,6 @@ def install_dashboard_routes(core):
             # users to switch between them without rebuilding their filters.
             while len(snapshots) > 128:
                 snapshots.popitem(last=False)
-            snapshot = snapshots[token]
         ensure_not_cancelled()
         report(90, 'Dashboard selection and slide structure are ready')
         return {**payload, 'token': token}

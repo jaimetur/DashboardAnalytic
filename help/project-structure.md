@@ -146,8 +146,10 @@ The Help navigation order and labels are curated in `src/DashboardAnalytic.py`. 
 - `tests/test_app.py`: routes, shared UI, Admin, documentation and integration behaviour.
 - `tests/test_e2e_dashboards.py`: Dashboard definitions, filtering, caching, rendering and PPT jobs.
 - `tests/test_cdr_reporting.py`: template, filter, chart and classic Reporting contracts.
-- Other test modules cover analytics, exports, workspaces and workspace template isolation.
-- `tools/`: maintenance/build helpers.
+- Other test modules cover analytics, exports, Query Builder, workspaces and workspace template isolation.
+- `tests/conftest.py`: the `client` fixture. Dataset sources are parsed by isolated background workers, so after upload, retry, reprocess and mapping requests the fixture waits for those workers and the combined CDR rebuilds they start; `wait_for_background_dataset_work()` does the same for work queued by other requests.
+- `tools/CreateUpdateRelease.py`: release helper that updates `src/version.py`, the `pyproject.toml` project version and the current `CHANGELOG.md` release, and can create and push a release branch.
+- `pyproject.toml`: package metadata and runtime dependencies (kept in sync with `requirements.txt`) plus the pytest configuration.
 - `.github/workflows/`: automated tests, Docker publishing and source packaging.
 - `docker/`: production/development Compose files, image definition and execution notes.
 

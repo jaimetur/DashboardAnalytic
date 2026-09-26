@@ -1064,7 +1064,7 @@ def test_interactive_cdf_model_uses_reporting_hierarchy_palette_and_legend() -> 
         (['VF_Huawei', '2026-Q1'], '#E15759', 1, []),
         (['VF_Huawei', '2026-Q2'], '#E15759', 4, []),
     ]
-    assert model['legend'] == {
+    assert {key: value for key, value in model['legend'].items() if key != 'format'} == {
         'position': 'right',
         'line_markers': True,
         'items': [
@@ -1175,11 +1175,11 @@ def test_interactive_status_model_preserves_reporting_row_and_column_aggregation
     ]
     assert model['states'] == [
         {'name': 'Completed', 'colour': '#2C9A62'},
-        {'name': 'Failed', 'colour': '#C83E4D'},
+        {'name': 'Failed', 'colour': '#E15759'},
     ]
     assert model['legend']['items'] == [
         {'label': 'Completed', 'colour': '#2C9A62', 'width': 2},
-        {'label': 'Failed', 'colour': '#C83E4D', 'width': 2},
+        {'label': 'Failed', 'colour': '#E15759', 'width': 2},
     ]
 
 
@@ -1254,13 +1254,13 @@ def test_interactive_distribution_model_uses_reporting_buckets_and_nested_keys()
         ['VF', '2026-Q1'], ['VF', '2026-Q2'],
         ['3', '2026-Q1'], ['3', '2026-Q2'],
     ]
-    assert [bucket['name'] for bucket in model['buckets']] == ['<1', '5-20', '1-5', '20+']
+    assert [bucket['name'] for bucket in model['buckets']] == ['<1', '1-5', '5-20', '20+']
     assert model['cells'] == [
-        pytest.approx([.5, .5, 0, 0]), pytest.approx([0, 0, .5, .5]),
-        pytest.approx([.5, 0, 0, .5]), pytest.approx([0, 0, 1, 0]),
+        pytest.approx([.5, 0, .5, 0]), pytest.approx([0, .5, 0, .5]),
+        pytest.approx([.5, 0, 0, .5]), pytest.approx([0, 1, 0, 0]),
     ]
     assert model['legend']['position'] == 'bottom'
-    assert [item['label'] for item in model['legend']['items']] == ['<1', '5-20', '1-5', '20+']
+    assert [item['label'] for item in model['legend']['items']] == ['<1', '1-5', '5-20', '20+']
     assert [item['colour'] for item in model['legend']['items']] == [
         bucket['colour'] for bucket in model['buckets']
     ]
@@ -1326,14 +1326,15 @@ def test_static_distribution_draws_horizontal_white_percentage_labels_inside_seg
         'below2', 'below5', 'below20', 'below100', 'Above',
     ]
 
-    with patch('src.modules.cdr_reporting._draw_inside_bar_label') as draw_label:
+    with patch('src.modules.cdr_reporting._draw_inside_horizontal_bar_label', return_value=True) as draw_label:
         _render_stacked_distribution(
             'Distribution', frame, 'Operator', 'Campaign', '__catalog_stack',
         )
 
-    assert [item.args[2] for item in draw_label.call_args_list] == ['80.0%', '20.0%']
-    assert {item.kwargs['fill'] for item in draw_label.call_args_list} == {'#FFFFFF'}
-    assert {item.kwargs['font'].size for item in draw_label.call_args_list} == {17}
+    visible = [item for item in draw_label.call_args_list if item.kwargs['height'] > 0]
+    assert [item.args[1] for item in visible] == ['80.00%', '20.00%']
+    assert {item.kwargs['fill'] for item in visible} == {'#FFFFFF'}
+    assert {item.kwargs['font'].size for item in visible} == {14}
 
 
 def test_interactive_mean_model_uses_reporting_aggregation_and_vendor_palette() -> None:
@@ -1584,7 +1585,7 @@ def test_distribution_bucket_legend_uses_resolved_bucket_colours_not_filter_text
         grouping_columns='Campaign x Rate Bucket', legend_position='bottom',
     )
     items = _resolved_legend_items(entry, frame, 'FDTT_Sustainable_MDR')
-    assert [caption for caption, _colour_value, _width in items] == ['20-100', '100+', '5-20', '1-5', '<1']
+    assert [caption for caption, _colour_value, _width in items] == ['<1', '1-5', '5-20', '20-100', '100+']
     assert all(colour for _caption, colour, _width in items)
 
 
@@ -2378,7 +2379,7 @@ def test_tableau_result_group_filter_uses_the_workbook_bins() -> None:
     entry = CatalogEntry(
         1, 'Failures', '', '', 'Failures', 'CDR-Data', 'Result Group',
         '100% Stacked Vertical Bars', 'Result Group', 'Result Group NOT IN (Success)',
-        'Operator', '', 'Right', dimensions,
+        'Operator', '', 'Right', calculated_dimensions=dimensions,
     )
     frame = chart_frame({
         'Operator': ['EE'] * 5,
@@ -2629,7 +2630,7 @@ def test_status_chart_maps_cutoff_to_a_visible_failure_segment_without_filtering
         'Completed', 'Cutoff', 'Failed', 'Aborted', 'Cancelled', 'Incomplete', 'Timeout', 'Unsuccessful',
     )
     assert hierarchy_renderer.call_args.args[5] == (
-        '#2C9A62', '#C83E4D', '#D8555F', '#E26A70', '#AE2F42', '#F08A8F', '#8F2035', '#C83E4D',
+        '#2C9A62', '#C83E4D', '#E15759', '#D8555F', '#E26A70', '#AE2F42', '#F08A8F', '#8F2035',
     )
 
 
@@ -3172,7 +3173,7 @@ def test_powerpoint_report_can_disable_tooltip_sidecars(tmp_path) -> None:
 
 
 def test_reporting_module_is_available_to_authenticated_users(client) -> None:
-    response = client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    response = client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     assert response.status_code == 303
 
     page = client.get('/reporting')
@@ -3218,7 +3219,7 @@ def test_reporting_module_is_available_to_authenticated_users(client) -> None:
 def test_processing_report_and_chart_jobs_can_be_stopped_then_deleted(client) -> None:
     import src.DashboardAnalytic as app_module
 
-    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     report_id = app_module.repository.create_report_job(
         report_type='netcheck_cdr', technology='nsa', scope='single',
         data_dataset_id=1, voice_dataset_id=2, speech_dataset_id=3,
@@ -3260,7 +3261,7 @@ def test_processing_report_and_chart_jobs_can_be_stopped_then_deleted(client) ->
 def test_chart_set_selector_excludes_published_but_processing_job(client) -> None:
     import src.DashboardAnalytic as app_module
 
-    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     chart_set = app_module.persist_report_charts(
         'NSA Slide Template', 'single',
         [({'slide': 1, 'title': 'Completed chart', 'source': 'data', 'chart_type': 'Bar'}, b'PNG')],
@@ -3286,7 +3287,7 @@ def test_chart_set_selector_excludes_published_but_processing_job(client) -> Non
 def test_persisted_chart_set_keeps_template_order_when_rendered_by_cdr_source(client) -> None:
     import src.DashboardAnalytic as app_module
 
-    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     chart_set = app_module.persist_report_charts(
         'NSA Slide Template', 'single',
         [
@@ -3398,7 +3399,7 @@ def test_interrupted_chart_set_reuses_only_verified_assets(tmp_path: Path) -> No
 def test_retrying_a_failed_chart_job_reuses_its_row(client) -> None:
     import src.DashboardAnalytic as app_module
 
-    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     job_id = app_module.repository.create_report_chart_job(
         technology='nsa', scope='single', dataset_ids={'data': [], 'voice': [], 'speech': []},
         dataset_names={}, template_name='NSA Slide Template', created_by='admin',
@@ -3416,7 +3417,7 @@ def test_retrying_a_failed_chart_job_reuses_its_row(client) -> None:
 def test_deleting_a_ready_chart_job_removes_its_chart_set(client) -> None:
     import src.DashboardAnalytic as app_module
 
-    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     chart_set = app_module.persist_report_charts(
         'NSA Slide Template', 'single',
         [({'slide': 1, 'title': 'Chart', 'source': 'data', 'chart_type': 'Bar'}, b'PNG')],
@@ -3438,7 +3439,7 @@ def test_deleting_a_ready_chart_job_removes_its_chart_set(client) -> None:
 
 
 def test_reporting_multivendor_requires_a_previously_mapped_selected_cdr(client) -> None:
-    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     uploads = [
         ('NetCheck_CDR_Data.csv', 'data', b'RAT,Operator,Mean_Data_Rate\nENDC,Vodafone UK,42\n'),
         ('NetCheck_CDR_Voice.csv', 'voice', b'RAT_A,Operator,Call_Duration\nENDC,Vodafone UK,60\n'),
@@ -3464,7 +3465,7 @@ def test_reporting_multivendor_requires_a_previously_mapped_selected_cdr(client)
 
 
 def test_netcheck_reporting_generates_template_backed_pptx(client) -> None:
-    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     uploads = [
         ('NetCheck_CDR_Data.csv', b'RAT,Operator,Mean_Data_Rate,Test_Result\nENDC,Vodafone UK,42,Success\n', 'text/csv'),
         ('NetCheck_CDR_Voice.csv', b'RAT_A,Operator,Call_Status,Call_Duration\nENDC,Vodafone UK,Completed,60\n', 'text/csv'),
@@ -3554,7 +3555,7 @@ def test_reporting_chart_dataset_reuses_one_source_frame_and_projects_chart_colu
 def test_reporting_generates_template_chart_previews(client, monkeypatch) -> None:
     import src.DashboardAnalytic as app_module
 
-    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     uploads = [
         ('NetCheck_CDR_Data.csv', 'data', b'RAT,Operator,Mean_Data_Rate\nENDC,Vodafone UK,42\n'),
         ('NetCheck_CDR_Voice.csv', 'voice', b'RAT_A,Operator,Call_Status\nENDC,Vodafone UK,Completed\n'),
@@ -3690,7 +3691,7 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
 def test_reporting_accepts_partial_cdr_sources_and_marks_missing_chart_sources(client, monkeypatch) -> None:
     import src.DashboardAnalytic as app_module
 
-    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     uploaded = client.post(
         '/datasets-analysis/upload', data={'dataset_kinds': 'data'},
         files={'dataset_files': ('NetCheck_CDR_Data.csv', BytesIO(b'RAT,Operator,Mean_Data_Rate,Test_Result\nENDC,Vodafone UK,42,Success\n'), 'text/csv')},
@@ -3730,7 +3731,7 @@ def test_reporting_accepts_partial_cdr_sources_and_marks_missing_chart_sources(c
 def test_chart_preview_focus_row_matches_the_editors_sorted_row(client) -> None:
     import src.DashboardAnalytic as app_module
 
-    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     content = (
         ','.join(CATALOG_HEADERS)
         + '\n2,Second slide,,Title and 1 column + Comments,Second chart,CDR-Data,Mean_Data_Rate,Average Vertical Bars,,Operator,,,,,'
@@ -3760,7 +3761,7 @@ def test_chart_preview_focus_row_matches_the_editors_sorted_row(client) -> None:
 def test_template_chart_image_preview_uses_combined_reporting_rows(client, monkeypatch) -> None:
     import src.DashboardAnalytic as app_module
 
-    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     catalogue_content = (
         ','.join(CATALOG_HEADERS)
         + '\n1,Preview slide,,Title and 1 column + Comments,Preview chart,CDR-Data,Mean_Data_Rate,Average Vertical Bars,,Operator,Campaign,,Top\n'
@@ -3822,7 +3823,7 @@ def test_template_chart_image_preview_uses_combined_reporting_rows(client, monke
 
 
 def test_reporting_requires_at_least_one_cdr_source(client) -> None:
-    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     form = {'technology': 'nsa', 'report_scope': 'single', 'slides_templates': 'nsa:NSA Slide Template'}
     report = client.post('/reporting/netcheck-cdr', data=form)
     charts = client.post('/reporting/netcheck-cdr/charts', data=form)
@@ -3834,7 +3835,7 @@ def test_reporting_requires_at_least_one_cdr_source(client) -> None:
 def test_partial_cdr_report_worker_receives_unavailable_frames(client, monkeypatch) -> None:
     import src.DashboardAnalytic as app_module
 
-    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     uploaded = client.post(
         '/datasets-analysis/upload', data={'dataset_kinds': 'data'},
         files={'dataset_files': ('NetCheck_CDR_Data.csv', BytesIO(b'RAT,Operator,Mean_Data_Rate,Test_Result\nENDC,Vodafone UK,42,Success\n'), 'text/csv')},
@@ -3874,7 +3875,7 @@ def test_temporary_preview_accepts_dataset_ids_with_legacy_multiplication_separa
 def test_report_chart_generation_failures_return_json_and_are_logged(client, monkeypatch) -> None:
     import src.DashboardAnalytic as app_module
 
-    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     for filename, kind, content in (
         ('NetCheck_CDR_Data.csv', 'data', b'RAT,Operator,Mean_Data_Rate\nENDC,Vodafone UK,42\n'),
         ('NetCheck_CDR_Voice.csv', 'voice', b'RAT_A,Operator,Call_Status\nENDC,Vodafone UK,Completed\n'),
@@ -3899,11 +3900,11 @@ def test_report_chart_generation_failures_return_json_and_are_logged(client, mon
     assert job['error'].endswith(': Synthetic renderer failure')
     assert job['error'].startswith('Slide ')
     log = next(row for row in app_module.repository.list_logs() if row['action'] == 'chart_set_generation_failed')
-    assert log['username'] == 'admin'
+    assert log['username'] == 'super'
     assert 'Synthetic renderer failure' in log['details']
     app_log = next(row for row in app_module.build_app_logs() if row['action'] == 'chart_set_generation_failed')
     assert app_log['log_type'] == 'Error'
-    assert app_log['username'] == 'admin'
+    assert app_log['username'] == 'super'
     assert app_log['executed_by'] == 'system'
     assert re.match(r'^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] Chart Set job 1 failed: Slide ', app_log['summary'])
     assert app_log['summary'].endswith(': Synthetic renderer failure')
@@ -3916,7 +3917,7 @@ def test_report_chart_generation_failures_return_json_and_are_logged(client, mon
 def test_report_generation_failures_show_the_error_and_are_logged(client, monkeypatch) -> None:
     import src.DashboardAnalytic as app_module
 
-    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     for filename, kind, content in (
         ('NetCheck_CDR_Data.csv', 'data', b'RAT,Operator,Mean_Data_Rate\nENDC,Vodafone UK,42\n'),
         ('NetCheck_CDR_Voice.csv', 'voice', b'RAT_A,Operator,Call_Status\nENDC,Vodafone UK,Completed\n'),
@@ -3951,7 +3952,7 @@ def test_report_generation_failures_show_the_error_and_are_logged(client, monkey
 def test_reporting_concatenates_multiple_campaign_cdrs_per_source(client, monkeypatch) -> None:
     import src.DashboardAnalytic as app_module
 
-    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     uploads = [
         ('data-q1.csv', 'data', b'RAT_A,Campaign,Operator,Data_Q1\nENDC,2026 Q1,EE,10\n'),
         ('data-q2.csv', 'data', b'RAT_A,Campaign,Operator,Data_Q2\nENDC,2026 Q2,EE,20\n'),

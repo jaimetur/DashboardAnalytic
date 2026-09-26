@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.modules.column_names import column_identity, resolve_column_name
+from src.modules.column_names import resolve_column_name
 from src.modules.runtime_config import ignore_event_time_filtering
 
 from src.modules.ingestion import DatasetSummary, infer_dataset_kind

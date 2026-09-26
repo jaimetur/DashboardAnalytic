@@ -3,6 +3,31 @@
 
 ---
 
+## Release: v0.4.1
+### Release Date: 2026-09-26
+#### ⚠️ Breaking Changes:
+
+#### 🌟 New Features:
+
+#### 🚀 Enhancements:
+- Distribution charts with explicit range buckets (for example `Buckets = 1,5,20`) now stack and list `<1`, `1-5`, `5-20` and `20+` in ascending numeric order instead of the order in which values first appear in the CDR rows.
+- `pyproject.toml` now reports the application version and lists every directly imported runtime dependency (`httpx`, `pillow` and `certifi` were missing or only listed for development); `requirements.txt` pins Pillow and certifi explicitly. The release helper also updates the `pyproject.toml` version, and the unused `tools/BuildBinary.py` script copied from another project was removed.
+
+#### 🐛 Bug fixes:
+- Multivendor E2E Reporting chart-set jobs no longer fail on their first chart with an undefined `prepare_multivendor_catalog_entry` error.
+- Dashboards whose Report Template cannot be read now return the template validation message instead of a server error.
+- Query Builder accepts selected CDRs whose names contain quotes or apostrophes; `source_dataset_name` is now emitted as a correctly escaped SQL literal.
+- Hierarchical failure-count charts draw nested row separators from their parent label column on every row, instead of shifting them to the left after the first bar with a count label.
+- E2E Reporting chart-set identifiers use the configured Application Config timezone, so they match the displayed generation time.
+- The Dashboard PPT job Filters column keeps the requested date range (for example `Oldest to Newest`) when an already prepared Dashboard snapshot is reused for the export.
+- Sign-in rejects a malformed stored password hash instead of raising a server error, and dataset workers no longer fail when their CDR is deleted while it is still processing.
+- The automated test suite passes again: tests wait for isolated dataset workers and combined CDR rebuilds, and reflect the E2E Reporting access rules, renamed mapping controls and current chart rendering contracts.
+
+#### 📚 Documentation:
+- README and Deployment Configuration list the `demo` bootstrap account with its current `user-viewer` role. Workspace Config documents the ascending order of explicit distribution ranges, and Project Structure describes how the test client waits for background dataset processing, the release helper and `pyproject.toml`.
+
+---
+
 ## Release: v0.4.0
 ### Release Date: 2026-09-25
 #### ⚠️ Breaking Changes:

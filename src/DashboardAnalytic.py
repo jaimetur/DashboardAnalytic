@@ -27,7 +27,7 @@ import zipfile
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager, closing, contextmanager, nullcontext
 from dataclasses import asdict, fields, replace
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, tzinfo
 from pathlib import Path, PurePosixPath
 from threading import Event, Lock, Thread
 from time import monotonic, sleep
@@ -57,7 +57,7 @@ from src.modules.analytics import build_analysis
 from src.modules.background_scheduler import BackgroundTaskScheduler
 from src.modules.auth import SessionUser, verify_password
 from src.modules.column_names import MAIN_CDR_FIELDS, PREVIEW_METADATA_FIELDS, VENDOR_FIELD_IDENTITIES, clean_column_name, column_identity, resolve_column_name
-from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalog_chart_payload, catalog_kpi_fields, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, materialize_calculated_dimensions, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_label_format, parse_label_position, parse_legend_position, parse_template_boolean, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_catalog_chart_preview_with_hover, render_cdr_report, render_unavailable_source_chart, report_chart_renderer_name, reset_dashboard_canvas_renderer, split_calculated_dimension_aliases
+from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalog_chart_payload, catalog_kpi_fields, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, is_empty_catalog_chart, materialize_calculated_dimensions, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_label_format, parse_label_position, parse_legend_position, parse_template_boolean, prepare_catalog_chart_preview_frame, prepare_multivendor_catalog_entry, preview_catalog_chart_data, render_catalog_chart_preview, render_catalog_chart_preview_with_hover, render_cdr_report, render_unavailable_source_chart, report_chart_renderer_name, reset_dashboard_canvas_renderer, split_calculated_dimension_aliases
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column, add_vfuk_gcid_column, apply_operator_mappings, ensure_fixed_cdr_fields, get_dataset_source_columns, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.geospatial import assign_regions, validate_region_mapping
@@ -3091,6 +3091,14 @@ def now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec='microseconds')
 
 
+def configured_display_timezone() -> tzinfo:
+    """Return the timezone selected in Application Runtime (UTC by default)."""
+    try:
+        return ZoneInfo(str(os.environ.get('TZ') or DEPLOYMENT_RUNTIME_DEFAULTS['timezone'] or 'UTC'))
+    except (KeyError, ValueError):
+        return timezone.utc
+
+
 def format_local_timestamp(value: Any) -> str:
     """Render an ISO timestamp in the timezone selected in Application Runtime."""
     raw = str(value or '').strip()
@@ -3100,9 +3108,8 @@ def format_local_timestamp(value: Any) -> str:
         parsed = datetime.fromisoformat(raw.replace('Z', '+00:00'))
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
-        configured_timezone = ZoneInfo(str(os.environ.get('TZ') or DEPLOYMENT_RUNTIME_DEFAULTS['timezone'] or 'UTC'))
-        return parsed.astimezone(configured_timezone).strftime('%Y-%m-%d %H:%M:%S')
-    except (KeyError, ValueError):
+        return parsed.astimezone(configured_display_timezone()).strftime('%Y-%m-%d %H:%M:%S')
+    except ValueError:
         return raw
 
 
@@ -3567,7 +3574,11 @@ def _run_dataset_in_worker(
                 processed_at=now_iso(),
             )
         return
-    if exit_code != 0 and str((task_repository.get_dataset(dataset_id) or {})['status'] or '') != 'stopped':
+    if exit_code == 0:
+        return
+    # A dataset deleted while its worker was running has no status to update.
+    finished = task_repository.get_dataset(dataset_id)
+    if finished and str(finished['status'] or '') != 'stopped':
         task_repository.update_dataset_profile(
             dataset_id, status='failed', processing_step='Failed',
             last_error='The isolated CDR worker stopped unexpectedly.', processed_at=now_iso(),
@@ -3645,11 +3656,13 @@ def enqueue_dataset_processing(
 
             # Parse every source outside the web process. The scheduler thread
             # waits on the child without consuming an interactive CPU core.
+            queued_dataset = task_repository.get_dataset(dataset_id)
+            queued_kind = str((queued_dataset['dataset_kind'] if queued_dataset else '') or '')
             future = _submit_workspace_job(
                 task_repository, wait_for_dataset_worker,
-                phase=0 if str((task_repository.get_dataset(dataset_id) or {})['dataset_kind'] or '') in {'mapping_vodafone', 'mapping_three', 'mapping_region'} else 1,
+                phase=0 if queued_kind in {'mapping_vodafone', 'mapping_three', 'mapping_region'} else 1,
                 dataset_id=dataset_id,
-                dataset_kind=str((task_repository.get_dataset(dataset_id) or {})['dataset_kind'] or ''),
+                dataset_kind=queued_kind,
                 batch_priority=batch_priority,
             )
             return _track_dataset_future(dataset_id, task_repository, future)
@@ -3682,11 +3695,12 @@ def enqueue_dataset_processing(
                     _unregister_dataset_processing(dataset_id, task_repository)
 
         queued_dataset = task_repository.get_dataset(dataset_id)
-        is_mapping = bool(queued_dataset and str(queued_dataset['dataset_kind'] or '') in {'mapping_vodafone', 'mapping_three', 'mapping_region'})
+        queued_kind = str((queued_dataset['dataset_kind'] if queued_dataset else '') or '')
         future = _submit_workspace_job(
             task_repository, process_after_dependencies,
-            phase=0 if is_mapping else 1, dataset_id=dataset_id,
-            dataset_kind=str((queued_dataset or {})['dataset_kind'] or ''),
+            phase=0 if queued_kind in {'mapping_vodafone', 'mapping_three', 'mapping_region'} else 1,
+            dataset_id=dataset_id,
+            dataset_kind=queued_kind,
             batch_priority=batch_priority,
         )
     except Exception:
@@ -13385,7 +13399,8 @@ def persist_report_charts(
                 shutil.rmtree(child, ignore_errors=True)
         except OSError:
             continue
-    generated_at = datetime.now().astimezone()
+    # Name the chart set with the same clock that renders its generated time.
+    generated_at = datetime.now(configured_display_timezone())
     generation = generated_at.strftime('%Y%m%d-%H%M%S')
     suffix = 2
     target = destination / resume_generation if resume_generation and _valid_report_chart_generation(resume_generation) else destination / generation
@@ -16554,7 +16569,6 @@ def rename_report_catalogue(
         if new_identifier != catalogue_id:
             previous_identifier = catalogue_id
             repository.rename_report_template(technology, catalogue_id, new_identifier)
-            content = bytes(catalogue['content'])
             catalogue_id = new_identifier
             rename_dashboards = getattr(sys.modules[__name__], 'e2e_dashboard_rename_template_references', None)
             if callable(rename_dashboards):

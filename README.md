@@ -179,7 +179,7 @@ A new empty configuration database creates these accounts once:
 | --- | --- | --- |
 | `super` | `super123` | `super-admin` |
 | `admin` | `admin123` | `admin` |
-| `demo` | `demo123` | `user` |
+| `demo` | `demo123` | `user-viewer` |
 
 All three initially have access to the `Default` workspace. Accounts are not recreated or reset on later starts.
 

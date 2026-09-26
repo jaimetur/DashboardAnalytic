@@ -237,6 +237,8 @@ Legend Position: Right
 
 With upper-bound mode, `Buckets < 2,5,20,100` evaluates each value against the limits in order and produces `below2`, `below5`, `below20`, `below100` or `Above`. Use `Buckets < 1,3,10,20` for the corresponding FDTT UDP UL distribution. `<=` is also accepted when boundary values must remain inside their named bucket.
 
+Explicit ranges such as `Buckets = 1,5,20` produce `<1`, `1-5`, `5-20` and `20+`. Stacked segments and legend entries always follow ascending numeric order, regardless of the order in which values appear in the CDR rows.
+
 #### Threshold Stacked Vertical Bars
 
 Use for a below/above distribution around one threshold.

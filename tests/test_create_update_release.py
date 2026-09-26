@@ -49,11 +49,19 @@ def test_write_release_files_updates_version_and_adds_changelog_release(tmp_path
         '# CHANGELOG\n\n---\n\n## Release: v1.2.3\n### Release Date: 2026-09-20\n',
         encoding='utf-8',
     )
+    pyproject_path = tmp_path / 'pyproject.toml'
+    pyproject_path.write_text(
+        '[build-system]\nrequires = ["setuptools>=68"]\n\n[project]\nname = "demo"\nversion = "1.2.3"\n',
+        encoding='utf-8',
+    )
     monkeypatch.setattr(release_tool, 'VERSION_PATH', version_path)
     monkeypatch.setattr(release_tool, 'CHANGELOG_PATH', changelog_path)
+    monkeypatch.setattr(release_tool, 'PYPROJECT_PATH', pyproject_path)
 
     release_tool.write_release_files('1.2.4', '2026-09-21', create_changelog_release=True)
 
+    assert 'version = "1.2.4"' in pyproject_path.read_text(encoding='utf-8')
+    assert 'requires = ["setuptools>=68"]' in pyproject_path.read_text(encoding='utf-8')
     assert '__version__ = "1.2.4"' in version_path.read_text(encoding='utf-8')
     assert '__release_date__ = "2026-09-21"' in version_path.read_text(encoding='utf-8')
     changelog = changelog_path.read_text(encoding='utf-8')
@@ -131,6 +139,7 @@ def test_create_release_carries_changes_and_pushes_new_branch(tmp_path, monkeypa
     monkeypatch.setattr(release_tool, 'ROOT', project)
     monkeypatch.setattr(release_tool, 'VERSION_PATH', project / 'src' / 'version.py')
     monkeypatch.setattr(release_tool, 'CHANGELOG_PATH', project / 'CHANGELOG.md')
+    monkeypatch.setattr(release_tool, 'PYPROJECT_PATH', project / 'pyproject.toml')
 
     release_tool.create_release(
         '1.2.4',

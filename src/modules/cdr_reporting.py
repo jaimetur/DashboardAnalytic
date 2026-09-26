@@ -16,7 +16,6 @@ import shutil
 import ssl
 import subprocess
 import threading
-import unicodedata
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 from collections import defaultdict
@@ -24,7 +23,6 @@ from bisect import bisect_left, bisect_right
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from io import BytesIO
-from itertools import product
 from pathlib import Path
 from typing import Callable, Iterable, Mapping
 
@@ -2407,7 +2405,25 @@ def _distribution_buckets(frame: pd.DataFrame, *, legend: bool = False) -> list[
         return domain if legend else list(reversed(domain))
     if "__catalog_stack" not in frame:
         return []
-    return [str(value) for value in frame["__catalog_stack"].dropna().drop_duplicates()]
+    observed = [str(value) for value in frame["__catalog_stack"].dropna().drop_duplicates()]
+    # Range buckets (``<1``, ``1-5`` ... ``20+``) follow their numeric order
+    # instead of the order in which the source rows happen to mention them.
+    range_keys = [_range_bucket_sort_key(value) for value in observed]
+    if observed and all(key is not None for key in range_keys):
+        return [value for _key, value in sorted(zip(range_keys, observed), key=lambda item: item[0])]
+    return observed
+
+
+def _range_bucket_sort_key(value: str) -> tuple[float, int] | None:
+    """Return the ascending position of a ``<low``, ``low-high`` or ``high+`` bucket."""
+    number = r"-?\d+(?:\.\d+)?(?:e[+-]?\d+)?"
+    if match := re.fullmatch(rf"<({number})", value):
+        return float(match.group(1)), 0
+    if match := re.fullmatch(rf"({number})-({number})", value):
+        return float(match.group(1)), 1
+    if match := re.fullmatch(rf"({number})\+", value):
+        return float(match.group(1)), 2
+    return None
 
 
 def _distribution_bucket_colours(
@@ -3864,7 +3880,6 @@ def _hierarchical_complete_keys(frame: pd.DataFrame, columns: list[str]) -> list
     if not columns:
         return [()]
     configured_values = frame.attrs.get("catalogue_dimension_values", {})
-    labels = frame.attrs.get("catalogue_dimension_labels", {})
     observed = list(frame[columns].drop_duplicates().itertuples(index=False, name=None))
     if not observed:
         return []
@@ -4747,7 +4762,6 @@ def _render_failure_count_hierarchy(
                 if segment_width:
                     draw.rectangle((x, y, x + segment_width, y + bar_height), fill=colours[state])
                     label = str(count)
-                    label_width = _text_width(draw, label, count_font)
                     def automatic_label() -> None:
                         if not _draw_inside_bar_label(image, draw, label, x=x, y=y, width=segment_width, height=bar_height, fill="white", font=count_font):
                             outside_counts.append(label)
@@ -4889,8 +4903,6 @@ def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | N
             draw.rectangle((x, y, x + bar_width, y + segment), fill=bucket_colours.get((bucket,), _colour(bucket, bucket_index)))
             value_label = f"{value:.2%}"
             label_font = _font(17, True)
-            label_box = draw.textbbox((0, 0), value_label, font=label_font)
-            label_height = label_box[3] - label_box[1]
             def automatic_label() -> None:
                 if _draw_inside_horizontal_bar_label(
                     draw, value_label,
@@ -5911,7 +5923,6 @@ def catalog_chart_payload(
         )
         payload_series = []
         fallback_legend = []
-        requested_legend = _legend_dimensions(render_entry.legend)
         for index, (combination, values, campaigns) in enumerate(series_rows):
             visible_points = _cdf_visible_points(values, low, high)
             if not visible_points:
