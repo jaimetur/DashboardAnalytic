@@ -544,8 +544,8 @@ def install_dashboard_routes(core):
         singular, plural = {'Region': ('Region', 'Regions'), 'City': ('City', 'Cities')}[field]
         return f'{singular if count == 1 else plural}: {label}'
 
-    def add_dashboard_ppt_cover_geography(slide, regions: str, cities: str, slide_height: int) -> None:
-        """Place selected geography below the title subtitle using the title alignment."""
+    def add_dashboard_ppt_cover_geography(slide, scope: str, regions: str, cities: str, slide_height: int) -> None:
+        """Place the Scope and selected geography at the bottom of the cover, aligned with its title."""
         title = next((shape for shape in slide.placeholders if shape.placeholder_format.type in {1, 3}), None)
         left = title.left if title is not None else Inches(0.52)
         width = title.width if title is not None else Inches(11)
@@ -553,13 +553,16 @@ def install_dashboard_routes(core):
         details = [
             (name, value, color)
             for name, value, color in (
+                ('scope', scope, RGBColor(139, 240, 166)),
                 ('region', regions, RGBColor(82, 221, 240)),
                 ('city', cities, RGBColor(255, 166, 203)),
             )
             if value
         ]
+        # The last line keeps its fixed distance from the bottom edge.
+        first_top = slide_height - Inches(0.35 + 0.4 * len(details))
         for index, (name, value, color) in enumerate(details):
-            box = slide.shapes.add_textbox(left, slide_height - Inches(1.15) + Inches(0.4 * index), width, Inches(0.34))
+            box = slide.shapes.add_textbox(left, first_top + Inches(0.4 * index), width, Inches(0.34))
             box.name = f'dashboard-ppt-{name}'
             box.text_frame.margin_left = margin_left
             box.text_frame.margin_top = 0
@@ -771,10 +774,12 @@ def install_dashboard_routes(core):
                         raise ValueError(f"Slide {slide_number}: layout '{header.layout}' is unavailable.")
                     slide = presentation.slides.add_slide(layout)
                     is_cover = header.structural_type == 'title slide' and slide_number == min(grouped)
-                    subtitle = dashboard_ppt_scope_label(snapshot.definition.scope) if is_cover else header.slide_subtitle
-                    _set_structural_slide_text(slide, header.slide_title, subtitle)
+                    _set_structural_slide_text(slide, header.slide_title, header.slide_subtitle)
                     if is_cover:
-                        add_dashboard_ppt_cover_geography(slide, cover_regions, cover_cities, presentation.slide_height)
+                        add_dashboard_ppt_cover_geography(
+                            slide, dashboard_ppt_scope_label(snapshot.definition.scope),
+                            cover_regions, cover_cities, presentation.slide_height,
+                        )
                     _set_commentary(slide, comments)
                     continue
                 chart_entries = [

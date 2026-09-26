@@ -17,6 +17,8 @@
 - Dashboard Universe selectors, the PPT export universe dialog (whose title shows the NR Mode, for example `CDR datasets (NSA)`), default universes (latest two CDRs per type, or one for Multivendor) and pre-cached universes only consider CDRs of the Dashboard's NR Mode. Changing a Dashboard's NR Mode selects the newest CDRs of the new mode.
 - Dashboard pre-caching covers every CDR plus the newest one, two, three and four CDRs of each type, skipping duplicate or impossible universes. It runs on its own low-priority worker instead of the shared background scheduler: open Dashboards are pre-cached first, closed ones pause while an open Dashboard needs work, and foreground preparations and PPT exports pause it until they finish. PPT exports are no longer blocked by pre-caching; the export job pre-caches its chosen universe before applying its own selections. Manage Dashboards shows `Checking Cache` and `Pre-Caching Universe n/m` (with `· Waiting` while queued or paused).
 - The first action of every E2E Dashboard filter selector is **Select All / None** (formerly **All values**) and toggles between selecting every value and none; selecting all still keeps an open selection that includes values from future CDRs.
+- A Dashboard that opens with a Title Slide shows the Scope, the selected Regions and the Cities below the cover subtitle, both in the viewer and in the exported PPT, in distinct green, cyan and pink accents. The PPT cover subtitle now keeps the template text instead of repeating the Scope.
+- The Dashboard viewer has a **Scope** selector before Dashboard Filters. Changing it asks for confirmation, because every chart is rendered again, and then applies the new scope with its default Dataset Universe.
 
 #### 🐛 Bug fixes:
 - Multivendor E2E Reporting chart-set jobs no longer fail on their first chart with an undefined `prepare_multivendor_catalog_entry` error.
@@ -29,6 +31,7 @@
 - A Dashboard marked Ready no longer returns to preparation after another Dashboard is opened: adding or filling combined-table columns keeps prepared universes valid, and only row changes invalidate them.
 - Reduced Dashboard timeouts (504) and memory pressure on smaller servers: Dashboard preparation runs in the background while the browser polls its progress, read-only requests retry transient gateway errors, status checks reuse their results and read universe manifests directly, identical cached universes share one snapshot, and only recently used snapshots keep chart frames in memory (`DASHBOARD_ANALYTIC_DASHBOARD_FRAME_CACHE_SNAPSHOTS`). A new preparation now only supersedes the same user's earlier request.
 - The Materialization status bar shows 100% when all fields are up to date instead of 0%.
+- Title and Transition slide subtitles in the Dashboard viewer use the template's yellow accent instead of a grey colour inherited from the viewer panel, and structural slide text scales with the slide so it no longer overflows short viewers. The viewer actions no longer overlap the slide selector on narrower screens.
 - The automated test suite passes again: tests wait for isolated dataset workers and combined CDR rebuilds, and reflect the E2E Reporting access rules, renamed mapping controls and current chart rendering contracts.
 
 #### 📚 Documentation:

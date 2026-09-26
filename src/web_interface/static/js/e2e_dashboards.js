@@ -148,7 +148,7 @@
   ]));
   const multivendorAvailable = Boolean(config.multivendor_available);
   const syncMultivendorAvailability = () => {
-    for (const id of ['ds-scope', 'ds-ppt-dataset-scope']) {
+    for (const id of ['ds-scope', 'ds-ppt-dataset-scope', 'ds-viewer-scope']) {
       const control = $(id);
       const choice = control?.querySelector('option[value="multivendor"]');
       if (choice) choice.disabled = !multivendorAvailable;
@@ -336,6 +336,7 @@
     $('ds-preparing-out-of-sync').hidden = !stale;
   };
   const updateFilterActionState = () => {
+    syncViewerScope();
     $('ds-save').disabled = !hasUnsavedFilterChanges() || filterActionBusy;
     $('ds-apply-filters').disabled = !hasUnappliedFilterChanges() || filterActionBusy;
     $('ds-save-universe').disabled = !hasUnsavedUniverseChanges() || filterActionBusy;
@@ -1817,6 +1818,7 @@
     sources();
     if (hasOpenFacetMenu()) refreshFacetsAfterMenusClose(); else facets();
     setDashboardStatus(activeId, 'ready', 'Ready');
+    syncViewerScope();
     setViewEnabled(Boolean(payload.slides?.length));
     setPreparationRows(payload);
     setPreparationState('ready');
@@ -2032,6 +2034,30 @@
     if (!hasUnappliedFilterChanges()) return;
     if (!$('ds-filter-overlay').hidden) await closeFilters();
     await preparePart('filters');
+  });
+  // The viewer's Scope selector applies a new comparison immediately, after
+  // warning that every chart is rendered again for the new Dataset Universe.
+  function syncViewerScope() {
+    const control = $('ds-viewer-scope');
+    if (!control) return;
+    control.value = (appliedDashboardDefinition || definition)?.scope || 'single';
+    control.disabled = !definition || Boolean(pptDashboardViewer) || filterActionBusy;
+  }
+  $('ds-viewer-scope').onchange = safe(async () => {
+    const control = $('ds-viewer-scope');
+    const next = control.value;
+    const current = (appliedDashboardDefinition || definition)?.scope || 'single';
+    if (!definition || next === current) return;
+    const label = next === 'multivendor' ? 'Multivendor Comparison' : 'Operator Comparison';
+    const accepted = await window.showConfirmDialog(
+      `Change the Scope to ${label}? Every Dashboard chart will be rendered again, and the Dataset Universe switches to the newest ${next === 'multivendor' ? 'CDR' : 'two CDRs'} of each type for this scope.`,
+      {title: 'Change Dashboard Scope', confirmLabel: 'Change Scope', tone: 'warning'},
+    );
+    if (!accepted) { control.value = current; return; }
+    $('ds-scope').value = next;
+    await $('ds-scope').onchange();
+    await preparePart('universe');
+    syncViewerScope();
   });
   bind('ds-apply-universe', async () => {
     if (!hasUnappliedUniverseChanges()) return;
@@ -2286,6 +2312,16 @@
     brand.append(node('strong', config.app_name || 'Dashboard Analytic'), mark);
     return brand;
   }
+  // Matches the PPT cover: "All Regions", "Region: A" or "Regions: A, B".
+  const coverGeographyLabel = (field, singular, plural, allLabel) => {
+    const filters = (appliedDashboardDefinition || definition || {}).filters || {};
+    const key = Object.keys(filters).find(item => identity(item) === identity(field));
+    const available = (facetOptions?.[field] || []).map(String).filter(Boolean);
+    const selected = key ? (filters[key] || []).map(String).filter(Boolean) : available;
+    if (!selected.length) return '';
+    if (!key || (available.length && selected.length === available.length && selected.every(value => available.includes(value)))) return allLabel;
+    return `${selected.length === 1 ? singular : plural}: ${selected.join(', ')}`;
+  };
   function structuralDashboard(stage, slide) {
     const kind = String(slide.structural_type || '').toLowerCase().includes('transition') ? 'transition' : 'title';
     const cover = node('section', undefined, `ds-structural-slide ds-structural-${kind}`);
@@ -2294,7 +2330,21 @@
     const content = node('div', undefined, 'ds-structural-content');
     content.append(node('h3', slide.title || 'Dashboard', 'ds-structural-title'));
     if (slide.subtitle) content.append(node('p', slide.subtitle, 'ds-structural-subtitle'));
-    cover.append(content, brand); stage.append(cover);
+    cover.append(content, brand);
+    // Like the exported PPT, a Title Slide that opens the Dashboard shows the
+    // Scope and the selected Regions and Cities at the bottom of the cover.
+    const firstSlideNumber = Math.min(...(prepared?.slides || [slide]).map(item => Number(item.number)));
+    if (kind === 'title' && Number(slide.number) === firstSlideNumber) {
+      const geography = node('div', undefined, 'ds-structural-geography');
+      const scope = (appliedDashboardDefinition || definition || {}).scope === 'multivendor' ? 'Multivendor Comparison' : 'Operator Comparison';
+      for (const [name, label] of [
+        ['scope', scope],
+        ['region', coverGeographyLabel('Region', 'Region', 'Regions', 'All Regions')],
+        ['city', coverGeographyLabel('City', 'City', 'Cities', 'All Cities')],
+      ]) if (label) geography.append(node('p', label, `ds-structural-geography-${name}`));
+      if (geography.childElementCount) content.append(geography);
+    }
+    stage.append(cover);
   }
   function chartZoomControls(canvas) {
     const controls = node('div', undefined, 'ds-chart-zoom'); controls.hidden = true; controls.setAttribute('role', 'group'); controls.setAttribute('aria-label', 'Chart zoom');

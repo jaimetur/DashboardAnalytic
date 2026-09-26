@@ -773,12 +773,16 @@ def test_dashboard_ppt_cover_uses_scope_and_catalogue_geography(client):
     placeholders = {shape.placeholder_format.type: shape for shape in slide.placeholders}
     title = placeholders.get(1) or placeholders[3]
     assert title.text == 'Quarterly review'
-    assert placeholders[4].text == 'Operator Comparison'
+    assert placeholders[4].text == 'Template subtitle'
     details = {shape.name: shape for shape in slide.shapes if shape.name.startswith('dashboard-ppt-')}
+    # The Scope is listed above the Regions and Cities in its own colour.
+    assert details['dashboard-ppt-scope'].text == 'Operator Comparison'
     assert details['dashboard-ppt-region'].text == 'All Regions'
     assert details['dashboard-ppt-city'].text == 'All Cities'
-    assert details['dashboard-ppt-region'].left == title.left
+    assert details['dashboard-ppt-scope'].top < details['dashboard-ppt-region'].top < details['dashboard-ppt-city'].top
+    assert details['dashboard-ppt-scope'].left == details['dashboard-ppt-region'].left == title.left
     assert details['dashboard-ppt-city'].left == title.left
+    assert details['dashboard-ppt-scope'].text_frame.paragraphs[0].font.color.rgb == RGBColor(139, 240, 166)
     assert details['dashboard-ppt-region'].text_frame.paragraphs[0].font.color.rgb not in {
         RGBColor(255, 255, 255), RGBColor(255, 255, 0),
     }
@@ -2732,3 +2736,32 @@ def test_adding_combined_columns_keeps_prepared_dashboard_caches_valid(client):
     assert core.repository.get_workspace_state('combined_reporting_columns_updated_data')
     core.mark_combined_reporting_updated(core.repository, 'data', rows_changed=True)
     assert core.repository.get_workspace_state('combined_reporting_updated_data') != before
+
+
+def test_dashboard_viewer_cover_matches_the_exported_ppt_cover():
+    root = Path(__file__).parents[1] / 'src/web_interface/static'
+    script = (root / 'js/e2e_dashboards.js').read_text(encoding='utf-8')
+    stylesheet = (root / 'css/e2e_dashboards.css').read_text(encoding='utf-8')
+
+    assert "coverGeographyLabel('Region', 'Region', 'Regions', 'All Regions')" in script
+    assert "coverGeographyLabel('City', 'City', 'Cities', 'All Cities')" in script
+    assert "if (kind === 'title' && Number(slide.number) === firstSlideNumber) {" in script
+    # These selectors outrank the viewer panel's generic paragraph colour.
+    # Title and Transition subtitles use the template's yellow accent.
+    assert '.ds-structural-slide p.ds-structural-subtitle{color:#fad22d}' in stylesheet
+    assert "['scope', scope]," in script
+    assert '.ds-structural-slide .ds-structural-geography p.ds-structural-geography-scope{color:#8bf0a6}' in stylesheet
+    assert '.ds-structural-slide .ds-structural-geography p.ds-structural-geography-region{color:#52ddf0}' in stylesheet
+    assert '.ds-structural-slide .ds-structural-geography p.ds-structural-geography-city{color:#ffa6cb}' in stylesheet
+
+
+def test_dashboard_viewer_scope_selector_confirms_before_rerendering():
+    root = Path(__file__).parents[1] / 'src/web_interface'
+    template = (root / 'templates/e2e_dashboards.html').read_text(encoding='utf-8')
+    script = (root / 'static/js/e2e_dashboards.js').read_text(encoding='utf-8')
+
+    assert template.index('id="ds-viewer-scope"') < template.index('id="ds-floating-filters"')
+    assert "title: 'Change Dashboard Scope', confirmLabel: 'Change Scope', tone: 'warning'" in script
+    assert "if (!accepted) { control.value = current; return; }" in script
+    assert "await preparePart('universe');" in script
+    assert "for (const id of ['ds-scope', 'ds-ppt-dataset-scope', 'ds-viewer-scope'])" in script
