@@ -25,7 +25,7 @@
 - Dashboard names are unique per NR Mode, so an NSA and an SA Dashboard can share a name; copies and imports only add a suffix when the name is taken in the same NR Mode.
 - The Dashboards and Report Templates tables are sorted by NR Mode (NSA first) and then name, ignoring an NSA/SA marker written in the name. The Report Templates table calls its type column **NR Mode** and adds **Last Updated by**, the user behind the latest import, edit, rename, duplicate, default change or NR Mode move (stored in `report_templates.updated_by`).
 - Dashboard PowerPoint export requests return as soon as the job is created. Resolving the export universe, cover labels, Filters column and file name now happens inside the background job, so a busy server no longer delays queuing; problems such as a universe without valid CDRs mark the job as failed with the reason.
-- The Dashboard viewer shows the current slide title in larger violet text and the subtitle in larger golden-yellow text, and aligns its lavender Scope selector with the adjacent action buttons.
+- The Dashboard viewer shows the NR Mode before the Dashboard name, a larger violet slide title and golden-yellow subtitle, and the applied Scope, Regions and Cities in distinct colours separated by bold dots. Its lavender Scope selector matches the adjacent action buttons in height and text size.
 
 #### 🐛 Bug fixes:
 - Multivendor E2E Reporting chart-set jobs no longer fail on their first chart with an undefined `prepare_multivendor_catalog_entry` error.

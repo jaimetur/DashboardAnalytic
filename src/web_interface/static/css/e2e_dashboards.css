@@ -80,6 +80,14 @@
 .ds-viewer-header{display:flex;justify-content:space-between;align-items:start;gap:20px}.ds-viewer-header h2{margin:0}.ds-viewer-header p{margin:4px 0}#ds-subtitle{min-height:1.4em}.ds-viewer-panel>.ds-actions{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;margin-top:.5rem}.ds-viewer-panel>.ds-actions>select{justify-self:start}.ds-viewer-panel>.ds-actions>.ds-viewer-tool-actions{justify-self:center;margin:0;padding:0;border:0}.ds-viewer-panel>.ds-actions>.ds-viewer-right-actions{justify-self:end;margin-left:0}
 .ds-viewer-header h2{color:#4c3277;font-size:1.9rem;font-weight:800;line-height:1.15}
 #ds-subtitle{color:#9a6c00;font-size:1.125rem;font-weight:700;line-height:1.35}
+.ds-viewer-header>div{min-width:0}
+.ds-viewer-context{display:flex;flex-wrap:wrap;row-gap:.2rem;margin-top:.3rem;font-size:.9rem;font-weight:750;line-height:1.25}
+.ds-viewer-context[hidden]{display:none}
+.ds-viewer-context span{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ds-viewer-context span+span::before{content:'●';margin:0 .65rem;color:#695678;font-size:.7em;font-weight:900;vertical-align:.1em}
+.ds-viewer-context-scope{color:#276c42}
+.ds-viewer-context-region{color:#0b7184}
+.ds-viewer-context-city{color:#9b3e70}
 .ds-slide-sidebar{display:flex;flex:0 0 auto;min-width:0;min-height:0;flex-direction:column}.ds-viewer-navigation-footer{display:flex;flex:0 0 auto;justify-content:center;padding:.55rem 0}.ds-slide-navigation{display:flex;align-items:center;justify-content:center;gap:4px}.e2e-dashboards .ds-slide-nav-button{display:grid;place-items:center;width:2rem;min-width:2rem;height:2rem;min-height:2rem;padding:0!important;border-radius:999px!important;font-size:1rem!important;font-weight:800;line-height:1}
 .ds-slide-content{position:relative;display:flex;flex:1 1 auto;min-height:0;margin-top:22px;flex-direction:column}.ds-viewer-preparing{position:absolute;z-index:12;top:50%;left:50%;width:min(560px,86%);margin:0;transform:translate(-50%,-50%)}.ds-chart-stage{position:relative;flex:1 1 auto;width:100%;min-height:280px;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
 .ds-chart-stage.ds-positioned{display:block}.ds-positioned .ds-chart{position:absolute}
@@ -1659,15 +1667,20 @@
 }
 
 .ds-viewer-scope-control { display:inline-flex; align-items:center; gap:.45rem; color:#4b3676; font-size:.78rem; font-weight:800; white-space:nowrap; }
-.ds-viewer-scope-control select { box-sizing:border-box; width:12.5rem; max-width:100%; height:2.55rem; min-height:2.55rem; padding:.3rem 1.8rem .3rem .8rem; border:1px solid #b69ad9; border-radius:999px; background-color:#e5d8f3; color:#4c3277; font-size:.8rem; font-weight:700; }
+.ds-viewer-scope-control select { box-sizing:border-box; width:15rem; max-width:100%; height:2.55rem; min-height:2.55rem; padding:.3rem 1.8rem .3rem .8rem; border:1px solid #b69ad9; border-radius:999px; background-color:#e5d8f3; color:#4c3277; font-size:1rem; font-weight:800; }
 .ds-viewer-scope-control select:hover:not(:disabled),.ds-viewer-scope-control select:focus-visible { border-color:#8b65b8; background-color:#d9c7ed; }
 .ds-viewer-scope-control select:disabled { opacity:.6; }
 
+@media (max-width:640px) {
+  .ds-viewer-context { font-size:.75rem; }
+  .ds-viewer-scope-control select { font-size:.7rem; }
+}
 @media (orientation:landscape) and (max-height:600px) {
-  .ds-viewer-scope-control select { height:2.15rem; min-height:2.15rem; }
+  .ds-viewer-context { margin-top:.1rem; font-size:.7rem; }
+  .ds-viewer-scope-control select { height:2.15rem; min-height:2.15rem; font-size:.64rem; }
 }
 @media (orientation:portrait) and (max-width:640px) {
-  .ds-viewer-scope-control select { height:2.25rem; min-height:2.25rem; }
+  .ds-viewer-scope-control select { height:2.25rem; min-height:2.25rem; font-size:.62rem; }
 }
 
 /* Size structural slide text from the slide itself, not the browser window,

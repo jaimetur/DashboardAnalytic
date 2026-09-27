@@ -2407,8 +2407,11 @@
       .then(payload => {
         if (coverGeographyKey() !== key) return;
         coverGeography = {key, regions: payload.regions || [], cities: payload.cities || [], loading: false};
-        // Redraw the cover once its catalogue arrives.
-        if (!$('ds-viewer').hidden && document.querySelector('.ds-structural-slide.ds-structural-title')) renderSlide();
+        // Refresh the visible geography after its catalogue arrives.
+        if (!$('ds-viewer').hidden) {
+          if (document.querySelector('.ds-structural-slide.ds-structural-title')) renderSlide();
+          else renderViewerContext();
+        }
       })
       // Without the catalogue the cover falls back to the Dashboard's filter values.
       .catch(() => { coverGeography = {key, regions: [], cities: [], loading: false}; });
@@ -2429,6 +2432,29 @@
     if (!key || covers(loaded.map(String).filter(Boolean)) || covers(facetValues)) return allLabel;
     return `${selected.length === 1 ? singular : plural}: ${selected.join(', ')}`;
   };
+  const viewerGeographyLabels = () => {
+    const snapshotCover = pptDashboardViewer?.cover;
+    if (!pptDashboardViewer) ensureCoverGeography();
+    const scope = snapshotCover?.scope
+      || ((pptDashboardViewer?.definition || appliedDashboardDefinition || definition || {}).scope === 'multivendor'
+        ? 'Multivendor Comparison' : 'Operator Comparison');
+    return [
+      ['scope', scope],
+      ['region', snapshotCover ? snapshotCover.regions : coverGeographyLabel('Region', 'Region', 'Regions', 'All Regions')],
+      ['city', snapshotCover ? snapshotCover.cities : coverGeographyLabel('City', 'City', 'Cities', 'All Cities')],
+    ];
+  };
+  function renderViewerContext() {
+    const context = $('ds-viewer-context');
+    context.replaceChildren(...viewerGeographyLabels()
+      .filter(([, label]) => label)
+      .map(([name, label]) => {
+        const item = node('span', name === 'scope' ? `Scope: ${label}` : label, `ds-viewer-context-${name}`);
+        item.title = item.textContent;
+        return item;
+      }));
+    context.hidden = !context.childElementCount;
+  }
   function structuralDashboard(stage, slide) {
     const kind = String(slide.structural_type || '').toLowerCase().includes('transition') ? 'transition' : 'title';
     const cover = node('section', undefined, `ds-structural-slide ds-structural-${kind}`);
@@ -2446,15 +2472,8 @@
     if (kind === 'title' && Number(slide.number) === firstSlideNumber) {
       const geography = node('div', undefined, 'ds-structural-geography');
       // A PPT job snapshot shows exactly the cover lines of its exported PPT.
-      const snapshotCover = pptDashboardViewer?.cover;
-      if (!snapshotCover) ensureCoverGeography();
-      const scope = snapshotCover?.scope
-        || ((appliedDashboardDefinition || definition || {}).scope === 'multivendor' ? 'Multivendor Comparison' : 'Operator Comparison');
-      for (const [name, label] of [
-        ['scope', scope],
-        ['region', snapshotCover ? snapshotCover.regions : coverGeographyLabel('Region', 'Region', 'Regions', 'All Regions')],
-        ['city', snapshotCover ? snapshotCover.cities : coverGeographyLabel('City', 'City', 'Cities', 'All Cities')],
-      ]) if (label) geography.append(node('p', label, `ds-structural-geography-${name}`));
+      for (const [name, label] of viewerGeographyLabels())
+        if (label) geography.append(node('p', label, `ds-structural-geography-${name}`));
       if (geography.childElementCount) content.append(geography);
     }
     stage.append(cover);
@@ -3220,9 +3239,11 @@
     // restored. Never leave the previous Dashboard's title, slide or comments
     // visible during that short wait.
     const viewer = viewerDefinition();
-    $('ds-position').textContent = viewer ? `${viewer.name} · Loading slides` : '';
+    $('ds-position').textContent = viewer ? `${dashboardNrMode(viewer)} · ${viewer.name} · Loading slides` : '';
     $('ds-title').textContent = 'Loading Dashboard…';
     $('ds-subtitle').textContent = '';
+    $('ds-viewer-context').replaceChildren();
+    $('ds-viewer-context').hidden = true;
     $('ds-slide').replaceChildren(option('', 'Loading slides…'));
     $('ds-slide').disabled = true;
     $('ds-first').disabled = $('ds-prev').disabled = $('ds-next').disabled = $('ds-last').disabled = true;
@@ -3240,7 +3261,9 @@
     const preloadOrigin = slideIndex;
     const visibleLoads = [];
     $('ds-title').textContent = slide.title || `Dashboard ${slide.number}`; $('ds-subtitle').textContent = slide.subtitle;
-    $('ds-position').textContent = `${viewerDefinition()?.name || 'Dashboard'} · Slide ${slideIndex+1} / ${prepared.slides.length}`;
+    renderViewerContext();
+    const viewer = viewerDefinition();
+    $('ds-position').textContent = `${dashboardNrMode(viewer)} · ${viewer?.name || 'Dashboard'} · Slide ${slideIndex+1} / ${prepared.slides.length}`;
     $('ds-slide').replaceChildren(...prepared.slides.map((item,index)=>option(String(index),`${item.number} · ${item.title || 'Dashboard'}`))); $('ds-slide').disabled = false; $('ds-slide').value = String(slideIndex);
     $('ds-first').disabled = $('ds-prev').disabled = slideIndex === 0;
     $('ds-next').disabled = $('ds-last').disabled = slideIndex === prepared.slides.length - 1;
