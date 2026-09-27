@@ -2339,14 +2339,15 @@
         // Redraw the cover once its catalogue arrives.
         if (!$('ds-viewer').hidden && document.querySelector('.ds-structural-slide.ds-structural-title')) renderSlide();
       })
-      .catch(() => { coverGeography = {...coverGeography, key, loading: false}; });
+      // Without the catalogue the cover falls back to the Dashboard's filter values.
+      .catch(() => { coverGeography = {key, regions: [], cities: [], loading: false}; });
   };
   // Matches the PPT cover: "All Regions", "Region: A" or "Regions: A, B".
   const coverGeographyLabel = (field, singular, plural, allLabel) => {
     const filters = (appliedDashboardDefinition || definition || {}).filters || {};
     const key = Object.keys(filters).find(item => identity(item) === identity(field));
-    const catalogue = coverGeography.key === coverGeographyKey()
-      ? coverGeography[field === 'Region' ? 'regions' : 'cities'] : (facetOptions?.[field] || []);
+    const loaded = coverGeography.key === coverGeographyKey() ? coverGeography[field === 'Region' ? 'regions' : 'cities'] : [];
+    const catalogue = loaded.length ? loaded : (facetOptions?.[field] || []);
     const available = catalogue.map(String).filter(Boolean);
     const selected = key ? (filters[key] || []).map(String).filter(Boolean) : available;
     if (!selected.length) return '';

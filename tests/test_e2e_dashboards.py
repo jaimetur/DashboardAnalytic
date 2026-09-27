@@ -2809,3 +2809,35 @@ def test_dashboard_filters_open_as_a_sub_panel_below_their_dashboard_row():
     assert "const parkFilterPanel = () => { $('ds-filter-parking').append($('ds-filter-home')); filterRow.remove(); };" in script
     assert "filterRowCell.append($('ds-filter-home'));" in script
     assert script.index("body.append(row);\n      if (filtersAreOpen) {") > 0
+
+
+def test_cover_geography_falls_back_to_dashboard_filter_values(client):
+    payload = setup_dashboard(client)
+    # A stale or alias-less catalogue has no Cities; the Dashboard's own City
+    # filter values (resolved through aliases) complete the cover geography.
+    core.repository.replace_cdr_catalogue(1, vendors=[], regions=[], cities=[])
+
+    options = client.post('/api/e2e-dashboards/geography-options', json=payload)
+
+    assert options.status_code == 200, options.text
+    assert options.json()['cities'] == ['Leeds', 'London']
+    assert options.json()['regions'] == []
+
+    core.repository.add_report_template('nsa', 'Cover only', (
+        'Slide,Slide tittle,Slide Subtittle,Layout,Chart Tittle,CDR source,KPI,Chart type,Filters,Rows Aggregation,Column Aggregation,Legend,Legend Position\n'
+        '1,Quarterly review,Template subtitle,Title Page,,,,Title Slide,,,,,Top\n'
+    ).encode(), is_default=False)
+    payload['template'] = 'Cover only'
+    assert client.put('/api/e2e-dashboards/cover-only', json=payload).status_code == 200
+    job_id = client.post('/api/e2e-dashboards/cover-only/export-ppt', json={'definition': payload}).json()['job_id']
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        job = next(item for item in client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
+        if job['status'] in {'ready', 'failed'}:
+            break
+        time.sleep(0.05)
+    assert job['status'] == 'ready', job
+    with core.repository.connection() as connection:
+        row = connection.execute('SELECT output_path FROM dashboard_ppt_jobs WHERE id = ?', (job_id,)).fetchone()
+    names = {shape.name: shape.text for shape in Presentation(row['output_path']).slides[0].shapes if shape.name.startswith('dashboard-ppt-')}
+    assert names == {'dashboard-ppt-scope': 'Operator Comparison', 'dashboard-ppt-city': 'All Cities'}

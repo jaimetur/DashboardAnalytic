@@ -1254,9 +1254,8 @@ def install_dashboard_routes(core):
         preview_fingerprint = dashboard_preview_fingerprint(raw_definition, task_repository)
         export_time = datetime.now()
         safe_scope = dashboard_ppt_filename_part(dashboard_ppt_scope_label(raw_definition.get('scope') or 'single'), 40)
-        selected_ids = [dataset_id for ids in (raw_definition.get('datasets') or {}).values() for dataset_id in ids]
-        catalogue = task_repository.cdr_catalogue_values(selected_ids) if selected_ids else {'vendors': [], 'regions': [], 'cities': []}
         selected_by_kind = selected_sources(snapshot_definition, task_repository)
+        catalogue = dashboard_geography_catalogue(snapshot_definition, selected_by_kind, task_repository)
         operators = profile_filter_options(snapshot_definition, [], selected_by_kind, ['Operator'], task_repository)['Operator']
         available = {'Operator': operators, 'Vendor': catalogue['vendors'], 'Region': catalogue['regions'], 'City': catalogue['cities']}
         requested = {field: explicit_selections.get(field, []) for field in ('Operator', 'Vendor', 'Region', 'City')}
@@ -2467,13 +2466,33 @@ def install_dashboard_routes(core):
             raise HTTPException(400, f'The selected CDRs do not contain the {field_name} field.')
         return sorted(values, key=str.casefold)
 
+    def dashboard_geography_catalogue(definition, selected_by_kind, task_repository) -> dict[str, list[str]]:
+        """Return Vendor, Region and City values of the selected CDRs.
+
+        Values come from the per-CDR catalogue. A Region or City catalogue can
+        be empty when the CDR stores that field under another alias, so the
+        Dashboard's own filter values (which resolve those aliases) complete it.
+        """
+        selected_ids = [int(row['id']) for rows in selected_by_kind.values() for row in rows]
+        if not selected_ids:
+            return {'vendors': [], 'regions': [], 'cities': []}
+        core.backfill_cdr_catalogues(selected_ids, task_repository)
+        catalogue = dict(task_repository.cdr_catalogue_values(selected_ids))
+        missing = [(field, key) for field, key in (('Region', 'regions'), ('City', 'cities')) if not catalogue.get(key)]
+        if missing:
+            fallback = profile_filter_options(definition, [], selected_by_kind, [field for field, _key in missing], task_repository)
+            for field, key in missing:
+                catalogue[key] = sorted(
+                    {str(value).strip() for value in fallback.get(field) or [] if str(value).strip()},
+                    key=str.casefold,
+                )
+        return catalogue
+
     def load_dashboard_geography_options(definition, task_repository) -> dict[str, list[str]]:
         """Load Vendor and geography catalogues from the per-CDR persisted cache."""
         validate(definition, task_repository)
         selected_by_kind = selected_sources(definition, task_repository)
-        selected_ids = [int(row['id']) for rows in selected_by_kind.values() for row in rows]
-        core.backfill_cdr_catalogues(selected_ids, task_repository)
-        options = task_repository.cdr_catalogue_values(selected_ids)
+        options = dashboard_geography_catalogue(definition, selected_by_kind, task_repository)
         operators = profile_filter_options(definition, [], selected_by_kind, ['Operator'], task_repository)['Operator']
         return {
             'operators': operators,
