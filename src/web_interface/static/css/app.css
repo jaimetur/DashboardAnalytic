@@ -645,7 +645,17 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .admin-stack .catalogue-workspace-actions .catalogue-edit-button:hover { background: linear-gradient(145deg, #4caedb, #87d1ed); color: #0b3048; }
 .slides-templates-editor-grid { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; align-items: start; }
 .slides-templates-editor-table-wrap { min-width: 0; }
-.catalogue-table-toolbar { display: flex; justify-content: flex-end; margin-bottom: 0.55rem; }
+.catalogue-table-toolbar { display: flex; justify-content: flex-end; gap: 0.5rem; margin-bottom: 0.55rem; }
+.catalogue-find-bar { display: flex; flex-wrap: wrap; align-items: end; gap: 0.5rem 0.65rem; margin-bottom: 0.65rem; padding: 0.6rem 0.75rem; border: 1px solid rgba(11, 122, 117, 0.25); border-radius: 14px; background: rgba(255, 255, 255, 0.92); }
+.catalogue-find-bar[hidden] { display: none; }
+.catalogue-find-bar label { display: grid; gap: 0.2rem; color: var(--brand-2); font-size: 0.72rem; font-weight: 700; }
+.catalogue-find-bar input[type="search"], .catalogue-find-bar input[type="text"] { min-width: 14rem; padding: 0.42rem 0.6rem; font-size: 0.82rem; }
+.catalogue-find-bar .catalogue-find-case { display: inline-flex; align-items: center; gap: 0.35rem; align-self: center; font-size: 0.78rem; white-space: nowrap; }
+.catalogue-find-count { align-self: center; min-width: 7.5rem; color: var(--muted); font-size: 0.78rem; font-weight: 700; }
+.catalogue-find-bar button { min-height: 2.1rem; padding: 0.35rem 0.75rem; }
+.catalogue-find-bar .catalogue-find-close { margin-left: auto; padding: 0.35rem 0.6rem; }
+.slides-templates-editor-table td.is-find-match { box-shadow: inset 0 0 0 2px rgba(231, 189, 101, 0.95); background-color: rgba(255, 241, 196, 0.75); }
+.slides-templates-editor-table td.is-find-current { box-shadow: inset 0 0 0 3px #d08a0b; background-color: rgba(255, 224, 138, 0.9); }
 .catalogue-table-toolbar button { min-height: 2.15rem; padding: 0.4rem 0.75rem; }
 .catalogue-calculated-dimensions-button { background: linear-gradient(145deg, #fff2ad, #efd66e); border-color: rgba(174, 132, 28, 0.54); color: #715211; box-shadow: 0 8px 18px rgba(167, 122, 19, 0.16); }
 .catalogue-calculated-dimensions-button:hover:not(:disabled) { background: linear-gradient(145deg, #ffea84, #dfbd45); color: #533b09; }

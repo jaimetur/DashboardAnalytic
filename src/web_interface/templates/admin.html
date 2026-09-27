@@ -171,7 +171,19 @@
       <form class="slides-templates-editor-table-wrap" action="/workspace-config/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/save" method="post" data-catalogue-editor-save>
         <input type="hidden" name="catalogue_content" value="" data-catalogue-editor-content>
         <div class="catalogue-table-toolbar">
+          <button type="button" class="catalogue-find-toggle" data-catalogue-find-toggle aria-expanded="false" title="Find and replace in the whole template (Ctrl/Cmd+F)">Find &amp; Replace</button>
           <button type="button" class="catalogue-calculated-dimensions-button" data-manage-calculated-dimensions>Auto-calculated Fields</button>
+        </div>
+        <div class="catalogue-find-bar" data-catalogue-find-bar role="search" aria-label="Find and replace in the template" hidden>
+          <label>Find<input type="search" data-catalogue-find-input placeholder="Text to find" autocomplete="off"></label>
+          <label>Replace with<input type="text" data-catalogue-replace-input placeholder="Replacement text" autocomplete="off"></label>
+          <label class="catalogue-find-case"><input type="checkbox" data-catalogue-find-case> Match case</label>
+          <span class="catalogue-find-count" data-catalogue-find-count aria-live="polite">No matches</span>
+          <button type="button" data-catalogue-find-previous title="Previous match (Shift+Enter)">Previous</button>
+          <button type="button" data-catalogue-find-next title="Next match (Enter)">Next</button>
+          <button type="button" data-catalogue-replace title="Replace every occurrence in the current match cell">Replace</button>
+          <button type="button" data-catalogue-replace-all title="Replace every occurrence in the whole template">Replace All</button>
+          <button type="button" class="catalogue-find-close" data-catalogue-find-close aria-label="Close Find and Replace" title="Close (Escape)">×</button>
         </div>
         <div class="table-wrap">
           <table class="slides-templates-editor-table" data-catalogue-editor-table>

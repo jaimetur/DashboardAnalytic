@@ -545,8 +545,9 @@ def install_dashboard_routes(core):
         return f'{singular if count == 1 else plural}: {label}'
 
     def add_dashboard_ppt_cover_geography(slide, scope: str, regions: str, cities: str, slide_height: int) -> None:
-        """Place the Scope and selected geography at the bottom of the cover, aligned with its title."""
+        """Place the Scope and selected geography below the cover subtitle, aligned with its title."""
         title = next((shape for shape in slide.placeholders if shape.placeholder_format.type in {1, 3}), None)
+        subtitle = next((shape for shape in slide.placeholders if shape.placeholder_format.type == 4), None)
         left = title.left if title is not None else Inches(0.52)
         width = title.width if title is not None else Inches(11)
         margin_left = title.text_frame.margin_left if title is not None else 0
@@ -559,10 +560,16 @@ def install_dashboard_routes(core):
             )
             if value
         ]
-        # The last line keeps its fixed distance from the bottom edge.
-        first_top = slide_height - Inches(0.35 + 0.4 * len(details))
+        # Like the Dashboard viewer, the details follow the title and subtitle,
+        # just below the template's decorative line under the subtitle.
+        anchor = subtitle or title
+        first_top = (
+            anchor.top + anchor.height + Inches(0.29) if anchor is not None
+            else slide_height - Inches(0.35 + 0.38 * len(details))
+        )
+        first_top = min(first_top, slide_height - Inches(0.4 + 0.38 * len(details)))
         for index, (name, value, color) in enumerate(details):
-            box = slide.shapes.add_textbox(left, first_top + Inches(0.4 * index), width, Inches(0.34))
+            box = slide.shapes.add_textbox(left, first_top + Inches(0.38 * index), width, Inches(0.34))
             box.name = f'dashboard-ppt-{name}'
             box.text_frame.margin_left = margin_left
             box.text_frame.margin_top = 0

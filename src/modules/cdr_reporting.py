@@ -32,6 +32,7 @@ import certifi
 from PIL import Image, ImageColor, ImageDraw, ImageFont
 from pptx import Presentation
 from pptx.dml.color import RGBColor
+from pptx.enum.dml import MSO_THEME_COLOR
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.enum.text import MSO_AUTO_SIZE
 from pptx.opc.constants import RELATIONSHIP_TYPE as RT
@@ -6778,8 +6779,18 @@ def _set_structural_slide_text(slide, title: str, subtitle: str) -> None:
         subtitle_shape.text = subtitle
         subtitle_shape.text_frame.word_wrap = True
         subtitle_shape.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+        subtitle_paragraphs = subtitle_shape.text_frame.paragraphs
     elif subtitle:
         _set_slide_header(slide, title, subtitle)
+        # The fallback writes the subtitle as the title's last paragraph.
+        subtitle_paragraphs = title_shape.text_frame.paragraphs[-1:] if title_shape is not None else []
+    else:
+        subtitle_paragraphs = []
+    # Title and transition subtitles use the template's yellow accent (theme
+    # accent 4, as on the Title Page layout) whatever layout hosts them.
+    for paragraph in subtitle_paragraphs:
+        for run in paragraph.runs:
+            run.font.color.theme_color = MSO_THEME_COLOR.ACCENT_4
 
     # Structural slides keep only their title/subtitle placeholders. Branding
     # and decorations inherited from the master/layout remain untouched.

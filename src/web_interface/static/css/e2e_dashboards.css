@@ -1667,3 +1667,9 @@
 .ds-structural-slide:is(.ds-structural-title,.ds-structural-transition) h3.ds-structural-title { font-size:clamp(1.6rem,min(7.75cqw,15cqh),8.25rem); }
 .ds-structural-slide.ds-structural-transition h3.ds-structural-title { font-size:clamp(1.6rem,min(6.9cqw,14cqh),7.25rem); }
 .ds-structural-slide:is(.ds-structural-title,.ds-structural-transition) p.ds-structural-subtitle { margin-top:clamp(.4rem,3.5cqh,2rem); font-size:clamp(.9rem,min(2.5cqw,6cqh),2.75rem); }
+/* Title slides follow the PPT Title Page: subtitle, decorative line, then Scope and geography. */
+.ds-structural-slide.ds-structural-title::before { display:none; }
+/* Proportions of the PPT Title Page: the line sits ~9.5% of the slide height
+   below the subtitle text, and the details start ~2.3% below the line. */
+.ds-structural-slide .ds-structural-rule { display:block; width:18.5cqw; height:max(3px,.6cqh); margin-top:9.5cqh; border-radius:999px; background:#ebc6dc; }
+.ds-structural-slide .ds-structural-rule + .ds-structural-geography { margin-top:2.3cqh; }

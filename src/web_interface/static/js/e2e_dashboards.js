@@ -2312,11 +2312,29 @@
     brand.append(node('strong', config.app_name || 'Dashboard Analytic'), mark);
     return brand;
   }
+  // Regions and Cities come from the same per-CDR catalogue as the PPT cover.
+  let coverGeography = {key: '', regions: [], cities: [], loading: false};
+  const coverGeographyKey = () => JSON.stringify((appliedDashboardDefinition || definition || {}).datasets || {});
+  const ensureCoverGeography = () => {
+    const key = coverGeographyKey();
+    if (coverGeography.key === key || (coverGeography.loading && coverGeography.pending === key)) return;
+    coverGeography = {...coverGeography, loading: true, pending: key};
+    api('/geography-options', 'POST', canonicalDashboardDefinition(appliedDashboardDefinition || definition))
+      .then(payload => {
+        if (coverGeographyKey() !== key) return;
+        coverGeography = {key, regions: payload.regions || [], cities: payload.cities || [], loading: false};
+        // Redraw the cover once its catalogue arrives.
+        if (!$('ds-viewer').hidden && document.querySelector('.ds-structural-slide.ds-structural-title')) renderSlide();
+      })
+      .catch(() => { coverGeography = {...coverGeography, key, loading: false}; });
+  };
   // Matches the PPT cover: "All Regions", "Region: A" or "Regions: A, B".
   const coverGeographyLabel = (field, singular, plural, allLabel) => {
     const filters = (appliedDashboardDefinition || definition || {}).filters || {};
     const key = Object.keys(filters).find(item => identity(item) === identity(field));
-    const available = (facetOptions?.[field] || []).map(String).filter(Boolean);
+    const catalogue = coverGeography.key === coverGeographyKey()
+      ? coverGeography[field === 'Region' ? 'regions' : 'cities'] : (facetOptions?.[field] || []);
+    const available = catalogue.map(String).filter(Boolean);
     const selected = key ? (filters[key] || []).map(String).filter(Boolean) : available;
     if (!selected.length) return '';
     if (!key || (available.length && selected.length === available.length && selected.every(value => available.includes(value)))) return allLabel;
@@ -2330,11 +2348,14 @@
     const content = node('div', undefined, 'ds-structural-content');
     content.append(node('h3', slide.title || 'Dashboard', 'ds-structural-title'));
     if (slide.subtitle) content.append(node('p', slide.subtitle, 'ds-structural-subtitle'));
+    // Title slides draw the template's decorative line right below the subtitle.
+    if (kind === 'title') content.append(node('span', undefined, 'ds-structural-rule'));
     cover.append(content, brand);
     // Like the exported PPT, a Title Slide that opens the Dashboard shows the
     // Scope and the selected Regions and Cities at the bottom of the cover.
     const firstSlideNumber = Math.min(...(prepared?.slides || [slide]).map(item => Number(item.number)));
     if (kind === 'title' && Number(slide.number) === firstSlideNumber) {
+      ensureCoverGeography();
       const geography = node('div', undefined, 'ds-structural-geography');
       const scope = (appliedDashboardDefinition || definition || {}).scope === 'multivendor' ? 'Multivendor Comparison' : 'Operator Comparison';
       for (const [name, label] of [

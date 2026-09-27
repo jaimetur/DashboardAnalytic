@@ -44,6 +44,7 @@ One template can be default for each technology within a workspace. Reporting in
 - Edited cells use a light pastel-yellow background.
 - Newly inserted text is highlighted more strongly.
 - A successful save resets all change highlighting.
+- **Find & Replace** (or Ctrl/Cmd+F inside the editor) searches every editable cell of the template. Matching cells are outlined and the current one is highlighted; Enter and Shift+Enter (or Next and Previous) move between them. **Replace** changes every occurrence in the current cell and **Replace All** changes every occurrence in the template after a confirmation. Replacements are ordinary unsaved edits until **Save Template**; **Match case** restricts matching to the exact capitalization.
 
 ### Validation
 
@@ -102,6 +103,8 @@ Use one row without `CDR source` or KPI fields. A structural row cannot share it
 
 - `Title Slide` normally uses `Title Page` and fills title/subtitle placeholders.
 - `Transition Slide` normally uses `Title Only` and creates a section divider.
+- Title and Transition subtitles use the template's yellow accent (theme accent 4) in exported presentations, whatever layout hosts them.
+- In E2E Dashboards, a Title Slide that opens the Dashboard also lists the Scope, Regions and Cities below its subtitle and decorative line, in the viewer and in the exported PPT.
 
 ```text
 Slide: 1

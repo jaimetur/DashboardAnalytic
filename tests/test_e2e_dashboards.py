@@ -10,6 +10,7 @@ import pandas as pd
 from PIL import Image
 from pptx import Presentation
 from pptx.dml.color import RGBColor
+from pptx.enum.dml import MSO_THEME_COLOR
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 import src.DashboardAnalytic as core
@@ -783,6 +784,9 @@ def test_dashboard_ppt_cover_uses_scope_and_catalogue_geography(client):
     assert details['dashboard-ppt-scope'].left == details['dashboard-ppt-region'].left == title.left
     assert details['dashboard-ppt-city'].left == title.left
     assert details['dashboard-ppt-scope'].text_frame.paragraphs[0].font.color.rgb == RGBColor(139, 240, 166)
+    # Like the viewer, the details follow the subtitle (below the template line).
+    assert details['dashboard-ppt-scope'].top > placeholders[4].top + placeholders[4].height
+    assert placeholders[4].text_frame.paragraphs[0].runs[0].font.color.theme_color == MSO_THEME_COLOR.ACCENT_4
     assert details['dashboard-ppt-region'].text_frame.paragraphs[0].font.color.rgb not in {
         RGBColor(255, 255, 255), RGBColor(255, 255, 0),
     }
@@ -2746,6 +2750,9 @@ def test_dashboard_viewer_cover_matches_the_exported_ppt_cover():
     assert "coverGeographyLabel('Region', 'Region', 'Regions', 'All Regions')" in script
     assert "coverGeographyLabel('City', 'City', 'Cities', 'All Cities')" in script
     assert "if (kind === 'title' && Number(slide.number) === firstSlideNumber) {" in script
+    # Regions and Cities use the same per-CDR catalogue as the PPT cover.
+    assert "api('/geography-options', 'POST', canonicalDashboardDefinition(appliedDashboardDefinition || definition))" in script
+    assert '.ds-structural-slide .ds-structural-rule { display:block; width:18.5cqw; height:max(3px,.6cqh); margin-top:9.5cqh;' in stylesheet
     # These selectors outrank the viewer panel's generic paragraph colour.
     # Title and Transition subtitles use the template's yellow accent.
     assert '.ds-structural-slide p.ds-structural-subtitle{color:#fad22d}' in stylesheet
@@ -2765,3 +2772,29 @@ def test_dashboard_viewer_scope_selector_confirms_before_rerendering():
     assert "if (!accepted) { control.value = current; return; }" in script
     assert "await preparePart('universe');" in script
     assert "for (const id of ['ds-scope', 'ds-ppt-dataset-scope', 'ds-viewer-scope'])" in script
+
+
+def test_transition_slide_subtitle_uses_the_template_yellow_accent():
+    from pptx import Presentation as PptxPresentation
+    from src.modules.cdr_reporting import _named_slide_layout, _set_structural_slide_text
+
+    deck = PptxPresentation(Path(__file__).parents[1] / 'assets/ppt-templates/Template_CDR_analysis.pptx')
+    slide = deck.slides.add_slide(_named_slide_layout(deck, 'Title Only'))
+    _set_structural_slide_text(slide, 'Executive Summary', 'Key findings')
+
+    title = next(shape for shape in slide.placeholders if shape.placeholder_format.type in {1, 3})
+    subtitle = title.text_frame.paragraphs[-1]
+    assert subtitle.text == 'Key findings'
+    assert all(run.font.color.theme_color == MSO_THEME_COLOR.ACCENT_4 for run in subtitle.runs)
+
+
+def test_report_template_editor_offers_find_and_replace():
+    root = Path(__file__).parents[1] / 'src/web_interface'
+    template = (root / 'templates/admin.html').read_text(encoding='utf-8')
+    script = (root / 'static/js/app.js').read_text(encoding='utf-8')
+
+    assert 'data-catalogue-find-toggle' in template
+    assert 'data-catalogue-replace-all' in template
+    assert "if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'f') {" in script
+    assert "title: 'Replace All', confirmLabel: 'Replace All', tone: 'warning'" in script
+    assert 'const setEditorCellValue = (cell, value) => {' in script

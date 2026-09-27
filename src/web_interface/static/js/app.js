@@ -3677,6 +3677,141 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     scheduleCatalogueValidation();
     activeCell.focus();
   });
+  // Find & Replace searches every editable template cell. Replacements are
+  // ordinary unsaved edits: they are highlighted and saved with the template.
+  const findBar = editor.querySelector('[data-catalogue-find-bar]');
+  const findToggle = editor.querySelector('[data-catalogue-find-toggle]');
+  const findInput = editor.querySelector('[data-catalogue-find-input]');
+  const replaceInput = editor.querySelector('[data-catalogue-replace-input]');
+  const findCase = editor.querySelector('[data-catalogue-find-case]');
+  const findCount = editor.querySelector('[data-catalogue-find-count]');
+  let findMatches = [];
+  let findIndex = -1;
+  const findPattern = () => {
+    const text = findInput?.value || '';
+    if (!text) return null;
+    return new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), findCase?.checked ? 'g' : 'gi');
+  };
+  const searchableCells = () => Array.from(table.querySelectorAll('td[data-catalogue-field]'))
+    .filter((cell) => cell.isContentEditable && cell.getAttribute('aria-disabled') !== 'true');
+  const cellText = (cell) => rowValue(cell.closest('tr'), cell.dataset.catalogueField || '');
+  const paintFindMatches = () => {
+    table.querySelectorAll('.is-find-match, .is-find-current').forEach((cell) => cell.classList.remove('is-find-match', 'is-find-current'));
+    findMatches.forEach((cell, index) => cell.classList.add(index === findIndex ? 'is-find-current' : 'is-find-match'));
+    if (findCount) {
+      findCount.textContent = !findInput?.value ? 'Type text to find'
+        : findMatches.length ? `${findIndex + 1} of ${findMatches.length} cells` : 'No matches';
+    }
+  };
+  const refreshFindMatches = ({keepCell = null} = {}) => {
+    const pattern = findPattern();
+    findMatches = pattern ? searchableCells().filter((cell) => { pattern.lastIndex = 0; return pattern.test(cellText(cell)); }) : [];
+    const kept = keepCell ? findMatches.indexOf(keepCell) : -1;
+    findIndex = findMatches.length ? (kept >= 0 ? kept : Math.min(Math.max(findIndex, 0), findMatches.length - 1)) : -1;
+    paintFindMatches();
+  };
+  const revealFindMatch = () => {
+    const cell = findMatches[findIndex];
+    if (!cell) return;
+    cell.scrollIntoView({block: 'center', inline: 'center'});
+    paintFindMatches();
+  };
+  const moveFindMatch = (step) => {
+    if (!findMatches.length) refreshFindMatches();
+    if (!findMatches.length) return;
+    findIndex = (findIndex + step + findMatches.length) % findMatches.length;
+    revealFindMatch();
+  };
+  const setEditorCellValue = (cell, value) => {
+    const field = cell.dataset.catalogueField || '';
+    const original = cell.dataset.originalValue || '';
+    if (field === 'Filters') renderFilterCell(cell, value, original);
+    else { cell.replaceChildren(); renderAddedText(cell, value, original); }
+    refreshCellEditedState(cell);
+    if (field === 'Chart type') syncConditionalVisualCells(cell.closest('tr'));
+  };
+  const replaceInCell = (cell) => {
+    const pattern = findPattern();
+    if (!pattern || !cell) return false;
+    const current = cellText(cell);
+    const replacement = replaceInput?.value || '';
+    const next = current.replace(pattern, () => replacement);
+    if (next === current) return false;
+    setEditorCellValue(cell, next);
+    return true;
+  };
+  const finishReplacement = (changed) => {
+    if (!changed) return;
+    refreshFilterValidationAlert();
+    scheduleCatalogueValidation();
+  };
+  const openFindBar = () => {
+    if (!findBar) return;
+    findBar.hidden = false;
+    findToggle?.setAttribute('aria-expanded', 'true');
+    const selection = window.getSelection()?.toString().trim();
+    if (selection && !selection.includes('\n') && findInput) findInput.value = selection;
+    findInput?.focus();
+    findInput?.select();
+    refreshFindMatches();
+    revealFindMatch();
+  };
+  const closeFindBar = () => {
+    if (!findBar) return;
+    findBar.hidden = true;
+    findToggle?.setAttribute('aria-expanded', 'false');
+    findMatches = [];
+    findIndex = -1;
+    paintFindMatches();
+  };
+  findToggle?.addEventListener('click', () => (findBar?.hidden ? openFindBar() : closeFindBar()));
+  editor.querySelector('[data-catalogue-find-close]')?.addEventListener('click', closeFindBar);
+  editor.querySelector('[data-catalogue-find-next]')?.addEventListener('click', () => moveFindMatch(1));
+  editor.querySelector('[data-catalogue-find-previous]')?.addEventListener('click', () => moveFindMatch(-1));
+  [findInput, findCase].forEach((control) => control?.addEventListener('input', () => {
+    findIndex = 0;
+    refreshFindMatches();
+    revealFindMatch();
+  }));
+  findInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); moveFindMatch(event.shiftKey ? -1 : 1); }
+    if (event.key === 'Escape') { event.preventDefault(); closeFindBar(); }
+  });
+  replaceInput?.addEventListener('keydown', (event) => {
+    // The bar lives inside the save form; Enter replaces instead of saving.
+    if (event.key === 'Enter') { event.preventDefault(); editor.querySelector('[data-catalogue-replace]')?.click(); }
+    if (event.key === 'Escape') { event.preventDefault(); closeFindBar(); }
+  });
+  editor.querySelector('[data-catalogue-replace]')?.addEventListener('click', () => {
+    if (!findMatches.length) refreshFindMatches();
+    const cell = findMatches[findIndex];
+    const changed = replaceInCell(cell);
+    finishReplacement(changed);
+    refreshFindMatches();
+    revealFindMatch();
+  });
+  editor.querySelector('[data-catalogue-replace-all]')?.addEventListener('click', async () => {
+    refreshFindMatches();
+    if (!findMatches.length) return;
+    const cells = [...findMatches];
+    const accepted = await showConfirmDialog(
+      `Replace “${findInput.value}” with “${replaceInput?.value || ''}” in ${cells.length} cell${cells.length === 1 ? '' : 's'} of this template?`,
+      {title: 'Replace All', confirmLabel: 'Replace All', tone: 'warning'},
+    );
+    if (!accepted) return;
+    const changed = cells.map((cell) => replaceInCell(cell)).filter(Boolean).length;
+    finishReplacement(changed > 0);
+    refreshFindMatches();
+    if (findCount) findCount.textContent = `Replaced in ${changed} cell${changed === 1 ? '' : 's'}`;
+  });
+  table.addEventListener('input', () => { if (findBar && !findBar.hidden) refreshFindMatches({keepCell: findMatches[findIndex]}); });
+  editor.addEventListener('keydown', (event) => {
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'f') {
+      event.preventDefault();
+      openFindBar();
+    }
+  });
+
   const saveCatalogueTemplate = async () => {
     contentField.value = serialiseCatalogueContent();
     const saveButton = saveForm.querySelector('button[type="submit"]');
