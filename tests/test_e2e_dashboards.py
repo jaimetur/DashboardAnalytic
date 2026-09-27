@@ -1,5 +1,7 @@
 import json
 import re
+import shutil
+import subprocess
 import time
 import zipfile
 from io import BytesIO
@@ -7,6 +9,7 @@ from pathlib import Path
 from threading import Event, Thread
 
 import pandas as pd
+import pytest
 from PIL import Image
 from pptx import Presentation
 from pptx.dml.color import RGBColor
@@ -35,6 +38,56 @@ def test_dashboard_filter_panel_state_is_scoped_to_the_authenticated_session():
     second_user = core.SessionUser(username='super', role='super-admin')
     assert first_user.session_marker
     assert first_user.session_marker != second_user.session_marker
+
+
+def test_dashboard_ppt_chart_filters_use_complete_job_geography_and_cross_filter():
+    node_binary = shutil.which('node')
+    if node_binary is None:
+        pytest.skip('Node.js is required for this browser filter test')
+    script_path = Path(__file__).parents[1] / 'src/web_interface/static/js/e2e_dashboards.js'
+    harness = r"""
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+const fields = ['nr_mode', 'dashboard', 'template', 'scope', 'region', 'city'];
+const controls = Object.fromEntries(fields.map(field => [field, {
+  dataset: {dashboardPptChartFilter: field}, options: [], value: '',
+  replaceChildren(...choices) { this.options = choices; },
+}]));
+const document = {querySelectorAll: () => Object.values(controls)};
+const option = (value, textContent) => ({value, textContent});
+const start = source.indexOf('  const dashboardPptChartFilterControls =');
+const end = source.indexOf('  const dashboardPptJobTimestampLabel =', start);
+assert.ok(start >= 0 && end > start);
+eval(source.slice(start, end) + `
+  const jobs = [
+    {nr_mode: 'SA', dashboard_name: 'Main Cities', template: 'A', scope: 'Operator Comparison',
+      cover: {regions: 'All Regions', cities: 'Cities: Belfast, Bristol, Cardiff, Edinburgh, Leeds, London, Sheffield'}},
+    {nr_mode: 'SA', dashboard_name: 'Full Report', template: 'B', scope: 'Operator Comparison',
+      cover: {regions: 'All Regions', cities: 'All Cities'}},
+  ];
+  const labels = field => controls[field].options.map(choice => choice.textContent);
+  refreshDashboardPptChartFilterChoices(jobs);
+  assert.deepEqual(labels('city'), ['All', 'All Cities',
+    'Cities: Belfast, Bristol, Cardiff, Edinburgh, Leeds, London, Sheffield']);
+  assert.deepEqual(labels('region'), ['All', 'All Regions']);
+  assert.deepEqual(labels('nr_mode'), ['All', 'SA']);
+  dashboardPptChartFilterState.dashboard = 'main cities';
+  refreshDashboardPptChartFilterChoices(jobs);
+  assert.deepEqual(labels('city'), ['All',
+    'Cities: Belfast, Bristol, Cardiff, Edinburgh, Leeds, London, Sheffield']);
+  assert.deepEqual(labels('template'), ['All', 'A']);
+  dashboardPptChartFilterState.dashboard = '';
+  dashboardPptChartFilterState.city = 'all cities';
+  refreshDashboardPptChartFilterChoices(jobs);
+  assert.deepEqual(labels('dashboard'), ['All', 'Full Report']);
+  assert.deepEqual(jobs.filter(matchesDashboardPptChartFilters), [jobs[1]]);
+`);
+"""
+    completed = subprocess.run(
+        [node_binary, '-e', harness, str(script_path)], capture_output=True, text=True, check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_dashboard_library_can_change_nr_mode_and_template_with_confirmation_controls():
@@ -737,6 +790,8 @@ def test_dashboard_ppt_dialog_selections_override_saved_dashboard_filters(client
     assert job['filters'][-4:] == [
         'Operator: B', 'Vendor: Vendor B', 'Region: South', 'City: Leeds',
     ]
+    assert job['cover']['regions'] == 'Region: South'
+    assert job['cover']['cities'] == 'City: Leeds'
     with core.repository.connection() as connection:
         output_file = connection.execute(
             'SELECT output_file FROM dashboard_ppt_jobs WHERE id = ?', (queued.json()['job_id'],),
@@ -798,12 +853,15 @@ def test_dashboard_ppt_cover_uses_scope_and_catalogue_geography(client):
     # The job's viewer snapshot shows exactly the same cover lines.
     expected_cover = {'scope': 'Operator Comparison', 'regions': 'All Regions', 'cities': 'All Cities'}
     assert client.get(f'/api/e2e-dashboards/ppt-jobs/{job_id}/charts.json').json()['cover'] == expected_cover
+    listed_job = next(item for item in client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
+    assert listed_job['cover'] == expected_cover
     manifest_path = Path(row['output_path']).parent / 'dashboard-charts' / 'manifest.json'
     legacy = json.loads(manifest_path.read_text(encoding='utf-8'))
     legacy.pop('cover')
     manifest_path.write_text(json.dumps(legacy), encoding='utf-8')
     # Jobs exported before the cover was stored rebuild it from their Filters.
     assert client.get(f'/api/e2e-dashboards/ppt-jobs/{job_id}/charts.json').json()['cover'] == expected_cover
+    assert next(item for item in client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)['cover'] == expected_cover
     # Like the viewer, the details follow the subtitle (below the template line).
     assert details['dashboard-ppt-scope'].top > placeholders[4].top + placeholders[4].height
     assert placeholders[4].text_frame.paragraphs[0].runs[0].font.color.theme_color == MSO_THEME_COLOR.ACCENT_4
@@ -1143,6 +1201,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'data-dashboard-ppt-chart-filter="dashboard"' in page.text
     assert 'data-dashboard-ppt-chart-filter="template"' in page.text
     assert 'data-dashboard-ppt-chart-filter="scope"' in page.text
+    assert 'data-dashboard-ppt-chart-filter="region"' in page.text
+    assert 'data-dashboard-ppt-chart-filter="city"' in page.text
     assert 'id="ds-ppt-charts-filters"' in page.text
     assert '>View Filters</button>' in page.text
     assert 'id="ds-ppt-chart-job-picker"' in page.text

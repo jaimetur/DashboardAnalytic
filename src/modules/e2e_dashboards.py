@@ -452,6 +452,14 @@ def install_dashboard_routes(core):
             filters = [str(item) for item in filters if str(item).strip()] if isinstance(filters, list) else []
         except (TypeError, json.JSONDecodeError):
             filters = []
+        cover = dashboard_ppt_job_cover(row, {})
+        if charts_ready and (not cover['regions'] or not cover['cities']):
+            try:
+                manifest = json.loads((charts_dir / 'manifest.json').read_text(encoding='utf-8'))
+            except (OSError, ValueError, json.JSONDecodeError):
+                pass
+            else:
+                cover = dashboard_ppt_job_cover(row, manifest if isinstance(manifest, dict) else {})
         return {
             'id': job_id, 'dashboard_id': str(row['dashboard_id']),
             'dashboard_name': str(row['dashboard_name']),
@@ -459,6 +467,7 @@ def install_dashboard_routes(core):
             'template': str(row['template_name'] or ''),
             'nr_mode': str(row['nr_mode'] or 'nsa').upper(),
             'scope': 'Multivendor Comparison' if str(row['scope'] or '').casefold() == 'multivendor' else 'Operator Comparison',
+            'cover': cover,
             'filters': filters,
             'generated_by': str(row['created_by']),
             'date': core._local_report_date(row['created_at']).replace(' ', '\n', 1),

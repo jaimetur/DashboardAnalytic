@@ -168,7 +168,7 @@ Depending on state, actions download the PPT, open/download charts, stop work, r
 
 ## Charts Panel
 
-Charts Panel browses completed Dashboard PPT charts. Filter by NR Mode, Dashboard, Template and Scope, then choose a PowerPoint Job. The selector identifies local date/time, Dashboard and scope; header badges repeat Dashboard, date and scope. Polling automatically selects and loads the newest matching job as soon as it finishes.
+Charts Panel browses completed Dashboard PPT charts. Filter by NR Mode, Dashboard, Template, Scope, Region and City, then choose a PowerPoint Job. Each filter offers only the complete values shown by generated jobs matching the other active filters. A job exported with seven cities contributes one City choice listing those seven cities; **All Cities** and **All Regions** appear only when a matching job shows those values. The selector fills the available width up to View Filters and identifies local date/time, NR Mode, Dashboard, Scope, Regions and Cities from the exported job, when geography was recorded; long city lists use the remaining selector width and expose the full list on hover. Header badges repeat Dashboard, date and scope. Polling automatically selects and loads the newest matching job as soon as it finishes.
 
 Cards fill equal template frames and repaint stored Canvas models with the current renderer. Legacy jobs without models retain their PNG. Open any card in the same expanded viewer and Filtered Chart Dataset used by the live Dashboard.
 

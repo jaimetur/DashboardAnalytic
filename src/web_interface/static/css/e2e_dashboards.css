@@ -164,7 +164,7 @@
 
 /* Dashboard PPT charts reuse the Reporting gallery and full-screen preview. */
 .ds-ppt-charts-panel { margin-top: 2.2rem; }
-.ds-ppt-chart-set-controls label { max-width: 62rem; }
+.ds-ppt-chart-set-controls > label { flex: 1 1 0; min-width: 0; max-width: none; }
 .ds-ppt-charts-panel .report-chart-card { display: grid; grid-template-rows: auto minmax(14rem, 1fr); height: 100%; padding: 0; overflow: hidden; cursor: zoom-in; }
 .ds-ppt-charts-panel .report-chart-card-head { margin: 0; padding: .9rem .9rem .65rem; }
 .ds-ppt-charts-panel .ds-ppt-chart-thumbnail { position: relative; min-width: 0; min-height: 14rem; aspect-ratio: 16 / 9; overflow: hidden; border-top: 1px solid #d8cce5; background: #fff; }
@@ -172,7 +172,7 @@
 .ds-ppt-charts-panel #ds-ppt-charts-dashboard { border-color: #59338d !important; background: #6d46a8 !important; color: #fff !important; }
 .ds-ppt-charts-panel #ds-ppt-charts-date { border-color: #27698d !important; background: #347ea7 !important; color: #fff !important; }
 .ds-ppt-charts-panel #ds-ppt-charts-scope { border-color: #28715e !important; background: #368a73 !important; color: #fff !important; }
-.ds-ppt-chart-filters { grid-template-columns: repeat(4, minmax(130px, 220px)); }
+.ds-ppt-chart-filters { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 .e2e-dashboards .ds-ppt-charts-filters { align-self: end; width: auto; min-width: 8.5rem; height: 2.55rem; min-height: 2.55rem; margin-left: auto; padding: .3rem 1rem; border-color: #b58a2f; border-radius: 999px; background: #d7a921; color: #fff; font: inherit; font-size: .82rem; font-weight: 800; line-height: 1.2; cursor: pointer; box-shadow: none; }
 .e2e-dashboards .ds-ppt-charts-filters:hover { border-color: #947022; background: #bd8e13; }
 .e2e-dashboards .ds-ppt-charts-filters:focus-visible { outline: 3px solid #7751b9; outline-offset: 2px; }
@@ -182,8 +182,16 @@
 .e2e-dashboards .ds-ppt-charts-filters{display:inline-flex;align-items:center;justify-content:center;gap:.48rem;font-size:.96rem}
 .e2e-dashboards .ds-ppt-charts-filters::before{content:'';width:1rem;height:1rem;flex:0 0 1rem;background:center/contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 5h18l-7 8v5l-4 2v-7L3 5Z'/%3E%3C/svg%3E")}
 .ds-ppt-chart-job-picker { margin-top: .35rem; }
+.ds-ppt-chart-job-picker > summary { flex-wrap: wrap; row-gap: .15rem; }
+.ds-ppt-chart-job-picker > summary::after { top: 50%; transform: translateY(-50%); }
+.ds-ppt-chart-job-picker .ds-ppt-chart-job-nr-mode { color: #805019; font-weight: 850; }
 .ds-ppt-chart-job-picker .ds-ppt-chart-job-dashboard { color: #4d267d; font-weight: 850; }
 .ds-ppt-chart-job-picker .ds-ppt-chart-job-timestamp { color: #526b7a; }
+.ds-ppt-chart-job-picker .ds-ppt-chart-job-region,.ds-ppt-chart-job-picker .ds-ppt-chart-job-city { display: inline-block; max-width: min(24rem,100%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.ds-ppt-chart-job-picker > summary .ds-ppt-chart-job-city { flex: 1 1 0; min-width: 0; max-width: none; }
+.ds-ppt-chart-job-picker .ds-ppt-chart-job-option :is(.ds-ppt-chart-job-region,.ds-ppt-chart-job-city) { max-width: none; overflow: visible; text-overflow: clip; white-space: normal; }
+.ds-ppt-chart-job-picker .ds-ppt-chart-job-region { color: #0b7184; }
+.ds-ppt-chart-job-picker .ds-ppt-chart-job-city { color: #9b3e70; }
 .ds-ppt-chart-job-picker .ds-ppt-chart-job-separator { display: inline-block; margin: 0 .45rem; color: #79529f; font-weight: 900; }
 .e2e-dashboards .ds-ppt-chart-job-option { border: 1px solid transparent; background: #f8f3fc; color: #49345f; line-height: 1.45; white-space: normal; }
 .e2e-dashboards .ds-ppt-chart-job-option:nth-child(even) { background: #f0e7f8; }

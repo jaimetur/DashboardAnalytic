@@ -1311,30 +1311,41 @@
     renderSlide();
   }
   const dashboardPptChartFilterControls = [...document.querySelectorAll('[data-dashboard-ppt-chart-filter]')];
-  const dashboardPptChartFilterState = {nr_mode: '', dashboard: '', template: '', scope: ''};
+  const dashboardPptChartFilterState = {nr_mode: '', dashboard: '', template: '', scope: '', region: '', city: ''};
   const normalizeDashboardPptChartFilter = value => String(value || '').trim().toLocaleLowerCase();
   const dashboardPptChartMetadata = job => ({
     nr_mode: normalizeDashboardPptChartFilter(job.nr_mode),
     dashboard: normalizeDashboardPptChartFilter(job.dashboard_name),
     template: normalizeDashboardPptChartFilter(job.template),
     scope: normalizeDashboardPptChartFilter(job.scope),
+    region: normalizeDashboardPptChartFilter(job.cover?.regions),
+    city: normalizeDashboardPptChartFilter(job.cover?.cities),
   });
-  const matchesDashboardPptChartFilters = job => {
-    const metadata = dashboardPptChartMetadata(job);
-    return Object.entries(dashboardPptChartFilterState).every(([field, selected]) => !selected || metadata[field] === selected);
-  };
+  const matchesDashboardPptChartFilters = (job, ignoredField = '') => Object.entries(dashboardPptChartFilterState)
+    .every(([field, selected]) => !selected || field === ignoredField || dashboardPptChartMetadata(job)[field] === selected);
   const refreshDashboardPptChartFilterChoices = jobs => {
     const labelFor = (field, job) => ({
       nr_mode: String(job.nr_mode || '').toUpperCase(), dashboard: job.dashboard_name,
-      template: job.template, scope: job.scope,
+      template: job.template, scope: job.scope, region: job.cover?.regions, city: job.cover?.cities,
     }[field] || '');
+    for (const [field, selected] of Object.entries(dashboardPptChartFilterState)) {
+      if (!selected) continue;
+      const stillAvailable = jobs.some(job => dashboardPptChartMetadata(job)[field] === selected);
+      if (!stillAvailable) dashboardPptChartFilterState[field] = '';
+    }
     for (const control of dashboardPptChartFilterControls) {
       const field = control.dataset.dashboardPptChartFilter;
       const values = new Map();
-      jobs.forEach(job => {
+      const matchingJobs = jobs.filter(job => matchesDashboardPptChartFilters(job, field));
+      matchingJobs.forEach(job => {
         const value = dashboardPptChartMetadata(job)[field];
         if (value && !values.has(value)) values.set(value, labelFor(field, job));
       });
+      const selected = dashboardPptChartFilterState[field];
+      if (selected && !values.has(selected)) {
+        const previousLabel = [...control.options].find(item => item.value === selected)?.textContent || selected;
+        values.set(selected, previousLabel);
+      }
       control.replaceChildren(option('', 'All'), ...[...values.entries()]
         .sort((left, right) => left[1].localeCompare(right[1]))
         .map(([value, label]) => option(value, label)));
@@ -1342,16 +1353,23 @@
     }
   };
   const dashboardPptJobTimestampLabel = job => String(job?.date || '').replace('\n', ' · ');
+  const dashboardPptJobLabelParts = job => [
+    ['timestamp', dashboardPptJobTimestampLabel(job)],
+    ['nr-mode', String(job.nr_mode || '').toUpperCase()],
+    ['dashboard', job.dashboard_name],
+    ['scope', job.scope],
+    ['region', job.cover?.regions],
+    ['city', job.cover?.cities],
+  ].filter(([, label]) => label);
   const renderDashboardPptJobPickerLabel = (container, job, emptyLabel = 'No generated Dashboard PPTs') => {
     container.replaceChildren();
     if (!job) { container.textContent = emptyLabel; return; }
-    container.append(
-      node('span', dashboardPptJobTimestampLabel(job), 'ds-ppt-chart-job-timestamp'),
-      node('span', '•', 'ds-ppt-chart-job-separator'),
-      node('strong', job.dashboard_name, 'ds-ppt-chart-job-dashboard'),
-      node('span', '•', 'ds-ppt-chart-job-separator'),
-      node('span', job.scope, 'ds-ppt-chart-job-scope'),
-    );
+    dashboardPptJobLabelParts(job).forEach(([name, label], index) => {
+      if (index) container.append(node('span', '•', 'ds-ppt-chart-job-separator'));
+      const item = node(name === 'dashboard' ? 'strong' : 'span', label, `ds-ppt-chart-job-${name}`);
+      if (name === 'region' || name === 'city') item.title = label;
+      container.append(item);
+    });
   };
   const rebuildDashboardPptJobPicker = (available, emptyLabel) => {
     const selected = available.find(job => String(job.id) === $('ds-ppt-chart-job').value);
@@ -1375,10 +1393,7 @@
     refreshDashboardPptChartFilterChoices(generated);
     const available = generated.filter(matchesDashboardPptChartFilters);
     select.replaceChildren(...(available.length
-      ? available.map(job => option(
-        String(job.id),
-        `${job.timestamp || String(job.date || '').replace(/[-:\s]/g, '').slice(0, 15)} • ${job.dashboard_name} • ${job.scope}`,
-      ))
+      ? available.map(job => option(String(job.id), dashboardPptJobLabelParts(job).map(([, label]) => label).join(' • ')))
       : [option('', generated.length ? 'No matching Dashboard PPTs' : 'No generated Dashboard PPTs')]));
     select.disabled = available.length === 0;
     select.value = available.some(job => String(job.id) === previous) ? previous : String(available[0]?.id || '');
