@@ -28,6 +28,8 @@ The last open Dashboard and page scroll position are remembered in the browser s
 
 ## Dashboard Datasets & Filters
 
+This panel is a sub-panel of Manage Dashboards. **Open Filters** shows it directly below that Dashboard's row, opening another Dashboard's filters moves it below that row, and **Close Filters** removes it. The viewer's **Dashboard Filters** action opens the same controls in a floating panel.
+
 The panel separates the comparison scope and selected universe under **Select Dataset Universe** from the default and additional filters under **Select Dataset Filters**. Each column has its own Apply and Save actions and its own unapplied/unsaved badges. PPT and View actions appear on the following row.
 
 ### Dashboard Scope

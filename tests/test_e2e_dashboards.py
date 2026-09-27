@@ -2798,3 +2798,14 @@ def test_report_template_editor_offers_find_and_replace():
     assert "if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'f') {" in script
     assert "title: 'Replace All', confirmLabel: 'Replace All', tone: 'warning'" in script
     assert 'const setEditorCellValue = (cell, value) => {' in script
+
+
+def test_dashboard_filters_open_as_a_sub_panel_below_their_dashboard_row():
+    root = Path(__file__).parents[1] / 'src/web_interface'
+    template = (root / 'templates/e2e_dashboards.html').read_text(encoding='utf-8')
+    script = (root / 'static/js/e2e_dashboards.js').read_text(encoding='utf-8')
+
+    assert '<div id="ds-filter-parking" hidden><div id="ds-filter-home">' in template
+    assert "const parkFilterPanel = () => { $('ds-filter-parking').append($('ds-filter-home')); filterRow.remove(); };" in script
+    assert "filterRowCell.append($('ds-filter-home'));" in script
+    assert script.index("body.append(row);\n      if (filtersAreOpen) {") > 0

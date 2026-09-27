@@ -1673,3 +1673,8 @@
    below the subtitle text, and the details start ~2.3% below the line. */
 .ds-structural-slide .ds-structural-rule { display:block; width:18.5cqw; height:max(3px,.6cqh); margin-top:9.5cqh; border-radius:999px; background:#ebc6dc; }
 .ds-structural-slide .ds-structural-rule + .ds-structural-geography { margin-top:2.3cqh; }
+/* Dashboard Datasets & Filters opens as a sub-panel below its Dashboard row. */
+.ds-dashboards-table tr.ds-dashboard-filters-open > td { border-bottom-color:transparent; }
+.ds-dashboards-table tr.ds-filter-row > td.ds-filter-row-cell { padding:0 .6rem .9rem 1.4rem; background:rgba(114,83,168,.06); border-left:3px solid #7253a8; }
+.ds-dashboards-table tr.ds-filter-row .ds-data-panel { margin:.2rem 0 0; box-shadow:none; }
+.ds-dashboards-table tr.ds-filter-row .ds-data-panel > .collapsible-summary { padding-top:.7rem; }

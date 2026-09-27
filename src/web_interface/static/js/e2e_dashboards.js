@@ -923,8 +923,16 @@
     status(`Updated NR Mode and Template for “${item.name}”. Dataset Universe and filters were preserved.`);
     void refreshDashboardStatuses();
   };
+  // "Dashboard Datasets & Filters" is a sub-panel of Manage Dashboards: it is
+  // shown in a table row directly below the Dashboard whose filters are open,
+  // and parked (hidden) whenever no Dashboard has its filters open.
+  const filterRow = node('tr', undefined, 'ds-filter-row');
+  const filterRowCell = node('td', undefined, 'ds-filter-row-cell'); filterRowCell.colSpan = 5; filterRow.append(filterRowCell);
+  filterRow.id = 'ds-filter-row';
+  const parkFilterPanel = () => { $('ds-filter-parking').append($('ds-filter-home')); filterRow.remove(); };
   function library() {
     rememberLibrary();
+    parkFilterPanel();
     $('ds-create').disabled = !$('ds-template').options.length;
     $('ds-count').textContent = `Total Dashboards: ${Object.keys(dashboards).length}`;
     const body = $('ds-dashboards-body'); body.replaceChildren();
@@ -1038,6 +1046,11 @@
       ppt.disabled = dashboardStatus.state !== 'ready';
       action('Delete Dashboard', '×', async () => { await deleteDashboard(id); }, 'danger-button');
       const cell = node('td'); cell.dataset.label = 'Actions'; cell.append(actions); row.append(cell); body.append(row);
+      if (filtersAreOpen) {
+        filterRowCell.append($('ds-filter-home'));
+        row.classList.add('ds-dashboard-filters-open');
+        body.append(filterRow);
+      }
     }
   }
   const renderDashboardStatuses = () => {

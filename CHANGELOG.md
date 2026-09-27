@@ -20,6 +20,7 @@
 - A Dashboard that opens with a Title Slide shows the Scope, the selected Regions and the Cities directly below the cover subtitle and its decorative line, with the same layout in the viewer and in the exported PPT and in distinct green, cyan and pink accents. The PPT cover subtitle now keeps the template text instead of repeating the Scope, and Title and Transition subtitles in exported PPTs (Dashboards and E2E Reporting) use the template's yellow accent.
 - The Dashboard viewer has a **Scope** selector before Dashboard Filters. Changing it asks for confirmation, because every chart is rendered again, and then applies the new scope with its default Dataset Universe.
 - The Report Template Editor has **Find & Replace** (also Ctrl/Cmd+F) to search every template cell, move between matches and replace in the current cell or the whole template; replacements remain unsaved edits until the template is saved.
+- Dashboard Datasets & Filters is now a sub-panel of Manage Dashboards: **Open Filters** shows it directly below the corresponding Dashboard row and **Close Filters** removes it, instead of a separate panel below the library.
 
 #### 🐛 Bug fixes:
 - Multivendor E2E Reporting chart-set jobs no longer fail on their first chart with an undefined `prepare_multivendor_catalog_entry` error.
