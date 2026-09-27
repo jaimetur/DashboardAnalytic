@@ -132,6 +132,7 @@ CREATE TABLE IF NOT EXISTS report_templates (
     is_default INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_by TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (technology, name),
     CHECK (technology IN ('nsa', 'sa'))
 );
@@ -1008,6 +1009,8 @@ class Repository:
             conn.execute("ALTER TABLE report_templates ADD COLUMN created_at TEXT")
         if 'updated_at' not in columns:
             conn.execute("ALTER TABLE report_templates ADD COLUMN updated_at TEXT")
+        if 'updated_by' not in columns:
+            conn.execute("ALTER TABLE report_templates ADD COLUMN updated_by TEXT NOT NULL DEFAULT ''")
         now = local_now_iso()
         if conn.execute("SELECT 1 FROM report_templates WHERE created_at IS NULL LIMIT 1").fetchone():
             conn.execute("UPDATE report_templates SET created_at = ? WHERE created_at IS NULL", (now,))
@@ -1036,25 +1039,29 @@ class Repository:
     def list_report_templates(self, technology: str) -> list[sqlite3.Row]:
         with self.connection() as conn:
             return conn.execute(
-                "SELECT technology, name, content, is_default, created_at, updated_at FROM report_templates WHERE technology = ? ORDER BY name COLLATE NOCASE",
+                "SELECT technology, name, content, is_default, created_at, updated_at, updated_by FROM report_templates WHERE technology = ? ORDER BY name COLLATE NOCASE",
                 (technology,),
             ).fetchall()
 
-    def add_report_template(self, technology: str, name: str, content: bytes = b'', *, is_default: bool = False) -> None:
+    # ``updated_by`` records the user behind a template change. ``None`` keeps
+    # the previous value for system updates (migrations, synchronizations).
+    def add_report_template(
+        self, technology: str, name: str, content: bytes = b'', *, is_default: bool = False, updated_by: str | None = None,
+    ) -> None:
         with self.connection() as conn:
             if is_default:
                 conn.execute("UPDATE report_templates SET is_default = 0 WHERE technology = ?", (technology,))
             now = local_now_iso()
             conn.execute(
-                "INSERT INTO report_templates (technology, name, content, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (technology, name, sqlite3.Binary(content), int(is_default), now, now),
+                "INSERT INTO report_templates (technology, name, content, is_default, created_at, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (technology, name, sqlite3.Binary(content), int(is_default), now, now, updated_by or ''),
             )
 
-    def set_report_template_content(self, technology: str, name: str, content: bytes) -> None:
+    def set_report_template_content(self, technology: str, name: str, content: bytes, *, updated_by: str | None = None) -> None:
         with self.connection() as conn:
             result = conn.execute(
-                "UPDATE report_templates SET content = ?, updated_at = ? WHERE technology = ? AND name = ?",
-                (sqlite3.Binary(content), local_now_iso(), technology, name),
+                "UPDATE report_templates SET content = ?, updated_at = ?, updated_by = COALESCE(?, updated_by) WHERE technology = ? AND name = ?",
+                (sqlite3.Binary(content), local_now_iso(), updated_by, technology, name),
             )
             if not result.rowcount:
                 raise ValueError('Report Template was not found.')
@@ -1068,7 +1075,7 @@ class Repository:
             raise ValueError('Report Template was not found.')
         return bytes(row['content'] or b'')
 
-    def set_default_report_template(self, technology: str, name: str) -> None:
+    def set_default_report_template(self, technology: str, name: str, *, updated_by: str | None = None) -> None:
         with self.connection() as conn:
             template = conn.execute(
                 "SELECT is_default FROM report_templates WHERE technology = ? AND name = ?", (technology, name)
@@ -1083,28 +1090,29 @@ class Repository:
             now = local_now_iso()
             conn.execute("UPDATE report_templates SET is_default = 0, updated_at = ? WHERE technology = ?", (now, technology))
             conn.execute(
-                "UPDATE report_templates SET is_default = 1, updated_at = ? WHERE technology = ? AND name = ?", (now, technology, name)
+                "UPDATE report_templates SET is_default = 1, updated_at = ?, updated_by = COALESCE(?, updated_by) WHERE technology = ? AND name = ?",
+                (now, updated_by, technology, name),
             )
 
-    def rename_report_template(self, technology: str, name: str, new_name: str) -> None:
+    def rename_report_template(self, technology: str, name: str, new_name: str, *, updated_by: str | None = None) -> None:
         with self.connection() as conn:
             conn.execute(
-                "UPDATE report_templates SET name = ?, updated_at = ? WHERE technology = ? AND name = ?",
-                (new_name, local_now_iso(), technology, name),
+                "UPDATE report_templates SET name = ?, updated_at = ?, updated_by = COALESCE(?, updated_by) WHERE technology = ? AND name = ?",
+                (new_name, local_now_iso(), updated_by, technology, name),
             )
 
-    def move_report_template(self, technology: str, name: str, target_technology: str) -> None:
+    def move_report_template(self, technology: str, name: str, target_technology: str, *, updated_by: str | None = None) -> None:
         with self.connection() as conn:
             conn.execute(
-                "UPDATE report_templates SET technology = ?, updated_at = ? WHERE technology = ? AND name = ?",
-                (target_technology, local_now_iso(), technology, name),
+                "UPDATE report_templates SET technology = ?, updated_at = ?, updated_by = COALESCE(?, updated_by) WHERE technology = ? AND name = ?",
+                (target_technology, local_now_iso(), updated_by, technology, name),
             )
 
-    def touch_report_template(self, technology: str, name: str) -> None:
+    def touch_report_template(self, technology: str, name: str, *, updated_by: str | None = None) -> None:
         with self.connection() as conn:
             conn.execute(
-                "UPDATE report_templates SET updated_at = ? WHERE technology = ? AND name = ?",
-                (local_now_iso(), technology, name),
+                "UPDATE report_templates SET updated_at = ?, updated_by = COALESCE(?, updated_by) WHERE technology = ? AND name = ?",
+                (local_now_iso(), updated_by, technology, name),
             )
 
     def delete_report_template(self, technology: str, name: str) -> None:

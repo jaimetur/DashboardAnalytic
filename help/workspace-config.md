@@ -12,7 +12,7 @@ The Workspace Config section is available to `user-editor`, `admin` and `super-a
 
 Templates belong to the active workspace and are stored in that workspace database's `report_templates` table. Import, export, backup and transfer packages serialize them as portable CSV files, but those files are package artifacts rather than the live source of record. Obsolete `slides-templates` directories are removed by the current migration and portability flows.
 
-Report Templates Management supports NSA and SA templates, one default for each technology, and the editor described below.
+Report Templates Management supports NSA and SA templates, one default for each technology, and the editor described below. Template names are unique per NR Mode, so an NSA and an SA template may share a name. The library is sorted by NR Mode (NSA first) and then name; its columns show the NR Mode, creation and last update times, and **Last Updated by**, the user who last imported, edited, renamed, duplicated, promoted or moved the template.
 
 Available actions:
 
@@ -21,7 +21,7 @@ Available actions:
 - Edit
 - Rename
 - Duplicate
-- Change NSA/SA type
+- Change NR Mode (NSA/SA)
 - Set Default
 - Export
 - Delete

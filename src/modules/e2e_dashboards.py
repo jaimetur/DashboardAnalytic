@@ -660,10 +660,8 @@ def install_dashboard_routes(core):
         try:
             if not run_is_active():
                 return
-            update_dashboard_ppt_job(
-                task_repository, job_id, status='processing',
-                started_at=datetime.now(timezone.utc).isoformat(),
-            )
+            # The preparation step already marked the job as started.
+            update_dashboard_ppt_job(task_repository, job_id, status='processing')
             if snapshot is None:
                 update_dashboard_ppt_job(
                     task_repository, job_id, progress=1, last_error='',
@@ -1229,12 +1227,50 @@ def install_dashboard_routes(core):
             background=BackgroundTask(archive.unlink, missing_ok=True),
         )
 
+    def dashboard_ppt_output_dir(task_repository) -> Path:
+        return Path(task_repository.db_path).parent / 'output' / 'dashboards'
+
+    def remove_dashboard_ppt_job_folder(task_repository, output_path) -> None:
+        """Delete one job folder, never anything outside the Dashboard output root."""
+        text = str(output_path or '').strip()
+        if not text:
+            return
+        folder = Path(text).parent.resolve()
+        root = dashboard_ppt_output_dir(task_repository).resolve()
+        if folder == root or root not in folder.parents:
+            return
+        shutil.rmtree(folder, ignore_errors=True)
+
+    def dashboard_ppt_unique_output(task_repository, export_time, nr_mode_label, dashboard_name, scope_label, zone_label, job_id=None):
+        """Return a unique ``timestamp - NR Mode - Dashboard - Scope - Regions`` file and folder."""
+        max_stem_bytes = 240
+        safe_scope = dashboard_ppt_filename_part(scope_label, 40)
+        fixed_bytes = len(f'{export_time:%Y%m%d_%H%M%S} - {nr_mode_label} -  -  - {safe_scope}'.encode('utf-8'))
+        zone_budget = max_stem_bytes - fixed_bytes - 4
+        safe_zone = dashboard_ppt_filename_part(zone_label, zone_budget) if zone_label else ''
+        suffix_parts = [part for part in (safe_scope, safe_zone) if part]
+        name_budget = max(4, max_stem_bytes - len(f'{export_time:%Y%m%d_%H%M%S} - {nr_mode_label} -  - {" - ".join(suffix_parts)}'.encode('utf-8')))
+        safe_name = dashboard_ppt_filename_part(dashboard_name, name_budget) or dashboard_ppt_filename_part('Dashboard', name_budget)
+        for offset in range(60):
+            timestamp = (export_time + timedelta(seconds=offset)).strftime('%Y%m%d_%H%M%S')
+            output_file = ' - '.join((timestamp, nr_mode_label, safe_name, *suffix_parts)) + '.pptx'
+            job_dir = dashboard_ppt_output_dir(task_repository) / Path(output_file).stem
+            with task_repository.connection() as connection:
+                already_queued = connection.execute(
+                    f'SELECT 1 FROM {DASHBOARD_PPT_JOBS_TABLE} WHERE output_file = ? AND id IS NOT ? LIMIT 1',
+                    (output_file, job_id),
+                ).fetchone()
+            if not already_queued and not job_dir.exists():
+                return output_file, job_dir / output_file
+        raise HTTPException(503, 'No unique PowerPoint filename is available for this export.')
+
     def queue_dashboard_ppt_export(
         dashboard_id, user, *, reuse_job_id=None, export_definition: DashboardDefinition | None = None,
         preparation_token: str | None = None, selected_operators: list[str] | None = None,
         selected_vendors: list[str] | None = None, selected_regions: list[str] | None = None,
         selected_cities: list[str] | None = None,
     ):
+        """Create the export job immediately; all preparation runs in the background job."""
         task_repository = bound_repository()
         workspace = workspace_key()
         # Preparation and pre-caching never block an export: the queued job
@@ -1243,10 +1279,7 @@ def install_dashboard_routes(core):
             stored_definition = read_dashboards(task_repository).get(dashboard_id)
         if not isinstance(stored_definition, dict):
             raise HTTPException(404, 'Dashboard not found.')
-        raw_definition = export_definition.model_dump(mode='json') if export_definition is not None else stored_definition
-        if not any((raw_definition.get('datasets') or {}).values()):
-            raw_definition.pop('datasets', None)
-            raw_definition = runtime_dashboard_definition(raw_definition, task_repository)
+        raw_definition = export_definition.model_dump(mode='json') if export_definition is not None else dict(stored_definition)
         explicit_selections = {
             field: list(dict.fromkeys(str(value).strip() for value in selected if str(value).strip()))
             for field, selected in (
@@ -1254,24 +1287,8 @@ def install_dashboard_routes(core):
                 ('Region', selected_regions), ('City', selected_cities),
             ) if selected is not None
         }
-        if explicit_selections:
-            raw_definition = dict(raw_definition)
-            raw_filters = dict(raw_definition.get('filters') or {})
-            for field, selected in explicit_selections.items():
-                for existing in list(raw_filters):
-                    if identity(existing) == identity(field):
-                        del raw_filters[existing]
-                if selected:
-                    raw_filters[field] = selected
-            raw_definition['filters'] = raw_filters
-        snapshot_definition = DashboardDefinition.model_validate(raw_definition)
-        # Inserting the export job must remain quick.  A valid active snapshot
-        # is reused when supplied, but cache discovery and preparation for a
-        # closed Dashboard belong to the queued worker, never this request.
+        # An active snapshot supplied by the viewer is only looked up in memory.
         snapshot = None
-        # A reused snapshot carries resolved calendar dates; the job Filters
-        # column keeps the requested (possibly symbolic) range either way.
-        requested_dates = {key: raw_definition.get(key) for key in ('date_from', 'date_to')}
         if preparation_token and not explicit_selections:
             with lock:
                 candidate = snapshots.get(preparation_token)
@@ -1281,92 +1298,42 @@ def install_dashboard_routes(core):
                 and candidate.owner in {user.username, '*'}
                 and (export_definition is None or candidate.definition.scope == export_definition.scope)
             ):
-                try:
-                    snapshot = validate_dashboard_export_snapshot(candidate, task_repository)
-                    raw_definition = snapshot.definition.model_dump(mode='json')
-                except ValueError:
-                    snapshot = None
+                snapshot = candidate
         dashboard_name = str(raw_definition.get('name') or dashboard_id)
-        preview_fingerprint = dashboard_preview_fingerprint(raw_definition, task_repository)
+        nr_mode_label = dashboard_nr_mode(raw_definition)
+        scope = 'multivendor' if str(raw_definition.get('scope') or 'single') == 'multivendor' else 'single'
         export_time = datetime.now()
-        safe_scope = dashboard_ppt_filename_part(dashboard_ppt_scope_label(raw_definition.get('scope') or 'single'), 40)
-        selected_by_kind = selected_sources(snapshot_definition, task_repository)
-        catalogue = dashboard_geography_catalogue(snapshot_definition, selected_by_kind, task_repository)
-        profile_options = profile_filter_options(
-            snapshot_definition, [], selected_by_kind, ['Operator', 'Region', 'City'], task_repository,
-        )
-        operators = profile_options['Operator']
-        available = {'Operator': operators, 'Vendor': catalogue['vendors'], 'Region': catalogue['regions'], 'City': catalogue['cities']}
-        requested = {field: explicit_selections.get(field, []) for field in ('Operator', 'Vendor', 'Region', 'City')}
-        filters = raw_definition.get('filters') or {}
-        selections = {
-            field: dashboard_ppt_selection_values(filters, field, requested[field], values)
-            for field, values in available.items()
-        }
-        selection_labels = {
-            field: dashboard_ppt_selection_label(
-                field, selections[field], values,
-                (profile_options[field],) if field in {'Region', 'City'} else (),
-            )
-            for field, values in available.items()
-        }
-        filters_json = json.dumps(dashboard_filter_lines(
-            {**raw_definition, **requested_dates}, task_repository, selection_labels,
-        ), ensure_ascii=False)
-        selected_regions, selected_cities = selections['Region'], selections['City']
-        region_label, city_label = selection_labels['Region'], selection_labels['City']
-        cover_regions = dashboard_ppt_cover_label('Region', region_label, len(selected_regions))
-        cover_cities = dashboard_ppt_cover_label('City', city_label, len(selected_cities))
-        zone_label = region_label if region_label == 'All Regions' else ' + '.join(selected_regions)
-        max_stem_bytes = 240
-        fixed_bytes = len(f'{export_time:%Y%m%d_%H%M%S} -  -  - {safe_scope}'.encode('utf-8'))
-        zone_budget = max_stem_bytes - fixed_bytes - 4
-        safe_zone = dashboard_ppt_filename_part(zone_label, zone_budget) if zone_label else ''
-        suffix_parts = [part for part in (safe_scope, safe_zone) if part]
-        name_budget = max(4, max_stem_bytes - len(f'{export_time:%Y%m%d_%H%M%S} -  - {" - ".join(suffix_parts)}'.encode('utf-8')))
-        safe_name = dashboard_ppt_filename_part(dashboard_name, name_budget) or dashboard_ppt_filename_part('Dashboard', name_budget)
         ensure_dashboard_ppt_jobs(task_repository)
-        for offset in range(60):
-            timestamp = (export_time + timedelta(seconds=offset)).strftime('%Y%m%d_%H%M%S')
-            output_file = ' - '.join((timestamp, safe_name, *suffix_parts)) + '.pptx'
-            job_dir = Path(task_repository.db_path).parent / 'output' / 'dashboards' / Path(output_file).stem
-            with task_repository.connection() as connection:
-                already_queued = connection.execute(
-                    f'SELECT 1 FROM {DASHBOARD_PPT_JOBS_TABLE} WHERE output_file = ? LIMIT 1',
-                    (output_file,),
-                ).fetchone()
-            if not already_queued and not job_dir.exists():
-                break
-        else:
-            raise HTTPException(503, 'No unique PowerPoint filename is available for this export.')
-        destination = job_dir / output_file
+        # A provisional, always valid output path; the background job adds the
+        # selected Regions once it has resolved them.
+        output_file, destination = dashboard_ppt_unique_output(
+            task_repository, export_time, nr_mode_label, dashboard_name, dashboard_ppt_scope_label(scope), '', reuse_job_id,
+        )
+        common = {
+            'dashboard_name': dashboard_name, 'template_name': str(raw_definition.get('template') or ''),
+            'nr_mode': nr_mode_label.casefold(), 'scope': scope, 'filters_json': '[]',
+            'output_file': output_file, 'output_path': str(destination),
+        }
         if reuse_job_id is None:
             with task_repository.connection() as connection:
                 cursor = connection.execute(
                     f'''INSERT INTO {DASHBOARD_PPT_JOBS_TABLE} (
                         dashboard_id, dashboard_name, template_name, nr_mode, scope, regions_json, selections_json, filters_json, output_file, output_path,
                         created_by, created_at, status, progress
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0)''',
+                    ) VALUES (?, ?, ?, ?, ?, '[]', '{{}}', ?, ?, ?, ?, ?, 'queued', 0)''',
                     (
-                        dashboard_id, dashboard_name, str(raw_definition.get('template') or ''),
-                        str(raw_definition.get('technology') or raw_definition.get('template_technology') or 'nsa'),
-                        str(raw_definition.get('scope') or 'single'), json.dumps(selected_regions, ensure_ascii=False),
-                        json.dumps(selections, ensure_ascii=False), filters_json,
-                        output_file, str(destination), user.username,
+                        dashboard_id, common['dashboard_name'], common['template_name'], common['nr_mode'], common['scope'],
+                        common['filters_json'], output_file, str(destination), user.username,
                         datetime.now(timezone.utc).isoformat(),
                     ),
                 )
                 job_id = int(cursor.lastrowid)
+            previous_output = ''
         else:
             job_id = int(reuse_job_id)
-            shutil.rmtree(Path(str(dashboard_ppt_job(task_repository, job_id)['output_path'])).parent, ignore_errors=True)
+            previous_output = str(dashboard_ppt_job(task_repository, job_id)['output_path'] or '')
             update_dashboard_ppt_job(
-                task_repository, job_id, dashboard_name=dashboard_name,
-                template_name=str(raw_definition.get('template') or ''),
-                nr_mode=str(raw_definition.get('technology') or raw_definition.get('template_technology') or 'nsa'),
-                scope=str(raw_definition.get('scope') or 'single'), regions_json=json.dumps(selected_regions, ensure_ascii=False),
-                selections_json=json.dumps(selections, ensure_ascii=False), filters_json=filters_json,
-                output_file=output_file, output_path=str(destination), created_at=datetime.now(timezone.utc).isoformat(),
+                task_repository, job_id, **common, created_at=datetime.now(timezone.utc).isoformat(),
                 status='queued', progress=0, slide_count=0, chart_count=0,
                 last_error='', started_at=None, finished_at=None,
             )
@@ -1377,14 +1344,111 @@ def install_dashboard_routes(core):
             if snapshot_token:
                 dashboard_ppt_data_tokens[(str(Path(task_repository.db_path).resolve()), job_id, user.username)] = snapshot_token
         core.submit_background_task(
-            render_dashboard_ppt_job,
-            job_id, run_token, task_repository, snapshot, snapshot_definition, user, destination,
-            dashboard_id, preview_fingerprint, cover_regions, cover_cities,
+            prepare_and_render_dashboard_ppt_job,
+            job_id, run_token, task_repository, user, dashboard_id, raw_definition,
+            explicit_selections, snapshot, export_time, previous_output,
         )
         task_repository.add_log(user.username, 'export_dashboard_ppt', json.dumps({
             'dashboard_id': dashboard_id, 'job_id': job_id, 'output': str(destination),
         }))
         return job_id
+
+    def prepare_and_render_dashboard_ppt_job(
+        job_id, run_token, task_repository, user, dashboard_id, raw_definition,
+        explicit_selections, snapshot, export_time, previous_output,
+    ):
+        """Resolve the export universe, labels and file name, then render the PPT."""
+        run_key = (str(Path(task_repository.db_path).resolve()), job_id)
+        with lock:
+            if dashboard_ppt_runs.get(run_key) != run_token:
+                return
+        try:
+            update_dashboard_ppt_job(
+                task_repository, job_id, status='processing', progress=1,
+                started_at=datetime.now(timezone.utc).isoformat(),
+            )
+            if previous_output:
+                remove_dashboard_ppt_job_folder(task_repository, previous_output)
+            raw_definition = dict(raw_definition)
+            if not any((raw_definition.get('datasets') or {}).values()):
+                raw_definition.pop('datasets', None)
+                raw_definition = runtime_dashboard_definition(raw_definition, task_repository)
+            if explicit_selections:
+                raw_filters = dict(raw_definition.get('filters') or {})
+                for field, selected in explicit_selections.items():
+                    for existing in list(raw_filters):
+                        if identity(existing) == identity(field):
+                            del raw_filters[existing]
+                    if selected:
+                        raw_filters[field] = selected
+                raw_definition['filters'] = raw_filters
+            snapshot_definition = DashboardDefinition.model_validate(raw_definition)
+            # A reused snapshot carries resolved calendar dates; the job Filters
+            # column keeps the requested (possibly symbolic) range either way.
+            requested_dates = {key: raw_definition.get(key) for key in ('date_from', 'date_to')}
+            if snapshot is not None:
+                try:
+                    snapshot = validate_dashboard_export_snapshot(snapshot, task_repository)
+                    raw_definition = snapshot.definition.model_dump(mode='json')
+                except (ValueError, HTTPException):
+                    snapshot = None
+            dashboard_name = str(raw_definition.get('name') or dashboard_id)
+            preview_fingerprint = dashboard_preview_fingerprint(raw_definition, task_repository)
+            selected_by_kind = selected_sources(snapshot_definition, task_repository)
+            catalogue = dashboard_geography_catalogue(snapshot_definition, selected_by_kind, task_repository)
+            profile_options = profile_filter_options(
+                snapshot_definition, [], selected_by_kind, ['Operator', 'Region', 'City'], task_repository,
+            )
+            available = {
+                'Operator': profile_options['Operator'], 'Vendor': catalogue['vendors'],
+                'Region': catalogue['regions'], 'City': catalogue['cities'],
+            }
+            requested = {field: explicit_selections.get(field, []) for field in ('Operator', 'Vendor', 'Region', 'City')}
+            filters = raw_definition.get('filters') or {}
+            selections = {
+                field: dashboard_ppt_selection_values(filters, field, requested[field], values)
+                for field, values in available.items()
+            }
+            selection_labels = {
+                field: dashboard_ppt_selection_label(
+                    field, selections[field], values,
+                    # Dialog selections are chosen from the catalogue; only saved
+                    # Dashboard filters come from the filter options.
+                    (profile_options[field],) if field in {'Region', 'City'} and field not in explicit_selections else (),
+                )
+                for field, values in available.items()
+            }
+            filters_json = json.dumps(dashboard_filter_lines(
+                {**raw_definition, **requested_dates}, task_repository, selection_labels,
+            ), ensure_ascii=False)
+            selected_regions, selected_cities = selections['Region'], selections['City']
+            region_label, city_label = selection_labels['Region'], selection_labels['City']
+            cover_regions = dashboard_ppt_cover_label('Region', region_label, len(selected_regions))
+            cover_cities = dashboard_ppt_cover_label('City', city_label, len(selected_cities))
+            zone_label = region_label if region_label == 'All Regions' else ' + '.join(selected_regions)
+            output_file, destination = dashboard_ppt_unique_output(
+                task_repository, export_time, dashboard_nr_mode(raw_definition), dashboard_name,
+                dashboard_ppt_scope_label(raw_definition.get('scope') or 'single'), zone_label, job_id,
+            )
+            update_dashboard_ppt_job(
+                task_repository, job_id, regions_json=json.dumps(selected_regions, ensure_ascii=False),
+                selections_json=json.dumps(selections, ensure_ascii=False), filters_json=filters_json,
+                output_file=output_file, output_path=str(destination),
+            )
+        except Exception as exc:
+            with lock:
+                active = dashboard_ppt_runs.get(run_key) == run_token
+            if active:
+                detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+                update_dashboard_ppt_job(
+                    task_repository, job_id, status='failed', last_error=str(detail),
+                    finished_at=datetime.now(timezone.utc).isoformat(),
+                )
+            return
+        render_dashboard_ppt_job(
+            job_id, run_token, task_repository, snapshot, snapshot_definition, user, destination,
+            dashboard_id, preview_fingerprint, cover_regions, cover_cities,
+        )
 
     @app.post('/api/e2e-dashboards/{dashboard_id}/export-ppt')
     def export_dashboard_ppt(
@@ -1805,7 +1869,7 @@ def install_dashboard_routes(core):
             for row in rows:
                 dashboard_ppt_runs.pop((database_key, int(row['id'])), None)
         for row in rows:
-            shutil.rmtree(Path(str(row['output_path'])).parent, ignore_errors=True)
+            remove_dashboard_ppt_job_folder(task_repository, row['output_path'])
         task_repository.add_log(user.username, 'delete_all_dashboard_ppts', json.dumps({'count': len(rows)}))
         return {'deleted': len(rows)}
 
@@ -1817,10 +1881,21 @@ def install_dashboard_routes(core):
             raise HTTPException(404, 'Dashboard export job not found.')
         if str(row['status']) in {'queued', 'processing'}:
             raise HTTPException(409, 'A running Dashboard export cannot be deleted.')
-        shutil.rmtree(Path(str(row['output_path'])).parent, ignore_errors=True)
+        remove_dashboard_ppt_job_folder(task_repository, row['output_path'])
         with task_repository.connection() as connection:
             connection.execute(f'DELETE FROM {DASHBOARD_PPT_JOBS_TABLE} WHERE id = ?', (job_id,))
         return {'deleted': job_id}
+
+    def ensure_unique_dashboard_name(dashboards, dashboard_id, name, nr_mode) -> None:
+        """Dashboard names are unique per NR Mode: an NSA and an SA Dashboard may share one."""
+        target = dashboard_nr_mode({'technology': nr_mode})
+        if any(
+            key != dashboard_id and isinstance(item, dict)
+            and str(item.get('name') or '').strip().casefold() == str(name).strip().casefold()
+            and dashboard_nr_mode(item) == target
+            for key, item in dashboards.items()
+        ):
+            raise HTTPException(409, f'An {target} Dashboard with this name already exists.')
 
     @app.put('/api/e2e-dashboards/{dashboard_id}')
     def save_dashboard(dashboard_id: str, definition: DashboardDefinition, user=Depends(dashboard_user)):
@@ -1829,8 +1904,7 @@ def install_dashboard_routes(core):
             task_repository = bound_repository()
             validate(definition, task_repository)
             dashboards = read_dashboards(task_repository)
-            if any(key != dashboard_id and item['name'].strip().casefold() == definition.name.strip().casefold() for key, item in dashboards.items()):
-                raise HTTPException(409, 'A Dashboard with this name already exists.')
+            ensure_unique_dashboard_name(dashboards, dashboard_id, definition.name, definition.technology)
             definition.name = definition.name.strip()
             saved_definition = normalize_dashboard_filters(definition.model_dump(mode='json'))
             dashboards[dashboard_id] = saved_definition
@@ -1851,8 +1925,7 @@ def install_dashboard_routes(core):
             dashboards = read_dashboards(task_repository)
             if dashboard_id not in dashboards:
                 raise HTTPException(404, 'Dashboard not found.')
-            if any(key != dashboard_id and item['name'].strip().casefold() == name.casefold() for key, item in dashboards.items()):
-                raise HTTPException(409, 'A Dashboard with this name already exists.')
+            ensure_unique_dashboard_name(dashboards, dashboard_id, name, dashboard_nr_mode(dashboards[dashboard_id]))
             dashboards[dashboard_id]['name'] = name
             task_repository.set_workspace_state(STATE_KEY, json.dumps(dashboards))
             task_repository.add_log(user.username, 'rename_dashboard', json.dumps({'id': dashboard_id, 'name': name}))
@@ -1877,6 +1950,8 @@ def install_dashboard_routes(core):
                 raise HTTPException(404, 'Dashboard not found.')
             updated = dict(current)
             nr_mode_changed = dashboard_nr_mode(current) != dashboard_nr_mode({'technology': payload.technology})
+            if nr_mode_changed:
+                ensure_unique_dashboard_name(dashboards, dashboard_id, str(current.get('name') or ''), payload.technology)
             updated['technology'] = payload.technology
             updated['template_technology'] = payload.technology
             updated['template'] = payload.template
@@ -4149,7 +4224,9 @@ def install_dashboard_routes(core):
             raise HTTPException(400, str(exc)) from exc
         entries[index] = updated_entry
         try:
-            task_repository.set_report_template_content(technology, template_name, core.catalogue_csv(entries))
+            task_repository.set_report_template_content(
+                technology, template_name, core.catalogue_csv(entries), updated_by=user.username,
+            )
         except (OSError, ValueError) as exc:
             raise HTTPException(503, f'Unable to update the Report Template: {exc}') from exc
         # Keep every live view of this Report Template consistent with the row

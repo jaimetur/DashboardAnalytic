@@ -2112,9 +2112,11 @@ def _template_row_content(row: Any) -> bytes:
     return bytes(row['content'] or b'')
 
 
-def persist_report_template(technology: str, name: str, content: bytes, *, is_default: bool | None = None) -> None:
+def persist_report_template(
+    technology: str, name: str, content: bytes, *, is_default: bool | None = None, updated_by: str | None = None,
+) -> None:
     """Persist Report Template CSV content in the workspace database."""
-    repository.set_report_template_content(technology, name, content)
+    repository.set_report_template_content(technology, name, content, updated_by=updated_by)
     if is_default is None:
         is_default = bool(next(row for row in repository.list_report_templates(technology) if str(row['name']) == name)['is_default'])
     if active_workspace:
@@ -2122,7 +2124,7 @@ def persist_report_template(technology: str, name: str, content: bytes, *, is_de
 
 
 def persist_report_template_for_request(
-    technology: str, name: str, content: bytes,
+    technology: str, name: str, content: bytes, *, updated_by: str | None = None,
 ) -> None:
     """Bound the database write without doing reconciliation under its lock."""
     if not TEMPLATE_SAVE_LOCK.acquire(timeout=TEMPLATE_SAVE_WAIT_SECONDS):
@@ -2135,7 +2137,7 @@ def persist_report_template_for_request(
             raise TimeoutError(
                 'The workspace is busy updating CDR tables. Stop or wait for the background task, then save again.'
             )
-        repository.set_report_template_content(technology, name, content)
+        repository.set_report_template_content(technology, name, content, updated_by=updated_by)
     finally:
         if workspace_acquired:
             workspace_lock.release()
@@ -2167,6 +2169,8 @@ def synchronize_template_file_names(technology: str) -> None:
 def promote_report_template_to_default(
     technology: str,
     identifier: str,
+    *,
+    updated_by: str | None = None,
 ) -> None:
     """Make a library template the default while retaining every library CSV."""
     available = {str(row['name']): row for row in repository.list_report_templates(technology)}
@@ -2176,7 +2180,7 @@ def promote_report_template_to_default(
     if not source_content:
         raise ValueError('The Report Template has no CSV content.')
     promoted_name = identifier
-    repository.set_default_report_template(technology, promoted_name)
+    repository.set_default_report_template(technology, promoted_name, updated_by=updated_by)
 
 
 def report_catalogue_options(technology: str) -> list[dict[str, Any]]:
@@ -2199,6 +2203,7 @@ def report_catalogue_options(technology: str) -> list[dict[str, Any]]:
             'active': is_default,
             'created_at': row['created_at'],
             'updated_at': row['updated_at'],
+            'updated_by': str(row['updated_by'] or '') if 'updated_by' in row.keys() else '',
         })
     return options
 
@@ -3121,6 +3126,15 @@ def configured_display_timezone() -> tzinfo:
         return ZoneInfo(str(os.environ.get('TZ') or DEPLOYMENT_RUNTIME_DEFAULTS['timezone'] or 'UTC'))
     except (KeyError, ValueError):
         return timezone.utc
+
+
+NR_MODE_NAME_AFFIX = re.compile(r'^\s*n?sa\s*[-–—:]\s*|\s*[-–—:]?\s*\(?\bn?sa\)?\s*$', re.IGNORECASE)
+
+
+def nr_mode_free_sort_name(name: object) -> str:
+    """Return a case-insensitive sort key without a leading or trailing NSA/SA marker."""
+    text = str(name or '').strip()
+    return (NR_MODE_NAME_AFFIX.sub('', text).strip() or text).casefold()
 
 
 def format_local_timestamp(value: Any) -> str:
@@ -8458,6 +8472,12 @@ def render_admin_template(
         for technology, payload in report_catalogs.items()
         for catalogue in payload['catalogues']
     ]
+    # Templates are listed by NR Mode (NSA before SA), then name. An NR Mode
+    # written in the name itself (``Report - NSA``) is ignored for the name key
+    # so the order matches the Dashboards table.
+    workspace_catalogues.sort(key=lambda item: (
+        str(item['technology']), nr_mode_free_sort_name(item['name']), str(item['name']).casefold(),
+    ))
     template_names_by_technology = {
         technology: [str(catalogue['name']) for catalogue in payload['catalogues']]
         for technology, payload in report_catalogs.items()
@@ -16478,12 +16498,12 @@ def _import_report_catalogue(
         identifier = existing_template or identifier
         catalogue_name = identifier
         if existing_template:
-            persist_report_template(technology, identifier, content)
+            persist_report_template(technology, identifier, content, updated_by=user.username)
             if next(row for row in repository.list_report_templates(technology) if str(row['name']) == identifier)['is_default']:
-                promote_report_template_to_default(technology, identifier)
+                promote_report_template_to_default(technology, identifier, updated_by=user.username)
         else:
-            repository.add_report_template(technology, identifier, content)
-            promote_report_template_to_default(technology, identifier)
+            repository.add_report_template(technology, identifier, content, updated_by=user.username)
+            promote_report_template_to_default(technology, identifier, updated_by=user.username)
             if active_workspace:
                 queue_workspace_dimension_materialization(active_workspace)
         # Keep the registry aligned with the files promoted by this import.
@@ -16550,7 +16570,7 @@ def activate_report_catalogue(
     available = {option['identifier']: option for option in report_catalogue_options(technology)}
     if catalogue_id not in available:
         return render_workspace_config_template(request, user, error='Report Template not found.', status_code=404)
-    promote_report_template_to_default(technology, catalogue_id)
+    promote_report_template_to_default(technology, catalogue_id, updated_by=user.username)
     repository.add_log(user.username, 'activate_report_template', json.dumps({
         'technology': technology,
         'template': available[catalogue_id]['name'],
@@ -16598,8 +16618,8 @@ def change_report_catalogue_type(
         content = bytes(catalogue['content'])
         if not content:
             raise ValueError('The Report Template has no CSV content.')
-        repository.move_report_template(technology, catalogue_id, target_technology)
-        repository.set_report_template_content(target_technology, catalogue_id, content)
+        repository.move_report_template(technology, catalogue_id, target_technology, updated_by=user.username)
+        repository.set_report_template_content(target_technology, catalogue_id, content, updated_by=user.username)
     except ValueError as exc:
         return render_workspace_config_template(request, user, error=str(exc), status_code=400)
     repository.add_log(user.username, 'change_report_template_type', json.dumps({
@@ -16638,7 +16658,7 @@ def rename_report_catalogue(
             raise ValueError(f"A {technology.upper()} template named '{new_identifier}' already exists.")
         if new_identifier != catalogue_id:
             previous_identifier = catalogue_id
-            repository.rename_report_template(technology, catalogue_id, new_identifier)
+            repository.rename_report_template(technology, catalogue_id, new_identifier, updated_by=user.username)
             catalogue_id = new_identifier
             rename_dashboards = getattr(sys.modules[__name__], 'e2e_dashboard_rename_template_references', None)
             if callable(rename_dashboards):
@@ -16677,7 +16697,7 @@ def duplicate_report_catalogue(
         name = f"{base_name} {suffix}"
         identifier = catalogue_registry_key(name)
         suffix += 1
-    repository.add_report_template(technology, identifier, bytes(catalogue['content']))
+    repository.add_report_template(technology, identifier, bytes(catalogue['content']), updated_by=user.username)
     repository.add_log(user.username, 'duplicate_report_template', json.dumps({'technology': technology, 'source': catalogue_id, 'template': name}))
     return RedirectResponse('/workspace-config', status_code=status.HTTP_303_SEE_OTHER)
 
@@ -16696,7 +16716,7 @@ def create_empty_report_catalogue(
         name = f'{base_name} {suffix}'
         suffix += 1
     content = catalogue_csv([])
-    repository.add_report_template(technology, name, content)
+    repository.add_report_template(technology, name, content, updated_by=user.username)
     repository.add_log(user.username, 'create_report_template', json.dumps({
         'technology': technology,
         'template': name,
@@ -16737,7 +16757,7 @@ def finalize_template_save(
 ) -> None:
     """Update metadata/audit after the template file is safely available."""
     try:
-        task_repository.touch_report_template(technology, template_name)
+        task_repository.touch_report_template(technology, template_name, updated_by=username)
     except (sqlite3.Error, OSError) as exc:
         warnings.warn(f'Unable to update Report Template metadata: {exc}', RuntimeWarning)
         try:
@@ -16811,7 +16831,7 @@ def save_report_catalogue(
         content = catalogue_csv(entries)
         task_repository = Repository(Path(repository.db_path), Path(repository.global_db_path))
         with TEMPLATE_SAVE_DISPATCH_LOCK:
-            persist_report_template_for_request(technology, template_name, content)
+            persist_report_template_for_request(technology, template_name, content, updated_by=user.username)
             _submit_workspace_job(
                 task_repository, reconcile_saved_template_comments,
                 task_repository, technology, template_name, previous_content, entries, phase=3,
@@ -17635,7 +17655,10 @@ async def copy_report_catalogue_items(
         ]
         content = catalogue_csv(copied_entries)
         with TEMPLATE_SAVE_LOCK:
-            persist_report_template(target_technology, target_identifier, content, is_default=bool(target['active']))
+            persist_report_template(
+                target_technology, target_identifier, content,
+                is_default=bool(target['active']), updated_by=user.username,
+            )
     except (IndexError, StopIteration, TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc) or 'The selected template content is unavailable.') from exc
     except (FileNotFoundError, OSError, sqlite3.Error) as exc:

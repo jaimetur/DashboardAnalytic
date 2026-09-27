@@ -25,7 +25,7 @@
     <h3 class="templates-library-heading">Report Templates Library</h3>
     <div class="table-wrap catalogue-workspace-table-wrap">
       <table class="catalogue-workspace-table">
-        <thead><tr><th>Template name</th><th>Type</th><th>Created</th><th>Last Updated</th><th>Default</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Template name</th><th>NR Mode</th><th>Created</th><th>Last Updated</th><th>Last Updated by</th><th>Default</th><th>Actions</th></tr></thead>
         <tbody>
           {% for catalogue in workspace_catalogues %}
           <tr>
@@ -36,12 +36,12 @@
             </td>
             <td>
               {% if catalogue.active %}
-              <select aria-label="Type for {{ catalogue.name }}" disabled title="Set another default template before changing this type.">
+              <select aria-label="NR Mode for {{ catalogue.name }}" disabled title="Set another default template before changing its NR Mode.">
                 <option value="{{ catalogue.technology }}" selected>{{ catalogue.technology | upper }}</option>
               </select>
               {% else %}
               <form class="catalogue-type-form" action="/workspace-config/report-templates/{{ catalogue.technology }}/{{ catalogue.identifier | urlencode }}/type" method="post">
-                <select name="template_type" aria-label="Type for {{ catalogue.name }}" onchange="this.form.requestSubmit()">
+                <select name="template_type" aria-label="NR Mode for {{ catalogue.name }}" onchange="this.form.requestSubmit()">
                   <option value="nsa" {% if catalogue.technology == 'nsa' %}selected{% endif %}>NSA</option>
                   <option value="sa" {% if catalogue.technology == 'sa' %}selected{% endif %}>SA</option>
                 </select>
@@ -52,6 +52,7 @@
             {% set updated_parts = (catalogue.updated_at or '').replace('T', ' ').split() %}
             <td class="catalogue-timestamp"><span>{{ created_parts[0] if created_parts else '-' }}</span>{% if created_parts | length > 1 %}<span>{{ created_parts[1] }}</span>{% endif %}</td>
             <td class="catalogue-timestamp"><span>{{ updated_parts[0] if updated_parts else '-' }}</span>{% if updated_parts | length > 1 %}<span>{{ updated_parts[1] }}</span>{% endif %}</td>
+            <td class="catalogue-updated-by">{{ catalogue.updated_by or '-' }}</td>
             <td class="catalogue-default-cell"><span class="catalogue-default-mark {% if catalogue.active %}is-default{% else %}is-not-default{% endif %}" aria-label="{% if catalogue.active %}Default template{% else %}Not the default template{% endif %}" title="{% if catalogue.active %}Default template{% else %}Not the default template{% endif %}">{% if catalogue.active %}✓{% else %}○{% endif %}</span></td>
             <td>
               <div class="catalogue-workspace-actions">

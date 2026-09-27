@@ -1680,3 +1680,4 @@
 .ds-dashboards-table tr.ds-filter-row .ds-data-panel > .collapsible-summary { padding-top:.7rem; }
 .e2e-dashboards .report-job-retry-button.is-busy { opacity:.55; cursor:progress; animation:ds-retry-spin 1s linear infinite; }
 @keyframes ds-retry-spin { to { transform:rotate(360deg); } }
+#ds-ppt-dataset-confirm.is-busy { cursor:progress; }

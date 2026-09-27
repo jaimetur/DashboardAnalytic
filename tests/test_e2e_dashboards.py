@@ -594,7 +594,8 @@ def test_dashboard_ppt_filename_summarizes_complete_geography_selections(client,
     core.repository.replace_cdr_catalogue(
         1, vendors=['Vendor A', 'Vendor B'], regions=['North', 'South'], cities=['Leeds', 'London'],
     )
-    monkeypatch.setattr(core, 'submit_background_task', lambda *args, **kwargs: None)
+    # Labels and file names are resolved by the background job; run it inline.
+    monkeypatch.setattr(core, 'submit_background_task', lambda callback, *args: callback(*args))
 
     def queued_name(regions, cities, operators=None):
         filters = {'Region': regions, 'City': cities}
@@ -615,17 +616,17 @@ def test_dashboard_ppt_filename_summarizes_complete_geography_selections(client,
         return row['output_file']
 
     assert re.fullmatch(
-        r'\d{8}_\d{6} - Comparison - Operator Comparison - All Regions\.pptx',
+        r'\d{8}_\d{6} - NSA - Comparison - Operator Comparison - All Regions\.pptx',
         queued_name(['South', 'North'], ['London', 'Leeds']),
     )
     first_north_export = queued_name(['North'], ['London'])
     assert re.fullmatch(
-        r'\d{8}_\d{6} - Comparison - Operator Comparison - North\.pptx',
+        r'\d{8}_\d{6} - NSA - Comparison - Operator Comparison - North\.pptx',
         first_north_export,
     )
     second_north_export = queued_name(['North'], ['London'], ['A'])
     assert re.fullmatch(
-        r'\d{8}_\d{6} - Comparison - Operator Comparison - North\.pptx',
+        r'\d{8}_\d{6} - NSA - Comparison - Operator Comparison - North\.pptx',
         second_north_export,
     )
     assert second_north_export != first_north_export
@@ -646,7 +647,7 @@ def test_dashboard_ppt_filename_summarizes_partial_selections_and_fits_filesyste
         regions=['North', 'South', 'East'],
         cities=['Belfast', 'Bristol', 'Cardiff', 'Edinburgh', 'Leeds', 'London', 'Sheffield', 'York'],
     )
-    monkeypatch.setattr(core, 'submit_background_task', lambda *args, **kwargs: None)
+    monkeypatch.setattr(core, 'submit_background_task', lambda callback, *args: callback(*args))
     selections = {
         'selected_operators': ['A'],
         'selected_vendors': ['Vendor A', 'Vendor B'],
@@ -668,7 +669,7 @@ def test_dashboard_ppt_filename_summarizes_partial_selections_and_fits_filesyste
     )
     assert len(output_path.parent.name.encode('utf-8')) <= 240
     assert len(output_path.name.encode('utf-8')) <= 255
-    output_path.parent.mkdir(parents=True)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     assert 'Vendor: Vendor A, Vendor B' in json.loads(row['filters_json'])
     assert 'Region: North, South' in json.loads(row['filters_json'])
     assert 'City: Belfast, Bristol, Cardiff, Edinburgh, Leeds, London, Sheffield' in json.loads(row['filters_json'])
@@ -697,7 +698,7 @@ def test_dashboard_ppt_filename_summarizes_partial_selections_and_fits_filesyste
         ).fetchone()
     unicode_path = Path(unicode_row['output_path'])
     assert len(unicode_path.parent.name.encode('utf-8')) <= 240
-    unicode_path.parent.mkdir(parents=True)
+    unicode_path.parent.mkdir(parents=True, exist_ok=True)
 
 
 def test_dashboard_ppt_dialog_selections_override_saved_dashboard_filters(client, monkeypatch):
@@ -716,7 +717,12 @@ def test_dashboard_ppt_dialog_selections_override_saved_dashboard_filters(client
         1, vendors=['Vendor A', 'Vendor B'], regions=['North', 'South'], cities=['Leeds', 'London'],
     )
     submitted = []
-    monkeypatch.setattr(core, 'submit_background_task', lambda *args, **kwargs: submitted.append(args))
+
+    def run_inline(callback, *args):
+        submitted.append(args)
+        callback(*args)
+
+    monkeypatch.setattr(core, 'submit_background_task', run_inline)
 
     queued = client.post(f'/api/e2e-dashboards/{dashboard_id}/export-ppt', json={
         'definition': payload,
@@ -731,8 +737,13 @@ def test_dashboard_ppt_dialog_selections_override_saved_dashboard_filters(client
     assert job['filters'][-4:] == [
         'Operator: B', 'Vendor: Vendor B', 'Region: South', 'City: Leeds',
     ]
-    assert submitted[0][7].name.endswith(' - Operator Comparison - South.pptx')
-    assert submitted[0][5].filters == {
+    with core.repository.connection() as connection:
+        output_file = connection.execute(
+            'SELECT output_file FROM dashboard_ppt_jobs WHERE id = ?', (queued.json()['job_id'],),
+        ).fetchone()['output_file']
+    assert output_file.endswith(' - Operator Comparison - South.pptx')
+    # The dialog selections travel with the job and override the saved filters.
+    assert submitted[0][6] == {
         'Operator': ['B'], 'Vendor': ['Vendor B'], 'Region': ['South'], 'City': ['Leeds'],
     }
     assert client.get('/api/e2e-dashboards').json()[dashboard_id]['filters'] == payload['filters']
@@ -1916,7 +1927,7 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypa
     charts_dir = output_path.parent / 'dashboard-charts'
     assert output_path.is_file()
     assert re.fullmatch(
-        r'\d{8}_\d{6} - Comparison - Multivendor Comparison\.pptx',
+        r'\d{8}_\d{6} - NSA - Comparison - Multivendor Comparison\.pptx',
         output_path.name,
     )
     assert output_path.parent.name == output_path.stem
@@ -2873,3 +2884,33 @@ def test_ppt_cover_treats_every_filter_value_as_all_cities(client):
     assert job['status'] == 'ready', job
     assert 'City: All Cities' in job['filters']
     assert client.get(f'/api/e2e-dashboards/ppt-jobs/{job_id}/charts.json').json()['cover']['cities'] == 'All Cities'
+
+
+def test_dashboard_names_are_unique_per_nr_mode(client):
+    payload = setup_dashboard(client)
+    core.repository.add_report_template('sa', 'Dashboard test', core.repository.report_template_content(
+        'nsa', 'Dashboard test',
+    ), is_default=False)
+    assert client.put('/api/e2e-dashboards/nsa-one', json=payload).status_code == 200
+    duplicate = client.put('/api/e2e-dashboards/nsa-two', json=payload)
+    assert duplicate.status_code == 409
+    assert 'NSA Dashboard with this name' in duplicate.json()['detail']
+    sa_payload = {**payload, 'technology': 'sa', 'template_technology': 'sa'}
+    # The same name is allowed for a Dashboard of the other NR Mode.
+    assert client.put('/api/e2e-dashboards/sa-one', json=sa_payload).status_code == 200
+
+
+def test_report_template_changes_record_the_last_editor(client):
+    from src.modules.cdr_reporting import CATALOG_HEADERS
+
+    client.post('/login', data={'username': 'super', 'password': 'super123'})
+    content = (','.join(CATALOG_HEADERS) + '\n1,T,,Title Page,,,,Title Slide,,,,,\n').encode()
+    response = client.post(
+        '/workspace-config/report-templates/sa', data={'catalogue_name': 'Editor audit'},
+        files={'catalogue_file': ('x.csv', BytesIO(content), 'text/csv')}, follow_redirects=False,
+    )
+    assert response.status_code == 303
+    row = next(row for row in core.repository.list_report_templates('sa') if row['name'] == 'Editor audit')
+    assert row['updated_by'] == 'super'
+    page = client.get('/workspace-config')
+    assert '<th>NR Mode</th><th>Created</th><th>Last Updated</th><th>Last Updated by</th>' in page.text

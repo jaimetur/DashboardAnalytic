@@ -94,7 +94,8 @@
   window.addEventListener('pagehide', rememberScroll);
   window.addEventListener('beforeunload', rememberScroll);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') rememberScroll(); });
-  const nextName = value => { let name = value, number = 2; while (Object.values(dashboards).some(item => item.name.toLowerCase() === name.toLowerCase())) name = `${value.slice(0, 108)} (${number++})`; return name; };
+  // Names are unique per NR Mode: an NSA and an SA Dashboard may share one.
+  const nextName = (value, nrMode = 'NSA') => { let name = value, number = 2; while (Object.values(dashboards).some(item => item.name.toLowerCase() === name.toLowerCase() && dashboardNrMode(item) === nrMode)) name = `${value.slice(0, 108)} (${number++})`; return name; };
   const focusReturn = new Map();
   const status = message => { $('ds-status').textContent = message; };
   const backgroundWorkspaceName = () => document.querySelector('[data-header-active-workspace-name]')?.textContent?.trim() || 'Active workspace';
@@ -674,6 +675,12 @@
       dateStatus.textContent = dateError;
       confirm.disabled = !choices.querySelector('input:checked') || Boolean(dateError)
         || geographyLoading;
+      // Say why the action is waiting instead of looking unresponsive.
+      confirm.textContent = geographyLoading ? 'Loading values…' : 'Generate PPT';
+      confirm.title = geographyLoading
+        ? 'Loading the Operators, Vendors, Regions and Cities of the selected CDRs…'
+        : !choices.querySelector('input:checked') ? 'Select at least one CDR dataset.' : dateError;
+      confirm.classList.toggle('is-busy', geographyLoading);
     };
     const refreshGeography = async () => {
       const request = ++geographyRequest;
@@ -873,20 +880,27 @@
     if (!chooseScope && filterDecision === 'unchanged' && !hasAppliedUnsavedFilterChanges()) {
       const accepted = await window.showConfirmDialog(
         `Generate a PowerPoint presentation for “${exportDefinition.name}”?`,
-        {title: 'Generate PPT Dashboard', confirmLabel: 'Generate PPT'},
+        {title: 'Generate Dashboard PPT', confirmLabel: 'Generate PPT'},
       );
       if (!accepted) return;
     }
-    await api(`/${encodeURIComponent(id)}/export-ppt`, 'POST', {
-      definition: exportDefinition,
-      preparation_token: preparationToken,
-      ...(chooseScope ? {
-        selected_operators: selectedOperators,
-        selected_vendors: selectedVendors,
-        selected_regions: selectedRegions,
-        selected_cities: selectedCities,
-      } : {}),
-    });
+    // Queuing validates the universe and resolves the cover labels on the
+    // server, which can take a few seconds on a busy server: show it.
+    window.showLoadingOverlay?.('Queuing Dashboard PPT', `Preparing the PowerPoint export for “${exportDefinition.name}”…`);
+    try {
+      await api(`/${encodeURIComponent(id)}/export-ppt`, 'POST', {
+        definition: exportDefinition,
+        preparation_token: preparationToken,
+        ...(chooseScope ? {
+          selected_operators: selectedOperators,
+          selected_vendors: selectedVendors,
+          selected_regions: selectedRegions,
+          selected_cities: selectedCities,
+        } : {}),
+      });
+    } finally {
+      window.hideLoadingOverlay?.();
+    }
     status(`Dashboard PPT export queued for “${exportDefinition.name}”.`);
     await refreshDashboardPptJobs();
     window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));
@@ -936,7 +950,19 @@
     $('ds-create').disabled = !$('ds-template').options.length;
     $('ds-count').textContent = `Total Dashboards: ${Object.keys(dashboards).length}`;
     const body = $('ds-dashboards-body'); body.replaceChildren();
-    const rows = Object.entries(dashboards).sort(([, left], [, right]) => left.name.localeCompare(right.name));
+    // Sort by NR Mode (NSA before SA), then Dashboard name, with the same
+    // rule as the Report Templates table: an NSA/SA marker in the name is
+    // ignored and names compare case-insensitively by character code.
+    const sortName = value => {
+      const text = String(value || '').trim();
+      return (text.replace(/^\s*n?sa\s*[-–—:]\s*|\s*[-–—:]?\s*\(?\bn?sa\)?\s*$/i, '').trim() || text).toLowerCase();
+    };
+    const compareText = (left, right) => (left < right ? -1 : left > right ? 1 : 0);
+    const rows = Object.entries(dashboards).sort(([, left], [, right]) => (
+      compareText(dashboardNrMode(left), dashboardNrMode(right))
+      || compareText(sortName(left.name), sortName(right.name))
+      || compareText(String(left.name).toLowerCase(), String(right.name).toLowerCase())
+    ));
     if (!rows.length) { const row = node('tr'), cell = node('td', 'No Dashboards have been created yet.', 'form-note'); cell.colSpan = 5; row.append(cell); body.append(row); return; }
     for (const [id, item] of rows) {
       const row = node('tr'); if (id === activeId) row.classList.add('ds-dashboard-active');
@@ -1041,9 +1067,10 @@
       primaryActionLabel(open, filtersAreOpen ? 'Close' : 'Open', 'Filters');
       action('Duplicate Dashboard', '⧉', async () => { if (await confirmDiscard()) await duplicateDashboard(id); });
       action('Export Dashboard', '', () => exportDashboard(id, item), 'ds-dashboard-export');
-      const ppt = action('Generate PPT Dashboard', '', () => queueDashboardPptExport(id, item, {chooseScope: true}), 'ds-dashboard-ppt');
+      const ppt = action('Generate Dashboard PPT', '', () => queueDashboardPptExport(id, item, {chooseScope: true}), 'ds-dashboard-ppt');
       ppt.dataset.dashboardPptId = id;
-      ppt.disabled = dashboardStatus.state !== 'ready';
+      // Same rule as the periodic status sync: pre-caching never blocks exports.
+      ppt.disabled = !dashboardCanExport(id);
       action('Delete Dashboard', '×', async () => { await deleteDashboard(id); }, 'danger-button');
       const cell = node('td'); cell.dataset.label = 'Actions'; cell.append(actions); row.append(cell); body.append(row);
       if (filtersAreOpen) {
@@ -2122,7 +2149,7 @@
     await preparePart('universe');
   });
   async function duplicateDashboard(sourceId) {
-    const id = dashboardId(), item = runtimeDashboardDefinition(dashboards[sourceId]); item.name = nextName(`${item.name.slice(0,110)} (copy)`);
+    const id = dashboardId(), item = runtimeDashboardDefinition(dashboards[sourceId]); item.name = nextName(`${item.name.slice(0,110)} (copy)`, dashboardNrMode(item));
     status(`Duplicating “${dashboards[sourceId].name}”…`);
     const result = await api(`/${id}`,'PUT',item); dashboards[id] = result.definition; await openDashboard(id);
   }
@@ -2141,7 +2168,7 @@
     await api(`/${id}`,'DELETE'); delete dashboards[id]; dashboardStatuses.delete(id); if (id === activeId) closeDashboard(); else { library(); status(`Deleted “${item.name}”.`); }
   }
   bind('ds-import',() => $('ds-import-file').click());
-  $('ds-import-file').onchange = safe(async () => { const file = $('ds-import-file').files[0]; if (!file) return; const payload = JSON.parse(await file.text()); const legacy = payload.format === 'dashboard-analytic-dashboard-set' && payload.version === 1; if (!legacy && (payload.format !== 'dashboard-analytic-dashboard' || payload.version !== 2)) throw new Error('Unsupported Dashboard file.'); if (!await confirmDiscard()) return; payload.definition.name = nextName(payload.definition.name); const id = dashboardId(), result = await api(`/${id}`,'PUT',payload.definition); dashboards[id] = result.definition; await openDashboard(id); $('ds-import-file').value = ''; });
+  $('ds-import-file').onchange = safe(async () => { const file = $('ds-import-file').files[0]; if (!file) return; const payload = JSON.parse(await file.text()); const legacy = payload.format === 'dashboard-analytic-dashboard-set' && payload.version === 1; if (!legacy && (payload.format !== 'dashboard-analytic-dashboard' || payload.version !== 2)) throw new Error('Unsupported Dashboard file.'); if (!await confirmDiscard()) return; payload.definition.name = nextName(payload.definition.name, dashboardNrMode(payload.definition)); const id = dashboardId(), result = await api(`/${id}`,'PUT',payload.definition); dashboards[id] = result.definition; await openDashboard(id); $('ds-import-file').value = ''; });
   function closeDashboard() { delete $('ds-viewer-export-ppt').dataset.dashboardPptId; $('ds-viewer-export-ppt').disabled = true; clearTimeout(facetsRefreshTimer); dismissPreparationStatus(); stopPresentation(); rememberOpen(''); rememberFiltersOpen(false); ++sequence; clearTimeout(timer); controller?.abort(); preparing = null; activeId = ''; dashboardFiltersOpen = false; definition = null; savedDefinition = ''; appliedFilterState = ''; appliedSelectionState = ''; appliedDashboardDefinition = null; prepared = null; dirty = false; updateUnsavedFiltersBadge(); setViewEnabled(false); setPreparationState('hidden'); $('ds-filter-panel').hidden = true; document.dispatchEvent(new CustomEvent('page-panel-navigation:update')); setActiveDashboardHeading(''); $('ds-name').value = ''; setNrMode('nsa'); syncNewDashboardNameFromTemplate(); library(); status('Dashboard closed.'); }
   $('ds-name').oninput = () => { if (definition) { definition.name = $('ds-name').value; updateDirtyState(); } };
   $('ds-nr-mode').onchange = () => {
