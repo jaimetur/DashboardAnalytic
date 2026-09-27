@@ -1428,7 +1428,26 @@
       if (job.charts_download_url) { const link = node('a', '', 'report-job-download-button report-job-charts-download-button'); link.href = job.charts_download_url; link.download = ''; link.title = link.ariaLabel = 'Download Dashboard charts as ZIP'; actions.append(link); }
       if (job.charts_api_url) actions.append(jobAction('Open Dashboard charts', 'report-job-charts-button', () => loadDashboardPptCharts(job.id, true), '📈'));
       if (job.charts_api_url) actions.append(jobAction('View Dashboard snapshot', 'report-job-dashboard-button', () => openDashboardPptViewer(job), ''));
-      if (job.retry_url) actions.append(jobAction(job.status === 'ready' ? 'Relaunch Job' : 'Retry export', 'report-job-retry-button', async () => { await api(`/ppt-jobs/${job.id}/retry`, 'POST'); await refreshDashboardPptJobs(); }, '↻'));
+      if (job.retry_url) {
+        const retry = jobAction(job.status === 'ready' ? 'Relaunch Job' : 'Retry export', 'report-job-retry-button', async () => {
+          // Relaunching can take a few seconds on a busy server: give
+          // immediate feedback and ignore repeated clicks until it answers.
+          if (dashboardPptRetrying.has(String(job.id))) return;
+          dashboardPptRetrying.add(String(job.id));
+          retry.disabled = true; retry.classList.add('is-busy'); retry.title = 'Relaunching…';
+          status(`Relaunching PowerPoint Job ${job.id}…`);
+          try {
+            await api(`/ppt-jobs/${job.id}/retry`, 'POST');
+            status(`PowerPoint Job ${job.id} was queued again.`);
+          } finally {
+            dashboardPptRetrying.delete(String(job.id));
+            retry.disabled = false; retry.classList.remove('is-busy'); retry.title = job.status === 'ready' ? 'Relaunch Job' : 'Retry export';
+            await refreshDashboardPptJobs({force: true});
+          }
+        }, '↻');
+        retry.disabled = dashboardPptRetrying.has(String(job.id));
+        actions.append(retry);
+      }
       if (job.stop_url) actions.append(jobAction('Stop export', 'report-job-stop-button', async () => { await api(`/ppt-jobs/${job.id}/stop`, 'POST'); await refreshDashboardPptJobs(); }, '■'));
       if (config.can_manage) actions.append(jobAction('Delete export', 'danger-button', async () => {
         if (!await window.showConfirmDialog(`Delete Dashboard PPT job ${job.id} and all its files?`, {title: 'Delete Dashboard PPT', confirmLabel: 'Delete'})) return;
@@ -1460,19 +1479,44 @@
       wrapper.style.maxHeight = `${Math.ceil(headerHeight + rowsHeight + 2)}px`;
     });
   }
-  const refreshDashboardPptJobs = async () => {
+  // The jobs table is rebuilt from each poll. Rebuilding it while a mouse
+  // button is held over it swaps the pressed button for a new element, so the
+  // browser never fires the click. Unchanged polls are skipped, and renders
+  // wait until the pointer is released.
+  const dashboardPptRetrying = new Set();
+  let dashboardPptJobsSignature = '', dashboardPptJobsPointerDown = false, dashboardPptJobsPendingRender = null;
+  const dashboardPptJobsTable = $('ds-ppt-jobs-body').closest('table');
+  dashboardPptJobsTable.addEventListener('pointerdown', () => { dashboardPptJobsPointerDown = true; });
+  const releaseDashboardPptJobsPointer = () => {
+    if (!dashboardPptJobsPointerDown) return;
+    dashboardPptJobsPointerDown = false;
+    // Let the click of the released button run before any deferred render.
+    window.setTimeout(() => {
+      const pending = dashboardPptJobsPendingRender;
+      dashboardPptJobsPendingRender = null;
+      if (pending && !dashboardPptJobsPointerDown) pending();
+    }, 0);
+  };
+  document.addEventListener('pointerup', releaseDashboardPptJobsPointer, true);
+  document.addEventListener('pointercancel', releaseDashboardPptJobsPointer, true);
+  const refreshDashboardPptJobs = async ({force = false} = {}) => {
     if (dashboardPptJobsRefreshing) return;
     dashboardPptJobsRefreshing = true;
     try {
       const previousJobs = new Map(dashboardPptJobs.map(job => [String(job.id), job]));
       const payload = await api('/ppt-jobs');
       const jobs = Array.isArray(payload.jobs) ? payload.jobs : [];
+      const signature = JSON.stringify(jobs);
+      if (!force && dashboardPptJobsLoaded && signature === dashboardPptJobsSignature) return;
+      dashboardPptJobsSignature = signature;
       const newlyReady = dashboardPptJobsLoaded ? jobs.filter(job => {
         const previous = previousJobs.get(String(job.id));
         return job.status === 'ready' && job.charts_api_url && (!previous || previous.status !== 'ready');
       }).sort((left, right) =>
         String(right.timestamp || '').localeCompare(String(left.timestamp || '')) || Number(right.id) - Number(left.id)) : [];
-      renderDashboardPptJobs(jobs, newlyReady[0]?.id || '');
+      const render = () => renderDashboardPptJobs(jobs, newlyReady[0]?.id || '');
+      if (dashboardPptJobsPointerDown) dashboardPptJobsPendingRender = render;
+      else render();
       dashboardPptJobsLoaded = true;
     } finally {
       dashboardPptJobsRefreshing = false;
