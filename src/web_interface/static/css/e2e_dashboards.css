@@ -78,6 +78,8 @@
 .ds-overlay[hidden]{display:none!important}.ds-secondary{z-index:1210}
 .ds-viewer-panel{position:relative;width:96vw!important;max-width:none!important;height:96vh;max-height:none;display:flex;flex-direction:column;padding:28px!important;overflow:hidden;background:#faf9fd}
 .ds-viewer-header{display:flex;justify-content:space-between;align-items:start;gap:20px}.ds-viewer-header h2{margin:0}.ds-viewer-header p{margin:4px 0}#ds-subtitle{min-height:1.4em}.ds-viewer-panel>.ds-actions{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;margin-top:.5rem}.ds-viewer-panel>.ds-actions>select{justify-self:start}.ds-viewer-panel>.ds-actions>.ds-viewer-tool-actions{justify-self:center;margin:0;padding:0;border:0}.ds-viewer-panel>.ds-actions>.ds-viewer-right-actions{justify-self:end;margin-left:0}
+.ds-viewer-header h2{color:#4c3277;font-size:1.9rem;font-weight:800;line-height:1.15}
+#ds-subtitle{color:#9a6c00;font-size:1.125rem;font-weight:700;line-height:1.35}
 .ds-slide-sidebar{display:flex;flex:0 0 auto;min-width:0;min-height:0;flex-direction:column}.ds-viewer-navigation-footer{display:flex;flex:0 0 auto;justify-content:center;padding:.55rem 0}.ds-slide-navigation{display:flex;align-items:center;justify-content:center;gap:4px}.e2e-dashboards .ds-slide-nav-button{display:grid;place-items:center;width:2rem;min-width:2rem;height:2rem;min-height:2rem;padding:0!important;border-radius:999px!important;font-size:1rem!important;font-weight:800;line-height:1}
 .ds-slide-content{position:relative;display:flex;flex:1 1 auto;min-height:0;margin-top:22px;flex-direction:column}.ds-viewer-preparing{position:absolute;z-index:12;top:50%;left:50%;width:min(560px,86%);margin:0;transform:translate(-50%,-50%)}.ds-chart-stage{position:relative;flex:1 1 auto;width:100%;min-height:280px;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
 .ds-chart-stage.ds-positioned{display:block}.ds-positioned .ds-chart{position:absolute}
@@ -606,8 +608,8 @@
   .ds-viewer-header { align-items: center; gap: .5rem; }
   .ds-viewer-header > div { min-width: 0; }
   .ds-viewer-header .eyebrow { display: none; }
-  .ds-viewer-header h2 { overflow: hidden; font-size: 1rem; text-overflow: ellipsis; white-space: nowrap; }
-  #ds-subtitle { min-height: 0; margin: 0; font-size: .72rem; }
+  .ds-viewer-header h2 { overflow: hidden; font-size: 1.2rem; text-overflow: ellipsis; white-space: nowrap; }
+  #ds-subtitle { min-height: 0; margin: 0; font-size: .85rem; }
   .ds-viewer-panel > .ds-actions { flex-wrap: wrap; overflow: visible; }
   .ds-viewer-panel > .ds-actions > select { flex: 1 1 100%; }
   .ds-slide-navigation { flex: 1 1 auto; justify-content: flex-start; }
@@ -1361,14 +1363,14 @@
   }
   #ds-viewer:not(.ds-presentation-active) .ds-viewer-header h2 {
     margin:0;
-    font-size:1rem;
+    font-size:1.2rem;
     line-height:1.1;
   }
   #ds-viewer:not(.ds-presentation-active) #ds-subtitle {
     display:-webkit-box;
     overflow:hidden;
     margin:.1rem 0 0;
-    font-size:.68rem;
+    font-size:.85rem;
     line-height:1.18;
     -webkit-box-orient:vertical;
     -webkit-line-clamp:2;
@@ -1657,8 +1659,16 @@
 }
 
 .ds-viewer-scope-control { display:inline-flex; align-items:center; gap:.45rem; color:#4b3676; font-size:.78rem; font-weight:800; white-space:nowrap; }
-.ds-viewer-scope-control select { width:12.5rem; max-width:100%; min-height:2.2rem; padding:.3rem 1.8rem .3rem .8rem; border:1px solid #cfc1df; border-radius:999px; background-color:#fff; color:#3b2a5e; font-size:.8rem; font-weight:700; }
+.ds-viewer-scope-control select { box-sizing:border-box; width:12.5rem; max-width:100%; height:2.55rem; min-height:2.55rem; padding:.3rem 1.8rem .3rem .8rem; border:1px solid #b69ad9; border-radius:999px; background-color:#e5d8f3; color:#4c3277; font-size:.8rem; font-weight:700; }
+.ds-viewer-scope-control select:hover:not(:disabled),.ds-viewer-scope-control select:focus-visible { border-color:#8b65b8; background-color:#d9c7ed; }
 .ds-viewer-scope-control select:disabled { opacity:.6; }
+
+@media (orientation:landscape) and (max-height:600px) {
+  .ds-viewer-scope-control select { height:2.15rem; min-height:2.15rem; }
+}
+@media (orientation:portrait) and (max-width:640px) {
+  .ds-viewer-scope-control select { height:2.25rem; min-height:2.25rem; }
+}
 
 /* Size structural slide text from the slide itself, not the browser window,
    so short viewers never let the cover text overflow or overlap. */
