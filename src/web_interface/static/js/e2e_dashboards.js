@@ -1271,7 +1271,7 @@
       throw new Error('This PowerPoint job does not contain the saved Dashboard viewer snapshot. Relaunch it to create one.');
     }
     pptDashboardViewer = {
-      job, definition: canonicalDashboardDefinition(payload.definition),
+      job, definition: canonicalDashboardDefinition(payload.definition), cover: payload.cover || null,
     };
     dashboardPptCharts = Array.isArray(payload.charts) ? payload.charts : [];
     dashboardPptChartsJobId = String(job.id);
@@ -2347,11 +2347,15 @@
     const filters = (appliedDashboardDefinition || definition || {}).filters || {};
     const key = Object.keys(filters).find(item => identity(item) === identity(field));
     const loaded = coverGeography.key === coverGeographyKey() ? coverGeography[field === 'Region' ? 'regions' : 'cities'] : [];
-    const catalogue = loaded.length ? loaded : (facetOptions?.[field] || []);
-    const available = catalogue.map(String).filter(Boolean);
+    const facetValues = (facetOptions?.[field] || []).map(String).filter(Boolean);
+    const available = (loaded.length ? loaded : facetValues).map(String).filter(Boolean);
     const selected = key ? (filters[key] || []).map(String).filter(Boolean) : available;
     if (!selected.length) return '';
-    if (!key || (available.length && selected.length === available.length && selected.every(value => available.includes(value)))) return allLabel;
+    // "All" when the selection covers the catalogue or the filter's own
+    // options, ignoring case and surrounding spaces (as on the PPT cover).
+    const normalized = new Set(selected.map(value => value.trim().toLocaleLowerCase()));
+    const covers = values => values.length > 0 && values.every(value => normalized.has(String(value).trim().toLocaleLowerCase()));
+    if (!key || covers(loaded.map(String).filter(Boolean)) || covers(facetValues)) return allLabel;
     return `${selected.length === 1 ? singular : plural}: ${selected.join(', ')}`;
   };
   function structuralDashboard(stage, slide) {
@@ -2369,13 +2373,16 @@
     // Scope and the selected Regions and Cities at the bottom of the cover.
     const firstSlideNumber = Math.min(...(prepared?.slides || [slide]).map(item => Number(item.number)));
     if (kind === 'title' && Number(slide.number) === firstSlideNumber) {
-      ensureCoverGeography();
       const geography = node('div', undefined, 'ds-structural-geography');
-      const scope = (appliedDashboardDefinition || definition || {}).scope === 'multivendor' ? 'Multivendor Comparison' : 'Operator Comparison';
+      // A PPT job snapshot shows exactly the cover lines of its exported PPT.
+      const snapshotCover = pptDashboardViewer?.cover;
+      if (!snapshotCover) ensureCoverGeography();
+      const scope = snapshotCover?.scope
+        || ((appliedDashboardDefinition || definition || {}).scope === 'multivendor' ? 'Multivendor Comparison' : 'Operator Comparison');
       for (const [name, label] of [
         ['scope', scope],
-        ['region', coverGeographyLabel('Region', 'Region', 'Regions', 'All Regions')],
-        ['city', coverGeographyLabel('City', 'City', 'Cities', 'All Cities')],
+        ['region', snapshotCover ? snapshotCover.regions : coverGeographyLabel('Region', 'Region', 'Regions', 'All Regions')],
+        ['city', snapshotCover ? snapshotCover.cities : coverGeographyLabel('City', 'City', 'Cities', 'All Cities')],
       ]) if (label) geography.append(node('p', label, `ds-structural-geography-${name}`));
       if (geography.childElementCount) content.append(geography);
     }

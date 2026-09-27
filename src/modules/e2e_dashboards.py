@@ -526,8 +526,18 @@ def install_dashboard_routes(core):
             return list(dict.fromkeys(str(value).strip() for value in values if str(value).strip()))
         return [str(values).strip()] if str(values).strip() else []
 
-    def dashboard_ppt_selection_label(field: str, values: list[str], available: list[str]) -> str:
-        if available and set(values) == set(available):
+    def dashboard_ppt_selection_label(
+        field: str, values: list[str], available: list[str], alternatives: tuple[list[str], ...] = (),
+    ) -> str:
+        # "All" means the selection covers every value of the CDR catalogue or
+        # of the Dashboard's own filter options (which a saved "select every
+        # value" filter comes from), ignoring case and surrounding spaces.
+        selected = {str(value).strip().casefold() for value in values if str(value).strip()}
+        candidates = [available, *alternatives]
+        if selected and any(
+            candidate and selected >= {str(value).strip().casefold() for value in candidate if str(value).strip()}
+            for candidate in candidates
+        ):
             return {'Operator': 'All Operators', 'Vendor': 'All Vendors', 'Region': 'All Regions', 'City': 'All Cities'}[field]
         return ', '.join(values)
 
@@ -543,6 +553,26 @@ def install_dashboard_routes(core):
             return label
         singular, plural = {'Region': ('Region', 'Regions'), 'City': ('City', 'Cities')}[field]
         return f'{singular if count == 1 else plural}: {label}'
+
+    def dashboard_ppt_job_cover(row, manifest: dict) -> dict[str, str]:
+        """Return a PPT job's cover lines, rebuilding them for older jobs."""
+        cover = manifest.get('cover')
+        if isinstance(cover, dict):
+            return {key: str(cover.get(key) or '') for key in ('scope', 'regions', 'cities')}
+        try:
+            lines = json.loads(str(row['filters_json'] or '[]'))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            lines = []
+        labels = {}
+        for line in lines if isinstance(lines, list) else []:
+            field, _separator, value = str(line).partition(': ')
+            if field in {'Region', 'City'} and value:
+                labels[field] = value
+        return {
+            'scope': dashboard_ppt_scope_label(str(row['scope'] or 'single')),
+            'regions': dashboard_ppt_cover_label('Region', labels.get('Region', ''), len(labels.get('Region', '').split(', '))),
+            'cities': dashboard_ppt_cover_label('City', labels.get('City', ''), len(labels.get('City', '').split(', '))),
+        }
 
     def add_dashboard_ppt_cover_geography(slide, scope: str, regions: str, cities: str, slide_height: int) -> None:
         """Place the Scope and selected geography below the cover subtitle, aligned with its title."""
@@ -875,6 +905,12 @@ def install_dashboard_routes(core):
                     # later be opened as its own Dashboard snapshot.
                     'slides': snapshot.payload.get('slides', []),
                     'charts': manifest,
+                    # The exact cover lines, so the job's viewer snapshot shows
+                    # the same Scope, Regions and Cities as the PPT cover.
+                    'cover': {
+                        'scope': dashboard_ppt_scope_label(snapshot.definition.scope),
+                        'regions': cover_regions, 'cities': cover_cities,
+                    },
                 }, ensure_ascii=False),
                 encoding='utf-8',
             )
@@ -1256,7 +1292,10 @@ def install_dashboard_routes(core):
         safe_scope = dashboard_ppt_filename_part(dashboard_ppt_scope_label(raw_definition.get('scope') or 'single'), 40)
         selected_by_kind = selected_sources(snapshot_definition, task_repository)
         catalogue = dashboard_geography_catalogue(snapshot_definition, selected_by_kind, task_repository)
-        operators = profile_filter_options(snapshot_definition, [], selected_by_kind, ['Operator'], task_repository)['Operator']
+        profile_options = profile_filter_options(
+            snapshot_definition, [], selected_by_kind, ['Operator', 'Region', 'City'], task_repository,
+        )
+        operators = profile_options['Operator']
         available = {'Operator': operators, 'Vendor': catalogue['vendors'], 'Region': catalogue['regions'], 'City': catalogue['cities']}
         requested = {field: explicit_selections.get(field, []) for field in ('Operator', 'Vendor', 'Region', 'City')}
         filters = raw_definition.get('filters') or {}
@@ -1265,7 +1304,10 @@ def install_dashboard_routes(core):
             for field, values in available.items()
         }
         selection_labels = {
-            field: dashboard_ppt_selection_label(field, selections[field], values)
+            field: dashboard_ppt_selection_label(
+                field, selections[field], values,
+                (profile_options[field],) if field in {'Region', 'City'} else (),
+            )
             for field, values in available.items()
         }
         filters_json = json.dumps(dashboard_filter_lines(
@@ -1506,6 +1548,7 @@ def install_dashboard_routes(core):
             'generate_tooltips': bool(manifest.get('generate_tooltips')),
             'charts': charts,
             'definition': manifest.get('definition') if definition_available else None,
+            'cover': dashboard_ppt_job_cover(row, manifest),
             'slides': slides,
             'viewer_available': bool(slides) and any(
                 chart.get('available') for slide in slides for chart in slide.get('charts', [])

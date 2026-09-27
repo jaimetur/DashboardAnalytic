@@ -784,6 +784,15 @@ def test_dashboard_ppt_cover_uses_scope_and_catalogue_geography(client):
     assert details['dashboard-ppt-scope'].left == details['dashboard-ppt-region'].left == title.left
     assert details['dashboard-ppt-city'].left == title.left
     assert details['dashboard-ppt-scope'].text_frame.paragraphs[0].font.color.rgb == RGBColor(139, 240, 166)
+    # The job's viewer snapshot shows exactly the same cover lines.
+    expected_cover = {'scope': 'Operator Comparison', 'regions': 'All Regions', 'cities': 'All Cities'}
+    assert client.get(f'/api/e2e-dashboards/ppt-jobs/{job_id}/charts.json').json()['cover'] == expected_cover
+    manifest_path = Path(row['output_path']).parent / 'dashboard-charts' / 'manifest.json'
+    legacy = json.loads(manifest_path.read_text(encoding='utf-8'))
+    legacy.pop('cover')
+    manifest_path.write_text(json.dumps(legacy), encoding='utf-8')
+    # Jobs exported before the cover was stored rebuild it from their Filters.
+    assert client.get(f'/api/e2e-dashboards/ppt-jobs/{job_id}/charts.json').json()['cover'] == expected_cover
     # Like the viewer, the details follow the subtitle (below the template line).
     assert details['dashboard-ppt-scope'].top > placeholders[4].top + placeholders[4].height
     assert placeholders[4].text_frame.paragraphs[0].runs[0].font.color.theme_color == MSO_THEME_COLOR.ACCENT_4
@@ -2841,3 +2850,26 @@ def test_cover_geography_falls_back_to_dashboard_filter_values(client):
         row = connection.execute('SELECT output_path FROM dashboard_ppt_jobs WHERE id = ?', (job_id,)).fetchone()
     names = {shape.name: shape.text for shape in Presentation(row['output_path']).slides[0].shapes if shape.name.startswith('dashboard-ppt-')}
     assert names == {'dashboard-ppt-scope': 'Operator Comparison', 'dashboard-ppt-city': 'All Cities'}
+
+
+def test_ppt_cover_treats_every_filter_value_as_all_cities(client):
+    payload = setup_dashboard(client)
+    # The catalogue lists one more City than the Dashboard's filter options.
+    core.repository.replace_cdr_catalogue(1, vendors=[], regions=[], cities=['Leeds', 'London', 'Manchester'])
+    core.repository.add_report_template('nsa', 'Cover only', (
+        'Slide,Slide tittle,Slide Subtittle,Layout,Chart Tittle,CDR source,KPI,Chart type,Filters,Rows Aggregation,Column Aggregation,Legend,Legend Position\n'
+        '1,Quarterly review,Template subtitle,Title Page,,,,Title Slide,,,,,Top\n'
+    ).encode(), is_default=False)
+    payload.update(template='Cover only', filters={'City': ['leeds ', 'London']})
+    assert client.put('/api/e2e-dashboards/all-cities', json=payload).status_code == 200
+
+    job_id = client.post('/api/e2e-dashboards/all-cities/export-ppt', json={'definition': payload}).json()['job_id']
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        job = next(item for item in client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
+        if job['status'] in {'ready', 'failed'}:
+            break
+        time.sleep(0.05)
+    assert job['status'] == 'ready', job
+    assert 'City: All Cities' in job['filters']
+    assert client.get(f'/api/e2e-dashboards/ppt-jobs/{job_id}/charts.json').json()['cover']['cities'] == 'All Cities'
