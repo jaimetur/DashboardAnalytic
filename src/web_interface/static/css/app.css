@@ -960,6 +960,12 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .report-job-report-download-button { position: relative; overflow: visible; font-size: 0; }
 .report-job-report-download-button::before { content: ''; width: 1.3rem; height: 1.08rem; background: center / contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 25'%3E%3Crect x='2' y='2' width='26' height='18' rx='2.5' fill='none' stroke='white' stroke-width='2.2'/%3E%3Ctext x='15' y='14.5' fill='white' font-family='Arial,sans-serif' font-size='8.5' font-weight='900' text-anchor='middle'%3EPPT%3C/text%3E%3Cpath d='M15 20v3M10.5 23h9' fill='none' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E"); }
 .report-job-report-download-button::after { content: '↓'; position: absolute; right: 0.08rem; bottom: 0.06rem; display: grid; place-items: center; width: 0.86rem; height: 0.86rem; border-radius: 999px; background: linear-gradient(135deg, var(--success), #3ca56f); color: #fff; font-size: 0.9rem; font-weight: 1000; line-height: 0.85; -webkit-text-stroke: 0.3px currentColor; box-shadow: 0 1px 3px rgba(30, 101, 61, 0.28); }
+.report-job-actions > .report-job-download-button.report-job-download-labeled { flex: 0 0 auto; gap: .4rem; width: auto; height: 2rem; padding: 0 .75rem 0 .6rem; border-color: #963817; background: linear-gradient(135deg, #b44720, #e47736); box-shadow: 0 5px 13px rgba(164, 65, 27, .26); white-space: nowrap; }
+.report-job-actions > .report-job-download-button.report-job-download-labeled:hover:not(.action-link-disabled) { background: linear-gradient(135deg, #913515, #c65d25); border-color: #7b2b10; box-shadow: 0 8px 18px rgba(145, 53, 21, .32); }
+.report-job-actions > .report-job-download-button.report-job-download-labeled.action-link-disabled { background: linear-gradient(135deg, #e3e8ec, #d5dde4); border-color: rgba(126, 139, 152, .24); color: #7a8792; box-shadow: none; }
+.report-job-download-labeled::before { flex: 0 0 1.3rem; }
+.report-job-download-labeled::after { right: auto; left: 1.3rem; bottom: .2rem; }
+.report-job-download-label { font-size: .76rem; font-weight: 800; line-height: 1; }
 .report-job-charts-download-button { position: relative; overflow: visible; font-size: 0; }
 .report-job-charts-download-button::before { content: '📈'; display: block; font-size: 1rem; line-height: 1; }
 .report-job-charts-download-button::after { content: '↓'; position: absolute; right: 0.1rem; bottom: 0.06rem; display: grid; place-items: center; width: 0.86rem; height: 0.86rem; border-radius: 999px; background: linear-gradient(135deg, var(--success), #3ca56f); color: #fff; font-size: 0.9rem; font-weight: 1000; line-height: 0.85; -webkit-text-stroke: 0.3px currentColor; box-shadow: 0 1px 3px rgba(30, 101, 61, 0.28); }
@@ -3617,4 +3623,20 @@ body:has(.release-navigator) .help-navigator{top:37%}
     line-height:1.15;
     white-space:normal;
   }
+}
+
+/* Reports and Charts Jobs fit the panel with the labelled Download PPT
+   action: compact data columns give Actions room for every job button. */
+@media (min-width: 641px) {
+  .reporting-jobs-table-wrap .report-jobs-table th:nth-child(1), .reporting-jobs-table-wrap .report-jobs-table td:nth-child(1) { width: 3.5rem; min-width: 3.5rem; }
+  .reporting-jobs-table-wrap .report-jobs-table th:nth-child(2), .reporting-jobs-table-wrap .report-jobs-table td:nth-child(2) { width: 8rem; min-width: 8rem; }
+  .reporting-jobs-table-wrap .report-jobs-table th:nth-child(3), .reporting-jobs-table-wrap .report-jobs-table td:nth-child(3) { width: 7.2rem; min-width: 7.2rem; }
+  .reporting-jobs-table-wrap .report-jobs-table th:nth-child(4), .reporting-jobs-table-wrap .report-jobs-table td:nth-child(4) { width: 7rem; min-width: 7rem; }
+  .reporting-jobs-table-wrap .report-jobs-table th:nth-child(6), .reporting-jobs-table-wrap .report-jobs-table td:nth-child(6) { width: 8.5rem; min-width: 8.5rem; }
+  .reporting-jobs-table-wrap .report-jobs-table th:nth-child(8), .reporting-jobs-table-wrap .report-jobs-table td:nth-child(8),
+  .reporting-jobs-table-wrap .report-jobs-table th:nth-child(9), .reporting-jobs-table-wrap .report-jobs-table td:nth-child(9) { width: 5.8rem; min-width: 5.8rem; }
+  .reporting-jobs-table-wrap .report-jobs-table th:nth-child(10), .reporting-jobs-table-wrap .report-jobs-table td:nth-child(10) { width: 6.9rem; min-width: 6.9rem; }
+  .reporting-jobs-table-wrap .report-jobs-table th:nth-child(11), .reporting-jobs-table-wrap .report-jobs-table td:nth-child(11) { width: 5.9rem; min-width: 5.9rem; }
+  .reporting-jobs-table-wrap .report-jobs-table th:nth-child(12), .reporting-jobs-table-wrap .report-jobs-table td:nth-child(12) { width: 8rem; min-width: 8rem; }
+  .reporting-jobs-table-wrap .report-jobs-table th:nth-child(13), .reporting-jobs-table-wrap .report-jobs-table td:nth-child(13) { width: 18rem; min-width: 18rem; }
 }

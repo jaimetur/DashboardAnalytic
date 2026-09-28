@@ -1475,10 +1475,10 @@
       const durationLabel = Number.isFinite(duration) ? ` · ${duration < 60 ? `${duration < 10 ? duration.toFixed(1) : Math.round(duration)}s` : `${Math.floor(duration / 60)}m ${Math.round(duration % 60)}s`}` : '';
       progressCell.append(progress, node('span', ` ${Number(job.progress) || 0}%${durationLabel}`)); row.append(progressCell);
       const actionsCell = node('td'); const actions = node('div', undefined, 'report-job-actions');
-      if (job.download_url) { const link = node('a', '', 'report-job-download-button report-job-report-download-button'); link.href = job.download_url; link.download = ''; link.title = link.ariaLabel = 'Download Dashboard PPT'; actions.append(link); }
+      if (job.download_url) { const link = node('a', undefined, 'report-job-download-button report-job-report-download-button report-job-download-labeled'); link.append(node('span', 'Download PPT', 'report-job-download-label')); link.href = job.download_url; link.download = ''; link.title = link.ariaLabel = 'Download Dashboard PPT'; actions.append(link); }
+      if (job.charts_api_url) actions.append(jobAction('View Dashboard snapshot', 'report-job-dashboard-button', () => openDashboardPptViewer(job), ''));
       if (job.charts_download_url) { const link = node('a', '', 'report-job-download-button report-job-charts-download-button'); link.href = job.charts_download_url; link.download = ''; link.title = link.ariaLabel = 'Download Dashboard charts as ZIP'; actions.append(link); }
       if (job.charts_api_url) actions.append(jobAction('Open Dashboard charts', 'report-job-charts-button', () => loadDashboardPptCharts(job.id, true), '📈'));
-      if (job.charts_api_url) actions.append(jobAction('View Dashboard snapshot', 'report-job-dashboard-button', () => openDashboardPptViewer(job), ''));
       if (job.retry_url) {
         const retry = jobAction(job.status === 'ready' ? 'Relaunch Job' : 'Retry export', 'report-job-retry-button', async () => {
           // Relaunching can take a few seconds on a busy server: give

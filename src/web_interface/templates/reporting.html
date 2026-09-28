@@ -129,7 +129,7 @@
             <td class="report-job-status"{% if job.error %} title="{{ job.error }}"{% endif %}><span class="queue-status-pill queue-status-{{ job.status | lower | replace('_', '-') }}">{{ job.status | title }}</span>{% if job.error and job.status | lower in ['failed', 'stopped'] %}<p class="report-job-error">{{ job.error }}</p>{% endif %}</td>
             <td><div class="report-job-progress"><progress value="{{ job.progress }}" max="100"></progress><span>{{ job.progress }}%{% if job.duration_label %} · {{ job.duration_label }}{% endif %}</span></div></td>
             <td><div class="report-job-actions">
-              {% if job.download_url %}<a class="report-job-download-button report-job-report-download-button" href="{{ job.download_url }}" download title="Download PPT Report" aria-label="Download PPT Report"></a>{% else %}<span class="report-job-download-button report-job-report-download-button action-link-disabled" title="PPT Report download unavailable" aria-label="PPT Report download unavailable"></span>{% endif %}
+              {% if job.download_url %}<a class="report-job-download-button report-job-report-download-button report-job-download-labeled" href="{{ job.download_url }}" download title="Download PPT Report" aria-label="Download PPT Report"><span class="report-job-download-label">Download PPT</span></a>{% else %}<span class="report-job-download-button report-job-report-download-button report-job-download-labeled action-link-disabled" title="PPT Report download unavailable" aria-label="PPT Report download unavailable"><span class="report-job-download-label">Download PPT</span></span>{% endif %}
               {% if job.charts_download_url %}<a class="report-job-download-button report-job-charts-download-button" href="{{ job.charts_download_url }}" download title="Download report charts as ZIP" aria-label="Download report charts as ZIP"></a>{% endif %}
               {% if job.charts_url %}<button type="button" class="report-job-charts-button" title="Open rendered report charts" aria-label="Open rendered report charts" data-report-job-charts="{{ job.charts_url }}">📈</button>{% endif %}
               {% if job.retry_url %}<button type="button" class="report-job-retry-button" title="{{ 'Relaunch Job' if job.status == 'ready' else 'Retry report' }}" aria-label="{{ 'Relaunch Job' if job.status == 'ready' else 'Retry report' }}" data-report-job-retry="{{ job.retry_url }}" data-report-job-id="{{ job.id }}" data-report-job-status="{{ job.status }}" data-report-job-name="{{ job.report_name }}">↻</button>{% endif %}
@@ -909,14 +909,16 @@
         actions.className = 'report-job-actions';
         if (job.download_url) {
           const download = reportActionLink('', job.download_url, true);
-          download.className = 'report-job-download-button report-job-report-download-button';
+          download.className = 'report-job-download-button report-job-report-download-button report-job-download-labeled';
+          download.append(Object.assign(document.createElement('span'), {className: 'report-job-download-label', textContent: 'Download PPT'}));
           download.download = '';
           download.title = 'Download PPT Report';
           download.setAttribute('aria-label', 'Download PPT Report');
           actions.append(download);
         } else {
           const disabled = document.createElement('span');
-          disabled.className = 'report-job-download-button report-job-report-download-button action-link-disabled';
+          disabled.className = 'report-job-download-button report-job-report-download-button report-job-download-labeled action-link-disabled';
+          disabled.append(Object.assign(document.createElement('span'), {className: 'report-job-download-label', textContent: 'Download PPT'}));
           disabled.title = 'PPT Report download unavailable';
           disabled.setAttribute('aria-label', 'PPT Report download unavailable');
           actions.append(disabled);

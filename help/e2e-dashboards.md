@@ -160,11 +160,11 @@ The job renders the template as a PPTX, preserving slides, layouts, chart placeh
 
 Template authoring details for the exported presentation are centralized in [Workspace Config → Report Template reference](workspace-config.md#report-template-reference).
 
-## PowerPoint Generation Jobs
+## PPT Generation Jobs
 
 Jobs continue on the server after leaving the page. The table records ID, creator, local date/time, NR Mode, Dashboard, scope, filter snapshot, slides, charts, status and elapsed progress.
 
-Depending on state, actions download the PPT, open/download charts, stop work, retry/relaunch or delete the job and files. The filter action groups CDRs as Data, Voice and Speech and shows exact dates and adaptive filters in a tooltip or dialog. Excel-style header filters search every job column. `user-editor`, `admin` and `super-admin` can delete individual jobs or use **Delete All PPTs**.
+Depending on state, actions download the PPT (the highlighted **Download PPT** button), open/download charts, stop work, retry/relaunch or delete the job and files. The filter action groups CDRs as Data, Voice and Speech and shows exact dates and adaptive filters in a tooltip or dialog. Excel-style header filters search every job column. `user-editor`, `admin` and `super-admin` can delete individual jobs or use **Delete All PPTs**.
 
 ## Charts Panel
 

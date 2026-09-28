@@ -120,7 +120,7 @@ Report Templates become CSV files only inside portable export, transfer and back
 
 - `output/reports/`: classic Report PPTX files and report chart assets.
 - `output/charts/`: standalone Chart Sets.
-- `output/dashboards/`: Dashboard PPTX files plus persistent PNG, tooltip and Canvas-model assets used by PowerPoint Generation Jobs and Charts Panel.
+- `output/dashboards/`: Dashboard PPTX files plus persistent PNG, tooltip and Canvas-model assets used by PPT Generation Jobs and Charts Panel.
 
 `transfer-packages/` holds temporary or recoverable portable packages. `scheduled-backups/` is the default Admin backup destination. `.map-tiles-cache/openstreetmap/` is a shared regenerable tile cache outside individual workspaces.
 

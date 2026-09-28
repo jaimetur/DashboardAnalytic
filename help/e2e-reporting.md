@@ -57,7 +57,7 @@ Chart Sets use the same datasets, NR Mode, scope, template and renderer as Repor
 
 Reports and Chart Sets share the workspace `generated_jobs` table and are distinguished by Type. The table supports Excel-style filters for ID, Date, NR Mode, Type, Template, Scope and other displayed fields.
 
-Actions depend on job state: open, download, stop, retry, relaunch or delete. If an interrupted job has valid deterministic PNG and tooltip files, retry keeps completed assets and renders only missing or invalid charts. Deliberately relaunching a completed job starts clean.
+Actions depend on job state: open, download (the highlighted **Download PPT** button), stop, retry, relaunch or delete. If an interrupted job has valid deterministic PNG and tooltip files, retry keeps completed assets and renders only missing or invalid charts. Deliberately relaunching a completed job starts clean.
 
 ## Charts Panel
 
