@@ -953,10 +953,28 @@
     const columnWidth = Math.floor((layout.right - left) / Math.max(headers.length, 1)), availableHeight = layout.bottom - top;
     const dynamic = Boolean(payload.dynamic), rowDimensionCount = Math.max(0, Number(payload.row_dimension_count) || 0);
     const columnHeading = String(payload.column_heading || ''), headerBands = dynamic && columnHeading ? 2 : 1;
+    // Rows share the available height (up to a comfortable maximum) and the
+    // text scales with them, so wide placeholders stay legible once the
+    // canvas is fitted to its card or PPT placeholder.
     const rowHeight = dynamic
-      ? Math.max(20, Math.min(38, Math.floor(availableHeight / Math.max(rows.length + headerBands, 1))))
-      : Math.max(34, Math.min(58, Math.floor(availableHeight / Math.max(rows.length + 1, 1))));
-    const headerTop = top + (headerBands - 1) * rowHeight; context.textBaseline = 'top';
+      ? Math.max(20, Math.min(92, Math.floor(availableHeight / Math.max(rows.length + headerBands, 1))))
+      : Math.max(34, Math.min(100, Math.floor(availableHeight / Math.max(rows.length + 1, 1))));
+    const headerFont = Math.max(12, Math.min(34, Math.round(rowHeight * .42)));
+    const cellFont = Math.max(11, Math.min(32, Math.round(rowHeight * .4)));
+    // Text is painted with the smaller of the horizontal and vertical scales;
+    // convert its measured width into the table's horizontal logical units.
+    const transform = context.getTransform();
+    const horizontalScale = Math.max(Math.hypot(transform.a, transform.b), .0001);
+    const textWidthRatio = Math.min(horizontalScale, Math.hypot(transform.c, transform.d)) / horizontalScale;
+    const textWidth = text => context.measureText(text).width * textWidthRatio;
+    const fitText = (value, maxWidth) => {
+      const text = String(value ?? '');
+      if (textWidth(text) <= maxWidth) return text;
+      let end = text.length;
+      while (end > 0 && textWidth(`${text.slice(0, end)}…`) > maxWidth) end -= 1;
+      return end ? `${text.slice(0, end)}…` : '';
+    };
+    const headerTop = top + (headerBands - 1) * rowHeight; context.textBaseline = 'middle';
     state.table = dynamic ? {
       left, top, right: layout.right, bottom: layout.bottom, columnWidth, rowHeight,
       headerTop, headerBands, rowDimensionCount, headerCount: headers.length, rowCount: rows.length,
@@ -964,12 +982,14 @@
     if (dynamic && columnHeading) {
       const pivotLeft = left + rowDimensionCount * columnWidth;
       context.fillStyle = '#23384A'; context.fillRect(pivotLeft, top, Math.max(columnWidth, layout.right - pivotLeft), rowHeight);
-      context.fillStyle = '#FFFFFF'; context.textAlign = 'center'; font(context, 13, true);
-      context.fillText(columnHeading.slice(0, 40), pivotLeft + Math.max(columnWidth, layout.right - pivotLeft) / 2, top + 6);
+      const pivotWidth = Math.max(columnWidth, layout.right - pivotLeft);
+      context.fillStyle = '#FFFFFF'; context.textAlign = 'center'; font(context, headerFont, true);
+      context.fillText(fitText(columnHeading, pivotWidth - 16), pivotLeft + pivotWidth / 2, top + rowHeight / 2);
     }
     headers.forEach((header, column) => {
       const x = left + column * columnWidth; context.fillStyle = '#23384A'; context.fillRect(x, headerTop, columnWidth, rowHeight);
-      context.fillStyle = '#FFFFFF'; context.textAlign = 'left'; font(context, dynamic ? 12 : 14, true); context.fillText(String(header).slice(0, 28), x + 8, headerTop + (dynamic ? 5 : 8));
+      context.fillStyle = '#FFFFFF'; context.textAlign = 'left'; font(context, headerFont, true);
+      context.fillText(fitText(header, columnWidth - 16), x + 8, headerTop + rowHeight / 2);
     });
     rows.forEach((row, rowIndex) => row.forEach((value, column) => {
       const x = left + column * columnWidth, y = top + (rowIndex + headerBands) * rowHeight;
@@ -978,9 +998,9 @@
       const displayValue = repeatedHierarchyValue ? '' : value;
       context.fillStyle = rowIndex % 2 ? '#FFFFFF' : '#F4F7F9'; context.fillRect(x, y, columnWidth, rowHeight);
       context.strokeStyle = '#D9E1E6'; context.lineWidth = 1; context.strokeRect(x, y, columnWidth, rowHeight);
-      context.fillStyle = '#34495A'; context.textAlign = column >= rowDimensionCount && dynamic ? 'right' : 'left'; font(context, dynamic ? 11 : 13, dynamic && column < rowDimensionCount);
-      const text = String(displayValue).slice(0, 28); const textX = column >= rowDimensionCount && dynamic ? x + columnWidth - 8 : x + 8;
-      context.fillText(text, textX, y + (dynamic ? 4 : 8));
+      context.fillStyle = '#34495A'; context.textAlign = column >= rowDimensionCount && dynamic ? 'right' : 'left'; font(context, cellFont, dynamic && column < rowDimensionCount);
+      const text = fitText(displayValue, columnWidth - 16); const textX = column >= rowDimensionCount && dynamic ? x + columnWidth - 8 : x + 8;
+      context.fillText(text, textX, y + rowHeight / 2);
     }));
     if (dynamic) {
       const tableBottom = top + (rows.length + headerBands) * rowHeight;

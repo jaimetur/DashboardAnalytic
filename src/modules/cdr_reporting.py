@@ -95,7 +95,7 @@ _DASHBOARD_CANVAS_RENDERER_LOCK = threading.RLock()
 # The browser worker keeps a copy of dashboard_charts.js in memory. Bump this
 # whenever rendering semantics change so a live server does not keep painting
 # previews with an older script after a hot reload.
-DASHBOARD_CANVAS_RENDERER_VERSION = 8
+DASHBOARD_CANVAS_RENDERER_VERSION = 9
 
 
 def _node_executable() -> str:
@@ -6748,8 +6748,18 @@ def _set_slide_header(slide, title: str, subtitle: str) -> None:
         if subtitle:
             subtitle_paragraph = text_frame.add_paragraph()
             subtitle_paragraph.text = subtitle
-            subtitle_paragraph.font.size = Pt(16)
+            # The template title style is condensed (negative letter spacing and
+            # 85% line spacing); the smaller subtitle needs normal spacing to
+            # keep its letters from touching.
+            subtitle_paragraph.line_spacing = 1.0
+            subtitle_paragraph.space_before = Pt(4)
+            subtitle_paragraph.font.size = Pt(20)
             subtitle_paragraph.font.color.rgb = RGBColor(36, 90, 150)
+            for run in subtitle_paragraph.runs:
+                run.font.size = Pt(20)
+                run.font.color.rgb = RGBColor(36, 90, 150)
+                run.font._rPr.set('spc', '0')
+                run.font._rPr.set('kern', '0')
     existing_subtitle = next((shape for shape in slide.shapes if shape.name == "catalogue-subtitle"), None)
     if existing_subtitle is not None:
         existing_subtitle._element.getparent().remove(existing_subtitle._element)

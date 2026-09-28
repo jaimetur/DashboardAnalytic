@@ -4062,7 +4062,41 @@ def cache_cdr_catalogue(dataset_id: int, frame: pd.DataFrame, task_repository: R
         vendors=values('vendor'),
         regions=values('region', 'g_level_2', 'g level 2'),
         cities=values('city', 'g_level_4', 'g level 4'),
+        campaigns=values('campaign'),
     )
+
+
+def _distinct_cdr_row_values(task_repository: Repository, dataset_id: int, columns: set[str], *aliases: str) -> list[str]:
+    """Read the distinct non-blank values of the first matching CDR column."""
+    column = next(
+        (task_repository._resolve_dataset_row_column_name(columns, alias) for alias in aliases
+         if task_repository._resolve_dataset_row_column_name(columns, alias)),
+        None,
+    )
+    if not column:
+        return []
+    quoted_table = task_repository._quote_identifier(task_repository.dataset_rows_table_name(dataset_id))
+    quoted_column = task_repository._quote_identifier(column)
+    with task_repository.connection() as connection:
+        rows = connection.execute(
+            f'''SELECT DISTINCT TRIM(CAST({quoted_column} AS TEXT)) AS value
+                FROM {quoted_table}
+                WHERE {quoted_column} IS NOT NULL AND TRIM(CAST({quoted_column} AS TEXT)) <> ''
+                ORDER BY LOWER(TRIM(CAST({quoted_column} AS TEXT)))''',
+        ).fetchall()
+    return [str(row['value']).strip() for row in rows]
+
+
+def backfill_cdr_campaigns(dataset_ids: Iterable[int], task_repository: Repository | None = None) -> None:
+    """Read and store, once, the Campaigns of CDRs catalogued before Campaigns were cached."""
+    task_repository = task_repository or repository
+    for dataset_id in task_repository.missing_cdr_campaign_ids(dataset_ids):
+        if not task_repository.dataset_rows_table_exists(dataset_id):
+            continue
+        columns = set(task_repository.list_dataset_row_columns(dataset_id))
+        task_repository.set_cdr_catalogue_campaigns(
+            dataset_id, _distinct_cdr_row_values(task_repository, dataset_id, columns, 'campaign'),
+        )
 
 
 def backfill_cdr_catalogues(dataset_ids: Iterable[int], task_repository: Repository | None = None) -> None:
@@ -4074,29 +4108,14 @@ def backfill_cdr_catalogues(dataset_ids: Iterable[int], task_repository: Reposit
         columns = set(task_repository.list_dataset_row_columns(dataset_id))
 
         def distinct_values(*aliases: str) -> list[str]:
-            column = next(
-                (task_repository._resolve_dataset_row_column_name(columns, alias) for alias in aliases
-                 if task_repository._resolve_dataset_row_column_name(columns, alias)),
-                None,
-            )
-            if not column:
-                return []
-            quoted_table = task_repository._quote_identifier(task_repository.dataset_rows_table_name(dataset_id))
-            quoted_column = task_repository._quote_identifier(column)
-            with task_repository.connection() as connection:
-                rows = connection.execute(
-                    f'''SELECT DISTINCT TRIM(CAST({quoted_column} AS TEXT)) AS value
-                        FROM {quoted_table}
-                        WHERE {quoted_column} IS NOT NULL AND TRIM(CAST({quoted_column} AS TEXT)) <> ''
-                        ORDER BY LOWER(TRIM(CAST({quoted_column} AS TEXT)))''',
-                ).fetchall()
-            return [str(row['value']).strip() for row in rows]
+            return _distinct_cdr_row_values(task_repository, dataset_id, columns, *aliases)
 
         task_repository.replace_cdr_catalogue(
             dataset_id,
             vendors=distinct_values('vendor'),
             regions=distinct_values('region', 'g_level_2', 'g level 2'),
             cities=distinct_values('city', 'g_level_4', 'g level 4'),
+            campaigns=distinct_values('campaign'),
         )
 
 
@@ -8515,7 +8534,7 @@ def render_admin_template(
         'audit_logs': 'Audit log',
         'dashboard_filter_selections': 'Dashboard filter selections',
         'dashboard_ppt_jobs': 'Dashboard PPT jobs',
-        'cdr_catalogues': 'CDR Vendor, Region and City catalogues',
+        'cdr_catalogues': 'CDR Vendor, Region, City and Campaign Catalogues',
         'dataset_profiles': 'Dataset profiles',
         'dataset_source_columns': 'Dataset source columns',
         'datasets': 'Datasets',

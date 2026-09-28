@@ -1740,3 +1740,13 @@
    tooltip; the Filters dialog keeps its light palette. */
 .ds-ppt-filter-tooltip { border-color: rgba(222, 207, 240, .4); background: #34264a; color: #fff; box-shadow: 0 12px 30px rgba(27, 17, 44, .32); }
 .ds-ppt-filter-tooltip .ds-ppt-job-filter-kind { color: #d9b9ff; }
+.e2e-dashboards #ds-chart-expanded-refresh.is-busy { opacity:.55; cursor:progress; animation:ds-retry-spin 1s linear infinite; }
+
+/* Campaigns lead the viewer context and the cover details in orange, a hue no
+   other context or cover line uses; on the cover they are larger than Scope. */
+.ds-viewer-context-campaigns { color:#c2410c; }
+.ds-structural-slide p.ds-structural-campaigns { margin:6.5cqh 0 0; overflow:hidden; color:#ff8c42; font-size:clamp(1.05rem,min(1.95cqw,5.25cqh),2.1rem); font-weight:800; letter-spacing:.01em; line-height:1.2; text-overflow:ellipsis; white-space:nowrap; }
+
+/* The viewer always shows the slide title and subtitle in capitals. */
+#ds-title, #ds-subtitle { text-transform:uppercase; }
+.ds-structural-slide .ds-structural-campaigns + .ds-structural-rule { margin-top:1.4cqh; }

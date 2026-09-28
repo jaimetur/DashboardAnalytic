@@ -2428,8 +2428,14 @@
     return brand;
   }
   // Regions and Cities come from the same per-CDR catalogue as the PPT cover.
-  let coverGeography = {key: '', regions: [], cities: [], loading: false};
-  const coverGeographyKey = () => JSON.stringify((appliedDashboardDefinition || definition || {}).datasets || {});
+  let coverGeography = {key: '', campaigns: [], regions: [], cities: [], loading: false};
+  let coverCampaignsRetryTimer = 0;
+  const coverGeographyKey = () => {
+    const current = appliedDashboardDefinition || definition || {};
+    const filters = current.filters || {};
+    const campaignKey = Object.keys(filters).find(item => identity(item) === identity('Campaign'));
+    return JSON.stringify([current.datasets || {}, campaignKey ? filters[campaignKey] : null]);
+  };
   const ensureCoverGeography = () => {
     const key = coverGeographyKey();
     if (coverGeography.key === key || (coverGeography.loading && coverGeography.pending === key)) return;
@@ -2437,15 +2443,25 @@
     api('/geography-options', 'POST', canonicalDashboardDefinition(appliedDashboardDefinition || definition))
       .then(payload => {
         if (coverGeographyKey() !== key) return;
-        coverGeography = {key, regions: payload.regions || [], cities: payload.cities || [], loading: false};
+        coverGeography = {key, campaigns: payload.campaigns || [], regions: payload.regions || [], cities: payload.cities || [], loading: false};
         // Refresh the visible geography after its catalogue arrives.
         if (!$('ds-viewer').hidden) {
           if (document.querySelector('.ds-structural-slide.ds-structural-title')) renderSlide();
           else renderViewerContext();
         }
+        // CDRs catalogued before Campaigns were cached are read once on the
+        // server; ask again until their Campaigns are stored.
+        clearTimeout(coverCampaignsRetryTimer);
+        if (payload.campaigns_pending) {
+          coverCampaignsRetryTimer = setTimeout(() => {
+            if (coverGeography.key !== key || coverGeographyKey() !== key) return;
+            coverGeography = {...coverGeography, key: ''};
+            ensureCoverGeography();
+          }, 3000);
+        }
       })
       // Without the catalogue the cover falls back to the Dashboard's filter values.
-      .catch(() => { coverGeography = {key, regions: [], cities: [], loading: false}; });
+      .catch(() => { coverGeography = {key, campaigns: [], regions: [], cities: [], loading: false}; });
   };
   // Matches the PPT cover: "All Regions", "Region: A" or "Regions: A, B".
   const coverGeographyLabel = (field, singular, plural, allLabel) => {
@@ -2454,7 +2470,11 @@
     const loaded = coverGeography.key === coverGeographyKey() ? coverGeography[field === 'Region' ? 'regions' : 'cities'] : [];
     const facetValues = (facetOptions?.[field] || []).map(String).filter(Boolean);
     const available = (loaded.length ? loaded : facetValues).map(String).filter(Boolean);
-    const selected = key ? (filters[key] || []).map(String).filter(Boolean) : available;
+    const configured = key ? (filters[key] || []).map(String).filter(Boolean) : available;
+    // Like the PPT, saved values that the selected CDRs do not contain are ignored.
+    const present = new Set(available.map(value => value.trim().toLocaleLowerCase()));
+    const inCdrs = configured.filter(value => present.has(value.trim().toLocaleLowerCase()));
+    const selected = present.size && inCdrs.length ? inCdrs : configured;
     if (!selected.length) return '';
     // "All" when the selection covers the catalogue or the filter's own
     // options, ignoring case and surrounding spaces (as on the PPT cover).
@@ -2463,6 +2483,11 @@
     if (!key || covers(loaded.map(String).filter(Boolean)) || covers(facetValues)) return allLabel;
     return `${selected.length === 1 ? singular : plural}: ${selected.join(', ')}`;
   };
+  // Same wording as the PPT cover: "Campaign: 2026-Q2" or "Campaigns: 2026-Q1, 2026-Q2".
+  const coverCampaignsLabel = () => {
+    const campaigns = coverGeography.key === coverGeographyKey() ? coverGeography.campaigns || [] : [];
+    return campaigns.length ? `${campaigns.length === 1 ? 'Campaign' : 'Campaigns'}: ${campaigns.join(', ')}` : '';
+  };
   const viewerGeographyLabels = () => {
     const snapshotCover = pptDashboardViewer?.cover;
     if (!pptDashboardViewer) ensureCoverGeography();
@@ -2470,6 +2495,7 @@
       || ((pptDashboardViewer?.definition || appliedDashboardDefinition || definition || {}).scope === 'multivendor'
         ? 'Multivendor Comparison' : 'Operator Comparison');
     return [
+      ['campaigns', snapshotCover ? snapshotCover.campaigns || '' : coverCampaignsLabel()],
       ['scope', scope],
       ['region', snapshotCover ? snapshotCover.regions : coverGeographyLabel('Region', 'Region', 'Regions', 'All Regions')],
       ['city', snapshotCover ? snapshotCover.cities : coverGeographyLabel('City', 'City', 'Cities', 'All Cities')],
@@ -2494,19 +2520,21 @@
     const content = node('div', undefined, 'ds-structural-content');
     content.append(node('h3', slide.title || 'Dashboard', 'ds-structural-title'));
     if (slide.subtitle) content.append(node('p', slide.subtitle, 'ds-structural-subtitle'));
+    // Like the exported PPT, a Title Slide that opens the Dashboard shows the
+    // Campaigns right above the decorative line, then the Scope and the
+    // selected Regions and Cities below it.
+    const firstSlideNumber = Math.min(...(prepared?.slides || [slide]).map(item => Number(item.number)));
+    const coverLabels = kind === 'title' && Number(slide.number) === firstSlideNumber ? viewerGeographyLabels() : [];
+    const campaigns = coverLabels.find(([name]) => name === 'campaigns')?.[1];
+    if (campaigns) content.append(node('p', campaigns, 'ds-structural-campaigns'));
     // Title slides draw the template's decorative line right below the subtitle.
     if (kind === 'title') content.append(node('span', undefined, 'ds-structural-rule'));
     cover.append(content, brand);
-    // Like the exported PPT, a Title Slide that opens the Dashboard shows the
-    // Scope and the selected Regions and Cities at the bottom of the cover.
-    const firstSlideNumber = Math.min(...(prepared?.slides || [slide]).map(item => Number(item.number)));
-    if (kind === 'title' && Number(slide.number) === firstSlideNumber) {
-      const geography = node('div', undefined, 'ds-structural-geography');
-      // A PPT job snapshot shows exactly the cover lines of its exported PPT.
-      for (const [name, label] of viewerGeographyLabels())
-        if (label) geography.append(node('p', label, `ds-structural-geography-${name}`));
-      if (geography.childElementCount) content.append(geography);
-    }
+    const geography = node('div', undefined, 'ds-structural-geography');
+    // A PPT job snapshot shows exactly the cover lines of its exported PPT.
+    for (const [name, label] of coverLabels)
+      if (label && name !== 'campaigns') geography.append(node('p', label, `ds-structural-geography-${name}`));
+    if (geography.childElementCount) content.append(geography);
     stage.append(cover);
   }
   function chartZoomControls(canvas) {
@@ -3041,19 +3069,28 @@
     }
     overlay('ds-editor-overlay', true);
   };
+  // Like Relaunch, Refresh spins and stays disabled until the chart is rendered.
+  const setExpandedRefreshBusy = busy => {
+    const refreshButton = $('ds-chart-expanded-refresh');
+    refreshButton.disabled = busy;
+    refreshButton.classList.toggle('is-busy', busy);
+    refreshButton.title = busy ? 'Refreshing chart…' : 'Refresh chart';
+    refreshButton.setAttribute('aria-busy', String(busy));
+  };
   $('ds-chart-expanded-refresh').onclick = safe(async () => {
     if (expandedChartMode === 'ppt') {
       const index = dashboardPptCharts.findIndex(chart => chart.index === expandedChart?.index);
-      if (index >= 0) await showDashboardPptChart(index);
+      if (index < 0) return;
+      setExpandedRefreshBusy(true);
+      try { await showDashboardPptChart(index); } finally { setExpandedRefreshBusy(false); }
       return;
     }
     if (!expandedChart || !prepared?.token) return;
-    const refreshButton = $('ds-chart-expanded-refresh');
     const chart = expandedChart;
     const token = prepared.token;
     const request = expandedChartRequest;
     const url = `/api/e2e-dashboards/chart/${token}/${chart.index}`;
-    refreshButton.disabled = true;
+    setExpandedRefreshBusy(true);
     status(`Rendering ${chart.title || 'chart'} again…`);
     try {
       const payload = await api(`/chart/${encodeURIComponent(token)}/${chart.index}/refresh`, 'POST');
@@ -3064,7 +3101,7 @@
       await openExpandedChart(chart, payload);
       status(`${chart.title || 'Chart'} was rendered again.`);
     } finally {
-      refreshButton.disabled = false;
+      setExpandedRefreshBusy(false);
     }
   });
   $('ds-chart-expanded-filters').onclick = openFloatingFilters;

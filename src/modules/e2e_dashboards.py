@@ -25,13 +25,14 @@ from typing import Literal
 from uuid import uuid4
 
 import pandas as pd
-from src.modules.column_names import column_identity
+from src.modules.column_names import column_identity, compact_campaign_value
 from src.modules.nr_mode import DEFAULT_NR_MODE, dataset_nr_mode, normalize_nr_mode
 from fastapi import BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 from pptx import Presentation
 from pptx.dml.color import RGBColor
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.enum.text import MSO_AUTO_SIZE
 from pptx.util import Inches, Pt
 from starlette.background import BackgroundTask
@@ -152,7 +153,7 @@ ADAPTATIVE_FILTER_FIELDS = (
     'Market', 'Region', 'City', 'Campaign', 'Operator', 'Vendor', 'RAT', 'Session Type', 'Call Status',
 )
 DASHBOARD_RENDER_CACHE_VERSION = 17
-DASHBOARD_SELECTION_CACHE_VERSION = 12
+DASHBOARD_SELECTION_CACHE_VERSION = 13
 # Pre-cached universes: every CDR plus the latest 1..N CDRs of each type.
 DASHBOARD_WARMUP_LATEST_COUNTS = 4
 # A Dashboard reported open by the browser within this period is pre-cached first.
@@ -413,11 +414,14 @@ def install_dashboard_routes(core):
         if not isinstance(filters, dict):
             filters = {}
         if selection_labels is not None:
+            # The Campaigns line already reads "Campaign: …" or "Campaigns: …".
+            if selection_labels.get('Campaign'):
+                lines.append(selection_labels['Campaign'])
             for field in ('Operator', 'Vendor', 'Region', 'City'):
                 if selection_labels.get(field):
                     lines.append(f'{field}: {selection_labels[field]}')
         for field, values in filters.items():
-            if selection_labels is not None and identity(field) in {'operator', 'vendor', 'region', 'city'}:
+            if selection_labels is not None and identity(field) in {'campaign', 'operator', 'vendor', 'region', 'city'}:
                 continue
             if isinstance(values, (list, tuple, set)):
                 selected = [str(value).strip() for value in values if str(value).strip()]
@@ -544,14 +548,29 @@ def install_dashboard_routes(core):
         """Return the human-readable scope used on Dashboard PPT covers."""
         return 'Multivendor Comparison' if str(scope).casefold() == 'multivendor' else 'Operator Comparison'
 
+    def values_present_in_cdrs(values: list[str], available: list[str]) -> list[str]:
+        """Keep only values that exist in the selected CDRs.
+
+        Saved filters can hold values of other CDRs (for example an NSA-only
+        Operator in an SA Dashboard). When none of the values exist, the
+        selection is kept so it never reads as an unrestricted "All".
+        """
+        present = {str(value).strip().casefold() for value in available if str(value).strip()}
+        if not present:
+            return values
+        kept = [value for value in values if str(value).strip().casefold() in present]
+        return kept or values
+
     def dashboard_ppt_selection_values(
         filters: dict, field: str, requested: list[str], available: list[str],
     ) -> list[str]:
         configured = next((values for key, values in filters.items() if identity(key) == identity(field)), None)
         values = configured if configured is not None else requested or available
         if isinstance(values, (list, tuple, set)):
-            return list(dict.fromkeys(str(value).strip() for value in values if str(value).strip()))
-        return [str(values).strip()] if str(values).strip() else []
+            values = list(dict.fromkeys(str(value).strip() for value in values if str(value).strip()))
+        else:
+            values = [str(values).strip()] if str(values).strip() else []
+        return values_present_in_cdrs(values, available)
 
     def dashboard_ppt_selection_label(
         field: str, values: list[str], available: list[str], alternatives: tuple[list[str], ...] = (),
@@ -591,7 +610,7 @@ def install_dashboard_routes(core):
         """Return a PPT job's cover lines, rebuilding them for older jobs."""
         cover = manifest.get('cover')
         if isinstance(cover, dict):
-            return {key: str(cover.get(key) or '') for key in ('scope', 'regions', 'cities')}
+            return {key: str(cover.get(key) or '') for key in ('campaigns', 'scope', 'regions', 'cities')}
         try:
             lines = json.loads(str(row['filters_json'] or '[]'))
         except (TypeError, ValueError, json.JSONDecodeError):
@@ -602,18 +621,40 @@ def install_dashboard_routes(core):
             if field in {'Region', 'City'} and value:
                 labels[field] = value
         return {
+            'campaigns': '',
             'scope': dashboard_ppt_scope_label(str(row['scope'] or 'single')),
             'regions': dashboard_ppt_cover_label('Region', labels.get('Region', ''), len(labels.get('Region', '').split(', '))),
             'cities': dashboard_ppt_cover_label('City', labels.get('City', ''), len(labels.get('City', '').split(', '))),
         }
 
-    def add_dashboard_ppt_cover_geography(slide, scope: str, regions: str, cities: str, slide_height: int) -> None:
-        """Place the Scope and selected geography below the cover subtitle, aligned with its title."""
+    def add_dashboard_ppt_cover_geography(
+        slide, campaigns: str, scope: str, regions: str, cities: str, slide_height: int,
+    ) -> None:
+        """Place the cover Campaigns above the decorative line and the Scope and geography below it."""
         title = next((shape for shape in slide.placeholders if shape.placeholder_format.type in {1, 3}), None)
         subtitle = next((shape for shape in slide.placeholders if shape.placeholder_format.type == 4), None)
         left = title.left if title is not None else Inches(0.52)
         width = title.width if title is not None else Inches(11)
         margin_left = title.text_frame.margin_left if title is not None else 0
+        anchor = subtitle or title
+        anchor_bottom = anchor.top + anchor.height if anchor is not None else None
+
+        def add_line(name: str, value: str, color: RGBColor, size: int, top: int, height: int) -> None:
+            box = slide.shapes.add_textbox(left, top, width, height)
+            box.name = f'dashboard-ppt-{name}'
+            box.text_frame.margin_left = margin_left
+            box.text_frame.margin_top = 0
+            box.text_frame.margin_bottom = 0
+            box.text_frame.word_wrap = True
+            box.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+            paragraph = box.text_frame.paragraphs[0]
+            paragraph.text = value
+            paragraph.font.size = Pt(size)
+            paragraph.font.bold = True
+            paragraph.font.color.rgb = color
+
+        # Like the Dashboard viewer, Scope, Regions and Cities follow the
+        # template's decorative line under the subtitle.
         details = [
             (name, value, color)
             for name, value, color in (
@@ -623,27 +664,34 @@ def install_dashboard_routes(core):
             )
             if value
         ]
-        # Like the Dashboard viewer, the details follow the title and subtitle,
-        # just below the template's decorative line under the subtitle.
-        anchor = subtitle or title
         first_top = (
-            anchor.top + anchor.height + Inches(0.29) if anchor is not None
+            anchor_bottom + Inches(0.29) if anchor_bottom is not None
             else slide_height - Inches(0.35 + 0.38 * len(details))
         )
         first_top = min(first_top, slide_height - Inches(0.4 + 0.38 * len(details)))
+        if campaigns:
+            # The larger orange Campaigns line sits right above the decorative
+            # line. Title and subtitle move up just enough to make room for it.
+            campaign_height = Inches(0.42)
+            separator = next((
+                shape for shape in slide.slide_layout.shapes
+                if shape.shape_type == MSO_SHAPE_TYPE.LINE and anchor_bottom is not None
+                and anchor_bottom - Inches(0.1) <= shape.top <= first_top
+            ), None)
+            if separator is not None:
+                campaign_top = separator.top - Inches(0.06) - campaign_height
+                shift = max(0, anchor_bottom + Inches(0.04) - campaign_top)
+                for placeholder in (title, subtitle):
+                    if placeholder is not None and shift:
+                        placeholder.left, placeholder.top, placeholder.width, placeholder.height = (
+                            placeholder.left, placeholder.top - shift, placeholder.width, placeholder.height,
+                        )
+            else:
+                campaign_top = anchor_bottom + Inches(0.06) if anchor_bottom is not None else first_top
+                first_top = max(first_top, campaign_top + campaign_height + Inches(0.08))
+            add_line('campaigns', campaigns, RGBColor(255, 140, 66), 20, campaign_top, campaign_height)
         for index, (name, value, color) in enumerate(details):
-            box = slide.shapes.add_textbox(left, first_top + Inches(0.38 * index), width, Inches(0.34))
-            box.name = f'dashboard-ppt-{name}'
-            box.text_frame.margin_left = margin_left
-            box.text_frame.margin_top = 0
-            box.text_frame.margin_bottom = 0
-            box.text_frame.word_wrap = True
-            box.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
-            paragraph = box.text_frame.paragraphs[0]
-            paragraph.text = value
-            paragraph.font.size = Pt(16)
-            paragraph.font.bold = True
-            paragraph.font.color.rgb = color
+            add_line(name, value, color, 16, first_top + Inches(0.38 * index), Inches(0.34))
 
     def add_dashboard_chart_picture(slide, png: bytes, placement) -> None:
         """Fill a same-ratio chart placeholder without PowerPoint cropping or distortion."""
@@ -679,7 +727,7 @@ def install_dashboard_routes(core):
 
     def render_dashboard_ppt_job(
         job_id, run_token, task_repository, snapshot, definition, user,
-        destination, dashboard_id, preview_fingerprint, cover_regions, cover_cities,
+        destination, dashboard_id, preview_fingerprint, cover_regions, cover_cities, cover_campaigns='',
     ):
         run_key = (str(Path(task_repository.db_path).resolve()), job_id)
 
@@ -845,7 +893,7 @@ def install_dashboard_routes(core):
                     _set_structural_slide_text(slide, header.slide_title, header.slide_subtitle)
                     if is_cover:
                         add_dashboard_ppt_cover_geography(
-                            slide, dashboard_ppt_scope_label(snapshot.definition.scope),
+                            slide, cover_campaigns, dashboard_ppt_scope_label(snapshot.definition.scope),
                             cover_regions, cover_cities, presentation.slide_height,
                         )
                     _set_commentary(slide, comments)
@@ -937,8 +985,9 @@ def install_dashboard_routes(core):
                     'slides': snapshot.payload.get('slides', []),
                     'charts': manifest,
                     # The exact cover lines, so the job's viewer snapshot shows
-                    # the same Scope, Regions and Cities as the PPT cover.
+                    # the same Campaigns, Scope, Regions and Cities as the PPT cover.
                     'cover': {
+                        'campaigns': cover_campaigns,
                         'scope': dashboard_ppt_scope_label(snapshot.definition.scope),
                         'regions': cover_regions, 'cities': cover_cities,
                     },
@@ -1274,9 +1323,17 @@ def install_dashboard_routes(core):
             return
         shutil.rmtree(folder, ignore_errors=True)
 
-    def dashboard_ppt_unique_output(task_repository, export_time, nr_mode_label, dashboard_name, scope_label, zone_label, job_id=None):
-        """Return a unique ``timestamp - NR Mode - Dashboard - Scope - Regions`` file and folder."""
-        max_stem_bytes = 240
+    def dashboard_ppt_campaign_suffix(campaigns: list[str]) -> str:
+        """Return ``2026-Q1_vs_2026-Q2`` for exports that compare several Campaigns."""
+        return '_vs_'.join(campaigns) if len(campaigns) > 1 else ''
+
+    def dashboard_ppt_unique_output(
+        task_repository, export_time, nr_mode_label, dashboard_name, scope_label, zone_label, job_id=None,
+        campaign_suffix='',
+    ):
+        """Return a unique ``timestamp - NR Mode - Dashboard - Scope - Regions - Campaigns`` file and folder."""
+        safe_campaigns = f' - {dashboard_ppt_filename_part(campaign_suffix, 60)}' if campaign_suffix else ''
+        max_stem_bytes = 240 - len(safe_campaigns.encode('utf-8'))
         safe_scope = dashboard_ppt_filename_part(scope_label, 40)
         fixed_bytes = len(f'{export_time:%Y%m%d_%H%M%S} - {nr_mode_label} -  -  - {safe_scope}'.encode('utf-8'))
         zone_budget = max_stem_bytes - fixed_bytes - 4
@@ -1286,7 +1343,7 @@ def install_dashboard_routes(core):
         safe_name = dashboard_ppt_filename_part(dashboard_name, name_budget) or dashboard_ppt_filename_part('Dashboard', name_budget)
         for offset in range(60):
             timestamp = (export_time + timedelta(seconds=offset)).strftime('%Y%m%d_%H%M%S')
-            output_file = ' - '.join((timestamp, nr_mode_label, safe_name, *suffix_parts)) + '.pptx'
+            output_file = ' - '.join((timestamp, nr_mode_label, safe_name, *suffix_parts)) + safe_campaigns + '.pptx'
             job_dir = dashboard_ppt_output_dir(task_repository) / Path(output_file).stem
             with task_repository.connection() as connection:
                 already_queued = connection.execute(
@@ -1429,8 +1486,11 @@ def install_dashboard_routes(core):
             preview_fingerprint = dashboard_preview_fingerprint(raw_definition, task_repository)
             selected_by_kind = selected_sources(snapshot_definition, task_repository)
             catalogue = dashboard_geography_catalogue(snapshot_definition, selected_by_kind, task_repository)
+            # Available values come only from the selected CDRs, never from
+            # the Dashboard's saved filters.
             profile_options = profile_filter_options(
-                snapshot_definition, [], selected_by_kind, ['Operator', 'Region', 'City'], task_repository,
+                unfiltered_definition(snapshot_definition), [], selected_by_kind,
+                ['Operator', 'Region', 'City'], task_repository,
             )
             available = {
                 'Operator': profile_options['Operator'], 'Vendor': catalogue['vendors'],
@@ -1451,8 +1511,11 @@ def install_dashboard_routes(core):
                 )
                 for field, values in available.items()
             }
+            campaigns = dashboard_campaign_values(snapshot_definition, selected_by_kind, task_repository)[0]
+            cover_campaigns = dashboard_campaigns_label(campaigns)
             filters_json = json.dumps(dashboard_filter_lines(
-                {**raw_definition, **requested_dates}, task_repository, selection_labels,
+                {**raw_definition, **requested_dates}, task_repository,
+                {**selection_labels, 'Campaign': cover_campaigns},
             ), ensure_ascii=False)
             selected_regions, selected_cities = selections['Region'], selections['City']
             region_label, city_label = selection_labels['Region'], selection_labels['City']
@@ -1462,6 +1525,7 @@ def install_dashboard_routes(core):
             output_file, destination = dashboard_ppt_unique_output(
                 task_repository, export_time, dashboard_nr_mode(raw_definition), dashboard_name,
                 dashboard_ppt_scope_label(raw_definition.get('scope') or 'single'), zone_label, job_id,
+                dashboard_ppt_campaign_suffix(campaigns),
             )
             update_dashboard_ppt_job(
                 task_repository, job_id, regions_json=json.dumps(selected_regions, ensure_ascii=False),
@@ -1480,7 +1544,7 @@ def install_dashboard_routes(core):
             return
         render_dashboard_ppt_job(
             job_id, run_token, task_repository, snapshot, snapshot_definition, user, destination,
-            dashboard_id, preview_fingerprint, cover_regions, cover_cities,
+            dashboard_id, preview_fingerprint, cover_regions, cover_cities, cover_campaigns,
         )
 
     @app.post('/api/e2e-dashboards/{dashboard_id}/export-ppt')
@@ -2466,7 +2530,8 @@ def install_dashboard_routes(core):
                 options[field_name].update(str(rule.value) for rule in dimension.rules if str(rule.value).strip())
                 if str(dimension.default).strip():
                     options[field_name].add(str(dimension.default))
-            options[field_name].update(str(value) for value in definition.filters.get(field_name, ()) if value is not None)
+            # Saved filter values are not options by themselves: only values the
+            # selected CDRs (or calculated dimensions) provide are offered.
         missing_fields = [
             field_name for field_name in fields
             if not options[field_name] or field_name in incomplete_fields
@@ -2617,6 +2682,10 @@ def install_dashboard_routes(core):
             raise HTTPException(400, f'The selected CDRs do not contain the {field_name} field.')
         return sorted(values, key=str.casefold)
 
+    def unfiltered_definition(definition):
+        """Return the Dashboard without its filters, to read the values its CDRs provide."""
+        return definition.model_copy(update={'filters': {}})
+
     def dashboard_geography_catalogue(definition, selected_by_kind, task_repository) -> dict[str, list[str]]:
         """Return Vendor, Region and City values of the selected CDRs.
 
@@ -2631,7 +2700,9 @@ def install_dashboard_routes(core):
         catalogue = dict(task_repository.cdr_catalogue_values(selected_ids))
         missing = [(field, key) for field, key in (('Region', 'regions'), ('City', 'cities')) if not catalogue.get(key)]
         if missing:
-            fallback = profile_filter_options(definition, [], selected_by_kind, [field for field, _key in missing], task_repository)
+            fallback = profile_filter_options(
+                unfiltered_definition(definition), [], selected_by_kind, [field for field, _key in missing], task_repository,
+            )
             for field, key in missing:
                 catalogue[key] = sorted(
                     {str(value).strip() for value in fallback.get(field) or [] if str(value).strip()},
@@ -2639,13 +2710,76 @@ def install_dashboard_routes(core):
                 )
         return catalogue
 
+    campaign_backfills: set[tuple[str, int]] = set()
+
+    def schedule_campaign_backfill(dataset_ids: list[int], task_repository) -> None:
+        """Read missing CDR Campaigns once in the background; the viewer polls for them."""
+        database = str(Path(task_repository.db_path).resolve())
+        with lock:
+            pending = [dataset_id for dataset_id in dataset_ids if (database, dataset_id) not in campaign_backfills]
+            campaign_backfills.update((database, dataset_id) for dataset_id in pending)
+        if not pending:
+            return
+
+        def run() -> None:
+            try:
+                core.backfill_cdr_campaigns(pending, task_repository)
+            finally:
+                with lock:
+                    campaign_backfills.difference_update((database, dataset_id) for dataset_id in pending)
+
+        Thread(target=run, name='dashboard-campaign-backfill', daemon=True).start()
+
+    def dashboard_campaign_values(
+        definition, selected_by_kind, task_repository, *, wait: bool = True,
+    ) -> tuple[list[str], bool]:
+        """Return the compact Campaigns (for example ``2026-Q2`` or ``2026-Q2_SA``) behind a Dashboard.
+
+        A Campaign filter limits them to its values; otherwise every Campaign of
+        the selected CDRs is read from their cached catalogue. CDRs catalogued
+        before Campaigns were cached are read once: immediately when ``wait``
+        is set, otherwise in the background, reporting that some are pending.
+        """
+        filters = definition.filters if isinstance(definition.filters, dict) else {}
+        configured = next((values for key, values in filters.items() if identity(key) == identity('Campaign')), None)
+        if isinstance(configured, str):
+            configured = [configured]
+        configured = [str(value).strip() for value in configured or [] if str(value).strip()]
+        dataset_ids = [int(row['id']) for rows in selected_by_kind.values() for row in rows]
+        pending = False
+        if dataset_ids:
+            core.backfill_cdr_catalogues(dataset_ids, task_repository)
+            missing = task_repository.missing_cdr_campaign_ids(dataset_ids)
+            if missing and wait:
+                core.backfill_cdr_campaigns(missing, task_repository)
+            elif missing:
+                schedule_campaign_backfill(missing, task_repository)
+                pending = True
+        available = task_repository.cdr_catalogue_values(dataset_ids)['campaigns'] if dataset_ids else []
+        # A Campaign filter only names the Campaigns its CDRs actually contain.
+        values = values_present_in_cdrs(configured, available) if configured else available
+        labels = {compact_campaign_value(value) for value in values}
+        return sorted((label for label in labels if label), key=str.casefold), pending
+
+    def dashboard_campaigns_label(campaigns: list[str]) -> str:
+        if not campaigns:
+            return ''
+        return f"{'Campaign' if len(campaigns) == 1 else 'Campaigns'}: {', '.join(campaigns)}"
+
     def load_dashboard_geography_options(definition, task_repository) -> dict[str, list[str]]:
         """Load Vendor and geography catalogues from the per-CDR persisted cache."""
         validate(definition, task_repository)
         selected_by_kind = selected_sources(definition, task_repository)
         options = dashboard_geography_catalogue(definition, selected_by_kind, task_repository)
-        operators = profile_filter_options(definition, [], selected_by_kind, ['Operator'], task_repository)['Operator']
+        operators = profile_filter_options(
+            unfiltered_definition(definition), [], selected_by_kind, ['Operator'], task_repository,
+        )['Operator']
+        campaigns, campaigns_pending = dashboard_campaign_values(
+            definition, selected_by_kind, task_repository, wait=False,
+        )
         return {
+            'campaigns': campaigns,
+            'campaigns_pending': campaigns_pending,
             'operators': operators,
             'vendors': options['vendors'],
             'regions': options['regions'],

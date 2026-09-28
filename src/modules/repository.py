@@ -191,6 +191,7 @@ CREATE TABLE IF NOT EXISTS cdr_catalogues (
     vendors_json TEXT NOT NULL DEFAULT '[]',
     regions_json TEXT NOT NULL DEFAULT '[]',
     cities_json TEXT NOT NULL DEFAULT '[]',
+    campaigns_json TEXT,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(dataset_id) REFERENCES datasets(id) ON DELETE CASCADE
 );
@@ -543,6 +544,7 @@ class Repository:
             # on large workspaces.
             self._ensure_report_template_columns(conn)
             self._ensure_dataset_profile_columns(conn)
+            self._ensure_cdr_catalogue_columns(conn)
             self._ensure_generated_job_columns(conn)
             self._migrate_generated_jobs(conn)
             self._cleanup_duplicate_datasets(conn)
@@ -777,6 +779,12 @@ class Repository:
             self._ensure_user_workspace_columns(conn)
             return any(self._workspace_ids_from_json(row['workspace_ids_json']) for row in conn.execute('SELECT workspace_ids_json FROM users'))
 
+    def _ensure_cdr_catalogue_columns(self, conn: sqlite3.Connection) -> None:
+        existing_columns = {row['name'] for row in conn.execute("PRAGMA table_info(cdr_catalogues)").fetchall()}
+        if existing_columns and 'campaigns_json' not in existing_columns:
+            # NULL marks catalogues whose Campaigns have not been read yet.
+            conn.execute("ALTER TABLE cdr_catalogues ADD COLUMN campaigns_json TEXT")
+
     def _ensure_dataset_profile_columns(self, conn: sqlite3.Connection) -> None:
         existing_columns = {row['name'] for row in conn.execute("PRAGMA table_info(dataset_profiles)").fetchall()}
         if 'normalization_version' not in existing_columns:
@@ -829,39 +837,72 @@ class Repository:
             (*kinds, *scope_parameters),
         )
 
+    @staticmethod
+    def _catalogue_json(values: Iterable[str]) -> str:
+        return json.dumps(sorted({str(value).strip() for value in values if str(value).strip()}, key=str.casefold))
+
     def replace_cdr_catalogue(
         self, dataset_id: int, *, vendors: Iterable[str], regions: Iterable[str], cities: Iterable[str],
+        campaigns: Iterable[str] | None = None,
     ) -> None:
-        """Persist the lightweight universe catalogues derived from one CDR."""
-        def normalized(values: Iterable[str]) -> str:
-            return json.dumps(sorted({str(value).strip() for value in values if str(value).strip()}, key=str.casefold))
+        """Persist the lightweight universe catalogues derived from one CDR.
+
+        ``campaigns=None`` keeps any Campaigns already stored for the CDR.
+        """
+        normalized = self._catalogue_json
+        campaigns_json = None if campaigns is None else normalized(campaigns)
         with self.connection() as conn:
             conn.execute(
                 """
-                INSERT INTO cdr_catalogues (dataset_id, vendors_json, regions_json, cities_json, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO cdr_catalogues (dataset_id, vendors_json, regions_json, cities_json, campaigns_json, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(dataset_id) DO UPDATE SET
                     vendors_json = excluded.vendors_json,
                     regions_json = excluded.regions_json,
                     cities_json = excluded.cities_json,
+                    campaigns_json = COALESCE(excluded.campaigns_json, cdr_catalogues.campaigns_json),
                     updated_at = excluded.updated_at
                 """,
-                (dataset_id, normalized(vendors), normalized(regions), normalized(cities), local_now_iso()),
+                (dataset_id, normalized(vendors), normalized(regions), normalized(cities), campaigns_json, local_now_iso()),
             )
+
+    def set_cdr_catalogue_campaigns(self, dataset_id: int, campaigns: Iterable[str]) -> None:
+        """Store the Campaigns read once from a CDR catalogued before they were cached."""
+        with self.connection() as conn:
+            conn.execute(
+                'UPDATE cdr_catalogues SET campaigns_json = ?, updated_at = ? WHERE dataset_id = ?',
+                (self._catalogue_json(campaigns), local_now_iso(), int(dataset_id)),
+            )
+
+    def missing_cdr_campaign_ids(self, dataset_ids: Iterable[int]) -> list[int]:
+        """Identify catalogued CDRs whose Campaigns have not been read yet."""
+        ids = [int(dataset_id) for dataset_id in dataset_ids]
+        if not ids:
+            return []
+        with self.connection() as conn:
+            rows = conn.execute(
+                f"SELECT dataset_id FROM cdr_catalogues WHERE campaigns_json IS NULL AND dataset_id IN ({','.join('?' for _ in ids)})",
+                ids,
+            ).fetchall()
+        missing = {int(row['dataset_id']) for row in rows}
+        return [dataset_id for dataset_id in ids if dataset_id in missing]
 
     def cdr_catalogue_values(self, dataset_ids: Iterable[int] | None = None) -> dict[str, list[str]]:
         """Return de-duplicated cached Vendor, Region and City values for CDRs."""
         ids = [int(dataset_id) for dataset_id in (dataset_ids or [])]
         with self.connection() as conn:
-            sql = 'SELECT vendors_json, regions_json, cities_json FROM cdr_catalogues'
+            sql = 'SELECT vendors_json, regions_json, cities_json, campaigns_json FROM cdr_catalogues'
             params: list[Any] = []
             if ids:
                 sql += f" WHERE dataset_id IN ({','.join('?' for _ in ids)})"
                 params = ids
             rows = conn.execute(sql, params).fetchall()
-        values = {'vendors': set(), 'regions': set(), 'cities': set()}
+        values = {'vendors': set(), 'regions': set(), 'cities': set(), 'campaigns': set()}
         for row in rows:
-            for key, column in (('vendors', 'vendors_json'), ('regions', 'regions_json'), ('cities', 'cities_json')):
+            for key, column in (
+                ('vendors', 'vendors_json'), ('regions', 'regions_json'), ('cities', 'cities_json'),
+                ('campaigns', 'campaigns_json'),
+            ):
                 try:
                     values[key].update(str(value).strip() for value in json.loads(row[column] or '[]') if str(value).strip())
                 except (TypeError, json.JSONDecodeError):

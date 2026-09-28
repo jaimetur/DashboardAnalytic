@@ -591,8 +591,75 @@ def test_dashboard_library_geography_options_are_loaded_in_one_request(client):
 
     assert response.status_code == 200, response.text
     assert response.json() == {
+        'campaigns': [], 'campaigns_pending': False,
         'operators': ['A', 'B'], 'vendors': [], 'regions': [], 'cities': ['Leeds', 'London'],
     }
+
+
+def test_dashboard_campaigns_keep_their_nr_mode_suffix(client):
+    client.post('/login', data={'username': 'super', 'password': 'super123'})
+    response = client.post('/datasets-analysis/upload', data={'dataset_kinds': 'data'}, files={
+        'dataset_files': ('campaigns.csv', BytesIO(
+            b'Campaign,Operator,City,Mean_Data_Rate,Test_Name,Test_Start_Time\n'
+            b'NetCheck_UK_2026_Q2_SA,A,London,10,HTTP DL,2026-09-01\n'
+            b'NetCheck UK 2026 Q1,B,Leeds,20,HTTP DL,2026-09-02\n'
+        ), 'text/csv'),
+    })
+    assert response.status_code == 200
+    core.repository.add_report_template('nsa', 'Dashboard test', (
+        'Slide,Slide tittle,Slide Subtittle,Layout,Chart Tittle,CDR source,KPI,Chart type,Filters,Rows Aggregation,Column Aggregation,Legend,Legend Position\n'
+        '1,Comparison,,Title and 1 column + Comments,Rate,CDR-Data,Mean_Data_Rate,CDF Line,,Operator,,,Top\n'
+    ).encode(), is_default=False)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and core.repository.get_dataset(1)['status'] != 'ready':
+        time.sleep(0.05)
+    payload = definition().model_dump(mode='json')
+
+    options = client.post('/api/e2e-dashboards/geography-options', json=payload)
+
+    assert options.status_code == 200, options.text
+    # Compact labels keep an SA/NSA suffix; a Campaign filter limits them.
+    assert options.json()['campaigns'] == ['2026-Q1', '2026-Q2_SA']
+    payload['filters'] = {'Campaign': ['NetCheck_UK_2026_Q2_SA']}
+    filtered = client.post('/api/e2e-dashboards/geography-options', json=payload)
+    assert filtered.json()['campaigns'] == ['2026-Q2_SA']
+
+    # The PPT cover lists the Campaigns above the Scope in a larger font.
+    core.repository.add_report_template('nsa', 'Campaign cover', (
+        'Slide,Slide tittle,Slide Subtittle,Layout,Chart Tittle,CDR source,KPI,Chart type,Filters,Rows Aggregation,Column Aggregation,Legend,Legend Position\n'
+        '1,Quarterly review,Template subtitle,Title Page,,,,Title Slide,,,,,Top\n'
+    ).encode(), is_default=False)
+    payload = {**definition().model_dump(mode='json'), 'template': 'Campaign cover'}
+    assert client.put('/api/e2e-dashboards/campaign-cover', json=payload).status_code == 200
+    queued = client.post('/api/e2e-dashboards/campaign-cover/export-ppt', json={'definition': payload})
+    assert queued.status_code == 202, queued.text
+    job_id = queued.json()['job_id']
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        job = next(item for item in client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
+        if job['status'] in {'ready', 'failed'}:
+            break
+        time.sleep(0.05)
+    assert job['status'] == 'ready', job
+    assert job['cover']['campaigns'] == 'Campaigns: 2026-Q1, 2026-Q2_SA'
+    # The job Filters list the Campaigns right above the Operators.
+    assert job['filters'].index('Campaigns: 2026-Q1, 2026-Q2_SA') + 1 == job['filters'].index('Operator: All Operators')
+    with core.repository.connection() as connection:
+        row = connection.execute('SELECT output_path FROM dashboard_ppt_jobs WHERE id = ?', (job_id,)).fetchone()
+    # Exports comparing several Campaigns name them at the end of the file name.
+    assert row['output_path'].endswith(' - Operator Comparison - 2026-Q1_vs_2026-Q2_SA.pptx')
+    slide = Presentation(row['output_path']).slides[0]
+    details = {shape.name: shape for shape in slide.shapes if shape.name.startswith('dashboard-ppt-')}
+    campaigns, scope = details['dashboard-ppt-campaigns'], details['dashboard-ppt-scope']
+    assert campaigns.text == 'Campaigns: 2026-Q1, 2026-Q2_SA'
+    # Campaigns sit between the subtitle and the template's decorative line,
+    # while the Scope and geography stay below that line.
+    subtitle = next(shape for shape in slide.placeholders if shape.placeholder_format.type == 4)
+    separator = next(shape for shape in slide.slide_layout.shapes if shape.shape_type == MSO_SHAPE_TYPE.LINE)
+    assert subtitle.top + subtitle.height <= campaigns.top
+    assert campaigns.top + campaigns.height <= separator.top < scope.top
+    assert campaigns.text_frame.paragraphs[0].font.size > scope.text_frame.paragraphs[0].font.size
+    assert campaigns.text_frame.paragraphs[0].font.color.rgb == RGBColor(255, 140, 66)
 
 
 def test_dashboard_filter_catalogue_includes_values_beyond_legacy_profile_limit(client, monkeypatch):
@@ -804,6 +871,41 @@ def test_dashboard_ppt_dialog_selections_override_saved_dashboard_filters(client
     assert client.get('/api/e2e-dashboards').json()[dashboard_id]['filters'] == payload['filters']
 
 
+def test_dashboard_ppt_all_labels_only_consider_the_selected_cdrs(client):
+    payload = setup_dashboard(client)
+    # A second CDR carries an extra Operator and City that the Dashboard's
+    # own CDR does not contain; its saved filters still list them.
+    other = client.post('/datasets-analysis/upload', data={'dataset_kinds': 'data'}, files={
+        'dataset_files': ('other.csv', BytesIO(
+            b'Operator,City,Mean_Data_Rate,Test_Name,Test_Start_Time\nC,York,5,HTTP DL,2026-09-01\n'
+        ), 'text/csv'),
+    })
+    assert other.status_code == 200
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline and any(core.repository.get_dataset(item)['status'] != 'ready' for item in (1, 2)):
+        time.sleep(0.05)
+    payload['filters'] = {'Operator': ['A', 'B', 'C'], 'City': ['Leeds', 'London', 'York']}
+    dashboard_id = 'selected-cdr-labels'
+    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+
+    options = client.post('/api/e2e-dashboards/geography-options', json=payload).json()
+    assert options['operators'] == ['A', 'B']
+    # Selecting every value the selected CDRs offer reads as "All", whether
+    # the export uses the saved filters or the dialog's explicit selection.
+    for selections in ({}, {'selected_operators': ['A', 'B'], 'selected_cities': ['Leeds', 'London']}):
+        queued = client.post(f'/api/e2e-dashboards/{dashboard_id}/export-ppt', json={'definition': payload, **selections})
+        assert queued.status_code == 202, queued.text
+        job_id = queued.json()['job_id']
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            job = next(item for item in client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
+            if job['status'] in {'ready', 'failed'}:
+                break
+            time.sleep(0.05)
+        assert 'Operator: All Operators' in job['filters'], job['filters']
+        assert 'City: All Cities' in job['filters'], job['filters']
+
+
 def test_dashboard_ppt_cover_uses_scope_and_catalogue_geography(client):
     payload = setup_dashboard(client)
     core.repository.add_report_template('nsa', 'Structural dashboard', (
@@ -860,7 +962,9 @@ def test_dashboard_ppt_cover_uses_scope_and_catalogue_geography(client):
     assert details['dashboard-ppt-city'].left == title.left
     assert details['dashboard-ppt-scope'].text_frame.paragraphs[0].font.color.rgb == RGBColor(139, 240, 166)
     # The job's viewer snapshot shows exactly the same cover lines.
-    expected_cover = {'scope': 'Operator Comparison', 'regions': 'All Regions', 'cities': 'All Cities'}
+    # This CDR has no Campaign column, so no Campaigns line is drawn.
+    assert 'dashboard-ppt-campaigns' not in details
+    expected_cover = {'campaigns': '', 'scope': 'Operator Comparison', 'regions': 'All Regions', 'cities': 'All Cities'}
     assert client.get(f'/api/e2e-dashboards/ppt-jobs/{job_id}/charts.json').json()['cover'] == expected_cover
     listed_job = next(item for item in client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
     assert listed_job['cover'] == expected_cover
@@ -1619,7 +1723,7 @@ def test_dashboards_lifecycle_and_layout(client):
     selection_key_source = dashboard_module[dashboard_module.index('def persistent_selection_key'):dashboard_module.index('def selected_date_bounds')]
     assert "'scope': definition.scope," not in selection_key_source
     assert "'schema': DASHBOARD_SELECTION_CACHE_VERSION," in selection_key_source
-    assert 'DASHBOARD_SELECTION_CACHE_VERSION = 12' in dashboard_module
+    assert 'DASHBOARD_SELECTION_CACHE_VERSION = 13' in dashboard_module
     assert "kind: sorted([" in selection_key_source
     assert "kind: sorted(set(dataset_ids))" in selection_key_source
     assert "field: sorted(set(values))" in selection_key_source
@@ -2838,7 +2942,11 @@ def test_dashboard_viewer_cover_matches_the_exported_ppt_cover():
 
     assert "coverGeographyLabel('Region', 'Region', 'Regions', 'All Regions')" in script
     assert "coverGeographyLabel('City', 'City', 'Cities', 'All Cities')" in script
-    assert "if (kind === 'title' && Number(slide.number) === firstSlideNumber) {" in script
+    assert "const coverLabels = kind === 'title' && Number(slide.number) === firstSlideNumber ? viewerGeographyLabels() : [];" in script
+    # Campaigns sit right above the decorative line, the other details below it.
+    assert "if (campaigns) content.append(node('p', campaigns, 'ds-structural-campaigns'));" in script
+    assert script.index("'ds-structural-campaigns'") < script.index("node('span', undefined, 'ds-structural-rule')")
+    assert '.ds-structural-slide .ds-structural-campaigns + .ds-structural-rule { margin-top:1.4cqh; }' in stylesheet
     # Regions and Cities use the same per-CDR catalogue as the PPT cover.
     assert "api('/geography-options', 'POST', canonicalDashboardDefinition(appliedDashboardDefinition || definition))" in script
     assert '.ds-structural-slide .ds-structural-rule { display:block; width:18.5cqw; height:max(3px,.6cqh); margin-top:9.5cqh;' in stylesheet

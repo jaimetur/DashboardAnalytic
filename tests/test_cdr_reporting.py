@@ -3112,8 +3112,10 @@ def test_catalogue_rows_use_matching_master_image_placeholders(tmp_path) -> None
     )
     assert [paragraph.text for paragraph in title_shape.text_frame.paragraphs] == ['Completed Call Ratio', 'Voice quality']
     subtitle_paragraph = title_shape.text_frame.paragraphs[1]
-    assert subtitle_paragraph.font.size.pt == 16
+    assert subtitle_paragraph.font.size.pt == 20
     assert subtitle_paragraph.font.color.rgb == RGBColor(36, 90, 150)
+    # The condensed title style must not squeeze the subtitle's letters.
+    assert all(run.font._rPr.get('spc') == '0' for run in subtitle_paragraph.runs)
     assert not any(shape.name == 'catalogue-subtitle' for shape in slide.shapes)
     manifest = json.loads((tmp_path / 'charts' / 'manifest.json').read_text(encoding='utf-8'))
     assert manifest['generate_tooltips'] is True
