@@ -119,14 +119,14 @@ fi
 if [[ -z "$python_bin" ]]; then
     bootstrap_python=""
     for candidate in /opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3; do
-        if [[ -x "$candidate" ]] && "$candidate" -c 'import sys; raise SystemExit(not (sys.version_info >= (3, 11)))' 2>/dev/null; then
+        if [[ -x "$candidate" ]] && "$candidate" -c 'import sys; raise SystemExit(not (sys.version_info >= (3, 12)))' 2>/dev/null; then
             bootstrap_python="$candidate"
             break
         fi
     done
 
     if [[ -z "$bootstrap_python" ]]; then
-        show_message "Dashboard Analytic" "Python 3.11 or later is required. Install it and open this application again."
+        show_message "Dashboard Analytic" "Python 3.12 or later is required. Install it and open this application again."
         exit 1
     fi
 

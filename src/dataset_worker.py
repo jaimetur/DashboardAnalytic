@@ -13,15 +13,16 @@ from threading import Thread
 from time import sleep
 from pathlib import Path
 
+import src.DashboardAnalytic as app_module
 from src.DashboardAnalytic import (
     _process_dataset,
     process_region_mapping,
     process_vendor_clearing,
     process_vendor_mapping,
     repository,
-    workspace_registry,
 )
 from src.modules.repository import Repository
+from src.modules.workspaces import WorkspaceRegistry
 
 
 def main() -> None:
@@ -40,7 +41,10 @@ def main() -> None:
     parser.add_argument('--vodafone-mapping-dataset-id', type=int)
     parser.add_argument('--three-mapping-dataset-id', type=int)
     parser.add_argument('--region-mapping-dataset-id', type=int)
+    parser.add_argument('--global-db', type=Path)
+    parser.add_argument('--workspace-registry-db', type=Path)
     args = parser.parse_args()
+    use_parent_databases(args)
     if args.parent_pid is not None:
         def stop_with_parent() -> None:
             while True:
@@ -53,7 +57,7 @@ def main() -> None:
     task_repository = Repository(
         args.workspace_db,
         global_db_path=repository.global_db_path,
-        workspace_registry_db_path=workspace_registry.registry_path,
+        workspace_registry_db_path=app_module.workspace_registry.registry_path,
     )
     lock_path = args.workspace_db.parent / f'.dataset-worker-{args.dataset_id}.lock'
     with lock_path.open('a+b') as lock_file:
@@ -69,9 +73,27 @@ def main() -> None:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
+def use_parent_databases(args: argparse.Namespace) -> None:
+    """Point this interpreter at the parent's global and registry databases.
+
+    The worker imports the application without running its startup, so its
+    module-level paths come from the default settings. The parent passes the
+    databases it actually uses, which may be configured at runtime.
+    """
+    if args.global_db is not None:
+        repository.set_global_database(args.global_db)
+    if args.workspace_registry_db is not None:
+        current = app_module.workspace_registry
+        app_module.workspace_registry = WorkspaceRegistry(
+            args.workspace_registry_db, current.legacy_data_dir,
+            current.legacy_slides_templates_dir, current.legacy_registry_path,
+        )
+        repository.set_workspace_registry_database(args.workspace_registry_db)
+
+
 def run_dataset_operation(args: argparse.Namespace, task_repository: Repository) -> None:
     workspace = next(
-        (item for item in workspace_registry.list() if item.database_path == args.workspace_db),
+        (item for item in app_module.workspace_registry.list() if item.database_path == args.workspace_db),
         None,
     )
     if args.operation == 'vendor-mapping':

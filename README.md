@@ -112,7 +112,7 @@ See [Product overview](help/overview.md) for a detailed tour of every module and
 
 ## Requirements
 
-- Python 3.11 or newer for source development.
+- Python 3.12 or newer for source development.
 - Docker Engine with Compose for the recommended service deployment.
 - Writable persistent configuration and data directories.
 
@@ -130,7 +130,7 @@ Open `http://127.0.0.1:7279`.
 
 ### macOS launcher
 
-The project keeps `Dashboard Analytic.app` under `macos-launcher/`. It uses the Dashboard Analytic logo as its icon and a universal native executable for Apple Silicon and Intel Macs. Its control window starts the local server on port `7278` without opening the browser automatically. Use **Open in Browser** to open the configured local URL, **Restart Server** to stop the current process cleanly before starting its replacement, or **Stop Server and Quit**. Closing the window, pressing `⌘Q`, or choosing **Quit** in the Dock also stops the server cleanly. The launcher monitors forced application termination so the server cannot remain orphaned after its window disappears. It reuses a working project `.venv` when available; otherwise, including when that environment contains Intel-only packages, it creates the separate native `.dashboard-analytic-venv` environment and installs the dependencies. Python 3.11 or later must be available on the Mac.
+The project keeps `Dashboard Analytic.app` under `macos-launcher/`. It uses the Dashboard Analytic logo as its icon and a universal native executable for Apple Silicon and Intel Macs. Its control window starts the local server on port `7278` without opening the browser automatically. Use **Open in Browser** to open the configured local URL, **Restart Server** to stop the current process cleanly before starting its replacement, or **Stop Server and Quit**. Closing the window, pressing `⌘Q`, or choosing **Quit** in the Dock also stops the server cleanly. The launcher monitors forced application termination so the server cannot remain orphaned after its window disappears. It reuses a working project `.venv` when available; otherwise, including when that environment contains Intel-only packages, it creates the separate native `.dashboard-analytic-venv` environment and installs the dependencies. Python 3.12 or later must be available on the Mac.
 
 Build the complete installer from the project root:
 

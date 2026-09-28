@@ -7,7 +7,7 @@ name = "dashboard-analytic"
 version = "0.4.2"
 description = "Web platform for NetCheck and Smart Orchestrator KPI analytics"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 authors = [{ name = "Jaimetur" }]
 dependencies = [
   "fastapi>=0.116.0,<1.0.0",

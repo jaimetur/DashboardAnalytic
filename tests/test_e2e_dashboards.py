@@ -1076,7 +1076,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert legacy_reporting.headers['location'] == '/e2e-reporting'
     assert 'id="ds-nr-mode"' in page.text
     assert 'id="ds-dashboards-body"' in page.text
-    assert '>PowerPoint Generation Jobs<' in page.text
+    assert '>PPT Generation Jobs<' in page.text
     assert 'id="ds-ppt-jobs-body"' in page.text
     assert '>Charts Panel<' in page.text
     assert 'id="ds-ppt-chart-job"' in page.text
@@ -1808,7 +1808,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'id="ds-filter-close-action"' in page.text
     assert '#ds-filter-close-action[hidden]{display:none!important}' in dashboard_css
     assert "bind('ds-filter-close-action', closeFilters);" in dashboard_script
-    assert "$('ds-generate-ppt').hidden = true; $('ds-view').hidden = true; $('ds-filter-close-action').hidden = false; overlay('ds-filter-overlay', true);" in dashboard_script
+    assert "$('ds-generate-ppt').hidden = !fromLibrary; $('ds-view').hidden = !fromLibrary; $('ds-filter-close-action').hidden = fromLibrary; overlay('ds-filter-overlay', true);" in dashboard_script
     assert "panel.hidden = !dashboardFiltersOpen;" in dashboard_script
     assert '#ds-add-filter::before' in dashboard_css
     assert '#ds-ppt-jobs-delete-all::before' in dashboard_css
@@ -2888,7 +2888,11 @@ def test_dashboard_filters_open_as_a_sub_panel_below_their_dashboard_row():
     assert '<div id="ds-filter-parking" hidden><div id="ds-filter-home">' in template
     assert "const parkFilterPanel = () => { $('ds-filter-parking').append($('ds-filter-home')); filterRow.remove(); };" in script
     assert "filterRowCell.append($('ds-filter-home'));" in script
-    assert script.index("body.append(row);\n      if (filtersAreOpen) {") > 0
+    assert script.index("body.append(row);\n      if (filtersAreOpen && !compactLibraryFiltersQuery.matches) {") > 0
+    # Compact screens open the same filters in the viewer's floating dialog.
+    assert "const compactLibraryFiltersQuery = window.matchMedia('(max-width:640px), (orientation:landscape) and (max-height:600px)');" in script
+    assert 'openFloatingFilters({fromLibrary: true});' in script
+    assert "if (closedFromLibrary) { dashboardFiltersOpen = false; rememberFiltersOpen(false); }" in script
 
 
 def test_cover_geography_falls_back_to_dashboard_filter_values(client):

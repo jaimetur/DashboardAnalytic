@@ -6,6 +6,7 @@
 ## Release: v0.4.2
 ### Release Date: 2026-09-28
 #### ⚠️ Breaking Changes:
+- Python 3.12 or newer is now required. `pyproject.toml`, the README, the Docker image (`python:3.12-slim`), the macOS launcher and the unit-test workflow no longer support Python 3.11.
 
 #### 🌟 New Features:
 

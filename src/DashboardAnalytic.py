@@ -3552,6 +3552,8 @@ def _run_dataset_in_worker(
         '--dataset-id', str(dataset_id), '--dataset-path', str(dataset_path),
         '--username', username, '--workspace-db', str(task_repository.db_path), '--operation', operation,
         '--parent-pid', str(os.getpid()),
+        '--global-db', str(repository.global_db_path),
+        '--workspace-registry-db', str(workspace_registry.registry_path),
     ]
     for option, value in (
         ('--vodafone-mapping-dataset-id', vodafone_mapping_dataset_id),

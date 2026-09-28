@@ -4990,7 +4990,7 @@ def test_dashboard_ppt_job_is_queued_before_preparation_and_chart_rendering() ->
     assert 'never make the library button wait for' in script
     assert 'scopePreview = await api' not in script
     assert 'for (const index of chartIndexes)' not in script
-    assert 'Inserting the export job must remain quick.' in dashboard_source
+    assert '# An active snapshot supplied by the viewer is only looked up in memory.' in dashboard_source
     assert 'preview = restore_matching_preview_manifest(workspace, dashboard_id, definition)' in dashboard_source
 
 
