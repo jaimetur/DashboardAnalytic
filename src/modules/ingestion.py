@@ -331,9 +331,8 @@ def _operator_sheet_names(workbook) -> list[str]:
 
     NetCheck CDR workbooks place their operator extracts immediately after the
     KPI Definition worksheet.  Later worksheets are helper material and must
-    never become CDR rows.  When a workbook carries a technology-specific
-    duplicate such as ``Vodafone VoNR``, the plain operator sheet is the
-    canonical extract and wins over that variant.
+    never become CDR rows.  Every operator sheet in that block is imported,
+    including technology-specific ones such as ``Vodafone VoNR``.
     """
     worksheets = list(workbook.worksheets)
     definition_index = next(
@@ -360,17 +359,7 @@ def _operator_sheet_names(workbook) -> list[str]:
                 break
             continue
         candidates.append(sheet.title)
-
-    candidate_keys = {name.strip().casefold() for name in candidates}
-    return [
-        name for name in candidates
-        if not any(
-            key != name.strip().casefold()
-            and name.strip().casefold().startswith(f'{key}{separator}')
-            for key in candidate_keys
-            for separator in (' ', '-', '_')
-        )
-    ]
+    return candidates
 
 
 def get_excel_sheet_columns(file_path: Path, sheet_name: str) -> list[str]:

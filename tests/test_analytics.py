@@ -124,8 +124,8 @@ def test_load_dataset_uses_only_operator_sheets_after_kpi_definition(tmp_path) -
 
     dataset = load_dataset(workbook)
 
-    assert dataset["source_sheet"].tolist() == ["Telekom", "Orange"]
-    assert dataset["Operator"].tolist() == ["Telekom", "Orange"]
+    assert dataset["source_sheet"].tolist() == ["Telekom", "Telekom VoNR", "Orange"]
+    assert dataset["Operator"].tolist() == ["Telekom", "Telekom VoNR", "Orange"]
 
 
 def test_load_dataset_reads_cp1252_three_mapping_csv(tmp_path) -> None:
