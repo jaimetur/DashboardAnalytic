@@ -1449,7 +1449,14 @@
     $('ds-ppt-jobs-empty').hidden = jobs.length > 0;
     for (const job of jobs) {
       const row = node('tr');
-      for (const value of [job.id, job.generated_by, job.date, job.nr_mode || job.technology || job.type || '-', job.dashboard_name, job.scope]) row.append(node('td', String(value)));
+      for (const value of [job.id, job.generated_by, job.date]) row.append(node('td', String(value)));
+      // NR Mode uses the same colour code as the Datasets and Dashboards selectors.
+      const nrMode = String(job.nr_mode || job.technology || job.type || '-');
+      const nrModeCell = node('td');
+      if (['nsa', 'sa'].includes(nrMode.toLowerCase())) nrModeCell.append(node('span', nrMode.toUpperCase(), `ds-nr-mode-badge ds-nr-mode-badge-${nrMode.toLowerCase()}`));
+      else nrModeCell.textContent = nrMode;
+      row.append(nrModeCell);
+      for (const value of [job.dashboard_name, job.scope]) row.append(node('td', String(value)));
       const filterLines = Array.isArray(job.filters) ? job.filters : [];
       const filterTooltip = filterLines.length ? filterLines.join('\n') : 'No filters applied';
       const filtersCell = node('td');

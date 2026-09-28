@@ -834,6 +834,15 @@ def test_dashboard_ppt_cover_uses_scope_and_catalogue_geography(client):
     assert 'Vendor: All Vendors' in job['filters']
     assert 'Region: All Regions' in job['filters']
     assert 'City: All Cities' in job['filters']
+    # Jobs that stored no Operator or Vendor line were not restricted by them.
+    stored = [line for line in job['filters'] if not line.startswith(('Operator:', 'Vendor:'))]
+    with core.repository.connection() as connection:
+        connection.execute(
+            'UPDATE dashboard_ppt_jobs SET filters_json = ? WHERE id = ?', (json.dumps(stored), job_id),
+        )
+    legacy = next(item for item in client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
+    assert legacy['filters'].index('Operator: All Operators') < legacy['filters'].index('Vendor: All Vendors')
+    assert legacy['filters'].index('Vendor: All Vendors') < legacy['filters'].index('Region: All Regions')
     with core.repository.connection() as connection:
         row = connection.execute('SELECT output_path FROM dashboard_ppt_jobs WHERE id = ?', (job_id,)).fetchone()
     slide = Presentation(row['output_path']).slides[0]

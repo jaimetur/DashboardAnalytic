@@ -3640,3 +3640,13 @@ body:has(.release-navigator) .help-navigator{top:37%}
   .reporting-jobs-table-wrap .report-jobs-table th:nth-child(12), .reporting-jobs-table-wrap .report-jobs-table td:nth-child(12) { width: 8rem; min-width: 8rem; }
   .reporting-jobs-table-wrap .report-jobs-table th:nth-child(13), .reporting-jobs-table-wrap .report-jobs-table td:nth-child(13) { width: 18rem; min-width: 18rem; }
 }
+
+/* NR Mode selectors in the Datasets and Dashboards tables are colour-coded by
+   their selected value: pastel yellow for NSA and pastel blue for SA. */
+:is(.queue-nr-mode-select, .ds-dashboard-nr-mode-select):has(option[value="nsa" i]:checked) { border-color: #dcc05a; background-color: #fff3bf; color: #6b5310; }
+:is(.queue-nr-mode-select, .ds-dashboard-nr-mode-select):has(option[value="sa" i]:checked) { border-color: #8db4e2; background-color: #dcebff; color: #1f4f7f; }
+:is(.queue-nr-mode-select, .ds-dashboard-nr-mode-select) option { background-color: #fff; color: #10314a; }
+.ds-nr-mode-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 2.6rem; padding: .22rem .55rem; border: 1px solid; border-radius: 999px; font-size: .74rem; font-weight: 800; line-height: 1.1; }
+.ds-nr-mode-badge-nsa { border-color: #dcc05a; background: #fff3bf; color: #6b5310; }
+.ds-nr-mode-badge-sa { border-color: #8db4e2; background: #dcebff; color: #1f4f7f; }
+.reporting-jobs-table-wrap .report-jobs-table td:nth-child(4) { text-align: center; }

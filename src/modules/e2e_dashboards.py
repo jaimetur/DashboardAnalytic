@@ -430,6 +430,23 @@ def install_dashboard_routes(core):
                 lines.append(f'{label}: {", ".join(selected)}')
         return lines
 
+    def dashboard_ppt_job_filters_with_all_selections(filters: list[str]) -> list[str]:
+        """Show All Operators and All Vendors for jobs that stored no such line.
+
+        Jobs that recorded their Region or City selection omitted Operator and
+        Vendor when nothing specific was selected; that means every value.
+        """
+        fields = [str(line).partition(':')[0].strip() for line in filters]
+        geography = next((index for index, field in enumerate(fields) if field in {'Region', 'City'}), None)
+        if geography is None:
+            return filters
+        missing = [
+            f'{field}: {label}'
+            for field, label in (('Operator', 'All Operators'), ('Vendor', 'All Vendors'))
+            if field not in fields
+        ]
+        return [*filters[:geography], *missing, *filters[geography:]]
+
     def serialize_dashboard_ppt_job(row):
         output_path = Path(str(row['output_path'] or ''))
         output_file = str(row['output_file'] or '')
@@ -452,6 +469,7 @@ def install_dashboard_routes(core):
             filters = [str(item) for item in filters if str(item).strip()] if isinstance(filters, list) else []
         except (TypeError, json.JSONDecodeError):
             filters = []
+        filters = dashboard_ppt_job_filters_with_all_selections(filters)
         cover = dashboard_ppt_job_cover(row, {})
         if charts_ready and (not cover['regions'] or not cover['cities']):
             try:
@@ -542,12 +560,18 @@ def install_dashboard_routes(core):
         # of the Dashboard's own filter options (which a saved "select every
         # value" filter comes from), ignoring case and surrounding spaces.
         selected = {str(value).strip().casefold() for value in values if str(value).strip()}
+        all_label = {'Operator': 'All Operators', 'Vendor': 'All Vendors', 'Region': 'All Regions', 'City': 'All Cities'}[field]
+        # No specific Operator or Vendor means the export is not restricted
+        # by them. Region and City stay blank so covers and file names only
+        # name geography the CDRs actually provide.
+        if not selected and field in {'Operator', 'Vendor'}:
+            return all_label
         candidates = [available, *alternatives]
         if selected and any(
             candidate and selected >= {str(value).strip().casefold() for value in candidate if str(value).strip()}
             for candidate in candidates
         ):
-            return {'Operator': 'All Operators', 'Vendor': 'All Vendors', 'Region': 'All Regions', 'City': 'All Cities'}[field]
+            return all_label
         return ', '.join(values)
 
     def dashboard_ppt_filename_part(value: str, max_bytes: int) -> str:

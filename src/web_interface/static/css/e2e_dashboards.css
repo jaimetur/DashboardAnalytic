@@ -1735,3 +1735,8 @@
   .ds-dashboards-table th:first-child, .ds-dashboards-table td:first-child,
   .ds-dashboards-table th:nth-child(3), .ds-dashboards-table td:nth-child(3) { width:27%; min-width:15rem; }
 }
+
+/* The PPT job Filters tooltip matches the Reports and Charts Jobs datasets
+   tooltip; the Filters dialog keeps its light palette. */
+.ds-ppt-filter-tooltip { border-color: rgba(222, 207, 240, .4); background: #34264a; color: #fff; box-shadow: 0 12px 30px rgba(27, 17, 44, .32); }
+.ds-ppt-filter-tooltip .ds-ppt-job-filter-kind { color: #d9b9ff; }
