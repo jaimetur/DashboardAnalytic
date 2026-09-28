@@ -1679,16 +1679,18 @@
 .ds-viewer-scope-control select:hover:not(:disabled),.ds-viewer-scope-control select:focus-visible { border-color:#8b65b8; background-color:#d9c7ed; }
 .ds-viewer-scope-control select:disabled { opacity:.6; }
 
+/* The global narrow-viewport guard forces 16px on every select; the Scope
+   selector must keep the same compact size as its neighbouring buttons. */
 @media (max-width:640px) {
   .ds-viewer-context { font-size:.75rem; }
-  .ds-viewer-scope-control select { font-size:.7rem; }
+  .ds-viewer-scope-control select { font-size:.7rem!important; }
 }
 @media (orientation:landscape) and (max-height:600px) {
   .ds-viewer-context { margin-top:.1rem; font-size:.7rem; }
-  .ds-viewer-scope-control select { height:2.15rem; min-height:2.15rem; font-size:.64rem; }
+  .ds-viewer-scope-control select { height:2.15rem; min-height:2.15rem; font-size:.64rem!important; }
 }
 @media (orientation:portrait) and (max-width:640px) {
-  .ds-viewer-scope-control select { height:2.25rem; min-height:2.25rem; font-size:.62rem; }
+  .ds-viewer-scope-control select { height:2.25rem; min-height:2.25rem; font-size:.62rem!important; }
 }
 
 /* Size structural slide text from the slide itself, not the browser window,

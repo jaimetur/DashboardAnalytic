@@ -869,8 +869,12 @@ function limitSeriesCollectionByX(seriesCollection, xMaxOverride) {
       .filter((row) => !row.hidden
         && !row.classList.contains('database-empty-row')
         && !row.hasAttribute('data-app-log-no-results')
-        && !row.hasAttribute('data-mobile-card-pagination-ignore'));
+        && !row.hasAttribute('data-mobile-card-pagination-ignore')
+        && !row.hasAttribute('data-mobile-card-section-header'));
   };
+  // Section header rows are not cards of their own: they are shown only on
+  // the pages that display one of the cards they introduce.
+  const sectionHeaderRows = (collection) => Array.from(collection.querySelectorAll(':scope > tbody > tr[data-mobile-card-section-header]'));
 
   const refreshTable = (table) => {
     let state = states.get(table);
@@ -897,14 +901,23 @@ function limitSeriesCollectionByX(seriesCollection, xMaxOverride) {
       });
     }
     const rows = cardRows(table);
+    const sectionHeaders = sectionHeaderRows(table);
     if (!compactViewport.matches) {
-      rows.forEach((row) => row.classList.remove('mobile-card-page-hidden'));
+      [...rows, ...sectionHeaders].forEach((row) => row.classList.remove('mobile-card-page-hidden'));
       state.pager.hidden = true;
       return;
     }
     const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
     state.page = Math.min(state.page, pageCount - 1);
     rows.forEach((row, index) => row.classList.toggle('mobile-card-page-hidden', Math.floor(index / pageSize) !== state.page));
+    sectionHeaders.forEach((header) => {
+      let onPage = false;
+      for (let sibling = header.nextElementSibling; sibling && !sibling.hasAttribute('data-mobile-card-section-header'); sibling = sibling.nextElementSibling) {
+        const index = rows.indexOf(sibling);
+        if (index >= 0 && Math.floor(index / pageSize) === state.page) { onPage = true; break; }
+      }
+      header.classList.toggle('mobile-card-page-hidden', !onPage);
+    });
     state.pager.hidden = rows.length <= pageSize;
     state.pager.querySelector('[data-mobile-card-page-label]').textContent = `Page ${state.page + 1} of ${pageCount}`;
     state.pager.querySelector('[data-mobile-card-first]').disabled = state.page === 0;
@@ -9090,6 +9103,10 @@ for (const [triggerSelector, optionsSelector] of [
     const below = triggerBounds.bottom + 5;
     const top = below + menuBounds.height <= window.innerHeight - 8
       ? below : Math.max(8, triggerBounds.top - menuBounds.height - 5);
+    // Explicit opposite edges keep the menu content-sized in browsers whose
+    // popover defaults would otherwise stretch it to the full viewport.
+    options.style.right = 'auto';
+    options.style.bottom = 'auto';
     options.style.left = `${left}px`;
     options.style.top = `${top}px`;
   };

@@ -939,7 +939,15 @@
   };
   // "Dashboard Datasets & Filters" is a sub-panel of Manage Dashboards: it is
   // shown in a table row directly below the Dashboard whose filters are open,
-  // and parked (hidden) whenever no Dashboard has its filters open.
+  // and parked (hidden) whenever no Dashboard has its filters open. Compact
+  // screens show it in the same floating dialog used by the Dashboard viewer.
+  const compactLibraryFiltersQuery = window.matchMedia('(max-width:640px), (orientation:landscape) and (max-height:600px)');
+  let libraryFloatingFilters = false;
+  const syncCompactLibraryFilters = () => {
+    if (!compactLibraryFiltersQuery.matches || !activeId || !dashboardFiltersOpen) return;
+    if (!$('ds-filter-overlay').hidden || !$('ds-viewer').hidden) return;
+    openFloatingFilters({fromLibrary: true});
+  };
   const filterRow = node('tr', undefined, 'ds-filter-row');
   const filterRowCell = node('td', undefined, 'ds-filter-row-cell'); filterRowCell.colSpan = 5; filterRow.append(filterRowCell);
   filterRow.id = 'ds-filter-row';
@@ -1073,12 +1081,13 @@
       ppt.disabled = !dashboardCanExport(id);
       action('Delete Dashboard', '×', async () => { await deleteDashboard(id); }, 'danger-button');
       const cell = node('td'); cell.dataset.label = 'Actions'; cell.append(actions); row.append(cell); body.append(row);
-      if (filtersAreOpen) {
+      if (filtersAreOpen && !compactLibraryFiltersQuery.matches) {
         filterRowCell.append($('ds-filter-home'));
         row.classList.add('ds-dashboard-filters-open');
         body.append(filterRow);
       }
     }
+    syncCompactLibraryFilters();
   }
   const renderDashboardStatuses = () => {
     document.querySelectorAll('[data-dashboard-status-id]').forEach(badge => {
@@ -2912,11 +2921,25 @@
   $('ds-chart-expanded-prev').onclick = safe(async () => navigateExpandedChart(expandedCharts().findIndex(chart => chart.index === expandedChart?.index) - 1));
   $('ds-chart-expanded-next').onclick = safe(async () => navigateExpandedChart(expandedCharts().findIndex(chart => chart.index === expandedChart?.index) + 1));
   $('ds-chart-expanded-last').onclick = safe(async () => navigateExpandedChart(expandedCharts().length - 1));
-  const openFloatingFilters = () => { const panel = $('ds-filter-panel'); panel.hidden = false; panel.open = true; panel.querySelector('summary').tabIndex = -1; $('ds-filter-float').append(panel); setPreparationState($('ds-preparing').dataset.state || 'hidden'); $('ds-generate-ppt').hidden = true; $('ds-view').hidden = true; $('ds-filter-close-action').hidden = false; overlay('ds-filter-overlay', true); };
+  // Opened from the Dashboards table, the dialog keeps the table actions
+  // (Generate PPT, View Dashboard) and closing it closes the Dashboard filters.
+  const openFloatingFilters = ({fromLibrary = false} = {}) => { libraryFloatingFilters = fromLibrary; const panel = $('ds-filter-panel'); panel.hidden = false; panel.open = true; panel.querySelector('summary').tabIndex = -1; $('ds-filter-float').append(panel); setPreparationState($('ds-preparing').dataset.state || 'hidden'); $('ds-generate-ppt').hidden = !fromLibrary; $('ds-view').hidden = !fromLibrary; $('ds-filter-close-action').hidden = fromLibrary; overlay('ds-filter-overlay', true); };
   const closeFilters = async () => {
+    const closedFromLibrary = libraryFloatingFilters;
+    libraryFloatingFilters = false;
+    if (closedFromLibrary) { dashboardFiltersOpen = false; rememberFiltersOpen(false); }
     const panel = $('ds-filter-panel'); panel.querySelector('summary').removeAttribute('tabindex'); $('ds-filter-home').append(panel); panel.hidden = !dashboardFiltersOpen; setPreparationState($('ds-preparing').dataset.state || 'hidden'); $('ds-generate-ppt').hidden = false; $('ds-view').hidden = false; $('ds-filter-close-action').hidden = true; overlay('ds-filter-overlay', false);
+    if (closedFromLibrary) { document.dispatchEvent(new CustomEvent('page-panel-navigation:update')); library(); }
     return true;
   };
+  compactLibraryFiltersQuery.addEventListener('change', () => {
+    // Leaving the compact layout returns open table filters to their row.
+    if (!compactLibraryFiltersQuery.matches && libraryFloatingFilters && !$('ds-filter-overlay').hidden) {
+      libraryFloatingFilters = false;
+      void closeFilters();
+    }
+    library();
+  });
   const templateEditorHasUnsavedChanges = () => {
     try {
       return Boolean($('ds-editor-frame').contentDocument?.querySelector('[data-catalogue-editor]')?.hasUnsavedCatalogueChanges?.());
@@ -3434,7 +3457,7 @@
   bind('ds-presentation-start', startPresentation);
   bind('ds-presentation-stop', stopPresentation);
   bind('ds-presentation-stop-viewer', stopPresentation);
-  bind('ds-floating-filters', openFloatingFilters);
+  bind('ds-floating-filters', () => openFloatingFilters());
   bind('ds-filter-close', closeFilters);
   bind('ds-filter-close-action', closeFilters);
   const closeOnOutsidePointer = (id, close) => {

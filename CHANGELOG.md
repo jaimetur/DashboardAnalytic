@@ -11,8 +11,10 @@
 
 #### 🚀 Enhancements:
 - The Charts Panel filters PowerPoint jobs by their complete Region and City selections as well as NR Mode, Dashboard, Template and Scope; each filter offers values from jobs matching the other active filters. Its job selector fills the space up to View Filters, shows the export's NR Mode and geography, and lets long city lists use the remaining width.
+- On phones and other small screens, **Open Filters** in Manage Dashboards shows Dashboard Datasets & Filters in the same floating panel as the viewer's **Dashboard Filters** instead of an extra table row.
 
 #### 🐛 Bug fixes:
+- On small screens, the **Builders** and **Config** module tabs have the same height as the other tabs and their menus only take the height of their options (iOS Safari stretched them to the full screen), the Dashboard viewer's **Scope** selector uses the same font size as its neighbouring buttons, and the Workspace Datasets cards no longer show the Combined CDR tables banner and a blank column-header row as cards of their own: the banner is shown above each combined CDR card.
 
 #### 📚 Documentation:
 

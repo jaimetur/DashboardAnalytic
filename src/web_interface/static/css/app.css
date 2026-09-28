@@ -253,9 +253,9 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .module-tab-config { background: linear-gradient(135deg, #d7f2ec, #bde8df); border-color: rgba(32, 144, 124, 0.40); color: #075d59; }
 .module-tab-config:hover { background: linear-gradient(135deg, #c6eae2, #a8ddd1); color: #064c48; }
 .module-tab-config.active { background: linear-gradient(135deg, #08736d, #0b5d58); border-color: rgba(5, 83, 79, 0.72); color: #fff; box-shadow: 0 10px 24px rgba(11, 122, 117, 0.30); }
-.module-tabs :is([data-module-config-trigger], [data-module-builders-trigger]) { font: inherit; font-weight: 700; cursor: pointer; }
-.module-config-options, .module-builders-options { position: fixed; inset: auto; box-sizing: border-box; width: max-content; min-width: 12rem; max-width: calc(100vw - 1rem); margin: 0; padding: .4rem; border: 1px solid rgba(32, 144, 124, .4); border-radius: 12px; background: #f4fbf9; box-shadow: 0 16px 35px rgba(5, 83, 79, .2); }
-.module-config-options:popover-open, .module-builders-options:popover-open { display: grid; gap: .2rem; }
+.module-tabs :is([data-module-config-trigger], [data-module-builders-trigger]) { min-height: 0; font: inherit; font-weight: 700; cursor: pointer; }
+.module-config-options, .module-builders-options { position: fixed; inset: auto; top: auto; right: auto; bottom: auto; left: auto; box-sizing: border-box; width: max-content; height: max-content; max-height: calc(100vh - 1rem); max-height: calc(100dvh - 1rem); overflow-y: auto; min-width: 12rem; max-width: calc(100vw - 1rem); margin: 0; padding: .4rem; border: 1px solid rgba(32, 144, 124, .4); border-radius: 12px; background: #f4fbf9; box-shadow: 0 16px 35px rgba(5, 83, 79, .2); }
+.module-config-options:popover-open, .module-builders-options:popover-open { display: grid; align-content: start; gap: .2rem; }
 .module-config-options a, .module-builders-options a { display: block; padding: .65rem .8rem; border-radius: 8px; color: #075d59; font-weight: 700; white-space: nowrap; }
 .module-config-options a:hover, .module-config-options a.is-active { background: linear-gradient(135deg, #d7f2ec, #bde8df); color: #064c48; }
 .module-config-options a:focus-visible { outline: 2px solid #08736d; outline-offset: -2px; }
