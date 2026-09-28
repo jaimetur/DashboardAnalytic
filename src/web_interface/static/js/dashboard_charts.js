@@ -957,16 +957,30 @@
     // text scales with them, so wide placeholders stay legible once the
     // canvas is fitted to its card or PPT placeholder.
     const rowHeight = dynamic
-      ? Math.max(20, Math.min(92, Math.floor(availableHeight / Math.max(rows.length + headerBands, 1))))
-      : Math.max(34, Math.min(100, Math.floor(availableHeight / Math.max(rows.length + 1, 1))));
-    const headerFont = Math.max(12, Math.min(34, Math.round(rowHeight * .42)));
-    const cellFont = Math.max(11, Math.min(32, Math.round(rowHeight * .4)));
+      ? Math.max(8, Math.min(92, Math.floor(availableHeight / Math.max(rows.length + headerBands, 1))))
+      : Math.max(8, Math.min(100, Math.floor(availableHeight / Math.max(rows.length + 1, 1))));
     // Text is painted with the smaller of the horizontal and vertical scales;
     // convert its measured width into the table's horizontal logical units.
     const transform = context.getTransform();
     const horizontalScale = Math.max(Math.hypot(transform.a, transform.b), .0001);
     const textWidthRatio = Math.min(horizontalScale, Math.hypot(transform.c, transform.d)) / horizontalScale;
     const textWidth = text => context.measureText(text).width * textWidthRatio;
+    // The text size is the smaller of what the row height allows and what
+    // lets every heading and value fit its column, so a table reads well in
+    // a wide Dashboard card, a PPT placeholder and the expanded chart view.
+    // Headings always fit whole; a few exceptionally long values may still
+    // be shortened with an ellipsis instead of shrinking the whole table.
+    const widestAtSize = (texts, bold, share = 1) => {
+      font(context, 100, bold);
+      const widths = texts.map(text => textWidth(String(text ?? ''))).sort((a, b) => a - b);
+      return Math.max(1, widths[Math.min(widths.length - 1, Math.floor((widths.length - 1) * share))] || 0);
+    };
+    const columnTextRoom = Math.max(1, columnWidth - 16);
+    const widthFit = (texts, bold, share) => Math.floor(100 * columnTextRoom / widestAtSize(texts, bold, share));
+    const cellTexts = rows.flatMap(row => row.map(value => value));
+    const fontRatio = rowHeight < 30 ? .74 : .58;
+    const headerFont = Math.max(8, Math.min(28, Math.round(rowHeight * (fontRatio + .02)), widthFit(headers, true)));
+    const cellFont = Math.max(8, Math.min(26, Math.round(rowHeight * fontRatio), widthFit(cellTexts, dynamic, .95)));
     const fitText = (value, maxWidth) => {
       const text = String(value ?? '');
       if (textWidth(text) <= maxWidth) return text;

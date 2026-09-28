@@ -163,7 +163,7 @@ DASHBOARD_OPEN_PRIORITY_SECONDS = 30.0
 DASHBOARD_FRAME_CACHE_SNAPSHOTS = max(1, int(os.environ.get('DASHBOARD_ANALYTIC_DASHBOARD_FRAME_CACHE_SNAPSHOTS') or 3))
 DASHBOARD_SELECTION_CACHE_LIMIT = 128
 DASHBOARD_PROFILE_SELECTION_THRESHOLD = 100_000
-DASHBOARD_CHART_MODEL_CACHE_VERSION = 14
+DASHBOARD_CHART_MODEL_CACHE_VERSION = 15
 DASHBOARD_CHART_MODEL_DISK_LIMIT = 500
 DASHBOARD_CHART_RENDER_WORKERS = max(1, min(2, (os.cpu_count() or 2) - 1))
 DASHBOARD_PREVIEW_MANIFEST_VERSION = 8
@@ -263,6 +263,8 @@ class Snapshot:
     chart_payloads: dict[int, dict[str, object]] = field(default_factory=dict)
     frame_locks: dict[str, RLock] = field(default_factory=dict)
     cancelled: object = None
+    # Operator/Vendor mapping fingerprint the cached frames were built with.
+    mapping_key: str = ''
 
 
 def install_dashboard_routes(core):
@@ -3986,6 +3988,10 @@ def install_dashboard_routes(core):
         snapshot, entry, _ = snapshot_chart(token, index, user, include_frame=False, expected_workspace=expected_workspace)
         model_path = canvas_model_path(snapshot, entry)
         model_dir = model_path.parent
+        mapping_key = sha256(json.dumps(
+            Repository(Path(snapshot.workspace), core.repository.global_db_path).chart_mapping_settings(),
+            sort_keys=True,
+        ).encode()).hexdigest()
         if force:
             with lock:
                 snapshot.chart_payloads.pop(index, None)
@@ -3994,14 +4000,19 @@ def install_dashboard_routes(core):
                 # only the Canvas payload would immediately rebuild it from
                 # that stale frame after an Admin mapping change.
                 snapshot.chart_frames.pop(index, None)
-                # Refresh is also the user's explicit request to re-read
-                # workspace mapping order and colours.  Filtered/raw frames
-                # are mapping-dependent, so retaining them can make a forced
-                # render paint an older operator order despite a new model.
-                snapshot.frames.clear()
-                snapshot.filtered_frames.clear()
-                snapshot.frame_locks.clear()
+                # Filtered/raw frames are mapping-dependent too, but reloading
+                # them re-reads every CDR row of the chart's type. Drop them
+                # only when the workspace mappings changed since they were
+                # built (or when that is unknown).
+                if snapshot.mapping_key != mapping_key:
+                    snapshot.frames.clear()
+                    snapshot.filtered_frames.clear()
+                    snapshot.frame_locks.clear()
             model_path.unlink(missing_ok=True)
+        with lock:
+            snapshot.mapping_key = snapshot.mapping_key or mapping_key
+            if force:
+                snapshot.mapping_key = mapping_key
         with lock:
             payload = snapshot.chart_payloads.get(index)
         if payload is None and model_path.is_file():

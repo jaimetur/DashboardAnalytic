@@ -978,6 +978,8 @@ def test_dashboard_ppt_cover_uses_scope_and_catalogue_geography(client):
     # Like the viewer, the details follow the subtitle (below the template line).
     assert details['dashboard-ppt-scope'].top > placeholders[4].top + placeholders[4].height
     assert placeholders[4].text_frame.paragraphs[0].runs[0].font.color.theme_color == MSO_THEME_COLOR.ACCENT_4
+    # The cover subtitle does not inherit the layout's condensed letter spacing.
+    assert placeholders[4].text_frame.paragraphs[0].runs[0].font._rPr.get('spc') == '0'
     assert details['dashboard-ppt-region'].text_frame.paragraphs[0].font.color.rgb not in {
         RGBColor(255, 255, 255), RGBColor(255, 255, 0),
     }

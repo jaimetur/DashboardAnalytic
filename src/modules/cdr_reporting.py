@@ -95,7 +95,7 @@ _DASHBOARD_CANVAS_RENDERER_LOCK = threading.RLock()
 # The browser worker keeps a copy of dashboard_charts.js in memory. Bump this
 # whenever rendering semantics change so a live server does not keep painting
 # previews with an older script after a hot reload.
-DASHBOARD_CANVAS_RENDERER_VERSION = 9
+DASHBOARD_CANVAS_RENDERER_VERSION = 10
 
 
 def _node_executable() -> str:
@@ -6392,7 +6392,9 @@ def catalog_chart_payload(
                 rows.sort(key=lambda row: hierarchy_sort_key(
                     visible_rows, tuple(row[:len(visible_rows)]),
                 ))
-            rows = rows[:36 if dynamic_table else 18]
+            # Table renderers share the available height among every row, so
+            # only very large tables are capped to stay legible.
+            rows = rows[:96 if dynamic_table else 60]
             return {
                 **_chart_payload_base("table", title, render_entry, data, metric),
                 "aggregation": aggregation,
@@ -6427,7 +6429,7 @@ def catalog_chart_payload(
         headers = [str(table.index.name or "Category"), *[str(value) for value in table.columns]]
         rows = [
             [str(index), *["" if pd.isna(value) else f"{float(value):.2f}{suffix}" for value in values]]
-            for index, values in table.head(18).iterrows()
+            for index, values in table.head(60).iterrows()
         ]
         return {
             **_chart_payload_base("table", title, render_entry, data, metric),
@@ -6797,10 +6799,13 @@ def _set_structural_slide_text(slide, title: str, subtitle: str) -> None:
     else:
         subtitle_paragraphs = []
     # Title and transition subtitles use the template's yellow accent (theme
-    # accent 4, as on the Title Page layout) whatever layout hosts them.
+    # accent 4, as on the Title Page layout) whatever layout hosts them, with
+    # normal letter spacing instead of the layout's condensed style.
     for paragraph in subtitle_paragraphs:
         for run in paragraph.runs:
             run.font.color.theme_color = MSO_THEME_COLOR.ACCENT_4
+            run.font._rPr.set('spc', '0')
+            run.font._rPr.set('kern', '0')
 
     # Structural slides keep only their title/subtitle placeholders. Branding
     # and decorations inherited from the master/layout remain untouched.
