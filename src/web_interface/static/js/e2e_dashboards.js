@@ -593,10 +593,58 @@
     return dashboard;
   };
   const pptDialogStorageKey = dashboardId => `dashboard-analytic:e2e-dashboards:${config.workspace}:ppt-dialog:${config.username || authenticatedSession}:${dashboardId}`;
+  // The PPT export dialog scrolls its body, which would clip an opened
+  // selector menu. The menu is fixed right below its field instead, so it can
+  // overflow the panel and the dialog without anything scrolling.
+  const pptDialogBody = document.querySelector('#ds-ppt-dataset-overlay .ds-ppt-universe-body');
+  const placePptDialogMenu = menu => {
+    for (const property of ['position', 'left', 'right', 'top', 'bottom', 'width', 'max-height', 'z-index']) menu.style.removeProperty(property);
+    const shell = menu.closest('.multiselect-shell');
+    if (menu.hidden || !shell) return;
+    const shellBounds = shell.getBoundingClientRect();
+    const gap = 7;
+    // A transformed or filtered ancestor becomes the fixed containing block;
+    // use its origin instead of assuming the viewport. The menu's own opening
+    // animation must not be measured, so the origin comes from the ancestor.
+    let origin = {left: 0, top: 0};
+    for (let ancestor = menu.parentElement; ancestor && ancestor !== document.documentElement; ancestor = ancestor.parentElement) {
+      const style = getComputedStyle(ancestor);
+      if (style.transform !== 'none' || style.filter !== 'none' || (style.backdropFilter && style.backdropFilter !== 'none')
+        || /paint|layout|strict|content/.test(style.contain) || /transform|filter/.test(style.willChange)) {
+        const bounds = ancestor.getBoundingClientRect();
+        origin = {left: bounds.left + ancestor.clientLeft, top: bounds.top + ancestor.clientTop};
+        break;
+      }
+    }
+    menu.style.position = 'fixed';
+    menu.style.right = 'auto'; menu.style.bottom = 'auto';
+    menu.style.width = `${shellBounds.width}px`;
+    menu.style.maxHeight = `${Math.max(140, Math.min(320, window.innerHeight - shellBounds.bottom - gap - 8))}px`;
+    menu.style.zIndex = '60';
+    menu.style.left = `${shellBounds.left - origin.left}px`;
+    menu.style.top = `${shellBounds.bottom + gap - origin.top}px`;
+  };
+  const placeOpenPptDialogMenus = () => pptDialogBody?.querySelectorAll('.multiselect-menu:not([hidden])').forEach(placePptDialogMenu);
+  if (pptDialogBody) {
+    new MutationObserver(records => records.forEach(record => {
+      if (!(record.target instanceof HTMLElement) || !record.target.matches('.multiselect-menu')) return;
+      placePptDialogMenu(record.target);
+      // Focusing the menu's search field can scroll the body right after it
+      // opens; place it again once that settles.
+      requestAnimationFrame(() => placePptDialogMenu(record.target));
+    })).observe(pptDialogBody, {attributes: true, attributeFilter: ['hidden'], subtree: true});
+    pptDialogBody.addEventListener('scroll', placeOpenPptDialogMenus, {passive: true});
+    window.addEventListener('resize', placeOpenPptDialogMenus);
+  }
   const chooseDashboardPptUniverse = (dashboard, dashboardId) => new Promise(resolve => {
     let remembered = null;
     try { remembered = JSON.parse(localStorage.getItem(pptDialogStorageKey(dashboardId)) || 'null'); }
     catch (_) { /* Local storage is optional. */ }
+    // The heading starts with the Dashboard's NR Mode and name.
+    const headingNrMode = dashboardNrMode(dashboard);
+    $('ds-ppt-dataset-nr-mode').textContent = headingNrMode;
+    $('ds-ppt-dataset-nr-mode').className = `ds-ppt-eyebrow-part ds-ppt-eyebrow-nr-mode-${headingNrMode.toLowerCase()}`;
+    $('ds-ppt-dataset-dashboard').textContent = String(dashboard?.name || '');
     const scopeControl = $('ds-ppt-dataset-scope');
     syncMultivendorAvailability();
     scopeControl.value = remembered?.scope === 'multivendor' && !$('ds-ppt-dataset-scope').querySelector('option[value="multivendor"]').disabled ? 'multivendor' : 'single';
@@ -634,10 +682,195 @@
     const selectionControls = {
       operators: operatorControl, vendors: vendorControl, regions: regionControl, cities: cityControl,
     };
+    // Dashboard Filters start from the values saved in the Dashboard; a field
+    // it does not filter starts with every value of the selected CDRs.
+    const selectionFields = {operators: 'Operator', vendors: 'Vendor', regions: 'Region', cities: 'City'};
+    // Save Universe and Save Filters update this saved definition.
+    let savedDashboard = dashboard;
+    const savedDashboardSelection = field => {
+      const filters = savedDashboard?.filters || {};
+      const key = Object.keys(filters).find(item => identity(item) === identity(field));
+      return key && Array.isArray(filters[key]) ? filters[key].map(String).filter(Boolean) : null;
+    };
     const selectionState = Object.fromEntries(Object.keys(selectionControls).map(key => {
-      const values = Array.isArray(remembered?.[key]) ? remembered[key].map(String) : [];
-      return [key, {values, all: !Array.isArray(remembered?.[key]) || remembered?.[`${key}_all`] === true}];
+      const saved = savedDashboardSelection(selectionFields[key]);
+      return [key, saved?.length ? {values: saved, all: false} : {values: [], all: true}];
     }));
+    // "Show All Filters" adds the Dashboard's other main filters and its
+    // Additional Filters, each starting from its saved Dashboard values.
+    const dialogPanel = $('ds-ppt-dataset-overlay').querySelector('[role=dialog]');
+    const showAllButton = $('ds-ppt-show-all-filters');
+    const extraMainHost = $('ds-ppt-extra-main-filters');
+    const additionalGroup = $('ds-ppt-additional-group');
+    const additionalHost = $('ds-ppt-additional-filters');
+    const mainFieldIds = new Set(Object.values(selectionFields).map(identity));
+    const hiddenFieldIds = new Set((dashboard?.hidden_filters || []).map(identity));
+    const additionalFields = [...new Set((dashboard?.custom_fields || []).map(String))];
+    const additionalFieldIds = new Set(additionalFields.map(identity));
+    const extraMainFields = [...(config.filter_fields || facetFields).filter(field => !hiddenFieldIds.has(identity(field))), ...Object.keys(dashboard?.filters || {})]
+      .filter((field, index, all) => !mainFieldIds.has(identity(field)) && !additionalFieldIds.has(identity(field))
+        && all.findIndex(item => identity(item) === identity(field)) === index);
+    const extraFilterLabel = (field, custom) => custom ? field : field === 'technology_primary' ? 'Technology' : field.replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase());
+    const extraFilters = new Map();
+    let showAllFilters = false;
+    let extraFiltersRequest = 0;
+    extraMainHost.replaceChildren(); additionalHost.replaceChildren();
+    extraMainHost.hidden = true; additionalGroup.hidden = true;
+    dialogPanel.classList.remove('ds-ppt-all-filters');
+    showAllButton.textContent = 'Show All Filters';
+    showAllButton.setAttribute('aria-expanded', 'false');
+    showAllButton.disabled = !extraMainFields.length && !additionalFields.length;
+    showAllButton.title = showAllButton.disabled ? 'This Dashboard has no other filters.' : 'Show every Dashboard filter, including Additional Filters';
+    const buildExtraFilters = () => {
+      if (extraFilters.size) return;
+      for (const [fields, host, custom] of [[extraMainFields, extraMainHost, false], [additionalFields, additionalHost, true]]) {
+        for (const field of fields) {
+          const label = extraFilterLabel(field, custom);
+          const section = node('section', undefined, 'ds-ppt-universe-section ds-ppt-extra-filter');
+          const control = document.createElement('select');
+          control.multiple = true; control.size = 1; control.disabled = true;
+          control.setAttribute('aria-label', `PowerPoint ${label} filter`);
+          control.append(extraPlaceholder('Loading available values…'));
+          section.append(node('h3', label), control);
+          host.append(section);
+          control.onchange = () => updateSaveState();
+          extraFilters.set(field, {control, loaded: false, saved: savedDashboardSelection(field)});
+        }
+      }
+      if (!additionalFields.length) additionalHost.append(node('p', 'No additional filters have been added.', 'form-note'));
+      globalThis.setupCustomMultiSelects?.();
+    };
+    // A marked placeholder makes the selector read "Loading available values…"
+    // instead of "None Selected" while its values load.
+    const extraPlaceholder = text => { const entry = option('', text); entry.selected = true; return entry; };
+    const loadExtraFilterOptions = async () => {
+      const request = ++extraFiltersRequest;
+      const previousSelections = new Map([...extraFilters].map(([field, state]) => [field, state.loaded ? {
+        values: [...state.control.selectedOptions].map(item => item.value),
+        all: [...state.control.options].every(item => item.selected),
+      } : null]));
+      for (const state of extraFilters.values()) {
+        state.loaded = false;
+        state.control.disabled = true;
+        state.control.replaceChildren(extraPlaceholder('Loading available values…'));
+        state.control.dispatchEvent(new Event('multiselect:options-updated'));
+      }
+      updateSaveState();
+      // One request returns every field, from the CDR profiles when possible.
+      let options = {};
+      try {
+        options = (await api('/filter-options/batch', 'POST', {definition: exportUniverse(), fields: [...extraFilters.keys()]})).options || {};
+      } catch (_error) { options = {}; }
+      if (request !== extraFiltersRequest) return;
+      for (const [field, state] of extraFilters) {
+        const values = (options[field] || []).map(String);
+        const previous = previousSelections.get(field);
+        const wanted = previous ? (previous.all ? values : previous.values) : state.saved;
+        const kept = wanted?.length ? values.filter(value => wanted.includes(value)) : [];
+        const selected = new Set(kept.length ? kept : values);
+        state.control.replaceChildren(...values.map(value => {
+          const entry = option(value, value || '(Empty)'); entry.selected = selected.has(value); return entry;
+        }));
+        if (!values.length) state.control.append(extraPlaceholder('No matching values'));
+        state.control.disabled = !values.length;
+        state.loaded = values.length > 0;
+        state.control.dispatchEvent(new Event('multiselect:options-updated'));
+      }
+      updateSaveState();
+    };
+    const extraFilterSelections = () => Object.fromEntries([...extraFilters].filter(([, state]) => state.loaded).map(([field, state]) => {
+      const available = [...state.control.options].filter(item => item.value !== '' || item.textContent === '(Empty)');
+      const values = available.filter(item => item.selected).map(item => item.value);
+      // Every value selected keeps the Dashboard's open selection.
+      return [field, values.length === available.length ? [] : values];
+    }));
+    // Save Universe / Save Filters are enabled only when the dialog differs
+    // from what the Dashboard has saved.
+    const saveUniverseButton = $('ds-ppt-save-universe');
+    const saveFiltersButton = $('ds-ppt-save-filters');
+    let savingDashboardPart = false;
+    const sameValues = (left, right) => left.length === right.length && left.every(value => right.includes(value));
+    const dialogUniverse = () => ({
+      scope: scopeControl.value,
+      datasets: Object.fromEntries(Object.entries(selectedDatasets()).map(([kind, ids]) => [kind, [...ids].sort((a, b) => a - b)])),
+      date_from: automaticFrom.checked ? 'Oldest' : dateFrom.value,
+      date_to: automaticTo.checked ? 'Newest' : dateTo.value,
+    });
+    const universeChanged = () => {
+      const current = dialogUniverse();
+      const saved = savedDashboard || {};
+      const savedIds = kind => (saved.datasets?.[kind] || []).map(Number).sort((a, b) => a - b);
+      return current.scope !== (saved.scope === 'multivendor' ? 'multivendor' : 'single')
+        || current.date_from !== String(saved.date_from || 'Oldest') || current.date_to !== String(saved.date_to || 'Newest')
+        || ['data', 'voice', 'speech'].some(kind => !sameValues(current.datasets[kind] || [], savedIds(kind)));
+    };
+    // A field reads as changed when its selection differs from the saved one,
+    // comparing only values the selected CDRs contain; every value selected
+    // equals an open (unfiltered) selection.
+    const changedFilterFields = () => {
+      const changes = {};
+      const compare = (field, control, currentAll, currentValues) => {
+        const available = [...control.options].filter(item => !control.disabled && (item.value !== '' || item.textContent === '(Empty)')).map(item => item.value);
+        if (!available.length) return;
+        const saved = savedDashboardSelection(field);
+        const savedPresent = saved?.length ? saved.filter(value => available.includes(value)) : [];
+        const savedAll = !savedPresent.length || savedPresent.length === available.length;
+        const changed = currentAll ? !savedAll : savedAll || !sameValues(savedPresent, currentValues);
+        if (changed) changes[field] = currentAll ? [] : currentValues;
+      };
+      for (const [key, field] of Object.entries(selectionFields)) compare(field, selectionControls[key], selectionState[key].all, selectionState[key].values);
+      for (const [field, state] of extraFilters) {
+        if (!state.loaded) continue;
+        const values = [...state.control.selectedOptions].map(item => item.value);
+        const available = [...state.control.options].filter(item => item.value !== '' || item.textContent === '(Empty)');
+        compare(field, state.control, values.length === available.length, values);
+      }
+      return changes;
+    };
+    const updateSaveState = () => {
+      const busy = savingDashboardPart || geographyLoading;
+      saveUniverseButton.disabled = busy || !choices.querySelector('input:checked') || !universeChanged();
+      saveFiltersButton.disabled = busy || !Object.keys(changedFilterFields()).length;
+    };
+    const saveDashboardPart = async part => {
+      savingDashboardPart = true; updateSaveState();
+      try {
+        const item = structuredClone(dashboards[dashboardId] || savedDashboard);
+        if (part === 'universe') Object.assign(item, dialogUniverse());
+        else {
+          item.filters ||= {};
+          for (const [field, values] of Object.entries(changedFilterFields())) {
+            for (const key of Object.keys(item.filters)) if (identity(key) === identity(field)) delete item.filters[key];
+            if (values.length) item.filters[field] = values;
+          }
+        }
+        const result = await api(`/${encodeURIComponent(dashboardId)}`, 'PUT', item);
+        dashboards[dashboardId] = structuredClone(result.definition);
+        savedDashboard = dashboards[dashboardId];
+        if (dashboardId === activeId && definition) {
+          const fields = part === 'universe' ? universeDefinitionFields : filterDefinitionFields;
+          definition = copyDefinitionFields(definition, result.definition, fields);
+          savedDefinition = definitionFingerprint(result.definition);
+          updateDirtyState(); sources(); facets();
+        }
+        library();
+        status(`Saved ${part === 'universe' ? 'Dataset Universe' : 'filters'} for “${result.definition.name}”.`);
+      } catch (error) {
+        window.showInfoDialog?.(error.message, {title: 'E2E Dashboards', tone: 'error'});
+      } finally {
+        savingDashboardPart = false; updateSaveState();
+      }
+    };
+    saveUniverseButton.onclick = () => { void saveDashboardPart('universe'); };
+    saveFiltersButton.onclick = () => { void saveDashboardPart('filters'); };
+    showAllButton.onclick = () => {
+      showAllFilters = !showAllFilters;
+      dialogPanel.classList.toggle('ds-ppt-all-filters', showAllFilters);
+      extraMainHost.hidden = !showAllFilters; additionalGroup.hidden = !showAllFilters;
+      showAllButton.textContent = showAllFilters ? 'Show Main Filters' : 'Show All Filters';
+      showAllButton.setAttribute('aria-expanded', String(showAllFilters));
+      if (showAllFilters && !extraFilters.size) { buildExtraFilters(); void loadExtraFilterOptions(); }
+    };
     const rememberDialog = () => {
       const choice = {
         scope: scopeControl.value, datasets: selectedDatasets(),
@@ -681,6 +914,7 @@
         ? 'Loading the Operators, Vendors, Regions and Cities of the selected CDRs…'
         : !choices.querySelector('input:checked') ? 'Select at least one CDR dataset.' : dateError;
       confirm.classList.toggle('is-busy', geographyLoading);
+      updateSaveState();
     };
     const refreshGeography = async () => {
       const request = ++geographyRequest;
@@ -742,6 +976,7 @@
           copy.textContent = `Select one or more ${field === 'Operator' ? 'Operators' : field === 'Vendor' ? 'Vendors' : field === 'Region' ? 'Regions' : 'Cities'} to include in this PowerPoint export.`;
         }
         rememberDialog();
+        if (extraFilters.size) void loadExtraFilterOptions();
       } catch (error) {
         if (request !== geographyRequest) return;
         operatorSection.hidden = true;
@@ -814,6 +1049,7 @@
       vendors: selectedVendors(),
       regions: selectedRegions(),
       cities: selectedCities(),
+      extra_filters: extraFilterSelections(),
     }); };
     renderChoices(true);
     syncDateControls();
@@ -847,6 +1083,7 @@
       withPptSelection(exportDefinition, 'Vendor', selectedVendors);
       withPptSelection(exportDefinition, 'Region', selectedRegions);
       withPptSelection(exportDefinition, 'City', selectedCities);
+      for (const [field, values] of Object.entries(universeChoice.extra_filters || {})) withPptSelection(exportDefinition, field, values);
     } else {
       filterDecision = id === activeId ? await resolveUnappliedFilterChanges() : 'unchanged';
       if (!filterDecision) return;

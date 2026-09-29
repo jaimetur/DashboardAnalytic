@@ -248,14 +248,14 @@
 @media(max-width:640px){.ds-multivendor-dialog{width:calc(100vw - .75rem);max-height:calc(100dvh - .75rem);padding:.72rem}.ds-multivendor-dialog .section-head{margin-bottom:.25rem}.ds-multivendor-dialog .section-head h2{font-size:1.05rem;line-height:1.15}.ds-ppt-universe-section{margin-top:.5rem;padding:.55rem}.ds-ppt-universe-section>h3{margin-bottom:.42rem;font-size:.84rem}.ds-ppt-universe-section>.form-note{margin:.2rem 0;font-size:.68rem}.ds-multivendor-choices{grid-template-columns:1fr;gap:.45rem;margin-top:.45rem}.ds-multivendor-group{padding:.5rem}.ds-multivendor-group h3{margin-bottom:.3rem;font-size:.78rem}.ds-multivendor-options{gap:.2rem;max-height:6.25rem}.ds-multivendor-option{gap:.35rem;padding:.24rem;font-size:.7rem;line-height:1.2}.ds-ppt-date-choices{grid-template-columns:repeat(2,minmax(0,1fr));gap:.55rem}.ds-ppt-date-choice{gap:.3rem}.ds-ppt-date-choice>label:first-child{gap:.25rem;font-size:.72rem}.ds-ppt-date-choice input[type="date"]{min-height:2.45rem;padding:.35rem;font-size:16px}.ds-ppt-automatic-date{align-items:flex-start;gap:.3rem;font-size:.66rem;line-height:1.15}.ds-ppt-date-status{margin:.25rem 0 0;font-size:.66rem}.ds-multivendor-actions{margin-top:.55rem;padding-top:.55rem;border-top:1px solid #ded3ed;background:#fff}.e2e-dashboards .ds-multivendor-actions button{min-height:2.35rem;padding:.42rem .68rem;font-size:.72rem}}
 
 /* Keep the four geography selectors paired in the PowerPoint export dialog. */
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-universe-body{box-sizing:border-box;display:grid;grid-template-columns:repeat(2,minmax(14rem,1fr));align-content:start;align-items:stretch;gap:.6rem;overflow-x:auto;overflow-y:auto;padding-right:.2rem}
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-universe-body>.ds-ppt-universe-section{box-sizing:border-box;min-width:0;margin:0}
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-universe-body>#ds-ppt-scope-section,.e2e-dashboards .ds-multivendor-dialog .ds-ppt-universe-body>#ds-ppt-cdr-section,.e2e-dashboards .ds-multivendor-dialog .ds-ppt-universe-body>#ds-ppt-dates-section{grid-column:1/-1}
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-universe-body>.ds-ppt-universe-section[hidden]{display:none}
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-universe-body>:is(#ds-ppt-operator-section,#ds-ppt-vendor-section,#ds-ppt-region-section,#ds-ppt-city-section){display:flex;flex-direction:column}
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-universe-body>:is(#ds-ppt-operator-section,#ds-ppt-vendor-section,#ds-ppt-region-section,#ds-ppt-city-section)>:is(select[multiple],.multiselect-shell){margin-top:auto}
-.e2e-dashboards .ds-multivendor-dialog .ds-ppt-universe-body>.ds-ppt-universe-section[hidden]{display:none!important}
-@media(max-width:640px){.e2e-dashboards .ds-multivendor-dialog .ds-ppt-universe-body{grid-template-columns:repeat(2,minmax(12rem,1fr));gap:.45rem}.e2e-dashboards .ds-multivendor-dialog .ds-ppt-universe-body>.ds-ppt-universe-section{padding:.55rem}}
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-universe-body{box-sizing:border-box;display:grid;grid-template-columns:minmax(0,1fr);align-content:start;gap:.8rem;overflow-x:auto;overflow-y:auto;padding-right:.2rem}.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group{box-sizing:border-box;display:grid;grid-template-columns:repeat(2,minmax(14rem,1fr));align-content:start;align-items:stretch;gap:.6rem;min-width:0;margin:0;padding:.8rem;border:1px solid #cdb8e6;border-radius:.9rem;background:#f6f1fc}
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group>.ds-ppt-universe-section{box-sizing:border-box;min-width:0;margin:0}
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group>#ds-ppt-scope-section,.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group>#ds-ppt-cdr-section,.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group>#ds-ppt-dates-section{grid-column:1/-1}
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group>.ds-ppt-universe-section[hidden]{display:none}
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group>:is(#ds-ppt-operator-section,#ds-ppt-vendor-section,#ds-ppt-region-section,#ds-ppt-city-section){display:flex;flex-direction:column}
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group>:is(#ds-ppt-operator-section,#ds-ppt-vendor-section,#ds-ppt-region-section,#ds-ppt-city-section)>:is(select[multiple],.multiselect-shell){margin-top:auto}
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group>.ds-ppt-universe-section[hidden]{display:none!important}
+@media(max-width:640px){.e2e-dashboards .ds-multivendor-dialog .ds-ppt-universe-body{gap:.55rem}.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group{grid-template-columns:repeat(2,minmax(12rem,1fr));gap:.45rem;padding:.55rem}.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group>.ds-ppt-universe-section{padding:.55rem}}
 
 .ds-scope-control.ds-filter-applied-unsaved select,
 .ds-date-picker.ds-date-picker-applied-unsaved .ds-date-picker-control>input,
@@ -1750,3 +1750,63 @@
 /* The viewer always shows the slide title and subtitle in capitals. */
 #ds-title, #ds-subtitle { text-transform:uppercase; }
 .ds-structural-slide .ds-structural-campaigns + .ds-structural-rule { margin-top:1.4cqh; }
+
+/* The PPT export dialog groups the Dashboard Universe (lavender, like the
+   filter panel's universe column) above the Dashboard Filters (blue, like
+   its default filters). */
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group-title { grid-column:1/-1; margin:0; color:#4c3277; font-size:1rem; font-weight:850; }
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group > .ds-ppt-universe-section { margin:0; background:#fff; }
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-filters-group { border-color:#afd1e8; background:#f1f8fd; }
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-filters-group .ds-ppt-group-title,
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-filters-group .ds-ppt-universe-section > h3 { color:#275f86; }
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-filters-group .ds-ppt-universe-section { border-color:#c7def0; }
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-filters-group .multiselect-trigger { border-color:#b8d5e9; color:#275f86; }
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-filters-group:not(:has(> .ds-ppt-universe-section:not([hidden]))) { display:none; }
+
+/* Main Dashboard Filters heading with Show All Filters, the extra filters it
+   reveals (Additional Filters in pink, as in the filter panel) and the
+   dialog's Save Universe / Save Filters actions. */
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-group-head { grid-column:1/-1; display:flex; align-items:center; justify-content:space-between; gap:.75rem; }
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-show-all-filters { min-height:0; padding:.38rem .8rem; border:1px solid #6a9cc4; border-radius:999px; background:#fff; color:#275f86; font-size:.78rem; font-weight:800; box-shadow:none; white-space:nowrap; }
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-show-all-filters:hover:not(:disabled) { background:#dcedf8; }
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-show-all-filters[aria-expanded="true"] { border-color:#397fa9; background:#397fa9; color:#fff; }
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-extra-filters { display:contents; }
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-extra-filters[hidden] { display:none; }
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-extra-filter { display:flex; flex-direction:column; gap:.45rem; }
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-extra-filter > :is(select[multiple], .multiselect-shell) { margin-top:auto; }
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-additional-group[hidden] { display:none; }
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-additional-group { border-color:#e7b8cd; background:#fff5f9; }
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-additional-group .ds-ppt-group-title,
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-additional-group .ds-ppt-universe-section > h3 { color:#843b61; }
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-additional-group .ds-ppt-universe-section { border-color:#efc9da; }
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-additional-group .multiselect-trigger { border-color:#dda7c0; background:#fffafd; color:#7c3158; }
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-additional-group > .form-note { grid-column:1/-1; margin:0; }
+@media (min-width:901px) {
+  .e2e-dashboards .ds-multivendor-dialog.ds-ppt-all-filters { width:min(82rem,96vw); }
+  .e2e-dashboards .ds-multivendor-dialog.ds-ppt-all-filters :is(.ds-ppt-filters-group, .ds-ppt-additional-group) { grid-template-columns:repeat(auto-fill,minmax(15rem,1fr)); }
+}
+.e2e-dashboards #ds-ppt-save-universe { background:linear-gradient(135deg,#456d9c,#6594c5); border-color:#365d89; color:#fff; }
+.e2e-dashboards #ds-ppt-save-universe:hover:not(:disabled) { background:linear-gradient(135deg,#355b86,#4c7dac); border-color:#294d75; }
+.e2e-dashboards #ds-ppt-save-filters { background:linear-gradient(135deg,#1f7a5c,#2fa37b); border-color:#18654b; color:#fff; }
+.e2e-dashboards #ds-ppt-save-filters:hover:not(:disabled) { background:linear-gradient(135deg,#17624a,#238a66); border-color:#124f3b; }
+.e2e-dashboards :is(#ds-ppt-save-universe,#ds-ppt-save-filters):disabled { background:#d9d5df; border-color:#c5bfcc; color:#807887; box-shadow:none; opacity:.8; }
+.e2e-dashboards .ds-multivendor-dialog .ds-ppt-extra-filters > .ds-ppt-universe-section { margin:0; background:#fff; }
+
+/* Show All Filters: every filter card looks the same (no per-selector help
+   text) and cards are compact so more of them fit on each row. */
+.e2e-dashboards .ds-multivendor-dialog.ds-ppt-all-filters :is(.ds-ppt-filters-group, .ds-ppt-additional-group) .ds-ppt-universe-section > .form-note { display:none; }
+.e2e-dashboards .ds-multivendor-dialog.ds-ppt-all-filters :is(.ds-ppt-filters-group, .ds-ppt-additional-group) { gap:.45rem; padding:.65rem; }
+.e2e-dashboards .ds-multivendor-dialog.ds-ppt-all-filters :is(.ds-ppt-filters-group, .ds-ppt-additional-group) .ds-ppt-universe-section { gap:.35rem; padding:.5rem .6rem; border-radius:.65rem; }
+.e2e-dashboards .ds-multivendor-dialog.ds-ppt-all-filters :is(.ds-ppt-filters-group, .ds-ppt-additional-group) .ds-ppt-universe-section > h3 { margin:0 0 .3rem; font-size:.82rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.e2e-dashboards .ds-multivendor-dialog.ds-ppt-all-filters :is(.ds-ppt-filters-group, .ds-ppt-additional-group) .multiselect-trigger { min-height:2.2rem; padding:.3rem .7rem; font-size:.8rem; }
+@media (min-width:901px) {
+  .e2e-dashboards .ds-multivendor-dialog.ds-ppt-all-filters :is(.ds-ppt-filters-group, .ds-ppt-additional-group) { grid-template-columns:repeat(auto-fill,minmax(11.5rem,1fr)); }
+}
+
+/* PowerPoint export heading: NR Mode (NSA gold, SA blue) · Dashboard name ·
+   PowerPoint export, with a dot only between non-empty parts. */
+.e2e-dashboards .ds-ppt-dataset-eyebrow .ds-ppt-eyebrow-part:empty { display:none; }
+.e2e-dashboards .ds-ppt-dataset-eyebrow .ds-ppt-eyebrow-part:not(:empty) ~ .ds-ppt-eyebrow-part:not(:empty)::before { content:'●'; margin:0 .6rem; color:#695678; font-size:.75em; vertical-align:.12em; }
+.e2e-dashboards .ds-ppt-dataset-eyebrow .ds-ppt-eyebrow-nr-mode-nsa { color:#9a6c00; font-weight:850; }
+.e2e-dashboards .ds-ppt-dataset-eyebrow .ds-ppt-eyebrow-nr-mode-sa { color:#1f5f99; font-weight:850; }
+.e2e-dashboards .ds-ppt-dataset-eyebrow .ds-ppt-eyebrow-dashboard { color:#6d46a8; font-weight:850; }

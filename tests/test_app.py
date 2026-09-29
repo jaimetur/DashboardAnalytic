@@ -4877,7 +4877,7 @@ def test_dashboard_library_ppt_export_selects_scope_cdrs_explicitly() -> None:
     assert 'data-multiselect-preset-label="Main Cities"' in template
     assert 'data-multiselect-preset-values' not in template
     assert "'main_cities': dashboard_main_cities | default([])" in template
-    assert '>Select Dashboard Datasets Universe<' in template
+    assert '>Select Dashboard Universe and Filters<' in template
     assert 'id="ds-ppt-date-from"' in template
     assert 'id="ds-ppt-date-to"' in template
     assert template.index('id="ds-ppt-scope-title"') < template.index('id="ds-ppt-cdr-title"') < template.index('id="ds-ppt-dates-title"')

@@ -596,6 +596,22 @@ def test_dashboard_library_geography_options_are_loaded_in_one_request(client):
     }
 
 
+def test_dashboard_filter_options_batch_returns_every_requested_field(client):
+    payload = setup_dashboard(client)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and core.repository.get_dataset(1)['status'] != 'ready':
+        time.sleep(0.05)
+    # Saved filters never restrict the values offered for the selected CDRs.
+    payload['filters'] = {'City': ['Leeds']}
+
+    response = client.post('/api/e2e-dashboards/filter-options/batch', json={
+        'definition': payload, 'fields': ['Operator', 'City'],
+    })
+
+    assert response.status_code == 200, response.text
+    assert response.json()['options'] == {'Operator': ['A', 'B'], 'City': ['Leeds', 'London']}
+
+
 def test_dashboard_campaigns_keep_their_nr_mode_suffix(client):
     client.post('/login', data={'username': 'super', 'password': 'super123'})
     response = client.post('/datasets-analysis/upload', data={'dataset_kinds': 'data'}, files={
@@ -1226,7 +1242,28 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'id="ds-ppt-dataset-overlay"' in page.text
     assert 'id="ds-ppt-dataset-choices"' in page.text
     assert 'id="ds-ppt-dataset-scope"' in page.text
-    assert '>Select Dashboard Datasets Universe<' in page.text
+    assert '>Select Dashboard Universe and Filters<' in page.text
+    # The PPT dialog groups the Dashboard Universe above the Dashboard Filters.
+    universe_group = page.text.index('class="ds-ppt-group ds-ppt-universe-group"')
+    filters_group = page.text.index('class="ds-ppt-group ds-ppt-filters-group"')
+    assert universe_group < page.text.index('id="ds-ppt-cdr-section"') < page.text.index('id="ds-ppt-dates-section"') < filters_group
+    assert filters_group < page.text.index('id="ds-ppt-operator-section"') < page.text.index('id="ds-ppt-city-section"')
+    # Main Dashboard Filters can reveal every other filter, including Additional Filters.
+    assert '>Main Dashboard Filters</h3><button type="button" id="ds-ppt-show-all-filters"' in page.text
+    # The heading names the Dashboard's NR Mode and the Dashboard.
+    assert '<span class="ds-ppt-eyebrow-part" id="ds-ppt-dataset-nr-mode"></span><span class="ds-ppt-eyebrow-part ds-ppt-eyebrow-dashboard" id="ds-ppt-dataset-dashboard"></span><span class="ds-ppt-eyebrow-part">PowerPoint export</span>' in page.text
+    assert page.text.index('id="ds-ppt-city-section"') < page.text.index('id="ds-ppt-extra-main-filters"') < page.text.index('id="ds-ppt-additional-group"')
+    # Save Universe and Save Filters sit between Cancel and Generate PPT.
+    actions = [page.text.index(f'id="{name}"') for name in ('ds-ppt-dataset-cancel', 'ds-ppt-save-universe', 'ds-ppt-save-filters', 'ds-ppt-dataset-confirm')]
+    assert actions == sorted(actions)
+    dialog_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
+    assert "return [key, saved?.length ? {values: saved, all: false} : {values: [], all: true}];" in dialog_script
+    assert "options = (await api('/filter-options/batch', 'POST', {definition: exportUniverse(), fields: [...extraFilters.keys()]})).options || {};" in dialog_script
+    assert "for (const [field, values] of Object.entries(universeChoice.extra_filters || {})) withPptSelection(exportDefinition, field, values);" in dialog_script
+    assert "saveFiltersButton.disabled = busy || !Object.keys(changedFilterFields()).length;" in dialog_script
+    assert "saveUniverseButton.disabled = busy || !choices.querySelector('input:checked') || !universeChanged();" in dialog_script
+    # An opened selector menu is fixed below its field and may overflow the dialog.
+    assert "menu.style.top = `${shellBounds.bottom + gap - origin.top}px`;" in dialog_script
     assert 'id="ds-ppt-date-from"' in page.text
     assert 'id="ds-ppt-date-to"' in page.text
     assert '>Dataset Universe<' in page.text

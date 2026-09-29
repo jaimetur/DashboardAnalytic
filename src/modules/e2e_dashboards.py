@@ -88,6 +88,11 @@ class DashboardFilterOptionsRequest(BaseModel):
     field: str = Field(min_length=1, max_length=255)
 
 
+class DashboardFilterOptionsBatchRequest(BaseModel):
+    definition: DashboardDefinition
+    fields: list[str] = Field(min_length=1, max_length=64)
+
+
 class DashboardChartFilterPreviewRequest(BaseModel):
     filters: str = ''
     chart_title: str | None = None
@@ -2649,6 +2654,25 @@ def install_dashboard_routes(core):
                 connection.execute('DELETE FROM dashboard_filter_selections WHERE id = ?', (row['id'],))
             return selection_id, cache_key, options, row_counts, universe_row_counts, True
 
+    def load_filter_options_batch(definition, field_names, task_repository):
+        """Load several unrestricted filter catalogues of the selected CDRs at once.
+
+        Values come from the CDR upload profiles; only fields missing from
+        them are read from the combined tables, in one pass per CDR table.
+        """
+        fields = list(dict.fromkeys(str(field).strip() for field in field_names if str(field).strip()))
+        validate(definition, task_repository)
+        dimensions = core.load_repository_calculated_dimensions(task_repository)
+        selected_by_kind = selected_sources(definition, task_repository)
+        requested_definition = unfiltered_definition(definition).model_copy(deep=True)
+        for field in fields:
+            known_default = any(identity(field) == identity(item) for item in ADAPTATIVE_FILTER_FIELDS)
+            if not known_default and not any(identity(field) == identity(item) for item in requested_definition.custom_fields):
+                requested_definition.custom_fields.append(field)
+        ensure_combined_filter_columns(requested_definition, task_repository, dimensions, selected_by_kind)
+        options = profile_filter_options(requested_definition, dimensions, selected_by_kind, fields, task_repository)
+        return {field: [str(value) for value in options.get(field, [])] for field in fields}
+
     def load_filter_options(definition, field_name, task_repository):
         """Load one adaptive filter catalogue without preparing Dashboard charts."""
         field_name = field_name.strip()
@@ -3417,6 +3441,15 @@ def install_dashboard_routes(core):
             task_repository = bound_repository()
             values = load_filter_options(request.definition, request.field, task_repository)
             return {'field': request.field.strip(), 'values': values}
+        except (ValueError, KeyError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post('/api/e2e-dashboards/filter-options/batch')
+    def filter_options_batch(request: DashboardFilterOptionsBatchRequest, user=Depends(dashboard_user)):
+        """Return the values the selected CDRs offer for several filters in one request."""
+        try:
+            task_repository = bound_repository()
+            return {'options': load_filter_options_batch(request.definition, request.fields, task_repository)}
         except (ValueError, KeyError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
