@@ -321,7 +321,11 @@
           const item = document.createElement('li');
           const link = document.createElement('a');
           link.href = `#${release.id}`;
-          link.textContent = `v${release.version}`;
+          link.append(Object.assign(document.createElement('span'), {className: 'release-nav-version', textContent: `v${release.version}`}));
+          if (release.date) {
+            link.append(Object.assign(document.createElement('span'), {className: 'release-nav-separator', textContent: '●'}));
+            link.append(Object.assign(document.createElement('span'), {className: 'release-nav-date', textContent: release.date}));
+          }
           link.addEventListener('click', () => {
             requestAnimationFrame(() => openChangelogRelease(release.id, true, true));
           });

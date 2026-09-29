@@ -3650,3 +3650,8 @@ body:has(.release-navigator) .help-navigator{top:37%}
 .ds-nr-mode-badge-nsa { border-color: #dcc05a; background: #fff3bf; color: #6b5310; }
 .ds-nr-mode-badge-sa { border-color: #8db4e2; background: #dcebff; color: #1f4f7f; }
 .reporting-jobs-table-wrap .report-jobs-table td:nth-child(4) { text-align: center; }
+
+/* Release navigators show each version with its date: "v0.4.2 ● 2026-09-28". */
+.help-nav-list .release-nav-separator { margin: 0 .45rem; color: #8a7f96; font-size: .7em; vertical-align: .12em; }
+.help-nav-list .release-nav-version { font-weight: 800; }
+.help-nav-list .release-nav-date { color: #5d6b76; font-weight: 400; }

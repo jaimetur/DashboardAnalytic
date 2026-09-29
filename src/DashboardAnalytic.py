@@ -9089,10 +9089,16 @@ def get_help_documents_index(user: SessionUser = Depends(current_user)) -> dict[
 @app.get('/api/documents/changelog-index')
 def get_changelog_index(user: SessionUser = Depends(current_user)) -> dict[str, Any]:
     changelog = resolve_doc_path('changelog').read_text(encoding='utf-8', errors='replace')
-    releases = [
-        {'version': match.group(1), 'id': f'release-v{match.group(1)}'}
-        for match in re.finditer(r'^##\s+Release:\s+v([^\s]+)', changelog, re.MULTILINE)
-    ]
+    headers = list(re.finditer(r'^##\s+Release:\s+v([^\s]+)', changelog, re.MULTILINE))
+    releases = []
+    for index, match in enumerate(headers):
+        # Each release section states its date on a "### Release Date:" line.
+        section_end = headers[index + 1].start() if index + 1 < len(headers) else len(changelog)
+        date_match = re.search(r'^###\s+Release Date:\s*(\S+)', changelog[match.end():section_end], re.MULTILINE)
+        releases.append({
+            'version': match.group(1), 'id': f'release-v{match.group(1)}',
+            'date': date_match.group(1) if date_match else '',
+        })
     return {'releases': releases}
 
 

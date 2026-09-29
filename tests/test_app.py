@@ -8859,9 +8859,12 @@ def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
     assert 'collapseOthers' in changelog_view.text
     changelog_index = client.get('/api/documents/changelog-index')
     assert changelog_index.status_code == 200
-    assert changelog_index.json()['releases'][0] == {
+    first_release = changelog_index.json()['releases'][0]
+    assert {key: first_release[key] for key in ('version', 'id')} == {
         'version': __version__, 'id': f'release-v{__version__}',
     }
+    assert re.fullmatch(r'\d{4}-\d{2}-\d{2}', first_release['date'])
+    assert "className: 'release-nav-separator', textContent: '●'" in changelog_view.text
 
     help_view = client.get("/documents/view/help")
     assert help_view.status_code == 200
