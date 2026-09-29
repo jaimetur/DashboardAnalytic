@@ -17,7 +17,7 @@ Dashboard uses the same Report Template schema and renderer as Reporting. This g
 
 1. Enter **Dashboard name**, select **NR Mode** and choose a compatible **Template**. Dashboard names are unique per NR Mode, so an NSA and an SA Dashboard may share a name; the library lists them by NR Mode (NSA first) and then name.
 2. Click **Create Dashboard**. The definition is persisted immediately and opens in Dashboard Datasets & Filters.
-3. Use Open to restore a Dashboard in the editor or the green eye to enter View Dashboard directly.
+3. Each row offers **View Dashboard**, **Open Filters** and **Generate PPT** as labelled actions, followed by the Duplicate, Export and Delete icons.
 4. Edit a name in the table and save it with the green check. The **NR Mode** and **Template** columns also provide selectors for changing an existing Dashboard. Confirming either change invalidates its prepared reports and charts, then rebuilds them from the new compatible template while preserving its saved Scope, CDR universe, date range, adaptive filters, custom fields and comments.
 5. Duplicate creates an independent definition. Close leaves the active definition without deleting it.
 6. Delete removes the definition after confirmation; it does not remove CDRs, templates or generated PPT jobs.

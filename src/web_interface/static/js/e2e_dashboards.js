@@ -1310,12 +1310,14 @@
       }, filtersAreOpen ? 'ds-dashboard-close' : 'ds-dashboard-open');
       open.classList.remove('icon-action');
       primaryActionLabel(open, filtersAreOpen ? 'Close' : 'Open', 'Filters');
-      action('Duplicate Dashboard', '⧉', async () => { if (await confirmDiscard()) await duplicateDashboard(id); });
-      action('Export Dashboard', '', () => exportDashboard(id, item), 'ds-dashboard-export');
       const ppt = action('Generate Dashboard PPT', '', () => queueDashboardPptExport(id, item, {chooseScope: true}), 'ds-dashboard-ppt');
+      ppt.classList.remove('icon-action');
+      primaryActionLabel(ppt, 'Generate', 'PPT');
       ppt.dataset.dashboardPptId = id;
       // Same rule as the periodic status sync: pre-caching never blocks exports.
       ppt.disabled = !dashboardCanExport(id);
+      action('Duplicate Dashboard', '⧉', async () => { if (await confirmDiscard()) await duplicateDashboard(id); });
+      action('Export Dashboard', '', () => exportDashboard(id, item), 'ds-dashboard-export');
       action('Delete Dashboard', '×', async () => { await deleteDashboard(id); }, 'danger-button');
       const cell = node('td'); cell.dataset.label = 'Actions'; cell.append(actions); row.append(cell); body.append(row);
       if (filtersAreOpen && !compactLibraryFiltersQuery.matches) {

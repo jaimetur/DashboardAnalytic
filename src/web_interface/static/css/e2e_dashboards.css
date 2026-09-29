@@ -40,7 +40,8 @@
 .ds-ppt-jobs-table .report-job-dashboard-button{position:relative;display:inline-grid;place-items:center;width:2rem;height:2rem;min-height:0;padding:0!important;border:1px solid #0d6a53;border-radius:999px;background:linear-gradient(145deg,#137a61,#22ad83);color:#fff;font-size:0!important;line-height:1;box-shadow:0 8px 18px rgba(18,130,98,.2)}.ds-ppt-jobs-table .report-job-dashboard-button::before{content:'';display:block;width:1.08rem;height:1.08rem;background:center/contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='16' rx='2'/%3E%3Cpath d='M3 9h18'/%3E%3Cpath d='M8 2v4M16 2v4'/%3E%3Cpath d='m8 14 2.2 2.2L16.5 11'/%3E%3C/svg%3E")}.ds-ppt-jobs-table .report-job-dashboard-button:hover:not(:disabled){border-color:#095740;background:linear-gradient(145deg,#0e694f,#168967);box-shadow:0 10px 22px rgba(9,87,64,.3);transform:translateY(-1px)}
 .e2e-dashboards .ds-dashboard-action.ds-dashboard-open,
 .e2e-dashboards .ds-dashboard-action.ds-dashboard-close,
-.e2e-dashboards .ds-dashboard-action.ds-dashboard-view{
+.e2e-dashboards .ds-dashboard-action.ds-dashboard-view,
+.e2e-dashboards .ds-dashboard-action.ds-dashboard-ppt{
   display:inline-flex;align-items:center;justify-content:center;gap:.4rem;
   width:fit-content!important;min-width:max-content!important;height:1.8rem;min-height:1.8rem;
   padding:.2rem .62rem!important;border-radius:999px!important;font-size:.82rem!important;
@@ -48,14 +49,16 @@
 }
 .e2e-dashboards .ds-dashboard-action.ds-dashboard-open::after,
 .e2e-dashboards .ds-dashboard-action.ds-dashboard-close::after,
-.e2e-dashboards .ds-dashboard-action.ds-dashboard-view::after{
+.e2e-dashboards .ds-dashboard-action.ds-dashboard-view::after,
+.e2e-dashboards .ds-dashboard-action.ds-dashboard-ppt::after{
   order:-1;flex:0 0 1rem;width:1rem;height:1rem;
 }
 .ds-dashboard-action-label{display:inline}.ds-dashboard-action-label>span+span::before{content:' '}
 @media(max-width:760px){
   .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-open,
   .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-close,
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-view{
+  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-view,
+  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-ppt{
     width:fit-content!important;min-width:max-content!important;justify-self:start;
   }
 }
@@ -582,7 +585,8 @@
   }
   .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-view,
   .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-open,
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-close {
+  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-close,
+  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-ppt {
     grid-column:span 2;
     display:grid;
     grid-template-columns:auto auto;
@@ -600,17 +604,17 @@
     font-size:.72rem!important;
     line-height:1.05;
   }
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:is(.ds-dashboard-view,.ds-dashboard-open,.ds-dashboard-close)::after {
+  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:is(.ds-dashboard-view,.ds-dashboard-open,.ds-dashboard-close,.ds-dashboard-ppt)::after {
     grid-column:1;
     grid-row:1;
     order:initial;
     width:1.25rem;
     height:1.25rem;
   }
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:is(.ds-dashboard-view,.ds-dashboard-open,.ds-dashboard-close) .ds-dashboard-action-label{display:contents}
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:is(.ds-dashboard-view,.ds-dashboard-open,.ds-dashboard-close) .ds-dashboard-action-label>span:first-child{grid-column:2;grid-row:1}
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:is(.ds-dashboard-view,.ds-dashboard-open,.ds-dashboard-close) .ds-dashboard-action-label>span:last-child{grid-column:1 / -1;grid-row:2}
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:is(.ds-dashboard-view,.ds-dashboard-open,.ds-dashboard-close) .ds-dashboard-action-label>span+span::before{content:none}
+  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:is(.ds-dashboard-view,.ds-dashboard-open,.ds-dashboard-close,.ds-dashboard-ppt) .ds-dashboard-action-label{display:contents}
+  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:is(.ds-dashboard-view,.ds-dashboard-open,.ds-dashboard-close,.ds-dashboard-ppt) .ds-dashboard-action-label>span:first-child{grid-column:2;grid-row:1}
+  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:is(.ds-dashboard-view,.ds-dashboard-open,.ds-dashboard-close,.ds-dashboard-ppt) .ds-dashboard-action-label>span:last-child{grid-column:1 / -1;grid-row:2}
+  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:is(.ds-dashboard-view,.ds-dashboard-open,.ds-dashboard-close,.ds-dashboard-ppt) .ds-dashboard-action-label>span+span::before{content:none}
   .report-jobs-table.ds-ppt-jobs-table { width: 100%; min-width: 0; }
   .ds-ppt-jobs-table tbody tr { grid-template-columns:repeat(3,minmax(0,1fr)); }
   .ds-ppt-jobs-table tbody td { width: auto !important; min-width: 0 !important; max-width: none !important; }
@@ -1810,3 +1814,7 @@
 .e2e-dashboards .ds-ppt-dataset-eyebrow .ds-ppt-eyebrow-nr-mode-nsa { color:#9a6c00; font-weight:850; }
 .e2e-dashboards .ds-ppt-dataset-eyebrow .ds-ppt-eyebrow-nr-mode-sa { color:#1f5f99; font-weight:850; }
 .e2e-dashboards .ds-ppt-dataset-eyebrow .ds-ppt-eyebrow-dashboard { color:#6d46a8; font-weight:850; }
+
+/* Generate PPT is a labelled library action right after Open Filters; its
+   PPT icon keeps its wider proportions. */
+.e2e-dashboards .ds-dashboard-action.ds-dashboard-ppt::after { flex:0 0 1.3rem; width:1.3rem; height:1.08rem; }
