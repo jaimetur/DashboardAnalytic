@@ -6282,7 +6282,7 @@ document.querySelectorAll('[data-import-package-form]').forEach((form) => {
     confirmed.value = '0';
     showLoadingOverlay(
       'Uploading import package',
-      'Uploading the selected ZIP package for inspection. Large workspace packages can take several minutes; the import warning will appear as soon as the upload is ready.',
+      'Uploading the selected ZIP package or Scoring Configuration JSON for inspection. Large workspace packages can take several minutes; the import warning will appear as soon as the upload is ready.',
     );
     try {
       // Let the browser paint the progress dialog before starting a potentially large upload.

@@ -317,11 +317,11 @@
       <form class="form-stack" action="/admin/import-export/import" method="post" enctype="multipart/form-data" data-import-package-form>
         <h3>Import</h3>
         <label>Import package
-          <input type="file" name="package" accept=".zip,application/zip" required>
+          <input type="file" name="package" accept=".zip,.json,application/zip,application/json" required>
         </label>
         <input type="hidden" name="confirmed_import" value="0" data-import-package-confirmed>
-        <p class="form-note">The package manifest identifies its content automatically. Dashboard, Report Template and Auto-calculated Field packages ask which destination workspaces should receive their definitions before the background import starts.</p>
-        <button type="submit" class="import-export-action">Import ZIP</button>
+        <p class="form-note">Choose a ZIP package or a Scoring Configuration JSON document. Its content is identified automatically. Workspace configuration packages ask which destination workspaces should receive their definitions before the background import starts.</p>
+        <button type="submit" class="import-export-action">Import ZIP / JSON</button>
       </form>
       <form class="form-stack" action="/admin/import-export/export/jobs" method="post" data-export-package-form data-loading-label="Preparing export package" data-loading-copy="Please wait while Dashboard Analytic creates the selected export package. You can keep this page open while it runs.">
         <h3>Export / Transfer</h3>
