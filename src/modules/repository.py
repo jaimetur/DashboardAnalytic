@@ -193,6 +193,7 @@ CREATE TABLE IF NOT EXISTS cdr_catalogues (
     regions_json TEXT NOT NULL DEFAULT '[]',
     cities_json TEXT NOT NULL DEFAULT '[]',
     campaigns_json TEXT,
+    operators_json TEXT,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(dataset_id) REFERENCES datasets(id) ON DELETE CASCADE
 );
@@ -814,6 +815,8 @@ class Repository:
         if existing_columns and 'campaigns_json' not in existing_columns:
             # NULL marks catalogues whose Campaigns have not been read yet.
             conn.execute("ALTER TABLE cdr_catalogues ADD COLUMN campaigns_json TEXT")
+        if existing_columns and 'operators_json' not in existing_columns:
+            conn.execute("ALTER TABLE cdr_catalogues ADD COLUMN operators_json TEXT")
 
     def _ensure_dataset_profile_columns(self, conn: sqlite3.Connection) -> None:
         existing_columns = {row['name'] for row in conn.execute("PRAGMA table_info(dataset_profiles)").fetchall()}
@@ -873,27 +876,29 @@ class Repository:
 
     def replace_cdr_catalogue(
         self, dataset_id: int, *, vendors: Iterable[str], regions: Iterable[str], cities: Iterable[str],
-        campaigns: Iterable[str] | None = None,
+        campaigns: Iterable[str] | None = None, operators: Iterable[str] | None = None,
     ) -> None:
         """Persist the lightweight universe catalogues derived from one CDR.
 
-        ``campaigns=None`` keeps any Campaigns already stored for the CDR.
+        ``campaigns=None`` and ``operators=None`` preserve the corresponding cached values.
         """
         normalized = self._catalogue_json
         campaigns_json = None if campaigns is None else normalized(campaigns)
+        operators_json = None if operators is None else normalized(operators)
         with self.connection() as conn:
             conn.execute(
                 """
-                INSERT INTO cdr_catalogues (dataset_id, vendors_json, regions_json, cities_json, campaigns_json, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO cdr_catalogues (dataset_id, vendors_json, regions_json, cities_json, campaigns_json, operators_json, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(dataset_id) DO UPDATE SET
                     vendors_json = excluded.vendors_json,
                     regions_json = excluded.regions_json,
                     cities_json = excluded.cities_json,
                     campaigns_json = COALESCE(excluded.campaigns_json, cdr_catalogues.campaigns_json),
+                    operators_json = COALESCE(excluded.operators_json, cdr_catalogues.operators_json),
                     updated_at = excluded.updated_at
                 """,
-                (dataset_id, normalized(vendors), normalized(regions), normalized(cities), campaigns_json, local_now_iso()),
+                (dataset_id, normalized(vendors), normalized(regions), normalized(cities), campaigns_json, operators_json, local_now_iso()),
             )
 
     def set_cdr_catalogue_campaigns(self, dataset_id: int, campaigns: Iterable[str]) -> None:
@@ -917,27 +922,53 @@ class Repository:
         missing = {int(row['dataset_id']) for row in rows}
         return [dataset_id for dataset_id in ids if dataset_id in missing]
 
-    def cdr_catalogue_values(self, dataset_ids: Iterable[int] | None = None) -> dict[str, list[str]]:
-        """Return de-duplicated cached Vendor, Region and City values for CDRs."""
-        ids = [int(dataset_id) for dataset_id in (dataset_ids or [])]
+    def cdr_catalogues_by_dataset(self, dataset_ids: Iterable[int]) -> dict[int, dict[str, list[str]]]:
+        """Read lightweight cached universes in one query, never materialized CDR rows."""
+        ids = list(dict.fromkeys(int(value) for value in dataset_ids))
+        if not ids:
+            return {}
+        fields = ('vendors', 'regions', 'cities', 'campaigns', 'operators')
         with self.connection() as conn:
-            sql = 'SELECT vendors_json, regions_json, cities_json, campaigns_json FROM cdr_catalogues'
-            params: list[Any] = []
-            if ids:
-                sql += f" WHERE dataset_id IN ({','.join('?' for _ in ids)})"
-                params = ids
-            rows = conn.execute(sql, params).fetchall()
-        values = {'vendors': set(), 'regions': set(), 'cities': set(), 'campaigns': set()}
+            rows = conn.execute(
+                f"SELECT * FROM cdr_catalogues WHERE dataset_id IN ({','.join('?' for _ in ids)})", ids,
+            ).fetchall()
+        catalogues = {value: {field: [] for field in fields} for value in ids}
         for row in rows:
-            for key, column in (
-                ('vendors', 'vendors_json'), ('regions', 'regions_json'), ('cities', 'cities_json'),
-                ('campaigns', 'campaigns_json'),
-            ):
+            for field in fields:
                 try:
-                    values[key].update(str(value).strip() for value in json.loads(row[column] or '[]') if str(value).strip())
+                    values = json.loads(row[f'{field}_json'] or '[]')
+                    catalogues[int(row['dataset_id'])][field] = sorted(
+                        {str(value).strip() for value in values if str(value).strip()}, key=str.casefold,
+                    )
                 except (TypeError, json.JSONDecodeError):
                     continue
-        return {key: sorted(items, key=str.casefold) for key, items in values.items()}
+        return catalogues
+
+    def cdr_catalogue_values(self, dataset_ids: Iterable[int] | None = None) -> dict[str, list[str]]:
+        """Return de-duplicated cached CDR universes, preserving the all-CDR default."""
+        dataset_ids = list(dataset_ids) if dataset_ids is not None else []
+        if not dataset_ids:
+            with self.connection() as conn:
+                dataset_ids = [int(row[0]) for row in conn.execute('SELECT dataset_id FROM cdr_catalogues')]
+        catalogues = self.cdr_catalogues_by_dataset(dataset_ids)
+        return {field: sorted({value for catalogue in catalogues.values() for value in catalogue[field]}, key=str.casefold)
+                for field in ('vendors', 'regions', 'cities', 'campaigns', 'operators')}
+
+    def missing_cdr_operator_ids(self, dataset_ids: Iterable[int]) -> list[int]:
+        """Identify legacy catalogue rows that need a one-time Operator backfill."""
+        ids = list(dict.fromkeys(int(value) for value in dataset_ids))
+        if not ids:
+            return []
+        with self.connection() as conn:
+            return [int(row[0]) for row in conn.execute(
+                f"SELECT dataset_id FROM cdr_catalogues WHERE operators_json IS NULL AND dataset_id IN ({','.join('?' for _ in ids)})", ids,
+            )]
+
+    def set_cdr_catalogue_operators(self, dataset_id: int, operators: Iterable[str]) -> None:
+        """Persist a one-time Operator backfill without changing other dimensions."""
+        with self.connection() as conn:
+            conn.execute('UPDATE cdr_catalogues SET operators_json = ?, updated_at = ? WHERE dataset_id = ?',
+                         (self._catalogue_json(operators), local_now_iso(), int(dataset_id)))
 
     def missing_cdr_catalogue_ids(self, dataset_ids: Iterable[int]) -> list[int]:
         """Identify CDRs created before catalogue persistence was introduced."""

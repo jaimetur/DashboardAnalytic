@@ -10,6 +10,37 @@
   const datasetInputs = [...root.querySelectorAll('[data-dataset-id]')];
   const datasetKindOrder = ['data', 'voice', 'speech'];
   const datasetKindLabels = {data: 'Data', voice: 'Voice', speech: 'Speech'};
+  const contextFilterDefinitions = [
+    {key: 'Region', catalogueKey: 'regions'},
+    {key: 'City', catalogueKey: 'cities'},
+    {key: 'Operator', catalogueKey: 'operators'},
+    {key: 'Vendor', catalogueKey: 'vendors'},
+    {key: 'Campaign', catalogueKey: 'campaigns'},
+  ];
+  const contextFilterSelects = new Map(contextFilterDefinitions.map(({key}) => [
+    key, root.querySelector(`[data-scoring-context-filter="${key}"]`),
+  ]));
+  const scoringConfigElement = root.querySelector('[data-scoring-config]');
+  let scoringConfig = {};
+  try {
+    scoringConfig = JSON.parse(scoringConfigElement?.textContent || '{}');
+  } catch {
+    scoringConfig = {};
+  }
+  const mainCities = [...new Set((Array.isArray(scoringConfig.main_cities) ? scoringConfig.main_cities : [])
+    .map(value => String(value ?? '').trim()).filter(Boolean))];
+  const mainCityIdentities = new Set(mainCities.map(city => city.toLocaleLowerCase()));
+  const operatorGroups = (Array.isArray(scoringConfig.operator_groups) ? scoringConfig.operator_groups : [])
+    .filter(group => group && typeof group === 'object' && String(group.canonical || '').trim());
+  const datasetCatalogues = new Map(datasetOptions.map(option => {
+    let catalogue = {};
+    try {
+      catalogue = JSON.parse(option.dataset.catalogue || '{}');
+    } catch {
+      catalogue = {};
+    }
+    return [String(option.querySelector('[data-dataset-id]')?.value || ''), catalogue];
+  }));
   const aggregationInputs = [...root.querySelectorAll('[data-aggregation-level]')];
   const baselineInput = root.querySelector('[data-baseline-operator]');
   const calculateButton = root.querySelector('[data-calculate-scoring]');
@@ -64,6 +95,122 @@
   const selectedLevels = () => aggregationInputs.filter(input => input.checked).map(input => input.value);
   const selectedDatasetIds = () => datasetInputs.filter(input => input.checked && !input.closest('[data-dataset-option]')?.hidden).map(input => input.value);
 
+  function uniqueCatalogueValues(values) {
+    return [...new Set((Array.isArray(values) ? values : [])
+      .map(value => String(value ?? '').trim()).filter(Boolean))];
+  }
+
+  function operatorGroupLabels(group) {
+    const canonical = String(group.canonical || '').trim();
+    return [canonical, ...(Array.isArray(group.aliases) ? group.aliases : [])]
+      .map(value => String(value ?? '').trim()).filter(Boolean);
+  }
+
+  function contextFilterOptions(key, catalogueValues) {
+    if (key !== 'Operator') {
+      return catalogueValues.map(value => ({value, label: value, color: ''}))
+        .sort((left, right) => left.label.localeCompare(right.label, undefined, {sensitivity: 'base'}));
+    }
+    const availableByIdentity = new Map(catalogueValues.map(value => [value.toLocaleLowerCase(), value]));
+    const mapped = new Set();
+    const options = [];
+    for (const group of operatorGroups) {
+      const canonical = String(group.canonical || '').trim();
+      const aliases = operatorGroupLabels(group);
+      const matches = aliases.some(alias => availableByIdentity.has(alias.toLocaleLowerCase()));
+      if (!matches) continue;
+      aliases.forEach(alias => mapped.add(alias.toLocaleLowerCase()));
+      options.push({value: canonical, label: canonical, color: String(group.color || '')});
+    }
+    const unknown = catalogueValues.filter(value => !mapped.has(value.toLocaleLowerCase()))
+      .map(value => ({value, label: value, color: ''}))
+      .sort((left, right) => left.label.localeCompare(right.label, undefined, {sensitivity: 'base'}));
+    return [...options, ...unknown];
+  }
+
+  function decorateOperatorOptions(select) {
+    const shell = select?.nextElementSibling;
+    if (!shell?.matches('.multiselect-shell')) return;
+    for (const label of shell.querySelectorAll('.multiselect-option')) {
+      const value = label.querySelector('[data-option-value]')?.getAttribute('data-option-value');
+      const option = [...(select.options || [])].find(item => item.value === value);
+      const color = option?.dataset.operatorColor || '';
+      label.classList.toggle('scoring-operator-option', Boolean(color));
+      if (color) label.style.setProperty('--scoring-operator-color', color);
+      else label.style.removeProperty('--scoring-operator-color');
+    }
+  }
+
+  function refreshContextFilterOptions() {
+    const selectedIds = new Set(selectedDatasetIds());
+    for (const {key, catalogueKey} of contextFilterDefinitions) {
+      const select = contextFilterSelects.get(key);
+      if (!select) continue;
+      const selectedValues = new Set([...select.selectedOptions].map(option => option.value).filter(Boolean));
+      const rawValues = [];
+      for (const datasetId of selectedIds) {
+        const values = datasetCatalogues.get(String(datasetId))?.[catalogueKey];
+        rawValues.push(...uniqueCatalogueValues(values));
+      }
+      const nextOptions = contextFilterOptions(key, [...new Set(rawValues)]);
+      const presetCities = key === 'City'
+        ? nextOptions.filter(option => mainCityIdentities.has(option.value.trim().toLocaleLowerCase())).map(option => option.value) : [];
+      const signature = JSON.stringify({
+        options: nextOptions.map(option => [option.value, option.label, option.color]),
+        presetCities,
+      });
+      if (select.dataset.scoringCatalogueSignature === signature) continue;
+      select.dataset.scoringCatalogueSignature = signature;
+      if (key === 'City') {
+        select.dataset.multiselectPresetLabel = 'Main Cities';
+        select.dataset.multiselectPresetValues = presetCities.join('|');
+      }
+      select.replaceChildren();
+      if (!nextOptions.length) {
+        const empty = document.createElement('option');
+        empty.value = '';
+        empty.disabled = true;
+        empty.textContent = 'No values';
+        select.append(empty);
+      } else {
+        for (const entry of nextOptions) {
+          const option = document.createElement('option');
+          option.value = entry.value;
+          option.textContent = entry.label;
+          option.selected = selectedValues.has(entry.value);
+          if (entry.color) {
+            option.dataset.operatorColor = entry.color;
+            option.style.color = entry.color;
+          }
+          select.append(option);
+        }
+      }
+      select.dispatchEvent(new Event('multiselect:options-updated'));
+      if (key === 'Operator') decorateOperatorOptions(select);
+    }
+  }
+
+  function selectedContextFilters() {
+    return Object.fromEntries(contextFilterDefinitions.map(({key}) => {
+      const select = contextFilterSelects.get(key);
+      const values = select ? [...select.selectedOptions]
+        .filter(option => !option.disabled && option.value)
+        .map(option => String(option.value)) : [];
+      return [key, values];
+    }));
+  }
+
+  function contextFilterSummary(job) {
+    const filters = job?.context_filters && typeof job.context_filters === 'object'
+      ? job.context_filters : {};
+    const entries = contextFilterDefinitions.flatMap(({key}) => {
+      const values = filters[key] ?? filters[key.toLowerCase()];
+      const normalized = uniqueCatalogueValues(Array.isArray(values) ? values : (values ? [values] : []));
+      return normalized.length ? [`${key}: ${normalized.join(', ')}`] : [];
+    });
+    return entries.length ? entries.join(' · ') : 'All values';
+  }
+
   function setMessage(text, kind = '') {
     if (!message) return;
     message.textContent = text;
@@ -71,6 +218,7 @@
   }
 
   function updateSelection() {
+    refreshContextFilterOptions();
     const selectedCount = selectedDatasetIds().length;
     const visibleCount = datasetOptions.filter(option => !option.hidden).length;
     const missingKinds = [];
@@ -241,6 +389,10 @@
       campaignMeta.className = 'scoring-job-meta';
       campaignMeta.textContent = `Campaigns: ${jobCampaigns(job).join(', ')}`;
       button.append(campaignMeta);
+      const filterMeta = document.createElement('span');
+      filterMeta.className = 'scoring-job-meta';
+      filterMeta.textContent = `Context filters: ${contextFilterSummary(job)}`;
+      button.append(filterMeta);
       if (isActive(job)) {
         const progress = document.createElement('span');
         progress.className = 'scoring-job-progress';
@@ -1757,7 +1909,7 @@
     const mode = valueOf(job || payload.job, ['nr_mode'], 'All NR Modes');
     const baseline = valueOf(job || payload.job, ['baseline_operator'], 'EE');
     const environmentMeta = selectedEnvironment ? ` · ${environmentLabel(selectedEnvironment)}` : '';
-    resultMeta.textContent = `${formatDate(valueOf(job || payload.job, ['created_at', 'completed_at', 'submitted_at'], ''))} · ${levels} · ${mode}${environmentMeta} · GAP: compared operator minus ${baseline}`;
+    resultMeta.textContent = `${formatDate(valueOf(job || payload.job, ['created_at', 'completed_at', 'submitted_at'], ''))} · ${levels} · ${mode}${environmentMeta} · GAP: compared operator minus ${baseline} · Filters: ${contextFilterSummary(job || payload.job)}`;
     setExportLinks(jobIdOf(job || payload.job || {}), true);
   }
 
@@ -1797,10 +1949,10 @@
       } else if (status === 'failed') {
         const error = valueOf(record, ['error', 'error_message', 'last_error'], 'This scoring job failed without an error message.');
         renderNoResult(error);
-        resultMeta.textContent = `${jobSummary(record)} · Failed · ${error}`;
+        resultMeta.textContent = `${jobSummary(record)} · Failed · ${error} · Filters: ${contextFilterSummary(record)}`;
       } else {
         renderNoResult('Scoring results will appear here when the job completes.');
-        resultMeta.textContent = `${jobSummary(record)} · ${status} · ${jobLevels(record)}`;
+        resultMeta.textContent = `${jobSummary(record)} · ${status} · ${jobLevels(record)} · Filters: ${contextFilterSummary(record)}`;
         setExportLinks('', false);
       }
     } catch (error) {
@@ -1912,6 +2064,7 @@
       aggregation_levels: levels,
       nr_mode: nrFilter.value || 'NSA',
       baseline_operator: baseline,
+      context_filters: selectedContextFilters(),
       force,
     };
     calculateButton.disabled = true;

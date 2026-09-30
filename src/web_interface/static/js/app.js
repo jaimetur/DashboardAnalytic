@@ -4992,7 +4992,7 @@ function setupCustomMultiSelects() {
       if (totalEnabled === 0) {
         triggerLabel.textContent = 'No values';
       } else if (selectedOptions.length === 0) {
-        triggerLabel.textContent = 'None Selected';
+        triggerLabel.textContent = select.dataset.multiselectEmptyLabel || 'None Selected';
       } else if (dynamicAll && selectedOptions.length === totalEnabled) {
         triggerLabel.textContent = 'All values';
       } else if (selectedOptions.length === 1) {

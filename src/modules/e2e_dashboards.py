@@ -49,6 +49,7 @@ from src.modules.cdr_reporting import (
 )
 
 from src.modules.repository import Repository
+from src.modules.cdr_report_filenames import build_cdr_report_filename
 from src.modules.runtime_config import ignore_event_time_filtering
 from src.modules.ingestion import apply_operator_mappings
 
@@ -599,13 +600,6 @@ def install_dashboard_routes(core):
         ):
             return all_label
         return ', '.join(values)
-
-    def dashboard_ppt_filename_part(value: str, max_bytes: int) -> str:
-        safe = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', str(value)).strip(' .')
-        if len(safe.encode('utf-8')) <= max_bytes:
-            return safe
-        clipped = safe.encode('utf-8')[:max_bytes - 3].decode('utf-8', errors='ignore').rstrip(' .,_-&')
-        return f'{clipped}…' if clipped else '…'
 
     def dashboard_ppt_cover_label(field: str, label: str, count: int) -> str:
         if not label or label.startswith('All '):
@@ -1339,18 +1333,11 @@ def install_dashboard_routes(core):
         campaign_suffix='',
     ):
         """Return a unique ``timestamp - NR Mode - Dashboard - Scope - Regions - Campaigns`` file and folder."""
-        safe_campaigns = f' - {dashboard_ppt_filename_part(campaign_suffix, 60)}' if campaign_suffix else ''
-        max_stem_bytes = 240 - len(safe_campaigns.encode('utf-8'))
-        safe_scope = dashboard_ppt_filename_part(scope_label, 40)
-        fixed_bytes = len(f'{export_time:%Y%m%d_%H%M%S} - {nr_mode_label} -  -  - {safe_scope}'.encode('utf-8'))
-        zone_budget = max_stem_bytes - fixed_bytes - 4
-        safe_zone = dashboard_ppt_filename_part(zone_label, zone_budget) if zone_label else ''
-        suffix_parts = [part for part in (safe_scope, safe_zone) if part]
-        name_budget = max(4, max_stem_bytes - len(f'{export_time:%Y%m%d_%H%M%S} - {nr_mode_label} -  - {" - ".join(suffix_parts)}'.encode('utf-8')))
-        safe_name = dashboard_ppt_filename_part(dashboard_name, name_budget) or dashboard_ppt_filename_part('Dashboard', name_budget)
         for offset in range(60):
-            timestamp = (export_time + timedelta(seconds=offset)).strftime('%Y%m%d_%H%M%S')
-            output_file = ' - '.join((timestamp, nr_mode_label, safe_name, *suffix_parts)) + safe_campaigns + '.pptx'
+            output_file = build_cdr_report_filename(
+                export_time + timedelta(seconds=offset), nr_mode_label, dashboard_name,
+                scope_label, zone_label, campaign_suffix,
+            )
             job_dir = dashboard_ppt_output_dir(task_repository) / Path(output_file).stem
             with task_repository.connection() as connection:
                 already_queued = connection.execute(

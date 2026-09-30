@@ -383,3 +383,38 @@ def test_cover_campaigns_prefer_scored_contexts_and_include_context_filters():
         assert 'NR Mode: SA · Aggregation: Operator, City · Baseline: EE · City = London' in text
         assert 'Campaigns: UK_Q2_2026' in text
         assert 'Wrong_source_campaign' not in text
+
+
+def test_intro_slides_show_all_canonical_scope_filters_without_overlapping_campaigns():
+    job_fields = {
+        'context_filters': {
+            'Region': ['North', 'South'],
+            'City': [],
+            'Operator': ['O2 UK'],
+            'Vendor': [],
+            'Campaign': ['UK_Q2_2026', 'UK_Q3_2026'],
+        },
+    }
+    presentation = _export(_result(), job_fields=job_fields)
+    for index in (0, 1):
+        slide = presentation.slides[index]
+        text = _slide_text(slide)
+        assert 'Region: North, South' in text
+        assert 'City: All' in text
+        assert 'Operator: O2 UK' in text
+        assert 'Vendor: All' in text
+        assert 'Campaign: UK_Q2_2026, UK_Q3_2026' in text
+        assert 'Campaigns: UK_Q2_2026' in text
+        campaign_shape = next(shape for shape in slide.shapes if shape.name == 'Scoring Campaigns')
+        if index == 0:
+            subtitle_shape = next(
+                shape for shape in slide.placeholders if shape.placeholder_format.type == 4
+            )
+        else:
+            subtitle_shape = next(
+                shape for shape in slide.placeholders if shape.placeholder_format.type in {1, 3}
+            )
+        assert subtitle_shape.left > 0
+        assert subtitle_shape.top > 0
+        assert subtitle_shape.width > Inches(9)
+        assert subtitle_shape.top + subtitle_shape.height <= campaign_shape.top

@@ -10,6 +10,11 @@
   .scoring-hero-badge { display: inline-flex; align-items: center; gap: .45rem; padding: .5rem .75rem; border: 1px solid rgba(255,255,255,.22); border-radius: 999px; background: rgba(4,36,54,.2); color: #fff; font-size: .78rem; font-weight: 750; white-space: nowrap; }
   .scoring-controls { display: grid; gap: 1rem; }
   .scoring-filter-grid { display: grid; grid-template-columns: minmax(12rem,15rem) minmax(0,1fr); gap: 1rem; align-items: start; }
+  .scoring-context-filter-grid { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: .65rem; }
+  .scoring-context-filter-grid > label { display: grid; min-width: 0; gap: .3rem; color: var(--muted); font-size: .76rem; font-weight: 750; }
+  .scoring-context-filter-grid select[multiple] { width: 100%; min-height: 2.35rem; }
+  .scoring-context-filter-note { margin: .45rem .1rem 0; color: var(--muted); font-size: .7rem; }
+  .scoring-operator-option::before { content: '●'; flex: 0 0 auto; color: var(--scoring-operator-color,#6b7d86); font-size: .68rem; line-height: 1.4; }
   .scoring-dataset-filter-grid > label { width: 100%; max-width: 15rem; }
   .scoring-dataset-filter-grid select[data-nr-filter] { min-height: 2.45rem; }
   .scoring-picker { min-width: 0; padding: .85rem; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.64); }
@@ -176,8 +181,9 @@
   .scoring-warnings { display: grid; gap: .3rem; margin: .7rem 0 0; padding-left: 1.1rem; color: #795b20; font-size: .78rem; }
   .scoring-warning-box { margin-top: .7rem; padding: .7rem .8rem; border: 1px solid rgba(213,143,31,.3); border-radius: 11px; background: #fff9e9; }
   @media(max-width:1050px) { .scoring-dataset-groups { grid-template-columns: 1fr; } .scoring-dataset-group .scoring-dataset-list { max-height: 12rem; } .scoring-best-network-layout { grid-template-columns: 1fr; } }
+  @media(max-width:1050px) { .scoring-context-filter-grid { grid-template-columns: repeat(3,minmax(0,1fr)); } }
   @media(max-width:900px) { .scoring-filter-grid,.scoring-jobs-layout { grid-template-columns: 1fr; } .scoring-job-list { max-height: 22rem; } }
-  @media(max-width:600px) { .scoring-dataset-list { grid-template-columns: 1fr; } .scoring-controls-foot { align-items: stretch; } .scoring-actions { width: 100%; } .scoring-actions button { flex: 1 1 100%; } .scoring-chart-expanded-dialog { width: calc(100vw - .5rem); height: calc(100dvh - .5rem); padding: .65rem; gap: .5rem; border-radius: 14px; } .scoring-chart-expanded-header h3 { font-size: 1rem; } .scoring-chart-expanded-header p:not(.eyebrow) { display: none; } }
+  @media(max-width:600px) { .scoring-context-filter-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .scoring-dataset-list { grid-template-columns: 1fr; } .scoring-controls-foot { align-items: stretch; } .scoring-actions { width: 100%; } .scoring-actions button { flex: 1 1 100%; } .scoring-chart-expanded-dialog { width: calc(100vw - .5rem); height: calc(100dvh - .5rem); padding: .65rem; gap: .5rem; border-radius: 14px; } .scoring-chart-expanded-header h3 { font-size: 1rem; } .scoring-chart-expanded-header p:not(.eyebrow) { display: none; } }
 </style>
 
 <section class="dashboard-stack spacious-stack scoring-stack" data-scoring-workspace data-configuration-error="{{ scoring_configuration_error or '' }}" data-jobs-url="/api/scoring/jobs" data-export-base="/scoring/jobs">
@@ -214,7 +220,7 @@
             <div class="scoring-dataset-group-head"><strong>{{ kind_label }}</strong><span data-kind-count="{{ kind }}">{{ kind_datasets | length }} available</span></div>
             <div class="scoring-dataset-list" data-kind-list="{{ kind }}">
               {% for dataset in kind_datasets %}
-              <label class="scoring-dataset-option" data-dataset-option data-dataset-kind="{{ dataset.dataset_kind }}" data-nr-mode="{{ dataset.nr_mode or '' }}" data-uploaded-at="{{ dataset.uploaded_at or dataset.created_at or '' }}">
+              <label class="scoring-dataset-option" data-dataset-option data-dataset-kind="{{ dataset.dataset_kind }}" data-nr-mode="{{ dataset.nr_mode or '' }}" data-uploaded-at="{{ dataset.uploaded_at or dataset.created_at or '' }}" data-catalogue="{{ dataset.catalogue | default({}, true) | tojson | forceescape }}">
                 <input type="checkbox" value="{{ dataset.id }}" data-dataset-id>
                 <span class="scoring-dataset-copy"><strong title="{{ dataset.original_name }}">{{ dataset.original_name }}</strong><small>{{ kind_label }}{% if dataset.campaign %} · {{ dataset.campaign }}{% endif %}{% if dataset.nr_mode %} · {{ dataset.nr_mode }}{% endif %}</small></span>
               </label>
@@ -226,6 +232,19 @@
         </div>
         <p class="scoring-picker-note">The latest uploaded CDR for each type in the selected NR Mode is selected by default. You can add older datasets if needed.</p>
       </div>
+    </div>
+    <div class="scoring-picker" aria-labelledby="scoring-context-filters-title">
+      <div class="scoring-picker-head"><strong id="scoring-context-filters-title">Context filters</strong><span>From selected CDRs</span></div>
+      <div class="scoring-context-filter-grid" data-scoring-context-filters>
+        {% for key, label in [('Region', 'Region'), ('City', 'City'), ('Operator', 'Operator'), ('Vendor', 'Vendor'), ('Campaign', 'Campaign')] %}
+        <label>{{ label }}
+          <select multiple size="1" data-scoring-context-filter="{{ key }}" data-multiselect-auto-close="1000" data-multiselect-empty-label="All values" aria-label="Filter by {{ label }}">
+            <option value="" disabled>No values</option>
+          </select>
+        </label>
+        {% endfor %}
+      </div>
+      <p class="scoring-context-filter-note">Values come from the selected CDR catalogues. Leaving a filter empty includes all values. Main Cities uses the workspace city list.</p>
     </div>
     <div class="scoring-filter-grid">
       <label>GAP reference operator
@@ -301,6 +320,7 @@
       <div class="scoring-chart-expanded-content" data-scoring-expanded-chart></div>
     </section>
   </div>
+  <script type="application/json" data-scoring-config>{{ {'main_cities': scoring_main_cities | default([], true), 'operator_groups': scoring_operator_groups | default([], true)} | tojson }}</script>
 </section>
 {% endblock %}
 {% block extra_scripts %}

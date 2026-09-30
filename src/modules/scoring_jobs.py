@@ -26,6 +26,14 @@ CDR_DATASET_KINDS = frozenset({'data', 'voice', 'speech'})
 DEFAULT_BASELINE_OPERATOR = 'EE'
 DEFAULT_LEVELS = ('Operator',)
 INTERRUPTED_JOB_MESSAGE = 'Interrupted because the application restarted. Retry the job to run it again.'
+SCORING_CONTEXT_FILTER_FIELDS = ('Region', 'City', 'Operator', 'Vendor', 'Campaign')
+SCORING_CONTEXT_FILTER_COLUMNS = {
+    'Region': ('Region', 'g_level_2'),
+    'City': ('City', 'g_level_4'),
+    'Operator': ('Operator',),
+    'Vendor': ('Vendor',),
+    'Campaign': ('Campaign',),
+}
 
 
 def _scoring_engine():
@@ -78,6 +86,76 @@ def _decode_json(value: Any, default: Any) -> Any:
     except (TypeError, ValueError):
         return default
     return decoded
+
+
+def _empty_context_filters() -> dict[str, list[str]]:
+    return {field: [] for field in SCORING_CONTEXT_FILTER_FIELDS}
+
+
+def _normalize_context_filters(context_filters: dict[str, list[str]] | None) -> dict[str, list[str]]:
+    """Normalize supported scoring filters while treating absent values as All."""
+    normalized = _empty_context_filters()
+    if context_filters is None:
+        return normalized
+    if not isinstance(context_filters, dict):
+        raise ValueError('Scoring context filters must be an object keyed by Region, City, Operator, Vendor or Campaign.')
+
+    fields_by_identity = {column_identity(field): field for field in SCORING_CONTEXT_FILTER_FIELDS}
+    values_by_field: dict[str, dict[str, str]] = {field: {} for field in SCORING_CONTEXT_FILTER_FIELDS}
+    for raw_field, raw_values in context_filters.items():
+        field = fields_by_identity.get(column_identity(raw_field))
+        if field is None:
+            raise ValueError(f"Unsupported scoring context filter '{raw_field}'.")
+        if raw_values is None:
+            continue
+        if isinstance(raw_values, str):
+            values = [raw_values]
+        elif isinstance(raw_values, (list, tuple, set)):
+            values = list(raw_values)
+        else:
+            raise ValueError(f"Scoring context filter '{field}' must contain a list of values.")
+        for raw_value in values:
+            if raw_value is None:
+                continue
+            value = str(raw_value).strip()
+            if value:
+                values_by_field[field].setdefault(value.casefold(), value)
+
+    for field, values in values_by_field.items():
+        normalized[field] = sorted(values.values(), key=lambda value: (value.casefold(), value))
+    return normalized
+
+
+def _expand_operator_context_filter(
+    repository: Repository, context_filters: dict[str, list[str]],
+) -> dict[str, list[str]]:
+    """Include mapped Operator aliases so canonical selections match raw CDR rows."""
+    expanded = {field: list(values) for field, values in context_filters.items()}
+    selected = {value.casefold() for value in expanded.get('Operator', [])}
+    getter = getattr(repository, 'list_operator_mapping_groups', None)
+    groups = getter() if callable(getter) else []
+    for group in groups if isinstance(groups, list) else []:
+        if not isinstance(group, dict):
+            continue
+        canonical = str(group.get('canonical') or '').strip()
+        raw_aliases = group.get('aliases', [])
+        aliases = [str(value).strip() for value in raw_aliases if str(value).strip()] if isinstance(raw_aliases, (list, tuple, set)) else []
+        labels = [value for value in [canonical, *aliases] if value]
+        if selected.intersection(value.casefold() for value in labels):
+            for value in labels:
+                selected.add(value.casefold())
+                if not any(existing.casefold() == value.casefold() for existing in expanded['Operator']):
+                    expanded['Operator'].append(value)
+    expanded['Operator'].sort(key=lambda value: (value.casefold(), value))
+    return expanded
+
+
+def _context_filter_cache_values(context_filters: dict[str, list[str]]) -> dict[str, list[str]]:
+    """Return the case-insensitive SQL semantics used to identify filter scopes."""
+    return {
+        field: sorted({str(value).strip().casefold() for value in context_filters.get(field, []) if str(value).strip()})
+        for field in SCORING_CONTEXT_FILTER_FIELDS
+    }
 
 
 def _serialize_result_value(value: Any) -> Any:
@@ -221,9 +299,11 @@ def validate_complete_scoring_cdr_selection(
     repository: Repository,
     dataset_ids: list[int],
     nr_mode: str | None,
+    context_filters: dict[str, list[str]] | None = None,
 ) -> list[int]:
     """Validate that a requested run has complete Data, Voice and Speech coverage."""
     normalized_ids = list(dict.fromkeys(int(dataset_id) for dataset_id in dataset_ids))
+    normalized_filters = _normalize_context_filters(context_filters)
     sources, _campaigns, _fingerprint = _source_snapshot(
         repository, normalized_ids, expected_nr_mode=nr_mode,
     )
@@ -244,11 +324,21 @@ def validate_complete_scoring_cdr_selection(
         campaigns_by_kind[str(metadata['kind'])].update(
             str(campaign).strip() for campaign in metadata.get('campaigns', []) if str(campaign).strip()
         )
-    all_campaigns = set().union(*campaigns_by_kind.values())
+    selected_campaigns = normalized_filters['Campaign']
+    if selected_campaigns:
+        campaigns_to_check = selected_campaigns
+    else:
+        campaigns_to_check = sorted(
+            set().union(*campaigns_by_kind.values()), key=lambda value: (value.casefold(), value),
+        )
     kind_order = ('data', 'voice', 'speech')
     uncovered = []
-    for campaign in sorted(all_campaigns, key=str.casefold):
-        missing = [labels[kind] for kind in kind_order if campaign not in campaigns_by_kind[kind]]
+    for campaign in campaigns_to_check:
+        campaign_key = campaign.casefold()
+        missing = [
+            labels[kind] for kind in kind_order
+            if not any(value.casefold() == campaign_key for value in campaigns_by_kind[kind])
+        ]
         if missing:
             uncovered.append(f"{campaign} ({', '.join(missing)})")
     if uncovered:
@@ -357,6 +447,8 @@ def _job_payload(
     levels: list[str], nr_mode: str, baseline_operator: str,
     method_version: str, source_fingerprint: str, config_hash: str = '',
     baseline_aliases: list[str] | None = None,
+    context_filters: dict[str, list[str]] | None = None,
+    resolved_context_filters: dict[str, list[str]] | None = None,
 ) -> tuple[str, str]:
     key_payload = {
         'method_version': method_version,
@@ -367,6 +459,11 @@ def _job_payload(
         'nr_mode': nr_mode,
         'baseline_operator': baseline_operator,
     }
+    normalized_filters = _normalize_context_filters(context_filters)
+    resolved_filters = _normalize_context_filters(resolved_context_filters or context_filters)
+    if any(normalized_filters.values()):
+        key_payload['context_filters'] = _context_filter_cache_values(normalized_filters)
+        key_payload['resolved_context_filters'] = _context_filter_cache_values(resolved_filters)
     canonical = json.dumps(key_payload, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
     return hashlib.sha256(canonical.encode('utf-8')).hexdigest(), canonical
 
@@ -384,10 +481,18 @@ def _row_to_job(
         metadata_list = source_metadata_payload.get('sources', [])
         configuration_payload = source_metadata_payload.get('configuration')
         baseline_aliases = source_metadata_payload.get('baseline_aliases', [])
+        context_filters = source_metadata_payload.get('context_filters', {})
+        resolved_context_filters = source_metadata_payload.get('resolved_context_filters', context_filters)
     else:
         metadata_list = source_metadata_payload if isinstance(source_metadata_payload, list) else []
         configuration_payload = None
         baseline_aliases = []
+        context_filters = {}
+        resolved_context_filters = {}
+    if not isinstance(context_filters, dict):
+        context_filters = {}
+    if not isinstance(resolved_context_filters, dict):
+        resolved_context_filters = context_filters
     if not isinstance(metadata_list, list):
         metadata_list = []
     if include_snapshot:
@@ -410,6 +515,16 @@ def _row_to_job(
         'source_fingerprint': str(row['source_fingerprint'] or ''),
         'dataset_ids': [int(value) for value in dataset_ids if str(value).strip().lstrip('-').isdigit()],
         'source_metadata': metadata_list,
+        'context_filters': {
+            str(field): [str(value) for value in values if str(value).strip()]
+            for field, values in context_filters.items()
+            if isinstance(values, (list, tuple, set))
+        },
+        'resolved_context_filters': {
+            str(field): [str(value) for value in values if str(value).strip()]
+            for field, values in resolved_context_filters.items()
+            if isinstance(values, (list, tuple, set))
+        },
         'dataset_names': [str(item.get('name') or '') for item in metadata_list if isinstance(item, dict)],
         'campaigns': sorted({
             str(campaign).strip()
@@ -446,9 +561,12 @@ def create_scoring_job(
     baseline_operator: str = DEFAULT_BASELINE_OPERATOR,
     force: bool = False,
     username: str = 'system',
+    context_filters: dict[str, list[str]] | None = None,
 ) -> tuple[dict[str, Any], bool]:
     """Return a matching cached result or persist a new queued scoring job."""
     normalized_ids = list(dict.fromkeys(int(dataset_id) for dataset_id in dataset_ids))
+    normalized_context_filters = _normalize_context_filters(context_filters)
+    resolved_context_filters = _expand_operator_context_filter(repository, normalized_context_filters)
     sources, _campaigns, source_fingerprint = _source_snapshot(
         repository, normalized_ids, expected_nr_mode=nr_mode,
     )
@@ -465,12 +583,15 @@ def create_scoring_job(
     version = _method_version(configuration)
     cache_key, _canonical = _job_payload(
         normalized_levels, selected_mode, baseline, version, source_fingerprint, config_hash, baseline_aliases,
+        normalized_context_filters, resolved_context_filters,
     )
     source_metadata = [source['metadata'] for source in sources]
     source_snapshot = {
         'sources': source_metadata,
         'configuration': configuration,
         'baseline_aliases': baseline_aliases,
+        'context_filters': normalized_context_filters,
+        'resolved_context_filters': resolved_context_filters,
     }
     now = local_now_iso()
     with repository.connection() as connection:
@@ -579,8 +700,11 @@ def _update_scoring_job(repository: Repository, job_id: int, **fields: Any) -> N
 
 def _load_source_frames(
     repository: Repository, sources: list[dict[str, Any]], progress_callback, required_columns,
+    context_filters: dict[str, list[str]] | None = None,
 ) -> dict[str, pd.DataFrame]:
     frames_by_kind: dict[str, list[pd.DataFrame]] = {}
+    normalized_filters = _normalize_context_filters(context_filters)
+    active_filters = {field: values for field, values in normalized_filters.items() if values}
     total = max(1, len(sources))
     for index, source in enumerate(sources, start=1):
         dataset_id = int(source['metadata']['dataset_id'])
@@ -596,12 +720,41 @@ def _load_source_frames(
             resolved for name in requested
             if (resolved := resolve_column_name(columns, name)) is not None
         ]
-        frame = repository.load_dataset_rows(dataset_id, list(dict.fromkeys(selected_columns)), {})
+        dataset_filters: dict[str, list[str]] = {}
+        missing_filter_fields = []
+        for field, values in active_filters.items():
+            resolved_filter_column = next((
+                resolved for candidate in SCORING_CONTEXT_FILTER_COLUMNS[field]
+                if (resolved := resolve_column_name(columns, candidate)) is not None
+            ), None)
+            if resolved_filter_column is None:
+                missing_filter_fields.append(field)
+            else:
+                dataset_filters[resolved_filter_column] = values
+        if missing_filter_fields:
+            frame = pd.DataFrame()
+        else:
+            frame = repository.load_dataset_rows(
+                dataset_id, list(dict.fromkeys(selected_columns)), dataset_filters,
+            )
         if frame.empty:
-            raise ValueError(f"Dataset '{source['metadata']['name']}' has no rows available for scoring.")
+            if not active_filters:
+                raise ValueError(f"Dataset '{source['metadata']['name']}' has no rows available for scoring.")
+            progress_callback(10 + round(index * 45 / total), f"Skipped {source['metadata']['name']} with no matching rows")
+            continue
         kind = str(source['metadata']['kind'])
         frames_by_kind.setdefault(kind, []).append(frame)
         progress_callback(10 + round(index * 45 / total), f"Loaded {source['metadata']['name']}")
+
+    if active_filters:
+        labels = {'data': 'Data', 'voice': 'Voice', 'speech': 'Speech'}
+        missing_kinds = [kind for kind in ('data', 'voice', 'speech') if not frames_by_kind.get(kind)]
+        if missing_kinds:
+            missing_labels = ', '.join(labels[kind] for kind in missing_kinds)
+            raise ValueError(
+                'Scoring context filters leave no matching processed rows for every required CDR type. '
+                f'Missing: {missing_labels}.'
+            )
     return {
         kind: pd.concat(frames, ignore_index=True, sort=False)
         for kind, frames in frames_by_kind.items()
@@ -653,7 +806,10 @@ def run_scoring_job(repository: Repository, job_id: int) -> dict[str, Any] | Non
         required_columns = getattr(engine, 'required_input_columns')
         for source in sources:
             source['levels'] = job['levels']
-        frames = _load_source_frames(repository, sources, update_progress, required_columns)
+        frames = _load_source_frames(
+            repository, sources, update_progress, required_columns,
+            job.get('resolved_context_filters', job.get('context_filters', {})),
+        )
         _current_sources, _campaigns, post_load_fingerprint = _source_snapshot(
             repository, dataset_ids, expected_nr_mode=job['nr_mode'],
         )

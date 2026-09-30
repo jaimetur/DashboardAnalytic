@@ -10,7 +10,7 @@ from pptx import Presentation
 from pptx.chart.data import CategoryChartData
 from pptx.dml.color import RGBColor
 from pptx.enum.chart import XL_CHART_TYPE, XL_DATA_LABEL_POSITION, XL_LEGEND_POSITION
-from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE, PP_ALIGN
 from pptx.oxml.xmlchemy import OxmlElement
 from pptx.util import Inches, Pt
 
@@ -23,6 +23,7 @@ from src.modules.scoring_views import build_scoring_views
 _FONT = 'Ericsson Hilda'
 _WHITE = '#FFFFFF'
 _NEUTRAL = '#ECEFF1'
+_SCOPE_FILTER_FIELDS = ('Region', 'City', 'Operator', 'Vendor', 'Campaign')
 
 
 def _number(value: Any) -> str:
@@ -155,10 +156,22 @@ def _filter_value(value: Any) -> str:
     return str(value).strip() if value is not None else ''
 
 
+def _canonical_scope_filter_labels(payload: Any) -> list[str] | None:
+    if not isinstance(payload, dict) or any(not isinstance(value, list) for value in payload.values()):
+        return None
+    normalized = {str(key).strip().casefold(): value for key, value in payload.items()}
+    if payload and not any(field.casefold() in normalized for field in _SCOPE_FILTER_FIELDS):
+        return None
+    return [
+        f'{field}: {_filter_value(normalized.get(field.casefold(), [])) or "All"}'
+        for field in _SCOPE_FILTER_FIELDS
+    ]
+
+
 def _context_filter_labels(job: dict[str, Any]) -> list[str]:
     labels: list[str] = []
     seen: set[str] = set()
-    reserved = {'campaign', 'period', 'quarter', 'nr mode', 'aggregation', 'aggregation level', 'baseline'}
+    reserved = {'period', 'quarter', 'nr mode', 'aggregation', 'aggregation level', 'baseline'}
 
     def append(label: Any, value: Any, operator: Any = None) -> None:
         name = str(label or '').strip().replace('_', ' ')
@@ -177,6 +190,11 @@ def _context_filter_labels(job: dict[str, Any]) -> list[str]:
     for payload_name in ('context_filters', 'filters'):
         payload = job.get(payload_name)
         if isinstance(payload, dict):
+            canonical_labels = _canonical_scope_filter_labels(payload) if payload_name == 'context_filters' else None
+            if canonical_labels is not None:
+                for label in canonical_labels:
+                    append(*label.split(': ', 1))
+                continue
             if any(key in payload for key in ('column', 'field', 'name', 'key')):
                 field = payload.get('column') or payload.get('field') or payload.get('name') or payload.get('key')
                 append(field, payload.get('value', payload.get('values')), payload.get('operator'))
@@ -214,8 +232,60 @@ def _scoring_filter_subtitle(job: dict[str, Any]) -> str:
     baseline = str(job.get('baseline_operator') or job.get('baseline') or '').strip()
     if baseline:
         parts.append(f'Baseline: {baseline}')
-    parts.extend(_context_filter_labels(job))
+    filter_labels = _context_filter_labels(job)
+    canonical_labels = _canonical_scope_filter_labels(job.get('context_filters'))
+    if canonical_labels is not None:
+        canonical_set = {label.casefold() for label in canonical_labels}
+        other_labels = [label for label in filter_labels if label.casefold() not in canonical_set]
+        filter_groups = [canonical_labels[index:index + 2] for index in range(0, len(canonical_labels), 2)]
+        subtitle_lines = [' · '.join(parts)] if parts else []
+        subtitle_lines.extend(' · '.join(group) for group in filter_groups)
+        if other_labels:
+            subtitle_lines.append(' · '.join(other_labels))
+        return '\n'.join(subtitle_lines)
+    parts.extend(filter_labels)
     return ' · '.join(parts)
+
+
+def _fit_scoring_intro_subtitle(slide, layout_name: str) -> None:
+    title_shape = next(
+        (shape for shape in slide.placeholders if shape.placeholder_format.type in {1, 3}),
+        None,
+    )
+    if title_shape is None:
+        return
+    subtitle_shape = next(
+        (shape for shape in slide.placeholders if shape.placeholder_format.type == 4),
+        None,
+    )
+    if layout_name == 'Title Page' and subtitle_shape is not None:
+        _set_shape_geometry(subtitle_shape, Inches(1.08))
+        subtitle_shape.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+        paragraphs = subtitle_shape.text_frame.paragraphs
+    else:
+        _set_shape_geometry(title_shape, Inches(1.38))
+        paragraphs = title_shape.text_frame.paragraphs[1:]
+        title_paragraphs = title_shape.text_frame.paragraphs[:1]
+        for paragraph in title_paragraphs:
+            paragraph.font.size = Pt(30)
+            for run in paragraph.runs:
+                run.font.size = Pt(30)
+    for paragraph in paragraphs:
+        paragraph.font.size = Pt(12)
+        paragraph.line_spacing = 1.0
+        paragraph.space_before = Pt(2)
+        paragraph.space_after = Pt(0)
+        for run in paragraph.runs:
+            run.font.size = Pt(12)
+
+
+def _set_shape_geometry(shape, height: int) -> None:
+    """Materialize inherited placeholder geometry before resizing its height."""
+    left, top, width = shape.left, shape.top, shape.width
+    shape.left = left
+    shape.top = top
+    shape.width = width
+    shape.height = height
 
 
 def _add_scoring_intro_slides(presentation, job: dict[str, Any], result: dict[str, Any]) -> None:
@@ -229,6 +299,8 @@ def _add_scoring_intro_slides(presentation, job: dict[str, Any], result: dict[st
             raise ValueError(f"The PowerPoint template needs a '{layout_name}' layout for scoring exports.")
         slide = presentation.slides.add_slide(layout)
         _set_structural_slide_text(slide, title, subtitle)
+        if '\n' in subtitle:
+            _fit_scoring_intro_subtitle(slide, layout_name)
         campaign_shape = _text(slide, campaign_text, top, left=.52, width=10.68, height=.7,
                                size=14, color=_WHITE)
         campaign_shape.name = 'Scoring Campaigns'

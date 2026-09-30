@@ -34,7 +34,7 @@ from time import monotonic, sleep
 from typing import Annotated
 from typing import Any, Iterable
 from typing import Callable
-from urllib.parse import urlencode, urlsplit, urlunsplit
+from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 from zoneinfo import ZoneInfo, available_timezones
 
@@ -42,7 +42,7 @@ import httpx
 import pandas as pd
 from PIL import Image
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -4105,6 +4105,7 @@ def cache_cdr_catalogue(dataset_id: int, frame: pd.DataFrame, task_repository: R
         regions=values('region', 'g_level_2', 'g level 2'),
         cities=values('city', 'g_level_4', 'g level 4'),
         campaigns=values('campaign'),
+        operators=values('operator', 'operator_a', 'home_operator', 'home_operator_a'),
     )
 
 
@@ -4158,6 +4159,20 @@ def backfill_cdr_catalogues(dataset_ids: Iterable[int], task_repository: Reposit
             regions=distinct_values('region', 'g_level_2', 'g level 2'),
             cities=distinct_values('city', 'g_level_4', 'g level 4'),
             campaigns=distinct_values('campaign'),
+            operators=distinct_values('operator', 'operator_a', 'home_operator', 'home_operator_a'),
+        )
+
+
+def backfill_cdr_operators(dataset_ids: Iterable[int], task_repository: Repository) -> None:
+    """Read distinct Operators only once for CDRs predating the catalogue column."""
+    for dataset_id in task_repository.missing_cdr_operator_ids(dataset_ids):
+        if not task_repository.dataset_rows_table_exists(dataset_id):
+            continue
+        columns = set(task_repository.list_dataset_row_columns(dataset_id))
+        task_repository.set_cdr_catalogue_operators(
+            dataset_id, _distinct_cdr_row_values(
+                task_repository, dataset_id, columns, 'operator', 'operator_a', 'home_operator', 'home_operator_a',
+            ),
         )
 
 
@@ -8697,7 +8712,7 @@ def render_admin_template(
         'audit_logs': 'Audit log',
         'dashboard_filter_selections': 'Dashboard filter selections',
         'dashboard_ppt_jobs': 'Dashboard PPT jobs',
-        'cdr_catalogues': 'CDR Vendor, Region, City and Campaign Catalogues',
+        'cdr_catalogues': 'CDR Operator, Vendor, Region, City And Campaign Catalogues',
         'dataset_profiles': 'Dataset profiles',
         'dataset_source_columns': 'Dataset source columns',
         'datasets': 'Datasets',
@@ -13921,6 +13936,7 @@ class ScoringJobRequest(BaseModel):
     nr_mode: str = 'NSA'
     force: bool = False
     baseline_operator: str = 'EE'
+    context_filters: dict[str, list[str]] = Field(default_factory=dict)
 
 
 def scoring_repository(user: SessionUser) -> Repository:
@@ -13960,18 +13976,26 @@ def scoring_page(request: Request, user: SessionUser = Depends(current_user)) ->
         task_repository.get_scoring_configuration()
     except ValueError as exc:
         configuration_error = str(exc)
+    ready_cdrs = [row for row in task_repository.list_datasets()
+                  if row['status'] == 'ready' and row['dataset_kind'] in CDR_DATASET_KINDS]
+    dataset_ids = [int(row['id']) for row in ready_cdrs]
+    backfill_cdr_catalogues(dataset_ids, task_repository)
+    backfill_cdr_campaigns(dataset_ids, task_repository)
+    backfill_cdr_operators(dataset_ids, task_repository)
+    catalogues = task_repository.cdr_catalogues_by_dataset(dataset_ids)
     datasets = []
-    for row in task_repository.list_datasets():
-        if row['status'] != 'ready' or row['dataset_kind'] not in CDR_DATASET_KINDS:
-            continue
+    for row in ready_cdrs:
         item = dict(row)
         item['original_name'] = item['file_name']
-        item['campaign'] = ', '.join(task_repository.cdr_catalogue_values([item['id']]).get('campaigns', []))
+        item['catalogue'] = catalogues[item['id']]
+        item['campaign'] = ', '.join(item['catalogue']['campaigns'])
         item['nr_mode'] = dataset_nr_mode(item['dataset_kind'], item['nr_mode'], item['file_name'])
         datasets.append(item)
     return render_template(request, 'scoring.html', {
         'user': user, 'scoring_datasets': datasets,
         'scoring_operator_options': scoring_operator_options(task_repository),
+        'scoring_operator_groups': task_repository.list_operator_mapping_groups(),
+        'scoring_main_cities': task_repository.list_main_cities(),
         'aggregation_levels': ['Operator', 'Region', 'City', 'Vendor', 'Dataset Type'],
         'scoring_configuration_error': configuration_error,
     })
@@ -13987,11 +14011,12 @@ def scoring_jobs_create(payload: ScoringJobRequest, user: SessionUser = Depends(
     task_repository = scoring_repository(user)
     try:
         selected_ids = validate_complete_scoring_cdr_selection(
-            task_repository, payload.dataset_ids, payload.nr_mode,
+            task_repository, payload.dataset_ids, payload.nr_mode, context_filters=payload.context_filters,
         )
         job, cached = create_scoring_job(
             task_repository, selected_ids, payload.aggregation_levels, payload.nr_mode,
             force=payload.force, username=user.username, baseline_operator=payload.baseline_operator,
+            context_filters=payload.context_filters,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -14070,7 +14095,8 @@ def scoring_job_export(job_id: int, export_kind: str, user: SessionUser = Depend
             'Content-Disposition': f'attachment; filename="scoring-job-{job_id}-{export_kind}.csv"',
         })
     if export_kind == 'ppt':
-        from src.modules.scoring_exports import export_scoring_powerpoint
+        from src.modules.scoring_exports import export_scoring_powerpoint, _campaigns_for_export
+        from src.modules.cdr_report_filenames import build_cdr_report_filename
         try:
             if not job.get('configuration') and not result.get('configuration'):
                 job['configuration'] = task_repository.get_scoring_configuration()
@@ -14080,8 +14106,18 @@ def scoring_job_export(job_id: int, export_kind: str, user: SessionUser = Depend
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        filters = job.get('context_filters') or {}
+        regions = filters.get('Region') or []
+        campaigns = _campaigns_for_export(job, result)
+        filename = build_cdr_report_filename(
+            datetime.now(), job.get('nr_mode') or 'NSA', 'Scoring & GAP Analysis',
+            'Multivendor Comparison' if 'Vendor' in job.get('aggregation_levels', []) else 'Operator Comparison',
+            ' + '.join(regions) if regions else 'All Regions',
+            '_vs_'.join(campaigns) if len(campaigns) > 1 else '',
+        )
+        disposition = f"attachment; filename*=UTF-8''{quote(filename)}"
         return Response(content, media_type='application/vnd.openxmlformats-officedocument.presentationml.presentation', headers={
-            'Content-Disposition': f'attachment; filename="Scoring & GAP Analysis - {job_id}.pptx"',
+            'Content-Disposition': disposition,
         })
     raise HTTPException(status_code=404, detail='Unknown scoring export format.')
 

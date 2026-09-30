@@ -72,6 +72,27 @@ def add_dataset(repository: Repository, name: str = 'UK_Q2_2026_NSA_Data.csv', *
     return dataset_id
 
 
+def add_complete_scoring_sources(repository: Repository, prefix: str = 'Scoped') -> list[int]:
+    dataset_ids = []
+    for kind in ('data', 'voice', 'speech'):
+        dataset_id = add_dataset(repository, f'{prefix}_NSA_{kind.title()}.csv', kind=kind)
+        frame = pd.DataFrame({
+            'Operator': ['VF_UK', 'VF_UK', 'O2', 'VF_UK', 'VF_UK'],
+            'Region': ['North'] * 5,
+            'City': ['Leeds', 'Manchester', 'Leeds', 'Leeds', 'Leeds'],
+            'Vendor': ['Nokia', 'Nokia', 'Nokia', 'Ericsson', 'Nokia'],
+            'Campaign': ['2026-Q2', '2026-Q2', '2026-Q2', '2026-Q2', '2026-Q1'],
+            'Dataset_Kind': [kind] * 5,
+            'score': [3.0, 4.0, 5.0, 6.0, 7.0],
+        })
+        repository.replace_dataset_rows(dataset_id, frame)
+        repository.update_dataset_profile(
+            dataset_id, row_count=len(frame), column_count=len(frame.columns),
+        )
+        dataset_ids.append(dataset_id)
+    return dataset_ids
+
+
 def test_scoring_jobs_persist_results_and_reuse_completed_cache(repository, scoring_engine):
     _engine, calls = scoring_engine
     dataset_id = add_dataset(repository)
@@ -184,6 +205,180 @@ def test_baseline_alias_snapshot_is_cached_and_passed_to_engine(repository, scor
     assert not reused
     assert updated['id'] != job['id']
     assert 'Voda' in updated['baseline_aliases']
+
+
+def test_scoring_context_filters_are_pushed_down_and_persisted(repository, scoring_engine, monkeypatch):
+    _engine, calls = scoring_engine
+    dataset_ids = add_complete_scoring_sources(repository)
+    repository.replace_operator_mapping_groups([
+        {'canonical': 'Vodafone UK', 'aliases': ['VF_UK'], 'color': '#FF0000'},
+    ])
+    filters = {
+        'Region': ['North'], 'City': ['Leeds'], 'Operator': ['Vodafone UK'],
+        'Vendor': ['Nokia'], 'Campaign': ['2026-Q2'],
+    }
+    load_filters = []
+    original_load_dataset_rows = repository.load_dataset_rows
+
+    def record_load(dataset_id, columns, dataset_filters):
+        load_filters.append(dataset_filters)
+        return original_load_dataset_rows(dataset_id, columns, dataset_filters)
+
+    monkeypatch.setattr(repository, 'load_dataset_rows', record_load)
+
+    job, reused = scoring_jobs.create_scoring_job(
+        repository, dataset_ids, ['Region'], 'NSA', context_filters=filters,
+    )
+
+    assert not reused
+    assert job['context_filters'] == filters
+    assert scoring_jobs.get_scoring_job(repository, job['id'])['context_filters'] == filters
+    assert scoring_jobs.list_scoring_jobs(repository)[0]['context_filters'] == filters
+    completed = scoring_jobs.run_scoring_job(repository, job['id'])
+    assert completed['status'] == 'completed'
+    loaded_frames, _levels, _baseline = calls[0]
+    assert set(loaded_frames) == {'data', 'voice', 'speech'}
+    for frame in loaded_frames.values():
+        assert len(frame) == 1
+        assert frame.iloc[0]['Operator'] == 'VF_UK'
+        assert frame.iloc[0]['Region'] == 'North'
+        assert frame.iloc[0]['score'] == 3.0
+    assert len(load_filters) == 3
+    for dataset_filters in load_filters:
+        assert dataset_filters['Region'] == ['North']
+        assert dataset_filters['City'] == ['Leeds']
+        assert dataset_filters['Operator'] == ['VF_UK', 'Vodafone UK']
+        assert dataset_filters['Vendor'] == ['Nokia']
+        assert dataset_filters['Campaign'] == ['2026-Q2']
+
+
+def test_scoring_context_filter_cache_is_order_independent_and_scope_specific(repository, scoring_engine):
+    _engine, _calls = scoring_engine
+    dataset_ids = add_complete_scoring_sources(repository)
+
+    first, reused = scoring_jobs.create_scoring_job(
+        repository, dataset_ids, [], 'NSA', context_filters={'Region': ['North', 'South']},
+    )
+    reordered, reused_reordered = scoring_jobs.create_scoring_job(
+        repository, dataset_ids, [], 'NSA', context_filters={'Region': ['South', 'North']},
+    )
+    different_case, reused_different_case = scoring_jobs.create_scoring_job(
+        repository, dataset_ids, [], 'NSA', context_filters={'Region': ['north', 'south']},
+    )
+    narrowed, reused_narrowed = scoring_jobs.create_scoring_job(
+        repository, dataset_ids, [], 'NSA', context_filters={'Region': ['North']},
+    )
+
+    assert not reused
+    assert reused_reordered
+    assert reordered['id'] == first['id']
+    assert reused_different_case
+    assert different_case['id'] == first['id']
+    assert not reused_narrowed
+    assert narrowed['id'] != first['id']
+
+
+def test_scoring_context_filters_skip_empty_sources_and_fail_when_a_type_has_no_matches(repository, scoring_engine):
+    _engine, _calls = scoring_engine
+    dataset_ids = add_complete_scoring_sources(repository, 'Rows')
+    data_empty_id = add_dataset(repository, 'Rows_Empty_NSA_Data.csv', kind='data')
+    frame = pd.DataFrame({
+        'Operator': ['O2'], 'Region': ['South'], 'City': ['London'],
+        'Vendor': ['Ericsson'], 'Campaign': ['2026-Q2'], 'score': [5.0],
+    })
+    repository.replace_dataset_rows(data_empty_id, frame)
+    repository.update_dataset_profile(data_empty_id, row_count=1, column_count=len(frame.columns))
+    voice_missing_region_id = add_dataset(repository, 'Rows_No_Region_NSA_Voice.csv', kind='voice')
+    missing_region_frame = pd.DataFrame({
+        'Operator': ['EE'], 'City': ['Leeds'], 'Vendor': ['Nokia'],
+        'Campaign': ['2026-Q2'], 'score': [8.0],
+    })
+    repository.replace_dataset_rows(voice_missing_region_id, missing_region_frame)
+    repository.update_dataset_profile(
+        voice_missing_region_id, row_count=1, column_count=len(missing_region_frame.columns),
+    )
+
+    job, _ = scoring_jobs.create_scoring_job(
+        repository, [*dataset_ids, data_empty_id, voice_missing_region_id], [], 'NSA',
+        context_filters={'Region': ['North']},
+    )
+    completed = scoring_jobs.run_scoring_job(repository, job['id'])
+    assert completed['status'] == 'completed'
+    assert len(completed['result']['scoring']) == 1
+
+    no_matches, _ = scoring_jobs.create_scoring_job(
+        repository, dataset_ids, [], 'NSA', context_filters={'Region': ['Nowhere']},
+    )
+    failed = scoring_jobs.run_scoring_job(repository, no_matches['id'])
+    assert failed['status'] == 'failed'
+    assert 'Missing: Data, Voice, Speech' in failed['error']
+
+
+def test_scoring_geography_filters_resolve_legacy_g_level_columns(repository, scoring_engine):
+    _engine, calls = scoring_engine
+    dataset_ids = []
+    for kind in ('data', 'voice', 'speech'):
+        dataset_id = add_dataset(repository, f'Legacy_Geography_NSA_{kind.title()}.csv', kind=kind)
+        frame = pd.DataFrame({
+            'Operator': ['EE', 'O2'], 'G_Level_2': ['North', 'South'],
+            'G_Level_4': ['Leeds', 'London'], 'score': [3.0, 4.0],
+        })
+        repository.replace_dataset_rows(dataset_id, frame)
+        repository.update_dataset_profile(
+            dataset_id, row_count=len(frame), column_count=len(frame.columns),
+        )
+        dataset_ids.append(dataset_id)
+
+    job, _ = scoring_jobs.create_scoring_job(
+        repository, dataset_ids, [], 'NSA', context_filters={
+            'Region': ['North'], 'City': ['Leeds'],
+        },
+    )
+    completed = scoring_jobs.run_scoring_job(repository, job['id'])
+
+    assert completed['status'] == 'completed'
+    loaded_frames, _levels, _baseline = calls[0]
+    assert all(len(frame) == 1 for frame in loaded_frames.values())
+
+
+def test_campaign_completeness_checks_only_selected_campaigns(repository):
+    data_q1 = add_dataset(repository, 'Campaign_Q1_NSA_Data.csv', kind='data')
+    data_q2 = add_dataset(repository, 'Campaign_Q2_NSA_Data.csv', kind='data')
+    voice_q1 = add_dataset(repository, 'Campaign_Q1_NSA_Voice.csv', kind='voice')
+    speech_q1 = add_dataset(repository, 'Campaign_Q1_NSA_Speech.csv', kind='speech')
+    for dataset_id, campaign in (
+        (data_q1, '2026-Q1'), (data_q2, '2026-Q2'),
+        (voice_q1, '2026-Q1'), (speech_q1, '2026-Q1'),
+    ):
+        repository.replace_cdr_catalogue(
+            dataset_id, vendors=['Nokia', 'Ericsson'], regions=['North', 'South'],
+            cities=['Leeds', 'London'], campaigns=[campaign],
+        )
+
+    with pytest.raises(ValueError, match=r'2026-Q2 \(Voice, Speech\)'):
+        scoring_jobs.validate_complete_scoring_cdr_selection(
+            repository, [data_q1, data_q2, voice_q1, speech_q1], 'NSA',
+        )
+
+    selected = scoring_jobs.validate_complete_scoring_cdr_selection(
+        repository, [data_q1, data_q2, voice_q1, speech_q1], 'NSA',
+        context_filters={'Campaign': ['2026-Q1']},
+    )
+    assert selected == [data_q1, data_q2, voice_q1, speech_q1]
+
+
+def test_legacy_scoring_jobs_default_to_no_context_filters(repository):
+    dataset_id = add_dataset(repository)
+    job, _ = scoring_jobs.create_scoring_job(repository, [dataset_id], [], 'NSA')
+    with repository.connection() as connection:
+        connection.execute(
+            'UPDATE scoring_jobs SET source_metadata_json = ? WHERE id = ?',
+            ('[{"name":"Legacy CDR"}]', job['id']),
+        )
+
+    reloaded = scoring_jobs.get_scoring_job(repository, job['id'])
+
+    assert reloaded['context_filters'] == {}
 
 
 def test_scoring_cache_invalidates_when_materialized_cdr_changes(repository, scoring_engine):
