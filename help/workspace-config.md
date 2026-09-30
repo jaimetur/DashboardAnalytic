@@ -1,6 +1,6 @@
 # Workspace Config
 
-Workspace Config is a dedicated page for settings owned by the active workspace: Report Templates Management, Operator Mappings, Vendor Mappings, Main Cities, Scoring KPI Configuration and GAP KPI Priority. These settings remain workspace-scoped and are included in the applicable import, export, transfer, backup and restore workflows.
+Workspace Config is a dedicated page for settings owned by the active workspace: Report Templates Management, Operator Mappings, Vendor Mappings, Main Cities, Scoring Aggregation Hierarchy, Scoring KPI Configuration and GAP KPI Priority. These settings remain workspace-scoped and are included in the applicable import, export, transfer, backup and restore workflows.
 
 Open **Config → Workspace Config** from the main navigation at `/workspace-config`. Template, mapping and Main Cities actions use routes below `/workspace-config/`. The page uses the same teal/navy palette as Application Config and its Page Sections navigator links to the panels.
 
@@ -374,12 +374,12 @@ Administrators use Admin's existing **Import / Export / Transfer** and **Backup 
 
 For global runtime settings, see [Application Config](app-config.md). Admin's [Database Viewer](administrator-config.md#database-viewer) documents the underlying Operator and Vendor mapping tables.
 
-## Scoring KPI Configuration and GAP KPI Priority
+## Scoring Aggregation Hierarchy, KPI Configuration and GAP KPI Priority
 
-The Scoring KPI Configuration panel sits above GAP KPI Priority. An unconfigured workspace requires an explicit import via **Import JSON** or Admin; **Export JSON** uses the same portable document format as the JSON inside configuration ZIP packages. Select an environment and edit the KPI maximum points (weights), Low/Medium/High/Ultra thresholds, KPI type and interpolation score anchors. Ultra may be absent, numeric or derived from the best minimum/maximum KPI in the comparison context. The workspace database is the authoritative source. Formulas and filters come from the imported configuration and are checked against supported engine operations; reference files are never loaded automatically. Save validates the complete configuration; invalid settings do not replace the saved configuration.
+The Scoring Aggregation Hierarchy panel comes first, followed by Scoring KPI Configuration and GAP KPI Priority. Reorder Operator, Vendor, Region, City and Campaign using the arrows; save the complete hierarchy. The default is Operator → Vendor → Region → City → Campaign. It controls the filter/aggregation panel order and hierarchical tables, charts and PPT outputs of new jobs. Operator remains mandatory for calculations wherever it appears in the chosen hierarchy. An unconfigured workspace requires an explicit import via **Import JSON** or Admin; **Export JSON** uses the same portable document format as the JSON inside configuration ZIP packages. Select an environment and edit the KPI maximum points (weights), Low/Medium/High/Ultra thresholds, KPI type and interpolation score anchors. Ultra may be absent, numeric or derived from the best minimum/maximum KPI in the comparison context. The workspace database is the authoritative source. Formulas and filters come from the imported configuration and are checked against supported engine operations; reference files are never loaded automatically. Save validates the complete configuration; invalid settings do not replace the saved configuration.
 
-Both panels fit the available page width. The KPI table scrolls horizontally inside its own bordered area, with compact controls and grouped threshold/mapping headers; it does not widen the page.
+The panels fit the available page width. The KPI table scrolls horizontally inside its own bordered area, with compact controls and grouped threshold/mapping headers; it does not widen the page.
 
 GAP KPI Priority defines the order of signed comparable KPI gaps in results and PowerPoint exports. Save the order before creating a new job. Historical jobs retain their configuration snapshot; a changed configuration generates a new calculation/cache identity. Operator labels, order and colors continue to come from Operator Mappings.
 
-Use the Scoring Configuration component in Import / Export / Transfer to move both panels together. They are included in configuration backups and full workspace database backups and restored within the destination workspace. See [Scoring & GAP Analysis](scoring-gap-analysis.md) for interpolation, coverage, results and exports.
+Use the Scoring Configuration component in Import / Export / Transfer to move all three settings together. They are included in configuration backups and full workspace database backups and restored within the destination workspace. See [Scoring & GAP Analysis](scoring-gap-analysis.md) for interpolation, coverage, results and exports.

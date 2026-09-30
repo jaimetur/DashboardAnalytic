@@ -301,9 +301,11 @@ def test_scoring_job_results_cache_force_and_exports(scoring_api):
         if any(shape.has_text_frame and 'Scoring Tables' in shape.text for shape in slide.shapes)
     )
     scoring_table = next(shape.table for shape in scoring_slide.shapes if shape.has_table)
-    assert [scoring_table.cell(0, column).text for column in range(4, 8)] == [
+    # New multi-level jobs use nested headers; legacy GAP normalization does not change the hierarchy contract.
+    assert [scoring_table.cell(0, column).text for column in range(4, 12, 2)] == [
         'Three UK', 'O2', 'Vodafone UK', 'EE',
     ]
+    assert all(scoring_table.cell(1, column).text == 'North' for column in range(4, 12, 2))
     assert str(scoring_table.cell(0, 4).fill.fore_color.rgb) == 'AABBCC'
 
     forced = client.post('/api/scoring/jobs', json={**payload, 'force': True})

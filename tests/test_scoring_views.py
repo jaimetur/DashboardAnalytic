@@ -352,3 +352,98 @@ def test_legacy_gap_normalization_flips_only_gap_values_and_preserves_input():
 def test_scoring_views_require_a_saved_or_explicit_workspace_configuration():
     with pytest.raises(ValueError, match='no configuration snapshot'):
         _build_scoring_views({}, {'scoring': []})
+
+
+def _hierarchy_contract_result():
+    contexts = [
+        ('North', '2026Q1', ('EE', 'O2 UK')),
+        ('North', '2026Q2', ('EE', 'O2 UK')),
+        ('South', '2026Q1', ('EE', 'O2 UK')),
+        ('South', '2026Q2', ('O2 UK',)),
+    ]
+    rows = []
+    for region, campaign, operators in contexts:
+        for operator in operators:
+            for metric_index, metric in enumerate(METRICS):
+                score = .8 if operator == 'EE' else .5 + .05 * metric_index
+                if region == 'South' and campaign == '2026Q1' and operator == 'O2 UK':
+                    score = .6 + .03 * metric_index
+                rows.append(metric_row(
+                    metric, operator, region=region, campaign=campaign,
+                    score=score, value=score * 100,
+                ))
+    return {
+        'aggregation_contract_version': 2,
+        'aggregation_levels': ['Operator', 'Region', 'Campaign'],
+        'scoring': rows,
+        'totals': [],
+        'configuration': CONFIG,
+    }
+
+
+def _hierarchy_job(levels=None):
+    return {
+        'aggregation_contract_version': 2,
+        'aggregation_levels': levels or ['Operator', 'Region', 'Campaign'],
+        'baseline_operator': 'EE',
+        'configuration': CONFIG,
+    }
+
+
+def test_hierarchy_views_keep_context_leaves_and_only_compare_matching_baselines():
+    result = _hierarchy_contract_result()
+    views = build_scoring_views(
+        _hierarchy_job(), result, operator_mapping_groups=OPERATOR_MAPPING_GROUPS,
+    )
+
+    assert len(views['score_tables']) == 4
+    assert len(views['hierarchy_score_tables']) == 1
+    matrix = views['hierarchy_score_tables'][0]
+    assert matrix['context'] == {'environment': 'DriveCity'}
+    assert matrix['hierarchy_levels'] == ['Operator', 'Region', 'Campaign']
+    assert len(matrix['hierarchy_columns']) == 7
+    assert matrix['operators'] == [column['id'] for column in matrix['hierarchy_columns']]
+    assert all(style['fullpath'] == style['label'] for style in matrix['operator_styles'].values())
+    assert all(style['color'] in {'#DA291C', '#1174E6', '#000000', '#17A09F'}
+               for style in matrix['operator_styles'].values())
+
+    row = next(row for row in matrix['rows'] if row['kpi_code'] == 'C5')
+    by_context = {
+        (
+            next(item['value'] for item in column['path'] if item['level'] == 'Region'),
+            next(item['value'] for item in column['path'] if item['level'] == 'Campaign'),
+            column['operator'],
+        ): column['id']
+        for column in matrix['hierarchy_columns']
+    }
+    north_q1_o2 = by_context[('North', '2026Q1', 'O2 UK')]
+    north_q1_ee = by_context[('North', '2026Q1', 'EE')]
+    assert row['gaps'][north_q1_o2] == pytest.approx(
+        row['values'][north_q1_o2]['points'] - row['values'][north_q1_ee]['points']
+    )
+    south_q2_o2 = by_context[('South', '2026Q2', 'O2 UK')]
+    assert row['gaps'][south_q2_o2] is None
+    assert row['values'][south_q2_o2]['points'] is not None
+    assert len(views['hierarchy_gap_tables']) == 1
+
+
+def test_hierarchy_level_permutation_is_preserved_and_legacy_results_stay_separate():
+    result = _hierarchy_contract_result()
+    levels = ['Region', 'Campaign', 'Operator']
+    views = build_scoring_views(
+        _hierarchy_job(levels), result, operator_mapping_groups=OPERATOR_MAPPING_GROUPS,
+    )
+    matrix = views['hierarchy_score_tables'][0]
+    assert matrix['hierarchy_levels'] == levels
+    assert all([item['level'] for item in column['path']] == levels for column in matrix['hierarchy_columns'])
+    assert matrix['hierarchy_columns'][0]['path'][0] == {'level': 'Region', 'value': 'North'}
+    assert matrix['hierarchy_columns'][0]['path'][1] == {'level': 'Campaign', 'value': '2026Q1'}
+    assert [column['operator'] for column in matrix['hierarchy_columns'][:2]] == ['O2 UK', 'EE']
+
+    legacy_result = {key: value for key, value in result.items() if key != 'aggregation_contract_version'}
+    legacy_result.pop('aggregation_levels')
+    legacy_job = {key: value for key, value in _hierarchy_job(levels).items() if key != 'aggregation_contract_version'}
+    legacy = build_scoring_views(legacy_job, legacy_result, operator_mapping_groups=OPERATOR_MAPPING_GROUPS)
+    assert legacy['hierarchy_score_tables'] == []
+    assert legacy['hierarchy_gap_tables'] == []
+    assert len(legacy['score_tables']) == 4

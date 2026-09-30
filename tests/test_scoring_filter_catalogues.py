@@ -13,27 +13,23 @@ from src.modules.repository import Repository
 from tests.test_scoring_api import scoring_api
 
 
-def test_scoring_filter_catalogues_backfill_once_and_then_use_cache(scoring_api, monkeypatch):
+def test_scoring_page_reports_incomplete_catalogues_without_backfilling(scoring_api, monkeypatch):
     repository = scoring_api['repository']
     repository.set_main_cities(['Leeds', 'London'])
-    reads = []
-    original = app_module._distinct_cdr_row_values
 
-    def record_read(*args):
-        reads.append(args[1])
-        return original(*args)
+    def fail_if_scanned(*_args, **_kwargs):
+        raise AssertionError('Opening Scoring must not scan materialized CDR rows.')
 
-    monkeypatch.setattr(app_module, '_distinct_cdr_row_values', record_read)
+    monkeypatch.setattr(app_module, '_distinct_cdr_row_values', fail_if_scanned)
+    monkeypatch.setattr(Repository, 'list_dataset_row_columns', fail_if_scanned)
     first = scoring_api['client'].get('/scoring')
     assert first.status_code == 200
-    assert len(reads) == 3
+    assert 'Some CDR filter catalogues are incomplete.' in first.text
     assert 'Main Cities' in first.text
     cached = repository.cdr_catalogues_by_dataset(scoring_api['complete_dataset_ids'])
-    assert all(item['operators'] == ['EE', 'O2'] for item in cached.values())
+    assert all(item['operators'] == [] for item in cached.values())
     assert repository.cdr_catalogues_by_dataset([]) == {}
-    reads.clear()
     assert scoring_api['client'].get('/scoring').status_code == 200
-    assert reads == []
 
 
 def test_operator_catalogue_replacement_preserves_unspecified_values_and_database_copy(scoring_api, tmp_path):

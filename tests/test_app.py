@@ -8903,6 +8903,7 @@ def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
         for item in help_documents
     )
     assert [item['relative_path'] for item in help_documents[9:]] == [
+        'scoring-gap-analysis.md',
         'chart-builder.md',
         'query-builder.md',
         'app-logs.md',
@@ -8961,7 +8962,8 @@ def test_reporting_help_is_available_to_super_admins_and_ejaitur(client) -> None
 
         index = client.get('/api/documents/help-index').json()['documents']
         assert index[9]['relative_path'] == 'e2e-reporting.md'
-        assert index[10]['relative_path'] == 'chart-builder.md'
+        assert index[10]['relative_path'] == 'scoring-gap-analysis.md'
+        assert index[11]['relative_path'] == 'chart-builder.md'
         assert client.get('/documents/view/help/e2e-reporting.md').status_code == 200
         assert client.get('/api/documents/help/e2e-reporting.md').status_code == 200
         home = client.get('/api/documents/help').json()['content']
@@ -8978,10 +8980,10 @@ def test_help_navigation_groups_unnumbered_documents() -> None:
     template = (Path(__file__).resolve().parents[1] / 'src/web_interface/templates/doc_view.html').read_text(encoding='utf-8')
     start = template.index('  function helpDocumentGroup(relativePath) {')
     end = template.index('\n  if (helpNavLists.length)', start)
-    script = template[start:end] + "\nconsole.log(JSON.stringify(['overview.md', 'configuration.md', 'docker-deployment.md', 'workspace-management.md', 'e2e-reporting.md', 'query-builder.md', 'administrator-config.md', 'app-config.md', 'workspace-config.md', 'app-logs.md', 'project-structure.md'].map(helpDocumentGroup)));"
+    script = template[start:end] + "\nconsole.log(JSON.stringify(['overview.md', 'configuration.md', 'docker-deployment.md', 'workspace-management.md', 'e2e-reporting.md', 'scoring-gap-analysis.md', 'query-builder.md', 'administrator-config.md', 'app-config.md', 'workspace-config.md', 'app-logs.md', 'project-structure.md'].map(helpDocumentGroup)));"
     result = subprocess.run([node_binary, '-e', script], text=True, capture_output=True, check=True)
     assert json.loads(result.stdout) == [
-        'General', 'General', 'General', 'Main Modules', 'Main Modules', 'Main Modules',
+        'General', 'General', 'General', 'Main Modules', 'Main Modules', 'Main Modules', 'Main Modules',
         'Administrative Modules', 'Administrative Modules', 'Administrative Modules',
         'Administrative Modules', 'Reference',
     ]

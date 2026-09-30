@@ -15,8 +15,13 @@ from src.modules.scoring_config import (
 
 # Semantic engine version only. Configuration identity is added to job versions
 # after the workspace snapshot has been supplied explicitly.
-METHOD_VERSION = 'campaign-gap-v2'
+METHOD_VERSION = 'campaign-gap-v3'
+AGGREGATION_CONTRACT_VERSION = 2
 _SHARED = ['Operator', 'Campaign', 'G_Level_1', 'G_Level_2']
+_LEVEL_SOURCE_ALIASES = {
+    'Region': ('Region', 'G_Level_2'),
+    'City': ('City', 'G_Level_4'),
+}
 _FIELDS = {
     'data': ['Test_Name', 'Test_Result', 'Mean_Data_Rate', 'Transfer_Duration', 'Type_of_Test',
              'http_Browser_Transferred_Bytes', 'http_Browser_1MB_Reached_Duration',
@@ -195,8 +200,9 @@ def calculate_scoring(
     frames: dict[str, pd.DataFrame], levels: Iterable[str] = ('Operator',),
     baseline_operator: str = 'EE', configuration: dict | None = None,
     baseline_aliases: Iterable[str] = (),
+    operator_mappings: dict[str, str] | None = None,
 ) -> dict:
-    """Calculate campaign-separated scores without reallocating missing weights."""
+    """Calculate KPI scores at the selected dimensions without reallocating missing weights."""
     config = _required_configuration(configuration)
     metrics = config['metrics']
     metric_by_code = {metric['code']: metric for metric in metrics}
@@ -208,16 +214,35 @@ def calculate_scoring(
     for level in levels:
         identity = column_identity(level)
         canonical = {'operator': 'Operator', 'region': 'Region', 'city': 'City', 'vendor': 'Vendor',
-                     'ranvendor': 'Vendor', 'datasettype': 'Dataset Type', 'datasetkind': 'Dataset Type'}.get(identity)
+                     'ranvendor': 'Vendor', 'campaign': 'Campaign',
+                     'datasettype': 'Dataset Type', 'datasetkind': 'Dataset Type'}.get(identity)
         if canonical is None:
             raise ValueError(f'Unsupported scoring level: {level}')
         if canonical not in dimensions:
             dimensions.append(canonical)
     if 'Operator' not in dimensions:
         dimensions.append('Operator')
-    group_fields = ['Campaign'] + dimensions + ['environment']
+    campaign_selected = 'Campaign' in dimensions
+    group_fields = list(dict.fromkeys(['Campaign', *dimensions, 'environment']))
     keys = [_key_name(field) for field in group_fields]
-    rows, warnings = [], ['Campaigns are scored separately; the supplied Tableau Prep flow pools campaigns.']
+    warnings = []
+    if campaign_selected:
+        warnings.append('Campaigns are scored separately; the supplied Tableau Prep flow pools campaigns.')
+    rows = []
+    normalized_operator_mappings = {
+        str(alias).strip().casefold(): str(canonical).strip()
+        for alias, canonical in (operator_mappings or {}).items()
+        if str(alias).strip() and str(canonical).strip()
+    }
+    campaign_values: dict[str, str] = {}
+    for source in frames.values():
+        campaign_column = resolve_column_name(source.columns, 'Campaign')
+        if campaign_column is None:
+            continue
+        for value in source[campaign_column].dropna().tolist():
+            campaign = str(value).strip()
+            if campaign:
+                campaign_values.setdefault(campaign.casefold(), campaign)
     for missing_kind in _FIELDS.keys() - frames.keys():
         warnings.append(f'{missing_kind.title()} source is missing; full benchmark coverage is unavailable.')
     for kind, source in frames.items():
@@ -225,9 +250,21 @@ def calculate_scoring(
             continue
         frame = pd.DataFrame(index=source.index)
         for field in required_input_columns(kind, dimensions):
-            resolved = resolve_column_name(source.columns, field)
+            aliases = _LEVEL_SOURCE_ALIASES.get(field, (field,))
+            resolved = next((
+                column for alias in aliases
+                if (column := resolve_column_name(source.columns, alias)) is not None
+            ), None)
             if resolved:
                 frame[field] = source[resolved]
+        if normalized_operator_mappings and 'Operator' in frame:
+            frame['Operator'] = frame['Operator'].map(
+                lambda value: value if pd.isna(value) else normalized_operator_mappings.get(
+                    str(value).strip().casefold(), str(value).strip(),
+                )
+            )
+        if not campaign_selected:
+            frame['Campaign'] = None
         if 'Dataset Type' in dimensions:
             frame['Dataset Type'] = kind.title()
         missing_group = [field for field in _SHARED + [d for d in dimensions if d != 'Dataset Type'] if field not in frame]
@@ -238,9 +275,12 @@ def calculate_scoring(
         for environment, context in config['scope']['environments'].items():
             mask = (frame['G_Level_1'] == context['g_level_1']) & (frame['G_Level_2'] == context['g_level_2'])
             frame.loc[mask, 'environment'] = environment
-        valid = frame['environment'].notna() & frame['Operator'].notna() & frame['Campaign'].notna()
+        valid = frame['environment'].notna() & frame['Operator'].notna()
+        if campaign_selected:
+            valid &= frame['Campaign'].notna()
         if (~valid).any():
-            warnings.append(f'{kind.title()}: {int((~valid).sum())} rows have unsupported or missing environment, operator or campaign and were excluded.')
+            missing_context = 'environment, operator or campaign' if campaign_selected else 'environment or operator'
+            warnings.append(f'{kind.title()}: {int((~valid).sum())} rows have unsupported or missing {missing_context} and were excluded.')
         for values, group in frame[valid].groupby(group_fields, dropna=False, sort=False):
             metadata = dict(zip(keys, values))
             metadata = {key: (None if pd.isna(value) else value) for key, value in metadata.items()}
@@ -303,6 +343,9 @@ def calculate_scoring(
                                'complete_coverage': complete})
     return {'scoring': rows, 'totals': totals, 'charts': [dict(row) for row in totals], 'gap': gap,
             'gap_totals': gap_totals, 'warnings': list(dict.fromkeys(warnings)),
+            'aggregation_levels': dimensions,
+            'aggregation_contract_version': AGGREGATION_CONTRACT_VERSION,
+            'campaigns': sorted(campaign_values.values(), key=lambda value: (value.casefold(), value)),
             'method_version': method_version, 'configuration': config,
             'configuration_hash': configuration_hash(config), 'gap_direction': 'operator_minus_reference',
             'baseline_aliases': baseline_aliases}

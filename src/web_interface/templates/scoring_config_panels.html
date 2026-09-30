@@ -44,6 +44,8 @@
   .scoring-config-panel .scoring-config-priority-actions { display: flex; gap: .35rem; }
   .scoring-config-panel .scoring-config-priority-actions button { min-width: 2.2rem; padding: .35rem .55rem; }
   .scoring-config-panel .scoring-config-transfer-link { color: #245e69; font-weight: 650; }
+  .scoring-config-panel .scoring-config-hierarchy-level { font-weight: 750; }
+  .scoring-config-panel .scoring-config-hierarchy-required { margin-left: .45rem; color: #607681; font-size: .76rem; font-weight: 600; }
   .scoring-config-panel [data-scoring-config-import] { background: #267c79; border-color: #267c79; color: #fff; }
   .scoring-config-panel [data-scoring-config-import]:hover { background: #1a625f; }
   @media (max-width: 720px) {
@@ -53,6 +55,30 @@
 </style>
 
 <section class="scoring-config-panels" data-scoring-config>
+  <details class="panel collapsible-panel scoring-config-panel" open data-panel-state-key="workspace-config:scoring-aggregation-hierarchy">
+    <summary class="collapsible-summary">
+      <div><p class="eyebrow">Scoring setup</p><h2>Scoring Aggregation Hierarchy</h2></div>
+      <span class="collapse-chip">Collapse</span>
+    </summary>
+    <div class="collapsible-panel-body">
+      {% if active_workspace %}
+      <p class="scoring-config-intro">Set the order used to group scoring results and filter values. Move each dimension into the desired hierarchy position. Operator remains required for every scoring job.</p>
+      <form data-scoring-hierarchy-form data-no-persist novalidate>
+        <div class="scoring-config-table-scroll" role="region" aria-label="Scoring aggregation hierarchy order" tabindex="0">
+          <table class="scoring-config-priority-table">
+            <thead><tr><th scope="col">Position</th><th scope="col">Aggregation level</th><th scope="col">Order</th></tr></thead>
+            <tbody data-scoring-hierarchy-rows><tr><td colspan="3">Loading aggregation hierarchy…</td></tr></tbody>
+          </table>
+        </div>
+        <div class="scoring-config-actions">
+          <p class="scoring-config-status" data-scoring-hierarchy-status role="status" aria-live="polite"></p>
+          <button type="submit" data-scoring-hierarchy-save disabled>Save Aggregation Hierarchy</button>
+        </div>
+      </form>
+      {% else %}<p class="form-note">Open a workspace before editing Scoring Aggregation Hierarchy.</p>{% endif %}
+    </div>
+  </details>
+
   <details class="panel collapsible-panel scoring-config-panel" open data-panel-state-key="workspace-config:scoring-kpi-configuration">
     <summary class="collapsible-summary">
       <div><p class="eyebrow">Scoring methodology</p><h2>Scoring KPI Configuration</h2></div>

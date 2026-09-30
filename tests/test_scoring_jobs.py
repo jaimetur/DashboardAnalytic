@@ -21,11 +21,16 @@ def scoring_engine(monkeypatch):
     calls = []
     engine.configuration_snapshots = []
     engine.baseline_alias_snapshots = []
+    engine.operator_mapping_snapshots = []
 
-    def calculate_scoring(frames, levels, *, baseline_operator, configuration=None, baseline_aliases=None):
+    def calculate_scoring(
+        frames, levels, *, baseline_operator, configuration=None, baseline_aliases=None,
+        operator_mappings=None,
+    ):
         calls.append((frames, levels, baseline_operator))
         engine.configuration_snapshots.append(copy.deepcopy(configuration))
         engine.baseline_alias_snapshots.append(list(baseline_aliases or []))
+        engine.operator_mapping_snapshots.append(dict(operator_mappings or {}))
         return {
             'scoring': [{'Operator': 'EE', 'Score': 4}],
             'gap': [{'Operator': 'EE', 'Gap': 0}],
@@ -102,7 +107,7 @@ def test_scoring_jobs_persist_results_and_reuse_completed_cache(repository, scor
     )
     assert not reused
     assert job['status'] == 'queued'
-    assert job['aggregation_levels'] == ['Operator', 'City', 'Region']
+    assert job['aggregation_levels'] == ['Operator', 'Region', 'City']
     assert job['campaigns'] == ['2026-Q2']
     duplicate, reused = scoring_jobs.create_scoring_job(
         repository, [dataset_id], ['Region', 'City'], 'NSA', username='other-user',
@@ -115,7 +120,7 @@ def test_scoring_jobs_persist_results_and_reuse_completed_cache(repository, scor
     assert completed['result']['scoring'] == [{'Operator': 'EE', 'Score': 4}]
     assert len(calls) == 1
     loaded_frames, levels, baseline = calls[0]
-    assert levels == ['Operator', 'City', 'Region']
+    assert levels == ['Operator', 'Region', 'City']
     assert baseline == 'EE'
     assert 'unused_payload' not in loaded_frames['data'].columns
 
@@ -178,6 +183,34 @@ def test_scoring_configuration_changes_cache_and_queued_job_keeps_its_snapshot(r
     assert completed['status'] == 'completed'
     assert completed['result']['configuration'] == original_configuration
     assert engine.configuration_snapshots[0] == original_configuration
+
+
+def test_job_levels_follow_configured_hierarchy_and_snapshot_contract(repository, scoring_engine):
+    engine, _calls = scoring_engine
+    configuration = scoring_configuration()
+    configuration['aggregation_hierarchy'] = ['Campaign', 'City', 'Operator', 'Region', 'Vendor']
+    repository.replace_scoring_configuration(configuration)
+    repository.replace_operator_mapping_groups([
+        {'canonical': 'Vodafone UK', 'aliases': ['VF_UK'], 'color': '#FF0000'},
+    ])
+    dataset_ids = add_complete_scoring_sources(repository, 'Hierarchy')
+
+    job, reused = scoring_jobs.create_scoring_job(
+        repository, dataset_ids, ['Vendor', 'Region', 'City', 'Campaign'], 'NSA',
+    )
+
+    assert not reused
+    assert job['levels'] == ['Campaign', 'City', 'Operator', 'Region', 'Vendor']
+    assert job['aggregation_levels'] == job['levels']
+    assert job['aggregation_hierarchy'] == configuration['aggregation_hierarchy']
+    assert job['aggregation_contract_version'] == 2
+    completed = scoring_jobs.run_scoring_job(repository, job['id'])
+    assert completed['status'] == 'completed'
+    assert completed['result']['aggregation_levels'] == job['levels']
+    assert completed['result']['aggregation_contract_version'] == 2
+    assert engine.operator_mapping_snapshots[0] == {
+        'vf_uk': 'Vodafone UK', 'vodafone uk': 'Vodafone UK',
+    }
 
 
 def test_baseline_alias_snapshot_is_cached_and_passed_to_engine(repository, scoring_engine):
@@ -379,6 +412,8 @@ def test_legacy_scoring_jobs_default_to_no_context_filters(repository):
     reloaded = scoring_jobs.get_scoring_job(repository, job['id'])
 
     assert reloaded['context_filters'] == {}
+    assert reloaded['aggregation_contract_version'] == 1
+    assert reloaded['aggregation_hierarchy'] == []
 
 
 def test_scoring_cache_invalidates_when_materialized_cdr_changes(repository, scoring_engine):

@@ -21,7 +21,7 @@ def frame(rows, operator='EE', environment='City', campaign='2026Q2'):
                           'G_Level_2': environment, **row} for row in rows])
 
 
-def metric(result, code, operator='EE', environment='DriveCity', campaign='2026Q2'):
+def metric(result, code, operator='EE', environment='DriveCity', campaign=None):
     return next(row for row in result['scoring'] if row['kpi_code'] == code and row['operator'] == operator
                 and row['environment'] == environment and row['campaign'] == campaign)
 
@@ -140,8 +140,8 @@ def test_campaign_environment_aliases_and_missing_coverage():
     invalid = frame([{'Session_Type': 'CALL', 'Call_Status': 'Completed'}], environment='Unknown')
     data = pd.concat([first, second, invalid], ignore_index=True).rename(columns={'Operator': 'operator', 'G_Level_1': 'g level 1', 'G_Level_2': 'g-level-2'})
     data['Region'] = 'City'
-    result = calculate_scoring({'voice': data}, ['Operator'])
-    assert metric(result, 'C5')['value'] == 100
+    result = calculate_scoring({'voice': data}, ['Operator', 'Campaign'])
+    assert metric(result, 'C5', campaign='2026Q2')['value'] == 100
     assert metric(result, 'C5', campaign='2026Q3')['value'] == 0
     assert len([r for r in result['scoring'] if r['kpi_code'] == 'C5']) == 2
     assert all(not row['complete_coverage'] and row['score'] is None for row in result['totals'])
@@ -157,16 +157,54 @@ def test_best_operator_ultra_and_gap_are_per_campaign_and_group():
     for operator, rate in [('EE', 1000), ('Other', 700)]:
         frames.append(frame([{'Test_Name': 'FDTT DL', 'Test_Result': 'Completed', 'Mean_Data_Rate': rate}], operator=operator))
     frames.append(frame([{'Test_Name': 'FDTT DL', 'Test_Result': 'Completed', 'Mean_Data_Rate': 2000}], operator='Other', campaign='Other campaign'))
-    result = calculate_scoring({'data': pd.concat(frames)}, ['Operator'])
-    assert metric(result, 'C25')['score'] == 1
+    result = calculate_scoring({'data': pd.concat(frames)}, ['Operator', 'Campaign'])
+    assert metric(result, 'C25', campaign='2026Q2')['score'] == 1
     c25_context = next(m for m in CONFIG['metrics'] if m['code'] == 'C25')['contexts']['DriveCity']
     expected = interpolate_score(700, c25_context['thresholds'], 1000, c25_context['score_mapping'])
-    assert metric(result, 'C25', operator='Other')['score'] == pytest.approx(expected)
+    assert metric(result, 'C25', operator='Other', campaign='2026Q2')['score'] == pytest.approx(expected)
     gap = next(row for row in result['gap'] if row['kpi_code'] == 'C25')
     assert gap['gap_points'] == pytest.approx(gap['operator_points'] - gap['baseline_points'])
     assert gap['gap_points'] < 0
     assert any('Baseline EE' in warning for warning in result['warnings'])
     assert all(row['campaign'] == '2026Q2' for row in result['gap'])
+
+
+def test_campaign_is_optional_and_defaults_to_pooled_raw_rows():
+    source = pd.concat([
+        frame([{'Session_Type': 'CALL', 'Call_Status': 'Completed'}], campaign='2026Q2'),
+        frame([{'Session_Type': 'CALL', 'Call_Status': 'Failed'}], campaign='2026Q3'),
+    ], ignore_index=True)
+
+    pooled = calculate_scoring({'voice': source}, ['Operator'])
+    separated = calculate_scoring({'voice': source}, ['Operator', 'Campaign'])
+
+    pooled_rows = [row for row in pooled['scoring'] if row['kpi_code'] == 'C5']
+    separated_rows = [row for row in separated['scoring'] if row['kpi_code'] == 'C5']
+    assert len(pooled_rows) == 1
+    assert pooled_rows[0]['campaign'] is None
+    assert pooled_rows[0]['value'] == 50
+    assert pooled['aggregation_levels'] == ['Operator']
+    assert pooled['aggregation_contract_version'] == 2
+    assert pooled['campaigns'] == ['2026Q2', '2026Q3']
+    assert {row['campaign']: row['value'] for row in separated_rows} == {'2026Q2': 100, '2026Q3': 0}
+    assert separated['aggregation_levels'] == ['Operator', 'Campaign']
+
+
+def test_operator_mapping_aliases_are_canonicalized_before_kpi_aggregation():
+    source = pd.concat([
+        frame([{'Session_Type': 'CALL', 'Call_Status': 'Completed'}], operator='VF_UK'),
+        frame([{'Session_Type': 'CALL', 'Call_Status': 'Failed'}], operator='Vodafone UK'),
+    ], ignore_index=True)
+
+    result = calculate_scoring(
+        {'voice': source}, ['Operator'],
+        operator_mappings={'vf_uk': 'Vodafone UK', 'vodafone uk': 'Vodafone UK'},
+    )
+    rows = [row for row in result['scoring'] if row['kpi_code'] == 'C5']
+
+    assert len(rows) == 1
+    assert rows[0]['operator'] == 'Vodafone UK'
+    assert rows[0]['value'] == 50
 
 
 def test_dimension_grouping_and_required_projection():

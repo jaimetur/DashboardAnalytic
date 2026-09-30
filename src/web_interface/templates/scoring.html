@@ -129,6 +129,11 @@
   .scoring-comparison-table .scoring-gap-header { background: #fff5a6 !important; }
   .scoring-comparison-table th.scoring-gap-header { background: #ffff00 !important; color: #242424 !important; }
   .scoring-comparison-table th.scoring-gap-operator-header { border-top: 4px solid var(--operator-accent, #607d8b) !important; }
+  .scoring-comparison-table th.scoring-hierarchy-header { min-width: 8rem; max-width: 20rem; white-space: normal; background: #e1e9eb; color: #263f4b; }
+  .scoring-comparison-table th.scoring-hierarchy-header[data-hierarchy-depth="0"] { background: #cfdde0; }
+  .scoring-comparison-table th.scoring-hierarchy-header[data-hierarchy-depth="1"] { background: #d8e4e6; }
+  .scoring-comparison-table th.scoring-hierarchy-header.scoring-reference-header { border-top: 5px solid #ffff00 !important; background: #ffff00 !important; color: #242424 !important; }
+  .scoring-comparison-table th.scoring-hierarchy-header.scoring-gap-header { background: #fff5a6 !important; }
   .scoring-comparison-table .scoring-category-cell { vertical-align: middle; background: #f0f2f3; color: #334854; font-weight: 800; }
   .scoring-comparison-table tbody tr:nth-child(even) td { background-color: #f6f7f7; }
   .scoring-comparison-table tbody tr:nth-child(even) td[data-column="weight"] { background-color: #e4eee1; }
@@ -233,12 +238,20 @@
         <p class="scoring-picker-note">The latest uploaded CDR for each type in the selected NR Mode is selected by default. You can add older datasets if needed.</p>
       </div>
     </div>
+    {% if scoring_incomplete_catalogue_datasets %}
+    <div class="scoring-warning-box" role="status">
+      <strong>Some CDR filter catalogues are incomplete. Reprocess these datasets to refresh their cached filter values.</strong>
+      <ul class="scoring-warnings">
+        {% for dataset_name in scoring_incomplete_catalogue_datasets %}<li>{{ dataset_name }}</li>{% endfor %}
+      </ul>
+    </div>
+    {% endif %}
     <div class="scoring-picker" aria-labelledby="scoring-context-filters-title">
       <div class="scoring-picker-head"><strong id="scoring-context-filters-title">Context filters</strong><span>From selected CDRs</span></div>
       <div class="scoring-context-filter-grid" data-scoring-context-filters>
-        {% for key, label in [('Region', 'Region'), ('City', 'City'), ('Operator', 'Operator'), ('Vendor', 'Vendor'), ('Campaign', 'Campaign')] %}
-        <label>{{ label }}
-          <select multiple size="1" data-scoring-context-filter="{{ key }}" data-multiselect-auto-close="1000" data-multiselect-empty-label="All values" aria-label="Filter by {{ label }}">
+        {% for level in aggregation_levels %}
+        <label>{{ level }}
+          <select multiple size="1" data-scoring-context-filter="{{ level }}" data-multiselect-auto-close="1000" data-multiselect-empty-label="All values" aria-label="Filter by {{ level }}">
             <option value="" disabled>No values</option>
           </select>
         </label>
@@ -320,7 +333,7 @@
       <div class="scoring-chart-expanded-content" data-scoring-expanded-chart></div>
     </section>
   </div>
-  <script type="application/json" data-scoring-config>{{ {'main_cities': scoring_main_cities | default([], true), 'operator_groups': scoring_operator_groups | default([], true)} | tojson }}</script>
+  <script type="application/json" data-scoring-config>{{ {'main_cities': scoring_main_cities | default([], true), 'operator_groups': scoring_operator_groups | default([], true), 'aggregation_hierarchy': aggregation_levels | default(['Operator', 'Vendor', 'Region', 'City', 'Campaign'], true)} | tojson }}</script>
 </section>
 {% endblock %}
 {% block extra_scripts %}

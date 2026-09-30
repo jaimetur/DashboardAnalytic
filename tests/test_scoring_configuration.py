@@ -4,6 +4,7 @@ import pytest
 
 from src.modules.scoring import interpolate_score, method_version_for_configuration
 from src.modules.scoring_config import (
+    DEFAULT_AGGREGATION_HIERARCHY,
     configuration_hash,
     validate_scoring_configuration,
 )
@@ -19,12 +20,28 @@ def test_test_configuration_fixture_is_complete_and_independent():
     second = scoring_configuration()
 
     assert len(first['metrics']) == 32
+    assert first['aggregation_hierarchy'] == DEFAULT_AGGREGATION_HIERARCHY
     assert first['gap_priority'] == [item['code'] for item in first['metrics']]
     assert set(metric(first, 'C9')['contexts']['DriveCity']['score_mapping']) == {
         'low_score', 'medium_score', 'high_score', 'ultra_score',
     }
     metric(first, 'C5')['contexts']['DriveCity']['max_points'] = 0
     assert metric(second, 'C5')['contexts']['DriveCity']['max_points'] > 0
+
+
+def test_legacy_configuration_defaults_hierarchy_and_custom_order_changes_identity():
+    configuration = scoring_configuration()
+    legacy = dict(configuration)
+    legacy.pop('aggregation_hierarchy')
+
+    validated_legacy = validate_scoring_configuration(legacy)
+    reordered = dict(configuration)
+    reordered['aggregation_hierarchy'] = ['Campaign', 'City', 'Region', 'Vendor', 'Operator']
+
+    assert validated_legacy['aggregation_hierarchy'] == DEFAULT_AGGREGATION_HIERARCHY
+    assert configuration_hash(validated_legacy) == configuration_hash(configuration)
+    assert configuration_hash(reordered) != configuration_hash(configuration)
+    assert method_version_for_configuration(reordered) != method_version_for_configuration(configuration)
 
 
 def test_seed_fixture_has_kpi_specific_high_with_ultra_anchors():
@@ -93,6 +110,7 @@ def test_validation_accepts_editable_thresholds_weights_types_anchors_and_priori
         (lambda c: metric(c, 'C5')['contexts']['DriveCity']['score_mapping'].__setitem__('high_score', 1.1), 'at most 1'),
         (lambda c: metric(c, 'C5')['contexts']['DriveCity']['score_mapping'].__setitem__('high_score', 0.7), 'monotonic'),
         (lambda c: c.__setitem__('gap_priority', ['C5'] * 32), 'every supported KPI code exactly once'),
+        (lambda c: c.__setitem__('aggregation_hierarchy', ['Operator', 'Vendor', 'Region', 'City', 'City']), 'aggregation_hierarchy'),
         (lambda c: metric(c, 'C5')['calculation'].__setitem__('formula', 'AVG(Other)'), 'unsupported voice field'),
         (lambda c: c['scope']['environments']['DriveCity'].__setitem__('g_level_2', 'Road'), 'is unsupported'),
     ],

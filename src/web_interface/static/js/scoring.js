@@ -10,16 +10,6 @@
   const datasetInputs = [...root.querySelectorAll('[data-dataset-id]')];
   const datasetKindOrder = ['data', 'voice', 'speech'];
   const datasetKindLabels = {data: 'Data', voice: 'Voice', speech: 'Speech'};
-  const contextFilterDefinitions = [
-    {key: 'Region', catalogueKey: 'regions'},
-    {key: 'City', catalogueKey: 'cities'},
-    {key: 'Operator', catalogueKey: 'operators'},
-    {key: 'Vendor', catalogueKey: 'vendors'},
-    {key: 'Campaign', catalogueKey: 'campaigns'},
-  ];
-  const contextFilterSelects = new Map(contextFilterDefinitions.map(({key}) => [
-    key, root.querySelector(`[data-scoring-context-filter="${key}"]`),
-  ]));
   const scoringConfigElement = root.querySelector('[data-scoring-config]');
   let scoringConfig = {};
   try {
@@ -27,6 +17,21 @@
   } catch {
     scoringConfig = {};
   }
+  const defaultHierarchy = ['Operator', 'Vendor', 'Region', 'City', 'Campaign'];
+  const catalogueKeyByLevel = new Map([
+    ['Operator', 'operators'], ['Vendor', 'vendors'], ['Region', 'regions'],
+    ['City', 'cities'], ['Campaign', 'campaigns'],
+  ]);
+  const configuredHierarchy = Array.isArray(scoringConfig.aggregation_hierarchy)
+    ? scoringConfig.aggregation_hierarchy.map(value => String(value)) : [];
+  const hierarchyIsValid = configuredHierarchy.length === defaultHierarchy.length
+    && new Set(configuredHierarchy).size === defaultHierarchy.length
+    && configuredHierarchy.every(level => catalogueKeyByLevel.has(level));
+  const contextFilterDefinitions = (hierarchyIsValid ? configuredHierarchy : defaultHierarchy)
+    .map(key => ({key, catalogueKey: catalogueKeyByLevel.get(key)}));
+  const contextFilterSelects = new Map(contextFilterDefinitions.map(({key}) => [
+    key, root.querySelector(`[data-scoring-context-filter="${key}"]`),
+  ]));
   const mainCities = [...new Set((Array.isArray(scoringConfig.main_cities) ? scoringConfig.main_cities : [])
     .map(value => String(value ?? '').trim()).filter(Boolean))];
   const mainCityIdentities = new Set(mainCities.map(city => city.toLocaleLowerCase()));
@@ -68,6 +73,8 @@
   let selectedJob = null;
   let selectedEnvironment = null;
   let currentResults = null;
+  let currentResultsJobId = null;
+  let activeResultTab = root.querySelector('[data-result-tab][aria-selected="true"]')?.dataset.resultTab || 'scoring';
   let chartFocusReturn = null;
   let previousBodyOverflow = '';
   let userSelectedJob = false;
@@ -104,6 +111,13 @@
     const canonical = String(group.canonical || '').trim();
     return [canonical, ...(Array.isArray(group.aliases) ? group.aliases : [])]
       .map(value => String(value ?? '').trim()).filter(Boolean);
+  }
+
+  function canonicalOperatorName(value) {
+    const raw = String(value ?? '').trim();
+    const identity = raw.toLocaleLowerCase();
+    const group = operatorGroups.find(item => operatorGroupLabels(item).some(alias => alias.toLocaleLowerCase() === identity));
+    return group ? String(group.canonical).trim() : raw;
   }
 
   function contextFilterOptions(key, catalogueValues) {
@@ -1019,6 +1033,474 @@
     }
   }
 
+  function hierarchyColumnEntries(tableData, styleSource = tableData, includeReference = true) {
+    const sourceColumns = Array.isArray(tableData?.hierarchy_columns) && tableData.hierarchy_columns.length
+      ? tableData.hierarchy_columns
+      : (Array.isArray(styleSource?.hierarchy_columns) ? styleSource.hierarchy_columns : []);
+    const byId = new Map(sourceColumns.map(column => [String(column?.id ?? ''), column]));
+    const ids = Array.isArray(tableData?.operators) ? tableData.operators.map(String) : sourceColumns.map(column => String(column?.id ?? ''));
+    const columns = ids.map((id, index) => ({...(byId.get(id) || {}), id, styleSource, sourceIndex: index}));
+    columns.sort((left, right) => {
+      const leftStyle = firstValue(styleSource?.operator_styles || {}, [left.id], {});
+      const rightStyle = firstValue(styleSource?.operator_styles || {}, [right.id], {});
+      const leftPosition = Number(firstValue(leftStyle, ['position'], left.sourceIndex));
+      const rightPosition = Number(firstValue(rightStyle, ['position'], right.sourceIndex));
+      return leftPosition - rightPosition || left.sourceIndex - right.sourceIndex;
+    });
+    return columns.filter(column => includeReference || !hierarchyColumnIsReference(column));
+  }
+
+  function hierarchyColumnIsReference(column) {
+    const style = firstValue(column?.styleSource?.operator_styles || {}, [column?.id], {});
+    return column?.is_reference === true || style?.is_reference === true
+      || (column?.operator && isReferenceOperator(column.styleSource, column.operator));
+  }
+
+  function hierarchyColumnOperator(column) {
+    const style = firstValue(column?.styleSource?.operator_styles || {}, [column?.id], {});
+    return String(column?.operator || style?.operator || column?.id || '');
+  }
+
+  function hierarchyLevelNames(tableData, columns) {
+    const configured = Array.isArray(tableData?.hierarchy_levels) ? tableData.hierarchy_levels.map(String) : [];
+    if (configured.length) return configured;
+    for (const column of columns) {
+      if (Array.isArray(column?.path) && column.path.length) return column.path.map(item => String(item?.level || 'Level'));
+    }
+    return [];
+  }
+
+  function hierarchyPathEntry(column, depth, levels) {
+    const path = Array.isArray(column?.path) ? column.path : [];
+    const expectedLevel = levels[depth] || '';
+    const entry = path.find(item => String(item?.level || '') === expectedLevel) || path[depth] || {};
+    return {
+      level: String(entry?.level || expectedLevel || `Level ${depth + 1}`),
+      value: String(entry?.value ?? ''),
+    };
+  }
+
+  function hierarchyPathValueLabel(column) {
+    const path = Array.isArray(column?.path) ? column.path : [];
+    return path.map(entry => {
+      const value = String(entry?.value ?? '').trim();
+      return value || 'Not specified';
+    }).join(' · ');
+  }
+
+  function hierarchyPathFullLabel(column) {
+    const path = Array.isArray(column?.path) ? column.path : [];
+    return String(column?.label || path.map(entry => {
+      const level = String(entry?.level || 'Level');
+      const value = String(entry?.value ?? '').trim() || 'Not specified';
+      return `${level}: ${value}`;
+    }).join(' · '));
+  }
+
+  function appendHierarchyAxisBands(svg, categories, levels, columnsById, categoryStarts, step, baselineY, left, right) {
+    if (!levels.length || !categories.length) return;
+    const rowHeight = 23;
+    const top = baselineY + 16;
+    const width = Math.max(0, right - left);
+    svg.append(svgElement(svg, 'rect', {x: left, y: top, width, height: rowHeight * levels.length, fill: '#ffffff'}));
+    for (let rowIndex = 0; rowIndex < levels.length; rowIndex += 1) {
+      const depth = levels.length - rowIndex - 1;
+      const y = top + rowIndex * rowHeight;
+      if (rowIndex % 2) svg.append(svgElement(svg, 'rect', {x: left, y, width, height: rowHeight, fill: '#f6f8f8'}));
+      svg.append(svgElement(svg, 'line', {x1: left, x2: right, y1: y + rowHeight, y2: y + rowHeight, stroke: '#cbd6d9', 'stroke-width': 1}));
+      let start = 0;
+      while (start < categories.length) {
+        const firstColumn = columnsById.get(String(categories[start]));
+        const prefix = firstColumn ? hierarchyPrefixKey(firstColumn, depth, levels) : JSON.stringify(['missing', categories[start]]);
+        let end = start + 1;
+        while (end < categories.length) {
+          const column = columnsById.get(String(categories[end]));
+          const key = column ? hierarchyPrefixKey(column, depth, levels) : JSON.stringify(['missing', categories[end]]);
+          if (key !== prefix) break;
+          end += 1;
+        }
+        const firstStart = categoryStarts.get(String(categories[start]));
+        const lastStart = categoryStarts.get(String(categories[end - 1]));
+        const x1 = firstStart ?? left + start * step;
+        const x2 = (lastStart ?? left + (end - 1) * step) + step;
+        const entry = firstColumn ? hierarchyPathEntry(firstColumn, depth, levels) : {level: levels[depth], value: ''};
+        const value = entry.value || 'Not specified';
+        const groupWidth = x2 - x1;
+        const maxCharacters = Math.max(5, Math.min(34, Math.floor(groupWidth / 7)));
+        const lines = wrappedSvgLabelLines(value, maxCharacters, 2);
+        const label = svgElement(svg, 'text', {
+          x: x1 + groupWidth / 2,
+          y: y + rowHeight / 2 + (lines.length > 1 ? -3 : 4),
+          'text-anchor': 'middle',
+          class: 'scoring-chart-hierarchy-label',
+          'aria-label': `${entry.level}: ${value}`,
+        });
+        label.setAttribute('fill', '#334b58');
+        label.setAttribute('font-size', '11');
+        label.setAttribute('font-weight', '650');
+        label.setAttribute('pointer-events', 'auto');
+        lines.forEach((line, lineIndex) => {
+          const span = svgElement(svg, 'tspan', {x: x1 + groupWidth / 2, dy: lineIndex ? '11' : '0'});
+          span.textContent = line;
+          label.append(span);
+        });
+        const title = svgElement(svg, 'title');
+        title.textContent = firstColumn ? hierarchyPathFullLabel(firstColumn) : `${entry.level}: ${value}`;
+        label.append(title);
+        svg.append(label);
+        svg.append(svgElement(svg, 'line', {x1, x2: x1, y1: y, y2: y + rowHeight, stroke: '#cbd6d9', 'stroke-width': 1}));
+        start = end;
+      }
+      const lastCategoryStart = categoryStarts.get(String(categories[categories.length - 1]));
+      const lastX = (lastCategoryStart ?? left + (categories.length - 1) * step) + step;
+      svg.append(svgElement(svg, 'line', {x1: lastX, x2: lastX, y1: y, y2: y + rowHeight, stroke: '#cbd6d9', 'stroke-width': 1}));
+    }
+  }
+
+  function hierarchyPrefixKey(column, depth, levels) {
+    return JSON.stringify(Array.from({length: depth + 1}, (_, index) => {
+      const entry = hierarchyPathEntry(column, index, levels);
+      return [entry.level, entry.value];
+    }));
+  }
+
+  function appendHierarchyHeaders(thead, tableData, columns, fixedHeadings, blocks) {
+    const levels = hierarchyLevelNames(tableData, columns);
+    const depth = Math.max(levels.length, ...columns.map(column => Array.isArray(column.path) ? column.path.length : 0));
+    const headerLevels = levels.length ? levels : Array.from({length: depth}, (_, index) => `Level ${index + 1}`);
+    const firstRow = document.createElement('tr');
+    for (const [title, key, className = ''] of fixedHeadings) {
+      const th = document.createElement('th');
+      th.scope = 'col';
+      th.rowSpan = depth + 1;
+      th.dataset.column = key;
+      th.textContent = title;
+      if (className) th.className = className;
+      firstRow.append(th);
+    }
+    for (const block of blocks) {
+      if (!block.columns.length) continue;
+      const th = document.createElement('th');
+      th.scope = 'colgroup';
+      th.colSpan = block.columns.length;
+      th.className = `scoring-column-group ${block.className || ''}`.trim();
+      th.textContent = block.label;
+      firstRow.append(th);
+    }
+    thead.append(firstRow);
+
+    for (let depthIndex = 0; depthIndex < depth; depthIndex += 1) {
+      const row = document.createElement('tr');
+      for (const block of blocks) {
+        if (!block.columns.length) continue;
+        let start = 0;
+        while (start < block.columns.length) {
+          const key = hierarchyPrefixKey(block.columns[start], depthIndex, headerLevels);
+          let end = start + 1;
+          while (end < block.columns.length && hierarchyPrefixKey(block.columns[end], depthIndex, headerLevels) === key) end += 1;
+          const groupedColumns = block.columns.slice(start, end);
+          const entry = hierarchyPathEntry(groupedColumns[0], depthIndex, headerLevels);
+          const th = document.createElement('th');
+          th.scope = groupedColumns.length > 1 ? 'colgroup' : 'col';
+          th.colSpan = groupedColumns.length;
+          th.className = `scoring-hierarchy-header ${block.headerClass || ''}`.trim();
+          th.dataset.column = block.column || 'hierarchy';
+          th.dataset.hierarchyLevel = entry.level;
+          th.dataset.hierarchyDepth = String(depthIndex);
+          th.textContent = entry.value || 'Not specified';
+          th.title = `${entry.level}: ${entry.value || 'Not specified'}`;
+          th.setAttribute('aria-label', `${entry.level}: ${entry.value || 'Not specified'}`);
+          if (depthIndex === depth - 1 && groupedColumns.length === 1) {
+            th.classList.add('scoring-operator-header');
+            const column = groupedColumns[0];
+            const presentation = operatorPresentation(column.styleSource, column.id);
+            const fullLabel = hierarchyPathFullLabel(column) || presentation.label || th.textContent;
+            th.title = fullLabel;
+            th.setAttribute('aria-label', fullLabel);
+            if (presentation.color) th.style.setProperty('--operator-accent', presentation.color);
+            if (hierarchyColumnIsReference(column)) {
+              markReferenceHeader(th);
+              th.title = `${fullLabel} is the reference operator`;
+            }
+          }
+          row.append(th);
+          start = end;
+        }
+      }
+      thead.append(row);
+    }
+    return {levels: headerLevels, depth};
+  }
+
+  function appendHierarchyMatrixTable(pane, tableData) {
+    const rows = Array.isArray(tableData?.rows) ? tableData.rows : [];
+    const allColumns = hierarchyColumnEntries(tableData);
+    const nonBaseline = allColumns.filter(column => !hierarchyColumnIsReference(column));
+    const showKpiValues = Boolean(showKpiValuesToggle?.checked);
+    const blocks = [
+      ...(showKpiValues ? [{label: 'KPI Value', className: 'scoring-kpi-value-group', headerClass: 'scoring-kpi-value-header', column: 'kpi-value', columns: allColumns}] : []),
+      {label: 'Score', className: 'scoring-score-group', headerClass: 'scoring-score-header', column: 'score', columns: allColumns},
+      {label: 'GAP', className: 'scoring-gap-group', headerClass: 'scoring-gap-header', column: 'gap', columns: nonBaseline},
+    ];
+    const wrapper = document.createElement('div');
+    wrapper.className = 'scoring-matrix-wrap';
+    const table = document.createElement('table');
+    table.className = 'scoring-comparison-table scoring-hierarchy-table';
+    const thead = document.createElement('thead');
+    appendHierarchyHeaders(thead, tableData, allColumns, [
+      ['Category', 'category'], ['KPI', 'kpi'], ['Score weight (%)', 'weight', 'scoring-weight-header'], ['Max score', 'maximum', 'scoring-maximum-header'],
+    ], blocks);
+    const tbody = document.createElement('tbody');
+    for (let index = 0; index < rows.length; index += 1) {
+      const item = rows[index];
+      const row = document.createElement('tr');
+      const category = String(item?.category || 'Other');
+      if (index === 0 || String(rows[index - 1]?.category || 'Other') !== category) {
+        let span = 1;
+        while (index + span < rows.length && String(rows[index + span]?.category || 'Other') === category) span += 1;
+        const categoryCell = document.createElement('td');
+        categoryCell.className = 'scoring-category-cell';
+        categoryCell.rowSpan = span;
+        categoryCell.textContent = category;
+        categoryCell.dataset.column = 'category';
+        row.append(categoryCell);
+      }
+      const kpi = document.createElement('td');
+      kpi.dataset.column = 'kpi';
+      kpi.textContent = String(item?.kpi || item?.kpi_code || 'N/A');
+      kpi.title = String(item?.kpi_code || item?.kpi || '');
+      row.append(kpi);
+      const weight = document.createElement('td');
+      weight.dataset.numeric = 'true';
+      weight.dataset.column = 'weight';
+      weight.textContent = formatMatrixNumber(item?.weight_percent);
+      row.append(weight);
+      const maximum = document.createElement('td');
+      maximum.dataset.numeric = 'true';
+      maximum.dataset.column = 'maximum';
+      maximum.textContent = formatMatrixNumber(item?.max_points);
+      row.append(maximum);
+      const values = item?.values && typeof item.values === 'object' ? item.values : {};
+      if (showKpiValues) {
+        for (const column of allColumns) {
+          const cell = document.createElement('td');
+          const operatorCell = operatorValue(values, column.id);
+          const rawValue = operatorCell && typeof operatorCell === 'object' ? firstValue(operatorCell, ['value', 'raw_value', 'kpi_value'], null) : null;
+          const presentation = operatorPresentation(column.styleSource, column.id);
+          const unit = firstValue(item, ['unit', 'units', 'measurement_unit'], '');
+          cell.className = 'scoring-kpi-value-cell';
+          cell.dataset.column = 'kpi-value';
+          cell.textContent = formatRawKpiValue(rawValue);
+          cell.dataset.numeric = rawValue !== null && rawValue !== undefined && String(rawValue).trim() !== '' && Number.isFinite(Number(rawValue)) ? 'true' : 'false';
+          cell.title = `Raw ${item?.kpi || item?.kpi_code || 'KPI'} measurement for ${presentation.label}${unit ? ` (${unit})` : ''}: ${formatRawKpiValue(rawValue)}`;
+          row.append(cell);
+        }
+      }
+      allColumns.forEach((column, columnIndex) => addMatrixScoreCell(row, operatorValue(values, column.id), `scoring-tone-${columnIndex % 5}`));
+      const gaps = item?.gaps && typeof item.gaps === 'object' ? item.gaps : {};
+      const gapColors = item?.gap_colors && typeof item.gap_colors === 'object' ? item.gap_colors : {};
+      for (const column of nonBaseline) addMatrixGapCell(row, firstValue(gaps, [column.id], null), firstValue(gapColors, [column.id], ''));
+      tbody.append(row);
+    }
+    table.append(thead, tbody);
+    const total = tableData?.total;
+    if (total && typeof total === 'object') {
+      const tfoot = document.createElement('tfoot');
+      const row = document.createElement('tr');
+      const category = document.createElement('th');
+      category.scope = 'row';
+      category.dataset.column = 'category';
+      category.textContent = 'Total';
+      row.append(category);
+      const label = document.createElement('td');
+      label.dataset.column = 'kpi';
+      label.textContent = 'Weighted score';
+      row.append(label);
+      const weight = document.createElement('td');
+      weight.dataset.numeric = 'true';
+      weight.dataset.column = 'weight';
+      weight.textContent = formatMatrixNumber(firstValue(total, ['weight_percent'], 100));
+      row.append(weight);
+      const maximum = document.createElement('td');
+      maximum.dataset.numeric = 'true';
+      maximum.dataset.column = 'maximum';
+      maximum.textContent = formatMatrixNumber(firstValue(total, ['max_points'], null));
+      row.append(maximum);
+      const values = total.values && typeof total.values === 'object' ? total.values : {};
+      if (showKpiValues) {
+        allColumns.forEach(() => {
+          const cell = document.createElement('td');
+          cell.className = 'scoring-kpi-value-cell';
+          cell.dataset.column = 'kpi-value';
+          cell.textContent = 'N/A';
+          cell.title = 'A single raw KPI measurement does not apply to the weighted total.';
+          row.append(cell);
+        });
+      }
+      allColumns.forEach(column => addMatrixScoreCell(row, operatorValue(values, column.id), '', true));
+      const gaps = total.gaps && typeof total.gaps === 'object' ? total.gaps : {};
+      const gapColors = total.gap_colors && typeof total.gap_colors === 'object' ? total.gap_colors : {};
+      nonBaseline.forEach(column => addMatrixGapCell(row, firstValue(gaps, [column.id], null), firstValue(gapColors, [column.id], '')));
+      tfoot.append(row);
+      table.append(tfoot);
+    }
+    wrapper.append(table);
+    pane.append(wrapper);
+    if (!rows.length) {
+      const empty = document.createElement('div');
+      empty.className = 'scoring-empty';
+      empty.textContent = 'No KPI rows are available for this hierarchy.';
+      pane.append(empty);
+    }
+  }
+
+  function renderHierarchyScoringViews(pane, tableData, thresholdLegend = []) {
+    pane.replaceChildren();
+    if (!tableData) {
+      const empty = document.createElement('div');
+      empty.className = 'scoring-empty';
+      empty.textContent = 'No hierarchical scoring table is available for this environment.';
+      pane.append(empty);
+      return;
+    }
+    appendContextHeader(pane, tableData, 'score');
+    appendThresholdLegend(pane, thresholdLegend.length ? thresholdLegend : tableData?.threshold_legend);
+    appendScoringGapScale(pane, tableData);
+    appendHierarchyMatrixTable(pane, tableData);
+  }
+
+  function renderHierarchyGapViews(pane, tableData, scoreTable) {
+    pane.replaceChildren();
+    if (!tableData) {
+      const empty = document.createElement('div');
+      empty.className = 'scoring-empty';
+      empty.textContent = 'No hierarchical GAP table is available for this environment.';
+      pane.append(empty);
+      return;
+    }
+    const styleSource = scoreTable || tableData;
+    const baselineRaw = String(tableData.baseline_operator || 'the reference operator');
+    const baseline = canonicalOperatorName(baselineRaw) || baselineRaw;
+    const allColumns = hierarchyColumnEntries(tableData, styleSource, false)
+      .filter(column => !hierarchyColumnIsReference(column)
+        && hierarchyColumnOperator(column).toLocaleLowerCase() !== baseline.toLocaleLowerCase());
+    const operators = [...new Set(allColumns.map(hierarchyColumnOperator).filter(Boolean))];
+    const comparisonStateKey = `hierarchy-gap-operator:${comparisonIdentity(tableData, 'hierarchy-gap')}`;
+    let comparison = contextSelections.get(comparisonStateKey) || 'all';
+    const selectedOperator = comparison.startsWith('operator:') ? comparison.slice('operator:'.length) : null;
+    if (selectedOperator && !operators.includes(selectedOperator)) comparison = 'all';
+    contextSelections.set(comparisonStateKey, comparison);
+    const columns = comparison === 'all'
+      ? allColumns
+      : allColumns.filter(column => hierarchyColumnOperator(column) === selectedOperator);
+    const rows = Array.isArray(tableData.rows) ? tableData.rows : [];
+    const comparisonLabel = comparison === 'all' ? `All vs ${baseline}` : `${selectedOperator} vs ${baseline}`;
+    const scaleRows = rows.flatMap(item => columns.map(column => ({gap_points: firstValue(item?.gaps || {}, [column.id], null)})))
+      .filter(item => item.gap_points !== null && item.gap_points !== undefined && Number.isFinite(Number(item.gap_points)));
+    appendContextHeader(pane, tableData, 'gap', `GAP Analysis — ${comparisonLabel}`);
+    if (operators.length) {
+      const controls = document.createElement('div');
+      controls.className = 'scoring-comparison-controls scoring-gap-comparison-controls';
+      const label = document.createElement('label');
+      label.textContent = 'Operator comparison';
+      const select = document.createElement('select');
+      select.dataset.hierarchyGapOperator = '';
+      select.dataset.hierarchyGapStateKey = comparisonStateKey;
+      select.setAttribute('aria-label', 'Choose all operators or one operator to compare with the reference');
+      const allOption = document.createElement('option');
+      allOption.value = 'all';
+      allOption.textContent = `All vs ${baseline}`;
+      allOption.selected = comparison === 'all';
+      select.append(allOption);
+      for (const operator of operators) {
+        const option = document.createElement('option');
+        option.value = `operator:${operator}`;
+        option.textContent = `${operator} vs ${baseline}`;
+        option.selected = comparison === option.value;
+        select.append(option);
+      }
+      label.append(select);
+      controls.append(label);
+      pane.append(controls);
+    }
+    const note = document.createElement('p');
+    note.className = 'scoring-context-note';
+    note.textContent = `GAP compares ${comparison === 'all' ? 'each hierarchy leaf' : selectedOperator} with ${baseline} at the same context. Positive values mean the compared operator leads.`;
+    pane.append(note);
+    if (!columns.length) {
+      const empty = document.createElement('div');
+      empty.className = 'scoring-empty';
+      empty.textContent = 'No operators can be compared with the selected reference operator.';
+      pane.append(empty);
+      return;
+    }
+    appendPriorityGapScale(pane, tableData, scaleRows);
+
+    const blocks = [{label: comparisonLabel, className: 'scoring-gap-group', headerClass: 'scoring-gap-header', column: 'gap', columns}];
+    const wrapper = document.createElement('div');
+    wrapper.className = 'scoring-matrix-wrap';
+    const table = document.createElement('table');
+    table.className = 'scoring-comparison-table scoring-priority-table scoring-gap-summary-table scoring-hierarchy-table';
+    const thead = document.createElement('thead');
+    appendHierarchyHeaders(thead, styleSource, columns, [
+      ['Category', 'category'], ['KPI', 'kpi'], ['Type of KPI', 'type'],
+    ], blocks);
+    const tbody = document.createElement('tbody');
+    for (let index = 0; index < rows.length; index += 1) {
+      const item = rows[index];
+      const row = document.createElement('tr');
+      const category = String(item?.category ?? '');
+      if (index === 0 || String(rows[index - 1]?.category ?? '') !== category) {
+        let span = 1;
+        while (index + span < rows.length && String(rows[index + span]?.category ?? '') === category) span += 1;
+        const categoryCell = document.createElement('td');
+        categoryCell.dataset.column = 'category';
+        categoryCell.rowSpan = span;
+        categoryCell.textContent = category || 'Unclassified';
+        row.append(categoryCell);
+      }
+      const kpiCell = document.createElement('td');
+      kpiCell.dataset.column = 'kpi';
+      kpiCell.textContent = String(item?.kpi || item?.kpi_code || 'N/A');
+      kpiCell.title = String(item?.kpi_code || item?.kpi || '');
+      row.append(kpiCell);
+      const typeCell = document.createElement('td');
+      typeCell.dataset.column = 'type';
+      const kpiType = String(item?.kpi_type ?? '');
+      typeCell.textContent = !kpiType || kpiType.toLowerCase() === 'unknown' ? 'Not classified' : kpiType;
+      if (kpiType.toLowerCase() === 'reliable') typeCell.dataset.kpiType = 'reliable';
+      row.append(typeCell);
+      const gaps = item?.gaps && typeof item.gaps === 'object' ? item.gaps : {};
+      const gapColors = item?.gap_colors && typeof item.gap_colors === 'object' ? item.gap_colors : {};
+      for (const column of columns) addMatrixGapCell(row, firstValue(gaps, [column.id], null), firstValue(gapColors, [column.id], ''));
+      tbody.append(row);
+    }
+    table.append(thead, tbody);
+    const total = tableData.total && typeof tableData.total === 'object' ? tableData.total : {};
+    const totalGaps = total.gaps && typeof total.gaps === 'object' ? total.gaps : {};
+    if (Object.keys(totalGaps).length) {
+      const tfoot = document.createElement('tfoot');
+      const row = document.createElement('tr');
+      const label = document.createElement('th');
+      label.scope = 'row';
+      label.colSpan = 3;
+      label.textContent = 'Total signed GAP';
+      row.append(label);
+      const totalGapColors = total.gap_colors && typeof total.gap_colors === 'object' ? total.gap_colors : {};
+      for (const column of columns) addMatrixGapCell(row, firstValue(totalGaps, [column.id], null), firstValue(totalGapColors, [column.id], ''));
+      tfoot.append(row);
+      table.append(tfoot);
+    }
+    wrapper.append(table);
+    pane.append(wrapper);
+    if (!rows.length) {
+      const empty = document.createElement('div');
+      empty.className = 'scoring-empty';
+      empty.textContent = 'No KPI rows are available for this hierarchy comparison.';
+      pane.append(empty);
+    }
+  }
+
   function renderScoringViews(pane, tables, thresholdLegend = []) {
     pane.replaceChildren();
     if (!tables.length) {
@@ -1293,44 +1775,107 @@
     return key ? String(row[key] ?? '') : '';
   }
 
-  function makeSvgChart(title, rows, operatorTable) {
-    const categories = [...new Set(rows.map(row => row.category))];
+  function wrappedSvgLabelLines(value, maxLength = 22, maxLines = 2) {
+    const lines = [];
+    let current = '';
+    for (const word of String(value).split(/\s+/)) {
+      const candidate = current ? `${current} ${word}` : word;
+      if (candidate.length > maxLength && current) {
+        lines.push(current);
+        current = word;
+      } else current = candidate;
+    }
+    if (current) lines.push(current);
+    if (lines.length > maxLines) {
+      const last = `${lines.slice(maxLines - 1).join(' ').slice(0, maxLength - 1)}…`;
+      lines.splice(maxLines - 1, lines.length - maxLines + 1, last);
+    }
+    return lines;
+  }
+
+  function makeSvgChart(title, rows, operatorTable, options = {}) {
+    const stacked = Boolean(options.stacked);
+    const categories = Array.isArray(options.categoryOrder)
+      ? [...new Set([...options.categoryOrder.map(String), ...rows.map(row => String(row.category))])]
+      : [...new Set(rows.map(row => row.category))];
     const presentSeries = new Set(rows.map(row => row.series));
     const mappedOrder = Array.isArray(operatorTable?.operators) ? operatorTable.operators.map(String) : [];
-    const series = [...mappedOrder.filter(name => presentSeries.has(name)),
-      ...[...presentSeries].filter(name => !mappedOrder.includes(name)).sort((left, right) => left.localeCompare(right))];
-    const width = Math.max(1180, categories.length * Math.max(168, series.length * 38 + 22) + 150);
+    const requestedSeriesOrder = Array.isArray(options.seriesOrder) ? options.seriesOrder.map(String) : mappedOrder;
+    const series = [...requestedSeriesOrder.filter(name => presentSeries.has(name)),
+      ...[...presentSeries].filter(name => !requestedSeriesOrder.includes(name)).sort((left, right) => left.localeCompare(right))];
+    const hierarchyColumns = Array.isArray(options.hierarchyColumns)
+      ? options.hierarchyColumns
+      : Object.values(options.hierarchyColumns || {});
+    const hierarchyColumnsById = new Map(hierarchyColumns.map(column => [String(column?.id ?? ''), column]));
+    const hierarchyLevels = Array.isArray(options.hierarchyLevels) ? options.hierarchyLevels.map(String) : [];
+    const hasHierarchyAxis = stacked && hierarchyLevels.length > 0 && hierarchyColumnsById.size > 0;
+    const width = Math.max(1180, categories.length * (stacked ? 150 : Math.max(168, series.length * 38 + 22)) + 150);
     const height = 700;
-    const left = 86, right = 28, top = 76, bottom = 150;
-    const chartHeight = height - top - bottom;
-    const maxValue = Math.max(0, ...rows.map(row => Number(row.value)).filter(Number.isFinite));
+    const left = 86, right = 28, bottom = Math.max(150, 24 + (hasHierarchyAxis ? hierarchyLevels.length * 23 : 0));
+    const maxValue = stacked
+      ? Math.max(0, ...categories.map(category => series.reduce((sum, seriesName) => {
+        const row = rows.find(candidate => String(candidate.category) === String(category) && String(candidate.series) === seriesName);
+        const value = row?.value === null || row?.value === undefined || String(row.value).trim() === '' ? Number.NaN : Number(row.value);
+        return sum + (Number.isFinite(value) ? Math.max(0, value) : 0);
+      }, 0)))
+      : Math.max(0, ...rows.map(row => Number(row.value)).filter(Number.isFinite));
     const scaleMaximum = maxValue > 0 ? maxValue * 1.16 : 1;
-    const step = (width - left - right) / Math.max(categories.length, 1);
+    const groupKeys = categories.map(category => String(options.groupKeyForCategory?.(category) || ''));
+    const groupTransitions = hasHierarchyAxis
+      ? groupKeys.slice(1).filter((key, index) => key && groupKeys[index] && key !== groupKeys[index]).length : 0;
+    const categoryGroupGap = hasHierarchyAxis ? Math.max(0, Number(options.categoryGroupGap) || 14) : 0;
+    const step = Math.max(1, (width - left - right - categoryGroupGap * groupTransitions) / Math.max(categories.length, 1));
+    const categoryStarts = new Map();
+    let categoryCursor = left;
+    categories.forEach((category, index) => {
+      if (index && groupKeys[index] && groupKeys[index - 1] && groupKeys[index] !== groupKeys[index - 1]) categoryCursor += categoryGroupGap;
+      categoryStarts.set(String(category), categoryCursor);
+      categoryCursor += step;
+    });
     const fallbackColors = ['#14867d', '#df7a45', '#5a82aa', '#8b63b1', '#b49a32'];
     const presentations = new Map(series.map((name, index) => {
-      const presentation = operatorPresentation(operatorTable, name);
+      const presentation = options.seriesStyles?.[name] || operatorPresentation(operatorTable, name);
       return [name, {...presentation, chartColor: presentation.color || fallbackColors[index % fallbackColors.length]}];
     }));
+    const legendEntries = Array.isArray(options.legendEntries)
+      ? options.legendEntries
+      : series.map(name => ({label: presentations.get(name).label, color: presentations.get(name).chartColor, title: name}));
+    const legendRows = [];
+    for (const entry of legendEntries) {
+      const label = String(entry?.label || '');
+      const entryWidth = 34 + label.length * 7.2;
+      let row = legendRows[legendRows.length - 1];
+      if (!row || (row.width + entryWidth > width - left - right && row.entries.length)) {
+        row = {width: 0, entries: []};
+        legendRows.push(row);
+      }
+      row.entries.push({...entry, label, entryWidth});
+      row.width += entryWidth;
+    }
+    const top = Math.max(76, 42 + legendRows.length * 20);
+    const chartHeight = height - top - bottom;
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
     svg.setAttribute('class', 'scoring-chart-svg');
     svg.setAttribute('role', 'img');
     svg.setAttribute('aria-label', title);
 
-    series.forEach((name, index) => {
-      const slot = (width - left - right) / Math.max(series.length, 1);
-      const x = left + index * slot;
-      const presentation = presentations.get(name);
-      const swatch = document.createElementNS(svg.namespaceURI, 'rect');
-      swatch.setAttribute('x', String(x)); swatch.setAttribute('y', '25'); swatch.setAttribute('width', '14'); swatch.setAttribute('height', '14');
-      swatch.setAttribute('rx', '3'); swatch.setAttribute('fill', presentation.chartColor);
-      const legend = document.createElementNS(svg.namespaceURI, 'text');
-      legend.setAttribute('x', String(x + 21)); legend.setAttribute('y', '37');
-      legend.setAttribute('class', 'scoring-chart-legend');
-      legend.textContent = presentation.label;
-      const fullName = document.createElementNS(svg.namespaceURI, 'title');
-      fullName.textContent = name; legend.append(fullName);
-      svg.append(swatch, legend);
+    legendRows.forEach((row, rowIndex) => {
+      let x = left;
+      for (const entry of row.entries) {
+        const color = safeHexColor(entry.color) || fallbackColors[0];
+        const swatch = document.createElementNS(svg.namespaceURI, 'rect');
+        swatch.setAttribute('x', String(x)); swatch.setAttribute('y', String(25 + rowIndex * 20)); swatch.setAttribute('width', '14'); swatch.setAttribute('height', '14');
+        swatch.setAttribute('rx', '3'); swatch.setAttribute('fill', color);
+        const legend = document.createElementNS(svg.namespaceURI, 'text');
+        legend.setAttribute('x', String(x + 21)); legend.setAttribute('y', String(37 + rowIndex * 20));
+        legend.setAttribute('class', 'scoring-chart-legend');
+        legend.textContent = entry.label;
+        const fullName = document.createElementNS(svg.namespaceURI, 'title');
+        fullName.textContent = String(entry.title || entry.label); legend.append(fullName);
+        svg.append(swatch, legend);
+        x += entry.entryWidth;
+      }
     });
 
     const baselineY = top + chartHeight;
@@ -1352,10 +1897,77 @@
     axisLabel.setAttribute('x', '22'); axisLabel.setAttribute('y', String(top + chartHeight / 2));
     axisLabel.setAttribute('text-anchor', 'middle'); axisLabel.setAttribute('class', 'scoring-chart-axis-label');
     axisLabel.setAttribute('transform', `rotate(-90 22 ${top + chartHeight / 2})`);
-    axisLabel.textContent = 'Weighted score (points)';
+    axisLabel.textContent = options.axisLabel || 'Weighted score (points)';
     svg.append(axisLabel);
+    if (hasHierarchyAxis) {
+      appendHierarchyAxisBands(svg, categories, hierarchyLevels, hierarchyColumnsById, categoryStarts, step, top + chartHeight, left, width - right);
+    }
 
     categories.forEach((category, categoryIndex) => {
+      if (stacked) {
+        const barWidth = Math.min(76, step * .58);
+        const categoryStart = categoryStarts.get(String(category)) ?? left + step * categoryIndex;
+        const x = categoryStart + (step - barWidth) / 2;
+        let stackY = baselineY;
+        let hasValue = false;
+        let complete = true;
+        let total = 0;
+        for (const [seriesIndex, seriesName] of series.entries()) {
+          const row = rows.find(candidate => String(candidate.category) === String(category) && String(candidate.series) === seriesName);
+          if (!row) continue;
+          const numeric = row.value === null || row.value === undefined || String(row.value).trim() === '' ? Number.NaN : Number(row.value);
+          if (!Number.isFinite(numeric)) {
+            complete = false;
+            continue;
+          }
+          hasValue = true;
+          total += numeric;
+          complete = complete && row.complete !== false;
+          const segmentHeight = Math.max(0, numeric / scaleMaximum * chartHeight);
+          const segmentY = stackY - segmentHeight;
+          const configuredSegmentColor = typeof options.segmentColor === 'function'
+            ? safeHexColor(options.segmentColor(category, seriesName, seriesIndex, row)) : '';
+          const color = configuredSegmentColor || presentations.get(seriesName).chartColor;
+          const rect = document.createElementNS(svg.namespaceURI, 'rect');
+          rect.setAttribute('x', String(x)); rect.setAttribute('y', String(segmentY));
+          rect.setAttribute('width', String(barWidth)); rect.setAttribute('height', String(Math.max(0, segmentHeight)));
+          rect.setAttribute('fill', color);
+          const visibleCategory = options.categoryLabels?.[category] || category;
+          const fullCategory = options.categoryTooltips?.[category] || visibleCategory;
+          rect.setAttribute('aria-label', `${fullCategory}, ${presentations.get(seriesName).label}: ${numeric}`);
+          const segmentTitle = document.createElementNS(svg.namespaceURI, 'title');
+          segmentTitle.textContent = `${fullCategory} · ${presentations.get(seriesName).label}: ${numeric.toLocaleString(undefined, {maximumFractionDigits: 3})}${row.complete === false ? ' (partial coverage)' : ''}`;
+          rect.append(segmentTitle);
+          svg.append(rect);
+          if (segmentHeight >= 24) {
+            const segmentLabel = document.createElementNS(svg.namespaceURI, 'text');
+            segmentLabel.setAttribute('x', String(x + barWidth / 2));
+            segmentLabel.setAttribute('y', String(segmentY + segmentHeight / 2 + 4));
+            segmentLabel.setAttribute('text-anchor', 'middle');
+            segmentLabel.setAttribute('class', 'scoring-best-network-segment');
+            segmentLabel.textContent = numeric.toLocaleString(undefined, {maximumFractionDigits: 1});
+            svg.append(segmentLabel);
+          }
+          stackY = segmentY;
+        }
+        if (!hasValue) {
+          const unavailable = document.createElementNS(svg.namespaceURI, 'text');
+          unavailable.setAttribute('x', String(x + barWidth / 2));
+          unavailable.setAttribute('y', String(baselineY - 7));
+          unavailable.setAttribute('text-anchor', 'middle');
+          unavailable.setAttribute('class', 'scoring-chart-unavailable');
+          unavailable.textContent = 'N/A';
+          svg.append(unavailable);
+        } else {
+          const totalLabel = document.createElementNS(svg.namespaceURI, 'text');
+          totalLabel.setAttribute('x', String(x + barWidth / 2));
+          totalLabel.setAttribute('y', String(Math.max(top + 14, stackY - 7)));
+          totalLabel.setAttribute('text-anchor', 'middle');
+          totalLabel.setAttribute('class', 'scoring-chart-value');
+          totalLabel.textContent = `${total.toLocaleString(undefined, {maximumFractionDigits: 1})}${complete ? '' : '*'}`;
+          svg.append(totalLabel);
+        }
+      } else {
       const groupWidth = step * .86;
       const slotWidth = groupWidth / Math.max(series.length, 1);
       const barWidth = Math.min(48, slotWidth * .64);
@@ -1390,30 +2002,27 @@
         value.textContent = `${Number.isInteger(row.value) ? row.value.toLocaleString() : row.value.toLocaleString(undefined, {maximumFractionDigits: 2})}${row.complete === false ? '*' : ''}`;
         svg.append(rect, value);
       });
-      const lines = [];
-      let currentLine = '';
-      for (const word of String(category).split(/\s+/)) {
-        const candidate = currentLine ? `${currentLine} ${word}` : word;
-        if (candidate.length > 22 && currentLine) {
-          lines.push(currentLine);
-          currentLine = word;
-        } else currentLine = candidate;
       }
-      if (currentLine) lines.push(currentLine);
-      if (lines.length > 2) lines.splice(1, lines.length - 2, `${lines.slice(1).join(' ').slice(0, 22)}…`);
-      const label = document.createElementNS(svg.namespaceURI, 'text');
-      const labelX = left + step * categoryIndex + step / 2;
-      label.setAttribute('x', String(labelX)); label.setAttribute('y', String(baselineY + 24));
-      label.setAttribute('text-anchor', 'middle'); label.setAttribute('class', 'scoring-chart-category');
-      lines.forEach((line, lineIndex) => {
-        const span = document.createElementNS(svg.namespaceURI, 'tspan');
-        span.setAttribute('x', String(labelX)); span.setAttribute('dy', lineIndex ? '1.15em' : '0');
-        span.textContent = line;
-        label.append(span);
-      });
-      const fullCategory = document.createElementNS(svg.namespaceURI, 'title');
-      fullCategory.textContent = category; label.append(fullCategory);
-      svg.append(label);
+      if (!hasHierarchyAxis) {
+        const lines = [];
+        const visibleCategory = options.categoryLabels?.[category] || category;
+        const fullCategory = options.categoryTooltips?.[category] || visibleCategory;
+        lines.push(...wrappedSvgLabelLines(visibleCategory, stacked ? 24 : 22, stacked ? 4 : 2));
+        const label = document.createElementNS(svg.namespaceURI, 'text');
+        const categoryStart = categoryStarts.get(String(category)) ?? left + step * categoryIndex;
+        const labelX = categoryStart + step / 2;
+        label.setAttribute('x', String(labelX)); label.setAttribute('y', String(baselineY + 24));
+        label.setAttribute('text-anchor', 'middle'); label.setAttribute('class', 'scoring-chart-category');
+        lines.forEach((line, lineIndex) => {
+          const span = document.createElementNS(svg.namespaceURI, 'tspan');
+          span.setAttribute('x', String(labelX)); span.setAttribute('dy', lineIndex ? '1.15em' : '0');
+          span.textContent = line;
+          label.append(span);
+        });
+        const fullCategoryTitle = document.createElementNS(svg.namespaceURI, 'title');
+        fullCategoryTitle.textContent = fullCategory; label.append(fullCategoryTitle);
+        svg.append(label);
+      }
     });
     return svg;
   }
@@ -1521,6 +2130,82 @@
     pane.classList.add('scoring-chart-grid');
   }
 
+  function renderHierarchyCharts(pane, tableData) {
+    pane.replaceChildren();
+    if (!tableData) {
+      const empty = document.createElement('div');
+      empty.className = 'scoring-empty';
+      empty.textContent = 'No hierarchical chart is available for this environment.';
+      pane.append(empty);
+      return;
+    }
+    const columns = hierarchyColumnEntries(tableData);
+    const sourceRows = scoreChartRows([tableData]);
+    const rows = sourceRows.map(row => ({
+      category: String(row.operator),
+      series: String(row.category),
+      value: row.weighted_points,
+      complete: row.complete,
+    }));
+    if (!rows.length || !columns.length) {
+      const empty = document.createElement('div');
+      empty.className = 'scoring-empty';
+      empty.textContent = 'No chart rows are available for this hierarchy.';
+      pane.append(empty);
+      return;
+    }
+    const categoryLabels = Object.fromEntries(columns.map(column => [
+      column.id,
+      hierarchyPathValueLabel(column) || operatorPresentation(column.styleSource, column.id).label,
+    ]));
+    const categoryTooltips = Object.fromEntries(columns.map(column => [
+      column.id,
+      hierarchyPathFullLabel(column) || operatorPresentation(column.styleSource, column.id).label,
+    ]));
+    const kpiCategories = [...new Set(sourceRows.map(row => String(row.category)))];
+    const operatorLegend = [];
+    const seenOperators = new Set();
+    const operatorColors = new Map();
+    for (const column of columns) {
+      const style = firstValue(tableData?.operator_styles || {}, [column.id], {});
+      const operator = String(column.operator || style.operator || operatorPresentation(column.styleSource, column.id).label);
+      const presentation = operatorPresentation(column.styleSource, column.id);
+      const color = presentation.color || ['#14867d', '#df7a45', '#5a82aa', '#8b63b1'][operatorColors.size % 4];
+      operatorColors.set(operator, color);
+      if (seenOperators.has(operator)) continue;
+      seenOperators.add(operator);
+      operatorLegend.push({
+        label: `${operator}${style.is_reference === true || column.is_reference === true ? ' (Reference)' : ''}`,
+        color,
+        title: `${operator}${style.is_reference === true || column.is_reference === true ? ' is the reference operator.' : ''} Segment shades identify KPI categories; hover a segment for its category and score.`,
+      });
+    }
+    const seriesStyles = Object.fromEntries(kpiCategories.map(category => [category, {label: category}]));
+    appendContextHeader(pane, tableData, 'score', 'Scoring Chart');
+    const chart = makeSvgChart('Weighted score by operator and aggregation', rows, tableData, {
+      stacked: true,
+      categoryOrder: columns.map(column => column.id),
+      categoryLabels,
+      categoryTooltips,
+      hierarchyLevels: tableData.hierarchy_levels,
+      hierarchyColumns: columns,
+      groupKeyForCategory: leafId => hierarchyColumnOperator(columns.find(column => column.id === leafId)),
+      categoryGroupGap: 14,
+      seriesOrder: kpiCategories,
+      seriesStyles,
+      legendEntries: operatorLegend,
+      segmentColor: (leafId, _category, categoryIndex) => {
+        const column = columns.find(item => item.id === leafId);
+        const operator = String(column?.operator || firstValue(tableData?.operator_styles || {}, [leafId], {}).operator || '');
+        return hierarchyChartColor(operatorColors.get(operator) || '#365F91', categoryIndex);
+      },
+      axisLabel: 'Weighted score points',
+    });
+    chart.style.minWidth = `${chart.viewBox.baseVal.width}px`;
+    pane.append(makeExpandableChartCard('Weighted score by operator and aggregation', contextLabel(tableData.context), chart));
+    pane.classList.add('scoring-chart-grid');
+  }
+
   function bestNetworkKind(item) {
     const sourceKind = String(firstValue(item, ['source_kind', 'sourceKind'], '')).toLowerCase();
     if (sourceKind === 'voice' || sourceKind === 'speech') return 'Voice';
@@ -1575,16 +2260,38 @@
     return `#${channels.map(channel => Math.round(channel + (255 - channel) * amount).toString(16).padStart(2, '0')).join('')}`;
   }
 
+  function hierarchyChartColor(color, categoryIndex) {
+    const safe = safeHexColor(color) || '#365F91';
+    const tint = Math.min(.42, Math.max(0, categoryIndex) * .1);
+    const channels = [1, 3, 5].map(offset => Number.parseInt(safe.slice(offset, offset + 2), 16));
+    return `#${channels.map(channel => Math.round(channel + (255 - channel) * tint).toString(16).padStart(2, '0')).join('')}`;
+  }
+
   function makeBestNetworkBars(tableData, data) {
+    const hierarchyLevels = Array.isArray(tableData?.hierarchy_levels) ? tableData.hierarchy_levels.map(String) : [];
+    const hierarchyColumns = Array.isArray(tableData?.hierarchy_columns) ? tableData.hierarchy_columns : [];
+    const hierarchyColumnsById = new Map(hierarchyColumns.map(column => [String(column?.id ?? ''), column]));
+    const hasHierarchyAxis = hierarchyLevels.length > 0 && hierarchyColumnsById.size > 0;
+    const groupKeys = data.operators.map(operator => hierarchyColumnOperator(hierarchyColumnsById.get(operator)));
+    const groupTransitions = hasHierarchyAxis
+      ? groupKeys.slice(1).filter((key, index) => key && groupKeys[index] && key !== groupKeys[index]).length : 0;
+    const categoryGroupGap = hasHierarchyAxis ? 14 : 0;
     const width = Math.max(980, data.operators.length * 190 + 170);
     const height = 500;
-    const left = 92, right = 36, top = 72, bottom = 124;
+    const left = 92, right = 36, top = 72, bottom = Math.max(124, 32 + (hasHierarchyAxis ? hierarchyLevels.length * 23 : 0));
     const plotHeight = height - top - bottom;
     const maxAllocation = data.allocation.Voice + data.allocation.Data;
     const maxActual = Math.max(0, ...data.operators.map(operator => ['Voice', 'Data'].reduce((sum, kind) => sum + (data.totals[operator][kind].value ?? 0), 0)));
     const maxValue = Math.max(maxAllocation, maxActual);
     const scaleMaximum = maxValue > 0 ? maxValue * 1.13 : 1;
-    const step = (width - left - right) / Math.max(data.operators.length, 1);
+    const step = Math.max(1, (width - left - right - categoryGroupGap * groupTransitions) / Math.max(data.operators.length, 1));
+    const categoryStarts = new Map();
+    let categoryCursor = left;
+    data.operators.forEach((operator, index) => {
+      if (index && groupKeys[index] && groupKeys[index - 1] && groupKeys[index] !== groupKeys[index - 1]) categoryCursor += categoryGroupGap;
+      categoryStarts.set(operator, categoryCursor);
+      categoryCursor += step;
+    });
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
     svg.setAttribute('class', 'scoring-chart-svg scoring-best-network-bars');
@@ -1592,7 +2299,13 @@
     svg.setAttribute('aria-label', 'Voice and Data weighted points by operator');
     const barColors = new Map(data.operators.map((operator, index) => {
       const mapped = operatorPresentation(tableData, operator);
-      return [operator, {label: mapped.label, color: mapped.color || ['#14867d', '#df7a45', '#5a82aa', '#8b63b1'][index % 4]}];
+      const hierarchyColumn = Array.isArray(tableData?.hierarchy_columns)
+        ? tableData.hierarchy_columns.find(column => String(column?.id) === operator) : null;
+      return [operator, {
+        label: hierarchyColumn ? hierarchyPathValueLabel(hierarchyColumn) : mapped.label,
+        fullLabel: hierarchyColumn ? hierarchyPathFullLabel(hierarchyColumn) : mapped.label,
+        color: mapped.color || ['#14867d', '#df7a45', '#5a82aa', '#8b63b1'][index % 4],
+      }];
     }));
     const baselineY = top + plotHeight;
     for (let tickIndex = 0; tickIndex <= 4; tickIndex += 1) {
@@ -1606,10 +2319,13 @@
     const axis = svgElement(svg, 'text', {x: 22, y: top + plotHeight / 2, 'text-anchor': 'middle', class: 'scoring-chart-axis-label', transform: `rotate(-90 22 ${top + plotHeight / 2})`});
     axis.textContent = 'Weighted score (points)';
     svg.append(axis);
+    if (hasHierarchyAxis) {
+      appendHierarchyAxisBands(svg, data.operators, hierarchyLevels, hierarchyColumnsById, categoryStarts, step, top + plotHeight, left, width - right);
+    }
     data.operators.forEach((operator, index) => {
       const presentation = barColors.get(operator);
       const barWidth = Math.min(92, step * .48);
-      const x = left + step * index + (step - barWidth) / 2;
+      const x = (categoryStarts.get(operator) ?? left + step * index) + (step - barWidth) / 2;
       let stackY = baselineY;
       let totalPoints = 0;
       let hasPoints = false;
@@ -1626,9 +2342,9 @@
         const segmentHeight = Math.max(0, cell.value / scaleMaximum * plotHeight);
         const segmentY = stackY - segmentHeight;
         const color = kind === 'Data' ? presentation.color : lightenHexColor(presentation.color);
-        const rect = svgElement(svg, 'rect', {x, y: segmentY, width: barWidth, height: segmentHeight, rx: 3, fill: color});
+        const rect = svgElement(svg, 'rect', {x, y: segmentY, width: barWidth, height: segmentHeight, ...(hasHierarchyAxis ? {} : {rx: 3}), fill: color});
         const tip = svgElement(svg, 'title');
-        tip.textContent = `${presentation.label} · ${kind}: ${cell.value.toLocaleString(undefined, {maximumFractionDigits: 2})}${cell.complete ? '' : ' (partial coverage)'}`;
+        tip.textContent = `${presentation.fullLabel} · ${kind}: ${cell.value.toLocaleString(undefined, {maximumFractionDigits: 2})}${cell.complete ? '' : ' (partial coverage)'}`;
         rect.append(tip);
         svg.append(rect);
         const segmentLabel = svgElement(svg, 'text', {x: x + barWidth / 2, y: segmentY + Math.max(13, segmentHeight / 2 + 4), 'text-anchor': 'middle', class: 'scoring-best-network-segment'});
@@ -1645,12 +2361,19 @@
       totalTitle.textContent = hasPoints ? `Displayed points are not renormalized; ${complete ? 'complete coverage.' : 'coverage is incomplete.'}` : 'No operator points are available.';
       totalLabel.append(totalTitle);
       svg.append(totalLabel);
-      const operatorLabel = svgElement(svg, 'text', {x: x + barWidth / 2, y: baselineY + 28, 'text-anchor': 'middle', class: 'scoring-chart-category'});
-      operatorLabel.textContent = presentation.label;
-      const rawLabel = svgElement(svg, 'title');
-      rawLabel.textContent = operator;
-      operatorLabel.append(rawLabel);
-      svg.append(operatorLabel);
+      if (!hasHierarchyAxis) {
+        const operatorLabel = svgElement(svg, 'text', {x: x + barWidth / 2, y: baselineY + 28, 'text-anchor': 'middle', class: 'scoring-chart-category'});
+        const labelLines = wrappedSvgLabelLines(presentation.label, 24, 1);
+        labelLines.forEach((line, lineIndex) => {
+          const span = svgElement(svg, 'tspan', {x: x + barWidth / 2, dy: lineIndex ? '1.15em' : '0'});
+          span.textContent = line;
+          operatorLabel.append(span);
+        });
+        const rawLabel = svgElement(svg, 'title');
+        rawLabel.textContent = presentation.fullLabel;
+        operatorLabel.append(rawLabel);
+        svg.append(operatorLabel);
+      }
     });
     return svg;
   }
@@ -1692,16 +2415,16 @@
     return svg;
   }
 
-  function renderBestNetworkChart(pane, scoreTables) {
+  function renderBestNetworkChart(pane, scoreTables, hierarchyTable = null) {
     pane.replaceChildren();
-    if (!scoreTables.length) {
+    if (!hierarchyTable && !scoreTables.length) {
       const empty = document.createElement('div');
       empty.className = 'scoring-empty';
       empty.textContent = 'No Best Network chart is available for this environment.';
       pane.append(empty);
       return;
     }
-    const selected = appendComparisonSelector(pane, scoreTables, 'score');
+    const selected = hierarchyTable || appendComparisonSelector(pane, scoreTables, 'score');
     appendContextHeader(pane, selected, 'score', 'Best Network Chart');
     const data = bestNetworkTotals(selected);
     if (!data.operators.length || !data.rows.length) {
@@ -1837,8 +2560,10 @@
     });
   }
 
-  function renderResult(payload, job) {
+  function renderResult(payload, job, panesToRender = [activeResultTab]) {
     currentResults = payload;
+    currentResultsJobId = jobIdOf(job || payload.job || {}) || null;
+    const shouldRenderPane = name => panesToRender.includes(name);
     const scoringRows = payload.scoring ?? payload.scoring_rows ?? [];
     const gapRows = payload.gap ?? payload.gap_rows ?? [];
     const scoringPane = root.querySelector('[data-result-pane="scoring"]');
@@ -1849,59 +2574,74 @@
     const allScoreTables = normalizeRows(views.score_tables ?? payload.score_tables ?? payload.scoring_views?.score_tables ?? []);
     const allGapTables = normalizeRows(views.gap_tables ?? payload.gap_tables ?? payload.scoring_views?.gap_tables ?? []);
     const allGapSummaryTables = normalizeRows(views.gap_summary_tables ?? payload.gap_summary_tables ?? payload.scoring_views?.gap_summary_tables ?? []);
-    syncResultEnvironment(allScoreTables);
+    const allHierarchyScoreTables = normalizeRows(views.hierarchy_score_tables ?? []);
+    const allHierarchyGapTables = normalizeRows(views.hierarchy_gap_tables ?? []);
+    syncResultEnvironment([...allScoreTables, ...allHierarchyScoreTables]);
     const scoreTables = allScoreTables.filter(table => environmentOf(table) === selectedEnvironment);
     const gapTables = allGapTables.filter(table => environmentOf(table) === selectedEnvironment);
     const gapSummaryTables = allGapSummaryTables.filter(table => environmentOf(table) === selectedEnvironment);
+    const hierarchyScoreTable = allHierarchyScoreTables.find(table => environmentOf(table) === selectedEnvironment) || null;
+    const hierarchyGapTable = allHierarchyGapTables.find(table => environmentOf(table) === selectedEnvironment) || null;
     const thresholdLegend = normalizeRows(views.threshold_legend ?? payload.threshold_legend ?? []);
     const totalsRows = normalizeRows(payload.totals ?? payload.scoring_totals ?? []);
     const detailRows = normalizeRows(scoringRows);
     const hasScoringViews = Array.isArray(views.score_tables) || Array.isArray(payload.score_tables) || Array.isArray(payload.scoring_views?.score_tables);
     const hasGapViews = Array.isArray(views.gap_tables) || Array.isArray(payload.gap_tables) || Array.isArray(payload.scoring_views?.gap_tables)
       || Array.isArray(views.gap_summary_tables) || Array.isArray(payload.gap_summary_tables) || Array.isArray(payload.scoring_views?.gap_summary_tables);
-    if (hasScoringViews) {
-      renderScoringViews(scoringPane, scoreTables, thresholdLegend);
-    } else if (totalsRows.length) {
-      scoringPane.replaceChildren();
-      const summaryHeading = document.createElement('h4');
-      summaryHeading.className = 'scoring-table-section-title';
-      summaryHeading.textContent = 'Scoring Summary';
-      const summaryTable = document.createElement('div');
-      summaryTable.className = 'scoring-table-section';
-      renderTable(summaryTable, totalsRows, 'No scoring summary rows are available.');
-      scoringPane.append(summaryHeading, summaryTable);
-      const detailHeading = document.createElement('h4');
-      detailHeading.className = 'scoring-table-section-title';
-      detailHeading.textContent = 'KPI Scoring Details';
-      const detailTable = document.createElement('div');
-      detailTable.className = 'scoring-table-section';
-      renderTable(detailTable, detailRows, 'No KPI detail rows are available.');
-      scoringPane.append(detailHeading, detailTable);
-    } else {
-      scoringPane.replaceChildren();
-      renderTable(scoringPane, detailRows, 'This job has no scoring table rows.');
-    }
-    chartPane.classList.remove('scoring-chart-grid');
-    renderCharts(chartPane, chartRowsForEnvironment(payload.charts ?? [], allScoreTables), scoreTables);
-    renderBestNetworkChart(bestNetworkPane, scoreTables);
-    const gapTotals = normalizeRows(payload.gap_totals ?? []);
-    if (gapSummaryTables.length) {
-      renderGapSummaryViews(gapPane, gapSummaryTables);
-    } else if (hasGapViews) {
-      renderGapViews(gapPane, gapTables);
-    } else if (gapTotals.length) {
-      gapPane.replaceChildren();
-      for (const [title, rows] of [['GAP Summary', gapTotals], ['KPI GAP Details', normalizeRows(gapRows)]]) {
-        const heading = document.createElement('h4');
-        heading.className = 'scoring-table-section-title';
-        heading.textContent = title;
-        const section = document.createElement('div');
-        section.className = 'scoring-table-section';
-        renderTable(section, rows, 'No comparable GAP rows are available.');
-        gapPane.append(heading, section);
+    if (shouldRenderPane('scoring')) {
+      if (hierarchyScoreTable) {
+        renderHierarchyScoringViews(scoringPane, hierarchyScoreTable, thresholdLegend);
+      } else if (hasScoringViews) {
+        renderScoringViews(scoringPane, scoreTables, thresholdLegend);
+      } else if (totalsRows.length) {
+        scoringPane.replaceChildren();
+        const summaryHeading = document.createElement('h4');
+        summaryHeading.className = 'scoring-table-section-title';
+        summaryHeading.textContent = 'Scoring Summary';
+        const summaryTable = document.createElement('div');
+        summaryTable.className = 'scoring-table-section';
+        renderTable(summaryTable, totalsRows, 'No scoring summary rows are available.');
+        scoringPane.append(summaryHeading, summaryTable);
+        const detailHeading = document.createElement('h4');
+        detailHeading.className = 'scoring-table-section-title';
+        detailHeading.textContent = 'KPI Scoring Details';
+        const detailTable = document.createElement('div');
+        detailTable.className = 'scoring-table-section';
+        renderTable(detailTable, detailRows, 'No KPI detail rows are available.');
+        scoringPane.append(detailHeading, detailTable);
+      } else {
+        scoringPane.replaceChildren();
+        renderTable(scoringPane, detailRows, 'This job has no scoring table rows.');
       }
-    } else {
-      renderTable(gapPane, gapRows, 'No GAP rows are available for the selected baseline operator.');
+    }
+    if (shouldRenderPane('charts')) {
+      chartPane.classList.remove('scoring-chart-grid');
+      if (hierarchyScoreTable) renderHierarchyCharts(chartPane, hierarchyScoreTable);
+      else renderCharts(chartPane, chartRowsForEnvironment(payload.charts ?? [], allScoreTables), scoreTables);
+    }
+    if (shouldRenderPane('best-network')) renderBestNetworkChart(bestNetworkPane, scoreTables, hierarchyScoreTable);
+    if (shouldRenderPane('gap')) {
+      const gapTotals = normalizeRows(payload.gap_totals ?? []);
+      if (hierarchyGapTable) {
+        renderHierarchyGapViews(gapPane, hierarchyGapTable, hierarchyScoreTable);
+      } else if (gapSummaryTables.length) {
+        renderGapSummaryViews(gapPane, gapSummaryTables);
+      } else if (hasGapViews) {
+        renderGapViews(gapPane, gapTables);
+      } else if (gapTotals.length) {
+        gapPane.replaceChildren();
+        for (const [title, rows] of [['GAP Summary', gapTotals], ['KPI GAP Details', normalizeRows(gapRows)]]) {
+          const heading = document.createElement('h4');
+          heading.className = 'scoring-table-section-title';
+          heading.textContent = title;
+          const section = document.createElement('div');
+          section.className = 'scoring-table-section';
+          renderTable(section, rows, 'No comparable GAP rows are available.');
+          gapPane.append(heading, section);
+        }
+      } else {
+        renderTable(gapPane, gapRows, 'No GAP rows are available for the selected baseline operator.');
+      }
     }
     const warnings = payload.warnings ?? job?.warnings ?? [];
     renderWarnings(warnings);
@@ -1925,16 +2665,21 @@
     setExportLinks('', false);
   }
 
-  async function loadJob(job, force = false) {
+  async function loadJob(job, force = false, updateJobList = true) {
     const id = jobIdOf(job);
     if (!id) return;
     selectedJobId = id;
     selectedJob = job;
-    renderJobs();
+    if (updateJobList) renderJobs();
     if (!force && resultCache.has(id) && isComplete(job)) {
-      currentResults = resultCache.get(id);
-      renderResult(currentResults, job);
+      const cached = resultCache.get(id);
+      if (currentResultsJobId !== id || currentResults !== cached) renderResult(cached, job);
       return;
+    }
+    if (currentResultsJobId !== id) {
+      currentResults = null;
+      currentResultsJobId = null;
+      renderNoResult('Loading scoring results…');
     }
     try {
       const payload = await requestJson(`${jobsUrl}/${encodeURIComponent(id)}`);
@@ -1947,16 +2692,22 @@
         resultCache.set(id, payload);
         renderResult(payload, record);
       } else if (status === 'failed') {
+        currentResults = null;
+        currentResultsJobId = null;
         const error = valueOf(record, ['error', 'error_message', 'last_error'], 'This scoring job failed without an error message.');
         renderNoResult(error);
         resultMeta.textContent = `${jobSummary(record)} · Failed · ${error} · Filters: ${contextFilterSummary(record)}`;
       } else {
+        currentResults = null;
+        currentResultsJobId = null;
         renderNoResult('Scoring results will appear here when the job completes.');
         resultMeta.textContent = `${jobSummary(record)} · ${status} · ${jobLevels(record)} · Filters: ${contextFilterSummary(record)}`;
         setExportLinks('', false);
       }
     } catch (error) {
       if (deletedJobIds.has(id) || selectedJobId !== id) return;
+      currentResults = null;
+      currentResultsJobId = null;
       renderNoResult(error.message || 'The selected job could not be loaded.');
       resultMeta.textContent = 'Unable to load this scoring job.';
       setMessage(error.message || 'The selected job could not be loaded.', 'error');
@@ -1982,10 +2733,15 @@
       renderJobs();
       if (selectedJob) {
         const hasCached = resultCache.has(jobIdOf(selectedJob)) && isComplete(selectedJob);
-        if (!hasCached || isActive(selectedJob)) await loadJob(selectedJob, isActive(selectedJob));
-        else renderResult(resultCache.get(jobIdOf(selectedJob)), selectedJob);
+        if (!hasCached || isActive(selectedJob)) await loadJob(selectedJob, isActive(selectedJob), false);
+        else {
+          const id = jobIdOf(selectedJob);
+          const cached = resultCache.get(id);
+          if (currentResultsJobId !== id || currentResults !== cached) renderResult(cached, selectedJob);
+        }
       } else {
         currentResults = null;
+        currentResultsJobId = null;
         resultMeta.textContent = 'No saved scoring result selected.';
         renderNoResult('Run a scoring job or select a saved job to see its results.');
       }
@@ -2023,6 +2779,7 @@
         selectedJobId = null;
         selectedJob = null;
         currentResults = null;
+        currentResultsJobId = null;
         userSelectedJob = false;
         resultMeta.textContent = 'No saved scoring result selected.';
         renderNoResult('Run a scoring job or select a saved job to see its results.');
@@ -2058,7 +2815,8 @@
       baselineInput.focus();
       return;
     }
-    const levels = [...new Set(['Operator', ...selectedLevels()])];
+    const levels = [...new Set(selectedLevels())];
+    if (!levels.includes('Operator')) levels.unshift('Operator');
     const payload = {
       dataset_ids: datasetIds,
       aggregation_levels: levels,
@@ -2114,6 +2872,12 @@
       renderResult(currentResults, selectedJob);
       return;
     }
+    const hierarchyGapOperator = event.target.closest('[data-hierarchy-gap-operator]');
+    if (hierarchyGapOperator && currentResults) {
+      contextSelections.set(hierarchyGapOperator.dataset.hierarchyGapStateKey, hierarchyGapOperator.value);
+      renderResult(currentResults, selectedJob);
+      return;
+    }
     const select = event.target.closest('[data-comparison-context]');
     if (!select || !currentResults) return;
     const kind = select.dataset.contextKind;
@@ -2156,12 +2920,15 @@
     const tab = event.target.closest('[data-result-tab]');
     if (!tab || !root.contains(tab)) return;
     const name = tab.dataset.resultTab;
+    if (activeResultTab === name) return;
+    activeResultTab = name;
     for (const other of root.querySelectorAll('[data-result-tab]')) {
       const selected = other === tab;
       other.setAttribute('aria-selected', String(selected));
       other.tabIndex = selected ? 0 : -1;
     }
     for (const pane of root.querySelectorAll('[data-result-pane]')) pane.hidden = pane.dataset.resultPane !== name;
+    if (currentResults) renderResult(currentResults, selectedJob, [name]);
   });
   expandedChartClose?.addEventListener('click', closeExpandedChart);
   chartOverlay?.addEventListener('click', event => {

@@ -12,6 +12,10 @@
   const priorityRows = root.querySelector('[data-scoring-priority-rows]');
   const priorityStatus = root.querySelector('[data-scoring-priority-status]');
   const prioritySave = root.querySelector('[data-scoring-priority-save]');
+  const hierarchyForm = root.querySelector('[data-scoring-hierarchy-form]');
+  const hierarchyRows = root.querySelector('[data-scoring-hierarchy-rows]');
+  const hierarchyStatus = root.querySelector('[data-scoring-hierarchy-status]');
+  const hierarchySave = root.querySelector('[data-scoring-hierarchy-save]');
   if (!environmentSelect || !kpiForm || !kpiRows || !priorityForm || !priorityRows) return;
 
   const anchors = [
@@ -20,7 +24,10 @@
     ['high_score', 'High score'],
     ['ultra_score', 'Ultra score'],
   ];
+  const defaultHierarchy = ['Operator', 'Vendor', 'Region', 'City', 'Campaign'];
+  const hierarchyDimensions = new Set(defaultHierarchy);
   let configuration = null;
+  let hierarchyOrder = [...defaultHierarchy];
   let kpiDirty = false;
   let lastEnvironment = environmentSelect.value;
   let saveQueue = Promise.resolve();
@@ -67,8 +74,10 @@
       render();
       if (kpiSave) kpiSave.disabled = false;
       if (prioritySave) prioritySave.disabled = false;
+      if (hierarchySave) hierarchySave.disabled = false;
       setStatus(kpiStatus, 'Scoring configuration imported into this workspace.', 'success');
       setStatus(priorityStatus, 'GAP KPI priority imported.', 'success');
+      setStatus(hierarchyStatus, 'Scoring aggregation hierarchy imported.', 'success');
     } catch (error) {
       setStatus(kpiStatus, error.message || 'Unable to import scoring configuration.', 'error');
     } finally {
@@ -286,7 +295,62 @@
     refreshPriorityButtons();
   };
 
+  const normalizeHierarchy = (value) => {
+    const items = Array.isArray(value) ? value.map((item) => String(item)) : [];
+    return items.length === defaultHierarchy.length
+      && new Set(items).size === defaultHierarchy.length
+      && items.every((item) => hierarchyDimensions.has(item))
+      ? items : [...defaultHierarchy];
+  };
+
+  const refreshHierarchyButtons = () => {
+    const rows = Array.from(hierarchyRows?.querySelectorAll('tr[data-aggregation-level]') || []);
+    rows.forEach((row, index) => {
+      row.querySelector('[data-hierarchy-rank]').textContent = String(index + 1);
+      row.querySelector('[data-hierarchy-move="up"]').disabled = index === 0;
+      row.querySelector('[data-hierarchy-move="down"]').disabled = index === rows.length - 1;
+    });
+    if (hierarchySave) hierarchySave.disabled = !configuration || rows.length !== defaultHierarchy.length;
+  };
+
+  const renderHierarchyRows = () => {
+    if (!hierarchyRows) return;
+    hierarchyRows.replaceChildren();
+    hierarchyOrder.forEach((level, index) => {
+      const row = document.createElement('tr');
+      row.dataset.aggregationLevel = level;
+      const rank = document.createElement('span');
+      rank.dataset.hierarchyRank = '';
+      rank.textContent = String(index + 1);
+      appendCell(row).append(rank);
+      const levelCell = appendCell(row, 'scoring-config-hierarchy-level');
+      levelCell.append(document.createTextNode(level));
+      if (level === 'Operator') {
+        const required = document.createElement('span');
+        required.className = 'scoring-config-hierarchy-required';
+        required.textContent = 'Required';
+        levelCell.append(required);
+      }
+      const actions = document.createElement('div');
+      actions.className = 'scoring-config-priority-actions';
+      for (const [direction, label] of [['up', 'Move up'], ['down', 'Move down']]) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.hierarchyMove = direction;
+        button.setAttribute('aria-label', `${label}: ${level}`);
+        button.title = label;
+        button.textContent = direction === 'up' ? '↑' : '↓';
+        actions.append(button);
+      }
+      appendCell(row).append(actions);
+      hierarchyRows.append(row);
+    });
+    refreshHierarchyButtons();
+  };
+
   const render = () => {
+    hierarchyOrder = normalizeHierarchy(configuration?.aggregation_hierarchy);
+    renderHierarchyRows();
     renderKpiRows();
     renderPriorityRows();
   };
@@ -371,6 +435,32 @@
     }
   };
 
+  const saveHierarchy = async () => {
+    const levels = Array.from(hierarchyRows.querySelectorAll('tr[data-aggregation-level]'), (row) => row.dataset.aggregationLevel);
+    if (levels.length !== defaultHierarchy.length
+        || new Set(levels).size !== defaultHierarchy.length
+        || levels.some((level) => !hierarchyDimensions.has(level))) {
+      setStatus(hierarchyStatus, 'The aggregation hierarchy must contain each dimension exactly once.', 'error');
+      return;
+    }
+    setStatus(hierarchyStatus, 'Saving scoring aggregation hierarchy…');
+    if (hierarchySave) hierarchySave.disabled = true;
+    try {
+      const saved = await saveConfiguration((latest) => {
+        latest.aggregation_hierarchy = [...levels];
+        return latest;
+      });
+      configuration = saved;
+      hierarchyOrder = normalizeHierarchy(saved.aggregation_hierarchy);
+      renderHierarchyRows();
+      setStatus(hierarchyStatus, 'Scoring aggregation hierarchy saved.', 'success');
+    } catch (error) {
+      setStatus(hierarchyStatus, error.message || 'Unable to save scoring aggregation hierarchy.', 'error');
+    } finally {
+      if (hierarchySave) hierarchySave.disabled = false;
+    }
+  };
+
   kpiForm.addEventListener('input', (event) => {
     kpiDirty = true;
     setStatus(kpiStatus, 'Unsaved KPI changes.');
@@ -411,13 +501,32 @@
     savePriority();
   });
 
+  hierarchyForm?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-hierarchy-move]');
+    if (!button || !hierarchyRows?.contains(button)) return;
+    const row = button.closest('tr[data-aggregation-level]');
+    const neighbor = button.dataset.hierarchyMove === 'up' ? row.previousElementSibling : row.nextElementSibling;
+    if (!row || !neighbor) return;
+    if (button.dataset.hierarchyMove === 'up') hierarchyRows.insertBefore(row, neighbor);
+    else hierarchyRows.insertBefore(neighbor, row);
+    hierarchyOrder = Array.from(hierarchyRows.querySelectorAll('tr[data-aggregation-level]'), (item) => item.dataset.aggregationLevel);
+    refreshHierarchyButtons();
+    setStatus(hierarchyStatus, 'Unsaved scoring aggregation hierarchy changes.');
+  });
+  hierarchyForm?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    saveHierarchy();
+  });
+
   loadConfiguration().then((loaded) => {
     configuration = loaded;
     render();
   }).catch((error) => {
     setStatus(kpiStatus, error.message || 'Unable to load scoring configuration.', 'error');
     setStatus(priorityStatus, error.message || 'Unable to load GAP KPI priority.', 'error');
+    setStatus(hierarchyStatus, error.message || 'Unable to load scoring aggregation hierarchy.', 'error');
     if (kpiSave) kpiSave.disabled = true;
     if (prioritySave) prioritySave.disabled = true;
+    if (hierarchySave) hierarchySave.disabled = true;
   });
 })();

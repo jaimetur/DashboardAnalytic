@@ -349,9 +349,9 @@ HELP_NAVIGATION_DOCUMENTS = (
     'datasets-analysis.md',
     'e2e-dashboards.md',
     'e2e-reporting.md',
+    'scoring-gap-analysis.md',
     'chart-builder.md',
     'query-builder.md',
-    'scoring-gap-analysis.md',
     'app-logs.md',
     'app-config.md',
     'workspace-config.md',
@@ -437,6 +437,22 @@ def filter_e2e_reporting_help_content(content: str, document_name: str) -> str:
     # Remove links to the restricted chapter and adjust nearby module lists.
     content = '\n'.join(lines)
     if normalized_name == 'web-interface.md':
+        content = content.replace(
+            'Scoring & GAP Analysis follows E2E Reporting in Main Modules, matching the main tab order.',
+            'Scoring & GAP Analysis follows E2E Dashboards in Main Modules, matching the main tab order.',
+        )
+        content = content.replace(
+            '**Datasets Analysis → E2E Dashboards → E2E Reporting → Scoring & GAP Analysis** for users with access.',
+            '**Datasets Analysis → E2E Dashboards → Scoring & GAP Analysis**.',
+        )
+        content = content.replace(
+            'Datasets Analysis uses blue, E2E Dashboards uses muted violet, and Reporting uses brighter purple.',
+            'Datasets Analysis uses blue and E2E Dashboards uses muted violet.',
+        )
+        content = content.replace(
+            'E2E Reporting is shown only to super-admins and the EJAITUR user when a workspace is active; '
+            'other users do not see it in the top navigation or Modules menu. ', '',
+        )
         content = content.replace('- E2E Reporting\n', '')
         content = content.replace(
             'The analytical tabs are ordered **Datasets Analysis → E2E Dashboards → E2E Reporting**. '
@@ -13971,17 +13987,22 @@ def scoring_operator_options(task_repository: Repository) -> list[dict[str, str]
 @app.get('/scoring', response_class=HTMLResponse)
 def scoring_page(request: Request, user: SessionUser = Depends(current_user)) -> HTMLResponse:
     task_repository = scoring_repository(user)
+    from src.modules.scoring_config import DEFAULT_AGGREGATION_HIERARCHY
     configuration_error = ''
+    aggregation_hierarchy = list(DEFAULT_AGGREGATION_HIERARCHY)
     try:
-        task_repository.get_scoring_configuration()
+        configuration = task_repository.get_scoring_configuration()
+        aggregation_hierarchy = list(configuration.get('aggregation_hierarchy') or DEFAULT_AGGREGATION_HIERARCHY)
     except ValueError as exc:
         configuration_error = str(exc)
     ready_cdrs = [row for row in task_repository.list_datasets()
                   if row['status'] == 'ready' and row['dataset_kind'] in CDR_DATASET_KINDS]
     dataset_ids = [int(row['id']) for row in ready_cdrs]
-    backfill_cdr_catalogues(dataset_ids, task_repository)
-    backfill_cdr_campaigns(dataset_ids, task_repository)
-    backfill_cdr_operators(dataset_ids, task_repository)
+    # Opening Scoring must use cached catalogue values only. Backfilling legacy
+    # catalogues here scans materialized CDR tables and can block the page load.
+    incomplete_catalogue_ids = set(task_repository.missing_cdr_catalogue_ids(dataset_ids))
+    incomplete_catalogue_ids.update(task_repository.missing_cdr_campaign_ids(dataset_ids))
+    incomplete_catalogue_ids.update(task_repository.missing_cdr_operator_ids(dataset_ids))
     catalogues = task_repository.cdr_catalogues_by_dataset(dataset_ids)
     datasets = []
     for row in ready_cdrs:
@@ -13996,7 +14017,11 @@ def scoring_page(request: Request, user: SessionUser = Depends(current_user)) ->
         'scoring_operator_options': scoring_operator_options(task_repository),
         'scoring_operator_groups': task_repository.list_operator_mapping_groups(),
         'scoring_main_cities': task_repository.list_main_cities(),
-        'aggregation_levels': ['Operator', 'Region', 'City', 'Vendor', 'Dataset Type'],
+        'scoring_incomplete_catalogue_datasets': [
+            str(row['file_name'] or f"Dataset {row['id']}")
+            for row in ready_cdrs if int(row['id']) in incomplete_catalogue_ids
+        ],
+        'aggregation_levels': aggregation_hierarchy,
         'scoring_configuration_error': configuration_error,
     })
 

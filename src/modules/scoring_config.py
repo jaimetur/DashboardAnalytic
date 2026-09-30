@@ -12,6 +12,8 @@ from typing import Any
 
 CONFIGURATION_FORMAT = 'dashboard-analytic-scoring-configuration'
 CONFIGURATION_FORMAT_VERSION = 1
+DEFAULT_AGGREGATION_HIERARCHY = ['Operator', 'Vendor', 'Region', 'City', 'Campaign']
+_AGGREGATION_FIELDS = frozenset(DEFAULT_AGGREGATION_HIERARCHY)
 _SCORE_ANCHORS = ('low_score', 'medium_score', 'high_score', 'ultra_score')
 _CONTEXT_NAMES = ('DriveCity', 'DriveConnectionroad')
 _METRIC_CODES = (
@@ -353,6 +355,15 @@ def validate_scoring_configuration(payload: object) -> dict[str, Any]:
     version = configuration.get('version')
     if not isinstance(version, str) or not version.strip():
         raise ValueError('Scoring configuration version must be a non-empty string.')
+    aggregation_hierarchy = configuration.get('aggregation_hierarchy', DEFAULT_AGGREGATION_HIERARCHY)
+    if (not isinstance(aggregation_hierarchy, list)
+            or any(not isinstance(field, str) for field in aggregation_hierarchy)
+            or len(aggregation_hierarchy) != len(DEFAULT_AGGREGATION_HIERARCHY)
+            or len(set(aggregation_hierarchy)) != len(DEFAULT_AGGREGATION_HIERARCHY)
+            or set(aggregation_hierarchy) != _AGGREGATION_FIELDS):
+        raise ValueError(
+            'Scoring configuration aggregation_hierarchy must list Operator, Vendor, Region, City and Campaign exactly once.'
+        )
     _validate_scope(configuration.get('scope'))
     interpolation = _validate_interpolation(configuration.get('interpolation'))
     supplied_metrics = configuration.get('metrics')
@@ -396,6 +407,7 @@ def validate_scoring_configuration(payload: object) -> dict[str, Any]:
             or set(priority) != set(_METRIC_CODES)):
         raise ValueError('GAP priority must list every supported KPI code exactly once.')
     validated = copy.deepcopy(configuration)
+    validated['aggregation_hierarchy'] = list(aggregation_hierarchy)
     validated['metrics'] = validated_metrics
     validated['gap_priority'] = list(priority)
     _refresh_weight_totals(validated)

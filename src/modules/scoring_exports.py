@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from io import BytesIO
+from math import ceil
 from pathlib import Path
 from typing import Any
 
@@ -18,12 +19,12 @@ from src.modules.cdr_reporting import (
     _named_slide_layout, _remove_all_slides, _set_slide_header,
     _set_structural_slide_text,
 )
-from src.modules.scoring_views import build_scoring_views
+from src.modules.scoring_views import THRESHOLD_COLORS, build_scoring_views
 
 _FONT = 'Ericsson Hilda'
 _WHITE = '#FFFFFF'
 _NEUTRAL = '#ECEFF1'
-_SCOPE_FILTER_FIELDS = ('Region', 'City', 'Operator', 'Vendor', 'Campaign')
+_SCOPE_FILTER_FIELDS = ('Operator', 'Vendor', 'Region', 'City', 'Campaign')
 
 
 def _number(value: Any) -> str:
@@ -156,15 +157,32 @@ def _filter_value(value: Any) -> str:
     return str(value).strip() if value is not None else ''
 
 
-def _canonical_scope_filter_labels(payload: Any) -> list[str] | None:
+def _scope_filter_fields(job: dict[str, Any]) -> tuple[str, ...]:
+    configured = job.get('aggregation_hierarchy')
+    if not isinstance(configured, list):
+        configuration = job.get('configuration')
+        configured = configuration.get('aggregation_hierarchy') if isinstance(configuration, dict) else None
+    if not isinstance(configured, list):
+        return _SCOPE_FILTER_FIELDS
+    canonical = {field.casefold(): field for field in _SCOPE_FILTER_FIELDS}
+    fields = []
+    for value in configured:
+        field = canonical.get(str(value).strip().casefold())
+        if field and field not in fields:
+            fields.append(field)
+    fields.extend(field for field in _SCOPE_FILTER_FIELDS if field not in fields)
+    return tuple(fields)
+
+
+def _canonical_scope_filter_labels(payload: Any, fields: tuple[str, ...] = _SCOPE_FILTER_FIELDS) -> list[str] | None:
     if not isinstance(payload, dict) or any(not isinstance(value, list) for value in payload.values()):
         return None
     normalized = {str(key).strip().casefold(): value for key, value in payload.items()}
-    if payload and not any(field.casefold() in normalized for field in _SCOPE_FILTER_FIELDS):
+    if payload and not any(field.casefold() in normalized for field in fields):
         return None
     return [
         f'{field}: {_filter_value(normalized.get(field.casefold(), [])) or "All"}'
-        for field in _SCOPE_FILTER_FIELDS
+        for field in fields
     ]
 
 
@@ -190,7 +208,10 @@ def _context_filter_labels(job: dict[str, Any]) -> list[str]:
     for payload_name in ('context_filters', 'filters'):
         payload = job.get(payload_name)
         if isinstance(payload, dict):
-            canonical_labels = _canonical_scope_filter_labels(payload) if payload_name == 'context_filters' else None
+            canonical_labels = (
+                _canonical_scope_filter_labels(payload, _scope_filter_fields(job))
+                if payload_name == 'context_filters' else None
+            )
             if canonical_labels is not None:
                 for label in canonical_labels:
                     append(*label.split(': ', 1))
@@ -233,7 +254,9 @@ def _scoring_filter_subtitle(job: dict[str, Any]) -> str:
     if baseline:
         parts.append(f'Baseline: {baseline}')
     filter_labels = _context_filter_labels(job)
-    canonical_labels = _canonical_scope_filter_labels(job.get('context_filters'))
+    canonical_labels = _canonical_scope_filter_labels(
+        job.get('context_filters'), _scope_filter_fields(job),
+    )
     if canonical_labels is not None:
         canonical_set = {label.casefold() for label in canonical_labels}
         other_labels = [label for label in filter_labels if label.casefold() not in canonical_set]
@@ -451,7 +474,13 @@ def _best_network(presentation, matrices: list[dict]) -> None:
         slide = _slide(presentation, 'Scoring & GAP Analysis — Best Network', _scope(matrix['context']))
         operators = matrix['operators']
         data = CategoryChartData()
-        data.categories = [_operator_label(matrix, operator) for operator in operators]
+        hierarchy_columns = matrix.get('hierarchy_columns', [])
+        if hierarchy_columns:
+            _add_hierarchy_chart_categories(data, hierarchy_columns)
+            hierarchy_labels = {column['id']: _hierarchy_display_path(column) for column in hierarchy_columns}
+        else:
+            data.categories = [_operator_label(matrix, operator) for operator in operators]
+            hierarchy_labels = {}
         maximums = []
         for family in ('Voice', 'Data'):
             metrics = [row for row in matrix['rows'] if (row['category'] in voice_categories) == (family == 'Voice')]
@@ -468,6 +497,10 @@ def _best_network(presentation, matrices: list[dict]) -> None:
         chart = slide.shapes.add_chart(XL_CHART_TYPE.COLUMN_STACKED, Inches(.65), Inches(1.75),
                                         Inches(8.65), Inches(4.75), data).chart
         _format_chart(chart, maximum=matrix['total']['max_points'], labels=XL_DATA_LABEL_POSITION.CENTER)
+        if hierarchy_columns:
+            chart.category_axis.tick_labels.font.size = Pt(
+                min(7, max(5, 38 / max(1, len(operators)) ** .5))
+            )
         for series_index, series in enumerate(list(chart.series)[:2]):
             for operator_index, operator in enumerate(operators):
                 color = _operator_color(matrix, operator).lstrip('#')
@@ -477,11 +510,15 @@ def _best_network(presentation, matrices: list[dict]) -> None:
                 point = series.points[operator_index]
                 point.format.fill.solid()
                 point.format.fill.fore_color.rgb = RGBColor(*channels)
+                if matrix.get('operator_styles', {}).get(operator, {}).get('is_reference'):
+                    point.format.line.color.rgb = RGBColor.from_string('FFFF00')
+                    point.format.line.width = Pt(2)
         _add_total_labels(chart)
         chart.has_legend = False
         _text(slide, 'Voice: lighter operator color · Data: solid operator color', 6.5, left=.8, width=8.3, size=10)
         _text(slide, 'Available totals: ' + ' · '.join(
-            f'{_operator_label(matrix, operator)} {_number(matrix["total"]["values"][operator]["points"])}'
+            f'{hierarchy_labels.get(operator, _operator_label(matrix, operator))} '
+            f'{_number(matrix["total"]["values"][operator]["points"])}'
             + ('*' if not matrix['total']['values'][operator]['complete'] else '') for operator in operators),
             1.4, left=.8, width=8.4, height=.3, size=10)
         donut_data = CategoryChartData()
@@ -531,6 +568,385 @@ def _add_total_labels(chart) -> None:
     for axis_id in bar_plot.findall('{http://schemas.openxmlformats.org/drawingml/2006/chart}axId'):
         line_plot.append(deepcopy(axis_id))
     plot_area.insert(plot_area.index(bar_plot) + 1, line_plot)
+
+
+def _hierarchy_chart(presentation, matrix: dict) -> None:
+    columns = matrix.get('hierarchy_columns', [])
+    slide = _slide(presentation, 'Scoring Chart', _scope(matrix['context']))
+    data = CategoryChartData()
+    _add_hierarchy_chart_categories(data, columns)
+    categories = list(dict.fromkeys(row['category'] for row in matrix['rows']))
+    stacked_values: list[list[float | None]] = []
+    for category in categories:
+        values = []
+        for column in columns:
+            cells = [row['values'][column['id']] for row in matrix['rows'] if row['category'] == category]
+            available = [cell['points'] for cell in cells if cell['points'] is not None]
+            value = sum(available) if available else None
+            values.append(value)
+        stacked_values.append(values)
+        data.add_series(str(category), values)
+
+    maximum = max(
+        (sum(value or 0 for value in column_values) for column_values in zip(*stacked_values)),
+        default=0.0,
+    )
+    chart = slide.shapes.add_chart(
+        XL_CHART_TYPE.COLUMN_STACKED, Inches(.55), Inches(1.92),
+        presentation.slide_width - Inches(1.1), Inches(4.48), data,
+    ).chart
+    _format_chart(chart, maximum=maximum, labels=XL_DATA_LABEL_POSITION.CENTER)
+    chart.has_legend = False
+    chart.category_axis.tick_labels.font.size = Pt(min(7, max(5, 38 / max(1, len(columns)) ** .5)))
+    for category_index, series in enumerate(chart.series):
+        for column_index, column in enumerate(columns):
+            point = series.points[column_index]
+            color = _hierarchy_chart_color(column['color'], category_index)
+            point.format.fill.solid()
+            point.format.fill.fore_color.rgb = RGBColor.from_string(color.lstrip('#'))
+            if column['is_reference']:
+                point.format.line.color.rgb = RGBColor.from_string('FFFF00')
+                point.format.line.width = Pt(1.5)
+    operator_entries = {}
+    for column in columns:
+        operator_entries.setdefault(column['operator'], column)
+    legend_shape = slide.shapes.add_table(1, max(1, len(operator_entries)), Inches(.55), Inches(1.62),
+                                          presentation.slide_width - Inches(1.1), Inches(.22))
+    legend_shape.name = 'Hierarchy Operator Legend'
+    legend = legend_shape.table
+    for index, (operator, column) in enumerate(operator_entries.items()):
+        label = f'{operator} (Reference)' if column['is_reference'] else operator
+        _cell(legend.cell(0, index), label, color=column['color'],
+              foreground=_header_foreground(column['color']), size=8, bold=True)
+    category_note = 'Stacked KPI categories: ' + ' · '.join(str(category) for category in categories)
+    _text(slide, category_note, 6.48, size=8, height=.18)
+    _text(slide, matrix['coverage_note'], 6.69, size=8, height=.2)
+
+
+def _hierarchy_chart_color(color: str, category_index: int) -> str:
+    """Use lighter shades of each operator color to distinguish stacked KPI groups."""
+    channels = [int(color.lstrip('#')[index:index + 2], 16) for index in (0, 2, 4)]
+    tint = min(.42, category_index * .1)
+    return '#{:02X}{:02X}{:02X}'.format(*(round(channel + (255 - channel) * tint) for channel in channels))
+
+
+def _wrapped_line_count(text: Any, width_inches: float, font_size: float) -> int:
+    capacity = max(1, int((width_inches * 72 - 3.6) / max(.1, font_size * .65)))
+    lines = 1
+    used = 0
+    for word in str(text or '').split():
+        word_length = len(word)
+        if used and used + 1 + word_length > capacity:
+            lines += 1
+            used = 0
+        if word_length > capacity:
+            extra_lines = ceil(word_length / capacity) - 1
+            lines += extra_lines
+            used = word_length % capacity
+        else:
+            used += (1 if used else 0) + word_length
+    return lines
+
+
+def _hierarchy_metric_layout(metrics: list[dict], total_label: str, *, available_height: float,
+                             kpi_width: float) -> tuple[float, list[float]]:
+    texts = [str(row.get('kpi', '')) for row in metrics] + [total_label]
+    font_size = min(7.5, max(5.0, available_height * 72 / max(1, len(texts)) * .82))
+    line_counts = [_wrapped_line_count(text, kpi_width, font_size) for text in texts]
+    for _ in range(3):
+        base_height = available_height / max(1, sum(line_counts))
+        font_size = min(7.5, max(5.0, base_height * 72 * .82))
+        updated = [_wrapped_line_count(text, kpi_width, font_size) for text in texts]
+        if updated == line_counts:
+            break
+        line_counts = updated
+    base_height = available_height / max(1, sum(line_counts))
+    return font_size, [base_height * lines for lines in line_counts]
+
+
+def _hierarchy_content_font(texts: list[str], width_inches: float, *, maximum: float = 7.5) -> float:
+    glyph_units = {
+        '.': .28, '-': .4, '+': .48, '*': .36,
+    }
+    widest = max(
+        (sum(glyph_units.get(char, .56 if char.isdigit() else .52) for char in str(text)) for text in texts),
+        default=1.0,
+    )
+    usable_width = max(1.0, width_inches * 72 - 3.6)
+    return min(maximum, max(2.5, usable_width / max(1.0, widest)))
+
+
+def _add_hierarchy_chart_categories(data: CategoryChartData, columns: list[dict]) -> None:
+    """Build native multi-level chart categories from hierarchy values."""
+    nodes = {}
+    for column in columns:
+        parent = None
+        prefix = ()
+        for item in column.get('path', []):
+            value = 'Not specified' if item.get('value') is None else str(item['value'])
+            prefix += (value,)
+            if prefix in nodes:
+                parent = nodes[prefix]
+                continue
+            node = data.add_category(value) if parent is None else parent.add_sub_category(value)
+            nodes[prefix] = node
+            parent = node
+
+
+def _hierarchy_display_path(column: dict) -> str:
+    return ' · '.join(
+        'Not specified' if item.get('value') is None else str(item['value'])
+        for item in column.get('path', [])
+    )
+
+
+def _hierarchy_header_groups(table, columns: list[dict], levels: list[str], *, start_col: int,
+                             leaf_width: int, header_rows: int, physical_column_width: float,
+                             leaf_label: str = 'Score') -> None:
+    for level_index, level in enumerate(levels):
+        start = 0
+        while start < len(columns):
+            representative = columns[start]
+            prefix = tuple((entry['level'], entry.get('value')) for entry in representative['path'][:level_index + 1])
+            end = start
+            while end + 1 < len(columns):
+                next_prefix = tuple(
+                    (entry['level'], entry.get('value')) for entry in columns[end + 1]['path'][:level_index + 1]
+                )
+                if next_prefix != prefix:
+                    break
+                end += 1
+            left_column = start_col + start * leaf_width
+            right_column = start_col + (end + 1) * leaf_width - 1
+            cell = table.cell(level_index, left_column)
+            if right_column > left_column:
+                cell.merge(table.cell(level_index, right_column))
+            value = representative['path'][level_index].get('value')
+            label = value if value is not None else 'Not specified'
+            color = representative['color'] if level == 'Operator' else '#E6ECFA'
+            header_size = min(7.5, max(5.0, physical_column_width * leaf_width
+                                      * (end - start + 1) * 12))
+            _cell(cell, str(label), color=color, foreground=_header_foreground(color), size=header_size, bold=True)
+            if level == 'Operator' and all(item['is_reference'] for item in columns[start:end + 1]):
+                _yellow_top_border(cell)
+            start = end + 1
+    subheader_row = len(levels)
+    for column_index, column in enumerate(columns):
+        color = column['color']
+        leaf_font_size = min(7.5, max(5.0, physical_column_width * 12))
+        _cell(table.cell(subheader_row, start_col + column_index * leaf_width), leaf_label,
+              color=color, foreground=_header_foreground(color), size=leaf_font_size, bold=True)
+        if leaf_width == 2:
+            _cell(table.cell(subheader_row, start_col + column_index * leaf_width + 1), 'GAP',
+                  color='#FFFF00', foreground='#17232D', size=leaf_font_size, bold=True)
+        if column['is_reference']:
+            _yellow_top_border(table.cell(subheader_row, start_col + column_index * leaf_width))
+
+
+def _yellow_top_border(cell) -> None:
+    properties = cell._tc.get_or_add_tcPr()
+    line = properties.find('{http://schemas.openxmlformats.org/drawingml/2006/main}lnT')
+    if line is None:
+        line = OxmlElement('a:lnT')
+        properties.append(line)
+    line.set('w', '38100')
+    fill = line.find('{http://schemas.openxmlformats.org/drawingml/2006/main}solidFill')
+    if fill is None:
+        fill = OxmlElement('a:solidFill')
+        line.append(fill)
+    rgb = fill.find('{http://schemas.openxmlformats.org/drawingml/2006/main}srgbClr')
+    if rgb is None:
+        rgb = OxmlElement('a:srgbClr')
+        fill.append(rgb)
+    rgb.set('val', 'FFFF00')
+
+
+def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dict]) -> None:
+    for matrix in matrices:
+        columns = matrix['hierarchy_columns']
+        levels = matrix['hierarchy_levels']
+        metrics = matrix['rows']
+        slide = _slide(presentation, 'Scoring Tables', _scope(matrix['context']))
+        header_rows = len(levels) + 1
+        row_count = header_rows + len(metrics) + 1
+        table_height = 5.0
+        table_width = presentation.slide_width / 914400 - 1.1
+        fixed_widths = [0.9, 2.35, 0.47, 0.52]
+        table = slide.shapes.add_table(row_count, 4 + 2 * len(columns), Inches(.55), Inches(1.5),
+                                       Inches(table_width), Inches(table_height)).table
+        leaf_width = (table_width - sum(fixed_widths)) / max(1, 2 * len(columns))
+        for index, column in enumerate(table.columns):
+            column.width = Inches(fixed_widths[index] if index < 4 else leaf_width)
+        header_level_height = min(.25, 1.05 / max(1, len(levels)))
+        subheader_height = .25
+        for row_index in range(len(levels)):
+            table.rows[row_index].height = Inches(header_level_height)
+        table.rows[len(levels)].height = Inches(subheader_height)
+        available_body_height = table_height - header_level_height * len(levels) - subheader_height
+        metric_font, body_heights = _hierarchy_metric_layout(
+            metrics, 'Available points; * incomplete coverage',
+            available_height=available_body_height, kpi_width=fixed_widths[1],
+        )
+        for row_index, row_height in enumerate(body_heights, header_rows):
+            table.rows[row_index].height = Inches(row_height)
+        _hierarchy_header_groups(table, columns, levels, start_col=4, leaf_width=2,
+                                 header_rows=header_rows, physical_column_width=leaf_width)
+        static_headers = [('Category', '#0084FF'), ('KPI', '#0084FF'), ('Score weight\n(%)', '#4EA72E'), ('Max score', '#FF0000')]
+        for index, (label, color) in enumerate(static_headers):
+            cell = table.cell(0, index)
+            if header_rows > 1:
+                cell.merge(table.cell(header_rows - 1, index))
+            _cell(cell, label, color=color, foreground=_header_foreground(color), size=7, bold=True)
+        data_font = min(7, metric_font)
+        total = matrix['total']
+        score_texts = []
+        gap_texts = []
+        for metric in metrics:
+            for column in columns:
+                leaf_id = column['id']
+                value = metric['values'][leaf_id]
+                score_texts.append(_number(value['points']) + ('*' if value['points'] is not None and not value['complete'] else ''))
+                gap_texts.append(_number(metric['gaps'].get(leaf_id)))
+        for column in columns:
+            leaf_id = column['id']
+            value = total['values'][leaf_id]
+            score_texts.append(_number(value['points']) + ('*' if value['points'] is not None and not value['complete'] else ''))
+            gap_texts.append(_number(total['gaps'].get(leaf_id)))
+        score_font = _hierarchy_content_font(score_texts, leaf_width)
+        gap_font = _hierarchy_content_font(gap_texts, leaf_width)
+        for row_offset, metric in enumerate(metrics, header_rows):
+            _cell(table.cell(row_offset, 0), metric['category'], size=data_font, left=True)
+            _cell(table.cell(row_offset, 1), metric['kpi'], color='#E7E8E9', bold=True, left=True, size=metric_font)
+            _cell(table.cell(row_offset, 2), _number(metric['weight_percent']) + '%', size=data_font)
+            _cell(table.cell(row_offset, 3), _number(metric['max_points']), size=data_font)
+            for column_index, column in enumerate(columns):
+                leaf_id = column['id']
+                value = metric['values'][leaf_id]
+                partial = value['points'] is not None and not value['complete']
+                _cell(table.cell(row_offset, 4 + 2 * column_index),
+                      _number(value['points']) + ('*' if partial else ''),
+                      color=value.get('color', _NEUTRAL), size=score_font)
+                _cell(table.cell(row_offset, 5 + 2 * column_index), _number(metric['gaps'].get(leaf_id)),
+                      color=metric.get('gap_colors', {}).get(leaf_id, '#FFF0D8'), size=gap_font, bold=True)
+        total_index = row_count - 1
+        _cell(table.cell(total_index, 0), 'TOTAL', color='#D8DFE4', bold=True, left=True, size=data_font)
+        _cell(table.cell(total_index, 1), 'Available points; * incomplete coverage',
+              color='#D8DFE4', size=metric_font, left=True)
+        _cell(table.cell(total_index, 2), _number(total['weight_percent']) + '%', color='#D8DFE4', size=data_font, bold=True)
+        _cell(table.cell(total_index, 3), _number(total['max_points']), color='#D8DFE4', size=data_font, bold=True)
+        for column_index, column in enumerate(columns):
+            leaf_id = column['id']
+            value = total['values'][leaf_id]
+            _cell(table.cell(total_index, 4 + 2 * column_index),
+                  _number(value['points']) + ('*' if value['points'] is not None and not value['complete'] else ''),
+                  color='#D8DFE4', size=score_font, bold=True)
+            _cell(table.cell(total_index, 5 + 2 * column_index), _number(total['gaps'].get(leaf_id)),
+                  color='#D8DFE4', size=gap_font, bold=True)
+        _merge_category_cells(table, metrics, header_rows)
+        for index, item in enumerate(legend):
+            legend_table = slide.shapes.add_table(
+                1, 1, Inches(6.8 + index * 1.15), Inches(1.25), Inches(1.1), Inches(.18),
+            ).table
+            _cell(legend_table.cell(0, 0), item.get('band', ''), color=item['color'], size=8)
+        _text(slide, matrix['coverage_note'], 7.27, size=8, height=.18)
+
+
+def _merge_category_cells(table, metrics: list[dict], start_row: int) -> None:
+    first = 0
+    while first < len(metrics):
+        last = first
+        while last + 1 < len(metrics) and metrics[last + 1]['category'] == metrics[first]['category']:
+            last += 1
+        if last > first:
+            cell = table.cell(start_row + first, 0)
+            cell.merge(table.cell(start_row + last, 0))
+            _cell(cell, metrics[first]['category'], size=8.5, left=True)
+        first = last + 1
+
+
+def _hierarchy_gap_projection(matrix: dict, columns: list[dict]) -> dict:
+    """Keep a selected set of leaves in a hierarchy GAP view."""
+    projected = deepcopy(matrix)
+    leaf_ids = [column['id'] for column in columns]
+    projected['hierarchy_columns'] = deepcopy(columns)
+    projected['operators'] = leaf_ids
+    projected['operator_styles'] = {
+        leaf_id: projected['operator_styles'][leaf_id]
+        for leaf_id in leaf_ids if leaf_id in projected.get('operator_styles', {})
+    }
+    projected['rows'] = [
+        row | {
+            'gaps': {leaf_id: row.get('gaps', {}).get(leaf_id) for leaf_id in leaf_ids},
+            'gap_colors': {leaf_id: row.get('gap_colors', {}).get(leaf_id, THRESHOLD_COLORS['Unavailable'])
+                           for leaf_id in leaf_ids},
+        }
+        for row in projected.get('rows', [])
+    ]
+    projected['total'] = {
+        'gaps': {leaf_id: matrix.get('total', {}).get('gaps', {}).get(leaf_id) for leaf_id in leaf_ids},
+    }
+    return projected
+
+
+def _hierarchy_gap_tables(presentation, matrices: list[dict], *, title: str = 'GAP Analysis — All vs reference') -> None:
+    for matrix in matrices:
+        columns = matrix['hierarchy_columns']
+        levels = matrix['hierarchy_levels']
+        metrics = matrix['rows']
+        slide = _slide(presentation, title, _scope(matrix['context']))
+        header_rows = len(levels) + 1
+        row_count = header_rows + len(metrics) + 1
+        table_height = 5.0
+        table_width = 12.03
+        fixed_widths = [1.0, 2.55, .7]
+        table = slide.shapes.add_table(row_count, 3 + len(columns), Inches(.65), Inches(1.55),
+                                       Inches(table_width), Inches(table_height)).table
+        leaf_width = (table_width - sum(fixed_widths)) / max(1, len(columns))
+        for index, column in enumerate(table.columns):
+            column.width = Inches(fixed_widths[index] if index < 3 else leaf_width)
+        header_level_height = min(.25, 1.05 / max(1, len(levels)))
+        subheader_height = .25
+        for row_index in range(len(levels)):
+            table.rows[row_index].height = Inches(header_level_height)
+        table.rows[len(levels)].height = Inches(subheader_height)
+        available_body_height = table_height - header_level_height * len(levels) - subheader_height
+        metric_font, body_heights = _hierarchy_metric_layout(
+            metrics, 'Weighted score GAP', available_height=available_body_height,
+            kpi_width=fixed_widths[1],
+        )
+        for row_index, row_height in enumerate(body_heights, header_rows):
+            table.rows[row_index].height = Inches(row_height)
+        _hierarchy_header_groups(table, columns, levels, start_col=3, leaf_width=1,
+                                 header_rows=header_rows, physical_column_width=leaf_width,
+                                 leaf_label='GAP')
+        data_font = min(7, metric_font)
+        for index, (label, color) in enumerate((('Category', '#0084FF'), ('KPI', '#0084FF'), ('Type of KPI', '#0084FF'))):
+            cell = table.cell(0, index)
+            if header_rows > 1:
+                cell.merge(table.cell(header_rows - 1, index))
+            _cell(cell, label, color=color, foreground=_WHITE, size=7, bold=True)
+        gap_texts = [
+            _number(row['gaps'].get(column['id']))
+            for row in metrics for column in columns
+        ] + [_number(matrix['total']['gaps'].get(column['id'])) for column in columns]
+        leaf_font = _hierarchy_content_font(gap_texts, leaf_width)
+        for row_offset, row in enumerate(metrics, header_rows):
+            _cell(table.cell(row_offset, 0), row['category'], color='#0084FF', foreground=_WHITE, size=data_font, bold=True)
+            _cell(table.cell(row_offset, 1), row['kpi'], color='#E6ECFA', size=metric_font, left=True)
+            _cell(table.cell(row_offset, 2), row['kpi_type'], color='#D8EFCA' if row['kpi_type'] == 'Reliable' else '#E6ECFA', size=data_font)
+            for column_index, column in enumerate(columns, 3):
+                leaf_id = column['id']
+                _cell(table.cell(row_offset, column_index), _number(row['gaps'].get(leaf_id)),
+                      color=row['gap_colors'].get(leaf_id, THRESHOLD_COLORS['Unavailable']), size=leaf_font, bold=True)
+        total_index = row_count - 1
+        total_gaps = matrix['total']['gaps']
+        for index, label in enumerate(('Total', 'Weighted score GAP', '')):
+            _cell(table.cell(total_index, index), label, color='#E4E9EC', size=data_font, bold=True, left=index == 1)
+        for column_index, column in enumerate(columns, 3):
+            _cell(table.cell(total_index, column_index), _number(total_gaps.get(column['id'])),
+                  color='#E4E9EC', size=leaf_font, bold=True)
+        _merge_category_cells(table, metrics, header_rows)
+        _text(slide, matrix['note'], 7.05, height=.25, size=9)
 
 
 def _gap_summary_tables(presentation, matrices: list[dict]) -> None:
@@ -612,7 +1028,46 @@ def export_scoring_powerpoint(job: dict[str, Any], result: dict[str, Any], templ
     levels = job.get('aggregation_levels') or job.get('levels') or ['Operator']
     subtitle = ', '.join(levels)
     matrices = views['score_tables']
-    if matrices:
+    hierarchy_matrices = views.get('hierarchy_score_tables', [])
+    use_hierarchy = bool(hierarchy_matrices) and len(hierarchy_matrices[0].get('hierarchy_levels', [])) > 1
+    if use_hierarchy:
+        gap_by_environment = {
+            matrix['context'].get('environment'): matrix
+            for matrix in views.get('hierarchy_gap_tables', [])
+        }
+        export_gap_matrices = []
+        for matrix in hierarchy_matrices:
+            _best_network(presentation, [matrix])
+            _hierarchy_chart(presentation, matrix)
+            _hierarchy_score_tables(presentation, [matrix], views.get('threshold_legend', []))
+            gap_matrix = gap_by_environment.get(matrix['context'].get('environment'))
+            if gap_matrix is not None:
+                export_gap_matrices.append(gap_matrix)
+        # Export every combined comparison before the operator-specific views.
+        for gap_matrix in export_gap_matrices:
+            reference = _operator_label(gap_matrix, gap_matrix['baseline_operator'])
+            compared_columns = [column for column in gap_matrix['hierarchy_columns']
+                                if not column.get('is_reference')]
+            if compared_columns:
+                all_matrix = _hierarchy_gap_projection(gap_matrix, compared_columns)
+                _hierarchy_gap_tables(
+                    presentation, [all_matrix], title=f'GAP Analysis — All vs {reference}',
+                )
+        for gap_matrix in export_gap_matrices:
+            reference = _operator_label(gap_matrix, gap_matrix['baseline_operator'])
+            compared_operators = dict.fromkeys(
+                column['operator'] for column in gap_matrix['hierarchy_columns']
+                if not column.get('is_reference')
+            )
+            for operator in compared_operators:
+                operator_columns = [column for column in gap_matrix['hierarchy_columns']
+                                    if column['operator'] == operator]
+                operator_matrix = _hierarchy_gap_projection(gap_matrix, operator_columns)
+                _hierarchy_gap_tables(
+                    presentation, [operator_matrix],
+                    title=f'GAP Analysis — {operator} vs {reference}',
+                )
+    elif matrices:
         for matrix in matrices:
             _best_network(presentation, [matrix])
             _charts(presentation, [matrix])

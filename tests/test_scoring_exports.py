@@ -405,6 +405,13 @@ def test_intro_slides_show_all_canonical_scope_filters_without_overlapping_campa
         assert 'Vendor: All' in text
         assert 'Campaign: UK_Q2_2026, UK_Q3_2026' in text
         assert 'Campaigns: UK_Q2_2026' in text
+        ordered_labels = [
+            'Operator: O2 UK', 'Vendor: All', 'Region: North, South', 'City: All',
+            'Campaign: UK_Q2_2026, UK_Q3_2026',
+        ]
+        assert [text.index(label) for label in ordered_labels] == sorted(
+            text.index(label) for label in ordered_labels
+        )
         campaign_shape = next(shape for shape in slide.shapes if shape.name == 'Scoring Campaigns')
         if index == 0:
             subtitle_shape = next(
@@ -418,3 +425,167 @@ def test_intro_slides_show_all_canonical_scope_filters_without_overlapping_campa
         assert subtitle_shape.top > 0
         assert subtitle_shape.width > Inches(9)
         assert subtitle_shape.top + subtitle_shape.height <= campaign_shape.top
+
+
+def test_intro_scope_filters_follow_saved_aggregation_hierarchy_order():
+    fields = ['Campaign', 'City', 'Vendor', 'Operator', 'Region']
+    job_fields = {
+        'aggregation_hierarchy': fields,
+        'context_filters': {
+            'Operator': ['O2 UK'], 'Vendor': ['Telefonica'], 'Region': ['North'],
+            'City': ['London'], 'Campaign': ['UK_Q2_2026'],
+        },
+    }
+    presentation = _export(_result(), job_fields=job_fields)
+    expected = [
+        'Campaign: UK_Q2_2026', 'City: London', 'Vendor: Telefonica',
+        'Operator: O2 UK', 'Region: North',
+    ]
+    for index in (0, 1):
+        text = _slide_text(presentation.slides[index])
+        assert [text.index(label) for label in expected] == sorted(
+            text.index(label) for label in expected
+        )
+
+
+def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_per_environment():
+    base_result = _result()
+    contexts = [
+        ('North', 'UK_Q2_2026', False),
+        ('North', 'UK_Q3_2026', False),
+        ('South', 'UK_Q2_2026', False),
+        ('South', 'UK_Q3_2026', True),
+    ]
+    scoring_rows = []
+    for region, campaign, omit_baseline in contexts:
+        for row in base_result['scoring']:
+            if omit_baseline and row['operator'] == 'EE':
+                continue
+            scoring_rows.append({**row, 'region': region, 'campaign': campaign})
+    result = {
+        'aggregation_contract_version': 2,
+        'aggregation_levels': ['Operator', 'Region', 'Campaign'],
+        'scoring': scoring_rows,
+        'totals': [],
+        'configuration': scoring_configuration(),
+        'warnings': [],
+    }
+    presentation = _export(
+        result,
+        operator_mapping_groups=_mapping_groups(),
+        job_fields={
+            'aggregation_contract_version': 2,
+            'aggregation_levels': ['Operator', 'Region', 'Campaign'],
+            'campaigns': ['UK_Q2_2026', 'UK_Q3_2026'],
+        },
+    )
+    titles = [slide.shapes.title.text.split('\n')[0] for slide in presentation.slides]
+    assert titles.count('Scoring Chart') == 1
+    best_network_slide = next(slide for slide, title in zip(presentation.slides, titles)
+                              if title == 'Scoring & GAP Analysis — Best Network')
+    best_network_chart = next(shape.chart for shape in best_network_slide.shapes if shape.has_chart)
+    best_network_categories = best_network_chart.plots[0].categories
+    assert best_network_categories.depth == 3
+    assert ('EE', 'North', 'UK_Q2_2026') in best_network_categories.flattened_labels
+    assert not re.search(r'\b(?:Operator|Vendor|Region|City|Campaign):', _slide_text(best_network_slide))
+    chart_slide = next(slide for slide, title in zip(presentation.slides, titles) if title == 'Scoring Chart')
+    chart_shape = next(shape for shape in chart_slide.shapes if shape.has_chart)
+    chart = chart_shape.chart
+    chart_categories = chart.plots[0].categories
+    assert chart_categories.depth == 3
+    assert ('EE', 'North', 'UK_Q2_2026') in chart_categories.flattened_labels
+    assert all(not re.search(r'\b(?:Operator|Vendor|Region|City|Campaign):', label)
+               for path in chart_categories.flattened_labels for label in path)
+    stacked_totals = [
+        sum(series.values[index] or 0 for series in chart.series)
+        for index in range(len(chart.series[0].values))
+    ]
+    assert chart.value_axis.maximum_scale >= max(stacked_totals)
+    operator_legend = next(shape for shape in chart_slide.shapes
+                           if shape.name == 'Hierarchy Operator Legend')
+    assert operator_legend.top < chart_shape.top
+    assert operator_legend.top + operator_legend.height <= chart_shape.top
+    score_slides = [slide for slide, title in zip(presentation.slides, titles) if title == 'Scoring Tables']
+    gap_slides = [slide for slide, title in zip(presentation.slides, titles)
+                  if title.startswith('GAP Analysis —')]
+    assert score_slides and gap_slides
+    assert len(score_slides) == 1
+    score_table = next(shape.table for shape in score_slides[0].shapes if shape.has_table)
+    assert len(score_table.rows) == 4 + len(METRICS) + 1
+    assert len(score_table.columns) == 4 + 2 * 15
+    score_table_shape = next(shape for shape in score_slides[0].shapes if shape.has_table)
+    hierarchy_legend = next(shape for shape in score_slides[0].shapes
+                            if shape.has_table and shape.top == Inches(1.25))
+    assert hierarchy_legend.top + hierarchy_legend.height < score_table_shape.top
+    assert hierarchy_legend.left == Inches(6.8)
+    all_gap_slides = [slide for slide, title in zip(presentation.slides, titles)
+                      if title == 'GAP Analysis — All vs EE']
+    individual_gap_slides = [
+        slide for slide, title in zip(presentation.slides, titles)
+        if title.startswith('GAP Analysis —') and title != 'GAP Analysis — All vs EE'
+    ]
+    assert max(presentation.slides.index(slide) for slide in all_gap_slides) < min(
+        presentation.slides.index(slide) for slide in individual_gap_slides
+    )
+    assert len(all_gap_slides) == 1
+    all_gap_tables = [next(shape.table for shape in slide.shapes if shape.has_table)
+                      for slide in all_gap_slides]
+    assert len(all_gap_tables[0].rows) == 4 + len(METRICS) + 1
+    assert len(all_gap_tables[0].columns) == 3 + 3 * len(contexts)
+    assert not any(cell.text == 'EE' for table in all_gap_tables
+                   for row in table.rows for cell in row.cells)
+    assert len(individual_gap_slides) == 3
+    for slide in individual_gap_slides:
+        operator_gap_table = next(shape.table for shape in slide.shapes if shape.has_table)
+        assert len(operator_gap_table.rows) == 4 + len(METRICS) + 1
+        assert len(operator_gap_table.columns) == 3 + len(contexts)
+        header_text = '\n'.join(cell.text for row in list(operator_gap_table.rows)[:4] for cell in row.cells)
+        assert 'North' in header_text and 'South' in header_text
+        assert 'UK_Q2_2026' in header_text and 'UK_Q3_2026' in header_text
+        assert not re.search(r'\b(?:Operator|Vendor|Region|City|Campaign):', header_text)
+        gap_header = operator_gap_table.rows[len(['Operator', 'Region', 'Campaign'])]
+        assert all(cell.text == 'GAP' for cell in list(gap_header.cells)[3:])
+    assert any(shape.has_chart for slide, title in zip(presentation.slides, titles)
+               if title == 'Scoring Chart' for shape in slide.shapes)
+    assert any(
+        cell.is_merge_origin and cell.span_width > 1 and cell.text in MAPPED_OPERATOR_ORDER
+        for slide in score_slides
+        for shape in slide.shapes if shape.has_table
+        for row in shape.table.rows
+        for cell in row.cells
+    )
+    assert all(any(shape.has_table for shape in slide.shapes) for slide in score_slides + gap_slides)
+    hierarchy_text = '\n'.join(_slide_text(slide) for slide in score_slides + gap_slides)
+    assert 'UK_Q2_2026' in hierarchy_text
+    assert 'South' in hierarchy_text
+    assert not re.search(r'\b(?:Operator|Vendor|Region|City|Campaign):', hierarchy_text)
+
+
+def test_unselected_campaign_stays_metadata_without_becoming_a_hierarchy_header():
+    result = _result()
+    result['aggregation_contract_version'] = 2
+    result['aggregation_levels'] = ['Operator', 'Region']
+    result['campaigns'] = ['UK_Q2_2026']
+    for row in result['scoring']:
+        row['campaign'] = None
+    job_fields = {
+        'aggregation_contract_version': 2,
+        'aggregation_levels': ['Operator', 'Region'],
+        'campaigns': ['UK_Q2_2026'],
+    }
+    job = {
+        'aggregation_contract_version': 2,
+        'aggregation_levels': ['Operator', 'Region'],
+        'baseline_operator': 'EE',
+        'configuration': scoring_configuration(),
+        **job_fields,
+    }
+    views = build_scoring_views(job, result, _mapping_groups())
+    matrix = views['hierarchy_score_tables'][0]
+    assert matrix['context'] == {'environment': 'DriveCity'}
+    assert all('Campaign' not in {item['level'] for item in column['path']}
+               for column in matrix['hierarchy_columns'])
+
+    presentation = _export(result, operator_mapping_groups=_mapping_groups(), job_fields=job_fields)
+    intro_text = '\n'.join(_slide_text(presentation.slides[index]) for index in (0, 1))
+    assert 'Campaigns: UK_Q2_2026' in intro_text

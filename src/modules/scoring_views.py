@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import math
 import re
 from typing import Any
@@ -86,7 +87,9 @@ def build_scoring_views(job: dict[str, Any] | None, result: dict[str, Any] | Non
     total_records = _records(result.get('totals', result.get('charts', [])))
     context_records = score_records + total_records
     if not context_records:
-        return {'score_tables': [], 'gap_tables': [], 'gap_summary_tables': [], 'threshold_legend': [dict(item) for item in THRESHOLD_LEGEND],
+        return {'score_tables': [], 'gap_tables': [], 'gap_summary_tables': [],
+                'hierarchy_score_tables': [], 'hierarchy_gap_tables': [],
+                'threshold_legend': [dict(item) for item in THRESHOLD_LEGEND],
                 'gap_direction': 'operator_minus_reference'}
 
     contexts: dict[tuple[Any, ...], dict[str, list[dict[str, Any]]]] = {}
@@ -126,10 +129,18 @@ def build_scoring_views(job: dict[str, Any] | None, result: dict[str, Any] | Non
             gap_summary_tables.append(_build_gap_summary_table(table, gap_priority_rank, baseline_aliases))
             gap_tables.extend(_build_gap_tables(table, gap_priority_rank, baseline_aliases))
 
+    hierarchy_levels = _hierarchy_levels(job, result)
+    hierarchy_score_tables, hierarchy_gap_tables = _build_hierarchy_tables(
+        score_tables, hierarchy_levels, requested_baseline, baseline_aliases,
+        operator_mapping_groups or [], metrics, gap_priority_rank,
+    ) if hierarchy_levels else ([], [])
+
     return {
         'score_tables': score_tables,
         'gap_tables': gap_tables,
         'gap_summary_tables': gap_summary_tables,
+        'hierarchy_score_tables': hierarchy_score_tables,
+        'hierarchy_gap_tables': hierarchy_gap_tables,
         'threshold_legend': [dict(item) for item in THRESHOLD_LEGEND],
         'gap_direction': 'operator_minus_reference',
         'gap_legend': {
@@ -138,6 +149,268 @@ def build_scoring_views(job: dict[str, Any] | None, result: dict[str, Any] | Non
             'colors': {'positive': _GAP_POSITIVE_MAX, 'negative': _GAP_NEGATIVE_MAX, 'zero': _GAP_NEUTRAL},
         },
     }
+
+
+_HIERARCHY_LEVELS = {
+    'operator': 'Operator',
+    'vendor': 'Vendor',
+    'ranvendor': 'Vendor',
+    'region': 'Region',
+    'city': 'City',
+    'campaign': 'Campaign',
+    'datasettype': 'Dataset Type',
+}
+_HIERARCHY_CONTEXT_FIELDS = {
+    'Vendor': 'vendor',
+    'Region': 'region',
+    'City': 'city',
+    'Campaign': 'campaign',
+    'Dataset Type': 'dataset_type',
+}
+
+
+def _hierarchy_levels(job: dict[str, Any], result: dict[str, Any]) -> list[str]:
+    """Return selected hierarchy levels only for jobs using the new aggregation contract."""
+    try:
+        contract_version = int(job.get('aggregation_contract_version') or result.get('aggregation_contract_version') or 0)
+    except (TypeError, ValueError):
+        contract_version = 0
+    if contract_version != 2:
+        return []
+    levels = job.get('aggregation_levels') or job.get('levels') or result.get('aggregation_levels') or []
+    if isinstance(levels, str):
+        levels = [levels]
+    if not isinstance(levels, list):
+        return []
+    canonical = []
+    for level in levels:
+        name = _HIERARCHY_LEVELS.get(_level_identity(level))
+        if name and name not in canonical:
+            canonical.append(name)
+    if 'Operator' not in canonical:
+        canonical.insert(0, 'Operator')
+    return canonical
+
+
+def _hierarchy_leaf_id(path: list[dict[str, Any]]) -> str:
+    return json.dumps(
+        [[entry['level'], entry.get('value')] for entry in path],
+        ensure_ascii=False, separators=(',', ':'), sort_keys=False,
+    )
+
+
+def _hierarchy_context_key(path: list[dict[str, Any]]) -> str:
+    return _hierarchy_leaf_id([entry for entry in path if entry['level'] != 'Operator'])
+
+
+def _hierarchy_column_sort_key(column: dict[str, Any]) -> tuple[Any, ...]:
+    values = []
+    for item in column['path']:
+        value = item.get('value')
+        if item['level'] == 'Operator':
+            values.append((0, column.get('operator_position', 0), str(value or '').casefold()))
+        else:
+            values.append((1, '' if value is None else str(value).casefold(), '' if value is None else str(value)))
+    return tuple(values)
+
+
+def _missing_hierarchy_value() -> dict[str, Any]:
+    return {
+        'points': None, 'complete': False, 'value': None, 'score': None, 'sample_count': 0,
+        'threshold_band': 'Unavailable', 'color': THRESHOLD_COLORS['Unavailable'],
+    }
+
+
+def _build_hierarchy_tables(
+    score_tables: list[dict[str, Any]], hierarchy_levels: list[str], requested_baseline: str,
+    baseline_aliases: list[str], operator_mapping_groups: list[dict[str, Any]],
+    metrics: list[dict[str, Any]], gap_priority_rank: dict[str, int],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Flatten new-contract per-context views into one complete leaf matrix per Environment."""
+    levels = [level for level in hierarchy_levels if level == 'Operator' or level in _HIERARCHY_CONTEXT_FIELDS]
+    if 'Operator' not in levels:
+        return [], []
+    by_environment: dict[str, list[dict[str, Any]]] = {}
+    actual_environments: set[str] = set()
+    for table in score_tables:
+        environment = str(table.get('context', {}).get('environment') or 'Unspecified')
+        by_environment.setdefault(environment, []).append(table)
+        if environment != 'Combined':
+            actual_environments.add(environment)
+
+    hierarchy_scores = []
+    hierarchy_gaps = []
+    for environment in sorted(by_environment, key=_environment_sort_key):
+        context_tables = by_environment[environment]
+        columns_by_id: dict[str, dict[str, Any]] = {}
+        leaf_sources: dict[str, tuple[dict[str, Any], str]] = {}
+        for table in context_tables:
+            context = table.get('context', {})
+            styles = table.get('operator_styles', {})
+            for raw_operator in table.get('operators', []):
+                base_style = styles.get(raw_operator, {})
+                canonical_operator = str(base_style.get('label') or raw_operator)
+                operator_position = _number(base_style.get('position'))
+                path = []
+                leaf_context = {'environment': environment}
+                for level in levels:
+                    if level == 'Operator':
+                        value = canonical_operator
+                    else:
+                        context_field = _HIERARCHY_CONTEXT_FIELDS[level]
+                        value = context.get(context_field)
+                        leaf_context[context_field] = value
+                    path.append({'level': level, 'value': value})
+                leaf_id = _hierarchy_leaf_id(path)
+                label = ' · '.join(
+                    f'{item["level"]}: {item.get("value") if item.get("value") is not None else "Not specified"}'
+                    for item in path
+                )
+                is_reference = _same_baseline_identity(canonical_operator, requested_baseline, baseline_aliases)
+                column = {
+                    'id': leaf_id,
+                    'operator': canonical_operator,
+                    'label': label,
+                    'path': path,
+                    'context': leaf_context,
+                    'is_reference': is_reference,
+                    'operator_position': int(operator_position) if operator_position is not None else 1_000_000,
+                    'color': str(base_style.get('color') or '#365F91').upper(),
+                }
+                if leaf_id not in columns_by_id:
+                    columns_by_id[leaf_id] = column
+                    leaf_sources[leaf_id] = (table, raw_operator)
+
+        columns = sorted(columns_by_id.values(), key=_hierarchy_column_sort_key)
+        leaf_ids = [column['id'] for column in columns]
+        if not columns:
+            continue
+        operator_styles = {
+            column['id']: {
+                'label': column['label'], 'fullpath': column['label'], 'operator': column['operator'],
+                'color': column['color'], 'position': index,
+                'operator_position': column['operator_position'], 'is_reference': column['is_reference'],
+            }
+            for index, column in enumerate(columns)
+        }
+        templates: dict[str, dict[str, Any]] = {}
+        source_rows: dict[str, dict[str, dict[str, Any]]] = {}
+        for leaf_id, (table, raw_operator) in leaf_sources.items():
+            by_code = {row['kpi_code']: row for row in table.get('rows', [])}
+            source_rows[leaf_id] = by_code
+            for code, row in by_code.items():
+                if code not in templates:
+                    templates[code] = {
+                        key: copy.deepcopy(value) for key, value in row.items()
+                        if key not in {'values', 'gaps', 'gap_colors'}
+                    }
+
+        metric_order = {metric['code']: index for index, metric in enumerate(metrics)}
+        ordered_codes = sorted(
+            templates,
+            key=lambda code: (metric_order.get(code, len(metric_order)), gap_priority_rank.get(code, len(gap_priority_rank)), code),
+        )
+        baseline_by_context = {
+            _hierarchy_context_key(column['path']): column['id']
+            for column in columns if column['is_reference']
+        }
+
+        rows = []
+        for code in ordered_codes:
+            row = dict(templates[code])
+            row['values'] = {}
+            for leaf_id in leaf_ids:
+                table, raw_operator = leaf_sources[leaf_id]
+                source_row = source_rows[leaf_id].get(code)
+                cell = source_row.get('values', {}).get(raw_operator) if source_row else None
+                row['values'][leaf_id] = copy.deepcopy(cell) if cell is not None else _missing_hierarchy_value()
+            row['gaps'] = {}
+            for column in columns:
+                baseline_id = baseline_by_context.get(_hierarchy_context_key(column['path']))
+                row['gaps'][column['id']] = _signed_gap(
+                    row['values'].get(baseline_id) if baseline_id else None,
+                    row['values'][column['id']], column['operator'], requested_baseline, baseline_aliases,
+                )
+            rows.append(row)
+
+        all_gaps = [abs(value) for row in rows for value in row['gaps'].values() if value is not None]
+        gap_scale_max = max(all_gaps, default=0.0)
+        for row in rows:
+            row['gap_colors'] = {
+                column['id']: gap_color(row['gaps'].get(column['id']), gap_scale_max)
+                for column in columns
+            }
+
+        first_table = context_tables[0]
+        total_values = {}
+        for leaf_id in leaf_ids:
+            table, raw_operator = leaf_sources[leaf_id]
+            raw_total = table.get('total', {}).get('values', {}).get(raw_operator)
+            total_values[leaf_id] = copy.deepcopy(raw_total) if raw_total is not None else {'points': None, 'complete': False}
+        total_gaps = {}
+        for column in columns:
+            baseline_id = baseline_by_context.get(_hierarchy_context_key(column['path']))
+            baseline_total = total_values.get(baseline_id) if baseline_id else None
+            current_total = total_values.get(column['id'])
+            if (column['is_reference'] and current_total and current_total.get('complete')
+                    and current_total.get('points') is not None):
+                total_gaps[column['id']] = 0.0
+            elif (baseline_total and current_total and baseline_total.get('complete') and current_total.get('complete')
+                  and baseline_total.get('points') is not None and current_total.get('points') is not None):
+                total_gaps[column['id']] = _clean_number(current_total['points'] - baseline_total['points'])
+            else:
+                total_gaps[column['id']] = None
+        total = {
+            'max_points': first_table.get('total', {}).get('max_points'),
+            'weight_percent': first_table.get('total', {}).get('weight_percent'),
+            'values': total_values,
+            'gaps': total_gaps,
+        }
+        score_matrix = {
+            'context': {'environment': environment},
+            'title': f'Scoring Table — {environment}',
+            'operators': leaf_ids,
+            'baseline_operator': requested_baseline,
+            'operator_styles': operator_styles,
+            'hierarchy_columns': columns,
+            'hierarchy_levels': list(levels),
+            'rows': rows,
+            'total': total,
+            'gap_scale_max': gap_scale_max,
+            'gap_scale_colors': {'zero': _GAP_NEUTRAL, 'positive': _GAP_POSITIVE_MAX, 'negative': _GAP_NEGATIVE_MAX},
+            'coverage_note': _coverage_note(rows, leaf_ids, environment, actual_environments),
+            'gap_priority': [code for code in gap_priority_rank],
+            'gap_direction': 'operator_minus_reference',
+        }
+        hierarchy_scores.append(score_matrix)
+
+        gap_rows = []
+        for row in rows:
+            gap_rows.append({
+                key: copy.deepcopy(row[key]) for key in ('category', 'kpi', 'kpi_code', 'kpi_type') if key in row
+            } | {
+                'gaps': dict(row['gaps']), 'gap_colors': dict(row['gap_colors']),
+            })
+        gap_rows.sort(key=lambda row: (
+            gap_priority_rank.get(row['kpi_code'], len(gap_priority_rank)),
+            row['kpi_code'],
+        ))
+        hierarchy_gaps.append({
+            'context': {'environment': environment},
+            'title': f'GAP Analysis — All vs reference — {environment}',
+            'operators': leaf_ids,
+            'baseline_operator': requested_baseline,
+            'operator_styles': operator_styles,
+            'hierarchy_columns': columns,
+            'hierarchy_levels': list(levels),
+            'rows': gap_rows,
+            'total': {'gaps': dict(total_gaps)},
+            'gap_scale_max': gap_scale_max,
+            'gap_scale_colors': {'zero': _GAP_NEUTRAL, 'positive': _GAP_POSITIVE_MAX, 'negative': _GAP_NEGATIVE_MAX},
+            'note': 'GAP comparisons use the reference operator in the same selected context. Missing matches are N/A.',
+            'gap_direction': 'operator_minus_reference',
+        })
+    return hierarchy_scores, hierarchy_gaps
 
 
 def gap_color(value: Any, scale_max: Any) -> str:

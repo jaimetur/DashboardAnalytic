@@ -17,6 +17,7 @@ from src.modules.column_names import column_identity, resolve_column_name
 from src.modules.nr_mode import NR_MODES, normalize_nr_mode
 from src.modules.repository import Repository, local_now_iso
 from src.modules.scoring_config import (
+    DEFAULT_AGGREGATION_HIERARCHY,
     configuration_hash,
     validate_scoring_configuration,
 )
@@ -26,6 +27,7 @@ CDR_DATASET_KINDS = frozenset({'data', 'voice', 'speech'})
 DEFAULT_BASELINE_OPERATOR = 'EE'
 DEFAULT_LEVELS = ('Operator',)
 INTERRUPTED_JOB_MESSAGE = 'Interrupted because the application restarted. Retry the job to run it again.'
+AGGREGATION_CONTRACT_VERSION = 2
 SCORING_CONTEXT_FILTER_FIELDS = ('Region', 'City', 'Operator', 'Vendor', 'Campaign')
 SCORING_CONTEXT_FILTER_COLUMNS = {
     'Region': ('Region', 'g_level_2'),
@@ -407,7 +409,10 @@ def select_latest_companion_cdrs(repository: Repository, dataset_id: int) -> lis
     return validate_complete_scoring_cdr_selection(repository, selected_ids, anchor_mode)
 
 
-def _normalize_levels(levels: Iterable[object], sources: list[dict[str, Any]]) -> list[str]:
+def _normalize_levels(
+    levels: Iterable[object], sources: list[dict[str, Any]],
+    aggregation_hierarchy: Iterable[object] = DEFAULT_AGGREGATION_HIERARCHY,
+) -> list[str]:
     raw_levels = [str(level).strip() for level in levels if str(level).strip()]
     if not any(column_identity(level) == 'operator' for level in raw_levels):
         raw_levels.append('Operator')
@@ -426,16 +431,25 @@ def _normalize_levels(levels: Iterable[object], sources: list[dict[str, Any]]) -
             resolved = 'Vendor' if resolve_column_name(available_columns, 'Vendor') else None
         elif requested_identity in {'region', 'city'}:
             canonical = 'Region' if requested_identity == 'region' else 'City'
-            resolved = canonical if resolve_column_name(available_columns, canonical) else None
+            aliases = ('Region', 'g_level_2') if canonical == 'Region' else ('City', 'g_level_4')
+            resolved = canonical if any(resolve_column_name(available_columns, alias) for alias in aliases) else None
+        elif requested_identity == 'campaign':
+            resolved = resolve_column_name(available_columns, 'Campaign')
         else:
-            resolved = resolve_column_name(available_columns, requested)
+            resolved = None
         if not resolved:
             raise ValueError(f"Aggregation level '{requested}' is not available in the selected CDR datasets.")
         resolved_identity = column_identity(resolved)
         if resolved_identity not in seen:
             resolved_levels.append(resolved)
             seen.add(resolved_identity)
-    resolved_levels.sort(key=lambda value: (column_identity(value) != 'operator', value.casefold()))
+    hierarchy_order = {
+        column_identity(field): index
+        for index, field in enumerate(aggregation_hierarchy)
+    }
+    resolved_levels.sort(key=lambda value: (
+        hierarchy_order.get(column_identity(value), len(hierarchy_order)), value.casefold(),
+    ))
     operator_sources = [source for source in sources if resolve_column_name(source['columns'], 'Operator') is None]
     if operator_sources:
         names = ', '.join(str(source['metadata']['name']) for source in operator_sources)
@@ -449,6 +463,7 @@ def _job_payload(
     baseline_aliases: list[str] | None = None,
     context_filters: dict[str, list[str]] | None = None,
     resolved_context_filters: dict[str, list[str]] | None = None,
+    operator_mappings: dict[str, str] | None = None,
 ) -> tuple[str, str]:
     key_payload = {
         'method_version': method_version,
@@ -458,6 +473,12 @@ def _job_payload(
         'levels': levels,
         'nr_mode': nr_mode,
         'baseline_operator': baseline_operator,
+        'aggregation_contract_version': AGGREGATION_CONTRACT_VERSION,
+        'operator_mappings': {
+            str(alias).strip().casefold(): str(canonical).strip()
+            for alias, canonical in sorted((operator_mappings or {}).items(), key=lambda item: str(item[0]).casefold())
+            if str(alias).strip() and str(canonical).strip()
+        },
     }
     normalized_filters = _normalize_context_filters(context_filters)
     resolved_filters = _normalize_context_filters(resolved_context_filters or context_filters)
@@ -470,6 +491,7 @@ def _job_payload(
 
 def _row_to_job(
     row: Any, *, include_result: bool = False, include_snapshot: bool = True,
+    include_internal_snapshot: bool = False,
 ) -> dict[str, Any]:
     if row is None:
         raise ValueError('Scoring job was not found.')
@@ -483,16 +505,30 @@ def _row_to_job(
         baseline_aliases = source_metadata_payload.get('baseline_aliases', [])
         context_filters = source_metadata_payload.get('context_filters', {})
         resolved_context_filters = source_metadata_payload.get('resolved_context_filters', context_filters)
+        aggregation_hierarchy = source_metadata_payload.get('aggregation_hierarchy', [])
+        aggregation_contract_version = source_metadata_payload.get('aggregation_contract_version', 1)
+        operator_mappings = source_metadata_payload.get('operator_mappings', {})
     else:
         metadata_list = source_metadata_payload if isinstance(source_metadata_payload, list) else []
         configuration_payload = None
         baseline_aliases = []
         context_filters = {}
         resolved_context_filters = {}
+        aggregation_hierarchy = []
+        aggregation_contract_version = 1
+        operator_mappings = {}
     if not isinstance(context_filters, dict):
         context_filters = {}
     if not isinstance(resolved_context_filters, dict):
         resolved_context_filters = context_filters
+    if not isinstance(aggregation_hierarchy, list):
+        aggregation_hierarchy = []
+    if not isinstance(operator_mappings, dict):
+        operator_mappings = {}
+    try:
+        aggregation_contract_version = max(1, int(aggregation_contract_version))
+    except (TypeError, ValueError):
+        aggregation_contract_version = 1
     if not isinstance(metadata_list, list):
         metadata_list = []
     if include_snapshot:
@@ -520,11 +556,8 @@ def _row_to_job(
             for field, values in context_filters.items()
             if isinstance(values, (list, tuple, set))
         },
-        'resolved_context_filters': {
-            str(field): [str(value) for value in values if str(value).strip()]
-            for field, values in resolved_context_filters.items()
-            if isinstance(values, (list, tuple, set))
-        },
+        'aggregation_hierarchy': [str(value) for value in aggregation_hierarchy if str(value).strip()],
+        'aggregation_contract_version': aggregation_contract_version,
         'dataset_names': [str(item.get('name') or '') for item in metadata_list if isinstance(item, dict)],
         'campaigns': sorted({
             str(campaign).strip()
@@ -549,6 +582,17 @@ def _row_to_job(
     if include_snapshot:
         job['configuration'] = configuration
         job['baseline_aliases'] = baseline_aliases
+    if include_internal_snapshot:
+        job['resolved_context_filters'] = {
+            str(field): [str(value) for value in values if str(value).strip()]
+            for field, values in resolved_context_filters.items()
+            if isinstance(values, (list, tuple, set))
+        }
+        job['operator_mappings'] = {
+            str(alias).strip().casefold(): str(canonical).strip()
+            for alias, canonical in operator_mappings.items()
+            if str(alias).strip() and str(canonical).strip()
+        }
     return job
 
 
@@ -570,7 +614,8 @@ def create_scoring_job(
     sources, _campaigns, source_fingerprint = _source_snapshot(
         repository, normalized_ids, expected_nr_mode=nr_mode,
     )
-    normalized_levels = _normalize_levels(levels, sources)
+    configuration = _workspace_scoring_configuration(repository)
+    normalized_levels = _normalize_levels(levels, sources, configuration['aggregation_hierarchy'])
     selected_mode = normalize_nr_mode(nr_mode) if nr_mode else str(sources[0]['metadata']['nr_mode'])
     if selected_mode not in NR_MODES:
         raise ValueError('NR Mode must be NSA or SA.')
@@ -578,12 +623,18 @@ def create_scoring_job(
     if not baseline:
         raise ValueError('Select a comparison baseline operator.')
     baseline_aliases = _baseline_aliases(repository, baseline)
-    configuration = _workspace_scoring_configuration(repository)
+    mapping_getter = getattr(repository, 'list_operator_mappings', None)
+    raw_operator_mappings = mapping_getter() if callable(mapping_getter) else {}
+    operator_mappings = {
+        str(alias).strip().casefold(): str(canonical).strip()
+        for alias, canonical in raw_operator_mappings.items()
+        if str(alias).strip() and str(canonical).strip()
+    } if isinstance(raw_operator_mappings, dict) else {}
     config_hash = configuration_hash(configuration)
     version = _method_version(configuration)
     cache_key, _canonical = _job_payload(
         normalized_levels, selected_mode, baseline, version, source_fingerprint, config_hash, baseline_aliases,
-        normalized_context_filters, resolved_context_filters,
+        normalized_context_filters, resolved_context_filters, operator_mappings,
     )
     source_metadata = [source['metadata'] for source in sources]
     source_snapshot = {
@@ -592,6 +643,9 @@ def create_scoring_job(
         'baseline_aliases': baseline_aliases,
         'context_filters': normalized_context_filters,
         'resolved_context_filters': resolved_context_filters,
+        'aggregation_hierarchy': list(configuration['aggregation_hierarchy']),
+        'aggregation_contract_version': AGGREGATION_CONTRACT_VERSION,
+        'operator_mappings': operator_mappings,
     }
     now = local_now_iso()
     with repository.connection() as connection:
@@ -661,13 +715,18 @@ def recover_interrupted_scoring_jobs(repository: Repository) -> list[int]:
     return job_ids
 
 
-def get_scoring_job(repository: Repository, job_id: int, include_result: bool = False) -> dict[str, Any] | None:
+def get_scoring_job(
+    repository: Repository, job_id: int, include_result: bool = False,
+    include_internal_snapshot: bool = False,
+) -> dict[str, Any] | None:
     """Return a job and optionally decode its persisted scoring tables."""
     with repository.connection() as connection:
         row = connection.execute('SELECT * FROM scoring_jobs WHERE id = ?', (int(job_id),)).fetchone()
     if row is None:
         return None
-    return _row_to_job(row, include_result=include_result)
+    return _row_to_job(
+        row, include_result=include_result, include_internal_snapshot=include_internal_snapshot,
+    )
 
 
 def delete_scoring_job(repository: Repository, job_id: int) -> bool:
@@ -763,7 +822,7 @@ def _load_source_frames(
 
 def run_scoring_job(repository: Repository, job_id: int) -> dict[str, Any] | None:
     """Calculate one queued job, persist its result, and retain failures for review."""
-    job = get_scoring_job(repository, job_id)
+    job = get_scoring_job(repository, job_id, include_internal_snapshot=True)
     if job is None:
         return None
     if job['status'] == 'completed':
@@ -822,6 +881,10 @@ def run_scoring_job(repository: Repository, job_id: int) -> dict[str, Any] | Non
             'baseline_operator': job['baseline_operator'],
             'configuration': configuration,
         }
+        if 'operator_mappings' in parameters or any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()
+        ):
+            call_kwargs['operator_mappings'] = job.get('operator_mappings', {})
         if 'baseline_aliases' in parameters or any(
             parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()
         ):
@@ -833,6 +896,9 @@ def run_scoring_job(repository: Repository, job_id: int) -> dict[str, Any] | Non
         result.setdefault('configuration_hash', configuration_hash(configuration))
         result.setdefault('gap_direction', 'operator_minus_reference')
         result.setdefault('baseline_aliases', job.get('baseline_aliases', []))
+        result.setdefault('aggregation_levels', job['levels'])
+        result.setdefault('aggregation_contract_version', job['aggregation_contract_version'])
+        result.setdefault('campaigns', job['campaigns'])
         _latest_sources, _latest_campaigns, final_fingerprint = _source_snapshot(
             repository, dataset_ids, expected_nr_mode=job['nr_mode'],
         )
