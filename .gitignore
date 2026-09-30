@@ -13,3 +13,5 @@ htmlcov/
 /data/
 /config/
 /.idea/
+# Local methodology reference; import explicitly into a workspace.
+/assets/scoring/netcheck_2026.json

@@ -1,0 +1,438 @@
+from __future__ import annotations
+
+import copy
+import re
+from pathlib import Path
+from types import ModuleType
+
+import pandas as pd
+import pytest
+
+from src.modules import scoring_jobs
+from src.modules.repository import Repository, SCHEMA, SCORING_CONFIGURATION_STATE_KEY, local_now_iso
+from scoring_fixtures import scoring_configuration
+
+
+@pytest.fixture()
+def scoring_engine(monkeypatch):
+    engine = ModuleType('src.modules.scoring')
+    engine.METHOD_VERSION = 'test-method-v1'
+    engine.required_input_columns = lambda kind, levels: [*levels, 'score']
+    calls = []
+    engine.configuration_snapshots = []
+    engine.baseline_alias_snapshots = []
+
+    def calculate_scoring(frames, levels, *, baseline_operator, configuration=None, baseline_aliases=None):
+        calls.append((frames, levels, baseline_operator))
+        engine.configuration_snapshots.append(copy.deepcopy(configuration))
+        engine.baseline_alias_snapshots.append(list(baseline_aliases or []))
+        return {
+            'scoring': [{'Operator': 'EE', 'Score': 4}],
+            'gap': [{'Operator': 'EE', 'Gap': 0}],
+            'charts': [],
+            'warnings': [],
+        }
+
+    engine.calculate_scoring = calculate_scoring
+    monkeypatch.setattr(scoring_jobs, '_scoring_engine', lambda: engine)
+    return engine, calls
+
+
+@pytest.fixture()
+def repository(tmp_path: Path) -> Repository:
+    repository = Repository(tmp_path / 'workspace.db')
+    repository.initialize()
+    repository.replace_scoring_configuration(scoring_configuration())
+    return repository
+
+
+def add_dataset(repository: Repository, name: str = 'UK_Q2_2026_NSA_Data.csv', *, kind: str = 'data', nr_mode: str = 'NSA') -> int:
+    source = Path(repository.db_path).parent / name
+    source.write_text('source', encoding='utf-8')
+    dataset_id, _created = repository.add_dataset(name, str(source), 'tester')
+    frame = pd.DataFrame({
+        'Operator': ['EE', 'O2'],
+        'Region': ['North', 'South'],
+        'City': ['Leeds', 'London'],
+        'Vendor': ['Nokia', 'Ericsson'],
+        'Dataset_Kind': [kind, kind],
+        'score': [3.0, 4.0],
+        'unused_payload': ['large', 'field'],
+    })
+    repository.replace_dataset_rows(dataset_id, frame)
+    repository.update_dataset_profile(
+        dataset_id,
+        status='ready', progress=100, dataset_kind=kind, nr_mode=nr_mode,
+        row_count=len(frame), column_count=len(frame.columns), processed_at=local_now_iso(),
+    )
+    repository.replace_cdr_catalogue(
+        dataset_id, vendors=['Nokia', 'Ericsson'], regions=['North', 'South'],
+        cities=['Leeds', 'London'], campaigns=['2026-Q2'],
+    )
+    return dataset_id
+
+
+def test_scoring_jobs_persist_results_and_reuse_completed_cache(repository, scoring_engine):
+    _engine, calls = scoring_engine
+    dataset_id = add_dataset(repository)
+
+    job, reused = scoring_jobs.create_scoring_job(
+        repository, [dataset_id], ['Region', 'City'], 'NSA', username='tester',
+    )
+    assert not reused
+    assert job['status'] == 'queued'
+    assert job['aggregation_levels'] == ['Operator', 'City', 'Region']
+    assert job['campaigns'] == ['2026-Q2']
+    duplicate, reused = scoring_jobs.create_scoring_job(
+        repository, [dataset_id], ['Region', 'City'], 'NSA', username='other-user',
+    )
+    assert reused
+    assert duplicate['id'] == job['id']
+
+    completed = scoring_jobs.run_scoring_job(repository, job['id'])
+    assert completed['status'] == 'completed'
+    assert completed['result']['scoring'] == [{'Operator': 'EE', 'Score': 4}]
+    assert len(calls) == 1
+    loaded_frames, levels, baseline = calls[0]
+    assert levels == ['Operator', 'City', 'Region']
+    assert baseline == 'EE'
+    assert 'unused_payload' not in loaded_frames['data'].columns
+
+    cached, reused = scoring_jobs.create_scoring_job(
+        repository, [dataset_id], ['Region', 'City'], 'NSA', username='tester',
+    )
+    assert reused
+    assert cached['id'] == job['id']
+    assert cached['result']['gap'] == [{'Operator': 'EE', 'Gap': 0}]
+    summaries = scoring_jobs.list_scoring_jobs(repository)
+    assert len(summaries) == 1
+    assert summaries[0]['result'] is None
+    assert 'configuration' not in summaries[0]
+    assert scoring_jobs.get_scoring_job(repository, 9999) is None
+
+
+def test_scoring_job_creation_requires_a_persisted_configuration(repository):
+    dataset_id = add_dataset(repository)
+    repository.set_workspace_state(SCORING_CONFIGURATION_STATE_KEY, '')
+
+    with pytest.raises(ValueError, match='Import a Scoring Configuration'):
+        scoring_jobs.create_scoring_job(repository, [dataset_id], ['Region'], 'NSA')
+
+
+def test_force_creates_a_fresh_calculation_and_method_baseline_are_cached(repository, scoring_engine):
+    _engine, calls = scoring_engine
+    dataset_id = add_dataset(repository)
+    first, _ = scoring_jobs.create_scoring_job(repository, [dataset_id], [], 'NSA')
+    scoring_jobs.run_scoring_job(repository, first['id'])
+
+    forced, reused = scoring_jobs.create_scoring_job(repository, [dataset_id], [], 'NSA', force=True)
+    assert not reused
+    assert forced['id'] != first['id']
+    assert scoring_jobs.run_scoring_job(repository, forced['id'])['status'] == 'completed'
+
+    other_baseline, reused = scoring_jobs.create_scoring_job(
+        repository, [dataset_id], [], 'NSA', baseline_operator='O2',
+    )
+    assert not reused
+    assert other_baseline['id'] != forced['id']
+    assert len(calls) == 2
+
+
+def test_scoring_configuration_changes_cache_and_queued_job_keeps_its_snapshot(repository, scoring_engine):
+    engine, _calls = scoring_engine
+    dataset_id = add_dataset(repository)
+    initial, _ = scoring_jobs.create_scoring_job(repository, [dataset_id], ['Region'], 'NSA')
+    original_configuration = copy.deepcopy(initial['configuration'])
+
+    changed_configuration = scoring_configuration()
+    c5 = next(metric for metric in changed_configuration['metrics'] if metric['code'] == 'C5')
+    c5['contexts']['DriveCity']['thresholds']['low'] = 86
+    repository.replace_scoring_configuration(changed_configuration)
+    changed, reused = scoring_jobs.create_scoring_job(repository, [dataset_id], ['Region'], 'NSA')
+
+    assert not reused
+    assert changed['id'] != initial['id']
+    assert changed['configuration']['metrics'][0]['contexts']['DriveCity']['thresholds']['low'] == 86
+    completed = scoring_jobs.run_scoring_job(repository, initial['id'])
+    assert completed['status'] == 'completed'
+    assert completed['result']['configuration'] == original_configuration
+    assert engine.configuration_snapshots[0] == original_configuration
+
+
+def test_baseline_alias_snapshot_is_cached_and_passed_to_engine(repository, scoring_engine):
+    engine, _calls = scoring_engine
+    dataset_id = add_dataset(repository)
+    repository.replace_operator_mapping_groups([
+        {'canonical': 'Vodafone UK', 'aliases': ['VF_UK', 'VF UK'], 'color': '#FF0000'},
+    ])
+
+    job, reused = scoring_jobs.create_scoring_job(
+        repository, [dataset_id], ['Region'], 'NSA', baseline_operator='Vodafone UK',
+    )
+    assert not reused
+    assert set(job['baseline_aliases']) == {'Vodafone UK', 'VF_UK', 'VF UK'}
+    completed = scoring_jobs.run_scoring_job(repository, job['id'])
+    assert completed['result']['baseline_aliases'] == job['baseline_aliases']
+    assert engine.baseline_alias_snapshots[0] == job['baseline_aliases']
+
+    repository.replace_operator_mapping_groups([
+        {'canonical': 'Vodafone UK', 'aliases': ['VF_UK', 'VF UK', 'Voda'], 'color': '#FF0000'},
+    ])
+    updated, reused = scoring_jobs.create_scoring_job(
+        repository, [dataset_id], ['Region'], 'NSA', baseline_operator='Vodafone UK',
+    )
+    assert not reused
+    assert updated['id'] != job['id']
+    assert 'Voda' in updated['baseline_aliases']
+
+
+def test_scoring_cache_invalidates_when_materialized_cdr_changes(repository, scoring_engine):
+    _engine, calls = scoring_engine
+    dataset_id = add_dataset(repository)
+    job, _ = scoring_jobs.create_scoring_job(repository, [dataset_id], ['Region'], 'NSA')
+    scoring_jobs.run_scoring_job(repository, job['id'])
+
+    repository.update_dataset_profile(dataset_id, processed_at=local_now_iso())
+    refreshed, reused = scoring_jobs.create_scoring_job(repository, [dataset_id], ['Region'], 'NSA')
+    assert not reused
+    assert refreshed['id'] != job['id']
+
+    repository.update_dataset_profile(dataset_id, processed_at=local_now_iso())
+    with repository.connection() as connection:
+        connection.execute(
+            "UPDATE dataset_profiles SET updated_at = '2099-01-01T00:00:00+00:00' WHERE dataset_id = ?",
+            (dataset_id,),
+        )
+    edited, reused = scoring_jobs.create_scoring_job(repository, [dataset_id], ['Region'], 'NSA')
+    assert not reused
+    assert edited['id'] != refreshed['id']
+    assert len(calls) == 1
+
+
+def test_scoring_cache_survives_dataset_reordering(repository, scoring_engine):
+    _engine, _calls = scoring_engine
+    first_id = add_dataset(repository, 'First_NSA_Data.csv')
+    second_id = add_dataset(repository, 'Second_NSA_Voice.csv', kind='voice')
+    job, _ = scoring_jobs.create_scoring_job(repository, [first_id, second_id], ['Region'], 'NSA')
+    scoring_jobs.run_scoring_job(repository, job['id'])
+
+    id_mapping = repository.reorder_dataset_ids([second_id, first_id])
+    assert id_mapping == {first_id: 2, second_id: 1}
+    reordered, reused = scoring_jobs.create_scoring_job(repository, [1, 2], ['Region'], 'NSA')
+
+    assert reused
+    assert reordered['id'] == job['id']
+    assert reordered['dataset_ids'] == [2, 1]
+
+
+def test_database_management_row_edits_invalidate_the_scoring_cache(repository, scoring_engine):
+    _engine, _calls = scoring_engine
+    dataset_id = add_dataset(repository)
+    job, _ = scoring_jobs.create_scoring_job(repository, [dataset_id], ['Region'], 'NSA')
+    scoring_jobs.run_scoring_job(repository, job['id'])
+
+    repository.update_database_table_row(
+        repository.dataset_rows_table_name(dataset_id), 1, {'score': 99.0},
+    )
+    edited, reused = scoring_jobs.create_scoring_job(repository, [dataset_id], ['Region'], 'NSA')
+
+    assert not reused
+    assert edited['id'] != job['id']
+
+
+@pytest.mark.parametrize(
+    ('ids', 'mode', 'levels', 'expected_error'),
+    [
+        ([], 'NSA', ['Region'], 'Select at least one'),
+        ([1], 'SA', ['Region'], 'does not match'),
+        ([1], 'NSA', ['Unknown Dimension'], 'not available'),
+    ],
+)
+def test_scoring_job_validates_cdr_mode_and_levels(repository, scoring_engine, ids, mode, levels, expected_error):
+    _engine, _calls = scoring_engine
+    add_dataset(repository)
+    with pytest.raises(ValueError, match=expected_error):
+        scoring_jobs.create_scoring_job(repository, ids, levels, mode)
+
+
+def test_scoring_jobs_are_visible_and_interrupted_jobs_become_retryable(repository, scoring_engine):
+    _engine, _calls = scoring_engine
+    dataset_id = add_dataset(repository)
+    job, _ = scoring_jobs.create_scoring_job(repository, [dataset_id], [], 'NSA')
+
+    assert 'scoring_jobs' in repository.list_database_tables()
+    interrupted_datasets, interrupted_reports = repository.fail_interrupted_background_jobs(fail_datasets=False)
+
+    assert interrupted_datasets == []
+    assert interrupted_reports == []
+    recovered = scoring_jobs.get_scoring_job(repository, job['id'])
+    assert recovered['status'] == 'failed'
+    assert 'application restarted' in recovered['error']
+
+
+def test_recover_interrupted_scoring_jobs_on_workspace_reopen(repository, scoring_engine):
+    _engine, _calls = scoring_engine
+    dataset_id = add_dataset(repository)
+
+    completed_job, _ = scoring_jobs.create_scoring_job(repository, [dataset_id], ['Region'], 'NSA')
+    scoring_jobs.run_scoring_job(repository, completed_job['id'])
+    completed_before = scoring_jobs.get_scoring_job(
+        repository, completed_job['id'], include_result=True,
+    )
+
+    queued_job, _ = scoring_jobs.create_scoring_job(repository, [dataset_id], ['City'], 'NSA')
+    processing_job, _ = scoring_jobs.create_scoring_job(
+        repository, [dataset_id], ['Vendor'], 'NSA', baseline_operator='O2',
+    )
+    with repository.connection() as connection:
+        connection.execute(
+            "UPDATE scoring_jobs SET status = 'processing', progress = 45 WHERE id = ?",
+            (processing_job['id'],),
+        )
+
+    reopened_repository = Repository(Path(repository.db_path))
+    reopened_repository.initialize()
+    recovered_ids = scoring_jobs.recover_interrupted_scoring_jobs(reopened_repository)
+
+    assert recovered_ids == sorted([queued_job['id'], processing_job['id']])
+    for job_id in recovered_ids:
+        recovered = scoring_jobs.get_scoring_job(reopened_repository, job_id)
+        assert recovered['status'] == 'failed'
+        assert 'application restarted' in recovered['error']
+
+    completed_after = scoring_jobs.get_scoring_job(
+        reopened_repository, completed_job['id'], include_result=True,
+    )
+    assert completed_after == completed_before
+    assert scoring_jobs.recover_interrupted_scoring_jobs(reopened_repository) == []
+
+
+def test_initialize_migrates_legacy_scoring_job_status_constraint(repository):
+    table_definition = re.search(
+        r"CREATE TABLE IF NOT EXISTS scoring_jobs \(.*?\n\);", SCHEMA, re.DOTALL,
+    )
+    assert table_definition is not None
+    legacy_ddl = table_definition.group(0).replace(
+        "('queued', 'processing', 'completed', 'failed', 'stopped')",
+        "('queued', 'processing', 'ready', 'failed', 'stopped')",
+    ).replace('CREATE TABLE IF NOT EXISTS scoring_jobs', 'CREATE TABLE scoring_jobs', 1)
+    assert "'ready'" in legacy_ddl and "'completed'" not in legacy_ddl
+
+    result_json = '{"scoring":[{"Operator":"EE","Score":4}],"gap":[],"charts":[],"warnings":[]}'
+    legacy_jobs = [
+        {
+            'id': 7, 'cache_key': 'legacy-ready', 'method_version': 'method-v1',
+            'source_fingerprint': 'fingerprint-ready', 'dataset_ids_json': '[3,5]',
+            'source_metadata_json': '[{"name":"Q2 CDR"}]', 'nr_mode': 'NSA',
+            'levels_json': '["Region"]', 'baseline_operator': 'O2', 'status': 'ready',
+            'progress': 100, 'message': 'Finished before upgrade', 'result_json': result_json,
+            'last_error': None, 'created_by': 'tester', 'created_at': '2026-09-29T10:00:00+00:00',
+            'started_at': '2026-09-29T10:01:00+00:00', 'updated_at': '2026-09-29T10:02:00+00:00',
+            'finished_at': '2026-09-29T10:02:00+00:00',
+        },
+        {
+            'id': 11, 'cache_key': 'legacy-processing', 'method_version': 'method-v1',
+            'source_fingerprint': 'fingerprint-processing', 'dataset_ids_json': '[9]',
+            'source_metadata_json': '[]', 'nr_mode': 'SA', 'levels_json': '["City"]',
+            'baseline_operator': 'EE', 'status': 'processing', 'progress': 45,
+            'message': 'Calculating KPIs', 'result_json': None, 'last_error': None,
+            'created_by': 'tester', 'created_at': '2026-09-29T11:00:00+00:00',
+            'started_at': '2026-09-29T11:01:00+00:00', 'updated_at': '2026-09-29T11:02:00+00:00',
+            'finished_at': None,
+        },
+        {
+            'id': 13, 'cache_key': 'legacy-failed', 'method_version': 'method-v1',
+            'source_fingerprint': 'fingerprint-failed', 'dataset_ids_json': '[10]',
+            'source_metadata_json': '[]', 'nr_mode': 'NSA', 'levels_json': '["Vendor"]',
+            'baseline_operator': 'EE', 'status': 'failed', 'progress': 60,
+            'message': 'Earlier failure', 'result_json': None, 'last_error': 'Source error',
+            'created_by': 'tester', 'created_at': '2026-09-29T12:00:00+00:00',
+            'started_at': '2026-09-29T12:01:00+00:00', 'updated_at': '2026-09-29T12:02:00+00:00',
+            'finished_at': '2026-09-29T12:02:00+00:00',
+        },
+    ]
+    with repository.connection() as connection:
+        connection.execute('DROP TABLE scoring_jobs')
+        connection.execute(legacy_ddl)
+        columns = list(legacy_jobs[0])
+        quoted_columns = ', '.join(f'"{column}"' for column in columns)
+        placeholders = ', '.join('?' for _ in columns)
+        for job in legacy_jobs:
+            connection.execute(
+                f'INSERT INTO scoring_jobs ({quoted_columns}) VALUES ({placeholders})',
+                [job[column] for column in columns],
+            )
+        connection.execute("UPDATE sqlite_sequence SET seq = 42 WHERE name = 'scoring_jobs'")
+        connection.execute(
+            'CREATE INDEX idx_scoring_jobs_cache_key ON scoring_jobs(cache_key, id DESC)'
+        )
+        connection.execute(
+            "CREATE UNIQUE INDEX idx_scoring_jobs_active_cache ON scoring_jobs(cache_key) "
+            "WHERE status IN ('queued', 'processing')"
+        )
+
+    repository.initialize()
+
+    with repository.connection() as connection:
+        migrated_jobs = [
+            dict(row) for row in connection.execute('SELECT * FROM scoring_jobs ORDER BY id').fetchall()
+        ]
+        index_rows = connection.execute('PRAGMA index_list(scoring_jobs)').fetchall()
+        index_metadata = {row['name']: (int(row['unique']), int(row['partial'])) for row in index_rows}
+        table_sql = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'scoring_jobs'"
+        ).fetchone()['sql']
+
+    expected_jobs = [
+        {**job, 'status': 'completed'} if job['status'] == 'ready' else job
+        for job in legacy_jobs
+    ]
+    assert migrated_jobs == expected_jobs
+    assert result_json == migrated_jobs[0]['result_json']
+    assert "'completed'" in table_sql and "'ready'" not in table_sql
+    assert index_metadata['idx_scoring_jobs_cache_key'] == (0, 0)
+    assert index_metadata['idx_scoring_jobs_active_cache'] == (1, 1)
+
+    repository.initialize()
+    with repository.connection() as connection:
+        repeated_jobs = [
+            dict(row) for row in connection.execute('SELECT * FROM scoring_jobs ORDER BY id').fetchall()
+        ]
+        cursor = connection.execute(
+            "INSERT INTO scoring_jobs (cache_key, method_version, source_fingerprint, nr_mode) "
+            "VALUES ('new-after-migration', 'method-v1', 'new-source', 'NSA')"
+        )
+    assert repeated_jobs == expected_jobs
+    assert cursor.lastrowid == 43
+
+
+def test_workspace_database_backup_restore_keeps_completed_scoring_results(client, tmp_path: Path, scoring_engine):
+    import src.DashboardAnalytic as app_module
+
+    _engine, _calls = scoring_engine
+    workspace = app_module.active_workspace
+    assert workspace is not None
+    app_module.repository.replace_scoring_configuration(scoring_configuration())
+    dataset_id = add_dataset(app_module.repository, 'Backup_NSA_Data.csv')
+    job, _ = scoring_jobs.create_scoring_job(
+        app_module.repository, [dataset_id], ['Region'], 'NSA', username='tester',
+    )
+    completed = scoring_jobs.run_scoring_job(app_module.repository, job['id'])
+    assert completed['status'] == 'completed'
+
+    backup_path = app_module.create_recurring_database_backup({
+        'components': ['workspace_database'],
+        'workspace_ids': [workspace.id],
+        'backup_path': str(tmp_path / 'scoring-backups'),
+        'max_backups': 2,
+    })
+    with app_module.repository.connection() as connection:
+        connection.execute('DELETE FROM scoring_jobs WHERE id = ?', (job['id'],))
+    assert scoring_jobs.get_scoring_job(app_module.repository, job['id']) is None
+
+    app_module.restore_database_backup(backup_path, ['workspace_database'])
+
+    restored = scoring_jobs.get_scoring_job(app_module.repository, job['id'], include_result=True)
+    assert restored is not None
+    assert restored['status'] == 'completed'
+    assert restored['result']['scoring'] == completed['result']['scoring']

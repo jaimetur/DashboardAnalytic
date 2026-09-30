@@ -8,6 +8,7 @@
 #### ⚠️ Breaking Changes:
 
 #### 🌟 New Features:
+- **Scoring & GAP Analysis** calculates configurable NetCheck City/Road scores from complete Data/Voice/Speech selections and compatible automatic processing groups. Persistent jobs reuse unchanged inputs, preserve configuration snapshots and support deletion, CSV exports and editable reference-style PowerPoint matrices. Results below the jobs panel offer environment filtering, grouped optional KPI values, threshold/GAP colors, a default All-vs-reference GAP table and labeled Scoring/Best Network charts with floating previews; Operator Mapping controls operator order and colors. The workspace database owns KPI thresholds, weights, score mappings and GAP priority, edited in contained Workspace Config tables with explicit JSON/ZIP import/export, transfer and backup/restore; local methodology references are not runtime dependencies. PowerPoint includes a cover and transition with filters/campaigns, then Best Network, Scoring Chart, Scoring Table and combined GAP before individual comparisons. Existing job tables migrate automatically and dataset actions remain compact.
 
 #### 🚀 Enhancements:
 

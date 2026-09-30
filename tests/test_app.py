@@ -2470,7 +2470,7 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     assert admin_response.text.index('<optgroup label="Full Workspace">') < admin_response.text.index('<optgroup label="Full Environment">')
     assert 'Config</option>' in admin_response.text
     assert 'Operator/Vendor Mappings &amp; Colors (from active workspace)' in admin_response.text
-    assert 'Full Environment (Application Config + Dashboards + Report Templates + Operator/Vendor Mappings &amp; Colors + Main Cities + Auto-calculated Fields + Query Builder Queries + Selected Workspaces)' in admin_response.text
+    assert 'Full Environment (Application Config + Dashboards + Report Templates + Operator/Vendor Mappings &amp; Colors + Main Cities + Scoring Configuration + Auto-calculated Fields + Query Builder Queries + Selected Workspaces)' in admin_response.text
     assert 'Workspace: Default' in admin_response.text
     stylesheet = app_module.PROJECT_ROOT.joinpath('src/web_interface/static/css/app.css').read_text(encoding='utf-8')
     assert '.multiselect-shell { position: relative; min-width: 0; max-width: 100%; }' in stylesheet

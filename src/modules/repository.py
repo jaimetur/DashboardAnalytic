@@ -26,6 +26,7 @@ from src.modules.runtime_config import ignore_event_time_filtering
 DATABASE_BLANK_FILTER = '__database_blank__'
 WORKSPACE_REGISTRY_TABLE = '__workspace_registry__'
 MAIN_CITIES_STATE_KEY = 'dashboard_main_cities'
+SCORING_CONFIGURATION_STATE_KEY = 'scoring_configuration'
 
 _WORKSPACE_WRITE_LOCKS: dict[str, RLock] = {}
 _WORKSPACE_WRITE_LOCKS_GUARD = Lock()
@@ -291,6 +292,34 @@ CREATE TABLE IF NOT EXISTS generated_jobs (
     finished_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS scoring_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cache_key TEXT NOT NULL,
+    method_version TEXT NOT NULL,
+    source_fingerprint TEXT NOT NULL,
+    dataset_ids_json TEXT NOT NULL DEFAULT '[]',
+    source_metadata_json TEXT NOT NULL DEFAULT '[]',
+    nr_mode TEXT NOT NULL,
+    levels_json TEXT NOT NULL DEFAULT '[]',
+    baseline_operator TEXT NOT NULL DEFAULT 'EE',
+    status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued', 'processing', 'completed', 'failed', 'stopped')),
+    progress INTEGER NOT NULL DEFAULT 0,
+    message TEXT NOT NULL DEFAULT '',
+    result_json TEXT,
+    last_error TEXT,
+    created_by TEXT NOT NULL DEFAULT 'system',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    started_at TEXT,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    finished_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_scoring_jobs_cache_key
+ON scoring_jobs(cache_key, id DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_scoring_jobs_active_cache
+ON scoring_jobs(cache_key) WHERE status IN ('queued', 'processing');
+
 """
 
 GLOBAL_SCHEMA = """
@@ -535,6 +564,7 @@ class Repository:
             self._configure_database_journal(conn)
             self._migrate_calculated_dimensions_table(conn)
             conn.executescript(SCHEMA)
+            self._migrate_scoring_jobs_status_constraint(conn)
             self._ensure_chart_mapping_groups(conn)
             self._ensure_dashboard_filter_selection_columns(conn)
             self._remove_legacy_dashboard_selection_rows(conn)
@@ -1004,6 +1034,119 @@ class Repository:
             )
             conn.execute('DROP TABLE report_chart_jobs')
 
+    def _migrate_scoring_jobs_status_constraint(self, conn: sqlite3.Connection) -> None:
+        """Replace the legacy ``ready`` scoring status with ``completed`` safely."""
+        table = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'scoring_jobs'"
+        ).fetchone()
+        if table is None or not table['sql']:
+            return
+
+        status_check = re.search(
+            r"\bcheck\s*\(\s*status\s+in\s*\(([^)]*)\)\s*\)",
+            str(table['sql']), re.IGNORECASE,
+        )
+        if status_check is None:
+            return
+        allowed_statuses = {
+            value.lower() for value in re.findall(r"['\"]([^'\"]+)['\"]", status_check.group(1))
+        }
+        if 'ready' not in allowed_statuses or 'completed' in allowed_statuses:
+            return
+
+        create_table = re.search(
+            r"CREATE TABLE IF NOT EXISTS scoring_jobs \(.*?\n\);", SCHEMA, re.DOTALL,
+        )
+        if create_table is None:
+            raise sqlite3.DatabaseError('The scoring_jobs schema definition is unavailable.')
+
+        source_columns = [
+            str(row['name']) for row in conn.execute('PRAGMA table_info(scoring_jobs)').fetchall()
+        ]
+        required_columns = {'id', 'cache_key', 'method_version', 'source_fingerprint', 'nr_mode', 'status'}
+        if not required_columns.issubset(source_columns):
+            missing = ', '.join(sorted(required_columns.difference(source_columns)))
+            raise sqlite3.DatabaseError(f'The legacy scoring_jobs table is missing required columns: {missing}.')
+
+        current_indexes = conn.execute(
+            "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'scoring_jobs'"
+        ).fetchall()
+        index_sql_by_name = {
+            str(row['name']): str(row['sql']) for row in current_indexes if row['sql']
+        }
+        sequence_row = conn.execute(
+            "SELECT seq FROM sqlite_sequence WHERE name = 'scoring_jobs'"
+        ).fetchone()
+        previous_sequence = int(sequence_row['seq']) if sequence_row is not None else None
+
+        replacement_name = 'scoring_jobs__replacement'
+        replacement_sql = create_table.group(0).replace(
+            'CREATE TABLE IF NOT EXISTS scoring_jobs',
+            f'CREATE TABLE {replacement_name}',
+            1,
+        )
+        index_definitions = {
+            'idx_scoring_jobs_cache_key': (
+                'CREATE INDEX IF NOT EXISTS idx_scoring_jobs_cache_key '
+                'ON scoring_jobs(cache_key, id DESC)'
+            ),
+            'idx_scoring_jobs_active_cache': (
+                'CREATE UNIQUE INDEX IF NOT EXISTS idx_scoring_jobs_active_cache '
+                "ON scoring_jobs(cache_key) WHERE status IN ('queued', 'processing')"
+            ),
+        }
+
+        conn.execute('SAVEPOINT scoring_jobs_status_migration')
+        try:
+            for row in current_indexes:
+                index_name = str(row['name']).replace('"', '""')
+                conn.execute(f'DROP INDEX "{index_name}"')
+
+            conn.execute(f'DROP TABLE IF EXISTS {replacement_name}')
+            conn.execute(replacement_sql)
+            replacement_columns = {
+                str(row['name']) for row in conn.execute(f'PRAGMA table_info({replacement_name})').fetchall()
+            }
+            copied_columns = [name for name in source_columns if name in replacement_columns]
+            quoted_columns = ', '.join(f'"{name}"' for name in copied_columns)
+            selected_columns = ', '.join(
+                "CASE WHEN \"status\" = 'ready' THEN 'completed' ELSE \"status\" END"
+                if name == 'status' else f'"{name}"'
+                for name in copied_columns
+            )
+            conn.execute(
+                f'INSERT INTO {replacement_name} ({quoted_columns}) '
+                f'SELECT {selected_columns} FROM scoring_jobs'
+            )
+            conn.execute('DROP TABLE scoring_jobs')
+            conn.execute(f'ALTER TABLE {replacement_name} RENAME TO scoring_jobs')
+
+            if previous_sequence is not None:
+                sequence = conn.execute(
+                    "SELECT seq FROM sqlite_sequence WHERE name = 'scoring_jobs'"
+                ).fetchone()
+                if sequence is None:
+                    conn.execute(
+                        "INSERT INTO sqlite_sequence(name, seq) VALUES ('scoring_jobs', ?)",
+                        (previous_sequence,),
+                    )
+                elif int(sequence['seq']) < previous_sequence:
+                    conn.execute(
+                        "UPDATE sqlite_sequence SET seq = ? WHERE name = 'scoring_jobs'",
+                        (previous_sequence,),
+                    )
+
+            for index_name, index_sql in index_definitions.items():
+                conn.execute(index_sql)
+                index_sql_by_name.pop(index_name, None)
+            for index_sql in index_sql_by_name.values():
+                conn.execute(index_sql)
+            conn.execute('RELEASE SAVEPOINT scoring_jobs_status_migration')
+        except BaseException:
+            conn.execute('ROLLBACK TO SAVEPOINT scoring_jobs_status_migration')
+            conn.execute('RELEASE SAVEPOINT scoring_jobs_status_migration')
+            raise
+
     def _ensure_generated_job_columns(self, conn: sqlite3.Connection) -> None:
         """Keep persisted job options available after schema upgrades."""
         tables = {str(row['name']) for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()}
@@ -1424,6 +1567,7 @@ class Repository:
             )
             if result.rowcount != 1:
                 raise ValueError('The row no longer exists. Refresh the table and try again.')
+            self._touch_dataset_rows_revision(conn, table_name)
 
     def delete_database_table_row(self, table_name: str, rowid: int) -> None:
         """Delete one row selected in Database Management by its SQLite rowid."""
@@ -1438,6 +1582,18 @@ class Repository:
             result = conn.execute(f"DELETE FROM {quoted_table} WHERE rowid = ?", (int(rowid),))
             if result.rowcount != 1:
                 raise ValueError('The row no longer exists. Refresh the table and try again.')
+            self._touch_dataset_rows_revision(conn, table_name)
+
+    @staticmethod
+    def _touch_dataset_rows_revision(conn: sqlite3.Connection, table_name: str) -> None:
+        """Invalidate derived caches after supported Database Management edits."""
+        match = re.fullmatch(r'dataset_rows_(\d+)', str(table_name))
+        if not match:
+            return
+        conn.execute(
+            'UPDATE dataset_profiles SET updated_at = ? WHERE dataset_id = ?',
+            (local_now_iso(), int(match.group(1))),
+        )
 
     def _index_name(self, table_name: str, column_name: str, suffix: str) -> str:
         return f'idx_{table_name}_{column_name}_{suffix}'
@@ -1743,6 +1899,29 @@ class Repository:
                 seen.add(key)
         self.set_workspace_state(MAIN_CITIES_STATE_KEY, json.dumps(result, ensure_ascii=False))
         return result
+
+    def get_scoring_configuration(self) -> dict[str, Any]:
+        """Return the validated scoring configuration stored in this workspace."""
+        from src.modules.scoring_config import validate_scoring_configuration
+
+        raw = self.get_workspace_state(SCORING_CONFIGURATION_STATE_KEY)
+        if raw is None or not raw.strip():
+            raise ValueError('Import a Scoring Configuration before calculating scoring.')
+        try:
+            return validate_scoring_configuration(json.loads(raw))
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
+            raise ValueError(f'Stored workspace scoring configuration is invalid: {error}') from error
+
+    def replace_scoring_configuration(self, payload: object) -> dict[str, Any]:
+        """Validate and persist a complete workspace scoring configuration."""
+        from src.modules.scoring_config import validate_scoring_configuration
+
+        configuration = validate_scoring_configuration(payload)
+        self.set_workspace_state(
+            SCORING_CONFIGURATION_STATE_KEY,
+            json.dumps(configuration, ensure_ascii=False, separators=(',', ':')),
+        )
+        return configuration
 
     def try_set_workspace_state(self, key: str, value: str, *, timeout_seconds: float = 0.25) -> bool:
         """Best-effort state update that never waits behind a long Workspace writer."""
@@ -3182,6 +3361,7 @@ class Repository:
             json_columns = {
                 'dataset_profiles': [('processing_options_json', False)],
                 'generated_jobs': [('dataset_ids_json', True)],
+                'scoring_jobs': [('dataset_ids_json', True), ('source_metadata_json', False)],
                 'audit_logs': [('details', False)],
                 'workspace_state': [('value', False)],
             }
@@ -3370,6 +3550,9 @@ class Repository:
             report_rows = conn.execute(
                 "SELECT id FROM generated_jobs WHERE job_type = 'report' AND status IN ('queued', 'processing')"
             ).fetchall() if 'generated_jobs' in tables else []
+            scoring_rows = conn.execute(
+                "SELECT id FROM scoring_jobs WHERE status IN ('queued', 'processing')"
+            ).fetchall() if 'scoring_jobs' in tables else []
             dataset_ids = [int(row['dataset_id']) for row in dataset_rows] if fail_datasets else []
             report_ids = [int(row['id']) for row in report_rows]
             if dataset_ids:
@@ -3385,6 +3568,14 @@ class Repository:
                     f"UPDATE generated_jobs SET status = 'failed', last_error = ?, updated_at = ?, finished_at = ? "
                     f"WHERE id IN ({placeholders})",
                     (message, now, now, *report_ids),
+                )
+            scoring_ids = [int(row['id']) for row in scoring_rows]
+            if scoring_ids:
+                placeholders = ','.join('?' for _ in scoring_ids)
+                conn.execute(
+                    f"UPDATE scoring_jobs SET status = 'failed', last_error = ?, message = ?, updated_at = ?, finished_at = ? "
+                    f"WHERE id IN ({placeholders})",
+                    (message, message, now, now, *scoring_ids),
                 )
         return dataset_ids, report_ids
 

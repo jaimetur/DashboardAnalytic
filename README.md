@@ -15,6 +15,7 @@ After login, the application opens **Help Home** by default.
 - Combine operator workbook sheets and materialise normalised reporting fields.
 - Preview complete datasets with pagination and Excel-style column filters.
 - Analyse one processed CDR in Datasets Analysis.
+- Calculate and revisit NetCheck scoring and operator GAP comparisons in Scoring & GAP Analysis, with CSV and PowerPoint exports.
 - Explore template-driven Dashboards with synchronized adaptive filters in E2E Dashboards.
 - Create temporary ad-hoc charts in Chart Builder.
 - Generate NSA/SA PowerPoint reports and standalone Chart Sets.
@@ -59,6 +60,10 @@ E2E Reporting combines ready CDRs with a Report Template from the active workspa
 - **NetCheck CDR Reports**: select Data, Voice and Speech campaigns, NSA/SA, template and Operator/Vendor Comparison.
 - **Charts Panel**: browse report or standalone Chart Sets, open Interactive Preview, inspect filtered data and edit the source template when authorised.
 - **Reports and Charts Jobs**: one table for both background job types, with job-specific open, download, stop, retry, relaunch and delete actions.
+
+### Scoring & GAP Analysis
+
+Calculate scoring from ready Data, Voice and Speech CDRs of one NR Mode, grouped by Operator and optional Region, City, Vendor or Dataset Type. The latest CDR of each type is preselected; automatic and dataset recalculations include compatible companions. Persisted jobs retain their scoring configuration, coverage and baseline GAP comparisons. Results offer reference-style KPI matrices, optional measured values, environment filtering, threshold/GAP colors and labeled charts with an enlarged view. Operator Mapping controls operator order and colors. Workspace Config manages KPI thresholds, weights, score mappings and GAP priority, with import/export and backup/restore support. Export CSV tables or editable PowerPoint matrices and charts. See [Scoring & GAP Analysis Help](help/scoring-gap-analysis.md).
 
 ### Chart Builder
 
@@ -308,7 +313,7 @@ DashboardAnalytic/
 - General analysis caches remain process-local; E2E Dashboard preview manifests and report-faithful compact chart models persist beside each workspace database and survive application restarts. Dashboard data itself is queried directly from the combined CDR tables.
 - SQLite is the current persistence model and may not suit very large concurrent deployments.
 - Smart Orchestrator Logs reporting is visible but not implemented.
-- Scoring and GAP automation remain planned work.
+- Scoring currently uses the supplied NetCheck 2026 Q2 Drive City/Road mapping; other environments require a separately validated methodology.
 
 ## More documentation
 

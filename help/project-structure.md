@@ -58,6 +58,8 @@ Runtime `config/` and `data/` directories use project-local defaults but are exc
 
 ## Persistent data layout
 
+Scoring calculations live in `src/modules/scoring.py`, with the authoritative rules stored in the workspace database. `scoring_jobs.py` persists the workspace's background jobs and result cache in `scoring_jobs`; `scoring_config.py` validates workspace KPI settings and GAP priority; `scoring_views.py` projects saved configuration snapshots into comparison matrices and signed GAP views. `scoring_exports.py` uses the CDR PowerPoint master for saved-result exports. These jobs/results travel with the workspace SQLite database.
+
 ```text
 APP_CONFIG_DIR/
 └── application.db
@@ -160,3 +162,5 @@ python -m pytest -q
 ```
 
 Keep databases, uploaded customer files, generated output, cache files and secrets out of source control.
+
+The database-backed scoring configuration and its import/update procedure are documented in [Scoring methodology configuration](scoring-methodology.md); reference source documents are not runtime dependencies.

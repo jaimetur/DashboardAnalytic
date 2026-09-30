@@ -50,6 +50,8 @@ The **NR Mode** column follows Input Type in the Datasets table. Its selector co
 
 ### Background Processing
 
+Ready CDRs queue their default Operator scoring automatically. Use **Recalculate Scoring** in a CDR's dataset actions to force a fresh background calculation, or open [Scoring & GAP Analysis](scoring-gap-analysis.md) to select several CDRs, geography/vendor aggregations, saved results and CSV/PPT exports.
+
 - A queued import retains its target workspace even if the user switches workspace.
 - Processing continues after sign-out.
 - Stop requests are cooperative.

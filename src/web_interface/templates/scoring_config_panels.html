@@ -1,0 +1,122 @@
+<style>
+  /* Keep the single implicit grid track from sizing itself to the KPI table's
+     intrinsic width. The table can then overflow inside its own scroll area. */
+  .workspace-config-stack { box-sizing: border-box; display: grid; grid-template-columns: minmax(0, 1fr); width: 100%; max-width: 100%; min-width: 0; }
+  .workspace-config-stack > .scoring-config-panels,
+  .scoring-config-panels,
+  .scoring-config-panels > .scoring-config-panel { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; }
+  .scoring-config-panels { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2.2rem; }
+  .scoring-config-panel { --scoring-config-border: rgba(47, 70, 82, .18); min-width: 0; max-width: 100%; }
+  .scoring-config-panel .collapsible-panel-body,
+  .scoring-config-panel form { box-sizing: border-box; min-width: 0; max-width: 100%; }
+  .scoring-config-panel .scoring-config-intro { max-width: 1000px; margin: 0 0 1rem; color: var(--muted, #627480); }
+  .scoring-config-panel .scoring-config-toolbar { display: flex; align-items: end; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin: .5rem 0 1rem; }
+  .scoring-config-panel .scoring-config-toolbar label { display: grid; gap: .35rem; font-weight: 650; }
+  .scoring-config-panel .scoring-config-toolbar select { min-width: 17rem; max-width: 100%; }
+  .scoring-config-panel .scoring-config-actions { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-top: 1rem; }
+  .scoring-config-panel .scoring-config-status { flex: 1 1 20rem; min-height: 1.4em; margin: 0; }
+  .scoring-config-panel .scoring-config-status.is-error { color: #a93226; }
+  .scoring-config-panel .scoring-config-status.is-success { color: #19724b; }
+  .scoring-config-panel .scoring-config-table-scroll { display: block; box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; overflow-x: auto; overscroll-behavior-inline: contain; contain: inline-size; border: 1px solid var(--scoring-config-border); border-radius: .65rem; }
+  .scoring-config-panel .scoring-config-table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; }
+  .scoring-config-panel .scoring-config-table th,
+  .scoring-config-panel .scoring-config-table td { padding: .55rem; vertical-align: top; border-bottom: 1px solid var(--scoring-config-border); }
+  .scoring-config-panel .scoring-config-table th { position: sticky; top: 0; z-index: 1; background: #e4f1f0; color: #294b52; text-align: left; white-space: nowrap; }
+  .scoring-config-panel .scoring-config-table thead tr:first-child th[colspan] { background: #d7e9e8; text-align: center; }
+  .scoring-config-panel .scoring-config-table tbody tr:last-child td { border-bottom: 0; }
+  .scoring-config-panel .scoring-config-table tbody tr:nth-child(even) { background: rgba(239, 244, 246, .45); }
+  .scoring-config-panel .scoring-config-kpi-label { min-width: 16rem; max-width: 20rem; font-weight: 700; }
+  .scoring-config-panel .scoring-config-kpi-code { display: block; margin-top: .2rem; color: var(--muted, #627480); font-size: .8rem; font-weight: 600; }
+  .scoring-config-panel .scoring-config-table input,
+  .scoring-config-panel .scoring-config-table select { box-sizing: border-box; width: 5.6rem; min-width: 0; max-width: 100%; padding: .4rem .45rem; }
+  .scoring-config-panel .scoring-config-type-input { width: 7.5rem !important; }
+  .scoring-config-panel .scoring-config-weight { display: block; min-width: 4.5rem; padding: .45rem 0; color: var(--muted, #627480); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .scoring-config-panel .scoring-config-ultra { display: grid; gap: .35rem; min-width: 8.5rem; }
+  .scoring-config-panel .scoring-config-ultra select,
+  .scoring-config-panel .scoring-config-ultra input { width: 6.5rem; }
+  .scoring-config-panel .scoring-config-source { min-width: 10rem; max-width: 14rem; }
+  .scoring-config-panel .scoring-config-source summary { cursor: pointer; color: #245e69; font-weight: 650; }
+  .scoring-config-panel .scoring-config-source pre { max-width: 25rem; white-space: pre-wrap; overflow-wrap: anywhere; font: .78rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .scoring-config-panel .scoring-config-priority-table { width: 100%; min-width: 100%; border-collapse: collapse; }
+  .scoring-config-panel .scoring-config-priority-table th,
+  .scoring-config-panel .scoring-config-priority-table td { padding: .55rem .7rem; border-bottom: 1px solid var(--scoring-config-border); text-align: left; }
+  .scoring-config-panel .scoring-config-priority-table th { color: #334b58; }
+  .scoring-config-panel .scoring-config-priority-actions { display: flex; gap: .35rem; }
+  .scoring-config-panel .scoring-config-priority-actions button { min-width: 2.2rem; padding: .35rem .55rem; }
+  .scoring-config-panel .scoring-config-transfer-link { color: #245e69; font-weight: 650; }
+  .scoring-config-panel [data-scoring-config-import] { background: #267c79; border-color: #267c79; color: #fff; }
+  .scoring-config-panel [data-scoring-config-import]:hover { background: #1a625f; }
+  @media (max-width: 720px) {
+    .scoring-config-panel .scoring-config-toolbar select { min-width: min(17rem, 100%); }
+    .scoring-config-panel .scoring-config-kpi-label { min-width: 13rem; max-width: 15rem; }
+  }
+</style>
+
+<section class="scoring-config-panels" data-scoring-config>
+  <details class="panel collapsible-panel scoring-config-panel" open data-panel-state-key="workspace-config:scoring-kpi-configuration">
+    <summary class="collapsible-summary">
+      <div><p class="eyebrow">Scoring methodology</p><h2>Scoring KPI Configuration</h2></div>
+      <span class="collapse-chip">Collapse</span>
+    </summary>
+    <div class="collapsible-panel-body">
+      {% if active_workspace %}
+      <p class="scoring-config-intro">Edit the KPI type, ranking weight, thresholds and score interpolation anchors for each scoring environment in <strong>“{{ active_workspace.name }}”</strong>. Weight percentages are derived from maximum points across both environments.</p>
+      <div class="inline-actions">
+        <button type="button" class="ghost-link" data-scoring-config-import>Import JSON</button>
+        <input type="file" accept=".json,application/json" data-scoring-config-file hidden>
+        <a class="ghost-link" href="/api/workspace-config/scoring-configuration/export" data-scoring-config-export>Export JSON</a>
+      </div>
+      <form class="scoring-config-form" data-scoring-kpi-form data-no-persist novalidate>
+        <div class="scoring-config-toolbar">
+          <label>Scoring environment
+            <select data-scoring-environment data-no-persist>
+              <option value="DriveCity">Drive City</option>
+              <option value="DriveConnectionroad">Drive Connectionroad</option>
+            </select>
+          </label>
+          <a class="scoring-config-transfer-link" href="/admin">Import or export this configuration in Admin → Import / Export</a>
+        </div>
+        <div class="scoring-config-table-scroll" role="region" aria-label="Editable scoring KPI settings" tabindex="0">
+          <table class="scoring-config-table">
+            <thead>
+              <tr><th scope="col" rowspan="2">KPI</th><th scope="col" rowspan="2">Type</th><th scope="col" rowspan="2">Max points</th><th scope="col" rowspan="2">Weight</th><th scope="colgroup" colspan="4">KPI thresholds</th><th scope="colgroup" colspan="4">Score interpolation anchors (%)</th><th scope="col" rowspan="2">Source calculation &amp; filters</th></tr>
+              <tr><th scope="col">Low</th><th scope="col">Medium</th><th scope="col">High</th><th scope="col">Ultra</th><th scope="col">Low</th><th scope="col">Medium</th><th scope="col">High</th><th scope="col">Ultra</th></tr>
+            </thead>
+            <tbody data-scoring-kpi-rows><tr><td colspan="13">Loading scoring configuration…</td></tr></tbody>
+          </table>
+        </div>
+        <div class="scoring-config-actions">
+          <p class="scoring-config-status" data-scoring-kpi-status role="status" aria-live="polite"></p>
+          <button type="submit" data-scoring-kpi-save disabled>Save KPI Configuration</button>
+        </div>
+      </form>
+      {% else %}<p class="form-note">Open a workspace before editing Scoring KPI Configuration.</p>{% endif %}
+    </div>
+  </details>
+
+  <details class="panel collapsible-panel scoring-config-panel" open data-panel-state-key="workspace-config:scoring-gap-priority">
+    <summary class="collapsible-summary">
+      <div><p class="eyebrow">GAP Analysis</p><h2>GAP KPI Priority</h2></div>
+      <span class="collapse-chip">Collapse</span>
+    </summary>
+    <div class="collapsible-panel-body">
+      {% if active_workspace %}
+      <p class="scoring-config-intro">Set the KPI order used to prioritize the GAP Analysis. Use the arrows to move KPIs, then save the complete priority list.</p>
+      <form data-scoring-priority-form data-no-persist novalidate>
+        <div class="scoring-config-table-scroll" role="region" aria-label="GAP KPI priority order" tabindex="0">
+          <table class="scoring-config-priority-table">
+            <thead><tr><th scope="col">Priority</th><th scope="col">KPI</th><th scope="col">Order</th></tr></thead>
+            <tbody data-scoring-priority-rows><tr><td colspan="3">Loading GAP KPI priority…</td></tr></tbody>
+          </table>
+        </div>
+        <div class="scoring-config-actions">
+          <p class="scoring-config-status" data-scoring-priority-status role="status" aria-live="polite"></p>
+          <button type="submit" data-scoring-priority-save disabled>Save GAP KPI Priority</button>
+        </div>
+      </form>
+      {% else %}<p class="form-note">Open a workspace before editing GAP KPI Priority.</p>{% endif %}
+    </div>
+  </details>
+</section>
+
+{% if active_workspace %}<script src="{{ static_path('js/scoring_config.js') }}?v={{ asset_version('js/scoring_config.js') }}" defer></script>{% endif %}

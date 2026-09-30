@@ -10,7 +10,8 @@ Dashboard Analytic turns processed CDR datasets into interactive KPI analysis, r
 4. Optionally map Vodafone and Three vendor information.
 5. Create or open a saved **E2E Dashboard** to analyse a complete template interactively, reuse prepared selections and generate its PowerPoint. Use **Datasets Analysis**, **Chart Builder** or **Query Builder** for focused exploration, or **E2E Reporting** for the classic report and Chart Set workflow.
 6. Follow Dashboard preparation and generation in the floating task cards, **PPT Generation Jobs** and **Reports and Charts Jobs**.
-7. Use **App Logs** for traceability and **Admin** for shared configuration.
+7. Use **Scoring & GAP Analysis** for saved NetCheck scores and baseline operator comparisons across selected CDRs and aggregation levels; CDR processing also queues default Operator scoring automatically. See [Scoring & GAP Analysis](scoring-gap-analysis.md).
+8. Use **App Logs** for traceability and **Admin** for shared configuration.
 
 ## Header and navigation
 

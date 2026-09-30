@@ -63,7 +63,17 @@ from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_rep
 from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column, add_vfuk_gcid_column, apply_operator_mappings, ensure_fixed_cdr_fields, get_dataset_source_columns, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.geospatial import assign_regions, validate_region_mapping
 from src.modules.nr_mode import NR_MODES, dataset_nr_mode, infer_nr_mode, normalize_nr_mode
-from src.modules.repository import Repository, WORKSPACE_REGISTRY_TABLE, workspace_write_lock
+from src.modules.scoring_jobs import (
+    create_scoring_job,
+    delete_scoring_job,
+    get_scoring_job,
+    list_scoring_jobs,
+    recover_interrupted_scoring_jobs,
+    run_scoring_job,
+    select_latest_companion_cdrs,
+    validate_complete_scoring_cdr_selection,
+)
+from src.modules.repository import Repository, SCORING_CONFIGURATION_STATE_KEY, WORKSPACE_REGISTRY_TABLE, workspace_write_lock
 from src.modules.runtime_config import IGNORE_EVENT_TIME_FILTERING_ENV, env_flag, ignore_event_time_filtering
 from src.modules.query_builder import MAX_PREVIEW_ROWS, execute_query, iter_query_csv, query_column_values, validate_query
 from src.runtime_logs import execution_log_entries
@@ -341,6 +351,7 @@ HELP_NAVIGATION_DOCUMENTS = (
     'e2e-reporting.md',
     'chart-builder.md',
     'query-builder.md',
+    'scoring-gap-analysis.md',
     'app-logs.md',
     'app-config.md',
     'workspace-config.md',
@@ -354,6 +365,7 @@ HELP_DOCUMENT_LABELS = {
     'datasets-analysis.md': 'Datasets Analysis',
     'e2e-dashboards.md': 'E2E Dashboards',
     'e2e-reporting.md': 'E2E Reporting',
+    'scoring-gap-analysis.md': 'Scoring & GAP Analysis',
     'chart-builder.md': 'Chart Builder',
     'query-builder.md': 'Query Builder',
     'workspace-management.md': 'Workspace Management',
@@ -2421,6 +2433,11 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
         if initialize:
             if database_key not in INITIALIZED_WORKSPACE_DATABASES:
                 repository.initialize()
+                recovered_scoring_ids = recover_interrupted_scoring_jobs(repository)
+                if recovered_scoring_ids:
+                    repository.try_add_log('system', 'recover_interrupted_scoring_jobs', json.dumps({
+                        'scoring_jobs': recovered_scoring_ids,
+                    }))
                 try:
                     initialized_inode = database_path.stat().st_ino
                 except OSError:
@@ -3206,6 +3223,28 @@ def submit_background_task(callback: Callable[..., Any], /, *args: Any) -> Futur
     return BACKGROUND_TASK_SCHEDULER.submit(callback, *args)
 
 
+def queue_dataset_scoring(task_repository: Repository, dataset_id: int, username: str) -> None:
+    """Persist the default operator scoring job when all three CDR types are ready."""
+    dataset = task_repository.get_dataset(dataset_id)
+    if not dataset or dataset['status'] != 'ready' or dataset['dataset_kind'] not in CDR_DATASET_KINDS:
+        return
+    try:
+        selected_ids = select_latest_companion_cdrs(task_repository, dataset_id)
+        job, cached = create_scoring_job(
+            task_repository, selected_ids, ['Operator'],
+            dataset_nr_mode(dataset['dataset_kind'], dataset['nr_mode'], dataset['file_name']),
+            username=username,
+        )
+        if not cached:
+            _submit_workspace_job(task_repository, run_scoring_job, task_repository, job['id'], phase=4)
+    except Exception as exc:
+        if isinstance(exc, ValueError) and str(exc).startswith('No processed '):
+            return
+        task_repository.try_add_log(username, 'scoring_queue_failed', json.dumps({
+            'dataset_id': dataset_id, 'error': str(exc),
+        }))
+
+
 def _dataset_processing_lock(task_repository: Repository):
     """Coordinate schema-wide maintenance with ordinary Workspace writes."""
     return workspace_write_lock(task_repository.db_path)
@@ -3530,6 +3569,7 @@ def process_dataset(
             task_repository, workspace, region_mapping_dataset_id,
         )
         if workspace and combined_kind:
+            queue_dataset_scoring(task_repository, dataset_id, username)
             start_combined_cdr_recreation_job(
                 workspace, combined_kind, username, background=True,
             )
@@ -3684,6 +3724,7 @@ def enqueue_dataset_processing(
                         task_workspace and completed and str(completed['status']) == 'ready'
                         and completed_kind in CDR_DATASET_KINDS
                     ):
+                        queue_dataset_scoring(task_repository, dataset_id, username)
                         start_combined_cdr_recreation_job(task_workspace, completed_kind, username)
                 except Exception as exc:
                     task_repository.update_dataset_profile(
@@ -3854,6 +3895,7 @@ def _resume_dataset_in_worker(
         if completed and str(completed['status']) == 'ready':
             completed_kind = str(completed['dataset_kind'] or '').casefold()
             if completed_kind in CDR_DATASET_KINDS:
+                queue_dataset_scoring(task_repository, dataset_id, username)
                 start_combined_cdr_recreation_job(workspace, completed_kind, username)
     finally:
         _unregister_dataset_processing(dataset_id, task_repository)
@@ -5129,7 +5171,7 @@ ARCHIVE_COMPONENTS = frozenset({
 })
 WORKSPACE_ARCHIVE_COMPONENTS = frozenset({
     'workspace_database', 'input', 'output', 'dashboards', 'report_templates', 'operator_mappings',
-    'auto_calculated_fields', 'query_builder_queries', 'main_cities',
+    'auto_calculated_fields', 'query_builder_queries', 'main_cities', 'scoring_configuration',
 })
 ARCHIVE_KIND_COMPONENTS = {
     'config': ('app_database',),
@@ -5140,11 +5182,12 @@ ARCHIVE_KIND_COMPONENTS = {
     'dashboards': ('workspace_components',),
     'operator-mappings': ('workspace_components',),
     'main-cities': ('workspace_components',),
+    'scoring-configuration': ('workspace_components',),
     'bundle': (),
 }
 WORKSPACE_ELEMENT_EXPORT_TARGETS = frozenset({
     'slides-templates', 'auto-calculated-fields', 'dashboards', 'operator-mappings', 'query-builder-queries',
-    'main-cities',
+    'main-cities', 'scoring-configuration',
 })
 STATIC_EXPORT_TARGETS = frozenset({'config', 'config-with-templates', 'full-environment'})
 UNCOMPRESSED_ARCHIVE_SUFFIXES = frozenset({
@@ -5196,6 +5239,7 @@ def archive_workspace_components(manifest: dict[str, Any]) -> list[str]:
         'dashboards': ('dashboards',),
         'operator-mappings': ('operator_mappings',),
         'main-cities': ('main_cities',),
+        'scoring-configuration': ('scoring_configuration',),
         'query-builder-queries': ('query_builder_queries',),
     }
     return list(fallback.get(str(manifest.get('kind') or ''), ()))
@@ -5256,7 +5300,7 @@ def full_workspace_archive_components(*, include_input_files: bool = True, inclu
         components.append('input')
     if include_generated_outputs:
         components.append('output')
-    return [*components, 'dashboards', 'report_templates', 'operator_mappings', 'auto_calculated_fields', 'query_builder_queries', 'main_cities']
+    return [*components, 'dashboards', 'report_templates', 'operator_mappings', 'auto_calculated_fields', 'query_builder_queries', 'main_cities', 'scoring_configuration']
 
 
 def archive_workspace_components_for_target(target: str, *, include_generated_outputs: bool = True) -> list[str]:
@@ -5271,6 +5315,8 @@ def archive_workspace_components_for_target(target: str, *, include_generated_ou
         return ['operator_mappings']
     if target == 'main-cities':
         return ['main_cities']
+    if target == 'scoring-configuration':
+        return ['scoring_configuration']
     if target == 'query-builder-queries':
         return ['query_builder_queries']
     if target.startswith('workspace:') or target in {'workspace', 'full-environment'}:
@@ -5360,7 +5406,7 @@ def recurring_backup_settings() -> dict[str, Any]:
         'enabled': False,
         'components': [
             'app_database', 'workspace_database', 'dashboards', 'report_templates',
-            'operator_mappings', 'main_cities', 'auto_calculated_fields',
+            'operator_mappings', 'main_cities', 'auto_calculated_fields', 'scoring_configuration',
         ],
         'workspace_ids': [],
         'recurrence': 'daily', 'execution_time': '02:00', 'weekly_day': 0, 'monthly_day': 1, 'max_backups': 30,
@@ -5380,7 +5426,10 @@ def recurring_backup_settings() -> dict[str, Any]:
             ('auto_calculated_fields', 'include_auto_calculated_fields'),
         ) if saved.get(legacy_key, True)]
     legacy_components = {
-        'full_workspaces': ('workspace_database', 'report_templates', 'operator_mappings', 'main_cities', 'auto_calculated_fields'),
+        'full_workspaces': (
+            'workspace_database', 'report_templates', 'operator_mappings', 'main_cities',
+            'auto_calculated_fields', 'scoring_configuration',
+        ),
         'slides_templates': ('report_templates',),
     }
     migrated_components: list[str] = []
@@ -5495,6 +5544,7 @@ def create_recurring_database_backup(
         component for component in (
             'workspace_database', 'dashboards', 'input', 'output', 'report_templates',
             'operator_mappings', 'main_cities', 'auto_calculated_fields', 'query_builder_queries',
+            'scoring_configuration',
         )
         if component in components
     ]
@@ -5529,6 +5579,8 @@ def create_recurring_database_backup(
             total_bytes += len(_operator_mappings_archive_payload(workspace))
         if 'main_cities' in components:
             total_bytes += len(_main_cities_archive_payload(workspace))
+        if 'scoring_configuration' in components:
+            total_bytes += len(_scoring_configuration_archive_payload(workspace))
         if 'query_builder_queries' in components:
             total_bytes += len(json.dumps(_query_builder_queries_payload(workspace), ensure_ascii=False).encode('utf-8'))
         if 'input' in components:
@@ -5577,6 +5629,9 @@ def create_recurring_database_backup(
                 if 'main_cities' in components:
                     report_progress(f'Exporting Main Cities for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                     _archive_workspace_main_cities(archive, workspace, archive_workspace_root, archived_bytes)
+                if 'scoring_configuration' in components:
+                    report_progress(f'Exporting Scoring Configuration for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
+                    _archive_workspace_scoring_configuration(archive, workspace, archive_workspace_root, archived_bytes)
                 if 'auto_calculated_fields' in components:
                     report_progress(f'Exporting Auto-calculated Fields for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                     task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
@@ -5864,6 +5919,8 @@ def _backup_archive_components(archive_path: Path) -> list[str]:
         components.append('operator_mappings')
     if any(name.startswith('workspaces/') and '/main-cities/main-cities.json' in name for name in names):
         components.append('main_cities')
+    if any(name.startswith('workspaces/') and '/scoring-configuration/scoring-configuration.json' in name for name in names):
+        components.append('scoring_configuration')
     if any(name.startswith('workspaces/') and '/auto-calculated-fields/' in name and name.endswith('.json') for name in names):
         components.append('auto_calculated_fields')
     if any(name.startswith('workspaces/') and '/query-builder-queries/query-builder-queries.json' in name for name in names):
@@ -5928,6 +5985,7 @@ def restore_database_backup(
                 ('dashboards', f'{prefix}dashboards/dashboards.json'),
                 ('operator_mappings', f'{prefix}operator-mappings/operator-mappings.json'),
                 ('main_cities', f'{prefix}main-cities/main-cities.json'),
+                ('scoring_configuration', f'{prefix}scoring-configuration/scoring-configuration.json'),
             ):
                 total_steps += int(component in selected and member in name_set)
             if 'report_templates' in selected:
@@ -6014,6 +6072,13 @@ def restore_database_backup(
                         progress_callback(f'Restoring Main Cities for {workspace_name}', completed_steps, total_steps)
                     _restore_workspace_main_cities(workspace, archive.read(member))
                     advance(f'Main Cities restored for {workspace_name}')
+            if 'scoring_configuration' in selected:
+                member = f'{prefix}scoring-configuration/scoring-configuration.json'
+                if member in names:
+                    if progress_callback:
+                        progress_callback(f'Restoring Scoring Configuration for {workspace_name}', completed_steps, total_steps)
+                    _restore_workspace_scoring_configuration(workspace, archive.read(member))
+                    advance(f'Scoring Configuration restored for {workspace_name}')
             if 'auto_calculated_fields' in selected:
                 member = next((candidate for candidate in (
                     f'{prefix}auto-calculated-fields/auto-calculated-fields.json',
@@ -6220,6 +6285,55 @@ def _restore_workspace_main_cities(workspace: Workspace, payload: bytes) -> None
         workspace.database_path, repository.global_db_path, workspace_registry.registry_path,
     )
     task_repository.set_main_cities(cities)
+
+
+def _scoring_configuration_archive_payload(workspace: Workspace) -> bytes:
+    """Serialize the validated Scoring Configuration for a workspace."""
+    task_repository = Repository(
+        workspace.database_path, repository.global_db_path, workspace_registry.registry_path,
+    )
+    configuration = (task_repository.get_scoring_configuration()
+                     if task_repository.get_workspace_state(SCORING_CONFIGURATION_STATE_KEY) else None)
+    return json.dumps({
+        'format': 'dashboard-analytic-scoring-configuration',
+        'version': 1,
+        'configuration': configuration,
+    }, ensure_ascii=False, indent=2).encode('utf-8')
+
+
+def _archive_workspace_scoring_configuration(
+    archive: zipfile.ZipFile,
+    workspace: Workspace,
+    archive_prefix: str,
+    progress_callback: Callable[[int], None] | None = None,
+) -> None:
+    payload = _scoring_configuration_archive_payload(workspace)
+    archive.writestr(f'{archive_prefix}/scoring-configuration/scoring-configuration.json', payload)
+    if progress_callback:
+        progress_callback(len(payload))
+
+
+def _restore_workspace_scoring_configuration(workspace: Workspace, payload: bytes) -> None:
+    try:
+        document = json.loads(payload.decode('utf-8'))
+        configuration = document.get('configuration') if isinstance(document, dict) else None
+        if (
+            not isinstance(document, dict)
+            or document.get('format') != 'dashboard-analytic-scoring-configuration'
+            or document.get('version') != 1
+            or (configuration is not None and not isinstance(configuration, dict))
+            or 'configuration' not in document
+        ):
+            raise ValueError('Invalid Scoring Configuration document.')
+        task_repository = Repository(
+            workspace.database_path, repository.global_db_path, workspace_registry.registry_path,
+        )
+        if configuration is None:
+            task_repository.set_workspace_state(SCORING_CONFIGURATION_STATE_KEY, '')
+        else:
+            task_repository.replace_scoring_configuration(configuration)
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise ValueError(f'Scoring Configuration for "{workspace.name}" is invalid.') from exc
 
 def _dashboard_archive_payload(workspace: Workspace) -> bytes:
     """Serialize saved Dashboard definitions only; generated chart caches are excluded."""
@@ -6447,6 +6561,7 @@ def _archive_workspace(
     _archive_workspace_report_templates(archive, workspace, f'{archive_prefix}/report-templates', progress_callback)
     _archive_workspace_operator_mappings(archive, workspace, archive_prefix, progress_callback)
     _archive_workspace_main_cities(archive, workspace, archive_prefix, progress_callback)
+    _archive_workspace_scoring_configuration(archive, workspace, archive_prefix, progress_callback)
     archive.writestr(
         f'{archive_prefix}/auto-calculated-fields/auto-calculated-fields.json',
         json.dumps(task_repository.list_calculated_dimensions(), ensure_ascii=False, indent=2),
@@ -6483,6 +6598,9 @@ def export_archive_filename(target: str | Iterable[str]) -> str:
     if target == 'main-cities':
         workspace_name = active_workspace.name if active_workspace else 'workspace'
         return f'{workspace_name}_main-cities_{generated_at}.zip'
+    if target == 'scoring-configuration':
+        workspace_name = active_workspace.name if active_workspace else 'workspace'
+        return f'{workspace_name}_scoring-configuration_{generated_at}.zip'
     if target == 'query-builder-queries':
         workspace_name = active_workspace.name if active_workspace else 'workspace'
         return f'{workspace_name}_query-builder-queries_{generated_at}.zip'
@@ -6612,6 +6730,22 @@ def _build_single_export_archive_file(
             )
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
             _archive_workspace_main_cities(
+                archive, source_workspace, f'workspaces/{source_workspace.name}', progress_callback,
+            )
+        elif target == 'scoring-configuration':
+            source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
+            source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
+            if not source_workspace:
+                raise ValueError('Open a workspace before exporting Scoring Configuration.')
+            archive_path = f'workspaces/{source_workspace.name}/scoring-configuration/scoring-configuration.json'
+            manifest = archive_manifest(
+                'scoring-configuration',
+                source_workspace={'id': source_workspace.id, 'name': source_workspace.name},
+                workspace_components=archive_workspace_components_for_target(target),
+                archive_path=archive_path,
+            )
+            archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
+            _archive_workspace_scoring_configuration(
                 archive, source_workspace, f'workspaces/{source_workspace.name}', progress_callback,
             )
         elif target == 'auto-calculated-fields':
@@ -6823,6 +6957,10 @@ def estimate_export_bytes(
         source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
         source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
         total = len(_main_cities_archive_payload(source_workspace)) if source_workspace else 0
+    elif target == 'scoring-configuration':
+        source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
+        source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
+        total = len(_scoring_configuration_archive_payload(source_workspace)) if source_workspace else 0
     elif target.startswith('workspace:'):
         workspace = workspace_registry.get(target.removeprefix('workspace:'))
         if workspace:
@@ -6927,6 +7065,10 @@ def _recovered_transfer_details(manifest: dict[str, Any]) -> tuple[str, list[str
         source = manifest.get('source_workspace')
         name = str(source.get('name') or '') if isinstance(source, dict) else ''
         return ('Main Cities', [name] if name else [])
+    if kind == 'scoring-configuration':
+        source = manifest.get('source_workspace')
+        name = str(source.get('name') or '') if isinstance(source, dict) else ''
+        return ('Scoring Configuration', [name] if name else [])
     if kind == 'query-builder-queries':
         source = manifest.get('source_workspace')
         name = str(source.get('name') or '') if isinstance(source, dict) else ''
@@ -6969,7 +7111,7 @@ def _recover_unimported_transfer_packages() -> None:
             if kind not in {
                 'config', 'workspace', 'full-environment', 'slides-templates',
                 'auto-calculated-fields', 'dashboards', 'operator-mappings', 'main-cities',
-                'query-builder-queries', 'database-backup', 'bundle',
+                'scoring-configuration', 'query-builder-queries', 'database-backup', 'bundle',
             }:
                 raise ValueError('Unsupported transfer package.')
         except (OSError, ValueError, zipfile.BadZipFile):
@@ -7743,6 +7885,26 @@ def _apply_import_archive(
             for workspace in destinations:
                 _restore_workspace_main_cities(workspace, payload)
             return f'Imported Main Cities into {len(destinations)} workspaces.'
+        if kind == 'scoring-configuration':
+            member = str(manifest.get('archive_path') or '')
+            if (
+                member not in archive.namelist()
+                or not re.fullmatch(r'workspaces/[^/]+/scoring-configuration/scoring-configuration\.json', member)
+            ):
+                raise ValueError('The package does not contain a valid Scoring Configuration.')
+            destinations = [workspace_registry.get(workspace_id) for workspace_id in destination_workspace_ids]
+            destinations = [workspace for workspace in destinations if workspace]
+            if not destinations:
+                source = manifest.get('source_workspace')
+                if isinstance(source, dict) and source.get('id'):
+                    candidate = workspace_registry.get(str(source['id']))
+                    destinations = [candidate] if candidate else []
+            if not destinations:
+                raise ValueError('Select at least one destination workspace.')
+            payload = archive.read(member)
+            for workspace in destinations:
+                _restore_workspace_scoring_configuration(workspace, payload)
+            return f'Imported Scoring Configuration into {len(destinations)} workspaces.'
         if kind == 'auto-calculated-fields':
             try:
                 member = next((candidate for candidate in (
@@ -8005,6 +8167,7 @@ def _transfer_content_label(target: str | Iterable[str]) -> str:
         'dashboards': 'Dashboards',
         'operator-mappings': 'Operator/Vendor Mappings & Colors',
         'main-cities': 'Main Cities',
+        'scoring-configuration': 'Scoring Configuration',
         'query-builder-queries': 'Query Builder Queries',
     }
     if target.startswith('workspace:'):
@@ -8389,7 +8552,7 @@ def require_import_export_permission(user: SessionUser, target: str) -> None:
     """Authorize imports; admins may restore templates and fields into accessible workspaces."""
     if user.role == 'super-admin' or target in {
         'slides-templates', 'auto-calculated-fields', 'dashboards', 'operator-mappings', 'main-cities',
-        'query-builder-queries',
+        'scoring-configuration', 'query-builder-queries',
     }:
         return
     raise HTTPException(
@@ -8423,7 +8586,7 @@ def require_export_permission(user: SessionUser, target: str) -> None:
     """Authorize exports and transfers without exposing other workspaces."""
     if user.role == 'super-admin':
         return
-    if target in {'auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings', 'main-cities', 'query-builder-queries'}:
+    if target in {'auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings', 'main-cities', 'scoring-configuration', 'query-builder-queries'}:
         if active_workspace and repository.user_has_workspace_access(user.username, active_workspace.id):
             return
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Open a workspace you can access first.')
@@ -8539,6 +8702,7 @@ def render_admin_template(
         'dataset_source_columns': 'Dataset source columns',
         'datasets': 'Datasets',
         'generated_jobs': 'Generated jobs',
+        'scoring_jobs': 'Scoring And GAP Analysis Jobs',
         'chart_mapping_groups': 'Chart mapping groups',
         'operator_mappings': 'Operator Mappings',
         'vendor_mappings': 'Vendor Mappings',
@@ -8582,9 +8746,10 @@ def render_admin_template(
         {'value': 'slides-templates', 'label': 'Report Templates (from active workspace)', 'disabled': not active_workspace},
         {'value': 'operator-mappings', 'label': 'Operator/Vendor Mappings & Colors (from active workspace)', 'disabled': not active_workspace},
         {'value': 'main-cities', 'label': 'Main Cities (from active workspace)', 'disabled': not active_workspace},
+        {'value': 'scoring-configuration', 'label': 'Scoring Configuration (from active workspace)', 'disabled': not active_workspace},
         {'value': 'auto-calculated-fields', 'label': 'Auto-calculated Fields (from active workspace)', 'disabled': not active_workspace},
         {'value': 'query-builder-queries', 'label': 'Query Builder Queries (from active workspace)', 'disabled': not active_workspace},
-        {'value': 'full-environment', 'label': 'Full Environment (Application Config + Dashboards + Report Templates + Operator/Vendor Mappings & Colors + Main Cities + Auto-calculated Fields + Query Builder Queries + Selected Workspaces)'},
+        {'value': 'full-environment', 'label': 'Full Environment (Application Config + Dashboards + Report Templates + Operator/Vendor Mappings & Colors + Main Cities + Scoring Configuration + Auto-calculated Fields + Query Builder Queries + Selected Workspaces)'},
         *[
             {'value': f'workspace:{workspace.id}', 'label': f'Full Workspace: {workspace.name}'}
             for workspace in accessible_workspaces(user)
@@ -8597,14 +8762,14 @@ def render_admin_template(
         export_options = [
             option for option in export_options
             if option['value'] in {
-                'slides-templates', 'auto-calculated-fields', 'dashboards', 'operator-mappings', 'main-cities',
+                'slides-templates', 'auto-calculated-fields', 'dashboards', 'operator-mappings', 'main-cities', 'scoring-configuration',
             } or option['value'].startswith('workspace:')
         ]
     export_option_groups = [
         ('Configuration Content', [option for option in export_options if option['value'] == 'config']),
         ('Workspace Content', [
             option for option in export_options
-            if option['value'] in {'dashboards', 'slides-templates', 'operator-mappings', 'main-cities', 'auto-calculated-fields', 'query-builder-queries'}
+            if option['value'] in {'dashboards', 'slides-templates', 'operator-mappings', 'main-cities', 'scoring-configuration', 'auto-calculated-fields', 'query-builder-queries'}
         ]),
         ('Full Workspace', [option for option in export_options if option['value'].startswith('workspace:')]),
         ('Full Environment', [option for option in export_options if option['value'] == 'full-environment']),
@@ -13750,6 +13915,177 @@ def retry_report_chart_job(job_id: int, user: SessionUser = Depends(current_user
     return JSONResponse({'job_id': job_id, 'status': 'queued'}, status_code=status.HTTP_202_ACCEPTED)
 
 
+class ScoringJobRequest(BaseModel):
+    dataset_ids: list[int]
+    aggregation_levels: list[str] = ['Operator']
+    nr_mode: str = 'NSA'
+    force: bool = False
+    baseline_operator: str = 'EE'
+
+
+def scoring_repository(user: SessionUser) -> Repository:
+    if not active_workspace:
+        raise HTTPException(status_code=409, detail='Open a workspace before using Scoring & GAP Analysis.')
+    require_workspace_access(user, active_workspace.id)
+    return Repository(
+        active_workspace.database_path, global_db_path=repository.global_db_path,
+        workspace_registry_db_path=workspace_registry.registry_path,
+    )
+
+
+def scoring_operator_options(task_repository: Repository) -> list[dict[str, str]]:
+    """Build baseline choices from the workspace's ordered operator mappings."""
+    mapping_groups = task_repository.list_operator_mapping_groups()
+    options: list[dict[str, str]] = []
+    included: set[str] = set()
+    for group in mapping_groups:
+        canonical = str(group.get('canonical') or '').strip()
+        identity = canonical.casefold()
+        if not canonical or identity in included:
+            continue
+        options.append({
+            'value': canonical,
+            'label': canonical,
+            'color': str(group.get('color') or '#365F91'),
+        })
+        included.add(identity)
+    return options
+
+
+@app.get('/scoring', response_class=HTMLResponse)
+def scoring_page(request: Request, user: SessionUser = Depends(current_user)) -> HTMLResponse:
+    task_repository = scoring_repository(user)
+    configuration_error = ''
+    try:
+        task_repository.get_scoring_configuration()
+    except ValueError as exc:
+        configuration_error = str(exc)
+    datasets = []
+    for row in task_repository.list_datasets():
+        if row['status'] != 'ready' or row['dataset_kind'] not in CDR_DATASET_KINDS:
+            continue
+        item = dict(row)
+        item['original_name'] = item['file_name']
+        item['campaign'] = ', '.join(task_repository.cdr_catalogue_values([item['id']]).get('campaigns', []))
+        item['nr_mode'] = dataset_nr_mode(item['dataset_kind'], item['nr_mode'], item['file_name'])
+        datasets.append(item)
+    return render_template(request, 'scoring.html', {
+        'user': user, 'scoring_datasets': datasets,
+        'scoring_operator_options': scoring_operator_options(task_repository),
+        'aggregation_levels': ['Operator', 'Region', 'City', 'Vendor', 'Dataset Type'],
+        'scoring_configuration_error': configuration_error,
+    })
+
+
+@app.get('/api/scoring/jobs')
+def scoring_jobs_list(user: SessionUser = Depends(current_user)) -> dict[str, Any]:
+    return {'jobs': list_scoring_jobs(scoring_repository(user))}
+
+
+@app.post('/api/scoring/jobs')
+def scoring_jobs_create(payload: ScoringJobRequest, user: SessionUser = Depends(current_user)) -> dict[str, Any]:
+    task_repository = scoring_repository(user)
+    try:
+        selected_ids = validate_complete_scoring_cdr_selection(
+            task_repository, payload.dataset_ids, payload.nr_mode,
+        )
+        job, cached = create_scoring_job(
+            task_repository, selected_ids, payload.aggregation_levels, payload.nr_mode,
+            force=payload.force, username=user.username, baseline_operator=payload.baseline_operator,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not cached:
+        _submit_workspace_job(task_repository, run_scoring_job, task_repository, job['id'], phase=4)
+    return {'job': job, 'cached': cached}
+
+
+@app.get('/api/scoring/jobs/{job_id}')
+def scoring_jobs_result(job_id: int, user: SessionUser = Depends(current_user)) -> dict[str, Any]:
+    task_repository = scoring_repository(user)
+    job = get_scoring_job(task_repository, job_id, include_result=True)
+    if not job:
+        raise HTTPException(status_code=404, detail='Scoring job not found.')
+    from src.modules.scoring_views import build_scoring_views, normalize_result_gaps
+    result = normalize_result_gaps(job.get('result') or {})
+    views = {}
+    if result.get('scoring') or result.get('score_rows'):
+        try:
+            fallback = (task_repository.get_scoring_configuration()
+                        if not result.get('configuration') and not job.get('configuration') else None)
+            views = build_scoring_views(job, result, task_repository.list_operator_mapping_groups(), fallback)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {'job': {key: value for key, value in job.items() if key != 'result'}, **result,
+            'views': views}
+
+
+@app.delete('/api/scoring/jobs/{job_id}')
+def scoring_jobs_delete(job_id: int, user: SessionUser = Depends(current_user)) -> dict[str, Any]:
+    task_repository = scoring_repository(user)
+    if not delete_scoring_job(task_repository, job_id):
+        raise HTTPException(status_code=404, detail='Scoring job not found.')
+    task_repository.try_add_log(user.username, 'delete_scoring_job', json.dumps({'job_id': job_id}))
+    return {'deleted': job_id}
+
+
+@app.post('/scoring/datasets/{dataset_id}/recalculate')
+def scoring_dataset_recalculate(dataset_id: int, user: SessionUser = Depends(current_user)) -> RedirectResponse:
+    task_repository = scoring_repository(user)
+    dataset = task_repository.get_dataset(dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail='CDR dataset not found.')
+    try:
+        selected_ids = select_latest_companion_cdrs(task_repository, dataset_id)
+        job, cached = create_scoring_job(
+            task_repository, selected_ids, ['Operator'],
+            dataset_nr_mode(dataset['dataset_kind'], dataset['nr_mode'], dataset['file_name']),
+            force=True, username=user.username,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not cached:
+        _submit_workspace_job(task_repository, run_scoring_job, task_repository, job['id'], phase=4)
+    return RedirectResponse(f'/scoring?job_id={job["id"]}', status_code=303)
+
+
+@app.get('/scoring/jobs/{job_id}/export/{export_kind}')
+def scoring_job_export(job_id: int, export_kind: str, user: SessionUser = Depends(current_user)) -> Response:
+    task_repository = scoring_repository(user)
+    job = get_scoring_job(task_repository, job_id, include_result=True)
+    if not job:
+        raise HTTPException(status_code=404, detail='Scoring job not found.')
+    if job['status'] != 'completed':
+        raise HTTPException(status_code=409, detail='The scoring job must finish before export.')
+    from src.modules.scoring_views import normalize_result_gaps
+    result = normalize_result_gaps(job.get('result') or {})
+    if export_kind in {'scoring', 'gap'}:
+        rows = result.get(export_kind, [])
+        summaries = result.get('totals' if export_kind == 'scoring' else 'gap_totals', [])
+        if summaries:
+            rows = ([{'row_type': 'summary', **row} for row in summaries]
+                    + [{'row_type': 'kpi', **row} for row in rows])
+        content = pd.DataFrame(rows).to_csv(index=False)
+        return Response(content.encode('utf-8-sig'), media_type='text/csv', headers={
+            'Content-Disposition': f'attachment; filename="scoring-job-{job_id}-{export_kind}.csv"',
+        })
+    if export_kind == 'ppt':
+        from src.modules.scoring_exports import export_scoring_powerpoint
+        try:
+            if not job.get('configuration') and not result.get('configuration'):
+                job['configuration'] = task_repository.get_scoring_configuration()
+            content = export_scoring_powerpoint(
+                job, result, settings.ppt_templates_dir / TEMPLATE_NAMES['nsa'],
+                task_repository.list_operator_mapping_groups(),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return Response(content, media_type='application/vnd.openxmlformats-officedocument.presentationml.presentation', headers={
+            'Content-Disposition': f'attachment; filename="Scoring & GAP Analysis - {job_id}.pptx"',
+        })
+    raise HTTPException(status_code=404, detail='Unknown scoring export format.')
+
+
 @app.get('/api/e2e-reporting/jobs')
 def reporting_jobs(user: SessionUser = Depends(current_user)) -> JSONResponse:
     return JSONResponse({'jobs': [serialize_report_job(row) for row in repository.list_report_runs(limit=None)]})
@@ -15176,6 +15512,71 @@ def save_workspace_main_cities(
     )
 
 
+@app.get('/api/workspace-config/scoring-configuration')
+def get_workspace_scoring_configuration(
+    user: SessionUser = Depends(config_editor_user),
+) -> JSONResponse:
+    task_repository = scoring_repository(user)
+    try:
+        configuration = task_repository.get_scoring_configuration()
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return JSONResponse(configuration, headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/api/workspace-config/scoring-configuration/export')
+def export_workspace_scoring_configuration(user: SessionUser = Depends(config_editor_user)) -> Response:
+    task_repository = scoring_repository(user)
+    try:
+        configuration = task_repository.get_scoring_configuration()
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    content = json.dumps({
+        'format': 'dashboard-analytic-scoring-configuration', 'version': 1,
+        'configuration': configuration,
+    }, ensure_ascii=False, indent=2)
+    return Response(content, media_type='application/json', headers={
+        'Content-Disposition': 'attachment; filename="scoring-configuration.json"',
+    })
+
+
+@app.post('/api/workspace-config/scoring-configuration/import')
+async def import_workspace_scoring_configuration(
+    package: UploadFile = File(...), user: SessionUser = Depends(config_editor_user),
+) -> JSONResponse:
+    task_repository = scoring_repository(user)
+    from src.modules.scoring_config import unwrap_scoring_configuration_payload
+    try:
+        payload = await package.read(4 * 1024 * 1024 + 1)
+        if len(payload) > 4 * 1024 * 1024:
+            raise ValueError('Scoring Configuration JSON must not exceed 4 MiB.')
+        document = json.loads(payload.decode('utf-8'))
+        if not isinstance(document, dict) or document.get('format') != 'dashboard-analytic-scoring-configuration':
+            raise ValueError('Choose an exported Scoring Configuration JSON document.')
+        configuration = task_repository.replace_scoring_configuration(unwrap_scoring_configuration_payload(document))
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        await package.close()
+    task_repository.try_add_log(user.username, 'import_scoring_configuration', json.dumps({'updated': True}))
+    return JSONResponse(configuration, headers={'Cache-Control': 'no-store'})
+
+
+@app.put('/api/workspace-config/scoring-configuration')
+async def save_workspace_scoring_configuration(
+    request: Request,
+    user: SessionUser = Depends(config_editor_user),
+) -> JSONResponse:
+    task_repository = scoring_repository(user)
+    try:
+        payload = await request.json()
+        configuration = task_repository.replace_scoring_configuration(payload)
+    except (json.JSONDecodeError, UnicodeDecodeError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc) or 'The scoring configuration is invalid.') from exc
+    task_repository.try_add_log(user.username, 'save_scoring_configuration', json.dumps({'updated': True}))
+    return JSONResponse(configuration, headers={'Cache-Control': 'no-store'})
+
+
 @app.post('/admin/database/backups')
 def save_recurring_backup_settings(
     request: Request,
@@ -15434,9 +15835,9 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
         raise HTTPException(status_code=400, detail='The transfer offer is invalid.')
     kind = str(payload.get('kind') or '')
     if kind not in {
-        'config', 'workspace', 'full-environment', 'slides-templates',
-        'auto-calculated-fields', 'dashboards', 'operator-mappings', 'main-cities',
-        'query-builder-queries', 'database-backup', 'bundle',
+            'config', 'workspace', 'full-environment', 'slides-templates',
+            'auto-calculated-fields', 'dashboards', 'operator-mappings', 'main-cities',
+            'scoring-configuration', 'query-builder-queries', 'database-backup', 'bundle',
     }:
         raise HTTPException(status_code=400, detail='The offered export type is not supported.')
     if payload.get('archive_version') != ARCHIVE_VERSION:
@@ -15939,12 +16340,35 @@ async def inspect_admin_import_package(
 
 def _retain_import_upload(upload_id: str, package_path: Path, user: SessionUser) -> JSONResponse:
     """Validate and retain an already disk-backed import upload."""
+    if not zipfile.is_zipfile(package_path):
+        from src.modules.scoring_config import unwrap_scoring_configuration_payload, validate_scoring_configuration
+        if package_path.stat().st_size > 4 * 1024 * 1024:
+            raise ValueError('Scoring Configuration JSON must not exceed 4 MiB.')
+        try:
+            document = json.loads(package_path.read_text(encoding='utf-8'))
+            if not isinstance(document, dict) or document.get('format') != 'dashboard-analytic-scoring-configuration':
+                raise ValueError('Choose a supported ZIP package or Scoring Configuration JSON document.')
+            configuration = validate_scoring_configuration(unwrap_scoring_configuration_payload(document))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError('Choose a supported ZIP package or Scoring Configuration JSON document.') from exc
+        archive_path = 'workspaces/Imported/scoring-configuration/scoring-configuration.json'
+        manifest = archive_manifest(
+            'scoring-configuration', source_workspace={'id': '', 'name': 'Imported'},
+            workspace_components=['scoring_configuration'], archive_path=archive_path,
+        )
+        # Normalize an explicitly uploaded JSON into the existing package workflow.
+        with zipfile.ZipFile(package_path, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr('manifest.json', json.dumps(manifest))
+            archive.writestr(archive_path, json.dumps({
+                'format': 'dashboard-analytic-scoring-configuration', 'version': 1,
+                'configuration': configuration,
+            }))
     manifest = read_import_manifest(package_path)
     kind = str(manifest.get('kind') or '')
     if kind not in {
         'config', 'workspace', 'full-environment', 'slides-templates',
         'auto-calculated-fields', 'dashboards', 'operator-mappings', 'main-cities',
-        'query-builder-queries', 'database-backup', 'bundle',
+        'scoring-configuration', 'query-builder-queries', 'database-backup', 'bundle',
     }:
         raise ValueError('The export package type is not supported.')
     require_import_manifest_permission(user, manifest)

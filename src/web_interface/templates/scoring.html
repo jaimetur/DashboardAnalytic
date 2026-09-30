@@ -1,0 +1,308 @@
+{% extends 'base.html' %}
+{% block content %}
+<style>
+  .scoring-stack { gap: 1.1rem; }
+  .scoring-hero { color: #fff; background: linear-gradient(128deg, #143653 0%, #176e77 58%, #40a88a 100%); overflow: hidden; position: relative; }
+  .scoring-hero::after { content: ''; position: absolute; width: 20rem; height: 20rem; right: -5rem; top: -11rem; border: 1px solid rgba(255,255,255,.2); border-radius: 50%; box-shadow: 0 0 0 2.4rem rgba(255,255,255,.035), 0 0 0 5rem rgba(255,255,255,.025); pointer-events: none; }
+  .scoring-hero .eyebrow, .scoring-hero .lede { color: rgba(255,255,255,.78); }
+  .scoring-hero h2 { margin: .1rem 0 .5rem; font-size: clamp(1.7rem, 3vw, 2.45rem); }
+  .scoring-hero .lede { max-width: 58rem; margin: 0; }
+  .scoring-hero-badge { display: inline-flex; align-items: center; gap: .45rem; padding: .5rem .75rem; border: 1px solid rgba(255,255,255,.22); border-radius: 999px; background: rgba(4,36,54,.2); color: #fff; font-size: .78rem; font-weight: 750; white-space: nowrap; }
+  .scoring-controls { display: grid; gap: 1rem; }
+  .scoring-filter-grid { display: grid; grid-template-columns: minmax(12rem,15rem) minmax(0,1fr); gap: 1rem; align-items: start; }
+  .scoring-dataset-filter-grid > label { width: 100%; max-width: 15rem; }
+  .scoring-dataset-filter-grid select[data-nr-filter] { min-height: 2.45rem; }
+  .scoring-picker { min-width: 0; padding: .85rem; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.64); }
+  .scoring-picker-head { display: flex; align-items: center; justify-content: space-between; gap: .7rem; margin-bottom: .6rem; }
+  .scoring-picker-head strong { color: var(--text); font-size: .88rem; }
+  .scoring-picker-head span { color: var(--muted); font-size: .76rem; }
+  .scoring-picker-note { margin: .5rem .1rem 0; color: var(--muted); font-size: .69rem; }
+  .scoring-dataset-list { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,18rem),1fr)); gap: .45rem; max-height: 15rem; overflow: auto; padding: .1rem .15rem .1rem 0; }
+  .scoring-dataset-groups { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .6rem; }
+  .scoring-dataset-group { min-width: 0; padding: .65rem; border: 1px solid rgba(25,42,53,.1); border-radius: 12px; background: rgba(255,255,255,.42); }
+  .scoring-dataset-group-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin: 0 0 .45rem; }
+  .scoring-dataset-group-head strong { color: var(--text); font-size: .8rem; }
+  .scoring-dataset-group-head span { color: var(--muted); font-size: .68rem; white-space: nowrap; }
+  .scoring-dataset-group .scoring-dataset-list { grid-template-columns: 1fr; max-height: 11rem; }
+  .scoring-dataset-option { display: flex; align-items: flex-start; gap: .65rem; min-width: 0; padding: .62rem .7rem; border: 1px solid rgba(25,42,53,.09); border-radius: 11px; background: rgba(255,255,255,.76); cursor: pointer; }
+  .scoring-dataset-option[hidden] { display: none; }
+  .scoring-dataset-option input, .scoring-level-option input { flex: 0 0 auto; width: 1rem; height: 1rem; margin: .14rem 0 0; accent-color: var(--brand); }
+  .scoring-dataset-copy { display: grid; min-width: 0; gap: .16rem; }
+  .scoring-dataset-copy strong { overflow: hidden; color: var(--text); font-size: .82rem; text-overflow: ellipsis; white-space: nowrap; }
+  .scoring-dataset-copy small { color: var(--muted); font-size: .72rem; }
+  .scoring-levels { display: flex; flex-wrap: wrap; gap: .5rem; }
+  .scoring-level-option { display: inline-flex; align-items: center; gap: .5rem; min-height: 2.45rem; padding: .48rem .72rem; border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.78); color: var(--text); font-size: .82rem; font-weight: 650; cursor: pointer; }
+  .scoring-level-option.is-required { border-color: rgba(11,122,117,.32); background: rgba(11,122,117,.09); }
+  .scoring-controls-foot { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+  .scoring-actions { display: flex; flex-wrap: wrap; gap: .55rem; }
+  .scoring-actions .scoring-force-button { border: 1px solid rgba(16,49,74,.2); background: linear-gradient(135deg,#f4f7f8,#e5ecef); color: #234657; box-shadow: none; }
+  .scoring-note { min-height: 1.2rem; margin: 0; color: var(--muted); font-size: .82rem; }
+  .scoring-note[data-kind="error"] { color: var(--danger); font-weight: 650; }
+  .scoring-note[data-kind="success"] { color: var(--success); font-weight: 650; }
+  .scoring-jobs-layout { display: grid; grid-template-columns: minmax(0,1fr); gap: 1rem; align-items: start; }
+  .scoring-jobs-panel, .scoring-results-panel { min-width: 0; }
+  .scoring-job-list { display: grid; gap: .55rem; max-height: 32rem; overflow: auto; }
+  .scoring-job-row { position: relative; box-sizing: border-box; min-width: 0; }
+  .scoring-job-row .scoring-job-item { box-sizing: border-box; display: grid; grid-template-columns: minmax(0,1fr); min-width: 0; width: 100%; padding-right: 3rem; }
+  .scoring-job-delete { position: absolute; right: .65rem; bottom: .65rem; display: inline-flex; align-items: center; justify-content: center; width: 1.55rem; min-width: 1.55rem; height: 1.55rem; min-height: 1.55rem; padding: 0; border: 1px solid rgba(164,61,47,.28); border-radius: 50%; background: #fff3f1; color: #a43d2f; font-size: 1rem; font-weight: 800; line-height: 1; box-shadow: none; }
+  .scoring-job-delete:hover:not(:disabled) { border-color: rgba(164,61,47,.52); background: #fde4e0; color: #842d23; box-shadow: none; transform: none; }
+  .scoring-job-delete:focus-visible { outline: 3px solid rgba(164,61,47,.25); outline-offset: 2px; }
+  .scoring-job-item { display: grid; gap: .4rem; width: 100%; padding: .75rem .8rem; border: 1px solid var(--line); border-radius: 13px; background: rgba(255,255,255,.68); color: var(--text); text-align: left; box-shadow: none; }
+  .scoring-job-item:hover:not(:disabled) { background: rgba(11,122,117,.08); box-shadow: none; transform: none; }
+  .scoring-job-item[aria-current="true"] { border-color: rgba(11,122,117,.58); background: rgba(11,122,117,.11); box-shadow: inset 3px 0 0 var(--brand); }
+  .scoring-job-item-top { display: flex; justify-content: space-between; align-items: center; gap: .6rem; min-width: 0; }
+  .scoring-job-item-top strong { flex: 1 1 auto; min-width: 0; overflow: hidden; font-size: .83rem; text-overflow: ellipsis; white-space: nowrap; }
+  .scoring-job-item-top .scoring-status { flex: 0 0 auto; }
+  .scoring-job-meta { min-width: 0; color: var(--muted); font-size: .72rem; line-height: 1.45; white-space: normal; overflow-wrap: anywhere; }
+  .scoring-status { display: inline-flex; align-items: center; gap: .3rem; padding: .2rem .48rem; border-radius: 999px; background: #e9eff1; color: #47606b; font-size: .68rem; font-weight: 800; text-transform: capitalize; white-space: nowrap; }
+  .scoring-status[data-status="completed"] { background: #e2f4e9; color: #247048; }
+  .scoring-status[data-status="failed"] { background: #fde9e5; color: #a43d2f; }
+  .scoring-status[data-status="processing"], .scoring-status[data-status="queued"] { background: #fff2d4; color: #8b5c08; }
+  .scoring-job-progress { height: .3rem; overflow: hidden; border-radius: 999px; background: rgba(25,42,53,.1); }
+  .scoring-job-progress span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg,var(--brand),#43b189); transition: width .2s ease; }
+  .scoring-results-head { display: flex; align-items: flex-start; justify-content: space-between; gap: .8rem; flex-wrap: wrap; }
+  .scoring-results-tools { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: .45rem; }
+  .scoring-environment-filter { display: inline-flex; align-items: center; gap: .4rem; color: var(--muted); font-size: .74rem; font-weight: 750; }
+  .scoring-environment-filter select { width: auto; min-width: 12rem; max-width: min(100%, 20rem); min-height: 2.1rem; padding: .32rem 1.8rem .32rem .6rem; font-size: .76rem; }
+  .scoring-environment-filter[hidden] { display: none; }
+  .scoring-kpi-values-toggle { display: inline-flex; align-items: center; gap: .35rem; color: var(--muted); font-size: .74rem; font-weight: 750; white-space: nowrap; }
+  .scoring-kpi-values-toggle input { width: 1rem; height: 1rem; margin: 0; accent-color: var(--brand); }
+  .scoring-results-head h3 { margin: 0; }
+  .scoring-export-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+  .scoring-export-actions a { display: inline-flex; align-items: center; min-height: 2.1rem; padding: .38rem .65rem; border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.72); color: #24615d; font-size: .75rem; font-weight: 750; }
+  .scoring-export-actions a[hidden] { display: none; }
+  .scoring-result-meta { margin: .35rem 0 0; color: var(--muted); font-size: .78rem; }
+  .scoring-result-tabs { display: flex; flex-wrap: wrap; gap: .4rem; margin: .9rem 0 .65rem; border-bottom: 1px solid var(--line); }
+  .scoring-result-tab { padding: .55rem .75rem; border: 1px solid #e4bf91; border-radius: 10px 10px 0 0; background: #fff0d1; color: #75411f; font-size: .78rem; font-weight: 750; box-shadow: none; }
+  .scoring-result-tab:hover:not(:disabled) { border-color: #d3a46c; background: #ffe6bb; color: #633612; box-shadow: none; transform: none; }
+  .scoring-result-tab[aria-selected="true"] { border-color: #78b6b0; background: #dff1ef; color: #074c49; font-weight: 850; box-shadow: inset 0 -3px var(--brand); }
+  .scoring-result-tab:focus-visible { outline: 3px solid rgba(11,122,117,.32); outline-offset: 2px; }
+  .scoring-result-pane[hidden] { display: none; }
+  .scoring-table-wrap { max-height: none; overflow-x: auto; overflow-y: visible; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.72); }
+  .scoring-table-section-title { margin: .75rem 0 .45rem; color: #245e5a; font-size: .86rem; }
+  .scoring-table-section + .scoring-table-section-title { margin-top: 1.1rem; }
+  .scoring-table-wrap table { width: 100%; border-collapse: collapse; font-size: .78rem; }
+  .scoring-table-wrap th, .scoring-table-wrap td { padding: .58rem .68rem; border-bottom: 1px solid rgba(25,42,53,.08); text-align: left; white-space: nowrap; }
+  .scoring-table-wrap th { position: sticky; top: 0; z-index: 1; background: #eaf3f1; color: #245e5a; font-size: .72rem; font-weight: 800; }
+  .scoring-table-wrap td[data-numeric="true"] { text-align: right; font-variant-numeric: tabular-nums; }
+  .scoring-comparison-controls { display: flex; align-items: center; flex-wrap: wrap; gap: .55rem; margin: .25rem 0 .65rem; }
+  .scoring-comparison-controls label { display: inline-flex; align-items: center; gap: .45rem; color: var(--muted); font-size: .75rem; font-weight: 700; }
+  .scoring-comparison-controls select { width: auto; min-width: 12rem; max-width: min(100%, 30rem); min-height: 2.15rem; padding: .35rem 2rem .35rem .6rem; font-size: .78rem; }
+  .scoring-gap-comparison-controls select { border: 1px solid #c8842f; background-color: #fff2c9; color: #49300c; font-weight: 800; box-shadow: 0 1px 2px rgba(119,74,16,.12); }
+  .scoring-gap-comparison-controls select:focus-visible { outline: 3px solid rgba(200,132,47,.28); outline-offset: 2px; }
+  .scoring-context-heading { margin: .25rem 0 .45rem; color: #1b3545; font-size: .94rem; }
+  .scoring-context-chips { display: flex; align-items: center; flex-wrap: wrap; gap: .35rem; margin: 0 0 .55rem; }
+  .scoring-context-chip { display: inline-flex; align-items: center; min-height: 1.45rem; padding: .18rem .5rem; border: 1px solid rgba(25,42,53,.1); border-radius: 999px; background: #f3f6f6; color: #465c68; font-size: .68rem; font-weight: 700; }
+  .scoring-context-note { margin: 0 0 .55rem; color: var(--muted); font-size: .72rem; }
+  .scoring-threshold-legend { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem .8rem; margin: 0 0 .55rem; padding: .45rem .6rem; border: 1px solid rgba(25,42,53,.1); border-radius: 10px; background: #f7f8f7; }
+  .scoring-threshold-legend > strong { color: #445a65; font-size: .7rem; }
+  .scoring-legend-item { display: inline-flex; align-items: flex-start; gap: .3rem; min-width: 0; color: #334854; font-size: .68rem; }
+  .scoring-legend-swatch { display: inline-block; flex: 0 0 auto; width: .72rem; height: .72rem; margin-top: .14rem; border: 1px solid rgba(25,42,53,.16); border-radius: 3px; background: #e7eaeb; }
+  .scoring-legend-copy { display: grid; gap: .08rem; }
+  .scoring-legend-copy strong { font-size: .68rem; }
+  .scoring-legend-copy small { max-width: 18rem; color: var(--muted); font-size: .62rem; }
+  .scoring-gap-scale { display: flex; align-items: center; flex-wrap: wrap; gap: .45rem; margin: 0 0 .55rem; color: #526570; font-size: .66rem; font-weight: 700; }
+  .scoring-gap-scale-bar { display: inline-block; width: min(15rem,35vw); height: .62rem; border: 1px solid rgba(25,42,53,.12); border-radius: 999px; }
+  .scoring-matrix-wrap { max-height: none; overflow-x: auto; overflow-y: visible; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+  .scoring-comparison-table { width: max-content !important; min-width: 100%; border-collapse: collapse; table-layout: auto; font-size: .72rem !important; }
+  .scoring-comparison-table th, .scoring-comparison-table td { padding: .42rem .48rem !important; border: 1px solid #d8dddf !important; text-align: center !important; white-space: nowrap; }
+  .scoring-comparison-table th { position: static; background: #dedfe0; color: #263640; font-size: .69rem !important; font-weight: 800; vertical-align: middle; }
+  .scoring-comparison-table th[data-column="category"], .scoring-comparison-table td[data-column="category"] { min-width: 7.2rem; text-align: left !important; }
+  .scoring-comparison-table th[data-column="kpi"], .scoring-comparison-table td[data-column="kpi"] { min-width: 12rem; max-width: 22rem; white-space: normal; text-align: left !important; }
+  .scoring-comparison-table .scoring-column-group { background: #465963; color: #fff; font-size: .72rem !important; letter-spacing: .025em; }
+  .scoring-comparison-table .scoring-gap-group { background: #ffff00 !important; color: #242424 !important; }
+  .scoring-comparison-table th.scoring-weight-header { background: #4ea72e !important; color: #fff !important; }
+  .scoring-comparison-table th.scoring-maximum-header { background: #d92d2d !important; color: #fff !important; }
+  .scoring-comparison-table th.scoring-reference-header { border-top: 5px solid #ffff00 !important; }
+  .scoring-comparison-table td[data-numeric="true"] { font-variant-numeric: tabular-nums; }
+  .scoring-comparison-table :is(th,td)[data-column="weight"], .scoring-comparison-table :is(th,td)[data-column="maximum"], .scoring-comparison-table :is(th,td)[data-column="kpi-value"], .scoring-comparison-table :is(th,td)[data-column="score"], .scoring-comparison-table :is(th,td)[data-column="gap"] { text-align: center !important; }
+  .scoring-comparison-table td[data-column="weight"] { background: #e7f0e4; }
+  .scoring-comparison-table td[data-column="maximum"] { background: #fde8e8; }
+  .scoring-comparison-table th.scoring-kpi-value-header { background: #e6eaeb; color: #334854; }
+  .scoring-comparison-table td.scoring-kpi-value-cell { background: #f3f5f6; font-variant-numeric: tabular-nums; }
+  .scoring-comparison-table .scoring-operator-header { border-top: 3px solid var(--operator-accent, #607d8b) !important; }
+  .scoring-comparison-table .scoring-gap-header { background: #fff5a6 !important; }
+  .scoring-comparison-table th.scoring-gap-header { background: #ffff00 !important; color: #242424 !important; }
+  .scoring-comparison-table th.scoring-gap-operator-header { border-top: 4px solid var(--operator-accent, #607d8b) !important; }
+  .scoring-comparison-table .scoring-category-cell { vertical-align: middle; background: #f0f2f3; color: #334854; font-weight: 800; }
+  .scoring-comparison-table tbody tr:nth-child(even) td { background-color: #f6f7f7; }
+  .scoring-comparison-table tbody tr:nth-child(even) td[data-column="weight"] { background-color: #e4eee1; }
+  .scoring-comparison-table tbody tr:nth-child(even) td[data-column="maximum"] { background-color: #f9dddd; }
+  .scoring-comparison-table tbody tr:nth-child(even) td.scoring-category-cell { background-color: #e9edef; }
+  .scoring-comparison-table td.scoring-gap-loss { color: #a43d2f; font-weight: 750; }
+  .scoring-comparison-table td.scoring-gap-gain { color: #247048; font-weight: 750; }
+  .scoring-comparison-table td.scoring-total-partial { color: #64747b; }
+  .scoring-comparison-table tfoot th, .scoring-comparison-table tfoot td { position: static; background: #e6eaeb; color: #203744; font-weight: 850; border-top: 2px solid #9eaaae !important; }
+  .scoring-priority-table td[data-column="category"] { background: #0084ff !important; color: #fff !important; font-weight: 800; }
+  .scoring-priority-table td[data-column="gap"] { background: #fff5a6; font-weight: 800; text-align: center !important; }
+  .scoring-priority-table td[data-column="type"] { color: #47606b; }
+  .scoring-priority-table td[data-column="type"][data-kpi-type="reliable"] { background: #dcefdc !important; color: #286a35; font-weight: 750; }
+  .scoring-tone-0 { --operator-accent: #315f9a; }
+  .scoring-tone-1 { --operator-accent: #bd4540; }
+  .scoring-tone-2 { --operator-accent: #43835b; }
+  .scoring-tone-3 { --operator-accent: #927031; }
+  .scoring-tone-4 { --operator-accent: #795a9c; }
+  .scoring-empty { padding: 2rem 1rem; color: var(--muted); text-align: center; font-size: .84rem; }
+  .scoring-chart-grid { display: grid; grid-template-columns: minmax(0,1fr); gap: .8rem; }
+  .scoring-best-network-layout { display: grid; grid-template-columns: minmax(0,2fr) minmax(17rem,1fr); gap: .8rem; align-items: stretch; }
+  .scoring-best-network-layout .scoring-chart-card { min-width: 0; }
+  .scoring-chart-card { min-width: 0; padding: 1rem; border: 1px solid var(--line); border-radius: 13px; background: rgba(255,255,255,.82); cursor: zoom-in; }
+  .scoring-chart-card h4 { margin: 0 0 .6rem; color: #245e5a; font-size: .85rem; }
+  .scoring-chart-svg { display: block; width: 100%; height: auto; min-height: 26rem; overflow: visible; }
+  .scoring-chart-svg.scoring-best-network-bars { min-width: 0; max-width: 100%; }
+  .scoring-chart-scroll { overflow-x: auto; overflow-y: hidden; }
+  .scoring-chart-svg text { fill: #516570; font: 11px "IBM Plex Sans", "Segoe UI", sans-serif; }
+  .scoring-chart-svg .scoring-chart-value { fill: #18384a; font-size: 15px; font-weight: 800; paint-order: stroke; stroke: #fff; stroke-width: 3px; stroke-linejoin: round; }
+  .scoring-chart-svg .scoring-chart-axis-label { fill: #445a65; font-size: 15px; font-weight: 750; }
+  .scoring-chart-svg .scoring-chart-tick { fill: #657780; font-size: 13px; }
+  .scoring-chart-svg .scoring-chart-legend { fill: #334854; font-size: 15px; font-weight: 750; }
+  .scoring-chart-svg .scoring-chart-category { fill: #435964; font-size: 14px; font-weight: 650; }
+  .scoring-chart-svg .scoring-best-network-segment { fill: #17303c; font-size: 11px; font-weight: 800; paint-order: stroke; stroke: rgba(255,255,255,.8); stroke-width: 2px; stroke-linejoin: round; }
+  .scoring-chart-svg .scoring-allocation-total { fill: #1c3745; font-size: 25px; font-weight: 850; }
+  .scoring-chart-svg .scoring-allocation-unit { fill: #5c707a; font-size: 12px; font-weight: 700; }
+  .scoring-chart-svg .scoring-allocation-legend { fill: #3d535e; font-size: 13px; font-weight: 700; }
+  .scoring-chart-card:focus-visible { outline: 3px solid rgba(11,122,117,.35); outline-offset: 2px; }
+  .scoring-chart-overlay { position: fixed; inset: 0; z-index: 12000; display: grid; place-items: center; padding: .5rem; background: rgba(21,34,45,.62); backdrop-filter: blur(3px); }
+  .scoring-chart-overlay[hidden] { display: none !important; }
+  .scoring-chart-expanded-dialog { display: grid; grid-template-rows: auto minmax(0,1fr); gap: .85rem; box-sizing: border-box; width: min(calc(100vw - 1rem),1840px); height: min(calc(100dvh - 1rem),1200px); padding: 1rem 1.2rem; overflow: hidden; border: 1px solid rgba(25,42,53,.18); border-radius: 20px; background: linear-gradient(180deg,#fffdfd,#f6f8f7); box-shadow: 0 24px 70px rgba(17,29,38,.4); }
+  .scoring-chart-expanded-header { display: flex; align-items: center; justify-content: space-between; gap: .75rem; min-width: 0; }
+  .scoring-chart-expanded-header > div { min-width: 0; }
+  .scoring-chart-expanded-header .eyebrow { margin: 0 0 .2rem; }
+  .scoring-chart-expanded-header h3 { margin: 0 0 .2rem; color: #203744; font-size: clamp(1rem,1.7vw,1.5rem); }
+  .scoring-chart-expanded-header p:not(.eyebrow) { margin: 0; color: var(--muted); font-size: .76rem; }
+  .scoring-chart-expanded-close { flex: 0 0 auto; width: 2.25rem; min-width: 2.25rem; height: 2.25rem; min-height: 2.25rem; padding: 0; border-radius: 50%; font-size: 1.3rem; line-height: 1; }
+  .scoring-chart-expanded-content { display: grid; align-content: center; min-width: 0; min-height: 0; overflow: auto; padding: .25rem; border: 1px solid rgba(25,42,53,.12); border-radius: 12px; background: #fff; }
+  .scoring-chart-expanded-content .scoring-chart-svg { width: 100%; min-width: 0 !important; min-height: 0; height: auto; }
+  .scoring-warnings { display: grid; gap: .3rem; margin: .7rem 0 0; padding-left: 1.1rem; color: #795b20; font-size: .78rem; }
+  .scoring-warning-box { margin-top: .7rem; padding: .7rem .8rem; border: 1px solid rgba(213,143,31,.3); border-radius: 11px; background: #fff9e9; }
+  @media(max-width:1050px) { .scoring-dataset-groups { grid-template-columns: 1fr; } .scoring-dataset-group .scoring-dataset-list { max-height: 12rem; } .scoring-best-network-layout { grid-template-columns: 1fr; } }
+  @media(max-width:900px) { .scoring-filter-grid,.scoring-jobs-layout { grid-template-columns: 1fr; } .scoring-job-list { max-height: 22rem; } }
+  @media(max-width:600px) { .scoring-dataset-list { grid-template-columns: 1fr; } .scoring-controls-foot { align-items: stretch; } .scoring-actions { width: 100%; } .scoring-actions button { flex: 1 1 100%; } .scoring-chart-expanded-dialog { width: calc(100vw - .5rem); height: calc(100dvh - .5rem); padding: .65rem; gap: .5rem; border-radius: 14px; } .scoring-chart-expanded-header h3 { font-size: 1rem; } .scoring-chart-expanded-header p:not(.eyebrow) { display: none; } }
+</style>
+
+<section class="dashboard-stack spacious-stack scoring-stack" data-scoring-workspace data-configuration-error="{{ scoring_configuration_error or '' }}" data-jobs-url="/api/scoring/jobs" data-export-base="/scoring/jobs">
+  <article class="panel scoring-hero">
+    <div class="section-head tight-head">
+      <div>
+        <p class="eyebrow">Performance insights</p>
+        <h2>Scoring &amp; GAP Analysis</h2>
+      </div>
+      <span class="scoring-hero-badge"><span aria-hidden="true">◉</span> CDR benchmark workspace</span>
+    </div>
+    <p class="lede">Calculate and review NetCheck scoring across one or more CDR datasets. Choose the aggregation levels for this run, then inspect the saved scoring tables, charts and GAP analysis.</p>
+  </article>
+
+  <article class="panel scoring-controls" aria-labelledby="scoring-run-title">
+    <div class="section-head tight-head">
+      <div><p class="eyebrow">New calculation</p><h3 id="scoring-run-title">Select CDRs and aggregation</h3></div>
+      <span class="pill" data-selected-count>0 CDRs selected</span>
+    </div>
+    <div class="scoring-filter-grid scoring-dataset-filter-grid">
+      <label>NR Mode
+        <select data-nr-filter>
+          {% for mode in scoring_datasets | map(attribute='nr_mode') | reject('equalto', none) | reject('equalto', '') | unique | sort %}
+          <option value="{{ mode }}" {% if mode == 'NSA' %}selected{% endif %}>{{ mode }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="scoring-picker">
+        <div class="scoring-picker-head"><strong>CDR datasets</strong><span data-visible-count>{{ scoring_datasets | length }} available</span></div>
+        <div class="scoring-dataset-groups" data-dataset-list>
+          {% for kind, kind_label in [('data', 'Data'), ('voice', 'Voice'), ('speech', 'Speech')] %}
+          {% set kind_datasets = scoring_datasets | selectattr('dataset_kind', 'equalto', kind) | list %}
+          <section class="scoring-dataset-group" data-dataset-group="{{ kind }}">
+            <div class="scoring-dataset-group-head"><strong>{{ kind_label }}</strong><span data-kind-count="{{ kind }}">{{ kind_datasets | length }} available</span></div>
+            <div class="scoring-dataset-list" data-kind-list="{{ kind }}">
+              {% for dataset in kind_datasets %}
+              <label class="scoring-dataset-option" data-dataset-option data-dataset-kind="{{ dataset.dataset_kind }}" data-nr-mode="{{ dataset.nr_mode or '' }}" data-uploaded-at="{{ dataset.uploaded_at or dataset.created_at or '' }}">
+                <input type="checkbox" value="{{ dataset.id }}" data-dataset-id>
+                <span class="scoring-dataset-copy"><strong title="{{ dataset.original_name }}">{{ dataset.original_name }}</strong><small>{{ kind_label }}{% if dataset.campaign %} · {{ dataset.campaign }}{% endif %}{% if dataset.nr_mode %} · {{ dataset.nr_mode }}{% endif %}</small></span>
+              </label>
+              {% endfor %}
+              <p class="scoring-empty" data-kind-empty hidden>No ready {{ kind_label }} CDR datasets are available for this NR Mode.</p>
+            </div>
+          </section>
+          {% endfor %}
+        </div>
+        <p class="scoring-picker-note">The latest uploaded CDR for each type in the selected NR Mode is selected by default. You can add older datasets if needed.</p>
+      </div>
+    </div>
+    <div class="scoring-filter-grid">
+      <label>GAP reference operator
+        <select data-baseline-operator aria-describedby="scoring-gap-baseline-note">
+          {% set scoring_options = scoring_operator_options | default([], true) %}
+          {% if scoring_options %}
+            {% for operator in scoring_options %}<option value="{{ operator.value }}" data-operator-color="{{ operator.color or '' }}" {% if operator.value | lower == 'ee' %}selected{% endif %}>{{ operator.label }}</option>{% endfor %}
+          {% else %}<option value="EE" selected>EE</option>{% endif %}
+        </select>
+      </label>
+      <p class="scoring-note" id="scoring-gap-baseline-note">GAP = compared operator weighted score minus the reference operator, in weighted score points.</p>
+    </div>
+    <div class="scoring-picker">
+      <div class="scoring-picker-head"><strong>Aggregation levels</strong><span>Operator is required</span></div>
+      <div class="scoring-levels" data-aggregation-levels>
+        {% for level in aggregation_levels %}
+        <label class="scoring-level-option{% if level == 'Operator' %} is-required{% endif %}">
+          <input type="checkbox" value="{{ level }}" data-aggregation-level {% if level == 'Operator' %}checked disabled{% endif %}>
+          <span>{{ level }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="scoring-controls-foot">
+      <p class="scoring-note" data-scoring-message role="status" aria-live="polite">Choose at least one CDR to calculate scoring.</p>
+      <div class="scoring-actions">
+        <button type="button" data-calculate-scoring disabled>Calculate Scoring</button>
+        <button type="button" class="scoring-force-button" data-recalculate-scoring disabled>Recalculate</button>
+      </div>
+    </div>
+  </article>
+
+  <section class="scoring-jobs-layout" aria-label="Scoring jobs and results">
+    <article class="panel scoring-jobs-panel">
+      <div class="section-head tight-head"><div><p class="eyebrow">Background processing</p><h3>Scoring jobs</h3></div><span class="pill" data-job-count>0 jobs</span></div>
+      <div class="scoring-job-list" data-job-list aria-live="polite"><div class="scoring-empty">Loading saved jobs…</div></div>
+    </article>
+
+    <article class="panel scoring-results-panel" aria-labelledby="scoring-results-title">
+      <div class="scoring-results-head">
+        <div><p class="eyebrow">Latest saved result</p><h3 id="scoring-results-title">Scoring results</h3><p class="scoring-result-meta" data-result-meta>Select a completed job to inspect its output.</p></div>
+        <div class="scoring-results-tools">
+          <label class="scoring-kpi-values-toggle"><input type="checkbox" data-show-kpi-values> Show KPI values</label>
+          <label class="scoring-environment-filter" data-result-environment-control hidden>Environment
+            <select data-result-environment aria-label="Filter scoring tables, charts and GAP analysis by environment"></select>
+          </label>
+          <div class="scoring-export-actions" aria-label="Export selected job">
+            <a href="#" data-export-scoring hidden>Scoring CSV</a>
+            <a href="#" data-export-gap hidden>GAP CSV</a>
+            <a href="#" data-export-ppt hidden>PowerPoint</a>
+          </div>
+        </div>
+      </div>
+      <div class="scoring-result-tabs" role="tablist" aria-label="Scoring outputs">
+        <button type="button" class="scoring-result-tab" role="tab" aria-selected="true" aria-controls="scoring-table-pane" data-result-tab="scoring">Scoring Tables</button>
+        <button type="button" class="scoring-result-tab" role="tab" aria-selected="false" aria-controls="scoring-gap-pane" data-result-tab="gap">GAP Analysis</button>
+        <button type="button" class="scoring-result-tab" role="tab" aria-selected="false" aria-controls="scoring-chart-pane" data-result-tab="charts">Scoring Chart</button>
+        <button type="button" class="scoring-result-tab" role="tab" aria-selected="false" aria-controls="scoring-best-network-pane" data-result-tab="best-network">Best Network Chart</button>
+      </div>
+      <div class="scoring-result-pane" id="scoring-table-pane" role="tabpanel" data-result-pane="scoring"><div class="scoring-empty">No scoring table is selected.</div></div>
+      <div class="scoring-result-pane" id="scoring-chart-pane" role="tabpanel" data-result-pane="charts" hidden><div class="scoring-empty">No scoring charts are selected.</div></div>
+      <div class="scoring-result-pane" id="scoring-gap-pane" role="tabpanel" data-result-pane="gap" hidden><div class="scoring-empty">No GAP analysis is selected.</div></div>
+      <div class="scoring-result-pane" id="scoring-best-network-pane" role="tabpanel" data-result-pane="best-network" hidden><div class="scoring-empty">No Best Network chart is selected.</div></div>
+      <div class="scoring-warning-box" data-warning-box hidden><strong>Calculation notes</strong><ul class="scoring-warnings" data-warning-list></ul></div>
+    </article>
+  </section>
+  <div class="scoring-chart-overlay" data-scoring-chart-overlay hidden>
+    <section class="scoring-chart-expanded-dialog" role="dialog" aria-modal="true" aria-labelledby="scoring-chart-expanded-title" tabindex="-1" data-scoring-chart-dialog>
+      <header class="scoring-chart-expanded-header">
+        <div><p class="eyebrow">Scoring chart</p><h3 id="scoring-chart-expanded-title" data-scoring-chart-title>Expanded scoring chart</h3><p data-scoring-chart-meta></p></div>
+        <button type="button" class="scoring-chart-expanded-close" data-scoring-chart-close aria-label="Close expanded chart" title="Close">×</button>
+      </header>
+      <div class="scoring-chart-expanded-content" data-scoring-expanded-chart></div>
+    </section>
+  </div>
+</section>
+{% endblock %}
+{% block extra_scripts %}
+<script src="{{ static_path('js/scoring.js') }}?v={{ asset_version('js/scoring.js') }}"></script>
+{% endblock %}

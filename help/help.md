@@ -17,6 +17,7 @@ Help Navigation groups chapters under General, Main Modules, Administrative Modu
 - Analysing one dataset? Read [Datasets Analysis](datasets-analysis.md).
 - Exploring a complete template as a live dashboard or generating its PowerPoint? Read [E2E Dashboards](e2e-dashboards.md).
 - Generating persistent Reports or Chart Sets? Read [E2E Reporting](e2e-reporting.md).
+- Calculating NetCheck scores or comparing operator gaps? Read [Scoring & GAP Analysis](scoring-gap-analysis.md).
 - Building ad-hoc SQL queries with guided controls? Read [Query Builder](query-builder.md).
 - Authoring templates? Read [Workspace Config](workspace-config.md), including the [Report Template reference](workspace-config.md#report-template-reference).
 - Managing users and transfers? Read [Administrator Config](administrator-config.md).

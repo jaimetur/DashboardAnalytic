@@ -10,6 +10,7 @@ Primary tabs:
 - Datasets Analysis
 - E2E Dashboards
 - E2E Reporting
+- Scoring & GAP Analysis
 - Builders (dropdown with Chart Builder and Query Builder)
 
 Other tabs:
@@ -102,6 +103,6 @@ On a phone, use portrait orientation for forms and landscape orientation when in
 
 ## Dashboard navigation and overlays
 
-The analytical tabs are ordered **Datasets Analysis → E2E Dashboards → E2E Reporting** for users with access. Datasets Analysis uses blue, E2E Dashboards uses muted violet, and Reporting uses brighter purple. E2E Reporting is shown only to super-admins and the EJAITUR user when a workspace is active; other users do not see it in the top navigation or Modules menu. The dashboard viewer groups charts by Slide and opens the same Dashboard Filters controls in a floating panel. Its dataset dialog provides pagination and CSV export.
+The analytical tabs are ordered **Datasets Analysis → E2E Dashboards → Scoring & GAP Analysis → E2E Reporting** for users with access. Datasets Analysis uses blue, E2E Dashboards uses muted violet, and Reporting uses brighter purple. Scoring offers NR Mode and CDR selection, aggregation controls, saved background jobs and tables/charts/GAP exports. E2E Reporting is shown only to super-admins and the EJAITUR user when a workspace is active; other users do not see it in the top navigation or Modules menu. The dashboard viewer groups charts by Slide and opens the same Dashboard Filters controls in a floating panel. Its dataset dialog provides pagination and CSV export.
 
 App Logs is available from the utility navigation and includes App Events for the active workspace plus the live Execution Log for the running server. See [App Logs](app-logs.md).

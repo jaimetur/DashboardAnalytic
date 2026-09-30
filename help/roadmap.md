@@ -10,6 +10,7 @@
 - Ad-hoc Chart Builder.
 - Ad-hoc Query Builder.
 - Template-driven NSA/SA Dashboards and PPT Reports.
+- NetCheck City/Road Scoring & GAP Analysis with persistent jobs, aggregation controls and CSV/PPT exports.
 - Shared Interactive Preview and filtered-data viewer.
 - Report Template management and validation.
 - Unified background jobs.
@@ -19,7 +20,6 @@
 
 ## Planned product work
 
-- Approved scoring and GAP-analysis automation.
 - Non-qualified calls Analysis module.
 - Configuration datasets injestion to enrich CDR dataset and combine them to extract combined info using SQL Queries or Report Templates.
 - Additional validated KPI/chart contracts.
