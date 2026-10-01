@@ -47,15 +47,46 @@ def test_summary_csv_gap_excludes_reference_and_keeps_missing_comparisons():
     assert all(row['reference_operator'] == 'EE' for row in rows)
 
 
+def test_csv_exposes_saved_global_raw_value_without_changing_category_or_total_rows():
+    job = _job()
+    result = _result()
+    source = next(row for row in result['scoring'] if row['kpi_code'] == 'K1' and row['operator'] == 'O2 UK')
+    result['global_kpis'] = [{
+        **{key: source[key] for key in ('campaign', 'region', 'operator', 'dataset_type', 'kpi_code', 'kpi', 'category', 'kpi_type')},
+        'value': 1234.5, 'sample_count': 100, 'environment': 'All Environments',
+        'complete_coverage': True, 'missing_environments': [],
+    }]
+    rows = list(csv.DictReader(StringIO(export_scoring_csv(
+        job, result, 'scoring', 'expanded', environment='all',
+    ))))
+    global_row = next(row for row in rows if row['environment'] == 'Combined'
+                      and row['operator'] == 'O2 UK' and row['kpi_code'] == 'K1')
+    assert global_row['kpi_value'] == '1234.5'
+    assert global_row['score_points'] != global_row['kpi_value']
+    assert all(row['kpi_value'] == '' for row in rows if row['row_type'] in {'category', 'total'})
+
+
 def test_ppt_table_modes_include_bold_category_totals_and_keep_identical_charts():
     result = _result(missing={('O2 UK', 'K1')})
     presentations = [Presentation(BytesIO(export_scoring_powerpoint(
         _job(), result, TEMPLATE, table_mode=mode, environment='DriveCity',
     )))
                      for mode in ('expanded', 'summary')]
-    expanded, summary = [_comparison_matrices(presentation)[0] for presentation in presentations]
+    expanded, summary = [_comparison_matrices(presentation) for presentation in presentations]
+    expanded = expanded[1]
+    summary = summary[0]
+    assert [slide.shapes.title.text.split('\n')[0] for slide in presentations[0].slides
+            if slide.shapes.title and slide.shapes.title.text.startswith('Scoring Tables')] == [
+                'Scoring Tables — Summary', 'Scoring Tables — Expanded',
+            ]
     assert len(expanded.rows) == 32 + 7 + 2
     assert len(summary.rows) == 7 + 2
+    for table in (summary, expanded):
+        assert str(table.cell(0, 0).fill.fore_color.rgb) == 'E6F0F7'
+        category_cells = [row.cells[0] for row in list(table.rows)[1:-1]
+                          if row.cells[0].text and row.cells[0].text != 'TOTAL']
+        assert category_cells
+        assert all(str(cell.fill.fore_color.rgb) == 'E6F0F7' for cell in category_cells)
     assert all(summary.cell(index, 5).text_frame.paragraphs[0].font.bold for index in range(1, 8))
     assert all(summary.cell(index, 1).text.endswith(' total') for index in range(1, 8))
     assert expanded.cell(len(expanded.rows) - 1, 5).text == summary.cell(len(summary.rows) - 1, 5).text
@@ -84,7 +115,7 @@ def test_gap_placement_excludes_reference_and_preserves_score_and_gap_values(lay
     presentation = Presentation(BytesIO(export_scoring_powerpoint(
         job, _result(), TEMPLATE, gap_layout=layout, environment='DriveCity',
     )))
-    slide = next(slide for slide in presentation.slides if slide.shapes.title.text.split('\n')[0] == 'Scoring Table')
+    slide = next(slide for slide in presentation.slides if slide.shapes.title.text.split('\n')[0] == 'Scoring Tables — Expanded')
     table = next(shape.table for shape in slide.shapes if shape.has_table)
     if layout == 'end':
         headers = [cell.text for cell in table.rows[0].cells][5:]
@@ -145,9 +176,9 @@ def test_hiding_scoring_table_gaps_preserves_scores_and_gap_analysis(levels, lay
     )))
 
     scoring_slide_with = next(slide for slide in with_gaps.slides
-                              if slide.shapes.title.text.split('\n')[0] == 'Scoring Table')
+                              if slide.shapes.title.text.split('\n')[0] == 'Scoring Tables — Expanded')
     scoring_slide_without = next(slide for slide in without_gaps.slides
-                                 if slide.shapes.title.text.split('\n')[0] == 'Scoring Table')
+                                 if slide.shapes.title.text.split('\n')[0] == 'Scoring Tables — Expanded')
     table_with = next(shape.table for shape in scoring_slide_with.shapes if shape.has_table)
     table_without = next(shape.table for shape in scoring_slide_without.shapes if shape.has_table)
     operator_count = len({row['operator'] for row in result['scoring']})
@@ -186,17 +217,20 @@ def test_all_environment_ppt_finishes_each_full_block_aggregate_first(levels):
     result = _multi_environment_result()
     result.update({'aggregation_contract_version': 2, 'aggregation_levels': levels})
     presentation = Presentation(BytesIO(export_scoring_powerpoint(job, result, TEMPLATE, table_mode='summary')))
-    titles = [slide.shapes.title.text.split('\n')[0] for slide in presentation.slides][2:]
-    expected_block = ['Scoring & GAP Analysis — Best Network', 'Scoring Chart', 'Scoring Table',
-                      'GAP Analysis — All vs EE',
-                      'GAP Analysis — O2 UK vs EE' if len(levels) > 1 else 'GAP Analysis']
-    assert titles == expected_block * 3
-    for index, environment in enumerate(('All Environments', 'DriveCity', 'DriveConnectionroad')):
-        for slide in list(presentation.slides)[2 + index * 5:7 + index * 5]:
-            text = '\n'.join(shape.text for shape in slide.shapes if shape.has_text_frame)
-            assert f'Environment: {environment}' in text
+    titles = [slide.shapes.title.text.split('\n')[0] for slide in presentation.slides]
+    for environment in ('All Environments', 'DriveCity', 'DriveConnectionroad'):
+        assert f'Scoring & GAP Analysis — {environment}' in titles
+    assert titles.count('Scoring Tables — Summary') == 3
+    assert titles.count('Scoring Tables — Expanded') == 3
+    assert titles.count('Best Network Scoring') == 3
+    assert titles.count('Scoring Charts — Category Comparison') == 3
+    for slide in presentation.slides:
+        text = '\n'.join(shape.text for shape in slide.shapes if shape.has_text_frame)
+        if slide.shapes.title and slide.shapes.title.text.startswith('Scoring Tables'):
+            assert 'Environment:' in text
     selected = Presentation(BytesIO(export_scoring_powerpoint(job, result, TEMPLATE, environment='DriveCity')))
-    assert len(selected.slides) == 7
+    assert [slide.shapes.title.text.split('\n')[0] for slide in selected.slides].count('Scoring Tables — Summary') == 1
+    assert [slide.shapes.title.text.split('\n')[0] for slide in selected.slides].count('Scoring Tables — Expanded') == 1
     assert all('Environment: DriveCity' in slide.shapes.title.text for slide in list(selected.slides)[2:])
 
 
@@ -221,11 +255,11 @@ def test_ppt_kpi_type_column_colors_and_neutral_aggregates(mode, layout, show_ga
     checked_types = set()
     for slide in presentation.slides:
         title = slide.shapes.title.text.split('\n')[0]
-        if title != 'Scoring Table' and not title.startswith('GAP Analysis'):
+        if not title.startswith('Scoring Tables —') and not title.startswith('GAP Analysis'):
             continue
         table = next(shape.table for shape in slide.shapes if shape.has_table)
         type_column = next(i for i, cell in enumerate(table.rows[0].cells) if cell.text == 'Type of KPI')
-        if title == 'Scoring Table':
+        if title.startswith('Scoring Tables —'):
             assert type_column == 2
         for row in table.rows:
             cell = row.cells[type_column]
@@ -239,7 +273,7 @@ def test_ppt_kpi_type_column_colors_and_neutral_aggregates(mode, layout, show_ga
     if mode == 'expanded':
         assert checked_types == {'Reliable', 'Diff'}
     else:
-        assert checked_types == set()
+        assert checked_types == {'Reliable', 'Diff'}
 
 
 def test_ppt_score_numeric_font_uses_available_space_without_exceeding_cell_height():
@@ -248,8 +282,9 @@ def test_ppt_score_numeric_font_uses_available_space_without_exceeding_cell_heig
         presentation = Presentation(BytesIO(export_scoring_powerpoint(
             _job(), result, TEMPLATE, table_mode=mode, gap_layout='adjacent', environment='DriveCity',
         )))
+        desired = 'Scoring Tables — Summary' if mode == 'summary' else 'Scoring Tables — Expanded'
         table = next(shape.table for slide in presentation.slides
-                     if slide.shapes.title.text.split('\n')[0] == 'Scoring Table'
+                     if slide.shapes.title.text.split('\n')[0] == desired
                      for shape in slide.shapes if shape.has_table)
         font_sizes = []
         for row in list(table.rows)[3:]:

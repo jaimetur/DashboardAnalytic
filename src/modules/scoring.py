@@ -17,7 +17,7 @@ from src.modules.scoring_config import (
 
 # Semantic engine version only. Configuration identity is added to job versions
 # after the workspace snapshot has been supplied explicitly.
-METHOD_VERSION = 'campaign-gap-v4'
+METHOD_VERSION = 'campaign-gap-global-kpi-v5'
 AGGREGATION_CONTRACT_VERSION = 2
 _SHARED = ['Operator', 'Campaign', 'G_Level_1', 'G_Level_2']
 _LEVEL_SOURCE_ALIASES = {
@@ -273,6 +273,7 @@ def calculate_scoring(
     keys = [_key_name(field) for field in group_fields]
     warnings = []
     rows = []
+    global_kpis = []
     normalized_operator_mappings = {
         str(alias).strip().casefold(): str(canonical).strip()
         for alias, canonical in (operator_mappings or {}).items()
@@ -316,11 +317,24 @@ def calculate_scoring(
             warnings.append(f'{kind.title()}: missing grouping columns: {", ".join(missing_group)}; no scores calculated.')
             continue
         frame['environment'] = None
+        environment_masks = {}
         for environment, context in config['scope']['environments'].items():
             mask = frame['G_Level_1'] == context['g_level_1']
             if 'g_level_2' in context:
                 mask &= frame['G_Level_2'] == context['g_level_2']
+            environment_masks[environment] = mask
             frame.loc[mask, 'environment'] = environment
+        # Preserve one pooled copy per source row, while remembering every
+        # matching selector so overlapping configured environments cannot
+        # inflate a global raw KPI.
+        environment_names = list(environment_masks)
+        environment_match_arrays = [
+            mask.fillna(False).to_numpy(dtype=bool) for mask in environment_masks.values()
+        ]
+        frame['__matched_environments'] = [
+            tuple(name for name, matched in zip(environment_names, matches) if matched)
+            for matches in zip(*environment_match_arrays)
+        ]
         valid = frame['environment'].notna() & frame['Operator'].notna()
         if campaign_selected:
             valid &= frame['Campaign'].notna()
@@ -341,6 +355,39 @@ def calculate_scoring(
                              'dataset_type': kind.title(), 'kpi_type': metric.get('kpi_type'),
                              'unit': metric.get('unit'), 'value': value, 'sample_count': count, 'score': None,
                              'weighted_points': None, 'max_points': context['max_points']})
+        global_valid = frame['__matched_environments'].map(bool) & frame['Operator'].notna()
+        if campaign_selected:
+            global_valid &= frame['Campaign'].notna()
+        global_group_fields = [field for field in group_fields if field != 'environment']
+        global_keys = [_key_name(field) for field in global_group_fields]
+        for values, group in frame[global_valid].groupby(global_group_fields, dropna=False, sort=False):
+            metadata = dict(zip(global_keys, values if isinstance(values, tuple) else (values,)))
+            metadata = {key: (None if pd.isna(value) else value) for key, value in metadata.items()}
+            for metric in (m for m in metrics if m['source_kind'] == kind):
+                try:
+                    value, count = _aggregate(group, metric)
+                except KeyError as error:
+                    value, count = None, 0
+                    warnings.append(f'{kind.title()}: {metric["code"]} requires missing column {error.args[0]}.')
+                expected_environments = [
+                    name for name in config['scope']['environments'] if name in metric['contexts']
+                ]
+                covered_environments = []
+                for environment in expected_environments:
+                    environment_group = group[group['__matched_environments'].map(lambda names: environment in names)]
+                    try:
+                        environment_value, _ = _aggregate(environment_group, metric)
+                    except KeyError:
+                        environment_value = None
+                    if environment_value is not None:
+                        covered_environments.append(environment)
+                missing_environments = [name for name in expected_environments if name not in covered_environments]
+                global_kpis.append({**metadata, 'environment': 'All Environments', 'kpi_code': metric['code'],
+                                    'kpi': metric['kpi'], 'category': metric['category'],
+                                    'dataset_type': kind.title(), 'kpi_type': metric.get('kpi_type'),
+                                    'unit': metric.get('unit'), 'value': value, 'sample_count': count,
+                                    'complete_coverage': value is not None and not missing_environments,
+                                    'missing_environments': missing_environments})
     for row in rows:
         if row['value'] is None:
             continue
@@ -390,7 +437,8 @@ def calculate_scoring(
                                'baseline_points': baseline['weighted_points'], 'operator_points': row['weighted_points'],
                                'gap_points': row['weighted_points'] - baseline['weighted_points'] if complete else None,
                                'complete_coverage': complete})
-    return {'scoring': rows, 'totals': totals, 'charts': [dict(row) for row in totals], 'gap': gap,
+    return {'scoring': rows, 'global_kpis': global_kpis,
+            'totals': totals, 'charts': [dict(row) for row in totals], 'gap': gap,
             'gap_totals': gap_totals, 'warnings': list(dict.fromkeys(warnings)),
             'aggregation_levels': dimensions,
             'aggregation_contract_version': AGGREGATION_CONTRACT_VERSION,

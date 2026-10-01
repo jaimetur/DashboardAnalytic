@@ -101,6 +101,20 @@ def add_complete_scoring_sources(repository: Repository, prefix: str = 'Scoped')
 
 def test_scoring_jobs_persist_results_and_reuse_completed_cache(repository, scoring_engine):
     _engine, calls = scoring_engine
+    global_kpi = {
+        'campaign': '2026-Q2', 'region': 'North', 'operator': 'EE',
+        'kpi_code': 'C5', 'kpi': 'CALL SUCCESS RATIO [%]', 'category': 'CLASSIC CALLS',
+        'kpi_type': 'Reliable', 'value': 98.75, 'sample_count': 12,
+        'environment': 'All Environments', 'complete_coverage': True, 'missing_environments': [],
+    }
+    original_calculate = _engine.calculate_scoring
+
+    def calculate_with_global_kpis(*args, **kwargs):
+        result = original_calculate(*args, **kwargs)
+        result['global_kpis'] = [global_kpi]
+        return result
+
+    _engine.calculate_scoring = calculate_with_global_kpis
     dataset_id = add_dataset(repository)
 
     job, reused = scoring_jobs.create_scoring_job(
@@ -119,6 +133,9 @@ def test_scoring_jobs_persist_results_and_reuse_completed_cache(repository, scor
     completed = scoring_jobs.run_scoring_job(repository, job['id'])
     assert completed['status'] == 'completed'
     assert completed['result']['scoring'] == [{'Operator': 'EE', 'Score': 4}]
+    assert completed['result']['global_kpis'] == [global_kpi]
+    reloaded = scoring_jobs.get_scoring_job(repository, job['id'], include_result=True)
+    assert reloaded['result']['global_kpis'] == [global_kpi]
     assert len(calls) == 1
     loaded_frames, levels, baseline = calls[0]
     assert levels == ['Operator', 'Region', 'City']

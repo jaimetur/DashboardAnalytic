@@ -249,6 +249,35 @@ def test_campaign_is_optional_and_defaults_to_pooled_raw_rows():
     assert {row['campaign']: row['value'] for row in separated_rows} == {'2026Q2': 100, '2026Q3': 0}
     assert separated['aggregation_levels'] == ['Operator', 'Campaign']
     assert 'Campaigns are scored separately; the supplied Tableau Prep flow pools campaigns.' not in separated['warnings']
+    global_pooled = next(row for row in pooled['global_kpis'] if row['kpi_code'] == 'K1')
+    global_separated = {row['campaign']: row['value'] for row in separated['global_kpis'] if row['kpi_code'] == 'K1'}
+    assert global_pooled['environment'] == 'All Environments'
+    assert global_pooled['campaign'] is None
+    assert global_pooled['value'] == 50
+    assert global_separated == {'2026Q2': 100, '2026Q3': 0}
+
+
+def test_global_kpis_recalculate_ratios_and_medians_over_pooled_source_rows():
+    configuration = scoring_configuration()
+    k2 = next(metric for metric in configuration['metrics'] if metric['code'] == 'K2')
+    k2['calculation']['formula'] = 'MEDIAN(Call_Setup_Time)'
+    source = pd.concat([
+        frame([{'Session_Type': 'CALL', 'Call_Status': 'Completed', 'Call_Setup_Time': 2}]),
+        frame([{'Session_Type': 'CALL', 'Call_Status': 'Dropped', 'Call_Setup_Time': 100}], environment='Connectionroad'),
+        frame([{'Session_Type': 'CALL', 'Call_Status': 'Dropped', 'Call_Setup_Time': 10}], environment='Connectionroad'),
+    ], ignore_index=True)
+
+    result = calculate_scoring({'voice': source}, configuration=configuration)
+    global_rows = {row['kpi_code']: row for row in result['global_kpis']}
+
+    assert global_rows['K1']['value'] == pytest.approx(100 / 3)
+    assert global_rows['K2']['value'] == pytest.approx(10)
+    assert global_rows['K1']['sample_count'] == 3
+    assert all(row['environment'] != 'All Environments' for row in result['scoring'] + result['totals'])
+    overall = {row['environment']: row for row in result['totals'] if row['category'] == 'Overall'}
+    assert overall['Combined']['weighted_points'] == pytest.approx(
+        overall['DriveCity']['weighted_points'] + overall['DriveConnectionroad']['weighted_points']
+    )
 
 
 def test_k31_ifnull_packet_component_can_be_absent_but_sent_denominator_is_required():
@@ -363,6 +392,21 @@ def test_zero_weight_metrics_remain_visible_but_do_not_block_total_coverage():
     assert overall['DriveConnectionroad']['complete_coverage'] is True
     assert overall['Combined']['complete_coverage'] is True
     assert overall['Combined']['max_points'] == 200
+
+
+def test_global_raw_kpi_keeps_zero_weight_environment_coverage_separate():
+    configuration = scoring_configuration()
+    for metric_configuration in configuration['metrics']:
+        metric_configuration['contexts']['DriveConnectionroad']['max_points'] = 0
+    source = frame([{'Session_Type': 'CALL', 'Call_Status': 'Completed'}])
+
+    result = calculate_scoring({'voice': source}, configuration=configuration)
+    global_k1 = next(row for row in result['global_kpis'] if row['kpi_code'] == 'K1')
+
+    assert global_k1['value'] == 100
+    assert global_k1['sample_count'] == 1
+    assert global_k1['complete_coverage'] is False
+    assert global_k1['missing_environments'] == ['DriveConnectionroad', 'Walk']
 
 
 def test_complete_city_road_coverage_combines_fixed_weights():

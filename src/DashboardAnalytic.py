@@ -14256,8 +14256,8 @@ def scoring_job_export(
             'Content-Disposition': f'attachment; filename="scoring-job-{job_id}-{export_kind}.csv"',
         })
     if export_kind == 'ppt':
-        from src.modules.scoring_exports import export_scoring_powerpoint, _campaigns_for_export
-        from src.modules.cdr_report_filenames import build_cdr_report_filename
+        from src.modules.scoring_exports import export_scoring_powerpoint
+        from src.modules.cdr_report_filenames import build_scoring_report_filename
         try:
             if not job.get('configuration') and not result.get('configuration'):
                 job['configuration'] = export_configuration or task_repository.get_scoring_configuration()
@@ -14269,14 +14269,8 @@ def scoring_job_export(
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        filters = job.get('context_filters') or {}
-        regions = filters.get('Region') or []
-        campaigns = _campaigns_for_export(job, result)
-        filename = build_cdr_report_filename(
-            datetime.now(), job.get('nr_mode') or 'NSA', 'Scoring & GAP Analysis',
-            'Multivendor Comparison' if 'Vendor' in job.get('aggregation_levels', []) else 'Operator Comparison',
-            ' + '.join(regions) if regions else 'All Regions',
-            '_vs_'.join(campaigns) if len(campaigns) > 1 else '',
+        filename = build_scoring_report_filename(
+            datetime.now(), job.get('nr_mode') or 'NSA', job.get('context_filters'),
         )
         disposition = f"attachment; filename*=UTF-8''{quote(filename)}"
         return Response(content, media_type='application/vnd.openxmlformats-officedocument.presentationml.presentation', headers={

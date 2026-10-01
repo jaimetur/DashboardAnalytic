@@ -66,6 +66,13 @@
   .scoring-job-item[aria-current="true"] { border-color: rgba(11,122,117,.58); background: rgba(11,122,117,.11); box-shadow: inset 3px 0 0 var(--brand); }
   .scoring-job-item-top { display: flex; justify-content: space-between; align-items: center; gap: .6rem; min-width: 0; }
   .scoring-job-item-top strong { flex: 1 1 auto; min-width: 0; overflow: hidden; font-size: .83rem; text-overflow: ellipsis; white-space: nowrap; }
+  .scoring-job-title-separator, .scoring-job-title-neutral { color: var(--text); }
+  .scoring-job-title-nr-mode { color: #a14c16; }
+  .scoring-job-title-operator { color: #2458a6; }
+  .scoring-job-title-vendor { color: #6941a5; }
+  .scoring-job-title-region { color: #087e75; }
+  .scoring-job-title-city { color: #966300; }
+  .scoring-job-title-campaign { color: #b4234d; }
   .scoring-job-item-top .scoring-status { flex: 0 0 auto; }
   .scoring-job-meta { min-width: 0; color: var(--muted); font-size: .72rem; line-height: 1.45; white-space: normal; overflow-wrap: anywhere; }
   .scoring-status { display: inline-flex; align-items: center; gap: .3rem; padding: .2rem .48rem; border-radius: 999px; background: #e9eff1; color: #47606b; font-size: .68rem; font-weight: 800; text-transform: capitalize; white-space: nowrap; }
@@ -111,6 +118,7 @@
   .scoring-result-pane[hidden] { display: none; }
   .scoring-table-wrap { max-height: none; overflow-x: auto; overflow-y: visible; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.72); }
   .scoring-table-section-title { margin: .75rem 0 .45rem; color: #245e5a; font-size: .86rem; }
+  .scoring-table-mode-section + .scoring-table-mode-section { margin-top: 1.25rem; }
   .scoring-table-section + .scoring-table-section-title { margin-top: 1.1rem; }
   .scoring-table-wrap table { width: 100%; border-collapse: collapse; font-size: .78rem; }
   .scoring-table-wrap th, .scoring-table-wrap td { padding: .58rem .68rem; border-bottom: 1px solid rgba(25,42,53,.08); text-align: left; white-space: nowrap; }
@@ -164,12 +172,13 @@
   .scoring-comparison-table tbody tr:nth-child(even) td[data-column="weight"] { background-color: #e4eee1; }
   .scoring-comparison-table tbody tr:nth-child(even) td[data-column="maximum"] { background-color: #f9dddd; }
   .scoring-comparison-table tbody tr.scoring-category-subtotal > td { background-color: #e3e6e7 !important; font-weight: 700 !important; }
-  .scoring-comparison-table tbody tr:nth-child(even) td.scoring-category-cell { background-color: #e9edef; }
+  .scoring-comparison-table tbody tr > td.scoring-category-cell { background-color: #E6F0F7 !important; color: #334854; }
+  .scoring-comparison-table tbody tr:nth-child(even) td.scoring-category-cell { background-color: #E6F0F7 !important; }
   .scoring-comparison-table td.scoring-gap-loss { color: #a43d2f; font-weight: 750; }
   .scoring-comparison-table td.scoring-gap-gain { color: #247048; font-weight: 750; }
   .scoring-comparison-table td.scoring-total-partial { color: #64747b; }
   .scoring-comparison-table tfoot th, .scoring-comparison-table tfoot td { position: static; background: #e6eaeb; color: #203744; font-weight: 850; border-top: 2px solid #9eaaae !important; }
-  .scoring-priority-table td[data-column="category"] { background: #0084ff !important; color: #fff !important; font-weight: 800; }
+  .scoring-priority-table td[data-column="category"] { background: #E6F0F7 !important; color: #334854 !important; font-weight: 800; }
   .scoring-priority-table td[data-column="gap"] { background: #fff5a6; font-weight: 800; text-align: center !important; }
   .scoring-comparison-table td[data-column="type"][data-kpi-type="reliable"] { background: #d8efca !important; color: #286a35; font-weight: 750; }
   .scoring-comparison-table td[data-column="type"][data-kpi-type="diff"] { background: #fff2cc !important; color: #684b0d; font-weight: 750; }
@@ -353,12 +362,6 @@
             <label class="scoring-environment-filter" data-result-environment-control hidden>Environment
               <select data-result-environment aria-label="Filter scoring tables, charts and GAP analysis by environment; defaults to all environments"></select>
             </label>
-            <label class="scoring-environment-filter">Results mode
-              <select data-scoring-table-mode aria-label="Choose expanded KPI rows or one summary row per category">
-                <option value="expanded" selected>Expanded</option>
-                <option value="summary">Summary</option>
-              </select>
-            </label>
           </div>
           <div class="scoring-results-value-row" data-scoring-results-value-row>
             <label class="scoring-kpi-values-toggle"><input type="checkbox" data-show-kpi-values> Show KPI values</label>
@@ -378,9 +381,9 @@
         </div>
       </div>
       <div class="scoring-result-tabs" role="tablist" aria-label="Scoring outputs">
-        <button type="button" class="scoring-result-tab" role="tab" aria-selected="true" aria-controls="scoring-table-pane" data-result-tab="scoring">Scoring Table</button>
+        <button type="button" class="scoring-result-tab" role="tab" aria-selected="true" aria-controls="scoring-table-pane" data-result-tab="scoring">Scoring Tables</button>
         <button type="button" class="scoring-result-tab" role="tab" aria-selected="false" aria-controls="scoring-gap-pane" data-result-tab="gap">GAP Analysis</button>
-        <button type="button" class="scoring-result-tab" role="tab" aria-selected="false" aria-controls="scoring-chart-pane" data-result-tab="charts">Scoring Chart</button>
+        <button type="button" class="scoring-result-tab" role="tab" aria-selected="false" aria-controls="scoring-chart-pane" data-result-tab="charts">Scoring Charts</button>
         <button type="button" class="scoring-result-tab" role="tab" aria-selected="false" aria-controls="scoring-best-network-pane" data-result-tab="best-network">Best Network Chart</button>
       </div>
       <div class="scoring-result-pane" id="scoring-table-pane" role="tabpanel" data-result-pane="scoring"><div class="scoring-empty">No scoring table is selected.</div></div>

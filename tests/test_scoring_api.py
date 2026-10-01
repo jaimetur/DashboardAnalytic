@@ -142,7 +142,9 @@ def test_scoring_page_requires_login_and_renders_workspace_controls(client, scor
     assert 'Operator is required' in page.text
     assert 'data-calculate-scoring' in page.text
     assert 'data-recalculate-scoring' in page.text
-    assert 'Scoring Table' in page.text and 'Scoring Tables' not in page.text and 'Scoring Chart' in page.text and 'GAP Analysis' in page.text
+    assert 'data-result-tab="scoring">Scoring Tables</button>' in page.text
+    assert 'data-result-tab="charts">Scoring Charts</button>' in page.text
+    assert 'GAP Analysis' in page.text
     assert 'Best Network Chart' in page.text
 
 
@@ -598,6 +600,73 @@ def test_scoring_job_results_cache_force_and_exports(scoring_api):
     assert forced.json()['job']['id'] != job_id
     assert forced.json()['cached'] is False
     assert len(scoring_api['submitted']) == 2
+
+
+def test_global_raw_kpis_survive_job_reload_api_get_and_csv_export(scoring_api, monkeypatch):
+    client = scoring_api['client']
+    repository = scoring_api['repository']
+    engine = scoring_jobs._scoring_engine()
+    original_calculate = engine.calculate_scoring
+    metric = repository.get_scoring_configuration()['metrics'][0]
+    global_kpi = {
+        'campaign': '2026-Q2', 'region': 'North', 'city': 'Leeds', 'vendor': 'Nokia',
+        'dataset_type': 'voice', 'operator': 'EE', 'kpi_code': metric['code'],
+        'kpi': metric['kpi'], 'category': metric['category'],
+        'kpi_type': metric['kpi_type'], 'unit': '%', 'value': 98.75, 'sample_count': 12,
+        'environment': 'All Environments', 'complete_coverage': True, 'missing_environments': [],
+    }
+
+    def calculate_with_global_kpis(frames, levels, *, baseline_operator, configuration=None):
+        result = original_calculate(
+            frames, levels, baseline_operator=baseline_operator, configuration=configuration,
+        )
+        result['global_kpis'] = [global_kpi]
+        return result
+
+    monkeypatch.setattr(engine, 'calculate_scoring', calculate_with_global_kpis)
+    payload = {
+        'dataset_ids': scoring_api['complete_dataset_ids'],
+        'aggregation_levels': ['Operator', 'Region'],
+        'nr_mode': 'NSA', 'baseline_operator': 'EE',
+    }
+    created = client.post('/api/scoring/jobs', json=payload)
+    assert created.status_code == 200, created.text
+    job_id = created.json()['job']['id']
+    completed = scoring_jobs.run_scoring_job(repository, job_id)
+    assert completed['status'] == 'completed'
+    persisted = scoring_jobs.get_scoring_job(repository, job_id, include_result=True)
+    assert persisted['result']['global_kpis'] == [global_kpi]
+
+    response = client.get(f'/api/scoring/jobs/{job_id}')
+    assert response.status_code == 200, response.text
+    api_result = response.json()
+    assert api_result['global_kpis'] == [global_kpi]
+    assert api_result['scoring'] == persisted['result']['scoring']
+    assert api_result['charts'] == persisted['result']['charts']
+
+    csv_response = client.get(f'/scoring/jobs/{job_id}/export/scoring?table_mode=expanded&environment=all')
+    assert csv_response.status_code == 200, csv_response.text
+    exported_rows = list(csv.DictReader(StringIO(csv_response.content.decode('utf-8-sig'))))
+    global_row = next((row for row in exported_rows if (
+        row['operator'] == 'EE' and row['kpi_code'] == metric['code'] and row['kpi_value'] == '98.75'
+    )), None)
+    assert global_row, [row for row in exported_rows if row['kpi_code'] == metric['code']][:8]
+    assert global_row['kpi_value'] == '98.75'
+
+    from src.modules.scoring_exports import export_scoring_csv
+
+    without_global_kpis = deepcopy(persisted['result'])
+    without_global_kpis.pop('global_kpis')
+    job_metadata = scoring_jobs.get_scoring_job(repository, job_id)
+    baseline_rows = list(csv.DictReader(StringIO(export_scoring_csv(
+        job_metadata, without_global_kpis, 'scoring', 'expanded', environment='all',
+    ))))
+    score_signature = lambda rows: sorted(
+        (row['environment'], row['region'], row['city'], row['campaign'],
+         row['kpi_code'], row['row_type'], row['score_points'])
+        for row in rows
+    )
+    assert score_signature(exported_rows) == score_signature(baseline_rows)
 
 
 def test_scoring_ppt_export_normalizes_legacy_gap_without_mutating_saved_result(scoring_api, monkeypatch):

@@ -10,7 +10,7 @@ from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.util import Inches
 
-from src.modules.scoring_exports import _hierarchy_chart_color, export_scoring_powerpoint
+from src.modules.scoring_exports import _cell, _hierarchy_chart_color, export_scoring_powerpoint
 from src.modules.scoring_views import THRESHOLD_COLORS, build_scoring_views
 from tests.scoring_fixtures import scoring_configuration
 
@@ -180,10 +180,25 @@ def _assert_sparse_series_values(series, expected_values):
 
 
 def _assert_gray_category_row(table, row_index):
-    assert all(
-        str(table.cell(row_index, column).fill.fore_color.rgb).upper() == CATEGORY_SUBTOTAL_FILL
-        for column in range(len(table.columns))
-    )
+    assert str(table.cell(row_index, 0).fill.fore_color.rgb).upper() == 'E6F0F7'
+    assert all(str(table.cell(row_index, column).fill.fore_color.rgb).upper() == CATEGORY_SUBTOTAL_FILL
+               for column in range(1, len(table.columns)))
+
+
+def test_table_cell_border_markup_is_unique_and_schema_ordered_when_reused():
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    table = slide.shapes.add_table(1, 1, Inches(1), Inches(1), Inches(2), Inches(1)).table
+    cell = table.cell(0, 0)
+    _cell(cell, 'first')
+    _cell(cell, 'second', color='#E6F0F7')
+    properties = cell._tc.get_or_add_tcPr()
+    tags = [child.tag.rsplit('}', 1)[-1] for child in properties]
+    for edge in ('lnL', 'lnR', 'lnT', 'lnB'):
+        assert tags.count(edge) == 1
+    fill_index = next(index for index, tag in enumerate(tags) if tag.endswith('Fill'))
+    assert [tags.index(edge) for edge in ('lnL', 'lnR', 'lnT', 'lnB')] == [0, 1, 2, 3]
+    assert fill_index > tags.index('lnB')
 
 
 def _assert_category_shade_bar(chart_group, chart_shape, categories):
@@ -234,8 +249,8 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
 
     assert presentation.slide_width == source.slide_width
     assert presentation.slide_height == source.slide_height
-    assert len(matrices) == 1
-    table = matrices[0]
+    assert len(matrices) == 2
+    table = matrices[-1]
     headers = _normalized_headers(table)
     assert headers[:5] == ['NETCHECK KPIs', 'KPI', 'Type of KPI', 'Score weight (%)', 'Max score']
     operator_columns = _operator_columns(table)
@@ -301,20 +316,25 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
         assert _rgb(gap_table.cell(reliable_rows[0], 3)) == THRESHOLD_COLORS['High'].lstrip('#')
 
     titles = [slide.shapes.title.text.split('\n')[0] for slide in presentation.slides]
-    assert titles[:2] == ['Scoring & GAP Analysis', 'Scoring & GAP Analysis']
-    assert titles[2:6] == [
-        'Scoring & GAP Analysis — Best Network', 'Scoring Chart', 'Scoring Table',
-        'GAP Analysis — All vs EE',
+    assert titles[:2] == ['Scoring & GAP Analysis', 'Scoring & GAP Analysis — DriveCity']
+    assert titles[2:7] == [
+        'Best Network Scoring — Voice and Data', 'Best Network Scoring',
+        'Scoring Charts — Category Comparison', 'Scoring Tables — Summary', 'Scoring Tables — Expanded',
     ]
-    assert all(title == 'GAP Analysis' for title in titles[6:])
-    assert len(titles[6:]) == 3
+    assert titles[7] == 'GAP Analysis — All vs EE'
+    assert all(title.startswith('GAP Analysis') for title in titles[7:])
+    for slide in presentation.slides:
+        if slide.shapes.title.text.startswith('GAP Analysis') and any(shape.has_table for shape in slide.shapes):
+            assert sum(shape.name.startswith('GAP Color Scale Segment ') for shape in slide.shapes) == 24
+            assert 'GAP color scale' in _slide_text(slide)
+    assert len(titles[7:]) == 4
     intro_slides = [presentation.slides[index] for index in range(2)]
     assert [slide.slide_layout.name for slide in intro_slides] == ['Title Page', 'Title Only']
-    cover_text = _slide_text(presentation.slides[0])
-    transition_text = _slide_text(presentation.slides[1])
-    expected_filter_text = 'NR Mode: NSA · Aggregation: Operator · Baseline: EE'
+    cover_text = _slide_text(presentation.slides[0]).replace('\x0b', '\n')
+    transition_text = _slide_text(presentation.slides[1]).replace('\x0b', '\n')
+    expected_filter_text = 'Non-Standalone\nAggregation: Operator\nOperator: All Operators\nVendor: All Vendors\nRegion: All Regions\nCity: All Cities'
     assert expected_filter_text in cover_text
-    assert expected_filter_text in transition_text
+    assert expected_filter_text in transition_text.replace(' · Environment: DriveCity', '')
     assert 'Campaigns: UK_Q2_2026' in cover_text
     assert 'Campaigns: UK_Q2_2026' in transition_text
     assert next(shape for shape in presentation.slides[0].shapes if shape.name == 'Scoring Campaigns').top > Inches(5.66)
@@ -326,7 +346,7 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
         ['Category', 'NETCHECK KPIs', 'Type of KPI',
          *[f'{operator} − EE' for operator in summary_view['operators']]],
     )
-    assert summary_slide is presentation.slides[5]
+    assert presentation.slides.index(summary_slide) == 7
     assert len(summary_table.rows) == len(summary_view['expanded_rows']) + 2
     assert len(summary_table.columns) == len(summary_view['operators']) + 3
     assert [summary_table.cell(row, 1).text for row in range(1, len(summary_table.rows) - 1)] == [
@@ -334,7 +354,8 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     ]
     for row_index, row in enumerate(summary_view['expanded_rows'], 1):
         if row.get('row_type') == 'category':
-            _assert_gray_category_row(summary_table, row_index)
+            assert all(_rgb(summary_table.cell(row_index, column)) == CATEGORY_SUBTOTAL_FILL
+                       for column in range(len(summary_table.columns)))
         for operator_index, operator in enumerate(summary_view['operators'], 3):
             expected = row['gaps'][operator]
             cell = summary_table.cell(row_index, operator_index)
@@ -357,7 +378,7 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
             assert float(cell.text) == pytest.approx(expected, abs=.0051)
 
     chart_shapes = [chart for slide in presentation.slides for chart in _charts_on_slide(slide)]
-    assert len(chart_shapes) == 3
+    assert len(chart_shapes) == 5
     best_network_chart = chart_shapes[0]
     assert best_network_chart.chart_type == XL_CHART_TYPE.COLUMN_STACKED
     assert best_network_chart.has_legend
@@ -406,13 +427,19 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
         'E6A81D', '176E77',
     ]
     best_network_slide = next(slide for slide in presentation.slides
-                              if slide.shapes.title.text.split('\n')[0] == 'Scoring & GAP Analysis — Best Network')
+                              if slide.shapes.title.text.split('\n')[0] == 'Best Network Scoring — Voice and Data')
     best_network_text = _slide_text(best_network_slide)
     assert '650.00' in best_network_text and 'pts' in best_network_text
     assert 'Configured maximum' not in best_network_text
     assert 'Available totals:' not in best_network_text
     assert 'Voice: lighter operator color' not in best_network_text
-    chart = chart_shapes[2]
+    stacked_chart = chart_shapes[2]
+    assert stacked_chart.chart_type == XL_CHART_TYPE.COLUMN_STACKED
+    assert _legend_visible_series_names(stacked_chart) == list(MAPPED_OPERATOR_ORDER)
+    assert stacked_chart.plots[0].categories.depth == 1
+    assert len([shape for slide in presentation.slides for shape in _nested_shapes(slide.shapes)
+                if shape.name == 'Scoring Chart Category Shade Key']) == 1
+    chart = chart_shapes[4]
     assert chart.chart_type == XL_CHART_TYPE.COLUMN_CLUSTERED
     categories = [category.label for category in chart.plots[0].categories]
     assert categories == list(dict.fromkeys(metric['category'] for metric in METRICS))
@@ -426,11 +453,22 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     assert chart.legend.position == XL_LEGEND_POSITION.TOP
     assert chart.legend.include_in_layout is False
     assert chart.value_axis.maximum_scale > max(value for series in chart.series for value in series.values if value is not None)
-    flat_chart_slide = next(slide for slide, title in zip(presentation.slides, titles) if title == 'Scoring Chart')
+    flat_chart_slide = next(slide for slide, title in zip(presentation.slides, titles)
+                            if title == 'Best Network Scoring')
     flat_chart_group = next(shape for shape in flat_chart_slide.shapes
-                            if shape.name == 'Scoring Chart With Category Key')
+                            if shape.name == 'Scoring Stacked Operator Chart')
     flat_chart_shape = next(shape for shape in flat_chart_group.shapes if shape.has_chart)
     _assert_category_shade_bar(flat_chart_group, flat_chart_shape, categories)
+    clustered_slide = next(slide for slide, title in zip(presentation.slides, titles)
+                           if title == 'Scoring Charts — Category Comparison')
+    assert not any(shape.name == 'Scoring Chart Category Shade Key' for shape in _nested_shapes(clustered_slide.shapes))
+    category_donut = chart_shapes[3]
+    assert category_donut.chart_type == XL_CHART_TYPE.DOUGHNUT
+    assert list(category_donut.series[0].values) == pytest.approx(expected_family_maximums)
+    total_line = stacked_chart._chartSpace.xpath('.//c:lineChart/c:ser')[0]
+    assert total_line.xpath('.//c:tx//c:v')[0].text == 'TOTAL SCORE'
+    assert stacked_chart._chartSpace.xpath('.//c:lineChart/c:dLbls/c:dLblPos/@val') == ['t']
+    assert stacked_chart._chartSpace.xpath('.//c:lineChart/c:dLbls/c:txPr//a:defRPr/@b') == ['1']
     reference_bottom = table.cell(0, operator_columns['EE'])._tc.get_or_add_tcPr().find('{http://schemas.openxmlformats.org/drawingml/2006/main}lnB')
     assert int(reference_bottom.get('w')) > 4500
     assert reference_bottom.find('.//{http://schemas.openxmlformats.org/drawingml/2006/main}srgbClr').get('val') == \
@@ -457,23 +495,26 @@ def test_powerpoint_keeps_many_operators_in_one_comparison_table():
     presentation = _export(result, operator_mapping_groups=groups)
     matrices = _comparison_matrices(presentation)
 
-    assert len(matrices) == 1
+    assert len(matrices) == 2
     counts = Counter()
     for table in matrices:
         operator_columns = _operator_columns(table)
         assert len(operator_columns) == len(operators)
         assert 'EE' in operator_columns
-        assert len(table.rows) == len(METRICS) + len({metric['category'] for metric in METRICS}) + 2
+        expected_row_count = (len(METRICS) + len({metric['category'] for metric in METRICS}) + 2
+                             if table is matrices[-1] else len({metric['category'] for metric in METRICS}) + 2)
+        assert len(table.rows) == expected_row_count
         assert {operator: _rgb(table.cell(0, column)) for operator, column in operator_columns.items()} == {
             operator: colors[operator].lstrip('#').upper() for operator in operator_columns
         }
         counts.update(operator_columns.keys())
     assert counts['EE'] == len(matrices)
     assert {name for name in counts if name != 'EE'} == set(peers)
-    assert all(counts[name] == 1 for name in peers)
-    assert [name for name in mapped_order if name != 'EE'] == [
-        name for table in matrices for name in _operator_columns(table) if name != 'EE'
-    ]
+    assert all(counts[name] == 2 for name in peers)
+    for table in matrices:
+        assert [name for name in _operator_columns(table) if name != 'EE'] == [
+            name for name in mapped_order if name != 'EE'
+        ]
     charts = [shape.chart for slide in presentation.slides for shape in _nested_shapes(slide.shapes) if shape.has_chart]
     scoring_charts = [chart for chart in charts if chart.chart_type == XL_CHART_TYPE.COLUMN_CLUSTERED]
     assert len(scoring_charts) == 1
@@ -507,8 +548,9 @@ def test_cover_campaigns_prefer_scored_contexts_and_include_context_filters():
     }
     presentation = _export(result, levels=('Operator',), job_fields=job_fields)
     for slide in (presentation.slides[index] for index in range(2)):
-        text = _slide_text(slide)
-        assert 'NR Mode: SA · Aggregation: Operator, City · Baseline: EE · City = London' in text
+        text = _slide_text(slide).replace('\x0b', '\n')
+        assert 'Standalone' in text and 'Aggregation: Operator, City' in text
+        assert 'City: London' in text
         assert 'Campaigns: UK_Q2_2026' in text
         assert 'Wrong_source_campaign' not in text
 
@@ -528,14 +570,14 @@ def test_intro_slides_show_all_canonical_scope_filters_without_overlapping_campa
         slide = presentation.slides[index]
         text = _slide_text(slide)
         assert 'Region: North, South' in text
-        assert 'City: All' in text
+        assert 'City: All Cities' in text
         assert 'Operator: O2 UK' in text
-        assert 'Vendor: All' in text
-        assert 'Campaign: UK_Q2_2026, UK_Q3_2026' in text
+        assert 'Vendor: All Vendors' in text
+        assert 'Campaign: UK_Q2_2026, UK_Q3_2026' not in text
         assert 'Campaigns: UK_Q2_2026' in text
         ordered_labels = [
-            'Operator: O2 UK', 'Vendor: All', 'Region: North, South', 'City: All',
-            'Campaign: UK_Q2_2026, UK_Q3_2026',
+            'Aggregation: Operator', 'Operator: O2 UK', 'Vendor: All Vendors',
+            'Region: North, South', 'City: All Cities',
         ]
         assert [text.index(label) for label in ordered_labels] == sorted(
             text.index(label) for label in ordered_labels
@@ -545,17 +587,24 @@ def test_intro_slides_show_all_canonical_scope_filters_without_overlapping_campa
             subtitle_shape = next(
                 shape for shape in slide.placeholders if shape.placeholder_format.type == 4
             )
+            assert campaign_shape.top > Inches(5.77)  # Existing title-page divider.
+            assert subtitle_shape.top + subtitle_shape.height <= Inches(5.771)
+            mode_paragraph = subtitle_shape.text_frame.paragraphs[0]
         else:
             subtitle_shape = next(
                 shape for shape in slide.placeholders if shape.placeholder_format.type in {1, 3}
             )
+            divider = next(shape for shape in slide.shapes if shape.name == 'Scoring Campaign Divider')
+            assert divider.top + divider.height < campaign_shape.top
+            assert subtitle_shape.top + subtitle_shape.height <= divider.top
+            mode_paragraph = subtitle_shape.text_frame.paragraphs[1]
+        assert mode_paragraph.font.size.pt == 18
         assert subtitle_shape.left > 0
         assert subtitle_shape.top > 0
         assert subtitle_shape.width > Inches(9)
-        assert subtitle_shape.top + subtitle_shape.height <= campaign_shape.top
 
 
-def test_intro_scope_filters_follow_saved_aggregation_hierarchy_order():
+def test_intro_dimension_lines_keep_requested_order_independent_of_hierarchy_configuration():
     fields = ['Campaign', 'City', 'Vendor', 'Operator', 'Region']
     job_fields = {
         'aggregation_hierarchy': fields,
@@ -566,11 +615,11 @@ def test_intro_scope_filters_follow_saved_aggregation_hierarchy_order():
     }
     presentation = _export(_result(), job_fields=job_fields)
     expected = [
-        'Campaign: UK_Q2_2026', 'City: London', 'Vendor: Telefonica',
-        'Operator: O2 UK', 'Region: North',
+        'Aggregation: Operator', 'Operator: O2 UK', 'Vendor: Telefonica',
+        'Region: North', 'City: London',
     ]
     for index in (0, 1):
-        text = _slide_text(presentation.slides[index])
+        text = _slide_text(presentation.slides[index]).replace('\x0b', '\n')
         assert [text.index(label) for label in expected] == sorted(
             text.index(label) for label in expected
         )
@@ -608,11 +657,12 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
         },
     )
     titles = [slide.shapes.title.text.split('\n')[0] for slide in presentation.slides]
-    assert titles.count('Scoring Chart') == 1
+    assert titles.count('Best Network Scoring') == 1
+    assert titles.count('Scoring Charts — Category Comparison') == 1
     best_network_slide = next(slide for slide, title in zip(presentation.slides, titles)
-                              if title == 'Scoring & GAP Analysis — Best Network')
+                              if title == 'Best Network Scoring — Voice and Data')
     assert best_network_slide.shapes.title.text == \
-        'Scoring & GAP Analysis — Best Network\nEnvironment: DriveCity'
+        'Best Network Scoring — Voice and Data\nEnvironment: DriveCity'
     best_network_chart, donut = _charts_on_slide(best_network_slide)
     best_network_categories = best_network_chart.plots[0].categories
     assert best_network_categories.depth == 3
@@ -672,8 +722,9 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     assert 'Available totals:' not in best_network_text
     assert 'Voice: lighter operator color' not in best_network_text
 
-    chart_slide = next(slide for slide, title in zip(presentation.slides, titles) if title == 'Scoring Chart')
-    assert chart_slide.shapes.title.text == 'Scoring Chart\nEnvironment: DriveCity'
+    chart_slide = next(slide for slide, title in zip(presentation.slides, titles)
+                       if title == 'Best Network Scoring')
+    assert chart_slide.shapes.title.text == 'Best Network Scoring\nEnvironment: DriveCity'
     chart_group = next(shape for shape in chart_slide.shapes
                        if shape.name == 'Scoring Chart With Category Key')
     chart_shape = next(shape for shape in chart_group.shapes if shape.has_chart)
@@ -688,7 +739,7 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     assert all(not re.search(r'\b(?:Operator|Vendor|Region|City|Campaign):', label)
                for path in chart_paths for label in path)
     categories = list(dict.fromkeys(row['category'] for row in scoring_rows))
-    chart_series = {series.name: series for series in chart.series}
+    chart_series = {series.name: series for series in chart.plots[0].series}
     for operator in MAPPED_OPERATOR_ORDER:
         for category_index, category in enumerate(categories):
             name = operator if category_index == 0 else f'{operator} · {category}'
@@ -712,8 +763,8 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     assert _legend_visible_series_names(chart) == list(MAPPED_OPERATOR_ORDER)
     assert chart._chartSpace.xpath('.//c:barChart/c:ser/c:dPt') == []
     stacked_totals = [
-        sum(series.values[index] or 0 for series in chart.series)
-        for index in range(len(chart.series[0].values))
+        sum(series.values[index] or 0 for series in chart.plots[0].series)
+        for index in range(len(chart.plots[0].series[0].values))
     ]
     assert chart.value_axis.maximum_scale >= max(stacked_totals)
     for index, path in enumerate(chart_paths):
@@ -726,12 +777,18 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     assert not best_network_chart._chartSpace.xpath('.//a:ln//a:srgbClr[@val="FFFF00"]')
     assert not any(shape.name == 'Hierarchy Operator Legend' for shape in chart_slide.shapes)
     _assert_category_shade_bar(chart_group, chart_shape, categories)
-    score_slides = [slide for slide, title in zip(presentation.slides, titles) if title == 'Scoring Table']
+    assert len([shape for shape in chart_slide.shapes if shape.has_chart
+                and shape.chart.chart_type == XL_CHART_TYPE.DOUGHNUT]) == 1
+    hierarchy_total_line = chart._chartSpace.xpath('.//c:lineChart/c:ser')[0]
+    assert hierarchy_total_line.xpath('.//c:tx//c:v')[0].text == 'TOTAL SCORE'
+    assert chart._chartSpace.xpath('.//c:lineChart/c:dLbls/c:dLblPos/@val') == ['t']
+    assert chart._chartSpace.xpath('.//c:lineChart/c:dLbls/c:txPr//a:defRPr/@b') == ['1']
+    score_slides = [slide for slide, title in zip(presentation.slides, titles) if title.startswith('Scoring Tables —')]
     gap_slides = [slide for slide, title in zip(presentation.slides, titles)
                   if title.startswith('GAP Analysis —')]
     assert score_slides and gap_slides
-    assert len(score_slides) == 1
-    score_table = next(shape.table for shape in score_slides[0].shapes if shape.has_table)
+    assert len(score_slides) == 2
+    score_table = next(shape.table for shape in score_slides[-1].shapes if shape.has_table)
     assert len(score_table.rows) == 5 + len(METRICS) + len({metric['category'] for metric in METRICS}) + 1
     assert len(score_table.columns) == 5 + 15 + 12
     export_views = build_scoring_views(
@@ -773,7 +830,8 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     for table in all_gap_tables:
         for row_index, row in enumerate(export_views['hierarchy_gap_tables'][0]['expanded_rows'], 4):
             if row.get('row_type') == 'category':
-                _assert_gray_category_row(table, row_index)
+                assert all(_rgb(table.cell(row_index, column)) == CATEGORY_SUBTOTAL_FILL
+                           for column in range(len(table.columns)))
     assert not any(cell.text == 'EE' for table in all_gap_tables
                    for row in table.rows for cell in row.cells)
     assert len(individual_gap_slides) == 3
@@ -788,7 +846,7 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
         gap_header = operator_gap_table.rows[len(['Operator', 'Region', 'Campaign'])]
         assert all(cell.text == 'GAP' for cell in list(gap_header.cells)[3:])
     assert any(_charts_on_slide(slide) for slide, title in zip(presentation.slides, titles)
-               if title == 'Scoring Chart')
+               if title == 'Best Network Scoring')
     assert any(
         cell.is_merge_origin and cell.span_width > 1 and cell.text in MAPPED_OPERATOR_ORDER
         for slide in score_slides

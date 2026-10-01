@@ -98,6 +98,7 @@ def build_scoring_views(job: dict[str, Any] | None, result: dict[str, Any] | Non
 
     score_records = _records(result.get('scoring', result.get('score_rows', [])))
     total_records = _records(result.get('totals', result.get('charts', [])))
+    global_kpi_records = _records(result.get('global_kpis', []))
     context_records = score_records + total_records
     if not context_records:
         return {'score_tables': [], 'gap_tables': [], 'gap_summary_tables': [],
@@ -112,6 +113,10 @@ def build_scoring_views(job: dict[str, Any] | None, result: dict[str, Any] | Non
         environment = _canonical_environment(_field(record, 'environment'), configured_environments)
         contexts.setdefault(scope, {}).setdefault(environment, []).append(record)
         all_operators.setdefault(scope, set()).update(_operators_in(record))
+
+    global_kpis_by_scope: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+    for record in global_kpi_records:
+        global_kpis_by_scope.setdefault(_scope_key(record, include_dataset_type), []).append(record)
 
     score_tables: list[dict[str, Any]] = []
     gap_tables: list[dict[str, Any]] = []
@@ -132,7 +137,7 @@ def build_scoring_views(job: dict[str, Any] | None, result: dict[str, Any] | Non
                 context, operators, baseline_operator,
                 environment_records, combined_environments, include_dataset_type,
                 actual_environments, metrics, configuration, baseline_aliases,
-                gap_priority_rank,
+                gap_priority_rank, global_kpis_by_scope.get(scope, []),
             )
             table['operator_styles'] = styles
             score_tables.append(table)
@@ -482,6 +487,7 @@ def _build_score_table(
     include_dataset_type: bool, actual_environments: set[str],
     metrics: list[dict[str, Any]], configuration: dict[str, Any],
     baseline_aliases: list[str], gap_priority_rank: dict[str, int],
+    global_kpi_records: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     environment = context['environment']
     source_environments = combined_environments if environment == 'Combined' else [environment]
@@ -497,11 +503,19 @@ def _build_score_table(
     rows = []
     for code, metric in metric_specs:
         row_values: dict[str, dict[str, Any]] = {}
+        global_unit = None
         for operator in operators:
             if environment == 'Combined':
                 value = _combined_metric_value(
                     code, operator, environment_records, combined_environments, metric,
                 )
+                global_record = _find_global_kpi_record(
+                    code, operator, global_kpi_records or [],
+                )
+                if global_record is not None:
+                    value['value'] = _field(global_record, 'value', 'raw_value', 'kpi_value')
+                    if global_unit is None:
+                        global_unit = _field(global_record, 'unit', 'units', 'measurement_unit')
             else:
                 source = _find_metric_record(code, operator, environment_records.get(environment, []))
                 value = _metric_value(source, metric, environment)
@@ -524,6 +538,7 @@ def _build_score_table(
             'kpi': metric.get('kpi', _fallback_kpi_label(code)),
             'kpi_type': metric.get('kpi_type', 'Unknown'),
             'source_kind': _metric_source_kind(metric),
+            **({'unit': global_unit} if global_unit is not None else {}),
             'weight_percent': weight_percent,
             'max_points': maximum,
             'values': row_values,
@@ -1137,6 +1152,20 @@ def _find_metric_record(code: str, operator: str, records: list[dict[str, Any]])
         if row_code == code and row_operator == operator:
             found = record
     return found
+
+
+def _find_global_kpi_record(
+    code: str, operator: str, records: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Find a saved cross-environment raw KPI for this exact comparison context."""
+    for record in records:
+        environment = str(_field(record, 'environment') or '').strip().casefold()
+        if environment and environment not in {'all environments', 'combined'}:
+            continue
+        if _record_view_code(record) != code or _operator_name(record) != operator:
+            continue
+        return record
+    return None
 
 
 def _metrics_for_context(

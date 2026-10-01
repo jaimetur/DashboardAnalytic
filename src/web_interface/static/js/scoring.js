@@ -91,6 +91,10 @@
         jobId: typeof stored.job_id === 'string' && stored.job_id ? stored.job_id : null,
         resultTab: resultTabNames.has(stored.result_tab) ? stored.result_tab : null,
         scrollY: Number.isFinite(stored.scroll_y) && stored.scroll_y >= 0 ? stored.scroll_y : null,
+        environment: typeof stored.environment === 'string' && stored.environment ? stored.environment : 'all',
+        showKpiValues: stored.show_kpi_values === true,
+        showGapValues: stored.show_gap_values === true,
+        gapLayout: ['end', 'adjacent'].includes(stored.gap_layout) ? stored.gap_layout : 'end',
       };
     } catch (_error) {
       return {};
@@ -106,6 +110,10 @@
         job_id: selectedJobId,
         result_tab: activeResultTab,
         scroll_y: window.scrollY,
+        environment: selectedEnvironment,
+        show_kpi_values: Boolean(showKpiValuesToggle?.checked),
+        show_gap_values: showGapValues(),
+        gap_layout: selectedGapLayout(),
       }));
     } catch (_error) {
       // View state is optional when browser session storage is unavailable.
@@ -205,10 +213,11 @@
   const expandedChartClose = root.querySelector('[data-scoring-chart-close]');
   const showKpiValuesToggle = root.querySelector('[data-show-kpi-values]');
   const showGapValuesToggle = root.querySelector('[data-show-gap-values]');
-  const tableModeSelect = root.querySelector('[data-scoring-table-mode]');
   const gapLayoutSelect = root.querySelector('[data-scoring-gap-layout]');
   const gapLayoutControl = root.querySelector('[data-scoring-gap-layout-control]');
-  if (showGapValuesToggle) showGapValuesToggle.checked = false;
+  if (showKpiValuesToggle) showKpiValuesToggle.checked = restoredScoringViewState.showKpiValues === true;
+  if (showGapValuesToggle) showGapValuesToggle.checked = restoredScoringViewState.showGapValues === true;
+  if (gapLayoutSelect) gapLayoutSelect.value = restoredScoringViewState.gapLayout || 'end';
   const resultPanes = [...root.querySelectorAll('[data-result-pane]')];
   const resultCache = new Map();
   const contextSelections = new Map();
@@ -218,7 +227,7 @@
   let jobs = [];
   let selectedJobId = restoredScoringViewState.jobId;
   let selectedJob = null;
-  let selectedEnvironment = 'all';
+  let selectedEnvironment = restoredScoringViewState.environment || 'all';
   let currentEffectiveEnvironment = null;
   let currentResults = null;
   let currentResultsJobId = null;
@@ -702,6 +711,50 @@
     return [campaign || `${count || 'Selected'} CDR${count === 1 ? '' : 's'}`].filter(Boolean).join('');
   }
 
+  function jobCdrSummary(job) {
+    let names = valueOf(job, ['dataset_names', 'cdr_names', 'source_names'], null);
+    if (!Array.isArray(names) || !names.length) {
+      const metadata = job?.source_metadata;
+      const entries = Array.isArray(metadata) ? metadata : (metadata && typeof metadata === 'object' ? Object.values(metadata) : []);
+      names = entries.map(entry => firstValue(entry, ['name', 'dataset_name', 'cdr_name'], '')).filter(Boolean);
+    }
+    if (Array.isArray(names) && names.length) return uniqueCatalogueValues(names).join(', ');
+    const ids = valueOf(job, ['dataset_ids', 'cdr_ids'], []);
+    const count = Array.isArray(ids) ? ids.length : Number(valueOf(job, ['dataset_count'], 0));
+    return `${count || 'Selected'} CDR${count === 1 ? '' : 's'}`;
+  }
+
+  function savedJobFilterValues(job, key) {
+    for (const filters of [job?.context_filters, job?.resolved_context_filters]) {
+      if (!filters || typeof filters !== 'object') continue;
+      const value = firstValue(filters, [key], null);
+      if (value === null || value === undefined) continue;
+      const values = uniqueCatalogueValues(Array.isArray(value) ? value : [value]);
+      if (values.length) return values;
+    }
+    return [];
+  }
+
+  function jobCardTitleSegments(job) {
+    const filterValue = (key, fallback) => savedJobFilterValues(job, key).join(', ') || fallback;
+    const campaignFilter = savedJobFilterValues(job, 'Campaign');
+    const campaigns = campaignFilter.length ? campaignFilter : jobCampaigns(job).filter(value => value !== 'Unspecified');
+    const campaignValue = campaigns.length ? campaigns.join(', ') : 'All Campaigns';
+    return [
+      {dimension: 'neutral', value: formatDate(valueOf(job, ['created_at', 'submitted_at', 'started_at'], ''))},
+      {dimension: 'nr-mode', value: valueOf(job, ['nr_mode'], 'All NR Modes')},
+      {dimension: 'operator', value: filterValue('Operator', 'All Operators')},
+      {dimension: 'vendor', value: filterValue('Vendor', 'All Vendors')},
+      {dimension: 'region', value: filterValue('Region', 'All Regions')},
+      {dimension: 'city', value: filterValue('City', 'All Cities')},
+      {dimension: 'campaign', value: campaignValue},
+    ];
+  }
+
+  function jobCardTitle(job) {
+    return jobCardTitleSegments(job).map(segment => segment.value).join(' ● ');
+  }
+
   function campaignLabels(value) {
     const values = Array.isArray(value) ? value : [value];
     return values.flatMap(item => {
@@ -765,8 +818,23 @@
       const top = document.createElement('span');
       top.className = 'scoring-job-item-top';
       const title = document.createElement('strong');
-      title.textContent = jobSummary(job);
-      title.title = title.textContent;
+      const titleSegments = jobCardTitleSegments(job);
+      titleSegments.forEach((segment, index) => {
+        if (index) {
+          const separator = document.createElement('span');
+          separator.className = 'scoring-job-title-separator';
+          separator.dataset.dimension = 'neutral';
+          separator.textContent = ' ● ';
+          title.append(separator);
+        }
+        const value = document.createElement('span');
+        value.className = `scoring-job-title-segment scoring-job-title-${segment.dimension}`;
+        value.dataset.dimension = segment.dimension;
+        value.textContent = segment.value;
+        title.append(value);
+      });
+      title.setAttribute('aria-label', jobCardTitle(job));
+      title.title = jobCardTitle(job);
       const statusBadge = document.createElement('span');
       statusBadge.className = 'scoring-status';
       statusBadge.dataset.status = status;
@@ -775,10 +843,13 @@
       button.append(top);
       const meta = document.createElement('span');
       meta.className = 'scoring-job-meta';
-      const mode = valueOf(job, ['nr_mode'], 'All NR Modes');
       const baseline = valueOf(job, ['baseline_operator'], 'EE');
-      meta.textContent = `${formatDate(valueOf(job, ['created_at', 'submitted_at', 'started_at'], ''))} · ${jobLevels(job)} · ${mode} · GAP baseline ${baseline}`;
+      meta.textContent = `${jobLevels(job)} · GAP baseline ${baseline}`;
       button.append(meta);
+      const cdrMeta = document.createElement('span');
+      cdrMeta.className = 'scoring-job-meta';
+      cdrMeta.textContent = `CDRs: ${jobCdrSummary(job)}`;
+      button.append(cdrMeta);
       const profileName = valueOf(job, ['scoring_profile_name', 'profile_name'], '');
       if (profileName) {
         const profileMeta = document.createElement('span');
@@ -786,14 +857,6 @@
         profileMeta.textContent = `Scoring methodology: ${profileName}`;
         button.append(profileMeta);
       }
-      const campaignMeta = document.createElement('span');
-      campaignMeta.className = 'scoring-job-meta';
-      campaignMeta.textContent = `Campaigns: ${jobCampaigns(job).join(', ')}`;
-      button.append(campaignMeta);
-      const filterMeta = document.createElement('span');
-      filterMeta.className = 'scoring-job-meta';
-      filterMeta.textContent = `Context filters: ${contextFilterSummary(job)}`;
-      button.append(filterMeta);
       if (isActive(job)) {
         const progress = document.createElement('span');
         progress.className = 'scoring-job-progress';
@@ -838,7 +901,7 @@
   }
 
   function selectedTableMode() {
-    return tableModeSelect?.value === 'summary' ? 'summary' : 'expanded';
+    return 'expanded';
   }
 
   function selectedGapLayout() {
@@ -870,8 +933,11 @@
   }
 
   function tableForSelectedMode(tableData) {
+    return tableForMode(tableData, selectedTableMode());
+  }
+
+  function tableForMode(tableData, mode) {
     if (!tableData || typeof tableData !== 'object') return tableData;
-    const mode = selectedTableMode();
     const rowsKey = mode === 'summary' ? 'category_rows' : 'expanded_rows';
     const totalKey = mode === 'summary' ? 'category_total' : 'expanded_total';
     if (!Array.isArray(tableData[rowsKey])) return tableData;
@@ -879,6 +945,7 @@
       ? tableData[totalKey] : tableData.total;
     return {
       ...tableData,
+      _display_mode: mode,
       rows: tableData[rowsKey],
       total,
       ...(total && Object.hasOwn(total, 'gap_points') ? {total_gap_points: total.gap_points} : {}),
@@ -1366,7 +1433,7 @@
       if (title === 'Max score') th.className = 'scoring-maximum-header';
       header.append(th);
     }
-    const showKpiValues = Boolean(showKpiValuesToggle?.checked);
+    const showKpiValues = tableData?._display_mode !== 'summary' && Boolean(showKpiValuesToggle?.checked);
     if (showKpiValues && operators.length) {
       const group = document.createElement('th');
       group.scope = 'colgroup';
@@ -1506,13 +1573,16 @@
           const cell = document.createElement('td');
           cell.dataset.column = 'kpi-value';
           const operatorCell = operatorValue(values, operator);
-          const rawValue = operatorCell && typeof operatorCell === 'object' ? firstValue(operatorCell, ['value', 'raw_value', 'kpi_value'], null) : null;
+          const isCategoryRow = item?.row_type === 'category';
+          const rawValue = !isCategoryRow && operatorCell && typeof operatorCell === 'object'
+            ? firstValue(operatorCell, ['value', 'raw_value', 'kpi_value'], null) : null;
           const presentation = operatorPresentation(tableData, operator);
           const unit = firstValue(item, ['unit', 'units', 'measurement_unit'], '');
           cell.className = 'scoring-kpi-value-cell';
-          cell.textContent = formatRawKpiValue(rawValue);
+          cell.textContent = isCategoryRow ? '' : formatRawKpiValue(rawValue);
           cell.dataset.numeric = 'true';
-          cell.title = `Raw ${item?.kpi || item?.kpi_code || 'KPI'} measurement for ${presentation.label}${unit ? ` (${unit})` : ''}: ${formatRawKpiValue(rawValue)}`;
+          cell.title = isCategoryRow ? ''
+            : `Raw ${item?.kpi || item?.kpi_code || 'KPI'} measurement for ${presentation.label}${unit ? ` (${unit})` : ''}: ${formatRawKpiValue(rawValue)}`;
           tr.append(cell);
         }
       }
@@ -1791,7 +1861,7 @@
     const rows = Array.isArray(tableData?.rows) ? tableData.rows : [];
     const allColumns = hierarchyColumnEntries(tableData);
     const nonBaseline = allColumns.filter(column => !hierarchyColumnIsReference(column));
-    const showKpiValues = Boolean(showKpiValuesToggle?.checked);
+    const showKpiValues = tableData?._display_mode !== 'summary' && Boolean(showKpiValuesToggle?.checked);
     const showGaps = showGapValues();
     const gapLayout = showGaps ? selectedGapLayout() : 'end';
     const blocks = [
@@ -1857,14 +1927,17 @@
         for (const column of allColumns) {
           const cell = document.createElement('td');
           const operatorCell = operatorValue(values, column.id);
-          const rawValue = operatorCell && typeof operatorCell === 'object' ? firstValue(operatorCell, ['value', 'raw_value', 'kpi_value'], null) : null;
+          const isCategoryRow = item?.row_type === 'category';
+          const rawValue = !isCategoryRow && operatorCell && typeof operatorCell === 'object'
+            ? firstValue(operatorCell, ['value', 'raw_value', 'kpi_value'], null) : null;
           const presentation = operatorPresentation(column.styleSource, column.id);
           const unit = firstValue(item, ['unit', 'units', 'measurement_unit'], '');
           cell.className = 'scoring-kpi-value-cell';
           cell.dataset.column = 'kpi-value';
-          cell.textContent = formatRawKpiValue(rawValue);
+          cell.textContent = isCategoryRow ? '' : formatRawKpiValue(rawValue);
           cell.dataset.numeric = 'true';
-          cell.title = `Raw ${item?.kpi || item?.kpi_code || 'KPI'} measurement for ${presentation.label}${unit ? ` (${unit})` : ''}: ${formatRawKpiValue(rawValue)}`;
+          cell.title = isCategoryRow ? ''
+            : `Raw ${item?.kpi || item?.kpi_code || 'KPI'} measurement for ${presentation.label}${unit ? ` (${unit})` : ''}: ${formatRawKpiValue(rawValue)}`;
           row.append(cell);
         }
       }
@@ -1951,10 +2024,25 @@
       pane.append(empty);
       return;
     }
-    appendContextHeader(pane, tableData, 'score');
+    appendContextHeader(pane, tableData, 'score', 'Scoring Tables');
     appendThresholdLegend(pane, thresholdLegend.length ? thresholdLegend : tableData?.threshold_legend);
     appendScoringGapScale(pane, tableData);
-    appendHierarchyMatrixTable(pane, tableData);
+    const summarySection = document.createElement('section');
+    summarySection.className = 'scoring-table-mode-section';
+    const summaryHeading = document.createElement('h4');
+    summaryHeading.className = 'scoring-table-section-title';
+    summaryHeading.textContent = 'Scoring Tables — Summary';
+    summarySection.append(summaryHeading);
+    appendHierarchyMatrixTable(summarySection, tableForMode(tableData, 'summary'));
+    pane.append(summarySection);
+    const expandedSection = document.createElement('section');
+    expandedSection.className = 'scoring-table-mode-section';
+    const expandedHeading = document.createElement('h4');
+    expandedHeading.className = 'scoring-table-section-title';
+    expandedHeading.textContent = 'Scoring Tables — Expanded';
+    expandedSection.append(expandedHeading);
+    appendHierarchyMatrixTable(expandedSection, tableForMode(tableData, 'expanded'));
+    pane.append(expandedSection);
   }
 
   function renderHierarchyGapViews(pane, tableData, scoreTable) {
@@ -2047,6 +2135,7 @@
         let span = 1;
         while (index + span < rows.length && String(rows[index + span]?.category ?? '') === category) span += 1;
         const categoryCell = document.createElement('td');
+        categoryCell.className = 'scoring-category-cell';
         categoryCell.dataset.column = 'category';
         categoryCell.rowSpan = span;
         categoryCell.textContent = category || 'Unclassified';
@@ -2107,10 +2196,25 @@
       return;
     }
     const selected = appendComparisonSelector(pane, tables, 'score');
-    appendContextHeader(pane, selected, 'score');
+    appendContextHeader(pane, selected, 'score', 'Scoring Tables');
     appendThresholdLegend(pane, thresholdLegend.length ? thresholdLegend : selected?.threshold_legend);
     appendScoringGapScale(pane, selected);
-    appendMatrixTable(pane, selected);
+    const summarySection = document.createElement('section');
+    summarySection.className = 'scoring-table-mode-section';
+    const summaryHeading = document.createElement('h4');
+    summaryHeading.className = 'scoring-table-section-title';
+    summaryHeading.textContent = 'Scoring Tables — Summary';
+    summarySection.append(summaryHeading);
+    appendMatrixTable(summarySection, tableForMode(selected, 'summary'));
+    pane.append(summarySection);
+    const expandedSection = document.createElement('section');
+    expandedSection.className = 'scoring-table-mode-section';
+    const expandedHeading = document.createElement('h4');
+    expandedHeading.className = 'scoring-table-section-title';
+    expandedHeading.textContent = 'Scoring Tables — Expanded';
+    expandedSection.append(expandedHeading);
+    appendMatrixTable(expandedSection, tableForMode(selected, 'expanded'));
+    pane.append(expandedSection);
   }
 
   function renderGapViews(pane, tables) {
@@ -2314,6 +2418,7 @@
         let span = 1;
         while (index + span < rows.length && String(rows[index + span]?.category ?? '') === category) span += 1;
         const categoryCell = document.createElement('td');
+        categoryCell.className = 'scoring-category-cell';
         categoryCell.dataset.column = 'category';
         categoryCell.rowSpan = span;
         categoryCell.textContent = category || 'Unclassified';
@@ -2437,11 +2542,26 @@
     return `#${channel.toString(16).padStart(2, '0').repeat(3)}`;
   }
 
+  let chartLegendMeasureContext = null;
+
+  function chartLegendTextWidth(label) {
+    try {
+      if (!chartLegendMeasureContext) chartLegendMeasureContext = document.createElement('canvas').getContext('2d');
+      if (chartLegendMeasureContext) {
+        chartLegendMeasureContext.font = '750 15px "IBM Plex Sans", "Segoe UI", sans-serif';
+        return chartLegendMeasureContext.measureText(label).width;
+      }
+    } catch (_error) {
+      // Canvas measurement is optional in test and restricted browser contexts.
+    }
+    return label.length * 8;
+  }
+
   function chartLegendRows(entries, width, left, right, fallbackColor) {
     const rows = [];
     for (const entry of entries) {
       const label = String(entry?.label || '');
-      const entryWidth = 34 + label.length * 7.2;
+      const entryWidth = 14 + 7 + chartLegendTextWidth(label) + 22;
       let row = rows[rows.length - 1];
       if (!row || (row.width + entryWidth > width - left - right && row.entries.length)) {
         row = {width: 0, entries: []};
@@ -2510,7 +2630,10 @@
     const hierarchyColumnsById = new Map(hierarchyColumns.map(column => [String(column?.id ?? ''), column]));
     const hierarchyLevels = Array.isArray(options.hierarchyLevels) ? options.hierarchyLevels.map(String) : [];
     const hasHierarchyAxis = stacked && hierarchyLevels.length > 0 && hierarchyColumnsById.size > 0;
-    const width = Math.max(1180, categories.length * (stacked ? 150 : Math.max(168, series.length * 38 + 22)) + 150);
+    const requestedChartWidth = Number(options.fitWidth);
+    const width = Number.isFinite(requestedChartWidth) && requestedChartWidth > 0
+      ? Math.max(720, Math.floor(requestedChartWidth))
+      : Math.max(1180, categories.length * (stacked ? 150 : Math.max(168, series.length * 38 + 22)) + 150);
     const baseHeight = 700;
     const left = 86, right = 28, baseBottom = Math.max(150, 24 + (hasHierarchyAxis ? hierarchyLevels.length * 23 : 0));
     const maxValue = stacked
@@ -2634,7 +2757,7 @@
           const hierarchyColumn = hierarchyColumnsById.get(String(category));
           const operatorName = hierarchyColumn
             ? String(hierarchyColumn.operator || firstValue(hierarchyColumn.styleSource, ['operator'], '') || '')
-            : '';
+            : String(options.operatorForCategory?.(category) || '');
           const tooltipParts = [
             `KPI category: ${seriesName}`,
             hasHierarchyAxis ? `Hierarchy: ${fullCategory}` : `Category: ${fullCategory}`,
@@ -2665,7 +2788,8 @@
           unavailable.setAttribute('class', 'scoring-chart-unavailable');
           unavailable.textContent = 'N/A';
           const hierarchyColumn = hierarchyColumnsById.get(String(category));
-          const operatorName = hierarchyColumn ? String(hierarchyColumn.operator || '') : '';
+          const operatorName = hierarchyColumn
+            ? String(hierarchyColumn.operator || '') : String(options.operatorForCategory?.(category) || '');
           setChartTooltip(unavailable, [
             'KPI categories total: unavailable because coverage is incomplete',
             options.categoryTooltips?.[category] ? `Hierarchy: ${options.categoryTooltips[category]}` : '',
@@ -2683,7 +2807,7 @@
           const hierarchyColumn = hierarchyColumnsById.get(String(category));
           const operatorName = hierarchyColumn
             ? String(hierarchyColumn.operator || firstValue(hierarchyColumn.styleSource, ['operator'], '') || '')
-            : '';
+            : String(options.operatorForCategory?.(category) || '');
           setChartTooltip(totalLabel, [
             `KPI categories total: ${formattedChartPoints(total)}`,
             hasHierarchyAxis && options.categoryTooltips?.[category] ? `Hierarchy: ${options.categoryTooltips[category]}` : '',
@@ -2708,7 +2832,7 @@
           const fullCategory = options.categoryTooltips?.[category] || options.categoryLabels?.[category] || category;
           setChartTooltip(unavailable, [
             `Category: ${fullCategory}`,
-            `Operator: ${presentations.get(seriesName).label}`,
+            options.seriesTooltips?.[seriesName] || `${mappedOrder.includes(seriesName) ? 'Operator' : 'Series'}: ${presentations.get(seriesName).label}`,
             chartEnvironmentName(operatorTable) ? `Environment: ${chartEnvironmentName(operatorTable)}` : '',
             'Weighted points: unavailable because coverage is incomplete',
           ].filter(Boolean).join('\n'), true);
@@ -2726,7 +2850,7 @@
         const isOperatorSeries = mappedOrder.includes(seriesName);
         const tooltipParts = [
           `Category: ${fullCategory}`,
-          `${isOperatorSeries ? 'Operator' : 'Series'}: ${presentations.get(seriesName).label}`,
+          options.seriesTooltips?.[seriesName] || `${isOperatorSeries ? 'Operator' : 'Series'}: ${presentations.get(seriesName).label}`,
           chartEnvironmentName(operatorTable) ? `Environment: ${chartEnvironmentName(operatorTable)}` : '',
           `Weighted points: ${formattedChartPoints(row.value)}`,
           row.complete === false ? 'Coverage: incomplete' : '',
@@ -2862,6 +2986,37 @@
     return chartRows;
   }
 
+  function chartOperatorLegend(operatorTable, operators) {
+    const fallbackColors = ['#14867d', '#df7a45', '#5a82aa', '#8b63b1', '#b49a32'];
+    const colors = new Map();
+    const entries = operators.map((operator, index) => {
+      const presentation = operatorPresentation(operatorTable, operator);
+      const style = firstValue(operatorTable?.operator_styles || {}, [operator], {});
+      const isReference = style?.is_reference === true || isReferenceOperator(operatorTable, operator);
+      const color = presentation.color || fallbackColors[index % fallbackColors.length];
+      colors.set(String(operator), color);
+      return {
+        label: `${presentation.label}${isReference ? ' (Reference)' : ''}`,
+        color,
+        title: `${presentation.label}${isReference ? ' is the reference operator.' : ''} Bar segments show KPI category shades; hover a bar for category and score details.`,
+      };
+    });
+    return {colors, entries};
+  }
+
+  function chartCategoryLegend(categories, description = 'Grayscale key') {
+    return categories.map((category, index) => ({
+      label: category,
+      color: categoryLegendGray(index, categories.length),
+      title: `${category}. ${description} ${index + 1} identifies this KPI category.`,
+    }));
+  }
+
+  function chartFitWidth(pane) {
+    const width = Number(pane?.getBoundingClientRect?.().width || pane?.clientWidth || 0);
+    return Number.isFinite(width) && width > 0 ? Math.max(720, width - 56) : null;
+  }
+
   function makeExpandableChartCard(title, meta, chart) {
     const card = document.createElement('article');
     card.className = 'scoring-chart-card';
@@ -2913,18 +3068,47 @@
       groups.get(groupKey).rows.push({category, series, value: entry.score.value, complete: row.complete !== false});
     }
     const selected = appendComparisonSelector(pane, [...groups.values()], 'score', 'chart');
-    appendContextHeader(pane, selected, 'score', 'Scoring Chart');
+    appendContextHeader(pane, selected, 'score', 'Scoring Charts');
     const categories = [...new Set(selected.rows.map(row => String(row.category)))];
-    const categoryLegendEntries = categories.map((category, index) => ({
-      label: category,
-      color: categoryLegendGray(index, categories.length),
-      title: `${category}. Grayscale key ${index + 1} identifies this KPI category.`,
+    const operators = Array.isArray(selected.operatorTable?.operators)
+      ? selected.operatorTable.operators.map(String)
+      : [...new Set(selected.rows.map(row => String(row.series)))];
+    const {colors: operatorColors, entries: operatorLegend} = chartOperatorLegend(selected.operatorTable, operators);
+    const categoryLegendEntries = chartCategoryLegend(categories);
+    const operatorLabels = Object.fromEntries(operators.map(operator => [
+      operator, operatorPresentation(selected.operatorTable, operator).label,
+    ]));
+    const stackedRows = selected.rows.map(row => ({
+      ...row,
+      category: String(row.series),
+      series: String(row.category),
     }));
-    const chart = makeSvgChart('Weighted score points by KPI category', selected.rows, selected.operatorTable, {
+    const categorySeriesStyles = Object.fromEntries(categories.map(category => [category, {label: category}]));
+    const stackedChart = makeSvgChart('Weighted score by operator', stackedRows, selected.operatorTable, {
+      stacked: true,
+      categoryOrder: operators,
+      categoryLabels: operatorLabels,
+      categoryTooltips: operatorLabels,
+      seriesOrder: categories,
+      seriesStyles: categorySeriesStyles,
+      legendEntries: operatorLegend,
       categoryLegendEntries,
+      operatorForCategory: operator => operator,
+      segmentColor: (operator, _category, categoryIndex) => hierarchyChartColor(
+        operatorColors.get(operator) || '#365F91', categoryIndex, categories.length,
+      ),
     });
-    chart.style.minWidth = `${chart.viewBox.baseVal.width}px`;
-    pane.append(makeExpandableChartCard('Weighted score points by KPI category', contextLabel(selected.context), chart));
+    stackedChart.style.minWidth = `${stackedChart.viewBox.baseVal.width}px`;
+    pane.append(makeExpandableChartCard('Weighted score by operator', contextLabel(selected.context), stackedChart));
+    const clusteredChart = makeSvgChart('Weighted score points by KPI category', selected.rows, selected.operatorTable, {
+      legendEntries: operatorLegend,
+      fitWidth: chartFitWidth(pane),
+    });
+    clusteredChart.style.minWidth = '0';
+    clusteredChart.style.width = '100%';
+    pane.append(makeExpandableChartCard(
+      'Weighted score points by KPI category', contextLabel(selected.context), clusteredChart,
+    ));
     pane.classList.add('scoring-chart-grid');
   }
 
@@ -2968,7 +3152,8 @@
       const style = firstValue(tableData?.operator_styles || {}, [column.id], {});
       const operator = String(column.operator || style.operator || operatorPresentation(column.styleSource, column.id).label);
       const presentation = operatorPresentation(column.styleSource, column.id);
-      const color = presentation.color || ['#14867d', '#df7a45', '#5a82aa', '#8b63b1'][operatorColors.size % 4];
+      const color = operatorColors.get(operator) || presentation.color
+        || ['#14867d', '#df7a45', '#5a82aa', '#8b63b1'][operatorColors.size % 4];
       operatorColors.set(operator, color);
       if (seenOperators.has(operator)) continue;
       seenOperators.add(operator);
@@ -2984,7 +3169,7 @@
       title: `${category}. Grayscale key ${index + 1} identifies this KPI category across operator-specific segment shades.`,
     }));
     const seriesStyles = Object.fromEntries(kpiCategories.map(category => [category, {label: category}]));
-    appendContextHeader(pane, tableData, 'score', 'Scoring Chart');
+    appendContextHeader(pane, tableData, 'score', 'Scoring Charts');
     const chart = makeSvgChart('Weighted score by operator and aggregation', rows, tableData, {
       stacked: true,
       categoryOrder: columns.map(column => column.id),
@@ -2998,6 +3183,7 @@
       seriesStyles,
       legendEntries: operatorLegend,
       categoryLegendEntries: categoryLegend,
+      operatorForCategory: leafId => hierarchyColumnOperator(columns.find(column => column.id === leafId)),
       segmentColor: (leafId, _category, categoryIndex) => {
         const column = columns.find(item => item.id === leafId);
         const operator = String(column?.operator || firstValue(tableData?.operator_styles || {}, [leafId], {}).operator || '');
@@ -3008,6 +3194,41 @@
     chart.style.minWidth = `${chart.viewBox.baseVal.width}px`;
     pane.append(makeExpandableChartCard(
       'Weighted score by operator and aggregation', contextLabel(tableData.context), chart,
+    ));
+    const clusteredRows = sourceRows.map(row => ({
+      category: String(row.category),
+      series: String(row.operator),
+      value: row.weighted_points,
+      complete: row.complete,
+    }));
+    const clusteredSeriesStyles = {};
+    const clusteredSeriesTooltips = {};
+    const clusteredLegend = operatorLegend.map(entry => ({
+      ...entry,
+      title: `${entry.label} uses its mapped operator color; separate bars show hierarchy contexts.`,
+    }));
+    for (const column of columns) {
+      const operator = hierarchyColumnOperator(column);
+      const operatorLabel = operatorPresentation(tableData, operator).label;
+      const isReference = hierarchyColumnIsReference(column);
+      const pathLabel = hierarchyPathValueLabel(column) || operatorLabel;
+      const pathTooltip = hierarchyPathFullLabel(column) || pathLabel;
+      const color = operatorColors.get(operator) || '#365F91';
+      clusteredSeriesStyles[column.id] = {label: pathLabel, color};
+      clusteredSeriesTooltips[column.id] = `Operator: ${operatorLabel}${isReference ? ' (Reference)' : ''}\nHierarchy: ${pathTooltip}`;
+    }
+    const clusteredChart = makeSvgChart('Weighted score points by KPI category and operator context', clusteredRows, tableData, {
+      categoryOrder: kpiCategories,
+      seriesOrder: columns.map(column => column.id),
+      seriesStyles: clusteredSeriesStyles,
+      seriesTooltips: clusteredSeriesTooltips,
+      legendEntries: clusteredLegend,
+      fitWidth: chartFitWidth(pane),
+    });
+    clusteredChart.style.minWidth = '0';
+    clusteredChart.style.width = '100%';
+    pane.append(makeExpandableChartCard(
+      'Weighted score points by KPI category and operator context', contextLabel(tableData.context), clusteredChart,
     ));
     pane.classList.add('scoring-chart-grid');
   }
@@ -3496,14 +3717,14 @@
         scoringPane.replaceChildren();
         const summaryHeading = document.createElement('h4');
         summaryHeading.className = 'scoring-table-section-title';
-        summaryHeading.textContent = 'Scoring Summary';
+        summaryHeading.textContent = 'Scoring Tables — Summary';
         const summaryTable = document.createElement('div');
         summaryTable.className = 'scoring-table-section';
         renderTable(summaryTable, totalsRows, 'No scoring summary rows are available.', {hideGapColumns: true});
         scoringPane.append(summaryHeading, summaryTable);
         const detailHeading = document.createElement('h4');
         detailHeading.className = 'scoring-table-section-title';
-        detailHeading.textContent = 'KPI Scoring Details';
+        detailHeading.textContent = 'Scoring Tables — Expanded';
         const detailTable = document.createElement('div');
         detailTable.className = 'scoring-table-section';
         renderTable(detailTable, detailRows, 'No KPI detail rows are available.', {hideGapColumns: true});
@@ -3771,6 +3992,10 @@
     scheduleSelectionSave();
   });
   root.addEventListener('change', event => {
+    if ([environmentSelect, showKpiValuesToggle, showGapValuesToggle, gapLayoutSelect].includes(event.target)) {
+      if (event.target === environmentSelect) selectedEnvironment = environmentSelect.value;
+      persistScoringViewState();
+    }
     if (event.target === scoringProfileSelect) {
       const profile = scoringProfileById.get(scoringProfileSelect.value);
       if (profile && applyProfileHierarchy(profile.aggregation_hierarchy)) {
@@ -3795,11 +4020,6 @@
     }
     if (event.target === showKpiValuesToggle && currentResults) {
       renderResult(currentResults, selectedJob);
-      return;
-    }
-    if (event.target === tableModeSelect && currentResults) {
-      renderResult(currentResults, selectedJob);
-      setExportLinks(currentResultsJobId, true);
       return;
     }
     if (event.target === gapLayoutSelect && currentResults) {

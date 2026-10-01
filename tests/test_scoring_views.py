@@ -155,6 +155,84 @@ def test_combined_tables_keep_partial_points_and_full_configured_maximum_when_en
     assert 'without renormalization' in partial_combined['coverage_note']
 
 
+def test_combined_global_raw_kpis_are_contextual_and_do_not_change_scoring_or_category_totals():
+    metric = METRICS[0]
+    rows = [
+        metric_row(metric, operator, environment, region=region, score=score, value=11.0)
+        for region, environment, operators in (
+            ('North', 'DriveCity', (('EE', 1.0), ('O2', 0.5))),
+            ('South', 'DriveCity', (('EE', 1.0), ('O2', 0.5))),
+            ('North', 'DriveConnectionroad', (('EE', 1.0),)),
+            ('South', 'DriveConnectionroad', (('EE', 1.0),)),
+        )
+        for operator, score in operators
+    ]
+    global_kpis = [
+        {
+            'campaign': '2026Q2', 'region': 'North', 'operator': 'EE',
+            'kpi_code': metric['code'], 'kpi': metric['kpi'], 'category': metric['category'],
+            'kpi_type': metric['kpi_type'], 'unit': 'ms', 'value': 24.5,
+            'sample_count': 8, 'environment': 'All Environments',
+            'complete_coverage': False, 'missing_environments': ['Walk'],
+        },
+        {
+            'campaign': '2026Q2', 'region': 'North', 'operator': 'O2',
+            'kpi_code': metric['code'], 'value': 30.0, 'sample_count': 4,
+            'environment': 'All Environments', 'complete_coverage': True,
+        },
+    ]
+    job = {
+        'levels': ['Operator', 'Region', 'Campaign'],
+        'aggregation_contract_version': 2,
+        'aggregation_levels': ['Operator', 'Region', 'Campaign'],
+    }
+    result = {
+        'scoring': rows,
+        'totals': [],
+        'global_kpis': global_kpis,
+        'configuration': CONFIG,
+        'aggregation_contract_version': 2,
+        'aggregation_levels': ['Operator', 'Region', 'Campaign'],
+    }
+    views = build_scoring_views(job, result)
+
+    combined_by_region = {
+        table['context']['region']: table for table in views['score_tables']
+        if table['context']['environment'] == 'Combined'
+    }
+    north = next(row for row in combined_by_region['North']['rows'] if row['kpi_code'] == metric['code'])
+    south = next(row for row in combined_by_region['South']['rows'] if row['kpi_code'] == metric['code'])
+    assert north['values']['EE']['value'] == pytest.approx(24.5)
+    assert north['values']['EE']['sample_count'] == 8  # Score sample metadata is preserved.
+    assert north['values']['EE']['points'] == pytest.approx(north['max_points'])
+    assert north['values']['EE']['complete'] is True
+    assert north['unit'] == 'ms'
+    assert north['values']['O2']['value'] == pytest.approx(30.0)
+    assert north['values']['O2']['complete'] is False
+    assert south['values']['EE']['value'] is None
+    assert north['values']['EE']['environment_values']
+
+    expanded_north = next(table for table in views['hierarchy_score_tables']
+                          if table['context']['environment'] == 'Combined'
+                          and any(column['context'].get('region') == 'North'
+                                  for column in table['hierarchy_columns']))
+    north_column = next(column['id'] for column in expanded_north['hierarchy_columns']
+                        if column['context'].get('region') == 'North' and column['operator'] == 'EE')
+    hierarchy_metric = next(row for row in expanded_north['rows'] if row['kpi_code'] == metric['code'])
+    assert hierarchy_metric['values'][north_column]['value'] == pytest.approx(24.5)
+    hierarchy_summary = next(row for row in expanded_north['category_rows'] if row['row_type'] == 'category')
+    assert hierarchy_summary['values'][north_column]['value'] is None
+    assert hierarchy_summary['values'][north_column]['points'] is not None
+
+    # Historical jobs lack the additive field, so the combined raw cell stays unavailable.
+    historical = build_scoring_views(job, {**result, 'global_kpis': []})
+    old_combined = next(table for table in historical['score_tables']
+                        if table['context']['environment'] == 'Combined'
+                        and table['context']['region'] == 'North')
+    old_row = next(row for row in old_combined['rows'] if row['kpi_code'] == metric['code'])
+    assert old_row['values']['EE']['value'] is None
+
+
 def test_combined_tables_follow_positive_environment_weights_and_keep_partial_walk_coverage():
     zero_walk = validate_scoring_configuration(scoring_configuration())
     assert zero_walk['scope']['environments']['Walk']['total_points'] == 0

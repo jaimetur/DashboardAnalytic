@@ -74,7 +74,10 @@ def test_scoring_api_filters_before_calculation_and_ppt_preserves_scope(scoring_
     assert all(set(frame['Operator']) == {'O2'} for frame in source_frames)
     exported = scoring_api['client'].get(f'/scoring/jobs/{job["id"]}/export/ppt')
     assert exported.status_code == 200, exported.text
-    assert re.search(r'\d{8}_\d{6}.*NSA.*Scoring', unquote(exported.headers['content-disposition']))
+    assert re.search(
+        r'\d{8}_\d{6} - Scoring & GAP Analysis - NSA - North - Leeds - O2 - Nokia - 2026-Q2\.pptx',
+        unquote(exported.headers['content-disposition']),
+    )
     deck = Presentation(BytesIO(exported.content))
     for slide in list(deck.slides)[:2]:
         text = '\n'.join(shape.text for shape in slide.shapes if shape.has_text_frame)
