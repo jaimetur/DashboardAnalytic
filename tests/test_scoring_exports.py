@@ -421,7 +421,7 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     assert list(donut.series[0].values) == pytest.approx(expected_family_maximums)
     assert donut.plots[0].vary_by_categories
     assert [str(point.format.fill.fore_color.rgb) for point in donut.series[0].points] == [
-        'E6A81D', '176E77',
+        '176E77', 'E6A81D',
     ]
     best_network_slide = next(slide for slide in presentation.slides
                               if slide.shapes.title.text.split('\n')[0] == 'Best Network Scoring')
@@ -595,10 +595,15 @@ def test_intro_slides_show_all_canonical_scope_filters_without_overlapping_campa
             assert divider.top + divider.height < campaign_shape.top
             assert subtitle_shape.top + subtitle_shape.height <= divider.top
             mode_paragraph = subtitle_shape.text_frame.paragraphs[0]
+        title_shape = slide.shapes.title
+        assert subtitle_shape.top - (title_shape.top + title_shape.height) == Inches(.05)
         assert 'Aggregation:' not in subtitle_shape.text
         filters_shape = next(shape for shape in slide.shapes
                              if shape.name == 'Scoring Aggregations and Filters')
         assert filters_shape.text.startswith('Aggregations & Filters:')
+        assert filters_shape.text_frame.paragraphs[0]._p.get_or_add_pPr().get('marL') == '0'
+        assert all(int(paragraph._p.get_or_add_pPr().get('marL')) > 0
+                   for paragraph in filters_shape.text_frame.paragraphs[1:])
         assert filters_shape.top >= subtitle_shape.top + subtitle_shape.height
         assert filters_shape.top + filters_shape.height < campaign_shape.top
         assert all(str(paragraph.font.color.rgb) == 'CCEEF4'
@@ -607,9 +612,9 @@ def test_intro_slides_show_all_canonical_scope_filters_without_overlapping_campa
         assert str(mode_paragraph.font.color.rgb) == 'FFC700'
         assert mode_paragraph._p.xpath('./a:pPr/a:buNone')
         if index == 1:
-            assert mode_paragraph.alignment == 2  # Center.
+            assert mode_paragraph.alignment == 1  # Left.
             title = slide.shapes.title.text_frame.paragraphs[0]
-            assert title.alignment == 2
+            assert title.alignment == 1
             assert str(title.runs[-1].font.color.rgb) == 'A8E6CF'
         for paragraph in subtitle_shape.text_frame.paragraphs:
             assert paragraph.font.name == 'Aptos'
@@ -727,10 +732,10 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     assert [category.label for category in donut.plots[0].categories] == ['Voice', 'Data']
     assert list(donut.series[0].values) == pytest.approx(expected_family_maximums)
     assert 'DriveCity' in _slide_text(best_network_slide)
-    assert f'Voice {expected_family_maximums[0]:.2f}' in _slide_text(best_network_slide)
-    assert f'Data {expected_family_maximums[1]:.2f}' in _slide_text(best_network_slide)
+    assert f'Voice  {expected_family_maximums[0]:.2f}' in _slide_text(best_network_slide)
+    assert f'Data  {expected_family_maximums[1]:.2f}' in _slide_text(best_network_slide)
     assert [str(point.format.fill.fore_color.rgb) for point in donut.series[0].points] == [
-        'E6A81D', '176E77',
+        '176E77', 'E6A81D',
     ]
     best_network_text = _slide_text(best_network_slide)
     assert '650.00' in best_network_text and 'pts' in best_network_text

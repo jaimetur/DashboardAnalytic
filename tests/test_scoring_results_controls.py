@@ -634,3 +634,43 @@ def test_kpi_value_cells_are_blank_for_category_subtotals_in_both_table_modes():
 
     assert script.count("cell.textContent = isCategoryRow ? '' : formatRawKpiValue(rawValue);") == 2
     assert script.count("const isCategoryRow = item?.row_type === 'category';") == 2
+
+
+def test_allocation_donut_global_environment_rings_and_single_environment_radius():
+    script = SCORING_SCRIPT.read_text(encoding='utf-8')
+    functions = '\n'.join(_function_source(script, name) for name in (
+        'maximumAllocationEnvironments', 'allocationIconPath', 'makeMaximumAllocationDonut',
+    ))
+    program = functions + """
+const document = {createElementNS: () => ({attributes: {}, children: [],
+  setAttribute(name, value) {this.attributes[name] = value;},
+  append(...children) {this.children.push(...children);}})};
+const svgElement = (svg, tag, attributes) => ({tag, attributes, setAttribute(name, value) {this.attributes[name] = value;}});
+const setChartTooltip = () => {};
+const formattedChartPoints = number => Number(number).toFixed(2);
+const config = {scope: {environments: {DriveCity: {total_points: 650}, 'Drive Connecting Roads': {total_points: 350}}},
+ metrics: [
+ {source_kind: 'voice', contexts: {DriveCity: {max_points: 227.5}, 'Drive Connecting Roads': {max_points: 122.5}}},
+ {source_kind: 'data', contexts: {DriveCity: {max_points: 422.5}, 'Drive Connecting Roads': {max_points: 227.5}}}]};
+const all = maximumAllocationEnvironments({context: {environment: 'Combined'}}, [], config);
+const single = maximumAllocationEnvironments({context: {environment: 'Drive Connecting Roads'}}, [], config);
+const globalSvg = makeMaximumAllocationDonut(all);
+const singleSvg = makeMaximumAllocationDonut(single);
+const circles = svg => svg.children.filter(item => item.tag === 'circle').map(item => item.attributes);
+console.log(JSON.stringify({all, single, global: circles(globalSvg), one: circles(singleSvg),
+ icons: globalSvg.children.filter(item => item.tag === 'path').length,
+ globalText: globalSvg.children.map(item => item.textContent || '').join('|'),
+ singleText: singleSvg.children.map(item => item.textContent || '').join('|')}));
+"""
+    result = _run_node_json(program, {})
+    assert len(result['global']) == 6  # Two global sectors plus two family sectors per environment.
+    assert [item['stroke'] for item in result['global'][:2]] == ['#4472C4', '#7030A0']
+    assert [item['stroke'] for item in result['global'][2:]] == ['#176E77', '#E6A81D'] * 2
+    assert len(result['one']) == 2
+    assert result['one'][0]['r'] == result['global'][0]['r'] == 126
+    assert result['global'][2]['r'] > result['global'][4]['r']
+    assert len(result['single']) == 1 and result['single'][0]['color'] == '#7030A0'
+    assert result['icons'] == 7
+    assert '1,000.00' in result['globalText']
+    assert '350.00' in result['singleText']
+    assert 'Global:' not in result['singleText']

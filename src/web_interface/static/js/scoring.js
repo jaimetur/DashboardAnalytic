@@ -3475,67 +3475,110 @@
     return svg;
   }
 
-  function makeMaximumAllocationDonut(allocation, environmentName = '') {
-    const voiceColor = '#91cfc2';
-    const dataColor = '#244b64';
-    const total = allocation.Voice + allocation.Data;
+  function maximumAllocationEnvironments(tableData, allTables, configuration = {}) {
+    const requested = String(tableData?.context?.environment || 'Combined');
+    const combined = ['combined', 'all', 'all environments'].includes(requested.toLowerCase());
+    const environments = new Map();
+    const configured = configuration?.scope?.environments || {};
+    for (const [name, details] of Object.entries(configured)) {
+      if (!(Number(details?.total_points) > 0)) continue;
+      const allocation = {Voice: 0, Data: 0};
+      for (const metric of configuration.metrics || []) {
+        const points = Number(metric?.contexts?.[name]?.max_points);
+        if (!Number.isFinite(points) || points <= 0) continue;
+        const kind = String(metric.source_kind || metric.calculation?.source_kind || '').toLowerCase();
+        if (['voice', 'speech'].includes(kind)) allocation.Voice += points;
+        else if (kind === 'data') allocation.Data += points;
+      }
+      environments.set(name, {name, ...allocation});
+    }
+    if (!environments.size) {
+      for (const table of allTables || []) {
+        const name = String(table?.context?.environment || '');
+        if (!name || ['combined', 'all', 'all environments'].includes(name.toLowerCase()) || environments.has(name)) continue;
+        environments.set(name, {name, ...bestNetworkTotals(table).allocation});
+      }
+    }
+    const palette = ['#4472C4', '#7030A0', '#C55A11', '#5B9BD5', '#A64D79'];
+    const allocations = [...environments.values()].map((item, index) => ({...item, color: palette[index % palette.length]}))
+      .filter(item => combined || item.name.toLowerCase() === requested.toLowerCase());
+    return allocations.length ? allocations : [{name: requested, ...bestNetworkTotals(tableData).allocation, color: palette[0]}];
+  }
+
+  function allocationIconPath(kind) {
+    if (kind === 'Voice') return 'M6 3h4l2 5-3 2c2 4 3 5 7 7l2-3 5 2v4c-1 3-5 2-8 0C7 16 2 7 6 3Z';
+    if (kind === 'Data') return 'M7 3h10v18H7ZM10 7h10m-3-3 3 3-3 3M14 16H4m3-3-3 3 3 3';
+    if (/city/i.test(kind)) return 'M3 21V7h7v14M10 21V3h10v18M1 21h22M6 10v2m0 3v2m8-10h3m-3 4h3m-3 4h3';
+    if (/road/i.test(kind)) return 'M5 21 9 3m10 18L15 3M12 3v3m0 3v3m0 3v3m0 2v1';
+    return 'M12 22s8-8 8-13a8 8 0 0 0-16 0c0 5 8 13 8 13ZM12 6a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z';
+  }
+
+  function makeMaximumAllocationDonut(environments) {
+    const voiceColor = '#176E77';
+    const dataColor = '#E6A81D';
+    const combined = environments.length > 1;
+    const total = environments.reduce((sum, item) => sum + item.Voice + item.Data, 0);
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('viewBox', '0 0 360 330');
+    const legendHeight = 55 + environments.length * 86;
+    const height = Math.max(320, legendHeight);
+    svg.setAttribute('viewBox', `0 0 640 ${height}`);
     svg.setAttribute('class', 'scoring-chart-svg scoring-allocation-donut');
     svg.setAttribute('role', 'img');
-    svg.setAttribute('aria-label', 'Maximum score allocation between Voice and Data KPIs');
-    const radius = 82;
-    const circumference = 2 * Math.PI * radius;
-    const voiceLength = total > 0 ? circumference * allocation.Voice / total : 0;
-    const dataCircle = svgElement(svg, 'circle', {cx: 180, cy: 145, r: radius, fill: 'none', stroke: dataColor, 'stroke-width': 38});
-    const dataPercent = total > 0 ? allocation.Data / total * 100 : 0;
-    setChartTooltip(dataCircle, [
-      'KPI allocation: Data',
-      `Maximum points: ${formattedChartPoints(allocation.Data)}`,
-      `Share of configured maximum: ${dataPercent.toFixed(1)}%`,
-      environmentName ? `Environment: ${environmentName}` : '',
-    ].filter(Boolean).join('\n'), true);
-    const voiceCircle = svgElement(svg, 'circle', {cx: 180, cy: 145, r: radius, fill: 'none', stroke: voiceColor, 'stroke-width': 38, 'stroke-dasharray': `${voiceLength} ${circumference - voiceLength}`, transform: 'rotate(-90 180 145)'});
-    const voicePercent = total > 0 ? allocation.Voice / total * 100 : 0;
-    setChartTooltip(voiceCircle, [
-      'KPI allocation: Voice',
-      `Maximum points: ${formattedChartPoints(allocation.Voice)}`,
-      `Share of configured maximum: ${voicePercent.toFixed(1)}%`,
-      environmentName ? `Environment: ${environmentName}` : '',
-    ].filter(Boolean).join('\n'), true);
-    svg.append(dataCircle, voiceCircle);
-    const center = svgElement(svg, 'text', {x: 180, y: 139, 'text-anchor': 'middle', class: 'scoring-allocation-total'});
-    center.textContent = total.toLocaleString(undefined, {maximumFractionDigits: 1});
-    setChartTooltip(center, [
-      'Total configured maximum',
-      `Maximum points: ${formattedChartPoints(total)}`,
-      environmentName ? `Environment: ${environmentName}` : '',
-    ].filter(Boolean).join('\n'));
-    const unit = svgElement(svg, 'text', {x: 180, y: 162, 'text-anchor': 'middle', class: 'scoring-allocation-unit'});
+    svg.setAttribute('aria-label', 'Maximum score allocation by environment, Voice and Data');
+    const cx = 155;
+    const cy = height / 2;
+    const ringCount = environments.length + (combined ? 1 : 0);
+    const outerRadius = 126;
+    const thickness = Math.min(32, 74 / ringCount);
+    const ringGap = Math.min(2, 8 / ringCount);
+    const rings = combined ? [{name: 'Global', segments: environments.map(item => ({label: item.name, value: item.Voice + item.Data, color: item.color}))}] : [];
+    environments.forEach(item => rings.push({name: item.name, segments: [
+      {label: 'Voice', value: item.Voice, color: voiceColor},
+      {label: 'Data', value: item.Data, color: dataColor},
+    ]}));
+    rings.forEach((ring, index) => {
+      const radius = outerRadius - index * (thickness + ringGap);
+      const circumference = 2 * Math.PI * radius;
+      const ringTotal = ring.segments.reduce((sum, segment) => sum + segment.value, 0);
+      let offset = 0;
+      ring.segments.forEach(segment => {
+        const length = ringTotal > 0 ? circumference * segment.value / ringTotal : 0;
+        const mark = svgElement(svg, 'circle', {cx, cy, r: radius, fill: 'none', stroke: segment.color,
+          'stroke-width': thickness, 'stroke-dasharray': `${length} ${circumference - length}`,
+          'stroke-dashoffset': -offset, transform: `rotate(-90 ${cx} ${cy})`});
+        setChartTooltip(mark, `${ring.name}: ${segment.label}\nMaximum points: ${formattedChartPoints(segment.value)}\nShare of configured maximum: ${(ringTotal > 0 ? segment.value / ringTotal * 100 : 0).toFixed(1)}%`, true);
+        svg.append(mark);
+        offset += length;
+      });
+    });
+    const center = svgElement(svg, 'text', {x: cx, y: cy - 4, 'text-anchor': 'middle', class: 'scoring-allocation-total'});
+    center.textContent = total.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    const innerRadius = outerRadius - (ringCount - 1) * (thickness + ringGap) - thickness / 2;
+    center.setAttribute('style', `font-size:${Math.min(25, (innerRadius * 2 - 12) / (center.textContent.length * .65))}px`);
+    const unit = svgElement(svg, 'text', {x: cx, y: cy + 20, 'text-anchor': 'middle', class: 'scoring-allocation-unit'});
     unit.textContent = 'max points';
+    setChartTooltip(center, `Total configured maximum\nMaximum points: ${formattedChartPoints(total)}`);
     svg.append(center, unit);
-    const legendItems = [['Voice', voiceColor, allocation.Voice], ['Data', dataColor, allocation.Data]];
-    legendItems.forEach(([label, color, value], index) => {
-      const y = 270 + index * 25;
-      const maxPercent = total > 0 ? Number(value) / total * 100 : 0;
-      const legendTooltip = [
-        `KPI allocation: ${label}`,
-        `Maximum points: ${formattedChartPoints(value)}`,
-        `Share of configured maximum: ${maxPercent.toFixed(1)}%`,
-        environmentName ? `Environment: ${environmentName}` : '',
-      ].filter(Boolean).join('\n');
-      const swatch = svgElement(svg, 'rect', {x: 55, y: y - 11, width: 14, height: 14, rx: 3, fill: color});
-      setChartTooltip(swatch, legendTooltip);
-      svg.append(swatch);
-      const textLabel = svgElement(svg, 'text', {x: 78, y, class: 'scoring-allocation-legend'});
-      textLabel.textContent = `${label}: ${Number(value).toLocaleString(undefined, {maximumFractionDigits: 2})} points`;
-      setChartTooltip(textLabel, legendTooltip);
-      svg.append(textLabel);
+    const legend = (label, color, value, y, iconKind, bold = false) => {
+      const icon = svgElement(svg, 'path', {d: allocationIconPath(iconKind), fill: 'none', stroke: color,
+        'stroke-width': 1.8, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', transform: `translate(310 ${y - 17}) scale(.8)`});
+      const swatch = svgElement(svg, 'rect', {x: 335, y: y - 12, width: 12, height: 12, rx: 2, fill: color});
+      const text = svgElement(svg, 'text', {x: 354, y, fill: '#243746', 'font-size': 14, 'font-weight': bold ? 700 : 400});
+      text.textContent = `${label}: ${formattedChartPoints(value)} pts`;
+      setChartTooltip(text, text.textContent);
+      svg.append(icon, swatch, text);
+    };
+    if (combined) legend('Global', '#465565', total, 30, 'Global', true);
+    environments.forEach((item, index) => {
+      const y = (combined ? 64 : 44) + index * 86;
+      legend(item.name, item.color, item.Voice + item.Data, y, item.name, true);
+      legend('Voice', voiceColor, item.Voice, y + 24, 'Voice');
+      legend('Data', dataColor, item.Data, y + 48, 'Data');
     });
     return svg;
   }
 
-  function renderBestNetworkChart(pane, scoreTables, hierarchyTable = null) {
+  function renderBestNetworkChart(pane, scoreTables, hierarchyTable = null, allTables = scoreTables) {
     pane.replaceChildren();
     if (!hierarchyTable && !scoreTables.length) {
       const empty = document.createElement('div');
@@ -3559,7 +3602,9 @@
     const meta = contextLabel(selected.context);
     const bars = makeBestNetworkBars(selected, data);
     layout.append(makeExpandableChartCard('Voice and Data weighted points by operator', meta, bars));
-    const donut = makeMaximumAllocationDonut(data.allocation, chartEnvironmentName(selected));
+    const configuration = selectedJob?.configuration || currentResults?.configuration || {};
+    const allocations = maximumAllocationEnvironments(selected, allTables, configuration);
+    const donut = makeMaximumAllocationDonut(allocations);
     layout.append(makeExpandableChartCard('Maximum score allocation', meta, donut));
     pane.append(layout);
   }
@@ -3748,7 +3793,7 @@
       if (hierarchyScoreTable) renderHierarchyCharts(chartPane, hierarchyScoreTable);
       else renderCharts(chartPane, chartRowsForEnvironment(payload.charts ?? [], allScoreTables, effectiveEnvironment), scoreTables);
     }
-    if (shouldRenderPane('best-network')) renderBestNetworkChart(bestNetworkPane, scoreTables, hierarchyScoreTable);
+    if (shouldRenderPane('best-network')) renderBestNetworkChart(bestNetworkPane, scoreTables, hierarchyScoreTable, allScoreTables);
     if (shouldRenderPane('gap')) {
       const gapTotals = normalizeRows(payload.gap_totals ?? []);
       if (displayHierarchyGapTable) {

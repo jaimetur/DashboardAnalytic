@@ -486,14 +486,14 @@ def _fit_scoring_intro_subtitle(presentation, slide, layout_name: str, subtitle:
     cover = layout_name == 'Title Page'
     title_text = title_shape.text_frame.text.split('\x0b', 1)[0].split('\n', 1)[0]
     title_shape.text_frame.text = title_text
-    _set_shape_geometry(title_shape, Inches(1.5 if cover else .8))
-    title_shape.top = Inches(1.4 if cover else .95)
+    _set_shape_geometry(title_shape, Inches(.7 if cover else .55))
+    title_shape.top = Inches(1.8 if cover else 1.9)
     if not cover:
-        title_shape.left = Inches(1)
-        title_shape.width = presentation.slide_width - Inches(2)
-        title_shape.height = Inches(1.1)
+        title_shape.left = Inches(.6)
+        title_shape.width = presentation.slide_width - Inches(1.2)
+        title_shape.height = Inches(.55)
         paragraph = title_shape.text_frame.paragraphs[0]
-        paragraph.alignment = PP_ALIGN.CENTER
+        paragraph.alignment = PP_ALIGN.LEFT
         prefix, separator, environment = title_text.partition(' — ')
         paragraph.clear()
         paragraph.add_run().text = prefix + separator
@@ -508,12 +508,11 @@ def _fit_scoring_intro_subtitle(presentation, slide, layout_name: str, subtitle:
     subtitle_shape.height = Inches(.45)
     subtitle_shape.left = title_shape.left
     subtitle_shape.width = title_shape.width
-    subtitle_shape.top = Inches(3.05 if cover else 2.15)
+    subtitle_shape.top = title_shape.top + title_shape.height + Inches(.05)
     subtitle_shape.text_frame.text = lines[0] if lines else ''
     subtitle_shape.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
     mode = subtitle_shape.text_frame.paragraphs[0]
-    if not cover:
-        mode.alignment = PP_ALIGN.CENTER
+    mode.alignment = PP_ALIGN.LEFT
     mode.font.size = Pt(18)
     mode.font.bold = True
     mode.font.color.rgb = RGBColor.from_string('FFC700')
@@ -525,8 +524,8 @@ def _fit_scoring_intro_subtitle(presentation, slide, layout_name: str, subtitle:
     properties.insert(0, OxmlElement('a:buNone'))
 
     filters_shape = _text(
-        slide, '', 3.55 if cover else 2.95, left=title_shape.left / Inches(1),
-        width=title_shape.width / Inches(1), height=2.1,
+        slide, '', 3.2, left=title_shape.left / Inches(1),
+        width=title_shape.width / Inches(1), height=1.85,
         size=16, color='#CCEEF4',
     )
     filters_shape.name = 'Scoring Aggregations and Filters'
@@ -538,6 +537,10 @@ def _fit_scoring_intro_subtitle(presentation, slide, layout_name: str, subtitle:
         paragraph.text = line
         paragraph.font.size = Pt(16)
         paragraph.font.bold = index == 0
+        properties = paragraph._p.get_or_add_pPr()
+        properties.set('marL', str(Inches(.22) if index else 0))
+        properties.set('indent', '0')
+        properties.insert(0, OxmlElement('a:buNone'))
         paragraph.font.color.rgb = RGBColor.from_string('CCEEF4')
         paragraph.line_spacing = 1.0
         paragraph.space_before = Pt(0)

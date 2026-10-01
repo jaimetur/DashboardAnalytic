@@ -104,12 +104,12 @@ def test_all_environments_ppt_uses_full_allocation_in_tables_and_charts():
     ]
 
     donut = _chart_for_environment(
-        presentation, 'Best Network Scoring — Voice and Data', 'All Environments', XL_CHART_TYPE.DOUGHNUT,
+        presentation, 'Best Network Scoring', 'All Environments', XL_CHART_TYPE.DOUGHNUT,
     )
     assert sum(float(value) for value in donut.series[0].values) == pytest.approx(1000)
 
     best_network = _chart_for_environment(
-        presentation, 'Best Network Scoring — Voice and Data', 'All Environments', XL_CHART_TYPE.COLUMN_STACKED,
+        presentation, 'Best Network Scoring', 'All Environments', XL_CHART_TYPE.COLUMN_STACKED,
     )
     total_series = next(series for series in best_network.series if series.name == 'Total')
     for operator, points in zip(combined['operators'], total_series.values):
@@ -150,6 +150,6 @@ def test_all_environments_ppt_keeps_full_maximum_and_marks_missing_road_incomple
     assert 'All Environments is incomplete because weighted environments are missing: DriveConnectionroad.' in _slide_text(combined_slide)
 
     donut = _chart_for_environment(
-        presentation, 'Best Network Scoring — Voice and Data', 'All Environments', XL_CHART_TYPE.DOUGHNUT,
+        presentation, 'Best Network Scoring', 'All Environments', XL_CHART_TYPE.DOUGHNUT,
     )
     assert sum(float(value) for value in donut.series[0].values) == pytest.approx(1000)

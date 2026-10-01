@@ -91,6 +91,15 @@ def test_generated_scoring_pptx_serializes_valid_table_and_combo_chart_structure
         assert chart_roots
         found_combo_chart = False
         for root in chart_roots:
+            child_names = [etree.QName(child).localname for child in root]
+            assert child_names.count('spPr') <= 1
+            if 'spPr' in child_names:
+                assert child_names.index('chart') < child_names.index('spPr')
+                assert all(child_names.index('spPr') < child_names.index(name)
+                           for name in ('txPr', 'externalData', 'printSettings', 'userShapes', 'extLst')
+                           if name in child_names)
+            assert all(10 <= int(hole.get('val')) <= 90
+                       for hole in root.xpath('.//c:holeSize', namespaces=NS))
             assert all(
                 0 <= int(axis.get('val')) <= 0xFFFFFFFF
                 for axis in root.xpath('.//c:axId | .//c:crossAx', namespaces=NS)

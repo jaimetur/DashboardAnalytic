@@ -1,5 +1,7 @@
 from pptx import Presentation
 from pptx.enum.chart import XL_CHART_TYPE
+from pptx.oxml.ns import qn
+import pytest
 
 from src.modules.scoring_pptx_allocation import (
     add_maximum_allocation_donut,
@@ -36,7 +38,7 @@ def test_configuration_allocations_sum_metrics_once_per_positive_environment():
     assert maximum_allocations_from_configuration(None) == {}
 
 
-def test_combined_allocation_is_editable_concentric_doughnut_with_total_center():
+def test_combined_allocation_has_global_outer_ring_and_editable_environment_rings():
     presentation = Presentation()
     slide = presentation.slides.add_slide(presentation.slide_layouts[6])
     allocations = maximum_allocations_from_configuration(_configuration())
@@ -47,23 +49,38 @@ def test_combined_allocation_is_editable_concentric_doughnut_with_total_center()
     )
 
     assert chart.chart_type == XL_CHART_TYPE.DOUGHNUT
-    assert len(chart.series) == 2
+    assert len(chart.series) == 1
     assert [[category.label for category in plot.categories] for plot in chart.plots] == [
-        ['Voice', 'Data'],
+        ['DriveCity', 'DriveRoad'],
     ]
-    assert [series.name for series in chart.series] == ['DriveCity', 'DriveRoad']
-    assert list(chart.series[0].values) == [12.0, 20.0]
-    assert list(chart.series[1].values) == [5.0, 9.0]
+    assert list(chart.series[0].values) == [32.0, 14.0]
     assert [str(point.format.fill.fore_color.rgb) for point in chart.series[0].points] == [
-        'E6A81D', '176E77',
+        '4472C4', '7030A0',
     ]
-    assert [str(point.format.fill.fore_color.rgb) for point in chart.series[1].points] == [
-        'D39C22', '29958F',
-    ]
+    charts = [shape.chart for shape in slide.shapes if shape.has_chart]
+    assert len(charts) == 3
+    for environment_chart, expected_values in zip(charts[1:], ([12.0, 20.0], [5.0, 9.0])):
+        assert list(environment_chart.series[0].values) == expected_values
+        assert [str(point.format.fill.fore_color.rgb) for point in environment_chart.series[0].points] == [
+            '176E77', 'E6A81D',
+        ]
+    environment_rings = [chart.plots[0] for chart in charts[1:]]
+    ring_sizes = [shape.width for shape in slide.shapes if shape.has_chart][1:]
+    hole_sizes = [int(plot._element.find(qn('c:holeSize')).get('val')) for plot in environment_rings]
+    openings = [size * (hole / 100) for size, hole in zip(ring_sizes, hole_sizes)]
+    assert openings == sorted(openings, reverse=True)
+    assert openings[-1] == pytest.approx(slide.shapes[0].width * .45, abs=1000)
+    for environment_chart in charts:
+        chart_space_children = list(environment_chart._chartSpace)
+        chart_index = next(i for i, child in enumerate(chart_space_children) if child.tag == qn('c:chart'))
+        shape_index = next(i for i, child in enumerate(chart_space_children) if child.tag == qn('c:spPr'))
+        assert shape_index > chart_index
+        text_properties = [i for i, child in enumerate(chart_space_children) if child.tag == qn('c:txPr')]
+        assert not text_properties or shape_index < text_properties[0]
     text = '\n'.join(shape.text for shape in slide.shapes if shape.has_text_frame).replace('\x0b', '\n')
     assert '46.00\nmax points' in text
-    assert 'DriveCity · 32.00 pts' in text and 'Voice 12.00 · Data 20.00' in text
-    assert 'DriveRoad · 14.00 pts' in text and 'Voice 5.00 · Data 9.00' in text
+    assert 'DriveCity\n32.00 pts' in text and 'Voice  12.00 pts' in text and 'Data  20.00 pts' in text
+    assert 'DriveRoad\n14.00 pts' in text and 'Voice  5.00 pts' in text and 'Data  9.00 pts' in text
 
 
 def test_single_environment_allocation_uses_one_ring_and_environment_maximum_center():
@@ -77,8 +94,35 @@ def test_single_environment_allocation_uses_one_ring_and_environment_maximum_cen
     )
 
     assert len(chart.series) == 1
-    assert chart.series[0].name == 'DriveRoad'
+    assert [category.label for category in chart.plots[0].categories] == ['Voice', 'Data']
     assert list(chart.series[0].values) == [5.0, 9.0]
+    assert [str(point.format.fill.fore_color.rgb) for point in chart.series[0].points] == [
+        '176E77', 'E6A81D',
+    ]
+    assert len([shape for shape in slide.shapes if shape.has_chart]) == 1
+    drive_road_swatch = next(
+        shape for shape in slide.shapes if shape.name == 'Maximum Allocation Swatch DriveRoad'
+    )
+    assert str(drive_road_swatch.fill.fore_color.rgb) == '7030A0'
     assert '14.00\nmax points' in '\n'.join(
         shape.text for shape in slide.shapes if shape.has_text_frame
     ).replace('\x0b', '\n')
+
+
+def test_many_environment_rings_keep_hole_size_within_powerpoint_limits():
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    allocations = {
+        f'Environment{index}': {'voice': 10 + index, 'data': 20 + index}
+        for index in range(6)
+    }
+
+    add_maximum_allocation_donut(
+        slide, {'context': {'environment': 'Combined'}}, allocations,
+        left=1, top=1, width=4, height=3,
+    )
+
+    charts = [shape.chart for shape in slide.shapes if shape.has_chart]
+    assert len(charts) == 7
+    hole_sizes = [int(chart.plots[0]._element.find(qn('c:holeSize')).get('val')) for chart in charts]
+    assert all(10 <= hole <= 90 for hole in hole_sizes)
