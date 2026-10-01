@@ -31,6 +31,9 @@ _FONT = 'Ericsson Hilda'
 _WHITE = '#FFFFFF'
 _NEUTRAL = '#ECEFF1'
 _CATEGORY_TOTAL = '#E3E6E7'
+_GAP_SUMMARY_HEADER = '#455B65'
+_GAP_SUMMARY_COMPARISON_HEADER = '#DDEBE6'
+_GAP_SUMMARY_CATEGORY = '#E6F0F7'
 _KPI_TYPE_COLORS = {'Reliable': '#D8EFCA', 'Diff': '#FFF2CC'}
 _LEGACY_CAMPAIGN_WARNING = 'Campaigns are scored separately; the supplied Tableau Prep flow pools campaigns.'
 _SCOPE_FILTER_FIELDS = ('Operator', 'Vendor', 'Region', 'City', 'Campaign')
@@ -1297,7 +1300,7 @@ def _add_hierarchy_chart_categories(data: CategoryChartData, columns: list[dict]
 
 def _hierarchy_header_groups(table, columns: list[dict], levels: list[str], *, start_col: int,
                              leaf_width: int, header_rows: int, physical_column_width: float,
-                             leaf_label: str = 'Score') -> None:
+                             leaf_label: str = 'Score', header_color: str | None = None) -> None:
     for level_index, level in enumerate(levels):
         start = 0
         while start < len(columns):
@@ -1318,7 +1321,7 @@ def _hierarchy_header_groups(table, columns: list[dict], levels: list[str], *, s
                 cell.merge(table.cell(level_index, right_column))
             value = representative['path'][level_index].get('value')
             label = value if value is not None else 'Not specified'
-            color = representative['color'] if level == 'Operator' else '#E6ECFA'
+            color = header_color or (representative['color'] if level == 'Operator' else '#E6ECFA')
             header_size = min(7.5, max(5.0, physical_column_width * leaf_width
                                       * (end - start + 1) * 12))
             _cell(cell, str(label), color=color, foreground=_header_foreground(color), size=header_size, bold=True)
@@ -1327,7 +1330,7 @@ def _hierarchy_header_groups(table, columns: list[dict], levels: list[str], *, s
             start = end + 1
     subheader_row = len(levels)
     for column_index, column in enumerate(columns):
-        color = column['color']
+        color = header_color or column['color']
         leaf_font_size = min(7.5, max(5.0, physical_column_width * 12))
         _cell(table.cell(subheader_row, start_col + column_index * leaf_width), leaf_label,
               color=color, foreground=_header_foreground(color), size=leaf_font_size, bold=True)
@@ -1575,6 +1578,7 @@ def _hierarchy_gap_projection(matrix: dict, columns: list[dict]) -> dict:
 
 
 def _hierarchy_gap_tables(presentation, matrices: list[dict], *, title: str = 'GAP Analysis — All vs reference') -> None:
+    combined = title.startswith('GAP Analysis — All')
     for matrix in matrices:
         columns = matrix['hierarchy_columns']
         levels = matrix['hierarchy_levels']
@@ -1604,13 +1608,15 @@ def _hierarchy_gap_tables(presentation, matrices: list[dict], *, title: str = 'G
             table.rows[row_index].height = Inches(row_height)
         _hierarchy_header_groups(table, columns, levels, start_col=3, leaf_width=1,
                                  header_rows=header_rows, physical_column_width=leaf_width,
-                                 leaf_label='GAP')
+                                 leaf_label='GAP',
+                                 header_color=_GAP_SUMMARY_COMPARISON_HEADER if combined else None)
         data_font = min(7, metric_font)
         for index, (label, color) in enumerate((('Category', '#0084FF'), ('KPI', '#0084FF'), ('Type of KPI', '#0084FF'))):
             cell = table.cell(0, index)
             if header_rows > 1:
                 cell.merge(table.cell(header_rows - 1, index))
-            _cell(cell, label, color=color, foreground=_WHITE, size=7, bold=True)
+            _cell(cell, label, color=_GAP_SUMMARY_HEADER if combined else color,
+                  foreground=_WHITE, size=7, bold=True)
         gap_texts = [
             _gap_number(row, column['id'])
             for row in metrics for column in columns
@@ -1619,8 +1625,8 @@ def _hierarchy_gap_tables(presentation, matrices: list[dict], *, title: str = 'G
         for row_offset, row in enumerate(metrics, header_rows):
             subtotal = row.get('row_type') == 'category'
             row_color = _CATEGORY_TOTAL if subtotal else None
-            _cell(table.cell(row_offset, 0), row['category'], color=row_color or '#0084FF',
-                  foreground='#17232D' if subtotal else _WHITE, size=data_font, bold=True)
+            _cell(table.cell(row_offset, 0), row['category'], color=row_color or (_GAP_SUMMARY_CATEGORY if combined else '#0084FF'),
+                  foreground='#17232D' if subtotal or combined else _WHITE, size=data_font, bold=True)
             _cell(table.cell(row_offset, 1), row['kpi'], color=row_color or '#E6ECFA', size=metric_font, left=True,
                   bold=subtotal)
             _cell(table.cell(row_offset, 2), row['kpi_type'],
@@ -1666,13 +1672,13 @@ def _gap_summary_tables(presentation, matrices: list[dict]) -> None:
             for row, height in zip(list(table.rows)[1:], body_heights):
                 row.height = Inches(height)
             for index, header in enumerate(headers):
-                _cell(table.cell(0, index), header, color='#FFFF00' if index >= 3 else '#0084FF',
+                _cell(table.cell(0, index), header, color=_GAP_SUMMARY_COMPARISON_HEADER if index >= 3 else _GAP_SUMMARY_HEADER,
                       foreground='#17232D' if index >= 3 else _WHITE, size=10, bold=True)
             for index, row in enumerate(rows, 1):
                 subtotal = row.get('row_type') == 'category'
                 row_color = _CATEGORY_TOTAL if subtotal else None
-                _cell(table.cell(index, 0), row['category'], color=row_color or '#0084FF',
-                      foreground='#17232D' if subtotal else _WHITE, size=metric_font, bold=True)
+                _cell(table.cell(index, 0), row['category'], color=row_color or _GAP_SUMMARY_CATEGORY,
+                      foreground='#17232D', size=metric_font, bold=True)
                 _cell(table.cell(index, 1), row['kpi'], color=row_color or '#E6ECFA', size=metric_font,
                       left=True, bold=subtotal)
                 _cell(table.cell(index, 2), row['kpi_type'],
