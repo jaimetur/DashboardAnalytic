@@ -1511,7 +1511,7 @@
           const unit = firstValue(item, ['unit', 'units', 'measurement_unit'], '');
           cell.className = 'scoring-kpi-value-cell';
           cell.textContent = formatRawKpiValue(rawValue);
-          cell.dataset.numeric = rawValue !== null && rawValue !== undefined && String(rawValue).trim() !== '' && Number.isFinite(Number(rawValue)) ? 'true' : 'false';
+          cell.dataset.numeric = 'true';
           cell.title = `Raw ${item?.kpi || item?.kpi_code || 'KPI'} measurement for ${presentation.label}${unit ? ` (${unit})` : ''}: ${formatRawKpiValue(rawValue)}`;
           tr.append(cell);
         }
@@ -1561,6 +1561,7 @@
           const cell = document.createElement('td');
           cell.className = 'scoring-kpi-value-cell';
           cell.dataset.column = 'kpi-value';
+          cell.dataset.numeric = 'true';
           cell.textContent = 'N/A';
           cell.title = 'A single raw KPI measurement does not apply to the weighted total.';
           row.append(cell);
@@ -1862,7 +1863,7 @@
           cell.className = 'scoring-kpi-value-cell';
           cell.dataset.column = 'kpi-value';
           cell.textContent = formatRawKpiValue(rawValue);
-          cell.dataset.numeric = rawValue !== null && rawValue !== undefined && String(rawValue).trim() !== '' && Number.isFinite(Number(rawValue)) ? 'true' : 'false';
+          cell.dataset.numeric = 'true';
           cell.title = `Raw ${item?.kpi || item?.kpi_code || 'KPI'} measurement for ${presentation.label}${unit ? ` (${unit})` : ''}: ${formatRawKpiValue(rawValue)}`;
           row.append(cell);
         }
@@ -1911,6 +1912,7 @@
           const cell = document.createElement('td');
           cell.className = 'scoring-kpi-value-cell';
           cell.dataset.column = 'kpi-value';
+          cell.dataset.numeric = 'true';
           cell.textContent = 'N/A';
           cell.title = 'A single raw KPI measurement does not apply to the weighted total.';
           row.append(cell);
@@ -1956,6 +1958,7 @@
   }
 
   function renderHierarchyGapViews(pane, tableData, scoreTable) {
+    disconnectScoringValueObservers(pane);
     pane.replaceChildren();
     if (!tableData) {
       const empty = document.createElement('div');
@@ -2084,6 +2087,7 @@
     }
     wrapper.append(table);
     pane.append(wrapper);
+    observeScoringValueCells(table, wrapper);
     if (!rows.length) {
       const empty = document.createElement('div');
       empty.className = 'scoring-empty';
@@ -2110,6 +2114,7 @@
   }
 
   function renderGapViews(pane, tables) {
+    disconnectScoringValueObservers(pane);
     pane.replaceChildren();
     if (!tables.length) {
       const empty = document.createElement('div');
@@ -2189,6 +2194,7 @@
     table.append(thead, tbody);
     wrapper.append(table);
     pane.append(wrapper);
+    observeScoringValueCells(table, wrapper);
     if (selected?.total_gap_points !== null && selected?.total_gap_points !== undefined) {
       const summary = document.createElement('p');
       summary.className = 'scoring-context-note';
@@ -2202,6 +2208,7 @@
   }
 
   function renderGapSummaryViews(pane, tables) {
+    disconnectScoringValueObservers(pane);
     pane.replaceChildren();
     if (!tables.length) {
       const empty = document.createElement('div');
@@ -2349,6 +2356,7 @@
     }
     wrapper.append(table);
     pane.append(wrapper);
+    observeScoringValueCells(table, wrapper);
   }
 
   function findKey(row, candidates) {
@@ -3070,7 +3078,7 @@
     const hierarchyColumns = Array.isArray(tableData?.hierarchy_columns) ? tableData.hierarchy_columns : [];
     const hierarchyColumnsById = new Map(hierarchyColumns.map(column => [String(column?.id ?? ''), column]));
     const hasHierarchyAxis = hierarchyLevels.length > 0 && hierarchyColumnsById.size > 0;
-    const width = Math.max(980, data.operators.length * 190 + 170);
+    const width = Math.max(980, data.operators.length * 85 + 128);
     const left = 92, right = 36;
     const fallbackColors = ['#14867d', '#df7a45', '#5a82aa', '#8b63b1'];
     const barColors = new Map(data.operators.map((operator, index) => {
@@ -3128,7 +3136,10 @@
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
     svg.setAttribute('class', 'scoring-chart-svg scoring-best-network-bars');
-    svg.style.minWidth = `${width}px`;
+    const visibleWidth = data.operators.length > 10
+      ? categoryStarts.get(data.operators[10]) + right : width;
+    svg.style.width = `${100 * width / visibleWidth}%`;
+    svg.style.minWidth = '0';
     svg.style.maxWidth = 'none';
     svg.style.minHeight = '0';
     svg.setAttribute('role', 'img');
@@ -3547,6 +3558,7 @@
 
   function renderNoResult(text) {
     for (const pane of resultPanes) {
+      disconnectScoringValueObservers(pane);
       pane.replaceChildren();
       const empty = document.createElement('div');
       empty.className = 'scoring-empty';

@@ -28,10 +28,11 @@ def test_best_network_chart_keeps_its_intrinsic_width_on_narrow_cards():
     script = SCORING_SCRIPT.read_text(encoding='utf-8')
 
     assert re.search(
-        r'\.scoring-chart-svg\.scoring-best-network-bars\s*\{[^}]*min-width:\s*980px;'
+        r'\.scoring-chart-svg\.scoring-best-network-bars\s*\{[^}]*min-width:\s*0;'
         r'[^}]*max-width:\s*none;[^}]*min-height:\s*0;', template,
     )
-    assert "svg.style.minWidth = `${width}px`;" in script
+    assert "svg.style.minWidth = '0';" in script
+    assert "svg.style.width = `${100 * width / visibleWidth}%`;" in script
     assert "svg.style.maxWidth = 'none';" in script
     assert "scroll.className = 'scoring-chart-scroll';" in script
     assert 'const baseHeight = 620;' in script
