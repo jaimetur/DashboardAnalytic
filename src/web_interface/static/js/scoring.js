@@ -1165,7 +1165,7 @@
       measurement.font = styles.font;
       const contentWidth = measurement.measureText(cell.textContent.trim()).width;
       if (contentWidth <= 0 || available <= contentWidth * 1.05) continue;
-      const scale = Math.min(1.28, available / contentWidth);
+      const scale = Math.min(1.65, available / (contentWidth * 1.05));
       cell.style.fontSize = `${Math.round(fontSize * scale * 10) / 10}px`;
     }
   }
