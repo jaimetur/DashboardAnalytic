@@ -23,7 +23,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
   const profileSelect = root.querySelector('[data-scoring-profile-select]');
   const profileActions = Array.from(root.querySelectorAll('[data-scoring-profile-action]'));
   const weightModeSelect = root.querySelector('[data-scoring-weight-mode]');
-  const addKpiButton = root.querySelector('[data-scoring-add-kpi]');
+  const addCategoryButton = root.querySelector('[data-scoring-add-category]');
   const environmentTotalPointsInput = root.querySelector('[data-environment-total-points]');
   const environmentTotalWeightInput = root.querySelector('[data-environment-total-weight]');
   const environmentTotalSummary = root.querySelector('[data-environment-total-summary]');
@@ -74,7 +74,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     ['ultra_score', 'Ultra'],
   ];
   const sourceKinds = [['data', 'Data'], ['voice', 'Voice'], ['speech', 'Speech']];
-  const directions = [['higher_is_better', 'Higher is better'], ['lower_is_better', 'Lower is better']];
+  const directions = [['higher_is_better', 'Higher'], ['lower_is_better', 'Lower']];
   const totalPacketLossFormula = '100 * SUM(totalpacketlost) / SUM(Packets_Sent)';
   const totalPacketLossExpression = 'IFNULL(Packets_Lost,0) + IFNULL(Packets_Discarded,0) + IFNULL(INT(Packets_Corrupted),0) + IFNULL(Packets_Not_Sent,0)';
   const defaultHierarchy = ['Operator', 'Vendor', 'Region', 'City', 'Campaign'];
@@ -228,9 +228,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     return latest;
   });
 
-  const appendCell = (row, className = '') => {
+  const appendCell = (row, className = '', label = '') => {
     const cell = document.createElement('td');
     if (className) cell.className = className;
+    if (label) cell.dataset.label = label;
     row.append(cell);
     return cell;
   };
@@ -254,6 +255,35 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     return textarea;
   };
 
+  const appendKpiActionIcon = (button, name) => {
+    const namespace = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(namespace, 'svg');
+    svg.setAttribute('viewBox', '0 0 20 20');
+    svg.setAttribute('width', '1em');
+    svg.setAttribute('height', '1em');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '1.8');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+    svg.classList.add('scoring-config-kpi-action-icon');
+    const paths = {
+      add: ['M10 4v12', 'M4 10h12'],
+      up: ['M10 16V4', 'm5 9 5-5 5 5'],
+      down: ['M10 4v12', 'm5 11 5 5 5-5'],
+      delete: ['M5 7h10', 'M8 7V5h4v2', 'm6 7 .7 9h6.6l.7-9', 'M8.5 9.5v4.5', 'M11.5 9.5v4.5'],
+      edit: ['m4 14.8-.8 3.2 3.2-.8L17.6 6 14 2.4 4 14.8z', 'M12.5 4 16 7.5'],
+    };
+    (paths[name] || []).forEach((pathData) => {
+      const path = document.createElementNS(namespace, 'path');
+      path.setAttribute('d', pathData);
+      svg.append(path);
+    });
+    button.append(svg);
+  };
+
   const appendSelect = (cell, value, label, options, attributes = {}) => {
     const select = document.createElement('select');
     select.setAttribute('aria-label', label);
@@ -275,6 +305,65 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
   );
 
   const rowMetrics = () => Array.from(kpiRows.querySelectorAll('tr[data-kpi-code]'));
+
+  const normalizeCategoryName = (value) => String(value ?? '').trim() || 'Other';
+
+  const categoryNames = (values) => {
+    const categories = [];
+    const seen = new Set();
+    values.forEach((value) => {
+      const category = normalizeCategoryName(value);
+      if (seen.has(category)) return;
+      seen.add(category);
+      categories.push(category);
+    });
+    return categories;
+  };
+
+  const currentCategoryNames = () => categoryNames(rowMetrics().map((row) => row.querySelector('[data-kpi-category]')?.value));
+
+  const categoryNameIsAvailable = (name) => {
+    const normalizedName = name.trim().toLocaleLowerCase();
+    return !currentCategoryNames().some((category) => category.toLocaleLowerCase() === normalizedName);
+  };
+
+  const refreshKpiCategoryOptions = () => {
+    const categories = currentCategoryNames();
+    rowMetrics().forEach((row) => {
+      const select = row.querySelector('[data-kpi-category]');
+      if (!select) return;
+      const selectedCategory = normalizeCategoryName(select.value);
+      const options = categories.includes(selectedCategory) ? categories : [...categories, selectedCategory];
+      select.replaceChildren(...options.map((category) => {
+        const option = document.createElement('option');
+        option.value = category;
+        option.textContent = category;
+        return option;
+      }));
+      select.value = selectedCategory;
+    });
+  };
+
+  const resizeKpiLabel = (textarea) => {
+    if (!textarea?.isConnected || textarea.offsetParent === null) return;
+    textarea.style.height = 'auto';
+    const style = window.getComputedStyle(textarea);
+    const borderHeight = ['borderTopWidth', 'borderBottomWidth']
+      .reduce((total, property) => total + (Number.parseFloat(style[property]) || 0), 0);
+    textarea.style.height = `${Math.ceil(textarea.scrollHeight + borderHeight)}px`;
+  };
+
+  const refreshKpiLabelHeights = () => {
+    kpiRows.querySelectorAll('[data-kpi-label]').forEach(resizeKpiLabel);
+  };
+
+  const kpiTableContainer = kpiRows.closest('.scoring-config-table-scroll');
+  if (typeof ResizeObserver === 'function' && kpiTableContainer) {
+    const kpiLabelResizeObserver = new ResizeObserver(refreshKpiLabelHeights);
+    kpiLabelResizeObserver.observe(kpiTableContainer);
+  } else {
+    window.addEventListener('resize', refreshKpiLabelHeights);
+  }
 
   const metricForRow = (row) => row?._newMetricTemplate
     ? row._newMetricTemplate
@@ -566,6 +655,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     cell.scope = 'colgroup';
     cell.colSpan = 18;
     const name = document.createElement('span');
+    name.className = 'scoring-config-category-name';
     name.textContent = category;
     const totals = document.createElement('span');
     totals.className = 'scoring-config-category-total';
@@ -585,6 +675,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
 
   const renderCategoryGroups = () => {
     const rows = rowMetrics();
+    refreshKpiCategoryOptions();
     const grouped = new Map();
     rows.forEach((row) => {
       const category = row.querySelector('[data-kpi-category]')?.value.trim() || 'Other';
@@ -598,11 +689,12 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       grouped.get(category).sort((left, right) => Number(left.dataset.orderIndex) - Number(right.dataset.orderIndex)).forEach((row) => fragments.push(row));
     });
     kpiRows.replaceChildren(...fragments);
+    refreshKpiLabelHeights();
     updateCategoryTotals();
     refreshKpiActionButtons();
   };
 
-  const renderKpiRow = (metric, index, {newMetric = false} = {}) => {
+  const renderKpiRow = (metric, index, {newMetric = false, categoryOptions = null} = {}) => {
     const environment = environmentSelect.value;
     const context = metric.contexts?.[environment];
     if (!context) return null;
@@ -612,66 +704,83 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     row.dataset.orderIndex = String(index);
     if (newMetric) row._newMetricTemplate = clone(metric);
 
-    const codeCell = appendCell(row, 'scoring-config-code-display');
+    const codeCell = appendCell(row, 'scoring-config-code-display', 'Code');
     appendInput(codeCell, 'text', metric.code, `KPI code for ${metric.kpi || metric.code}`, {
       'data-kpi-code-input': '', class: 'scoring-config-code-input', maxlength: '32', required: '',
       title: 'Changing this code also updates its saved GAP priority entry.',
     });
 
-    const kpiCell = appendCell(row, 'scoring-config-kpi-label');
-    appendInput(kpiCell, 'text', metric.kpi || metric.code, `KPI label for ${metric.code}`, {
-      'data-kpi-label': '', class: 'scoring-config-identity-input', maxlength: '160', required: '',
+    const kpiCell = appendCell(row, 'scoring-config-kpi-label', 'KPI');
+    appendTextArea(kpiCell, metric.kpi || metric.code, `KPI label for ${metric.code}`, {
+      'data-kpi-label': '', class: 'scoring-config-identity-input', maxlength: '160', required: '', rows: '1',
     });
 
-    const categoryCell = appendCell(row);
-    appendInput(categoryCell, 'text', metric.category || 'Other', `Category for ${metric.kpi || metric.code}`, {
-      'data-kpi-category': '', class: 'scoring-config-category-input', maxlength: '100', required: '',
+    const categoryCell = appendCell(row, '', 'Category');
+    const selectedCategory = normalizeCategoryName(metric.category);
+    const availableCategories = categoryNames(categoryOptions || currentCategoryNames());
+    if (!availableCategories.includes(selectedCategory)) availableCategories.push(selectedCategory);
+    appendSelect(categoryCell, selectedCategory, `Category for ${metric.kpi || metric.code}`, availableCategories.map((category) => [category, category]), {
+      'data-kpi-category': '', class: 'scoring-config-category-select scoring-config-category-input', required: '',
     });
 
-    const typeCell = appendCell(row);
+    const typeCell = appendCell(row, '', 'Type');
     appendInput(typeCell, 'text', metric.kpi_type || '', `Type of KPI for ${metric.kpi || metric.code}`, {
       'data-kpi-type': '', class: 'scoring-config-type-input', maxlength: '80', required: '',
     });
 
-    const directionCell = appendCell(row);
+    const directionCell = appendCell(row, '', 'Direction');
     const directionSelect = appendSelect(directionCell, metric.direction || 'higher_is_better', `Scoring direction for ${metric.kpi || metric.code}`, directions, {
       'data-kpi-direction': '', class: 'scoring-config-direction',
     });
+    Array.from(directionSelect.options).forEach((option) => {
+      option.title = option.value === 'higher_is_better' ? 'Higher is better' : 'Lower is better';
+    });
+    directionSelect.title = 'Higher means larger KPI results score better. Lower means smaller KPI results score better.';
 
-    const pointsCell = appendCell(row);
+    const pointsCell = appendCell(row, '', 'Max Points');
     appendNumericInput(pointsCell, context.max_points, `Maximum points for ${metric.kpi || metric.code}`, {
       'data-max-points': '', min: '0', required: '',
     });
     const pointsOutput = document.createElement('span');
     pointsOutput.dataset.maxPointsOutput = '';
     pointsCell.append(pointsOutput);
-    const weightCell = appendCell(row, 'scoring-config-weight');
+    const weightCell = appendCell(row, 'scoring-config-weight', 'Environment Weight');
     const weightOutput = document.createElement('span');
     weightOutput.dataset.weightEnvironmentPercent = '';
     weightCell.append(weightOutput);
     appendNumericInput(weightCell, '', `Weight percentage for ${metric.kpi || metric.code}`, {
       'data-weight-environment-input': '', min: '0', max: '100', step: '0.01', required: '',
     });
-    const globalWeightCell = appendCell(row, 'scoring-config-weight');
+    const globalWeightCell = appendCell(row, 'scoring-config-weight', 'Global Weight');
     const globalWeightOutput = document.createElement('span');
     globalWeightOutput.dataset.weightGlobalPercent = '';
     globalWeightCell.append(globalWeightOutput);
 
     for (const key of ['low', 'medium', 'high']) {
-      const cell = appendCell(row);
+      const cell = appendCell(row, '', `${key[0].toUpperCase()}${key.slice(1)} Threshold`);
       appendNumericInput(cell, context.thresholds?.[key], `${key} KPI threshold for ${metric.kpi || metric.code}`, {
         'data-threshold': key, required: '',
       });
     }
 
-    const ultraCell = appendCell(row, 'scoring-config-ultra');
+    const ultraCell = appendCell(row, 'scoring-config-ultra', 'Ultra Threshold');
     const ultraEditor = document.createElement('div');
     ultraEditor.className = 'scoring-config-ultra-editor';
     const ultra = context.thresholds?.ultra;
     const ultraMode = ultra === null || ultra === undefined ? 'none' : typeof ultra === 'object' ? String(ultra.rule || 'none') : 'fixed';
-    appendSelect(ultraEditor, ultraMode, `Ultra threshold type for ${metric.kpi || metric.code}`, [
-      ['none', 'None'], ['fixed', 'Fixed value'], ['best_min', 'Best minimum'], ['best_max', 'Best maximum'],
+    const ultraModeSelect = appendSelect(ultraEditor, ultraMode, `Ultra threshold type for ${metric.kpi || metric.code}`, [
+      ['none', 'None'], ['fixed', 'Fixed'], ['best_min', 'Best min'], ['best_max', 'Best max'],
     ], {'data-ultra-mode': ''});
+    const ultraModeMeanings = {
+      none: 'No Ultra threshold',
+      fixed: 'Fixed value',
+      best_min: 'Best minimum observed KPI result',
+      best_max: 'Best maximum observed KPI result',
+    };
+    Array.from(ultraModeSelect.options).forEach((option) => {
+      option.title = ultraModeMeanings[option.value] || option.textContent;
+    });
+    ultraModeSelect.title = 'None disables the Ultra threshold. Fixed uses a fixed value. Best min selects the minimum observed result; Best max selects the maximum observed result.';
     appendNumericInput(
       ultraEditor, typeof ultra === 'number' ? ultra : '', `Fixed Ultra threshold for ${metric.kpi || metric.code}`,
       {'data-ultra-value': '', required: ''},
@@ -683,18 +792,31 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
 
     const mapping = context.score_mapping || {};
     anchors.forEach(([key, label]) => {
-      const cell = appendCell(row);
+      const cell = appendCell(row, '', `${label} Score Anchor`);
       appendNumericInput(cell, Number(mapping[key]) * 100, `${label} score interpolation anchor for ${metric.kpi || metric.code}`, {
         'data-score-anchor': key, min: '0', max: '100', required: '',
       });
     });
 
-    const calculationCell = appendCell(row, 'scoring-config-source');
-    const details = document.createElement('details');
-    details.className = 'scoring-config-source';
-    const summary = document.createElement('summary');
-    summary.textContent = 'Edit formula and filters';
-    details.append(summary);
+    const calculationCell = appendCell(row, 'scoring-config-calculation', 'KPI Definition');
+    const calculationDialog = document.createElement('dialog');
+    calculationDialog.className = 'scoring-config-calculation-dialog';
+    const dialogHeading = document.createElement('h2');
+    dialogHeading.textContent = 'Formula and filters';
+    const dialogHeadingId = `scoring-calculation-heading-${String(metric.code).replace(/[^A-Za-z0-9_-]/g, '-')}`;
+    dialogHeading.id = dialogHeadingId;
+    calculationDialog.setAttribute('aria-labelledby', dialogHeadingId);
+    const dialogHeader = document.createElement('div');
+    dialogHeader.className = 'scoring-config-calculation-dialog-header';
+    dialogHeader.append(dialogHeading);
+    const closeCalculationDialog = document.createElement('button');
+    closeCalculationDialog.type = 'button';
+    closeCalculationDialog.className = 'ghost-link scoring-config-calculation-close';
+    closeCalculationDialog.setAttribute('aria-label', `Close formula and filters for ${metric.kpi || metric.code}`);
+    closeCalculationDialog.title = 'Close formula editor';
+    closeCalculationDialog.textContent = 'Close';
+    closeCalculationDialog.addEventListener('click', () => calculationDialog.close());
+    dialogHeader.append(closeCalculationDialog);
     const sourceLabel = document.createElement('label');
     sourceLabel.textContent = 'Source kind';
     appendSelect(sourceLabel, metric.source_kind || metric.calculation?.source_kind || 'data', `Source kind for ${metric.kpi || metric.code}`, sourceKinds, {
@@ -732,41 +854,50 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     packetLossInput.placeholder = totalPacketLossExpression;
     packetLossLabel.hidden = String(metric.calculation?.formula || '').trim() !== totalPacketLossFormula;
     formulaEditor.append(formulaLabel, filtersLabel, denominatorLabel, packetLossLabel);
-    details.append(sourceLabel, formulaEditor);
-    calculationCell.append(details);
+    calculationDialog.append(dialogHeader, sourceLabel, formulaEditor);
+    const editFormulaButton = document.createElement('button');
+    editFormulaButton.type = 'button';
+    editFormulaButton.className = 'ghost-link scoring-config-kpi-action scoring-config-calculation-edit';
+    editFormulaButton.setAttribute('aria-label', `Edit formula and filters for ${metric.kpi || metric.code}`);
+    editFormulaButton.title = `Edit formula and filters for ${metric.kpi || metric.code}`;
+    appendKpiActionIcon(editFormulaButton, 'edit');
+    editFormulaButton.addEventListener('click', () => {
+      if (!calculationDialog.open) calculationDialog.showModal();
+    });
+    calculationCell.append(editFormulaButton, calculationDialog);
     directionSelect.addEventListener('change', () => syncUltraInput(row));
     row.querySelector('[data-ultra-mode]')?.addEventListener('change', () => syncUltraInput(row));
     syncUltraInput(row);
 
+    const actionsCell = appendCell(row, '', 'Actions');
     const actions = document.createElement('div');
     actions.className = 'scoring-config-kpi-actions';
     const addBelow = document.createElement('button');
     addBelow.type = 'button';
-    addBelow.className = 'ghost-link';
+    addBelow.className = 'ghost-link scoring-config-kpi-action';
     addBelow.dataset.kpiAddBelow = '';
     addBelow.setAttribute('aria-label', `Add KPI below ${metric.kpi || metric.code} in this category`);
     addBelow.title = 'Add a KPI below this row in the same category';
-    addBelow.textContent = 'Add below';
+    appendKpiActionIcon(addBelow, 'add');
     actions.append(addBelow);
     for (const [directionName, label] of [['up', 'Move up within category'], ['down', 'Move down within category']]) {
       const move = document.createElement('button');
       move.type = 'button';
-      move.className = 'ghost-link';
+      move.className = 'ghost-link scoring-config-kpi-action';
       move.dataset.kpiMove = directionName;
       move.setAttribute('aria-label', `${label}: ${metric.kpi || metric.code}`);
       move.title = label;
-      move.textContent = directionName === 'up' ? '↑' : '↓';
+      appendKpiActionIcon(move, directionName);
       actions.append(move);
     }
-    const actionsCell = appendCell(row);
     actionsCell.append(actions);
     const remove = document.createElement('button');
     remove.type = 'button';
-    remove.className = 'ghost-link scoring-config-delete-kpi';
+    remove.className = 'ghost-link scoring-config-delete-kpi scoring-config-kpi-action';
     remove.dataset.kpiDelete = '';
     remove.setAttribute('aria-label', `Delete KPI ${metric.kpi || metric.code}`);
     remove.title = 'Delete KPI';
-    remove.textContent = 'Delete';
+    appendKpiActionIcon(remove, 'delete');
     actions.append(remove);
     const formulaInput = row.querySelector('[data-kpi-formula]');
     formulaInput?.addEventListener('input', () => syncFormulaDependentControls(row));
@@ -798,8 +929,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
   const renderKpiRows = () => {
     kpiRows.replaceChildren();
     const metrics = Array.isArray(configuration?.metrics) ? configuration.metrics : [];
+    const initialCategories = categoryNames(metrics.map((metric) => metric.category));
     metrics.forEach((metric, index) => {
-      const row = renderKpiRow(metric, index);
+      const row = renderKpiRow(metric, index, {categoryOptions: initialCategories});
       if (row) kpiRows.append(row);
     });
     renderCategoryGroups();
@@ -807,7 +939,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     syncWeightMode();
     updateDerivedWeights();
     if (kpiSave) kpiSave.disabled = false;
-    if (addKpiButton) addKpiButton.disabled = !configuration;
+    if (addCategoryButton) addCategoryButton.disabled = !configuration;
     if (distributePointsButton) distributePointsButton.disabled = !configuration || !environmentKeys().length;
   };
 
@@ -928,7 +1060,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     profileActions.forEach((button) => {
       button.disabled = !hasProfile || (button.dataset.scoringProfileAction === 'delete' && (profileCollection?.profiles?.length || 0) <= 1);
     });
-    if (addKpiButton) addKpiButton.disabled = !configuration;
+    if (addCategoryButton) addCategoryButton.disabled = !configuration;
   };
 
   const render = () => {
@@ -1297,27 +1429,29 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     }
   };
 
-  const openProfileDialog = ({title, description, confirmLabel = 'Continue', initialValue = '', nameRequired = false, exceptId = '', distribution = false, environmentCreate = false, environmentRename = false, exceptEnvironmentKey = '', initialG1 = '', initialG2 = ''}) => {
+  const openProfileDialog = ({title, description, confirmLabel = 'Continue', initialValue = '', nameRequired = false, exceptId = '', distribution = false, environmentCreate = false, environmentRename = false, categoryCreate = false, exceptEnvironmentKey = '', initialG1 = '', initialG2 = ''}) => {
     if (!profileDialog || !profileDialogTitle || !profileDialogCopy || !profileDialogConfirm || !profileDialogCancel) {
       return Promise.resolve(null);
     }
     if (profileDialogResolver) closeProfileDialog(null);
-    profileDialogOptions = {nameRequired, exceptId, distribution, environmentCreate, environmentRename, exceptEnvironmentKey};
-    if (profileDialogEyebrow) profileDialogEyebrow.textContent = environmentCreate || environmentRename
-      ? 'Scoring environment' : 'Scoring methodology';
+    profileDialogOptions = {nameRequired, exceptId, distribution, environmentCreate, environmentRename, categoryCreate, exceptEnvironmentKey};
+    if (profileDialogEyebrow) profileDialogEyebrow.textContent = categoryCreate
+      ? 'KPI category' : environmentCreate || environmentRename ? 'Scoring environment' : 'Scoring methodology';
     profileDialogTitle.textContent = title;
     profileDialogCopy.textContent = description;
     profileDialogConfirm.textContent = confirmLabel;
     if (profileDialogNameField) profileDialogNameField.hidden = !nameRequired;
     if (profileDialogDistribution) profileDialogDistribution.hidden = !distribution;
     if (profileDialogEnvironmentFields) profileDialogEnvironmentFields.hidden = !environmentCreate;
-    if (profileDialogNameLabel) profileDialogNameLabel.textContent = environmentCreate || environmentRename ? 'Environment name' : 'Methodology name';
+    if (profileDialogNameLabel) profileDialogNameLabel.textContent = categoryCreate
+      ? 'Category name' : environmentCreate || environmentRename ? 'Environment name' : 'Methodology name';
     if (profileDialogTotalLabel) profileDialogTotalLabel.textContent = environmentCreate ? 'New environment total points' : 'Selected environment total points';
     if (profileDialogTotal) profileDialogTotal.setAttribute('aria-label', environmentCreate
       ? 'New environment total points' : `Total points for ${environmentLabel(environmentSelect.value)}`);
     if (profileDialogName) {
       profileDialogName.value = initialValue;
       profileDialogName.required = nameRequired;
+      profileDialogName.maxLength = categoryCreate ? 100 : 80;
     }
     if (distribution && profileDialogReference) {
       profileDialogReference.replaceChildren();
@@ -1393,6 +1527,18 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       return;
     }
     const name = profileDialogName?.value.trim() || '';
+    if (profileDialogOptions.categoryCreate) {
+      let categoryError = '';
+      if (!name || name.length > 100) categoryError = 'Category name must contain 1 to 100 characters.';
+      else if (!categoryNameIsAvailable(name)) categoryError = 'A category with that name already exists.';
+      if (categoryError) {
+        if (profileDialogError) profileDialogError.textContent = categoryError;
+        profileDialogName?.focus();
+        return;
+      }
+      closeProfileDialog(name);
+      return;
+    }
     if (profileDialogOptions.environmentRename) {
       let environmentError = '';
       if (!name || name.length > 80) environmentError = 'Environment name must contain 1 to 80 characters.';
@@ -1548,14 +1694,16 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     return metric;
   };
 
-  const addKpi = (afterRow = null) => {
+  const addKpi = (afterRow = null, categoryOverride = '', {categoryCreated = false} = {}) => {
     try {
-      const category = afterRow?.querySelector('[data-kpi-category]')?.value.trim() || 'Custom';
-      const metric = makeNewMetric(afterRow ? category : 'Custom');
+      const category = categoryOverride.trim()
+        || afterRow?.querySelector('[data-kpi-category]')?.value.trim()
+        || 'Custom';
+      const metric = makeNewMetric(category);
       const orderedRows = rowMetrics().sort((left, right) => Number(left.dataset.orderIndex) - Number(right.dataset.orderIndex));
       const insertionIndex = afterRow ? Math.max(0, orderedRows.indexOf(afterRow) + 1) : orderedRows.length;
       const index = afterRow ? insertionIndex : Math.max(0, ...orderedRows.map((row) => Number(row.dataset.orderIndex) + 1));
-      const row = renderKpiRow(metric, index, {newMetric: true});
+      const row = renderKpiRow(metric, index, {newMetric: true, categoryOptions: currentCategoryNames()});
       if (!row) throw new Error('Unable to create the KPI row.');
       if (afterRow) {
         orderedRows.splice(insertionIndex, 0, row);
@@ -1568,10 +1716,26 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       updateDerivedWeights();
       row.querySelector('[data-kpi-label]')?.focus();
       kpiDirty = true;
-      setStatus(kpiStatus, 'Unsaved KPI changes. Complete the new KPI formula and filters before saving.');
+      setStatus(kpiStatus, categoryCreated
+        ? 'New category created with its first KPI. Complete the new KPI formula and filters before saving.'
+        : 'Unsaved KPI changes. Complete the new KPI formula and filters before saving.');
+      return row;
     } catch (error) {
       setStatus(kpiStatus, error.message || 'Unable to add KPI.', 'error');
+      return null;
     }
+  };
+
+  const addCategory = async () => {
+    const category = await openProfileDialog({
+      title: 'Add category',
+      description: 'Create a category with its first KPI. Configure the KPI before saving.',
+      confirmLabel: 'Add category',
+      nameRequired: true,
+      categoryCreate: true,
+    });
+    if (category === null) return;
+    addKpi(null, category, {categoryCreated: true});
   };
 
   const moveKpiWithinCategory = (row, direction) => {
@@ -1953,6 +2117,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     const target = event.target;
     if (target.matches('[data-scoring-environment], [data-scoring-weight-mode]')) return;
     kpiDirty = true;
+    if (target.matches('[data-kpi-label]')) resizeKpiLabel(target);
     if (target.matches('[data-environment-total-points]')) {
       const message = applyEnvironmentPointsEdit(target);
       setStatus(kpiStatus, message || 'Unsaved KPI changes. Environment points are distributed using its relative KPI weights.', target.getAttribute('aria-invalid') ? 'error' : '');
@@ -2005,18 +2170,17 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     setStatus(kpiStatus, 'Unsaved KPI changes.');
   });
   kpiForm.addEventListener('click', (event) => {
-    const addBelow = event.target.closest('[data-kpi-add-below]');
-    if (addBelow && kpiRows.contains(addBelow)) {
-      addKpi(addBelow.closest('tr[data-kpi-code]'));
+    const button = event.target.closest('button');
+    if (!button || !kpiRows.contains(button)) return;
+    if (button.hasAttribute('data-kpi-add-below')) {
+      addKpi(button.closest('tr[data-kpi-code]'));
       return;
     }
-    const move = event.target.closest('[data-kpi-move]');
-    if (move && kpiRows.contains(move) && !move.disabled) {
-      moveKpiWithinCategory(move.closest('tr[data-kpi-code]'), move.dataset.kpiMove);
+    if (button.hasAttribute('data-kpi-move') && !button.disabled) {
+      moveKpiWithinCategory(button.closest('tr[data-kpi-code]'), button.dataset.kpiMove);
       return;
     }
-    const button = event.target.closest('[data-kpi-delete]');
-    if (!button || !kpiRows.contains(button) || button.disabled) return;
+    if (!button.hasAttribute('data-kpi-delete') || button.disabled) return;
     button.closest('tr[data-kpi-code]').remove();
     renderCategoryGroups();
     refreshKpiActionButtons();
@@ -2051,7 +2215,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       : 'Edit maximum points directly. Changing an environment total distributes its points using the relative KPI weights.');
   });
 
-  addKpiButton?.addEventListener('click', addKpi);
+  addCategoryButton?.addEventListener('click', addCategory);
   distributePointsButton?.addEventListener('click', distributeEnvironmentPoints);
   createEnvironmentButton?.addEventListener('click', createEnvironment);
   renameEnvironmentButton?.addEventListener('click', renameEnvironment);

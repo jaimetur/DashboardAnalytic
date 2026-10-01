@@ -2458,6 +2458,7 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     import src.DashboardAnalytic as app_module
 
     login_super(client)
+    app_module.repository.set_application_state(app_module.RECURRING_BACKUP_STATE_KEY, '')
     admin_response = client.get('/admin')
     assert admin_response.status_code == 200
     assert 'Import / Export / Transfer' in admin_response.text
@@ -2469,13 +2470,27 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     assert '<optgroup label="Full Environment">' in admin_response.text
     assert admin_response.text.index('<optgroup label="Full Workspace">') < admin_response.text.index('<optgroup label="Full Environment">')
     assert 'Config</option>' in admin_response.text
-    assert 'Operator/Vendor Mappings &amp; Colors (from active workspace)' in admin_response.text
-    assert 'Full Environment (Application Config + Dashboards + Report Templates + Operator/Vendor Mappings &amp; Colors + Main Cities + Scoring Configuration + Auto-calculated Fields + Query Builder Queries + Selected Workspaces)' in admin_response.text
+    assert 'Main Cities (from active workspace)</option>' in admin_response.text
+    assert 'Operator &amp; Vendor Maps (from active workspace)</option>' in admin_response.text
+    assert admin_response.text.index('Main Cities (from active workspace)</option>') < admin_response.text.index('Operator &amp; Vendor Maps (from active workspace)</option>')
+    assert 'Scoring &amp; GAP Analysis Configuration (from active workspace)' in admin_response.text
+    assert 'Full Environment (Application Config + Dashboards + Report Templates + Main Cities + Operator &amp; Vendor Maps + Scoring &amp; GAP Analysis Configuration + Auto-calculated Fields + Query Builder Queries + Selected Workspaces)' in admin_response.text
+    assert admin_response.text.index('Main Cities (workspace city selection)') < admin_response.text.index('Operator &amp; Vendor Maps (aliases, order and theme colors)')
+    assert 'Scoring &amp; GAP Analysis Configuration (KPI methodology profiles, aggregation hierarchy and GAP KPI priorities)' in admin_response.text
+    assert "main_cities: 'Main Cities', operator_mappings: 'Operator & Vendor Maps', scoring_configuration: 'Scoring & GAP Analysis Configuration'" in admin_response.text
+    assert "['Workspace Content', ['workspace_database', 'dashboards', 'report_templates', 'main_cities', 'operator_mappings', 'scoring_configuration'" in admin_response.text
+    assert {'main_cities', 'scoring_configuration'} <= set(app_module.recurring_backup_settings()['components'])
+    assert 'value="main_cities" selected' in admin_response.text
+    assert 'value="scoring_configuration" selected' in admin_response.text
     assert 'Workspace: Default' in admin_response.text
     stylesheet = app_module.PROJECT_ROOT.joinpath('src/web_interface/static/css/app.css').read_text(encoding='utf-8')
+    app_script = app_module.PROJECT_ROOT.joinpath('src/web_interface/static/js/app.js').read_text(encoding='utf-8')
     assert '.multiselect-shell { position: relative; min-width: 0; max-width: 100%; }' in stylesheet
     assert '.multiselect-trigger-label { flex: 1 1 auto; min-width: 0;' in stylesheet
     assert '.admin-export-components { min-width: 0; }' in stylesheet
+    assert "title: 'Overwrite Main Cities?'" in app_script
+    assert "title: 'Overwrite Scoring & GAP Analysis Configuration?'" in app_script
+    assert 'KPI methodology profiles, aggregation hierarchy and GAP KPI priorities.' in app_script
 
     config_response = client.get('/admin/import-export/export?export_target=config')
     assert config_response.status_code == 200
@@ -6342,7 +6357,7 @@ def test_operator_mapping_backup_supports_selective_restore(client, tmp_path: Pa
 
     assert app_module.repository.list_operator_mappings()['backup alias'] == 'Backup Carrier'
     assert progress_steps[-1][1:] == (1, 1)
-    assert 'Operator Mappings restored' in progress_steps[-1][0]
+    assert 'Operator & Vendor Maps restored' in progress_steps[-1][0]
     restored_vendor = next(
         group for group in app_module.repository.list_vendor_mapping_groups()
         if group['canonical'] == 'Backup Vendor'

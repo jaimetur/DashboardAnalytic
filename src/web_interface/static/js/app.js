@@ -6133,8 +6133,20 @@ function importWarningDetails(payload) {
   }
   if (kind === 'operator-mappings') {
     return {
-      title: 'Overwrite Operator/Vendor Mappings & Colors?',
+      title: 'Overwrite Operator & Vendor Maps?',
       message: 'Choose the destination workspaces next. Their complete Operator and Vendor aliases, order and theme colors will be replaced. Stored CDR values will not be modified or rematerialized.',
+    };
+  }
+  if (kind === 'main-cities') {
+    return {
+      title: 'Overwrite Main Cities?',
+      message: 'Choose the destination workspaces next. Their configured Main Cities selection will be replaced by the package.',
+    };
+  }
+  if (kind === 'scoring-configuration') {
+    return {
+      title: 'Overwrite Scoring & GAP Analysis Configuration?',
+      message: 'Choose the destination workspaces next. The package data will replace their Scoring & GAP Analysis Configuration, including its available KPI methodology profiles, aggregation hierarchy and GAP KPI priorities.',
     };
   }
   if (kind === 'auto-calculated-fields') {
@@ -6168,10 +6180,15 @@ function importPackageContents(payload) {
   const labels = {
     config: 'Application Config', workspace: 'Full Workspace', 'full-environment': 'Full Environment',
     dashboards: 'Dashboards', 'slides-templates': 'Report Templates',
-    'operator-mappings': 'Operator/Vendor Mappings & Colors', 'auto-calculated-fields': 'Auto-calculated Fields',
+    'operator-mappings': 'Operator & Vendor Maps', 'main-cities': 'Main Cities',
+    'scoring-configuration': 'Scoring & GAP Analysis Configuration',
+    'auto-calculated-fields': 'Auto-calculated Fields',
   };
   const targets = Array.isArray(payload.targets) && payload.targets.length ? payload.targets : [payload.kind];
-  const workspaceTargets = new Set(['dashboards', 'slides-templates', 'operator-mappings', 'auto-calculated-fields']);
+  const workspaceTargets = new Set([
+    'dashboards', 'slides-templates', 'main-cities', 'operator-mappings',
+    'scoring-configuration', 'auto-calculated-fields',
+  ]);
   const workspaceContents = targets.length && targets.every((item) => workspaceTargets.has(String(item)));
   return [
     workspaceContents ? 'Workspace contents:' : 'Package includes:',
@@ -6282,7 +6299,7 @@ document.querySelectorAll('[data-import-package-form]').forEach((form) => {
     confirmed.value = '0';
     showLoadingOverlay(
       'Uploading import package',
-      'Uploading the selected ZIP package or Scoring Configuration JSON for inspection. Large workspace packages can take several minutes; the import warning will appear as soon as the upload is ready.',
+      'Uploading the selected ZIP package or Scoring & GAP Analysis Configuration JSON for inspection. Large workspace packages can take several minutes; the import warning will appear as soon as the upload is ready.',
     );
     try {
       // Let the browser paint the progress dialog before starting a potentially large upload.
@@ -6762,20 +6779,25 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
         'full-environment': 'Full Environment',
         dashboards: 'Dashboards',
         'slides-templates': 'Report Templates',
-        'operator-mappings': 'Operator/Vendor Mappings & Colors',
+        'operator-mappings': 'Operator & Vendor Maps',
+        'main-cities': 'Main Cities',
+        'scoring-configuration': 'Scoring & GAP Analysis Configuration',
         'auto-calculated-fields': 'Auto-calculated Fields',
         workspace_database: 'Workspace database',
         input: 'Input CDR files',
         output: 'Generated outputs',
         report_templates: 'Report Templates',
-        operator_mappings: 'Operator/Vendor Mappings & Colors',
+        main_cities: 'Main Cities',
+        operator_mappings: 'Operator & Vendor Maps',
+        scoring_configuration: 'Scoring & GAP Analysis Configuration',
         auto_calculated_fields: 'Auto-calculated Fields',
       };
       const describeTransferItem = (item) => transferContentLabels[String(item)] || String(item).replaceAll('-', ' ');
       const targetItems = Array.isArray(offer.targets) && offer.targets.length ? offer.targets : [offer.kind];
       const workspaceItems = Array.isArray(offer.workspace_components) ? offer.workspace_components : [];
       const workspaceContentTargets = new Set([
-        'dashboards', 'slides-templates', 'operator-mappings', 'auto-calculated-fields',
+        'dashboards', 'slides-templates', 'main-cities', 'operator-mappings',
+        'scoring-configuration', 'auto-calculated-fields',
       ]);
       const isWorkspaceContentsSelection = targetItems.length > 0
         && targetItems.every((item) => workspaceContentTargets.has(String(item)));

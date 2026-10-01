@@ -11,7 +11,7 @@ Administrator Config centralises user, portability, database and dataset adminis
 
 An admin cannot modify a super-admin account or assign the super-admin role. The signed-in account cannot delete itself, and at least one active super-admin must remain.
 
-**Application Config** is the application-wide runtime settings page and is available to `user-editor`, `admin` and `super-admin`. **Workspace Config** is a separate workspace-scoped page with Report Templates Management, Operator Mappings and Vendor Mappings. Both require an active session; Workspace Config operations also require an open workspace. See [Application Config](app-config.md) and [Workspace Config](workspace-config.md) for the respective workflows.
+**Application Config** is the application-wide runtime settings page and is available to `user-editor`, `admin` and `super-admin`. **Workspace Config** is a separate workspace-scoped page with Report Templates Management, Main Cities, Operator & Vendor Maps and Scoring & GAP Analysis Setup. Both require an active session; Workspace Config operations also require an open workspace. See [Application Config](app-config.md) and [Workspace Config](workspace-config.md) for the respective workflows.
 
 ## Create user and Users
 
@@ -34,24 +34,26 @@ Only a super-admin can change workspace access. Leave a password field empty whe
 - Application Config
 - Dashboards from the active workspace
 - Report Templates from the active workspace
-- Operator/Vendor Mappings & Colors from the active workspace
+- Main Cities from the active workspace
+- Operator & Vendor Maps from the active workspace
+- Scoring & GAP Analysis Configuration from the active workspace (all methodology profiles, active profile, KPI definitions, aggregation hierarchy and GAP KPI priorities)
 - Auto-calculated Fields from the active workspace
 - An accessible workspace
 - Full Environment with selected workspaces
 
-Admins can export/transfer the active workspace's Dashboards, Report Templates, Operator/Vendor Mappings & Colors and Auto-calculated Fields, plus complete workspaces they can access. Super-admins can also export Application Config and a Full Environment. Dashboard, template, mapping and field packages preselect a destination workspace with the same name as their source, where available, and allow one or more accessible destinations to be selected.
+Admins can export/transfer the active workspace's Dashboards, Report Templates, Main Cities, Operator & Vendor Maps, Scoring & GAP Analysis Configuration and Auto-calculated Fields, plus complete workspaces they can access. Super-admins can also export Application Config and a Full Environment. Dashboard, template, mapping and field packages preselect a destination workspace with the same name as their source, where available, and allow one or more accessible destinations to be selected.
 
 Importing or transferring Report Templates synchronizes the destination library with the package. Templates absent from the package are removed unless a saved local Dashboard uses them. A template used by a local Dashboard keeps its local definition when the package contains a matching name; names are matched without case differences, so the import does not create a second copy. When the same package also includes Dashboards, its Report Templates replace the destination library because the Dashboard definitions are replaced too. Selective backup restore uses the same rule.
 
-A Full Environment always contains Application Config and the complete database/input content, Dashboard definitions, Report Templates, Operator/Vendor Mappings & Colors and Auto-calculated Fields for every selected workspace. Selecting Full Environment only chooses the package type; the workspace picker opens when **Export ZIP** or **Transfer to other server** is pressed. **Include generated Reports, Chart Sets and Dashboard PPT jobs** controls whether their `output/` trees are included. At least one workspace is required.
+A Full Environment always contains Application Config and the complete database/input content, Dashboard definitions, Report Templates, Main Cities, Operator & Vendor Maps, Scoring & GAP Analysis Configuration and Auto-calculated Fields for every selected workspace. Selecting Full Environment only chooses the package type; the workspace picker opens when **Export ZIP** or **Transfer to other server** is pressed. **Include generated Reports, Chart Sets and Dashboard PPT jobs** controls whether their `output/` trees are included. At least one workspace is required.
 
 Exports run as disk-backed jobs and show estimated progress. The ZIP download starts when package creation finishes.
 
 ### Import workflow
 
-1. Select a Dashboard Analytic ZIP and wait for its disk-backed upload.
+1. Select a Dashboard Analytic ZIP or Scoring & GAP Analysis Configuration JSON and wait for its upload.
 2. Review the manifest-detected content, affected workspaces and overwrite warnings.
-3. For Dashboard, Report Template, Operator/Vendor Mappings & Colors or Auto-calculated Field packages, choose one or more accessible destination workspaces; a matching source name is preselected when available.
+3. For Dashboard, Report Template, Main Cities, Operator & Vendor Maps, Scoring & GAP Analysis Configuration or Auto-calculated Field packages, choose one or more accessible destination workspaces; a matching source name is preselected when available.
 4. Confirm import.
 5. Follow the background import in the floating task card.
 
@@ -86,12 +88,14 @@ In **Backup**, select one or more content types:
 - **Workspace Content: Workspace Database** stores the selected workspace SQLite databases.
 - **Workspace Content: Dashboards** stores one JSON file with every Dashboard definition and its comments for each selected workspace.
 - **Workspace Content: Report Templates** stores one CSV file for each Report Template.
-- **Workspace Content: Operator/Vendor Mappings & Colors** stores one JSON file containing every canonical Operator and Vendor, alias, row position and thematic colour.
+- **Workspace Content: Main Cities** stores the workspace city selection.
+- **Workspace Content: Operator & Vendor Maps** stores one JSON file containing every canonical Operator and Vendor, alias, row position and thematic colour.
+- **Workspace Content: Scoring & GAP Analysis Configuration** stores all methodology profiles, their active selection, KPI definitions, aggregation hierarchy and GAP KPI priorities; import and restore recover all three Scoring Setup subpanels together.
 - **Workspace Content: Auto-calculated Fields** stores one JSON file containing every selected workspace definition.
 - **Workspace Content: Input** stores raw dataset files when explicitly selected.
 - **Workspace Content: Output** stores generated Reports, Chart Sets and Dashboard PowerPoint jobs when explicitly selected.
 
-Application database, Workspace Database, Dashboards, Report Templates, Operator/Vendor Mappings & Colors and Auto-calculated Fields are selected by default. Input and Output are opt-in. Selecting any workspace content reveals **Workspaces to include**, containing only workspaces you can access. Dashboard, template and mapping JSON/CSV files use dedicated paths below `workspaces/<workspace name>/` in Backup and Export ZIPs; these portable paths are independent from the application's internal workspace folder name. Use **Backup folder** and **Browse** to choose the server-visible destination, then use **Backup Now** to create a ZIP in the background from the current content and workspace selection. Content, workspace and folder selections are saved for the scheduler without enabling it; the job appears in the floating background-task card and keeps the Admin panel in place.
+Application database, Workspace Database, Dashboards, Report Templates, Main Cities, Operator & Vendor Maps, Scoring & GAP Analysis Configuration and Auto-calculated Fields are selected by default. Main Cities precedes Operator & Vendor Maps in Export and Backup/Restore component lists. Input and Output are opt-in. Selecting any workspace content reveals **Workspaces to include**, containing only workspaces you can access. Dashboard, template and mapping JSON/CSV files use dedicated paths below `workspaces/<workspace name>/` in Backup and Export ZIPs; these portable paths are independent from the application's internal workspace folder name. Use **Backup folder** and **Browse** to choose the server-visible destination, then use **Backup Now** to create a ZIP in the background from the current content and workspace selection. Content, workspace and folder selections are saved for the scheduler without enabling it; the job appears in the floating background-task card and keeps the Admin panel in place.
 
 In **Restore**, choose a server-visible **Backup folder** and one of its ZIP files. The application reads the selected backup's manifest to detect its granular content and affected workspace names, with a structural fallback for older ZIPs, then shows a structured overwrite confirmation grouped into **Configuration Content** and **Workspace Content**. Choose the individual parts to restore only after reviewing that existing data will be replaced. Restore work also runs in the floating background-task card. The ZIP selector refreshes after an immediate backup and periodically while Admin remains open, so completed scheduled backups appear without a page reload.
 
@@ -124,7 +128,7 @@ The related **Chart mapping groups** table (`chart_mapping_groups`) stores each 
 
 Select either mapping table in Database Viewer to inspect its rows, paginate 100 at a time, filter distinct values from a column, review active filter chips, edit a non-key cell or delete one row. `source_value` is a primary key and cannot be edited there; use Workspace Config to add or change an alias. In **Chart mapping groups**, `mapping_type` and `canonical_value` identify the group, while `position` and `color` hold its order and colour. Direct edits to these related tables are individual row operations and can leave a group's aliases, identity or order inconsistent.
 
-Use [Workspace Config → Operator Maps](workspace-config.md#operator-maps) or [Vendor Maps](workspace-config.md#vendor-maps) for group operations: add a canonical identity, edit its aliases or colour, Save, Move up/down, and confirm Delete. A canonical rename also updates exact references in Report Templates and saved Dashboards, and group changes clear chart caches. Database Viewer supports inspection, filtering and individual row edits or deletion, but a row-level change there does not perform the group-level rename and ordering workflow. Use the Workspace Config controls when changing a mapping group so aliases, order and colour stay consistent. Admin's export, transfer and backup workflows carry both mapping types together as **Operator/Vendor Mappings & Colors**.
+Use [Workspace Config → Operator Maps](workspace-config.md#operator-maps) or [Vendor Maps](workspace-config.md#vendor-maps) for group operations: add a canonical identity, edit its aliases or colour, Save, Move up/down, and confirm Delete. A canonical rename also updates exact references in Report Templates and saved Dashboards, and group changes clear chart caches. Database Viewer supports inspection, filtering and individual row edits or deletion, but a row-level change there does not perform the group-level rename and ordering workflow. Use the Workspace Config controls when changing a mapping group so aliases, order and colour stay consistent. Admin's export, transfer and backup workflows carry both mapping types together as **Operator & Vendor Maps**.
 
 Capabilities:
 

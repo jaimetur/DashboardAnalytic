@@ -35,9 +35,12 @@ def test_scoring_kpi_table_exposes_editable_category_formula_and_filter_controls
     template = PANEL_TEMPLATE.read_text(encoding='utf-8')
     script = PANEL_SCRIPT.read_text(encoding='utf-8')
 
-    assert 'data-scoring-add-kpi' in template
+    assert 'data-scoring-add-category' in template
+    assert 'data-scoring-add-kpi' not in template
     assert 'data-scoring-kpi-rows' in template
+    assert 'KPI Definition</th>' in template
     assert '<th scope="col">Category</th>' in template
+    assert "name.className = 'scoring-config-category-name';" in script
     assert 'data-kpi-category' in script
     assert 'data-kpi-code-input' in script
     assert 'data-kpi-source-kind' in script
@@ -50,6 +53,33 @@ def test_scoring_kpi_table_exposes_editable_category_formula_and_filter_controls
     assert 'data-category-weight' in script
     assert 'data-weight-environment-input' in script
     assert 'data-weight-global-percent' in script
+
+
+def test_kpi_categories_are_selectable_saved_and_created_with_a_first_kpi():
+    script = PANEL_SCRIPT.read_text(encoding='utf-8')
+
+    assert "appendSelect(categoryCell, selectedCategory" in script
+    assert "'data-kpi-category': ''" in script
+    assert 'refreshKpiCategoryOptions();' in script
+    assert 'select.value = selectedCategory;' in script
+    assert "description: 'Create a category with its first KPI. Configure the KPI before saving.'" in script
+    assert 'categoryCreate: true' in script
+    assert 'categoryNameIsAvailable(name)' in script
+    assert 'addKpi(null, category, {categoryCreated: true});' in script
+    assert 'metric.category = category;' in script
+    assert 'latestConfiguration.metrics = submittedMetrics;' in script
+    assert "appendCell(row).textContent = priorityMetric(code)?.category || 'Other';" in script
+
+
+def test_long_kpi_labels_resize_after_render_and_container_changes():
+    script = PANEL_SCRIPT.read_text(encoding='utf-8')
+
+    assert "'data-kpi-label': '', class: 'scoring-config-identity-input', maxlength: '160', required: '', rows: '1'" in script
+    assert 'if (!textarea?.isConnected || textarea.offsetParent === null) return;' in script
+    assert "textarea.style.height = 'auto';" in script
+    assert 'textarea.scrollHeight + borderHeight' in script
+    assert 'kpiLabelResizeObserver.observe(kpiTableContainer);' in script
+    assert "window.addEventListener('resize', refreshKpiLabelHeights);" in script
 
 
 def test_scoring_environments_are_dynamic_and_zero_point_weights_remain_editable():
@@ -121,13 +151,15 @@ def test_code_column_is_the_single_editable_code_input_and_updates_gap_priority(
 
     assert '<th scope="col" rowspan="2">Code</th><th scope="col" rowspan="2">KPI</th>' in template
     assert script.count("'data-kpi-code-input': ''") == 1
-    assert "summary.textContent = 'Edit formula and filters';" in script
+    assert "const calculationDialog = document.createElement('dialog');" in script
+    assert "editFormulaButton.setAttribute('aria-label', `Edit formula and filters for ${metric.kpi || metric.code}`);" in script
+    assert "editFormulaButton.title = `Edit formula and filters for ${metric.kpi || metric.code}`;" in script
     assert 'codeMap.get(code)' in script
     assert "title: 'Changing this code also updates its saved GAP priority entry.'" in script
     assert 'window.prompt' not in script
     assert 'window.confirm' not in script
     assert 'const orderedCategories = Array.from(grouped.keys());' in script
-    assert "summary.textContent = 'Edit formula and filters';" in script
+    assert 'calculationDialog.showModal()' in script
     assert "denominatorLabel.textContent = 'Calculation basis (derived from formula)'" in script
     assert "formula.trim() === originalFormula && storedDenominator ? storedDenominator : deriveDenominator(formula)" in script
     assert "[data-scoring-config] [hidden] { display: none !important; }" in template

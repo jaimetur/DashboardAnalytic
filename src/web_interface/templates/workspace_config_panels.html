@@ -138,7 +138,7 @@
       {% if operator_mapping_error %}<div class="alert alert-error">{{ operator_mapping_error }}</div>{% endif %}
       <div class="table-wrap operator-mappings-table-wrap">
         <table class="operator-mappings-table">
-          <thead><tr><th>Order</th><th>Colour</th><th>Canonical label</th><th>Mapped source labels</th><th>Actions</th></tr></thead>
+          <thead><tr><th class="mapping-order-column">Order</th><th class="mapping-colour-column">Colour</th><th class="mapping-canonical-column">Canonical label</th><th class="mapping-aliases-column">Mapped source labels</th><th class="mapping-actions-column">Actions</th></tr></thead>
           <tbody>
             {% for mapping in operator_mapping_groups %}
             <tr>
@@ -158,9 +158,9 @@
         </table>
       </div>
       <form class="operator-mapping-create" action="/workspace-config/operator-mappings/save" method="post">
+        <label>Colour<input type="color" name="color" value="#6F42C1"></label>
         <label>Canonical label<input type="text" name="canonical_value" placeholder="Canonical Operator" required></label>
         <label>Mapped source labels<textarea name="aliases" rows="3" placeholder="One source label per line"></textarea></label>
-        <label>Colour<input type="color" name="color" value="#6F42C1"></label>
         <button type="submit">Add canonical mapping</button>
       </form>
       <p class="form-note">Saving or deleting a group refreshes chart caches without changing materialized CDR values.</p>
@@ -182,7 +182,7 @@
       {% if vendor_mapping_error %}<div class="alert alert-error">{{ vendor_mapping_error }}</div>{% endif %}
       <div class="table-wrap operator-mappings-table-wrap">
         <table class="operator-mappings-table">
-          <thead><tr><th>Order</th><th>Colour</th><th>Canonical label</th><th>Mapped source labels</th><th>Actions</th></tr></thead>
+          <thead><tr><th class="mapping-order-column">Order</th><th class="mapping-colour-column">Colour</th><th class="mapping-canonical-column">Canonical label</th><th class="mapping-aliases-column">Mapped source labels</th><th class="mapping-actions-column">Actions</th></tr></thead>
           <tbody>
             {% for mapping in vendor_mapping_groups %}
             <tr>
@@ -197,9 +197,9 @@
         </table>
       </div>
       <form class="operator-mapping-create" action="/workspace-config/vendor-mappings/save" method="post">
+        <label>Colour<input type="color" name="color" value="#6F42C1"></label>
         <label>Canonical label<input type="text" name="canonical_value" placeholder="Canonical Vendor" required></label>
         <label>Mapped source labels<textarea name="aliases" rows="3" placeholder="One source label per line"></textarea></label>
-        <label>Colour<input type="color" name="color" value="#6F42C1"></label>
         <button type="submit">Add canonical mapping</button>
       </form>
       <p class="form-note">Saving, deleting or reordering a group refreshes chart caches without changing materialized CDR values.</p>

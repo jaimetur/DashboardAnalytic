@@ -5337,7 +5337,7 @@ def full_workspace_archive_components(*, include_input_files: bool = True, inclu
         components.append('input')
     if include_generated_outputs:
         components.append('output')
-    return [*components, 'dashboards', 'report_templates', 'operator_mappings', 'auto_calculated_fields', 'query_builder_queries', 'main_cities', 'scoring_configuration']
+    return [*components, 'dashboards', 'report_templates', 'main_cities', 'operator_mappings', 'scoring_configuration', 'auto_calculated_fields', 'query_builder_queries']
 
 
 def archive_workspace_components_for_target(target: str, *, include_generated_outputs: bool = True) -> list[str]:
@@ -5457,7 +5457,7 @@ def recurring_backup_settings() -> dict[str, Any]:
     if not isinstance(saved, dict):
         saved = {}
     config = defaults | {key: saved[key] for key in defaults if key in saved}
-    if 'components' not in saved:
+    if saved and 'components' not in saved:
         config['components'] = [name for name, legacy_key in (
             ('app_database', 'include_database'), ('slides_templates', 'include_slides_templates'),
             ('auto_calculated_fields', 'include_auto_calculated_fields'),
@@ -5661,13 +5661,13 @@ def create_recurring_database_backup(
                     report_progress(f'Archiving Report Templates for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                     _archive_workspace_report_templates(archive, workspace, f'{archive_workspace_root}/report-templates', archived_bytes)
                 if 'operator_mappings' in components:
-                    report_progress(f'Exporting Operator/Vendor Mappings & Colors for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
+                    report_progress(f'Exporting Operator & Vendor Maps for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                     _archive_workspace_operator_mappings(archive, workspace, archive_workspace_root, archived_bytes)
                 if 'main_cities' in components:
                     report_progress(f'Exporting Main Cities for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                     _archive_workspace_main_cities(archive, workspace, archive_workspace_root, archived_bytes)
                 if 'scoring_configuration' in components:
-                    report_progress(f'Exporting Scoring Configuration for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
+                    report_progress(f'Exporting Scoring & GAP Analysis Configuration for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                     _archive_workspace_scoring_configuration(archive, workspace, archive_workspace_root, archived_bytes)
                 if 'auto_calculated_fields' in components:
                     report_progress(f'Exporting Auto-calculated Fields for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
@@ -6099,9 +6099,9 @@ def restore_database_backup(
                 member = f'{prefix}operator-mappings/operator-mappings.json'
                 if member in names:
                     if progress_callback:
-                        progress_callback(f'Restoring Operator Mappings for {workspace_name}', completed_steps, total_steps)
+                        progress_callback(f'Restoring Operator & Vendor Maps for {workspace_name}', completed_steps, total_steps)
                     _restore_workspace_operator_mappings(workspace, archive.read(member))
-                    advance(f'Operator Mappings restored for {workspace_name}')
+                    advance(f'Operator & Vendor Maps restored for {workspace_name}')
             if 'main_cities' in selected:
                 member = f'{prefix}main-cities/main-cities.json'
                 if member in names:
@@ -6113,9 +6113,9 @@ def restore_database_backup(
                 member = f'{prefix}scoring-configuration/scoring-configuration.json'
                 if member in names:
                     if progress_callback:
-                        progress_callback(f'Restoring Scoring Configuration for {workspace_name}', completed_steps, total_steps)
+                        progress_callback(f'Restoring Scoring & GAP Analysis Configuration for {workspace_name}', completed_steps, total_steps)
                     _restore_workspace_scoring_configuration(workspace, archive.read(member))
-                    advance(f'Scoring Configuration restored for {workspace_name}')
+                    advance(f'Scoring & GAP Analysis Configuration restored for {workspace_name}')
             if 'auto_calculated_fields' in selected:
                 member = next((candidate for candidate in (
                     f'{prefix}auto-calculated-fields/auto-calculated-fields.json',
@@ -6257,14 +6257,14 @@ def _restore_workspace_operator_mappings(workspace: Workspace, payload: bytes) -
         document = json.loads(payload.decode('utf-8'))
         groups = document.get('mappings') if isinstance(document, dict) else None
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError(f'Operator/Vendor Mappings & Colors for "{workspace.name}" are invalid.') from exc
+        raise ValueError(f'Operator & Vendor Maps for "{workspace.name}" are invalid.') from exc
     if (
         not isinstance(document, dict)
         or document.get('format') != 'dashboard-analytic-operator-mappings'
         or document.get('version') not in {1, 2}
         or not isinstance(groups, list)
     ):
-        raise ValueError(f'Operator/Vendor Mappings & Colors for "{workspace.name}" are invalid.')
+        raise ValueError(f'Operator & Vendor Maps for "{workspace.name}" are invalid.')
     task_repository = Repository(
         workspace.database_path, repository.global_db_path, workspace_registry.registry_path,
     )
@@ -6272,7 +6272,7 @@ def _restore_workspace_operator_mappings(workspace: Workspace, payload: bytes) -
     if document.get('version') == 2:
         vendor_groups = document.get('vendor_mappings')
         if not isinstance(vendor_groups, list):
-            raise ValueError(f'Operator/Vendor Mappings & Colors for "{workspace.name}" are invalid.')
+            raise ValueError(f'Operator & Vendor Maps for "{workspace.name}" are invalid.')
         task_repository.replace_vendor_mapping_groups(vendor_groups)
     if active_workspace and workspace.id == active_workspace.id:
         ANALYSIS_CACHE.clear()
@@ -6364,7 +6364,7 @@ def _restore_workspace_scoring_configuration(workspace: Workspace, payload: byte
         else:
             task_repository.replace_scoring_profiles(profiles)
     except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
-        raise ValueError(f'Scoring Configuration for "{workspace.name}" is invalid.') from exc
+        raise ValueError(f'Scoring & GAP Analysis Configuration for "{workspace.name}" is invalid.') from exc
 
 def _dashboard_archive_payload(workspace: Workspace) -> bytes:
     """Serialize saved Dashboard definitions only; generated chart caches are excluded."""
@@ -6735,7 +6735,7 @@ def _build_single_export_archive_file(
             source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
             source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
             if not source_workspace:
-                raise ValueError('Open a workspace before exporting Operator/Vendor Mappings & Colors.')
+                raise ValueError('Open a workspace before exporting Operator & Vendor Maps.')
             archive_path = f'workspaces/{source_workspace.name}/operator-mappings/operator-mappings.json'
             manifest = archive_manifest(
                 'operator-mappings',
@@ -6767,7 +6767,7 @@ def _build_single_export_archive_file(
             source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
             source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
             if not source_workspace:
-                raise ValueError('Open a workspace before exporting Scoring Configuration.')
+                raise ValueError('Open a workspace before exporting Scoring & GAP Analysis Configuration.')
             archive_path = f'workspaces/{source_workspace.name}/scoring-configuration/scoring-configuration.json'
             manifest = archive_manifest(
                 'scoring-configuration',
@@ -7091,7 +7091,7 @@ def _recovered_transfer_details(manifest: dict[str, Any]) -> tuple[str, list[str
     if kind == 'operator-mappings':
         source = manifest.get('source_workspace')
         name = str(source.get('name') or '') if isinstance(source, dict) else ''
-        return ('Operator/Vendor Mappings & Colors', [name] if name else [])
+        return ('Operator & Vendor Maps', [name] if name else [])
     if kind == 'main-cities':
         source = manifest.get('source_workspace')
         name = str(source.get('name') or '') if isinstance(source, dict) else ''
@@ -7099,7 +7099,7 @@ def _recovered_transfer_details(manifest: dict[str, Any]) -> tuple[str, list[str
     if kind == 'scoring-configuration':
         source = manifest.get('source_workspace')
         name = str(source.get('name') or '') if isinstance(source, dict) else ''
-        return ('Scoring Configuration', [name] if name else [])
+        return ('Scoring & GAP Analysis Configuration', [name] if name else [])
     if kind == 'query-builder-queries':
         source = manifest.get('source_workspace')
         name = str(source.get('name') or '') if isinstance(source, dict) else ''
@@ -7882,7 +7882,7 @@ def _apply_import_archive(
                 member not in archive.namelist()
                 or not re.fullmatch(r'workspaces/[^/]+/operator-mappings/operator-mappings\.json', member)
             ):
-                raise ValueError('The package does not contain valid Operator/Vendor Mappings & Colors.')
+                raise ValueError('The package does not contain valid Operator & Vendor Maps.')
             destinations = [workspace_registry.get(workspace_id) for workspace_id in destination_workspace_ids]
             destinations = [workspace for workspace in destinations if workspace]
             if not destinations:
@@ -7895,7 +7895,7 @@ def _apply_import_archive(
             payload = archive.read(member)
             for workspace in destinations:
                 _restore_workspace_operator_mappings(workspace, payload)
-            return f'Imported Operator/Vendor Mappings & Colors into {len(destinations)} workspaces.'
+            return f'Imported Operator & Vendor Maps into {len(destinations)} workspaces.'
         if kind == 'main-cities':
             member = str(manifest.get('archive_path') or '')
             if (
@@ -7922,7 +7922,7 @@ def _apply_import_archive(
                 member not in archive.namelist()
                 or not re.fullmatch(r'workspaces/[^/]+/scoring-configuration/scoring-configuration\.json', member)
             ):
-                raise ValueError('The package does not contain a valid Scoring Configuration.')
+                raise ValueError('The package does not contain a valid Scoring & GAP Analysis Configuration.')
             destinations = [workspace_registry.get(workspace_id) for workspace_id in destination_workspace_ids]
             destinations = [workspace for workspace in destinations if workspace]
             if not destinations:
@@ -7935,7 +7935,7 @@ def _apply_import_archive(
             payload = archive.read(member)
             for workspace in destinations:
                 _restore_workspace_scoring_configuration(workspace, payload)
-            return f'Imported Scoring Configuration into {len(destinations)} workspaces.'
+            return f'Imported Scoring & GAP Analysis Configuration into {len(destinations)} workspaces.'
         if kind == 'auto-calculated-fields':
             try:
                 member = next((candidate for candidate in (
@@ -8196,9 +8196,9 @@ def _transfer_content_label(target: str | Iterable[str]) -> str:
         'full-environment': 'Full Environment',
         'auto-calculated-fields': 'Auto-calculated Fields',
         'dashboards': 'Dashboards',
-        'operator-mappings': 'Operator/Vendor Mappings & Colors',
+        'operator-mappings': 'Operator & Vendor Maps',
         'main-cities': 'Main Cities',
-        'scoring-configuration': 'Scoring Configuration',
+        'scoring-configuration': 'Scoring & GAP Analysis Configuration',
         'query-builder-queries': 'Query Builder Queries',
     }
     if target.startswith('workspace:'):
@@ -8775,12 +8775,12 @@ def render_admin_template(
         {'value': 'config', 'label': 'Application Config'},
         {'value': 'dashboards', 'label': 'Dashboards (from active workspace)', 'disabled': not active_workspace},
         {'value': 'slides-templates', 'label': 'Report Templates (from active workspace)', 'disabled': not active_workspace},
-        {'value': 'operator-mappings', 'label': 'Operator/Vendor Mappings & Colors (from active workspace)', 'disabled': not active_workspace},
         {'value': 'main-cities', 'label': 'Main Cities (from active workspace)', 'disabled': not active_workspace},
-        {'value': 'scoring-configuration', 'label': 'Scoring Configuration (from active workspace)', 'disabled': not active_workspace},
+        {'value': 'operator-mappings', 'label': 'Operator & Vendor Maps (from active workspace)', 'disabled': not active_workspace},
+        {'value': 'scoring-configuration', 'label': 'Scoring & GAP Analysis Configuration (from active workspace)', 'disabled': not active_workspace},
         {'value': 'auto-calculated-fields', 'label': 'Auto-calculated Fields (from active workspace)', 'disabled': not active_workspace},
         {'value': 'query-builder-queries', 'label': 'Query Builder Queries (from active workspace)', 'disabled': not active_workspace},
-        {'value': 'full-environment', 'label': 'Full Environment (Application Config + Dashboards + Report Templates + Operator/Vendor Mappings & Colors + Main Cities + Scoring Configuration + Auto-calculated Fields + Query Builder Queries + Selected Workspaces)'},
+        {'value': 'full-environment', 'label': 'Full Environment (Application Config + Dashboards + Report Templates + Main Cities + Operator & Vendor Maps + Scoring & GAP Analysis Configuration + Auto-calculated Fields + Query Builder Queries + Selected Workspaces)'},
         *[
             {'value': f'workspace:{workspace.id}', 'label': f'Full Workspace: {workspace.name}'}
             for workspace in accessible_workspaces(user)
@@ -8800,7 +8800,7 @@ def render_admin_template(
         ('Configuration Content', [option for option in export_options if option['value'] == 'config']),
         ('Workspace Content', [
             option for option in export_options
-            if option['value'] in {'dashboards', 'slides-templates', 'operator-mappings', 'main-cities', 'scoring-configuration', 'auto-calculated-fields', 'query-builder-queries'}
+            if option['value'] in {'dashboards', 'slides-templates', 'main-cities', 'operator-mappings', 'scoring-configuration', 'auto-calculated-fields', 'query-builder-queries'}
         ]),
         ('Full Workspace', [option for option in export_options if option['value'].startswith('workspace:')]),
         ('Full Environment', [option for option in export_options if option['value'] == 'full-environment']),
@@ -15778,7 +15778,7 @@ async def import_workspace_scoring_configuration(
     try:
         payload = await package.read(4 * 1024 * 1024 + 1)
         if len(payload) > 4 * 1024 * 1024:
-            raise ValueError('Scoring Configuration JSON must not exceed 4 MiB.')
+            raise ValueError('Scoring & GAP Analysis Configuration JSON must not exceed 4 MiB.')
         document = json.loads(payload.decode('utf-8'))
         profiles = unwrap_scoring_profiles_payload(document)
         if profiles is None:
@@ -16578,12 +16578,12 @@ def _retain_import_upload(upload_id: str, package_path: Path, user: SessionUser)
     if not zipfile.is_zipfile(package_path):
         from src.modules.scoring_config import unwrap_scoring_profiles_payload
         if package_path.stat().st_size > 4 * 1024 * 1024:
-            raise ValueError('Scoring Configuration JSON must not exceed 4 MiB.')
+            raise ValueError('Scoring & GAP Analysis Configuration JSON must not exceed 4 MiB.')
         try:
             document = json.loads(package_path.read_text(encoding='utf-8'))
             profiles = unwrap_scoring_profiles_payload(document)
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise ValueError('Choose a supported ZIP package or Scoring Configuration JSON document.') from exc
+            raise ValueError('Choose a supported ZIP package or Scoring & GAP Analysis Configuration JSON document.') from exc
         archive_path = 'workspaces/Imported/scoring-configuration/scoring-configuration.json'
         manifest = archive_manifest(
             'scoring-configuration', source_workspace={'id': '', 'name': 'Imported'},

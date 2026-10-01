@@ -38,10 +38,18 @@ def _configuration_with_medium_score(repository: Repository, value: float) -> di
     return configuration
 
 
+def _configuration_with_custom_gap_sections(repository: Repository) -> dict:
+    configuration = _configuration_with_medium_score(repository, 0.81)
+    configuration['aggregation_hierarchy'] = list(reversed(configuration['aggregation_hierarchy']))
+    priorities = configuration['gap_priority']
+    configuration['gap_priority'] = [priorities[1], priorities[0], *priorities[2:]]
+    return configuration
+
+
 def test_scoring_configuration_export_import_round_trip(client, tmp_path: Path) -> None:
     _login(client)
     workspace, repository = _workspace_repository()
-    expected = _configuration_with_medium_score(repository, 0.81)
+    expected = _configuration_with_custom_gap_sections(repository)
     repository.replace_scoring_configuration(expected)
     profiles = repository.get_scoring_profiles()
     second_profile = copy.deepcopy(profiles['profiles'][0])
@@ -51,6 +59,12 @@ def test_scoring_configuration_export_import_round_trip(client, tmp_path: Path) 
     second_profile['configuration']['version'] = 'NetCheck 2025'
     second_profile['configuration']['metrics'][0]['contexts']['Walk']['max_points'] = 10
     second_profile['configuration']['metrics'][1]['contexts']['Walk']['max_points'] = 30
+    second_configuration = second_profile['configuration']
+    second_configuration['aggregation_hierarchy'] = (
+        second_configuration['aggregation_hierarchy'][1:] + second_configuration['aggregation_hierarchy'][:1]
+    )
+    priorities = second_configuration['gap_priority']
+    second_configuration['gap_priority'] = priorities[1:] + priorities[:1]
     profiles['profiles'].append(second_profile)
     profiles['active_profile_id'] = second_profile['id']
     expected_profiles = repository.replace_scoring_profiles(profiles)
@@ -69,6 +83,11 @@ def test_scoring_configuration_export_import_round_trip(client, tmp_path: Path) 
     assert document['version'] == 2
     assert document['active_profile_id'] == expected_profiles['active_profile_id']
     assert document['profiles'] == expected_profiles['profiles']
+    assert all(
+        profile['configuration']['aggregation_hierarchy'] != scoring_configuration()['aggregation_hierarchy']
+        and profile['configuration']['gap_priority'] != scoring_configuration()['gap_priority']
+        for profile in document['profiles']
+    )
     assert expected_profiles['profiles'][0]['configuration']['scope']['environments']['Walk']['total_points'] == 0
     assert expected_profiles['profiles'][1]['configuration']['scope']['environments']['Walk']['total_points'] == 40
     assert all(
@@ -89,12 +108,18 @@ def test_scoring_configuration_export_import_round_trip(client, tmp_path: Path) 
 def test_partial_backup_restores_only_scoring_configuration(client, tmp_path: Path) -> None:
     _login(client)
     workspace, repository = _workspace_repository()
-    expected = _configuration_with_medium_score(repository, 0.81)
+    expected = _configuration_with_custom_gap_sections(repository)
     repository.replace_scoring_configuration(expected)
     profiles = repository.get_scoring_profiles()
     second_profile = copy.deepcopy(profiles['profiles'][0])
     second_profile.update({'id': 'netcheck-2025', 'name': 'NetCheck 2025'})
     second_profile['configuration']['version'] = 'NetCheck 2025'
+    second_configuration = second_profile['configuration']
+    second_configuration['aggregation_hierarchy'] = (
+        second_configuration['aggregation_hierarchy'][1:] + second_configuration['aggregation_hierarchy'][:1]
+    )
+    priorities = second_configuration['gap_priority']
+    second_configuration['gap_priority'] = priorities[1:] + priorities[:1]
     profiles['profiles'].append(second_profile)
     profiles['active_profile_id'] = second_profile['id']
     expected_profiles = repository.replace_scoring_profiles(profiles)
@@ -114,6 +139,11 @@ def test_partial_backup_restores_only_scoring_configuration(client, tmp_path: Pa
     app_module.restore_database_backup(backup_path, ['scoring_configuration'])
 
     assert repository.get_scoring_profiles() == expected_profiles
+    assert all(
+        profile['configuration']['aggregation_hierarchy'] != scoring_configuration()['aggregation_hierarchy']
+        and profile['configuration']['gap_priority'] != scoring_configuration()['gap_priority']
+        for profile in repository.get_scoring_profiles()['profiles']
+    )
 
 
 def test_deleted_walk_environment_survives_json_archive_restore(client):
