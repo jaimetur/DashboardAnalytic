@@ -473,49 +473,30 @@ def _scoring_filter_subtitle(job: dict[str, Any], environment: str | None = None
     if isinstance(levels, str):
         levels = [levels]
     level_labels = [str(level).strip() for level in levels if str(level).strip()] if isinstance(levels, list) else []
-    filters = job.get('context_filters')
-    if isinstance(filters, dict):
-        filters = {str(key).strip().casefold(): value for key, value in filters.items()}
-    elif isinstance(filters, list):
-        legacy_filters = {}
-        for item in filters:
-            if not isinstance(item, dict):
-                continue
-            field = str(item.get('column') or item.get('field') or '').strip().casefold()
-            value = item.get('value', item.get('values', []))
-            if field in {'operator', 'vendor', 'region', 'city'}:
-                legacy_filters.setdefault(field, []).extend(
-                    value if isinstance(value, (list, tuple, set)) else [value]
-                )
-        filters = legacy_filters
-    else:
-        filters = {}
+    plan = job.get('_scoring_display_selections')
+    if plan is None:
+        from src.modules.cdr_report_filenames import scoring_display_selections
+        plan = scoring_display_selections(job.get('context_filters'), aggregation_values=level_labels,
+                                          nr_mode_label=nr_mode)
+    def display(field):
+        selected = ', '.join(plan['values'][field])
+        return selected + (', ...' if selected else '...') if plan['omitted'][field] else selected
+    return '\n'.join([mode_label, *[
+        f'{field.title()}: {display(field)}'
+        for field in ('aggregation', 'operator', 'vendor', 'region', 'city')
+    ]])
 
-    def selected_value(field: str, all_label: str) -> str:
-        value = filters.get(field.casefold(), [])
-        if isinstance(value, (list, tuple, set)):
-            selected = list(dict.fromkeys(
-                str(item).strip() for item in value
-                if item is not None and str(item).strip()
-            ))
-        elif value is None:
-            selected = []
-        else:
-            rendered = str(value).strip()
-            selected = [rendered] if rendered else []
-        if not selected or (len(selected) == 1 and selected[0].casefold() in {'all', all_label.casefold()}):
-            return all_label
-        return ', '.join(selected)
 
-    mode_line = mode_label
-    return '\n'.join([
-        mode_line,
-        f'Aggregation: {", ".join(level_labels) if level_labels else "Operator"}',
-        f'Operator: {selected_value("Operator", "All Operators")}',
-        f'Vendor: {selected_value("Vendor", "All Vendors")}',
-        f'Region: {selected_value("Region", "All Regions")}',
-        f'City: {selected_value("City", "All Cities")}',
-    ])
+def prepare_scoring_display_selections(job: dict[str, Any], result: dict[str, Any],
+                                       template_path: Path) -> dict:
+    """Compute shared presentation and download-name selections without changing filters."""
+    from src.modules.cdr_report_filenames import scoring_display_selections
+    return scoring_display_selections(
+        job.get('context_filters'),
+        campaign_values=_campaigns_for_export(job, result),
+        aggregation_values=job.get('aggregation_levels') or job.get('levels'),
+        nr_mode_label=job.get('nr_mode') or 'NSA',
+    )
 
 
 def _fit_scoring_intro_subtitle(presentation, slide, layout_name: str, subtitle: str) -> None:
@@ -578,11 +559,14 @@ def _fit_scoring_intro_subtitle(presentation, slide, layout_name: str, subtitle:
     filters_shape.name = 'Scoring Aggregations and Filters'
     frame = filters_shape.text_frame
     frame.clear()
-    frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    frame.word_wrap = False
+    frame.auto_size = MSO_AUTO_SIZE.NONE
     for index, line in enumerate(['Aggregations & Filters:', *lines[1:]]):
         paragraph = frame.paragraphs[0] if index == 0 else frame.add_paragraph()
         paragraph.text = line
-        paragraph.font.size = Pt(16)
+        paragraph.font.size = Pt(16 if index == 0 else _hierarchy_content_font(
+            [line], filters_shape.width / Inches(1) - .72, maximum=16,
+        ))
         paragraph.font.bold = index == 0
         properties = paragraph._p.get_or_add_pPr()
         properties.set('marL', str(Inches(.22) if index else 0))
@@ -631,7 +615,11 @@ def _add_scoring_intro_slides(
              else 'Scoring & GAP Analysis')
     subtitle = _scoring_filter_subtitle(job, environment)
     campaigns = _campaigns_for_export(job, result)
-    campaign_text = f'Campaigns: {", ".join(campaigns) if campaigns else "All Campaigns"}'
+    plan = job.get('_scoring_display_selections')
+    campaign_value = ', '.join(plan['values']['campaign']) if plan else ', '.join(campaigns) or 'All Campaigns'
+    if plan and plan['omitted']['campaign']:
+        campaign_value += ', ...' if campaign_value else '...'
+    campaign_text = f'Campaigns: {campaign_value}'
     layout_name = 'Title Page'
     layout = _named_slide_layout(presentation, layout_name)
     if layout is None:
@@ -643,7 +631,11 @@ def _add_scoring_intro_slides(
     campaign_shape = _text(slide, campaign_text, campaign_top, left=.52, width=10.68, height=.32,
                            size=16, color=_WHITE)
     campaign_shape.name = 'Scoring Campaigns'
+    campaign_shape.text_frame.word_wrap = False
     for paragraph in campaign_shape.text_frame.paragraphs:
+        paragraph.font.size = Pt(_hierarchy_content_font(
+            [campaign_text], campaign_shape.width / Inches(1) - .5, maximum=16,
+        ))
         paragraph.font.name = 'Aptos'
         for run in paragraph.runs:
             run.font.name = 'Aptos'
@@ -1852,6 +1844,9 @@ def export_scoring_powerpoint(job: dict[str, Any], result: dict[str, Any], templ
         raise ValueError('Table mode must be expanded or summary.')
     if gap_layout not in {'end', 'adjacent'}:
         raise ValueError('GAP layout must be end or adjacent.')
+    job = dict(job)
+    if '_scoring_display_selections' not in job:
+        job['_scoring_display_selections'] = prepare_scoring_display_selections(job, result, template_path)
     presentation = Presentation(template_path)
     _remove_all_slides(presentation)
     views = _export_environment_views(build_scoring_views(job, result, operator_mapping_groups), environment)

@@ -164,7 +164,7 @@ def test_scoring_ppt_export_labels_full_selected_catalogues_as_all(scoring_api):
     assert exported.status_code == 200, exported.text
     filename = unquote(exported.headers['content-disposition'])
     assert 'All Regions' in filename and 'All Cities' in filename
-    assert 'All Operators' in filename and 'All Vendors' in filename and 'All Campaigns' in filename
+    assert 'All Operators' in filename and 'All Vendors' in filename and '2026-Q2' in filename
     assert 'South' not in filename and 'London' not in filename and '2026-Q3' not in filename
 
     deck = Presentation(BytesIO(exported.content))

@@ -14314,12 +14314,15 @@ def scoring_job_export(
             'Content-Disposition': f'attachment; filename="scoring-job-{job_id}-{export_kind}.csv"',
         })
     if export_kind == 'ppt':
-        from src.modules.scoring_exports import export_scoring_powerpoint
+        from src.modules.scoring_exports import export_scoring_powerpoint, prepare_scoring_display_selections
         from src.modules.cdr_report_filenames import build_scoring_report_filename
         try:
             if not job.get('configuration') and not result.get('configuration'):
                 job['configuration'] = export_configuration or task_repository.get_scoring_configuration()
             export_job = _scoring_export_job_with_catalogue_defaults(task_repository, job)
+            export_job['_scoring_display_selections'] = prepare_scoring_display_selections(
+                export_job, result, settings.ppt_templates_dir / TEMPLATE_NAMES['nsa'],
+            )
             content = export_scoring_powerpoint(
                 export_job, result, settings.ppt_templates_dir / TEMPLATE_NAMES['nsa'],
                 operator_mapping_groups, table_mode=table_mode or 'expanded',
@@ -14330,6 +14333,7 @@ def scoring_job_export(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         filename = build_scoring_report_filename(
             datetime.now(), export_job.get('nr_mode') or 'NSA', export_job.get('context_filters'),
+            display_selections=export_job['_scoring_display_selections'],
         )
         disposition = f"attachment; filename*=UTF-8''{quote(filename)}"
         return Response(content, media_type='application/vnd.openxmlformats-officedocument.presentationml.presentation', headers={

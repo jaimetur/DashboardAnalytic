@@ -42,52 +42,70 @@ def build_cdr_report_filename(
     return ' - '.join((timestamp, nr_mode_label, safe_name, *suffix_parts)) + safe_campaigns + '.pptx'
 
 
-def build_scoring_report_filename(
-    export_time: datetime,
-    nr_mode_label: str,
-    context_filters: dict[str, object] | None = None,
-) -> str:
-    """Build a timestamped scoring filename from its saved dimension selections."""
-    filters = {
-        str(key).strip().casefold(): value
-        for key, value in (context_filters.items() if isinstance(context_filters, dict) else [])
-    }
+SCORING_LIST_MAX_CHARACTERS = 110
 
-    def selection(field: str, all_label: str) -> str:
-        value = filters.get(field.casefold(), [])
-        if isinstance(value, (list, tuple, set)):
-            selected = list(dict.fromkeys(
-                str(item).strip() for item in value
-                if item is not None and str(item).strip()
-            ))
-        elif value is None:
-            selected = []
-        else:
-            rendered = str(value).strip()
-            selected = [rendered] if rendered else []
-        if not selected or (len(selected) == 1 and selected[0].casefold() in {'all', all_label.casefold()}):
-            return all_label
-        return ' + '.join(selected)
+_SCORING_FIELDS = {
+    'region': 'All Regions', 'city': 'All Cities', 'operator': 'All Operators',
+    'vendor': 'All Vendors', 'campaign': 'All Campaigns',
+}
 
-    values = [
-        selection('region', 'All Regions'),
-        selection('city', 'All Cities'),
-        selection('operator', 'All Operators'),
-        selection('vendor', 'All Vendors'),
-        selection('campaign', 'All Campaigns'),
-    ]
-    timestamp = export_time.strftime('%Y%m%d_%H%M%S')
-    safe_mode = _filename_part(nr_mode_label or 'NSA', 10) or 'NSA'
-    fixed = [timestamp, 'Scoring & GAP Analysis', safe_mode]
-    fixed_bytes = len(' - '.join(fixed).encode('utf-8')) + len('.pptx'.encode('utf-8'))
-    separators_bytes = 3 * (len(values))
-    available = max(5, 245 - fixed_bytes - separators_bytes)
-    budgets = [len(_filename_part(value, 245).encode('utf-8')) for value in values]
-    excess = sum(budgets) - available
-    while excess > 0:
-        largest = max(range(len(budgets)), key=budgets.__getitem__)
-        reduction = min(excess, max(1, budgets[largest] - 5))
-        budgets[largest] -= reduction
-        excess -= reduction
-    safe_values = [_filename_part(value, budget) for value, budget in zip(values, budgets)]
-    return ' - '.join([*fixed, *safe_values]) + '.pptx'
+
+def scoring_display_selections(context_filters, *, max_characters: int = SCORING_LIST_MAX_CHARACTERS,
+                               campaign_values=None, aggregation_values=None,
+                               nr_mode_label: str = 'NSA') -> dict:
+    """Retain complete values within the presentation list limit."""
+    filters = context_filters if isinstance(context_filters, dict) else {}
+    if isinstance(context_filters, list):
+        filters = {}
+        for item in context_filters:
+            if isinstance(item, dict):
+                key = str(item.get('column') or item.get('field') or '').casefold()
+                value = item.get('value', item.get('values', []))
+                filters.setdefault(key, []).extend(value if isinstance(value, (list, tuple, set)) else [value])
+    filters = {str(key).strip().casefold(): value for key, value in filters.items()}
+
+    def values(value, fallback):
+        if not isinstance(value, (list, tuple, set)):
+            value = [value]
+        if isinstance(value, set):
+            value = sorted(value, key=str)
+        selected = list(dict.fromkeys(re.sub(r'\s+', ' ', str(item)).strip()
+                                      for item in value if item is not None and str(item).strip()))
+        return [fallback] if not selected or (len(selected) == 1 and selected[0].casefold() in {'all', fallback.casefold()}) else selected
+
+    original = {key: values(filters.get(key, []), fallback) for key, fallback in _SCORING_FIELDS.items()}
+    if campaign_values is not None:
+        original['campaign'] = values(campaign_values, 'All Campaigns')
+    original['aggregation'] = values(aggregation_values or ['Operator'], 'Operator')
+    retained = {key: list(value) for key, value in original.items()}
+    def fit_line(key, selected):
+        while selected and len(', '.join(selected)) > max_characters:
+            selected.pop()
+
+    for key, selected in retained.items():
+        fit_line(key, selected)
+
+    return {'values': retained, 'omitted': {key: len(retained[key]) < len(value) for key, value in original.items()}}
+
+
+def _scoring_filename(export_time: datetime, nr_mode_label: str, selections: dict[str, list[str]]) -> str:
+    safe_mode = re.sub(r'[^A-Za-z0-9_-]', '', str(nr_mode_label or 'NSA'))[:10] or 'NSA'
+    fixed = [f'{export_time:%Y%m%d_%H%M%S}', 'Scoring & GAP Analysis', safe_mode]
+    parts = [re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', ' + '.join(selections[key])).strip(' .')
+             for key in _SCORING_FIELDS]
+    return ' - '.join([*fixed, *parts]) + '.pptx'
+
+
+def build_scoring_report_filename(export_time: datetime, nr_mode_label: str,
+                                  context_filters: dict[str, object] | None = None,
+                                  *, display_selections: dict | None = None) -> str:
+    """Build a bounded filename using complete values retained on intro slides."""
+    plan = display_selections or scoring_display_selections(context_filters, nr_mode_label=nr_mode_label)
+    selected = {key: list(plan['values'][key]) for key in _SCORING_FIELDS}
+    while len(_scoring_filename(export_time, nr_mode_label, selected).encode('utf-8')) > 245:
+        candidates = [key for key in _SCORING_FIELDS if selected[key] and selected[key] != [_SCORING_FIELDS[key]]]
+        if not candidates:
+            break
+        key = max(candidates, key=lambda field: len(' + '.join(selected[field]).encode('utf-8')))
+        selected[key].pop()
+    return _scoring_filename(export_time, nr_mode_label, selected)
