@@ -1436,9 +1436,36 @@
     const notice = document.createElement('p');
     notice.className = 'scoring-priority-order-notice';
     const text = document.createElement('strong');
-    text.textContent = 'KPIs are ordered by priority, from highest to lowest.';
+    text.textContent = 'KPIs are ordered by priority, from highest to lowest as defined in Workspace Config.';
     notice.append(text);
     parent.append(notice);
+  }
+
+  function appendGapScaleAside(parent, tableData, rows) {
+    parent.style.display = 'flex';
+    parent.style.alignItems = 'center';
+    parent.style.flexWrap = 'wrap';
+    parent.style.gap = '.55rem 1rem';
+    parent.style.marginBottom = '.55rem';
+    const explanation = parent.querySelector('.scoring-context-note');
+    if (explanation) {
+      explanation.style.flex = '1 1 30rem';
+      explanation.style.margin = '0';
+    }
+    const aside = document.createElement('div');
+    aside.className = 'scoring-gap-info-aside';
+    aside.style.display = 'flex';
+    aside.style.flexDirection = 'column';
+    aside.style.alignItems = 'flex-end';
+    aside.style.gap = '.15rem';
+    aside.style.marginLeft = 'auto';
+    appendPriorityOrderNotice(aside);
+    const notice = aside.querySelector('.scoring-priority-order-notice');
+    if (notice) notice.style.cssText = 'margin: 0; text-align: right;';
+    appendPriorityGapScale(aside, tableData, rows);
+    const scale = aside.querySelector('.scoring-gap-scale');
+    if (scale) scale.style.cssText = 'margin: 0; justify-content: flex-end;';
+    parent.append(aside);
   }
 
   function appendMatrixTable(pane, tableData) {
@@ -2138,7 +2165,10 @@
     const note = document.createElement('p');
     note.className = 'scoring-context-note';
     note.textContent = `KPI GAP compares ${comparison === 'all' ? 'each hierarchy leaf' : selectedOperator} with ${baseline} at the same context. Category and final GAP rows show the arithmetic mean of valid KPI GAPs.`;
-    pane.append(note);
+    const gapInfo = document.createElement('div');
+    gapInfo.className = 'scoring-gap-info';
+    gapInfo.append(note);
+    pane.append(gapInfo);
     if (!columns.length) {
       const empty = document.createElement('div');
       empty.className = 'scoring-empty';
@@ -2146,8 +2176,7 @@
       pane.append(empty);
       return;
     }
-    appendPriorityGapScale(pane, tableData, scaleRows);
-    appendPriorityOrderNotice(pane);
+    appendGapScaleAside(gapInfo, tableData, scaleRows);
 
     const blocks = [{label: comparisonLabel, className: 'scoring-gap-group', headerClass: 'scoring-gap-header', column: 'gap', columns}];
     const wrapper = document.createElement('div');
@@ -2167,9 +2196,16 @@
         row.style.fontWeight = '700';
       }
       const category = String(item?.category ?? '');
-      if (index === 0 || String(rows[index - 1]?.category ?? '') !== category) {
+      const previous = rows[index - 1];
+      const startsCategoryRun = index === 0
+        || String(previous?.category ?? '') !== category
+        || previous?.row_type === 'category'
+        || item?.row_type === 'category';
+      if (startsCategoryRun) {
         let span = 1;
-        while (index + span < rows.length && String(rows[index + span]?.category ?? '') === category) span += 1;
+        while (item?.row_type !== 'category' && index + span < rows.length
+          && String(rows[index + span]?.category ?? '') === category
+          && rows[index + span]?.row_type !== 'category') span += 1;
         const categoryCell = document.createElement('td');
         categoryCell.className = 'scoring-category-cell';
         categoryCell.dataset.column = 'category';
@@ -2280,8 +2316,10 @@
       pane.append(empty);
       return;
     }
-    appendPriorityGapScale(pane, selected, rows);
-    appendPriorityOrderNotice(pane);
+    const gapInfo = document.createElement('div');
+    gapInfo.className = 'scoring-gap-info';
+    appendGapScaleAside(gapInfo, selected, rows);
+    pane.append(gapInfo);
     const wrapper = document.createElement('div');
     wrapper.className = 'scoring-matrix-wrap';
     const table = document.createElement('table');
@@ -2298,13 +2336,39 @@
     }
     thead.append(header);
     const tbody = document.createElement('tbody');
-    for (const item of rows) {
+    const categoryRuns = new Map();
+    for (let index = 0; index < rows.length; index += 1) {
+      const item = rows[index];
+      const category = String(item?.category ?? 'N/A');
+      const previous = rows[index - 1];
+      const startsCategoryRun = index === 0
+        || String(previous?.category ?? 'N/A') !== category
+        || previous?.row_type === 'category'
+        || item?.row_type === 'category';
+      if (!startsCategoryRun) continue;
+      let span = 1;
+      while (item?.row_type !== 'category' && index + span < rows.length
+        && String(rows[index + span]?.category ?? 'N/A') === category
+        && rows[index + span]?.row_type !== 'category') span += 1;
+      categoryRuns.set(index, {category, span});
+    }
+    rows.forEach((item, index) => {
       const row = document.createElement('tr');
       if (item?.row_type === 'category') {
         row.classList.add('scoring-category-subtotal');
         row.style.fontWeight = '700';
       }
       for (const [value, key] of [[item.category, 'category'], [item.kpi || item.kpi_code, 'kpi'], [item.kpi_type, 'type'], [item.gap_points, 'gap']]) {
+        if (key === 'category') {
+          const categoryRun = categoryRuns.get(index);
+          if (!categoryRun) continue;
+          const cell = document.createElement('td');
+          cell.dataset.column = 'category';
+          cell.rowSpan = categoryRun.span;
+          cell.textContent = categoryRun.category;
+          row.append(cell);
+          continue;
+        }
         if (key === 'type') {
           row.append(createKpiTypeCell(value, item?.row_type === 'category'));
           continue;
@@ -2331,7 +2395,7 @@
         row.append(cell);
       }
       tbody.append(row);
-    }
+    });
     table.append(thead, tbody);
     wrapper.append(table);
     pane.append(wrapper);
@@ -2401,10 +2465,13 @@
     const gapNote = document.createElement('p');
     gapNote.className = 'scoring-context-note';
     gapNote.textContent = `KPI GAP = compared operator weighted points minus ${baseline} weighted points for each KPI. Category and final GAP rows show the arithmetic mean of valid KPI GAPs.`;
-    pane.append(gapNote);
+    const gapInfo = document.createElement('div');
+    gapInfo.className = 'scoring-gap-info';
+    gapInfo.append(gapNote);
+    pane.append(gapInfo);
 
     const rows = Array.isArray(selected.rows) ? selected.rows : [];
-    appendPriorityGapScale(pane, selected, rows);
+    appendGapScaleAside(gapInfo, selected, rows);
     const comparisons = comparison === 'all'
       ? operators
       : operators.filter(operator => `operator:${operator}` === comparison);
@@ -2416,7 +2483,6 @@
       return;
     }
 
-    appendPriorityOrderNotice(pane);
     const wrapper = document.createElement('div');
     wrapper.className = 'scoring-matrix-wrap';
     const table = document.createElement('table');
@@ -2452,9 +2518,16 @@
         row.style.fontWeight = '700';
       }
       const category = String(item?.category ?? '');
-      if (index === 0 || String(rows[index - 1]?.category ?? '') !== category) {
+      const previous = rows[index - 1];
+      const startsCategoryRun = index === 0
+        || String(previous?.category ?? '') !== category
+        || previous?.row_type === 'category'
+        || item?.row_type === 'category';
+      if (startsCategoryRun) {
         let span = 1;
-        while (index + span < rows.length && String(rows[index + span]?.category ?? '') === category) span += 1;
+        while (item?.row_type !== 'category' && index + span < rows.length
+          && String(rows[index + span]?.category ?? '') === category
+          && rows[index + span]?.row_type !== 'category') span += 1;
         const categoryCell = document.createElement('td');
         categoryCell.className = 'scoring-category-cell';
         categoryCell.dataset.column = 'category';

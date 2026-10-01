@@ -914,17 +914,34 @@ def _score_category_row(
     }
 
 
+def _priority_rows_with_category_totals(
+    rows: list[dict[str, Any]], gap_priority_rank: dict[str, int],
+    category_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Place each full-category subtotal after its last globally ordered KPI."""
+    ordered = _priority_order_rows(rows, gap_priority_rank)
+    last_positions = {
+        str(row.get('category') or 'Other'): index for index, row in enumerate(ordered)
+    }
+    subtotals = {row['category']: row for row in category_rows}
+    expanded = []
+    for index, row in enumerate(ordered):
+        expanded.append({**copy.deepcopy(row), 'row_type': 'kpi'})
+        category = str(row.get('category') or 'Other')
+        if last_positions[category] == index:
+            expanded.append(copy.deepcopy(subtotals[category]))
+    return expanded
+
+
 def _attach_gap_matrix_modes(table: dict[str, Any], gap_priority_rank: dict[str, int]) -> None:
     operators = list(table.get('operators') or [])
     rows = list(table.get('rows') or [])
     scale_max = float(_number(table.get('gap_scale_max')) or 0.0)
-    expanded_rows: list[dict[str, Any]] = []
-    category_rows: list[dict[str, Any]] = []
-    for category, category_items in _ordered_category_groups(rows, gap_priority_rank):
-        expanded_rows.extend({**copy.deepcopy(row), 'row_type': 'kpi'} for row in category_items)
-        subtotal = _category_gap_row(category, category_items, operators, scale_max)
-        expanded_rows.append(subtotal)
-        category_rows.append(copy.deepcopy(subtotal))
+    category_rows = [
+        _category_gap_row(category, category_items, operators, scale_max)
+        for category, category_items in _ordered_category_groups(rows, gap_priority_rank)
+    ]
+    expanded_rows = _priority_rows_with_category_totals(rows, gap_priority_rank, category_rows)
     average_gaps = {
         operator: _average_numbers([row.get('gaps', {}).get(operator) for row in rows])
         for operator in operators
@@ -941,25 +958,29 @@ def _attach_gap_matrix_modes(table: dict[str, Any], gap_priority_rank: dict[str,
     )
 
 
+def _scalar_category_gap_row(
+    category: str, rows: list[dict[str, Any]], scale_max: float,
+) -> dict[str, Any]:
+    mean_gap = _average_numbers([row.get('gap_points') for row in rows])
+    partial, environments = _scalar_gap_metadata(rows)
+    return {
+        'row_type': 'category', 'category': category, 'kpi': f'{category} total',
+        'kpi_code': '', 'kpi_type': '', 'source_kind': None,
+        'gap_points': mean_gap, 'gap_color': gap_color(mean_gap, scale_max),
+        'gap_partial': partial, 'gap_environments': environments,
+    }
+
+
 def _attach_scalar_gap_modes(
     table: dict[str, Any], gap_priority_rank: dict[str, int], mode_rows: list[dict[str, Any]] | None = None,
 ) -> None:
     rows = list(mode_rows if mode_rows is not None else table.get('rows') or [])
-    expanded_rows: list[dict[str, Any]] = []
-    category_rows: list[dict[str, Any]] = []
     scale_max = float(_number(table.get('gap_scale_max')) or 0.0)
-    for category, category_items in _ordered_category_groups(rows, gap_priority_rank):
-        expanded_rows.extend({**copy.deepcopy(row), 'row_type': 'kpi'} for row in category_items)
-        values = [row.get('gap_points') for row in category_items]
-        mean_gap = _average_numbers(values)
-        subtotal = {
-            'row_type': 'category', 'category': category, 'kpi': f'{category} total',
-            'kpi_code': '', 'kpi_type': '', 'source_kind': None,
-            'gap_points': mean_gap, 'gap_color': gap_color(mean_gap, scale_max),
-        }
-        subtotal['gap_partial'], subtotal['gap_environments'] = _scalar_gap_metadata(category_items)
-        expanded_rows.append(subtotal)
-        category_rows.append(copy.deepcopy(subtotal))
+    category_rows = [
+        _scalar_category_gap_row(category, category_items, scale_max)
+        for category, category_items in _ordered_category_groups(rows, gap_priority_rank)
+    ]
+    expanded_rows = _priority_rows_with_category_totals(rows, gap_priority_rank, category_rows)
     mean_gap = _average_numbers([row.get('gap_points') for row in rows])
     table['expanded_rows'] = expanded_rows
     table['category_rows'] = category_rows

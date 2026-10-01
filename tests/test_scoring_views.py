@@ -909,3 +909,53 @@ def test_hierarchy_matrices_expose_the_same_expanded_and_summary_contract():
     assert all(row['row_type'] == 'category' for row in gap_matrix['category_rows'])
     assert score_matrix['expanded_total']['gap_label'] == 'Average KPI GAP'
     assert gap_matrix['expanded_total']['gap_label'] == 'Average KPI GAP'
+
+
+@pytest.mark.parametrize('hierarchy', [False, True])
+def test_gap_expanded_rows_preserve_interleaved_global_priority_and_category_subtotals(hierarchy):
+    configuration = scoring_configuration()
+    first_category = configuration['metrics'][0]['category']
+    first_metrics = [metric for metric in configuration['metrics'] if metric['category'] == first_category]
+    other_metric = next(metric for metric in configuration['metrics'] if metric['category'] != first_category)
+    leading_codes = [first_metrics[0]['code'], other_metric['code'], first_metrics[1]['code']]
+    configuration['gap_priority'] = leading_codes + [
+        code for code in configuration['gap_priority'] if code not in leading_codes
+    ]
+    result = full_result(operators=('EE', 'O2 UK'), environments=('DriveCity', 'DriveConnectionroad'))
+    result['configuration'] = configuration
+    views = build_scoring_views(
+        _hierarchy_job(['Region', 'Operator']) if hierarchy else {'levels': ['Operator'], 'baseline_operator': 'EE'},
+        result,
+    )
+    tables = views['hierarchy_gap_tables'] if hierarchy else [
+        *views['gap_summary_tables'], *views['gap_tables'],
+    ]
+    assert tables
+    assert any(table['context']['environment'] == 'Combined' for table in tables)
+    for table in tables:
+        expanded = table['expanded_rows']
+        kpis = [row for row in expanded if row['row_type'] == 'kpi']
+        assert [row['kpi_code'] for row in table['rows']] == configuration['gap_priority']
+        assert [row['kpi_code'] for row in kpis] == configuration['gap_priority']
+        assert [row['category'] for row in table['category_rows']].count(first_category) == 1
+        scalar = 'operator' in table
+        operators = [table['operator']] if scalar else table['operators']
+        subtotals = [row for row in expanded if row['row_type'] == 'category']
+        assert len(subtotals) == len(table['category_rows'])
+        for index, row in enumerate(expanded):
+            if row['row_type'] == 'category':
+                assert expanded[index - 1]['category'] == row['category']
+                assert not any(item['row_type'] == 'kpi' and item['category'] == row['category']
+                               for item in expanded[index + 1:])
+                assert row == next(item for item in table['category_rows']
+                                   if item['category'] == row['category'])
+        for operator in operators:
+            category_values = [
+                row['gap_points'] if scalar else row['gaps'][operator]
+                for row in kpis if row['category'] == first_category
+            ]
+            category_values = [value for value in category_values if value is not None]
+            category = next(row for row in table['category_rows'] if row['category'] == first_category)
+            actual = category['gap_points'] if scalar else category['gaps'][operator]
+            assert actual == pytest.approx(sum(category_values) / len(category_values))
+        assert table['expanded_total'] == table['category_total']

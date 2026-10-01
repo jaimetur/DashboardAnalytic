@@ -1764,6 +1764,7 @@ def _gap_summary_tables(presentation, matrices: list[dict]) -> None:
                     _gap_number(matrix['total'], operator) for operator in operators]):
                 _cell(table.cell(total_index, index), text, color='#E4E9EC', size=metric_font, bold=True, left=index == 1)
             _text(slide, matrix['note'], 7.12, height=.25, size=9)
+            _merge_category_cells(table, rows, 1)
             _add_gap_priority_arrow(slide, table)
             _add_gap_color_scale(slide, matrix, left=.65, width=12.03)
 
@@ -1823,6 +1824,7 @@ def _gap_tables(presentation, matrices: list[dict]) -> None:
             gap_run.font.bold = True
             gap_run.font.color.rgb = RGBColor.from_string('C62828')
             average_paragraph.add_run().text = ' points'
+            _merge_category_cells(table, rows, 1)
             _add_gap_priority_arrow(slide, table)
             _add_gap_color_scale(slide, matrix, left=.65, width=9.3)
             _text(slide, 'KPI types and priority follow this job’s saved workspace configuration.', 6.85, size=10)
