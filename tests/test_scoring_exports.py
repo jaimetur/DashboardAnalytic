@@ -119,7 +119,7 @@ def _table_shapes(presentation):
 def _comparison_matrices(presentation):
     return [
         table for table in _table_shapes(presentation)
-        if len(table.rows) >= 3 and table.cell(0, 0).text.strip() == 'NETCHECK KPIs'
+        if len(table.rows) >= 3 and table.cell(0, 0).text.strip() in {'NETCHECK KPIs', 'CATEGORY'}
     ]
 
 
@@ -252,8 +252,9 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     assert presentation.slide_height == source.slide_height
     assert len(matrices) == 2
     assert _normalized_headers(matrices[0])[:4] == [
-        'NETCHECK KPIs', 'CATEGORY', 'Score weight (%)', 'Max score',
+        'CATEGORY', 'NETCHECK KPI', 'Score weight (%)', 'Max score',
     ]
+    assert _rgb(matrices[0].cell(0, 1)) == '455B65'
     table = matrices[-1]
     headers = _normalized_headers(table)
     assert headers[:5] == ['NETCHECK KPIs', 'KPI', 'Type of KPI', 'Score weight (%)', 'Max score']

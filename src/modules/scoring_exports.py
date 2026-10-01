@@ -691,7 +691,7 @@ def _score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap
                 page_label = f' · KPIs {page_index + 1}/{len(metric_pages)}' if len(metric_pages) > 1 else ''
                 slide = _slide(presentation, title, _scope(matrix['context']) + page_label)
                 include_total = page_index == len(metric_pages) - 1
-                headers = ['NETCHECK KPIs', 'CATEGORY' if is_summary else 'KPI',
+                headers = ['CATEGORY' if is_summary else 'NETCHECK KPIs', 'NETCHECK KPI' if is_summary else 'KPI',
                            *([] if is_summary else ['Type of KPI']), 'Score weight\n(%)', 'Max score',
                            *[_operator_label(matrix, name) for name in operators],
                            *[f'GAP {_operator_label(matrix, name)}\n− {_operator_label(matrix, baseline)}' for name in comparisons]]
@@ -716,7 +716,7 @@ def _score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap
                 numeric_font = _hierarchy_content_font(
                     numeric_texts, remaining, maximum=min(11, min(body_heights) * 72 * .82),
                 )
-                colors = ['#E6F0F7', _WHITE, *([] if is_summary else [_WHITE]), '#4EA72E', '#FF0000',
+                colors = ['#E6F0F7', '#455B65' if is_summary else _WHITE, *([] if is_summary else [_WHITE]), '#4EA72E', '#FF0000',
                           *[_operator_color(matrix, name) for name in operators], *['#FFFF00'] * len(comparisons)]
                 for index, header in enumerate(headers):
                     _cell(table.cell(0, index), header, color=colors[index],
@@ -1453,7 +1453,8 @@ def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dic
             table.rows[row_index].height = Inches(row_height)
         _score_column_headers(table, plan, levels, gap_layout=gap_layout, leaf_width=leaf_width,
                               fixed_count=fixed_count)
-        static_headers = [('Category', '#E6F0F7'), ('CATEGORY' if is_summary else 'KPI', '#0084FF'),
+        static_headers = [('CATEGORY' if is_summary else 'Category', '#E6F0F7'),
+                          ('NETCHECK KPI' if is_summary else 'KPI', '#455B65' if is_summary else '#0084FF'),
                           *([] if is_summary else [('Type of KPI', '#0084FF')]),
                           ('Score weight\n(%)', '#4EA72E'), ('Max score', '#FF0000')]
         for index, (label, color) in enumerate(static_headers):
