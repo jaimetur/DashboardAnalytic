@@ -57,6 +57,44 @@ def test_operator_catalogue_replacement_preserves_unspecified_values_and_databas
     assert restored_job['configuration'] == job['configuration']
 
 
+def test_scoring_export_labels_collapse_full_catalogue_filters_and_preserve_incomplete_jobs(scoring_api):
+    repository = scoring_api['repository']
+    repository.replace_cdr_catalogue(
+        scoring_api['dataset_id'], vendors=['Nokia'], regions=['North'], cities=['Leeds'],
+        campaigns=['2026-Q2'], operators=['O2'],
+    )
+    complete = {'dataset_ids': [scoring_api['dataset_id']], 'context_filters': {
+        'Region': ['North'], 'City': ['Leeds'], 'Operator': ['O2'],
+        'Vendor': ['Nokia'], 'Campaign': ['2026-Q2'],
+    }}
+    normalized = app_module._scoring_export_job_with_catalogue_defaults(repository, complete)
+    assert normalized['context_filters'] == {
+        'Region': [], 'City': [], 'Operator': [], 'Vendor': [], 'Campaign': [],
+    }
+    assert complete['context_filters']['City'] == ['Leeds']
+
+    explicitly_all = {'dataset_ids': [scoring_api['dataset_id']], 'context_filters': {
+        'Region': [], 'City': [], 'Operator': [], 'Vendor': [], 'Campaign': [],
+    }}
+    assert app_module._scoring_export_job_with_catalogue_defaults(repository, explicitly_all) == explicitly_all
+
+    partial = {'dataset_ids': [scoring_api['dataset_id']], 'context_filters': {'City': []}}
+    assert app_module._scoring_export_job_with_catalogue_defaults(repository, partial) == partial
+    partial_with_complete_city = {
+        'dataset_ids': [scoring_api['dataset_id']], 'context_filters': {'City': ['Leeds']},
+    }
+    assert app_module._scoring_export_job_with_catalogue_defaults(
+        repository, partial_with_complete_city,
+    )['context_filters'] == {'City': []}
+
+    missing = {
+        'dataset_ids': [999999],
+        'context_filters': {'Region': ['North'], 'City': ['Leeds'], 'Operator': ['O2'],
+                            'Vendor': ['Nokia'], 'Campaign': ['2026-Q2']},
+    }
+    assert app_module._scoring_export_job_with_catalogue_defaults(repository, missing)['context_filters'] == missing['context_filters']
+
+
 def test_scoring_api_filters_before_calculation_and_ppt_preserves_scope(scoring_api):
     response = scoring_api['client'].post('/api/scoring/jobs', json={
         'dataset_ids': scoring_api['complete_dataset_ids'], 'nr_mode': 'NSA',
@@ -84,3 +122,60 @@ def test_scoring_api_filters_before_calculation_and_ppt_preserves_scope(scoring_
         assert 'Leeds' in text and 'North' in text and 'Nokia' in text and 'O2' in text
     saved = scoring_jobs.get_scoring_job(scoring_api['repository'], job['id'])
     assert saved['context_filters'] == job['context_filters']
+
+
+def test_scoring_ppt_export_labels_full_selected_catalogues_as_all(scoring_api):
+    repository = scoring_api['repository']
+    selected_ids = scoring_api['complete_dataset_ids']
+    repository.replace_cdr_catalogue(
+        selected_ids[0], vendors=['Nokia'], regions=['North'], cities=['Leeds'],
+        campaigns=['2026-Q2'], operators=['EE', 'O2'],
+    )
+    for dataset_id in selected_ids[1:]:
+        repository.replace_cdr_catalogue(
+            dataset_id, vendors=['Nokia'], regions=['North'], cities=['Leeds'],
+            campaigns=['2026-Q2'], operators=['EE', 'O2'],
+        )
+    unrelated_id = scoring_api['add_ready_cdr'](
+        name='Other_Q3_2026_NSA_Data.csv', campaign='2026-Q3',
+    )
+    repository.replace_cdr_catalogue(
+        unrelated_id, vendors=['Huawei'], regions=['South'], cities=['London'],
+        campaigns=['2026-Q3'], operators=['Three UK'],
+    )
+    selected_catalogues = repository.cdr_catalogues_by_dataset(selected_ids)
+    selected_values = {
+        field: sorted({value for catalogue in selected_catalogues.values()
+                       for value in catalogue[catalogue_field]}, key=str.casefold)
+        for field, catalogue_field in {
+            'Region': 'regions', 'City': 'cities', 'Operator': 'operators',
+            'Vendor': 'vendors', 'Campaign': 'campaigns',
+        }.items()
+    }
+    response = scoring_api['client'].post('/api/scoring/jobs', json={
+        'dataset_ids': selected_ids, 'nr_mode': 'NSA', 'aggregation_levels': ['Operator'],
+        'context_filters': selected_values,
+    })
+    assert response.status_code == 200, response.text
+    job = response.json()['job']
+    scoring_jobs.run_scoring_job(repository, job['id'])
+
+    exported = scoring_api['client'].get(f'/scoring/jobs/{job["id"]}/export/ppt')
+    assert exported.status_code == 200, exported.text
+    filename = unquote(exported.headers['content-disposition'])
+    assert 'All Regions' in filename and 'All Cities' in filename
+    assert 'All Operators' in filename and 'All Vendors' in filename and 'All Campaigns' in filename
+    assert 'South' not in filename and 'London' not in filename and '2026-Q3' not in filename
+
+    deck = Presentation(BytesIO(exported.content))
+    cover_text = '\n'.join(shape.text for slide in list(deck.slides)[:2]
+                            for shape in slide.shapes if shape.has_text_frame)
+    assert 'Region: All Regions' in cover_text
+    assert 'City: All Cities' in cover_text
+    assert 'Vendor: All Vendors' in cover_text
+    assert 'Operator: All Operators' in cover_text
+    assert 'Campaigns: 2026-Q2' in cover_text
+    assert 'South' not in cover_text and 'London' not in cover_text and 'Huawei' not in cover_text
+
+    saved = scoring_jobs.get_scoring_job(repository, job['id'])
+    assert saved['context_filters'] == selected_values

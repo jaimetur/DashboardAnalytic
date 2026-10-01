@@ -44,7 +44,6 @@ def test_results_environment_defaults_to_all_and_exports_selected_scope():
     assert "selectedEnvironment === 'all'" in script
     assert "const combinedIsAvailable = tables.some(table => environmentOf(table) === 'Combined');" in script
     assert "? (combinedIsAvailable ? 'Combined' : null)" in script
-    assert 'All Environments aggregate is unavailable in this saved result' in script
     assert "actual[0]" not in script
     assert '&environment=${encodeURIComponent(selectedEnvironment || \'all\')}' in script
     assert 'All Environments' in script
@@ -568,6 +567,7 @@ def test_scoring_job_title_and_cdr_summary_use_saved_filters_and_source_names():
         _function_source(script, 'uniqueCatalogueValues'),
         _function_source(script, 'firstValue'),
         _function_source(script, 'formatDate'),
+        _function_source(script, 'selectedContextFilters'),
         _function_source(script, 'savedJobFilterValues'),
         _function_source(script, 'campaignLabels'),
         _function_source(script, 'jobCampaigns'),
@@ -591,23 +591,39 @@ def test_scoring_job_title_and_cdr_summary_use_saved_filters_and_source_names():
     program = r"""
 const vm = require('node:vm');
 const payload = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
-const context = {job: payload.job};
+const context = {job: payload.job,
+  catalogueKeyByLevel: new Map([['Vendor', 'vendors']]),
+  datasetCatalogues: new Map([['1', {vendors: ['Nokia']}], ['2', {vendors: ['Ericsson']}]]),
+  contextFilterDefinitions: [{key: 'Vendor'}],
+  contextFilterSelects: new Map([['Vendor', {options: [{value: 'Nokia'}, {value: 'Ericsson'}], selectedOptions: [{value: 'Nokia'}, {value: 'Ericsson'}]}]])};
 vm.createContext(context);
 vm.runInContext(payload.snippets.join('\n') + `
+  globalThis.completeVendors = savedJobFilterValues({dataset_ids: [1, 2], context_filters: {Vendor: ['Ericsson', 'Nokia']}}, 'Vendor');
+  globalThis.subsetVendors = savedJobFilterValues({dataset_ids: [1, 2], context_filters: {Vendor: ['Nokia']}}, 'Vendor');
+  globalThis.submittedFilters = selectedContextFilters();
   globalThis.title = jobCardTitle(job);
   globalThis.cdrSummary = jobCdrSummary(job);
   globalThis.metadataCdrSummary = jobCdrSummary({source_metadata: {data: {name: 'data.csv'}, voice: {name: 'voice.csv'}}});
+  globalThis.partialVendors = savedJobFilterValues({context_filters: {Vendor: ['Nokia']}, resolved_context_filters: {Vendor: ['Nokia', 'Ericsson']}}, 'Vendor');
+  globalThis.legacyVendors = savedJobFilterValues({resolved_context_filters: {Vendor: ['Ericsson']}}, 'Vendor');
   globalThis.fallbackTitle = jobCardTitle({created_at: 'not-a-date', nr_mode: 'SA', dataset_ids: [1], source_metadata: [{campaigns: ['UK_Q3_2026']}]});`, context);
 process.stdout.write(JSON.stringify({title: context.title, cdrSummary: context.cdrSummary,
-  metadataCdrSummary: context.metadataCdrSummary, fallbackTitle: context.fallbackTitle}));
+  metadataCdrSummary: context.metadataCdrSummary, fallbackTitle: context.fallbackTitle,
+  partialVendors: context.partialVendors, legacyVendors: context.legacyVendors,
+  completeVendors: context.completeVendors, subsetVendors: context.subsetVendors, submittedFilters: context.submittedFilters}));
 """
     result = _run_node_json(program, payload)
 
     assert result['title'].split(' ● ')[1:] == [
-        'NSA', 'EE, O2', 'Nokia', 'North', 'Leeds', 'UK_Q2_2026',
+        'NSA', 'All Operators', 'All Vendors', 'All Regions', 'All Cities', 'UK_Q2_2026',
     ]
     assert result['cdrSummary'] == 'data.csv, voice.csv'
     assert result['metadataCdrSummary'] == 'data.csv, voice.csv'
+    assert result['completeVendors'] == []
+    assert result['subsetVendors'] == ['Nokia']
+    assert result['submittedFilters'] == {'Vendor': []}
+    assert result['partialVendors'] == ['Nokia']
+    assert result['legacyVendors'] == ['Ericsson']
     assert result['fallbackTitle'].split(' ● ')[1:] == [
         'SA', 'All Operators', 'All Vendors', 'All Regions', 'All Cities', 'UK_Q3_2026',
     ]

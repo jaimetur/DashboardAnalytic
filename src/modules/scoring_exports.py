@@ -23,6 +23,9 @@ from src.modules.cdr_reporting import (
     _set_structural_slide_text,
 )
 from src.modules.scoring_views import THRESHOLD_COLORS, build_scoring_views
+from src.modules.scoring_pptx_allocation import (
+    add_maximum_allocation_donut, maximum_allocations_from_configuration,
+)
 
 _FONT = 'Ericsson Hilda'
 _WHITE = '#FFFFFF'
@@ -470,7 +473,14 @@ def _fit_scoring_intro_subtitle(slide, layout_name: str, subtitle: str) -> None:
         None,
     )
     if layout_name == 'Title Page' and subtitle_shape is not None:
-        _set_shape_geometry(subtitle_shape, Inches(.96))
+        _set_shape_geometry(title_shape, Inches(1.5))
+        title_shape.top = Inches(1.4)
+        for paragraph in title_shape.text_frame.paragraphs:
+            paragraph.font.size = Pt(44)
+            for run in paragraph.runs:
+                run.font.size = Pt(44)
+        _set_shape_geometry(subtitle_shape, Inches(2.4))
+        subtitle_shape.top = Inches(3.15)
         subtitle_shape.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
         text_frame = subtitle_shape.text_frame
         text_frame.clear()
@@ -480,7 +490,8 @@ def _fit_scoring_intro_subtitle(slide, layout_name: str, subtitle: str) -> None:
             paragraph.text = line
             paragraphs.append(paragraph)
     else:
-        _set_shape_geometry(title_shape, Inches(2.0))
+        _set_shape_geometry(title_shape, Inches(4.4))
+        title_shape.top = Inches(.55)
         text_frame = title_shape.text_frame
         title_text = text_frame.text.split('\x0b', 1)[0].split('\n', 1)[0]
         text_frame.clear()
@@ -496,14 +507,25 @@ def _fit_scoring_intro_subtitle(slide, layout_name: str, subtitle: str) -> None:
             paragraphs.append(paragraph)
     for index, paragraph in enumerate(paragraphs):
         mode_line = index == 0
-        paragraph.font.size = Pt(18 if mode_line else 10.5)
+        paragraph.font.size = Pt(18 if mode_line else 16)
         paragraph.font.bold = mode_line
-        paragraph.line_spacing = .9
+        paragraph.line_spacing = 1.1
         paragraph.space_before = Pt(0)
-        paragraph.space_after = Pt(0)
+        paragraph.space_after = Pt(6)
         for run in paragraph.runs:
-            run.font.size = Pt(18 if mode_line else 10.5)
+            run.font.size = Pt(18 if mode_line else 16)
             run.font.bold = mode_line
+    for shape in (title_shape, subtitle_shape):
+        if shape is None:
+            continue
+        for paragraph in shape.text_frame.paragraphs:
+            paragraph.font.name = 'Aptos'
+            paragraph.font._rPr.set('spc', '0')
+            paragraph.font._rPr.set('kern', '0')
+            for run in paragraph.runs:
+                run.font.name = 'Aptos'
+                run.font._rPr.set('spc', '0')
+                run.font._rPr.set('kern', '0')
 
 
 def _set_shape_geometry(shape, height: int) -> None:
@@ -534,16 +556,20 @@ def _add_scoring_intro_slides(
         campaign_top = 5.9
     else:
         divider = slide.shapes.add_shape(
-            MSO_SHAPE.RECTANGLE, Inches(.6), Inches(2.62), Inches(2.47), Inches(.018),
+            MSO_SHAPE.RECTANGLE, Inches(.6), Inches(5.25), Inches(2.47), Inches(.018),
         )
         divider.name = 'Scoring Campaign Divider'
         divider.fill.solid()
         divider.fill.fore_color.rgb = RGBColor.from_string('FFC700')
         divider.line.fill.background()
-        campaign_top = 2.72
+        campaign_top = 5.45
     campaign_shape = _text(slide, campaign_text, campaign_top, left=.52, width=10.68, height=.32,
-                           size=12, color=_WHITE)
+                           size=16, color=_WHITE)
     campaign_shape.name = 'Scoring Campaigns'
+    for paragraph in campaign_shape.text_frame.paragraphs:
+        paragraph.font.name = 'Aptos'
+        for run in paragraph.runs:
+            run.font.name = 'Aptos'
 
 
 def _header_foreground(color: str) -> str:
@@ -691,6 +717,13 @@ def _score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap
 
 
 def _format_chart(chart, *, maximum: float, labels=XL_DATA_LABEL_POSITION.OUTSIDE_END) -> None:
+    # Axis identifiers are unsigned integers in DrawingML, including cross references.
+    axis_references = chart._chartSpace.xpath('.//c:axId | .//c:crossAx')
+    axis_ids = {value: str(index + 1) for index, value in enumerate(
+        dict.fromkeys(reference.get('val') for reference in axis_references),
+    )}
+    for axis_reference in axis_references:
+        axis_reference.set('val', axis_ids[axis_reference.get('val')])
     chart.has_legend = True
     chart.legend.position = XL_LEGEND_POSITION.TOP
     chart.legend.include_in_layout = False
@@ -770,31 +803,19 @@ def _add_family_allocation_donut(slide, matrix: dict) -> None:
                 if row.get('source_kind') else row['category'] in voice_categories) == is_voice)
         for is_voice in (True, False)
     ]
-    data = CategoryChartData()
-    data.categories = ['Voice', 'Data']
-    data.add_series('Maximum ranking points', maximums)
-    donut = slide.shapes.add_chart(
-        XL_CHART_TYPE.DOUGHNUT, Inches(9.7), Inches(1.75), Inches(3.0), Inches(3.2), data,
-    ).chart
-    donut.has_title = False
-    donut.plots[0].hole_size = 65
-    donut.plots[0].vary_by_categories = True
-    donut.plots[0].has_data_labels = True
-    labels = donut.plots[0].data_labels
-    labels.show_category_name = True
-    labels.show_value = True
-    labels.position = XL_DATA_LABEL_POSITION.OUTSIDE_END
-    labels.number_format = '0.00 "pts"'
-    labels.font.name = _FONT
-    labels.font.size = Pt(8)
-    for point, color in zip(donut.series[0].points, ('E6A81D', '176E77')):
-        point.format.fill.solid()
-        point.format.fill.fore_color.rgb = RGBColor.from_string(color)
+    allocations = matrix.get('environment_allocations') or {
+        str(matrix['context'].get('environment') or 'All Environments'): {
+            'voice': maximums[0], 'data': maximums[1],
+        },
+    }
+    return add_maximum_allocation_donut(
+        slide, matrix, allocations, left=9.7, top=1.75, width=3.0, height=3.2,
+    )
 
 
 def _stacked_category_chart(presentation, matrix: dict) -> None:
     """Compare KPI category contributions as one stacked bar per operator."""
-    slide = _slide(presentation, 'Best Network Scoring', _chart_subtitle(matrix['context']))
+    slide = _slide(presentation, 'Scoring Charts — Stacked', _chart_subtitle(matrix['context']))
     categories = list(dict.fromkeys(row['category'] for row in matrix['rows']))
     operators = list(matrix['operators'])
     data = CategoryChartData()
@@ -846,7 +867,7 @@ def _stacked_category_chart(presentation, matrix: dict) -> None:
 def _best_network(presentation, matrices: list[dict]) -> None:
     voice_categories = {'CLASSIC CALLS', 'WHATSAPP CALLS', 'MULTI RAB'}
     for matrix in matrices:
-        slide = _slide(presentation, 'Best Network Scoring — Voice and Data', _chart_subtitle(matrix['context']))
+        slide = _slide(presentation, 'Best Network Scoring', _chart_subtitle(matrix['context']))
         hierarchy_columns = matrix.get('hierarchy_columns', [])
         if hierarchy_columns:
             chart_columns = hierarchy_columns
@@ -907,29 +928,7 @@ def _best_network(presentation, matrices: list[dict]) -> None:
             _fill_series(chart.series[operator_index], voice_color)
             _fill_series(chart.series[voice_series_count + operator_index], color)
         _add_total_labels(chart)
-        donut_data = CategoryChartData()
-        donut_data.categories = ['Voice', 'Data']
-        donut_data.add_series('Maximum ranking points', maximums)
-        donut = slide.shapes.add_chart(XL_CHART_TYPE.DOUGHNUT, Inches(9.5), Inches(3), Inches(3.2), Inches(3.2), donut_data).chart
-        donut.has_title = False
-        donut.plots[0].hole_size = 65
-        donut.plots[0].vary_by_categories = True
-        donut.plots[0].has_data_labels = True
-        donut_labels = donut.plots[0].data_labels
-        donut_labels.show_category_name = True
-        donut_labels.show_value = True
-        donut_labels.position = XL_DATA_LABEL_POSITION.OUTSIDE_END
-        donut_labels.number_format = '0.00 "pts"'
-        donut_labels.font.name = _FONT
-        donut_labels.font.size = Pt(9)
-        donut.has_legend = True
-        donut.legend.position = XL_LEGEND_POSITION.BOTTOM
-        donut.legend.include_in_layout = False
-        donut.legend.font.size = Pt(11)
-        for point, color in zip(donut.series[0].points, ('E6A81D', '176E77')):
-            point.format.fill.solid()
-            point.format.fill.fore_color.rgb = RGBColor.from_string(color)
-        _text(slide, f'{matrix["total"]["max_points"]:.2f}\npts', 4.25, left=10.3, width=1.6, height=.7, size=15, align=PP_ALIGN.CENTER)
+        _add_family_allocation_donut(slide, matrix)
         _text(slide, matrix['coverage_note'], 7.03, size=9, height=.35)
 
 
@@ -974,7 +973,7 @@ def _add_total_labels(chart) -> None:
 
 def _hierarchy_chart(presentation, matrix: dict) -> None:
     columns = matrix.get('hierarchy_columns', [])
-    slide = _slide(presentation, 'Best Network Scoring', _chart_subtitle(matrix['context']))
+    slide = _slide(presentation, 'Scoring Charts — Stacked', _chart_subtitle(matrix['context']))
     data = CategoryChartData()
     _add_hierarchy_chart_categories(data, columns)
     categories = list(dict.fromkeys(row['category'] for row in matrix['rows']))
@@ -1600,6 +1599,12 @@ def export_scoring_powerpoint(job: dict[str, Any], result: dict[str, Any], templ
     presentation = Presentation(template_path)
     _remove_all_slides(presentation)
     views = _export_environment_views(build_scoring_views(job, result, operator_mapping_groups), environment)
+    environment_allocations = maximum_allocations_from_configuration(
+        job.get('configuration') or result.get('configuration') or {},
+    )
+    for matrix_key in ('score_tables', 'hierarchy_score_tables'):
+        for matrix in views.get(matrix_key, []):
+            matrix['environment_allocations'] = environment_allocations
     _add_scoring_intro_slides(presentation, job, result)
     levels = job.get('aggregation_levels') or job.get('levels') or ['Operator']
     subtitle = ', '.join(levels)

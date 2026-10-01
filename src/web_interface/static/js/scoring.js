@@ -201,7 +201,6 @@
   const calculationPanel = root.querySelector('.scoring-controls');
   const message = root.querySelector('[data-scoring-message]');
   const jobList = root.querySelector('[data-job-list]');
-  const resultMeta = root.querySelector('[data-result-meta]');
   const environmentControl = root.querySelector('[data-result-environment-control]');
   const environmentSelect = root.querySelector('[data-result-environment]');
   const chartPane = root.querySelector('[data-result-pane="charts"]');
@@ -405,7 +404,8 @@
       const values = select ? [...select.selectedOptions]
         .filter(option => !option.disabled && option.value)
         .map(option => String(option.value)) : [];
-      return [key, values];
+      const available = select ? [...select.options].filter(option => !option.disabled && option.value) : [];
+      return [key, available.length && values.length === available.length ? [] : values];
     }));
   }
 
@@ -730,7 +730,16 @@
       const value = firstValue(filters, [key], null);
       if (value === null || value === undefined) continue;
       const values = uniqueCatalogueValues(Array.isArray(value) ? value : [value]);
-      if (values.length) return values;
+      const datasetIds = valueOf(job, ['dataset_ids', 'cdr_ids'], []);
+      const catalogueKey = catalogueKeyByLevel.get(key);
+      if (values.length && Array.isArray(datasetIds) && datasetIds.length
+          && datasetIds.every(id => Array.isArray(datasetCatalogues.get(String(id))?.[catalogueKey]))) {
+        const available = new Set(datasetIds.flatMap(id => datasetCatalogues.get(String(id))[catalogueKey])
+          .map(item => String(item).trim().toLocaleLowerCase()).filter(Boolean));
+        const selected = new Set(values.map(item => item.toLocaleLowerCase()));
+        if (available.size && available.size === selected.size && [...available].every(item => selected.has(item))) return [];
+      }
+      return values;
     }
     return [];
   }
@@ -3765,15 +3774,6 @@
     }
     const warnings = payload.warnings ?? job?.warnings ?? [];
     renderWarnings(warnings);
-    const levels = jobLevels(job || payload.job || {}) || 'Operator';
-    const mode = valueOf(job || payload.job, ['nr_mode'], 'All NR Modes');
-    const baseline = valueOf(job || payload.job, ['baseline_operator'], 'EE');
-    const profileName = valueOf(job || payload.job, ['scoring_profile_name', 'profile_name'], '');
-    const unavailableMeta = environmentSelection.unavailable
-      ? ' (All Environments aggregate is unavailable in this saved result)' : '';
-    const environmentMeta = selectedEnvironment ? ` · ${environmentLabel(selectedEnvironment)}${unavailableMeta}` : '';
-    const profileMeta = profileName ? ` · Scoring methodology: ${profileName}` : '';
-    resultMeta.textContent = `${formatDate(valueOf(job || payload.job, ['created_at', 'completed_at', 'submitted_at'], ''))} · ${levels} · ${mode}${environmentMeta}${profileMeta} · GAP: compared operator minus ${baseline} · Filters: ${contextFilterSummary(job || payload.job)}`;
     setExportLinks(jobIdOf(job || payload.job || {}), true);
   }
 
@@ -3821,12 +3821,10 @@
         currentResultsJobId = null;
         const error = valueOf(record, ['error', 'error_message', 'last_error'], 'This scoring job failed without an error message.');
         renderNoResult(error);
-        resultMeta.textContent = `${jobSummary(record)} · Failed · ${error} · Filters: ${contextFilterSummary(record)}`;
       } else {
         currentResults = null;
         currentResultsJobId = null;
         renderNoResult('Scoring results will appear here when the job completes.');
-        resultMeta.textContent = `${jobSummary(record)} · ${status} · ${jobLevels(record)} · Filters: ${contextFilterSummary(record)}`;
         setExportLinks('', false);
       }
     } catch (error) {
@@ -3834,7 +3832,6 @@
       currentResults = null;
       currentResultsJobId = null;
       renderNoResult(error.message || 'The selected job could not be loaded.');
-      resultMeta.textContent = 'Unable to load this scoring job.';
       setMessage(error.message || 'The selected job could not be loaded.', 'error');
     }
   }
@@ -3867,7 +3864,6 @@
       } else {
         currentResults = null;
         currentResultsJobId = null;
-        resultMeta.textContent = 'No saved scoring result selected.';
         renderNoResult('Run a scoring job or select a saved job to see its results.');
       }
       const anyActive = jobs.some(isActive);
@@ -3908,7 +3904,6 @@
         currentResults = null;
         currentResultsJobId = null;
         userSelectedJob = false;
-        resultMeta.textContent = 'No saved scoring result selected.';
         renderNoResult('Run a scoring job or select a saved job to see its results.');
       }
       renderJobs();
@@ -4062,7 +4057,7 @@
   });
   calculateButton.addEventListener('click', () => createJob(false));
   recalculateButton.addEventListener('click', () => createJob(true));
-  jobList.addEventListener('click', event => {
+  jobList.addEventListener('click', async event => {
     const remove = event.target.closest('[data-delete-job-id]');
     if (remove) {
       deleteJob(remove.dataset.deleteJobId);
@@ -4076,7 +4071,10 @@
     selectedJobId = jobIdOf(job);
     selectedJob = job;
     persistScoringViewState();
-    loadJob(job, true);
+    await loadJob(job, true);
+    if (selectedJobId === jobIdOf(job)) {
+      root.querySelector('.scoring-results-panel')?.scrollIntoView({behavior: 'smooth', block: 'start'});
+    }
   });
   root.addEventListener('click', event => {
     const tab = event.target.closest('[data-result-tab]');

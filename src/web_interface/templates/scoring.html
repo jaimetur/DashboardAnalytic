@@ -82,7 +82,8 @@
   .scoring-job-progress { height: .3rem; overflow: hidden; border-radius: 999px; background: rgba(25,42,53,.1); }
   .scoring-job-progress span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg,var(--brand),#43b189); transition: width .2s ease; }
   .scoring-results-head { display: flex; align-items: flex-start; justify-content: space-between; gap: .8rem; flex-wrap: wrap; }
-  .scoring-results-tools { display: grid; justify-items: end; gap: .5rem; }
+  .scoring-results-head > :first-child { flex: 1 1 20rem; min-width: 0; }
+  .scoring-results-tools { display: grid; justify-items: end; gap: .5rem; margin-left: auto; }
   .scoring-results-selector-row, .scoring-results-value-row { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: .5rem; }
   .scoring-results-selector-row { padding: .48rem .58rem; border: 1px solid #a9c5dc; border-radius: 12px; background: #eaf3fa; }
   .scoring-results-selector-row .scoring-environment-filter { color: #244e70; }
@@ -109,7 +110,6 @@
   .scoring-export-actions a[data-export-gap] { border-color: #1267a5; background: #1267a5; color: #fff; }
   .scoring-export-actions a[data-export-ppt] { border-color: #a84d00; background: #a84d00; color: #fff; }
   .scoring-export-actions a[hidden] { display: none; }
-  .scoring-result-meta { margin: .35rem 0 0; color: var(--muted); font-size: .78rem; }
   .scoring-result-tabs { display: flex; flex-wrap: wrap; gap: .4rem; margin: .9rem 0 .65rem; border-bottom: 1px solid var(--line); }
   .scoring-result-tab { padding: .55rem .75rem; border: 1px solid #e4bf91; border-radius: 10px 10px 0 0; background: #fff0d1; color: #75411f; font-size: .78rem; font-weight: 750; box-shadow: none; }
   .scoring-result-tab:hover:not(:disabled) { border-color: #d3a46c; background: #ffe6bb; color: #633612; box-shadow: none; transform: none; }
@@ -356,7 +356,7 @@
 
     <article class="panel scoring-results-panel" aria-labelledby="scoring-results-title">
       <div class="scoring-results-head">
-        <div><p class="eyebrow">Latest saved result</p><h3 id="scoring-results-title">Scoring results</h3><p class="scoring-result-meta" data-result-meta>Select a completed job to inspect its output.</p><nav class="scoring-config-shortcuts scoring-results-config-shortcuts" aria-label="Scoring configuration sections"><a data-config-shortcut="kpi" href="/workspace-config#scoring-kpi-configuration">KPI configuration</a><a data-config-shortcut="hierarchy" href="/workspace-config#scoring-aggregation-hierarchy">Aggregation hierarchy</a><a data-config-shortcut="gap" href="/workspace-config#scoring-gap-priority">GAP priorities</a></nav></div>
+        <div><p class="eyebrow">Latest saved result</p><h3 id="scoring-results-title">Scoring results</h3><nav class="scoring-config-shortcuts scoring-results-config-shortcuts" aria-label="Scoring configuration sections"><a data-config-shortcut="kpi" href="/workspace-config#scoring-kpi-configuration">KPI configuration</a><a data-config-shortcut="hierarchy" href="/workspace-config#scoring-aggregation-hierarchy">Aggregation hierarchy</a><a data-config-shortcut="gap" href="/workspace-config#scoring-gap-priority">GAP priorities</a></nav></div>
         <div class="scoring-results-tools">
           <div class="scoring-results-selector-row" data-scoring-results-selector-row>
             <label class="scoring-environment-filter" data-result-environment-control hidden>Environment

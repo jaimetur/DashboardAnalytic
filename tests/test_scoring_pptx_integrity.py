@@ -91,6 +91,10 @@ def test_generated_scoring_pptx_serializes_valid_table_and_combo_chart_structure
         assert chart_roots
         found_combo_chart = False
         for root in chart_roots:
+            assert all(
+                0 <= int(axis.get('val')) <= 0xFFFFFFFF
+                for axis in root.xpath('.//c:axId | .//c:crossAx', namespaces=NS)
+            )
             bar_plots = root.xpath('.//c:barChart', namespaces=NS)
             line_plots = root.xpath('.//c:lineChart', namespaces=NS)
             if bar_plots and line_plots:

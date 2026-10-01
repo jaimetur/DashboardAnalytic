@@ -13997,6 +13997,64 @@ def scoring_operator_options(task_repository: Repository) -> list[dict[str, str]
     return options
 
 
+def _scoring_export_job_with_catalogue_defaults(
+    task_repository: Repository, job: dict[str, Any],
+) -> dict[str, Any]:
+    """Hide complete explicit catalogue selections in export labels as All."""
+    export_job = dict(job)
+    context_filters = job.get('context_filters')
+    if not isinstance(context_filters, dict):
+        return export_job
+
+    fields = ('Region', 'City', 'Operator', 'Vendor', 'Campaign')
+    fields_by_identity = {field.casefold(): field for field in fields}
+    raw_dataset_ids = job.get('dataset_ids')
+    if not isinstance(raw_dataset_ids, (list, tuple, set)):
+        return export_job
+    try:
+        dataset_ids = list(dict.fromkeys(int(value) for value in raw_dataset_ids))
+        if not dataset_ids:
+            return export_job
+        catalogues = task_repository.cdr_catalogues_by_dataset(dataset_ids)
+        # A partial catalogue cannot prove that the saved list means "all".
+        if (set(catalogues) != set(dataset_ids)
+                or task_repository.missing_cdr_catalogue_ids(dataset_ids)
+                or task_repository.missing_cdr_operator_ids(dataset_ids)
+                or task_repository.missing_cdr_campaign_ids(dataset_ids)):
+            return export_job
+    except (TypeError, ValueError):
+        return export_job
+    catalogue_fields = {
+        'Region': 'regions', 'City': 'cities', 'Operator': 'operators',
+        'Vendor': 'vendors', 'Campaign': 'campaigns',
+    }
+    normalized_filters = dict(context_filters)
+    for field, catalogue_field in catalogue_fields.items():
+        key = next((key for key in context_filters
+                    if fields_by_identity.get(str(key).strip().casefold()) == field), None)
+        if key is None:
+            continue
+        value = context_filters[key]
+        if not isinstance(value, (list, tuple, set)) or not value:
+            continue
+        values = {
+            str(item).strip()
+            for catalogue in catalogues.values()
+            if isinstance(catalogue, dict)
+            for item in catalogue.get(catalogue_field, [])
+            if str(item).strip()
+        }
+        selected = {
+            str(item).strip()
+            for item in value
+            if item is not None and str(item).strip()
+        }
+        if {item.casefold() for item in selected} == {item.casefold() for item in values}:
+            normalized_filters[key] = []
+    export_job['context_filters'] = normalized_filters
+    return export_job
+
+
 @app.get('/scoring', response_class=HTMLResponse)
 def scoring_page(request: Request, user: SessionUser = Depends(current_user)) -> HTMLResponse:
     task_repository = scoring_repository(user)
@@ -14261,8 +14319,9 @@ def scoring_job_export(
         try:
             if not job.get('configuration') and not result.get('configuration'):
                 job['configuration'] = export_configuration or task_repository.get_scoring_configuration()
+            export_job = _scoring_export_job_with_catalogue_defaults(task_repository, job)
             content = export_scoring_powerpoint(
-                job, result, settings.ppt_templates_dir / TEMPLATE_NAMES['nsa'],
+                export_job, result, settings.ppt_templates_dir / TEMPLATE_NAMES['nsa'],
                 operator_mapping_groups, table_mode=table_mode or 'expanded',
                 gap_layout=gap_layout or 'end', environment=selected_environment,
                 show_gap_values=show_gap_values,
@@ -14270,7 +14329,7 @@ def scoring_job_export(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         filename = build_scoring_report_filename(
-            datetime.now(), job.get('nr_mode') or 'NSA', job.get('context_filters'),
+            datetime.now(), export_job.get('nr_mode') or 'NSA', export_job.get('context_filters'),
         )
         disposition = f"attachment; filename*=UTF-8''{quote(filename)}"
         return Response(content, media_type='application/vnd.openxmlformats-officedocument.presentationml.presentation', headers={

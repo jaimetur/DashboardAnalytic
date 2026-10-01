@@ -318,7 +318,7 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     titles = [slide.shapes.title.text.split('\n')[0] for slide in presentation.slides]
     assert titles[:2] == ['Scoring & GAP Analysis', 'Scoring & GAP Analysis — DriveCity']
     assert titles[2:7] == [
-        'Best Network Scoring — Voice and Data', 'Best Network Scoring',
+        'Best Network Scoring', 'Scoring Charts — Stacked',
         'Scoring Charts — Category Comparison', 'Scoring Tables — Summary', 'Scoring Tables — Expanded',
     ]
     assert titles[7] == 'GAP Analysis — All vs EE'
@@ -420,14 +420,11 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     ]
     assert list(donut.series[0].values) == pytest.approx(expected_family_maximums)
     assert donut.plots[0].vary_by_categories
-    assert donut.plots[0].has_data_labels
-    assert donut._chartSpace.xpath('.//c:doughnutChart//c:showCatName[@val="1"]')
-    assert donut._chartSpace.xpath('.//c:doughnutChart//c:showVal[@val="1"]')
     assert [str(point.format.fill.fore_color.rgb) for point in donut.series[0].points] == [
         'E6A81D', '176E77',
     ]
     best_network_slide = next(slide for slide in presentation.slides
-                              if slide.shapes.title.text.split('\n')[0] == 'Best Network Scoring — Voice and Data')
+                              if slide.shapes.title.text.split('\n')[0] == 'Best Network Scoring')
     best_network_text = _slide_text(best_network_slide)
     assert '650.00' in best_network_text and 'pts' in best_network_text
     assert 'Configured maximum' not in best_network_text
@@ -454,7 +451,7 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     assert chart.legend.include_in_layout is False
     assert chart.value_axis.maximum_scale > max(value for series in chart.series for value in series.values if value is not None)
     flat_chart_slide = next(slide for slide, title in zip(presentation.slides, titles)
-                            if title == 'Best Network Scoring')
+                            if title == 'Scoring Charts — Stacked')
     flat_chart_group = next(shape for shape in flat_chart_slide.shapes
                             if shape.name == 'Scoring Stacked Operator Chart')
     flat_chart_shape = next(shape for shape in flat_chart_group.shapes if shape.has_chart)
@@ -599,6 +596,10 @@ def test_intro_slides_show_all_canonical_scope_filters_without_overlapping_campa
             assert subtitle_shape.top + subtitle_shape.height <= divider.top
             mode_paragraph = subtitle_shape.text_frame.paragraphs[1]
         assert mode_paragraph.font.size.pt == 18
+        for paragraph in subtitle_shape.text_frame.paragraphs:
+            assert paragraph.font.name == 'Aptos'
+            assert paragraph.font._rPr.get('spc') == '0'
+            assert all(run.font._rPr.get('spc') == '0' for run in paragraph.runs)
         assert subtitle_shape.left > 0
         assert subtitle_shape.top > 0
         assert subtitle_shape.width > Inches(9)
@@ -657,12 +658,12 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
         },
     )
     titles = [slide.shapes.title.text.split('\n')[0] for slide in presentation.slides]
-    assert titles.count('Best Network Scoring') == 1
+    assert titles.count('Scoring Charts — Stacked') == 1
     assert titles.count('Scoring Charts — Category Comparison') == 1
     best_network_slide = next(slide for slide, title in zip(presentation.slides, titles)
-                              if title == 'Best Network Scoring — Voice and Data')
+                              if title == 'Best Network Scoring')
     assert best_network_slide.shapes.title.text == \
-        'Best Network Scoring — Voice and Data\nEnvironment: DriveCity'
+        'Best Network Scoring\nEnvironment: DriveCity'
     best_network_chart, donut = _charts_on_slide(best_network_slide)
     best_network_categories = best_network_chart.plots[0].categories
     assert best_network_categories.depth == 3
@@ -710,9 +711,9 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     ]
     assert [category.label for category in donut.plots[0].categories] == ['Voice', 'Data']
     assert list(donut.series[0].values) == pytest.approx(expected_family_maximums)
-    assert donut.plots[0].vary_by_categories and donut.plots[0].has_data_labels
-    assert donut._chartSpace.xpath('.//c:doughnutChart//c:showCatName[@val="1"]')
-    assert donut._chartSpace.xpath('.//c:doughnutChart//c:showVal[@val="1"]')
+    assert 'DriveCity' in _slide_text(best_network_slide)
+    assert f'Voice {expected_family_maximums[0]:.2f}' in _slide_text(best_network_slide)
+    assert f'Data {expected_family_maximums[1]:.2f}' in _slide_text(best_network_slide)
     assert [str(point.format.fill.fore_color.rgb) for point in donut.series[0].points] == [
         'E6A81D', '176E77',
     ]
@@ -723,8 +724,8 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     assert 'Voice: lighter operator color' not in best_network_text
 
     chart_slide = next(slide for slide, title in zip(presentation.slides, titles)
-                       if title == 'Best Network Scoring')
-    assert chart_slide.shapes.title.text == 'Best Network Scoring\nEnvironment: DriveCity'
+                       if title == 'Scoring Charts — Stacked')
+    assert chart_slide.shapes.title.text == 'Scoring Charts — Stacked\nEnvironment: DriveCity'
     chart_group = next(shape for shape in chart_slide.shapes
                        if shape.name == 'Scoring Chart With Category Key')
     chart_shape = next(shape for shape in chart_group.shapes if shape.has_chart)
@@ -846,7 +847,7 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
         gap_header = operator_gap_table.rows[len(['Operator', 'Region', 'Campaign'])]
         assert all(cell.text == 'GAP' for cell in list(gap_header.cells)[3:])
     assert any(_charts_on_slide(slide) for slide, title in zip(presentation.slides, titles)
-               if title == 'Best Network Scoring')
+               if title == 'Scoring Charts — Stacked')
     assert any(
         cell.is_merge_origin and cell.span_width > 1 and cell.text in MAPPED_OPERATOR_ORDER
         for slide in score_slides
