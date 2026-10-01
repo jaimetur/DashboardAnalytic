@@ -1481,10 +1481,12 @@ body[data-embedded-template-editor] .slides-templates-editor-table-wrap .form-ac
 .workspace-config-stack .collapsible-summary h2 { color: #fff; }
 .workspace-config-stack .collapsible-summary .eyebrow { color: #bcebe3; }
 .workspace-config-stack .collapsible-panel[open] > .collapsible-summary { border-bottom-color: #075450; }
-.workspace-config-stack .scoring-config-subpanels > .collapsible-panel > .collapsible-summary { background: linear-gradient(135deg, #e2edf5, #d3e5ed); color: #21485e; border-bottom-color: #abc5d4; }
-.workspace-config-stack .scoring-config-subpanels > .collapsible-panel > .collapsible-summary h2 { color: #21485e; }
-.workspace-config-stack .scoring-config-subpanels > .collapsible-panel > .collapsible-summary .eyebrow { color: #456e82; }
-.workspace-config-stack .scoring-config-subpanels > .collapsible-panel > .collapsible-summary .collapse-chip { background: #f5f9fc; border-color: #9ab7c7; color: #21485e; }
+.workspace-config-stack .operator-vendor-maps-panel, .workspace-config-stack .operator-vendor-map-subpanels > .collapsible-panel { min-width: 0; max-width: 100%; }
+.workspace-config-stack .operator-vendor-map-subpanels { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.25rem; }
+.workspace-config-stack :is(.scoring-config-subpanels, .operator-vendor-map-subpanels) > .collapsible-panel > .collapsible-summary { background: linear-gradient(135deg, #e2edf5, #d3e5ed); color: #21485e; border-bottom-color: #abc5d4; }
+.workspace-config-stack :is(.scoring-config-subpanels, .operator-vendor-map-subpanels) > .collapsible-panel > .collapsible-summary h2 { color: #21485e; }
+.workspace-config-stack :is(.scoring-config-subpanels, .operator-vendor-map-subpanels) > .collapsible-panel > .collapsible-summary .eyebrow { color: #456e82; }
+.workspace-config-stack :is(.scoring-config-subpanels, .operator-vendor-map-subpanels) > .collapsible-panel > .collapsible-summary .collapse-chip { background: #f5f9fc; border-color: #9ab7c7; color: #21485e; }
 .workspace-config-stack .catalogue-workspace-table thead th, .workspace-config-stack .operator-mappings-table thead th { z-index: 1; border-bottom-color: #075450; background: #0b6664; color: #fff; font-weight: 700; }
 .workspace-config-stack .main-cities-panel .main-cities-form { display: grid !important; gap: .9rem !important; }
 .workspace-config-stack .main-cities-panel .main-cities-transfer { display: grid !important; grid-template-columns: minmax(13rem, 1fr) 3.1rem minmax(13rem, 1fr) !important; gap: .75rem !important; align-items: center !important; width: 100% !important; max-width: 100% !important; min-width: 0 !important; overflow-x: auto !important; padding: .2rem .1rem .55rem !important; }

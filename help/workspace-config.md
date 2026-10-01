@@ -1,6 +1,6 @@
 # Workspace Config
 
-Workspace Config is a dedicated page for settings owned by the active workspace: Report Templates Management, Operator Mappings, Vendor Mappings, Main Cities, Scoring Aggregation Hierarchy, Scoring KPI Configuration and GAP KPI Priority. These settings remain workspace-scoped and are included in the applicable import, export, transfer, backup and restore workflows.
+Workspace Config is a dedicated page for settings owned by the active workspace: Report Templates Management, Operator & Vendor Maps (Operator Mappings and Vendor Mappings), Main Cities, Scoring Aggregation Hierarchy, Scoring KPI Configuration and GAP KPI Priority. These settings remain workspace-scoped and are included in the applicable import, export, transfer, backup and restore workflows.
 
 Open **Config → Workspace Config** from the main navigation at `/workspace-config`. Template, mapping and Main Cities actions use routes below `/workspace-config/`. The page uses the same teal/navy palette as Application Config and its Page Sections navigator links to the panels.
 
@@ -348,7 +348,11 @@ Rows sharing a `Slide` number create separate charts on one slide. They must sha
 
 Operator and Vendor aliases resolve to the canonical values configured in Workspace Config without changing the source workbook. Their table order controls Operator, Subscriber, Vendor and combined Operator_Vendor chart dimensions. Each canonical row defines its chart theme colour; multiple campaigns or operators using one identity receive contrasting shades derived from that colour.
 
-## Operator Mappings
+## Operator & Vendor Maps
+
+The Operator & Vendor Maps panel contains Operator Mappings and Vendor Mappings as independently collapsible subpanels. Their light blue headers distinguish them from the dark parent header. Existing mapping controls and saved expansion states remain available inside each subpanel.
+
+### Operator Mappings
 
 The table groups raw Operator labels under one canonical identity for charts. Each row shows **Order**, **Canonical label**, **Mapped source labels**, **Colour** and **Actions**. Enter source aliases one per line; comma and semicolon separators are accepted too. The canonical label also maps to itself automatically, so it need not be repeated among the aliases. An alias cannot belong to two canonical groups.
 
@@ -356,7 +360,7 @@ Use **Add canonical mapping** to create a group. Change its label, aliases or co
 
 The colour picker sets the group's chart theme colour; charts can derive related shades to distinguish campaigns or series. Order and colour are presentation choices, while aliases make source labels such as `Vodafone UK` resolve to the intended canonical Operator. These settings affect chart grouping, legends and template filters. They do not rewrite source workbooks, stored CDR rows or combined CDR tables. Saving, moving or deleting a group clears chart caches so later views use the new settings.
 
-## Vendor Mappings
+### Vendor Mappings
 
 The Vendor table has the same **Order**, **Canonical label**, **Mapped source labels**, **Colour** and **Actions** controls. Use **Add canonical mapping**, **Save**, **Move up**, **Move down** or confirmed **Delete** to manage a Vendor and all its aliases. Alias matching is case-insensitive, the canonical label maps to itself, and an alias cannot belong to two Vendor groups. Renaming a canonical Vendor updates exact matching Report Template and saved Dashboard references.
 
