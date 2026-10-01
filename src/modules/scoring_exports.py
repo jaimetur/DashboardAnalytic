@@ -24,7 +24,8 @@ from src.modules.cdr_reporting import (
 )
 from src.modules.scoring_views import THRESHOLD_COLORS, build_scoring_views
 from src.modules.scoring_pptx_allocation import (
-    add_maximum_allocation_donut, category_maximum_allocations, maximum_allocations_from_configuration,
+    _environment_display_label, add_maximum_allocation_donut, category_maximum_allocations,
+    maximum_allocations_from_configuration,
 )
 
 _FONT = 'Ericsson Hilda'
@@ -563,10 +564,23 @@ def _set_shape_geometry(shape, height: int) -> None:
     shape.height = height
 
 
+def _scoring_environment_title(environment: str, configuration: dict) -> str:
+    scope = configuration.get('scope', {}).get('environments', {}).get(environment, {})
+    filters = [str(scope.get(key) or '').strip() for key in ('g_level_1', 'g_level_2')]
+    filters = [value for value in filters if value]
+    if filters:
+        filters = ['Connecting Roads' if value.casefold() in {'connectionroad', 'connectingroads'}
+                   else value for value in filters]
+        return ' - '.join(filters)
+    return _environment_display_label(environment)
+
+
 def _add_scoring_intro_slides(
     presentation, job: dict[str, Any], result: dict[str, Any], *, environment: str | None = None,
 ) -> None:
-    title = environment or 'Scoring & GAP Analysis'
+    configuration = job.get('configuration') or result.get('configuration') or {}
+    title = (_scoring_environment_title(environment, configuration) if environment
+             else 'Scoring & GAP Analysis')
     subtitle = _scoring_filter_subtitle(job, environment)
     campaigns = _campaigns_for_export(job, result)
     campaign_text = f'Campaigns: {", ".join(campaigns) if campaigns else "All Campaigns"}'

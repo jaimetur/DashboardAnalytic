@@ -327,7 +327,7 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
         assert _rgb(gap_table.cell(reliable_rows[0], 2)) == THRESHOLD_COLORS['High'].lstrip('#')
 
     titles = [slide.shapes.title.text.split('\n')[0] for slide in presentation.slides]
-    assert titles[:2] == ['Scoring & GAP Analysis', 'DriveCity']
+    assert titles[:2] == ['Scoring & GAP Analysis', 'Drive - City']
     assert titles[2:7] == [
         'Best Network Scoring per Service', 'Best Network Scoring per Category',
         'Scoring per Category', 'Scoring Tables — Summary', 'Scoring Tables — Drill-down',
