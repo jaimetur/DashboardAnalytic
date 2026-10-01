@@ -170,10 +170,10 @@ def test_results_controls_are_grouped_with_icons_and_unique_environment_heading(
         anchor = re.search(rf'<a\b[^>]*{re.escape(marker)}[^>]*>(.*?)</a>', right_markup, re.S)
         assert anchor and '<svg ' in anchor.group(1) and 'viewBox="0 0 20 20"' in anchor.group(1)
     assert '.scoring-results-head { display: grid; grid-template-columns: minmax(0,1fr) auto;' in template
-    assert '.scoring-results-tools { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap;' in template
+    assert '.scoring-results-tools { grid-column: 2; grid-row: 1; display: flex; align-items: center; justify-content: flex-end; flex-wrap: nowrap;' in template
     assert '.scoring-results-config-shortcuts svg, .scoring-export-actions svg {' in template
     assert 'fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;' in template
-    assert '.scoring-results-config-shortcuts, .scoring-results-tools > .scoring-export-actions { justify-content: flex-start; }' in template
+    assert '.scoring-results-config-shortcuts, .scoring-results-tools > .scoring-export-actions { justify-content: flex-end; }' in template
 
     payload = {
         'snippets': {
@@ -550,9 +550,10 @@ def test_operator_color_and_reference_markers_stay_on_operator_headers():
 def test_export_links_have_distinct_high_contrast_colors():
     template = SCORING_TEMPLATE.read_text(encoding='utf-8')
 
-    assert '.scoring-export-actions a[data-export-scoring] { border-color: #16734b; background: #16734b; color: #fff; }' in template
-    assert '.scoring-export-actions a[data-export-gap] { border-color: #1267a5; background: #1267a5; color: #fff; }' in template
-    assert '.scoring-export-actions a[data-export-ppt] { border-color: #a84d00; background: #a84d00; color: #fff; }' in template
+    for marker in ('data-config-shortcut="kpi"', 'data-config-shortcut="hierarchy"',
+                   'data-config-shortcut="gap"', 'data-export-scoring', 'data-export-gap', 'data-export-ppt'):
+        assert re.search(rf'\.scoring-results-tools a\[{re.escape(marker)}\] \{{ background: linear-gradient\(', template)
+    assert '.scoring-results-tools a[data-config-shortcut] { color: #fff;' in template
 
 
 def test_gap_value_toggle_defaults_off_and_only_changes_scoring_tables():

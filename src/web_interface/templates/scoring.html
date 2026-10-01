@@ -82,10 +82,10 @@
   .scoring-job-progress { height: .3rem; overflow: hidden; border-radius: 999px; background: rgba(25,42,53,.1); }
   .scoring-job-progress span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg,var(--brand),#43b189); transition: width .2s ease; }
   .scoring-results-head { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: start; gap: 1rem; }
-  .scoring-results-primary { display: grid; align-content: start; min-width: 0; gap: .55rem; }
+  .scoring-results-primary { display: contents; }
   .scoring-results-primary h3 { margin: 0; }
-  .scoring-results-controls { display: grid; justify-items: start; gap: .45rem; }
-  .scoring-results-tools { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: .5rem; min-width: 0; }
+  .scoring-results-controls { grid-column: 1 / -1; grid-row: 2; display: flex; align-items: center; flex-wrap: wrap; gap: .6rem; }
+  .scoring-results-tools { grid-column: 2; grid-row: 1; display: flex; align-items: center; justify-content: flex-end; flex-wrap: nowrap; gap: .45rem; min-width: 0; }
   .scoring-results-selector-row, .scoring-results-value-row { display: flex; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: .5rem; }
   .scoring-results-selector-row { padding: .48rem .58rem; border: 1px solid #a9c5dc; border-radius: 12px; background: #eaf3fa; }
   .scoring-results-selector-row .scoring-environment-filter { color: #244e70; }
@@ -105,14 +105,20 @@
   .scoring-environment-filter[hidden] { display: none; }
   .scoring-kpi-values-toggle { display: inline-flex; align-items: center; gap: .35rem; color: var(--muted); font-size: .74rem; font-weight: 750; white-space: nowrap; }
   .scoring-kpi-values-toggle input { width: 1rem; height: 1rem; margin: 0; accent-color: var(--brand); }
-  .scoring-results-config-shortcuts { margin: 0; }
-  .scoring-results-config-shortcuts a, .scoring-export-actions a { gap: .4rem; }
-  .scoring-results-config-shortcuts svg, .scoring-export-actions svg { flex: 0 0 auto; width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-  .scoring-export-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
-  .scoring-export-actions a { display: inline-flex; align-items: center; min-height: 2.1rem; padding: .38rem .65rem; border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.72); color: #24615d; font-size: .75rem; font-weight: 750; }
-  .scoring-export-actions a[data-export-scoring] { border-color: #16734b; background: #16734b; color: #fff; }
-  .scoring-export-actions a[data-export-gap] { border-color: #1267a5; background: #1267a5; color: #fff; }
-  .scoring-export-actions a[data-export-ppt] { border-color: #a84d00; background: #a84d00; color: #fff; }
+  .scoring-results-config-shortcuts { margin: 0; display: flex; flex-wrap: nowrap; gap: .45rem; }
+  .scoring-results-tools a { display: inline-flex; align-items: center; flex: 0 0 auto; gap: .4rem; min-height: 2.25rem; padding: .42rem .68rem; border: 1px solid rgba(255,255,255,.2); border-radius: 999px; color: #fff; font-size: .75rem; font-weight: 750; white-space: nowrap; box-shadow: 0 2px 5px rgba(25,42,53,.14); text-decoration: none; }
+  .scoring-results-tools a[data-config-shortcut] { color: #fff; border-color: rgba(255,255,255,.2); }
+  .scoring-results-tools a:hover { filter: brightness(1.1); }
+  .scoring-results-tools a:focus-visible { outline: 2px solid #1b607e; outline-offset: 3px; }
+  .scoring-results-tools a[data-config-shortcut="kpi"] { background: linear-gradient(135deg,#087c83,#11505f); }
+  .scoring-results-tools a[data-config-shortcut="hierarchy"] { background: linear-gradient(135deg,#496bc7,#283e89); }
+  .scoring-results-tools a[data-config-shortcut="gap"] { background: linear-gradient(135deg,#9250b5,#602b83); }
+  .scoring-results-tools a[data-export-scoring] { background: linear-gradient(135deg,#22865d,#105739); }
+  .scoring-results-tools a[data-export-gap] { background: linear-gradient(135deg,#1688bb,#145584); }
+  .scoring-results-tools a[data-export-ppt] { background: linear-gradient(135deg,#db7823,#a6420d); }
+  .scoring-results-tools svg * { fill: none; stroke: currentColor; }
+  .scoring-results-config-shortcuts svg, .scoring-export-actions svg { flex: 0 0 auto; width: 1.15rem; height: 1.15rem; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .scoring-export-actions { display: flex; flex-wrap: nowrap; gap: .45rem; }
   .scoring-export-actions a[hidden] { display: none; }
   .scoring-result-tabs { display: flex; flex-wrap: wrap; gap: .4rem; margin: .9rem 0 .65rem; border-bottom: 1px solid var(--line); }
   .scoring-result-tab { padding: .55rem .75rem; border: 1px solid #e4bf91; border-radius: 10px 10px 0 0; background: #fff0d1; color: #75411f; font-size: .78rem; font-weight: 750; box-shadow: none; }
@@ -236,7 +242,7 @@
   .scoring-warning-box { margin-top: .7rem; padding: .7rem .8rem; border: 1px solid rgba(213,143,31,.3); border-radius: 11px; background: #fff9e9; }
   @media(max-width:1050px) { .scoring-dataset-groups { grid-template-columns: 1fr; } .scoring-dataset-group .scoring-dataset-list { max-height: 12rem; } .scoring-best-network-layout { grid-template-columns: 1fr; } }
   @media(max-width:1050px) { .scoring-context-filter-grid { grid-template-columns: repeat(3,minmax(0,1fr)); } }
-  @media(max-width:900px) { .scoring-filter-grid,.scoring-jobs-layout { grid-template-columns: 1fr; } .scoring-job-list { max-height: 22rem; } .scoring-results-head { grid-template-columns: minmax(0,1fr); } .scoring-results-tools { justify-content: flex-start; width: 100%; } .scoring-results-config-shortcuts, .scoring-results-tools > .scoring-export-actions { justify-content: flex-start; } }
+  @media(max-width:900px) { .scoring-filter-grid,.scoring-jobs-layout { grid-template-columns: 1fr; } .scoring-job-list { max-height: 22rem; } .scoring-results-head { grid-template-columns: minmax(0,1fr); } .scoring-results-tools { grid-column: 1; grid-row: 3; justify-content: flex-start; width: 100%; overflow-x: auto; padding: .2rem 0; } .scoring-results-config-shortcuts, .scoring-results-tools > .scoring-export-actions { justify-content: flex-end; } }
   @media(max-width:600px) { .scoring-context-filter-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .scoring-dataset-list { grid-template-columns: 1fr; } .scoring-controls-foot { align-items: stretch; } .scoring-actions { width: 100%; } .scoring-actions button { flex: 1 1 100%; } .scoring-chart-expanded-dialog { width: calc(100vw - .5rem); height: calc(100dvh - .5rem); padding: .65rem; gap: .5rem; border-radius: 14px; } .scoring-chart-expanded-header h3 { font-size: 1rem; } .scoring-chart-expanded-header p:not(.eyebrow) { display: none; } }
 </style>
 
@@ -384,14 +390,14 @@
         </div>
         <div class="scoring-results-tools">
           <nav class="scoring-config-shortcuts scoring-results-config-shortcuts" aria-label="Scoring configuration sections">
-            <a data-config-shortcut="kpi" href="/workspace-config#scoring-kpi-configuration"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M4 3.5h12v13H4zM7 7h6M7 10h6M7 13h3"/></svg><span>KPI configuration</span></a>
-            <a data-config-shortcut="hierarchy" href="/workspace-config#scoring-aggregation-hierarchy"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M5 4v12m0-8h5m0 0V5m0 3v7m0-7h5m0 0V5m0 3v7m0-7h3"/><circle cx="5" cy="4" r="1.5"/><circle cx="10" cy="5" r="1.5"/><circle cx="10" cy="15" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="15" cy="15" r="1.5"/></svg><span>Aggregation hierarchy</span></a>
-            <a data-config-shortcut="gap" href="/workspace-config#scoring-gap-priority"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M3 16.5h14M4.5 14V9m4 5V5m4 9v-3m4 3V7"/><path d="m3 6 3-2 3 2 4-3 4 2"/></svg><span>GAP priorities</span></a>
+            <a data-config-shortcut="kpi" href="/workspace-config#scoring-kpi-configuration"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 5h14M3 10h14M3 15h14"/><circle cx="7" cy="5" r="2"/><circle cx="13" cy="10" r="2"/><circle cx="7" cy="15" r="2"/></svg><span>KPI configuration</span></a>
+            <a data-config-shortcut="hierarchy" href="/workspace-config#scoring-aggregation-hierarchy"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="7" y="2" width="6" height="4" rx="1"/><path d="M10 6v4M4 14v-4h12v4"/><rect x="1" y="14" width="6" height="4" rx="1"/><rect x="13" y="14" width="6" height="4" rx="1"/></svg><span>Aggregation hierarchy</span></a>
+            <a data-config-shortcut="gap" href="/workspace-config#scoring-gap-priority"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 4h9M8 10h6M8 16h3M3 2v5m-1-4 1-1 1 1M2 10h2m-2 5h2m0 0-2 3h2"/></svg><span>GAP priorities</span></a>
           </nav>
           <div class="scoring-export-actions" aria-label="Export selected job">
-            <a href="#" data-export-scoring hidden><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M4 2.5h8l4 4v11H4zM12 2.5v4h4M7 10h6M7 13h6M7 16h4"/></svg><span>Scoring CSV</span></a>
-            <a href="#" data-export-gap hidden><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M4 2.5h8l4 4v11H4zM12 2.5v4h4M7 15v-3m3 3V8m3 7v-5"/></svg><span>GAP CSV</span></a>
-            <a href="#" data-export-ppt hidden><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><rect x="2.5" y="4" width="15" height="12" rx="1.5"/><path d="M10 4v12M5.5 8h2m-2 3h2m5-2h2m-2 3h2M7 16v2m6-2v2m-4-11 3 2-3 2z"/></svg><span>PowerPoint</span></a>
+            <a href="#" data-export-scoring hidden><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="2" y="2" width="12" height="15" rx="1"/><path d="M2 7h12M2 12h7M7 2v15M16 10v8m-3-3 3 3 3-3"/></svg><span>Scoring CSV</span></a>
+            <a href="#" data-export-gap hidden><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2 17V3M2 17h8M5 13V8m4 5V4m4 8V7M16 11v7m-3-3 3 3 3-3"/></svg><span>GAP CSV</span></a>
+            <a href="#" data-export-ppt hidden><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2 3h16M10 3V1M10 14v4m-3 0h6"/><rect x="3" y="3" width="14" height="11" rx="1"/><path d="m8 6 5 3-5 3z"/></svg><span>PowerPoint</span></a>
           </div>
         </div>
       </div>

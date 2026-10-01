@@ -1433,6 +1433,7 @@
   }
 
   function appendMatrixTable(pane, tableData) {
+    const isSummary = tableData?._display_mode === 'summary';
     const rows = Array.isArray(tableData?.rows) ? tableData.rows : [];
     const operators = Array.isArray(tableData?.operators) ? tableData.operators.map(String) : [];
     const baseline = String(tableData?.baseline_operator || '');
@@ -1446,11 +1447,11 @@
     table.className = 'scoring-comparison-table';
     const thead = document.createElement('thead');
     const header = document.createElement('tr');
-    for (const title of ['Category', 'KPI', 'Type of KPI', 'Score weight (%)', 'Max score']) {
+    for (const title of ['Category', isSummary ? 'CATEGORY' : 'KPI', ...(!isSummary ? ['Type of KPI'] : []), 'Score weight (%)', 'Max score']) {
       const th = document.createElement('th');
       th.scope = 'col';
       th.rowSpan = 2;
-      th.dataset.column = ({Category: 'category', KPI: 'kpi', 'Type of KPI': 'type', 'Score weight (%)': 'weight', 'Max score': 'maximum'})[title];
+      th.dataset.column = ({Category: 'category', CATEGORY: 'kpi', KPI: 'kpi', 'Type of KPI': 'type', 'Score weight (%)': 'weight', 'Max score': 'maximum'})[title];
       th.textContent = title;
       if (title === 'Score weight (%)') th.className = 'scoring-weight-header';
       if (title === 'Max score') th.className = 'scoring-maximum-header';
@@ -1577,7 +1578,7 @@
       kpi.textContent = String(item?.kpi || item?.kpi_code || 'N/A');
       kpi.title = String(item?.kpi_code || item?.kpi || '');
       tr.append(kpi);
-      tr.append(createKpiTypeCell(item?.kpi_type, item?.row_type === 'category'));
+      if (!isSummary) tr.append(createKpiTypeCell(item?.kpi_type, item?.row_type === 'category'));
 
       const weight = document.createElement('td');
       weight.dataset.numeric = 'true';
@@ -1637,7 +1638,7 @@
       label.dataset.column = 'kpi';
       label.textContent = showGapValues() && total.gap_label ? `Weighted score · ${total.gap_label}` : 'Weighted score';
       row.append(label);
-      row.append(createKpiTypeCell('', true));
+      if (!isSummary) row.append(createKpiTypeCell('', true));
       const weight = document.createElement('td');
       weight.dataset.numeric = 'true';
       weight.dataset.column = 'weight';
@@ -1881,6 +1882,7 @@
   }
 
   function appendHierarchyMatrixTable(pane, tableData) {
+    const isSummary = tableData?._display_mode === 'summary';
     const rows = Array.isArray(tableData?.rows) ? tableData.rows : [];
     const allColumns = hierarchyColumnEntries(tableData);
     const nonBaseline = allColumns.filter(column => !hierarchyColumnIsReference(column));
@@ -1907,7 +1909,8 @@
     table.className = 'scoring-comparison-table scoring-hierarchy-table';
     const thead = document.createElement('thead');
     appendHierarchyHeaders(thead, tableData, allColumns, [
-      ['Category', 'category'], ['KPI', 'kpi'], ['Type of KPI', 'type'],
+      ['Category', 'category'], [isSummary ? 'CATEGORY' : 'KPI', 'kpi'],
+      ...(!isSummary ? [['Type of KPI', 'type']] : []),
       ['Score weight (%)', 'weight', 'scoring-weight-header'], ['Max score', 'maximum', 'scoring-maximum-header'],
     ], blocks);
     const tbody = document.createElement('tbody');
@@ -1934,7 +1937,7 @@
       kpi.textContent = String(item?.kpi || item?.kpi_code || 'N/A');
       kpi.title = String(item?.kpi_code || item?.kpi || '');
       row.append(kpi);
-      row.append(createKpiTypeCell(item?.kpi_type, item?.row_type === 'category'));
+      if (!isSummary) row.append(createKpiTypeCell(item?.kpi_type, item?.row_type === 'category'));
       const weight = document.createElement('td');
       weight.dataset.numeric = 'true';
       weight.dataset.column = 'weight';
@@ -1991,7 +1994,7 @@
       label.dataset.column = 'kpi';
       label.textContent = showGapValues() && total.gap_label ? `Weighted score · ${total.gap_label}` : 'Weighted score';
       row.append(label);
-      row.append(createKpiTypeCell('', true));
+      if (!isSummary) row.append(createKpiTypeCell('', true));
       const weight = document.createElement('td');
       weight.dataset.numeric = 'true';
       weight.dataset.column = 'weight';
@@ -2274,7 +2277,7 @@
     table.className = 'scoring-comparison-table scoring-priority-table';
     const thead = document.createElement('thead');
     const header = document.createElement('tr');
-    for (const [title, key] of [['Category', 'category'], ['KPI', 'kpi'], [`GAP (${operator} − ${baseline})`, 'gap'], ['Type of KPI', 'type']]) {
+    for (const [title, key] of [['Category', 'category'], ['KPI', 'kpi'], ['Type of KPI', 'type'], [`GAP (${operator} − ${baseline})`, 'gap']]) {
       const th = document.createElement('th');
       th.scope = 'col';
       th.textContent = title;
@@ -2290,7 +2293,7 @@
         row.classList.add('scoring-category-subtotal');
         row.style.fontWeight = '700';
       }
-      for (const [value, key] of [[item.category, 'category'], [item.kpi || item.kpi_code, 'kpi'], [item.gap_points, 'gap'], [item.kpi_type, 'type']]) {
+      for (const [value, key] of [[item.category, 'category'], [item.kpi || item.kpi_code, 'kpi'], [item.kpi_type, 'type'], [item.gap_points, 'gap']]) {
         if (key === 'type') {
           row.append(createKpiTypeCell(value, item?.row_type === 'category'));
           continue;

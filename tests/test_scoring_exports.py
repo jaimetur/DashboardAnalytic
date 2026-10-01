@@ -130,7 +130,8 @@ def _normalized_headers(table):
 def _operator_columns(table):
     headers = _normalized_headers(table)
     gap_start = next((index for index, label in enumerate(headers) if label.startswith('GAP ')), len(headers))
-    return {headers[index]: index for index in range(5, gap_start)}
+    operator_start = headers.index('Max score') + 1
+    return {headers[index]: index for index in range(operator_start, gap_start)}
 
 
 def _rgb(cell):
@@ -250,6 +251,9 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     assert presentation.slide_width == source.slide_width
     assert presentation.slide_height == source.slide_height
     assert len(matrices) == 2
+    assert _normalized_headers(matrices[0])[:4] == [
+        'NETCHECK KPIs', 'CATEGORY', 'Score weight (%)', 'Max score',
+    ]
     table = matrices[-1]
     headers = _normalized_headers(table)
     assert headers[:5] == ['NETCHECK KPIs', 'KPI', 'Type of KPI', 'Score weight (%)', 'Max score']
@@ -305,15 +309,15 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
         assert _rgb(table.cell(c9_index, operator_columns[operator])) == THRESHOLD_COLORS[band].lstrip('#')
 
     gap_slide, gap_table = _slide_with_table(
-        presentation, ['Category', 'NETCHECK KPIs', 'GAP operator −\nEE', 'Type of KPI'],
+        presentation, ['Category', 'NETCHECK KPIs', 'Type of KPI', 'GAP operator −\nEE'],
     )
     expected_gap_table = views['gap_tables'][0]
     assert [gap_table.cell(row, 1).text for row in range(1, len(gap_table.rows) - 1)] == [row['kpi'] for row in expected_gap_table['expanded_rows']]
-    assert [float(gap_table.cell(row, 2).text) for row in range(1, len(gap_table.rows) - 1)] == pytest.approx([row['gap_points'] for row in expected_gap_table['expanded_rows']], abs=.0051)
-    assert _rgb(gap_table.cell(0, 2)) == 'FFFF00'
-    reliable_rows = [row for row in range(1, len(gap_table.rows)) if gap_table.cell(row, 3).text == 'Reliable']
+    assert [float(gap_table.cell(row, 3).text) for row in range(1, len(gap_table.rows) - 1)] == pytest.approx([row['gap_points'] for row in expected_gap_table['expanded_rows']], abs=.0051)
+    assert _rgb(gap_table.cell(0, 3)) == 'FFFF00'
+    reliable_rows = [row for row in range(1, len(gap_table.rows)) if gap_table.cell(row, 2).text == 'Reliable']
     if reliable_rows:
-        assert _rgb(gap_table.cell(reliable_rows[0], 3)) == THRESHOLD_COLORS['High'].lstrip('#')
+        assert _rgb(gap_table.cell(reliable_rows[0], 2)) == THRESHOLD_COLORS['High'].lstrip('#')
 
     titles = [slide.shapes.title.text.split('\n')[0] for slide in presentation.slides]
     assert titles[:2] == ['Scoring & GAP Analysis', 'DriveCity']
