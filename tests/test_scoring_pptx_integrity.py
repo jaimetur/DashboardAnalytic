@@ -50,7 +50,7 @@ def test_generated_scoring_pptx_serializes_valid_table_and_combo_chart_structure
     assert any(shape.has_table for slide in presentation.slides for shape in slide.shapes)
     best_network_slide = next(
         slide for slide in presentation.slides
-        if slide.shapes.title.text.startswith('Best Network Scoring')
+        if slide.shapes.title.text.startswith('Best Network Scoring per Service')
     )
     assert any(shape.has_chart for shape in best_network_slide.shapes)
 

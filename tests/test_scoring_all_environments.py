@@ -24,7 +24,7 @@ def _presentation(result):
 def _environment_matrix_slide(presentation, environment):
     for slide in presentation.slides:
         title = slide.shapes.title.text.split('\n')[0] if slide.shapes.title else ''
-        if title != 'Scoring Tables — Expanded' or f'Environment: {environment}' not in _slide_text(slide):
+        if title != 'Scoring Tables — Drill-down' or f'Environment: {environment}' not in _slide_text(slide):
             continue
         matrix = next(
             shape.table for shape in slide.shapes
@@ -104,19 +104,19 @@ def test_all_environments_ppt_uses_full_allocation_in_tables_and_charts():
     ]
 
     donut = _chart_for_environment(
-        presentation, 'Best Network Scoring', 'All Environments', XL_CHART_TYPE.DOUGHNUT,
+        presentation, 'Best Network Scoring per Service', 'All Environments', XL_CHART_TYPE.DOUGHNUT,
     )
     assert sum(float(value) for value in donut.series[0].values) == pytest.approx(1000)
 
     best_network = _chart_for_environment(
-        presentation, 'Best Network Scoring', 'All Environments', XL_CHART_TYPE.COLUMN_STACKED,
+        presentation, 'Best Network Scoring per Service', 'All Environments', XL_CHART_TYPE.COLUMN_STACKED,
     )
     total_series = next(series for series in best_network.series if series.name == 'Total')
     for operator, points in zip(combined['operators'], total_series.values):
         assert float(points) == pytest.approx(combined['total']['values'][operator]['points'])
 
     category_chart = _chart_for_environment(
-        presentation, 'Scoring Charts — Category Comparison', 'All Environments', XL_CHART_TYPE.COLUMN_CLUSTERED,
+        presentation, 'Scoring per Category', 'All Environments', XL_CHART_TYPE.COLUMN_CLUSTERED,
     )
     for series in category_chart.series:
         assert sum(float(value) for value in series.values if value is not None) == pytest.approx(
@@ -150,6 +150,6 @@ def test_all_environments_ppt_keeps_full_maximum_and_marks_missing_road_incomple
     assert 'All Environments is incomplete because weighted environments are missing: DriveConnectionroad.' in _slide_text(combined_slide)
 
     donut = _chart_for_environment(
-        presentation, 'Best Network Scoring', 'All Environments', XL_CHART_TYPE.DOUGHNUT,
+        presentation, 'Best Network Scoring per Service', 'All Environments', XL_CHART_TYPE.DOUGHNUT,
     )
     assert sum(float(value) for value in donut.series[0].values) == pytest.approx(1000)

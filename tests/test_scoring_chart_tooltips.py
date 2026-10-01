@@ -34,7 +34,7 @@ def test_tooltips_cover_scoring_hierarchy_best_network_and_allocation_marks():
     assert 'Maximum points: ${formattedChartPoints(segment.value)}' in script
     assert "setChartTooltip(rect, segmentTooltip, true);" in script
     assert "setChartTooltip(mark," in script
-    assert "setChartTooltip(text, text.textContent);" in script
+    assert "setChartTooltip(text, item.lines.join(' '));" in script
 
 
 def test_category_legend_is_a_continuous_gray_band_inside_each_scoring_chart():

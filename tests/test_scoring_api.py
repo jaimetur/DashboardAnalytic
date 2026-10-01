@@ -145,7 +145,7 @@ def test_scoring_page_requires_login_and_renders_workspace_controls(client, scor
     assert 'data-result-tab="scoring">Scoring Tables</button>' in page.text
     assert 'data-result-tab="charts">Scoring Charts</button>' in page.text
     assert 'GAP Analysis' in page.text
-    assert 'Best Network Chart' in page.text
+    assert 'data-result-tab="best-network"' not in page.text
 
 
 def test_scoring_page_exposes_profile_choices_and_active_profile(scoring_api, monkeypatch):

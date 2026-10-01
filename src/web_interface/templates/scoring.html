@@ -81,10 +81,12 @@
   .scoring-status[data-status="processing"], .scoring-status[data-status="queued"] { background: #fff2d4; color: #8b5c08; }
   .scoring-job-progress { height: .3rem; overflow: hidden; border-radius: 999px; background: rgba(25,42,53,.1); }
   .scoring-job-progress span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg,var(--brand),#43b189); transition: width .2s ease; }
-  .scoring-results-head { display: flex; align-items: flex-start; justify-content: space-between; gap: .8rem; flex-wrap: wrap; }
-  .scoring-results-head > :first-child { flex: 1 1 20rem; min-width: 0; }
-  .scoring-results-tools { display: grid; justify-items: end; gap: .5rem; margin-left: auto; }
-  .scoring-results-selector-row, .scoring-results-value-row { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: .5rem; }
+  .scoring-results-head { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: start; gap: 1rem; }
+  .scoring-results-primary { display: grid; align-content: start; min-width: 0; gap: .55rem; }
+  .scoring-results-primary h3 { margin: 0; }
+  .scoring-results-controls { display: grid; justify-items: start; gap: .45rem; }
+  .scoring-results-tools { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: .5rem; min-width: 0; }
+  .scoring-results-selector-row, .scoring-results-value-row { display: flex; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: .5rem; }
   .scoring-results-selector-row { padding: .48rem .58rem; border: 1px solid #a9c5dc; border-radius: 12px; background: #eaf3fa; }
   .scoring-results-selector-row .scoring-environment-filter { color: #244e70; }
   .scoring-results-selector-row select { border-color: #91b2cf; background: #fff; color: #183d5b; }
@@ -94,16 +96,18 @@
   .scoring-results-value-row .scoring-kpi-values-toggle[data-show-gap-label] input { accent-color: #a8640b; }
   .scoring-results-value-row .scoring-environment-filter { color: #78501b; }
   .scoring-results-value-row .scoring-environment-filter select { border-color: #d7a85e; background: #fff8e8; color: #51350e; }
+  .scoring-results-value-row[hidden] { display: none !important; }
   .scoring-results-value-row [hidden] { display: none !important; }
-  .scoring-results-value-row { justify-self: end; }
-  .scoring-results-tools > .scoring-export-actions { justify-content: flex-end; }
+  .scoring-results-selector-row, .scoring-results-value-row { justify-self: start; }
+  .scoring-results-tools > .scoring-export-actions, .scoring-results-config-shortcuts { justify-content: flex-end; }
   .scoring-environment-filter { display: inline-flex; align-items: center; gap: .4rem; color: var(--muted); font-size: .74rem; font-weight: 750; }
   .scoring-environment-filter select { width: auto; min-width: 12rem; max-width: min(100%, 20rem); min-height: 2.1rem; padding: .32rem 1.8rem .32rem .6rem; font-size: .76rem; }
   .scoring-environment-filter[hidden] { display: none; }
   .scoring-kpi-values-toggle { display: inline-flex; align-items: center; gap: .35rem; color: var(--muted); font-size: .74rem; font-weight: 750; white-space: nowrap; }
   .scoring-kpi-values-toggle input { width: 1rem; height: 1rem; margin: 0; accent-color: var(--brand); }
-  .scoring-results-head h3 { margin: 0; }
-  .scoring-results-config-shortcuts { margin-top: .5rem; }
+  .scoring-results-config-shortcuts { margin: 0; }
+  .scoring-results-config-shortcuts a, .scoring-export-actions a { gap: .4rem; }
+  .scoring-results-config-shortcuts svg, .scoring-export-actions svg { flex: 0 0 auto; width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
   .scoring-export-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
   .scoring-export-actions a { display: inline-flex; align-items: center; min-height: 2.1rem; padding: .38rem .65rem; border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.72); color: #24615d; font-size: .75rem; font-weight: 750; }
   .scoring-export-actions a[data-export-scoring] { border-color: #16734b; background: #16734b; color: #fff; }
@@ -129,9 +133,10 @@
   .scoring-comparison-controls select { width: auto; min-width: 12rem; max-width: min(100%, 30rem); min-height: 2.15rem; padding: .35rem 2rem .35rem .6rem; font-size: .78rem; }
   .scoring-gap-comparison-controls select { border: 1px solid #c8842f; background-color: #fff2c9; color: #49300c; font-weight: 800; box-shadow: 0 1px 2px rgba(119,74,16,.12); }
   .scoring-gap-comparison-controls select:focus-visible { outline: 3px solid rgba(200,132,47,.28); outline-offset: 2px; }
-  .scoring-context-heading { margin: .25rem 0 .45rem; color: #1b3545; font-size: .94rem; }
+  .scoring-context-heading { display: flex; align-items: center; flex-wrap: wrap; gap: .55rem; margin: .25rem 0 .65rem; padding-bottom: .6rem; border-bottom: 1px solid #d5dedf; color: #9a542e; font-size: .94rem; }
   .scoring-context-chips { display: flex; align-items: center; flex-wrap: wrap; gap: .35rem; margin: 0 0 .55rem; }
   .scoring-context-chip { display: inline-flex; align-items: center; min-height: 1.45rem; padding: .18rem .5rem; border: 1px solid rgba(25,42,53,.1); border-radius: 999px; background: #f3f6f6; color: #465c68; font-size: .68rem; font-weight: 700; }
+  .scoring-environment-chip { border-color: #80b9b2; background: #e0f3f0; color: #07534f; font-size: .72rem; font-weight: 800; }
   .scoring-context-note { margin: 0 0 .55rem; color: var(--muted); font-size: .72rem; }
   .scoring-threshold-legend { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem .8rem; margin: 0 0 .55rem; padding: .45rem .6rem; border: 1px solid rgba(25,42,53,.1); border-radius: 10px; background: #f7f8f7; }
   .scoring-threshold-legend > strong { color: #445a65; font-size: .7rem; }
@@ -196,6 +201,7 @@
   .scoring-chart-card h4 { margin: 0 0 .6rem; color: #245e5a; font-size: .85rem; }
   .scoring-chart-svg { display: block; width: 100%; height: auto; min-height: 26rem; overflow: visible; }
   .scoring-chart-svg.scoring-best-network-bars { min-width: 0; max-width: none; min-height: 0; }
+  .scoring-chart-svg.scoring-allocation-donut { min-height: 0; max-width: 100%; margin: 0 auto; }
   .scoring-chart-scroll { overflow-x: auto; overflow-y: hidden; }
   .scoring-chart-svg text { fill: #516570; font: 11px "IBM Plex Sans", "Segoe UI", sans-serif; }
   .scoring-chart-svg .scoring-chart-value { fill: #18384a; font-size: 15px; font-weight: 800; paint-order: stroke; stroke: #fff; stroke-width: 3px; stroke-linejoin: round; }
@@ -230,7 +236,7 @@
   .scoring-warning-box { margin-top: .7rem; padding: .7rem .8rem; border: 1px solid rgba(213,143,31,.3); border-radius: 11px; background: #fff9e9; }
   @media(max-width:1050px) { .scoring-dataset-groups { grid-template-columns: 1fr; } .scoring-dataset-group .scoring-dataset-list { max-height: 12rem; } .scoring-best-network-layout { grid-template-columns: 1fr; } }
   @media(max-width:1050px) { .scoring-context-filter-grid { grid-template-columns: repeat(3,minmax(0,1fr)); } }
-  @media(max-width:900px) { .scoring-filter-grid,.scoring-jobs-layout { grid-template-columns: 1fr; } .scoring-job-list { max-height: 22rem; } }
+  @media(max-width:900px) { .scoring-filter-grid,.scoring-jobs-layout { grid-template-columns: 1fr; } .scoring-job-list { max-height: 22rem; } .scoring-results-head { grid-template-columns: minmax(0,1fr); } .scoring-results-tools { justify-content: flex-start; width: 100%; } .scoring-results-config-shortcuts, .scoring-results-tools > .scoring-export-actions { justify-content: flex-start; } }
   @media(max-width:600px) { .scoring-context-filter-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .scoring-dataset-list { grid-template-columns: 1fr; } .scoring-controls-foot { align-items: stretch; } .scoring-actions { width: 100%; } .scoring-actions button { flex: 1 1 100%; } .scoring-chart-expanded-dialog { width: calc(100vw - .5rem); height: calc(100dvh - .5rem); padding: .65rem; gap: .5rem; border-radius: 14px; } .scoring-chart-expanded-header h3 { font-size: 1rem; } .scoring-chart-expanded-header p:not(.eyebrow) { display: none; } }
 </style>
 
@@ -356,27 +362,36 @@
 
     <article class="panel scoring-results-panel" aria-labelledby="scoring-results-title">
       <div class="scoring-results-head">
-        <div><p class="eyebrow">Latest saved result</p><h3 id="scoring-results-title">Scoring results</h3><nav class="scoring-config-shortcuts scoring-results-config-shortcuts" aria-label="Scoring configuration sections"><a data-config-shortcut="kpi" href="/workspace-config#scoring-kpi-configuration">KPI configuration</a><a data-config-shortcut="hierarchy" href="/workspace-config#scoring-aggregation-hierarchy">Aggregation hierarchy</a><a data-config-shortcut="gap" href="/workspace-config#scoring-gap-priority">GAP priorities</a></nav></div>
+        <div class="scoring-results-primary">
+          <div><p class="eyebrow">Latest saved result</p><h3 id="scoring-results-title">Scoring results</h3></div>
+          <div class="scoring-results-controls">
+            <div class="scoring-results-selector-row" data-scoring-results-selector-row>
+              <label class="scoring-environment-filter" data-result-environment-control hidden>Environment
+                <select data-result-environment aria-label="Filter scoring tables, charts and GAP analysis by environment; defaults to all environments"></select>
+              </label>
+            </div>
+            <div class="scoring-results-value-row" data-scoring-results-value-row>
+              <label class="scoring-kpi-values-toggle"><input type="checkbox" data-show-kpi-values> Show KPI values</label>
+              <label class="scoring-kpi-values-toggle" data-show-gap-label><input type="checkbox" data-show-gap-values> Show GAP values</label>
+              <label class="scoring-environment-filter" data-scoring-gap-layout-control hidden>GAP columns
+                <select data-scoring-gap-layout aria-label="Choose whether GAP columns appear at the end or next to each score">
+                  <option value="end" selected>At the end</option>
+                  <option value="adjacent">Next to each score</option>
+                </select>
+              </label>
+            </div>
+          </div>
+        </div>
         <div class="scoring-results-tools">
-          <div class="scoring-results-selector-row" data-scoring-results-selector-row>
-            <label class="scoring-environment-filter" data-result-environment-control hidden>Environment
-              <select data-result-environment aria-label="Filter scoring tables, charts and GAP analysis by environment; defaults to all environments"></select>
-            </label>
-          </div>
-          <div class="scoring-results-value-row" data-scoring-results-value-row>
-            <label class="scoring-kpi-values-toggle"><input type="checkbox" data-show-kpi-values> Show KPI values</label>
-            <label class="scoring-kpi-values-toggle" data-show-gap-label><input type="checkbox" data-show-gap-values> Show GAP values</label>
-            <label class="scoring-environment-filter" data-scoring-gap-layout-control hidden>GAP columns
-              <select data-scoring-gap-layout aria-label="Choose whether GAP columns appear at the end or next to each score">
-                <option value="end" selected>At the end</option>
-                <option value="adjacent">Next to each score</option>
-              </select>
-            </label>
-          </div>
+          <nav class="scoring-config-shortcuts scoring-results-config-shortcuts" aria-label="Scoring configuration sections">
+            <a data-config-shortcut="kpi" href="/workspace-config#scoring-kpi-configuration"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M4 3.5h12v13H4zM7 7h6M7 10h6M7 13h3"/></svg><span>KPI configuration</span></a>
+            <a data-config-shortcut="hierarchy" href="/workspace-config#scoring-aggregation-hierarchy"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M5 4v12m0-8h5m0 0V5m0 3v7m0-7h5m0 0V5m0 3v7m0-7h3"/><circle cx="5" cy="4" r="1.5"/><circle cx="10" cy="5" r="1.5"/><circle cx="10" cy="15" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="15" cy="15" r="1.5"/></svg><span>Aggregation hierarchy</span></a>
+            <a data-config-shortcut="gap" href="/workspace-config#scoring-gap-priority"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M3 16.5h14M4.5 14V9m4 5V5m4 9v-3m4 3V7"/><path d="m3 6 3-2 3 2 4-3 4 2"/></svg><span>GAP priorities</span></a>
+          </nav>
           <div class="scoring-export-actions" aria-label="Export selected job">
-            <a href="#" data-export-scoring hidden>Scoring CSV</a>
-            <a href="#" data-export-gap hidden>GAP CSV</a>
-            <a href="#" data-export-ppt hidden>PowerPoint</a>
+            <a href="#" data-export-scoring hidden><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M4 2.5h8l4 4v11H4zM12 2.5v4h4M7 10h6M7 13h6M7 16h4"/></svg><span>Scoring CSV</span></a>
+            <a href="#" data-export-gap hidden><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M4 2.5h8l4 4v11H4zM12 2.5v4h4M7 15v-3m3 3V8m3 7v-5"/></svg><span>GAP CSV</span></a>
+            <a href="#" data-export-ppt hidden><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><rect x="2.5" y="4" width="15" height="12" rx="1.5"/><path d="M10 4v12M5.5 8h2m-2 3h2m5-2h2m-2 3h2M7 16v2m6-2v2m-4-11 3 2-3 2z"/></svg><span>PowerPoint</span></a>
           </div>
         </div>
       </div>
@@ -384,12 +399,10 @@
         <button type="button" class="scoring-result-tab" role="tab" aria-selected="true" aria-controls="scoring-table-pane" data-result-tab="scoring">Scoring Tables</button>
         <button type="button" class="scoring-result-tab" role="tab" aria-selected="false" aria-controls="scoring-gap-pane" data-result-tab="gap">GAP Analysis</button>
         <button type="button" class="scoring-result-tab" role="tab" aria-selected="false" aria-controls="scoring-chart-pane" data-result-tab="charts">Scoring Charts</button>
-        <button type="button" class="scoring-result-tab" role="tab" aria-selected="false" aria-controls="scoring-best-network-pane" data-result-tab="best-network">Best Network Chart</button>
       </div>
       <div class="scoring-result-pane" id="scoring-table-pane" role="tabpanel" data-result-pane="scoring"><div class="scoring-empty">No scoring table is selected.</div></div>
       <div class="scoring-result-pane" id="scoring-chart-pane" role="tabpanel" data-result-pane="charts" hidden><div class="scoring-empty">No scoring charts are selected.</div></div>
       <div class="scoring-result-pane" id="scoring-gap-pane" role="tabpanel" data-result-pane="gap" hidden><div class="scoring-empty">No GAP analysis is selected.</div></div>
-      <div class="scoring-result-pane" id="scoring-best-network-pane" role="tabpanel" data-result-pane="best-network" hidden><div class="scoring-empty">No Best Network chart is selected.</div></div>
       <div class="scoring-warning-box" data-warning-box hidden><strong>Calculation notes</strong><ul class="scoring-warnings" data-warning-list></ul></div>
     </article>
   </section>

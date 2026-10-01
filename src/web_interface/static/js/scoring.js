@@ -82,14 +82,15 @@
     encodeURIComponent(document.body.dataset.authenticatedUser || 'anonymous'),
     encodeURIComponent(root.dataset.scoringWorkspaceId || 'unknown'),
   ].join(':');
-  const resultTabNames = new Set(['scoring', 'gap', 'charts', 'best-network']);
+  const resultTabNames = new Set(['scoring', 'gap', 'charts']);
   function readScoringViewState() {
     try {
       const stored = JSON.parse(window.sessionStorage.getItem(scoringViewStorageKey) || 'null');
       if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return {};
       return {
         jobId: typeof stored.job_id === 'string' && stored.job_id ? stored.job_id : null,
-        resultTab: resultTabNames.has(stored.result_tab) ? stored.result_tab : null,
+        resultTab: stored.result_tab === 'best-network' ? 'charts'
+          : resultTabNames.has(stored.result_tab) ? stored.result_tab : null,
         scrollY: Number.isFinite(stored.scroll_y) && stored.scroll_y >= 0 ? stored.scroll_y : null,
         environment: typeof stored.environment === 'string' && stored.environment ? stored.environment : 'all',
         showKpiValues: stored.show_kpi_values === true,
@@ -921,6 +922,11 @@
     return Boolean(showGapValuesToggle?.checked);
   }
 
+  function syncResultTableControls() {
+    const controls = root.querySelector('[data-scoring-results-value-row]');
+    if (controls) controls.hidden = activeResultTab !== 'scoring';
+  }
+
   function syncGapValueControls() {
     if (gapLayoutControl) gapLayoutControl.hidden = !showGapValues();
   }
@@ -1082,15 +1088,23 @@
   function appendContextHeader(pane, table, kind, titlePrefix = '') {
     const heading = document.createElement('h4');
     heading.className = 'scoring-context-heading';
-    const contextTitle = contextLabel(table?.context);
-    heading.textContent = titlePrefix
-      ? [titlePrefix, contextTitle].filter(Boolean).join(' · ')
-      : comparisonLabel(table, kind);
+    heading.textContent = titlePrefix || (kind === 'gap' || kind === 'gap-summary' ? 'GAP Analysis' : 'Scoring Tables');
+    const context = table?.context && typeof table.context === 'object' ? table.context : {};
+    const environment = context.environment;
+    if (environment !== null && environment !== undefined && environment !== '') {
+      const separator = document.createElement('span');
+      separator.className = 'scoring-context-separator';
+      separator.ariaHidden = 'true';
+      separator.textContent = '—';
+      const environmentChip = document.createElement('span');
+      environmentChip.className = 'scoring-context-chip scoring-environment-chip';
+      environmentChip.textContent = `Environment: ${environmentLabel(String(environment))}`;
+      heading.append(separator, environmentChip);
+    }
     pane.append(heading);
 
-    const context = table?.context && typeof table.context === 'object' ? table.context : {};
     const preferred = ['campaign', 'region', 'city', 'vendor', 'dataset_type', 'environment'];
-    const entries = preferred.filter(key => context[key] !== null && context[key] !== undefined && context[key] !== '')
+    const entries = preferred.filter(key => key !== 'environment' && context[key] !== null && context[key] !== undefined && context[key] !== '')
       .map(key => [key, key === 'environment' ? environmentLabel(String(context[key])) : context[key]]);
     for (const [key, value] of Object.entries(context)) {
       if (!preferred.includes(key) && value !== null && value !== undefined && value !== '') entries.push([key, key === 'environment' ? environmentLabel(String(value)) : value]);
@@ -2048,7 +2062,7 @@
     expandedSection.className = 'scoring-table-mode-section';
     const expandedHeading = document.createElement('h4');
     expandedHeading.className = 'scoring-table-section-title';
-    expandedHeading.textContent = 'Scoring Tables — Expanded';
+    expandedHeading.textContent = 'Scoring Tables — Drill-down';
     expandedSection.append(expandedHeading);
     appendHierarchyMatrixTable(expandedSection, tableForMode(tableData, 'expanded'));
     pane.append(expandedSection);
@@ -2220,7 +2234,7 @@
     expandedSection.className = 'scoring-table-mode-section';
     const expandedHeading = document.createElement('h4');
     expandedHeading.className = 'scoring-table-section-title';
-    expandedHeading.textContent = 'Scoring Tables — Expanded';
+    expandedHeading.textContent = 'Scoring Tables — Drill-down';
     expandedSection.append(expandedHeading);
     appendMatrixTable(expandedSection, tableForMode(selected, 'expanded'));
     pane.append(expandedSection);
@@ -3093,7 +3107,7 @@
       series: String(row.category),
     }));
     const categorySeriesStyles = Object.fromEntries(categories.map(category => [category, {label: category}]));
-    const stackedChart = makeSvgChart('Weighted score by operator', stackedRows, selected.operatorTable, {
+    const stackedChart = makeSvgChart('Best Network Scoring per Category', stackedRows, selected.operatorTable, {
       stacked: true,
       categoryOrder: operators,
       categoryLabels: operatorLabels,
@@ -3107,16 +3121,16 @@
         operatorColors.get(operator) || '#365F91', categoryIndex, categories.length,
       ),
     });
-    stackedChart.style.minWidth = `${stackedChart.viewBox.baseVal.width}px`;
-    pane.append(makeExpandableChartCard('Weighted score by operator', contextLabel(selected.context), stackedChart));
-    const clusteredChart = makeSvgChart('Weighted score points by KPI category', selected.rows, selected.operatorTable, {
+    stackedChart.style.minWidth = '0';
+    pane.append(makeExpandableChartCard('Best Network Scoring per Category', contextLabel(selected.context), stackedChart));
+    const clusteredChart = makeSvgChart('Scoring per Category', selected.rows, selected.operatorTable, {
       legendEntries: operatorLegend,
       fitWidth: chartFitWidth(pane),
     });
     clusteredChart.style.minWidth = '0';
     clusteredChart.style.width = '100%';
     pane.append(makeExpandableChartCard(
-      'Weighted score points by KPI category', contextLabel(selected.context), clusteredChart,
+      'Scoring per Category', contextLabel(selected.context), clusteredChart,
     ));
     pane.classList.add('scoring-chart-grid');
   }
@@ -3179,7 +3193,7 @@
     }));
     const seriesStyles = Object.fromEntries(kpiCategories.map(category => [category, {label: category}]));
     appendContextHeader(pane, tableData, 'score', 'Scoring Charts');
-    const chart = makeSvgChart('Weighted score by operator and aggregation', rows, tableData, {
+    const chart = makeSvgChart('Best Network Scoring per Category', rows, tableData, {
       stacked: true,
       categoryOrder: columns.map(column => column.id),
       categoryLabels,
@@ -3200,9 +3214,9 @@
       },
       axisLabel: 'Weighted score points',
     });
-    chart.style.minWidth = `${chart.viewBox.baseVal.width}px`;
+    chart.style.minWidth = '0';
     pane.append(makeExpandableChartCard(
-      'Weighted score by operator and aggregation', contextLabel(tableData.context), chart,
+      'Best Network Scoring per Category', contextLabel(tableData.context), chart,
     ));
     const clusteredRows = sourceRows.map(row => ({
       category: String(row.category),
@@ -3226,7 +3240,7 @@
       clusteredSeriesStyles[column.id] = {label: pathLabel, color};
       clusteredSeriesTooltips[column.id] = `Operator: ${operatorLabel}${isReference ? ' (Reference)' : ''}\nHierarchy: ${pathTooltip}`;
     }
-    const clusteredChart = makeSvgChart('Weighted score points by KPI category and operator context', clusteredRows, tableData, {
+    const clusteredChart = makeSvgChart('Scoring per Category', clusteredRows, tableData, {
       categoryOrder: kpiCategories,
       seriesOrder: columns.map(column => column.id),
       seriesStyles: clusteredSeriesStyles,
@@ -3237,7 +3251,7 @@
     clusteredChart.style.minWidth = '0';
     clusteredChart.style.width = '100%';
     pane.append(makeExpandableChartCard(
-      'Weighted score points by KPI category and operator context', contextLabel(tableData.context), clusteredChart,
+      'Scoring per Category', contextLabel(tableData.context), clusteredChart,
     ));
     pane.classList.add('scoring-chart-grid');
   }
@@ -3373,7 +3387,7 @@
     svg.style.maxWidth = 'none';
     svg.style.minHeight = '0';
     svg.setAttribute('role', 'img');
-    svg.setAttribute('aria-label', 'Voice and Data weighted points by operator');
+    svg.setAttribute('aria-label', 'Best Network Scoring per Service');
     if (operatorLegendRows.length) {
       const legendTitle = svgElement(svg, 'text', {x: left, y: 13, class: 'scoring-chart-operator-legend-title'});
       legendTitle.textContent = 'Operators';
@@ -3505,7 +3519,37 @@
     return allocations.length ? allocations : [{name: requested, ...bestNetworkTotals(tableData).allocation, color: palette[0]}];
   }
 
+  function maximumAllocationCategories(tableData, environments, configuration = {}) {
+    const totals = new Map();
+    for (const metric of configuration.metrics || []) {
+      const category = String(metric.category || 'Other');
+      const points = environments.reduce((sum, environment) => {
+        const value = Number(metric?.contexts?.[environment.name]?.max_points);
+        return sum + (Number.isFinite(value) && value > 0 ? value : 0);
+      }, 0);
+      if (points > 0) totals.set(category, (totals.get(category) || 0) + points);
+    }
+    if (!totals.size) {
+      for (const row of tableData?.rows || []) {
+        if (row.row_type === 'category') continue;
+        const points = Number(row.max_points);
+        const category = String(row.category || 'Other');
+        if (Number.isFinite(points) && points > 0) totals.set(category, (totals.get(category) || 0) + points);
+      }
+    }
+    const palette = ['#4472C4', '#7030A0', '#C55A11', '#5B9BD5', '#A64D79', '#548235', '#D65F8D', '#8064A2'];
+    return [...totals].map(([label, value], index) => ({label, value, color: palette[index % palette.length]}));
+  }
+
   function allocationIconPath(kind) {
+    if (/whatsapp/i.test(kind)) return 'M3 4h18v13H9l-6 4ZM8 7h3l1 3-2 1 3 3 1-2 3 1v3c-4 1-10-5-9-9Z';
+    if (/classic|calls/i.test(kind)) return 'M6 3h4l2 5-3 2c2 4 3 5 7 7l2-3 5 2v4c-1 3-5 2-8 0C7 16 2 7 6 3Z';
+    if (/multi.*rab/i.test(kind)) return 'M12 3v18M5 21l7-18 7 18M4 7a11 11 0 0 1 16 0M7 10a7 7 0 0 1 10 0';
+    if (/transfer/i.test(kind)) return 'M7 3v17m-4-4 4 4 4-4M17 21V4m-4 4 4-4 4 4';
+    if (/brows/i.test(kind)) return 'M2 4h20v16H2ZM2 8h20M5 6h1m2 0h1m2 0h1M8 12l-3 2 3 2m8-4 3 2-3 2';
+    if (/video/i.test(kind)) return 'M3 4h18v16H3ZM9 8l7 4-7 4Z';
+    if (/interactivity/i.test(kind)) return 'M2 12h4l3-8 5 16 3-8h5';
+    if (kind === 'Category') return 'M3 3h7v7H3ZM14 3h7v7h-7ZM3 14h7v7H3ZM14 14h7v7h-7Z';
     if (kind === 'Voice') return 'M6 3h4l2 5-3 2c2 4 3 5 7 7l2-3 5 2v4c-1 3-5 2-8 0C7 16 2 7 6 3Z';
     if (kind === 'Data') return 'M7 3h10v18H7ZM10 7h10m-3-3 3 3-3 3M14 16H4m3-3-3 3 3 3';
     if (/city/i.test(kind)) return 'M3 21V7h7v14M10 21V3h10v18M1 21h22M6 10v2m0 3v2m8-10h3m-3 4h3m-3 4h3';
@@ -3513,83 +3557,163 @@
     return 'M12 22s8-8 8-13a8 8 0 0 0-16 0c0 5 8 13 8 13ZM12 6a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z';
   }
 
-  function makeMaximumAllocationDonut(environments) {
+  function allocationEnvironmentLabel(name) {
+    const normalized = String(name).replace(/[\s_-]/g, '').toLowerCase();
+    if (normalized === 'drivecity') return 'Drive - City';
+    if (['driveroad', 'driveconnectionroad', 'driveconnectingroads'].includes(normalized)) return 'Drive - Connecting Roads';
+    return String(name);
+  }
+
+  function allocationCategoryLabel(name) {
+    return String(name).toLowerCase().replace(/\b[a-z]/g, letter => letter.toUpperCase());
+  }
+
+  function allocationSectorPath(cx, cy, outerRadius, innerRadius, startAngle, endAngle) {
+    const point = (radius, angle) => [cx + radius * Math.cos(angle), cy + radius * Math.sin(angle)];
+    const span = endAngle - startAngle;
+    const [ox, oy] = point(outerRadius, startAngle);
+    const [ix, iy] = point(innerRadius, startAngle);
+    if (span >= Math.PI * 2 - .000001) {
+      const [omx, omy] = point(outerRadius, startAngle + Math.PI);
+      const [imx, imy] = point(innerRadius, startAngle + Math.PI);
+      return `M ${ox} ${oy} A ${outerRadius} ${outerRadius} 0 1 1 ${omx} ${omy} A ${outerRadius} ${outerRadius} 0 1 1 ${ox} ${oy} L ${ix} ${iy} A ${innerRadius} ${innerRadius} 0 1 0 ${imx} ${imy} A ${innerRadius} ${innerRadius} 0 1 0 ${ix} ${iy} Z`;
+    }
+    const [ex, ey] = point(outerRadius, endAngle);
+    const [iex, iey] = point(innerRadius, endAngle);
+    const largeArc = span > Math.PI ? 1 : 0;
+    return `M ${ox} ${oy} A ${outerRadius} ${outerRadius} 0 ${largeArc} 1 ${ex} ${ey} L ${iex} ${iey} A ${innerRadius} ${innerRadius} 0 ${largeArc} 0 ${ix} ${iy} Z`;
+  }
+
+  function makeMaximumAllocationDonut(environments, categories = null) {
     const voiceColor = '#4472C4';
     const dataColor = '#7030A0';
     const combined = environments.length > 1;
     const total = environments.reduce((sum, item) => sum + item.Voice + item.Data, 0);
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    const legendHeight = combined ? 130 + environments.length * 44 : 150;
-    const height = Math.max(320, legendHeight);
-    svg.setAttribute('viewBox', `0 0 640 ${height}`);
-    svg.setAttribute('class', 'scoring-chart-svg scoring-allocation-donut');
-    svg.setAttribute('role', 'img');
-    svg.setAttribute('aria-label', 'Maximum score allocation by environment, Voice and Data');
-    const cx = 155;
-    const cy = height / 2;
-    const ringCount = combined ? 2 : 1;
-    const outerRadius = 126;
-    const thickness = Math.min(32, 74 / ringCount);
-    const ringGap = Math.min(2, 8 / ringCount);
     const voiceTotal = environments.reduce((sum, item) => sum + item.Voice, 0);
     const dataTotal = environments.reduce((sum, item) => sum + item.Data, 0);
-    const familyRing = {name: combined ? 'Global Voice/Data' : environments[0].name, segments: [
+    const legendItems = [];
+    const addLegend = (label, color, value, iconKind, global = false) => {
+      const percentage = total > 0 ? value / total * 100 : 0;
+      const amount = `${formattedChartPoints(value)} pts (${percentage.toFixed(1)}%)`;
+      const text = `${label}: ${amount}`;
+      legendItems.push({color, iconKind, global, label, amount, lines: [text],
+        fontSize: Math.min(14, 304 / Math.max(1, text.length * .55))});
+    };
+    if (combined) addLegend('Total Points', '#465565', total, 'Global', true);
+    legendItems.push({heading: 'Points per Environment:'});
+    environments.forEach(item => addLegend(allocationEnvironmentLabel(item.name), item.color, item.Voice + item.Data, item.name));
+    legendItems.push({heading: categories ? 'Points per KPI Category:' : 'Points per Service:'});
+    if (categories) categories.forEach(item => addLegend(allocationCategoryLabel(item.label), item.color, item.value, item.label));
+    else {
+      addLegend('Voice', voiceColor, voiceTotal, 'Voice');
+      addLegend('Data', dataColor, dataTotal, 'Data');
+    }
+    const height = 350 + legendItems.reduce((sum, item) => sum + (item.heading ? 30 : item.lines.length * 22 + 8), 0) + 18;
+    svg.setAttribute('viewBox', `0 0 420 ${height}`);
+    svg.setAttribute('class', 'scoring-chart-svg scoring-allocation-donut');
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', categories ? 'Maximum score allocation by environment and category'
+      : 'Maximum score allocation by environment, Voice and Data');
+    const cx = 210;
+    const cy = 166;
+    const ringCount = 2;
+    const outerRadius = 140;
+    const thickness = Math.min(32, 74 / ringCount);
+    const ringGap = Math.min(2, 8 / ringCount);
+    const familyRing = {name: categories ? 'KPI categories' : combined ? 'Global Voice/Data' : environments[0].name, segments: categories || [
       {label: 'Voice', value: voiceTotal, color: voiceColor},
       {label: 'Data', value: dataTotal, color: dataColor},
     ]};
-    const rings = combined ? [{name: 'Environments', segments: environments.map(item => ({
+    const rings = [{name: 'Environments', segments: environments.map(item => ({
       label: item.name, value: item.Voice + item.Data, color: item.color,
-    }))}, familyRing] : [familyRing];
+    }))}, familyRing];
     rings.forEach((ring, index) => {
       const radius = outerRadius - index * (thickness + ringGap);
-      const circumference = 2 * Math.PI * radius;
       const ringTotal = ring.segments.reduce((sum, segment) => sum + segment.value, 0);
-      let offset = 0;
+      let angle = -Math.PI / 2;
       ring.segments.forEach(segment => {
-        const length = ringTotal > 0 ? circumference * segment.value / ringTotal : 0;
-        const mark = svgElement(svg, 'circle', {cx, cy, r: radius, fill: 'none', stroke: segment.color,
-          'stroke-width': thickness, 'stroke-dasharray': `${length} ${circumference - length}`,
-          'stroke-dashoffset': -offset, transform: `rotate(-90 ${cx} ${cy})`});
+        const span = ringTotal > 0 ? Math.PI * 2 * segment.value / ringTotal : 0;
+        if (span <= 0) return;
+        const mark = svgElement(svg, 'path', {
+          d: allocationSectorPath(cx, cy, radius + thickness / 2, radius - thickness / 2, angle, angle + span),
+          fill: segment.color, stroke: 'none', 'data-allocation-segment': ring.name,
+          'data-allocation-radius': radius, 'data-allocation-center': `${cx},${cy}`,
+        });
         setChartTooltip(mark, `${ring.name}: ${segment.label}\nMaximum points: ${formattedChartPoints(segment.value)}\nShare of configured maximum: ${(ringTotal > 0 ? segment.value / ringTotal * 100 : 0).toFixed(1)}%`, true);
         svg.append(mark);
-        offset += length;
+        const percentage = segment.value / ringTotal * 100;
+        const percentageLabel = `${percentage.toFixed(1)}%`;
+        const fontSize = 11;
+        if (radius * span >= percentageLabel.length * fontSize * .62 + 12 && thickness >= fontSize + 8) {
+          const middle = angle + span / 2;
+          const label = svgElement(svg, 'text', {
+            x: cx + radius * Math.cos(middle), y: cy + radius * Math.sin(middle),
+            'text-anchor': 'middle', 'dominant-baseline': 'central',
+            style: `font-size:${fontSize}px;font-weight:700;fill:${readableTextColor(segment.color)}`,
+            'data-allocation-percentage': percentageLabel,
+          });
+          label.textContent = percentageLabel;
+          setChartTooltip(label, `${ring.name}: ${segment.label}\n${percentageLabel} of configured maximum`);
+          svg.append(label);
+        }
+        angle += span;
       });
     });
     const center = svgElement(svg, 'text', {x: cx, y: cy - 4, 'text-anchor': 'middle', class: 'scoring-allocation-total'});
     center.textContent = total.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
     const innerRadius = outerRadius - (ringCount - 1) * (thickness + ringGap) - thickness / 2;
-    center.setAttribute('style', `font-size:${Math.min(25, (innerRadius * 2 - 12) / (center.textContent.length * .65))}px`);
+    center.setAttribute('style', `font-size:${Math.min(31, (innerRadius * 2 - 12) / (center.textContent.length * .65))}px`);
     const unit = svgElement(svg, 'text', {x: cx, y: cy + 20, 'text-anchor': 'middle', class: 'scoring-allocation-unit'});
     unit.textContent = 'max points';
     setChartTooltip(center, `Total configured maximum\nMaximum points: ${formattedChartPoints(total)}`);
     svg.append(center, unit);
-    const legend = (label, color, value, y, iconKind, bold = false) => {
-      const icon = svgElement(svg, 'path', {d: allocationIconPath(iconKind), fill: 'none', stroke: color,
-        'stroke-width': 1.8, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', transform: `translate(310 ${y - 17}) scale(.8)`});
-      const swatch = svgElement(svg, 'rect', {x: 335, y: y - 12, width: 12, height: 12, rx: 2, fill: color});
-      const text = svgElement(svg, 'text', {x: 354, y, fill: '#243746', 'font-size': 14, 'font-weight': bold ? 700 : 400});
-      text.textContent = `${label}: ${formattedChartPoints(value)} pts`;
-      setChartTooltip(text, text.textContent);
+    let legendY = 350;
+    legendItems.forEach(item => {
+      if (item.heading) {
+        const heading = svgElement(svg, 'text', {x: 18, y: legendY, style: 'font-size:14px;font-weight:700'});
+        heading.textContent = item.heading;
+        svg.append(heading);
+        legendY += 30;
+        return;
+      }
+      const indent = item.global ? 0 : 20;
+      const icon = svgElement(svg, 'path', {d: allocationIconPath(item.iconKind), fill: 'none', stroke: item.color,
+        'stroke-width': 1.8, 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+        transform: `translate(${18 + indent} ${legendY - 18}) scale(.85)`});
+      const swatch = svgElement(svg, 'rect', {x: 48 + indent, y: legendY - 13, width: 14, height: 14, rx: 2, fill: item.color});
+      const text = svgElement(svg, 'text', {x: 74 + indent, y: legendY,
+        style: `font-size:${item.fontSize}px;font-weight:${item.global ? 700 : 400}`});
+      const label = svgElement(svg, 'tspan');
+      label.textContent = `${item.label}: `;
+      const amount = svgElement(svg, 'tspan', {dx: 3, fill: '#8A3D0A', style: 'fill:#8A3D0A'});
+      amount.textContent = item.amount;
+      text.append(label, amount);
+      setChartTooltip(text, item.lines.join(' '));
       svg.append(icon, swatch, text);
-    };
-    if (combined) {
-      legend('Global', '#465565', total, 30, 'Global', true);
-      legend('Voice', voiceColor, voiceTotal, 58, 'Voice');
-      legend('Data', dataColor, dataTotal, 82, 'Data');
-      environments.forEach((item, index) => {
-        legend(item.name, item.color, item.Voice + item.Data, 126 + index * 44, item.name, true);
-      });
-    } else {
-      const item = environments[0];
-      legend(item.name, item.color, total, 44, item.name, true);
-      legend('Voice', voiceColor, voiceTotal, 68, 'Voice');
-      legend('Data', dataColor, dataTotal, 92, 'Data');
-    }
+      legendY += item.lines.length * 22 + 8;
+    });
     return svg;
   }
 
+  function renderCategoryAllocation(pane, scoreTables, hierarchyTable, allTables) {
+    const card = pane.querySelector(':scope > .scoring-chart-card');
+    const selected = hierarchyTable
+      || scoreTables.find(table => comparisonIdentity(table, 'score') === contextSelections.get('score'))
+      || scoreTables[0];
+    if (!card || !selected) return;
+    const configuration = selectedJob?.configuration || currentResults?.configuration || {};
+    const allocations = maximumAllocationEnvironments(selected, allTables, configuration);
+    const categories = maximumAllocationCategories(selected, allocations, configuration);
+    if (!categories.length) return;
+    const layout = document.createElement('div');
+    layout.className = 'scoring-best-network-layout';
+    pane.insertBefore(layout, card);
+    layout.append(card, makeExpandableChartCard('Maximum score allocation per environment & category',
+      contextLabel(selected.context), makeMaximumAllocationDonut(allocations, categories)));
+  }
+
   function renderBestNetworkChart(pane, scoreTables, hierarchyTable = null, allTables = scoreTables) {
-    pane.replaceChildren();
     if (!hierarchyTable && !scoreTables.length) {
       const empty = document.createElement('div');
       empty.className = 'scoring-empty';
@@ -3597,8 +3721,9 @@
       pane.append(empty);
       return;
     }
-    const selected = hierarchyTable || appendComparisonSelector(pane, scoreTables, 'score');
-    appendContextHeader(pane, selected, 'score', 'Best Network Chart');
+    const selected = hierarchyTable
+      || scoreTables.find(table => comparisonIdentity(table, 'score') === contextSelections.get('score'))
+      || scoreTables[0];
     const data = bestNetworkTotals(selected);
     if (!data.operators.length || !data.rows.length) {
       const empty = document.createElement('div');
@@ -3611,12 +3736,12 @@
     layout.className = 'scoring-best-network-layout';
     const meta = contextLabel(selected.context);
     const bars = makeBestNetworkBars(selected, data);
-    layout.append(makeExpandableChartCard('Voice and Data weighted points by operator', meta, bars));
+    layout.append(makeExpandableChartCard('Best Network Scoring per Service', meta, bars));
     const configuration = selectedJob?.configuration || currentResults?.configuration || {};
     const allocations = maximumAllocationEnvironments(selected, allTables, configuration);
     const donut = makeMaximumAllocationDonut(allocations);
-    layout.append(makeExpandableChartCard('Maximum score allocation', meta, donut));
-    pane.append(layout);
+    layout.append(makeExpandableChartCard('Maximum score allocation per environment & service', meta, donut));
+    pane.insertBefore(layout, pane.querySelector(':scope > .scoring-best-network-layout, :scope > .scoring-chart-card'));
   }
 
   function openExpandedChart(card) {
@@ -3747,7 +3872,6 @@
     const scoringPane = root.querySelector('[data-result-pane="scoring"]');
     const chartPane = root.querySelector('[data-result-pane="charts"]');
     const gapPane = root.querySelector('[data-result-pane="gap"]');
-    const bestNetworkPane = root.querySelector('[data-result-pane="best-network"]');
     const views = payload.views && typeof payload.views === 'object' ? payload.views : {};
     const allScoreTables = normalizeRows(views.score_tables ?? payload.score_tables ?? payload.scoring_views?.score_tables ?? []);
     const allGapTables = normalizeRows(views.gap_tables ?? payload.gap_tables ?? payload.scoring_views?.gap_tables ?? []);
@@ -3788,7 +3912,7 @@
         scoringPane.append(summaryHeading, summaryTable);
         const detailHeading = document.createElement('h4');
         detailHeading.className = 'scoring-table-section-title';
-        detailHeading.textContent = 'Scoring Tables — Expanded';
+        detailHeading.textContent = 'Scoring Tables — Drill-down';
         const detailTable = document.createElement('div');
         detailTable.className = 'scoring-table-section';
         renderTable(detailTable, detailRows, 'No KPI detail rows are available.', {hideGapColumns: true});
@@ -3802,8 +3926,9 @@
       chartPane.classList.remove('scoring-chart-grid');
       if (hierarchyScoreTable) renderHierarchyCharts(chartPane, hierarchyScoreTable);
       else renderCharts(chartPane, chartRowsForEnvironment(payload.charts ?? [], allScoreTables, effectiveEnvironment), scoreTables);
+      renderCategoryAllocation(chartPane, scoreTables, hierarchyScoreTable, allScoreTables);
+      renderBestNetworkChart(chartPane, scoreTables, hierarchyScoreTable, allScoreTables);
     }
-    if (shouldRenderPane('best-network')) renderBestNetworkChart(bestNetworkPane, scoreTables, hierarchyScoreTable, allScoreTables);
     if (shouldRenderPane('gap')) {
       const gapTotals = normalizeRows(payload.gap_totals ?? []);
       if (displayHierarchyGapTable) {
@@ -4137,6 +4262,7 @@
     const name = tab.dataset.resultTab;
     if (activeResultTab === name) return;
     activeResultTab = name;
+    syncResultTableControls();
     for (const other of root.querySelectorAll('[data-result-tab]')) {
       const selected = other === tab;
       other.setAttribute('aria-selected', String(selected));
@@ -4171,6 +4297,7 @@
   });
   window.addEventListener('pagehide', flushSelectionSaveOnPageHide);
   syncGapValueControls();
+  syncResultTableControls();
   applyNrFilter(false);
   loadCalculationSelection();
   refreshJobs();

@@ -67,6 +67,283 @@ def test_best_network_chart_keeps_its_intrinsic_width_on_narrow_cards():
     assert 'const scaleValue = maxActual > 0 ? maxActual : maxAllocation;' in script
 
 
+def test_best_network_charts_start_scoring_charts_and_legacy_tab_migrates():
+    template = SCORING_TEMPLATE.read_text(encoding='utf-8')
+    script = SCORING_SCRIPT.read_text(encoding='utf-8')
+
+    assert 'data-result-tab="best-network"' not in template
+    assert "const resultTabNames = new Set(['scoring', 'gap', 'charts']);" in script
+    assert "stored.result_tab === 'best-network' ? 'charts'" in script
+    renderer = _function_source(script, 'renderBestNetworkChart')
+    allocation_renderer = _function_source(script, 'renderCategoryAllocation')
+    assert allocation_renderer.index("makeExpandableChartCard('Maximum score allocation per environment & category'") >= 0
+    assert "pane.insertBefore(layout, card)" in allocation_renderer
+    assert renderer.index("makeExpandableChartCard('Best Network Scoring per Service'") < renderer.index(
+        "makeExpandableChartCard('Maximum score allocation per environment & service'"
+    )
+    assert "pane.insertBefore(layout, pane.querySelector(':scope > .scoring-best-network-layout, :scope > .scoring-chart-card'))" in renderer
+    assert "renderBestNetworkChart(chartPane, scoreTables, hierarchyScoreTable, allScoreTables)" in script
+    assert "renderCategoryAllocation(chartPane, scoreTables, hierarchyScoreTable, allScoreTables)" in script
+    assert script.index('renderCategoryAllocation(chartPane,') < script.index('renderBestNetworkChart(chartPane,')
+    assert 'Best Network Scoring per Category' in script
+    assert 'Scoring per Category' in script
+
+    payload = {
+        'snippets': {
+            'readScoringViewState': _function_source(script, 'readScoringViewState'),
+        },
+        'storageKey': 'dashboard-analytic:scoring-view:test:workspace',
+        'legacyState': {'result_tab': 'best-network'},
+    }
+    program = r"""
+const vm = require('node:vm');
+const payload = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+const values = new Map([[payload.storageKey, JSON.stringify(payload.legacyState)]]);
+const context = {
+  scoringViewStorageKey: payload.storageKey,
+  resultTabNames: new Set(['scoring', 'gap', 'charts']),
+  window: {sessionStorage: {getItem: key => values.get(key) ?? null}},
+};
+vm.createContext(context);
+vm.runInContext(Object.values(payload.snippets).join('\n') + '\nglobalThis.restored = readScoringViewState();', context);
+process.stdout.write(JSON.stringify(context.restored));
+"""
+    result = _run_node_json(program, payload)
+    assert result['resultTab'] == 'charts'
+
+
+def test_scoring_table_value_row_is_hidden_outside_scoring_tab_without_changing_options():
+    template = SCORING_TEMPLATE.read_text(encoding='utf-8')
+    script = SCORING_SCRIPT.read_text(encoding='utf-8')
+    assert 'data-scoring-results-value-row' in template
+
+    payload = {'snippet': _function_source(script, 'syncResultTableControls')}
+    program = r"""
+const vm = require('node:vm');
+const payload = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+const row = {hidden: false};
+const context = {
+  row,
+  root: {querySelector: selector => selector === '[data-scoring-results-value-row]' ? row : null},
+  activeResultTab: 'scoring',
+  showKpiValuesToggle: {checked: true},
+  showGapValuesToggle: {checked: false},
+};
+vm.createContext(context);
+vm.runInContext(payload.snippet + `
+const visibility = {};
+for (const tab of ['scoring', 'gap', 'charts']) {
+  activeResultTab = tab;
+  syncResultTableControls();
+  visibility[tab] = {hidden: row.hidden, options: [showKpiValuesToggle.checked, showGapValuesToggle.checked]};
+}
+globalThis.result = visibility;`, context);
+process.stdout.write(JSON.stringify(context.result));
+"""
+    result = _run_node_json(program, payload)
+    assert result == {
+        'scoring': {'hidden': False, 'options': [True, False]},
+        'gap': {'hidden': True, 'options': [True, False]},
+        'charts': {'hidden': True, 'options': [True, False]},
+    }
+
+
+def test_results_controls_are_grouped_with_icons_and_unique_environment_heading():
+    template = SCORING_TEMPLATE.read_text(encoding='utf-8')
+    script = SCORING_SCRIPT.read_text(encoding='utf-8')
+    header = re.search(r'<div class="scoring-results-head">(.*?)<div class="scoring-result-tabs"', template, re.S)
+    assert header
+    markup = header.group(1)
+    primary = re.search(r'<div class="scoring-results-primary">(.*?)</div>\s*<div class="scoring-results-tools">', markup, re.S)
+    tools = re.search(r'<div class="scoring-results-tools">(.*)</div>\s*$', markup, re.S)
+    assert primary and tools
+    left_markup = primary.group(1)
+    right_markup = tools.group(1)
+    assert left_markup.index('data-result-environment-control') < left_markup.index('data-scoring-results-value-row')
+    assert left_markup.index('data-show-kpi-values') < left_markup.index('data-show-gap-values')
+    assert right_markup.index('data-config-shortcut="kpi"') < right_markup.index('data-export-scoring')
+    assert right_markup.index('data-config-shortcut="gap"') < right_markup.index('data-export-scoring')
+    for marker in (
+        'data-config-shortcut="kpi"', 'data-config-shortcut="hierarchy"', 'data-config-shortcut="gap"',
+        'data-export-scoring', 'data-export-gap', 'data-export-ppt',
+    ):
+        anchor = re.search(rf'<a\b[^>]*{re.escape(marker)}[^>]*>(.*?)</a>', right_markup, re.S)
+        assert anchor and '<svg ' in anchor.group(1) and 'viewBox="0 0 20 20"' in anchor.group(1)
+    assert '.scoring-results-head { display: grid; grid-template-columns: minmax(0,1fr) auto;' in template
+    assert '.scoring-results-tools { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap;' in template
+    assert '.scoring-results-config-shortcuts svg, .scoring-export-actions svg {' in template
+    assert 'fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;' in template
+    assert '.scoring-results-config-shortcuts, .scoring-results-tools > .scoring-export-actions { justify-content: flex-start; }' in template
+
+    payload = {
+        'snippets': {
+            'appendContextHeader': _function_source(script, 'appendContextHeader'),
+            'environmentLabel': _function_source(script, 'environmentLabel'),
+            'humanizeKey': _function_source(script, 'humanizeKey'),
+        },
+    }
+    program = r"""
+const vm = require('node:vm');
+const payload = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+class Element {
+  constructor(tagName) { this.tagName = tagName; this.children = []; this.className = ''; this.ownText = ''; }
+  set textContent(value) { this.ownText = String(value); this.children = []; }
+  get textContent() { return this.ownText + this.children.map(child => child.textContent).join(''); }
+  append(...nodes) { this.children.push(...nodes); }
+}
+const document = {createElement: tag => new Element(tag)};
+const context = {document, Element, displayValue: value => String(value)};
+vm.createContext(context);
+vm.runInContext(Object.values(payload.snippets).join('\n') + `
+const results = [];
+for (const [kind, title] of [['score', 'Scoring Tables'], ['gap', 'GAP Analysis'], ['charts', 'Scoring Charts']]) {
+  const pane = new Element('section');
+  appendContextHeader(pane, {context: {environment: 'DriveCity', campaign: '2026Q2', city: 'London'}}, kind, title);
+  const heading = pane.children[0];
+  results.push({
+    title: heading.ownText,
+    environmentChips: heading.children.filter(child => child.className.includes('scoring-environment-chip')).map(child => child.textContent),
+    otherContextChips: pane.children.filter(child => child.className === 'scoring-context-chips')
+      .flatMap(group => group.children.map(child => child.textContent)),
+  });
+}
+globalThis.result = results;`, context);
+process.stdout.write(JSON.stringify(context.result));
+"""
+    result = _run_node_json(program, payload)
+    assert [item['title'] for item in result] == ['Scoring Tables', 'GAP Analysis', 'Scoring Charts']
+    assert all(item['environmentChips'] == ['Environment: Drive City'] for item in result)
+    assert all('Environment:' not in ' '.join(item['otherContextChips']) for item in result)
+
+
+def test_category_allocation_donut_uses_configured_maxima_order_and_tooltips():
+    script = SCORING_SCRIPT.read_text(encoding='utf-8')
+    names = (
+        'maximumAllocationEnvironments', 'maximumAllocationCategories',
+        'allocationEnvironmentLabel', 'allocationCategoryLabel', 'allocationIconPath', 'allocationSectorPath',
+        'wrappedSvgLabelLines', 'safeHexColor', 'readableTextColor', 'makeMaximumAllocationDonut',
+    )
+    payload = {
+        'snippets': {name: _function_source(script, name) for name in names},
+        'configuration': {
+            'scope': {'environments': {'DriveCity': {'total_points': 100}, 'UrbanRoad': {'total_points': 50}}},
+            'metrics': [
+                {'category': 'Calls', 'source_kind': 'voice', 'contexts': {
+                    'DriveCity': {'max_points': 30}, 'UrbanRoad': {'max_points': 8},
+                }},
+                {'category': 'Connectivity', 'source_kind': 'data', 'contexts': {
+                    'DriveCity': {'max_points': 50}, 'UrbanRoad': {'max_points': 10},
+                }},
+                {'category': 'Calls', 'source_kind': 'speech', 'contexts': {
+                    'DriveCity': {'max_points': 20}, 'UrbanRoad': {'max_points': 7},
+                }},
+            ],
+        },
+    }
+    program = r"""
+const vm = require('node:vm');
+const payload = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+class Element {
+  constructor(tagName) { this.tagName = tagName; this.namespaceURI = 'svg'; this.attributes = {}; this.children = []; this.style = {}; this.textContent = ''; }
+  setAttribute(name, value) { this.attributes[name] = String(value); }
+  append(...nodes) { this.children.push(...nodes); this.textContent += nodes.map(node => node.textContent || '').join(''); }
+}
+const document = {createElementNS: (_namespace, tag) => new Element(tag)};
+const helpers = `
+function svgElement(svg, name, attributes = {}) {
+  const node = document.createElementNS(svg.namespaceURI, name);
+  for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, String(value));
+  return node;
+}
+function setChartTooltip(node, message) { node.setAttribute('data-chart-tooltip', String(message)); }
+function formattedChartPoints(value) { return Number(value).toLocaleString(undefined, {maximumFractionDigits: 3}); }
+function bestNetworkTotals(table) { return {allocation: table.allocation || {Voice: 0, Data: 0}}; }
+`;
+const context = {document, console, payload};
+vm.createContext(context);
+vm.runInContext(helpers + Object.values(payload.snippets).join('\n') + `
+const selected = {context: {environment: 'Combined'}, rows: [
+  {category: 'Calls', max_points: 30}, {category: 'Connectivity', max_points: 60},
+  {category: 'Calls', max_points: 35}, {category: 'Ignored', max_points: 999, row_type: 'category'},
+]};
+const environments = maximumAllocationEnvironments(selected, [], payload.configuration);
+const categories = maximumAllocationCategories(selected, environments, payload.configuration);
+const chart = makeMaximumAllocationDonut(environments, categories);
+const tinyChart = makeMaximumAllocationDonut([
+  {name: 'Tiny', Voice: 1.4, Data: 0, color: '#176E77'},
+  {name: 'Large', Voice: 98.6, Data: 0, color: '#E6A81D'},
+], [
+  {label: 'Tiny KPI', value: 1.4, color: '#C55A11'},
+  {label: 'Large KPI', value: 98.6, color: '#7030A5'},
+]);
+const singleEnvironmentChart = makeMaximumAllocationDonut([
+  {name: 'DriveCity', Voice: 100, Data: 0, color: '#176E77'},
+]);
+const fallback = maximumAllocationCategories(selected, [], {});
+globalThis.result = {
+  environments: environments.map(item => [item.name, item.Voice, item.Data]),
+  categories: categories.map(item => [item.label, item.value]),
+  fallback: fallback.map(item => [item.label, item.value]),
+  viewBox: chart.attributes.viewBox,
+  segmentTooltips: chart.children.filter(item => item.attributes['data-allocation-segment']).map(item => item.attributes['data-chart-tooltip']),
+  segmentGeometry: chart.children.filter(item => item.attributes['data-allocation-segment'])
+    .map(item => [item.attributes['data-allocation-segment'], item.attributes['data-allocation-radius'], item.attributes['data-allocation-center'], item.attributes.d]),
+  percentageLabels: chart.children.filter(item => item.attributes['data-allocation-percentage']).map(item => ({
+    value: item.attributes['data-allocation-percentage'], style: item.attributes.style,
+    tooltip: item.attributes['data-chart-tooltip'],
+  })),
+  tinyPercentageLabels: tinyChart.children.filter(item => item.attributes['data-allocation-percentage'])
+    .map(item => item.attributes['data-allocation-percentage']),
+  singleEnvironmentPercentages: singleEnvironmentChart.children
+    .filter(item => item.attributes['data-allocation-percentage']).map(item => item.attributes['data-allocation-percentage']),
+      legend: chart.children.filter(item => item.tagName === 'text' && ['18', '74', '94'].includes(item.attributes.x)).map(item => ({
+        text: item.children.length ? item.children.map(child => child.textContent).join('') : item.textContent,
+        x: item.attributes.x, y: item.attributes.y, style: item.attributes.style,
+        amountColor: item.children[1]?.attributes.fill,
+      })),
+  icons: chart.children.filter(item => item.tagName === 'path' && item.attributes.transform).map(item => item.attributes.d),
+  representativeIcons: [allocationIconPath('Classic Calls'), allocationIconPath('WhatsApp Calls')],
+};`, context);
+process.stdout.write(JSON.stringify(context.result));
+"""
+    result = _run_node_json(program, payload)
+
+    assert result['environments'] == [['DriveCity', 50, 50], ['UrbanRoad', 15, 10]]
+    assert result['categories'] == [['Calls', 65], ['Connectivity', 60]]
+    assert result['fallback'] == [['Calls', 65], ['Connectivity', 60]]
+    assert result['viewBox'].startswith('0 0 420 ')
+    assert [segment[:3] for segment in result['segmentGeometry']] == [
+        ['Environments', '140', '210,166'], ['Environments', '140', '210,166'],
+        ['KPI categories', '106', '210,166'], ['KPI categories', '106', '210,166'],
+    ]
+    assert all(segment[3].startswith('M ') and ' A ' in segment[3] and ' Z' in segment[3]
+               for segment in result['segmentGeometry'])
+    assert all('stroke-dasharray' not in segment[3] for segment in result['segmentGeometry'])
+    assert [tooltip.splitlines()[0] for tooltip in result['segmentTooltips']] == [
+        'Environments: DriveCity', 'Environments: UrbanRoad',
+        'KPI categories: Calls', 'KPI categories: Connectivity',
+    ]
+    assert 'Maximum points: 100' in result['segmentTooltips'][0]
+    assert [item['value'] for item in result['percentageLabels']] == ['80.0%', '20.0%', '52.0%', '48.0%']
+    assert all('font-size:11px' in item['style'] and 'font-weight:700' in item['style'] for item in result['percentageLabels'])
+    assert all(' of configured maximum' in item['tooltip'] for item in result['percentageLabels'])
+    assert '1.4%' not in result['tinyPercentageLabels']
+    assert {'98.6%'} <= set(result['tinyPercentageLabels'])
+    assert result['singleEnvironmentPercentages'] == ['100.0%', '100.0%']
+    assert [item['text'] for item in result['legend']] == [
+        'Total Points: 125 pts (100.0%)', 'Points per Environment:', 'Drive - City: 100 pts (80.0%)',
+        'UrbanRoad: 25 pts (20.0%)', 'Points per KPI Category:', 'Calls: 65 pts (52.0%)',
+        'Connectivity: 60 pts (48.0%)',
+    ]
+    assert result['legend'][0]['x'] == '74'
+    assert [item['x'] for item in result['legend'][1:]] == ['18', '94', '94', '18', '94', '94']
+    assert 'font-weight:700' in result['legend'][1]['style']
+    assert 'font-weight:400' in result['legend'][2]['style']
+    assert all(float(re.search(r'font-size:([\d.]+)px', item['style']).group(1)) <= 14 for item in result['legend'] if item['x'] != '18')
+    assert all(item['amountColor'] == '#8A3D0A' for item in result['legend'] if item['x'] in {'74', '94'})
+    assert len(set(result['representativeIcons'])) == 2
+
+
 def test_scoring_chart_pairs_render_five_operator_two_category_views():
     script = SCORING_SCRIPT.read_text(encoding='utf-8')
     names = (
@@ -507,7 +784,7 @@ process.stdout.write(JSON.stringify(sections.map(summarize)));
     results = _run_node_json(program, payload)
 
     assert [section['heading'] for section in results] == [
-        'Scoring Tables — Summary', 'Scoring Tables — Expanded',
+        'Scoring Tables — Summary', 'Scoring Tables — Drill-down',
     ]
     assert results[0]['valueGroups'] == 0
     assert results[0]['valueHeaders'] == 0
@@ -639,13 +916,16 @@ def test_kpi_value_cells_are_blank_for_category_subtotals_in_both_table_modes():
 def test_allocation_donut_global_environment_rings_and_single_environment_radius():
     script = SCORING_SCRIPT.read_text(encoding='utf-8')
     functions = '\n'.join(_function_source(script, name) for name in (
-        'maximumAllocationEnvironments', 'allocationIconPath', 'makeMaximumAllocationDonut',
+        'maximumAllocationEnvironments', 'allocationEnvironmentLabel', 'allocationCategoryLabel', 'allocationIconPath',
+        'allocationSectorPath', 'wrappedSvgLabelLines', 'safeHexColor', 'readableTextColor', 'makeMaximumAllocationDonut',
     ))
     program = functions + """
 const document = {createElementNS: () => ({attributes: {}, children: [],
   setAttribute(name, value) {this.attributes[name] = value;},
   append(...children) {this.children.push(...children);}})};
-const svgElement = (svg, tag, attributes) => ({tag, attributes, setAttribute(name, value) {this.attributes[name] = value;}});
+const svgElement = (svg, tag, attributes) => ({tag, attributes, children: [], textContent: '',
+  setAttribute(name, value) {this.attributes[name] = value;},
+  append(...children) {this.children.push(...children);}});
 const setChartTooltip = () => {};
 const formattedChartPoints = number => Number(number).toFixed(2);
 const config = {scope: {environments: {DriveCity: {total_points: 650}, 'Drive Connecting Roads': {total_points: 350}}},
@@ -656,21 +936,29 @@ const all = maximumAllocationEnvironments({context: {environment: 'Combined'}}, 
 const single = maximumAllocationEnvironments({context: {environment: 'Drive Connecting Roads'}}, [], config);
 const globalSvg = makeMaximumAllocationDonut(all);
 const singleSvg = makeMaximumAllocationDonut(single);
-const circles = svg => svg.children.filter(item => item.tag === 'circle').map(item => item.attributes);
-console.log(JSON.stringify({all, single, global: circles(globalSvg), one: circles(singleSvg),
- icons: globalSvg.children.filter(item => item.tag === 'path').length,
- globalText: globalSvg.children.map(item => item.textContent || '').join('|'),
- singleText: singleSvg.children.map(item => item.textContent || '').join('|')}));
+const segments = svg => svg.children.filter(item => item.attributes?.['data-allocation-segment']).map(item => item.attributes);
+const icons = svg => svg.children.filter(item => item.tag === 'path' && item.attributes?.transform);
+const textContent = svg => svg.children.filter(item => item.tag === 'text').map(item => item.children?.length
+  ? item.children.map(child => child.textContent || '').join('') : item.textContent || '').join('|');
+console.log(JSON.stringify({all, single, global: segments(globalSvg), one: segments(singleSvg),
+ icons: icons(globalSvg).length,
+ globalText: textContent(globalSvg),
+ singleText: textContent(singleSvg)}));
 """
     result = _run_node_json(program, {})
     assert len(result['global']) == 4  # Environment allocation plus one global Voice/Data ring.
-    assert [item['stroke'] for item in result['global'][:2]] == ['#176E77', '#E6A81D']
-    assert [item['stroke'] for item in result['global'][2:]] == ['#4472C4', '#7030A0']
-    assert len(result['one']) == 2
-    assert result['one'][0]['r'] == result['global'][0]['r'] == 126
-    assert result['global'][0]['r'] > result['global'][2]['r']
+    assert [item['fill'] for item in result['global'][:2]] == ['#176E77', '#E6A81D']
+    assert [item['fill'] for item in result['global'][2:]] == ['#4472C4', '#7030A0']
+    assert len(result['one']) == 3
+    assert [item['fill'] for item in result['one']] == ['#E6A81D', '#4472C4', '#7030A0']
+    assert result['one'][0]['data-allocation-radius'] == result['global'][0]['data-allocation-radius'] == 140
+    assert result['one'][0]['data-allocation-center'] == '210,166'
+    assert result['one'][0]['d'].count(' A ') == 4
+    assert [item['data-allocation-radius'] for item in result['one'][1:]] == [106, 106]
+    assert result['global'][0]['data-allocation-radius'] > result['global'][2]['data-allocation-radius']
     assert len(result['single']) == 1 and result['single'][0]['color'] == '#E6A81D'
     assert result['icons'] == 5
     assert '1,000.00' in result['globalText']
     assert '350.00' in result['singleText']
+    assert 'Drive - Connecting Roads:' in result['singleText']
     assert 'Global:' not in result['singleText']

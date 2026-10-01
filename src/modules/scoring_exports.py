@@ -5,7 +5,7 @@ from copy import deepcopy
 import csv
 import json
 from io import BytesIO, StringIO
-from math import ceil
+from math import ceil, isclose, isfinite
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +24,7 @@ from src.modules.cdr_reporting import (
 )
 from src.modules.scoring_views import THRESHOLD_COLORS, build_scoring_views
 from src.modules.scoring_pptx_allocation import (
-    add_maximum_allocation_donut, maximum_allocations_from_configuration,
+    add_maximum_allocation_donut, category_maximum_allocations, maximum_allocations_from_configuration,
 )
 
 _FONT = 'Ericsson Hilda'
@@ -164,15 +164,20 @@ def _slide(presentation, title: str, subtitle: str):
     slide.background.fill.solid()
     slide.background.fill.fore_color.rgb = RGBColor(255, 255, 255)
     _set_slide_header(slide, title, subtitle)
-    if slide.shapes.title is not None:
-        for paragraph in slide.shapes.title.text_frame.paragraphs:
-            paragraph.font.color.rgb = RGBColor.from_string('17232D')
-            for run in paragraph.runs:
+    title_shape = slide.shapes.title
+    if title_shape is not None:
+        paragraphs = title_shape.text_frame.paragraphs
+        if paragraphs:
+            title_paragraph = paragraphs[0]
+            title_paragraph.font.color.rgb = RGBColor.from_string('17232D')
+            for run in title_paragraph.runs:
                 run.font.color.rgb = RGBColor.from_string('17232D')
-        for paragraph in slide.shapes.title.text_frame.paragraphs[1:]:
-            paragraph.font.size = Pt(12)
-            for run in paragraph.runs:
-                run.font.size = Pt(12)
+        for subtitle_paragraph in paragraphs[1:]:
+            subtitle_paragraph.font.size = Pt(14)
+            subtitle_paragraph.font.color.rgb = RGBColor.from_string('245A96')
+            for run in subtitle_paragraph.runs:
+                run.font.size = Pt(14)
+                run.font.color.rgb = RGBColor.from_string('245A96')
     return slide
 
 
@@ -483,20 +488,14 @@ def _fit_scoring_intro_subtitle(presentation, slide, layout_name: str, subtitle:
         subtitle_shape = next(shape for shape in slide.placeholders
                               if shape.placeholder_format.type == 4)
 
-    cover = layout_name == 'Title Page'
     title_text = title_shape.text_frame.text.split('\x0b', 1)[0].split('\n', 1)[0]
     title_shape.text_frame.text = title_text
-    _set_shape_geometry(title_shape, Inches(.7 if cover else .55))
-    title_shape.top = Inches(1.8 if cover else 1.9)
-    if not cover:
-        title_shape.left = Inches(.6)
-        title_shape.width = presentation.slide_width - Inches(1.2)
-        title_shape.height = Inches(.55)
-        paragraph = title_shape.text_frame.paragraphs[0]
-        paragraph.alignment = PP_ALIGN.LEFT
-        paragraph.font.color.rgb = RGBColor.from_string('A8E6CF')
+    _set_shape_geometry(title_shape, Inches(.7))
+    title_shape.top = Inches(1.8)
     for paragraph in title_shape.text_frame.paragraphs:
-        paragraph.font.size = Pt(44 if cover else 30)
+        paragraph.alignment = PP_ALIGN.LEFT
+        paragraph.font.size = Pt(44)
+        paragraph.font.color.rgb = RGBColor.from_string('FFFFFF')
 
     lines = subtitle.splitlines()
     subtitle_shape.height = Inches(.45)
@@ -515,7 +514,9 @@ def _fit_scoring_intro_subtitle(presentation, slide, layout_name: str, subtitle:
     properties = mode._p.get_or_add_pPr()
     properties.set('marL', '0')
     properties.set('indent', '0')
-    properties.insert(0, OxmlElement('a:buNone'))
+    for bullet in properties.xpath('./a:buNone'):
+        properties.remove(bullet)
+    properties.insert_element_before(OxmlElement('a:buNone'), 'a:tabLst', 'a:defRPr', 'a:extLst')
 
     filters_shape = _text(
         slide, '', 3.2, left=title_shape.left / Inches(1),
@@ -566,32 +567,13 @@ def _add_scoring_intro_slides(
     subtitle = _scoring_filter_subtitle(job, environment)
     campaigns = _campaigns_for_export(job, result)
     campaign_text = f'Campaigns: {", ".join(campaigns) if campaigns else "All Campaigns"}'
-    layout_name = 'Title Page' if environment is None else 'Title Only'
+    layout_name = 'Title Page'
     layout = _named_slide_layout(presentation, layout_name)
     if layout is None:
         raise ValueError(f"The PowerPoint template needs a '{layout_name}' layout for scoring exports.")
     slide = presentation.slides.add_slide(layout)
     _set_structural_slide_text(slide, title, subtitle)
     _fit_scoring_intro_subtitle(presentation, slide, layout_name, subtitle)
-    if environment is not None:
-        title_layout = _named_slide_layout(presentation, 'Title Page')
-        source = next((shape for shape in title_layout.shapes
-                       if shape.top is not None and abs(shape.top - Inches(5.771)) < Inches(.05)
-                       and shape.height == 0), None)
-        if source is not None:
-            divider_element = deepcopy(source._element)
-            properties = divider_element.xpath('.//p:cNvPr')[0]
-            properties.set('id', str(slide.shapes._next_shape_id))
-            properties.set('name', 'Scoring Campaign Divider')
-            slide.shapes._spTree.insert_element_before(divider_element, 'p:extLst')
-        else:
-            divider = slide.shapes.add_shape(
-                MSO_SHAPE.RECTANGLE, Inches(.6), Inches(5.771), Inches(2.47), Inches(.025),
-            )
-            divider.name = 'Scoring Campaign Divider'
-            divider.fill.solid()
-            divider.fill.fore_color.rgb = RGBColor.from_string('F3D3DF')
-            divider.line.fill.background()
     campaign_top = 5.9
     campaign_shape = _text(slide, campaign_text, campaign_top, left=.52, width=10.68, height=.32,
                            size=16, color=_WHITE)
@@ -635,8 +617,55 @@ def _kpi_type_color(metric: dict) -> str:
     return _KPI_TYPE_COLORS.get(str(metric.get('kpi_type', '')), _NEUTRAL)
 
 
+_SUMMARY_BEST_COLOR = '#C6EFCE'
+_SUMMARY_WORST_COLOR = '#FFC7CE'
+
+
+def _summary_extreme_operators(values: dict[str, dict]) -> tuple[set[str], set[str]]:
+    """Return tied best and worst operators when the values establish a ranking."""
+    available = {}
+    for operator, value in values.items():
+        points = value.get('points') if isinstance(value, dict) else value
+        try:
+            points = float(points)
+        except (TypeError, ValueError):
+            continue
+        if isfinite(points):
+            available[operator] = points
+    if len(available) < 2:
+        return set(), set()
+    best = max(available.values())
+    worst = min(available.values())
+    if isclose(best, worst, rel_tol=1e-9, abs_tol=1e-9):
+        return set(), set()
+    return (
+        {operator for operator, points in available.items()
+         if isclose(points, best, rel_tol=1e-9, abs_tol=1e-9)},
+        {operator for operator, points in available.items()
+         if isclose(points, worst, rel_tol=1e-9, abs_tol=1e-9)},
+    )
+
+
+def _summary_extreme_columns(values: dict[str, dict], columns: list[dict]) -> tuple[set[str], set[str]]:
+    """Rank hierarchy leaves only against operators in the same non-operator path."""
+    groups: dict[tuple[tuple[str, Any], ...], dict[str, dict]] = {}
+    for column in columns:
+        context = tuple(
+            (entry['level'], entry.get('value'))
+            for entry in column.get('path', []) if entry.get('level') != 'Operator'
+        )
+        groups.setdefault(context, {})[column['id']] = values.get(column['id'], {})
+    best_columns: set[str] = set()
+    worst_columns: set[str] = set()
+    for group in groups.values():
+        best, worst = _summary_extreme_operators(group)
+        best_columns.update(best)
+        worst_columns.update(worst)
+    return best_columns, worst_columns
+
+
 def _score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap_layout: str = 'end',
-                  show_gap_values: bool = True, title: str = 'Scoring Tables — Expanded') -> None:
+                  show_gap_values: bool = True, title: str = 'Scoring Tables — Drill-down') -> None:
     if gap_layout == 'adjacent':
         matrices = [_scalar_matrix_as_hierarchy(matrix) for matrix in matrices]
         _hierarchy_score_tables(presentation, matrices, legend, gap_layout=gap_layout,
@@ -690,6 +719,8 @@ def _score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap
                 for row_index, metric in enumerate(metrics, 1):
                     subtotal = metric.get('row_type') == 'category'
                     row_color = _CATEGORY_TOTAL if subtotal else None
+                    best, worst = (_summary_extreme_operators(metric.get('values', {}))
+                                   if matrix.get('table_mode') == 'summary' and subtotal else (set(), set()))
                     _cell(table.cell(row_index, 0), metric['category'], color='#E6F0F7',
                           size=metric_font, left=True, bold=subtotal)
                     _cell(table.cell(row_index, 1), metric['kpi'], color=row_color or '#E7E8E9',
@@ -703,8 +734,11 @@ def _score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap
                     for offset, operator in enumerate(operators, 5):
                         value = metric['values'][operator]
                         partial = value['points'] is not None and not value['complete']
+                        score_color = (_SUMMARY_BEST_COLOR if operator in best else
+                                       _SUMMARY_WORST_COLOR if operator in worst else
+                                       row_color or value.get('color', _WHITE if value['complete'] else _NEUTRAL))
                         _cell(table.cell(row_index, offset), _number(value['points']) + ('*' if partial else ''),
-                              color=row_color or value.get('color', _WHITE if value['complete'] else _NEUTRAL),
+                              color=score_color,
                               size=numeric_font, bold=subtotal)
                     for offset, operator in enumerate(comparisons, 5 + len(operators)):
                         _cell(table.cell(row_index, offset), _gap_number(metric, operator),
@@ -733,14 +767,26 @@ def _score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap
                         _cell(table.cell(index, column), value, color='#D8DFE4', bold=True, size=numeric_font)
                     for column, operator in enumerate(operators, 5):
                         value = total['values'][operator]
+                        best, worst = (_summary_extreme_operators(total.get('values', {}))
+                                       if matrix.get('table_mode') == 'summary' else (set(), set()))
+                        score_color = (_SUMMARY_BEST_COLOR if operator in best else
+                                       _SUMMARY_WORST_COLOR if operator in worst else '#D8DFE4')
                         _cell(table.cell(index, column), _number(value['points']) + ('*' if value['points'] is not None and not value['complete'] else ''),
-                              color='#D8DFE4', bold=True, size=numeric_font)
+                              color=score_color, bold=True, size=numeric_font)
                     for column, operator in enumerate(comparisons, 5 + len(operators)):
                         _cell(table.cell(index, column), _gap_number(total, operator), color='#D8DFE4', bold=True, size=numeric_font)
-                # A native legend keeps the same threshold colors as the web view.
-                for index, item in enumerate(legend):
-                    legend_table = slide.shapes.add_table(1, 1, Inches(.55 + index * 1.15), Inches(7.02), Inches(1.1), Inches(.18)).table
-                    _cell(legend_table.cell(0, 0), item.get('band', ''), color=item['color'], size=8)
+                if matrix.get('table_mode') == 'summary':
+                    summary_legend = [('Best operator', _SUMMARY_BEST_COLOR),
+                                      ('Worst operator', _SUMMARY_WORST_COLOR)]
+                    for legend_index, (label, color) in enumerate(summary_legend):
+                        legend_table = slide.shapes.add_table(
+                            1, 1, Inches(.55 + legend_index * 1.35), Inches(7.02), Inches(1.3), Inches(.18),
+                        ).table
+                        _cell(legend_table.cell(0, 0), label, color=color, size=8)
+                else:
+                    for index, item in enumerate(legend):
+                        legend_table = slide.shapes.add_table(1, 1, Inches(.55 + index * 1.15), Inches(7.02), Inches(1.1), Inches(.18)).table
+                        _cell(legend_table.cell(0, 0), item.get('band', ''), color=item['color'], size=8)
                 _text(slide, f'GAP = operator − reference; ±{matrix.get("gap_scale_max", 0):.2f} points; green + / red −',
                       7.03, left=6.5, width=6.2, size=8.5, height=.18)
                 _text(slide, matrix['coverage_note'], 7.27, size=8, height=.18)
@@ -798,7 +844,7 @@ def _fill_series(series, color: str) -> None:
 
 def _charts(presentation, matrices: list[dict]) -> None:
     for matrix in matrices:
-        slide = _slide(presentation, 'Scoring Charts — Category Comparison', _chart_subtitle(matrix['context']))
+        slide = _slide(presentation, 'Scoring per Category', _chart_subtitle(matrix['context']))
         categories = list(dict.fromkeys(row['category'] for row in matrix['rows']))
         data = CategoryChartData()
         data.categories = categories
@@ -817,7 +863,10 @@ def _charts(presentation, matrices: list[dict]) -> None:
                                              chart_width, Inches(4.65), data)
         chart = chart_shape.chart
         _format_chart(chart, maximum=maximum)
-        chart.legend.font.size = Pt(8.5)
+        chart.plots[0].gap_width = 140
+        chart.plots[0].overlap = -20
+        chart.plots[0].data_labels.font.size = Pt(7)
+        chart.legend.font.size = Pt(10)
         for series, operator in zip(chart.series, matrix['operators']):
             series.format.fill.solid()
             series.format.fill.fore_color.rgb = RGBColor.from_string(_operator_color(matrix, operator).lstrip('#'))
@@ -839,13 +888,32 @@ def _add_family_allocation_donut(slide, matrix: dict) -> None:
         },
     }
     return add_maximum_allocation_donut(
-        slide, matrix, allocations, left=9.7, top=1.75, width=3.0, height=3.2,
+        slide, matrix, allocations, left=9.7, top=1.75, width=3.0, height=5.0,
+    )
+
+
+def _add_category_allocation_donut(slide, matrix: dict) -> None:
+    voice_categories = {'CLASSIC CALLS', 'WHATSAPP CALLS', 'MULTI RAB'}
+    maximums = [
+        sum(row.get('max_points') or 0 for row in matrix['rows']
+            if (row.get('source_kind') in {'voice', 'speech'}
+                if row.get('source_kind') else row['category'] in voice_categories) == is_voice)
+        for is_voice in (True, False)
+    ]
+    allocations = matrix.get('environment_allocations') or {
+        str(matrix['context'].get('environment') or 'All Environments'): {
+            'voice': maximums[0], 'data': maximums[1],
+        },
+    }
+    return add_maximum_allocation_donut(
+        slide, matrix, allocations, left=9.7, top=1.75, width=3.0, height=5.0,
+        category_allocations=category_maximum_allocations(matrix),
     )
 
 
 def _stacked_category_chart(presentation, matrix: dict) -> None:
     """Compare KPI category contributions as one stacked bar per operator."""
-    slide = _slide(presentation, 'Scoring Charts — Stacked', _chart_subtitle(matrix['context']))
+    slide = _slide(presentation, 'Best Network Scoring per Category', _chart_subtitle(matrix['context']))
     categories = list(dict.fromkeys(row['category'] for row in matrix['rows']))
     operators = list(matrix['operators'])
     data = CategoryChartData()
@@ -890,14 +958,14 @@ def _stacked_category_chart(presentation, matrix: dict) -> None:
     )
     chart_group = [chart_shape] + ([category_key] if category_key is not None else [])
     slide.shapes.add_group_shape(chart_group).name = 'Scoring Stacked Operator Chart'
-    _add_family_allocation_donut(slide, matrix)
+    _add_category_allocation_donut(slide, matrix)
     _text(slide, matrix['coverage_note'], 6.95, size=9)
 
 
 def _best_network(presentation, matrices: list[dict]) -> None:
     voice_categories = {'CLASSIC CALLS', 'WHATSAPP CALLS', 'MULTI RAB'}
     for matrix in matrices:
-        slide = _slide(presentation, 'Best Network Scoring', _chart_subtitle(matrix['context']))
+        slide = _slide(presentation, 'Best Network Scoring per Service', _chart_subtitle(matrix['context']))
         hierarchy_columns = matrix.get('hierarchy_columns', [])
         if hierarchy_columns:
             chart_columns = hierarchy_columns
@@ -1003,7 +1071,7 @@ def _add_total_labels(chart) -> None:
 
 def _hierarchy_chart(presentation, matrix: dict) -> None:
     columns = matrix.get('hierarchy_columns', [])
-    slide = _slide(presentation, 'Scoring Charts — Stacked', _chart_subtitle(matrix['context']))
+    slide = _slide(presentation, 'Best Network Scoring per Category', _chart_subtitle(matrix['context']))
     data = CategoryChartData()
     _add_hierarchy_chart_categories(data, columns)
     categories = list(dict.fromkeys(row['category'] for row in matrix['rows']))
@@ -1060,14 +1128,14 @@ def _hierarchy_chart(presentation, matrix: dict) -> None:
     )
     chart_group = [chart_shape] + ([category_key] if category_key is not None else [])
     slide.shapes.add_group_shape(chart_group).name = 'Scoring Chart With Category Key'
-    _add_family_allocation_donut(slide, matrix)
+    _add_category_allocation_donut(slide, matrix)
     _text(slide, matrix['coverage_note'], 7.06, size=8, height=.2)
 
 
 def _hierarchy_category_comparison_chart(presentation, matrix: dict) -> None:
     """Compare per-category hierarchy totals with one solid-color series per leaf."""
     columns = matrix.get('hierarchy_columns', [])
-    slide = _slide(presentation, 'Scoring Charts — Category Comparison', _chart_subtitle(matrix['context']))
+    slide = _slide(presentation, 'Scoring per Category', _chart_subtitle(matrix['context']))
     categories = list(dict.fromkeys(row['category'] for row in matrix['rows']))
     data = CategoryChartData()
     data.categories = categories
@@ -1095,7 +1163,10 @@ def _hierarchy_category_comparison_chart(presentation, matrix: dict) -> None:
     )
     chart = chart_shape.chart
     _format_chart(chart, maximum=maximum)
-    chart.legend.font.size = Pt(min(8, max(5, 70 / max(1, len(columns)) ** .5)))
+    chart.plots[0].gap_width = 120
+    chart.plots[0].overlap = -20
+    chart.plots[0].data_labels.font.size = Pt(8)
+    chart.legend.font.size = Pt(min(11, max(9, 115 / max(1, len(columns)) ** .5)))
     for series, column in zip(chart.series, columns):
         series.format.fill.solid()
         series.format.fill.fore_color.rgb = RGBColor.from_string(
@@ -1321,7 +1392,7 @@ def _score_column_headers(table, plan: list[tuple[dict, str]], levels: list[str]
 
 
 def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap_layout: str = 'end',
-                            show_gap_values: bool = True, title: str = 'Scoring Tables — Expanded') -> None:
+                            show_gap_values: bool = True, title: str = 'Scoring Tables — Drill-down') -> None:
     total_label = ('Weighted score / Average KPI GAP; * incomplete' if show_gap_values
                    else 'Weighted score; * incomplete')
     for matrix in matrices:
@@ -1372,6 +1443,9 @@ def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dic
         for row_offset, metric in enumerate(metrics, header_rows):
             subtotal = metric.get('row_type') == 'category'
             row_color = _CATEGORY_TOTAL if subtotal else None
+            best, worst = (_summary_extreme_columns(
+                metric.get('values', {}), [column for column, kind in plan if kind == 'Score'],
+            ) if matrix.get('table_mode') == 'summary' and subtotal else (set(), set()))
             _cell(table.cell(row_offset, 0), metric['category'], color='#E6F0F7',
                   size=data_font, left=True, bold=subtotal)
             _cell(table.cell(row_offset, 1), metric['kpi'], color=row_color or '#E7E8E9',
@@ -1391,23 +1465,39 @@ def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dic
                           size=numeric_font, bold=True)
                 else:
                     partial = value['points'] is not None and not value['complete']
+                    score_color = (_SUMMARY_BEST_COLOR if leaf_id in best else
+                                   _SUMMARY_WORST_COLOR if leaf_id in worst else
+                                   row_color or value.get('color', _NEUTRAL))
                     _cell(table.cell(row_offset, index), _number(value['points']) + ('*' if partial else ''),
-                          color=row_color or value.get('color', _NEUTRAL), size=numeric_font, bold=subtotal)
+                          color=score_color, size=numeric_font, bold=subtotal)
         total_index = row_count - 1
         for index, label in enumerate(('TOTAL', total_label, '',
                                       _number(total['weight_percent']) + '%', _number(total['max_points']))):
             _cell(table.cell(total_index, index), label, color='#D8DFE4', bold=True, left=index < 2, size=data_font)
+        total_best, total_worst = (_summary_extreme_columns(
+            total.get('values', {}), [column for column, kind in plan if kind == 'Score'],
+        ) if matrix.get('table_mode') == 'summary' else (set(), set()))
         for index, (column, kind) in enumerate(plan, 5):
             value = total['values'][column['id']]
             text = (_gap_number(total, column['id']) if kind == 'GAP' else
                     _number(value['points']) + ('*' if value['points'] is not None and not value['complete'] else ''))
-            _cell(table.cell(total_index, index), text, color='#D8DFE4', size=numeric_font, bold=True)
+            color = (_SUMMARY_BEST_COLOR if kind == 'Score' and column['id'] in total_best else
+                     _SUMMARY_WORST_COLOR if kind == 'Score' and column['id'] in total_worst else '#D8DFE4')
+            _cell(table.cell(total_index, index), text, color=color, size=numeric_font, bold=True)
         _merge_category_cells(table, metrics, header_rows)
-        for index, item in enumerate(legend):
-            legend_table = slide.shapes.add_table(
-                1, 1, Inches(6.8 + index * 1.15), Inches(1.25), Inches(1.1), Inches(.18),
-            ).table
-            _cell(legend_table.cell(0, 0), item.get('band', ''), color=item['color'], size=8)
+        if matrix.get('table_mode') == 'summary':
+            summary_legend = [('Best operator', _SUMMARY_BEST_COLOR), ('Worst operator', _SUMMARY_WORST_COLOR)]
+            for index, (label, color) in enumerate(summary_legend):
+                legend_table = slide.shapes.add_table(
+                    1, 1, Inches(6.8 + index * 1.35), Inches(1.25), Inches(1.3), Inches(.18),
+                ).table
+                _cell(legend_table.cell(0, 0), label, color=color, size=8)
+        else:
+            for index, item in enumerate(legend):
+                legend_table = slide.shapes.add_table(
+                    1, 1, Inches(6.8 + index * 1.15), Inches(1.25), Inches(1.1), Inches(.18),
+                ).table
+                _cell(legend_table.cell(0, 0), item.get('band', ''), color=item['color'], size=8)
         _text(slide, matrix['coverage_note'], 7.27, size=8, height=.18)
 
 
@@ -1656,7 +1746,7 @@ def export_scoring_powerpoint(job: dict[str, Any], result: dict[str, Any], templ
                 _hierarchy_chart(presentation, matrix)
                 _hierarchy_category_comparison_chart(presentation, matrix)
                 for mode, title in (('summary', 'Scoring Tables — Summary'),
-                                    ('expanded', 'Scoring Tables — Expanded')):
+                                    ('expanded', 'Scoring Tables — Drill-down')):
                     _hierarchy_score_tables(
                         presentation, [_table_for_mode(matrix, mode)], views.get('threshold_legend', []),
                         gap_layout=gap_layout, show_gap_values=show_gap_values, title=title,
@@ -1696,7 +1786,7 @@ def export_scoring_powerpoint(job: dict[str, Any], result: dict[str, Any], templ
                 _stacked_category_chart(presentation, matrix)
                 _charts(presentation, [matrix])
                 for mode, title in (('summary', 'Scoring Tables — Summary'),
-                                    ('expanded', 'Scoring Tables — Expanded')):
+                                    ('expanded', 'Scoring Tables — Drill-down')):
                     _score_tables(
                         presentation, [_table_for_mode(matrix, mode)], views.get('threshold_legend', []),
                         gap_layout=gap_layout, show_gap_values=show_gap_values, title=title,
