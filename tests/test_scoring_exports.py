@@ -333,6 +333,7 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
         'Scoring per Category', 'Scoring Tables — Summary', 'Scoring Tables — Drill-down',
     ]
     assert titles[7] == 'GAP Analysis — All vs EE'
+    assert presentation.slides[7].shapes.title.text.split('\n')[1] == 'Campaign: UK_Q2_2026 · Region: North · DriveCity'
     assert all(title.startswith('GAP Analysis') for title in titles[7:])
     for slide in presentation.slides:
         if slide.shapes.title.text.startswith('GAP Analysis') and any(shape.has_table for shape in slide.shapes):

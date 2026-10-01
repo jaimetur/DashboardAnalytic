@@ -150,9 +150,12 @@ def _gap_number(row: dict, operator: str | None = None) -> str:
     return _number(value) + ('*' if value is not None and partial else '')
 
 
-def _scope(context: dict[str, Any]) -> str:
-    return ' · '.join(f'{key.replace("_", " ").title()}: {value}' for key, value in context.items()
-                      if value is not None and str(value).strip())
+def _scope(context: dict[str, Any], *, environment_label: bool = True) -> str:
+    return ' · '.join(
+        str(value) if key == 'environment' and not environment_label
+        else f'{key.replace("_", " ").title()}: {value}'
+        for key, value in context.items() if value is not None and str(value).strip()
+    )
 
 
 def _chart_subtitle(context: dict[str, Any]) -> str:
@@ -1605,7 +1608,7 @@ def _hierarchy_gap_tables(presentation, matrices: list[dict], *, title: str = 'G
         columns = matrix['hierarchy_columns']
         levels = matrix['hierarchy_levels']
         metrics = matrix['rows']
-        slide = _slide(presentation, title, _scope(matrix['context']))
+        slide = _slide(presentation, title, _scope(matrix['context'], environment_label=False))
         header_rows = len(levels) + 1
         row_count = header_rows + len(metrics) + 1
         table_height = 5.0
@@ -1679,7 +1682,8 @@ def _gap_summary_tables(presentation, matrices: list[dict]) -> None:
         for page_index, rows in enumerate(pages):
             page_label = f' · Page {page_index + 1}/{len(pages)}' if len(pages) > 1 else ''
             reference = _operator_label(matrix, matrix['baseline_operator'])
-            slide = _slide(presentation, 'GAP Analysis — All vs ' + reference, _scope(matrix['context']) + page_label)
+            slide = _slide(presentation, 'GAP Analysis — All vs ' + reference,
+                           _scope(matrix['context'], environment_label=False) + page_label)
             table = slide.shapes.add_table(len(rows) + 2, len(operators) + 3, Inches(.65), Inches(1.65),
                                            Inches(12.03), Inches(4.9)).table
             widths = [1.45, 4.05, 1.1] + [5.43 / max(1, len(operators))] * len(operators)
