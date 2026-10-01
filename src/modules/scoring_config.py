@@ -12,40 +12,23 @@ from typing import Any
 
 CONFIGURATION_FORMAT = 'dashboard-analytic-scoring-configuration'
 CONFIGURATION_FORMAT_VERSION = 1
+PROFILE_COLLECTION_VERSION = 2
+MAX_SCORING_METRICS = 256
+MAX_SCORING_PROFILES = 64
+MAX_SCORING_ENVIRONMENTS = 32
+_PROFILE_ID = re.compile(r'[a-z0-9][a-z0-9_-]{0,63}\Z')
 DEFAULT_AGGREGATION_HIERARCHY = ['Operator', 'Vendor', 'Region', 'City', 'Campaign']
 _AGGREGATION_FIELDS = frozenset(DEFAULT_AGGREGATION_HIERARCHY)
 _SCORE_ANCHORS = ('low_score', 'medium_score', 'high_score', 'ultra_score')
-_CONTEXT_NAMES = ('DriveCity', 'DriveConnectionroad')
-_METRIC_CODES = (
-    'C5', 'C6', 'C7', 'C8', 'C9', 'C10', 'C11', 'C12', 'C13', 'C14', 'C15',
-    'C17', 'C18', 'C19', 'C20', 'C21', 'C22', 'C23', 'C24', 'C25', 'C26',
-    'C27', 'C28', 'C29', 'C30', 'C31', 'C32', 'C33', 'C34', 'C35', 'C36', 'C37',
-)
-_VOICE_CODES = frozenset({'C5', 'C6', 'C7', 'C10', 'C11', 'C14', 'C15'})
-_SPEECH_CODES = frozenset({'C8', 'C9', 'C12', 'C13'})
-_LOWER_IS_BETTER_CODES = frozenset({
-    'C6', 'C7', 'C8', 'C10', 'C12', 'C14', 'C18', 'C20', 'C31', 'C34', 'C35', 'C36', 'C37',
-})
-_SOURCE_KIND_BY_CODE = {
-    code: ('voice' if code in _VOICE_CODES else 'speech' if code in _SPEECH_CODES else 'data')
-    for code in _METRIC_CODES
-}
-_DIRECTION_BY_CODE = {
-    code: ('lower_is_better' if code in _LOWER_IS_BETTER_CODES else 'higher_is_better')
-    for code in _METRIC_CODES
-}
 _SCOPE_ENVIRONMENTS = {
     'DriveCity': {'sheet': 'DriveCity', 'g_level_1': 'Drive', 'g_level_2': 'City'},
     'DriveConnectionroad': {
         'sheet': 'DriveConnectionroad', 'g_level_1': 'Drive', 'g_level_2': 'Connectionroad',
     },
+    'Walk': {'sheet': 'Walk', 'g_level_1': 'Walk'},
 }
 _SCOPE_IDENTITIES = {
     'environment_fields': ['G_Level_1', 'G_Level_2'],
-    'environment_mapping': {
-        'Drive + City': 'DriveCity',
-        'Drive + Connectionroad': 'DriveConnectionroad',
-    },
     'tableau_group_key': '[Operator] + "_" + [G_Level_1] + "_" + [G_Level_2]',
     'tableau_aggregate_group_by': ['dataset'],
     'campaign_in_tableau_group_key': False,
@@ -72,6 +55,36 @@ _TOTAL_PACKET_LOST_FORMULA = (
     'IFNULL(Packets_Lost,0) + IFNULL(Packets_Discarded,0) + '
     'IFNULL(INT(Packets_Corrupted),0) + IFNULL(Packets_Not_Sent,0)'
 )
+_LEGACY_KPI_CODES = (
+    'C5', 'C6', 'C7', 'C8', 'C9', 'C10', 'C11', 'C12', 'C13', 'C14', 'C15',
+    'C17', 'C18', 'C19', 'C20', 'C21', 'C22', 'C23', 'C24', 'C25', 'C26',
+    'C27', 'C28', 'C29', 'C30', 'C31', 'C32', 'C33', 'C34', 'C35', 'C36', 'C37',
+)
+_LEGACY_KPI_CODE_MAP = {code: f'K{index}' for index, code in enumerate(_LEGACY_KPI_CODES, start=1)}
+
+
+def _is_legacy_two_environment_configuration(configuration: object) -> bool:
+    """Identify saved snapshots that predate the zero-weight Walk context."""
+    if not isinstance(configuration, dict):
+        return False
+    if configuration.get('next_kpi_number') is not None:
+        return False
+    scope = configuration.get('scope')
+    environments = scope.get('environments') if isinstance(scope, dict) else None
+    metrics = configuration.get('metrics')
+    legacy_names = {'DriveCity', 'DriveConnectionroad'}
+    if not isinstance(environments, dict) or set(environments) != legacy_names or not isinstance(metrics, list):
+        return False
+    if any(
+            isinstance(metric, dict) and isinstance(metric.get('code'), str)
+            and re.fullmatch(r'K\d+', metric['code'], flags=re.IGNORECASE)
+            for metric in metrics):
+        return False
+    return all(
+        isinstance(metric, dict) and isinstance(metric.get('contexts'), dict)
+        and set(metric['contexts']) == legacy_names
+        for metric in metrics
+    )
 
 
 def unwrap_scoring_configuration_payload(payload: object) -> dict[str, Any]:
@@ -106,10 +119,27 @@ def _finite_number(value: Any, label: str, *, minimum: float | None = None,
 def _refresh_weight_totals(configuration: dict[str, Any]) -> None:
     metrics = configuration['metrics']
     environments = configuration['scope']['environments']
+    names = list(environments)
     totals = {
         name: sum(float(metric['contexts'][name]['max_points']) for metric in metrics)
-        for name in _CONTEXT_NAMES
+        for name in names
     }
+    for name, total_points in totals.items():
+        contexts = [metric['contexts'][name] for metric in metrics]
+        if total_points > 0:
+            for context in contexts:
+                context['weight_share'] = context['max_points'] / total_points
+            continue
+        shares = [float(context.get('weight_share', 0.0)) for context in contexts]
+        share_total = sum(shares)
+        if share_total <= 0 and name == 'Walk' and 'DriveCity' in environments:
+            shares = [float(metric['contexts']['DriveCity'].get('weight_share', 0.0)) for metric in metrics]
+            share_total = sum(shares)
+        if share_total <= 0:
+            shares = [1.0] * len(contexts)
+            share_total = len(contexts)
+        for context, share in zip(contexts, shares):
+            context['weight_share'] = share / share_total
     grand_total = sum(totals.values())
     for name, total_points in totals.items():
         environments[name]['total_points'] = total_points
@@ -126,15 +156,43 @@ def _validate_scope(scope: Any) -> None:
         if scope.get(key) != expected:
             raise ValueError(f'Scoring scope field {key} is unsupported.')
     environments = scope.get('environments')
-    if not isinstance(environments, dict) or set(environments) != set(_CONTEXT_NAMES):
-        raise ValueError('Scoring scope must contain exactly the supported environments.')
-    for name, identity in _SCOPE_ENVIRONMENTS.items():
-        environment = environments.get(name)
+    if not isinstance(environments, dict) or not 1 <= len(environments) <= MAX_SCORING_ENVIRONMENTS:
+        raise ValueError('Scoring scope must contain between 1 and 32 environments.')
+    seen_names: set[str] = set()
+    selectors: list[tuple[str, str | None, str]] = []
+    expected_mapping: dict[str, str] = {}
+    for name, environment in environments.items():
+        if (not isinstance(name, str) or not name or name != name.strip()
+                or name.casefold() == 'combined'
+                or len(name) > 80 or name.casefold() in seen_names):
+            raise ValueError('Environment names must be unique trimmed text of at most 80 characters and cannot be Combined.')
+        seen_names.add(name.casefold())
         if not isinstance(environment, dict):
             raise ValueError(f'Scoring scope {name} configuration is missing.')
-        for key, expected in identity.items():
-            if environment.get(key) != expected:
-                raise ValueError(f'Scoring scope {name} field {key} is unsupported.')
+        g_level_1 = environment.get('g_level_1')
+        g_level_2 = environment.get('g_level_2')
+        if not isinstance(g_level_1, str) or not g_level_1.strip() or len(g_level_1) > 128:
+            raise ValueError(f'Scoring scope {name} requires a valid g_level_1 source value.')
+        if 'g_level_2' in environment and (
+                not isinstance(g_level_2, str) or not g_level_2.strip() or len(g_level_2) > 128):
+            raise ValueError(f'Scoring scope {name} g_level_2 must be non-empty text when provided.')
+        if 'sheet' in environment and (
+                not isinstance(environment['sheet'], str) or not environment['sheet'].strip()):
+            raise ValueError(f'Scoring scope {name} sheet must be non-empty text when provided.')
+        selector = (g_level_1.casefold(), g_level_2.casefold() if g_level_2 is not None else None, name)
+        for previous_g1, previous_g2, previous_name in selectors:
+            if (selector[0] == previous_g1
+                    and (selector[1] is None or previous_g2 is None or selector[1] == previous_g2)):
+                raise ValueError(
+                    f'Scoring environments {previous_name} and {name} have overlapping source selectors.',
+                )
+        selectors.append(selector)
+        label = f'{g_level_1} + {g_level_2}' if g_level_2 is not None else g_level_1
+        if label in expected_mapping:
+            raise ValueError('Scoring environment source labels must be unique.')
+        expected_mapping[label] = name
+    if scope.get('environment_mapping') != expected_mapping:
+        raise ValueError('Scoring scope environment_mapping must match its environment source selectors.')
 
 
 def _validate_interpolation(interpolation: Any) -> dict[str, Any]:
@@ -232,21 +290,29 @@ def _validate_formula(formula: Any, kind: str, label: str) -> None:
         return
     if formula == '100 * SUM(totalpacketlost) / SUM(Packets_Sent)' and kind == 'data':
         return
-    ratio = re.fullmatch(rf'100 \* (SUM|COUNT)\((.+)\) / COUNT\(({_FORMULA_IDENTIFIER})\)', formula)
-    if not ratio:
-        raise ValueError(f'{label} formula is unsupported.')
-    numerator = ratio.group(2).strip()
-    numerator_fields = _condition_fields(numerator, kind, label)
-    denominator = ratio.group(3)
-    if denominator not in _FORMULA_FIELDS_BY_KIND[kind]:
-        raise ValueError(f'{label} formula references an unsupported {kind} denominator field.')
-    if not numerator_fields:
-        raise ValueError(f'{label} formula must reference a source field.')
+    ratio = re.fullmatch(
+        rf'(?:100 \* )?(SUM|COUNT)\((.+)\) / (SUM|COUNT)\(({_FORMULA_IDENTIFIER})\)', formula,
+    )
+    if ratio:
+        _numerator_operation, numerator, _denominator_operation, denominator = ratio.groups()
+        numerator = numerator.strip()
+        if numerator not in _FORMULA_FIELDS_BY_KIND[kind]:
+            _condition_fields(numerator, kind, label)
+        if denominator not in _FORMULA_FIELDS_BY_KIND[kind]:
+            raise ValueError(f'{label} formula references an unsupported {kind} denominator field.')
+        return
+    aggregate = re.fullmatch(r'(SUM|COUNT)\((.+)\)', formula)
+    if aggregate:
+        expression = aggregate.group(2).strip()
+        if expression not in _FORMULA_FIELDS_BY_KIND[kind]:
+            _condition_fields(expression, kind, label)
+        return
+    raise ValueError(f'{label} formula is unsupported.')
 
 
 def _validate_calculation(metric: dict[str, Any]) -> dict[str, Any]:
     code = metric['code']
-    kind = _SOURCE_KIND_BY_CODE[code]
+    kind = metric['source_kind']
     calculation = metric.get('calculation')
     label = f'KPI {code} calculation'
     if not isinstance(calculation, dict):
@@ -308,6 +374,9 @@ def _validate_metric_context(metric: dict[str, Any], name: str, interpolation: d
     if not isinstance(context, dict):
         raise ValueError(f'{label} configuration is missing.')
     maximum = _finite_number(context.get('max_points'), f'{label} max_points', minimum=0)
+    weight_share = None
+    if 'weight_share' in context:
+        weight_share = _finite_number(context['weight_share'], f'{label} weight_share', minimum=0, maximum=1)
     thresholds = context.get('thresholds')
     if not isinstance(thresholds, dict) or set(thresholds) != {'low', 'medium', 'high', 'ultra'}:
         raise ValueError(f'{label} thresholds must contain low, medium, high and ultra.')
@@ -338,17 +407,111 @@ def _validate_metric_context(metric: dict[str, Any], name: str, interpolation: d
     }
     if list(validated_mapping.values()) != sorted(validated_mapping.values()):
         raise ValueError(f'{label} score anchors must be monotonic.')
-    return {
+    validated = {
         **copy.deepcopy(context),
         'max_points': maximum,
         'thresholds': normalized_thresholds,
         'score_mapping': validated_mapping,
     }
+    if weight_share is not None:
+        validated['weight_share'] = weight_share
+    return validated
+
+
+def _add_legacy_walk_context(configuration: dict[str, Any]) -> dict[str, Any]:
+    """Add a zero-weight Walk context when loading a two-environment configuration."""
+    normalized = copy.deepcopy(configuration)
+    scope = normalized.get('scope')
+    environments = scope.get('environments') if isinstance(scope, dict) else None
+    if not isinstance(environments, dict):
+        return normalized
+    supported_names = {'DriveCity', 'DriveConnectionroad', 'Walk'}
+    if set(environments) not in (
+        {'DriveCity', 'DriveConnectionroad'},
+        supported_names,
+    ):
+        return normalized
+    was_legacy = (
+        'Walk' not in environments
+        and set(environments) == {'DriveCity', 'DriveConnectionroad'}
+        and not normalized.get('next_kpi_number')
+        and not any(
+            isinstance(metric, dict) and isinstance(metric.get('code'), str)
+            and re.fullmatch(r'K\d+', metric['code'], flags=re.IGNORECASE)
+            for metric in normalized.get('metrics', [])
+        )
+    )
+    if was_legacy:
+        environments['Walk'] = {
+            **copy.deepcopy(_SCOPE_ENVIRONMENTS['Walk']),
+            'total_points': 0.0,
+            'weight_share': 0.0,
+        }
+    mapping = scope.get('environment_mapping')
+    if was_legacy and isinstance(mapping, dict) and mapping == {
+        'Drive + City': 'DriveCity',
+        'Drive + Connectionroad': 'DriveConnectionroad',
+    }:
+        mapping['Walk'] = 'Walk'
+    metrics = normalized.get('metrics')
+    if not isinstance(metrics, list):
+        return normalized
+    for metric in metrics:
+        if not isinstance(metric, dict):
+            continue
+        contexts = metric.get('contexts')
+        if not isinstance(contexts, dict) or 'DriveCity' not in contexts:
+            continue
+        if was_legacy:
+            walk_context = copy.deepcopy(contexts['DriveCity'])
+            walk_context['max_points'] = 0.0
+            walk_context.pop('weight_share', None)
+            contexts['Walk'] = walk_context
+    return normalized
+
+
+def _remap_legacy_kpi_references(value: Any, code_map: dict[str, str]) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: code_map.get(item, item) if key == 'kpi_code' and isinstance(item, str)
+            else _remap_legacy_kpi_references(item, code_map)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_remap_legacy_kpi_references(item, code_map) for item in value]
+    return value
+
+
+def _normalize_legacy_kpi_codes(configuration: dict[str, Any]) -> dict[str, Any]:
+    """Replace source-workbook IDs for an unmigrated profile with stable sequential IDs."""
+    has_sequential_codes = any(
+        re.fullmatch(r'K\d+', metric['code'], flags=re.IGNORECASE)
+        for metric in configuration['metrics']
+    )
+    if has_sequential_codes:
+        return configuration
+    code_map = {
+        metric['code']: _LEGACY_KPI_CODE_MAP[metric['code']]
+        for metric in configuration['metrics'] if metric['code'] in _LEGACY_KPI_CODE_MAP
+    }
+    if not code_map:
+        return configuration
+    for metric in configuration['metrics']:
+        if metric['code'] in code_map:
+            metric['code'] = code_map[metric['code']]
+    configuration['gap_priority'] = [code_map.get(code, code) for code in configuration['gap_priority']]
+    configuration = _remap_legacy_kpi_references(configuration, code_map)
+    configuration['next_kpi_number'] = max(
+        configuration.get('next_kpi_number', 1),
+        max((int(match.group(1)) for code in code_map.values()
+             if (match := re.fullmatch(r'K(\d+)', code))), default=0) + 1,
+    )
+    return validate_scoring_configuration(configuration)
 
 
 def validate_scoring_configuration(payload: object) -> dict[str, Any]:
     """Validate a self-contained workspace configuration without reading seed files."""
-    configuration = unwrap_scoring_configuration_payload(payload)
+    configuration = _add_legacy_walk_context(unwrap_scoring_configuration_payload(payload))
     required = {'version', 'scope', 'interpolation', 'metrics'}
     if not required <= set(configuration):
         raise ValueError('Scoring configuration must include version, scope, interpolation and metrics.')
@@ -366,17 +529,27 @@ def validate_scoring_configuration(payload: object) -> dict[str, Any]:
         )
     _validate_scope(configuration.get('scope'))
     interpolation = _validate_interpolation(configuration.get('interpolation'))
+    context_names = list(configuration['scope']['environments'])
     supplied_metrics = configuration.get('metrics')
-    if not isinstance(supplied_metrics, list) or len(supplied_metrics) != len(_METRIC_CODES):
-        raise ValueError(f'Scoring configuration must contain all {len(_METRIC_CODES)} supported KPIs.')
+    if not isinstance(supplied_metrics, list) or not 1 <= len(supplied_metrics) <= MAX_SCORING_METRICS:
+        raise ValueError(f'Scoring configuration must contain between 1 and {MAX_SCORING_METRICS} KPIs.')
     validated_metrics: list[dict[str, Any]] = []
-    for code, supplied in zip(_METRIC_CODES, supplied_metrics):
-        if not isinstance(supplied, dict) or supplied.get('code') != code:
-            raise ValueError('KPI codes and their supported source order cannot be changed.')
-        kind = _SOURCE_KIND_BY_CODE[code]
-        direction = _DIRECTION_BY_CODE[code]
-        if supplied.get('source_kind') != kind or supplied.get('direction') != direction:
-            raise ValueError(f'KPI {code} source_kind or direction does not match its supported identity.')
+    codes: list[str] = []
+    for supplied in supplied_metrics:
+        if not isinstance(supplied, dict):
+            raise ValueError('Each KPI must be an object.')
+        code = supplied.get('code')
+        if not isinstance(code, str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,31}', code):
+            raise ValueError('KPI code must start with a letter and contain at most 32 letters, numbers, underscores or hyphens.')
+        if code.casefold() in {existing.casefold() for existing in codes}:
+            raise ValueError(f'KPI code {code} is duplicated.')
+        codes.append(code)
+        kind = supplied.get('source_kind')
+        if not isinstance(kind, str) or kind not in _FORMULA_FIELDS_BY_KIND:
+            raise ValueError(f'KPI {code} source_kind must be data, voice or speech.')
+        direction = supplied.get('direction')
+        if not isinstance(direction, str) or direction not in {'higher_is_better', 'lower_is_better'}:
+            raise ValueError(f'KPI {code} direction must be higher_is_better or lower_is_better.')
         for key in ('category', 'kpi'):
             value = supplied.get(key)
             if not isinstance(value, str) or not value.strip():
@@ -386,8 +559,8 @@ def validate_scoring_configuration(payload: object) -> dict[str, Any]:
             raise ValueError(f'KPI {code} kpi_type must be non-empty text.')
         calculation = _validate_calculation(supplied)
         contexts = supplied.get('contexts')
-        if not isinstance(contexts, dict) or set(contexts) != set(_CONTEXT_NAMES):
-            raise ValueError(f'KPI {code} must contain both supported scoring environments.')
+        if not isinstance(contexts, dict) or set(contexts) != set(context_names):
+            raise ValueError(f'KPI {code} must contain exactly one context per configured environment.')
         metric = copy.deepcopy(supplied)
         metric.update({
             'code': code,
@@ -397,25 +570,123 @@ def validate_scoring_configuration(payload: object) -> dict[str, Any]:
             'calculation': calculation,
             'contexts': {
                 name: _validate_metric_context({**supplied, 'contexts': contexts}, name, interpolation)
-                for name in _CONTEXT_NAMES
+                for name in context_names
             },
         })
         validated_metrics.append(metric)
-    priority = configuration.get('gap_priority', list(_METRIC_CODES))
+    priority = configuration.get('gap_priority', list(codes))
     if (not isinstance(priority, list) or any(not isinstance(code, str) for code in priority)
-            or len(priority) != len(_METRIC_CODES) or len(set(priority)) != len(priority)
-            or set(priority) != set(_METRIC_CODES)):
-        raise ValueError('GAP priority must list every supported KPI code exactly once.')
+            or len(priority) != len(set(priority))):
+        raise ValueError('GAP priority must list unique KPI codes from this configuration.')
     validated = copy.deepcopy(configuration)
     validated['aggregation_hierarchy'] = list(aggregation_hierarchy)
     validated['metrics'] = validated_metrics
-    validated['gap_priority'] = list(priority)
+    highest_kpi_number = max(
+        (int(match.group(1)) for code in codes
+         if (match := re.fullmatch(r'K(\d+)', code, flags=re.IGNORECASE))),
+        default=0,
+    )
+    requested_next_number = configuration.get('next_kpi_number', 1)
+    if (isinstance(requested_next_number, bool) or not isinstance(requested_next_number, int)
+            or requested_next_number < 1):
+        raise ValueError('next_kpi_number must be a positive integer.')
+    validated['next_kpi_number'] = max(highest_kpi_number + 1, requested_next_number)
+    known_codes = set(codes)
+    normalized_priority = [code for code in priority if code in known_codes]
+    prioritized = set(normalized_priority)
+    validated['gap_priority'] = [
+        *normalized_priority, *(code for code in codes if code not in prioritized),
+    ]
     _refresh_weight_totals(validated)
     if validated['scope']['total_max_points'] <= 0:
         raise ValueError('At least one KPI weight must be greater than zero.')
-    if any(validated['scope']['environments'][name]['total_points'] <= 0 for name in _CONTEXT_NAMES):
-        raise ValueError('Each scoring environment must have positive maximum points.')
     return validated
+
+
+def default_scoring_profile(configuration: object) -> dict[str, Any]:
+    """Create a stable, named profile when reading a legacy single configuration."""
+    validated = _normalize_legacy_kpi_codes(validate_scoring_configuration(configuration))
+    year_match = re.search(r'20\d{2}', validated['version'])
+    year = year_match.group(0) if year_match else None
+    identifier = f'netcheck-{year}' if year else 'netcheck-default'
+    name = f'NetCheck {year}' if year else 'NetCheck Configuration'
+    return {'id': identifier, 'name': name, 'configuration': validated}
+
+
+def validate_scoring_profiles(payload: object) -> dict[str, Any]:
+    """Validate a complete workspace collection of named scoring profiles."""
+    if not isinstance(payload, dict):
+        raise ValueError('Scoring profiles must be an object.')
+    active_profile_id = payload.get('active_profile_id')
+    profiles = payload.get('profiles')
+    if not isinstance(profiles, list) or not 1 <= len(profiles) <= MAX_SCORING_PROFILES:
+        raise ValueError(f'Scoring profiles must contain between 1 and {MAX_SCORING_PROFILES} profiles.')
+    normalized_profiles: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    seen_names: set[str] = set()
+    for profile in profiles:
+        if not isinstance(profile, dict) or set(profile) != {'id', 'name', 'configuration'}:
+            raise ValueError('Each scoring profile must contain only id, name and configuration.')
+        profile_id = profile.get('id')
+        if not isinstance(profile_id, str) or not _PROFILE_ID.fullmatch(profile_id):
+            raise ValueError('Scoring profile id must be a lowercase identifier of up to 64 characters.')
+        if profile_id in seen_ids:
+            raise ValueError(f'Scoring profile id {profile_id} is duplicated.')
+        seen_ids.add(profile_id)
+        name = profile.get('name')
+        if not isinstance(name, str) or not name.strip() or len(name.strip()) > 80:
+            raise ValueError('Scoring profile name must contain between 1 and 80 characters.')
+        normalized_name = name.strip()
+        if normalized_name.casefold() in seen_names:
+            raise ValueError(f'Scoring profile name {normalized_name} is duplicated.')
+        seen_names.add(normalized_name.casefold())
+        configuration = _normalize_legacy_kpi_codes(
+            validate_scoring_configuration(profile.get('configuration')),
+        )
+        normalized_profiles.append({
+            'id': profile_id,
+            'name': normalized_name,
+            'configuration': configuration,
+        })
+    if not isinstance(active_profile_id, str) or active_profile_id not in seen_ids:
+        raise ValueError('The active scoring profile must reference an existing profile.')
+    return {'active_profile_id': active_profile_id, 'profiles': normalized_profiles}
+
+
+def unwrap_scoring_profiles_payload(payload: object) -> dict[str, Any] | None:
+    """Unwrap current profile collections and migrate supported legacy single-profile files."""
+    if not isinstance(payload, dict):
+        raise ValueError('Scoring configuration must be an object.')
+    if payload.get('format') == CONFIGURATION_FORMAT:
+        version = payload.get('version')
+        if isinstance(version, bool) or not isinstance(version, int):
+            raise ValueError('Unsupported scoring configuration file version.')
+        if version == CONFIGURATION_FORMAT_VERSION:
+            if 'configuration' not in payload:
+                raise ValueError('This file does not contain a scoring configuration to import.')
+            if payload.get('configuration') is None:
+                return None
+            profile = default_scoring_profile(unwrap_scoring_configuration_payload(payload))
+            return validate_scoring_profiles({'active_profile_id': profile['id'], 'profiles': [profile]})
+        if version != PROFILE_COLLECTION_VERSION:
+            raise ValueError('Unsupported scoring configuration file version.')
+        if 'profiles' not in payload:
+            raise ValueError('This file does not contain a scoring profile collection.')
+        if payload.get('profiles') is None:
+            if payload.get('active_profile_id') is not None:
+                raise ValueError('An empty scoring profile collection cannot have an active profile.')
+            return None
+        return validate_scoring_profiles({
+            'active_profile_id': payload.get('active_profile_id'),
+            'profiles': payload.get('profiles'),
+        })
+    if 'profiles' in payload or 'active_profile_id' in payload:
+        return validate_scoring_profiles(payload)
+    profile = default_scoring_profile(payload)
+    return validate_scoring_profiles({
+        'active_profile_id': profile['id'],
+        'profiles': [profile],
+    })
 
 
 def _normalize_initial_configuration(payload: dict[str, Any]) -> dict[str, Any]:
@@ -462,6 +733,7 @@ def default_scoring_configuration(path: Path | str) -> dict[str, Any]:
 
 def _hash_projection(configuration: dict[str, Any]) -> dict[str, Any]:
     projection = copy.deepcopy(configuration)
+    projection.pop('next_kpi_number', None)
     for key in _PROVENANCE_KEYS:
         projection.pop(key, None)
     interpolation = projection.get('interpolation')

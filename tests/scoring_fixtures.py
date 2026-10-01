@@ -1052,20 +1052,40 @@ _INITIAL_SCORING_CONFIGURATION = {'version': '2026Q2',
 def scoring_configuration() -> dict:
     """Return an independent, validated scoring seed fixture for tests."""
     configuration = deepcopy(_INITIAL_SCORING_CONFIGURATION)
+    legacy_codes = [metric['code'] for metric in configuration['metrics']]
+    code_map = {code: f'K{index}' for index, code in enumerate(legacy_codes, start=1)}
     for metric in configuration['metrics']:
+        metric['code'] = code_map[metric['code']]
         for context in metric['contexts'].values():
             ultra = context['thresholds'].get('ultra')
             if isinstance(ultra, dict) and ultra.get('rule') == 'fixed':
                 context['thresholds']['ultra'] = ultra['value']
+    configuration['scope']['environments']['Walk'] = {
+        'sheet': 'Walk', 'g_level_1': 'Walk',
+    }
+    configuration['scope']['environment_mapping']['Walk'] = 'Walk'
+    for metric in configuration['metrics']:
+        walk = deepcopy(metric['contexts']['DriveCity'])
+        walk['max_points'] = 0
+        walk.pop('weight_share', None)
+        metric['contexts']['Walk'] = walk
+    configuration['gap_priority'] = [code_map.get(code, code) for code in configuration.get('gap_priority', legacy_codes)]
     examples = configuration.get('validation_examples', {})
     samples = [examples.get('mapping_workbook_sample'), *examples.get('mapping_workbook_samples', [])]
     for sample in filter(None, samples):
+        if isinstance(sample.get('kpi_code'), str):
+            sample['kpi_code'] = code_map.get(sample['kpi_code'], sample['kpi_code'])
         if 'thresholds' not in sample:
             continue
         ultra = sample['thresholds'].get('ultra')
         if isinstance(ultra, dict) and ultra.get('rule') == 'fixed':
             sample['thresholds']['ultra'] = ultra['value']
     return validate_scoring_configuration(configuration)
+
+
+def legacy_scoring_configuration() -> dict:
+    """Return the original C-coded two-environment configuration for migration tests."""
+    return deepcopy(_INITIAL_SCORING_CONFIGURATION)
 
 
 def load_initial_scoring_configuration() -> dict:

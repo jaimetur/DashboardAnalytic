@@ -11,6 +11,7 @@
   const datasetKindOrder = ['data', 'voice', 'speech'];
   const datasetKindLabels = {data: 'Data', voice: 'Voice', speech: 'Speech'};
   const scoringConfigElement = root.querySelector('[data-scoring-config]');
+  const scoringProfileSelect = root.querySelector('[data-scoring-profile]');
   let scoringConfig = {};
   try {
     scoringConfig = JSON.parse(scoringConfigElement?.textContent || '{}');
@@ -22,12 +23,23 @@
     ['Operator', 'operators'], ['Vendor', 'vendors'], ['Region', 'regions'],
     ['City', 'cities'], ['Campaign', 'campaigns'],
   ]);
-  const configuredHierarchy = Array.isArray(scoringConfig.aggregation_hierarchy)
-    ? scoringConfig.aggregation_hierarchy.map(value => String(value)) : [];
-  const hierarchyIsValid = configuredHierarchy.length === defaultHierarchy.length
-    && new Set(configuredHierarchy).size === defaultHierarchy.length
-    && configuredHierarchy.every(level => catalogueKeyByLevel.has(level));
-  const contextFilterDefinitions = (hierarchyIsValid ? configuredHierarchy : defaultHierarchy)
+  const validHierarchy = hierarchy => Array.isArray(hierarchy)
+    && hierarchy.length === defaultHierarchy.length
+    && new Set(hierarchy).size === defaultHierarchy.length
+    && hierarchy.every(level => catalogueKeyByLevel.has(level))
+    ? hierarchy.map(String) : null;
+  const scoringProfiles = (Array.isArray(scoringConfig.scoring_profiles) ? scoringConfig.scoring_profiles : [])
+    .filter(profile => profile && typeof profile.id === 'string' && typeof profile.name === 'string')
+    .map(profile => ({...profile, aggregation_hierarchy: validHierarchy(profile.aggregation_hierarchy)}))
+    .filter(profile => profile.aggregation_hierarchy);
+  const scoringProfileById = new Map(scoringProfiles.map(profile => [profile.id, profile]));
+  const activeProfileId = String(scoringConfig.active_profile_id || '');
+  const initialProfile = scoringProfileById.get(scoringProfileSelect?.value)
+    || scoringProfileById.get(activeProfileId);
+  const configuredHierarchy = validHierarchy(initialProfile?.aggregation_hierarchy)
+    || validHierarchy(scoringConfig.aggregation_hierarchy) || defaultHierarchy;
+  let currentHierarchy = [...configuredHierarchy];
+  let contextFilterDefinitions = currentHierarchy
     .map(key => ({key, catalogueKey: catalogueKeyByLevel.get(key)}));
   const contextFilterSelects = new Map(contextFilterDefinitions.map(({key}) => [
     key, root.querySelector(`[data-scoring-context-filter="${key}"]`),
@@ -47,6 +59,9 @@
     return [String(option.querySelector('[data-dataset-id]')?.value || ''), catalogue];
   }));
   const aggregationInputs = [...root.querySelectorAll('[data-aggregation-level]')];
+  const aggregationInputByLevel = new Map(aggregationInputs.map(input => [input.value, input]));
+  const contextFilterGrid = root.querySelector('[data-scoring-context-filters]');
+  const aggregationLevelsContainer = root.querySelector('[data-aggregation-levels]');
   const baselineInput = root.querySelector('[data-baseline-operator]');
   const calculateButton = root.querySelector('[data-calculate-scoring]');
   const recalculateButton = root.querySelector('[data-recalculate-scoring]');
@@ -63,6 +78,8 @@
   const expandedChartMeta = root.querySelector('[data-scoring-chart-meta]');
   const expandedChartClose = root.querySelector('[data-scoring-chart-close]');
   const showKpiValuesToggle = root.querySelector('[data-show-kpi-values]');
+  const tableModeSelect = root.querySelector('[data-scoring-table-mode]');
+  const gapLayoutSelect = root.querySelector('[data-scoring-gap-layout]');
   const resultPanes = [...root.querySelectorAll('[data-result-pane]')];
   const resultCache = new Map();
   const contextSelections = new Map();
@@ -71,7 +88,8 @@
   let jobs = [];
   let selectedJobId = null;
   let selectedJob = null;
-  let selectedEnvironment = null;
+  let selectedEnvironment = 'all';
+  let currentEffectiveEnvironment = null;
   let currentResults = null;
   let currentResultsJobId = null;
   let activeResultTab = root.querySelector('[data-result-tab][aria-selected="true"]')?.dataset.resultTab || 'scoring';
@@ -99,7 +117,7 @@
   };
   const isActive = job => ['queued', 'processing'].includes(normalizeStatus(job));
   const isComplete = job => normalizeStatus(job) === 'completed';
-  const selectedLevels = () => aggregationInputs.filter(input => input.checked).map(input => input.value);
+  const selectedLevels = () => currentHierarchy.filter(level => aggregationInputByLevel.get(level)?.checked);
   const selectedDatasetIds = () => datasetInputs.filter(input => input.checked && !input.closest('[data-dataset-option]')?.hidden).map(input => input.value);
 
   function uniqueCatalogueValues(values) {
@@ -202,6 +220,25 @@
       select.dispatchEvent(new Event('multiselect:options-updated'));
       if (key === 'Operator') decorateOperatorOptions(select);
     }
+  }
+
+  function applyProfileHierarchy(hierarchy) {
+    const ordered = validHierarchy(hierarchy);
+    if (!ordered) return false;
+    const selected = new Set(aggregationInputs.filter(input => input.checked).map(input => input.value));
+    currentHierarchy = ordered;
+    contextFilterDefinitions = ordered.map(key => ({key, catalogueKey: catalogueKeyByLevel.get(key)}));
+    for (const level of ordered) {
+      const filter = contextFilterSelects.get(level);
+      const filterLabel = filter?.closest('label');
+      if (filterLabel && contextFilterGrid) contextFilterGrid.append(filterLabel);
+      const input = aggregationInputByLevel.get(level);
+      const levelLabel = input?.closest('label');
+      if (levelLabel && aggregationLevelsContainer) aggregationLevelsContainer.append(levelLabel);
+      if (input) input.checked = level === 'Operator' || selected.has(level);
+    }
+    updateSelection();
+    return true;
   }
 
   function selectedContextFilters() {
@@ -399,6 +436,13 @@
       const baseline = valueOf(job, ['baseline_operator'], 'EE');
       meta.textContent = `${formatDate(valueOf(job, ['created_at', 'submitted_at', 'started_at'], ''))} · ${jobLevels(job)} · ${mode} · GAP baseline ${baseline}`;
       button.append(meta);
+      const profileName = valueOf(job, ['scoring_profile_name', 'profile_name'], '');
+      if (profileName) {
+        const profileMeta = document.createElement('span');
+        profileMeta.className = 'scoring-job-meta';
+        profileMeta.textContent = `Scoring methodology: ${profileName}`;
+        button.append(profileMeta);
+      }
       const campaignMeta = document.createElement('span');
       campaignMeta.className = 'scoring-job-meta';
       campaignMeta.textContent = `Campaigns: ${jobCampaigns(job).join(', ')}`;
@@ -450,11 +494,49 @@
     return body || {};
   }
 
+  function selectedTableMode() {
+    return tableModeSelect?.value === 'summary' ? 'summary' : 'expanded';
+  }
+
+  function selectedGapLayout() {
+    return gapLayoutSelect?.value === 'adjacent' ? 'adjacent' : 'end';
+  }
+
+  function appendScoreGapCells(operators, nonBaseline, layout, appendScore, appendGap) {
+    if (layout === 'adjacent') {
+      for (const [operatorIndex, operator] of operators.entries()) {
+        appendScore(operator, operatorIndex);
+        if (nonBaseline.includes(operator)) appendGap(operator);
+      }
+      return;
+    }
+    for (const [operatorIndex, operator] of operators.entries()) appendScore(operator, operatorIndex);
+    for (const operator of nonBaseline) appendGap(operator);
+  }
+
+  function tableForSelectedMode(tableData) {
+    if (!tableData || typeof tableData !== 'object') return tableData;
+    const mode = selectedTableMode();
+    const rowsKey = mode === 'summary' ? 'category_rows' : 'expanded_rows';
+    const totalKey = mode === 'summary' ? 'category_total' : 'expanded_total';
+    if (!Array.isArray(tableData[rowsKey])) return tableData;
+    const total = tableData[totalKey] && typeof tableData[totalKey] === 'object'
+      ? tableData[totalKey] : tableData.total;
+    return {
+      ...tableData,
+      rows: tableData[rowsKey],
+      total,
+      ...(total && Object.hasOwn(total, 'gap_points') ? {total_gap_points: total.gap_points} : {}),
+    };
+  }
+
   function setExportLinks(jobId, enabled) {
     for (const [kind, selector] of [['scoring', '[data-export-scoring]'], ['gap', '[data-export-gap]'], ['ppt', '[data-export-ppt]']]) {
       const link = root.querySelector(selector);
       link.hidden = !enabled;
-      link.href = enabled ? `${exportBase}/${encodeURIComponent(jobId)}/export/${kind}` : '#';
+      link.href = enabled
+        ? `${exportBase}/${encodeURIComponent(jobId)}/export/${kind}?table_mode=${encodeURIComponent(selectedTableMode())}&gap_layout=${encodeURIComponent(selectedGapLayout())}&environment=${encodeURIComponent(selectedEnvironment || 'all')}`
+        : '#';
     }
   }
 
@@ -548,9 +630,9 @@
     if (!context || typeof context !== 'object') return '';
     const preferred = ['campaign', 'region', 'city', 'vendor', 'dataset_type', 'environment'];
     const entries = preferred.filter(key => context[key] !== null && context[key] !== undefined && context[key] !== '')
-      .map(key => [key, context[key]]);
+      .map(key => [key, key === 'environment' ? environmentLabel(String(context[key])) : context[key]]);
     for (const [key, value] of Object.entries(context)) {
-      if (!preferred.includes(key) && value !== null && value !== undefined && value !== '') entries.push([key, value]);
+      if (!preferred.includes(key) && value !== null && value !== undefined && value !== '') entries.push([key, key === 'environment' ? environmentLabel(String(value)) : value]);
     }
     return entries.map(([key, value]) => `${humanizeKey(key)}: ${value}`).join(' · ');
   }
@@ -567,9 +649,9 @@
     const context = table?.context && typeof table.context === 'object' ? table.context : {};
     const preferred = ['campaign', 'region', 'city', 'vendor', 'dataset_type', 'environment'];
     const entries = preferred.filter(key => context[key] !== null && context[key] !== undefined && context[key] !== '')
-      .map(key => [key, context[key]]);
+      .map(key => [key, key === 'environment' ? environmentLabel(String(context[key])) : context[key]]);
     for (const [key, value] of Object.entries(context)) {
-      if (!preferred.includes(key) && value !== null && value !== undefined && value !== '') entries.push([key, value]);
+      if (!preferred.includes(key) && value !== null && value !== undefined && value !== '') entries.push([key, key === 'environment' ? environmentLabel(String(value)) : value]);
     }
     if (entries.length) {
       const chips = document.createElement('div');
@@ -830,7 +912,8 @@
     const operators = Array.isArray(tableData?.operators) ? tableData.operators.map(String) : [];
     const baseline = String(tableData?.baseline_operator || '');
     const baselineLabel = operatorPresentation(tableData, baseline).label;
-    const nonBaseline = operators.filter(operator => !baseline || operator.toLowerCase() !== baseline.toLowerCase());
+    const nonBaseline = operators.filter(operator => !isReferenceOperator(tableData, operator));
+    const gapLayout = selectedGapLayout();
     const wrapper = document.createElement('div');
     wrapper.className = 'scoring-matrix-wrap';
     const table = document.createElement('table');
@@ -856,7 +939,7 @@
       group.textContent = 'KPI Value';
       header.append(group);
     }
-    if (operators.length) {
+    if (operators.length && gapLayout === 'end') {
       const group = document.createElement('th');
       group.scope = 'colgroup';
       group.colSpan = operators.length;
@@ -864,7 +947,18 @@
       group.textContent = 'Score';
       header.append(group);
     }
-    if (nonBaseline.length) {
+    if (gapLayout === 'adjacent') {
+      for (const operator of operators) {
+        const presentation = operatorPresentation(tableData, operator);
+        const isCompared = nonBaseline.includes(operator);
+        const group = document.createElement('th');
+        group.scope = 'colgroup';
+        group.colSpan = isCompared ? 2 : 1;
+        group.className = `scoring-column-group ${isCompared ? 'scoring-adjacent-group' : 'scoring-score-group'}`;
+        group.textContent = `${presentation.label} · ${isCompared ? 'Score / GAP' : 'Score'}`;
+        header.append(group);
+      }
+    } else if (nonBaseline.length) {
       const group = document.createElement('th');
       group.scope = 'colgroup';
       group.colSpan = nonBaseline.length;
@@ -890,15 +984,15 @@
         operatorHeader.append(th);
       }
     }
-    operators.forEach((operator, index) => {
+    const appendScoreHeader = (operator, index) => {
       const th = document.createElement('th');
       th.scope = 'col';
       th.dataset.column = 'score';
       const presentation = operatorPresentation(tableData, operator);
-      th.textContent = presentation.label;
+      th.textContent = gapLayout === 'adjacent' ? 'Score' : presentation.label;
       const operatorTone = operator.toLowerCase().replace(/[^a-z0-9]+/g, '-');
       th.className = `scoring-operator-header scoring-tone-${index % 5} scoring-operator-${operatorTone}`;
-      th.title = `${operator} weighted KPI points`;
+      th.title = `${presentation.label} (${operator}) weighted KPI points`;
       if (presentation.color) {
         th.style.backgroundColor = presentation.color;
         th.style.color = readableTextColor(presentation.color);
@@ -906,17 +1000,26 @@
       }
       if (isReferenceOperator(tableData, operator)) markReferenceHeader(th);
       operatorHeader.append(th);
-    });
-    nonBaseline.forEach(operator => {
+    };
+    const appendGapHeader = operator => {
       const th = document.createElement('th');
       th.scope = 'col';
       th.className = 'scoring-gap-header';
       th.dataset.column = 'gap';
       const operatorLabel = operatorPresentation(tableData, operator).label;
-      th.textContent = `${operatorLabel} − ${baselineLabel}`;
+      th.textContent = gapLayout === 'adjacent' ? 'GAP' : `${operatorLabel} − ${baselineLabel}`;
       th.title = `${operator} weighted points minus baseline ${baseline} weighted points`;
       operatorHeader.append(th);
-    });
+    };
+    if (gapLayout === 'adjacent') {
+      operators.forEach((operator, index) => {
+        appendScoreHeader(operator, index);
+        if (nonBaseline.includes(operator)) appendGapHeader(operator);
+      });
+    } else {
+      operators.forEach(appendScoreHeader);
+      nonBaseline.forEach(appendGapHeader);
+    }
     thead.append(header, operatorHeader);
 
     const tbody = document.createElement('tbody');
@@ -930,6 +1033,10 @@
     }
     rows.forEach((item, index) => {
       const tr = document.createElement('tr');
+      if (item?.row_type === 'category') {
+        tr.classList.add('scoring-category-subtotal');
+        tr.style.fontWeight = '700';
+      }
       const run = categoryRuns.get(index);
       if (run) {
         const category = document.createElement('td');
@@ -972,12 +1079,14 @@
           tr.append(cell);
         }
       }
-      for (const [operatorIndex, operator] of operators.entries()) {
-        addMatrixScoreCell(tr, operatorValue(values, operator), `scoring-tone-${operatorIndex % 5}`);
-      }
       const gaps = item?.gaps && typeof item.gaps === 'object' ? item.gaps : {};
       const gapColors = item?.gap_colors && typeof item.gap_colors === 'object' ? item.gap_colors : {};
-      for (const operator of nonBaseline) addMatrixGapCell(tr, firstValue(gaps, [operator], null), firstValue(gapColors, [operator], ''));
+      appendScoreGapCells(operators, nonBaseline, gapLayout,
+        (operator, operatorIndex) => addMatrixScoreCell(
+          tr, operatorValue(values, operator), `scoring-tone-${operatorIndex % 5}`, item?.row_type === 'category',
+        ),
+        operator => addMatrixGapCell(tr, firstValue(gaps, [operator], null), firstValue(gapColors, [operator], '')),
+      );
       tbody.append(tr);
     });
 
@@ -993,7 +1102,7 @@
       row.append(category);
       const label = document.createElement('td');
       label.dataset.column = 'kpi';
-      label.textContent = 'Weighted score';
+      label.textContent = total.gap_label ? `Weighted score · ${total.gap_label}` : 'Weighted score';
       row.append(label);
       const weight = document.createElement('td');
       weight.dataset.numeric = 'true';
@@ -1016,10 +1125,12 @@
           row.append(cell);
         });
       }
-      operators.forEach(operator => addMatrixScoreCell(row, operatorValue(values, operator), '', true));
       const gaps = total.gaps && typeof total.gaps === 'object' ? total.gaps : {};
       const gapColors = total.gap_colors && typeof total.gap_colors === 'object' ? total.gap_colors : {};
-      nonBaseline.forEach(operator => addMatrixGapCell(row, firstValue(gaps, [operator], null), firstValue(gapColors, [operator], '')));
+      appendScoreGapCells(operators, nonBaseline, gapLayout,
+        operator => addMatrixScoreCell(row, operatorValue(values, operator), '', true),
+        operator => addMatrixGapCell(row, firstValue(gaps, [operator], null), firstValue(gapColors, [operator], '')),
+      );
       tfoot.append(row);
       table.append(tfoot);
     }
@@ -1237,10 +1348,20 @@
     const allColumns = hierarchyColumnEntries(tableData);
     const nonBaseline = allColumns.filter(column => !hierarchyColumnIsReference(column));
     const showKpiValues = Boolean(showKpiValuesToggle?.checked);
+    const gapLayout = selectedGapLayout();
     const blocks = [
       ...(showKpiValues ? [{label: 'KPI Value', className: 'scoring-kpi-value-group', headerClass: 'scoring-kpi-value-header', column: 'kpi-value', columns: allColumns}] : []),
-      {label: 'Score', className: 'scoring-score-group', headerClass: 'scoring-score-header', column: 'score', columns: allColumns},
-      {label: 'GAP', className: 'scoring-gap-group', headerClass: 'scoring-gap-header', column: 'gap', columns: nonBaseline},
+      ...(gapLayout === 'adjacent'
+        ? allColumns.flatMap(column => [
+          {label: 'Score', className: 'scoring-score-group', headerClass: 'scoring-score-header', column: 'score', columns: [column]},
+          ...(!hierarchyColumnIsReference(column)
+            ? [{label: 'GAP', className: 'scoring-gap-group', headerClass: 'scoring-gap-header', column: 'gap', columns: [column]}]
+            : []),
+        ])
+        : [
+          {label: 'Score', className: 'scoring-score-group', headerClass: 'scoring-score-header', column: 'score', columns: allColumns},
+          {label: 'GAP', className: 'scoring-gap-group', headerClass: 'scoring-gap-header', column: 'gap', columns: nonBaseline},
+        ]),
     ];
     const wrapper = document.createElement('div');
     wrapper.className = 'scoring-matrix-wrap';
@@ -1254,6 +1375,10 @@
     for (let index = 0; index < rows.length; index += 1) {
       const item = rows[index];
       const row = document.createElement('tr');
+      if (item?.row_type === 'category') {
+        row.classList.add('scoring-category-subtotal');
+        row.style.fontWeight = '700';
+      }
       const category = String(item?.category || 'Other');
       if (index === 0 || String(rows[index - 1]?.category || 'Other') !== category) {
         let span = 1;
@@ -1296,10 +1421,14 @@
           row.append(cell);
         }
       }
-      allColumns.forEach((column, columnIndex) => addMatrixScoreCell(row, operatorValue(values, column.id), `scoring-tone-${columnIndex % 5}`));
       const gaps = item?.gaps && typeof item.gaps === 'object' ? item.gaps : {};
       const gapColors = item?.gap_colors && typeof item.gap_colors === 'object' ? item.gap_colors : {};
-      for (const column of nonBaseline) addMatrixGapCell(row, firstValue(gaps, [column.id], null), firstValue(gapColors, [column.id], ''));
+      appendScoreGapCells(allColumns, nonBaseline, gapLayout,
+        (column, columnIndex) => addMatrixScoreCell(
+          row, operatorValue(values, column.id), `scoring-tone-${columnIndex % 5}`, item?.row_type === 'category',
+        ),
+        column => addMatrixGapCell(row, firstValue(gaps, [column.id], null), firstValue(gapColors, [column.id], '')),
+      );
       tbody.append(row);
     }
     table.append(thead, tbody);
@@ -1314,7 +1443,7 @@
       row.append(category);
       const label = document.createElement('td');
       label.dataset.column = 'kpi';
-      label.textContent = 'Weighted score';
+      label.textContent = total.gap_label ? `Weighted score · ${total.gap_label}` : 'Weighted score';
       row.append(label);
       const weight = document.createElement('td');
       weight.dataset.numeric = 'true';
@@ -1337,10 +1466,12 @@
           row.append(cell);
         });
       }
-      allColumns.forEach(column => addMatrixScoreCell(row, operatorValue(values, column.id), '', true));
       const gaps = total.gaps && typeof total.gaps === 'object' ? total.gaps : {};
       const gapColors = total.gap_colors && typeof total.gap_colors === 'object' ? total.gap_colors : {};
-      nonBaseline.forEach(column => addMatrixGapCell(row, firstValue(gaps, [column.id], null), firstValue(gapColors, [column.id], '')));
+      appendScoreGapCells(allColumns, nonBaseline, gapLayout,
+        column => addMatrixScoreCell(row, operatorValue(values, column.id), '', true),
+        column => addMatrixGapCell(row, firstValue(gaps, [column.id], null), firstValue(gapColors, [column.id], '')),
+      );
       tfoot.append(row);
       table.append(tfoot);
     }
@@ -1425,7 +1556,7 @@
     }
     const note = document.createElement('p');
     note.className = 'scoring-context-note';
-    note.textContent = `GAP compares ${comparison === 'all' ? 'each hierarchy leaf' : selectedOperator} with ${baseline} at the same context. Positive values mean the compared operator leads.`;
+    note.textContent = `KPI GAP compares ${comparison === 'all' ? 'each hierarchy leaf' : selectedOperator} with ${baseline} at the same context. Category and final GAP rows show the arithmetic mean of valid KPI GAPs.`;
     pane.append(note);
     if (!columns.length) {
       const empty = document.createElement('div');
@@ -1449,6 +1580,10 @@
     for (let index = 0; index < rows.length; index += 1) {
       const item = rows[index];
       const row = document.createElement('tr');
+      if (item?.row_type === 'category') {
+        row.classList.add('scoring-category-subtotal');
+        row.style.fontWeight = '700';
+      }
       const category = String(item?.category ?? '');
       if (index === 0 || String(rows[index - 1]?.category ?? '') !== category) {
         let span = 1;
@@ -1467,7 +1602,8 @@
       const typeCell = document.createElement('td');
       typeCell.dataset.column = 'type';
       const kpiType = String(item?.kpi_type ?? '');
-      typeCell.textContent = !kpiType || kpiType.toLowerCase() === 'unknown' ? 'Not classified' : kpiType;
+      typeCell.textContent = item?.row_type === 'category'
+        ? '—' : (!kpiType || kpiType.toLowerCase() === 'unknown' ? 'Not classified' : kpiType);
       if (kpiType.toLowerCase() === 'reliable') typeCell.dataset.kpiType = 'reliable';
       row.append(typeCell);
       const gaps = item?.gaps && typeof item.gaps === 'object' ? item.gaps : {};
@@ -1484,7 +1620,7 @@
       const label = document.createElement('th');
       label.scope = 'row';
       label.colSpan = 3;
-      label.textContent = 'Total signed GAP';
+      label.textContent = total.gap_label || 'Total signed GAP';
       row.append(label);
       const totalGapColors = total.gap_colors && typeof total.gap_colors === 'object' ? total.gap_colors : {};
       for (const column of columns) addMatrixGapCell(row, firstValue(totalGaps, [column.id], null), firstValue(totalGapColors, [column.id], ''));
@@ -1532,9 +1668,10 @@
     const operatorRaw = String(selected?.operator || 'this operator');
     const baseline = operatorPresentation(selected, baselineRaw).label;
     const operator = operatorPresentation(selected, operatorRaw).label;
-    const rows = (Array.isArray(selected?.rows) ? selected.rows : [])
-      .filter(row => row?.gap_points !== null && row?.gap_points !== undefined && String(row.gap_points).trim() !== '' && Number.isFinite(Number(row.gap_points)))
-      .sort((left, right) => Math.abs(Number(right.gap_points)) - Math.abs(Number(left.gap_points)));
+    const rows = (Array.isArray(selected?.rows) ? selected.rows : []).filter(row => (
+      row?.row_type === 'category' || row?.row_type === 'kpi'
+      || (row?.gap_points !== null && row?.gap_points !== undefined && String(row.gap_points).trim() !== '' && Number.isFinite(Number(row.gap_points)))
+    ));
     if (!rows.length) {
       const empty = document.createElement('div');
       empty.className = 'scoring-empty';
@@ -1561,6 +1698,10 @@
     const tbody = document.createElement('tbody');
     for (const item of rows) {
       const row = document.createElement('tr');
+      if (item?.row_type === 'category') {
+        row.classList.add('scoring-category-subtotal');
+        row.style.fontWeight = '700';
+      }
       for (const [value, key] of [[item.category, 'category'], [item.kpi || item.kpi_code, 'kpi'], [item.gap_points, 'gap'], [item.kpi_type, 'type']]) {
         const cell = document.createElement('td');
         cell.dataset.column = key;
@@ -1574,9 +1715,11 @@
           if (Number(value) < 0) cell.classList.add('scoring-gap-loss');
         } else {
           const normalizedType = String(value ?? '').toLowerCase();
-          cell.textContent = key === 'type' && (value === null || value === undefined || value === '' || normalizedType === 'unknown')
-            ? 'Not classified'
-            : (value === null || value === undefined || value === '' ? 'N/A' : String(value));
+          cell.textContent = key === 'type' && item?.row_type === 'category'
+            ? '—'
+            : key === 'type' && (value === null || value === undefined || value === '' || normalizedType === 'unknown')
+              ? 'Not classified'
+              : (value === null || value === undefined || value === '' ? 'N/A' : String(value));
           if (key === 'type' && normalizedType === 'reliable') cell.dataset.kpiType = 'reliable';
           if (key === 'kpi') cell.title = String(item.kpi_code || item.kpi || '');
         }
@@ -1590,7 +1733,8 @@
     if (selected?.total_gap_points !== null && selected?.total_gap_points !== undefined) {
       const summary = document.createElement('p');
       summary.className = 'scoring-context-note';
-      summary.textContent = `Total signed GAP (${operator} − ${baseline}): ${formatMatrixNumber(selected.total_gap_points, true)} points.`;
+      const label = selected.expanded_total?.gap_label || selected.total?.gap_label || 'Total signed GAP';
+      summary.textContent = `${label} (${operator} − ${baseline}): ${formatMatrixNumber(selected.total_gap_points, true)} points.`;
       pane.append(summary);
     }
   }
@@ -1646,7 +1790,7 @@
     appendContextHeader(pane, selected, 'gap-summary');
     const gapNote = document.createElement('p');
     gapNote.className = 'scoring-context-note';
-    gapNote.textContent = `GAP = compared operator weighted score minus ${baseline} weighted score. Positive values mean the compared operator leads.`;
+    gapNote.textContent = `KPI GAP = compared operator weighted points minus ${baseline} weighted points for each KPI. Category and final GAP rows show the arithmetic mean of valid KPI GAPs.`;
     pane.append(gapNote);
 
     const rows = Array.isArray(selected.rows) ? selected.rows : [];
@@ -1692,6 +1836,10 @@
     for (let index = 0; index < rows.length; index += 1) {
       const item = rows[index];
       const row = document.createElement('tr');
+      if (item?.row_type === 'category') {
+        row.classList.add('scoring-category-subtotal');
+        row.style.fontWeight = '700';
+      }
       const category = String(item?.category ?? '');
       if (index === 0 || String(rows[index - 1]?.category ?? '') !== category) {
         let span = 1;
@@ -1710,7 +1858,8 @@
       const typeCell = document.createElement('td');
       typeCell.dataset.column = 'type';
       const kpiType = String(item?.kpi_type ?? '');
-      typeCell.textContent = !kpiType || kpiType.toLowerCase() === 'unknown' ? 'Not classified' : kpiType;
+      typeCell.textContent = item?.row_type === 'category'
+        ? '—' : (!kpiType || kpiType.toLowerCase() === 'unknown' ? 'Not classified' : kpiType);
       if (kpiType.toLowerCase() === 'reliable') typeCell.dataset.kpiType = 'reliable';
       row.append(typeCell);
 
@@ -1730,7 +1879,7 @@
       const labelCell = document.createElement('th');
       labelCell.scope = 'row';
       labelCell.colSpan = 3;
-      labelCell.textContent = 'Total signed GAP';
+      labelCell.textContent = total.gap_label || 'Total signed GAP';
       totalRow.append(labelCell);
       for (const operator of comparisons) addMatrixGapCell(totalRow, firstValue(totalGaps, [operator], null), firstValue(totalGapColors, [operator], ''));
       tfoot.append(totalRow);
@@ -1932,6 +2081,10 @@
           rect.setAttribute('x', String(x)); rect.setAttribute('y', String(segmentY));
           rect.setAttribute('width', String(barWidth)); rect.setAttribute('height', String(Math.max(0, segmentHeight)));
           rect.setAttribute('fill', color);
+          if (hasHierarchyAxis) {
+            rect.setAttribute('stroke', '#ffffff');
+            rect.setAttribute('stroke-width', '.5');
+          }
           const visibleCategory = options.categoryLabels?.[category] || category;
           const fullCategory = options.categoryTooltips?.[category] || visibleCategory;
           rect.setAttribute('aria-label', `${fullCategory}, ${presentations.get(seriesName).label}: ${numeric}`);
@@ -2180,6 +2333,12 @@
         title: `${operator}${style.is_reference === true || column.is_reference === true ? ' is the reference operator.' : ''} Segment shades identify KPI categories; hover a segment for its category and score.`,
       });
     }
+    const categoryLegendColor = operatorLegend[0]?.color || '#365F91';
+    const categoryLegend = kpiCategories.map((category, index) => ({
+      label: category,
+      color: hierarchyChartColor(categoryLegendColor, index, kpiCategories.length),
+      title: `${category}: segment shade ${index + 1}. Each operator keeps its mapped base color.`,
+    }));
     const seriesStyles = Object.fromEntries(kpiCategories.map(category => [category, {label: category}]));
     appendContextHeader(pane, tableData, 'score', 'Scoring Chart');
     const chart = makeSvgChart('Weighted score by operator and aggregation', rows, tableData, {
@@ -2193,11 +2352,11 @@
       categoryGroupGap: 14,
       seriesOrder: kpiCategories,
       seriesStyles,
-      legendEntries: operatorLegend,
+      legendEntries: [...operatorLegend, ...categoryLegend],
       segmentColor: (leafId, _category, categoryIndex) => {
         const column = columns.find(item => item.id === leafId);
         const operator = String(column?.operator || firstValue(tableData?.operator_styles || {}, [leafId], {}).operator || '');
-        return hierarchyChartColor(operatorColors.get(operator) || '#365F91', categoryIndex);
+        return hierarchyChartColor(operatorColors.get(operator) || '#365F91', categoryIndex, kpiCategories.length);
       },
       axisLabel: 'Weighted score points',
     });
@@ -2260,9 +2419,9 @@
     return `#${channels.map(channel => Math.round(channel + (255 - channel) * amount).toString(16).padStart(2, '0')).join('')}`;
   }
 
-  function hierarchyChartColor(color, categoryIndex) {
+  function hierarchyChartColor(color, categoryIndex, categoryCount = 7) {
     const safe = safeHexColor(color) || '#365F91';
-    const tint = Math.min(.42, Math.max(0, categoryIndex) * .1);
+    const tint = .72 * Math.max(0, categoryIndex) / Math.max(1, categoryCount - 1);
     const channels = [1, 3, 5].map(offset => Number.parseInt(safe.slice(offset, offset + 2), 16));
     return `#${channels.map(channel => Math.round(channel + (255 - channel) * tint).toString(16).padStart(2, '0')).join('')}`;
   }
@@ -2277,13 +2436,13 @@
       ? groupKeys.slice(1).filter((key, index) => key && groupKeys[index] && key !== groupKeys[index]).length : 0;
     const categoryGroupGap = hasHierarchyAxis ? 14 : 0;
     const width = Math.max(980, data.operators.length * 190 + 170);
-    const height = 500;
+    const height = 620;
     const left = 92, right = 36, top = 72, bottom = Math.max(124, 32 + (hasHierarchyAxis ? hierarchyLevels.length * 23 : 0));
     const plotHeight = height - top - bottom;
     const maxAllocation = data.allocation.Voice + data.allocation.Data;
     const maxActual = Math.max(0, ...data.operators.map(operator => ['Voice', 'Data'].reduce((sum, kind) => sum + (data.totals[operator][kind].value ?? 0), 0)));
-    const maxValue = Math.max(maxAllocation, maxActual);
-    const scaleMaximum = maxValue > 0 ? maxValue * 1.13 : 1;
+    const scaleValue = maxActual > 0 ? maxActual : maxAllocation;
+    const scaleMaximum = scaleValue > 0 ? scaleValue * 1.13 : 1;
     const step = Math.max(1, (width - left - right - categoryGroupGap * groupTransitions) / Math.max(data.operators.length, 1));
     const categoryStarts = new Map();
     let categoryCursor = left;
@@ -2295,6 +2454,9 @@
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
     svg.setAttribute('class', 'scoring-chart-svg scoring-best-network-bars');
+    svg.style.minWidth = `${width}px`;
+    svg.style.maxWidth = 'none';
+    svg.style.minHeight = '0';
     svg.setAttribute('role', 'img');
     svg.setAttribute('aria-label', 'Voice and Data weighted points by operator');
     const barColors = new Map(data.operators.map((operator, index) => {
@@ -2482,7 +2644,7 @@
     }
   }
 
-  const environmentOrder = ['DriveCity', 'DriveConnectionroad', 'Combined'];
+  const environmentOrder = ['DriveCity', 'DriveConnectionroad', 'Walk', 'Combined'];
   const comparisonScopeFields = ['campaign', 'region', 'city', 'vendor', 'dataset_type'];
 
   function environmentOf(table) {
@@ -2504,35 +2666,39 @@
       if (!actualByScope.has(scope)) actualByScope.set(scope, new Set());
       actualByScope.get(scope).add(environment);
     }
-    const combinedIsAvailable = tables.some(table => environmentOf(table) === 'Combined'
-      && ['DriveCity', 'DriveConnectionroad'].every(environment => actualByScope.get(scopeIdentity(table.context || {}))?.has(environment)));
+    const combinedIsAvailable = tables.some(table => {
+      if (environmentOf(table) !== 'Combined') return false;
+      const required = Array.isArray(table.combined_required_environments) && table.combined_required_environments.length
+        ? table.combined_required_environments
+        : ['DriveCity', 'DriveConnectionroad'];
+      return required.every(environment => actualByScope.get(scopeIdentity(table.context || {}))?.has(environment));
+    });
     const ordered = [...available].sort((left, right) => {
       const leftIndex = environmentOrder.indexOf(left);
       const rightIndex = environmentOrder.indexOf(right);
       return (leftIndex < 0 ? environmentOrder.length : leftIndex) - (rightIndex < 0 ? environmentOrder.length : rightIndex) || left.localeCompare(right);
     });
-    if (combinedIsAvailable) ordered.push('Combined');
-    return ordered;
+    return ordered.length || combinedIsAvailable ? ['all', ...ordered] : [];
   }
 
   function environmentLabel(environment) {
+    if (environment === 'all' || environment === 'Combined') return 'All Environments';
     if (environment === 'DriveCity') return 'Drive City';
     if (environment === 'DriveConnectionroad') return 'Drive Connection Road';
+    if (environment === 'Walk') return 'Walk';
     return environment;
   }
 
   function syncResultEnvironment(tables) {
     const environments = availableScoreEnvironments(tables);
     if (!environments.length) {
-      selectedEnvironment = null;
+      currentEffectiveEnvironment = null;
       environmentSelect.replaceChildren();
       environmentControl.hidden = true;
-      return environments;
+      return {environments, effective: null, fallback: null};
     }
     if (!environments.includes(selectedEnvironment)) {
-      selectedEnvironment = environments.includes('Combined')
-        ? 'Combined'
-        : (environments.includes('DriveCity') ? 'DriveCity' : environments[0]);
+      selectedEnvironment = 'all';
     }
     const currentOptions = [...environmentSelect.options].map(option => option.value);
     if (JSON.stringify(currentOptions) !== JSON.stringify(environments)) {
@@ -2546,15 +2712,29 @@
     }
     environmentSelect.value = selectedEnvironment;
     environmentControl.hidden = false;
-    return environments;
+    const actual = environments.filter(environment => environment !== 'all');
+    const combinedTables = tables.filter(table => environmentOf(table) === 'Combined');
+    const combinedIsAvailable = combinedTables.some(table => {
+      const required = Array.isArray(table.combined_required_environments) && table.combined_required_environments.length
+        ? table.combined_required_environments : ['DriveCity', 'DriveConnectionroad'];
+      const scope = scopeIdentity(table.context || {});
+      const actualByScope = new Set(tables.filter(candidate => scopeIdentity(candidate.context || {}) === scope)
+        .map(environmentOf));
+      return required.every(environment => actualByScope.has(environment));
+    }) || (!actual.length && combinedTables.length > 0);
+    const effective = selectedEnvironment === 'all'
+      ? (combinedIsAvailable ? 'Combined' : (actual[0] || null))
+      : selectedEnvironment;
+    currentEffectiveEnvironment = effective;
+    return {environments, effective, fallback: selectedEnvironment === 'all' && effective && effective !== 'Combined' ? effective : null};
   }
 
-  function chartRowsForEnvironment(source, scoreTables) {
+  function chartRowsForEnvironment(source, scoreTables, effectiveEnvironment) {
     const rows = normalizeRows(source);
     if (!scoreTables.length) return rows;
     return rows.filter(row => {
-      if (String(firstValue(row, ['environment'], '')) !== selectedEnvironment) return false;
-      return scoreTables.some(table => environmentOf(table) === selectedEnvironment
+      if (String(firstValue(row, ['environment'], '')) !== effectiveEnvironment) return false;
+      return scoreTables.some(table => environmentOf(table) === effectiveEnvironment
         && comparisonScopeFields.every(field => String(firstValue(table.context || {}, [field], '') ?? '')
           === String(firstValue(row, [field], '') ?? '')));
     });
@@ -2576,12 +2756,18 @@
     const allGapSummaryTables = normalizeRows(views.gap_summary_tables ?? payload.gap_summary_tables ?? payload.scoring_views?.gap_summary_tables ?? []);
     const allHierarchyScoreTables = normalizeRows(views.hierarchy_score_tables ?? []);
     const allHierarchyGapTables = normalizeRows(views.hierarchy_gap_tables ?? []);
-    syncResultEnvironment([...allScoreTables, ...allHierarchyScoreTables]);
-    const scoreTables = allScoreTables.filter(table => environmentOf(table) === selectedEnvironment);
-    const gapTables = allGapTables.filter(table => environmentOf(table) === selectedEnvironment);
-    const gapSummaryTables = allGapSummaryTables.filter(table => environmentOf(table) === selectedEnvironment);
-    const hierarchyScoreTable = allHierarchyScoreTables.find(table => environmentOf(table) === selectedEnvironment) || null;
-    const hierarchyGapTable = allHierarchyGapTables.find(table => environmentOf(table) === selectedEnvironment) || null;
+    const environmentSelection = syncResultEnvironment([...allScoreTables, ...allHierarchyScoreTables]);
+    const effectiveEnvironment = environmentSelection.effective;
+    const scoreTables = allScoreTables.filter(table => environmentOf(table) === effectiveEnvironment);
+    const gapTables = allGapTables.filter(table => environmentOf(table) === effectiveEnvironment);
+    const gapSummaryTables = allGapSummaryTables.filter(table => environmentOf(table) === effectiveEnvironment);
+    const hierarchyScoreTable = allHierarchyScoreTables.find(table => environmentOf(table) === effectiveEnvironment) || null;
+    const hierarchyGapTable = allHierarchyGapTables.find(table => environmentOf(table) === effectiveEnvironment) || null;
+    const displayScoreTables = scoreTables.map(tableForSelectedMode);
+    const displayGapTables = gapTables.map(tableForSelectedMode);
+    const displayGapSummaryTables = gapSummaryTables.map(tableForSelectedMode);
+    const displayHierarchyScoreTable = tableForSelectedMode(hierarchyScoreTable);
+    const displayHierarchyGapTable = tableForSelectedMode(hierarchyGapTable);
     const thresholdLegend = normalizeRows(views.threshold_legend ?? payload.threshold_legend ?? []);
     const totalsRows = normalizeRows(payload.totals ?? payload.scoring_totals ?? []);
     const detailRows = normalizeRows(scoringRows);
@@ -2589,10 +2775,10 @@
     const hasGapViews = Array.isArray(views.gap_tables) || Array.isArray(payload.gap_tables) || Array.isArray(payload.scoring_views?.gap_tables)
       || Array.isArray(views.gap_summary_tables) || Array.isArray(payload.gap_summary_tables) || Array.isArray(payload.scoring_views?.gap_summary_tables);
     if (shouldRenderPane('scoring')) {
-      if (hierarchyScoreTable) {
-        renderHierarchyScoringViews(scoringPane, hierarchyScoreTable, thresholdLegend);
+      if (displayHierarchyScoreTable) {
+        renderHierarchyScoringViews(scoringPane, displayHierarchyScoreTable, thresholdLegend);
       } else if (hasScoringViews) {
-        renderScoringViews(scoringPane, scoreTables, thresholdLegend);
+        renderScoringViews(scoringPane, displayScoreTables, thresholdLegend);
       } else if (totalsRows.length) {
         scoringPane.replaceChildren();
         const summaryHeading = document.createElement('h4');
@@ -2617,17 +2803,17 @@
     if (shouldRenderPane('charts')) {
       chartPane.classList.remove('scoring-chart-grid');
       if (hierarchyScoreTable) renderHierarchyCharts(chartPane, hierarchyScoreTable);
-      else renderCharts(chartPane, chartRowsForEnvironment(payload.charts ?? [], allScoreTables), scoreTables);
+      else renderCharts(chartPane, chartRowsForEnvironment(payload.charts ?? [], allScoreTables, effectiveEnvironment), scoreTables);
     }
     if (shouldRenderPane('best-network')) renderBestNetworkChart(bestNetworkPane, scoreTables, hierarchyScoreTable);
     if (shouldRenderPane('gap')) {
       const gapTotals = normalizeRows(payload.gap_totals ?? []);
-      if (hierarchyGapTable) {
-        renderHierarchyGapViews(gapPane, hierarchyGapTable, hierarchyScoreTable);
-      } else if (gapSummaryTables.length) {
-        renderGapSummaryViews(gapPane, gapSummaryTables);
+      if (displayHierarchyGapTable) {
+        renderHierarchyGapViews(gapPane, displayHierarchyGapTable, displayHierarchyScoreTable);
+      } else if (displayGapSummaryTables.length) {
+        renderGapSummaryViews(gapPane, displayGapSummaryTables);
       } else if (hasGapViews) {
-        renderGapViews(gapPane, gapTables);
+        renderGapViews(gapPane, displayGapTables);
       } else if (gapTotals.length) {
         gapPane.replaceChildren();
         for (const [title, rows] of [['GAP Summary', gapTotals], ['KPI GAP Details', normalizeRows(gapRows)]]) {
@@ -2648,8 +2834,12 @@
     const levels = jobLevels(job || payload.job || {}) || 'Operator';
     const mode = valueOf(job || payload.job, ['nr_mode'], 'All NR Modes');
     const baseline = valueOf(job || payload.job, ['baseline_operator'], 'EE');
-    const environmentMeta = selectedEnvironment ? ` · ${environmentLabel(selectedEnvironment)}` : '';
-    resultMeta.textContent = `${formatDate(valueOf(job || payload.job, ['created_at', 'completed_at', 'submitted_at'], ''))} · ${levels} · ${mode}${environmentMeta} · GAP: compared operator minus ${baseline} · Filters: ${contextFilterSummary(job || payload.job)}`;
+    const profileName = valueOf(job || payload.job, ['scoring_profile_name', 'profile_name'], '');
+    const fallbackMeta = environmentSelection.fallback
+      ? ` (Combined view unavailable; showing ${environmentLabel(environmentSelection.fallback)} because required coverage is incomplete)` : '';
+    const environmentMeta = selectedEnvironment ? ` · ${environmentLabel(selectedEnvironment)}${fallbackMeta}` : '';
+    const profileMeta = profileName ? ` · Scoring methodology: ${profileName}` : '';
+    resultMeta.textContent = `${formatDate(valueOf(job || payload.job, ['created_at', 'completed_at', 'submitted_at'], ''))} · ${levels} · ${mode}${environmentMeta}${profileMeta} · GAP: compared operator minus ${baseline} · Filters: ${contextFilterSummary(job || payload.job)}`;
     setExportLinks(jobIdOf(job || payload.job || {}), true);
   }
 
@@ -2820,6 +3010,7 @@
     const payload = {
       dataset_ids: datasetIds,
       aggregation_levels: levels,
+      scoring_profile_id: scoringProfileSelect?.value || undefined,
       nr_mode: nrFilter.value || 'NSA',
       baseline_operator: baseline,
       context_filters: selectedContextFilters(),
@@ -2857,6 +3048,13 @@
   datasetInputs.forEach(input => input.addEventListener('change', updateSelection));
   nrFilter.addEventListener('change', () => applyNrFilter(true));
   root.addEventListener('change', event => {
+    if (event.target === scoringProfileSelect) {
+      const profile = scoringProfileById.get(scoringProfileSelect.value);
+      if (profile && applyProfileHierarchy(profile.aggregation_hierarchy)) {
+        setMessage(`This calculation will use ${profile.name}.`, 'success');
+      }
+      return;
+    }
     if (event.target === environmentSelect && currentResults) {
       selectedEnvironment = environmentSelect.value;
       renderResult(currentResults, selectedJob);
@@ -2864,6 +3062,16 @@
     }
     if (event.target === showKpiValuesToggle && currentResults) {
       renderResult(currentResults, selectedJob);
+      return;
+    }
+    if (event.target === tableModeSelect && currentResults) {
+      renderResult(currentResults, selectedJob);
+      setExportLinks(currentResultsJobId, true);
+      return;
+    }
+    if (event.target === gapLayoutSelect && currentResults) {
+      renderResult(currentResults, selectedJob);
+      setExportLinks(currentResultsJobId, true);
       return;
     }
     const gapSummaryOperator = event.target.closest('[data-gap-summary-operator]');
@@ -2893,7 +3101,7 @@
       : kind === 'gap-summary'
         ? (views.gap_summary_tables ?? currentResults.gap_summary_tables ?? currentResults.scoring_views?.gap_summary_tables ?? [])
       : (views.score_tables ?? currentResults.score_tables ?? currentResults.scoring_views?.score_tables ?? []);
-    const tables = (Array.isArray(allTables) ? allTables : []).filter(table => environmentOf(table) === selectedEnvironment);
+    const tables = (Array.isArray(allTables) ? allTables : []).filter(table => environmentOf(table) === currentEffectiveEnvironment);
     const selected = Array.isArray(tables) ? tables[Number(select.value)] : null;
     if (!selected) return;
     contextSelections.set(kind, comparisonIdentity(selected, kind));

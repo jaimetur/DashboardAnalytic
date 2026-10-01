@@ -14,7 +14,7 @@ from src.modules.scoring_config import (
     load_initial_scoring_configuration,
     validate_scoring_configuration,
 )
-from tests.scoring_fixtures import scoring_configuration
+from tests.scoring_fixtures import legacy_scoring_configuration, scoring_configuration
 
 
 @pytest.fixture()
@@ -63,21 +63,21 @@ def test_explicit_loader_accepts_bare_and_enveloped_configurations(tmp_path, env
         sum(metric['contexts'][environment]['max_points']
             for metric in loaded['metrics'] for environment in ('DriveCity', 'DriveConnectionroad')),
     )
-    assert _metric(loaded, 'C5')['contexts']['DriveCity']['score_mapping']['high_score'] == pytest.approx(1.0)
+    assert _metric(loaded, 'K1')['contexts']['DriveCity']['score_mapping']['high_score'] == pytest.approx(1.0)
 
 
 def test_imported_workspace_config_survives_seed_file_unavailable_and_keeps_editable_values(
     repository, monkeypatch, tmp_path,
 ):
     configuration = scoring_configuration()
-    c5 = _metric(configuration, 'C5')
+    c5 = _metric(configuration, 'K1')
     c5['contexts']['DriveCity']['max_points'] = 82.5
     c5['contexts']['DriveCity']['thresholds']['low'] = 87
     c5['contexts']['DriveCity']['score_mapping'] = {
         'low_score': 0.05, 'medium_score': 0.65, 'high_score': 0.95, 'ultra_score': 1.0,
     }
     configuration['gap_priority'] = [
-        'C6', 'C5', *[code for code in configuration['gap_priority'] if code not in {'C5', 'C6'}],
+        'K2', 'K1', *[code for code in configuration['gap_priority'] if code not in {'K1', 'K2'}],
     ]
     seed_path = tmp_path / 'explicit-import.json'
     _write_json(seed_path, {
@@ -94,11 +94,11 @@ def test_imported_workspace_config_survives_seed_file_unavailable_and_keeps_edit
     monkeypatch.setattr(Path, 'read_text', deny_file_reads)
     loaded = repository.get_scoring_configuration()
 
-    stored_c5 = _metric(loaded, 'C5')['contexts']['DriveCity']
+    stored_c5 = _metric(loaded, 'K1')['contexts']['DriveCity']
     assert stored_c5['max_points'] == pytest.approx(82.5)
     assert stored_c5['thresholds']['low'] == pytest.approx(87)
     assert stored_c5['score_mapping']['high_score'] == pytest.approx(0.95)
-    assert loaded['gap_priority'][:2] == ['C6', 'C5']
+    assert loaded['gap_priority'][:2] == ['K2', 'K1']
     assert loaded['scope']['total_max_points'] == pytest.approx(
         sum(metric['contexts'][environment]['max_points']
             for metric in loaded['metrics'] for environment in ('DriveCity', 'DriveConnectionroad')),
@@ -107,7 +107,7 @@ def test_imported_workspace_config_survives_seed_file_unavailable_and_keeps_edit
 
 def test_invalid_stored_configuration_fails_without_resetting_database_value(repository):
     invalid = scoring_configuration()
-    _metric(invalid, 'C5')['calculation']['formula'] = 'AVG(__import__("os"))'
+    _metric(invalid, 'K1')['calculation']['formula'] = 'AVG(__import__("os"))'
     raw = json.dumps(invalid, ensure_ascii=False)
     repository.set_workspace_state(SCORING_CONFIGURATION_STATE_KEY, raw)
 
@@ -120,10 +120,10 @@ def test_invalid_stored_configuration_fails_without_resetting_database_value(rep
 @pytest.mark.parametrize(
     ('edit', 'message'),
     [
-        (lambda config: _metric(config, 'C5')['calculation'].__setitem__('formula', 'AVG(__import__("os"))'), 'formula'),
-        (lambda config: _metric(config, 'C5')['calculation']['filters'].__setitem__('Unknown_Field', ['x']), 'filter'),
-        (lambda config: _metric(config, 'C25')['calculation']['filters'].__setitem__('Test_Name contains', 'FDTT'), 'list of text fragments'),
-        (lambda config: config['scope']['environments'].__setitem__('Unknown', {}), 'supported environments'),
+        (lambda config: _metric(config, 'K1')['calculation'].__setitem__('formula', 'AVG(__import__("os"))'), 'formula'),
+        (lambda config: _metric(config, 'K1')['calculation']['filters'].__setitem__('Unknown_Field', ['x']), 'filter'),
+        (lambda config: _metric(config, 'K20')['calculation']['filters'].__setitem__('Test_Name contains', 'FDTT'), 'list of text fragments'),
+        (lambda config: config['scope']['environments'].__setitem__('Unknown', {}), 'g_level_1'),
         (lambda config: config['metrics'][0].__setitem__('direction', 'unknown'), 'direction'),
     ],
 )
@@ -156,7 +156,16 @@ def test_workspace_configuration_derives_omitted_context_anchors_from_saved_inte
     repository.replace_scoring_configuration(configuration)
 
     stored = repository.get_scoring_configuration()
-    context = _metric(stored, 'C25')['contexts']['DriveCity']
+    context = _metric(stored, 'K20')['contexts']['DriveCity']
     assert context['score_mapping']['medium_score'] == .7
     assert context['score_mapping']['high_score'] == .9
-    assert _metric(stored, 'C5')['contexts']['DriveCity']['score_mapping']['high_score'] == .98
+    assert _metric(stored, 'K1')['contexts']['DriveCity']['score_mapping']['high_score'] == .98
+
+
+def test_bare_legacy_configuration_save_returns_migrated_k_codes(repository):
+    repository.set_workspace_state(SCORING_CONFIGURATION_STATE_KEY, '')
+
+    saved = repository.replace_scoring_configuration(legacy_scoring_configuration())
+
+    assert saved['metrics'][0]['code'] == 'K1'
+    assert repository.get_scoring_configuration()['metrics'][0]['code'] == 'K1'

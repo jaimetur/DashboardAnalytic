@@ -1932,26 +1932,90 @@ class Repository:
         return result
 
     def get_scoring_configuration(self) -> dict[str, Any]:
-        """Return the validated scoring configuration stored in this workspace."""
-        from src.modules.scoring_config import validate_scoring_configuration
+        """Return the active validated scoring configuration in this workspace."""
+        profile_state = self.get_scoring_profiles()
+        active_id = profile_state['active_profile_id']
+        return next(profile['configuration'] for profile in profile_state['profiles']
+                    if profile['id'] == active_id)
+
+    def get_scoring_profiles(self) -> dict[str, Any]:
+        """Return all named scoring profiles, migrating a legacy single config in memory."""
+        from src.modules.scoring_config import (
+            default_scoring_profile,
+            validate_scoring_configuration,
+            validate_scoring_profiles,
+        )
 
         raw = self.get_workspace_state(SCORING_CONFIGURATION_STATE_KEY)
         if raw is None or not raw.strip():
             raise ValueError('Import a Scoring Configuration before calculating scoring.')
         try:
-            return validate_scoring_configuration(json.loads(raw))
+            payload = json.loads(raw)
+            if isinstance(payload, dict) and 'profiles' in payload:
+                return validate_scoring_profiles(payload)
+            profile = default_scoring_profile(validate_scoring_configuration(payload))
+            return validate_scoring_profiles({
+                'active_profile_id': profile['id'],
+                'profiles': [profile],
+            })
         except (TypeError, ValueError, json.JSONDecodeError) as error:
             raise ValueError(f'Stored workspace scoring configuration is invalid: {error}') from error
 
-    def replace_scoring_configuration(self, payload: object) -> dict[str, Any]:
-        """Validate and persist a complete workspace scoring configuration."""
-        from src.modules.scoring_config import validate_scoring_configuration
+    def get_scoring_profile(self, profile_id: str | None = None) -> dict[str, Any]:
+        """Return the active scoring profile or a selected profile by id."""
+        profiles = self.get_scoring_profiles()
+        selected_id = profile_id or profiles['active_profile_id']
+        profile = next((item for item in profiles['profiles'] if item['id'] == selected_id), None)
+        if profile is None:
+            raise ValueError(f'Scoring profile {selected_id} was not found.')
+        return profile
 
-        configuration = validate_scoring_configuration(payload)
+    def replace_scoring_profiles(self, payload: object) -> dict[str, Any]:
+        """Validate and persist a complete named scoring profile collection."""
+        from src.modules.scoring_config import validate_scoring_profiles
+
+        profiles = validate_scoring_profiles(payload)
         self.set_workspace_state(
             SCORING_CONFIGURATION_STATE_KEY,
-            json.dumps(configuration, ensure_ascii=False, separators=(',', ':')),
+            json.dumps(profiles, ensure_ascii=False, separators=(',', ':')),
         )
+        return profiles
+
+    def replace_scoring_configuration(self, payload: object) -> dict[str, Any]:
+        """Replace only the active profile's configuration, preserving other profiles."""
+        from src.modules.scoring_config import (
+            default_scoring_profile,
+            validate_scoring_configuration,
+            validate_scoring_profiles,
+        )
+
+        configuration = validate_scoring_configuration(payload)
+        raw = self.get_workspace_state(SCORING_CONFIGURATION_STATE_KEY)
+        try:
+            if raw is None or not raw.strip():
+                profile = default_scoring_profile(configuration)
+                profiles = {'active_profile_id': profile['id'], 'profiles': [profile]}
+            else:
+                profiles = self.get_scoring_profiles()
+                active = next(item for item in profiles['profiles']
+                              if item['id'] == profiles['active_profile_id'])
+                profiles = {
+                    'active_profile_id': profiles['active_profile_id'],
+                    'profiles': [
+                        {**item, 'configuration': configuration}
+                        if item['id'] == active['id'] else item
+                        for item in profiles['profiles']
+                    ],
+                }
+            profiles = validate_scoring_profiles(profiles)
+            configuration = next(
+                item['configuration'] for item in profiles['profiles']
+                if item['id'] == profiles['active_profile_id']
+            )
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
+            raise ValueError(f'Stored workspace scoring configuration is invalid: {error}') from error
+        self.set_workspace_state(SCORING_CONFIGURATION_STATE_KEY,
+                                 json.dumps(profiles, ensure_ascii=False, separators=(',', ':')))
         return configuration
 
     def try_set_workspace_state(self, key: str, value: str, *, timeout_seconds: float = 0.25) -> bool:

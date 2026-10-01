@@ -15,12 +15,12 @@ def test_scoring_calculation_views_and_export_use_only_the_persisted_configurati
     repository = Repository(tmp_path / 'workspace.db')
     repository.initialize()
     imported_configuration = scoring_configuration()
-    c10 = next(metric for metric in imported_configuration['metrics'] if metric['code'] == 'C10')
+    c10 = next(metric for metric in imported_configuration['metrics'] if metric['code'] == 'K6')
     c10['calculation']['formula'] = (
         '100 * SUM(Call_Status == "Completed" AND Disturbed_and_Impaired_Call == "Yes" '
         'AND Session_Type == "CALL") / COUNT(Call_Status)'
     )
-    c31 = next(metric for metric in imported_configuration['metrics'] if metric['code'] == 'C31')
+    c31 = next(metric for metric in imported_configuration['metrics'] if metric['code'] == 'K26')
     c31['calculation']['filters'] = {
         'Type_of_Test': 'contains Successful',
         'http_Browser_Transferred_Bytes': '>= 2000000',
@@ -89,9 +89,9 @@ def test_scoring_calculation_views_and_export_use_only_the_persisted_configurati
     result = scoring.calculate_scoring(frames, configuration=configuration)
     assert result['configuration'] == configuration
     assert scoring.method_version_for_configuration(configuration).startswith(f"{configuration['version']}-")
-    c31_result = next(row for row in result['scoring'] if row['kpi_code'] == 'C31')
+    c31_result = next(row for row in result['scoring'] if row['kpi_code'] == 'K26')
     assert c31_result['value'] == pytest.approx(2_000)
-    c10_result = next(row for row in result['scoring'] if row['kpi_code'] == 'C10')
+    c10_result = next(row for row in result['scoring'] if row['kpi_code'] == 'K6')
     assert c10_result['value'] == pytest.approx(25)
     assert scoring._totals([], [], configuration) == []
 

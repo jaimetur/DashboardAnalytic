@@ -6319,16 +6319,17 @@ def _restore_workspace_main_cities(workspace: Workspace, payload: bytes) -> None
 
 
 def _scoring_configuration_archive_payload(workspace: Workspace) -> bytes:
-    """Serialize the validated Scoring Configuration for a workspace."""
+    """Serialize all validated scoring profiles for a workspace."""
     task_repository = Repository(
         workspace.database_path, repository.global_db_path, workspace_registry.registry_path,
     )
-    configuration = (task_repository.get_scoring_configuration()
-                     if task_repository.get_workspace_state(SCORING_CONFIGURATION_STATE_KEY) else None)
+    profiles = (task_repository.get_scoring_profiles()
+                if task_repository.get_workspace_state(SCORING_CONFIGURATION_STATE_KEY) else None)
     return json.dumps({
         'format': 'dashboard-analytic-scoring-configuration',
-        'version': 1,
-        'configuration': configuration,
+        'version': 2,
+        'active_profile_id': profiles['active_profile_id'] if profiles else None,
+        'profiles': profiles['profiles'] if profiles else None,
     }, ensure_ascii=False, indent=2).encode('utf-8')
 
 
@@ -6347,22 +6348,15 @@ def _archive_workspace_scoring_configuration(
 def _restore_workspace_scoring_configuration(workspace: Workspace, payload: bytes) -> None:
     try:
         document = json.loads(payload.decode('utf-8'))
-        configuration = document.get('configuration') if isinstance(document, dict) else None
-        if (
-            not isinstance(document, dict)
-            or document.get('format') != 'dashboard-analytic-scoring-configuration'
-            or document.get('version') != 1
-            or (configuration is not None and not isinstance(configuration, dict))
-            or 'configuration' not in document
-        ):
-            raise ValueError('Invalid Scoring Configuration document.')
+        from src.modules.scoring_config import unwrap_scoring_profiles_payload
+        profiles = unwrap_scoring_profiles_payload(document)
         task_repository = Repository(
             workspace.database_path, repository.global_db_path, workspace_registry.registry_path,
         )
-        if configuration is None:
+        if profiles is None:
             task_repository.set_workspace_state(SCORING_CONFIGURATION_STATE_KEY, '')
         else:
-            task_repository.replace_scoring_configuration(configuration)
+            task_repository.replace_scoring_profiles(profiles)
     except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
         raise ValueError(f'Scoring Configuration for "{workspace.name}" is invalid.') from exc
 
@@ -13952,6 +13946,7 @@ class ScoringJobRequest(BaseModel):
     nr_mode: str = 'NSA'
     force: bool = False
     baseline_operator: str = 'EE'
+    scoring_profile_id: str | None = None
     context_filters: dict[str, list[str]] = Field(default_factory=dict)
 
 
@@ -13990,8 +13985,25 @@ def scoring_page(request: Request, user: SessionUser = Depends(current_user)) ->
     from src.modules.scoring_config import DEFAULT_AGGREGATION_HIERARCHY
     configuration_error = ''
     aggregation_hierarchy = list(DEFAULT_AGGREGATION_HIERARCHY)
+    active_profile_id = ''
+    active_profile_name = ''
+    scoring_profiles: list[dict[str, Any]] = []
     try:
-        configuration = task_repository.get_scoring_configuration()
+        profile_collection = task_repository.get_scoring_profiles()
+        scoring_profiles = [{
+            'id': profile['id'],
+            'name': profile['name'],
+            'aggregation_hierarchy': list(
+                profile['configuration'].get('aggregation_hierarchy') or DEFAULT_AGGREGATION_HIERARCHY,
+            ),
+        } for profile in profile_collection['profiles']]
+        active_profile_id = profile_collection['active_profile_id']
+        active_profile = next(
+            profile for profile in profile_collection['profiles']
+            if profile['id'] == active_profile_id
+        )
+        configuration = active_profile['configuration']
+        active_profile_name = active_profile['name']
         aggregation_hierarchy = list(configuration.get('aggregation_hierarchy') or DEFAULT_AGGREGATION_HIERARCHY)
     except ValueError as exc:
         configuration_error = str(exc)
@@ -14023,6 +14035,9 @@ def scoring_page(request: Request, user: SessionUser = Depends(current_user)) ->
         ],
         'aggregation_levels': aggregation_hierarchy,
         'scoring_configuration_error': configuration_error,
+        'scoring_profiles': scoring_profiles,
+        'scoring_active_profile_id': active_profile_id,
+        'scoring_active_profile_name': active_profile_name,
     })
 
 
@@ -14042,6 +14057,7 @@ def scoring_jobs_create(payload: ScoringJobRequest, user: SessionUser = Depends(
             task_repository, selected_ids, payload.aggregation_levels, payload.nr_mode,
             force=payload.force, username=user.username, baseline_operator=payload.baseline_operator,
             context_filters=payload.context_filters,
+            scoring_profile_id=payload.scoring_profile_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -14100,7 +14116,18 @@ def scoring_dataset_recalculate(dataset_id: int, user: SessionUser = Depends(cur
 
 
 @app.get('/scoring/jobs/{job_id}/export/{export_kind}')
-def scoring_job_export(job_id: int, export_kind: str, user: SessionUser = Depends(current_user)) -> Response:
+def scoring_job_export(
+    job_id: int,
+    export_kind: str,
+    table_mode: str | None = None,
+    gap_layout: str | None = None,
+    environment: str = 'all',
+    user: SessionUser = Depends(current_user),
+) -> Response:
+    if table_mode is not None and table_mode not in {'expanded', 'summary'}:
+        raise HTTPException(status_code=400, detail='Table mode must be expanded or summary.')
+    if gap_layout is not None and gap_layout not in {'end', 'adjacent'}:
+        raise HTTPException(status_code=400, detail='GAP layout must be end or adjacent.')
     task_repository = scoring_repository(user)
     job = get_scoring_job(task_repository, job_id, include_result=True)
     if not job:
@@ -14109,9 +14136,61 @@ def scoring_job_export(job_id: int, export_kind: str, user: SessionUser = Depend
         raise HTTPException(status_code=409, detail='The scoring job must finish before export.')
     from src.modules.scoring_views import normalize_result_gaps
     result = normalize_result_gaps(job.get('result') or {})
+    operator_mapping_groups = task_repository.list_operator_mapping_groups()
+    export_configuration = job.get('configuration') or result.get('configuration')
+    selected_environment = str(environment or 'all').strip() or 'all'
+    if selected_environment.casefold() == 'all':
+        selected_environment = 'all'
+    else:
+        from src.modules.scoring_views import build_scoring_views
+        workspace_configuration = None
+        if not export_configuration:
+            try:
+                workspace_configuration = task_repository.get_scoring_configuration()
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            export_configuration = workspace_configuration
+        try:
+            saved_views = build_scoring_views(
+                job, result, operator_mapping_groups, workspace_configuration,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        valid_environments = {
+            str(matrix.get('context', {}).get('environment'))
+            for matrix in saved_views.get('score_tables', [])
+            if matrix.get('context', {}).get('environment')
+            and str(matrix['context']['environment']).casefold() != 'combined'
+        }
+        if selected_environment not in valid_environments:
+            raise HTTPException(status_code=400, detail='The selected scoring environment is not available for this job.')
     if export_kind in {'scoring', 'gap'}:
+        if table_mode is not None:
+            from src.modules.scoring_exports import export_scoring_csv
+            try:
+                content = export_scoring_csv(
+                    job, result, export_kind, table_mode,
+                    operator_mapping_groups,
+                    environment=selected_environment,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            return Response(content.encode('utf-8-sig'), media_type='text/csv', headers={
+                'Content-Disposition': f'attachment; filename="scoring-job-{job_id}-{export_kind}.csv"',
+            })
         rows = result.get(export_kind, [])
         summaries = result.get('totals' if export_kind == 'scoring' else 'gap_totals', [])
+        if selected_environment != 'all':
+            from src.modules.scoring_views import _canonical_environment
+            configured_environments = list(
+                export_configuration.get('scope', {}).get('environments', {})
+            ) if isinstance(export_configuration, dict) else []
+            rows = [row for row in rows if _canonical_environment(
+                row.get('environment'), configured_environments,
+            ) == selected_environment]
+            summaries = [row for row in summaries if _canonical_environment(
+                row.get('environment'), configured_environments,
+            ) == selected_environment]
         if summaries:
             rows = ([{'row_type': 'summary', **row} for row in summaries]
                     + [{'row_type': 'kpi', **row} for row in rows])
@@ -14124,10 +14203,11 @@ def scoring_job_export(job_id: int, export_kind: str, user: SessionUser = Depend
         from src.modules.cdr_report_filenames import build_cdr_report_filename
         try:
             if not job.get('configuration') and not result.get('configuration'):
-                job['configuration'] = task_repository.get_scoring_configuration()
+                job['configuration'] = export_configuration or task_repository.get_scoring_configuration()
             content = export_scoring_powerpoint(
                 job, result, settings.ppt_templates_dir / TEMPLATE_NAMES['nsa'],
-                task_repository.list_operator_mapping_groups(),
+                operator_mapping_groups, table_mode=table_mode or 'expanded',
+                gap_layout=gap_layout or 'end', environment=selected_environment,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -15585,16 +15665,46 @@ def get_workspace_scoring_configuration(
     return JSONResponse(configuration, headers={'Cache-Control': 'no-store'})
 
 
+@app.get('/api/workspace-config/scoring-profiles')
+def get_workspace_scoring_profiles(
+    user: SessionUser = Depends(config_editor_user),
+) -> JSONResponse:
+    task_repository = scoring_repository(user)
+    try:
+        profiles = task_repository.get_scoring_profiles()
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return JSONResponse(profiles, headers={'Cache-Control': 'no-store'})
+
+
+@app.put('/api/workspace-config/scoring-profiles')
+async def save_workspace_scoring_profiles(
+    request: Request,
+    user: SessionUser = Depends(config_editor_user),
+) -> JSONResponse:
+    task_repository = scoring_repository(user)
+    try:
+        payload = await request.json()
+        profiles = task_repository.replace_scoring_profiles(payload)
+    except (json.JSONDecodeError, UnicodeDecodeError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc) or 'The scoring profiles are invalid.') from exc
+    task_repository.try_add_log(user.username, 'save_scoring_profiles', json.dumps({
+        'active_profile_id': profiles['active_profile_id'],
+        'profile_count': len(profiles['profiles']),
+    }))
+    return JSONResponse(profiles, headers={'Cache-Control': 'no-store'})
+
+
 @app.get('/api/workspace-config/scoring-configuration/export')
 def export_workspace_scoring_configuration(user: SessionUser = Depends(config_editor_user)) -> Response:
     task_repository = scoring_repository(user)
     try:
-        configuration = task_repository.get_scoring_configuration()
+        profiles = task_repository.get_scoring_profiles()
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     content = json.dumps({
-        'format': 'dashboard-analytic-scoring-configuration', 'version': 1,
-        'configuration': configuration,
+        'format': 'dashboard-analytic-scoring-configuration', 'version': 2,
+        **profiles,
     }, ensure_ascii=False, indent=2)
     return Response(content, media_type='application/json', headers={
         'Content-Disposition': 'attachment; filename="scoring-configuration.json"',
@@ -15606,21 +15716,27 @@ async def import_workspace_scoring_configuration(
     package: UploadFile = File(...), user: SessionUser = Depends(config_editor_user),
 ) -> JSONResponse:
     task_repository = scoring_repository(user)
-    from src.modules.scoring_config import unwrap_scoring_configuration_payload
+    from src.modules.scoring_config import unwrap_scoring_profiles_payload
     try:
         payload = await package.read(4 * 1024 * 1024 + 1)
         if len(payload) > 4 * 1024 * 1024:
             raise ValueError('Scoring Configuration JSON must not exceed 4 MiB.')
         document = json.loads(payload.decode('utf-8'))
-        if not isinstance(document, dict) or document.get('format') != 'dashboard-analytic-scoring-configuration':
-            raise ValueError('Choose an exported Scoring Configuration JSON document.')
-        configuration = task_repository.replace_scoring_configuration(unwrap_scoring_configuration_payload(document))
+        profiles = unwrap_scoring_profiles_payload(document)
+        if profiles is None:
+            task_repository.set_workspace_state(SCORING_CONFIGURATION_STATE_KEY, '')
+            result: dict[str, Any] = {'active_profile_id': None, 'profiles': []}
+        else:
+            result = task_repository.replace_scoring_profiles(profiles)
     except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:
         await package.close()
-    task_repository.try_add_log(user.username, 'import_scoring_configuration', json.dumps({'updated': True}))
-    return JSONResponse(configuration, headers={'Cache-Control': 'no-store'})
+    task_repository.try_add_log(user.username, 'import_scoring_configuration', json.dumps({
+        'profile_count': len(result['profiles']),
+        'active_profile_id': result['active_profile_id'],
+    }))
+    return JSONResponse(result, headers={'Cache-Control': 'no-store'})
 
 
 @app.put('/api/workspace-config/scoring-configuration')
@@ -16402,14 +16518,12 @@ async def inspect_admin_import_package(
 def _retain_import_upload(upload_id: str, package_path: Path, user: SessionUser) -> JSONResponse:
     """Validate and retain an already disk-backed import upload."""
     if not zipfile.is_zipfile(package_path):
-        from src.modules.scoring_config import unwrap_scoring_configuration_payload, validate_scoring_configuration
+        from src.modules.scoring_config import unwrap_scoring_profiles_payload
         if package_path.stat().st_size > 4 * 1024 * 1024:
             raise ValueError('Scoring Configuration JSON must not exceed 4 MiB.')
         try:
             document = json.loads(package_path.read_text(encoding='utf-8'))
-            if not isinstance(document, dict) or document.get('format') != 'dashboard-analytic-scoring-configuration':
-                raise ValueError('Choose a supported ZIP package or Scoring Configuration JSON document.')
-            configuration = validate_scoring_configuration(unwrap_scoring_configuration_payload(document))
+            profiles = unwrap_scoring_profiles_payload(document)
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ValueError('Choose a supported ZIP package or Scoring Configuration JSON document.') from exc
         archive_path = 'workspaces/Imported/scoring-configuration/scoring-configuration.json'
@@ -16421,8 +16535,9 @@ def _retain_import_upload(upload_id: str, package_path: Path, user: SessionUser)
         with zipfile.ZipFile(package_path, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
             archive.writestr('manifest.json', json.dumps(manifest))
             archive.writestr(archive_path, json.dumps({
-                'format': 'dashboard-analytic-scoring-configuration', 'version': 1,
-                'configuration': configuration,
+                'format': 'dashboard-analytic-scoring-configuration', 'version': 2,
+                'active_profile_id': profiles['active_profile_id'] if profiles else None,
+                'profiles': profiles['profiles'] if profiles else None,
             }))
     manifest = read_import_manifest(package_path)
     kind = str(manifest.get('kind') or '')

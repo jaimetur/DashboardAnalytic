@@ -19,6 +19,7 @@ from src.modules.repository import Repository, local_now_iso
 from src.modules.scoring_config import (
     DEFAULT_AGGREGATION_HIERARCHY,
     configuration_hash,
+    _is_legacy_two_environment_configuration,
     validate_scoring_configuration,
 )
 
@@ -47,10 +48,10 @@ def _method_version(configuration: dict[str, Any]) -> str:
     engine = _scoring_engine()
     if configuration is None:
         raise ValueError('A scoring configuration is required. Import a Scoring Configuration before calculating scoring.')
-    snapshot = validate_scoring_configuration(configuration)
     configured_version = getattr(engine, 'method_version_for_configuration', None)
     if callable(configured_version):
-        return str(configured_version(snapshot))
+        return str(configured_version(configuration))
+    snapshot = validate_scoring_configuration(configuration)
     base_version = str(getattr(engine, 'METHOD_VERSION', '1'))
     return f'{base_version}-config-{configuration_hash(snapshot)[:16]}'
 
@@ -464,6 +465,8 @@ def _job_payload(
     context_filters: dict[str, list[str]] | None = None,
     resolved_context_filters: dict[str, list[str]] | None = None,
     operator_mappings: dict[str, str] | None = None,
+    scoring_profile_id: str = '',
+    scoring_profile_name: str = '',
 ) -> tuple[str, str]:
     key_payload = {
         'method_version': method_version,
@@ -480,6 +483,10 @@ def _job_payload(
             if str(alias).strip() and str(canonical).strip()
         },
     }
+    if scoring_profile_id:
+        key_payload['scoring_profile_id'] = scoring_profile_id
+    if scoring_profile_name:
+        key_payload['scoring_profile_name'] = scoring_profile_name
     normalized_filters = _normalize_context_filters(context_filters)
     resolved_filters = _normalize_context_filters(resolved_context_filters or context_filters)
     if any(normalized_filters.values()):
@@ -502,6 +509,8 @@ def _row_to_job(
     if isinstance(source_metadata_payload, dict):
         metadata_list = source_metadata_payload.get('sources', [])
         configuration_payload = source_metadata_payload.get('configuration')
+        scoring_profile_id = str(source_metadata_payload.get('scoring_profile_id') or '')
+        scoring_profile_name = str(source_metadata_payload.get('scoring_profile_name') or '')
         baseline_aliases = source_metadata_payload.get('baseline_aliases', [])
         context_filters = source_metadata_payload.get('context_filters', {})
         resolved_context_filters = source_metadata_payload.get('resolved_context_filters', context_filters)
@@ -511,6 +520,8 @@ def _row_to_job(
     else:
         metadata_list = source_metadata_payload if isinstance(source_metadata_payload, list) else []
         configuration_payload = None
+        scoring_profile_id = ''
+        scoring_profile_name = ''
         baseline_aliases = []
         context_filters = {}
         resolved_context_filters = {}
@@ -534,7 +545,10 @@ def _row_to_job(
     if include_snapshot:
         if configuration_payload is None and isinstance(result, dict):
             configuration_payload = result.get('configuration')
-        configuration = validate_scoring_configuration(configuration_payload) if configuration_payload is not None else None
+        if _is_legacy_two_environment_configuration(configuration_payload):
+            configuration = configuration_payload
+        else:
+            configuration = validate_scoring_configuration(configuration_payload) if configuration_payload is not None else None
     else:
         configuration = None
     if isinstance(result, dict):
@@ -568,6 +582,8 @@ def _row_to_job(
         'levels': [str(value) for value in levels if str(value).strip()],
         'aggregation_levels': [str(value) for value in levels if str(value).strip()],
         'baseline_operator': str(row['baseline_operator'] or DEFAULT_BASELINE_OPERATOR),
+        'scoring_profile_id': scoring_profile_id,
+        'scoring_profile_name': scoring_profile_name,
         'status': str(row['status'] or 'queued'),
         'progress': max(0, min(100, int(row['progress'] or 0))),
         'message': str(row['message'] or ''),
@@ -606,15 +622,31 @@ def create_scoring_job(
     force: bool = False,
     username: str = 'system',
     context_filters: dict[str, list[str]] | None = None,
+    scoring_profile_id: str | None = None,
 ) -> tuple[dict[str, Any], bool]:
     """Return a matching cached result or persist a new queued scoring job."""
     normalized_ids = list(dict.fromkeys(int(dataset_id) for dataset_id in dataset_ids))
     normalized_context_filters = _normalize_context_filters(context_filters)
     resolved_context_filters = _expand_operator_context_filter(repository, normalized_context_filters)
+    profile_getter = getattr(repository, 'get_scoring_profile', None)
+    if callable(profile_getter):
+        if scoring_profile_id is None or (
+            isinstance(scoring_profile_id, str) and not scoring_profile_id.strip()
+        ):
+            scoring_profile = profile_getter()
+        else:
+            if not isinstance(scoring_profile_id, str):
+                raise ValueError('Scoring profile ID must be a non-empty identifier.')
+            scoring_profile = profile_getter(scoring_profile_id.strip())
+        configuration = validate_scoring_configuration(scoring_profile['configuration'])
+    else:
+        if scoring_profile_id is not None:
+            raise ValueError('This workspace does not support selecting scoring profiles for a job.')
+        configuration = _workspace_scoring_configuration(repository)
+        scoring_profile = {'id': '', 'name': ''}
     sources, _campaigns, source_fingerprint = _source_snapshot(
         repository, normalized_ids, expected_nr_mode=nr_mode,
     )
-    configuration = _workspace_scoring_configuration(repository)
     normalized_levels = _normalize_levels(levels, sources, configuration['aggregation_hierarchy'])
     selected_mode = normalize_nr_mode(nr_mode) if nr_mode else str(sources[0]['metadata']['nr_mode'])
     if selected_mode not in NR_MODES:
@@ -635,11 +667,14 @@ def create_scoring_job(
     cache_key, _canonical = _job_payload(
         normalized_levels, selected_mode, baseline, version, source_fingerprint, config_hash, baseline_aliases,
         normalized_context_filters, resolved_context_filters, operator_mappings,
+        str(scoring_profile.get('id') or ''), str(scoring_profile.get('name') or ''),
     )
     source_metadata = [source['metadata'] for source in sources]
     source_snapshot = {
         'sources': source_metadata,
         'configuration': configuration,
+        'scoring_profile_id': str(scoring_profile.get('id') or ''),
+        'scoring_profile_name': str(scoring_profile.get('name') or ''),
         'baseline_aliases': baseline_aliases,
         'context_filters': normalized_context_filters,
         'resolved_context_filters': resolved_context_filters,
@@ -850,10 +885,10 @@ def run_scoring_job(repository: Repository, job_id: int) -> dict[str, Any] | Non
             raise ValueError(
                 'This scoring job has no saved configuration snapshot. Import a Scoring Configuration and create a new scoring job.'
             )
-        configuration = validate_scoring_configuration(configuration)
         current_version = _method_version(configuration)
         if current_version != job['method_version']:
             raise ValueError('The scoring methodology changed after this job was queued. Create a new scoring job.')
+        configuration = validate_scoring_configuration(configuration)
         dataset_ids = [int(value) for value in job['dataset_ids']]
         sources, _campaigns, current_fingerprint = _source_snapshot(
             repository, dataset_ids, expected_nr_mode=job['nr_mode'],

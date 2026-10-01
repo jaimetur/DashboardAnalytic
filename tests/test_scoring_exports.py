@@ -30,7 +30,7 @@ WARNINGS = ['Speech CDR missing from this comparison.', 'Incomplete campaign cov
 
 
 def _score_for(operator, index, code):
-    if code == 'C9':
+    if code == 'K5':
         return {'Vodafone UK': 0.50, 'O2 UK': 0.85, 'Three UK': 0.97, 'EE': 1.00}.get(operator, 0.90)
     if operator == 'EE':
         return 0.80
@@ -153,7 +153,7 @@ def _slide_with_table(presentation, headers):
 
 
 def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_and_notes():
-    result = _result(missing={('O2 UK', 'C5')})
+    result = _result(missing={('O2 UK', 'K1')})
     groups = _mapping_groups()
     views = build_scoring_views(
         {'levels': ['Operator'], 'baseline_operator': 'EE'},
@@ -175,9 +175,10 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     assert list(operator_columns) == list(MAPPED_OPERATOR_ORDER)
     gap_columns = [index for index, header in enumerate(headers) if header.startswith('GAP ')]
     assert len(gap_columns) == 3
-    assert len(table.rows) == 34  # header + all 32 KPIs + total
+    display_rows = views['score_tables'][0]['expanded_rows']
+    assert len(table.rows) == len(display_rows) + 2
     assert len(table.columns) == 11
-    assert [table.cell(row, 1).text for row in range(1, 33)] == [metric['kpi'] for metric in METRICS]
+    assert [table.cell(row, 1).text for row in range(1, len(table.rows) - 1)] == [row['kpi'] for row in display_rows]
     assert all(table.cell(row, 0).text not in OPERATORS for row in range(1, 33))
 
     total_row = len(table.rows) - 1
@@ -208,12 +209,12 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     assert any(value > 0 for value in signed_gaps)
     assert any(value < 0 for value in signed_gaps)
 
-    c5_index = next(index for index, metric in enumerate(METRICS, 1) if metric['code'] == 'C5')
+    c5_index = next(index for index, metric in enumerate(display_rows, 1) if metric['kpi_code'] == 'K1')
     missing_cell = table.cell(c5_index, operator_columns['O2 UK'])
     assert missing_cell.text == 'N/A'
     assert _rgb(missing_cell) == 'ECEFF1'
 
-    c9_index = next(index for index, metric in enumerate(METRICS, 1) if metric['code'] == 'C9')
+    c9_index = next(index for index, metric in enumerate(display_rows, 1) if metric['kpi_code'] == 'K5')
     expected_bands = {'Vodafone UK': 'Low', 'O2 UK': 'Medium', 'Three UK': 'High', 'EE': 'UltraHigh'}
     for operator, band in expected_bands.items():
         assert _rgb(table.cell(c9_index, operator_columns[operator])) == THRESHOLD_COLORS[band].lstrip('#')
@@ -222,8 +223,8 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
         presentation, ['Category', 'NETCHECK KPIs', 'GAP operator −\nEE', 'Type of KPI'],
     )
     expected_gap_table = views['gap_tables'][0]
-    assert [gap_table.cell(row, 1).text for row in range(1, len(gap_table.rows))] == [row['kpi'] for row in expected_gap_table['rows']]
-    assert [float(gap_table.cell(row, 2).text) for row in range(1, len(gap_table.rows))] == pytest.approx([row['gap_points'] for row in expected_gap_table['rows']], abs=.0051)
+    assert [gap_table.cell(row, 1).text for row in range(1, len(gap_table.rows) - 1)] == [row['kpi'] for row in expected_gap_table['expanded_rows']]
+    assert [float(gap_table.cell(row, 2).text) for row in range(1, len(gap_table.rows) - 1)] == pytest.approx([row['gap_points'] for row in expected_gap_table['expanded_rows']], abs=.0051)
     assert _rgb(gap_table.cell(0, 2)) == 'FFFF00'
     reliable_rows = [row for row in range(1, len(gap_table.rows)) if gap_table.cell(row, 3).text == 'Reliable']
     if reliable_rows:
@@ -256,12 +257,12 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
          *[f'{operator} − EE' for operator in summary_view['operators']]],
     )
     assert summary_slide is presentation.slides[5]
-    assert len(summary_table.rows) == len(summary_view['rows']) + 2
+    assert len(summary_table.rows) == len(summary_view['expanded_rows']) + 2
     assert len(summary_table.columns) == len(summary_view['operators']) + 3
-    assert [summary_table.cell(row, 1).text for row in range(1, 33)] == [
-        row['kpi'] for row in summary_view['rows']
+    assert [summary_table.cell(row, 1).text for row in range(1, len(summary_table.rows) - 1)] == [
+        row['kpi'] for row in summary_view['expanded_rows']
     ]
-    for row_index, row in enumerate(summary_view['rows'], 1):
+    for row_index, row in enumerate(summary_view['expanded_rows'], 1):
         for operator_index, operator in enumerate(summary_view['operators'], 3):
             expected = row['gaps'][operator]
             cell = summary_table.cell(row_index, operator_index)
@@ -274,7 +275,7 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     summary_total_row = len(summary_table.rows) - 1
     assert summary_table.cell(summary_total_row, 0).text == 'Total'
     for operator_index, operator in enumerate(summary_view['operators'], 3):
-        expected = summary_view['total']['gaps'][operator]
+        expected = summary_view['expanded_total']['gaps'][operator]
         cell = summary_table.cell(summary_total_row, operator_index)
         if expected is None:
             assert cell.text == 'N/A'
@@ -317,7 +318,7 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
                for slide in presentation.slides)
 
 
-def test_powerpoint_splits_many_operators_into_comparable_five_column_pages():
+def test_powerpoint_keeps_many_operators_in_one_comparison_table():
     peers = [f'Network {index:02}' for index in range(36)]
     operators = peers + ['EE']
     mapped_order = list(reversed(peers)) + ['EE']
@@ -331,13 +332,13 @@ def test_powerpoint_splits_many_operators_into_comparable_five_column_pages():
     presentation = _export(result, operator_mapping_groups=groups)
     matrices = _comparison_matrices(presentation)
 
-    assert len(matrices) == 9
+    assert len(matrices) == 1
     counts = Counter()
     for table in matrices:
         operator_columns = _operator_columns(table)
-        assert len(operator_columns) == 5
+        assert len(operator_columns) == len(operators)
         assert 'EE' in operator_columns
-        assert len(table.rows) == 34
+        assert len(table.rows) == len(METRICS) + len({metric['category'] for metric in METRICS}) + 2
         assert {operator: _rgb(table.cell(0, column)) for operator, column in operator_columns.items()} == {
             operator: colors[operator].lstrip('#').upper() for operator in operator_columns
         }
@@ -501,6 +502,8 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
         for index in range(len(chart.series[0].values))
     ]
     assert chart.value_axis.maximum_scale >= max(stacked_totals)
+    assert not chart._chartSpace.xpath('.//a:ln//a:srgbClr[@val="FFFF00"]')
+    assert not best_network_chart._chartSpace.xpath('.//a:ln//a:srgbClr[@val="FFFF00"]')
     operator_legend = next(shape for shape in chart_slide.shapes
                            if shape.name == 'Hierarchy Operator Legend')
     assert operator_legend.top < chart_shape.top
@@ -511,8 +514,11 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     assert score_slides and gap_slides
     assert len(score_slides) == 1
     score_table = next(shape.table for shape in score_slides[0].shapes if shape.has_table)
-    assert len(score_table.rows) == 4 + len(METRICS) + 1
-    assert len(score_table.columns) == 4 + 2 * 15
+    assert len(score_table.rows) == 5 + len(METRICS) + len({metric['category'] for metric in METRICS}) + 1
+    assert len(score_table.columns) == 4 + 15 + 12
+    for row in list(score_table.rows)[5:]:
+        for cell in list(row.cells)[4:]:
+            assert cell.text_frame.paragraphs[0].font.size.pt <= row.height.pt
     score_table_shape = next(shape for shape in score_slides[0].shapes if shape.has_table)
     hierarchy_legend = next(shape for shape in score_slides[0].shapes
                             if shape.has_table and shape.top == Inches(1.25))
@@ -530,14 +536,14 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     assert len(all_gap_slides) == 1
     all_gap_tables = [next(shape.table for shape in slide.shapes if shape.has_table)
                       for slide in all_gap_slides]
-    assert len(all_gap_tables[0].rows) == 4 + len(METRICS) + 1
+    assert len(all_gap_tables[0].rows) == 4 + len(METRICS) + len({metric['category'] for metric in METRICS}) + 1
     assert len(all_gap_tables[0].columns) == 3 + 3 * len(contexts)
     assert not any(cell.text == 'EE' for table in all_gap_tables
                    for row in table.rows for cell in row.cells)
     assert len(individual_gap_slides) == 3
     for slide in individual_gap_slides:
         operator_gap_table = next(shape.table for shape in slide.shapes if shape.has_table)
-        assert len(operator_gap_table.rows) == 4 + len(METRICS) + 1
+        assert len(operator_gap_table.rows) == 4 + len(METRICS) + len({metric['category'] for metric in METRICS}) + 1
         assert len(operator_gap_table.columns) == 3 + len(contexts)
         header_text = '\n'.join(cell.text for row in list(operator_gap_table.rows)[:4] for cell in row.cells)
         assert 'North' in header_text and 'South' in header_text

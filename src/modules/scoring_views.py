@@ -10,7 +10,7 @@ from typing import Any
 from src.modules.scoring_config import validate_scoring_configuration
 
 
-_ENVIRONMENT_ORDER = ('DriveCity', 'DriveConnectionroad', 'Combined')
+_ENVIRONMENT_ORDER = ('DriveCity', 'DriveConnectionroad', 'Walk')
 _SCOPE_FIELDS = ('campaign', 'region', 'city', 'vendor', 'dataset_type')
 THRESHOLD_COLORS = {
     'Low': '#F8CCCC',
@@ -29,6 +29,17 @@ THRESHOLD_LEGEND = [
 _GAP_NEUTRAL = '#FFFFFF'
 _GAP_POSITIVE_MAX = '#70AD47'
 _GAP_NEGATIVE_MAX = '#E57373'
+
+
+def _positive_scoring_environments(configuration: dict[str, Any]) -> list[str]:
+    """Return scoring environments with a positive configured point allocation."""
+    configured = configuration.get('scope', {}).get('environments', {})
+    active = [
+        str(name)
+        for name, details in configured.items()
+        if isinstance(details, dict) and (_number(details.get('total_points')) or 0.0) > 0
+    ]
+    return sorted(set(active), key=_environment_sort_key)
 
 
 def normalize_result_gaps(result: dict[str, Any] | None) -> dict[str, Any]:
@@ -56,8 +67,8 @@ def build_scoring_views(job: dict[str, Any] | None, result: dict[str, Any] | Non
                         workspace_configuration: dict[str, Any] | None = None) -> dict[str, list[dict[str, Any]]]:
     """Build reference-style KPI matrices and signed, priority-ordered GAP tables.
 
-    The source ``result`` remains untouched. City and road rows are combined only
-    when both environments actually occur in the same aggregation context.
+    The source ``result`` remains untouched. Combined values use every configured
+    environment with a positive scoring allocation in the same aggregation context.
     """
     job = job if isinstance(job, dict) else {}
     result = result if isinstance(result, dict) else {}
@@ -72,6 +83,8 @@ def build_scoring_views(job: dict[str, Any] | None, result: dict[str, Any] | Non
         )
     configuration = validate_scoring_configuration(configuration_payload)
     metrics = configuration['metrics']
+    configured_environments = list(configuration.get('scope', {}).get('environments', {}))
+    combined_environments = _positive_scoring_environments(configuration)
     gap_priority = list(configuration.get('gap_priority') or [metric['code'] for metric in metrics])
     gap_priority_rank = {code: index for index, code in enumerate(gap_priority)}
     levels = job.get('levels', job.get('aggregation_levels', [])) or []
@@ -96,7 +109,7 @@ def build_scoring_views(job: dict[str, Any] | None, result: dict[str, Any] | Non
     all_operators: dict[tuple[Any, ...], set[str]] = {}
     for record in context_records:
         scope = _scope_key(record, include_dataset_type)
-        environment = _canonical_environment(_field(record, 'environment'))
+        environment = _canonical_environment(_field(record, 'environment'), configured_environments)
         contexts.setdefault(scope, {}).setdefault(environment, []).append(record)
         all_operators.setdefault(scope, set()).update(_operators_in(record))
 
@@ -109,18 +122,15 @@ def build_scoring_views(job: dict[str, Any] | None, result: dict[str, Any] | Non
         operators = sorted(styles, key=lambda name: (styles[name]['position'], styles[name]['label'].casefold(), name.casefold()))
         actual_environments = {environment for environment in environment_records if environment != 'Combined'}
         environments = sorted(actual_environments, key=_environment_sort_key)
-        if {'DriveCity', 'DriveConnectionroad'} <= actual_environments:
+        if combined_environments and set(combined_environments) <= actual_environments:
             environments.append('Combined')
 
         for environment in environments:
             context = _make_context(scope, environment, include_dataset_type)
-            env_rows = environment_records.get(environment, [])
-            city_rows = environment_records.get('DriveCity', []) if environment == 'Combined' else []
-            road_rows = environment_records.get('DriveConnectionroad', []) if environment == 'Combined' else []
             baseline_operator = _matching_baseline(operators, requested_baseline, baseline_aliases)
             table = _build_score_table(
                 context, operators, baseline_operator,
-                env_rows, city_rows, road_rows, include_dataset_type,
+                environment_records, combined_environments, include_dataset_type,
                 actual_environments, metrics, configuration, baseline_aliases,
                 gap_priority_rank,
             )
@@ -366,6 +376,10 @@ def _build_hierarchy_tables(
             'values': total_values,
             'gaps': total_gaps,
         }
+        combined_required_environments = next((
+            list(table.get('combined_required_environments') or []) for table in context_tables
+            if table.get('combined_required_environments') is not None
+        ), [])
         score_matrix = {
             'context': {'environment': environment},
             'title': f'Scoring Table — {environment}',
@@ -378,10 +392,14 @@ def _build_hierarchy_tables(
             'total': total,
             'gap_scale_max': gap_scale_max,
             'gap_scale_colors': {'zero': _GAP_NEUTRAL, 'positive': _GAP_POSITIVE_MAX, 'negative': _GAP_NEGATIVE_MAX},
-            'coverage_note': _coverage_note(rows, leaf_ids, environment, actual_environments),
+            'coverage_note': _coverage_note(
+                rows, leaf_ids, environment, actual_environments, combined_required_environments,
+            ),
+            'combined_required_environments': combined_required_environments,
             'gap_priority': [code for code in gap_priority_rank],
             'gap_direction': 'operator_minus_reference',
         }
+        _attach_score_table_modes(score_matrix, gap_priority_rank)
         hierarchy_scores.append(score_matrix)
 
         gap_rows = []
@@ -395,7 +413,7 @@ def _build_hierarchy_tables(
             gap_priority_rank.get(row['kpi_code'], len(gap_priority_rank)),
             row['kpi_code'],
         ))
-        hierarchy_gaps.append({
+        gap_matrix = {
             'context': {'environment': environment},
             'title': f'GAP Analysis — All vs reference — {environment}',
             'operators': leaf_ids,
@@ -409,7 +427,9 @@ def _build_hierarchy_tables(
             'gap_scale_colors': {'zero': _GAP_NEUTRAL, 'positive': _GAP_POSITIVE_MAX, 'negative': _GAP_NEGATIVE_MAX},
             'note': 'GAP comparisons use the reference operator in the same selected context. Missing matches are N/A.',
             'gap_direction': 'operator_minus_reference',
-        })
+        }
+        _attach_gap_matrix_modes(gap_matrix, gap_priority_rank)
+        hierarchy_gaps.append(gap_matrix)
     return hierarchy_scores, hierarchy_gaps
 
 
@@ -429,16 +449,18 @@ def gap_color(value: Any, scale_max: Any) -> str:
 
 def _build_score_table(
     context: dict[str, Any], operators: list[str], baseline_operator: str,
-    env_rows: list[dict[str, Any]],
-    city_rows: list[dict[str, Any]], road_rows: list[dict[str, Any]],
+    environment_records: dict[str, list[dict[str, Any]]], combined_environments: list[str],
     include_dataset_type: bool, actual_environments: set[str],
     metrics: list[dict[str, Any]], configuration: dict[str, Any],
     baseline_aliases: list[str], gap_priority_rank: dict[str, int],
 ) -> dict[str, Any]:
     environment = context['environment']
+    source_environments = combined_environments if environment == 'Combined' else [environment]
+    source_rows = [row for source_environment in source_environments
+                   for row in environment_records.get(source_environment, [])]
     global_max_points = _number(configuration.get('scope', {}).get('total_max_points')) or 0.0
     selected_metrics = _metrics_for_context(context, include_dataset_type, metrics)
-    unknown = _unknown_metrics(env_rows if environment != 'Combined' else city_rows + road_rows, metrics)
+    unknown = _unknown_metrics(source_rows, metrics)
     metric_specs = [(metric['code'], metric) for metric in selected_metrics]
     known_codes = {code for code, _ in metric_specs}
     metric_specs.extend((code, spec) for code, spec in unknown.items() if code not in known_codes)
@@ -448,17 +470,16 @@ def _build_score_table(
         row_values: dict[str, dict[str, Any]] = {}
         for operator in operators:
             if environment == 'Combined':
-                value = _combined_metric_value(code, operator, city_rows, road_rows, metric)
+                value = _combined_metric_value(
+                    code, operator, environment_records, combined_environments, metric,
+                )
             else:
-                source = _find_metric_record(code, operator, env_rows)
+                source = _find_metric_record(code, operator, environment_records.get(environment, []))
                 value = _metric_value(source, metric, environment)
             row_values[operator] = value
-        maximum = _metric_max_points(metric, environment)
+        maximum = _metric_max_points(metric, environment, combined_environments)
         if maximum is None:
-            maximum = _unknown_max_points(
-                code, env_rows if environment != 'Combined' else city_rows + road_rows,
-                environment,
-            )
+            maximum = _unknown_max_points(code, source_rows, environment, combined_environments)
         weight_percent = maximum * 100.0 / global_max_points if maximum is not None and global_max_points > 0 else None
         gaps = {}
         for operator in operators:
@@ -471,6 +492,7 @@ def _build_score_table(
             'category': metric.get('category', 'Other'),
             'kpi': metric.get('kpi', _fallback_kpi_label(code)),
             'kpi_type': metric.get('kpi_type', 'Unknown'),
+            'source_kind': _metric_source_kind(metric),
             'weight_percent': weight_percent,
             'max_points': maximum,
             'values': row_values,
@@ -514,7 +536,7 @@ def _build_score_table(
         row['gap_colors'] = {operator: gap_color(row['gaps'].get(operator), gap_scale_max) for operator in operators}
         row['weight_percent'] = row['max_points'] * 100.0 / global_max_points if row['max_points'] is not None and global_max_points > 0 else None
     title = _make_title('Scoring Table', context)
-    return {
+    table = {
         'context': context,
         'title': title,
         'operators': operators,
@@ -523,10 +545,15 @@ def _build_score_table(
         'total': total,
         'gap_scale_max': gap_scale_max,
         'gap_scale_colors': {'zero': _GAP_NEUTRAL, 'positive': _GAP_POSITIVE_MAX, 'negative': _GAP_NEGATIVE_MAX},
-        'coverage_note': _coverage_note(rows, operators, environment, actual_environments),
+        'coverage_note': _coverage_note(
+            rows, operators, environment, actual_environments, combined_environments,
+        ),
+        'combined_required_environments': list(combined_environments),
         'gap_priority': [code for code in gap_priority_rank],
         'gap_direction': 'operator_minus_reference',
     }
+    _attach_score_table_modes(table, gap_priority_rank)
+    return table
 
 
 def _build_gap_summary_table(
@@ -538,12 +565,13 @@ def _build_gap_summary_table(
                  if not _same_baseline_identity(operator, baseline, baseline_aliases)]
     rows = [{
         **{key: row[key] for key in ('category', 'kpi', 'kpi_code', 'kpi_type')},
+        'source_kind': row.get('source_kind'),
         'gaps': {operator: row['gaps'].get(operator) for operator in operators},
         'gap_colors': {operator: gap_color(row['gaps'].get(operator), score_table['gap_scale_max'])
                        for operator in operators},
     } for row in score_table['rows']]
-    rows.sort(key=lambda row: gap_priority_rank.get(row['kpi_code'], len(gap_priority_rank)))
-    return {
+    rows = _priority_order_rows(rows, gap_priority_rank)
+    table = {
         'context': dict(score_table['context']),
         'title': _make_title(f'GAP Analysis: All vs {baseline}', score_table['context']),
         'operators': operators,
@@ -555,6 +583,8 @@ def _build_gap_summary_table(
         'gap_scale_colors': dict(score_table['gap_scale_colors']),
         'note': 'Operator − reference. Positive values are green; negative values are red. Missing comparisons are N/A.',
     }
+    _attach_gap_matrix_modes(table, gap_priority_rank)
+    return table
 
 
 def _build_gap_tables(
@@ -566,20 +596,24 @@ def _build_gap_tables(
         if _same_baseline_identity(operator, baseline, baseline_aliases):
             continue
         prioritized = []
+        mode_rows = []
         for row in score_table['rows']:
             gap = row['gaps'].get(operator)
+            mode_row = {
+                'kpi_code': row['kpi_code'],
+                'category': row['category'],
+                'kpi': row['kpi'],
+                'gap_points': gap,
+                'kpi_type': row['kpi_type'],
+                'source_kind': row.get('source_kind'),
+                'gap_color': gap_color(gap, score_table['gap_scale_max']),
+            }
+            mode_rows.append(mode_row)
             if gap is not None:
-                prioritized.append({
-                    'kpi_code': row['kpi_code'],
-                    'category': row['category'],
-                    'kpi': row['kpi'],
-                    'gap_points': gap,
-                    'kpi_type': row['kpi_type'],
-                    'gap_color': gap_color(gap, score_table['gap_scale_max']),
-                })
-        prioritized.sort(key=lambda row: (gap_priority_rank.get(row['kpi_code'], len(gap_priority_rank)), -row['gap_points']))
+                prioritized.append(mode_row)
+        prioritized = _priority_order_rows(prioritized, gap_priority_rank)
         total_gap = score_table['total']['gaps'].get(operator)
-        tables.append({
+        table = {
             'context': dict(score_table['context']),
             'title': _make_title(f'GAP Analysis: {operator} vs {baseline}', score_table['context']),
             'operator': operator,
@@ -591,8 +625,200 @@ def _build_gap_tables(
             'gap_scale_colors': dict(score_table['gap_scale_colors']),
             'note': 'Positive values mean the compared operator scores above the reference; negative values mean it scores below.',
             'gap_direction': 'operator_minus_reference',
-        })
+        }
+        _attach_scalar_gap_modes(table, gap_priority_rank, mode_rows)
+        tables.append(table)
     return tables
+
+
+def _metric_source_kind(metric: dict[str, Any]) -> str | None:
+    value = metric.get('source_kind')
+    if value in (None, '') and isinstance(metric.get('calculation'), dict):
+        value = metric['calculation'].get('source_kind')
+    if value is None:
+        return None
+    return str(value).strip().casefold() or None
+
+
+def _priority_order_rows(rows: list[dict[str, Any]], gap_priority_rank: dict[str, int]) -> list[dict[str, Any]]:
+    return sorted(
+        rows,
+        key=lambda row: (
+            gap_priority_rank.get(str(row.get('kpi_code') or ''), len(gap_priority_rank)),
+            str(row.get('kpi_code') or '').casefold(),
+        ),
+    )
+
+
+def _average_numbers(values: list[Any]) -> float | None:
+    valid = [number for value in values if (number := _number(value)) is not None]
+    return _clean_number(sum(valid) / len(valid)) if valid else None
+
+
+def _ordered_category_groups(
+    rows: list[dict[str, Any]], gap_priority_rank: dict[str, int],
+) -> list[tuple[str, list[dict[str, Any]]]]:
+    ordered = _priority_order_rows(rows, gap_priority_rank)
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in ordered:
+        category = str(row.get('category') or 'Other')
+        grouped.setdefault(category, []).append(row)
+    return list(grouped.items())
+
+
+def _category_groups_in_source_order(rows: list[dict[str, Any]]) -> list[tuple[str, list[dict[str, Any]]]]:
+    """Group score rows without changing the configured KPI or category order."""
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        category = str(row.get('category') or 'Other')
+        grouped.setdefault(category, []).append(row)
+    return list(grouped.items())
+
+
+def _category_gap_row(
+    category: str, rows: list[dict[str, Any]], operators: list[str],
+    gap_scale_max: float,
+) -> dict[str, Any]:
+    gaps = {
+        operator: _average_numbers([row.get('gaps', {}).get(operator) for row in rows])
+        for operator in operators
+    }
+    return {
+        'row_type': 'category',
+        'category': category,
+        'kpi': f'{category} total',
+        'kpi_code': '',
+        'kpi_type': '',
+        'source_kind': None,
+        'gaps': gaps,
+        'gap_colors': {operator: gap_color(gaps[operator], gap_scale_max) for operator in operators},
+    }
+
+
+def _mode_total(total: dict[str, Any], gaps: dict[str, float | None], operators: list[str], scale_max: float) -> dict[str, Any]:
+    output = copy.deepcopy(total)
+    output['gaps'] = gaps
+    output['gap_colors'] = {operator: gap_color(gaps.get(operator), scale_max) for operator in operators}
+    output['gap_label'] = 'Average KPI GAP'
+    return output
+
+
+def _attach_score_table_modes(table: dict[str, Any], _gap_priority_rank: dict[str, int]) -> None:
+    operators = list(table.get('operators') or [])
+    rows = list(table.get('rows') or [])
+    scale_max = float(_number(table.get('gap_scale_max')) or 0.0)
+    expanded_rows: list[dict[str, Any]] = []
+    category_rows: list[dict[str, Any]] = []
+    for category, category_items in _category_groups_in_source_order(rows):
+        for item in category_items:
+            expanded_rows.append({**copy.deepcopy(item), 'row_type': 'kpi'})
+        subtotal = _score_category_row(category, category_items, operators, scale_max)
+        expanded_rows.append(subtotal)
+        category_rows.append(copy.deepcopy(subtotal))
+    average_gaps = {
+        operator: _average_numbers([row.get('gaps', {}).get(operator) for row in rows])
+        for operator in operators
+    }
+    table['expanded_rows'] = expanded_rows
+    table['category_rows'] = category_rows
+    table['expanded_total'] = _mode_total(table.get('total') or {}, average_gaps, operators, scale_max)
+    table['category_total'] = _mode_total(table.get('total') or {}, average_gaps, operators, scale_max)
+
+
+def _score_category_row(
+    category: str, rows: list[dict[str, Any]], operators: list[str], gap_scale_max: float,
+) -> dict[str, Any]:
+    max_points = sum(number for row in rows if (number := _number(row.get('max_points'))) is not None)
+    weights = [number for row in rows if (number := _number(row.get('weight_percent'))) is not None]
+    values: dict[str, dict[str, Any]] = {}
+    for operator in operators:
+        cells = [row.get('values', {}).get(operator) or {} for row in rows]
+        points = [number for cell in cells if (number := _number(cell.get('points'))) is not None]
+        known_points = sum(points) if points else None
+        has_weighted_rows = any((_number(row.get('max_points')) or 0.0) > 0 for row in rows)
+        complete = bool(rows) and all(
+            cell.get('complete') is True and _number(cell.get('points')) is not None
+            for row, cell in zip(rows, cells)
+            if (_number(row.get('max_points')) or 0.0) > 0
+        )
+        values[operator] = {
+            'points': known_points,
+            'complete': complete,
+            'value': None,
+            'kpi_value': None,
+            'score': known_points / max_points if known_points is not None and max_points > 0 else None,
+            'sample_count': sum(_integer(cell.get('sample_count')) or 0 for cell in cells),
+            'threshold_band': 'Unavailable',
+            'color': THRESHOLD_COLORS['Unavailable'],
+        }
+        if not has_weighted_rows and rows and not points:
+            values[operator]['points'] = 0.0
+            values[operator]['complete'] = all(cell.get('complete') is True for cell in cells)
+    gaps = {
+        operator: _average_numbers([row.get('gaps', {}).get(operator) for row in rows])
+        for operator in operators
+    }
+    return {
+        'row_type': 'category',
+        'category': category,
+        'kpi': f'{category} total',
+        'kpi_code': '',
+        'kpi_type': '',
+        'source_kind': None,
+        'kpi_value': None,
+        'weight_percent': _clean_number(sum(weights)) if weights else None,
+        'max_points': _clean_number(max_points),
+        'values': values,
+        'gaps': gaps,
+        'gap_colors': {operator: gap_color(gaps[operator], gap_scale_max) for operator in operators},
+    }
+
+
+def _attach_gap_matrix_modes(table: dict[str, Any], gap_priority_rank: dict[str, int]) -> None:
+    operators = list(table.get('operators') or [])
+    rows = list(table.get('rows') or [])
+    scale_max = float(_number(table.get('gap_scale_max')) or 0.0)
+    expanded_rows: list[dict[str, Any]] = []
+    category_rows: list[dict[str, Any]] = []
+    for category, category_items in _ordered_category_groups(rows, gap_priority_rank):
+        expanded_rows.extend({**copy.deepcopy(row), 'row_type': 'kpi'} for row in category_items)
+        subtotal = _category_gap_row(category, category_items, operators, scale_max)
+        expanded_rows.append(subtotal)
+        category_rows.append(copy.deepcopy(subtotal))
+    average_gaps = {
+        operator: _average_numbers([row.get('gaps', {}).get(operator) for row in rows])
+        for operator in operators
+    }
+    table['expanded_rows'] = expanded_rows
+    table['category_rows'] = category_rows
+    total = table.get('total') if isinstance(table.get('total'), dict) else {}
+    table['expanded_total'] = _mode_total(total, average_gaps, operators, scale_max)
+    table['category_total'] = _mode_total(total, average_gaps, operators, scale_max)
+
+
+def _attach_scalar_gap_modes(
+    table: dict[str, Any], gap_priority_rank: dict[str, int], mode_rows: list[dict[str, Any]] | None = None,
+) -> None:
+    rows = list(mode_rows if mode_rows is not None else table.get('rows') or [])
+    expanded_rows: list[dict[str, Any]] = []
+    category_rows: list[dict[str, Any]] = []
+    scale_max = float(_number(table.get('gap_scale_max')) or 0.0)
+    for category, category_items in _ordered_category_groups(rows, gap_priority_rank):
+        expanded_rows.extend({**copy.deepcopy(row), 'row_type': 'kpi'} for row in category_items)
+        values = [row.get('gap_points') for row in category_items]
+        mean_gap = _average_numbers(values)
+        subtotal = {
+            'row_type': 'category', 'category': category, 'kpi': f'{category} total',
+            'kpi_code': '', 'kpi_type': '', 'source_kind': None,
+            'gap_points': mean_gap, 'gap_color': gap_color(mean_gap, scale_max),
+        }
+        expanded_rows.append(subtotal)
+        category_rows.append(copy.deepcopy(subtotal))
+    mean_gap = _average_numbers([row.get('gap_points') for row in rows])
+    table['expanded_rows'] = expanded_rows
+    table['category_rows'] = category_rows
+    table['expanded_total'] = {'gap_points': mean_gap, 'gap_label': 'Average KPI GAP'}
+    table['category_total'] = {'gap_points': mean_gap, 'gap_label': 'Average KPI GAP'}
 
 
 def _metric_value(record: dict[str, Any] | None, metric: dict[str, Any], environment: str) -> dict[str, Any]:
@@ -623,23 +849,38 @@ def _metric_value(record: dict[str, Any] | None, metric: dict[str, Any], environ
 
 
 def _combined_metric_value(
-    code: str, operator: str, city_rows: list[dict[str, Any]],
-    road_rows: list[dict[str, Any]], metric: dict[str, Any],
+    code: str, operator: str, environment_records: dict[str, list[dict[str, Any]]],
+    combined_environments: list[str], metric: dict[str, Any],
 ) -> dict[str, Any]:
-    city = _metric_value(_find_metric_record(code, operator, city_rows), metric, 'DriveCity')
-    road = _metric_value(_find_metric_record(code, operator, road_rows), metric, 'DriveConnectionroad')
-    known_points = [cell['points'] for cell in (city, road) if cell['points'] is not None]
-    points = sum(known_points) if known_points else None
-    maximum = _metric_max_points(metric, 'Combined')
+    metric_contexts = metric.get('contexts', {}) if isinstance(metric.get('contexts'), dict) else {}
+    required_environments = [
+        environment for environment in combined_environments
+        if isinstance(metric_contexts.get(environment), dict)
+        and (_number(metric_contexts[environment].get('max_points')) or 0.0) > 0
+    ]
+    # Legacy/unknown KPI rows have no configured contexts; require each globally
+    # weighted environment and derive their maxima from the source records.
+    if not metric_contexts:
+        required_environments = list(combined_environments)
+    cells = [
+        _metric_value(
+            _find_metric_record(code, operator, environment_records.get(environment, [])),
+            metric, environment,
+        )
+        for environment in required_environments
+    ]
+    known_points = [cell['points'] for cell in cells if cell['points'] is not None]
+    points = sum(known_points) if known_points else (0.0 if not required_environments else None)
+    maximum = _metric_max_points(metric, 'Combined', combined_environments)
     score = points / maximum if points is not None and maximum else None
-    complete = city['complete'] and road['complete']
-    threshold_band = _threshold_band(score, metric, 'Combined', complete)
+    complete = all(cell['complete'] for cell in cells)
+    threshold_band = _threshold_band(score, metric, 'Combined', complete, combined_environments)
     return {
         'points': points,
         'complete': complete,
         'value': None,
         'score': score,
-        'sample_count': city['sample_count'] + road['sample_count'],
+        'sample_count': sum(cell['sample_count'] for cell in cells),
         'threshold_band': threshold_band,
         'color': THRESHOLD_COLORS[threshold_band],
     }
@@ -703,41 +944,75 @@ def _unknown_metrics(records: list[dict[str, Any]], metrics: list[dict[str, Any]
     return unknown
 
 
-def _unknown_max_points(code: str, records: list[dict[str, Any]], environment: str) -> float | None:
+def _unknown_max_points(
+    code: str, records: list[dict[str, Any]], environment: str,
+    combined_environments: list[str] | None = None,
+) -> float | None:
     candidates: dict[str, float] = {}
     for record in records:
         if _record_view_code(record) == code:
             value = _number(_field(record, 'max_points', 'maximum_points'))
             if value is not None:
-                row_environment = _canonical_environment(_field(record, 'environment'))
+                available_environments = (
+                    combined_environments if environment == 'Combined'
+                    else [environment]
+                )
+                row_environment = _canonical_environment(
+                    _field(record, 'environment'), available_environments,
+                )
                 if environment == 'Combined':
-                    candidates[row_environment] = max(candidates.get(row_environment, value), value)
+                    if combined_environments is None or row_environment in combined_environments:
+                        candidates[row_environment] = max(candidates.get(row_environment, value), value)
                 else:
                     candidates[environment] = max(candidates.get(environment, value), value)
     if not candidates:
         return None
-    return sum(candidates.values()) if environment == 'Combined' else max(candidates.values())
+    if environment != 'Combined':
+        return max(candidates.values())
+    if combined_environments is None:
+        return sum(candidates.values())
+    if any(name not in candidates for name in combined_environments):
+        return None
+    return sum(candidates[name] for name in combined_environments)
 
 
-def _metric_max_points(metric: dict[str, Any], environment: str) -> float | None:
+def _metric_max_points(
+    metric: dict[str, Any], environment: str,
+    combined_environments: list[str] | None = None,
+) -> float | None:
     contexts = metric.get('contexts', {})
     if environment == 'Combined':
-        city = _metric_max_points(metric, 'DriveCity')
-        road = _metric_max_points(metric, 'DriveConnectionroad')
-        return city + road if city is not None and road is not None else None
-    canonical = _canonical_environment(environment)
+        selected = combined_environments or ['DriveCity', 'DriveConnectionroad']
+        values = [
+            _number(contexts[name].get('max_points'))
+            for name in selected
+            if isinstance(contexts.get(name), dict)
+            and (_number(contexts[name].get('max_points')) or 0.0) > 0
+        ]
+        if not values:
+            return 0.0 if combined_environments is not None else None
+        return sum(values)
+    canonical = _canonical_environment(environment, list(contexts))
     context = contexts.get(canonical)
     return _number(context.get('max_points')) if isinstance(context, dict) else None
 
 
-def _threshold_band(score: float | None, metric: dict[str, Any], environment: str, complete: bool) -> str:
+def _threshold_band(
+    score: float | None, metric: dict[str, Any], environment: str, complete: bool,
+    combined_environments: list[str] | None = None,
+) -> str:
     if not complete or score is None:
         return 'Unavailable'
     contexts = metric.get('contexts', {})
     if environment == 'Combined':
-        metric_contexts = [contexts.get('DriveCity'), contexts.get('DriveConnectionroad')]
+        selected = combined_environments or ['DriveCity', 'DriveConnectionroad']
+        metric_contexts = [contexts.get(name) for name in selected]
+        metric_contexts = [
+            context for context in metric_contexts
+            if isinstance(context, dict) and (_number(context.get('max_points')) or 0.0) > 0
+        ]
     else:
-        metric_contexts = [contexts.get(_canonical_environment(environment))]
+        metric_contexts = [contexts.get(_canonical_environment(environment, list(contexts)))]
     available = [context for context in metric_contexts
                  if isinstance(context, dict) and isinstance(context.get('thresholds'), dict)]
     if not available:
@@ -793,15 +1068,30 @@ def _make_context(scope: tuple[Any, ...], environment: str, include_dataset_type
     return context
 
 
-def _canonical_environment(value: Any) -> str:
+def _canonical_environment(
+    value: Any,
+    configured_environments: list[str] | tuple[str, ...] | set[str] | None = None,
+) -> str:
     text = str(value or '').strip()
+    configured = [str(name) for name in configured_environments or []]
+    configured_by_identity = {name.casefold(): name for name in configured}
+    if text.casefold() in configured_by_identity:
+        return configured_by_identity[text.casefold()]
     identity = re.sub(r'[^a-z0-9]+', '', text.casefold())
-    if identity in {'drivecity', 'city', 'driveandcity'}:
-        return 'DriveCity'
-    if identity in {'driveconnectionroad', 'connectionroad', 'road', 'driveandroad'}:
-        return 'DriveConnectionroad'
-    if identity == 'combined':
-        return 'Combined'
+    aliases = {
+        'drivecity': 'DriveCity', 'city': 'DriveCity', 'driveandcity': 'DriveCity',
+        'driveconnectionroad': 'DriveConnectionroad', 'connectionroad': 'DriveConnectionroad',
+        'road': 'DriveConnectionroad', 'driveandroad': 'DriveConnectionroad',
+        'walk': 'Walk', 'drivewalk': 'Walk', 'driveandwalk': 'Walk',
+        'combined': 'Combined',
+    }
+    canonical = aliases.get(identity)
+    if canonical:
+        if not configured or canonical.casefold() in configured_by_identity:
+            return configured_by_identity.get(canonical.casefold(), canonical)
+        # A legacy alias is meaningful only when its canonical environment is
+        # part of this configuration. Otherwise preserve the source label.
+        return text or 'Unspecified'
     return text or 'Unspecified'
 
 
@@ -920,13 +1210,17 @@ def _same_baseline_identity(operator: str, baseline: str, aliases: list[str] | N
 
 def _coverage_note(
     rows: list[dict[str, Any]], operators: list[str], environment: str,
-    actual_environments: set[str],
+    actual_environments: set[str], combined_environments: list[str] | None = None,
 ) -> str:
     notes = []
-    if environment == 'DriveCity' and 'DriveConnectionroad' not in actual_environments:
-        notes.append('No DriveConnectionroad results are available for this aggregation context; Combined is not shown.')
-    elif environment == 'DriveConnectionroad' and 'DriveCity' not in actual_environments:
-        notes.append('No DriveCity results are available for this aggregation context; Combined is not shown.')
+    required = combined_environments or ['DriveCity', 'DriveConnectionroad']
+    if environment != 'Combined' and environment in required:
+        missing_environments = [name for name in required if name not in actual_environments]
+        if missing_environments:
+            notes.append(
+                'Combined is not shown because weighted environments are missing: '
+                + ', '.join(missing_environments) + '.'
+            )
     weighted_rows = [row for row in rows if row.get('max_points') is None or (_number(row.get('max_points')) or 0.0) > 0]
     missing = sum(1 for row in weighted_rows
                   if any(not row['values'].get(operator, {}).get('complete', False) for operator in operators))
@@ -989,6 +1283,8 @@ def _scope_sort_key(scope: tuple[Any, ...]) -> tuple[str, ...]:
 
 
 def _environment_sort_key(environment: str) -> tuple[int, str]:
+    if environment == 'Combined':
+        return (len(_ENVIRONMENT_ORDER) + 1, 'combined')
     try:
         return (_ENVIRONMENT_ORDER.index(environment), environment.casefold())
     except ValueError:

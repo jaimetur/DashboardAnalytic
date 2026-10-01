@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import re
 from pathlib import Path
 from types import ModuleType
@@ -171,7 +172,7 @@ def test_scoring_configuration_changes_cache_and_queued_job_keeps_its_snapshot(r
     original_configuration = copy.deepcopy(initial['configuration'])
 
     changed_configuration = scoring_configuration()
-    c5 = next(metric for metric in changed_configuration['metrics'] if metric['code'] == 'C5')
+    c5 = next(metric for metric in changed_configuration['metrics'] if metric['code'] == 'K1')
     c5['contexts']['DriveCity']['thresholds']['low'] = 86
     repository.replace_scoring_configuration(changed_configuration)
     changed, reused = scoring_jobs.create_scoring_job(repository, [dataset_id], ['Region'], 'NSA')
@@ -183,6 +184,140 @@ def test_scoring_configuration_changes_cache_and_queued_job_keeps_its_snapshot(r
     assert completed['status'] == 'completed'
     assert completed['result']['configuration'] == original_configuration
     assert engine.configuration_snapshots[0] == original_configuration
+
+
+def test_legacy_job_configuration_snapshot_is_returned_without_walk_migration(repository, scoring_engine):
+    engine, _calls = scoring_engine
+    from src.modules.scoring import method_version_for_configuration
+
+    engine.method_version_for_configuration = method_version_for_configuration
+    dataset_id = add_dataset(repository)
+    job, _reused = scoring_jobs.create_scoring_job(repository, [dataset_id], [], 'NSA')
+    legacy = copy.deepcopy(job['configuration'])
+    legacy['scope']['environments'].pop('Walk')
+    legacy['scope']['environment_mapping'].pop('Walk')
+    for metric in legacy['metrics']:
+        metric['contexts'].pop('Walk')
+
+    with repository.connection() as connection:
+        row = connection.execute(
+            'SELECT source_metadata_json FROM scoring_jobs WHERE id = ?', (job['id'],),
+        ).fetchone()
+        snapshot = json.loads(row['source_metadata_json'])
+        snapshot['configuration'] = legacy
+        connection.execute(
+            'UPDATE scoring_jobs SET source_metadata_json = ?, method_version = ? WHERE id = ?',
+            (json.dumps(snapshot), method_version_for_configuration(legacy), job['id']),
+        )
+
+    loaded = scoring_jobs.get_scoring_job(repository, job['id'])
+    assert loaded['configuration'] == legacy
+    assert 'Walk' not in loaded['configuration']['scope']['environments']
+    completed = scoring_jobs.run_scoring_job(repository, job['id'])
+    assert completed['status'] == 'completed'
+    assert completed['configuration'] == legacy
+    with repository.connection() as connection:
+        stored = connection.execute(
+            'SELECT source_metadata_json FROM scoring_jobs WHERE id = ?', (job['id'],),
+        ).fetchone()
+    assert json.loads(stored['source_metadata_json'])['configuration'] == legacy
+
+
+def test_active_profile_identity_partitions_cache_and_is_saved_with_job(repository, scoring_engine):
+    dataset_id = add_dataset(repository)
+    first, reused = scoring_jobs.create_scoring_job(repository, [dataset_id], ['Region'], 'NSA')
+    assert not reused
+    assert first['scoring_profile_id'] == 'netcheck-2026'
+    assert scoring_jobs.run_scoring_job(repository, first['id'])['status'] == 'completed'
+
+    profiles = repository.get_scoring_profiles()
+    second_profile = copy.deepcopy(profiles['profiles'][0])
+    second_profile.update({'id': 'netcheck-alt', 'name': 'NetCheck Alternate'})
+    profiles['profiles'].append(second_profile)
+    profiles['active_profile_id'] = second_profile['id']
+    repository.replace_scoring_profiles(profiles)
+
+    second, reused = scoring_jobs.create_scoring_job(repository, [dataset_id], ['Region'], 'NSA')
+    assert not reused
+    assert second['id'] != first['id']
+    assert second['scoring_profile_id'] == 'netcheck-alt'
+    assert second['scoring_profile_name'] == 'NetCheck Alternate'
+
+    profiles['active_profile_id'] = 'netcheck-2026'
+    repository.replace_scoring_profiles(profiles)
+    cached, reused = scoring_jobs.create_scoring_job(repository, [dataset_id], ['Region'], 'NSA')
+    assert reused
+    assert cached['id'] == first['id']
+
+
+def test_explicit_inactive_profile_sets_job_snapshot_and_hierarchy_without_switching_active(
+    repository, scoring_engine,
+):
+    engine, _calls = scoring_engine
+    dataset_id = add_dataset(repository)
+    profiles = repository.get_scoring_profiles()
+    active_id = profiles['active_profile_id']
+    active_configuration = copy.deepcopy(repository.get_scoring_configuration())
+    inactive = copy.deepcopy(profiles['profiles'][0])
+    inactive.update({'id': 'netcheck-2025', 'name': 'NetCheck 2025'})
+    inactive['configuration']['version'] = 'NetCheck 2025'
+    inactive['configuration']['aggregation_hierarchy'] = [
+        'Region', 'Operator', 'Vendor', 'City', 'Campaign',
+    ]
+    inactive['configuration']['metrics'][0]['contexts']['DriveCity']['max_points'] = 88
+    profiles['profiles'].append(inactive)
+    repository.replace_scoring_profiles(profiles)
+
+    selected, reused = scoring_jobs.create_scoring_job(
+        repository, [dataset_id], ['Region', 'City'], 'NSA', scoring_profile_id='netcheck-2025',
+    )
+
+    assert not reused
+    assert selected['scoring_profile_id'] == 'netcheck-2025'
+    assert selected['scoring_profile_name'] == 'NetCheck 2025'
+    assert selected['configuration']['metrics'][0]['contexts']['DriveCity']['max_points'] == 88
+    assert selected['aggregation_hierarchy'] == inactive['configuration']['aggregation_hierarchy']
+    assert selected['aggregation_levels'] == ['Region', 'Operator', 'City']
+    assert repository.get_scoring_profiles()['active_profile_id'] == active_id
+    assert repository.get_scoring_configuration() == active_configuration
+
+    completed = scoring_jobs.run_scoring_job(repository, selected['id'])
+    assert completed['status'] == 'completed'
+    assert engine.configuration_snapshots[0]['metrics'][0]['contexts']['DriveCity']['max_points'] == 88
+
+    default_job, default_reused = scoring_jobs.create_scoring_job(
+        repository, [dataset_id], ['Region', 'City'], 'NSA',
+    )
+    assert not default_reused
+    assert default_job['scoring_profile_id'] == active_id
+    assert default_job['id'] != selected['id']
+
+
+def test_explicit_same_configuration_profile_uses_separate_cache_entry(repository):
+    dataset_id = add_dataset(repository)
+    profiles = repository.get_scoring_profiles()
+    alternate = copy.deepcopy(profiles['profiles'][0])
+    alternate.update({'id': 'netcheck-copy', 'name': 'NetCheck Copy'})
+    profiles['profiles'].append(alternate)
+    repository.replace_scoring_profiles(profiles)
+
+    active, reused_active = scoring_jobs.create_scoring_job(repository, [dataset_id], ['Region'], 'NSA')
+    explicit, reused_explicit = scoring_jobs.create_scoring_job(
+        repository, [dataset_id], ['Region'], 'NSA', scoring_profile_id='netcheck-copy',
+    )
+
+    assert not reused_active and not reused_explicit
+    assert explicit['id'] != active['id']
+    assert explicit['scoring_profile_id'] == 'netcheck-copy'
+
+
+def test_unknown_explicit_profile_is_rejected(repository):
+    dataset_id = add_dataset(repository)
+
+    with pytest.raises(ValueError, match='was not found'):
+        scoring_jobs.create_scoring_job(
+            repository, [dataset_id], ['Region'], 'NSA', scoring_profile_id='missing-profile',
+        )
 
 
 def test_job_levels_follow_configured_hierarchy_and_snapshot_contract(repository, scoring_engine):

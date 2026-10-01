@@ -10,6 +10,7 @@ import pandas as pd
 from src.modules.column_names import column_identity, resolve_column_name
 from src.modules.scoring_config import (
     configuration_hash,
+    _is_legacy_two_environment_configuration,
     validate_scoring_configuration,
 )
 
@@ -53,7 +54,8 @@ def _required_configuration(configuration: dict | None) -> dict:
 def method_version_for_configuration(configuration: dict) -> str:
     """Return a calculation version bound to every scoring setting."""
     snapshot = _required_configuration(configuration)
-    return f"{snapshot['version']}-{METHOD_VERSION}-{configuration_hash(snapshot)[:16]}"
+    hashed_configuration = configuration if _is_legacy_two_environment_configuration(configuration) else snapshot
+    return f"{snapshot['version']}-{METHOD_VERSION}-{configuration_hash(hashed_configuration)[:16]}"
 
 
 def interpolate_score(
@@ -151,32 +153,60 @@ def _condition(frame: pd.DataFrame, expression: str) -> pd.Series:
     return {'==': series.eq, '<=': series.le, '>=': series.ge, '>': series.gt}[operator](value).fillna(False)
 
 
+def _is_condition_expression(expression: str) -> bool:
+    return bool(
+        ' AND ' in expression
+        or re.fullmatch(r'CONTAINS\(\w+, "[^\"]+"\)', expression)
+        or expression.endswith(' IS NOT NULL')
+        or re.fullmatch(r'\w+ (?:==|<=|>=|>) .+', expression)
+    )
+
+
+def _aggregate_term(frame: pd.DataFrame, operation: str, expression: str) -> tuple[float | None, int]:
+    expression = expression.strip()
+    if _is_condition_expression(expression):
+        matches = _condition(frame, expression)
+        return float(matches.sum()), int(matches.sum())
+    if operation == 'COUNT':
+        count = int(frame[expression].notna().sum())
+        return float(count), count
+    values = _numeric(frame, expression).dropna()
+    if values.empty:
+        return None, 0
+    if operation == 'SUM':
+        return float(values.sum()), len(values)
+    if operation == 'AVG':
+        return float(values.mean()), len(values)
+    if operation == 'MEDIAN':
+        return float(values.median()), len(values)
+    if operation == 'PCT90':
+        return float(values.quantile(.9, interpolation='linear')), len(values)
+    raise ValueError(f'Unsupported scoring aggregate: {operation}')
+
+
 def _aggregate(frame: pd.DataFrame, metric: dict) -> tuple[float | None, int]:
     calculation = metric['calculation']
     frame = _filter(frame, calculation['filters'])
     formula = calculation['formula']
-    aggregate = re.fullmatch(r'(AVG|MEDIAN|PCT90)\((\w+)\)', formula)
-    if aggregate:
-        operation, field = aggregate.groups()
-        values = _numeric(frame, field).dropna()
-        if values.empty:
-            return None, 0
-        value = values.mean() if operation == 'AVG' else (values.median() if operation == 'MEDIAN' else values.quantile(.9, interpolation='linear'))
-        return float(value), len(values)
     if formula == '100 * SUM(totalpacketlost) / SUM(Packets_Sent)':
         sent = _numeric(frame, 'Packets_Sent')
         denominator = sent.sum(min_count=1)
         lost = sum(_numeric(frame, field).fillna(0).map(math.trunc) if field == 'Packets_Corrupted' else _numeric(frame, field).fillna(0)
                    for field in ['Packets_Lost', 'Packets_Discarded', 'Packets_Corrupted', 'Packets_Not_Sent'])
         return (float(100 * lost.sum() / denominator), int(sent.notna().sum())) if denominator > 0 else (None, 0)
-    ratio = re.fullmatch(r'100 \* (?:SUM|COUNT)\((.+)\) / COUNT\((\w+)\)', formula)
-    if not ratio:
-        raise ValueError(f'Unsupported scoring formula: {formula}')
-    expression, denominator_field = ratio.groups()
-    count = int(frame[denominator_field].notna().sum())
-    if not count:
-        return None, 0
-    return float(100 * _condition(frame, expression).sum() / count), count
+    ratio = re.fullmatch(r'(100 \* )?(SUM|COUNT)\((.+)\) / (SUM|COUNT)\((\w+)\)', formula)
+    if ratio:
+        multiplier, numerator_operation, expression, denominator_operation, denominator_field = ratio.groups()
+        numerator, _numerator_count = _aggregate_term(frame, numerator_operation, expression)
+        denominator, count = _aggregate_term(frame, denominator_operation, denominator_field)
+        if numerator is None or denominator is None or denominator == 0:
+            return None, 0
+        return float((100 if multiplier else 1) * numerator / denominator), count
+    aggregate = re.fullmatch(r'(AVG|MEDIAN|PCT90|SUM|COUNT)\((.+)\)', formula)
+    if aggregate:
+        operation, expression = aggregate.groups()
+        return _aggregate_term(frame, operation, expression)
+    raise ValueError(f'Unsupported scoring formula: {formula}')
 
 
 def _key_name(value: str) -> str:
@@ -273,7 +303,9 @@ def calculate_scoring(
             continue
         frame['environment'] = None
         for environment, context in config['scope']['environments'].items():
-            mask = (frame['G_Level_1'] == context['g_level_1']) & (frame['G_Level_2'] == context['g_level_2'])
+            mask = frame['G_Level_1'] == context['g_level_1']
+            if 'g_level_2' in context:
+                mask &= frame['G_Level_2'] == context['g_level_2']
             frame.loc[mask, 'environment'] = environment
         valid = frame['environment'].notna() & frame['Operator'].notna()
         if campaign_selected:
@@ -383,16 +415,24 @@ def _totals(rows: list[dict], keys: list[str], configuration: dict) -> list[dict
     base_keys = [key for key in keys if key != 'environment'] + ['category']
     for row in totals:
         combined.setdefault(tuple(row.get(key) for key in base_keys), []).append(row)
+    active_environments = [
+        name for name in environments
+        if environments[name].get('total_points', 0) > 0
+    ]
     for group, members in combined.items():
         metadata = dict(zip(base_keys, group))
+        active_members = [row for row in members if row.get('environment') in active_environments]
         expected = [m for m in metrics
                     if ('dataset_type' not in keys or m['source_kind'].title() == metadata['dataset_type'])
                     and (metadata['category'] == 'Overall' or m['category'] == metadata['category'])
-                    and sum(m['contexts'][name]['max_points'] for name in environments if name in m['contexts']) > 0]
-        maximum = sum(sum(m['contexts'][name]['max_points'] for name in environments if name in m['contexts'])
+                    and sum(m['contexts'][name]['max_points'] for name in active_environments
+                            if name in m['contexts']) > 0]
+        maximum = sum(sum(m['contexts'][name]['max_points'] for name in active_environments
+                          if name in m['contexts'])
                       for m in expected)
-        totals.append(_summary({**metadata, 'environment': 'Combined'}, members, maximum,
-                               len(members) == 2 and all(row['complete_coverage'] for row in members), summary=True))
+        totals.append(_summary({**metadata, 'environment': 'Combined'}, active_members, maximum,
+                               len(active_members) == len(active_environments)
+                               and all(row['complete_coverage'] for row in active_members), summary=True))
     return totals
 
 

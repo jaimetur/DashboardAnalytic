@@ -146,6 +146,28 @@ def test_scoring_page_requires_login_and_renders_workspace_controls(client, scor
     assert 'Best Network Chart' in page.text
 
 
+def test_scoring_page_exposes_profile_choices_and_active_profile(scoring_api, monkeypatch):
+    captured = {}
+    original_render = app_module.render_template
+
+    def capture_context(request, template_name, context):
+        captured.update(context)
+        return original_render(request, template_name, context)
+
+    monkeypatch.setattr(app_module, 'render_template', capture_context)
+    page = scoring_api['client'].get('/scoring')
+
+    assert page.status_code == 200
+    profiles = captured['scoring_profiles']
+    assert profiles == [{
+        'id': 'netcheck-2026',
+        'name': 'NetCheck 2026',
+        'aggregation_hierarchy': scoring_api['repository'].get_scoring_configuration()['aggregation_hierarchy'],
+    }]
+    assert captured['scoring_active_profile_id'] == 'netcheck-2026'
+    assert captured['aggregation_levels'] == profiles[0]['aggregation_hierarchy']
+
+
 def test_scoring_baseline_options_follow_mapping_without_scanning_cdr_rows(scoring_api, monkeypatch):
     repository = scoring_api['repository']
     repository.replace_operator_mapping_groups([
@@ -204,10 +226,133 @@ def test_scoring_configuration_api_round_trips_complete_validated_document(scori
     assert saved.json()['gap_priority'] == updated['gap_priority']
 
     invalid = deepcopy(updated)
-    invalid['gap_priority'].pop()
+    invalid['gap_priority'].append(invalid['gap_priority'][0])
     rejected = client.put('/api/workspace-config/scoring-configuration', json=invalid)
     assert rejected.status_code == 400
     assert repository.get_scoring_configuration() == saved.json()
+
+
+def test_scoring_profiles_api_edits_inactive_profile_and_switches_active(scoring_api):
+    client = scoring_api['client']
+    repository = scoring_api['repository']
+    active_configuration = repository.get_scoring_configuration()
+    profiles = client.get('/api/workspace-config/scoring-profiles').json()
+    second_configuration = deepcopy(active_configuration)
+    second_configuration['version'] = 'NetCheck 2025'
+    profiles['profiles'].append({
+        'id': 'netcheck-2025',
+        'name': 'NetCheck 2025',
+        'configuration': second_configuration,
+    })
+
+    saved = client.put('/api/workspace-config/scoring-profiles', json=profiles)
+    assert saved.status_code == 200, saved.text
+    assert client.get('/api/workspace-config/scoring-configuration').json() == active_configuration
+
+    inactive_edit = deepcopy(saved.json())
+    inactive_edit['profiles'][1]['configuration']['metrics'][0]['contexts']['DriveCity']['max_points'] = 81
+    edited = client.put('/api/workspace-config/scoring-profiles', json=inactive_edit)
+    assert edited.status_code == 200, edited.text
+    assert client.get('/api/workspace-config/scoring-configuration').json() == active_configuration
+
+    selected = edited.json()
+    selected['active_profile_id'] = 'netcheck-2025'
+    switched = client.put('/api/workspace-config/scoring-profiles', json=selected)
+    assert switched.status_code == 200
+    assert client.get('/api/workspace-config/scoring-configuration').json() == selected['profiles'][1]['configuration']
+
+
+def test_scoring_job_can_select_inactive_profile_without_changing_workspace_default(scoring_api):
+    client = scoring_api['client']
+    repository = scoring_api['repository']
+    active_id = repository.get_scoring_profiles()['active_profile_id']
+    active_configuration = deepcopy(repository.get_scoring_configuration())
+    profiles = repository.get_scoring_profiles()
+    inactive = deepcopy(profiles['profiles'][0])
+    inactive.update({'id': 'netcheck-2025', 'name': 'NetCheck 2025'})
+    inactive['configuration']['version'] = 'NetCheck 2025'
+    inactive['configuration']['aggregation_hierarchy'] = [
+        'Region', 'Operator', 'Vendor', 'City', 'Campaign',
+    ]
+    inactive['configuration']['metrics'][0]['contexts']['DriveCity']['max_points'] = 88
+    profiles['profiles'].append(inactive)
+    repository.replace_scoring_profiles(profiles)
+
+    response = client.post('/api/scoring/jobs', json={
+        'dataset_ids': scoring_api['complete_dataset_ids'],
+        'nr_mode': 'NSA',
+        'aggregation_levels': ['Region', 'City'],
+        'scoring_profile_id': 'netcheck-2025',
+    })
+
+    assert response.status_code == 200, response.text
+    job = response.json()['job']
+    assert job['scoring_profile_id'] == 'netcheck-2025'
+    assert job['scoring_profile_name'] == 'NetCheck 2025'
+    assert job['configuration']['metrics'][0]['contexts']['DriveCity']['max_points'] == 88
+    assert job['aggregation_hierarchy'] == inactive['configuration']['aggregation_hierarchy']
+    assert job['aggregation_levels'] == ['Region', 'Operator', 'City']
+    assert repository.get_scoring_profiles()['active_profile_id'] == active_id
+    assert repository.get_scoring_configuration() == active_configuration
+
+    defaulted = client.post('/api/scoring/jobs', json={
+        'dataset_ids': scoring_api['complete_dataset_ids'],
+        'nr_mode': 'NSA',
+        'aggregation_levels': ['Operator'],
+        'scoring_profile_id': '',
+    })
+    assert defaulted.status_code == 200, defaulted.text
+    assert defaulted.json()['job']['scoring_profile_id'] == active_id
+
+    unknown = client.post('/api/scoring/jobs', json={
+        'dataset_ids': scoring_api['complete_dataset_ids'],
+        'nr_mode': 'NSA',
+        'aggregation_levels': ['Operator'],
+        'scoring_profile_id': 'missing-profile',
+    })
+    assert unknown.status_code == 400
+    assert 'was not found' in unknown.json()['detail']
+
+
+def test_scoring_exports_accept_expanded_and_summary_table_modes(scoring_api):
+    client = scoring_api['client']
+    repository = scoring_api['repository']
+    response = client.post('/api/scoring/jobs', json={
+        'dataset_ids': scoring_api['complete_dataset_ids'],
+        'nr_mode': 'NSA',
+        'aggregation_levels': ['Operator'],
+    })
+    assert response.status_code == 200, response.text
+    job = scoring_jobs.run_scoring_job(repository, response.json()['job']['id'])
+    assert job['status'] == 'completed'
+
+    legacy_csv = client.get(f"/scoring/jobs/{job['id']}/export/scoring")
+    city_raw_csv = client.get(f"/scoring/jobs/{job['id']}/export/scoring?environment=DriveCity")
+    summary_csv = client.get(f"/scoring/jobs/{job['id']}/export/scoring?table_mode=summary")
+    city_summary_csv = client.get(
+        f"/scoring/jobs/{job['id']}/export/scoring?table_mode=summary&environment=DriveCity",
+    )
+    summary_ppt = client.get(f"/scoring/jobs/{job['id']}/export/ppt?table_mode=summary&gap_layout=adjacent")
+    city_ppt = client.get(f"/scoring/jobs/{job['id']}/export/ppt?environment=DriveCity")
+    invalid_environment = client.get(f"/scoring/jobs/{job['id']}/export/ppt?environment=Unknown")
+    invalid_mode = client.get(f"/scoring/jobs/{job['id']}/export/gap?table_mode=compact")
+    invalid_gap_layout = client.get(f"/scoring/jobs/{job['id']}/export/ppt?gap_layout=side")
+
+    assert legacy_csv.status_code == 200
+    assert city_raw_csv.status_code == 200
+    raw_city_rows = list(csv.DictReader(StringIO(city_raw_csv.content.decode('utf-8-sig'))))
+    assert raw_city_rows and {row['environment'] for row in raw_city_rows} == {'City'}
+    assert summary_csv.status_code == 200
+    assert summary_csv.headers['content-type'].startswith('text/csv')
+    assert city_summary_csv.status_code == 200
+    city_summary_rows = list(csv.DictReader(StringIO(city_summary_csv.content.decode('utf-8-sig'))))
+    assert city_summary_rows and {row['environment'] for row in city_summary_rows} == {'DriveCity'}
+    assert summary_ppt.status_code == 200
+    assert summary_ppt.headers['content-type'].startswith('application/vnd.openxmlformats-officedocument.presentationml.presentation')
+    assert city_ppt.status_code == 200
+    assert invalid_environment.status_code == 400
+    assert invalid_mode.status_code == 400
+    assert invalid_gap_layout.status_code == 400
 
 
 def test_workspace_config_renders_kpi_and_gap_priority_panels(scoring_api):
@@ -301,12 +446,14 @@ def test_scoring_job_results_cache_force_and_exports(scoring_api):
         if any(shape.has_text_frame and 'Scoring Tables' in shape.text for shape in slide.shapes)
     )
     scoring_table = next(shape.table for shape in scoring_slide.shapes if shape.has_table)
-    # New multi-level jobs use nested headers; legacy GAP normalization does not change the hierarchy contract.
-    assert [scoring_table.cell(0, column).text for column in range(4, 12, 2)] == [
+    # The first row groups Score and GAP; the next rows show operator and region hierarchy.
+    assert scoring_table.cell(0, 4).text == 'Score'
+    assert scoring_table.cell(0, 8).text == 'GAP'
+    assert [scoring_table.cell(1, column).text for column in range(4, 8)] == [
         'Three UK', 'O2', 'Vodafone UK', 'EE',
     ]
-    assert all(scoring_table.cell(1, column).text == 'North' for column in range(4, 12, 2))
-    assert str(scoring_table.cell(0, 4).fill.fore_color.rgb) == 'AABBCC'
+    assert all(scoring_table.cell(2, column).text == 'North' for column in range(4, 8))
+    assert str(scoring_table.cell(1, 4).fill.fore_color.rgb) == 'AABBCC'
 
     forced = client.post('/api/scoring/jobs', json={**payload, 'force': True})
     assert forced.status_code == 200
@@ -331,16 +478,22 @@ def test_scoring_ppt_export_normalizes_legacy_gap_without_mutating_saved_result(
     from src.modules import scoring_exports
     captured = {}
 
-    def capture_export(job, result, *_args, **_kwargs):
+    def capture_export(job, result, *_args, **kwargs):
         captured['result'] = deepcopy(result)
+        captured['gap_layout'] = kwargs.get('gap_layout')
         return b'ppt'
 
     monkeypatch.setattr(scoring_exports, 'export_scoring_powerpoint', capture_export)
     exported = client.get(f'/scoring/jobs/{job_id}/export/ppt')
     assert exported.status_code == 200
     assert exported.content == b'ppt'
+    assert captured['gap_layout'] == 'end'
     assert captured['result']['gap'][0]['gap_points'] == -0.6
     assert captured['result']['gap_direction'] == 'operator_minus_reference'
+
+    adjacent = client.get(f'/scoring/jobs/{job_id}/export/ppt?gap_layout=adjacent')
+    assert adjacent.status_code == 200
+    assert captured['gap_layout'] == 'adjacent'
 
     stored = scoring_jobs.get_scoring_job(scoring_api['repository'], job_id, include_result=True)['result']
     assert stored['gap'][0]['gap_points'] == 0.6
@@ -452,14 +605,14 @@ def test_real_cdr_ingestion_automatically_scores_kpi_and_reuses_cache(client):
     assert result_response.status_code == 200, result_response.text
     result = result_response.json()
 
-    c17_rows = [row for row in result['scoring'] if row['kpi_code'] == 'C17']
+    c17_rows = [row for row in result['scoring'] if row['kpi_code'] == 'K12']
     assert {row['operator']: row['value'] for row in c17_rows} == {'EE': 100.0, 'O2': 50.0}
     assert any('Incomplete KPI or environment coverage' in warning for warning in result['warnings'])
 
     csv_response = client.get(f"/scoring/jobs/{automatic_job['id']}/export/scoring")
     assert csv_response.status_code == 200, csv_response.text
     exported_rows = list(csv.DictReader(StringIO(csv_response.content.decode('utf-8-sig'))))
-    exported_c17 = {row['operator']: float(row['value']) for row in exported_rows if row['kpi_code'] == 'C17'}
+    exported_c17 = {row['operator']: float(row['value']) for row in exported_rows if row['kpi_code'] == 'K12'}
     assert exported_c17 == {'EE': 100.0, 'O2': 50.0}
 
     cached = client.post('/api/scoring/jobs', json={

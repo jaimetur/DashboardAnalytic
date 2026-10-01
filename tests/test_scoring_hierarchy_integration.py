@@ -49,7 +49,7 @@ def test_hierarchy_round_trip_json_zip_and_configuration_backup(scoring_api, tmp
     configuration['aggregation_hierarchy'] = CUSTOM_HIERARCHY
     assert client.put('/api/workspace-config/scoring-configuration', json=configuration).status_code == 200
     document = client.get('/api/workspace-config/scoring-configuration/export').json()
-    assert document['configuration']['aggregation_hierarchy'] == CUSTOM_HIERARCHY
+    assert document['profiles'][0]['configuration']['aggregation_hierarchy'] == CUSTOM_HIERARCHY
     workspace = app_module.active_workspace
     package = tmp_path / 'scoring-hierarchy.zip'
     app_module._build_single_export_archive_file('scoring-configuration', package, [workspace.id])
@@ -70,7 +70,7 @@ def test_hierarchy_round_trip_json_zip_and_configuration_backup(scoring_api, tmp
         'package': ('hierarchy.json', json.dumps(document).encode(), 'application/json'),
     })
     assert imported.status_code == 200, imported.text
-    assert imported.json()['aggregation_hierarchy'] == CUSTOM_HIERARCHY
+    assert imported.json()['profiles'][0]['configuration']['aggregation_hierarchy'] == CUSTOM_HIERARCHY
 
 
 def test_scoring_follows_reporting_in_module_and_help_navigation(scoring_api):

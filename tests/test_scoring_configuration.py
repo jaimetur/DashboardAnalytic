@@ -1,8 +1,11 @@
 """Validation and interpolation tests for workspace scoring configuration."""
 
-import pytest
+import copy
 
-from src.modules.scoring import interpolate_score, method_version_for_configuration
+import pytest
+import pandas as pd
+
+from src.modules.scoring import _aggregate, interpolate_score, method_version_for_configuration
 from src.modules.scoring_config import (
     DEFAULT_AGGREGATION_HIERARCHY,
     configuration_hash,
@@ -22,11 +25,11 @@ def test_test_configuration_fixture_is_complete_and_independent():
     assert len(first['metrics']) == 32
     assert first['aggregation_hierarchy'] == DEFAULT_AGGREGATION_HIERARCHY
     assert first['gap_priority'] == [item['code'] for item in first['metrics']]
-    assert set(metric(first, 'C9')['contexts']['DriveCity']['score_mapping']) == {
+    assert set(metric(first, 'K5')['contexts']['DriveCity']['score_mapping']) == {
         'low_score', 'medium_score', 'high_score', 'ultra_score',
     }
-    metric(first, 'C5')['contexts']['DriveCity']['max_points'] = 0
-    assert metric(second, 'C5')['contexts']['DriveCity']['max_points'] > 0
+    metric(first, 'K1')['contexts']['DriveCity']['max_points'] = 0
+    assert metric(second, 'K1')['contexts']['DriveCity']['max_points'] > 0
 
 
 def test_legacy_configuration_defaults_hierarchy_and_custom_order_changes_identity():
@@ -48,20 +51,20 @@ def test_seed_fixture_has_kpi_specific_high_with_ultra_anchors():
     configuration = scoring_configuration()
     expected = {'low_score': 0.0, 'medium_score': 0.8, 'high_score': 0.9, 'ultra_score': 1.0}
     expected_source_formulas = {
-        'C25': {'DriveCity': '=MAX(M23:O23)', 'DriveConnectionroad': '=MAX(K23:O23)'},
-        'C30': {'DriveCity': '=MAX(M28:O28)', 'DriveConnectionroad': '=MAX(K28:O28)'},
+        'K20': {'DriveCity': '=MAX(M23:O23)', 'DriveConnectionroad': '=MAX(K23:O23)', 'Walk': '=MAX(M23:O23)'},
+        'K25': {'DriveCity': '=MAX(M28:O28)', 'DriveConnectionroad': '=MAX(K28:O28)', 'Walk': '=MAX(M28:O28)'},
     }
 
-    for code in ('C25', 'C30'):
+    for code in ('K20', 'K25'):
         for context_name, context in metric(configuration, code)['contexts'].items():
             assert context['score_mapping'] == expected
             assert context['thresholds']['ultra']['source_formula'] == expected_source_formulas[code][context_name]
     assert configuration['interpolation']['high_score_with_ultra'] == 0.95
-    assert metric(configuration, 'C31')['contexts']['DriveCity']['score_mapping'] == {
+    assert metric(configuration, 'K26')['contexts']['DriveCity']['score_mapping'] == {
         'low_score': 0.0, 'medium_score': 0.8, 'high_score': 0.95, 'ultra_score': 1.0,
     }
-    assert metric(configuration, 'C31')['contexts']['DriveCity']['thresholds']['ultra']['source_formula'] == '=MIN(M29:O29)'
-    assert metric(configuration, 'C31')['contexts']['DriveConnectionroad']['thresholds']['ultra']['source_formula'] == '=MIN(K29:O29)'
+    assert metric(configuration, 'K26')['contexts']['DriveCity']['thresholds']['ultra']['source_formula'] == '=MIN(M29:O29)'
+    assert metric(configuration, 'K26')['contexts']['DriveConnectionroad']['thresholds']['ultra']['source_formula'] == '=MIN(K29:O29)'
 
 
 def test_piecewise_interpolation_uses_custom_mapping_anchors_for_both_directions():
@@ -77,23 +80,23 @@ def test_piecewise_interpolation_uses_custom_mapping_anchors_for_both_directions
 
 def test_validation_accepts_editable_thresholds_weights_types_anchors_and_priority():
     configuration = scoring_configuration()
-    c5 = metric(configuration, 'C5')
+    c5 = metric(configuration, 'K1')
     c5['kpi_type'] = 'Reliable'
     c5['contexts']['DriveCity']['max_points'] = 80
     c5['contexts']['DriveCity']['thresholds']['low'] = 86
     c5['contexts']['DriveCity']['score_mapping'] = {
         'low_score': 0.05, 'medium_score': 0.7, 'high_score': 0.92, 'ultra_score': 1,
     }
-    c6 = metric(configuration, 'C6')
+    c6 = metric(configuration, 'K2')
     c6['contexts']['DriveCity']['thresholds']['low'] = 11
-    configuration['gap_priority'] = ['C6', 'C5', *[code for code in configuration['gap_priority'] if code not in {'C5', 'C6'}]]
+    configuration['gap_priority'] = ['K2', 'K1', *[code for code in configuration['gap_priority'] if code not in {'K1', 'K2'}]]
 
     validated = validate_scoring_configuration(configuration)
 
-    assert metric(validated, 'C5')['contexts']['DriveCity']['max_points'] == 80
-    assert metric(validated, 'C5')['contexts']['DriveCity']['thresholds']['low'] == 86
-    assert metric(validated, 'C5')['contexts']['DriveCity']['score_mapping']['high_score'] == 0.92
-    assert validated['gap_priority'][:2] == ['C6', 'C5']
+    assert metric(validated, 'K1')['contexts']['DriveCity']['max_points'] == 80
+    assert metric(validated, 'K1')['contexts']['DriveCity']['thresholds']['low'] == 86
+    assert metric(validated, 'K1')['contexts']['DriveCity']['score_mapping']['high_score'] == 0.92
+    assert validated['gap_priority'][:2] == ['K2', 'K1']
     assert validated['scope']['total_max_points'] == pytest.approx(
         sum(item['contexts'][name]['max_points'] for item in validated['metrics']
             for name in ('DriveCity', 'DriveConnectionroad')),
@@ -105,14 +108,14 @@ def test_validation_accepts_editable_thresholds_weights_types_anchors_and_priori
 @pytest.mark.parametrize(
     ('edit', 'message'),
     [
-        (lambda c: metric(c, 'C5')['contexts']['DriveCity'].__setitem__('max_points', float('nan')), 'finite number'),
-        (lambda c: metric(c, 'C5')['contexts']['DriveCity']['thresholds'].__setitem__('low', 101), 'thresholds'),
-        (lambda c: metric(c, 'C5')['contexts']['DriveCity']['score_mapping'].__setitem__('high_score', 1.1), 'at most 1'),
-        (lambda c: metric(c, 'C5')['contexts']['DriveCity']['score_mapping'].__setitem__('high_score', 0.7), 'monotonic'),
-        (lambda c: c.__setitem__('gap_priority', ['C5'] * 32), 'every supported KPI code exactly once'),
+        (lambda c: metric(c, 'K1')['contexts']['DriveCity'].__setitem__('max_points', float('nan')), 'finite number'),
+        (lambda c: metric(c, 'K1')['contexts']['DriveCity']['thresholds'].__setitem__('low', 101), 'thresholds'),
+        (lambda c: metric(c, 'K1')['contexts']['DriveCity']['score_mapping'].__setitem__('high_score', 1.1), 'at most 1'),
+        (lambda c: metric(c, 'K1')['contexts']['DriveCity']['score_mapping'].__setitem__('high_score', 0.7), 'monotonic'),
+        (lambda c: c.__setitem__('gap_priority', ['K1'] * 32), 'unique KPI codes'),
         (lambda c: c.__setitem__('aggregation_hierarchy', ['Operator', 'Vendor', 'Region', 'City', 'City']), 'aggregation_hierarchy'),
-        (lambda c: metric(c, 'C5')['calculation'].__setitem__('formula', 'AVG(Other)'), 'unsupported voice field'),
-        (lambda c: c['scope']['environments']['DriveCity'].__setitem__('g_level_2', 'Road'), 'is unsupported'),
+        (lambda c: metric(c, 'K1')['calculation'].__setitem__('formula', 'AVG(Other)'), 'unsupported voice field'),
+        (lambda c: c['scope']['environments']['DriveCity'].__setitem__('g_level_2', 'Road'), 'environment_mapping'),
     ],
 )
 def test_validation_rejects_invalid_or_source_methodology_edits(edit, message):
@@ -123,11 +126,137 @@ def test_validation_rejects_invalid_or_source_methodology_edits(edit, message):
         validate_scoring_configuration(configuration)
 
 
+def test_validation_and_calculation_support_added_removed_and_reclassified_kpis():
+    configuration = scoring_configuration()
+    existing = metric(configuration, 'K26')
+    added = dict(existing)
+    added['contexts'] = {name: dict(context) for name, context in existing['contexts'].items()}
+    added.update({
+        'code': 'QOS_99',
+        'source_kind': 'data',
+        'direction': 'lower_is_better',
+        'category': 'Custom Quality',
+        'kpi': 'Completed Result Ratio',
+        'kpi_type': 'Custom',
+        'calculation': {
+            'source_kind': 'data',
+            'formula': '100 * SUM(Test_Result == "Completed") / COUNT(Test_Result)',
+            'filters': {},
+            'denominator': 'Available data test results',
+        },
+    })
+    configuration['metrics'] = [existing, added]
+    configuration['gap_priority'] = ['QOS_99', 'K1']
+
+    validated = validate_scoring_configuration(configuration)
+    result = _aggregate(pd.DataFrame({'Test_Result': ['Completed', 'Failed', 'Completed']}), added)
+
+    assert [item['code'] for item in validated['metrics']] == ['K26', 'QOS_99']
+    assert validated['gap_priority'] == ['QOS_99', 'K26']
+    assert result == (pytest.approx(200 / 3), 3)
+
+
+def test_formula_validation_rejects_executable_python_expressions():
+    configuration = scoring_configuration()
+    metric(configuration, 'K1')['calculation']['formula'] = "__import__('os').system('whoami')"
+
+    with pytest.raises(ValueError, match='formula is unsupported'):
+        validate_scoring_configuration(configuration)
+
+
+def test_ratio_without_percentage_multiplier_is_validated_and_calculated():
+    configuration = scoring_configuration()
+    selected = metric(configuration, 'K20')
+    selected['calculation']['formula'] = 'SUM(Mean_Data_Rate) / COUNT(Mean_Data_Rate)'
+    selected['calculation']['filters'] = {}
+
+    validated = validate_scoring_configuration(configuration)
+    result = _aggregate(pd.DataFrame({'Mean_Data_Rate': [1.0, 3.0, None]}), metric(validated, 'K20'))
+
+    assert result == (2.0, 2)
+
+
 def test_zero_weight_kpis_are_allowed_and_derived_totals_follow_configured_weights():
     configuration = scoring_configuration()
-    metric(configuration, 'C5')['contexts']['DriveCity']['max_points'] = 0
+    metric(configuration, 'K1')['contexts']['DriveCity']['max_points'] = 0
 
     validated = validate_scoring_configuration(configuration)
 
-    assert metric(validated, 'C5')['contexts']['DriveCity']['max_points'] == 0
+    assert metric(validated, 'K1')['contexts']['DriveCity']['max_points'] == 0
     assert validated['scope']['environments']['DriveCity']['total_points'] < 650
+
+
+def test_named_environments_are_dynamic_and_can_be_deleted_without_legacy_walk_migration():
+    configuration = scoring_configuration()
+    configuration['scope']['environments']['Indoor'] = {
+        'g_level_1': 'Indoor',
+        'g_level_2': 'Hall',
+    }
+    configuration['scope']['environment_mapping']['Indoor + Hall'] = 'Indoor'
+    for item in configuration['metrics']:
+        context = dict(item['contexts']['DriveCity'])
+        context['max_points'] = 0
+        context['weight_share'] = item['contexts']['DriveCity']['weight_share']
+        item['contexts']['Indoor'] = context
+
+    validated = validate_scoring_configuration(configuration)
+
+    assert list(validated['scope']['environments'])[-1] == 'Indoor'
+    assert all('Indoor' in item['contexts'] for item in validated['metrics'])
+    assert validated['scope']['environments']['Indoor']['total_points'] == 0
+    assert sum(item['contexts']['Indoor']['weight_share'] for item in validated['metrics']) == pytest.approx(1)
+
+    validated['scope']['environments'].pop('Walk')
+    validated['scope']['environment_mapping'].pop('Walk')
+    for item in validated['metrics']:
+        item['contexts'].pop('Walk')
+    without_walk = validate_scoring_configuration(validated)
+
+    assert 'Walk' not in without_walk['scope']['environments']
+    assert all('Walk' not in item['contexts'] for item in without_walk['metrics'])
+
+
+def test_kpi_allocator_survives_deletion_and_never_reuses_a_generated_code():
+    configuration = scoring_configuration()
+    assert configuration['next_kpi_number'] == 33
+    allocator_only_change = copy.deepcopy(configuration)
+    allocator_only_change['next_kpi_number'] = 57
+    assert configuration_hash(allocator_only_change) == configuration_hash(configuration)
+    assert method_version_for_configuration(allocator_only_change) == method_version_for_configuration(configuration)
+    configuration['metrics'].pop()
+    configuration['gap_priority'].remove('K32')
+
+    deleted = validate_scoring_configuration(configuration)
+    assert deleted['next_kpi_number'] == 33
+
+    added = dict(deleted['metrics'][-1])
+    added['contexts'] = {name: dict(context) for name, context in added['contexts'].items()}
+    added['code'] = 'K33'
+    deleted['metrics'].append(added)
+    deleted['gap_priority'].append('K33')
+
+    validated = validate_scoring_configuration(deleted)
+    assert validated['metrics'][-1]['code'] == 'K33'
+    assert validated['next_kpi_number'] == 34
+
+
+def test_environment_source_selectors_must_not_overlap_or_use_combined_name():
+    configuration = scoring_configuration()
+    configuration['scope']['environments']['Combined'] = {
+        'g_level_1': 'Indoor',
+    }
+    configuration['scope']['environment_mapping']['Indoor'] = 'Combined'
+    for item in configuration['metrics']:
+        item['contexts']['Combined'] = dict(item['contexts']['DriveCity'])
+    with pytest.raises(ValueError, match='cannot be Combined'):
+        validate_scoring_configuration(configuration)
+
+    configuration['scope']['environments'].pop('Combined')
+    configuration['scope']['environment_mapping'].pop('Indoor')
+    configuration['scope']['environments']['Indoor'] = {'g_level_1': 'Walk'}
+    configuration['scope']['environment_mapping']['Walk'] = 'Indoor'
+    for item in configuration['metrics']:
+        item['contexts'].pop('Combined')
+        item['contexts']['Indoor'] = dict(item['contexts']['Walk'])
+    with pytest.raises(ValueError, match='overlapping source selectors'):
+        validate_scoring_configuration(configuration)

@@ -39,6 +39,14 @@
   .scoring-level-option { display: inline-flex; align-items: center; gap: .5rem; min-height: 2.45rem; padding: .48rem .72rem; border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.78); color: var(--text); font-size: .82rem; font-weight: 650; cursor: pointer; }
   .scoring-level-option.is-required { border-color: rgba(11,122,117,.32); background: rgba(11,122,117,.09); }
   .scoring-controls-foot { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+  .scoring-config-shortcuts { display: flex; align-items: center; flex-wrap: wrap; gap: .35rem; }
+  .scoring-config-shortcuts a { display: inline-flex; align-items: center; min-height: 1.8rem; padding: .28rem .58rem; border: 1px solid transparent; border-radius: 999px; font-size: .69rem; font-weight: 800; text-decoration: none; transition: filter .15s ease, border-color .15s ease; }
+  .scoring-config-shortcuts a[data-config-shortcut="kpi"] { border-color: #8ab7b0; background: #e6f3f0; color: #174f49; }
+  .scoring-config-shortcuts a[data-config-shortcut="hierarchy"] { border-color: #9db4d3; background: #eaf0fa; color: #274a77; }
+  .scoring-config-shortcuts a[data-config-shortcut="gap"] { border-color: #d3ad69; background: #fff1d4; color: #70420d; }
+  .scoring-config-shortcuts a:hover { filter: brightness(.96); }
+  .scoring-profile-choice { display: inline-flex; align-items: center; gap: .45rem; min-height: 2.25rem; padding: .3rem .55rem; border: 1px solid #8ab7b0; border-radius: 999px; background: #e6f3f0; color: #174f49; font-size: .75rem; font-weight: 800; }
+  .scoring-profile-choice select { width: auto; min-width: 11rem; max-width: min(100%, 20rem); min-height: 1.8rem; padding: .2rem 1.7rem .2rem .45rem; border-color: rgba(23,79,73,.28); color: #173f3b; font-size: .76rem; font-weight: 700; }
   .scoring-actions { display: flex; flex-wrap: wrap; gap: .55rem; }
   .scoring-actions .scoring-force-button { border: 1px solid rgba(16,49,74,.2); background: linear-gradient(135deg,#f4f7f8,#e5ecef); color: #234657; box-shadow: none; }
   .scoring-note { min-height: 1.2rem; margin: 0; color: var(--muted); font-size: .82rem; }
@@ -73,8 +81,12 @@
   .scoring-kpi-values-toggle { display: inline-flex; align-items: center; gap: .35rem; color: var(--muted); font-size: .74rem; font-weight: 750; white-space: nowrap; }
   .scoring-kpi-values-toggle input { width: 1rem; height: 1rem; margin: 0; accent-color: var(--brand); }
   .scoring-results-head h3 { margin: 0; }
+  .scoring-results-config-shortcuts { margin-top: .5rem; }
   .scoring-export-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
   .scoring-export-actions a { display: inline-flex; align-items: center; min-height: 2.1rem; padding: .38rem .65rem; border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.72); color: #24615d; font-size: .75rem; font-weight: 750; }
+  .scoring-export-actions a[data-export-scoring] { border-color: #16734b; background: #16734b; color: #fff; }
+  .scoring-export-actions a[data-export-gap] { border-color: #1267a5; background: #1267a5; color: #fff; }
+  .scoring-export-actions a[data-export-ppt] { border-color: #a84d00; background: #a84d00; color: #fff; }
   .scoring-export-actions a[hidden] { display: none; }
   .scoring-result-meta { margin: .35rem 0 0; color: var(--muted); font-size: .78rem; }
   .scoring-result-tabs { display: flex; flex-wrap: wrap; gap: .4rem; margin: .9rem 0 .65rem; border-bottom: 1px solid var(--line); }
@@ -115,6 +127,7 @@
   .scoring-comparison-table th[data-column="category"], .scoring-comparison-table td[data-column="category"] { min-width: 7.2rem; text-align: left !important; }
   .scoring-comparison-table th[data-column="kpi"], .scoring-comparison-table td[data-column="kpi"] { min-width: 12rem; max-width: 22rem; white-space: normal; text-align: left !important; }
   .scoring-comparison-table .scoring-column-group { background: #465963; color: #fff; font-size: .72rem !important; letter-spacing: .025em; }
+  .scoring-comparison-table .scoring-adjacent-group { background: #465963; color: #fff; }
   .scoring-comparison-table .scoring-gap-group { background: #ffff00 !important; color: #242424 !important; }
   .scoring-comparison-table th.scoring-weight-header { background: #4ea72e !important; color: #fff !important; }
   .scoring-comparison-table th.scoring-maximum-header { background: #d92d2d !important; color: #fff !important; }
@@ -132,7 +145,7 @@
   .scoring-comparison-table th.scoring-hierarchy-header { min-width: 8rem; max-width: 20rem; white-space: normal; background: #e1e9eb; color: #263f4b; }
   .scoring-comparison-table th.scoring-hierarchy-header[data-hierarchy-depth="0"] { background: #cfdde0; }
   .scoring-comparison-table th.scoring-hierarchy-header[data-hierarchy-depth="1"] { background: #d8e4e6; }
-  .scoring-comparison-table th.scoring-hierarchy-header.scoring-reference-header { border-top: 5px solid #ffff00 !important; background: #ffff00 !important; color: #242424 !important; }
+  .scoring-comparison-table th.scoring-hierarchy-header.scoring-reference-header { border-top: 5px solid #ffff00 !important; }
   .scoring-comparison-table th.scoring-hierarchy-header.scoring-gap-header { background: #fff5a6 !important; }
   .scoring-comparison-table .scoring-category-cell { vertical-align: middle; background: #f0f2f3; color: #334854; font-weight: 800; }
   .scoring-comparison-table tbody tr:nth-child(even) td { background-color: #f6f7f7; }
@@ -159,7 +172,7 @@
   .scoring-chart-card { min-width: 0; padding: 1rem; border: 1px solid var(--line); border-radius: 13px; background: rgba(255,255,255,.82); cursor: zoom-in; }
   .scoring-chart-card h4 { margin: 0 0 .6rem; color: #245e5a; font-size: .85rem; }
   .scoring-chart-svg { display: block; width: 100%; height: auto; min-height: 26rem; overflow: visible; }
-  .scoring-chart-svg.scoring-best-network-bars { min-width: 0; max-width: 100%; }
+  .scoring-chart-svg.scoring-best-network-bars { min-width: 980px; max-width: none; min-height: 0; }
   .scoring-chart-scroll { overflow-x: auto; overflow-y: hidden; }
   .scoring-chart-svg text { fill: #516570; font: 11px "IBM Plex Sans", "Segoe UI", sans-serif; }
   .scoring-chart-svg .scoring-chart-value { fill: #18384a; font-size: 15px; font-weight: 800; paint-order: stroke; stroke: #fff; stroke-width: 3px; stroke-linejoin: round; }
@@ -205,7 +218,7 @@
 
   <article class="panel scoring-controls" aria-labelledby="scoring-run-title">
     <div class="section-head tight-head">
-      <div><p class="eyebrow">New calculation</p><h3 id="scoring-run-title">Select CDRs and aggregation</h3></div>
+      <div><p class="eyebrow">Scoring Calculation</p><h3 id="scoring-run-title">Select CDRs and aggregation</h3></div>
       <span class="pill" data-selected-count>0 CDRs selected</span>
     </div>
     <div class="scoring-filter-grid scoring-dataset-filter-grid">
@@ -268,7 +281,7 @@
           {% else %}<option value="EE" selected>EE</option>{% endif %}
         </select>
       </label>
-      <p class="scoring-note" id="scoring-gap-baseline-note">GAP = compared operator weighted score minus the reference operator, in weighted score points.</p>
+      <p class="scoring-note" id="scoring-gap-baseline-note">KPI GAP = compared operator weighted points minus reference weighted points for each KPI. Category and final GAP rows show the arithmetic mean of valid KPI GAPs.</p>
     </div>
     <div class="scoring-picker">
       <div class="scoring-picker-head"><strong>Aggregation levels</strong><span>Operator is required</span></div>
@@ -282,6 +295,21 @@
       </div>
     </div>
     <div class="scoring-controls-foot">
+      <label class="scoring-profile-choice">Scoring methodology
+        <select data-scoring-profile aria-label="Choose the scoring methodology for this calculation">
+          {% set scoring_profile_options = scoring_profiles | default([], true) %}
+          {% for profile in scoring_profile_options %}
+          <option value="{{ profile.id }}" {% if profile.id == scoring_active_profile_id %}selected{% endif %}>{{ profile.name }}</option>
+          {% else %}
+          <option value="{{ scoring_active_profile_id | default('', true) }}" selected>{{ scoring_active_profile_name | default('Default', true) }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <nav class="scoring-config-shortcuts" aria-label="Scoring configuration sections">
+        <a data-config-shortcut="kpi" href="/workspace-config#scoring-kpi-configuration">KPI configuration</a>
+        <a data-config-shortcut="hierarchy" href="/workspace-config#scoring-aggregation-hierarchy">Aggregation hierarchy</a>
+        <a data-config-shortcut="gap" href="/workspace-config#scoring-gap-priority">GAP priorities</a>
+      </nav>
       <p class="scoring-note" data-scoring-message role="status" aria-live="polite">Choose at least one CDR to calculate scoring.</p>
       <div class="scoring-actions">
         <button type="button" data-calculate-scoring disabled>Calculate Scoring</button>
@@ -298,11 +326,23 @@
 
     <article class="panel scoring-results-panel" aria-labelledby="scoring-results-title">
       <div class="scoring-results-head">
-        <div><p class="eyebrow">Latest saved result</p><h3 id="scoring-results-title">Scoring results</h3><p class="scoring-result-meta" data-result-meta>Select a completed job to inspect its output.</p></div>
+        <div><p class="eyebrow">Latest saved result</p><h3 id="scoring-results-title">Scoring results</h3><p class="scoring-result-meta" data-result-meta>Select a completed job to inspect its output.</p><nav class="scoring-config-shortcuts scoring-results-config-shortcuts" aria-label="Scoring configuration sections"><a data-config-shortcut="kpi" href="/workspace-config#scoring-kpi-configuration">KPI configuration</a><a data-config-shortcut="hierarchy" href="/workspace-config#scoring-aggregation-hierarchy">Aggregation hierarchy</a><a data-config-shortcut="gap" href="/workspace-config#scoring-gap-priority">GAP priorities</a></nav></div>
         <div class="scoring-results-tools">
           <label class="scoring-kpi-values-toggle"><input type="checkbox" data-show-kpi-values> Show KPI values</label>
+          <label class="scoring-environment-filter">Results mode
+            <select data-scoring-table-mode aria-label="Choose expanded KPI rows or one summary row per category">
+              <option value="expanded" selected>Expanded</option>
+              <option value="summary">Summary</option>
+            </select>
+          </label>
+          <label class="scoring-environment-filter">GAP columns
+            <select data-scoring-gap-layout aria-label="Choose whether GAP columns appear at the end or next to each score">
+              <option value="end" selected>At the end</option>
+              <option value="adjacent">Next to each score</option>
+            </select>
+          </label>
           <label class="scoring-environment-filter" data-result-environment-control hidden>Environment
-            <select data-result-environment aria-label="Filter scoring tables, charts and GAP analysis by environment"></select>
+            <select data-result-environment aria-label="Filter scoring tables, charts and GAP analysis by environment; defaults to all environments"></select>
           </label>
           <div class="scoring-export-actions" aria-label="Export selected job">
             <a href="#" data-export-scoring hidden>Scoring CSV</a>
@@ -333,7 +373,7 @@
       <div class="scoring-chart-expanded-content" data-scoring-expanded-chart></div>
     </section>
   </div>
-  <script type="application/json" data-scoring-config>{{ {'main_cities': scoring_main_cities | default([], true), 'operator_groups': scoring_operator_groups | default([], true), 'aggregation_hierarchy': aggregation_levels | default(['Operator', 'Vendor', 'Region', 'City', 'Campaign'], true)} | tojson }}</script>
+  <script type="application/json" data-scoring-config>{{ {'main_cities': scoring_main_cities | default([], true), 'operator_groups': scoring_operator_groups | default([], true), 'aggregation_hierarchy': aggregation_levels | default(['Operator', 'Vendor', 'Region', 'City', 'Campaign'], true), 'scoring_profiles': scoring_profiles | default([], true), 'active_profile_id': scoring_active_profile_id | default('', true)} | tojson }}</script>
 </section>
 {% endblock %}
 {% block extra_scripts %}
