@@ -1736,8 +1736,18 @@ def _gap_tables(presentation, matrices: list[dict]) -> None:
             for column, text in enumerate(('Total', 'Average KPI GAP', '',
                                            _gap_number(matrix.get('total', {'gap_points': mean_gap})))):
                 _cell(table.cell(len(rows) + 1, column), text, color='#E4E9EC', size=metric_font, bold=True)
-            _text(slide, f'KPI prioritization\n\nAverage KPI GAP: {_gap_number(matrix.get('total', {'gap_points': mean_gap}))} points\n\nOperator − reference\nGreen: positive\nRed: negative\n\n{matrix["note"]}',
-                  1.8, left=10.2, width=2.5, height=3.9, size=13)
+            average_gap = _gap_number(matrix.get('total', {'gap_points': mean_gap}))
+            priority_note = _text(
+                slide, f'KPI prioritization\n\nAverage KPI GAP: {average_gap} points\n\nOperator − reference\nGreen: positive\nRed: negative\n\n{matrix["note"]}',
+                1.8, left=10.2, width=2.5, height=3.9, size=13,
+            )
+            average_paragraph = priority_note.text_frame.paragraphs[2]
+            average_paragraph.text = 'Average KPI GAP: '
+            gap_run = average_paragraph.add_run()
+            gap_run.text = average_gap
+            gap_run.font.bold = True
+            gap_run.font.color.rgb = RGBColor.from_string('C62828')
+            average_paragraph.add_run().text = ' points'
             _add_gap_color_scale(slide, matrix, left=.65, width=9.3)
             _text(slide, 'KPI types and priority follow this job’s saved workspace configuration.', 6.85, size=10)
 
