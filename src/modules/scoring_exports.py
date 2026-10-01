@@ -461,7 +461,7 @@ def _scoring_filter_subtitle(job: dict[str, Any], environment: str | None = None
     ])
 
 
-def _fit_scoring_intro_subtitle(slide, layout_name: str, subtitle: str) -> None:
+def _fit_scoring_intro_subtitle(presentation, slide, layout_name: str, subtitle: str) -> None:
     title_shape = next(
         (shape for shape in slide.placeholders if shape.placeholder_format.type in {1, 3}),
         None,
@@ -472,52 +472,77 @@ def _fit_scoring_intro_subtitle(slide, layout_name: str, subtitle: str) -> None:
         (shape for shape in slide.placeholders if shape.placeholder_format.type == 4),
         None,
     )
-    if layout_name == 'Title Page' and subtitle_shape is not None:
-        _set_shape_geometry(title_shape, Inches(1.5))
-        title_shape.top = Inches(1.4)
-        for paragraph in title_shape.text_frame.paragraphs:
-            paragraph.font.size = Pt(44)
-            for run in paragraph.runs:
-                run.font.size = Pt(44)
-        _set_shape_geometry(subtitle_shape, Inches(2.4))
-        subtitle_shape.top = Inches(3.15)
-        subtitle_shape.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
-        text_frame = subtitle_shape.text_frame
-        text_frame.clear()
-        paragraphs = []
-        for index, line in enumerate(subtitle.splitlines()):
-            paragraph = text_frame.paragraphs[0] if index == 0 else text_frame.add_paragraph()
-            paragraph.text = line
-            paragraphs.append(paragraph)
-    else:
-        _set_shape_geometry(title_shape, Inches(4.4))
-        title_shape.top = Inches(.55)
-        text_frame = title_shape.text_frame
-        title_text = text_frame.text.split('\x0b', 1)[0].split('\n', 1)[0]
-        text_frame.clear()
-        title_paragraph = text_frame.paragraphs[0]
-        title_paragraph.text = title_text
-        title_paragraph.font.size = Pt(30)
-        for run in title_paragraph.runs:
-            run.font.size = Pt(30)
-        paragraphs = []
-        for line in subtitle.splitlines():
-            paragraph = text_frame.add_paragraph()
-            paragraph.text = line
-            paragraphs.append(paragraph)
-    for index, paragraph in enumerate(paragraphs):
-        mode_line = index == 0
-        paragraph.font.size = Pt(18 if mode_line else 16)
-        paragraph.font.bold = mode_line
-        paragraph.line_spacing = 1.1
+    if subtitle_shape is None:
+        # Transition layouts may omit the subtitle; clone the template's real placeholder.
+        title_layout = _named_slide_layout(presentation, 'Title Page')
+        source = next((shape for shape in title_layout.placeholders
+                       if shape.placeholder_format.type == 4), None) if title_layout else None
+        if source is None:
+            raise ValueError("The PowerPoint template needs a subtitle placeholder for scoring exports.")
+        slide.shapes.clone_placeholder(source)
+        subtitle_shape = next(shape for shape in slide.placeholders
+                              if shape.placeholder_format.type == 4)
+
+    cover = layout_name == 'Title Page'
+    title_text = title_shape.text_frame.text.split('\x0b', 1)[0].split('\n', 1)[0]
+    title_shape.text_frame.text = title_text
+    _set_shape_geometry(title_shape, Inches(1.5 if cover else .8))
+    title_shape.top = Inches(1.4 if cover else .95)
+    if not cover:
+        title_shape.left = Inches(1)
+        title_shape.width = presentation.slide_width - Inches(2)
+        title_shape.height = Inches(1.1)
+        paragraph = title_shape.text_frame.paragraphs[0]
+        paragraph.alignment = PP_ALIGN.CENTER
+        prefix, separator, environment = title_text.partition(' — ')
+        paragraph.clear()
+        paragraph.add_run().text = prefix + separator
+        if environment:
+            run = paragraph.add_run()
+            run.text = environment
+            run.font.color.rgb = RGBColor.from_string('A8E6CF')
+    for paragraph in title_shape.text_frame.paragraphs:
+        paragraph.font.size = Pt(44 if cover else 30)
+
+    lines = subtitle.splitlines()
+    subtitle_shape.height = Inches(.45)
+    subtitle_shape.left = title_shape.left
+    subtitle_shape.width = title_shape.width
+    subtitle_shape.top = Inches(3.05 if cover else 2.15)
+    subtitle_shape.text_frame.text = lines[0] if lines else ''
+    subtitle_shape.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    mode = subtitle_shape.text_frame.paragraphs[0]
+    if not cover:
+        mode.alignment = PP_ALIGN.CENTER
+    mode.font.size = Pt(18)
+    mode.font.bold = True
+    mode.font.color.rgb = RGBColor.from_string('FFC700')
+    mode.line_spacing = 1.0
+    mode.space_before = mode.space_after = Pt(0)
+    properties = mode._p.get_or_add_pPr()
+    properties.set('marL', '0')
+    properties.set('indent', '0')
+    properties.insert(0, OxmlElement('a:buNone'))
+
+    filters_shape = _text(
+        slide, '', 3.55 if cover else 2.95, left=title_shape.left / Inches(1),
+        width=title_shape.width / Inches(1), height=2.1,
+        size=16, color='#CCEEF4',
+    )
+    filters_shape.name = 'Scoring Aggregations and Filters'
+    frame = filters_shape.text_frame
+    frame.clear()
+    frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    for index, line in enumerate(['Aggregations & Filters:', *lines[1:]]):
+        paragraph = frame.paragraphs[0] if index == 0 else frame.add_paragraph()
+        paragraph.text = line
+        paragraph.font.size = Pt(16)
+        paragraph.font.bold = index == 0
+        paragraph.font.color.rgb = RGBColor.from_string('CCEEF4')
+        paragraph.line_spacing = 1.0
         paragraph.space_before = Pt(0)
-        paragraph.space_after = Pt(6)
-        for run in paragraph.runs:
-            run.font.size = Pt(18 if mode_line else 16)
-            run.font.bold = mode_line
-    for shape in (title_shape, subtitle_shape):
-        if shape is None:
-            continue
+        paragraph.space_after = Pt(3)
+    for shape in (title_shape, subtitle_shape, filters_shape):
         for paragraph in shape.text_frame.paragraphs:
             paragraph.font.name = 'Aptos'
             paragraph.font._rPr.set('spc', '0')
@@ -550,7 +575,7 @@ def _add_scoring_intro_slides(
         raise ValueError(f"The PowerPoint template needs a '{layout_name}' layout for scoring exports.")
     slide = presentation.slides.add_slide(layout)
     _set_structural_slide_text(slide, title, subtitle)
-    _fit_scoring_intro_subtitle(slide, layout_name, subtitle)
+    _fit_scoring_intro_subtitle(presentation, slide, layout_name, subtitle)
     if environment is None:
         # The title-page template provides its own short divider under the metadata.
         campaign_top = 5.9

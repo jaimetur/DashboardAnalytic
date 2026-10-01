@@ -332,7 +332,7 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     assert [slide.slide_layout.name for slide in intro_slides] == ['Title Page', 'Title Only']
     cover_text = _slide_text(presentation.slides[0]).replace('\x0b', '\n')
     transition_text = _slide_text(presentation.slides[1]).replace('\x0b', '\n')
-    expected_filter_text = 'Non-Standalone\nAggregation: Operator\nOperator: All Operators\nVendor: All Vendors\nRegion: All Regions\nCity: All Cities'
+    expected_filter_text = 'Non-Standalone\nAggregations & Filters:\nAggregation: Operator\nOperator: All Operators\nVendor: All Vendors\nRegion: All Regions\nCity: All Cities'
     assert expected_filter_text in cover_text
     assert expected_filter_text in transition_text.replace(' · Environment: DriveCity', '')
     assert 'Campaigns: UK_Q2_2026' in cover_text
@@ -589,13 +589,28 @@ def test_intro_slides_show_all_canonical_scope_filters_without_overlapping_campa
             mode_paragraph = subtitle_shape.text_frame.paragraphs[0]
         else:
             subtitle_shape = next(
-                shape for shape in slide.placeholders if shape.placeholder_format.type in {1, 3}
+                shape for shape in slide.placeholders if shape.placeholder_format.type == 4
             )
             divider = next(shape for shape in slide.shapes if shape.name == 'Scoring Campaign Divider')
             assert divider.top + divider.height < campaign_shape.top
             assert subtitle_shape.top + subtitle_shape.height <= divider.top
-            mode_paragraph = subtitle_shape.text_frame.paragraphs[1]
+            mode_paragraph = subtitle_shape.text_frame.paragraphs[0]
+        assert 'Aggregation:' not in subtitle_shape.text
+        filters_shape = next(shape for shape in slide.shapes
+                             if shape.name == 'Scoring Aggregations and Filters')
+        assert filters_shape.text.startswith('Aggregations & Filters:')
+        assert filters_shape.top >= subtitle_shape.top + subtitle_shape.height
+        assert filters_shape.top + filters_shape.height < campaign_shape.top
+        assert all(str(paragraph.font.color.rgb) == 'CCEEF4'
+                   for paragraph in filters_shape.text_frame.paragraphs)
         assert mode_paragraph.font.size.pt == 18
+        assert str(mode_paragraph.font.color.rgb) == 'FFC700'
+        assert mode_paragraph._p.xpath('./a:pPr/a:buNone')
+        if index == 1:
+            assert mode_paragraph.alignment == 2  # Center.
+            title = slide.shapes.title.text_frame.paragraphs[0]
+            assert title.alignment == 2
+            assert str(title.runs[-1].font.color.rgb) == 'A8E6CF'
         for paragraph in subtitle_shape.text_frame.paragraphs:
             assert paragraph.font.name == 'Aptos'
             assert paragraph.font._rPr.get('spc') == '0'
