@@ -55,6 +55,31 @@ def test_scoring_kpi_table_exposes_editable_category_formula_and_filter_controls
     assert 'data-weight-global-percent' in script
 
 
+def test_scoring_kpi_mapping_methods_are_explicit_and_persisted():
+    script = PANEL_SCRIPT.read_text(encoding='utf-8')
+
+    direction_index = script.index("const directionCell = appendCell(row, '', 'Direction');")
+    mapping_index = script.index("const mappingMethodCell = appendCell(row, '', 'Mapping method');")
+    points_index = script.index("const pointsCell = appendCell(row, '', 'Max Points');")
+    assert direction_index < mapping_index < points_index
+    assert "['piecewise_linear', 'Linear']" in script
+    assert "['piecewise_quadratic', 'Quadratic']" in script
+    assert "['piecewise_smoothstep', 'Smooth curve']" in script
+    assert '`Mapping method for ${metric.kpi || metric.code}`' in script
+    assert "'data-kpi-mapping-method': ''" in script
+    assert 'mappingMethodSelect.title = mappingMethodDescription;' in script
+    assert 'between configured score anchors' in script
+    assert 'lower intermediate scores (t²)' in script
+    assert '3t²−2t³' in script
+    assert 'Direction defines which values are better.' in script
+    assert 'option.title = mappingMethodDescriptions[option.value] || option.textContent;' in script
+    assert 'if (!supportedMappingMethods.has(mappingMethod))' in script
+    assert 'metric.mapping_method = mappingMethod;' in script
+    assert "? template.mapping_method" in script
+    assert ": 'piecewise_linear';" in script
+    assert 'cell.colSpan = 19;' in script
+
+
 def test_kpi_categories_are_selectable_saved_and_created_with_a_first_kpi():
     script = PANEL_SCRIPT.read_text(encoding='utf-8')
 
@@ -174,7 +199,11 @@ def test_reference_distribution_allocates_100_points_in_reference_proportions():
         f"const math = require({module_path});"
         "const shares = math.normalizeShares([500, 150]);"
         "const points = math.allocatePoints(100, shares);"
-        "console.log(JSON.stringify({shares, points, total: points.reduce((a, b) => a + b, 0)}));"
+        "const display = math.formatPointDisplay(8.645);"
+        "const unchanged = math.readPointValue(display, 8.645, display);"
+        "const editedAtDisplay = math.readPointValue(display, 8.645, display, true);"
+        "const editedPrecise = math.readPointValue('8.6457', 8.645, display, true);"
+        "console.log(JSON.stringify({shares, points, total: points.reduce((a, b) => a + b, 0), display, unchanged, editedAtDisplay, editedPrecise}));"
     )
     completed = subprocess.run([node, '-e', program], check=True, capture_output=True, text=True)
     allocation = json.loads(completed.stdout)
@@ -182,6 +211,23 @@ def test_reference_distribution_allocates_100_points_in_reference_proportions():
     assert allocation['shares'] == pytest.approx([500 / 650, 150 / 650])
     assert allocation['points'] == pytest.approx([100 * 500 / 650, 100 * 150 / 650])
     assert allocation['total'] == pytest.approx(100)
+    assert allocation['display'] == '8.65'
+    assert allocation['unchanged'] == pytest.approx(8.645)
+    assert allocation['editedAtDisplay'] == pytest.approx(8.65)
+    assert allocation['editedPrecise'] == pytest.approx(8.6457)
+
+
+def test_max_points_editor_keeps_exact_values_behind_two_decimal_display():
+    script = PANEL_SCRIPT.read_text(encoding='utf-8')
+
+    assert 'input.value = scoringConfigMath.formatPointDisplay(exactPoints);' in script
+    assert 'input.dataset.displayPoints = input.value;' in script
+    assert "input?.dataset.pointEdited === 'true'" in script
+    assert "target.dataset.pointEdited = 'true';" in script
+    assert 'commitPointInput(target);' in script
+    assert 'String(pointInputValue(pointsInput))' in script
+    assert 'context.max_points = pointsForRow(row, environment);' in script
+    assert 'setRowEnvironmentPoints(row, environment, targetPoints);' in script
 
 
 def test_scoring_gap_setup_parent_keeps_child_anchor_ids_and_opens_ancestors():

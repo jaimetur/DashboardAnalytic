@@ -260,3 +260,89 @@ def test_environment_source_selectors_must_not_overlap_or_use_combined_name():
         item['contexts']['Indoor'] = dict(item['contexts']['Walk'])
     with pytest.raises(ValueError, match='overlapping source selectors'):
         validate_scoring_configuration(configuration)
+
+
+def test_mapping_method_defaults_preserve_legacy_configuration_identity_and_results():
+    from src.modules.scoring import calculate_scoring
+
+    legacy = scoring_configuration()
+    for item in legacy['metrics']:
+        item.pop('mapping_method', None)
+    original_hash = configuration_hash(legacy)
+    original_version = method_version_for_configuration(legacy)
+    explicit = validate_scoring_configuration(legacy)
+    assert all(item['mapping_method'] == legacy['interpolation']['method'] for item in explicit['metrics'])
+    assert configuration_hash(explicit) == original_hash
+    assert method_version_for_configuration(explicit) == original_version
+    frames = {'voice': pd.DataFrame({
+        'Campaign': ['2026Q2', '2026Q2'], 'Operator': ['EE', 'EE'],
+        'G_Level_1': ['Drive', 'Drive'], 'G_Level_2': ['City', 'City'],
+        'Session_Type': ['CALL', 'CALL'], 'Call_Status': ['Completed', 'Failed'],
+    })}
+    old_result = calculate_scoring(frames, configuration=legacy)
+    explicit_result = calculate_scoring(frames, configuration=explicit)
+    assert old_result == explicit_result
+    thresholds = metric(explicit, 'K1')['contexts']['DriveCity']['thresholds']
+    assert interpolate_score(99, thresholds) == interpolate_score(99, thresholds, mapping_method='piecewise_linear')
+
+
+@pytest.mark.parametrize('unsupported', ['logarithmic', '', None, [], 1])
+def test_unsupported_mapping_method_is_rejected_by_validation_and_engine(unsupported):
+    from src.modules.scoring import calculate_scoring
+
+    configuration = scoring_configuration()
+    metric(configuration, 'K1')['mapping_method'] = unsupported
+    with pytest.raises(ValueError, match='mapping_method'):
+        validate_scoring_configuration(configuration)
+    with pytest.raises(ValueError, match='mapping_method'):
+        calculate_scoring({}, configuration=configuration)
+    with pytest.raises(ValueError, match='Unsupported scoring mapping method'):
+        interpolate_score(1, {'low': 0, 'medium': 1, 'high': 2, 'ultra': None}, mapping_method=unsupported)
+
+
+@pytest.mark.parametrize(('mapping_method', 'quarter', 'midpoint'), [
+    ('piecewise_linear', .25, .5),
+    ('piecewise_quadratic', .0625, .25),
+    ('piecewise_smoothstep', .15625, .5),
+])
+@pytest.mark.parametrize('direction', [1, -1])
+def test_selected_mapping_preserves_anchors_and_clamps_in_both_directions(mapping_method, quarter, midpoint, direction):
+    thresholds = {'low': 0 * direction, 'medium': 10 * direction,
+                  'high': 20 * direction, 'ultra': 30 * direction}
+    anchors = {'low_score': .1, 'medium_score': .5, 'high_score': .9, 'ultra_score': 1.}
+    def score(value):
+        return interpolate_score(value * direction, thresholds, score_mapping=anchors, mapping_method=mapping_method)
+    assert [score(x) for x in [-10, 0, 10, 20, 30, 40]] == pytest.approx([.1, .1, .5, .9, 1, 1])
+    assert score(2.5) == pytest.approx(.1 + .4 * quarter)
+    assert score(15) == pytest.approx(.5 + .4 * midpoint)
+    assert score(22.5) == pytest.approx(.9 + .1 * quarter)
+    assert score(25) == pytest.approx(.9 + .1 * midpoint)
+    dynamic = {**thresholds, 'ultra': {'rule': 'best_max' if direction == 1 else 'best_min'}}
+    assert interpolate_score(15 * direction, dynamic, ultra=15 * direction,
+                             score_mapping=anchors, mapping_method=mapping_method) == pytest.approx(.5 + .4 * midpoint)
+
+
+@pytest.mark.parametrize(('mapping_method', 'expected'), [
+    ('piecewise_linear', .6), ('piecewise_quadratic', .45), ('piecewise_smoothstep', .675),
+])
+def test_engine_uses_each_kpi_selected_mapping_method(mapping_method, expected):
+    from src.modules.scoring import calculate_scoring
+
+    configuration = scoring_configuration()
+    selected = metric(configuration, 'K1')
+    selected['mapping_method'] = mapping_method
+    selected['contexts']['DriveCity']['thresholds'] = {'low': 0, 'medium': 100, 'high': 200, 'ultra': None}
+    selected['contexts']['DriveCity']['score_mapping'] = {'low_score': 0, 'medium_score': .8, 'high_score': 1, 'ultra_score': 1}
+    frames = {'voice': pd.DataFrame({
+        'Campaign': ['2026Q2'] * 4, 'Operator': ['EE'] * 4,
+        'G_Level_1': ['Drive'] * 4, 'G_Level_2': ['City'] * 4,
+        'Session_Type': ['CALL'] * 4, 'Call_Status': ['Completed'] * 3 + ['Failed'],
+    })}
+    result = calculate_scoring(frames, configuration=configuration)
+    row = next(row for row in result['scoring'] if row['kpi_code'] == 'K1')
+    assert row['value'] == 75
+    assert row['score'] == pytest.approx(expected)
+    linear = copy.deepcopy(configuration)
+    metric(linear, 'K1')['mapping_method'] = 'piecewise_linear'
+    if mapping_method != 'piecewise_linear':
+        assert configuration_hash(configuration) != configuration_hash(linear)

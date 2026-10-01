@@ -10,6 +10,7 @@ import pandas as pd
 from src.modules.column_names import column_identity, resolve_column_name
 from src.modules.scoring_config import (
     configuration_hash,
+    SUPPORTED_MAPPING_METHODS,
     _is_legacy_two_environment_configuration,
     validate_scoring_configuration,
 )
@@ -60,9 +61,19 @@ def method_version_for_configuration(configuration: dict) -> str:
 
 def interpolate_score(
     value: float, thresholds: dict, ultra: float | None = None,
-    score_mapping: dict | None = None,
+    score_mapping: dict | None = None, mapping_method: str = 'piecewise_linear',
 ) -> float:
-    """Apply configurable piecewise interpolation, clamped to the unit interval."""
+    """Apply the selected piecewise mapping between configurable score anchors."""
+    if not isinstance(mapping_method, str) or mapping_method not in SUPPORTED_MAPPING_METHODS:
+        raise ValueError(f'Unsupported scoring mapping method: {mapping_method!r}.')
+
+    def map_fraction(fraction: float) -> float:
+        if mapping_method == 'piecewise_quadratic':
+            return fraction * fraction
+        if mapping_method == 'piecewise_smoothstep':
+            return fraction * fraction * (3 - 2 * fraction)
+        return fraction
+
     specification = thresholds.get('ultra')
     if isinstance(specification, dict) and specification.get('rule') == 'fixed':
         ultra = specification['value']
@@ -87,7 +98,7 @@ def interpolate_score(
         if x <= right:
             if right == left:
                 return float(high_score)
-            return low_score + (x - left) / (right - left) * (high_score - low_score)
+            return low_score + map_fraction((x - left) / (right - left)) * (high_score - low_score)
     if not has_ultra:
         return float(mapping['high_score'])
     high = normalized[-1][0]
@@ -96,7 +107,7 @@ def interpolate_score(
         return float(mapping['ultra_score'])
     if upper == high:
         return float(mapping['ultra_score'])
-    return mapping['high_score'] + (x - high) / (upper - high) * (mapping['ultra_score'] - mapping['high_score'])
+    return mapping['high_score'] + map_fraction((x - high) / (upper - high)) * (mapping['ultra_score'] - mapping['high_score'])
 
 
 def _numeric(frame: pd.DataFrame, field: str) -> pd.Series:
@@ -343,7 +354,10 @@ def calculate_scoring(
             ultra_value = min(peers) if ultra['rule'] == 'best_min' else max(peers)
         else:
             ultra_value = None
-        row['score'] = interpolate_score(row['value'], thresholds, ultra_value, metric_context['score_mapping'])
+        row['score'] = interpolate_score(
+            row['value'], thresholds, ultra_value, metric_context['score_mapping'],
+            metric.get('mapping_method', config['interpolation'].get('method', 'piecewise_linear')),
+        )
         row['weighted_points'] = row['score'] * row['max_points']
     totals = _totals(rows, keys, config)
     if any(not row['complete_coverage'] for row in totals):

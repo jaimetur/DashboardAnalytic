@@ -16,6 +16,7 @@ PROFILE_COLLECTION_VERSION = 2
 MAX_SCORING_METRICS = 256
 MAX_SCORING_PROFILES = 64
 MAX_SCORING_ENVIRONMENTS = 32
+SUPPORTED_MAPPING_METHODS = frozenset({'piecewise_linear', 'piecewise_quadratic', 'piecewise_smoothstep'})
 _PROFILE_ID = re.compile(r'[a-z0-9][a-z0-9_-]{0,63}\Z')
 DEFAULT_AGGREGATION_HIERARCHY = ['Operator', 'Vendor', 'Region', 'City', 'Campaign']
 _AGGREGATION_FIELDS = frozenset(DEFAULT_AGGREGATION_HIERARCHY)
@@ -560,6 +561,9 @@ def validate_scoring_configuration(payload: object) -> dict[str, Any]:
         direction = supplied.get('direction')
         if not isinstance(direction, str) or direction not in {'higher_is_better', 'lower_is_better'}:
             raise ValueError(f'KPI {code} direction must be higher_is_better or lower_is_better.')
+        mapping_method = supplied.get('mapping_method', interpolation.get('method', 'piecewise_linear'))
+        if not isinstance(mapping_method, str) or mapping_method not in SUPPORTED_MAPPING_METHODS:
+            raise ValueError(f'KPI {code} mapping_method must be one of: {", ".join(sorted(SUPPORTED_MAPPING_METHODS))}.')
         for key in ('category', 'kpi'):
             value = supplied.get(key)
             if not isinstance(value, str) or not value.strip():
@@ -576,6 +580,7 @@ def validate_scoring_configuration(payload: object) -> dict[str, Any]:
             'code': code,
             'source_kind': kind,
             'direction': direction,
+            'mapping_method': mapping_method,
             'kpi_type': kpi_type.strip(),
             'calculation': calculation,
             'contexts': {
@@ -816,6 +821,10 @@ def _hash_projection(configuration: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(metric, dict):
             continue
         metric.pop('source', None)
+        # An explicit historical default has the same scoring identity as an
+        # older profile that derives it from the interpolation configuration.
+        if metric.get('mapping_method') == 'piecewise_linear':
+            metric.pop('mapping_method')
         for context in metric.get('contexts', {}).values():
             if isinstance(context, dict):
                 context.pop('threshold_reference', None)

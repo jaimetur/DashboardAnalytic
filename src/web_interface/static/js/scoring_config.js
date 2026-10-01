@@ -7,6 +7,19 @@ globalThis.ScoringConfigMath = globalThis.ScoringConfigMath || Object.freeze({
   allocatePoints(total, shares) {
     return shares.map((share) => Number(total) * Number(share));
   },
+  formatPointDisplay(value) {
+    const points = Number(value);
+    if (!Number.isFinite(points)) return '0.00';
+    return (Math.round((points + Number.EPSILON) * 100) / 100).toFixed(2);
+  },
+  readPointValue(value, exactValue, displayValue, edited = false) {
+    if (!edited && String(value) === String(displayValue)) {
+      const exactPoints = Number(exactValue);
+      if (Number.isFinite(exactPoints)) return exactPoints;
+    }
+    const points = Number(value);
+    return Number.isFinite(points) ? points : 0;
+  },
 });
 
 if (typeof module !== 'undefined' && module.exports) module.exports = globalThis.ScoringConfigMath;
@@ -75,6 +88,18 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
   ];
   const sourceKinds = [['data', 'Data'], ['voice', 'Voice'], ['speech', 'Speech']];
   const directions = [['higher_is_better', 'Higher'], ['lower_is_better', 'Lower']];
+  const mappingMethods = [
+    ['piecewise_linear', 'Linear'],
+    ['piecewise_quadratic', 'Quadratic'],
+    ['piecewise_smoothstep', 'Smooth curve'],
+  ];
+  const supportedMappingMethods = new Set(mappingMethods.map(([value]) => value));
+  const mappingMethodDescription = 'Mapping converts KPI values into normalized scores between configured score anchors. Linear interpolates in straight segments; Quadratic gives lower intermediate scores (t²); Smooth curve smooths transitions near anchors (3t²−2t³). Direction defines which values are better.';
+  const mappingMethodDescriptions = {
+    piecewise_linear: 'Linear interpolates in straight segments between configured score anchors.',
+    piecewise_quadratic: 'Quadratic gives lower intermediate scores using t² between configured score anchors.',
+    piecewise_smoothstep: 'Smooth curve smooths transitions near configured score anchors using 3t²−2t³.',
+  };
   const totalPacketLossFormula = '100 * SUM(totalpacketlost) / SUM(Packets_Sent)';
   const totalPacketLossExpression = 'IFNULL(Packets_Lost,0) + IFNULL(Packets_Discarded,0) + IFNULL(INT(Packets_Corrupted),0) + IFNULL(Packets_Not_Sent,0)';
   const defaultHierarchy = ['Operator', 'Vendor', 'Region', 'City', 'Campaign'];
@@ -371,6 +396,32 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
 
   const contextDraftsForRow = (row) => row._contextDrafts || (row._contextDrafts = {});
 
+  const pointInputValue = (input) => scoringConfigMath.readPointValue(
+    input?.value ?? '',
+    input?.dataset.exactPoints,
+    input?.dataset.displayPoints,
+    input?.dataset.pointEdited === 'true',
+  );
+
+  const setPointInputValue = (input, value) => {
+    if (!input) return 0;
+    const numericValue = Number(value);
+    const exactPoints = Number.isFinite(numericValue) ? numericValue : 0;
+    input.value = scoringConfigMath.formatPointDisplay(exactPoints);
+    input.dataset.exactPoints = String(exactPoints);
+    input.dataset.displayPoints = input.value;
+    delete input.dataset.pointEdited;
+    return exactPoints;
+  };
+
+  const commitPointInput = (input) => {
+    if (!input || input.dataset.pointEdited !== 'true') return;
+    const enteredValue = input.value.trim();
+    const points = Number(enteredValue);
+    if (!enteredValue || !Number.isFinite(points) || !input.checkValidity()) return;
+    setPointInputValue(input, points);
+  };
+
   const captureSelectedContext = (row, targetEnvironment = environmentSelect.value) => {
     const environment = targetEnvironment;
     const existing = row._contextDrafts?.[environment] || {};
@@ -382,7 +433,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     anchors.forEach(([key]) => {
       mapping[key] = row.querySelector(`[data-score-anchor="${key}"]`)?.value ?? '';
     });
-    const points = row.querySelector('[data-max-points]')?.value ?? '';
+    const pointsInput = row.querySelector('[data-max-points]');
+    const points = pointsInput?.value.trim() ? String(pointInputValue(pointsInput)) : '';
     const ultraMode = row.querySelector('[data-ultra-mode]')?.value || 'none';
     const ultraValue = row.querySelector('[data-ultra-value]')?.value ?? '';
     const numericPoints = Number(points);
@@ -403,7 +455,14 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     const saved = metricForRow(row)?.contexts?.[environment] || {};
     const points = draft?.max_points ?? saved.max_points;
     const pointsInput = row.querySelector('[data-max-points]');
-    if (pointsInput) pointsInput.value = points === null || points === undefined ? '0' : String(points);
+    if (pointsInput && points === '') {
+      pointsInput.value = '';
+      pointsInput.dataset.exactPoints = '0';
+      pointsInput.dataset.displayPoints = '';
+      delete pointsInput.dataset.pointEdited;
+    } else if (pointsInput) {
+      setPointInputValue(pointsInput, points ?? 0);
+    }
     ['low', 'medium', 'high'].forEach((key) => {
       const input = row.querySelector(`[data-threshold="${key}"]`);
       const value = draft?.thresholds?.[key] ?? saved.thresholds?.[key];
@@ -431,7 +490,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
 
   const pointsForRow = (row, environment) => {
     if (environment === environmentSelect.value) {
-      const value = Number(row.querySelector('[data-max-points]')?.value);
+      const value = pointInputValue(row.querySelector('[data-max-points]'));
       return Number.isFinite(value) ? value : 0;
     }
     const draft = Number(row._contextPointDrafts?.[environment]);
@@ -441,15 +500,17 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
   };
 
   const setRowEnvironmentPoints = (row, environment, points) => {
+    const numericPoints = Number(points);
+    const exactPoints = Number.isFinite(numericPoints) ? numericPoints : 0;
     row._contextPointDrafts = row._contextPointDrafts || {};
-    row._contextPointDrafts[environment] = points;
+    row._contextPointDrafts[environment] = exactPoints;
     contextDraftsForRow(row)[environment] = {
       ...(row._contextDrafts?.[environment] || {}),
-      max_points: String(points),
+      max_points: String(exactPoints),
     };
     if (environment === environmentSelect.value) {
       const input = row.querySelector('[data-max-points]');
-      if (input) input.value = String(points);
+      if (input) setPointInputValue(input, exactPoints);
     }
   };
 
@@ -568,8 +629,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       const environmentOutput = row.querySelector('[data-weight-environment-percent]');
       const environmentInput = row.querySelector('[data-weight-environment-input]');
       const globalOutput = row.querySelector('[data-weight-global-percent]');
-      if (pointInput && document.activeElement !== pointInput) pointInput.value = String(points);
-      if (pointOutput) pointOutput.textContent = points.toFixed(2);
+      if (pointInput && document.activeElement !== pointInput) setPointInputValue(pointInput, points);
+      if (pointOutput) pointOutput.textContent = scoringConfigMath.formatPointDisplay(points);
       if (environmentOutput) environmentOutput.textContent = `${environmentPercent.toFixed(2)}%`;
       if (environmentInput && document.activeElement !== environmentInput) {
         environmentInput.value = environmentPercent.toFixed(2);
@@ -653,7 +714,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     row.dataset.kpiCategoryHeading = category;
     const cell = document.createElement('th');
     cell.scope = 'colgroup';
-    cell.colSpan = 18;
+    cell.colSpan = 19;
     const name = document.createElement('span');
     name.className = 'scoring-config-category-name';
     name.textContent = category;
@@ -737,10 +798,27 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     });
     directionSelect.title = 'Higher means larger KPI results score better. Lower means smaller KPI results score better.';
 
+    const mappingMethodCell = appendCell(row, '', 'Mapping method');
+    const mappingMethodValue = supportedMappingMethods.has(metric.mapping_method)
+      ? metric.mapping_method
+      : 'piecewise_linear';
+    const mappingMethodSelect = appendSelect(
+      mappingMethodCell,
+      mappingMethodValue,
+      `Mapping method for ${metric.kpi || metric.code}`,
+      mappingMethods,
+      {'data-kpi-mapping-method': '', class: 'scoring-config-mapping-method', required: ''},
+    );
+    mappingMethodSelect.title = mappingMethodDescription;
+    Array.from(mappingMethodSelect.options).forEach((option) => {
+      option.title = mappingMethodDescriptions[option.value] || option.textContent;
+    });
+
     const pointsCell = appendCell(row, '', 'Max Points');
-    appendNumericInput(pointsCell, context.max_points, `Maximum points for ${metric.kpi || metric.code}`, {
+    const maxPointsInput = appendNumericInput(pointsCell, context.max_points, `Maximum points for ${metric.kpi || metric.code}`, {
       'data-max-points': '', min: '0', required: '',
     });
+    setPointInputValue(maxPointsInput, context.max_points ?? 0);
     const pointsOutput = document.createElement('span');
     pointsOutput.dataset.maxPointsOutput = '';
     pointsCell.append(pointsOutput);
@@ -1178,7 +1256,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
 
   const readKpiRows = (latestConfiguration, environment) => {
     const rows = rowMetrics();
-    rows.forEach(captureSelectedContext);
+    rows.forEach((row) => captureSelectedContext(row));
     if (!rows.length) throw new Error('A scoring methodology must contain at least one KPI.');
     if (!environmentKeys().length || globalPointsTotal(rows) <= 0) {
       throw new Error('A scoring methodology must contain at least one environment and a positive total of environment points.');
@@ -1198,6 +1276,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       const category = readText(row, '[data-kpi-category]', `Category for ${label}`);
       const sourceKind = row.querySelector('[data-kpi-source-kind]').value;
       const direction = row.querySelector('[data-kpi-direction]').value;
+      const mappingMethod = row.querySelector('[data-kpi-mapping-method]')?.value;
+      if (!supportedMappingMethods.has(mappingMethod)) {
+        throw new Error(`${label} uses an unsupported KPI mapping method.`);
+      }
       const type = readText(row, '[data-kpi-type]', `Type for ${label}`);
       const formula = readText(row, '[data-kpi-formula]', `Formula for ${label}`);
       const originalFormula = String(metric.calculation?.formula || '').trim();
@@ -1213,12 +1295,14 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       metric.category = category;
       metric.source_kind = sourceKind;
       metric.direction = direction;
+      metric.mapping_method = mappingMethod;
       metric.kpi_type = type;
       metric.calculation = calculation;
       metric.contexts = metric.contexts || {};
       metric.contexts[environment] = metric.contexts[environment] || {};
       const context = metric.contexts[environment];
-      context.max_points = readNumeric(row, '[data-max-points]', `Maximum points for ${label}`);
+      readNumeric(row, '[data-max-points]', `Maximum points for ${label}`);
+      context.max_points = pointsForRow(row, environment);
       context.thresholds = context.thresholds || {};
       const thresholds = {};
       for (const key of ['low', 'medium', 'high']) {
@@ -1682,6 +1766,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     nextKpiNumber += 1;
     metric.kpi = 'New KPI';
     metric.category = category;
+    metric.mapping_method = supportedMappingMethods.has(template.mapping_method)
+      ? template.mapping_method
+      : 'piecewise_linear';
     metric.kpi_type = template.kpi_type || 'Reliable';
     environmentKeys().forEach((environment) => {
       metric.contexts[environment] = metric.contexts[environment] || {};
@@ -1785,7 +1872,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     rows.forEach((item, index) => setRowEnvironmentShare(item, environment, nextShares[index]));
     if (selectedTotal > 0) {
       const targetPoints = selectedTotal * targetPercent / 100;
-      row.querySelector('[data-max-points]').value = String(targetPoints);
+      setRowEnvironmentPoints(row, environment, targetPoints);
       peerRows.forEach((item, index) => {
         setRowEnvironmentPoints(item, environment, selectedTotal * nextShares[rows.indexOf(item)]);
       });
@@ -1913,7 +2000,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       setStatus(kpiStatus, 'A scoring methodology can contain up to 32 environments.', 'error');
       return;
     }
-    rowMetrics().forEach(captureSelectedContext);
+    rowMetrics().forEach((row) => captureSelectedContext(row));
     const result = await openProfileDialog({
       title: 'Create scoring environment',
       description: 'Choose a name, source selector, and reference environment. KPI thresholds and score mappings follow the reference environment; points follow its relative KPI weights.',
@@ -1979,7 +2066,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       setStatus(kpiStatus, 'Keep at least one scoring environment in this methodology.', 'error');
       return;
     }
-    rowMetrics().forEach(captureSelectedContext);
+    rowMetrics().forEach((row) => captureSelectedContext(row));
     const remainingTotal = globalPointsTotal() - environmentTotalFor(environment);
     if (remainingTotal <= 0) {
       setStatus(kpiStatus, 'Deleting this environment would leave the methodology with 0 points. Keep at least one environment with points.', 'error');
@@ -2128,7 +2215,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       setStatus(kpiStatus, message || 'Unsaved KPI changes. The global points total is preserved.', target.getAttribute('aria-invalid') ? 'error' : '');
       return;
     }
-    if (target.matches('[data-max-points]')) updateDerivedWeights();
+    if (target.matches('[data-max-points]')) {
+      target.dataset.pointEdited = 'true';
+      updateDerivedWeights();
+    }
     if (target.matches('[data-environment-g1]')) {
       const environment = configuration?.scope?.environments?.[environmentSelect.value];
       if (environment) environment.g_level_1 = target.value;
@@ -2161,6 +2251,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     const target = event.target;
     if (target.matches('[data-scoring-environment], [data-scoring-weight-mode]')) return;
     kpiDirty = true;
+    if (target.matches('[data-max-points]')) commitPointInput(target);
     if (target.matches('[data-kpi-category]')) renderCategoryGroups();
     if (target.matches('[data-ultra-mode]')) syncUltraInput(target.closest('tr[data-kpi-code]'));
     if (target.matches('[data-weight-environment-input]')) return;
@@ -2169,6 +2260,13 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     if (row) captureSelectedContext(row);
     setStatus(kpiStatus, 'Unsaved KPI changes.');
   });
+  kpiForm.addEventListener('blur', (event) => {
+    const target = event.target;
+    if (!target.matches('[data-max-points]')) return;
+    commitPointInput(target);
+    const row = target.closest('tr[data-kpi-code]');
+    if (row) captureSelectedContext(row);
+  }, true);
   kpiForm.addEventListener('click', (event) => {
     const button = event.target.closest('button');
     if (!button || !kpiRows.contains(button)) return;

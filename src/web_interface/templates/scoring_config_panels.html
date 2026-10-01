@@ -20,8 +20,8 @@
   .scoring-config-panel .scoring-config-settings-group .inline-actions { margin: 0; display: flex; flex-wrap: wrap; gap: .65rem; }
   .scoring-config-panel .scoring-config-allocation-controls { display: grid; grid-template-columns: minmax(11rem, 14rem) minmax(16rem, 22rem) max-content; align-items: start; gap: 1rem; padding: 1rem 0; border-top: 1px solid #c8ded3; border-bottom: 1px solid #c8ded3; }
   .scoring-config-panel .scoring-config-allocation-controls > button { align-self: start; margin-top: 1.5rem; }
-  .scoring-config-panel [data-scoring-distribute-points] { background: #267c79; border-color: #267c79; color: #fff; }
-  .scoring-config-panel [data-scoring-distribute-points]:hover:not(:disabled) { background: #1a625f; }
+  .scoring-config-panel [data-scoring-distribute-points] { background: #7752a3; border-color: #66448e; color: #fff; }
+  .scoring-config-panel [data-scoring-distribute-points]:hover:not(:disabled) { background: #604085; }
   .scoring-config-panel [data-scoring-config-export] { background: #dceaf8; border-color: #8eaecb; color: #254f76; font-weight: 700; }
   .scoring-config-panel [data-scoring-config-export]:hover { background: #c4dcef; color: #173b5c; }
   .scoring-config-panel .scoring-config-weight-help { margin-top: .65rem; color: #47685b; }
@@ -41,11 +41,15 @@
   .scoring-config-panel .scoring-config-environment-actions button { background: #e7f1f1; border: 1px solid #9cb7b8; color: #174b50; font-weight: 700; }
   .scoring-config-panel .scoring-config-environment-actions button:hover { background: #d4e7e7; color: #123e42; }
   .scoring-config-panel .scoring-config-environment-actions button:disabled { opacity: .5; cursor: not-allowed; }
+  .scoring-config-panel .scoring-config-profile-actions button[data-scoring-profile-action="delete"],
+  .scoring-config-panel .scoring-config-environment-actions button[data-scoring-environment-delete] { background: #b63a43; border-color: #9e2c35; color: #fff; }
+  .scoring-config-panel .scoring-config-profile-actions button[data-scoring-profile-action="delete"]:hover:not(:disabled),
+  .scoring-config-panel .scoring-config-environment-actions button[data-scoring-environment-delete]:hover:not(:disabled) { background: #962a32; color: #fff; }
   .scoring-config-panel .scoring-config-source-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 14rem)); align-items: start; gap: .65rem; margin: 0; }
   .scoring-config-panel .scoring-config-source-fields > small { grid-column: 1 / -1; color: #47685b; }
   .scoring-config-panel .scoring-config-source-fields label { display: grid; min-width: 0; gap: .3rem; font-weight: 650; }
   .scoring-config-panel .scoring-config-source-fields input { box-sizing: border-box; min-width: 0; width: 100%; max-width: 100%; padding: .4rem .45rem; }
-  .scoring-config-panel .scoring-config-kpi-actions { display: grid; grid-template-columns: repeat(4, 1.4rem); gap: .12rem; min-width: 0; }
+  .scoring-config-panel .scoring-config-kpi-actions { display: grid; grid-template-columns: repeat(4, 1.25rem); gap: .12rem; min-width: 0; }
   .scoring-config-panel .scoring-config-kpi-actions button { background: #e7f1f1; border: 1px solid #9cb7b8; color: #174b50; font-weight: 650; }
   .scoring-config-panel .scoring-config-kpi-actions button:hover { background: #d4e7e7; color: #123e42; }
   .scoring-config-panel .scoring-config-kpi-actions button:disabled { opacity: .45; cursor: not-allowed; }
@@ -77,38 +81,29 @@
   .scoring-config-panel .scoring-config-table thead tr:first-child th[colspan] { background: #d7e9e8; text-align: center; }
   .scoring-config-panel .scoring-config-table tbody tr:last-child td { border-bottom: 0; }
   .scoring-config-panel .scoring-config-table tbody tr:nth-child(even) { background: rgba(239, 244, 246, .45); }
-  .scoring-config-panel .scoring-config-table thead tr:first-child th:nth-child(-n+5),
-  .scoring-config-panel .scoring-config-table thead tr:first-child th:nth-child(17),
-  .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(-n+5),
-  .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(17) { background: #edf4f8; }
-  .scoring-config-panel .scoring-config-table thead tr:first-child th:nth-child(6),
-  .scoring-config-panel .scoring-config-table thead tr:first-child th:nth-child(7),
-  .scoring-config-panel .scoring-config-table thead tr:first-child th:nth-child(8),
-  .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(n+6):nth-child(-n+8) { background: #eef7ec; }
-  .scoring-config-panel .scoring-config-table thead tr:first-child th:nth-child(9),
-  .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(n+9):nth-child(-n+12) { background: #fff6e4; }
-  .scoring-config-panel .scoring-config-table thead tr:first-child th:nth-child(10),
-  .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(n+13):nth-child(-n+16) { background: #f4effb; }
-  .scoring-config-panel .scoring-config-table thead tr:nth-child(2) th:nth-child(-n+4) { background: #fff0d4; }
-  .scoring-config-panel .scoring-config-table thead tr:nth-child(2) th:nth-child(n+5) { background: #ebe3f7; }
+  .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(-n+6),
+  .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(18) { background: #edf4f8; }
+  .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(n+7):nth-child(-n+9) { background: #eef7ec; }
+  .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(n+10):nth-child(-n+13) { background: #fff6e4; }
+  .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(n+14):nth-child(-n+17) { background: #f4effb; }
   .scoring-config-panel .scoring-config-table thead tr:first-child th { background: #cadfe0; }
-  .scoring-config-panel .scoring-config-table thead tr:first-child th:nth-child(-n+5),
-  .scoring-config-panel .scoring-config-table thead tr:first-child th:nth-child(n+11) { background: #d3e2ec; }
-  .scoring-config-panel .scoring-config-table thead tr:first-child th:nth-child(n+6):nth-child(-n+8) { background: #d7e8d2; }
-  .scoring-config-panel .scoring-config-table thead tr:first-child th:nth-child(9),
-  .scoring-config-panel .scoring-config-table thead tr:nth-child(2) th:nth-child(-n+4) { background: #f3deb1; }
+  .scoring-config-panel .scoring-config-table thead tr:first-child th:nth-child(-n+6),
+  .scoring-config-panel .scoring-config-table thead tr:first-child th:nth-child(n+12) { background: #d3e2ec; }
+  .scoring-config-panel .scoring-config-table thead tr:first-child th:nth-child(n+7):nth-child(-n+9) { background: #d7e8d2; }
   .scoring-config-panel .scoring-config-table thead tr:first-child th:nth-child(10),
+  .scoring-config-panel .scoring-config-table thead tr:nth-child(2) th:nth-child(-n+4) { background: #f3deb1; }
+  .scoring-config-panel .scoring-config-table thead tr:first-child th:nth-child(11),
   .scoring-config-panel .scoring-config-table thead tr:nth-child(2) th:nth-child(n+5) { background: #dcd0ee; }
   .scoring-config-panel .scoring-config-calculation { text-align: center; }
-  .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(-n+5) input,
-  .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(17) textarea { background: rgba(255, 255, 255, .78); }
-  .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(n+6):nth-child(-n+8) input { background: #fff; }
+  .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(-n+6) input,
+  .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(18) textarea { background: rgba(255, 255, 255, .78); }
+  .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(n+7):nth-child(-n+9) input { background: #fff; }
   .scoring-config-panel .scoring-config-category-row th { position: static; padding: .4rem .5rem; background: #eef4f3; color: #31545a; font-size: .75rem; font-weight: 750; letter-spacing: .025em; }
   .scoring-config-panel .scoring-config-table input,
   .scoring-config-panel .scoring-config-table select,
   .scoring-config-panel .scoring-config-table textarea { box-sizing: border-box; width: 100% !important; min-width: 0; max-width: 100%; padding: .3rem .2rem; border-radius: .4rem; font: inherit; }
   .scoring-config-panel .scoring-config-table textarea { min-height: 0; resize: vertical; }
-  .scoring-config-panel .scoring-config-identity-input { resize: none !important; overflow: hidden; }
+  .scoring-config-panel .scoring-config-identity-input { resize: none !important; overflow: hidden; font-weight: 700 !important; }
   .scoring-config-panel .scoring-config-category-input { font-size: .65rem !important; }
   .scoring-config-panel .scoring-config-table input[type="number"] { appearance: textfield; }
   .scoring-config-panel .scoring-config-table input[type="number"]::-webkit-inner-spin-button,
@@ -118,7 +113,7 @@
   .scoring-config-panel td.scoring-config-ultra { min-width: 0; }
   .scoring-config-panel .scoring-config-ultra-editor { display: grid; gap: .25rem; min-width: 0; }
   .scoring-config-panel .scoring-config-ultra-editor small { display: none; }
-  .scoring-config-panel .scoring-config-kpi-action { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: 1.4rem; height: 1.4rem; min-width: 1.4rem; padding: 0; border-radius: 50%; background: #e7f1f1; border: 1px solid #9cb7b8; color: #174b50; }
+  .scoring-config-panel .scoring-config-kpi-action { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: 1.25rem; height: 1.25rem; min-width: 1.25rem; padding: 0; border-radius: 50%; background: #e7f1f1; border: 1px solid #9cb7b8; color: #174b50; }
   .scoring-config-panel .scoring-config-kpi-action:hover { background: #d4e7e7; }
   .scoring-config-panel .scoring-config-kpi-action[data-kpi-add-below] { background: #d9f1df; border-color: #368652; color: #176337; }
   .scoring-config-panel .scoring-config-kpi-action[data-kpi-add-below]:hover { background: #bee5c8; }
@@ -224,8 +219,8 @@
             <div class="scoring-config-profile-actions" aria-label="Scoring methodology actions">
               <button type="button" class="ghost-link" data-scoring-profile-action="create" disabled>Create Profile</button>
               <button type="button" class="ghost-link" data-scoring-profile-action="copy" disabled>Copy Profile</button>
-              <button type="button" class="ghost-link" data-scoring-profile-action="rename" disabled>Rename</button>
-              <button type="button" class="ghost-link" data-scoring-profile-action="delete" disabled>Delete</button>
+              <button type="button" class="ghost-link" data-scoring-profile-action="rename" disabled>Rename Profile</button>
+              <button type="button" class="ghost-link" data-scoring-profile-action="delete" disabled>Delete Profile</button>
             </div>
           </div>
       <div class="inline-actions">
@@ -263,7 +258,7 @@
             </label>
             <small data-environment-total-summary>Environment points and global share</small>
           </div>
-            <button type="button" class="ghost-link" data-scoring-distribute-points disabled>Distribute points</button>
+            <button type="button" class="ghost-link" data-scoring-distribute-points disabled>Distribute points keeping percentages</button>
           </div>
         <div class="scoring-config-source-fields" data-scoring-environment-source-fields>
           <label>Source G_Level_1
@@ -286,29 +281,30 @@
           <table class="scoring-config-table">
             <colgroup>
               <col style="width: 4%">
-              <col style="width: 14.5%">
+              <col style="width: 16.5%">
               <col style="width: 9%">
-              <col style="width: 5%">
-              <col style="width: 6%">
-              <col style="width: 5%">
+              <col style="width: 4%">
               <col style="width: 5%">
               <col style="width: 5%">
-              <col style="width: 3.5%">
-              <col style="width: 3.5%">
-              <col style="width: 3.5%">
-              <col style="width: 7%">
-              <col style="width: 3.5%">
+              <col style="width: 5%">
+              <col style="width: 4.25%">
+              <col style="width: 4.25%">
               <col style="width: 3.5%">
               <col style="width: 3.5%">
               <col style="width: 3.5%">
               <col style="width: 6%">
-              <col style="width: 9%">
+              <col style="width: 3.5%">
+              <col style="width: 3.5%">
+              <col style="width: 3.5%">
+              <col style="width: 3.5%">
+              <col style="width: 4.5%">
+              <col style="width: 8%">
             </colgroup>
             <thead>
-              <tr><th scope="col" rowspan="2">Code</th><th scope="col" rowspan="2">KPI</th><th scope="col" rowspan="2">Category</th><th scope="col" rowspan="2">Type</th><th scope="col" rowspan="2">Direction</th><th scope="col" rowspan="2">Max points</th><th scope="col" rowspan="2">Environment Weight (%)</th><th scope="col" rowspan="2">Global weight (%)</th><th scope="colgroup" colspan="4">KPI thresholds</th><th scope="colgroup" colspan="4">Score interpolation anchors (%)</th><th scope="col" rowspan="2">KPI Definition</th><th scope="col" rowspan="2">Actions</th></tr>
+              <tr><th scope="col" rowspan="2">Code</th><th scope="col" rowspan="2">KPI</th><th scope="col" rowspan="2">Category</th><th scope="col" rowspan="2">Type</th><th scope="col" rowspan="2">Direction</th><th scope="col" rowspan="2">Mapping</th><th scope="col" rowspan="2">Max points</th><th scope="col" rowspan="2">Environment Weight (%)</th><th scope="col" rowspan="2">Global weight (%)</th><th scope="colgroup" colspan="4">KPI thresholds</th><th scope="colgroup" colspan="4" title="Percentage of the KPI’s maximum points awarded at each threshold. The NetCheck defaults are constants within workbook scoring formulas, not separate workbook columns.">Score interpolation anchors (%)</th><th scope="col" rowspan="2">KPI Definition</th><th scope="col" rowspan="2">Actions</th></tr>
               <tr><th scope="col">Low</th><th scope="col">Medium</th><th scope="col">High</th><th scope="col">Ultra</th><th scope="col">Low</th><th scope="col">Medium</th><th scope="col">High</th><th scope="col">Ultra</th></tr>
             </thead>
-            <tbody data-scoring-kpi-rows><tr><td colspan="18">Loading scoring configuration…</td></tr></tbody>
+            <tbody data-scoring-kpi-rows><tr><td colspan="19">Loading scoring configuration…</td></tr></tbody>
           </table>
         </div>
         <div class="scoring-config-actions">

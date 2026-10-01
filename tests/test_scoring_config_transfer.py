@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 import zipfile
 
+import pytest
+
 import src.DashboardAnalytic as app_module
 from src.modules.repository import Repository
 from src.modules.scoring_config import default_scoring_profile, validate_scoring_configuration, validate_scoring_profiles
@@ -40,16 +42,19 @@ def _configuration_with_medium_score(repository: Repository, value: float) -> di
 
 def _configuration_with_custom_gap_sections(repository: Repository) -> dict:
     configuration = _configuration_with_medium_score(repository, 0.81)
+    configuration['metrics'][0]['mapping_method'] = 'piecewise_quadratic'
     configuration['aggregation_hierarchy'] = list(reversed(configuration['aggregation_hierarchy']))
     priorities = configuration['gap_priority']
     configuration['gap_priority'] = [priorities[1], priorities[0], *priorities[2:]]
     return configuration
 
 
-def test_scoring_configuration_export_import_round_trip(client, tmp_path: Path) -> None:
+@pytest.mark.parametrize('mapping_method', ['piecewise_quadratic', 'piecewise_smoothstep'])
+def test_scoring_configuration_export_import_round_trip(client, tmp_path: Path, mapping_method: str) -> None:
     _login(client)
     workspace, repository = _workspace_repository()
     expected = _configuration_with_custom_gap_sections(repository)
+    expected['metrics'][0]['mapping_method'] = mapping_method
     repository.replace_scoring_configuration(expected)
     profiles = repository.get_scoring_profiles()
     second_profile = copy.deepcopy(profiles['profiles'][0])
@@ -83,6 +88,8 @@ def test_scoring_configuration_export_import_round_trip(client, tmp_path: Path) 
     assert document['version'] == 2
     assert document['active_profile_id'] == expected_profiles['active_profile_id']
     assert document['profiles'] == expected_profiles['profiles']
+    assert all(profile['configuration']['metrics'][0]['mapping_method'] == mapping_method
+               for profile in document['profiles'])
     assert all(
         profile['configuration']['aggregation_hierarchy'] != scoring_configuration()['aggregation_hierarchy']
         and profile['configuration']['gap_priority'] != scoring_configuration()['gap_priority']
