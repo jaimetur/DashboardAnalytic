@@ -344,6 +344,8 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
         if slide.shapes.title.text.startswith('GAP Analysis') and any(shape.has_table for shape in slide.shapes):
             assert sum(shape.name.startswith('GAP Color Scale Segment ') for shape in slide.shapes) == 24
             assert 'GAP color scale' in _slide_text(slide)
+            assert sum(shape.name == 'GAP KPI Priority Arrow' for shape in slide.shapes) == 1
+            assert sum(shape.name == 'GAP KPI Priority Label' for shape in slide.shapes) == 1
     assert len(titles[7:]) == 4
     intro_slides = [presentation.slides[index] for index in range(2)]
     assert [slide.slide_layout.name for slide in intro_slides] == ['Title Page', 'Title Page']

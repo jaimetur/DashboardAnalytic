@@ -1432,6 +1432,15 @@
     row.append(td);
   }
 
+  function appendPriorityOrderNotice(parent) {
+    const notice = document.createElement('p');
+    notice.className = 'scoring-priority-order-notice';
+    const text = document.createElement('strong');
+    text.textContent = 'KPIs are ordered by priority, from highest to lowest.';
+    notice.append(text);
+    parent.append(notice);
+  }
+
   function appendMatrixTable(pane, tableData) {
     const isSummary = tableData?._display_mode === 'summary';
     const rows = Array.isArray(tableData?.rows) ? tableData.rows : [];
@@ -2138,6 +2147,7 @@
       return;
     }
     appendPriorityGapScale(pane, tableData, scaleRows);
+    appendPriorityOrderNotice(pane);
 
     const blocks = [{label: comparisonLabel, className: 'scoring-gap-group', headerClass: 'scoring-gap-header', column: 'gap', columns}];
     const wrapper = document.createElement('div');
@@ -2271,6 +2281,7 @@
       return;
     }
     appendPriorityGapScale(pane, selected, rows);
+    appendPriorityOrderNotice(pane);
     const wrapper = document.createElement('div');
     wrapper.className = 'scoring-matrix-wrap';
     const table = document.createElement('table');
@@ -2405,6 +2416,7 @@
       return;
     }
 
+    appendPriorityOrderNotice(pane);
     const wrapper = document.createElement('div');
     wrapper.className = 'scoring-matrix-wrap';
     const table = document.createElement('table');

@@ -218,6 +218,34 @@ def _text(slide, text: str, top: float, *, left: float = .55, width: float = 12.
     return box
 
 
+def _add_gap_priority_arrow(slide, table, *, header_rows: int = 1) -> None:
+    """Mark the highest-to-lowest KPI priority order beside the table body."""
+    frame = table._graphic_frame
+    label = _text(slide, 'Priority', frame.top.inches, left=frame.left.inches - .59,
+                  width=.52, height=.28, size=7, color='#245A96', align=PP_ALIGN.CENTER)
+    label.name = 'GAP KPI Priority Label'
+    label.fill.solid()
+    label.fill.fore_color.rgb = RGBColor(255, 255, 255)
+    label.line.color.rgb = RGBColor.from_string('245A96')
+    label.line.width = Pt(1)
+    label.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+    label.text_frame.paragraphs[0].font.name = 'Arial'
+    label.text_frame.paragraphs[0].font.bold = True
+    body_top = frame.top + sum(row.height for row in list(table.rows)[:header_rows])
+    body_bottom = frame.top + frame.height - table.rows[len(table.rows) - 1].height
+    arrow = slide.shapes.add_shape(
+        MSO_SHAPE.DOWN_ARROW, frame.left - Inches(.38), body_top,
+        Inches(.12), max(Inches(.2), body_bottom - body_top),
+    )
+    arrow.name = 'GAP KPI Priority Arrow'
+    arrow.fill.solid()
+    arrow.fill.fore_color.rgb = RGBColor.from_string('245A96')
+    arrow.line.fill.background()
+    arrow._element.spPr.append(OxmlElement('a:effectLst'))
+    for reference in arrow._element.xpath('./p:style/a:effectRef'):
+        reference.set('idx', '0')
+
+
 def _add_gap_color_scale(slide, matrix: dict, *, left: float, width: float, top: float = 6.57) -> None:
     """Add an editable red-white-green bar with this comparison's actual GAP range."""
     colors = matrix.get('gap_scale_colors') or {
@@ -1688,6 +1716,7 @@ def _hierarchy_gap_tables(presentation, matrices: list[dict], *, title: str = 'G
                   color='#E4E9EC', size=leaf_font, bold=True)
         _merge_category_cells(table, metrics, header_rows)
         _text(slide, matrix['note'], 7.05, height=.25, size=9)
+        _add_gap_priority_arrow(slide, table, header_rows=header_rows)
         _add_gap_color_scale(slide, matrix, left=.65, width=12.03)
 
 
@@ -1735,6 +1764,7 @@ def _gap_summary_tables(presentation, matrices: list[dict]) -> None:
                     _gap_number(matrix['total'], operator) for operator in operators]):
                 _cell(table.cell(total_index, index), text, color='#E4E9EC', size=metric_font, bold=True, left=index == 1)
             _text(slide, matrix['note'], 7.12, height=.25, size=9)
+            _add_gap_priority_arrow(slide, table)
             _add_gap_color_scale(slide, matrix, left=.65, width=12.03)
 
 
@@ -1793,6 +1823,7 @@ def _gap_tables(presentation, matrices: list[dict]) -> None:
             gap_run.font.bold = True
             gap_run.font.color.rgb = RGBColor.from_string('C62828')
             average_paragraph.add_run().text = ' points'
+            _add_gap_priority_arrow(slide, table)
             _add_gap_color_scale(slide, matrix, left=.65, width=9.3)
             _text(slide, 'KPI types and priority follow this job’s saved workspace configuration.', 6.85, size=10)
 
