@@ -76,6 +76,60 @@
   const selectionUrl = root.dataset.selectionUrl || '/api/scoring/selection';
   const exportBase = root.dataset.exportBase || '/scoring/jobs';
   const requestedJobId = new URLSearchParams(window.location.search).get('job_id');
+  const requestedJobIdPending = {value: requestedJobId};
+  const scoringViewStorageKey = [
+    'dashboard-analytic', 'scoring-view',
+    encodeURIComponent(document.body.dataset.authenticatedUser || 'anonymous'),
+    encodeURIComponent(root.dataset.scoringWorkspaceId || 'unknown'),
+  ].join(':');
+  const resultTabNames = new Set(['scoring', 'gap', 'charts', 'best-network']);
+  function readScoringViewState() {
+    try {
+      const stored = JSON.parse(window.sessionStorage.getItem(scoringViewStorageKey) || 'null');
+      if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return {};
+      return {
+        jobId: typeof stored.job_id === 'string' && stored.job_id ? stored.job_id : null,
+        resultTab: resultTabNames.has(stored.result_tab) ? stored.result_tab : null,
+        scrollY: Number.isFinite(stored.scroll_y) && stored.scroll_y >= 0 ? stored.scroll_y : null,
+      };
+    } catch (_error) {
+      return {};
+    }
+  }
+  const restoredScoringViewState = readScoringViewState();
+  let scoringViewScrollRestorePending = Number.isFinite(restoredScoringViewState.scrollY);
+  let scoringViewScrollRestoreStarted = false;
+  let scoringViewSaveTimer = null;
+  function persistScoringViewState() {
+    try {
+      window.sessionStorage.setItem(scoringViewStorageKey, JSON.stringify({
+        job_id: selectedJobId,
+        result_tab: activeResultTab,
+        scroll_y: window.scrollY,
+      }));
+    } catch (_error) {
+      // View state is optional when browser session storage is unavailable.
+    }
+  }
+  function restoreScoringViewScroll() {
+    if (!scoringViewScrollRestorePending || scoringViewScrollRestoreStarted) return;
+    scoringViewScrollRestoreStarted = true;
+    scoringViewScrollRestorePending = false;
+    const target = restoredScoringViewState.scrollY;
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      const maximum = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+      window.scrollTo({left: window.scrollX, top: Math.min(target, maximum), behavior: 'auto'});
+      persistScoringViewState();
+    }));
+  }
+  window.addEventListener('scroll', () => {
+    if (scoringViewSaveTimer !== null) window.clearTimeout(scoringViewSaveTimer);
+    scoringViewSaveTimer = window.setTimeout(() => {
+      scoringViewSaveTimer = null;
+      persistScoringViewState();
+    }, 120);
+  }, {passive: true});
+  window.addEventListener('pagehide', persistScoringViewState);
   const nrFilter = root.querySelector('[data-nr-filter]');
   const datasetOptions = [...root.querySelectorAll('[data-dataset-option]')];
   const datasetInputs = [...root.querySelectorAll('[data-dataset-id]')];
@@ -158,19 +212,27 @@
   const resultPanes = [...root.querySelectorAll('[data-result-pane]')];
   const resultCache = new Map();
   const contextSelections = new Map();
+  const scoringValueObservers = new Map();
   const deletedJobIds = new Set();
   const deletingJobIds = new Set();
   let jobs = [];
-  let selectedJobId = null;
+  let selectedJobId = restoredScoringViewState.jobId;
   let selectedJob = null;
   let selectedEnvironment = 'all';
   let currentEffectiveEnvironment = null;
   let currentResults = null;
   let currentResultsJobId = null;
-  let activeResultTab = root.querySelector('[data-result-tab][aria-selected="true"]')?.dataset.resultTab || 'scoring';
+  let activeResultTab = restoredScoringViewState.resultTab
+    || root.querySelector('[data-result-tab][aria-selected="true"]')?.dataset.resultTab || 'scoring';
+  for (const tab of root.querySelectorAll('[data-result-tab]')) {
+    const selected = tab.dataset.resultTab === activeResultTab;
+    tab.setAttribute('aria-selected', String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+  }
+  for (const pane of resultPanes) pane.hidden = pane.dataset.resultPane !== activeResultTab;
   let chartFocusReturn = null;
   let previousBodyOverflow = '';
-  let userSelectedJob = false;
+  let userSelectedJob = Boolean(selectedJobId);
   let refreshInFlight = false;
   let timer = null;
   let selectionLoaded = false;
@@ -875,7 +937,9 @@
     for (const column of columns) {
       const th = document.createElement('th');
       th.scope = 'col';
-      th.textContent = humanizeKey(column);
+      const isKpiType = ['kpi_type', 'type_of_kpi'].includes(String(column).toLocaleLowerCase());
+      th.textContent = isKpiType ? 'Type of KPI' : humanizeKey(column);
+      if (isKpiType) th.dataset.column = 'type';
       headerRow.append(th);
     }
     thead.append(headerRow);
@@ -883,6 +947,11 @@
     for (const row of rows) {
       const tr = document.createElement('tr');
       for (const column of columns) {
+        const isKpiType = ['kpi_type', 'type_of_kpi'].includes(String(column).toLocaleLowerCase());
+        if (isKpiType) {
+          tr.append(createKpiTypeCell(row[column], ['category', 'total'].includes(String(row.row_type || '').toLocaleLowerCase())));
+          continue;
+        }
         const td = document.createElement('td');
         const value = row[column];
         td.textContent = displayValue(value);
@@ -1060,8 +1129,63 @@
   function formatRawKpiValue(value) {
     if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) return 'N/A';
     const numeric = Number(value);
-    if (Number.isFinite(numeric)) return numeric.toLocaleString(undefined, {maximumFractionDigits: 3});
+    if (Number.isFinite(numeric)) return numeric.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
     return String(value);
+  }
+
+  function createKpiTypeCell(value, neutral = false) {
+    const cell = document.createElement('td');
+    cell.className = 'scoring-kpi-type-cell';
+    cell.dataset.column = 'type';
+    const rawType = String(value ?? '').trim();
+    const normalized = rawType.toLocaleLowerCase();
+    if (neutral) {
+      cell.textContent = '—';
+      cell.dataset.kpiType = 'neutral';
+    } else if (normalized === 'reliable' || normalized === 'diff') {
+      cell.textContent = rawType;
+      cell.dataset.kpiType = normalized;
+    } else {
+      cell.textContent = rawType && normalized !== 'unknown' ? rawType : 'Not classified';
+      cell.dataset.kpiType = 'neutral';
+    }
+    return cell;
+  }
+
+  function fitScoringValueCells(table) {
+    if (!table?.isConnected) return;
+    const measurement = document.createElement('canvas').getContext('2d');
+    if (!measurement) return;
+    for (const cell of table.querySelectorAll('tbody td[data-numeric="true"], tfoot td[data-numeric="true"]')) {
+      cell.style.fontSize = '';
+      const styles = window.getComputedStyle(cell);
+      const fontSize = Number.parseFloat(styles.fontSize);
+      const available = cell.clientWidth - Number.parseFloat(styles.paddingLeft) - Number.parseFloat(styles.paddingRight);
+      if (!Number.isFinite(fontSize) || available <= 0) continue;
+      measurement.font = styles.font;
+      const contentWidth = measurement.measureText(cell.textContent.trim()).width;
+      if (contentWidth <= 0 || available <= contentWidth * 1.05) continue;
+      const scale = Math.min(1.28, available / contentWidth);
+      cell.style.fontSize = `${Math.round(fontSize * scale * 10) / 10}px`;
+    }
+  }
+
+  function observeScoringValueCells(table, wrapper) {
+    if (typeof ResizeObserver !== 'function') {
+      window.requestAnimationFrame(() => fitScoringValueCells(table));
+      return;
+    }
+    const observer = new ResizeObserver(() => window.requestAnimationFrame(() => fitScoringValueCells(table)));
+    scoringValueObservers.set(wrapper, observer);
+    observer.observe(wrapper);
+  }
+
+  function disconnectScoringValueObservers(pane) {
+    for (const [wrapper, observer] of scoringValueObservers) {
+      if (!pane.contains(wrapper)) continue;
+      observer.disconnect();
+      scoringValueObservers.delete(wrapper);
+    }
   }
 
   function safeHexColor(value) {
@@ -1232,11 +1356,11 @@
     table.className = 'scoring-comparison-table';
     const thead = document.createElement('thead');
     const header = document.createElement('tr');
-    for (const title of ['Category', 'KPI', 'Score weight (%)', 'Max score']) {
+    for (const title of ['Category', 'KPI', 'Type of KPI', 'Score weight (%)', 'Max score']) {
       const th = document.createElement('th');
       th.scope = 'col';
       th.rowSpan = 2;
-      th.dataset.column = title === 'Category' ? 'category' : (title === 'KPI' ? 'kpi' : (title === 'Score weight (%)' ? 'weight' : 'maximum'));
+      th.dataset.column = ({Category: 'category', KPI: 'kpi', 'Type of KPI': 'type', 'Score weight (%)': 'weight', 'Max score': 'maximum'})[title];
       th.textContent = title;
       if (title === 'Score weight (%)') th.className = 'scoring-weight-header';
       if (title === 'Max score') th.className = 'scoring-maximum-header';
@@ -1363,6 +1487,7 @@
       kpi.textContent = String(item?.kpi || item?.kpi_code || 'N/A');
       kpi.title = String(item?.kpi_code || item?.kpi || '');
       tr.append(kpi);
+      tr.append(createKpiTypeCell(item?.kpi_type, item?.row_type === 'category'));
 
       const weight = document.createElement('td');
       weight.dataset.numeric = 'true';
@@ -1419,6 +1544,7 @@
       label.dataset.column = 'kpi';
       label.textContent = showGapValues() && total.gap_label ? `Weighted score · ${total.gap_label}` : 'Weighted score';
       row.append(label);
+      row.append(createKpiTypeCell('', true));
       const weight = document.createElement('td');
       weight.dataset.numeric = 'true';
       weight.dataset.column = 'weight';
@@ -1454,6 +1580,7 @@
     }
     wrapper.append(table);
     pane.append(wrapper);
+    observeScoringValueCells(table, wrapper);
     if (!rows.length) {
       const empty = document.createElement('div');
       empty.className = 'scoring-empty';
@@ -1686,7 +1813,8 @@
     table.className = 'scoring-comparison-table scoring-hierarchy-table';
     const thead = document.createElement('thead');
     appendHierarchyHeaders(thead, tableData, allColumns, [
-      ['Category', 'category'], ['KPI', 'kpi'], ['Score weight (%)', 'weight', 'scoring-weight-header'], ['Max score', 'maximum', 'scoring-maximum-header'],
+      ['Category', 'category'], ['KPI', 'kpi'], ['Type of KPI', 'type'],
+      ['Score weight (%)', 'weight', 'scoring-weight-header'], ['Max score', 'maximum', 'scoring-maximum-header'],
     ], blocks);
     const tbody = document.createElement('tbody');
     for (let index = 0; index < rows.length; index += 1) {
@@ -1712,6 +1840,7 @@
       kpi.textContent = String(item?.kpi || item?.kpi_code || 'N/A');
       kpi.title = String(item?.kpi_code || item?.kpi || '');
       row.append(kpi);
+      row.append(createKpiTypeCell(item?.kpi_type, item?.row_type === 'category'));
       const weight = document.createElement('td');
       weight.dataset.numeric = 'true';
       weight.dataset.column = 'weight';
@@ -1765,6 +1894,7 @@
       label.dataset.column = 'kpi';
       label.textContent = showGapValues() && total.gap_label ? `Weighted score · ${total.gap_label}` : 'Weighted score';
       row.append(label);
+      row.append(createKpiTypeCell('', true));
       const weight = document.createElement('td');
       weight.dataset.numeric = 'true';
       weight.dataset.column = 'weight';
@@ -1800,6 +1930,7 @@
     }
     wrapper.append(table);
     pane.append(wrapper);
+    observeScoringValueCells(table, wrapper);
     if (!rows.length) {
       const empty = document.createElement('div');
       empty.className = 'scoring-empty';
@@ -1809,6 +1940,7 @@
   }
 
   function renderHierarchyScoringViews(pane, tableData, thresholdLegend = []) {
+    disconnectScoringValueObservers(pane);
     pane.replaceChildren();
     if (!tableData) {
       const empty = document.createElement('div');
@@ -1922,13 +2054,7 @@
       kpiCell.textContent = String(item?.kpi || item?.kpi_code || 'N/A');
       kpiCell.title = String(item?.kpi_code || item?.kpi || '');
       row.append(kpiCell);
-      const typeCell = document.createElement('td');
-      typeCell.dataset.column = 'type';
-      const kpiType = String(item?.kpi_type ?? '');
-      typeCell.textContent = item?.row_type === 'category'
-        ? '—' : (!kpiType || kpiType.toLowerCase() === 'unknown' ? 'Not classified' : kpiType);
-      if (kpiType.toLowerCase() === 'reliable') typeCell.dataset.kpiType = 'reliable';
-      row.append(typeCell);
+      row.append(createKpiTypeCell(item?.kpi_type, item?.row_type === 'category'));
       const gaps = item?.gaps && typeof item.gaps === 'object' ? item.gaps : {};
       const gapColors = item?.gap_colors && typeof item.gap_colors === 'object' ? item.gap_colors : {};
       const gapPartial = item?.gap_partial && typeof item.gap_partial === 'object' ? item.gap_partial : {};
@@ -1967,6 +2093,7 @@
   }
 
   function renderScoringViews(pane, tables, thresholdLegend = []) {
+    disconnectScoringValueObservers(pane);
     pane.replaceChildren();
     if (!tables.length) {
       const empty = document.createElement('div');
@@ -2032,6 +2159,10 @@
         row.style.fontWeight = '700';
       }
       for (const [value, key] of [[item.category, 'category'], [item.kpi || item.kpi_code, 'kpi'], [item.gap_points, 'gap'], [item.kpi_type, 'type']]) {
+        if (key === 'type') {
+          row.append(createKpiTypeCell(value, item?.row_type === 'category'));
+          continue;
+        }
         const cell = document.createElement('td');
         cell.dataset.column = key;
         if (key === 'gap') {
@@ -2048,13 +2179,7 @@
           if (Number(value) > 0) cell.classList.add('scoring-gap-gain');
           if (Number(value) < 0) cell.classList.add('scoring-gap-loss');
         } else {
-          const normalizedType = String(value ?? '').toLowerCase();
-          cell.textContent = key === 'type' && item?.row_type === 'category'
-            ? '—'
-            : key === 'type' && (value === null || value === undefined || value === '' || normalizedType === 'unknown')
-              ? 'Not classified'
-              : (value === null || value === undefined || value === '' ? 'N/A' : String(value));
-          if (key === 'type' && normalizedType === 'reliable') cell.dataset.kpiType = 'reliable';
+          cell.textContent = value === null || value === undefined || value === '' ? 'N/A' : String(value);
           if (key === 'kpi') cell.title = String(item.kpi_code || item.kpi || '');
         }
         row.append(cell);
@@ -2192,13 +2317,7 @@
       kpiCell.textContent = String(item?.kpi || item?.kpi_code || 'N/A');
       kpiCell.title = String(item?.kpi_code || item?.kpi || '');
       row.append(kpiCell);
-      const typeCell = document.createElement('td');
-      typeCell.dataset.column = 'type';
-      const kpiType = String(item?.kpi_type ?? '');
-      typeCell.textContent = item?.row_type === 'category'
-        ? '—' : (!kpiType || kpiType.toLowerCase() === 'unknown' ? 'Not classified' : kpiType);
-      if (kpiType.toLowerCase() === 'reliable') typeCell.dataset.kpiType = 'reliable';
-      row.append(typeCell);
+      row.append(createKpiTypeCell(item?.kpi_type, item?.row_type === 'category'));
 
       const gaps = item?.gaps && typeof item.gaps === 'object' ? item.gaps : {};
       const gapColors = item?.gap_colors && typeof item.gap_colors === 'object' ? item.gap_colors : {};
@@ -3495,14 +3614,14 @@
       jobs = (Array.isArray(payload) ? payload : (Array.isArray(payload.jobs) ? payload.jobs : []))
         .filter(job => !deletedJobIds.has(jobIdOf(job)));
       const ordered = sortedJobs(jobs);
-      const retained = userSelectedJob && selectedJobId ? ordered.find(job => jobIdOf(job) === selectedJobId) : null;
-      if (retained) {
-        selectedJob = retained;
-      } else {
-        const requested = requestedJobId ? ordered.find(job => jobIdOf(job) === requestedJobId) : null;
-        selectedJob = requested && isActive(requested) ? requested : (ordered.find(isComplete) || ordered[0] || null);
-        selectedJobId = selectedJob ? jobIdOf(selectedJob) : null;
-      }
+      const requested = requestedJobIdPending.value
+        ? ordered.find(job => jobIdOf(job) === requestedJobIdPending.value) : null;
+      requestedJobIdPending.value = null;
+      const retained = !requested && userSelectedJob && selectedJobId
+        ? ordered.find(job => jobIdOf(job) === selectedJobId) : null;
+      selectedJob = requested || retained || ordered.find(isComplete) || ordered[0] || null;
+      selectedJobId = selectedJob ? jobIdOf(selectedJob) : null;
+      userSelectedJob = Boolean(requested || retained);
       renderJobs();
       if (selectedJob) {
         const hasCached = resultCache.has(jobIdOf(selectedJob)) && isComplete(selectedJob);
@@ -3530,6 +3649,8 @@
       setMessage(error.message || 'Scoring jobs could not be loaded.', 'error');
     } finally {
       refreshInFlight = false;
+      if (scoringViewScrollRestorePending) restoreScoringViewScroll();
+      else persistScoringViewState();
     }
   }
 
@@ -3722,6 +3843,7 @@
     userSelectedJob = true;
     selectedJobId = jobIdOf(job);
     selectedJob = job;
+    persistScoringViewState();
     loadJob(job, true);
   });
   root.addEventListener('click', event => {
@@ -3736,6 +3858,7 @@
       other.tabIndex = selected ? 0 : -1;
     }
     for (const pane of root.querySelectorAll('[data-result-pane]')) pane.hidden = pane.dataset.resultPane !== name;
+    persistScoringViewState();
     if (currentResults) renderResult(currentResults, selectedJob, [name]);
   });
   expandedChartClose?.addEventListener('click', closeExpandedChart);

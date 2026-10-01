@@ -585,13 +585,13 @@ def test_scoring_job_results_cache_force_and_exports(scoring_api):
     )
     scoring_table = next(shape.table for shape in scoring_slide.shapes if shape.has_table)
     # The first row groups Score and GAP; the next rows show operator and region hierarchy.
-    assert scoring_table.cell(0, 4).text == 'Score'
-    assert scoring_table.cell(0, 8).text == 'GAP'
-    assert [scoring_table.cell(1, column).text for column in range(4, 8)] == [
+    assert scoring_table.cell(0, 5).text == 'Score'
+    assert scoring_table.cell(0, 9).text == 'GAP'
+    assert [scoring_table.cell(1, column).text for column in range(5, 9)] == [
         'Three UK', 'O2', 'Vodafone UK', 'EE',
     ]
-    assert all(scoring_table.cell(2, column).text == 'North' for column in range(4, 8))
-    assert str(scoring_table.cell(1, 4).fill.fore_color.rgb) == 'AABBCC'
+    assert all(scoring_table.cell(2, column).text == 'North' for column in range(5, 9))
+    assert str(scoring_table.cell(1, 5).fill.fore_color.rgb) == 'AABBCC'
 
     forced = client.post('/api/scoring/jobs', json={**payload, 'force': True})
     assert forced.status_code == 200

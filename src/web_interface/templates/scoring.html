@@ -171,8 +171,9 @@
   .scoring-comparison-table tfoot th, .scoring-comparison-table tfoot td { position: static; background: #e6eaeb; color: #203744; font-weight: 850; border-top: 2px solid #9eaaae !important; }
   .scoring-priority-table td[data-column="category"] { background: #0084ff !important; color: #fff !important; font-weight: 800; }
   .scoring-priority-table td[data-column="gap"] { background: #fff5a6; font-weight: 800; text-align: center !important; }
-  .scoring-priority-table td[data-column="type"] { color: #47606b; }
-  .scoring-priority-table td[data-column="type"][data-kpi-type="reliable"] { background: #dcefdc !important; color: #286a35; font-weight: 750; }
+  .scoring-comparison-table td[data-column="type"][data-kpi-type="reliable"] { background: #d8efca !important; color: #286a35; font-weight: 750; }
+  .scoring-comparison-table td[data-column="type"][data-kpi-type="diff"] { background: #fff2cc !important; color: #684b0d; font-weight: 750; }
+  .scoring-comparison-table td[data-column="type"][data-kpi-type="neutral"] { background: #e6eaeb !important; color: #64747b; }
   .scoring-tone-0 { --operator-accent: #315f9a; }
   .scoring-tone-1 { --operator-accent: #bd4540; }
   .scoring-tone-2 { --operator-accent: #43835b; }
@@ -224,7 +225,7 @@
   @media(max-width:600px) { .scoring-context-filter-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .scoring-dataset-list { grid-template-columns: 1fr; } .scoring-controls-foot { align-items: stretch; } .scoring-actions { width: 100%; } .scoring-actions button { flex: 1 1 100%; } .scoring-chart-expanded-dialog { width: calc(100vw - .5rem); height: calc(100dvh - .5rem); padding: .65rem; gap: .5rem; border-radius: 14px; } .scoring-chart-expanded-header h3 { font-size: 1rem; } .scoring-chart-expanded-header p:not(.eyebrow) { display: none; } }
 </style>
 
-<section class="dashboard-stack spacious-stack scoring-stack" data-scoring-workspace data-configuration-error="{{ scoring_configuration_error or '' }}" data-jobs-url="/api/scoring/jobs" data-selection-url="/api/scoring/selection" data-export-base="/scoring/jobs">
+<section class="dashboard-stack spacious-stack scoring-stack" data-scoring-workspace data-scoring-workspace-id="{{ active_workspace.id if active_workspace else '' }}" data-configuration-error="{{ scoring_configuration_error or '' }}" data-jobs-url="/api/scoring/jobs" data-selection-url="/api/scoring/selection" data-export-base="/scoring/jobs">
   <article class="panel scoring-hero">
     <div class="section-head tight-head">
       <div>

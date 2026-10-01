@@ -56,9 +56,9 @@ def test_ppt_table_modes_include_bold_category_totals_and_keep_identical_charts(
     expanded, summary = [_comparison_matrices(presentation)[0] for presentation in presentations]
     assert len(expanded.rows) == 32 + 7 + 2
     assert len(summary.rows) == 7 + 2
-    assert all(summary.cell(index, 4).text_frame.paragraphs[0].font.bold for index in range(1, 8))
+    assert all(summary.cell(index, 5).text_frame.paragraphs[0].font.bold for index in range(1, 8))
     assert all(summary.cell(index, 1).text.endswith(' total') for index in range(1, 8))
-    assert expanded.cell(len(expanded.rows) - 1, 4).text == summary.cell(len(summary.rows) - 1, 4).text
+    assert expanded.cell(len(expanded.rows) - 1, 5).text == summary.cell(len(summary.rows) - 1, 5).text
     chart_values = [[list(series.values) for slide in presentation.slides for shape in _nested_shapes(slide.shapes)
                      if shape.has_chart for series in shape.chart.series] for presentation in presentations]
     assert chart_values[0] == chart_values[1]
@@ -87,14 +87,14 @@ def test_gap_placement_excludes_reference_and_preserves_score_and_gap_values(lay
     slide = next(slide for slide in presentation.slides if slide.shapes.title.text.split('\n')[0] == 'Scoring Table')
     table = next(shape.table for shape in slide.shapes if shape.has_table)
     if layout == 'end':
-        headers = [cell.text for cell in table.rows[0].cells][4:]
+        headers = [cell.text for cell in table.rows[0].cells][5:]
         assert headers[:4] == ['EE', 'O2 UK', 'Three UK', 'Vodafone UK']
         assert len(headers) == 7
         assert all('GAP' in text and 'GAP EE' not in text for text in headers[4:])
     else:
-        headers = [cell.text for cell in table.rows[2].cells][4:]
+        headers = [cell.text for cell in table.rows[2].cells][5:]
         assert headers == ['Score', 'Score', 'GAP', 'Score', 'GAP', 'Score', 'GAP']
-        values = [cell.text for cell in table.rows[3].cells][4:]
+        values = [cell.text for cell in table.rows[3].cells][5:]
         assert values[0] == '58.79'
         assert values[2] != '0.00'
     with pytest.raises(ValueError, match='GAP layout'):
@@ -209,3 +209,53 @@ def test_csv_environment_selection_filters_rows_and_rejects_unavailable_environm
         export_scoring_powerpoint(_job(), _result(), TEMPLATE, environment='Walk')
     with pytest.raises(ValueError, match='not available'):
         export_scoring_csv(_job(), _result(), 'gap', 'summary', environment='Unknown')
+
+
+@pytest.mark.parametrize('mode', ['expanded', 'summary'])
+@pytest.mark.parametrize(('layout', 'show_gap'), [('end', True), ('adjacent', True), ('end', False)])
+def test_ppt_kpi_type_column_colors_and_neutral_aggregates(mode, layout, show_gap):
+    presentation = Presentation(BytesIO(export_scoring_powerpoint(
+        _job(), _result(), TEMPLATE, table_mode=mode, gap_layout=layout,
+        show_gap_values=show_gap, environment='DriveCity',
+    )))
+    checked_types = set()
+    for slide in presentation.slides:
+        title = slide.shapes.title.text.split('\n')[0]
+        if title != 'Scoring Table' and not title.startswith('GAP Analysis'):
+            continue
+        table = next(shape.table for shape in slide.shapes if shape.has_table)
+        type_column = next(i for i, cell in enumerate(table.rows[0].cells) if cell.text == 'Type of KPI')
+        if title == 'Scoring Table':
+            assert type_column == 2
+        for row in table.rows:
+            cell = row.cells[type_column]
+            if cell.text in {'Reliable', 'Diff'}:
+                checked_types.add(cell.text)
+                expected = 'D8EFCA' if cell.text == 'Reliable' else 'FFF2CC'
+                assert str(cell.fill.fore_color.rgb) == expected
+            elif row.cells[0].text.upper() in {'TOTAL', 'TOTALS'} or row.cells[1].text.endswith(' total'):
+                assert cell.text == ''
+                assert str(cell.fill.fore_color.rgb) == str(row.cells[len(row.cells) - 1].fill.fore_color.rgb)
+    if mode == 'expanded':
+        assert checked_types == {'Reliable', 'Diff'}
+    else:
+        assert checked_types == set()
+
+
+def test_ppt_score_numeric_font_uses_available_space_without_exceeding_cell_height():
+    result = _result()
+    for mode in ['expanded', 'summary']:
+        presentation = Presentation(BytesIO(export_scoring_powerpoint(
+            _job(), result, TEMPLATE, table_mode=mode, gap_layout='adjacent', environment='DriveCity',
+        )))
+        table = next(shape.table for slide in presentation.slides
+                     if slide.shapes.title.text.split('\n')[0] == 'Scoring Table'
+                     for shape in slide.shapes if shape.has_table)
+        font_sizes = []
+        for row in list(table.rows)[3:]:
+            for cell in list(row.cells)[5:]:
+                size = cell.text_frame.paragraphs[0].font.size.pt
+                assert size <= row.height.pt
+                font_sizes.append(size)
+        if mode == 'summary':
+            assert max(font_sizes) > 7.5

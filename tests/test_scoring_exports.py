@@ -130,7 +130,7 @@ def _normalized_headers(table):
 def _operator_columns(table):
     headers = _normalized_headers(table)
     gap_start = next((index for index, label in enumerate(headers) if label.startswith('GAP ')), len(headers))
-    return {headers[index]: index for index in range(4, gap_start)}
+    return {headers[index]: index for index in range(5, gap_start)}
 
 
 def _rgb(cell):
@@ -237,14 +237,14 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     assert len(matrices) == 1
     table = matrices[0]
     headers = _normalized_headers(table)
-    assert headers[:4] == ['NETCHECK KPIs', 'KPI', 'Score weight (%)', 'Max score']
+    assert headers[:5] == ['NETCHECK KPIs', 'KPI', 'Type of KPI', 'Score weight (%)', 'Max score']
     operator_columns = _operator_columns(table)
     assert list(operator_columns) == list(MAPPED_OPERATOR_ORDER)
     gap_columns = [index for index, header in enumerate(headers) if header.startswith('GAP ')]
     assert len(gap_columns) == 3
     display_rows = views['score_tables'][0]['expanded_rows']
     assert len(table.rows) == len(display_rows) + 2
-    assert len(table.columns) == 11
+    assert len(table.columns) == 12
     assert [table.cell(row, 1).text for row in range(1, len(table.rows) - 1)] == [row['kpi'] for row in display_rows]
     assert all(table.cell(row, 0).text not in OPERATORS for row in range(1, 33))
     for row_index, row in enumerate(display_rows, 1):
@@ -253,14 +253,14 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
 
     total_row = len(table.rows) - 1
     assert table.cell(total_row, 0).text == 'TOTAL'
-    assert table.cell(total_row, 2).text == '65.00%'
-    assert table.cell(total_row, 3).text == '650.00'
-    assert table.cell(total_row, 2).text != '100.00%'
+    assert table.cell(total_row, 3).text == '65.00%'
+    assert table.cell(total_row, 4).text == '650.00'
+    assert table.cell(total_row, 3).text != '100.00%'
 
     # Scoring bands keep the reference colors; operator headers follow workspace mappings.
     reference_header_colors = {
-        'Score weight (%)': _rgb(table.cell(0, 2)),
-        'Max score': _rgb(table.cell(0, 3)),
+        'Score weight (%)': _rgb(table.cell(0, 3)),
+        'Max score': _rgb(table.cell(0, 4)),
     }
     assert reference_header_colors == {
         'Score weight (%)': '4EA72E',
@@ -733,7 +733,7 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     assert len(score_slides) == 1
     score_table = next(shape.table for shape in score_slides[0].shapes if shape.has_table)
     assert len(score_table.rows) == 5 + len(METRICS) + len({metric['category'] for metric in METRICS}) + 1
-    assert len(score_table.columns) == 4 + 15 + 12
+    assert len(score_table.columns) == 5 + 15 + 12
     export_views = build_scoring_views(
         {
             'aggregation_contract_version': 2,
@@ -749,7 +749,7 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
         if row.get('row_type') == 'category':
             _assert_gray_category_row(score_table, row_index)
     for row in list(score_table.rows)[5:]:
-        for cell in list(row.cells)[4:]:
+        for cell in list(row.cells)[5:]:
             assert cell.text_frame.paragraphs[0].font.size.pt <= row.height.pt
     score_table_shape = next(shape for shape in score_slides[0].shapes if shape.has_table)
     hierarchy_legend = next(shape for shape in score_slides[0].shapes
