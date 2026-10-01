@@ -308,13 +308,17 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     for operator, band in expected_bands.items():
         assert _rgb(table.cell(c9_index, operator_columns[operator])) == THRESHOLD_COLORS[band].lstrip('#')
 
-    gap_slide, gap_table = _slide_with_table(
-        presentation, ['Category', 'NETCHECK KPIs', 'Type of KPI', 'GAP operator −\nEE'],
+    gap_slide, gap_table = next(
+        (slide, shape.table) for slide in presentation.slides for shape in slide.shapes
+        if shape.has_table and len(shape.table.columns) == 4
+        and _normalized_headers(shape.table)[:3] == ['Category', 'NETCHECK KPIs', 'Type of KPI']
     )
     expected_gap_table = views['gap_tables'][0]
     assert [gap_table.cell(row, 1).text for row in range(1, len(gap_table.rows) - 1)] == [row['kpi'] for row in expected_gap_table['expanded_rows']]
     assert [float(gap_table.cell(row, 3).text) for row in range(1, len(gap_table.rows) - 1)] == pytest.approx([row['gap_points'] for row in expected_gap_table['expanded_rows']], abs=.0051)
-    assert _rgb(gap_table.cell(0, 3)) == 'FFFF00'
+    assert _rgb(gap_table.cell(0, 3)) == 'DDEBE6'
+    assert all(_rgb(gap_table.cell(0, column)) == '455B65' for column in range(3))
+    assert _rgb(gap_table.cell(1, 0)) == 'E6F0F7'
     reliable_rows = [row for row in range(1, len(gap_table.rows)) if gap_table.cell(row, 2).text == 'Reliable']
     if reliable_rows:
         assert _rgb(gap_table.cell(reliable_rows[0], 2)) == THRESHOLD_COLORS['High'].lstrip('#')

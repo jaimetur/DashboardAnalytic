@@ -1578,7 +1578,6 @@ def _hierarchy_gap_projection(matrix: dict, columns: list[dict]) -> dict:
 
 
 def _hierarchy_gap_tables(presentation, matrices: list[dict], *, title: str = 'GAP Analysis — All vs reference') -> None:
-    combined = title.startswith('GAP Analysis — All')
     for matrix in matrices:
         columns = matrix['hierarchy_columns']
         levels = matrix['hierarchy_levels']
@@ -1609,13 +1608,13 @@ def _hierarchy_gap_tables(presentation, matrices: list[dict], *, title: str = 'G
         _hierarchy_header_groups(table, columns, levels, start_col=3, leaf_width=1,
                                  header_rows=header_rows, physical_column_width=leaf_width,
                                  leaf_label='GAP',
-                                 header_color=_GAP_SUMMARY_COMPARISON_HEADER if combined else None)
+                                 header_color=_GAP_SUMMARY_COMPARISON_HEADER)
         data_font = min(7, metric_font)
-        for index, (label, color) in enumerate((('Category', '#0084FF'), ('KPI', '#0084FF'), ('Type of KPI', '#0084FF'))):
+        for index, label in enumerate(('Category', 'KPI', 'Type of KPI')):
             cell = table.cell(0, index)
             if header_rows > 1:
                 cell.merge(table.cell(header_rows - 1, index))
-            _cell(cell, label, color=_GAP_SUMMARY_HEADER if combined else color,
+            _cell(cell, label, color=_GAP_SUMMARY_HEADER,
                   foreground=_WHITE, size=7, bold=True)
         gap_texts = [
             _gap_number(row, column['id'])
@@ -1625,8 +1624,8 @@ def _hierarchy_gap_tables(presentation, matrices: list[dict], *, title: str = 'G
         for row_offset, row in enumerate(metrics, header_rows):
             subtotal = row.get('row_type') == 'category'
             row_color = _CATEGORY_TOTAL if subtotal else None
-            _cell(table.cell(row_offset, 0), row['category'], color=row_color or (_GAP_SUMMARY_CATEGORY if combined else '#0084FF'),
-                  foreground='#17232D' if subtotal or combined else _WHITE, size=data_font, bold=True)
+            _cell(table.cell(row_offset, 0), row['category'], color=row_color or _GAP_SUMMARY_CATEGORY,
+                  foreground='#17232D', size=data_font, bold=True)
             _cell(table.cell(row_offset, 1), row['kpi'], color=row_color or '#E6ECFA', size=metric_font, left=True,
                   bold=subtotal)
             _cell(table.cell(row_offset, 2), row['kpi_type'],
@@ -1718,13 +1717,13 @@ def _gap_tables(presentation, matrices: list[dict]) -> None:
             headers = ['Category', 'NETCHECK KPIs', 'Type of KPI',
                        f'GAP operator −\n{_operator_label(matrix, matrix["baseline_operator"])}']
             for index, header in enumerate(headers):
-                _cell(table.cell(0, index), header, color='#FFFF00' if index == 3 else '#0084FF',
+                _cell(table.cell(0, index), header, color=_GAP_SUMMARY_COMPARISON_HEADER if index == 3 else _GAP_SUMMARY_HEADER,
                       foreground='#17232D' if index == 3 else _WHITE, size=11, bold=True)
             for index, row in enumerate(rows, 1):
                 subtotal = row.get('row_type') == 'category'
                 row_color = _CATEGORY_TOTAL if subtotal else None
-                _cell(table.cell(index, 0), row['category'], color=row_color or '#0084FF',
-                      foreground='#17232D' if subtotal else _WHITE, size=metric_font, bold=True)
+                _cell(table.cell(index, 0), row['category'], color=row_color or _GAP_SUMMARY_CATEGORY,
+                      foreground='#17232D', size=metric_font, bold=True)
                 _cell(table.cell(index, 1), row['kpi'], color=row_color or '#E6ECFA', size=metric_font,
                       left=True, bold=subtotal)
                 _cell(table.cell(index, 2), row['kpi_type'],
