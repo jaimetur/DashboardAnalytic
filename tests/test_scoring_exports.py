@@ -393,6 +393,10 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     best_network_chart = chart_shapes[0]
     assert best_network_chart.chart_type == XL_CHART_TYPE.COLUMN_STACKED
     assert best_network_chart.has_legend
+    assert best_network_chart.plots[0].data_labels.font.name == 'Arial'
+    assert best_network_chart.category_axis._element.xpath('./c:noMultiLvlLbl/@val') == ['1']
+    assert best_network_chart.category_axis._element.xpath('./c:majorTickMark/@val') == ['none']
+    assert best_network_chart._chartSpace.xpath('.//c:lineChart/c:dLbls/c:txPr//a:defRPr/@sz') == ['1200']
     assert best_network_chart.legend.position == XL_LEGEND_POSITION.TOP
     best_series = {series.name: series for series in best_network_chart.series}
     metric_by_code = {metric['code']: metric for metric in result['configuration']['metrics']}

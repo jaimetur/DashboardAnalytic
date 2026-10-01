@@ -829,10 +829,10 @@ def _format_chart(chart, *, maximum: float, labels=XL_DATA_LABEL_POSITION.OUTSID
     chart.has_legend = True
     chart.legend.position = XL_LEGEND_POSITION.TOP
     chart.legend.include_in_layout = False
-    chart.legend.font.name = _FONT
+    chart.legend.font.name = 'Arial'
     chart.legend.font.size = Pt(11)
     for axis in (chart.category_axis, chart.value_axis):
-        axis.tick_labels.font.name = _FONT
+        axis.tick_labels.font.name = 'Arial'
         axis.tick_labels.font.size = Pt(10)
     chart.value_axis.minimum_scale = 0
     chart.value_axis.maximum_scale = max(1, maximum) * 1.12
@@ -840,8 +840,13 @@ def _format_chart(chart, *, maximum: float, labels=XL_DATA_LABEL_POSITION.OUTSID
     data_labels = chart.plots[0].data_labels
     data_labels.position = labels
     data_labels.number_format = '0.0'
-    data_labels.font.name = _FONT
-    data_labels.font.size = Pt(9)
+    data_labels.font.name = 'Arial'
+    data_labels.font.size = Pt(10)
+    # Single-level categories need no native hierarchy label dividers.
+    for flag in chart.category_axis._element.xpath('./c:noMultiLvlLbl'):
+        flag.set('val', '1' if chart.plots[0].categories.depth <= 1 else '0')
+    for gridline in chart.category_axis._element.xpath('./c:majorGridlines | ./c:minorGridlines'):
+        gridline.getparent().remove(gridline)
     chart.category_axis.major_tick_mark = XL_TICK_MARK.NONE
     chart.category_axis.minor_tick_mark = XL_TICK_MARK.NONE
     chart.category_axis.format.line.fill.background()
@@ -1094,7 +1099,7 @@ def _add_total_labels(chart) -> None:
     labels.find('{http://schemas.openxmlformats.org/drawingml/2006/chart}dLblPos').set('val', 't')
     for run_properties in labels.xpath('.//a:defRPr | .//a:rPr'):
         run_properties.set('b', '1')
-        run_properties.set('sz', '1100')
+        run_properties.set('sz', '1200')
         for fill in run_properties.xpath('./a:solidFill'):
             run_properties.remove(fill)
         fill = OxmlElement('a:solidFill')
