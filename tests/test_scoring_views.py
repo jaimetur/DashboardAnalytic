@@ -501,7 +501,7 @@ def test_signed_gaps_use_operator_minus_reference_and_gap_tables_keep_all_compar
     assert c6['gaps']['Three UK'] == 0
     o2_gap = next(gap for gap in build_scoring_views({'levels': ['Operator'], 'baseline_operator': 'EE'}, result)['gap_tables']
                   if gap['operator'] == 'O2 UK')
-    assert o2_gap['rows'][-1]['kpi_code'] == METRICS[0]['code']
+    assert o2_gap['rows'][0]['kpi_code'] == METRICS[0]['code']
     assert len(o2_gap['rows']) == 32
     assert any(row['gap_points'] < 0 for row in o2_gap['rows'])
     assert any(row['gap_points'] == 0 for row in o2_gap['rows'])
@@ -660,7 +660,7 @@ def test_gap_priority_configuration_does_not_override_signed_gap_value():
     o2_gap = next(gap for gap in views['gap_tables'] if gap['operator'] == 'O2 UK')
     summary = views['gap_summary_tables'][0]
 
-    assert o2_gap['rows'][-1]['kpi_code'] == first_code
+    assert o2_gap['rows'][0]['kpi_code'] == first_code
     assert o2_gap['rows'] == sorted(o2_gap['rows'], key=_gap_order_key)
     configuration['gap_priority'].reverse()
     reordered = build_scoring_views({'levels': ['Operator'], 'baseline_operator': 'EE'}, result)
@@ -992,8 +992,8 @@ def test_multi_operator_gap_order_preserves_definition_and_ignores_priority(hier
     if not hierarchy:
         for table in views['gap_tables']:
             relevant = [row['kpi_code'] for row in table['rows'] if row['kpi_code'] in codes]
-            assert relevant == ([codes[1], codes[0], codes[2], codes[3]] if table['operator'] == 'O2 UK'
-                                else [codes[1], codes[2], codes[0], codes[3]])
+            assert relevant == ([codes[2], codes[0], codes[1], codes[3]] if table['operator'] == 'O2 UK'
+                                else [codes[2], codes[1], codes[0], codes[3]])
 
 
 @pytest.mark.parametrize('hierarchy', [False, True])
@@ -1013,7 +1013,7 @@ def test_single_operator_gap_sort_uses_signed_values_with_na_last(hierarchy):
     assert any(table['context']['environment'] == 'Combined' for table in tables)
     for table in tables:
         assert [row['kpi_code'] for row in table['rows'] if row['kpi_code'] in codes] == [
-            codes[1], codes[0], codes[2], codes[3],
+            codes[2], codes[0], codes[1], codes[3],
         ]
         assert [row['kpi_code'] for row in table['expanded_rows'] if row['row_type'] == 'kpi'] == [
             row['kpi_code'] for row in table['rows']

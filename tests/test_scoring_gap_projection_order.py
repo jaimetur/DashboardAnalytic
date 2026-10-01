@@ -1,3 +1,8 @@
+import pytest
+from pptx import Presentation
+from pptx.util import Inches
+from src.modules.scoring_exports import _merge_category_cells
+
 from src.modules.scoring_exports import _hierarchy_gap_projection
 
 
@@ -72,15 +77,15 @@ def test_individual_expanded_projection_reranks_kpis_and_places_subtotal_after_l
     )
 
     assert [(row['row_type'], row['kpi_code'] or row['category']) for row in projected['rows']] == [
+        ('kpi', 'KPI-A1'),
+        ('kpi', 'KPI-A2'),
+        ('category', 'Category A'),
         ('kpi', 'KPI-B1'),
         ('category', 'Category B'),
-        ('kpi', 'KPI-A2'),
-        ('kpi', 'KPI-A1'),
-        ('category', 'Category A'),
     ]
 
 
-def test_individual_summary_projection_sorts_by_numeric_signed_gap_descending():
+def test_individual_summary_projection_sorts_by_numeric_signed_gap_ascending():
     source_rows = [
         _kpi('KPI-NEGATIVE', 'Category A', -2.0),
         _kpi('KPI-TEN', 'Category B', 10.0),
@@ -92,5 +97,28 @@ def test_individual_summary_projection_sorts_by_numeric_signed_gap_descending():
     )
 
     assert [row['kpi_code'] for row in projected['rows']] == [
-        'KPI-TEN', 'KPI-ONE', 'KPI-NEGATIVE',
+        'KPI-NEGATIVE', 'KPI-ONE', 'KPI-TEN',
     ]
+
+
+
+
+@pytest.mark.parametrize('include_subtotals', [False, True])
+def test_category_merge_includes_only_adjacent_subtotal_when_enabled(include_subtotals):
+    rows = [
+        _kpi('K1', 'Category A', -3),
+        _kpi('K2', 'Category A', -2),
+        _subtotal('Category A', -2.5),
+        _kpi('K3', 'Category B', -1),
+        _kpi('K4', 'Category A', 0),
+    ]
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    table = slide.shapes.add_table(6, 2, Inches(1), Inches(1), Inches(5), Inches(3)).table
+    _merge_category_cells(table, rows, 1, include_subtotals=include_subtotals)
+    assert table.cell(1, 0).is_merge_origin
+    assert table.cell(2, 0).is_spanned
+    assert table.cell(3, 0).is_spanned is include_subtotals
+    assert not table.cell(4, 0).is_spanned
+    assert not table.cell(5, 0).is_spanned
+    assert table.cell(1, 0).text == 'Category A'

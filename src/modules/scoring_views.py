@@ -721,12 +721,12 @@ def _metric_source_kind(metric: dict[str, Any]) -> str | None:
 
 
 def _gap_order_key(row: dict[str, Any], operators: list[str] | None = None) -> tuple[Any, ...]:
-    """Sort signed scalar GAPs or means of valid comparison cells descending."""
+    """Sort signed scalar GAPs or means of valid comparison cells ascending."""
     value = (_number(row.get('gap_points')) if 'gap_points' in row else
              _average_numbers([value for operator, value in row.get('gaps', {}).items()
                                if operators is None or operator in operators]))
     identity = str(row.get('kpi_code') or row.get('category') or '')
-    return (value is None, -(value or 0.0), identity.casefold(), identity)
+    return (value is None, value or 0.0, identity.casefold(), identity)
 
 
 def _priority_order_rows(rows: list[dict[str, Any]], _gap_priority_rank: dict[str, int]) -> list[dict[str, Any]]:

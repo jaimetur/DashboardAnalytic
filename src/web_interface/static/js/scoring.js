@@ -1445,7 +1445,7 @@
       const rightGap = gapMean(right);
       if (leftGap === null) return rightGap === null ? 0 : 1;
       if (rightGap === null) return -1;
-      return rightGap - leftGap;
+      return leftGap - rightGap;
     };
     const kpis = rows.filter(item => item?.row_type !== 'category');
     if (sortByGap) kpis.sort(compare);
@@ -1461,12 +1461,11 @@
   }
 
   function appendGapOrderNotice(parent, sortByGap = true) {
+    if (!sortByGap) return;
     const notice = document.createElement('p');
     notice.className = 'scoring-priority-order-notice';
     const text = document.createElement('strong');
-    text.textContent = sortByGap
-      ? 'KPIs are ordered by GAP, from highest to lowest.'
-      : 'KPIs follow the default KPI definition order.';
+    text.textContent = 'KPIs are ordered by GAP, from lowest to highest.';
     notice.append(text);
     parent.append(notice);
   }
@@ -2208,7 +2207,7 @@
       pane.append(empty);
       return;
     }
-    appendGapScaleAside(gapInfo, tableData, scaleRows, sortByGap);
+    appendGapScaleAside(gapInfo, tableData, scaleRows, comparison !== 'all');
 
     const blocks = [{label: comparisonLabel, className: 'scoring-gap-group', headerClass: 'scoring-gap-header', column: 'gap', columns}];
     const wrapper = document.createElement('div');
@@ -2230,14 +2229,11 @@
       const category = String(item?.category ?? '');
       const previous = rows[index - 1];
       const startsCategoryRun = index === 0
-        || String(previous?.category ?? '') !== category
-        || previous?.row_type === 'category'
-        || item?.row_type === 'category';
+        || String(previous?.category ?? '') !== category;
       if (startsCategoryRun) {
         let span = 1;
-        while (item?.row_type !== 'category' && index + span < rows.length
-          && String(rows[index + span]?.category ?? '') === category
-          && rows[index + span]?.row_type !== 'category') span += 1;
+        while (index + span < rows.length
+          && String(rows[index + span]?.category ?? '') === category) span += 1;
         const categoryCell = document.createElement('td');
         categoryCell.className = 'scoring-category-cell';
         categoryCell.dataset.column = 'category';
@@ -2374,14 +2370,11 @@
       const category = String(item?.category ?? 'N/A');
       const previous = rows[index - 1];
       const startsCategoryRun = index === 0
-        || String(previous?.category ?? 'N/A') !== category
-        || previous?.row_type === 'category'
-        || item?.row_type === 'category';
+        || String(previous?.category ?? 'N/A') !== category;
       if (!startsCategoryRun) continue;
       let span = 1;
-      while (item?.row_type !== 'category' && index + span < rows.length
-        && String(rows[index + span]?.category ?? 'N/A') === category
-        && rows[index + span]?.row_type !== 'category') span += 1;
+      while (index + span < rows.length
+        && String(rows[index + span]?.category ?? 'N/A') === category) span += 1;
       categoryRuns.set(index, {category, span});
     }
     rows.forEach((item, index) => {
@@ -2508,7 +2501,7 @@
     const sortByGap = comparisons.length === 1;
     const rows = orderGapRows(Array.isArray(selected.rows) ? selected.rows : [],
       item => comparisons.map(operator => firstValue(item?.gaps || {}, [operator], null)), sortByGap);
-    appendGapScaleAside(gapInfo, selected, rows, sortByGap);
+    appendGapScaleAside(gapInfo, selected, rows, comparison !== 'all');
     if (!comparisons.length || !rows.length) {
       const empty = document.createElement('div');
       empty.className = 'scoring-empty';
@@ -2554,14 +2547,11 @@
       const category = String(item?.category ?? '');
       const previous = rows[index - 1];
       const startsCategoryRun = index === 0
-        || String(previous?.category ?? '') !== category
-        || previous?.row_type === 'category'
-        || item?.row_type === 'category';
+        || String(previous?.category ?? '') !== category;
       if (startsCategoryRun) {
         let span = 1;
-        while (item?.row_type !== 'category' && index + span < rows.length
-          && String(rows[index + span]?.category ?? '') === category
-          && rows[index + span]?.row_type !== 'category') span += 1;
+        while (index + span < rows.length
+          && String(rows[index + span]?.category ?? '') === category) span += 1;
         const categoryCell = document.createElement('td');
         categoryCell.className = 'scoring-category-cell';
         categoryCell.dataset.column = 'category';
