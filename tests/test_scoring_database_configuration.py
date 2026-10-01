@@ -99,9 +99,10 @@ def test_imported_workspace_config_survives_seed_file_unavailable_and_keeps_edit
     assert stored_c5['thresholds']['low'] == pytest.approx(87)
     assert stored_c5['score_mapping']['high_score'] == pytest.approx(0.95)
     assert loaded['gap_priority'][:2] == ['K2', 'K1']
+    assert loaded['scope']['environments']['Drive Connecting Roads']['g_level_2'] == 'Connecting Roads'
     assert loaded['scope']['total_max_points'] == pytest.approx(
         sum(metric['contexts'][environment]['max_points']
-            for metric in loaded['metrics'] for environment in ('DriveCity', 'DriveConnectionroad')),
+            for metric in loaded['metrics'] for environment in ('DriveCity', 'Drive Connecting Roads')),
     )
 
 

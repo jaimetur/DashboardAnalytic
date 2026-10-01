@@ -142,7 +142,7 @@ def test_scoring_page_requires_login_and_renders_workspace_controls(client, scor
     assert 'Operator is required' in page.text
     assert 'data-calculate-scoring' in page.text
     assert 'data-recalculate-scoring' in page.text
-    assert 'Scoring Tables' in page.text and 'Scoring Chart' in page.text and 'GAP Analysis' in page.text
+    assert 'Scoring Table' in page.text and 'Scoring Tables' not in page.text and 'Scoring Chart' in page.text and 'GAP Analysis' in page.text
     assert 'Best Network Chart' in page.text
 
 
@@ -186,6 +186,144 @@ def test_scoring_baseline_options_follow_mapping_without_scanning_cdr_rows(scori
     assert baseline_select.index('value="O2"') < baseline_select.index('value="EE"')
     assert 'value="O2" data-operator-color="#112233"' in baseline_select
     assert 'value="EE" data-operator-color="#445566"' in baseline_select
+
+
+def test_scoring_selection_defaults_use_catalogue_metadata_without_reading_cdr_rows(scoring_api, monkeypatch):
+    def fail_if_cdr_rows_are_read(*_args, **_kwargs):
+        raise AssertionError('Loading the saved scoring selection must not read CDR rows.')
+
+    monkeypatch.setattr(Repository, 'list_distinct_dataset_row_values', fail_if_cdr_rows_are_read)
+    monkeypatch.setattr(Repository, 'dataset_row_count', fail_if_cdr_rows_are_read)
+    monkeypatch.setattr(Repository, 'list_dataset_row_columns', fail_if_cdr_rows_are_read)
+
+    response = scoring_api['client'].get('/api/scoring/selection')
+
+    assert response.status_code == 200
+    assert response.json() == {
+        'selection': {
+            'dataset_ids': scoring_api['complete_dataset_ids'],
+            'aggregation_levels': ['Operator'],
+            'nr_mode': 'NSA',
+            'baseline_operator': 'EE',
+            'scoring_profile_id': 'netcheck-2026',
+            'context_filters': {
+                'Region': [], 'City': [], 'Operator': [], 'Vendor': [], 'Campaign': [],
+            },
+        },
+        'warnings': [],
+        'persisted': False,
+    }
+
+
+def test_scoring_selection_persists_for_workspace_and_rejects_delayed_tab_updates(scoring_api):
+    client = scoring_api['client']
+    common_selection = {
+        'dataset_ids': scoring_api['complete_dataset_ids'],
+        'aggregation_levels': ['Operator', 'Region'],
+        'nr_mode': 'NSA',
+        'baseline_operator': 'O2',
+        'scoring_profile_id': 'netcheck-2026',
+        'context_filters': {'Region': ['North'], 'City': [], 'Operator': [], 'Vendor': [], 'Campaign': []},
+    }
+    saved = client.put('/api/scoring/selection', json={
+        'selection': common_selection, 'client_id': 'tab-a', 'client_revision': 1,
+    })
+
+    assert saved.status_code == 200
+    assert saved.json()['accepted'] is True
+    assert saved.json()['selection'] == common_selection
+    assert client.get('/api/scoring/selection').json()['persisted'] is True
+
+    newer_selection = {**common_selection, 'baseline_operator': 'EE'}
+    newer = client.put('/api/scoring/selection', json={
+        'selection': newer_selection, 'client_id': 'tab-a', 'client_revision': 2,
+    })
+    delayed = client.put('/api/scoring/selection', json={
+        'selection': common_selection, 'client_id': 'tab-a', 'client_revision': 1,
+    })
+
+    assert newer.status_code == 200 and newer.json()['accepted'] is True
+    assert delayed.status_code == 200 and delayed.json()['accepted'] is False
+    assert delayed.json()['selection'] == newer_selection
+    assert client.get('/api/scoring/selection').json()['selection'] == newer_selection
+
+    other_tab = client.put('/api/scoring/selection', json={
+        'selection': common_selection, 'client_id': 'tab-b', 'client_revision': 1,
+    })
+    assert other_tab.status_code == 200 and other_tab.json()['accepted'] is True
+    assert client.get('/api/scoring/selection').json()['selection'] == common_selection
+
+    empty_selection = {**common_selection, 'dataset_ids': []}
+    cleared = client.put('/api/scoring/selection', json={'selection': empty_selection})
+    assert cleared.status_code == 200 and cleared.json()['accepted'] is True
+    assert client.get('/api/scoring/selection').json()['selection']['dataset_ids'] == []
+
+
+def test_scoring_selection_recovers_from_deleted_cdr_and_methodology(scoring_api):
+    client = scoring_api['client']
+    repository = scoring_api['repository']
+    selection = {
+        'dataset_ids': scoring_api['complete_dataset_ids'],
+        'aggregation_levels': ['Operator', 'Region'],
+        'nr_mode': 'NSA',
+        'baseline_operator': 'EE',
+        'scoring_profile_id': 'netcheck-2026',
+        'context_filters': {'Region': ['North']},
+    }
+    saved = client.put('/api/scoring/selection', json={'selection': selection})
+    assert saved.status_code == 200
+
+    stale_dataset_id = scoring_api['complete_dataset_ids'][1]
+    repository.delete_dataset(stale_dataset_id)
+    configuration = repository.get_scoring_configuration()
+    repository.replace_scoring_profiles({
+        'active_profile_id': 'alternate-method',
+        'profiles': [{
+            'id': 'alternate-method', 'name': 'Alternate Method', 'configuration': configuration,
+        }],
+    })
+
+    recovered = client.get('/api/scoring/selection')
+
+    assert recovered.status_code == 200
+    assert recovered.json()['selection']['dataset_ids'] == [
+        scoring_api['complete_dataset_ids'][0], scoring_api['complete_dataset_ids'][2],
+    ]
+    assert recovered.json()['selection']['scoring_profile_id'] == 'alternate-method'
+    assert recovered.json()['selection']['aggregation_levels'] == ['Operator', 'Region']
+    assert any('CDR datasets' in warning for warning in recovered.json()['warnings'])
+    assert any('methodology' in warning for warning in recovered.json()['warnings'])
+
+
+def test_scoring_selection_survives_workspace_database_backup_restore(scoring_api, tmp_path):
+    client = scoring_api['client']
+    repository = scoring_api['repository']
+    workspace = app_module.active_workspace
+    selection = {
+        'dataset_ids': scoring_api['complete_dataset_ids'],
+        'aggregation_levels': ['Operator', 'Region'],
+        'nr_mode': 'NSA',
+        'baseline_operator': 'EE',
+        'scoring_profile_id': 'netcheck-2026',
+        'context_filters': {'Region': ['North']},
+    }
+    saved = client.put('/api/scoring/selection', json={'selection': selection})
+    assert saved.status_code == 200
+    persisted_selection = saved.json()['selection']
+
+    archive_path = app_module.create_recurring_database_backup({
+        'components': ['workspace_database'],
+        'backup_path': str(tmp_path / 'backups'),
+        'max_backups': 5,
+        'workspace_ids': [workspace.id],
+    })
+    changed = {**persisted_selection, 'baseline_operator': 'O2'}
+    assert client.put('/api/scoring/selection', json={'selection': changed}).status_code == 200
+
+    app_module.restore_database_backup(archive_path, ['workspace_database'])
+
+    assert client.get('/api/scoring/selection').json()['selection'] == persisted_selection
+    assert repository.get_workspace_state('scoring_calculation_selection_v1')
 
 
 def test_scoring_api_validates_auth_mode_and_missing_jobs(client, scoring_api):
@@ -443,7 +581,7 @@ def test_scoring_job_results_cache_force_and_exports(scoring_api):
     assert '2026-Q2' in slide_text
     scoring_slide = next(
         slide for slide in presentation.slides
-        if any(shape.has_text_frame and 'Scoring Tables' in shape.text for shape in slide.shapes)
+        if any(shape.has_text_frame and 'Scoring Table' in shape.text for shape in slide.shapes)
     )
     scoring_table = next(shape.table for shape in scoring_slide.shapes if shape.has_table)
     # The first row groups Score and GAP; the next rows show operator and region hierarchy.
@@ -481,6 +619,7 @@ def test_scoring_ppt_export_normalizes_legacy_gap_without_mutating_saved_result(
     def capture_export(job, result, *_args, **kwargs):
         captured['result'] = deepcopy(result)
         captured['gap_layout'] = kwargs.get('gap_layout')
+        captured['show_gap_values'] = kwargs.get('show_gap_values')
         return b'ppt'
 
     monkeypatch.setattr(scoring_exports, 'export_scoring_powerpoint', capture_export)
@@ -488,12 +627,17 @@ def test_scoring_ppt_export_normalizes_legacy_gap_without_mutating_saved_result(
     assert exported.status_code == 200
     assert exported.content == b'ppt'
     assert captured['gap_layout'] == 'end'
+    assert captured['show_gap_values'] is True
     assert captured['result']['gap'][0]['gap_points'] == -0.6
     assert captured['result']['gap_direction'] == 'operator_minus_reference'
 
     adjacent = client.get(f'/scoring/jobs/{job_id}/export/ppt?gap_layout=adjacent')
     assert adjacent.status_code == 200
     assert captured['gap_layout'] == 'adjacent'
+
+    hidden_gaps = client.get(f'/scoring/jobs/{job_id}/export/ppt?show_gap_values=false')
+    assert hidden_gaps.status_code == 200
+    assert captured['show_gap_values'] is False
 
     stored = scoring_jobs.get_scoring_job(scoring_api['repository'], job_id, include_result=True)['result']
     assert stored['gap'][0]['gap_points'] == 0.6

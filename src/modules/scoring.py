@@ -16,7 +16,7 @@ from src.modules.scoring_config import (
 
 # Semantic engine version only. Configuration identity is added to job versions
 # after the workspace snapshot has been supplied explicitly.
-METHOD_VERSION = 'campaign-gap-v3'
+METHOD_VERSION = 'campaign-gap-v4'
 AGGREGATION_CONTRACT_VERSION = 2
 _SHARED = ['Operator', 'Campaign', 'G_Level_1', 'G_Level_2']
 _LEVEL_SOURCE_ALIASES = {
@@ -191,8 +191,13 @@ def _aggregate(frame: pd.DataFrame, metric: dict) -> tuple[float | None, int]:
     if formula == '100 * SUM(totalpacketlost) / SUM(Packets_Sent)':
         sent = _numeric(frame, 'Packets_Sent')
         denominator = sent.sum(min_count=1)
-        lost = sum(_numeric(frame, field).fillna(0).map(math.trunc) if field == 'Packets_Corrupted' else _numeric(frame, field).fillna(0)
-                   for field in ['Packets_Lost', 'Packets_Discarded', 'Packets_Corrupted', 'Packets_Not_Sent'])
+        packet_loss_fields = ['Packets_Lost', 'Packets_Discarded', 'Packets_Corrupted', 'Packets_Not_Sent']
+        packet_components = []
+        for field in packet_loss_fields:
+            values = _numeric(frame, field) if field in frame.columns else pd.Series(0.0, index=frame.index)
+            values = values.fillna(0)
+            packet_components.append(values.map(math.trunc) if field == 'Packets_Corrupted' else values)
+        lost = sum(packet_components)
         return (float(100 * lost.sum() / denominator), int(sent.notna().sum())) if denominator > 0 else (None, 0)
     ratio = re.fullmatch(r'(100 \* )?(SUM|COUNT)\((.+)\) / (SUM|COUNT)\((\w+)\)', formula)
     if ratio:
@@ -256,8 +261,6 @@ def calculate_scoring(
     group_fields = list(dict.fromkeys(['Campaign', *dimensions, 'environment']))
     keys = [_key_name(field) for field in group_fields]
     warnings = []
-    if campaign_selected:
-        warnings.append('Campaigns are scored separately; the supplied Tableau Prep flow pools campaigns.')
     rows = []
     normalized_operator_mappings = {
         str(alias).strip().casefold(): str(canonical).strip()

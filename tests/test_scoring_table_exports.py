@@ -9,7 +9,7 @@ from pptx import Presentation
 from src.modules.scoring_exports import export_scoring_csv, export_scoring_powerpoint, _hierarchy_chart_color
 from src.modules.scoring_views import build_scoring_views
 from tests.scoring_fixtures import scoring_configuration
-from tests.test_scoring_exports import TEMPLATE, _result, _comparison_matrices
+from tests.test_scoring_exports import TEMPLATE, _result, _comparison_matrices, _nested_shapes
 
 
 def _job():
@@ -21,7 +21,9 @@ def _job():
 def test_display_csv_has_category_points_and_mean_gap_without_double_counting(mode):
     job = _job()
     result = _result(missing={('O2 UK', 'K1')})
-    rows = list(csv.DictReader(StringIO(export_scoring_csv(job, result, 'scoring', mode))))
+    rows = list(csv.DictReader(StringIO(export_scoring_csv(
+        job, result, 'scoring', mode, environment='DriveCity',
+    ))))
     matrix = build_scoring_views(job, result)['score_tables'][0]
     operator_rows = [row for row in rows if row['operator'] == 'O2 UK']
     category_rows = [row for row in operator_rows if row['row_type'] == 'category']
@@ -37,7 +39,9 @@ def test_display_csv_has_category_points_and_mean_gap_without_double_counting(mo
 
 def test_summary_csv_gap_excludes_reference_and_keeps_missing_comparisons():
     result = _result(missing={('EE', 'K1')})
-    rows = list(csv.DictReader(StringIO(export_scoring_csv(_job(), result, 'gap', 'summary'))))
+    rows = list(csv.DictReader(StringIO(export_scoring_csv(
+        _job(), result, 'gap', 'summary', environment='DriveCity',
+    ))))
     assert all(row['operator'] != 'EE' for row in rows)
     assert {row['row_type'] for row in rows} == {'category', 'total'}
     assert all(row['reference_operator'] == 'EE' for row in rows)
@@ -45,7 +49,9 @@ def test_summary_csv_gap_excludes_reference_and_keeps_missing_comparisons():
 
 def test_ppt_table_modes_include_bold_category_totals_and_keep_identical_charts():
     result = _result(missing={('O2 UK', 'K1')})
-    presentations = [Presentation(BytesIO(export_scoring_powerpoint(_job(), result, TEMPLATE, table_mode=mode)))
+    presentations = [Presentation(BytesIO(export_scoring_powerpoint(
+        _job(), result, TEMPLATE, table_mode=mode, environment='DriveCity',
+    )))
                      for mode in ('expanded', 'summary')]
     expanded, summary = [_comparison_matrices(presentation)[0] for presentation in presentations]
     assert len(expanded.rows) == 32 + 7 + 2
@@ -53,7 +59,7 @@ def test_ppt_table_modes_include_bold_category_totals_and_keep_identical_charts(
     assert all(summary.cell(index, 4).text_frame.paragraphs[0].font.bold for index in range(1, 8))
     assert all(summary.cell(index, 1).text.endswith(' total') for index in range(1, 8))
     assert expanded.cell(len(expanded.rows) - 1, 4).text == summary.cell(len(summary.rows) - 1, 4).text
-    chart_values = [[list(series.values) for slide in presentation.slides for shape in slide.shapes
+    chart_values = [[list(series.values) for slide in presentation.slides for shape in _nested_shapes(slide.shapes)
                      if shape.has_chart for series in shape.chart.series] for presentation in presentations]
     assert chart_values[0] == chart_values[1]
     all_gap_slides = [slide for slide in presentations[1].slides
@@ -75,8 +81,10 @@ def test_seven_category_tints_are_distinct_and_invalid_export_mode_is_rejected()
 @pytest.mark.parametrize('layout', ['end', 'adjacent'])
 def test_gap_placement_excludes_reference_and_preserves_score_and_gap_values(layout):
     job = _job()
-    presentation = Presentation(BytesIO(export_scoring_powerpoint(job, _result(), TEMPLATE, gap_layout=layout)))
-    slide = next(slide for slide in presentation.slides if slide.shapes.title.text.split('\n')[0] == 'Scoring Tables')
+    presentation = Presentation(BytesIO(export_scoring_powerpoint(
+        job, _result(), TEMPLATE, gap_layout=layout, environment='DriveCity',
+    )))
+    slide = next(slide for slide in presentation.slides if slide.shapes.title.text.split('\n')[0] == 'Scoring Table')
     table = next(shape.table for shape in slide.shapes if shape.has_table)
     if layout == 'end':
         headers = [cell.text for cell in table.rows[0].cells][4:]
@@ -90,7 +98,73 @@ def test_gap_placement_excludes_reference_and_preserves_score_and_gap_values(lay
         assert values[0] == '58.79'
         assert values[2] != '0.00'
     with pytest.raises(ValueError, match='GAP layout'):
-        export_scoring_powerpoint(job, _result(), TEMPLATE, gap_layout='invalid')
+        export_scoring_powerpoint(job, _result(), TEMPLATE, gap_layout='invalid', environment='DriveCity')
+
+
+def _gap_slide_contents(presentation):
+    contents = []
+    for slide in presentation.slides:
+        title = slide.shapes.title.text.split('\n')[0]
+        if not title.startswith('GAP Analysis'):
+            continue
+        tables = [
+            tuple(tuple(cell.text for cell in row.cells) for row in shape.table.rows)
+            for shape in slide.shapes if shape.has_table
+        ]
+        contents.append((title, tuple(tables)))
+    return contents
+
+
+def _scoring_table_score_cells(table, aggregation_levels, layout, operator_count):
+    if len(aggregation_levels) == 1 and layout == 'end':
+        start_row = 1
+        score_columns = list(range(4, 4 + operator_count))
+    else:
+        kind_row = len(aggregation_levels) + 1
+        start_row = kind_row + 1
+        score_columns = [
+            index for index in range(4, len(table.columns))
+            if table.cell(kind_row, index).text == 'Score'
+        ]
+    return [
+        tuple(table.cell(row, column).text for column in score_columns)
+        for row in range(start_row, len(table.rows))
+    ]
+
+
+@pytest.mark.parametrize('levels', [['Operator'], ['Operator', 'Region', 'Campaign']])
+@pytest.mark.parametrize('layout', ['end', 'adjacent'])
+def test_hiding_scoring_table_gaps_preserves_scores_and_gap_analysis(levels, layout):
+    job = {**_job(), 'aggregation_levels': levels}
+    result = _result()
+    with_gaps = Presentation(BytesIO(export_scoring_powerpoint(
+        job, result, TEMPLATE, gap_layout=layout, environment='DriveCity', show_gap_values=True,
+    )))
+    without_gaps = Presentation(BytesIO(export_scoring_powerpoint(
+        job, result, TEMPLATE, gap_layout=layout, environment='DriveCity', show_gap_values=False,
+    )))
+
+    scoring_slide_with = next(slide for slide in with_gaps.slides
+                              if slide.shapes.title.text.split('\n')[0] == 'Scoring Table')
+    scoring_slide_without = next(slide for slide in without_gaps.slides
+                                 if slide.shapes.title.text.split('\n')[0] == 'Scoring Table')
+    table_with = next(shape.table for shape in scoring_slide_with.shapes if shape.has_table)
+    table_without = next(shape.table for shape in scoring_slide_without.shapes if shape.has_table)
+    operator_count = len({row['operator'] for row in result['scoring']})
+    assert _scoring_table_score_cells(table_with, levels, layout, operator_count) == \
+        _scoring_table_score_cells(table_without, levels, layout, operator_count)
+    assert len(table_without.columns) < len(table_with.columns)
+    header_row_count = 1 if len(levels) == 1 and layout == 'end' else len(levels) + 2
+    assert all(
+        'GAP' not in table_without.cell(row, column).text
+        for row in range(header_row_count)
+        for column in range(len(table_without.columns))
+    )
+
+    gap_slides_with = _gap_slide_contents(with_gaps)
+    gap_slides_without = _gap_slide_contents(without_gaps)
+    assert gap_slides_with
+    assert gap_slides_without == gap_slides_with
 
 
 def _multi_environment_result():
@@ -113,7 +187,7 @@ def test_all_environment_ppt_finishes_each_full_block_aggregate_first(levels):
     result.update({'aggregation_contract_version': 2, 'aggregation_levels': levels})
     presentation = Presentation(BytesIO(export_scoring_powerpoint(job, result, TEMPLATE, table_mode='summary')))
     titles = [slide.shapes.title.text.split('\n')[0] for slide in presentation.slides][2:]
-    expected_block = ['Scoring & GAP Analysis — Best Network', 'Scoring Chart', 'Scoring Tables',
+    expected_block = ['Scoring & GAP Analysis — Best Network', 'Scoring Chart', 'Scoring Table',
                       'GAP Analysis — All vs EE',
                       'GAP Analysis — O2 UK vs EE' if len(levels) > 1 else 'GAP Analysis']
     assert titles == expected_block * 3

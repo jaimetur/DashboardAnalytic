@@ -97,12 +97,17 @@ def test_scoring_environment_crud_and_context_drafts_are_available():
     script = PANEL_SCRIPT.read_text(encoding='utf-8')
 
     assert 'data-scoring-environment-create' in template
+    assert 'data-scoring-environment-rename' in template
     assert 'data-scoring-environment-delete' in template
     assert 'data-environment-g1' in template
     assert 'data-environment-g2' in template
     assert 'data-profile-dialog-environment-fields' in template
     assert 'const createEnvironment = async () =>' in script
+    assert 'const renameEnvironment = async () =>' in script
     assert 'const deleteEnvironment = async () =>' in script
+    assert 'display_name: requestedName' in script
+    assert 'metric.contexts = Object.fromEntries' in script
+    assert 'environmentRename: true' in script
     assert 'applyEnvironmentMapping(latestConfiguration.scope)' in script
     assert "mapping[g2 ? `${g1} + ${g2}` : g1] = key;" in script
     assert 'captureSelectedContext(row, lastEnvironment)' in script

@@ -146,6 +146,65 @@ def test_deleted_walk_environment_survives_json_archive_restore(client):
     assert 'Indoor' in repository.get_scoring_configuration()['scope']['environments']
 
 
+def test_renamed_environments_survive_profile_and_workspace_database_round_trips(client, tmp_path: Path):
+    _login(client)
+    workspace, repository = _workspace_repository()
+    configuration = repository.get_scoring_configuration()
+    original_road_contexts = [copy.deepcopy(metric['contexts']['Drive Connecting Roads']) for metric in configuration['metrics']]
+    original_walk_contexts = [copy.deepcopy(metric['contexts']['Walk']) for metric in configuration['metrics']]
+
+    walk = configuration['scope']['environments'].pop('Walk')
+    walk['display_name'] = 'Walk QA'
+    configuration['scope']['environments']['Walk QA'] = walk
+    for metric in configuration['metrics']:
+        metric['contexts']['Walk QA'] = metric['contexts'].pop('Walk')
+    configuration['scope']['environment_mapping'] = {
+        (f"{environment['g_level_1']} + {environment['g_level_2']}"
+         if environment.get('g_level_2') else environment['g_level_1']): name
+        for name, environment in configuration['scope']['environments'].items()
+    }
+    repository.replace_scoring_configuration(configuration)
+    expected_profiles = repository.get_scoring_profiles()
+    expected_configuration = expected_profiles['profiles'][0]['configuration']
+
+    assert 'Walk QA' in expected_configuration['scope']['environments']
+    assert 'Walk' not in expected_configuration['scope']['environments']
+    assert 'DriveConnectionroad' not in expected_configuration['scope']['environments']
+    assert expected_configuration['scope']['environments']['Drive Connecting Roads']['g_level_2'] == 'Connecting Roads'
+    assert expected_configuration['scope']['environments']['Walk QA']['display_name'] == 'Walk QA'
+    for index, metric in enumerate(expected_configuration['metrics']):
+        assert metric['contexts']['Drive Connecting Roads'] == original_road_contexts[index]
+        assert metric['contexts']['Walk QA'] == original_walk_contexts[index]
+        assert 'Walk' not in metric['contexts']
+
+    exported = client.get('/api/workspace-config/scoring-configuration/export')
+    assert exported.status_code == 200
+    document = exported.json()
+    assert document['version'] == 2
+    assert document['profiles'] == expected_profiles['profiles']
+
+    repository.set_workspace_state('scoring_configuration', '')
+    imported = client.post('/api/workspace-config/scoring-configuration/import', files={
+        'package': ('renamed-scoring-configuration.json', exported.content, 'application/json'),
+    })
+    assert imported.status_code == 200, imported.text
+    assert imported.json() == expected_profiles
+
+    backup_path = app_module.create_recurring_database_backup({
+        'components': ['workspace_database'],
+        'workspace_ids': [workspace.id],
+        'backup_path': str(tmp_path),
+        'max_backups': 5,
+    })
+    repository.set_workspace_state('scoring_configuration', '')
+    app_module.restore_database_backup(backup_path, ['workspace_database'])
+    restored_profiles = repository.get_scoring_profiles()
+    assert restored_profiles == expected_profiles
+    restored_configuration = restored_profiles['profiles'][0]['configuration']
+    assert 'Walk' not in restored_configuration['scope']['environments']
+    assert 'Walk' not in restored_configuration['metrics'][0]['contexts']
+
+
 def test_legacy_workspace_backup_does_not_claim_scoring_configuration(tmp_path: Path) -> None:
     package_path = tmp_path / 'legacy-workspace-backup.zip'
     manifest = app_module.archive_manifest(
@@ -212,10 +271,14 @@ def test_legacy_bare_json_and_v1_zip_import_create_a_single_default_profile(clie
     app_module._apply_import_archive(
         legacy_archive, legacy_manifest, destination_workspace_ids=[workspace.id],
     )
-    assert repository.get_scoring_profiles() == {
-        'active_profile_id': 'netcheck-2026',
-        'profiles': [default_scoring_profile(configuration)],
-    }
+    restored = repository.get_scoring_profiles()
+    assert restored['active_profile_id'] == 'netcheck-2026'
+    restored_configuration = restored['profiles'][0]['configuration']
+    assert restored_configuration['scope']['environments']['Drive Connecting Roads']['g_level_2'] == 'Connecting Roads'
+    assert restored_configuration['scope']['environment_mapping']['Drive + Connecting Roads'] == 'Drive Connecting Roads'
+    assert restored_configuration['metrics'][0]['contexts']['Drive Connecting Roads'] == (
+        default_scoring_profile(configuration)['configuration']['metrics'][0]['contexts']['DriveConnectionroad']
+    )
 
 
 def test_legacy_kpi_ids_migrate_to_sequential_codes_without_changing_gap_order(client):

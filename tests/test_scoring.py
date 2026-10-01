@@ -248,6 +248,30 @@ def test_campaign_is_optional_and_defaults_to_pooled_raw_rows():
     assert pooled['campaigns'] == ['2026Q2', '2026Q3']
     assert {row['campaign']: row['value'] for row in separated_rows} == {'2026Q2': 100, '2026Q3': 0}
     assert separated['aggregation_levels'] == ['Operator', 'Campaign']
+    assert 'Campaigns are scored separately; the supplied Tableau Prep flow pools campaigns.' not in separated['warnings']
+
+
+def test_k31_ifnull_packet_component_can_be_absent_but_sent_denominator_is_required():
+    source = frame([{
+        'Type_of_Test': 'Interactivity',
+        'Packets_Lost': 1,
+        'Packets_Discarded': 2,
+        'Packets_Not_Sent': 3,
+        'Packets_Sent': 100,
+    }])
+
+    result = calculate_scoring({'data': source})
+    row = metric(result, 'K31')
+
+    assert row['value'] == pytest.approx(6)
+    assert row['sample_count'] == 1
+    assert row['score'] is not None
+    assert not any('K31 requires missing column Packets_Corrupted' in warning for warning in result['warnings'])
+
+    missing_denominator = source.drop(columns='Packets_Sent')
+    unavailable = calculate_scoring({'data': missing_denominator})
+    assert metric(unavailable, 'K31')['value'] is None
+    assert 'Data: K31 requires missing column Packets_Sent.' in unavailable['warnings']
 
 
 def test_operator_mapping_aliases_are_canonicalized_before_kpi_aggregation():

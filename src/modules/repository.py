@@ -1942,6 +1942,7 @@ class Repository:
         """Return all named scoring profiles, migrating a legacy single config in memory."""
         from src.modules.scoring_config import (
             default_scoring_profile,
+            migrate_known_legacy_2026_profiles,
             validate_scoring_configuration,
             validate_scoring_profiles,
         )
@@ -1952,12 +1953,14 @@ class Repository:
         try:
             payload = json.loads(raw)
             if isinstance(payload, dict) and 'profiles' in payload:
-                return validate_scoring_profiles(payload)
+                profiles = validate_scoring_profiles(payload)
+                return migrate_known_legacy_2026_profiles(profiles)
             profile = default_scoring_profile(validate_scoring_configuration(payload))
-            return validate_scoring_profiles({
+            profiles = validate_scoring_profiles({
                 'active_profile_id': profile['id'],
                 'profiles': [profile],
             })
+            return migrate_known_legacy_2026_profiles(profiles)
         except (TypeError, ValueError, json.JSONDecodeError) as error:
             raise ValueError(f'Stored workspace scoring configuration is invalid: {error}') from error
 

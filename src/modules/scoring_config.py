@@ -61,6 +61,10 @@ _LEGACY_KPI_CODES = (
     'C27', 'C28', 'C29', 'C30', 'C31', 'C32', 'C33', 'C34', 'C35', 'C36', 'C37',
 )
 _LEGACY_KPI_CODE_MAP = {code: f'K{index}' for index, code in enumerate(_LEGACY_KPI_CODES, start=1)}
+_LEGACY_2026_PROFILE_ID = 'netcheck-2026'
+_LEGACY_2026_VERSION = '2026Q2'
+_LEGACY_2026_ENVIRONMENT = 'DriveConnectionroad'
+_CURRENT_2026_ENVIRONMENT = 'Drive Connecting Roads'
 
 
 def _is_legacy_two_environment_configuration(configuration: object) -> bool:
@@ -179,6 +183,12 @@ def _validate_scope(scope: Any) -> None:
         if 'sheet' in environment and (
                 not isinstance(environment['sheet'], str) or not environment['sheet'].strip()):
             raise ValueError(f'Scoring scope {name} sheet must be non-empty text when provided.')
+        if 'display_name' in environment and (
+                not isinstance(environment['display_name'], str)
+                or not environment['display_name'].strip()
+                or environment['display_name'] != environment['display_name'].strip()
+                or len(environment['display_name']) > 80):
+            raise ValueError(f'Scoring scope {name} display_name must be trimmed text of at most 80 characters.')
         selector = (g_level_1.casefold(), g_level_2.casefold() if g_level_2 is not None else None, name)
         for previous_g1, previous_g2, previous_name in selectors:
             if (selector[0] == previous_g1
@@ -651,6 +661,61 @@ def validate_scoring_profiles(payload: object) -> dict[str, Any]:
     if not isinstance(active_profile_id, str) or active_profile_id not in seen_ids:
         raise ValueError('The active scoring profile must reference an existing profile.')
     return {'active_profile_id': active_profile_id, 'profiles': normalized_profiles}
+
+
+def migrate_known_legacy_2026_profiles(payload: dict[str, Any]) -> dict[str, Any]:
+    """Normalize the known 2026 workspace profile without rewriting historical configs."""
+    if not isinstance(payload.get('profiles'), list):
+        return payload  # The caller validates the profile collection before invoking this helper.
+    profile_indexes: list[int] = []
+    for index, profile in enumerate(payload['profiles']):
+        if not isinstance(profile, dict) or profile.get('id') != _LEGACY_2026_PROFILE_ID:
+            continue
+        configuration = profile.get('configuration')
+        if not isinstance(configuration, dict) or configuration.get('version') != _LEGACY_2026_VERSION:
+            continue
+        scope = configuration.get('scope')
+        environments = scope.get('environments') if isinstance(scope, dict) else None
+        if not isinstance(environments, dict):
+            continue
+        legacy_environment = environments.get(_LEGACY_2026_ENVIRONMENT)
+        if legacy_environment is None or _CURRENT_2026_ENVIRONMENT in environments:
+            continue
+        if (not isinstance(legacy_environment, dict) or legacy_environment.get('g_level_1') != 'Drive'
+                or legacy_environment.get('g_level_2') not in {'Connectionroad', 'Connecting Roads'}
+                or legacy_environment.get('display_name')):
+            continue
+        profile_indexes.append(index)
+    if not profile_indexes:
+        return payload
+
+    migrated = copy.deepcopy(payload)
+    for index in profile_indexes:
+        profile = migrated['profiles'][index]
+        configuration = profile.get('configuration')
+        scope = configuration.get('scope')
+        environments = scope['environments']
+        environments = {
+            (_CURRENT_2026_ENVIRONMENT if key == _LEGACY_2026_ENVIRONMENT else key): value
+            for key, value in environments.items()
+        }
+        scope['environments'] = environments
+        for metric in configuration.get('metrics', []):
+            contexts = metric.get('contexts') if isinstance(metric, dict) else None
+            if not isinstance(contexts, dict) or _LEGACY_2026_ENVIRONMENT not in contexts:
+                continue
+            metric['contexts'] = {
+                (_CURRENT_2026_ENVIRONMENT if key == _LEGACY_2026_ENVIRONMENT else key): value
+                for key, value in contexts.items()
+            }
+        environment = environments[_CURRENT_2026_ENVIRONMENT]
+        environment['g_level_2'] = 'Connecting Roads'
+        environment['display_name'] = _CURRENT_2026_ENVIRONMENT
+        scope['environment_mapping'] = {
+            (f"{item['g_level_1']} + {item['g_level_2']}" if item.get('g_level_2') else item['g_level_1']): key
+            for key, item in environments.items()
+        }
+    return validate_scoring_profiles(migrated)
 
 
 def unwrap_scoring_profiles_payload(payload: object) -> dict[str, Any] | None:

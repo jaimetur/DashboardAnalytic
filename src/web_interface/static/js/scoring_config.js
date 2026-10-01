@@ -30,10 +30,12 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
   const environmentTotalLabel = root.querySelector('[data-environment-total-label]');
   const distributePointsButton = root.querySelector('[data-scoring-distribute-points]');
   const createEnvironmentButton = root.querySelector('[data-scoring-environment-create]');
+  const renameEnvironmentButton = root.querySelector('[data-scoring-environment-rename]');
   const deleteEnvironmentButton = root.querySelector('[data-scoring-environment-delete]');
   const environmentG1Input = root.querySelector('[data-environment-g1]');
   const environmentG2Input = root.querySelector('[data-environment-g2]');
   const profileDialog = root.querySelector('[data-scoring-profile-dialog]');
+  const profileDialogEyebrow = root.querySelector('[data-profile-dialog-eyebrow]');
   const profileDialogTitle = root.querySelector('[data-profile-dialog-title]');
   const profileDialogCopy = root.querySelector('[data-profile-dialog-copy]');
   const profileDialogNameField = root.querySelector('[data-profile-dialog-name-field]');
@@ -130,7 +132,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
 
   const environmentEntries = () => Object.entries(configuration?.scope?.environments || {});
   const environmentKeys = () => environmentEntries().map(([key]) => key);
-  const environmentLabel = (key) => String(configuration?.scope?.environments?.[key]?.sheet || key)
+  const environmentLabel = (key) => String(configuration?.scope?.environments?.[key]?.display_name
+    || configuration?.scope?.environments?.[key]?.sheet || key)
     .replace(/([a-z])([A-Z])/g, '$1 $2');
 
   const normalizeNextKpiNumber = (config) => {
@@ -158,6 +161,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     lastEnvironment = selected;
     syncEnvironmentSourceFields();
     if (createEnvironmentButton) createEnvironmentButton.disabled = !configuration || entries.length >= 32;
+    if (renameEnvironmentButton) renameEnvironmentButton.disabled = !configuration || !selected;
     if (deleteEnvironmentButton) deleteEnvironmentButton.disabled = !configuration || entries.length <= 1;
   };
 
@@ -1264,8 +1268,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     (profile) => profile.id !== exceptId && profile.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase(),
   );
 
-  const environmentNameIsAvailable = (name) => !environmentEntries().some(
-    ([key]) => key.trim().toLocaleLowerCase() === name.toLocaleLowerCase(),
+  const environmentNameIsAvailable = (name, exceptKey = '') => !environmentEntries().some(
+    ([key]) => key !== exceptKey && key.trim().toLocaleLowerCase() === name.toLocaleLowerCase(),
   );
 
   const closeProfileDialog = (result) => {
@@ -1286,19 +1290,21 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     }
   };
 
-  const openProfileDialog = ({title, description, confirmLabel = 'Continue', initialValue = '', nameRequired = false, exceptId = '', distribution = false, environmentCreate = false, initialG1 = '', initialG2 = ''}) => {
+  const openProfileDialog = ({title, description, confirmLabel = 'Continue', initialValue = '', nameRequired = false, exceptId = '', distribution = false, environmentCreate = false, environmentRename = false, exceptEnvironmentKey = '', initialG1 = '', initialG2 = ''}) => {
     if (!profileDialog || !profileDialogTitle || !profileDialogCopy || !profileDialogConfirm || !profileDialogCancel) {
       return Promise.resolve(null);
     }
     if (profileDialogResolver) closeProfileDialog(null);
-    profileDialogOptions = {nameRequired, exceptId, distribution, environmentCreate};
+    profileDialogOptions = {nameRequired, exceptId, distribution, environmentCreate, environmentRename, exceptEnvironmentKey};
+    if (profileDialogEyebrow) profileDialogEyebrow.textContent = environmentCreate || environmentRename
+      ? 'Scoring environment' : 'Scoring methodology';
     profileDialogTitle.textContent = title;
     profileDialogCopy.textContent = description;
     profileDialogConfirm.textContent = confirmLabel;
     if (profileDialogNameField) profileDialogNameField.hidden = !nameRequired;
     if (profileDialogDistribution) profileDialogDistribution.hidden = !distribution;
     if (profileDialogEnvironmentFields) profileDialogEnvironmentFields.hidden = !environmentCreate;
-    if (profileDialogNameLabel) profileDialogNameLabel.textContent = environmentCreate ? 'Environment name' : 'Methodology name';
+    if (profileDialogNameLabel) profileDialogNameLabel.textContent = environmentCreate || environmentRename ? 'Environment name' : 'Methodology name';
     if (profileDialogTotalLabel) profileDialogTotalLabel.textContent = environmentCreate ? 'New environment total points' : 'Selected environment total points';
     if (profileDialogTotal) profileDialogTotal.setAttribute('aria-label', environmentCreate
       ? 'New environment total points' : `Total points for ${environmentLabel(environmentSelect.value)}`);
@@ -1380,6 +1386,19 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       return;
     }
     const name = profileDialogName?.value.trim() || '';
+    if (profileDialogOptions.environmentRename) {
+      let environmentError = '';
+      if (!name || name.length > 80) environmentError = 'Environment name must contain 1 to 80 characters.';
+      else if (name.toLocaleLowerCase() === 'combined') environmentError = 'Environment name cannot be Combined.';
+      else if (!environmentNameIsAvailable(name, profileDialogOptions.exceptEnvironmentKey)) environmentError = 'An environment with that name already exists.';
+      if (environmentError) {
+        if (profileDialogError) profileDialogError.textContent = environmentError;
+        profileDialogName?.focus();
+        return;
+      }
+      closeProfileDialog(name);
+      return;
+    }
     let error = '';
     if (!name || name.length > 80) error = 'Methodology name must contain 1 to 80 characters.';
     else if (!profileNameIsAvailable(name, profileDialogOptions.exceptId)) error = 'A scoring methodology with that name already exists.';
@@ -1824,6 +1843,69 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     setStatus(kpiStatus, `Unsaved environment “${environmentLabel(environment)}” deletion. Save to apply the change.`);
   };
 
+  const renameEnvironment = async () => {
+    const previousName = environmentSelect.value;
+    const previousLabel = environmentLabel(previousName);
+    if (!configuration || !previousName) return;
+    const requestedName = await openProfileDialog({
+      title: 'Rename scoring environment',
+      description: `Rename “${previousLabel}”. Its KPI points, thresholds, source selectors and saved allocations will stay with the environment.`,
+      confirmLabel: 'Rename environment',
+      initialValue: previousName,
+      nameRequired: true,
+      environmentRename: true,
+      exceptEnvironmentKey: previousName,
+    });
+    if (!requestedName || requestedName === previousName) return;
+
+    rowMetrics().forEach((row) => captureSelectedContext(row));
+    const scope = clone(configuration.scope || {});
+    const environments = scope.environments || {};
+    if (!Object.prototype.hasOwnProperty.call(environments, previousName)
+        || !environmentNameIsAvailable(requestedName, previousName)) {
+      setStatus(kpiStatus, 'An environment with that name already exists or is no longer available.', 'error');
+      return;
+    }
+    scope.environments = Object.fromEntries(Object.entries(environments).map(([key, environment]) => [
+      key === previousName ? requestedName : key,
+      key === previousName ? {...environment, display_name: requestedName} : environment,
+    ]));
+    applyEnvironmentMapping(scope);
+
+    const metrics = new Set([
+      ...(configuration.metrics || []),
+      ...rowMetrics().map((row) => row._newMetricTemplate).filter(Boolean),
+    ]);
+    metrics.forEach((metric) => {
+      const contexts = metric.contexts || {};
+      if (Object.prototype.hasOwnProperty.call(contexts, previousName)) {
+        metric.contexts = Object.fromEntries(Object.entries(contexts).map(([key, context]) => [
+          key === previousName ? requestedName : key, context,
+        ]));
+      }
+    });
+    rowMetrics().forEach((row) => {
+      for (const property of ['_contextDrafts', '_contextPointDrafts', '_weightShareDrafts']) {
+        const drafts = row[property];
+        if (!drafts || !Object.prototype.hasOwnProperty.call(drafts, previousName)) continue;
+        row[property] = Object.fromEntries(Object.entries(drafts).map(([key, value]) => [
+          key === previousName ? requestedName : key, value,
+        ]));
+      }
+    });
+
+    configuration.scope = scope;
+    renderEnvironmentOptions();
+    environmentSelect.value = requestedName;
+    lastEnvironment = requestedName;
+    rowMetrics().forEach((row) => hydrateSelectedContext(row, requestedName));
+    syncEnvironmentSourceFields();
+    syncWeightMode();
+    updateDerivedWeights();
+    kpiDirty = true;
+    setStatus(kpiStatus, `Unsaved environment rename from “${previousLabel}” to “${requestedName}”. Save to apply the change.`, 'success');
+  };
+
   const importButton = root.querySelector('[data-scoring-config-import]');
   const importFile = root.querySelector('[data-scoring-config-file]');
   importButton?.addEventListener('click', () => importFile?.click());
@@ -1965,6 +2047,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
   addKpiButton?.addEventListener('click', addKpi);
   distributePointsButton?.addEventListener('click', distributeEnvironmentPoints);
   createEnvironmentButton?.addEventListener('click', createEnvironment);
+  renameEnvironmentButton?.addEventListener('click', renameEnvironment);
   deleteEnvironmentButton?.addEventListener('click', deleteEnvironment);
   profileSelect?.addEventListener('change', () => activateProfile(profileSelect.value));
   profileActions.forEach((button) => button.addEventListener('click', () => runProfileAction(button.dataset.scoringProfileAction)));

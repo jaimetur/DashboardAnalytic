@@ -25,8 +25,12 @@ def test_scoring_calculation_views_and_export_use_only_the_persisted_configurati
         'Type_of_Test': 'contains Successful',
         'http_Browser_Transferred_Bytes': '>= 2000000',
     }
-    expected = repository.replace_scoring_configuration(imported_configuration)
-    assert repository.get_scoring_configuration() == expected
+    repository.replace_scoring_configuration(imported_configuration)
+    expected = repository.get_scoring_configuration()
+    assert expected['scope']['environments']['Drive Connecting Roads']['g_level_2'] == 'Connecting Roads'
+    assert expected['metrics'][0]['contexts']['Drive Connecting Roads'] == (
+        imported_configuration['metrics'][0]['contexts']['DriveConnectionroad']
+    )
 
     asset_path = Path(scoring_config.__file__).resolve().parents[2] / 'assets' / 'scoring' / 'netcheck_2026.json'
     original_read_text = Path.read_text
@@ -96,8 +100,10 @@ def test_scoring_calculation_views_and_export_use_only_the_persisted_configurati
     assert scoring._totals([], [], configuration) == []
 
     views = build_scoring_views({}, result)
-    assert len(views['score_tables']) == 1
-    assert views['score_tables'][0]['context']['environment'] == 'DriveCity'
+    assert {table['context']['environment'] for table in views['score_tables']} == {'Combined', 'DriveCity'}
+    combined = next(table for table in views['score_tables'] if table['context']['environment'] == 'Combined')
+    assert combined['total']['max_points'] == pytest.approx(configuration['scope']['total_max_points'])
+    assert combined['total']['values']['EE']['complete'] is False
 
     template = Path(__file__).resolve().parents[1] / 'assets' / 'ppt-templates' / 'Template_CDR_analysis.pptx'
     export_result = {**result, 'scoring': [], 'totals': [], 'charts': []}

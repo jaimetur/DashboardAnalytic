@@ -62,8 +62,9 @@ def test_reference_matrix_contains_all_32_kpis_and_four_preserved_operator_colum
         operator_mapping_groups=OPERATOR_MAPPING_GROUPS,
     )
 
-    assert len(views['score_tables']) == 1
-    table = views['score_tables'][0]
+    individual_tables = [table for table in views['score_tables'] if table['context']['environment'] != 'Combined']
+    assert len(individual_tables) == 1
+    table = individual_tables[0]
     assert len(table['rows']) == 32
     assert [row['kpi_code'] for row in table['rows']] == [metric['code'] for metric in METRICS]
     assert table['operators'] == ['Vodafone UK', 'O2 UK', 'Three UK', 'EE (UK)']
@@ -91,16 +92,17 @@ def test_dataset_type_context_filters_to_its_kpis_and_contexts_do_not_merge():
     ])
     views = build_scoring_views({'levels': ['Operator', 'Region', 'Dataset Type']}, {'scoring': rows})
 
-    assert len(views['score_tables']) == 2
-    voice_table = next(table for table in views['score_tables'] if table['context']['dataset_type'] == 'Voice')
-    data_table = next(table for table in views['score_tables'] if table['context']['dataset_type'] == 'Data')
+    individual_tables = [table for table in views['score_tables'] if table['context']['environment'] != 'Combined']
+    assert len(individual_tables) == 2
+    voice_table = next(table for table in individual_tables if table['context']['dataset_type'] == 'Voice')
+    data_table = next(table for table in individual_tables if table['context']['dataset_type'] == 'Data')
     assert {row['kpi_code'] for row in voice_table['rows']} == {m['code'] for m in METRICS if m['source_kind'] == 'voice'}
     assert {row['kpi_code'] for row in data_table['rows']} == {m['code'] for m in METRICS if m['source_kind'] == 'data'}
     assert voice_table['context']['region'] == 'North'
     assert data_table['context']['region'] == 'South'
 
 
-def test_combined_tables_require_both_real_environments_and_keep_partial_points():
+def test_combined_tables_keep_partial_points_and_full_configured_maximum_when_environment_is_missing():
     c5 = METRICS[0]
     rows = [
         metric_row(c5, 'EE', 'DriveCity', score=0.8),
@@ -135,12 +137,25 @@ def test_combined_tables_require_both_real_environments_and_keep_partial_points(
     assert road_c5['values']['O2']['points'] is None
     assert road_c5['values']['O2']['complete'] is False
 
-    city_only = build_scoring_views({'levels': ['Operator']}, {'scoring': [rows[0]], 'totals': result['totals']})
-    assert [table['context']['environment'] for table in city_only['score_tables']] == ['DriveCity']
-    assert 'Combined is not shown' in city_only['score_tables'][0]['coverage_note']
+    city_only = build_scoring_views({'levels': ['Operator']}, {'scoring': [rows[0]]})
+    assert [table['context']['environment'] for table in city_only['score_tables']] == ['DriveCity', 'Combined']
+    partial_combined = city_only['score_tables'][-1]
+    partial_c5 = next(row for row in partial_combined['rows'] if row['kpi_code'] == METRICS[0]['code'])
+    assert partial_combined['combined_required_environments'] == ['DriveCity', 'DriveConnectionroad']
+    assert partial_combined['total']['max_points'] == pytest.approx(1000)
+    assert partial_c5['max_points'] == pytest.approx(
+        METRICS[0]['contexts']['DriveCity']['max_points']
+        + METRICS[0]['contexts']['DriveConnectionroad']['max_points']
+    )
+    assert partial_c5['values']['EE']['points'] == pytest.approx(METRICS[0]['contexts']['DriveCity']['max_points'] * 0.8)
+    assert partial_c5['values']['EE']['complete'] is False
+    assert partial_c5['values']['EE']['threshold_band'] == 'Unavailable'
+    assert 'All Environments is incomplete' in partial_combined['coverage_note']
+    assert 'DriveConnectionroad' in partial_combined['coverage_note']
+    assert 'without renormalization' in partial_combined['coverage_note']
 
 
-def test_combined_tables_follow_positive_environment_weights_and_require_walk_coverage():
+def test_combined_tables_follow_positive_environment_weights_and_keep_partial_walk_coverage():
     zero_walk = validate_scoring_configuration(scoring_configuration())
     assert zero_walk['scope']['environments']['Walk']['total_points'] == 0
     c5_zero_walk = zero_walk['metrics'][0]
@@ -194,9 +209,23 @@ def test_combined_tables_follow_positive_environment_weights_and_require_walk_co
         {'levels': ['Operator']},
         {'scoring': [row for row in walk_rows if row['environment'] != 'Walk'], 'configuration': walk_configuration},
     )
-    assert all(table['context']['environment'] != 'Combined' for table in no_walk_views['score_tables'])
-    assert any('Walk' in table['coverage_note'] and 'Combined is not shown' in table['coverage_note']
-               for table in no_walk_views['score_tables'])
+    no_walk_combined = next(
+        table for table in no_walk_views['score_tables'] if table['context']['environment'] == 'Combined'
+    )
+    no_walk_c5 = next(row for row in no_walk_combined['rows'] if row['kpi_code'] == c5_walk['code'])
+    assert no_walk_combined['total']['max_points'] == pytest.approx(
+        sum(metric['contexts'][environment]['max_points'] for metric in walk_configuration['metrics']
+            for environment in ('DriveCity', 'DriveConnectionroad', 'Walk'))
+    )
+    assert no_walk_c5['max_points'] == pytest.approx(sum(
+        c5_walk['contexts'][environment]['max_points'] for environment in ('DriveCity', 'DriveConnectionroad', 'Walk')
+    ))
+    assert no_walk_c5['values']['O2']['points'] == pytest.approx(
+        0.5 * (c5_walk['contexts']['DriveCity']['max_points'] + c5_walk['contexts']['DriveConnectionroad']['max_points'])
+    )
+    assert no_walk_c5['values']['O2']['complete'] is False
+    assert 'Walk' in no_walk_combined['coverage_note']
+    assert 'All Environments is incomplete' in no_walk_combined['coverage_note']
 
 
 def test_custom_environment_names_are_preserved_and_included_in_combined_views():
@@ -255,7 +284,7 @@ def test_custom_environment_names_are_preserved_and_included_in_combined_views()
     assert combined_row['values']['EE']['score'] == pytest.approx(expected_points / expected_maximum)
 
 
-def test_custom_environment_requires_coverage_before_combined_is_shown():
+def test_custom_environment_combined_view_is_shown_with_incomplete_coverage_notice():
     configuration = scoring_configuration()
     environments = configuration['scope']['environments']
     environments['Indoor'] = {'sheet': 'Indoor', 'g_level_1': 'Indoor'}
@@ -272,11 +301,18 @@ def test_custom_environment_requires_coverage_before_combined_is_shown():
         {'levels': ['Operator']}, {'scoring': rows, 'configuration': configuration},
     )
 
-    assert all(table['context']['environment'] != 'Combined' for table in views['score_tables'])
-    assert any(
-        'Indoor' in table['coverage_note'] and 'Combined is not shown' in table['coverage_note']
-        for table in views['score_tables']
+    combined = next(table for table in views['score_tables'] if table['context']['environment'] == 'Combined')
+    combined_metric = next(row for row in combined['rows'] if row['kpi_code'] == metric['code'])
+    assert combined_metric['max_points'] == pytest.approx(
+        metric['contexts']['DriveCity']['max_points'] + metric['contexts']['DriveConnectionroad']['max_points']
+        + metric['contexts']['Indoor']['max_points']
     )
+    assert combined_metric['values']['EE']['points'] == pytest.approx(
+        metric['contexts']['DriveCity']['max_points'] + metric['contexts']['DriveConnectionroad']['max_points']
+    )
+    assert combined_metric['values']['EE']['complete'] is False
+    assert 'Indoor' in combined['coverage_note']
+    assert 'All Environments is incomplete' in combined['coverage_note']
 
 
 def test_legacy_environment_alias_resolves_only_to_a_configured_canonical_environment():
@@ -285,7 +321,95 @@ def test_legacy_environment_alias_resolves_only_to_a_configured_canonical_enviro
 
     legacy_views = build_scoring_views({'levels': ['Operator']}, {'scoring': [row]})
 
-    assert [table['context']['environment'] for table in legacy_views['score_tables']] == ['DriveCity']
+    assert [table['context']['environment'] for table in legacy_views['score_tables']] == ['DriveCity', 'Combined']
+
+
+def _road_configuration_with_key(road_key, road_label):
+    configuration = copy.deepcopy(CONFIG)
+    environments = configuration['scope']['environments']
+    existing_road_key = next(
+        name for name in ('DriveConnectionroad', 'Drive Connecting Roads') if name in environments
+    )
+    road = environments.pop(existing_road_key)
+    road['g_level_2'] = road_label
+    environments[road_key] = road
+    for metric in configuration['metrics']:
+        metric['contexts'][road_key] = metric['contexts'].pop(existing_road_key)
+    configuration['scope']['environment_mapping'] = {
+        (f"{item['g_level_1']} + {item['g_level_2']}" if item.get('g_level_2') is not None
+         else item['g_level_1']): name
+        for name, item in environments.items()
+    }
+    return validate_scoring_configuration(configuration)
+
+
+def test_new_canonical_road_environment_alias_and_order_are_supported():
+    configuration = _road_configuration_with_key('Drive Connecting Roads', 'Connecting Roads')
+    metric = configuration['metrics'][0]
+    road_row = metric_row(metric, 'EE', 'Drive Connecting Roads', score=0.8)
+    road_row['environment'] = 'Drive + Connecting Roads'
+    rows = [
+        metric_row(metric, 'EE', 'DriveCity', score=0.4),
+        road_row,
+    ]
+
+    views = _build_scoring_views(
+        {'levels': ['Operator'], 'baseline_operator': 'EE'},
+        {'scoring': rows, 'configuration': configuration},
+    )
+
+    assert [table['context']['environment'] for table in views['score_tables']] == [
+        'DriveCity', 'Drive Connecting Roads', 'Combined',
+    ]
+    road = next(table for table in views['score_tables']
+                if table['context']['environment'] == 'Drive Connecting Roads')
+    road_row = next(row for row in road['rows'] if row['kpi_code'] == metric['code'])
+    assert road_row['values']['EE']['points'] == pytest.approx(
+        metric['contexts']['Drive Connecting Roads']['max_points'] * 0.8,
+    )
+
+
+def test_custom_environment_name_is_preserved_after_canonical_road_rename():
+    configuration = _road_configuration_with_key('Drive Connecting Roads', 'Connecting Roads')
+    environments = configuration['scope']['environments']
+    environments['Lab North'] = {'sheet': 'Lab North', 'g_level_1': 'Lab North'}
+    configuration['scope']['environment_mapping']['Lab North'] = 'Lab North'
+    for metric in configuration['metrics']:
+        context = copy.deepcopy(metric['contexts']['DriveCity'])
+        context['max_points'] *= 0.1
+        metric['contexts']['Lab North'] = context
+    configuration = validate_scoring_configuration(configuration)
+    metric = configuration['metrics'][0]
+    rows = [metric_row(metric, 'EE', 'Lab North', score=0.7)]
+
+    views = _build_scoring_views(
+        {'levels': ['Operator'], 'baseline_operator': 'EE'},
+        {'scoring': rows, 'configuration': configuration},
+    )
+
+    assert [table['context']['environment'] for table in views['score_tables']] == [
+        'Lab North', 'Combined',
+    ]
+    custom = views['score_tables'][0]
+    assert custom['context']['environment'] == 'Lab North'
+    assert custom['rows'][0]['values']['EE']['points'] == pytest.approx(
+        metric['contexts']['Lab North']['max_points'] * 0.7,
+    )
+
+
+def test_legacy_road_snapshot_keeps_its_original_environment_key():
+    configuration = _road_configuration_with_key('DriveConnectionroad', 'Connectionroad')
+    metric = configuration['metrics'][0]
+    rows = [metric_row(metric, 'EE', 'DriveConnectionroad', score=0.8)]
+
+    views = _build_scoring_views(
+        {'levels': ['Operator'], 'baseline_operator': 'EE'},
+        {'scoring': rows, 'configuration': configuration},
+    )
+
+    assert [table['context']['environment'] for table in views['score_tables']] == [
+        'DriveConnectionroad', 'Combined',
+    ]
 
 
 def test_signed_gaps_use_operator_minus_reference_and_gap_tables_keep_all_comparable_rows():
@@ -353,7 +477,7 @@ def test_operator_order_alias_matching_and_names_are_not_collapsed():
     assert table['operators'] == ['Vodafone UK', 'O2 UK', 'Three UK', 'EE', 'EE (UK)', 'Other']
     assert table['baseline_operator'] == 'EE'
     assert table['rows'][0]['values']['EE']['points'] == table['rows'][0]['values']['EE (UK)']['points']
-    assert {gap['operator'] for gap in views['gap_tables']} == {
+    assert {gap['operator'] for gap in views['gap_tables'] if gap['context']['environment'] == 'DriveCity'} == {
         'Vodafone UK', 'O2 UK', 'Three UK', 'Other',
     }
 
@@ -372,7 +496,7 @@ def test_baseline_alias_snapshot_matches_raw_operator_name():
 
     assert table['baseline_operator'] == 'VF_UK'
     assert table['rows'][0]['gaps']['O2'] < 0
-    assert [gap['operator'] for gap in views['gap_tables']] == ['O2']
+    assert [gap['operator'] for gap in views['gap_tables'] if gap['context']['environment'] == 'DriveCity'] == ['O2']
 
 
 def test_unmapped_operator_names_fall_back_to_alphabetical_order():
@@ -394,8 +518,7 @@ def test_unknown_kpi_without_environment_is_kept_as_generic_view():
     before = copy.deepcopy(source)
     views = build_scoring_views({'levels': ['Operator']}, source)
 
-    assert len(views['score_tables']) == 1
-    table = views['score_tables'][0]
+    table = next(table for table in views['score_tables'] if table['context']['environment'] == 'Unspecified')
     assert table['context']['environment'] == 'Unspecified'
     legacy = next(row for row in table['rows'] if row['kpi'] == 'Legacy KPI')
     assert legacy['kpi_code'] == 'LEGACY-KPI:LEGACY-KPI'
@@ -546,9 +669,9 @@ def test_hierarchy_views_keep_context_leaves_and_only_compare_matching_baselines
         _hierarchy_job(), result, operator_mapping_groups=OPERATOR_MAPPING_GROUPS,
     )
 
-    assert len(views['score_tables']) == 4
-    assert len(views['hierarchy_score_tables']) == 1
-    matrix = views['hierarchy_score_tables'][0]
+    individual_tables = [table for table in views['score_tables'] if table['context']['environment'] != 'Combined']
+    assert len(individual_tables) == 4
+    matrix = next(table for table in views['hierarchy_score_tables'] if table['context']['environment'] == 'DriveCity')
     assert matrix['context'] == {'environment': 'DriveCity'}
     assert matrix['hierarchy_levels'] == ['Operator', 'Region', 'Campaign']
     assert len(matrix['hierarchy_columns']) == 7
@@ -574,7 +697,7 @@ def test_hierarchy_views_keep_context_leaves_and_only_compare_matching_baselines
     south_q2_o2 = by_context[('South', '2026Q2', 'O2 UK')]
     assert row['gaps'][south_q2_o2] is None
     assert row['values'][south_q2_o2]['points'] is not None
-    assert len(views['hierarchy_gap_tables']) == 1
+    assert len(views['hierarchy_gap_tables']) == 2
 
 
 def test_hierarchy_level_permutation_is_preserved_and_legacy_results_stay_separate():
@@ -596,7 +719,7 @@ def test_hierarchy_level_permutation_is_preserved_and_legacy_results_stay_separa
     legacy = build_scoring_views(legacy_job, legacy_result, operator_mapping_groups=OPERATOR_MAPPING_GROUPS)
     assert legacy['hierarchy_score_tables'] == []
     assert legacy['hierarchy_gap_tables'] == []
-    assert len(legacy['score_tables']) == 4
+    assert len([table for table in legacy['score_tables'] if table['context']['environment'] != 'Combined']) == 4
 
 
 def test_expanded_and_summary_rows_preserve_metric_order_and_add_category_subtotals_and_average_gaps():

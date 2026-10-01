@@ -52,6 +52,7 @@
   .scoring-note { min-height: 1.2rem; margin: 0; color: var(--muted); font-size: .82rem; }
   .scoring-note[data-kind="error"] { color: var(--danger); font-weight: 650; }
   .scoring-note[data-kind="success"] { color: var(--success); font-weight: 650; }
+  .scoring-note[data-kind="warning"] { color: #795b20; font-weight: 650; }
   .scoring-jobs-layout { display: grid; grid-template-columns: minmax(0,1fr); gap: 1rem; align-items: start; }
   .scoring-jobs-panel, .scoring-results-panel { min-width: 0; }
   .scoring-job-list { display: grid; gap: .55rem; max-height: 32rem; overflow: auto; }
@@ -74,7 +75,20 @@
   .scoring-job-progress { height: .3rem; overflow: hidden; border-radius: 999px; background: rgba(25,42,53,.1); }
   .scoring-job-progress span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg,var(--brand),#43b189); transition: width .2s ease; }
   .scoring-results-head { display: flex; align-items: flex-start; justify-content: space-between; gap: .8rem; flex-wrap: wrap; }
-  .scoring-results-tools { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: .45rem; }
+  .scoring-results-tools { display: grid; justify-items: end; gap: .5rem; }
+  .scoring-results-selector-row, .scoring-results-value-row { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: .5rem; }
+  .scoring-results-selector-row { padding: .48rem .58rem; border: 1px solid #a9c5dc; border-radius: 12px; background: #eaf3fa; }
+  .scoring-results-selector-row .scoring-environment-filter { color: #244e70; }
+  .scoring-results-selector-row select { border-color: #91b2cf; background: #fff; color: #183d5b; }
+  .scoring-results-value-row { padding: .4rem .52rem; border: 1px solid #d9d5c5; border-radius: 12px; background: #f6f4eb; }
+  .scoring-results-value-row .scoring-kpi-values-toggle { color: #385352; }
+  .scoring-results-value-row .scoring-kpi-values-toggle[data-show-gap-label] { color: #78501b; }
+  .scoring-results-value-row .scoring-kpi-values-toggle[data-show-gap-label] input { accent-color: #a8640b; }
+  .scoring-results-value-row .scoring-environment-filter { color: #78501b; }
+  .scoring-results-value-row .scoring-environment-filter select { border-color: #d7a85e; background: #fff8e8; color: #51350e; }
+  .scoring-results-value-row [hidden] { display: none !important; }
+  .scoring-results-value-row { justify-self: end; }
+  .scoring-results-tools > .scoring-export-actions { justify-content: flex-end; }
   .scoring-environment-filter { display: inline-flex; align-items: center; gap: .4rem; color: var(--muted); font-size: .74rem; font-weight: 750; }
   .scoring-environment-filter select { width: auto; min-width: 12rem; max-width: min(100%, 20rem); min-height: 2.1rem; padding: .32rem 1.8rem .32rem .6rem; font-size: .76rem; }
   .scoring-environment-filter[hidden] { display: none; }
@@ -131,26 +145,25 @@
   .scoring-comparison-table .scoring-gap-group { background: #ffff00 !important; color: #242424 !important; }
   .scoring-comparison-table th.scoring-weight-header { background: #4ea72e !important; color: #fff !important; }
   .scoring-comparison-table th.scoring-maximum-header { background: #d92d2d !important; color: #fff !important; }
-  .scoring-comparison-table th.scoring-reference-header { border-top: 5px solid #ffff00 !important; }
   .scoring-comparison-table td[data-numeric="true"] { font-variant-numeric: tabular-nums; }
   .scoring-comparison-table :is(th,td)[data-column="weight"], .scoring-comparison-table :is(th,td)[data-column="maximum"], .scoring-comparison-table :is(th,td)[data-column="kpi-value"], .scoring-comparison-table :is(th,td)[data-column="score"], .scoring-comparison-table :is(th,td)[data-column="gap"] { text-align: center !important; }
   .scoring-comparison-table td[data-column="weight"] { background: #e7f0e4; }
   .scoring-comparison-table td[data-column="maximum"] { background: #fde8e8; }
   .scoring-comparison-table th.scoring-kpi-value-header { background: #e6eaeb; color: #334854; }
   .scoring-comparison-table td.scoring-kpi-value-cell { background: #f3f5f6; font-variant-numeric: tabular-nums; }
-  .scoring-comparison-table .scoring-operator-header { border-top: 3px solid var(--operator-accent, #607d8b) !important; }
+  .scoring-comparison-table .scoring-operator-header { border-bottom: 3px solid var(--operator-accent, #607d8b) !important; }
   .scoring-comparison-table .scoring-gap-header { background: #fff5a6 !important; }
   .scoring-comparison-table th.scoring-gap-header { background: #ffff00 !important; color: #242424 !important; }
-  .scoring-comparison-table th.scoring-gap-operator-header { border-top: 4px solid var(--operator-accent, #607d8b) !important; }
+  .scoring-comparison-table th.scoring-gap-operator-header { border-bottom: 3px solid var(--operator-accent, #607d8b) !important; }
   .scoring-comparison-table th.scoring-hierarchy-header { min-width: 8rem; max-width: 20rem; white-space: normal; background: #e1e9eb; color: #263f4b; }
   .scoring-comparison-table th.scoring-hierarchy-header[data-hierarchy-depth="0"] { background: #cfdde0; }
   .scoring-comparison-table th.scoring-hierarchy-header[data-hierarchy-depth="1"] { background: #d8e4e6; }
-  .scoring-comparison-table th.scoring-hierarchy-header.scoring-reference-header { border-top: 5px solid #ffff00 !important; }
   .scoring-comparison-table th.scoring-hierarchy-header.scoring-gap-header { background: #fff5a6 !important; }
   .scoring-comparison-table .scoring-category-cell { vertical-align: middle; background: #f0f2f3; color: #334854; font-weight: 800; }
   .scoring-comparison-table tbody tr:nth-child(even) td { background-color: #f6f7f7; }
   .scoring-comparison-table tbody tr:nth-child(even) td[data-column="weight"] { background-color: #e4eee1; }
   .scoring-comparison-table tbody tr:nth-child(even) td[data-column="maximum"] { background-color: #f9dddd; }
+  .scoring-comparison-table tbody tr.scoring-category-subtotal > td { background-color: #e3e6e7 !important; font-weight: 700 !important; }
   .scoring-comparison-table tbody tr:nth-child(even) td.scoring-category-cell { background-color: #e9edef; }
   .scoring-comparison-table td.scoring-gap-loss { color: #a43d2f; font-weight: 750; }
   .scoring-comparison-table td.scoring-gap-gain { color: #247048; font-weight: 750; }
@@ -179,6 +192,11 @@
   .scoring-chart-svg .scoring-chart-axis-label { fill: #445a65; font-size: 15px; font-weight: 750; }
   .scoring-chart-svg .scoring-chart-tick { fill: #657780; font-size: 13px; }
   .scoring-chart-svg .scoring-chart-legend { fill: #334854; font-size: 15px; font-weight: 750; }
+  .scoring-chart-svg .scoring-chart-operator-legend-title { fill: #43545c; font-size: 11px; font-weight: 800; }
+  .scoring-chart-svg .scoring-chart-category-legend-title { fill: #43545c; font-size: 11px; font-weight: 800; }
+  .scoring-chart-svg .scoring-chart-category-legend-segment { cursor: help; }
+  .scoring-chart-svg .scoring-chart-category-legend-label { font-size: 12px; font-weight: 800; cursor: help; }
+  .scoring-chart-svg [data-chart-tooltip]:focus-visible { outline: 2px solid rgba(11,122,117,.7); outline-offset: 2px; }
   .scoring-chart-svg .scoring-chart-category { fill: #435964; font-size: 14px; font-weight: 650; }
   .scoring-chart-svg .scoring-best-network-segment { fill: #17303c; font-size: 11px; font-weight: 800; paint-order: stroke; stroke: rgba(255,255,255,.8); stroke-width: 2px; stroke-linejoin: round; }
   .scoring-chart-svg .scoring-allocation-total { fill: #1c3745; font-size: 25px; font-weight: 850; }
@@ -196,6 +214,8 @@
   .scoring-chart-expanded-close { flex: 0 0 auto; width: 2.25rem; min-width: 2.25rem; height: 2.25rem; min-height: 2.25rem; padding: 0; border-radius: 50%; font-size: 1.3rem; line-height: 1; }
   .scoring-chart-expanded-content { display: grid; align-content: center; min-width: 0; min-height: 0; overflow: auto; padding: .25rem; border: 1px solid rgba(25,42,53,.12); border-radius: 12px; background: #fff; }
   .scoring-chart-expanded-content .scoring-chart-svg { width: 100%; min-width: 0 !important; min-height: 0; height: auto; }
+  .scoring-chart-tooltip { position: fixed; z-index: 13000; max-width: min(25rem,calc(100vw - 1rem)); padding: .48rem .62rem; border: 1px solid rgba(255,255,255,.18); border-radius: 8px; background: #20333d; color: #fff; box-shadow: 0 6px 20px rgba(18,32,40,.24); font-size: .72rem; line-height: 1.45; white-space: pre-line; pointer-events: none; }
+  .scoring-chart-tooltip[hidden] { display: none !important; }
   .scoring-warnings { display: grid; gap: .3rem; margin: .7rem 0 0; padding-left: 1.1rem; color: #795b20; font-size: .78rem; }
   .scoring-warning-box { margin-top: .7rem; padding: .7rem .8rem; border: 1px solid rgba(213,143,31,.3); border-radius: 11px; background: #fff9e9; }
   @media(max-width:1050px) { .scoring-dataset-groups { grid-template-columns: 1fr; } .scoring-dataset-group .scoring-dataset-list { max-height: 12rem; } .scoring-best-network-layout { grid-template-columns: 1fr; } }
@@ -204,7 +224,7 @@
   @media(max-width:600px) { .scoring-context-filter-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .scoring-dataset-list { grid-template-columns: 1fr; } .scoring-controls-foot { align-items: stretch; } .scoring-actions { width: 100%; } .scoring-actions button { flex: 1 1 100%; } .scoring-chart-expanded-dialog { width: calc(100vw - .5rem); height: calc(100dvh - .5rem); padding: .65rem; gap: .5rem; border-radius: 14px; } .scoring-chart-expanded-header h3 { font-size: 1rem; } .scoring-chart-expanded-header p:not(.eyebrow) { display: none; } }
 </style>
 
-<section class="dashboard-stack spacious-stack scoring-stack" data-scoring-workspace data-configuration-error="{{ scoring_configuration_error or '' }}" data-jobs-url="/api/scoring/jobs" data-export-base="/scoring/jobs">
+<section class="dashboard-stack spacious-stack scoring-stack" data-scoring-workspace data-configuration-error="{{ scoring_configuration_error or '' }}" data-jobs-url="/api/scoring/jobs" data-selection-url="/api/scoring/selection" data-export-base="/scoring/jobs">
   <article class="panel scoring-hero">
     <div class="section-head tight-head">
       <div>
@@ -328,22 +348,27 @@
       <div class="scoring-results-head">
         <div><p class="eyebrow">Latest saved result</p><h3 id="scoring-results-title">Scoring results</h3><p class="scoring-result-meta" data-result-meta>Select a completed job to inspect its output.</p><nav class="scoring-config-shortcuts scoring-results-config-shortcuts" aria-label="Scoring configuration sections"><a data-config-shortcut="kpi" href="/workspace-config#scoring-kpi-configuration">KPI configuration</a><a data-config-shortcut="hierarchy" href="/workspace-config#scoring-aggregation-hierarchy">Aggregation hierarchy</a><a data-config-shortcut="gap" href="/workspace-config#scoring-gap-priority">GAP priorities</a></nav></div>
         <div class="scoring-results-tools">
-          <label class="scoring-kpi-values-toggle"><input type="checkbox" data-show-kpi-values> Show KPI values</label>
-          <label class="scoring-environment-filter">Results mode
-            <select data-scoring-table-mode aria-label="Choose expanded KPI rows or one summary row per category">
-              <option value="expanded" selected>Expanded</option>
-              <option value="summary">Summary</option>
-            </select>
-          </label>
-          <label class="scoring-environment-filter">GAP columns
-            <select data-scoring-gap-layout aria-label="Choose whether GAP columns appear at the end or next to each score">
-              <option value="end" selected>At the end</option>
-              <option value="adjacent">Next to each score</option>
-            </select>
-          </label>
-          <label class="scoring-environment-filter" data-result-environment-control hidden>Environment
-            <select data-result-environment aria-label="Filter scoring tables, charts and GAP analysis by environment; defaults to all environments"></select>
-          </label>
+          <div class="scoring-results-selector-row" data-scoring-results-selector-row>
+            <label class="scoring-environment-filter" data-result-environment-control hidden>Environment
+              <select data-result-environment aria-label="Filter scoring tables, charts and GAP analysis by environment; defaults to all environments"></select>
+            </label>
+            <label class="scoring-environment-filter">Results mode
+              <select data-scoring-table-mode aria-label="Choose expanded KPI rows or one summary row per category">
+                <option value="expanded" selected>Expanded</option>
+                <option value="summary">Summary</option>
+              </select>
+            </label>
+          </div>
+          <div class="scoring-results-value-row" data-scoring-results-value-row>
+            <label class="scoring-kpi-values-toggle"><input type="checkbox" data-show-kpi-values> Show KPI values</label>
+            <label class="scoring-kpi-values-toggle" data-show-gap-label><input type="checkbox" data-show-gap-values> Show GAP values</label>
+            <label class="scoring-environment-filter" data-scoring-gap-layout-control hidden>GAP columns
+              <select data-scoring-gap-layout aria-label="Choose whether GAP columns appear at the end or next to each score">
+                <option value="end" selected>At the end</option>
+                <option value="adjacent">Next to each score</option>
+              </select>
+            </label>
+          </div>
           <div class="scoring-export-actions" aria-label="Export selected job">
             <a href="#" data-export-scoring hidden>Scoring CSV</a>
             <a href="#" data-export-gap hidden>GAP CSV</a>
@@ -352,7 +377,7 @@
         </div>
       </div>
       <div class="scoring-result-tabs" role="tablist" aria-label="Scoring outputs">
-        <button type="button" class="scoring-result-tab" role="tab" aria-selected="true" aria-controls="scoring-table-pane" data-result-tab="scoring">Scoring Tables</button>
+        <button type="button" class="scoring-result-tab" role="tab" aria-selected="true" aria-controls="scoring-table-pane" data-result-tab="scoring">Scoring Table</button>
         <button type="button" class="scoring-result-tab" role="tab" aria-selected="false" aria-controls="scoring-gap-pane" data-result-tab="gap">GAP Analysis</button>
         <button type="button" class="scoring-result-tab" role="tab" aria-selected="false" aria-controls="scoring-chart-pane" data-result-tab="charts">Scoring Chart</button>
         <button type="button" class="scoring-result-tab" role="tab" aria-selected="false" aria-controls="scoring-best-network-pane" data-result-tab="best-network">Best Network Chart</button>

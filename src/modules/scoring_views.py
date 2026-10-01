@@ -122,7 +122,7 @@ def build_scoring_views(job: dict[str, Any] | None, result: dict[str, Any] | Non
         operators = sorted(styles, key=lambda name: (styles[name]['position'], styles[name]['label'].casefold(), name.casefold()))
         actual_environments = {environment for environment in environment_records if environment != 'Combined'}
         environments = sorted(actual_environments, key=_environment_sort_key)
-        if combined_environments and set(combined_environments) <= actual_environments:
+        if combined_environments:
             environments.append('Combined')
 
         for environment in environments:
@@ -312,7 +312,7 @@ def _build_hierarchy_tables(
                 if code not in templates:
                     templates[code] = {
                         key: copy.deepcopy(value) for key, value in row.items()
-                        if key not in {'values', 'gaps', 'gap_colors'}
+                        if key not in {'values', 'gaps', 'gap_colors', 'gap_partial', 'gap_environments'}
                     }
 
         metric_order = {metric['code']: index for index, metric in enumerate(metrics)}
@@ -335,11 +335,15 @@ def _build_hierarchy_tables(
                 cell = source_row.get('values', {}).get(raw_operator) if source_row else None
                 row['values'][leaf_id] = copy.deepcopy(cell) if cell is not None else _missing_hierarchy_value()
             row['gaps'] = {}
+            row['gap_partial'] = {}
+            row['gap_environments'] = {}
             for column in columns:
                 baseline_id = baseline_by_context.get(_hierarchy_context_key(column['path']))
-                row['gaps'][column['id']] = _signed_gap(
+                (row['gaps'][column['id']], row['gap_partial'][column['id']],
+                 row['gap_environments'][column['id']]) = _gap_with_coverage(
                     row['values'].get(baseline_id) if baseline_id else None,
                     row['values'][column['id']], column['operator'], requested_baseline, baseline_aliases,
+                    environment,
                 )
             rows.append(row)
 
@@ -358,23 +362,39 @@ def _build_hierarchy_tables(
             raw_total = table.get('total', {}).get('values', {}).get(raw_operator)
             total_values[leaf_id] = copy.deepcopy(raw_total) if raw_total is not None else {'points': None, 'complete': False}
         total_gaps = {}
+        total_gap_partial = {}
+        total_gap_environments = {}
         for column in columns:
             baseline_id = baseline_by_context.get(_hierarchy_context_key(column['path']))
             baseline_total = total_values.get(baseline_id) if baseline_id else None
             current_total = total_values.get(column['id'])
-            if (column['is_reference'] and current_total and current_total.get('complete')
+            if environment == 'Combined':
+                (total_gaps[column['id']], total_gap_partial[column['id']],
+                 total_gap_environments[column['id']]) = _gap_with_coverage(
+                    baseline_total, current_total, column['operator'], requested_baseline,
+                    baseline_aliases, environment,
+                )
+            elif (column['is_reference'] and current_total and current_total.get('complete')
                     and current_total.get('points') is not None):
                 total_gaps[column['id']] = 0.0
+                total_gap_partial[column['id']] = False
+                total_gap_environments[column['id']] = [environment]
             elif (baseline_total and current_total and baseline_total.get('complete') and current_total.get('complete')
                   and baseline_total.get('points') is not None and current_total.get('points') is not None):
                 total_gaps[column['id']] = _clean_number(current_total['points'] - baseline_total['points'])
+                total_gap_partial[column['id']] = False
+                total_gap_environments[column['id']] = [environment]
             else:
                 total_gaps[column['id']] = None
+                total_gap_partial[column['id']] = False
+                total_gap_environments[column['id']] = []
         total = {
             'max_points': first_table.get('total', {}).get('max_points'),
             'weight_percent': first_table.get('total', {}).get('weight_percent'),
             'values': total_values,
             'gaps': total_gaps,
+            'gap_partial': total_gap_partial,
+            'gap_environments': total_gap_environments,
         }
         combined_required_environments = next((
             list(table.get('combined_required_environments') or []) for table in context_tables
@@ -408,6 +428,8 @@ def _build_hierarchy_tables(
                 key: copy.deepcopy(row[key]) for key in ('category', 'kpi', 'kpi_code', 'kpi_type') if key in row
             } | {
                 'gaps': dict(row['gaps']), 'gap_colors': dict(row['gap_colors']),
+                'gap_partial': dict(row['gap_partial']),
+                'gap_environments': copy.deepcopy(row['gap_environments']),
             })
         gap_rows.sort(key=lambda row: (
             gap_priority_rank.get(row['kpi_code'], len(gap_priority_rank)),
@@ -422,10 +444,17 @@ def _build_hierarchy_tables(
             'hierarchy_columns': columns,
             'hierarchy_levels': list(levels),
             'rows': gap_rows,
-            'total': {'gaps': dict(total_gaps)},
+            'total': {
+                'gaps': dict(total_gaps),
+                'gap_partial': dict(total_gap_partial),
+                'gap_environments': copy.deepcopy(total_gap_environments),
+            },
             'gap_scale_max': gap_scale_max,
             'gap_scale_colors': {'zero': _GAP_NEUTRAL, 'positive': _GAP_POSITIVE_MAX, 'negative': _GAP_NEGATIVE_MAX},
-            'note': 'GAP comparisons use the reference operator in the same selected context. Missing matches are N/A.',
+            'note': _join_notes(
+                'GAP comparisons use the reference operator in the same selected context. Missing matches are N/A.',
+                _partial_gap_note(gap_rows, leaf_ids),
+            ),
             'gap_direction': 'operator_minus_reference',
         }
         _attach_gap_matrix_modes(gap_matrix, gap_priority_rank)
@@ -482,10 +511,12 @@ def _build_score_table(
             maximum = _unknown_max_points(code, source_rows, environment, combined_environments)
         weight_percent = maximum * 100.0 / global_max_points if maximum is not None and global_max_points > 0 else None
         gaps = {}
+        gap_partial = {}
+        gap_environments = {}
         for operator in operators:
-            gaps[operator] = _signed_gap(
+            gaps[operator], gap_partial[operator], gap_environments[operator] = _gap_with_coverage(
                 row_values.get(baseline_operator), row_values.get(operator),
-                operator, baseline_operator, baseline_aliases,
+                operator, baseline_operator, baseline_aliases, environment,
             )
         rows.append({
             'kpi_code': code,
@@ -497,6 +528,8 @@ def _build_score_table(
             'max_points': maximum,
             'values': row_values,
             'gaps': gaps,
+            'gap_partial': gap_partial,
+            'gap_environments': gap_environments,
         })
 
     total_max_points = sum(row['max_points'] for row in rows if row['max_points'] is not None)
@@ -511,22 +544,38 @@ def _build_score_table(
         )
         zero_weight_only = all((_number(row.get('max_points')) or 0.0) == 0 for row in rows)
         total_points = sum(known_points) if known_points else (0.0 if zero_weight_only else None)
-        total_values[operator] = {'points': total_points, 'complete': complete}
+        total_values[operator] = {
+            'points': total_points,
+            'complete': complete,
+            **({'environment_values': _sum_environment_contributions(cells)} if environment == 'Combined' else {}),
+        }
+    total_gap_partial: dict[str, bool] = {}
+    total_gap_environments: dict[str, list[str]] = {}
     for operator in operators:
         baseline_total = total_values.get(baseline_operator)
         operator_total = total_values.get(operator)
-        if (_same_baseline_identity(operator, baseline_operator, baseline_aliases) or not baseline_total or not operator_total
+        if environment == 'Combined':
+            total_gaps[operator], total_gap_partial[operator], total_gap_environments[operator] = _gap_with_coverage(
+                baseline_total, operator_total, operator, baseline_operator, baseline_aliases, environment,
+            )
+        elif (_same_baseline_identity(operator, baseline_operator, baseline_aliases) or not baseline_total or not operator_total
                 or not baseline_total['complete'] or not operator_total['complete']
                 or baseline_total['points'] is None or operator_total['points'] is None):
             total_gaps[operator] = None
+            total_gap_partial[operator] = False
+            total_gap_environments[operator] = []
         else:
             total_gaps[operator] = _clean_number(operator_total['points'] - baseline_total['points'])
+            total_gap_partial[operator] = False
+            total_gap_environments[operator] = [environment] if environment else []
 
     total = {
         'max_points': total_max_points,
         'weight_percent': total_max_points * 100.0 / global_max_points if global_max_points > 0 else None,
         'values': total_values,
         'gaps': total_gaps,
+        'gap_partial': total_gap_partial,
+        'gap_environments': total_gap_environments,
     }
     gap_scale_max = max(
         (abs(gap) for row in rows for gap in row['gaps'].values() if gap is not None),
@@ -569,6 +618,10 @@ def _build_gap_summary_table(
         'gaps': {operator: row['gaps'].get(operator) for operator in operators},
         'gap_colors': {operator: gap_color(row['gaps'].get(operator), score_table['gap_scale_max'])
                        for operator in operators},
+        'gap_partial': {operator: row.get('gap_partial', {}).get(operator, False) for operator in operators},
+        'gap_environments': {
+            operator: list(row.get('gap_environments', {}).get(operator) or []) for operator in operators
+        },
     } for row in score_table['rows']]
     rows = _priority_order_rows(rows, gap_priority_rank)
     table = {
@@ -578,10 +631,21 @@ def _build_gap_summary_table(
         'baseline_operator': baseline,
         'operator_styles': score_table.get('operator_styles', {}),
         'rows': rows,
-        'total': {'gaps': {operator: score_table['total']['gaps'].get(operator) for operator in operators}},
+        'total': {
+            'gaps': {operator: score_table['total']['gaps'].get(operator) for operator in operators},
+            'gap_partial': {operator: score_table['total'].get('gap_partial', {}).get(operator, False)
+                            for operator in operators},
+            'gap_environments': {
+                operator: list(score_table['total'].get('gap_environments', {}).get(operator) or [])
+                for operator in operators
+            },
+        },
         'gap_scale_max': score_table['gap_scale_max'],
         'gap_scale_colors': dict(score_table['gap_scale_colors']),
-        'note': 'Operator − reference. Positive values are green; negative values are red. Missing comparisons are N/A.',
+        'note': _join_notes(
+            'Operator − reference. Positive values are green; negative values are red. Missing comparisons are N/A.',
+            _partial_gap_note(rows, operators),
+        ),
     }
     _attach_gap_matrix_modes(table, gap_priority_rank)
     return table
@@ -607,6 +671,8 @@ def _build_gap_tables(
                 'kpi_type': row['kpi_type'],
                 'source_kind': row.get('source_kind'),
                 'gap_color': gap_color(gap, score_table['gap_scale_max']),
+                'gap_partial': bool(row.get('gap_partial', {}).get(operator, False)),
+                'gap_environments': list(row.get('gap_environments', {}).get(operator) or []),
             }
             mode_rows.append(mode_row)
             if gap is not None:
@@ -621,9 +687,14 @@ def _build_gap_tables(
             'operator_styles': score_table.get('operator_styles', {}),
             'rows': prioritized,
             'total_gap_points': total_gap,
+            'gap_partial': bool(score_table['total'].get('gap_partial', {}).get(operator, False)),
+            'gap_environments': list(score_table['total'].get('gap_environments', {}).get(operator) or []),
             'gap_scale_max': score_table['gap_scale_max'],
             'gap_scale_colors': dict(score_table['gap_scale_colors']),
-            'note': 'Positive values mean the compared operator scores above the reference; negative values mean it scores below.',
+            'note': _join_notes(
+                'Positive values mean the compared operator scores above the reference; negative values mean it scores below.',
+                _partial_gap_note(mode_rows, [operator]),
+            ),
             'gap_direction': 'operator_minus_reference',
         }
         _attach_scalar_gap_modes(table, gap_priority_rank, mode_rows)
@@ -655,6 +726,34 @@ def _average_numbers(values: list[Any]) -> float | None:
     return _clean_number(sum(valid) / len(valid)) if valid else None
 
 
+def _matrix_gap_metadata(
+    rows: list[dict[str, Any]], operators: list[str],
+) -> tuple[dict[str, bool], dict[str, list[str]]]:
+    partial: dict[str, bool] = {}
+    environments: dict[str, list[str]] = {}
+    for operator in operators:
+        contributing = [row for row in rows if _number(row.get('gaps', {}).get(operator)) is not None]
+        partial[operator] = any(bool(row.get('gap_partial', {}).get(operator)) for row in contributing)
+        names = {
+            str(name)
+            for row in contributing
+            for name in (row.get('gap_environments', {}).get(operator) or [])
+        }
+        environments[operator] = sorted(names, key=_environment_sort_key)
+    return partial, environments
+
+
+def _scalar_gap_metadata(rows: list[dict[str, Any]]) -> tuple[bool, list[str]]:
+    contributing = [row for row in rows if _number(row.get('gap_points')) is not None]
+    partial = any(bool(row.get('gap_partial')) for row in contributing)
+    environments = {
+        str(name)
+        for row in contributing
+        for name in (row.get('gap_environments') or [])
+    }
+    return partial, sorted(environments, key=_environment_sort_key)
+
+
 def _ordered_category_groups(
     rows: list[dict[str, Any]], gap_priority_rank: dict[str, int],
 ) -> list[tuple[str, list[dict[str, Any]]]]:
@@ -683,6 +782,7 @@ def _category_gap_row(
         operator: _average_numbers([row.get('gaps', {}).get(operator) for row in rows])
         for operator in operators
     }
+    gap_partial, gap_environments = _matrix_gap_metadata(rows, operators)
     return {
         'row_type': 'category',
         'category': category,
@@ -691,13 +791,21 @@ def _category_gap_row(
         'kpi_type': '',
         'source_kind': None,
         'gaps': gaps,
+        'gap_partial': gap_partial,
+        'gap_environments': gap_environments,
         'gap_colors': {operator: gap_color(gaps[operator], gap_scale_max) for operator in operators},
     }
 
 
-def _mode_total(total: dict[str, Any], gaps: dict[str, float | None], operators: list[str], scale_max: float) -> dict[str, Any]:
+def _mode_total(
+    total: dict[str, Any], gaps: dict[str, float | None], operators: list[str], scale_max: float,
+    gap_partial: dict[str, bool] | None = None,
+    gap_environments: dict[str, list[str]] | None = None,
+) -> dict[str, Any]:
     output = copy.deepcopy(total)
     output['gaps'] = gaps
+    output['gap_partial'] = gap_partial or {operator: False for operator in operators}
+    output['gap_environments'] = gap_environments or {operator: [] for operator in operators}
     output['gap_colors'] = {operator: gap_color(gaps.get(operator), scale_max) for operator in operators}
     output['gap_label'] = 'Average KPI GAP'
     return output
@@ -719,10 +827,17 @@ def _attach_score_table_modes(table: dict[str, Any], _gap_priority_rank: dict[st
         operator: _average_numbers([row.get('gaps', {}).get(operator) for row in rows])
         for operator in operators
     }
+    average_gap_partial, average_gap_environments = _matrix_gap_metadata(rows, operators)
     table['expanded_rows'] = expanded_rows
     table['category_rows'] = category_rows
-    table['expanded_total'] = _mode_total(table.get('total') or {}, average_gaps, operators, scale_max)
-    table['category_total'] = _mode_total(table.get('total') or {}, average_gaps, operators, scale_max)
+    table['expanded_total'] = _mode_total(
+        table.get('total') or {}, average_gaps, operators, scale_max,
+        average_gap_partial, average_gap_environments,
+    )
+    table['category_total'] = _mode_total(
+        table.get('total') or {}, average_gaps, operators, scale_max,
+        average_gap_partial, average_gap_environments,
+    )
 
 
 def _score_category_row(
@@ -758,6 +873,7 @@ def _score_category_row(
         operator: _average_numbers([row.get('gaps', {}).get(operator) for row in rows])
         for operator in operators
     }
+    gap_partial, gap_environments = _matrix_gap_metadata(rows, operators)
     return {
         'row_type': 'category',
         'category': category,
@@ -769,7 +885,16 @@ def _score_category_row(
         'weight_percent': _clean_number(sum(weights)) if weights else None,
         'max_points': _clean_number(max_points),
         'values': values,
+        'environment_values': {
+            operator: _sum_environment_contributions(cells)
+            for operator, cells in (
+                (operator, [row.get('values', {}).get(operator) or {} for row in rows])
+                for operator in operators
+            )
+        },
         'gaps': gaps,
+        'gap_partial': gap_partial,
+        'gap_environments': gap_environments,
         'gap_colors': {operator: gap_color(gaps[operator], gap_scale_max) for operator in operators},
     }
 
@@ -789,11 +914,16 @@ def _attach_gap_matrix_modes(table: dict[str, Any], gap_priority_rank: dict[str,
         operator: _average_numbers([row.get('gaps', {}).get(operator) for row in rows])
         for operator in operators
     }
+    average_gap_partial, average_gap_environments = _matrix_gap_metadata(rows, operators)
     table['expanded_rows'] = expanded_rows
     table['category_rows'] = category_rows
     total = table.get('total') if isinstance(table.get('total'), dict) else {}
-    table['expanded_total'] = _mode_total(total, average_gaps, operators, scale_max)
-    table['category_total'] = _mode_total(total, average_gaps, operators, scale_max)
+    table['expanded_total'] = _mode_total(
+        total, average_gaps, operators, scale_max, average_gap_partial, average_gap_environments,
+    )
+    table['category_total'] = _mode_total(
+        total, average_gaps, operators, scale_max, average_gap_partial, average_gap_environments,
+    )
 
 
 def _attach_scalar_gap_modes(
@@ -812,13 +942,18 @@ def _attach_scalar_gap_modes(
             'kpi_code': '', 'kpi_type': '', 'source_kind': None,
             'gap_points': mean_gap, 'gap_color': gap_color(mean_gap, scale_max),
         }
+        subtotal['gap_partial'], subtotal['gap_environments'] = _scalar_gap_metadata(category_items)
         expanded_rows.append(subtotal)
         category_rows.append(copy.deepcopy(subtotal))
     mean_gap = _average_numbers([row.get('gap_points') for row in rows])
     table['expanded_rows'] = expanded_rows
     table['category_rows'] = category_rows
-    table['expanded_total'] = {'gap_points': mean_gap, 'gap_label': 'Average KPI GAP'}
-    table['category_total'] = {'gap_points': mean_gap, 'gap_label': 'Average KPI GAP'}
+    mean_partial, mean_environments = _scalar_gap_metadata(rows)
+    table['expanded_total'] = {
+        'gap_points': mean_gap, 'gap_label': 'Average KPI GAP',
+        'gap_partial': mean_partial, 'gap_environments': mean_environments,
+    }
+    table['category_total'] = copy.deepcopy(table['expanded_total'])
 
 
 def _metric_value(record: dict[str, Any] | None, metric: dict[str, Any], environment: str) -> dict[str, Any]:
@@ -862,13 +997,21 @@ def _combined_metric_value(
     # weighted environment and derive their maxima from the source records.
     if not metric_contexts:
         required_environments = list(combined_environments)
-    cells = [
-        _metric_value(
-            _find_metric_record(code, operator, environment_records.get(environment, [])),
-            metric, environment,
-        )
-        for environment in required_environments
-    ]
+    environment_values = {}
+    cells = []
+    for environment in required_environments:
+        record = _find_metric_record(code, operator, environment_records.get(environment, []))
+        cell = _metric_value(record, metric, environment)
+        context = metric_contexts.get(environment)
+        maximum = _number(context.get('max_points')) if isinstance(context, dict) else None
+        if maximum is None and record is not None:
+            maximum = _number(_field(record, 'max_points', 'maximum_points'))
+        environment_values[environment] = {
+            'points': cell['points'],
+            'complete': cell['complete'],
+            'max_points': maximum,
+        }
+        cells.append(cell)
     known_points = [cell['points'] for cell in cells if cell['points'] is not None]
     points = sum(known_points) if known_points else (0.0 if not required_environments else None)
     maximum = _metric_max_points(metric, 'Combined', combined_environments)
@@ -883,6 +1026,7 @@ def _combined_metric_value(
         'sample_count': sum(cell['sample_count'] for cell in cells),
         'threshold_band': threshold_band,
         'color': THRESHOLD_COLORS[threshold_band],
+        'environment_values': environment_values,
     }
 
 
@@ -897,6 +1041,92 @@ def _signed_gap(
     if baseline['points'] is None or compared['points'] is None:
         return None
     return _clean_number(compared['points'] - baseline['points'])
+
+
+def _gap_with_coverage(
+    baseline: dict[str, Any] | None, compared: dict[str, Any] | None,
+    operator: str, baseline_operator: str, baseline_aliases: list[str] | None = None,
+    environment: str | None = None,
+) -> tuple[float | None, bool, list[str]]:
+    """Return a GAP and its comparable environment coverage.
+
+    Individual environments retain the strict legacy completeness behavior. For
+    Combined, only environments with complete, positive-allocation cells on both
+    sides contribute; the result is partial when that intersection omits any
+    positive-allocation contribution from either side.
+    """
+    if environment != 'Combined':
+        gap = _signed_gap(baseline, compared, operator, baseline_operator, baseline_aliases)
+        environments = [environment] if gap is not None and environment else []
+        return gap, False, environments
+
+    compared_values = compared.get('environment_values', {}) if isinstance(compared, dict) else {}
+    compared_expected = {
+        name for name, value in compared_values.items()
+        if isinstance(value, dict) and (_number(value.get('max_points')) or 0.0) > 0
+    }
+    compared_valid = {
+        name for name, value in compared_values.items()
+        if isinstance(value, dict) and (_number(value.get('max_points')) or 0.0) > 0
+        and value.get('complete') is True and _number(value.get('points')) is not None
+    }
+    same_baseline = _same_baseline_identity(operator, baseline_operator, baseline_aliases or [])
+    if same_baseline:
+        common = sorted(compared_valid, key=_environment_sort_key)
+        if not common:
+            return None, False, []
+        return 0.0, compared_valid != compared_expected, common
+
+    baseline_values = baseline.get('environment_values', {}) if isinstance(baseline, dict) else {}
+    baseline_expected = {
+        name for name, value in baseline_values.items()
+        if isinstance(value, dict) and (_number(value.get('max_points')) or 0.0) > 0
+    }
+    baseline_valid = {
+        name for name, value in baseline_values.items()
+        if isinstance(value, dict) and (_number(value.get('max_points')) or 0.0) > 0
+        and value.get('complete') is True and _number(value.get('points')) is not None
+    }
+    common = sorted(baseline_valid & compared_valid, key=_environment_sort_key)
+    if not common:
+        return None, False, []
+    gap = sum(
+        _number(compared_values[name].get('points')) - _number(baseline_values[name].get('points'))
+        for name in common
+    )
+    partial = set(common) != baseline_expected or set(common) != compared_expected
+    return _clean_number(gap), partial, common
+
+
+def _sum_environment_contributions(cells: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Aggregate per-environment KPI contributions for a total or category row."""
+    environment_names = {
+        name
+        for cell in cells
+        for name in (cell.get('environment_values') or {})
+    }
+    output: dict[str, dict[str, Any]] = {}
+    for environment in sorted(environment_names, key=_environment_sort_key):
+        contributions = [
+            (cell.get('environment_values') or {}).get(environment)
+            for cell in cells
+        ]
+        contributions = [
+            value for value in contributions
+            if isinstance(value, dict) and (_number(value.get('max_points')) or 0.0) > 0
+        ]
+        if not contributions:
+            continue
+        points = [number for item in contributions if (number := _number(item.get('points'))) is not None]
+        output[environment] = {
+            'points': _clean_number(sum(points)) if points else None,
+            'max_points': _clean_number(sum(_number(item.get('max_points')) or 0.0 for item in contributions)),
+            'complete': bool(contributions) and all(
+                item.get('complete') is True and _number(item.get('points')) is not None
+                for item in contributions
+            ),
+        }
+    return output
 
 
 def _find_metric_record(code: str, operator: str, records: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -1082,6 +1312,8 @@ def _canonical_environment(
         'drivecity': 'DriveCity', 'city': 'DriveCity', 'driveandcity': 'DriveCity',
         'driveconnectionroad': 'DriveConnectionroad', 'connectionroad': 'DriveConnectionroad',
         'road': 'DriveConnectionroad', 'driveandroad': 'DriveConnectionroad',
+        'driveconnectingroads': 'Drive Connecting Roads',
+        'connectingroads': 'Drive Connecting Roads', 'driveandconnectingroads': 'Drive Connecting Roads',
         'walk': 'Walk', 'drivewalk': 'Walk', 'driveandwalk': 'Walk',
         'combined': 'Combined',
     }
@@ -1208,24 +1440,56 @@ def _same_baseline_identity(operator: str, baseline: str, aliases: list[str] | N
     return _operator_identity(operator) in identities
 
 
+def _join_notes(*notes: str) -> str:
+    return ' '.join(note for note in notes if note)
+
+
+def _partial_gap_note(rows: list[dict[str, Any]], operators: list[str]) -> str:
+    has_partial = False
+    environments: set[str] = set()
+    for row in rows:
+        partial_value = row.get('gap_partial', False)
+        environment_value = row.get('gap_environments', [])
+        if isinstance(partial_value, dict):
+            has_partial = has_partial or any(bool(partial_value.get(operator)) for operator in operators)
+        else:
+            has_partial = has_partial or bool(partial_value)
+        if isinstance(environment_value, dict):
+            environments.update(
+                str(name)
+                for operator in operators
+                for name in (environment_value.get(operator) or [])
+            )
+        elif isinstance(environment_value, list):
+            environments.update(str(name) for name in environment_value)
+    if not has_partial:
+        return ''
+    common = sorted(environments, key=_environment_sort_key)
+    suffix = f" ({', '.join(common)})" if common else ''
+    return f'* marks a partial GAP calculated only from common available environment contributions{suffix}.'
+
+
 def _coverage_note(
     rows: list[dict[str, Any]], operators: list[str], environment: str,
     actual_environments: set[str], combined_environments: list[str] | None = None,
 ) -> str:
     notes = []
     required = combined_environments or ['DriveCity', 'DriveConnectionroad']
-    if environment != 'Combined' and environment in required:
-        missing_environments = [name for name in required if name not in actual_environments]
-        if missing_environments:
-            notes.append(
-                'Combined is not shown because weighted environments are missing: '
-                + ', '.join(missing_environments) + '.'
-            )
+    missing_environments = [name for name in required if name not in actual_environments]
+    if missing_environments and (environment == 'Combined' or environment in required):
+        notes.append(
+            'All Environments is incomplete because weighted environments are missing: '
+            + ', '.join(missing_environments)
+            + '. Available points are shown without renormalization.'
+        )
     weighted_rows = [row for row in rows if row.get('max_points') is None or (_number(row.get('max_points')) or 0.0) > 0]
     missing = sum(1 for row in weighted_rows
                   if any(not row['values'].get(operator, {}).get('complete', False) for operator in operators))
     if missing:
         notes.append(f'Incomplete KPI coverage: {missing} of {len(weighted_rows)} weighted KPI rows have at least one missing operator score.')
+    partial_note = _partial_gap_note(rows, operators)
+    if partial_note:
+        notes.append(partial_note)
     return ' '.join(notes)
 
 
@@ -1285,6 +1549,9 @@ def _scope_sort_key(scope: tuple[Any, ...]) -> tuple[str, ...]:
 def _environment_sort_key(environment: str) -> tuple[int, str]:
     if environment == 'Combined':
         return (len(_ENVIRONMENT_ORDER) + 1, 'combined')
+    identity = re.sub(r'[^a-z0-9]+', '', str(environment).casefold())
+    if identity == 'driveconnectingroads':
+        return (_ENVIRONMENT_ORDER.index('DriveConnectionroad'), str(environment).casefold())
     try:
         return (_ENVIRONMENT_ORDER.index(environment), environment.casefold())
     except ValueError:

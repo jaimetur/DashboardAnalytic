@@ -73,6 +73,12 @@ from src.modules.scoring_jobs import (
     select_latest_companion_cdrs,
     validate_complete_scoring_cdr_selection,
 )
+from src.modules.scoring_selection import (
+    SCORING_SELECTION_STATE_KEY,
+    load_scoring_selection,
+    normalize_scoring_selection,
+    save_scoring_selection,
+)
 from src.modules.repository import Repository, SCORING_CONFIGURATION_STATE_KEY, WORKSPACE_REGISTRY_TABLE, workspace_write_lock
 from src.modules.runtime_config import IGNORE_EVENT_TIME_FILTERING_ENV, env_flag, ignore_event_time_filtering
 from src.modules.query_builder import MAX_PREVIEW_ROWS, execute_query, iter_query_csv, query_column_values, validate_query
@@ -13950,6 +13956,18 @@ class ScoringJobRequest(BaseModel):
     context_filters: dict[str, list[str]] = Field(default_factory=dict)
 
 
+class ScoringSelectionRequest(BaseModel):
+    selection: dict[str, Any] | None = None
+    dataset_ids: list[Any] = Field(default_factory=list)
+    aggregation_levels: list[Any] = Field(default_factory=lambda: ['Operator'])
+    nr_mode: str = 'NSA'
+    baseline_operator: str = 'EE'
+    scoring_profile_id: str = ''
+    context_filters: dict[str, Any] = Field(default_factory=dict)
+    client_id: str | None = None
+    client_revision: int | None = Field(default=None, gt=0)
+
+
 def scoring_repository(user: SessionUser) -> Repository:
     if not active_workspace:
         raise HTTPException(status_code=409, detail='Open a workspace before using Scoring & GAP Analysis.')
@@ -14046,6 +14064,44 @@ def scoring_jobs_list(user: SessionUser = Depends(current_user)) -> dict[str, An
     return {'jobs': list_scoring_jobs(scoring_repository(user))}
 
 
+@app.get('/api/scoring/selection')
+def scoring_selection_get(user: SessionUser = Depends(current_user)) -> dict[str, Any]:
+    task_repository = scoring_repository(user)
+    persisted = task_repository.get_workspace_state(SCORING_SELECTION_STATE_KEY) is not None
+    selection, warnings = load_scoring_selection(task_repository)
+    return {'selection': selection, 'warnings': warnings, 'persisted': persisted}
+
+
+@app.put('/api/scoring/selection')
+def scoring_selection_put(
+    payload: ScoringSelectionRequest,
+    user: SessionUser = Depends(current_user),
+) -> dict[str, Any]:
+    task_repository = scoring_repository(user)
+    if payload.client_id is not None and (not payload.client_id.strip() or len(payload.client_id) > 100):
+        raise HTTPException(status_code=400, detail='Scoring selection client ID must contain 1 to 100 characters.')
+    if (payload.client_id is None) != (payload.client_revision is None):
+        raise HTTPException(status_code=400, detail='Scoring selection client ID and revision must be provided together.')
+    selection_payload = payload.selection if payload.selection is not None else {
+        'dataset_ids': payload.dataset_ids,
+        'aggregation_levels': payload.aggregation_levels,
+        'nr_mode': payload.nr_mode,
+        'baseline_operator': payload.baseline_operator,
+        'scoring_profile_id': payload.scoring_profile_id,
+        'context_filters': payload.context_filters,
+    }
+    selection, warnings = normalize_scoring_selection(task_repository, selection_payload)
+    accepted = save_scoring_selection(
+        task_repository,
+        selection,
+        client_id=payload.client_id.strip() if payload.client_id else None,
+        client_revision=payload.client_revision,
+    )
+    if not accepted:
+        selection, warnings = load_scoring_selection(task_repository)
+    return {'selection': selection, 'warnings': warnings, 'accepted': accepted}
+
+
 @app.post('/api/scoring/jobs')
 def scoring_jobs_create(payload: ScoringJobRequest, user: SessionUser = Depends(current_user)) -> dict[str, Any]:
     task_repository = scoring_repository(user)
@@ -14122,6 +14178,7 @@ def scoring_job_export(
     table_mode: str | None = None,
     gap_layout: str | None = None,
     environment: str = 'all',
+    show_gap_values: bool = True,
     user: SessionUser = Depends(current_user),
 ) -> Response:
     if table_mode is not None and table_mode not in {'expanded', 'summary'}:
@@ -14208,6 +14265,7 @@ def scoring_job_export(
                 job, result, settings.ppt_templates_dir / TEMPLATE_NAMES['nsa'],
                 operator_mapping_groups, table_mode=table_mode or 'expanded',
                 gap_layout=gap_layout or 'end', environment=selected_environment,
+                show_gap_values=show_gap_values,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
