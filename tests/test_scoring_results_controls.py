@@ -663,14 +663,14 @@ console.log(JSON.stringify({all, single, global: circles(globalSvg), one: circle
  singleText: singleSvg.children.map(item => item.textContent || '').join('|')}));
 """
     result = _run_node_json(program, {})
-    assert len(result['global']) == 6  # Two global sectors plus two family sectors per environment.
-    assert [item['stroke'] for item in result['global'][:2]] == ['#4472C4', '#7030A0']
-    assert [item['stroke'] for item in result['global'][2:]] == ['#176E77', '#E6A81D'] * 2
+    assert len(result['global']) == 4  # Environment allocation plus one global Voice/Data ring.
+    assert [item['stroke'] for item in result['global'][:2]] == ['#176E77', '#E6A81D']
+    assert [item['stroke'] for item in result['global'][2:]] == ['#4472C4', '#7030A0']
     assert len(result['one']) == 2
     assert result['one'][0]['r'] == result['global'][0]['r'] == 126
-    assert result['global'][2]['r'] > result['global'][4]['r']
-    assert len(result['single']) == 1 and result['single'][0]['color'] == '#7030A0'
-    assert result['icons'] == 7
+    assert result['global'][0]['r'] > result['global'][2]['r']
+    assert len(result['single']) == 1 and result['single'][0]['color'] == '#E6A81D'
+    assert result['icons'] == 5
     assert '1,000.00' in result['globalText']
     assert '350.00' in result['singleText']
     assert 'Global:' not in result['singleText']

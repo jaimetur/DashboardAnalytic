@@ -3499,7 +3499,7 @@
         environments.set(name, {name, ...bestNetworkTotals(table).allocation});
       }
     }
-    const palette = ['#4472C4', '#7030A0', '#C55A11', '#5B9BD5', '#A64D79'];
+    const palette = ['#176E77', '#E6A81D', '#C55A11', '#5B9BD5', '#A64D79'];
     const allocations = [...environments.values()].map((item, index) => ({...item, color: palette[index % palette.length]}))
       .filter(item => combined || item.name.toLowerCase() === requested.toLowerCase());
     return allocations.length ? allocations : [{name: requested, ...bestNetworkTotals(tableData).allocation, color: palette[0]}];
@@ -3514,12 +3514,12 @@
   }
 
   function makeMaximumAllocationDonut(environments) {
-    const voiceColor = '#176E77';
-    const dataColor = '#E6A81D';
+    const voiceColor = '#4472C4';
+    const dataColor = '#7030A0';
     const combined = environments.length > 1;
     const total = environments.reduce((sum, item) => sum + item.Voice + item.Data, 0);
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    const legendHeight = 55 + environments.length * 86;
+    const legendHeight = combined ? 130 + environments.length * 44 : 150;
     const height = Math.max(320, legendHeight);
     svg.setAttribute('viewBox', `0 0 640 ${height}`);
     svg.setAttribute('class', 'scoring-chart-svg scoring-allocation-donut');
@@ -3527,15 +3527,19 @@
     svg.setAttribute('aria-label', 'Maximum score allocation by environment, Voice and Data');
     const cx = 155;
     const cy = height / 2;
-    const ringCount = environments.length + (combined ? 1 : 0);
+    const ringCount = combined ? 2 : 1;
     const outerRadius = 126;
     const thickness = Math.min(32, 74 / ringCount);
     const ringGap = Math.min(2, 8 / ringCount);
-    const rings = combined ? [{name: 'Global', segments: environments.map(item => ({label: item.name, value: item.Voice + item.Data, color: item.color}))}] : [];
-    environments.forEach(item => rings.push({name: item.name, segments: [
-      {label: 'Voice', value: item.Voice, color: voiceColor},
-      {label: 'Data', value: item.Data, color: dataColor},
-    ]}));
+    const voiceTotal = environments.reduce((sum, item) => sum + item.Voice, 0);
+    const dataTotal = environments.reduce((sum, item) => sum + item.Data, 0);
+    const familyRing = {name: combined ? 'Global Voice/Data' : environments[0].name, segments: [
+      {label: 'Voice', value: voiceTotal, color: voiceColor},
+      {label: 'Data', value: dataTotal, color: dataColor},
+    ]};
+    const rings = combined ? [{name: 'Environments', segments: environments.map(item => ({
+      label: item.name, value: item.Voice + item.Data, color: item.color,
+    }))}, familyRing] : [familyRing];
     rings.forEach((ring, index) => {
       const radius = outerRadius - index * (thickness + ringGap);
       const circumference = 2 * Math.PI * radius;
@@ -3568,13 +3572,19 @@
       setChartTooltip(text, text.textContent);
       svg.append(icon, swatch, text);
     };
-    if (combined) legend('Global', '#465565', total, 30, 'Global', true);
-    environments.forEach((item, index) => {
-      const y = (combined ? 64 : 44) + index * 86;
-      legend(item.name, item.color, item.Voice + item.Data, y, item.name, true);
-      legend('Voice', voiceColor, item.Voice, y + 24, 'Voice');
-      legend('Data', dataColor, item.Data, y + 48, 'Data');
-    });
+    if (combined) {
+      legend('Global', '#465565', total, 30, 'Global', true);
+      legend('Voice', voiceColor, voiceTotal, 58, 'Voice');
+      legend('Data', dataColor, dataTotal, 82, 'Data');
+      environments.forEach((item, index) => {
+        legend(item.name, item.color, item.Voice + item.Data, 126 + index * 44, item.name, true);
+      });
+    } else {
+      const item = environments[0];
+      legend(item.name, item.color, total, 44, item.name, true);
+      legend('Voice', voiceColor, voiceTotal, 68, 'Voice');
+      legend('Data', dataColor, dataTotal, 92, 'Data');
+    }
     return svg;
   }
 

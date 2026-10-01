@@ -316,7 +316,7 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
         assert _rgb(gap_table.cell(reliable_rows[0], 3)) == THRESHOLD_COLORS['High'].lstrip('#')
 
     titles = [slide.shapes.title.text.split('\n')[0] for slide in presentation.slides]
-    assert titles[:2] == ['Scoring & GAP Analysis', 'Scoring & GAP Analysis — DriveCity']
+    assert titles[:2] == ['Scoring & GAP Analysis', 'DriveCity']
     assert titles[2:7] == [
         'Best Network Scoring', 'Scoring Charts — Stacked',
         'Scoring Charts — Category Comparison', 'Scoring Tables — Summary', 'Scoring Tables — Expanded',
@@ -421,7 +421,7 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     assert list(donut.series[0].values) == pytest.approx(expected_family_maximums)
     assert donut.plots[0].vary_by_categories
     assert [str(point.format.fill.fore_color.rgb) for point in donut.series[0].points] == [
-        '176E77', 'E6A81D',
+        '4472C4', '7030A0',
     ]
     best_network_slide = next(slide for slide in presentation.slides
                               if slide.shapes.title.text.split('\n')[0] == 'Best Network Scoring')
@@ -592,6 +592,15 @@ def test_intro_slides_show_all_canonical_scope_filters_without_overlapping_campa
                 shape for shape in slide.placeholders if shape.placeholder_format.type == 4
             )
             divider = next(shape for shape in slide.shapes if shape.name == 'Scoring Campaign Divider')
+            cover_layout = next(layout for layout in Presentation(TEMPLATE).slide_layouts
+                                if layout.name == 'Title Page')
+            cover_divider = next(shape for shape in cover_layout.shapes
+                                 if shape.height == 0 and abs(shape.top - Inches(5.771)) < Inches(.05))
+            assert (divider.top, divider.left, divider.width) == (
+                cover_divider.top, cover_divider.left, cover_divider.width,
+            )
+            assert divider.line.width == cover_divider.line.width
+            assert divider.line.color.rgb == cover_divider.line.color.rgb
             assert divider.top + divider.height < campaign_shape.top
             assert subtitle_shape.top + subtitle_shape.height <= divider.top
             mode_paragraph = subtitle_shape.text_frame.paragraphs[0]
@@ -608,6 +617,7 @@ def test_intro_slides_show_all_canonical_scope_filters_without_overlapping_campa
         assert filters_shape.top + filters_shape.height < campaign_shape.top
         assert all(str(paragraph.font.color.rgb) == 'CCEEF4'
                    for paragraph in filters_shape.text_frame.paragraphs)
+        assert subtitle_shape.text == 'Non-Standalone'
         assert mode_paragraph.font.size.pt == 18
         assert str(mode_paragraph.font.color.rgb) == 'FFC700'
         assert mode_paragraph._p.xpath('./a:pPr/a:buNone')
@@ -615,7 +625,7 @@ def test_intro_slides_show_all_canonical_scope_filters_without_overlapping_campa
             assert mode_paragraph.alignment == 1  # Left.
             title = slide.shapes.title.text_frame.paragraphs[0]
             assert title.alignment == 1
-            assert str(title.runs[-1].font.color.rgb) == 'A8E6CF'
+            assert str(title.font.color.rgb) == 'A8E6CF'
         for paragraph in subtitle_shape.text_frame.paragraphs:
             assert paragraph.font.name == 'Aptos'
             assert paragraph.font._rPr.get('spc') == '0'
@@ -735,7 +745,7 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     assert f'Voice  {expected_family_maximums[0]:.2f}' in _slide_text(best_network_slide)
     assert f'Data  {expected_family_maximums[1]:.2f}' in _slide_text(best_network_slide)
     assert [str(point.format.fill.fore_color.rgb) for point in donut.series[0].points] == [
-        '176E77', 'E6A81D',
+        '4472C4', '7030A0',
     ]
     best_network_text = _slide_text(best_network_slide)
     assert '650.00' in best_network_text and 'pts' in best_network_text

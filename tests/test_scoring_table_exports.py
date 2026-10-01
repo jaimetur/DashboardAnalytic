@@ -219,7 +219,7 @@ def test_all_environment_ppt_finishes_each_full_block_aggregate_first(levels):
     presentation = Presentation(BytesIO(export_scoring_powerpoint(job, result, TEMPLATE, table_mode='summary')))
     titles = [slide.shapes.title.text.split('\n')[0] for slide in presentation.slides]
     for environment in ('All Environments', 'DriveCity', 'DriveConnectionroad'):
-        assert f'Scoring & GAP Analysis — {environment}' in titles
+        assert environment in titles
     assert titles.count('Scoring Tables — Summary') == 3
     assert titles.count('Scoring Tables — Expanded') == 3
     assert titles.count('Best Network Scoring') == 3

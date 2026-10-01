@@ -450,7 +450,7 @@ def _scoring_filter_subtitle(job: dict[str, Any], environment: str | None = None
             return all_label
         return ', '.join(selected)
 
-    mode_line = f'{mode_label} · Environment: {environment}' if environment else mode_label
+    mode_line = mode_label
     return '\n'.join([
         mode_line,
         f'Aggregation: {", ".join(level_labels) if level_labels else "Operator"}',
@@ -494,13 +494,7 @@ def _fit_scoring_intro_subtitle(presentation, slide, layout_name: str, subtitle:
         title_shape.height = Inches(.55)
         paragraph = title_shape.text_frame.paragraphs[0]
         paragraph.alignment = PP_ALIGN.LEFT
-        prefix, separator, environment = title_text.partition(' — ')
-        paragraph.clear()
-        paragraph.add_run().text = prefix + separator
-        if environment:
-            run = paragraph.add_run()
-            run.text = environment
-            run.font.color.rgb = RGBColor.from_string('A8E6CF')
+        paragraph.font.color.rgb = RGBColor.from_string('A8E6CF')
     for paragraph in title_shape.text_frame.paragraphs:
         paragraph.font.size = Pt(44 if cover else 30)
 
@@ -568,7 +562,7 @@ def _set_shape_geometry(shape, height: int) -> None:
 def _add_scoring_intro_slides(
     presentation, job: dict[str, Any], result: dict[str, Any], *, environment: str | None = None,
 ) -> None:
-    title = 'Scoring & GAP Analysis' + (f' — {environment}' if environment else '')
+    title = environment or 'Scoring & GAP Analysis'
     subtitle = _scoring_filter_subtitle(job, environment)
     campaigns = _campaigns_for_export(job, result)
     campaign_text = f'Campaigns: {", ".join(campaigns) if campaigns else "All Campaigns"}'
@@ -579,18 +573,26 @@ def _add_scoring_intro_slides(
     slide = presentation.slides.add_slide(layout)
     _set_structural_slide_text(slide, title, subtitle)
     _fit_scoring_intro_subtitle(presentation, slide, layout_name, subtitle)
-    if environment is None:
-        # The title-page template provides its own short divider under the metadata.
-        campaign_top = 5.9
-    else:
-        divider = slide.shapes.add_shape(
-            MSO_SHAPE.RECTANGLE, Inches(.6), Inches(5.25), Inches(2.47), Inches(.018),
-        )
-        divider.name = 'Scoring Campaign Divider'
-        divider.fill.solid()
-        divider.fill.fore_color.rgb = RGBColor.from_string('FFC700')
-        divider.line.fill.background()
-        campaign_top = 5.45
+    if environment is not None:
+        title_layout = _named_slide_layout(presentation, 'Title Page')
+        source = next((shape for shape in title_layout.shapes
+                       if shape.top is not None and abs(shape.top - Inches(5.771)) < Inches(.05)
+                       and shape.height == 0), None)
+        if source is not None:
+            divider_element = deepcopy(source._element)
+            properties = divider_element.xpath('.//p:cNvPr')[0]
+            properties.set('id', str(slide.shapes._next_shape_id))
+            properties.set('name', 'Scoring Campaign Divider')
+            slide.shapes._spTree.insert_element_before(divider_element, 'p:extLst')
+        else:
+            divider = slide.shapes.add_shape(
+                MSO_SHAPE.RECTANGLE, Inches(.6), Inches(5.771), Inches(2.47), Inches(.025),
+            )
+            divider.name = 'Scoring Campaign Divider'
+            divider.fill.solid()
+            divider.fill.fore_color.rgb = RGBColor.from_string('F3D3DF')
+            divider.line.fill.background()
+    campaign_top = 5.9
     campaign_shape = _text(slide, campaign_text, campaign_top, left=.52, width=10.68, height=.32,
                            size=16, color=_WHITE)
     campaign_shape.name = 'Scoring Campaigns'

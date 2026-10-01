@@ -14,9 +14,9 @@ from pptx.oxml.ns import qn
 from pptx.util import Inches, Pt
 
 
-_GLOBAL_COLORS = ('4472C4', '7030A0', 'C55A11', '5B9BD5', 'A64D79')
-_VOICE_COLOR = '176E77'
-_DATA_COLOR = 'E6A81D'
+_GLOBAL_COLORS = ('176E77', 'E6A81D', 'C55A11', '5B9BD5', 'A64D79')
+_VOICE_COLOR = '4472C4'
+_DATA_COLOR = '7030A0'
 
 
 def _number(value: Any) -> float:
@@ -260,12 +260,12 @@ def add_maximum_allocation_donut(
     width: float,
     height: float,
 ):
-    """Add an editable Global doughnut with nested Voice/Data environment rings.
+    """Add an editable environment doughnut with one inner Voice/Data allocation ring.
 
     Geometry is in inches and describes the whole widget: the chart sits on the
     left, with compact per-environment maxima alongside it. Combined matrices
-    show environment totals on the outer Global ring and a Voice/Data ring per
-    environment inside it; a specific environment shows only its ring. The
+    show environment totals on the outer ring and global Voice/Data totals
+    inside it; a specific environment shows only its ring. The
     returned value is the outer native chart.
     """
     allocations = _selected_allocations(matrix, environment_allocations)
@@ -283,21 +283,19 @@ def add_maximum_allocation_donut(
         )
     else:
         totals = [voice + data_points for _, voice, data_points in allocations]
-        global_colors = [_GLOBAL_COLORS[i % len(_GLOBAL_COLORS)] for i in range(len(allocations))]
+        family_totals = [sum(voice for _, voice, _ in allocations),
+                         sum(data_points for _, _, data_points in allocations)]
         chart = _allocation_chart(
             slide, [environment for environment, _, _ in allocations], totals,
-            global_colors, chart_left, chart_top, chart_size, 63,
+            [_global_color(environment, environment_allocations) for environment, _, _ in allocations],
+            chart_left, chart_top, chart_size, 72,
         )
-        ring_step = chart_size * .55 / (len(allocations) + 1)
-        for index, (environment, voice, data_points) in enumerate(allocations):
-            ring_size = chart_size - ring_step * (index + 1)
-            hole_size = min(90, max(10, round(100 * (ring_size - ring_step) / ring_size)))
-            ring_left = left + (chart_size - ring_size) / 2
-            ring_top = top + (height - ring_size) / 2
-            _allocation_chart(
-                slide, ['Voice', 'Data'], [voice, data_points],
-                [_VOICE_COLOR, _DATA_COLOR], ring_left, ring_top, ring_size, hole_size,
-            )
+        ring_size = chart_size * .72
+        _allocation_chart(
+            slide, ['Voice', 'Data'], family_totals, [_VOICE_COLOR, _DATA_COLOR],
+            left + (chart_size - ring_size) / 2, top + (height - ring_size) / 2,
+            ring_size, 63,
+        )
 
     center_total = sum(voice + data_points for _, voice, data_points in allocations)
     center = slide.shapes.add_textbox(
@@ -316,18 +314,23 @@ def add_maximum_allocation_donut(
 
     label_left = left + chart_size + .10
     label_width = max(.35, left + width - label_left)
-    block_height = height / len(allocations)
-    legend_top = top
-    for index, (environment, voice, data_points) in enumerate(allocations):
-        block_top = legend_top + index * block_height
-        global_color = _global_color(environment, environment_allocations)
-        heading_height = block_height * .48
-        family_height = (block_height - heading_height) / 2
-        _legend_row(slide, label_left, block_top, label_width, heading_height,
-                    _environment_kind(environment), global_color,
+    if len(allocations) > 1:
+        _legend_row(slide, label_left, top, label_width, .35,
+                    'voice', _VOICE_COLOR, f'Voice  {sum(v for _, v, _ in allocations):.2f} pts')
+        _legend_row(slide, label_left, top + .35, label_width, .35,
+                    'data', _DATA_COLOR, f'Data  {sum(d for _, _, d in allocations):.2f} pts')
+        block_height = (height - .8) / len(allocations)
+        for index, (environment, voice, data_points) in enumerate(allocations):
+            _legend_row(slide, label_left, top + .8 + index * block_height, label_width, block_height,
+                        _environment_kind(environment), _global_color(environment, environment_allocations),
+                        f'{environment}\n{voice + data_points:.2f} pts', True, wrap=True)
+    else:
+        environment, voice, data_points = allocations[0]
+        _legend_row(slide, label_left, top, label_width, height * .48,
+                    _environment_kind(environment), _global_color(environment, environment_allocations),
                     f'{environment}\n{voice + data_points:.2f} pts', True, wrap=True)
-        _legend_row(slide, label_left, block_top + heading_height, label_width, family_height,
+        _legend_row(slide, label_left, top + height * .48, label_width, height * .26,
                     'voice', _VOICE_COLOR, f'Voice  {voice:.2f} pts')
-        _legend_row(slide, label_left, block_top + heading_height + family_height,
-                    label_width, family_height, 'data', _DATA_COLOR, f'Data  {data_points:.2f} pts')
+        _legend_row(slide, label_left, top + height * .74, label_width, height * .26,
+                    'data', _DATA_COLOR, f'Data  {data_points:.2f} pts')
     return chart
