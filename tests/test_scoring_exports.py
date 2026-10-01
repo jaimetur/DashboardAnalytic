@@ -181,7 +181,7 @@ def _assert_sparse_series_values(series, expected_values):
 
 
 def _assert_gray_category_row(table, row_index):
-    assert str(table.cell(row_index, 0).fill.fore_color.rgb).upper() == 'E6F0F7'
+    assert str(table.cell(row_index, 0).fill.fore_color.rgb).upper() == 'DCE5E9'
     assert all(str(table.cell(row_index, column).fill.fore_color.rgb).upper() == CATEGORY_SUBTOTAL_FILL
                for column in range(1, len(table.columns)))
 
@@ -258,6 +258,8 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     table = matrices[-1]
     headers = _normalized_headers(table)
     assert headers[:5] == ['NETCHECK KPIs', 'KPI', 'Type of KPI', 'Score weight (%)', 'Max score']
+    assert [_rgb(table.cell(0, index)) for index in range(3)] == ['455B65'] * 3
+    assert _rgb(table.cell(1, 0)) == 'DCE5E9'
     operator_columns = _operator_columns(table)
     assert list(operator_columns) == list(MAPPED_OPERATOR_ORDER)
     gap_columns = [index for index, header in enumerate(headers) if header.startswith('GAP ')]

@@ -716,7 +716,8 @@ def _score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap
                 numeric_font = _hierarchy_content_font(
                     numeric_texts, remaining, maximum=min(11, min(body_heights) * 72 * .82),
                 )
-                colors = ['#E6F0F7', '#455B65' if is_summary else _WHITE, *([] if is_summary else [_WHITE]), '#4EA72E', '#FF0000',
+                colors = ['#E6F0F7' if is_summary else _GAP_SUMMARY_HEADER, _GAP_SUMMARY_HEADER,
+                          *([] if is_summary else [_GAP_SUMMARY_HEADER]), '#4EA72E', '#FF0000',
                           *[_operator_color(matrix, name) for name in operators], *['#FFFF00'] * len(comparisons)]
                 for index, header in enumerate(headers):
                     _cell(table.cell(0, index), header, color=colors[index],
@@ -729,7 +730,7 @@ def _score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap
                     row_color = _CATEGORY_TOTAL if subtotal else None
                     best, worst = (_summary_extreme_operators(metric.get('values', {}))
                                    if matrix.get('table_mode') == 'summary' and subtotal else (set(), set()))
-                    _cell(table.cell(row_index, 0), metric['category'], color='#E6F0F7',
+                    _cell(table.cell(row_index, 0), metric['category'], color='#E6F0F7' if is_summary else '#DCE5E9',
                           size=metric_font, left=True, bold=subtotal)
                     _cell(table.cell(row_index, 1), metric['kpi'], color=row_color or '#E7E8E9',
                           bold=True, left=True, size=metric_font)
@@ -763,7 +764,7 @@ def _score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap
                         cell = table.cell(first + 1, 0)
                         cell.merge(table.cell(last + 1, 0))
                         subtotal = metrics[first].get('row_type') == 'category'
-                        _cell(cell, metrics[first]['category'], color='#E6F0F7',
+                        _cell(cell, metrics[first]['category'], color='#E6F0F7' if is_summary else '#DCE5E9',
                               size=metric_font, left=True, bold=subtotal)
                     first = last + 1
                 if include_total:
@@ -1453,9 +1454,9 @@ def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dic
             table.rows[row_index].height = Inches(row_height)
         _score_column_headers(table, plan, levels, gap_layout=gap_layout, leaf_width=leaf_width,
                               fixed_count=fixed_count)
-        static_headers = [('CATEGORY' if is_summary else 'Category', '#E6F0F7'),
-                          ('NETCHECK KPI' if is_summary else 'KPI', '#455B65' if is_summary else '#0084FF'),
-                          *([] if is_summary else [('Type of KPI', '#0084FF')]),
+        static_headers = [('CATEGORY' if is_summary else 'Category', '#E6F0F7' if is_summary else _GAP_SUMMARY_HEADER),
+                          ('NETCHECK KPI' if is_summary else 'KPI', _GAP_SUMMARY_HEADER),
+                          *([] if is_summary else [('Type of KPI', _GAP_SUMMARY_HEADER)]),
                           ('Score weight\n(%)', '#4EA72E'), ('Max score', '#FF0000')]
         for index, (label, color) in enumerate(static_headers):
             cell = table.cell(0, index)
@@ -1478,7 +1479,7 @@ def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dic
             best, worst = (_summary_extreme_columns(
                 metric.get('values', {}), [column for column, kind in plan if kind == 'Score'],
             ) if matrix.get('table_mode') == 'summary' and subtotal else (set(), set()))
-            _cell(table.cell(row_offset, 0), metric['category'], color='#E6F0F7',
+            _cell(table.cell(row_offset, 0), metric['category'], color='#E6F0F7' if is_summary else '#DCE5E9',
                   size=data_font, left=True, bold=subtotal)
             _cell(table.cell(row_offset, 1), metric['kpi'], color=row_color or '#E7E8E9',
                   bold=subtotal, left=True, size=metric_font)
@@ -1517,7 +1518,8 @@ def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dic
             color = (_SUMMARY_BEST_COLOR if kind == 'Score' and column['id'] in total_best else
                      _SUMMARY_WORST_COLOR if kind == 'Score' and column['id'] in total_worst else '#D8DFE4')
             _cell(table.cell(total_index, index), text, color=color, size=numeric_font, bold=True)
-        _merge_category_cells(table, metrics, header_rows)
+        _merge_category_cells(table, metrics, header_rows,
+                              color='#E6F0F7' if is_summary else '#DCE5E9')
         if matrix.get('table_mode') == 'summary':
             summary_legend = [('Best operator', _SUMMARY_BEST_COLOR), ('Worst operator', _SUMMARY_WORST_COLOR)]
             for index, (label, color) in enumerate(summary_legend):
@@ -1534,7 +1536,8 @@ def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dic
         _text(slide, matrix['coverage_note'], 7.27, size=8, height=.18)
 
 
-def _merge_category_cells(table, metrics: list[dict], start_row: int) -> None:
+def _merge_category_cells(table, metrics: list[dict], start_row: int,
+                          *, color: str = '#E6F0F7') -> None:
     first = 0
     while first < len(metrics):
         last = first
@@ -1545,7 +1548,7 @@ def _merge_category_cells(table, metrics: list[dict], start_row: int) -> None:
             cell = table.cell(start_row + first, 0)
             cell.merge(table.cell(start_row + last, 0))
             subtotal = metrics[first].get('row_type') == 'category'
-            _cell(cell, metrics[first]['category'], color='#E6F0F7',
+            _cell(cell, metrics[first]['category'], color=color,
                   size=7, left=True, bold=subtotal)
         first = last + 1
 
