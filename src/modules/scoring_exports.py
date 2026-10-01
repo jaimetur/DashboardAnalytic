@@ -22,7 +22,9 @@ from src.modules.cdr_reporting import (
     _named_slide_layout, _remove_all_slides, _set_slide_header,
     _set_structural_slide_text,
 )
-from src.modules.scoring_views import THRESHOLD_COLORS, build_scoring_views
+from src.modules.scoring_views import (
+    THRESHOLD_COLORS, _gap_order_key, _priority_rows_with_category_totals, build_scoring_views,
+)
 from src.modules.scoring_pptx_allocation import (
     _environment_display_label, add_maximum_allocation_donut, category_maximum_allocations,
     maximum_allocations_from_configuration,
@@ -219,7 +221,7 @@ def _text(slide, text: str, top: float, *, left: float = .55, width: float = 12.
 
 
 def _add_gap_priority_arrow(slide, table, *, header_rows: int = 1) -> None:
-    """Mark the highest-to-lowest KPI priority order beside the table body."""
+    """Mark the displayed KPI order beside the table body."""
     frame = table._graphic_frame
     label = _text(slide, 'Priority', frame.top.inches, left=frame.left.inches - .59,
                   width=.52, height=.28, size=7, color='#245A96', align=PP_ALIGN.CENTER)
@@ -1636,6 +1638,15 @@ def _hierarchy_gap_projection(matrix: dict, columns: list[dict]) -> dict:
         }
         for row in projected.get('rows', [])
     ]
+    compared_ids = [column['id'] for column in columns if not column.get('is_reference')]
+    if len({column['operator'] for column in columns if not column.get('is_reference')}) == 1:
+        if projected.get('table_mode') == 'summary':
+            projected['rows'].sort(key=lambda row: _gap_order_key(row, compared_ids))
+        else:
+            kpis = [row for row in projected['rows'] if row.get('row_type') != 'category']
+            subtotals = [row for row in projected['rows'] if row.get('row_type') == 'category']
+            projected['rows'] = (_priority_rows_with_category_totals(kpis, {}, subtotals, compared_ids)
+                                 if subtotals else sorted(kpis, key=lambda row: _gap_order_key(row, compared_ids)))
     projected['total'] = {
         'gaps': {leaf_id: matrix.get('total', {}).get('gaps', {}).get(leaf_id) for leaf_id in leaf_ids},
         'gap_partial': {leaf_id: matrix.get('total', {}).get('gap_partial', {}).get(leaf_id, False)
@@ -1814,7 +1825,7 @@ def _gap_tables(presentation, matrices: list[dict]) -> None:
                 _cell(table.cell(len(rows) + 1, column), text, color='#E4E9EC', size=metric_font, bold=True)
             average_gap = _gap_number(matrix.get('total', {'gap_points': mean_gap}))
             priority_note = _text(
-                slide, f'KPI prioritization\n\nAverage KPI GAP: {average_gap} points\n\nOperator − reference\nGreen: positive\nRed: negative\n\n{matrix["note"]}',
+                slide, f'KPIs ordered by GAP\n\nAverage KPI GAP: {average_gap} points\n\nOperator − reference\nGreen: positive\nRed: negative\n\n{matrix["note"]}',
                 1.8, left=10.2, width=2.5, height=3.9, size=13,
             )
             average_paragraph = priority_note.text_frame.paragraphs[2]
@@ -1827,7 +1838,7 @@ def _gap_tables(presentation, matrices: list[dict]) -> None:
             _merge_category_cells(table, rows, 1)
             _add_gap_priority_arrow(slide, table)
             _add_gap_color_scale(slide, matrix, left=.65, width=9.3)
-            _text(slide, 'KPI types and priority follow this job’s saved workspace configuration.', 6.85, size=10)
+            _text(slide, 'KPIs are ordered by GAP, from highest to lowest. GAP Priority does not affect this order.', 7.12, height=.25, size=9)
 
 
 def export_scoring_powerpoint(job: dict[str, Any], result: dict[str, Any], template_path: Path,

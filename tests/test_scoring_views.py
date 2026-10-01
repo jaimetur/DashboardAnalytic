@@ -6,7 +6,7 @@ import pytest
 from scoring_fixtures import scoring_configuration
 from src.modules.scoring_config import validate_scoring_configuration
 from src.modules.scoring_views import (
-    THRESHOLD_COLORS, build_scoring_views as _build_scoring_views, gap_color, normalize_result_gaps,
+    THRESHOLD_COLORS, build_scoring_views as _build_scoring_views, gap_color, normalize_result_gaps, _gap_order_key,
 )
 
 
@@ -501,7 +501,7 @@ def test_signed_gaps_use_operator_minus_reference_and_gap_tables_keep_all_compar
     assert c6['gaps']['Three UK'] == 0
     o2_gap = next(gap for gap in build_scoring_views({'levels': ['Operator'], 'baseline_operator': 'EE'}, result)['gap_tables']
                   if gap['operator'] == 'O2 UK')
-    assert o2_gap['rows'][0]['kpi_code'] == METRICS[0]['code']
+    assert o2_gap['rows'][-1]['kpi_code'] == METRICS[0]['code']
     assert len(o2_gap['rows']) == 32
     assert any(row['gap_points'] < 0 for row in o2_gap['rows'])
     assert any(row['gap_points'] == 0 for row in o2_gap['rows'])
@@ -646,7 +646,7 @@ def test_gap_gradient_uses_shared_context_scale_for_matrix_and_gap_rows():
     assert gap_color(-2, 2) == '#E57373'
 
 
-def test_gap_priority_precedes_gap_magnitude_and_can_be_configured():
+def test_gap_priority_configuration_does_not_override_signed_gap_value():
     configuration = scoring_configuration()
     codes = configuration['gap_priority']
     first_code, second_code = METRICS[0]['code'], METRICS[1]['code']
@@ -660,9 +660,12 @@ def test_gap_priority_precedes_gap_magnitude_and_can_be_configured():
     o2_gap = next(gap for gap in views['gap_tables'] if gap['operator'] == 'O2 UK')
     summary = views['gap_summary_tables'][0]
 
-    assert o2_gap['rows'][0]['kpi_code'] == second_code
-    assert o2_gap['rows'][1]['kpi_code'] == first_code
-    assert [row['kpi_code'] for row in summary['rows'][:2]] == [second_code, first_code]
+    assert o2_gap['rows'][-1]['kpi_code'] == first_code
+    assert o2_gap['rows'] == sorted(o2_gap['rows'], key=_gap_order_key)
+    configuration['gap_priority'].reverse()
+    reordered = build_scoring_views({'levels': ['Operator'], 'baseline_operator': 'EE'}, result)
+    assert views['gap_tables'] == reordered['gap_tables']
+    assert views['gap_summary_tables'] == reordered['gap_summary_tables']
 
 
 def test_configured_threshold_anchors_control_score_bands_and_weights():
@@ -852,7 +855,7 @@ def test_expanded_and_summary_rows_preserve_metric_order_and_add_category_subtot
     assert [row['row_type'] for row in gap_summary['category_rows']] == ['category'] * len(subtotals)
 
 
-def test_scoring_rows_follow_configuration_order_while_gap_rows_follow_gap_priority():
+def test_scoring_rows_follow_configuration_order_while_gap_rows_follow_signed_value():
     configuration = scoring_configuration()
     configured_codes = [metric['code'] for metric in configuration['metrics']]
     configuration['metrics'] = list(reversed(configuration['metrics']))
@@ -869,8 +872,8 @@ def test_scoring_rows_follow_configuration_order_while_gap_rows_follow_gap_prior
     assert [row['category'] for row in score_table['category_rows']] == list(dict.fromkeys(
         metric['category'] for metric in configuration['metrics']
     ))
-    assert [row['kpi_code'] for row in gap_table['rows']] == configuration['gap_priority']
-    assert [row['kpi_code'] for row in summary_table['rows']] == configuration['gap_priority']
+    assert gap_table['rows'] == sorted(gap_table['rows'], key=_gap_order_key)
+    assert summary_table['rows'] == sorted(summary_table['rows'], key=_gap_order_key)
 
 
 def test_category_gap_is_unavailable_when_all_kpi_comparisons_are_missing():
@@ -912,7 +915,7 @@ def test_hierarchy_matrices_expose_the_same_expanded_and_summary_contract():
 
 
 @pytest.mark.parametrize('hierarchy', [False, True])
-def test_gap_expanded_rows_preserve_interleaved_global_priority_and_category_subtotals(hierarchy):
+def test_gap_expanded_rows_preserve_interleaved_global_gap_order_and_category_subtotals(hierarchy):
     configuration = scoring_configuration()
     first_category = configuration['metrics'][0]['category']
     first_metrics = [metric for metric in configuration['metrics'] if metric['category'] == first_category]
@@ -935,8 +938,9 @@ def test_gap_expanded_rows_preserve_interleaved_global_priority_and_category_sub
     for table in tables:
         expanded = table['expanded_rows']
         kpis = [row for row in expanded if row['row_type'] == 'kpi']
-        assert [row['kpi_code'] for row in table['rows']] == configuration['gap_priority']
-        assert [row['kpi_code'] for row in kpis] == configuration['gap_priority']
+        assert table['rows'] == sorted(table['rows'], key=_gap_order_key)
+        assert [row['kpi_code'] for row in kpis] == [row['kpi_code'] for row in table['rows']]
+        assert table['category_rows'] == sorted(table['category_rows'], key=_gap_order_key)
         assert [row['category'] for row in table['category_rows']].count(first_category) == 1
         scalar = 'operator' in table
         operators = [table['operator']] if scalar else table['operators']
@@ -959,3 +963,63 @@ def test_gap_expanded_rows_preserve_interleaved_global_priority_and_category_sub
             actual = category['gap_points'] if scalar else category['gaps'][operator]
             assert actual == pytest.approx(sum(category_values) / len(category_values))
         assert table['expanded_total'] == table['category_total']
+
+
+@pytest.mark.parametrize('hierarchy', [False, True])
+def test_multi_operator_gap_order_preserves_definition_and_ignores_priority(hierarchy):
+    configuration = scoring_configuration()
+    codes = [metric['code'] for metric in METRICS[:4]]
+    result = full_result(operators=('EE', 'O2 UK', 'Three UK'), environments=('DriveCity', 'DriveConnectionroad'))
+    result['configuration'] = configuration
+    gaps = {'O2 UK': [2, 3, -20, None], 'Three UK': [None, 4, -10, None]}
+    for row in result['scoring']:
+        if row['operator'] == 'EE':
+            row['weighted_points'] = 30
+        elif row['kpi_code'] in codes:
+            value = gaps[row['operator']][codes.index(row['kpi_code'])]
+            row['weighted_points'] = 30 + value if value is not None else None
+    job = _hierarchy_job(['Region', 'Operator']) if hierarchy else {'levels': ['Operator'], 'baseline_operator': 'EE'}
+    views = build_scoring_views(job, result)
+    tables = views['hierarchy_gap_tables'] if hierarchy else views['gap_summary_tables']
+    for table in tables:
+        relevant = [row['kpi_code'] for row in table['rows'] if row['kpi_code'] in codes]
+        assert relevant == [codes[0], codes[1], codes[2], codes[3]]
+        relevant_expanded = [row['kpi_code'] for row in table['expanded_rows'] if row['kpi_code'] in codes]
+        assert relevant_expanded == relevant
+    configuration['gap_priority'].reverse()
+    reordered = build_scoring_views(job, result)
+    assert tables == (reordered['hierarchy_gap_tables'] if hierarchy else reordered['gap_summary_tables'])
+    if not hierarchy:
+        for table in views['gap_tables']:
+            relevant = [row['kpi_code'] for row in table['rows'] if row['kpi_code'] in codes]
+            assert relevant == ([codes[1], codes[0], codes[2], codes[3]] if table['operator'] == 'O2 UK'
+                                else [codes[1], codes[2], codes[0], codes[3]])
+
+
+@pytest.mark.parametrize('hierarchy', [False, True])
+def test_single_operator_gap_sort_uses_signed_values_with_na_last(hierarchy):
+    configuration = scoring_configuration()
+    codes = [metric['code'] for metric in METRICS[:4]]
+    result = full_result(operators=('EE', 'O2 UK'), environments=('DriveCity', 'DriveConnectionroad'))
+    result['configuration'] = configuration
+    for row in result['scoring']:
+        row['weighted_points'] = 30
+        if row['operator'] == 'O2 UK' and row['kpi_code'] in codes:
+            gap = [2, 3, -20, None][codes.index(row['kpi_code'])]
+            row['weighted_points'] = 30 + gap if gap is not None else None
+    job = _hierarchy_job(['Region', 'Operator']) if hierarchy else {'levels': ['Operator'], 'baseline_operator': 'EE'}
+    views = build_scoring_views(job, result)
+    tables = views['hierarchy_gap_tables'] if hierarchy else [*views['gap_tables'], *views['gap_summary_tables']]
+    assert any(table['context']['environment'] == 'Combined' for table in tables)
+    for table in tables:
+        assert [row['kpi_code'] for row in table['rows'] if row['kpi_code'] in codes] == [
+            codes[1], codes[0], codes[2], codes[3],
+        ]
+        assert [row['kpi_code'] for row in table['expanded_rows'] if row['row_type'] == 'kpi'] == [
+            row['kpi_code'] for row in table['rows']
+        ]
+    configuration['gap_priority'].reverse()
+    reordered = build_scoring_views(job, result)
+    assert tables == (reordered['hierarchy_gap_tables'] if hierarchy else [
+        *reordered['gap_tables'], *reordered['gap_summary_tables'],
+    ])

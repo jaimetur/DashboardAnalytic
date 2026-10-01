@@ -65,7 +65,7 @@ def normalize_result_gaps(result: dict[str, Any] | None) -> dict[str, Any]:
 def build_scoring_views(job: dict[str, Any] | None, result: dict[str, Any] | None,
                         operator_mapping_groups: list[dict[str, Any]] | None = None,
                         workspace_configuration: dict[str, Any] | None = None) -> dict[str, list[dict[str, Any]]]:
-    """Build reference-style KPI matrices and signed, priority-ordered GAP tables.
+    """Build reference-style KPI matrices and signed GAP tables with numerical ordering for individual comparisons.
 
     The source ``result`` remains untouched. Combined values use every configured
     environment with a positive scoring allocation in the same aggregation context.
@@ -436,10 +436,6 @@ def _build_hierarchy_tables(
                 'gap_partial': dict(row['gap_partial']),
                 'gap_environments': copy.deepcopy(row['gap_environments']),
             })
-        gap_rows.sort(key=lambda row: (
-            gap_priority_rank.get(row['kpi_code'], len(gap_priority_rank)),
-            row['kpi_code'],
-        ))
         gap_matrix = {
             'context': {'environment': environment},
             'title': f'GAP Analysis — All vs reference — {environment}',
@@ -623,7 +619,7 @@ def _build_score_table(
 def _build_gap_summary_table(
     score_table: dict[str, Any], gap_priority_rank: dict[str, int], baseline_aliases: list[str],
 ) -> dict[str, Any]:
-    """Project all operator gaps into one priority-ordered comparison matrix."""
+    """Project all operator gaps into one comparison matrix in KPI definition order."""
     baseline = score_table['baseline_operator']
     operators = [operator for operator in score_table['operators']
                  if not _same_baseline_identity(operator, baseline, baseline_aliases)]
@@ -638,7 +634,6 @@ def _build_gap_summary_table(
             operator: list(row.get('gap_environments', {}).get(operator) or []) for operator in operators
         },
     } for row in score_table['rows']]
-    rows = _priority_order_rows(rows, gap_priority_rank)
     table = {
         'context': dict(score_table['context']),
         'title': _make_title(f'GAP Analysis: All vs {baseline}', score_table['context']),
@@ -690,8 +685,7 @@ def _build_gap_tables(
                 'gap_environments': list(row.get('gap_environments', {}).get(operator) or []),
             }
             mode_rows.append(mode_row)
-            if gap is not None:
-                prioritized.append(mode_row)
+            prioritized.append(mode_row)
         prioritized = _priority_order_rows(prioritized, gap_priority_rank)
         total_gap = score_table['total']['gaps'].get(operator)
         table = {
@@ -726,14 +720,17 @@ def _metric_source_kind(metric: dict[str, Any]) -> str | None:
     return str(value).strip().casefold() or None
 
 
-def _priority_order_rows(rows: list[dict[str, Any]], gap_priority_rank: dict[str, int]) -> list[dict[str, Any]]:
-    return sorted(
-        rows,
-        key=lambda row: (
-            gap_priority_rank.get(str(row.get('kpi_code') or ''), len(gap_priority_rank)),
-            str(row.get('kpi_code') or '').casefold(),
-        ),
-    )
+def _gap_order_key(row: dict[str, Any], operators: list[str] | None = None) -> tuple[Any, ...]:
+    """Sort signed scalar GAPs or means of valid comparison cells descending."""
+    value = (_number(row.get('gap_points')) if 'gap_points' in row else
+             _average_numbers([value for operator, value in row.get('gaps', {}).items()
+                               if operators is None or operator in operators]))
+    identity = str(row.get('kpi_code') or row.get('category') or '')
+    return (value is None, -(value or 0.0), identity.casefold(), identity)
+
+
+def _priority_order_rows(rows: list[dict[str, Any]], _gap_priority_rank: dict[str, int]) -> list[dict[str, Any]]:
+    return sorted(rows, key=_gap_order_key)
 
 
 def _average_numbers(values: list[Any]) -> float | None:
@@ -916,10 +913,11 @@ def _score_category_row(
 
 def _priority_rows_with_category_totals(
     rows: list[dict[str, Any]], gap_priority_rank: dict[str, int],
-    category_rows: list[dict[str, Any]],
+    category_rows: list[dict[str, Any]], operators: list[str] | None = None,
+    preserve_order: bool = False,
 ) -> list[dict[str, Any]]:
     """Place each full-category subtotal after its last globally ordered KPI."""
-    ordered = _priority_order_rows(rows, gap_priority_rank)
+    ordered = list(rows) if preserve_order else sorted(rows, key=lambda row: _gap_order_key(row, operators))
     last_positions = {
         str(row.get('category') or 'Other'): index for index, row in enumerate(ordered)
     }
@@ -936,12 +934,24 @@ def _priority_rows_with_category_totals(
 def _attach_gap_matrix_modes(table: dict[str, Any], gap_priority_rank: dict[str, int]) -> None:
     operators = list(table.get('operators') or [])
     rows = list(table.get('rows') or [])
+    compared_operators = [operator for operator in operators
+                          if not table.get('operator_styles', {}).get(operator, {}).get('is_reference')]
+    compared_names = {table.get('operator_styles', {}).get(operator, {}).get('operator', operator)
+                      for operator in compared_operators}
+    individual = len(compared_names) == 1
+    if individual:
+        rows.sort(key=lambda row: _gap_order_key(row, compared_operators))
+    table['rows'] = rows
     scale_max = float(_number(table.get('gap_scale_max')) or 0.0)
     category_rows = [
         _category_gap_row(category, category_items, operators, scale_max)
-        for category, category_items in _ordered_category_groups(rows, gap_priority_rank)
+        for category, category_items in _category_groups_in_source_order(rows)
     ]
-    expanded_rows = _priority_rows_with_category_totals(rows, gap_priority_rank, category_rows)
+    if individual:
+        category_rows.sort(key=lambda row: _gap_order_key(row, compared_operators))
+    expanded_rows = _priority_rows_with_category_totals(
+        rows, gap_priority_rank, category_rows, compared_operators, preserve_order=not individual,
+    )
     average_gaps = {
         operator: _average_numbers([row.get('gaps', {}).get(operator) for row in rows])
         for operator in operators
@@ -980,6 +990,7 @@ def _attach_scalar_gap_modes(
         _scalar_category_gap_row(category, category_items, scale_max)
         for category, category_items in _ordered_category_groups(rows, gap_priority_rank)
     ]
+    category_rows.sort(key=_gap_order_key)
     expanded_rows = _priority_rows_with_category_totals(rows, gap_priority_rank, category_rows)
     mean_gap = _average_numbers([row.get('gap_points') for row in rows])
     table['expanded_rows'] = expanded_rows

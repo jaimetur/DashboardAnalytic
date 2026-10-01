@@ -1432,16 +1432,46 @@
     row.append(td);
   }
 
-  function appendPriorityOrderNotice(parent) {
+  function orderGapRows(rows, valuesForRow, sortByGap = true) {
+    const gapMean = item => {
+      const values = valuesForRow(item)
+        .filter(value => value !== null && value !== undefined
+          && typeof value !== 'boolean' && String(value).trim() !== '')
+        .map(Number).filter(Number.isFinite);
+      return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+    };
+    const compare = (left, right) => {
+      const leftGap = gapMean(left);
+      const rightGap = gapMean(right);
+      if (leftGap === null) return rightGap === null ? 0 : 1;
+      if (rightGap === null) return -1;
+      return rightGap - leftGap;
+    };
+    const kpis = rows.filter(item => item?.row_type !== 'category');
+    if (sortByGap) kpis.sort(compare);
+    if (!kpis.length) return sortByGap ? [...rows].sort(compare) : [...rows];
+    const subtotals = new Map(rows.filter(item => item?.row_type === 'category')
+      .map(item => [String(item?.category ?? ''), item]));
+    const lastCategoryIndexes = new Map(kpis.map((item, index) => [String(item?.category ?? ''), index]));
+    return kpis.flatMap((item, index) => {
+      const category = String(item?.category ?? '');
+      return lastCategoryIndexes.get(category) === index && subtotals.has(category)
+        ? [item, subtotals.get(category)] : [item];
+    });
+  }
+
+  function appendGapOrderNotice(parent, sortByGap = true) {
     const notice = document.createElement('p');
     notice.className = 'scoring-priority-order-notice';
     const text = document.createElement('strong');
-    text.textContent = 'KPIs are ordered by priority, from highest to lowest as defined in Workspace Config.';
+    text.textContent = sortByGap
+      ? 'KPIs are ordered by GAP, from highest to lowest.'
+      : 'KPIs follow the default KPI definition order.';
     notice.append(text);
     parent.append(notice);
   }
 
-  function appendGapScaleAside(parent, tableData, rows) {
+  function appendGapScaleAside(parent, tableData, rows, sortByGap = true) {
     parent.style.display = 'flex';
     parent.style.alignItems = 'center';
     parent.style.flexWrap = 'wrap';
@@ -1459,7 +1489,7 @@
     aside.style.alignItems = 'flex-end';
     aside.style.gap = '.15rem';
     aside.style.marginLeft = 'auto';
-    appendPriorityOrderNotice(aside);
+    appendGapOrderNotice(aside, sortByGap);
     const notice = aside.querySelector('.scoring-priority-order-notice');
     if (notice) notice.style.cssText = 'margin: 0; text-align: right;';
     appendPriorityGapScale(aside, tableData, rows);
@@ -2132,7 +2162,9 @@
     const columns = comparison === 'all'
       ? allColumns
       : allColumns.filter(column => hierarchyColumnOperator(column) === selectedOperator);
-    const rows = Array.isArray(tableData.rows) ? tableData.rows : [];
+    const sortByGap = new Set(columns.map(hierarchyColumnOperator)).size === 1;
+    const rows = orderGapRows(Array.isArray(tableData.rows) ? tableData.rows : [],
+      item => columns.map(column => firstValue(item?.gaps || {}, [column.id], null)), sortByGap);
     const comparisonLabel = comparison === 'all' ? `All vs ${baseline}` : `${selectedOperator} vs ${baseline}`;
     const scaleRows = rows.flatMap(item => columns.map(column => ({gap_points: firstValue(item?.gaps || {}, [column.id], null)})))
       .filter(item => item.gap_points !== null && item.gap_points !== undefined && Number.isFinite(Number(item.gap_points)));
@@ -2176,7 +2208,7 @@
       pane.append(empty);
       return;
     }
-    appendGapScaleAside(gapInfo, tableData, scaleRows);
+    appendGapScaleAside(gapInfo, tableData, scaleRows, sortByGap);
 
     const blocks = [{label: comparisonLabel, className: 'scoring-gap-group', headerClass: 'scoring-gap-header', column: 'gap', columns}];
     const wrapper = document.createElement('div');
@@ -2305,10 +2337,10 @@
     const operatorRaw = String(selected?.operator || 'this operator');
     const baseline = operatorPresentation(selected, baselineRaw).label;
     const operator = operatorPresentation(selected, operatorRaw).label;
-    const rows = (Array.isArray(selected?.rows) ? selected.rows : []).filter(row => (
+    const rows = orderGapRows((Array.isArray(selected?.rows) ? selected.rows : []).filter(row => (
       row?.row_type === 'category' || row?.row_type === 'kpi'
       || (row?.gap_points !== null && row?.gap_points !== undefined && String(row.gap_points).trim() !== '' && Number.isFinite(Number(row.gap_points)))
-    ));
+    )), item => [item?.gap_points]);
     if (!rows.length) {
       const empty = document.createElement('div');
       empty.className = 'scoring-empty';
@@ -2470,11 +2502,13 @@
     gapInfo.append(gapNote);
     pane.append(gapInfo);
 
-    const rows = Array.isArray(selected.rows) ? selected.rows : [];
-    appendGapScaleAside(gapInfo, selected, rows);
     const comparisons = comparison === 'all'
       ? operators
       : operators.filter(operator => `operator:${operator}` === comparison);
+    const sortByGap = comparisons.length === 1;
+    const rows = orderGapRows(Array.isArray(selected.rows) ? selected.rows : [],
+      item => comparisons.map(operator => firstValue(item?.gaps || {}, [operator], null)), sortByGap);
+    appendGapScaleAside(gapInfo, selected, rows, sortByGap);
     if (!comparisons.length || !rows.length) {
       const empty = document.createElement('div');
       empty.className = 'scoring-empty';
