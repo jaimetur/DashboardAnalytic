@@ -36,13 +36,14 @@
   .scoring-config-panel .scoring-config-kpi-toolbar button { background: #e7f1f1; border: 1px solid #9cb7b8; color: #174b50; font-weight: 700; }
   .scoring-config-panel .scoring-config-kpi-toolbar button:hover { background: #d4e7e7; color: #123e42; }
   .scoring-config-panel .scoring-config-kpi-toolbar button:disabled { opacity: .5; cursor: not-allowed; }
-  .scoring-config-panel .scoring-profile-dialog { z-index: 1200; }
-  .scoring-config-panel .scoring-profile-dialog .confirm-panel { width: min(32rem, calc(100vw - 2rem)); }
-  .scoring-config-panel .scoring-profile-dialog label { display: grid; gap: .4rem; margin: 1rem 0; font-weight: 650; }
-  .scoring-config-panel .scoring-profile-dialog input { box-sizing: border-box; width: 100%; padding: .55rem .65rem; }
-  .scoring-config-panel .scoring-profile-dialog select { box-sizing: border-box; width: 100%; padding: .55rem .65rem; }
-  .scoring-config-panel .scoring-profile-dialog label[data-profile-dialog-distribution-field] { display: grid; gap: .4rem; margin: 1rem 0; font-weight: 650; }
-  .scoring-config-panel .scoring-profile-dialog-error { min-height: 1.3em; color: #a93226; }
+  .scoring-profile-dialog { z-index: 10020; background: rgba(9, 17, 24, .18); backdrop-filter: none; overflow: auto; }
+  .scoring-profile-dialog [hidden] { display: none !important; }
+  .scoring-profile-dialog .confirm-panel { box-sizing: border-box; width: min(32rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); overflow-y: auto; margin: 0; }
+  .scoring-profile-dialog label { display: grid; gap: .4rem; margin: 1rem 0; font-weight: 650; }
+  .scoring-profile-dialog input { box-sizing: border-box; width: 100%; padding: .55rem .65rem; }
+  .scoring-profile-dialog select { box-sizing: border-box; width: 100%; padding: .55rem .65rem; }
+  .scoring-profile-dialog label[data-profile-dialog-distribution-field] { display: grid; gap: .4rem; margin: 1rem 0; font-weight: 650; }
+  .scoring-profile-dialog-error { min-height: 1.3em; color: #a93226; }
   .scoring-config-panel .scoring-config-add-kpi { margin: 0 0 .75rem; }
   .scoring-config-panel .scoring-config-kpi-toolbar { display: flex; flex-wrap: wrap; gap: .5rem; margin: 0 0 .75rem; }
   .scoring-config-panel .scoring-config-environment-total { display: grid; gap: .25rem; min-width: 12rem; }
@@ -79,7 +80,7 @@
   .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(17) textarea { background: rgba(255, 255, 255, .78); }
   .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(n+6):nth-child(-n+8) input { background: #fff; }
   .scoring-config-panel .scoring-config-category-row th { position: static; padding: .55rem .7rem; background: #eef4f3; color: #31545a; font-size: .9rem; font-weight: 750; letter-spacing: .025em; }
-  .scoring-config-panel .scoring-config-identity-input { width: 15rem !important; }
+  .scoring-config-panel .scoring-config-identity-input { width: 38rem !important; }
   .scoring-config-panel .scoring-config-code-input { width: 8rem !important; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   .scoring-config-panel .scoring-config-category-input { width: 10rem !important; }
   .scoring-config-panel .scoring-config-source-kind,
@@ -99,7 +100,11 @@
   .scoring-config-panel .scoring-config-formula textarea { box-sizing: border-box; width: min(34rem, 70vw); min-width: 18rem; max-width: 100%; min-height: 5rem; padding: .45rem; font: .78rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
   .scoring-config-panel .scoring-config-delete-kpi { color: #8b2626; }
   .scoring-config-panel .scoring-config-delete-kpi:disabled { opacity: .45; cursor: not-allowed; }
-  .scoring-config-panel .scoring-config-category-total { display: inline-flex; gap: .7rem; margin-left: .8rem; color: #536c75; font-size: .8rem; font-weight: 750; letter-spacing: normal; }
+  .scoring-config-panel .scoring-config-category-total { display: inline-flex; flex-wrap: wrap; gap: 1rem; margin-left: 1rem; color: #536c75; font-size: .8rem; font-weight: 750; letter-spacing: normal; vertical-align: middle; }
+  .scoring-config-panel .scoring-config-category-total > span { display: inline-block; padding: .35rem .65rem; border: 1px solid transparent; border-radius: .45rem; }
+  .scoring-config-panel [data-category-points] { background: #e2f0df; border-color: #b7d3b2 !important; color: #305a32; }
+  .scoring-config-panel [data-category-weight] { background: #e0edf7; border-color: #b2cde1 !important; color: #254f70; }
+  .scoring-config-panel [data-category-global-weight] { background: #eee4f6; border-color: #ceb9df !important; color: #64427d; }
   .scoring-config-panel .scoring-config-edit-mode { display: inline-grid; gap: .3rem; font-weight: 650; }
   .scoring-config-panel .scoring-config-edit-mode select { min-width: 11rem; }
   .scoring-config-panel .scoring-config-denominator-note { color: var(--muted, #627480); font-size: .76rem; }

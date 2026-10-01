@@ -1319,8 +1319,8 @@ def test_configuration_access_matches_editor_and_viewer_roles(client) -> None:
     assert 'href="/workspace-config"' in workspace_page.text
     assert 'class="module-tab module-tab-config active"' in workspace_page.text
     assert '<h2>Report Templates Management</h2>' in workspace_page.text
-    assert '<h2>Operator Mappings</h2>' in workspace_page.text
-    assert '<h2>Vendor Mappings</h2>' in workspace_page.text
+    assert '<h2>Operator Maps</h2>' in workspace_page.text
+    assert '<h2>Vendor Maps</h2>' in workspace_page.text
     assert client.get('/admin').status_code == 403
     saved_app_config = client.post('/application-config', data={
         'timezone_name': 'UTC', 'report_chart_renderer': 'dashboard-canvas',
@@ -5954,9 +5954,9 @@ def test_admin_operator_mapping_panel_groups_and_edits_aliases(client) -> None:
     assert page.status_code == 200
     assert '<h2>Report Templates Management</h2>' not in client.get('/admin').text
     assert 'data-panel-state-key="admin:operator-mappings"' in page.text
-    assert '<h2>Operator Mappings</h2>' in page.text
-    assert '<h2>Vendor Mappings</h2>' in page.text
-    assert page.text.index('<h2>Report Templates Management</h2>') < page.text.index('<h2>Operator Mappings</h2>')
+    assert '<h2>Operator Maps</h2>' in page.text
+    assert '<h2>Vendor Maps</h2>' in page.text
+    assert page.text.index('<h2>Report Templates Management</h2>') < page.text.index('<h2>Operator Maps</h2>')
     assert 'value="VF"' in page.text
     assert 'value="Legacy Carrier"' in page.text
     assert 'Legacy A\nLegacy B' in page.text

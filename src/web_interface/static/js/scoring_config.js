@@ -51,6 +51,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
   const profileDialogError = root.querySelector('[data-profile-dialog-error]');
   const profileDialogConfirm = root.querySelector('[data-profile-dialog-confirm]');
   const profileDialogCancel = root.querySelector('[data-profile-dialog-cancel]');
+  // Keep the fixed overlay outside panels whose backdrop filters create a containing block.
+  if (profileDialog) document.body.append(profileDialog);
   const kpiForm = root.querySelector('[data-scoring-kpi-form]');
   const kpiRows = root.querySelector('[data-scoring-kpi-rows]');
   const kpiStatus = root.querySelector('[data-scoring-kpi-status]');
@@ -457,7 +459,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       const totals = categories.get(heading.dataset.kpiCategoryHeading) || {points: 0, share: 0};
       heading.querySelector('[data-category-points]').textContent = `${totals.points.toFixed(2)} points in ${environmentLabel(environmentSelect.value)}`;
       const environmentPercent = environmentTotal > 0 ? totals.points * 100 / environmentTotal : totals.share * 100;
-      heading.querySelector('[data-category-weight]').textContent = `${environmentPercent.toFixed(2)}% Environment · ${globalTotal > 0 ? (totals.points * 100 / globalTotal).toFixed(2) : '0.00'}% Global`;
+      heading.querySelector('[data-category-weight]').textContent = `Environment weight: ${environmentPercent.toFixed(2)}%`;
+      heading.querySelector('[data-category-global-weight]').textContent = `Global weight: ${globalTotal > 0 ? (totals.points * 100 / globalTotal).toFixed(2) : '0.00'}%`;
     });
   };
 
@@ -570,7 +573,11 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     points.dataset.categoryPoints = '';
     const weight = document.createElement('span');
     weight.dataset.categoryWeight = '';
-    totals.append(points, weight);
+    weight.title = 'Category points as a percentage of the selected Environment total.';
+    const globalWeight = document.createElement('span');
+    globalWeight.dataset.categoryGlobalWeight = '';
+    globalWeight.title = 'Category points in the selected Environment as a percentage of the total points across all Environments.';
+    totals.append(points, weight, globalWeight);
     cell.append(name, totals);
     row.append(cell);
     return row;

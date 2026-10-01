@@ -40,7 +40,7 @@ Help Navigation groups chapters under General, Main Modules, Administrative Modu
 - [Query Builder](query-builder.md) — guided query design, SQL editing, execution and saved queries.
 - [App Logs](app-logs.md) — workspace events and live server output.
 - [Application Config](app-config.md) — application-wide runtime settings and their effect.
-- [Workspace Config](workspace-config.md) — workspace-owned Report Templates, Operator Mappings and Vendor Mappings.
+- [Workspace Config](workspace-config.md) — workspace-owned Report Templates, Main Cities, Operator Maps and Vendor Maps.
 - [Administrator Config](administrator-config.md) — users, portability, databases and datasets.
 - [Project Structure](project-structure.md) — source/browser layers, database ownership, persistent storage, caches and generated output.
 - [Roadmap](roadmap.md) — current limitations and planned work.
