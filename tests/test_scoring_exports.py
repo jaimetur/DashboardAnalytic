@@ -254,7 +254,7 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     assert _normalized_headers(matrices[0])[:4] == [
         'CATEGORY', 'NETCHECK KPI', 'Score weight (%)', 'Max score',
     ]
-    assert _rgb(matrices[0].cell(0, 1)) == '455B65'
+    assert [_rgb(matrices[0].cell(0, index)) for index in (0, 1)] == ['455B65', '455B65']
     table = matrices[-1]
     headers = _normalized_headers(table)
     assert headers[:5] == ['NETCHECK KPIs', 'KPI', 'Type of KPI', 'Score weight (%)', 'Max score']
@@ -317,6 +317,11 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
         and _normalized_headers(shape.table)[:3] == ['Category', 'NETCHECK KPIs', 'Type of KPI']
     )
     expected_gap_table = views['gap_tables'][0]
+    assert gap_slide.shapes.title.text.split('\n')[0] == 'GAP Analysis — Three UK vs EE'
+    title_runs = gap_slide.shapes.title.text_frame.paragraphs[0].runs
+    assert title_runs[-1].text == 'Three UK vs EE'
+    assert str(title_runs[-1].font.color.rgb) == 'A34E16'
+    assert 'Environment:' not in gap_slide.shapes.title.text
     assert [gap_table.cell(row, 1).text for row in range(1, len(gap_table.rows) - 1)] == [row['kpi'] for row in expected_gap_table['expanded_rows']]
     assert [float(gap_table.cell(row, 3).text) for row in range(1, len(gap_table.rows) - 1)] == pytest.approx([row['gap_points'] for row in expected_gap_table['expanded_rows']], abs=.0051)
     assert _rgb(gap_table.cell(0, 3)) == 'DDEBE6'
@@ -395,6 +400,7 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     assert best_network_chart.chart_type == XL_CHART_TYPE.COLUMN_STACKED
     assert best_network_chart.has_legend
     assert best_network_chart.plots[0].data_labels.font.name == 'Arial'
+    assert best_network_chart.plots[0].data_labels.font.size.pt == 9
     assert best_network_chart.category_axis._element.xpath('./c:noMultiLvlLbl/@val') == ['1']
     assert best_network_chart.category_axis._element.xpath('./c:majorTickMark/@val') == ['none']
     assert best_network_chart._chartSpace.xpath('.//c:lineChart/c:dLbls/c:txPr//a:defRPr/@sz') == ['1200']

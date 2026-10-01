@@ -188,6 +188,21 @@ def _slide(presentation, title: str, subtitle: str):
     return slide
 
 
+def _accent_gap_comparison_title(slide) -> None:
+    paragraph = slide.shapes.title.text_frame.paragraphs[0]
+    heading, separator, comparison = paragraph.text.partition(' — ')
+    if not separator:
+        return
+    properties = deepcopy(paragraph.runs[0]._r.rPr) if paragraph.runs else None
+    paragraph.clear()
+    for text, color in ((heading + separator, '17232D'), (comparison, 'A34E16')):
+        run = paragraph.add_run()
+        if properties is not None:
+            run._r.insert(0, deepcopy(properties))
+        run.text = text
+        run.font.color.rgb = RGBColor.from_string(color)
+
+
 def _text(slide, text: str, top: float, *, left: float = .55, width: float = 12.2,
           height: float = .4, size: float = 10, color: str = '#263746', align=PP_ALIGN.LEFT):
     box = slide.shapes.add_textbox(Inches(left), Inches(top), Inches(width), Inches(height))
@@ -733,7 +748,7 @@ def _score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap
                 numeric_font = _hierarchy_content_font(
                     numeric_texts, remaining, maximum=min(11, min(body_heights) * 72 * .82),
                 )
-                colors = ['#E6F0F7' if is_summary else _GAP_SUMMARY_HEADER, _GAP_SUMMARY_HEADER,
+                colors = [_GAP_SUMMARY_HEADER, _GAP_SUMMARY_HEADER,
                           *([] if is_summary else [_GAP_SUMMARY_HEADER]), '#4EA72E', '#FF0000',
                           *[_operator_color(matrix, name) for name in operators], *['#FFFF00'] * len(comparisons)]
                 for index, header in enumerate(headers):
@@ -844,7 +859,7 @@ def _format_chart(chart, *, maximum: float, labels=XL_DATA_LABEL_POSITION.OUTSID
     data_labels.position = labels
     data_labels.number_format = '0.0'
     data_labels.font.name = 'Arial'
-    data_labels.font.size = Pt(10)
+    data_labels.font.size = Pt(9)
     # Single-level categories need no native hierarchy label dividers.
     for flag in chart.category_axis._element.xpath('./c:noMultiLvlLbl'):
         flag.set('val', '1' if chart.plots[0].categories.depth <= 1 else '0')
@@ -1476,7 +1491,7 @@ def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dic
             table.rows[row_index].height = Inches(row_height)
         _score_column_headers(table, plan, levels, gap_layout=gap_layout, leaf_width=leaf_width,
                               fixed_count=fixed_count)
-        static_headers = [('CATEGORY' if is_summary else 'Category', '#E6F0F7' if is_summary else _GAP_SUMMARY_HEADER),
+        static_headers = [('CATEGORY' if is_summary else 'Category', _GAP_SUMMARY_HEADER),
                           ('NETCHECK KPI' if is_summary else 'KPI', _GAP_SUMMARY_HEADER),
                           *([] if is_summary else [('Type of KPI', _GAP_SUMMARY_HEADER)]),
                           ('Score weight\n(%)', '#4EA72E'), ('Max score', '#FF0000')]
@@ -1609,6 +1624,8 @@ def _hierarchy_gap_tables(presentation, matrices: list[dict], *, title: str = 'G
         levels = matrix['hierarchy_levels']
         metrics = matrix['rows']
         slide = _slide(presentation, title, _scope(matrix['context'], environment_label=False))
+        if not title.startswith('GAP Analysis — All vs '):
+            _accent_gap_comparison_title(slide)
         header_rows = len(levels) + 1
         row_count = header_rows + len(metrics) + 1
         table_height = 5.0
@@ -1726,8 +1743,10 @@ def _gap_tables(presentation, matrices: list[dict]) -> None:
         pages = [matrix['rows']]
         for page_index, rows in enumerate(pages):
             page_label = f' · Page {page_index + 1}/{len(pages)}' if len(pages) > 1 else ''
-            subtitle = f'{_operator_label(matrix, matrix["operator"])} vs {_operator_label(matrix, matrix["baseline_operator"])} · {_scope(matrix["context"])}{page_label}'
-            slide = _slide(presentation, 'GAP Analysis', subtitle)
+            comparison = f'{_operator_label(matrix, matrix["operator"])} vs {_operator_label(matrix, matrix["baseline_operator"])}'
+            subtitle = _scope(matrix['context'], environment_label=False) + page_label
+            slide = _slide(presentation, 'GAP Analysis — ' + comparison, subtitle)
+            _accent_gap_comparison_title(slide)
             if not rows:
                 _text(slide, 'No comparable KPI gaps are available. See the scoring matrix for missing values.', 1.8, height=1, size=16)
                 continue

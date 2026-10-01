@@ -416,6 +416,30 @@ def _legend_icon(slide, kind: str, x: float, y: float, size: float, color: str) 
             line.line.width = Pt(.7)
 
 
+def _environment_segment_icons(slide, allocations, environment_allocations,
+                               chart_left: float, chart_top: float, chart_size: float) -> None:
+    total = sum(voice + data_points for _, voice, data_points in allocations)
+    if total <= 0:
+        return
+    size = .30
+    radius = chart_size * .45 + .18
+    angle = 0.0
+    for environment, voice, data_points in allocations:
+        share = (voice + data_points) / total
+        midpoint = math.radians(angle + share * 180)
+        x = chart_left + chart_size / 2 + radius * math.sin(midpoint) - size / 2
+        y = chart_top + chart_size / 2 - radius * math.cos(midpoint) - size / 2
+        first_shape = len(slide.shapes)
+        _legend_icon(slide, _environment_kind(environment), x, y, size,
+                     _global_color(environment, environment_allocations))
+        parts = list(slide.shapes)[first_shape:]
+        for part in parts:
+            part.line.width = Pt(1.3)
+        icon = parts[0] if len(parts) == 1 else slide.shapes.add_group_shape(parts)
+        icon.name = f'Maximum Allocation Environment Segment Icon {environment}'
+        angle += share * 360
+
+
 def _legend_row(slide, x, y, width, height, icon, color, label, detail, bold=False, wrap=False):
     _legend_icon(slide, icon, x, y + max(.02, (height - .18) / 2), .18, color)
     swatch = slide.shapes.add_shape(
@@ -532,7 +556,7 @@ def add_maximum_allocation_donut(
             legend_items.append((kind, color, label, f'{value:.2f} pts ({percent:.1f}%)'))
 
     legend_heights = [.22 for _ in legend_items]
-    chart_size = min(width * .90, height - .15 - sum(legend_heights))
+    chart_size = min(width * .90, height - .35 - sum(legend_heights))
     chart_left = left + (width - chart_size) / 2
     chart_top = top
     totals = [voice + data_points for _, voice, data_points in allocations]
@@ -541,6 +565,8 @@ def add_maximum_allocation_donut(
         [_global_color(environment, environment_allocations) for environment, _, _ in allocations],
         chart_left, chart_top, chart_size, 72,
     )
+    _environment_segment_icons(slide, allocations, environment_allocations,
+                               chart_left, chart_top, chart_size)
     ring_size = chart_size * .72
     _allocation_chart(
         slide, inner_labels, inner_totals, inner_colors,
@@ -569,7 +595,7 @@ def add_maximum_allocation_donut(
     paragraph.font.name = 'Ericsson Hilda'
     paragraph.font.size = Pt(10 if len(allocations) > 1 else 12)
 
-    label_top = top + chart_size + .05
+    label_top = top + chart_size + .25
     label_width = width
     label_y = label_top
     for item, label_height in zip(legend_items, legend_heights):

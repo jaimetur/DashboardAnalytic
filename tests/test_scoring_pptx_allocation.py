@@ -208,3 +208,18 @@ def test_percentage_labels_hide_category_slices_that_are_too_small():
     percentage_labels = [shape.text_frame.text for shape in slide.shapes
                          if shape.name == 'Maximum Allocation Percentage Label']
     assert percentage_labels == ['100.0%', '96.1%']
+
+
+def test_environment_segment_icons_are_larger_than_legend_icons():
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    allocations = {'DriveCity': {'voice': 227.5, 'data': 422.5},
+                   'DriveRoad': {'voice': 122.5, 'data': 227.5}}
+    add_maximum_allocation_donut(
+        slide, {'context': {'environment': 'Combined'}}, allocations,
+        left=1, top=1, width=3, height=5,
+    )
+    icons = [shape for shape in slide.shapes
+             if shape.name.startswith('Maximum Allocation Environment Segment Icon')]
+    assert len(icons) == 2
+    assert all(max(icon.width.inches, icon.height.inches) > .18 for icon in icons)
