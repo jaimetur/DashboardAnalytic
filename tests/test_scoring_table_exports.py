@@ -112,9 +112,10 @@ def test_ppt_table_modes_include_bold_category_totals_and_keep_identical_charts(
     all_gap_slides = [slide for slide in presentations[1].slides
                       if slide.shapes.title.text.split('\n')[0] == 'GAP Analysis — All vs EE']
     table = next(shape.table for shape in all_gap_slides[0].shapes if shape.has_table)
-    assert len(table.rows) == 9
-    assert table.cell(8, 1).text == 'Average KPI GAP'
-    assert table.cell(8, 3).text != 'N/A'
+    assert len(table.rows) == 1 + len(scoring_configuration()['metrics'])
+    gap_kpis = [table.cell(row, 1).text for row in range(1, len(table.rows))]
+    assert all(not kpi.casefold().endswith(' total') for kpi in gap_kpis)
+    assert all(kpi.casefold() != 'average kpi gap' for kpi in gap_kpis)
 
 
 def test_seven_category_tints_are_distinct_and_invalid_export_mode_is_rejected():
@@ -242,8 +243,13 @@ def test_all_environment_ppt_finishes_each_full_block_aggregate_first(levels):
     assert titles.count('Scoring per Category') == 3
     for slide in presentation.slides:
         text = '\n'.join(shape.text for shape in slide.shapes if shape.has_text_frame)
+        if slide.shapes.title:
+            assert all('Environment:' not in paragraph.text
+                       for paragraph in slide.shapes.title.text_frame.paragraphs)
         if slide.shapes.title and slide.shapes.title.text.startswith('Scoring Tables'):
-            assert 'Environment:' in text
+            assert any(environment in text for environment in (
+                'All Environments', 'DriveCity', 'DriveConnectionroad',
+            ))
     selected = Presentation(BytesIO(export_scoring_powerpoint(job, result, TEMPLATE, environment='DriveCity')))
     assert [slide.shapes.title.text.split('\n')[0] for slide in selected.slides].count('Scoring Tables — Summary') == 1
     assert [slide.shapes.title.text.split('\n')[0] for slide in selected.slides].count('Scoring Tables — Breakdown') == 1

@@ -186,7 +186,7 @@ def test_missing_road_keeps_city_gap_and_combined_marks_common_environment_gap_p
     combined_gap_slide = next(
         slide for slide in presentation.slides
         if slide.shapes.title.text.startswith('GAP Analysis — All vs')
-        and 'Environment: All Environments' in slide.shapes.title.text
+        and 'All Environments' in slide.shapes.title.text
         and 'Vendor: Nokia' in slide.shapes.title.text and 'Campaign: 2026-Q2' in slide.shapes.title.text
     )
     combined_gap_table = next(shape.table for shape in combined_gap_slide.shapes if shape.has_table)

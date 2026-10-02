@@ -24,11 +24,11 @@ def _presentation(result):
 def _environment_matrix_slide(presentation, environment):
     for slide in presentation.slides:
         title = slide.shapes.title.text.split('\n')[0] if slide.shapes.title else ''
-        if title != 'Scoring Tables — Breakdown' or f'Environment: {environment}' not in _slide_text(slide):
+        if title != 'Scoring Tables — Breakdown' or environment not in _slide_text(slide):
             continue
         matrix = next(
             shape.table for shape in slide.shapes
-            if shape.has_table and shape.table.cell(0, 0).text.strip() == 'NETCHECK KPIs'
+            if shape.has_table and shape.table.cell(0, 0).text.strip() in {'CATEGORY', 'NETCHECK KPIs'}
         )
         return slide, matrix
     raise AssertionError(f'No Scoring Table slide found for {environment}.')
@@ -37,7 +37,7 @@ def _environment_matrix_slide(presentation, environment):
 def _chart_for_environment(presentation, title, environment, chart_type):
     for slide in presentation.slides:
         slide_title = slide.shapes.title.text.split('\n')[0] if slide.shapes.title else ''
-        if slide_title != title or f'Environment: {environment}' not in _slide_text(slide):
+        if slide_title != title or environment not in _slide_text(slide):
             continue
         for shape in _nested_shapes(slide.shapes):
             if shape.has_chart and shape.chart.chart_type == chart_type:
