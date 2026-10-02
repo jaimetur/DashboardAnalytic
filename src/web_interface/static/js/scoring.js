@@ -1028,6 +1028,37 @@
     }
   }
 
+  function pptHasDenseCharts(payload, environment) {
+    const views = payload?.views || payload?.scoring_views || payload || {};
+    const hierarchy = Array.isArray(views.hierarchy_score_tables) ? views.hierarchy_score_tables : [];
+    const tables = hierarchy.length ? hierarchy : (views.score_tables || []);
+    return tables.some(table => {
+      if (environment !== 'all' && environmentOf(table) !== environment) return false;
+      const bestNetworkBars = table.hierarchy_columns?.length || table.operators?.length || 0;
+      const categories = new Set((table.rows || []).map(row => row.category)).size;
+      const categoryBars = categories * bestNetworkBars;
+      return bestNetworkBars > 20 || categoryBars > 40;
+    });
+  }
+
+  async function generateScoringPpt(link) {
+    let splitCharts = false;
+    if (pptHasDenseCharts(currentResults, selectedEnvironment || 'all')) {
+      const message = 'Some Best Network charts contain more than 20 bars or Scoring charts contain more than 40 bars. Split charts across multiple slides?';
+      const choice = typeof showConfirmDialog === 'function'
+        ? await showConfirmDialog(message, {
+          title: 'PowerPoint chart layout', confirmLabel: 'Yes, split charts',
+          secondaryLabel: 'No, keep all bars on one slide', cancelLabel: 'Cancel', wideActions: true,
+        })
+        : (window.confirm(message) ? 'confirm' : 'secondary');
+      if (choice !== 'confirm' && choice !== 'secondary') return;
+      splitCharts = choice === 'confirm';
+    }
+    const url = new URL(link.href, window.location.href);
+    url.searchParams.set('split_charts', String(splitCharts));
+    window.location.assign(url.href);
+  }
+
   function normalizeRows(data) {
     if (Array.isArray(data)) return data.filter(row => row && typeof row === 'object');
     if (data && Array.isArray(data.rows)) return data.rows.filter(row => row && typeof row === 'object');
@@ -4728,6 +4759,11 @@
     const exportLink = event.target.closest('.scoring-export-actions a');
     if (exportLink?.getAttribute('aria-disabled') === 'true') {
       event.preventDefault();
+      return;
+    }
+    if (exportLink?.matches('[data-export-ppt]')) {
+      event.preventDefault();
+      void generateScoringPpt(exportLink);
       return;
     }
     const tab = event.target.closest('[data-result-tab]');

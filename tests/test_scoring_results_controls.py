@@ -13,7 +13,10 @@ SCORING_SCRIPT = PROJECT_ROOT / 'src/web_interface/static/js/scoring.js'
 
 
 def _function_source(script: str, name: str) -> str:
-    start = script.index(f'  function {name}(')
+    marker = f'  function {name}('
+    if marker not in script:
+        marker = f'  async function {name}('
+    start = script.index(marker)
     end = script.index('\n  }', start) + len('\n  }')
     return script[start:end]
 
@@ -777,6 +780,116 @@ def test_gap_value_choice_is_sent_only_to_powerpoint_export():
     assert "const gapOption = kind === 'ppt' ? `&show_gap_values=${showGapValues() ? 'true' : 'false'}` : '';" in script
     assert "link.href = enabled ? `${exportBase}/${encodeURIComponent(jobId)}/export/${kind}?${query}${gapOption}` : '#';" in script
     assert "const query = `table_mode=${encodeURIComponent(selectedTableMode())}&gap_layout=${encodeURIComponent(selectedGapLayout())}&environment=${encodeURIComponent(selectedEnvironment || 'all')}`;" in script
+
+
+def test_dense_powerpoint_export_choice_controls_split_parameter_and_cancel():
+    script = SCORING_SCRIPT.read_text(encoding='utf-8')
+    payload = {
+        'snippets': {
+            'environmentOf': _function_source(script, 'environmentOf'),
+            'pptHasDenseCharts': _function_source(script, 'pptHasDenseCharts'),
+            'generateScoringPpt': _function_source(script, 'generateScoringPpt'),
+        },
+    }
+    program = r"""
+const vm = require('node:vm');
+const payload = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+const dense = environment => ({context: {environment}, hierarchy_columns: Array(21).fill({})});
+const atLimit = {context: {environment: 'DriveCity'}, hierarchy_columns: Array(20).fill({}),
+  rows: [{category: 'Only category'}]};
+const cases = [
+  {choice: 'confirm', environment: 'DriveCity', tables: [dense('DriveCity')]},
+  {choice: 'secondary', environment: 'DriveCity', tables: [dense('DriveCity')]},
+  {choice: 'cancel', environment: 'DriveCity', tables: [dense('DriveCity')]},
+  {choice: 'confirm', environment: 'all', tables: [dense('DriveCity'), dense('Walk')]},
+  {choice: 'no-dialog', environment: 'DriveCity', tables: [atLimit]},
+];
+const results = [];
+(async () => {
+  for (const testCase of cases) {
+    let assigned = null;
+    let dialog = null;
+    const context = {
+      currentResults: {views: {hierarchy_score_tables: testCase.tables}},
+      selectedEnvironment: testCase.environment,
+      showConfirmDialog: testCase.choice === 'no-dialog' ? undefined
+        : async (message, options) => { dialog = {message, ...options}; return testCase.choice; },
+      URL,
+      window: {
+        location: {href: 'https://example.test/scoring/jobs/1/export/ppt?environment=DriveCity',
+          assign: url => { assigned = url; }},
+      },
+    };
+    vm.createContext(context);
+    vm.runInContext(Object.values(payload.snippets).join('\n'), context);
+    await vm.runInContext("generateScoringPpt({href: window.location.href})", context);
+    results.push({
+      choice: testCase.choice,
+      assigned,
+      splitCharts: assigned && new URL(assigned).searchParams.get('split_charts'),
+      dialog,
+    });
+  }
+  process.stdout.write(JSON.stringify(results));
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+
+    result = _run_node_json(program, payload)
+
+    assert [item['splitCharts'] for item in result] == ['true', 'false', None, 'true', 'false']
+    assert result[2]['assigned'] is None
+    assert result[4]['dialog'] is None
+    assert all(item['dialog']['title'] == 'PowerPoint chart layout' for item in result[:4])
+    assert all('more than 20 bars' in item['dialog']['message']
+               and 'more than 40 bars' in item['dialog']['message'] for item in result[:4])
+    assert all(item['dialog']['confirmLabel'] == 'Yes, split charts' for item in result[:4])
+    assert all(item['dialog']['secondaryLabel'] == 'No, keep all bars on one slide' for item in result[:4])
+    assert all(item['dialog']['cancelLabel'] == 'Cancel' for item in result[:4])
+
+
+def test_dense_chart_thresholds_respect_best_network_and_category_bar_limits():
+    script = SCORING_SCRIPT.read_text(encoding='utf-8')
+    payload = {
+        'snippets': {
+            'environmentOf': _function_source(script, 'environmentOf'),
+            'pptHasDenseCharts': _function_source(script, 'pptHasDenseCharts'),
+        },
+    }
+    program = r"""
+const vm = require('node:vm');
+const payload = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+const context = {};
+vm.createContext(context);
+vm.runInContext(Object.values(payload.snippets).join('\n'), context);
+const hierarchy = count => ({
+  context: {environment: 'DriveCity'}, hierarchy_columns: Array(count).fill({}),
+  rows: [{category: 'Only category'}],
+});
+const simple = (categoryCount, environment = 'DriveCity') => ({
+  context: {environment}, operators: ['A', 'B', 'C', 'D'],
+  rows: Array.from({length: categoryCount}, (_value, index) => ({category: `Category ${index}`})),
+});
+const checks = [
+  ['best-network-20', {hierarchy_score_tables: [hierarchy(20)]}, 'DriveCity'],
+  ['best-network-21', {hierarchy_score_tables: [hierarchy(21)]}, 'DriveCity'],
+  ['category-40', {score_tables: [simple(10)]}, 'DriveCity'],
+  ['category-44', {score_tables: [simple(11)]}, 'DriveCity'],
+  ['selected-environment-excludes-dense', {score_tables: [simple(11, 'Walk')]}, 'DriveCity'],
+  ['all-environments-includes-dense', {score_tables: [simple(11, 'Walk')]}, 'all'],
+];
+const result = checks.map(([name, payload, environment]) => [
+  name, context.pptHasDenseCharts(payload, environment),
+]);
+process.stdout.write(JSON.stringify(result));
+"""
+
+    result = _run_node_json(program, payload)
+
+    assert result == [
+        ['best-network-20', False], ['best-network-21', True],
+        ['category-40', False], ['category-44', True],
+        ['selected-environment-excludes-dense', False], ['all-environments-includes-dense', True],
+    ]
 
 
 def test_scoring_tab_is_plural_and_subtotals_and_totals_share_category_background():

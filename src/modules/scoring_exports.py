@@ -5,9 +5,10 @@ from copy import deepcopy
 import csv
 import json
 from io import BytesIO, StringIO
-from math import ceil, isclose, isfinite
+from math import ceil, floor, isclose, isfinite, log10
 from pathlib import Path
 from typing import Any
+from textwrap import wrap
 
 from pptx import Presentation
 from pptx.chart.data import CategoryChartData
@@ -969,8 +970,18 @@ def _fill_series(series, color: str) -> None:
 
 def _charts(presentation, matrices: list[dict]) -> None:
     for matrix in matrices:
-        slide = _slide(presentation, 'Scoring per Category', _chart_subtitle(matrix))
         categories = list(dict.fromkeys(row['category'] for row in matrix['rows']))
+        categories_per_slide = max(1, 20 // max(1, len(matrix['operators'])))
+        if matrix.get('_split_charts') is not False and len(categories) > categories_per_slide:
+            chunks = [categories[start:start + categories_per_slide]
+                      for start in range(0, len(categories), categories_per_slide)]
+            for index, chunk in enumerate(chunks, 1):
+                page = dict(matrix, rows=[row for row in matrix['rows'] if row['category'] in chunk],
+                            _stacked_chart_page=f'Page {index} of {len(chunks)}')
+                _charts(presentation, [page])
+            continue
+        slide = _slide(presentation, 'Scoring per Category', _chart_subtitle(matrix))
+        _stacked_chart_page_note(slide, matrix)
         data = CategoryChartData()
         data.categories = categories
         maximum = 0.0
@@ -990,7 +1001,10 @@ def _charts(presentation, matrices: list[dict]) -> None:
         _format_chart(chart, maximum=maximum)
         chart.plots[0].gap_width = 140
         chart.plots[0].overlap = -20
-        chart.plots[0].data_labels.font.size = Pt(7)
+        bar_count = len(categories) * len(matrix['operators'])
+        chart.plots[0].data_labels.font.size = Pt(min(7, max(4, 140 / max(1, bar_count))))
+        chart.plots[0].data_labels.number_format = '0' if bar_count > 40 else '0.0'
+        chart.plots[0].has_data_labels = bar_count <= 70
         chart.legend.font.size = Pt(10)
         for series, operator in zip(chart.series, matrix['operators']):
             series.format.fill.solid()
@@ -1092,17 +1106,17 @@ def _stacked_category_chart(presentation, matrix: dict) -> None:
         {'id': operator, 'operator': _operator_label(matrix, operator)} for operator in operators
     ])
     chart_group = [chart_shape] + ([category_key] if category_key is not None else []) + ([hierarchy_grid] if hierarchy_grid is not None else [])
-    slide.shapes.add_group_shape(chart_group).name = 'Scoring Stacked Operator Chart'
+    slide.shapes.add_group_shape(chart_group + chart_shape._scoring_axis_labels).name = 'Scoring Stacked Operator Chart'
     _add_category_allocation_donut(slide, matrix)
     _text(slide, matrix['coverage_note'], 6.95, size=9)
 
 
-def _stacked_chart_pages(matrix: dict, *, limit: int = 12) -> list[dict]:
+def _stacked_chart_pages(matrix: dict, *, limit: int = 20) -> list[dict]:
     """Keep preferred operators together and preserve hierarchy order within each page."""
     columns = matrix.get('hierarchy_columns') or [
         {'id': operator, 'operator': operator} for operator in matrix['operators']
     ]
-    if len(columns) <= limit:
+    if matrix.get('_split_charts') is False or len(columns) <= limit:
         return [matrix]
     grouped = {}
     for column in columns:
@@ -1155,7 +1169,12 @@ def _add_chart_hierarchy_grid(slide, chart_shape, columns: list[dict]) -> Any:
                    for column in columns]
     depth = len(columns[0]['path'])
     chart = chart_shape.chart
+    chart_shape._scoring_axis_labels = []
+    if depth == 1:
+        chart.category_axis.tick_label_position = XL_TICK_LABEL_POSITION.NEXT_TO_AXIS
+        return None
     chart.category_axis.tick_label_position = XL_TICK_LABEL_POSITION.NONE
+    chart.value_axis.tick_label_position = XL_TICK_LABEL_POSITION.NONE
     plot = chart._chartSpace.chart.plotArea
     layout = plot.find('{http://schemas.openxmlformats.org/drawingml/2006/chart}layout')
     if layout is None:
@@ -1165,6 +1184,29 @@ def _add_chart_hierarchy_grid(slide, chart_shape, columns: list[dict]) -> Any:
         layout.remove(child)
     narrow_leaves = chart_shape.width.inches * .89 / len(columns) < .65
     row_heights = [.30 if narrow_leaves and index == depth - 1 else .22 for index in range(depth)]
+    grid_cells = {}
+    for depth_index in range(depth):
+        start = 0
+        while start < len(columns):
+            prefix = columns[start]['path'][:depth_index + 1]
+            end = start
+            while end + 1 < len(columns) and columns[end + 1]['path'][:depth_index + 1] == prefix:
+                end += 1
+            value = str(_hierarchy_display_value(columns[start]['path'][depth_index]))
+            cell_width = (chart_shape.width.inches - .75) * (end - start + 1) / len(columns)
+            longest_line = max(len(line) for line in value.split('\n'))
+            font_size = min(8, max(4, (cell_width - .02) * 72 / max(1, longest_line * .52)))
+            grid_cells[depth_index, start] = (end, value, font_size)
+            start = end + 1
+        level_font = min(font for (level, _), (_, _, font) in grid_cells.items() if level == depth_index)
+        for (level, start), (end, value, _) in list(grid_cells.items()):
+            if level != depth_index:
+                continue
+            cell_width = (chart_shape.width.inches - .75) * (end - start + 1) / len(columns)
+            characters = max(1, floor((cell_width - .02) * 72 / (level_font * .56)))
+            lines = [part for line in value.split('\n') for part in (wrap(line, characters) or [''])]
+            row_heights[depth_index] = max(row_heights[depth_index], len(lines) * level_font * 1.2 / 72 + .04)
+            grid_cells[depth_index, start] = (end, '\n'.join(lines), level_font)
     grid_height = sum(row_heights)
     chart_shape.height -= Inches(grid_height + .1)
     plot_left = .55 / chart_shape.width.inches
@@ -1180,6 +1222,22 @@ def _add_chart_hierarchy_grid(slide, chart_shape, columns: list[dict]) -> Any:
     left = chart_shape.left + Inches(.55)
     width = chart_shape.width - Inches(.75)
     top = chart_shape.top + chart_shape.height
+    maximum = chart.value_axis.maximum_scale
+    tick_base = 10 ** floor(log10(maximum / 6))
+    tick_step = min((1, 2, 5, 10), key=lambda step: abs(step * tick_base - maximum / 6)) * tick_base
+    chart.value_axis.major_unit = tick_step
+    axis_labels = []
+    plot_top = chart_shape.top.inches + chart_shape.height.inches * .13
+    plot_height = chart_shape.height.inches * .87
+    for index in range(floor(maximum / tick_step) + 1):
+        value = index * tick_step
+        label = _text(slide, f'{value:g}', plot_top + plot_height * (1 - value / maximum) - .08,
+                      left=left / 914400 - .48, width=.40, height=.18, size=10,
+                      color='#17232D', align=PP_ALIGN.RIGHT)
+        label.text_frame.margin_left = label.text_frame.margin_right = 0
+        label.name = 'Scoring Chart Value Axis Tick'
+        axis_labels.append(label)
+    chart_shape._scoring_axis_labels = axis_labels
     grid = slide.shapes.add_table(depth, len(columns), left, top, width, Inches(grid_height))
     grid.name = 'Scoring Chart Aggregation Grid'
     row_top = top / 914400
@@ -1188,19 +1246,15 @@ def _add_chart_hierarchy_grid(slide, chart_shape, columns: list[dict]) -> Any:
         row.height = Inches(row_heights[depth_index])
         start = 0
         while start < len(columns):
-            prefix = columns[start]['path'][:depth_index + 1]
-            end = start
-            while end + 1 < len(columns) and columns[end + 1]['path'][:depth_index + 1] == prefix:
-                end += 1
+            end, value, grid_font = grid_cells[depth_index, start]
             cell = grid.table.cell(row_index, start)
             if end > start:
                 cell.merge(grid.table.cell(row_index, end))
-            value = str(_hierarchy_display_value(columns[start]['path'][depth_index]))
-            if narrow_leaves and depth_index == depth - 1 and len(value) == 7 and value[4:6] == '-Q':
-                value = value[:5] + '\n' + value[5:]
             _cell(cell, value,
                   color='#EDF3F7' if row_index % 2 == 0 else '#E1EBF1',
-                  foreground='#344858', size=8, bold=depth_index == 0)
+                  foreground='#344858', size=grid_font, bold=depth_index == 0)
+            cell.margin_left = cell.margin_right = Inches(.01)
+            cell.text_frame.word_wrap = False
             start = end + 1
         level = columns[0]['path'][depth_index]['level']
         label = _text(slide, 'Category (0)' if level == 'Category' else level, row_top,
@@ -1209,6 +1263,7 @@ def _add_chart_hierarchy_grid(slide, chart_shape, columns: list[dict]) -> Any:
         label.name = 'Scoring Chart Aggregation Level ' + level
         label.text_frame.margin_left = label.text_frame.margin_right = 0
         label.text_frame.word_wrap = False
+        label.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
         row_top += row_heights[depth_index]
     return grid
 
@@ -1216,6 +1271,8 @@ def _add_chart_hierarchy_grid(slide, chart_shape, columns: list[dict]) -> Any:
 def _format_stacked_segment_labels(chart) -> None:
     """Use contrasting labels and omit numbers that cannot fit thin segments."""
     chart.plots[0].gap_width = 45
+    leaf_count = len(chart.series[-1].values)
+    chart.plots[0].data_labels.font.size = Pt(min(9, max(4, 108 / max(1, leaf_count))))
     plot = chart._chartSpace.xpath('.//c:barChart')[0]
     defaults = plot.find('{http://schemas.openxmlformats.org/drawingml/2006/chart}dLbls')
     for series in list(chart.series)[:-1]:
@@ -1331,7 +1388,8 @@ def _best_network(presentation, matrices: list[dict]) -> None:
         ]
         hierarchy_grid = _add_chart_hierarchy_grid(slide, chart_shape, grid_columns)
         slide.shapes.add_group_shape(
-            [chart_shape, service_heading, service_key] + ([hierarchy_grid] if hierarchy_grid is not None else []),
+            [chart_shape, service_heading, service_key] + ([hierarchy_grid] if hierarchy_grid is not None else [])
+            + chart_shape._scoring_axis_labels,
         ).name = 'Scoring Best Network Service Chart'
         _add_family_allocation_donut(slide, matrix)
         _text(slide, matrix['coverage_note'], 7.03, size=9, height=.35)
@@ -1370,7 +1428,8 @@ def _add_total_labels(chart) -> None:
     labels.find('{http://schemas.openxmlformats.org/drawingml/2006/chart}dLblPos').set('val', 't')
     for run_properties in labels.xpath('.//a:defRPr | .//a:rPr'):
         run_properties.set('b', '1')
-        run_properties.set('sz', '1200')
+        label_size = min(12, max(4, 144 / max(1, len(chart.series[-1].values))))
+        run_properties.set('sz', str(round(label_size * 100)))
         for fill in run_properties.xpath('./a:solidFill'):
             run_properties.remove(fill)
         fill = OxmlElement('a:solidFill')
@@ -1450,7 +1509,7 @@ def _hierarchy_chart(presentation, matrix: dict) -> None:
     )
     hierarchy_grid = _add_chart_hierarchy_grid(slide, chart_shape, columns)
     chart_group = [chart_shape] + ([category_key] if category_key is not None else []) + ([hierarchy_grid] if hierarchy_grid is not None else [])
-    slide.shapes.add_group_shape(chart_group).name = 'Scoring Chart With Category Key'
+    slide.shapes.add_group_shape(chart_group + chart_shape._scoring_axis_labels).name = 'Scoring Chart With Category Key'
     _add_category_allocation_donut(slide, matrix)
     _text(slide, matrix['coverage_note'], 7.06, size=8, height=.2)
 
@@ -1458,15 +1517,18 @@ def _hierarchy_chart(presentation, matrix: dict) -> None:
 def _hierarchy_category_comparison_chart(presentation, matrix: dict) -> None:
     """Show each category with readable hierarchy labels and one series per operator."""
     categories = list(dict.fromkeys(row['category'] for row in matrix['rows']))
-    for category in categories:
-        metrics = [row for row in matrix['rows'] if row['category'] == category]
-        maximum = max((sum(row['values'][column['id']]['points'] or 0 for row in metrics)
-                   for column in matrix['hierarchy_columns']), default=0.0)
-        columns = [dict(column, path=[{'level': 'Category', 'value': category}] + column['path'])
-                   for column in matrix['hierarchy_columns']]
+    category_groups = [categories] if matrix.get('_split_charts') is False else [[category] for category in categories]
+    for category_group in category_groups:
+        metrics = [row for row in matrix['rows'] if row['category'] in category_group]
+        columns = [dict(column, comparison_category=category,
+                        path=[{'level': 'Category', 'value': category}] + column['path'])
+                   for category in category_group for column in matrix['hierarchy_columns']]
+        maximum = max((sum(row['values'][column['id']]['points'] or 0 for row in metrics
+                           if row['category'] == column['comparison_category'])
+                       for column in columns), default=0.0)
         operators = list(dict.fromkeys(column['operator'] for column in columns))
         slide = _slide(presentation, 'Scoring per Category', _chart_subtitle(matrix))
-        heading = category
+        heading = category_group[0] if len(category_group) == 1 else 'All Categories'
         _text(slide, heading, 1.42, left=.7, width=11.9, height=.25, size=12, color='#4A5B65')
         data = CategoryChartData()
         _add_hierarchy_chart_categories(data, columns)
@@ -1474,7 +1536,8 @@ def _hierarchy_category_comparison_chart(presentation, matrix: dict) -> None:
             values = []
             for column in columns:
                 points = [row['values'][column['id']]['points'] for row in metrics
-                          if row['values'][column['id']]['points'] is not None]
+                          if row['category'] == column['comparison_category']
+                          and row['values'][column['id']]['points'] is not None]
                 values.append(sum(points) if points and column['operator'] == operator else None)
             data.add_series(_operator_label(matrix, operator), values)
         chart_shape = slide.shapes.add_chart(
@@ -1485,13 +1548,15 @@ def _hierarchy_category_comparison_chart(presentation, matrix: dict) -> None:
         _format_chart(chart, maximum=maximum)
         chart.plots[0].gap_width = 120
         chart.plots[0].overlap = 100
-        chart.plots[0].data_labels.font.size = Pt(min(10, max(6, chart_shape.width.inches * .89 * 72 / max(1, len(columns)) / 3.2)))
+        chart.plots[0].data_labels.font.size = Pt(min(10, max(4, chart_shape.width.inches * .89 * 72 / max(1, len(columns)) / 3.2)))
+        chart.plots[0].data_labels.number_format = '0' if len(columns) > 40 else '0.0'
+        chart.plots[0].has_data_labels = len(columns) <= 70
         chart.category_axis.tick_labels.font.size = Pt(9)
         chart.legend.font.size = Pt(11)
         for series, operator in zip(chart.series, operators):
             _fill_series(series, _operator_color(matrix, operator))
         hierarchy_grid = _add_chart_hierarchy_grid(slide, chart_shape, columns)
-        slide.shapes.add_group_shape([chart_shape, hierarchy_grid]).name = 'Scoring Hierarchy Category Comparison Chart'
+        slide.shapes.add_group_shape([chart_shape, hierarchy_grid] + chart_shape._scoring_axis_labels).name = 'Scoring Hierarchy Category Comparison Chart'
         _text(slide, matrix['coverage_note'], 6.95, size=9)
 
 
@@ -1807,7 +1872,8 @@ def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dic
         else:
             for index, item in enumerate(legend):
                 legend_table = slide.shapes.add_table(
-                    1, 1, Inches(6.8 + index * 1.15), Inches(1.25), Inches(1.1), Inches(.18),
+                    1, 1, Inches(presentation.slide_width.inches - .55 - len(legend) * 1.15 + .05 + index * 1.15),
+                    Inches(1.25), Inches(1.1), Inches(.18),
                 ).table
                 _cell(legend_table.cell(0, 0), item.get('band', ''), color=item['color'], size=8)
         _text(slide, matrix['coverage_note'], 7.27, size=8, height=.18)
@@ -2052,7 +2118,8 @@ def _gap_tables(presentation, matrices: list[dict]) -> None:
 def export_scoring_powerpoint(job: dict[str, Any], result: dict[str, Any], template_path: Path,
                              operator_mapping_groups: list[dict[str, Any]] | None = None,
                              *, table_mode: str = 'expanded', gap_layout: str = 'end',
-                             environment: str = 'all', show_gap_values: bool = True) -> bytes:
+                             environment: str = 'all', show_gap_values: bool = True,
+                             split_charts: bool = True) -> bytes:
     """Export saved points as comparison matrices, charts and prioritized gaps."""
     if not template_path.is_file():
         raise ValueError('The configured CDR PowerPoint template is missing.')
@@ -2076,6 +2143,7 @@ def export_scoring_powerpoint(job: dict[str, Any], result: dict[str, Any], templ
     environment_allocations = maximum_allocations_from_configuration(configuration)
     for matrix_key in ('score_tables', 'hierarchy_score_tables'):
         for matrix in views.get(matrix_key, []):
+            matrix['_split_charts'] = split_charts
             matrix['environment_allocations'] = environment_allocations
             matrix['environment_labels'] = {
                 name: str(scope.get('display_name') or _environment_display_label(name))

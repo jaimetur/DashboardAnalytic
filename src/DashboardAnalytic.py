@@ -14241,6 +14241,7 @@ def scoring_job_export(
     gap_layout: str | None = None,
     environment: str = 'all',
     show_gap_values: bool = True,
+    split_charts: bool = True,
     user: SessionUser = Depends(current_user),
 ) -> Response:
     if table_mode is not None and table_mode not in {'expanded', 'summary'}:
@@ -14332,6 +14333,7 @@ def scoring_job_export(
                 operator_mapping_groups, table_mode=table_mode or 'expanded',
                 gap_layout=gap_layout or 'end', environment=selected_environment,
                 show_gap_values=show_gap_values,
+                split_charts=split_charts,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
