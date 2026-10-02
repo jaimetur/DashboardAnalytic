@@ -550,6 +550,21 @@ def prepare_scoring_display_selections(job: dict[str, Any], result: dict[str, An
     )
 
 
+def _style_scoring_intro_field(paragraph, text: str, *, bold_label: bool = False) -> None:
+    """Show field labels in white and their values in bold yellow."""
+    label, separator, value = text.partition(':')
+    paragraph.clear()
+    label_run = paragraph.add_run()
+    label_run.text = label + separator + (' ' if value.strip() else '')
+    label_run.font.color.rgb = RGBColor.from_string('FFFFFF')
+    label_run.font.bold = bold_label
+    if value.strip():
+        value_run = paragraph.add_run()
+        value_run.text = value.strip()
+        value_run.font.color.rgb = RGBColor.from_string('FFC700')
+        value_run.font.bold = True
+
+
 def _fit_scoring_intro_subtitle(presentation, slide, layout_name: str, subtitle: str) -> None:
     title_shape = next(
         (shape for shape in slide.placeholders if shape.placeholder_format.type in {1, 3}),
@@ -605,7 +620,7 @@ def _fit_scoring_intro_subtitle(presentation, slide, layout_name: str, subtitle:
     filters_shape = _text(
         slide, '', 3.6, left=title_shape.left / Inches(1),
         width=title_shape.width / Inches(1), height=1.85,
-        size=16, color='#CCEEF4',
+        size=16, color=_WHITE,
     )
     filters_shape.name = 'Scoring Aggregations and Filters'
     frame = filters_shape.text_frame
@@ -623,7 +638,9 @@ def _fit_scoring_intro_subtitle(presentation, slide, layout_name: str, subtitle:
         properties.set('marL', str(Inches(.22) if index else 0))
         properties.set('indent', '0')
         properties.insert(0, OxmlElement('a:buNone'))
-        paragraph.font.color.rgb = RGBColor.from_string('CCEEF4')
+        paragraph.font.color.rgb = RGBColor.from_string('FFFFFF')
+        if index:
+            _style_scoring_intro_field(paragraph, line)
         paragraph.line_spacing = 1.0
         paragraph.space_before = Pt(0)
         paragraph.space_after = Pt(3)
@@ -692,6 +709,7 @@ def _add_scoring_intro_slides(
             [campaign_text], campaign_shape.width / Inches(1) - .5, maximum=16,
         ))
         paragraph.font.name = 'Aptos'
+        _style_scoring_intro_field(paragraph, campaign_text, bold_label=True)
         for run in paragraph.runs:
             run.font.name = 'Aptos'
 
