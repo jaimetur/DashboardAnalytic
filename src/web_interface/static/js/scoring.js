@@ -237,6 +237,10 @@
   const deletedJobIds = new Set();
   const deletingJobIds = new Set();
   let jobs = [];
+  let calculationMatchKey = '';
+  let calculationMatchRevision = 0;
+  let calculationMatchTimer = null;
+  let submittingCalculation = false;
   let selectedJobId = restoredScoringViewState.jobId;
   let selectedJob = null;
   let selectedEnvironment = restoredScoringViewState.environment || 'all';
@@ -657,6 +661,52 @@
     message.dataset.kind = kind;
   }
 
+  function calculationPayload() {
+    const levels = [...new Set(selectedLevels())];
+    if (!levels.includes('Operator')) levels.unshift('Operator');
+    return {
+      dataset_ids: selectedDatasetIds(),
+      aggregation_levels: levels,
+      scoring_profile_id: scoringProfileSelect?.value || undefined,
+      nr_mode: nrFilter.value || 'NSA',
+      baseline_operator: baselineInput.value.trim(),
+      context_filters: selectedContextFilters(),
+    };
+  }
+
+  function updateCalculationMatch(ready) {
+    if (submittingCalculation) return;
+    const payload = calculationPayload();
+    const key = ready ? JSON.stringify(payload) : '';
+    if (key && key === calculationMatchKey) return;
+    calculationMatchKey = key;
+    const revision = ++calculationMatchRevision;
+    window.clearTimeout(calculationMatchTimer);
+    calculateButton.disabled = true;
+    recalculateButton.disabled = true;
+    if (!ready || !payload.baseline_operator) return;
+    calculationMatchTimer = window.setTimeout(async () => {
+      try {
+        const response = await requestJson(`${jobsUrl}/match`, {method: 'POST', body: JSON.stringify(payload)});
+        if (revision !== calculationMatchRevision || submittingCalculation) return;
+        const existing = response.job;
+        calculateButton.disabled = Boolean(existing);
+        recalculateButton.disabled = !existing || isActive(existing);
+        if (existing && isActive(existing)) {
+          setMessage('A scoring job with these parameters is already queued or running.');
+        } else if (existing) {
+          setMessage('A scoring job with these parameters already exists. Use Recalculate to update it.');
+        } else {
+          setMessage('Ready to calculate a new scoring job.');
+        }
+      } catch (error) {
+        if (revision === calculationMatchRevision && !submittingCalculation) {
+          setMessage(error.message || 'Unable to check existing scoring jobs.', 'error');
+        }
+      }
+    }, 180);
+  }
+
   function updateSelection() {
     refreshContextFilterOptions();
     const selectedCount = selectedDatasetIds().length;
@@ -682,8 +732,7 @@
     if (visibleBadge) visibleBadge.textContent = `${visibleCount} available`;
     const configurationError = root.dataset.configurationError || '';
     const ready = missingKinds.length === 0 && !configurationError;
-    calculateButton.disabled = !ready;
-    recalculateButton.disabled = !ready;
+    updateCalculationMatch(ready);
     if (configurationError) {
       setMessage(`${configurationError} Open Workspace Config → Scoring KPI Configuration.`, 'error');
     } else if (!ready) {
@@ -932,7 +981,7 @@
       if (profileName) {
         const profileMeta = document.createElement('span');
         profileMeta.className = 'scoring-job-meta';
-        profileMeta.textContent = 'Scoring Methodology Profile: ';
+        profileMeta.textContent = 'Scoring Methodology: ';
         const profileValue = document.createElement('strong');
         profileValue.className = 'scoring-job-profile';
         profileValue.textContent = profileName;
@@ -4552,6 +4601,11 @@
       const payload = await requestJson(jobsUrl);
       jobs = (Array.isArray(payload) ? payload : (Array.isArray(payload.jobs) ? payload.jobs : []))
         .filter(job => !deletedJobIds.has(jobIdOf(job)));
+      for (const job of jobs) {
+        const id = jobIdOf(job);
+        const cached = resultCache.get(id);
+        if (cached && (isActive(job) || cached.job?.updated_at !== job.updated_at)) resultCache.delete(id);
+      }
       const ordered = sortedJobs(jobs);
       const requested = requestedJobIdPending.value
         ? ordered.find(job => jobIdOf(job) === requestedJobIdPending.value) : null;
@@ -4575,6 +4629,8 @@
         currentResultsJobId = null;
         renderNoResult('Run a scoring job or select a saved job to see its results.');
       }
+      calculationMatchKey = '';
+      updateSelection();
       const anyActive = jobs.some(isActive);
       if (anyActive && !timer) timer = window.setInterval(refreshJobs, 3500);
       if (!anyActive && timer) { window.clearInterval(timer); timer = null; }
@@ -4608,6 +4664,8 @@
       deletedJobIds.add(id);
       resultCache.delete(id);
       jobs = jobs.filter(record => jobIdOf(record) !== id);
+      calculationMatchKey = '';
+      updateSelection();
       if (selectedJobId === id) {
         selectedJobId = null;
         selectedJob = null;
@@ -4647,17 +4705,10 @@
       baselineInput.focus();
       return;
     }
-    const levels = [...new Set(selectedLevels())];
-    if (!levels.includes('Operator')) levels.unshift('Operator');
-    const payload = {
-      dataset_ids: datasetIds,
-      aggregation_levels: levels,
-      scoring_profile_id: scoringProfileSelect?.value || undefined,
-      nr_mode: nrFilter.value || 'NSA',
-      baseline_operator: baseline,
-      context_filters: selectedContextFilters(),
-      force,
-    };
+    const payload = {...calculationPayload(), force};
+    submittingCalculation = true;
+    ++calculationMatchRevision;
+    window.clearTimeout(calculationMatchTimer);
     calculateButton.disabled = true;
     recalculateButton.disabled = true;
     setMessage(force ? 'Submitting a fresh scoring calculation…' : 'Submitting scoring calculation…');
@@ -4670,6 +4721,7 @@
       selectedJobId = id;
       selectedJob = job;
       userSelectedJob = true;
+      if (force) resultCache.delete(id);
       const cached = Boolean(body.cached);
       if (cached && (body.scoring || body.gap)) {
         const result = {job, scoring: body.scoring || [], gap: body.gap || [], warnings: body.warnings || []};
@@ -4684,6 +4736,8 @@
     } catch (error) {
       setMessage(error.message || 'The scoring job could not be started.', 'error');
     } finally {
+      submittingCalculation = false;
+      calculationMatchKey = '';
       updateSelection();
     }
   }
@@ -4702,6 +4756,7 @@
       persistScoringViewState();
     }
     if (event.target === scoringProfileSelect) {
+      calculationMatchKey = '';
       const profile = scoringProfileById.get(scoringProfileSelect.value);
       if (profile && applyProfileHierarchy(profile.aggregation_hierarchy)) {
         setMessage(`This calculation will use ${profile.name}.`, 'success');
@@ -4710,6 +4765,7 @@
       return;
     }
     if (event.target === baselineInput || event.target.matches('[data-aggregation-level], [data-scoring-context-filter]')) {
+      updateSelection();
       scheduleSelectionSave();
       return;
     }
@@ -4767,6 +4823,7 @@
     contextSelections.set(kind, comparisonIdentity(selected, kind));
     renderResult(currentResults, selectedJob);
   });
+  baselineInput.addEventListener('input', updateSelection);
   calculateButton.addEventListener('click', () => createJob(false));
   recalculateButton.addEventListener('click', () => createJob(true));
   document.addEventListener('click', event => {

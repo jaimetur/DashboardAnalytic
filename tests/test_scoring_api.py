@@ -503,14 +503,16 @@ def test_workspace_config_renders_kpi_and_gap_priority_panels(scoring_api):
     page = scoring_api['client'].get('/workspace-config')
 
     assert page.status_code == 200
-    assert '<h2>Scoring KPI Configuration</h2>' in page.text
-    assert '<h2>GAP KPI Priority</h2>' in page.text
+    assert '<h2>Scoring &amp; GAP Analysis Setup</h2>' in page.text
+    assert '<h2>Methodology KPIs Priorities for GAP analysis</h2>' in page.text
+    assert 'Scoring Methodology' in page.text
     assert 'data-scoring-environment' in page.text
     assert 'data-scoring-kpi-rows' in page.text
     assert 'data-scoring-priority-rows' in page.text
     assert '/static/js/scoring_config.js?v=' in page.text
     assert 'data-no-persist' in page.text
-    assert 'Import or export this configuration in Admin' in page.text
+    assert 'Import Methodology (JSON)' in page.text
+    assert 'Export all methodologies or back them up in Admin' in page.text
 
 
 def test_scoring_job_results_cache_force_and_exports(scoring_api):
@@ -614,9 +616,55 @@ def test_scoring_job_results_cache_force_and_exports(scoring_api):
 
     forced = client.post('/api/scoring/jobs', json={**payload, 'force': True})
     assert forced.status_code == 200
+    # The operator mappings changed after the original calculation, so the canonical cache identity changed too.
     assert forced.json()['job']['id'] != job_id
     assert forced.json()['cached'] is False
     assert len(scoring_api['submitted']) == 2
+    assert len(scoring_jobs.list_scoring_jobs(scoring_api['repository'])) == 2
+
+
+def test_scoring_job_match_api_is_read_only_and_uses_complete_validation(scoring_api):
+    client = scoring_api['client']
+    repository = scoring_api['repository']
+    payload = {
+        'dataset_ids': scoring_api['complete_dataset_ids'],
+        'aggregation_levels': ['Operator', 'Region'],
+        'nr_mode': 'NSA',
+        'baseline_operator': 'EE',
+        'context_filters': {'Region': ['North']},
+    }
+
+    missing = client.post('/api/scoring/jobs/match', json=payload)
+    assert missing.status_code == 200, missing.text
+    assert missing.json() == {'job': None}
+    assert scoring_jobs.list_scoring_jobs(repository) == []
+    assert scoring_api['submitted'] == []
+
+    created = client.post('/api/scoring/jobs', json=payload)
+    assert created.status_code == 200, created.text
+    job_id = created.json()['job']['id']
+    submitted_before_match = len(scoring_api['submitted'])
+    matched = client.post('/api/scoring/jobs/match', json=payload)
+    assert matched.status_code == 200, matched.text
+    assert matched.json()['job']['id'] == job_id
+    assert matched.json()['job']['status'] == 'queued'
+    assert len(scoring_jobs.list_scoring_jobs(repository)) == 1
+    assert len(scoring_api['submitted']) == submitted_before_match
+
+    incomplete = client.post('/api/scoring/jobs/match', json={
+        **payload, 'dataset_ids': [scoring_api['dataset_id']],
+    })
+    assert incomplete.status_code == 400
+    assert len(scoring_jobs.list_scoring_jobs(repository)) == 1
+    assert len(scoring_api['submitted']) == submitted_before_match
+
+    scoring_jobs.run_scoring_job(repository, job_id)
+    forced = client.post('/api/scoring/jobs', json={**payload, 'force': True})
+    assert forced.status_code == 200, forced.text
+    assert forced.json()['job']['id'] == job_id
+    assert forced.json()['cached'] is False
+    assert forced.json()['job']['status'] == 'queued'
+    assert len(scoring_jobs.list_scoring_jobs(repository)) == 1
 
 
 def test_global_raw_kpis_survive_job_reload_api_get_and_csv_export(scoring_api, monkeypatch):

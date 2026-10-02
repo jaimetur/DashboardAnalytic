@@ -100,11 +100,11 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
   const setKpiSaveDisabled = (disabled) => kpiSaveButtons.forEach(button => { button.disabled = disabled; });
   const priorityForm = root.querySelector('[data-scoring-priority-form]');
   const priorityRows = root.querySelector('[data-scoring-priority-rows]');
-  const priorityStatus = root.querySelector('[data-scoring-priority-status]');
+  const priorityStatus = kpiStatus;
   const prioritySave = root.querySelector('[data-scoring-priority-save]');
   const hierarchyForm = root.querySelector('[data-scoring-hierarchy-form]');
   const hierarchyRows = root.querySelector('[data-scoring-hierarchy-rows]');
-  const hierarchyStatus = root.querySelector('[data-scoring-hierarchy-status]');
+  const hierarchyStatus = kpiStatus;
   const hierarchySave = root.querySelector('[data-scoring-hierarchy-save]');
   if (!environmentSelect || !kpiForm || !kpiRows || !priorityForm || !priorityRows) return;
 
@@ -1270,6 +1270,11 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       methodologyTitleInput.value = configuration?.title || '';
       methodologyTitleInput.disabled = !currentProfile();
     }
+    const exportLink = root.querySelector('[data-scoring-config-export]');
+    if (exportLink) {
+      exportLink.href = `${endpoint}/export?profile_id=${encodeURIComponent(activeProfileId || '')}`;
+      exportLink.setAttribute('aria-disabled', currentProfile() ? 'false' : 'true');
+    }
     const hasProfile = Boolean(currentProfile());
     profileActions.forEach((button) => {
       button.disabled = !hasProfile || (button.dataset.scoringProfileAction === 'delete' && ((profileCollection?.profiles?.length || 0) <= 1 || activeProfileId === profileCollection?.active_profile_id))
@@ -1539,7 +1544,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
   const saveKpis = async () => {
     const profileId = activeProfileId;
     const environment = environmentSelect.value;
-    setStatus(kpiStatus, 'Saving methodology profile…');
+    setStatus(kpiStatus, 'Saving methodology…');
     setKpiSaveDisabled(true);
     try {
       await saveConfiguration((latest) => {
@@ -1559,58 +1564,11 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       hierarchyDirty = false;
       hierarchyOrder = [...configuration.aggregation_hierarchy];
       render();
-      setStatus(kpiStatus, 'Methodology profile saved, including all environments and KPI settings.', 'success');
+      setStatus(kpiStatus, 'Methodology saved, including all environments, KPIs, aggregation hierarchy and GAP priority.', 'success');
     } catch (error) {
-      setStatus(kpiStatus, error.message || 'Unable to save methodology profile.', 'error');
+      setStatus(kpiStatus, error.message || 'Unable to save methodology.', 'error');
     } finally {
       setKpiSaveDisabled(false);
-    }
-  };
-
-  const savePriority = async () => {
-    const profileId = activeProfileId;
-    setStatus(priorityStatus, 'Saving GAP KPI priority…');
-    if (prioritySave) prioritySave.disabled = true;
-    try {
-      const codes = Array.from(priorityRows.querySelectorAll('tr[data-kpi-code]'), (row) => row.dataset.kpiCode);
-      await saveConfiguration((latest) => {
-        latest.gap_priority = [...codes];
-        return latest;
-      }, profileId, true);
-      priorityDirty = false;
-      renderPriorityRows();
-      setStatus(priorityStatus, 'GAP KPI priority saved.', 'success');
-    } catch (error) {
-      setStatus(priorityStatus, error.message || 'Unable to save GAP KPI priority.', 'error');
-    } finally {
-      if (prioritySave) prioritySave.disabled = false;
-    }
-  };
-
-  const saveHierarchy = async () => {
-    const profileId = activeProfileId;
-    const levels = Array.from(hierarchyRows.querySelectorAll('tr[data-aggregation-level]'), (row) => row.dataset.aggregationLevel);
-    if (levels.length !== defaultHierarchy.length
-        || new Set(levels).size !== defaultHierarchy.length
-        || levels.some((level) => !hierarchyDimensions.has(level))) {
-      setStatus(hierarchyStatus, 'The aggregation hierarchy must contain each dimension exactly once.', 'error');
-      return;
-    }
-    setStatus(hierarchyStatus, 'Saving scoring aggregation hierarchy…');
-    if (hierarchySave) hierarchySave.disabled = true;
-    try {
-      await saveConfiguration((latest) => {
-        latest.aggregation_hierarchy = [...levels];
-        return latest;
-      }, profileId, true);
-      hierarchyDirty = false;
-      hierarchyOrder = [...levels];
-      renderHierarchyRows();
-      setStatus(hierarchyStatus, 'Scoring aggregation hierarchy saved.', 'success');
-    } catch (error) {
-      setStatus(hierarchyStatus, error.message || 'Unable to save scoring aggregation hierarchy.', 'error');
-    } finally {
-      if (hierarchySave) hierarchySave.disabled = false;
     }
   };
 
@@ -1828,7 +1786,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
         return;
       }
       if (action === 'delete' && activeProfileId === profileCollection?.active_profile_id) {
-        setStatus(kpiStatus, 'Set another methodology as Default before deleting this profile.', 'error');
+        setStatus(kpiStatus, 'Set another methodology as Default before deleting this methodology.', 'error');
         return;
       }
       if (!await confirmProfileChange()) return;
@@ -1854,7 +1812,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
         }
         const confirmed = await openProfileDialog({
           title: 'Delete scoring methodology?',
-          description: `Delete “${active?.name || 'Scoring methodology'}”? Future scoring jobs will no longer use this profile.`,
+          description: `Delete “${active?.name || 'Scoring methodology'}”? Future scoring jobs will no longer use this methodology.`,
           confirmLabel: 'Delete',
         });
         if (!confirmed) return;
@@ -1868,7 +1826,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
           const target = latest.profiles.find((profile) => profile.id === source.id);
           target.name = requestedName;
         } else if (action === 'delete') {
-          if (latest.active_profile_id === source.id) throw new Error('Set another methodology as Default before deleting this profile.');
+          if (latest.active_profile_id === source.id) throw new Error('Set another methodology as Default before deleting this methodology.');
           latest.profiles = latest.profiles.filter((profile) => profile.id !== source.id);
           selectedProfileId = latest.active_profile_id;
         } else {
@@ -2340,6 +2298,13 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     setStatus(kpiStatus, `Unsaved environment rename from “${previousLabel}” to “${requestedName}”. Save to apply the change.`, 'success');
   };
 
+  root.querySelector('[data-scoring-config-export]')?.addEventListener('click', (event) => {
+    if (!currentProfile() || hasUnsavedChanges()) {
+      event.preventDefault();
+      setStatus(kpiStatus, 'Save the methodology before exporting its JSON.', 'error');
+    }
+  });
+
   const importButton = root.querySelector('[data-scoring-config-import]');
   const importFile = root.querySelector('[data-scoring-config-file]');
   importButton?.addEventListener('click', () => importFile?.click());
@@ -2347,10 +2312,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     const file = importFile.files?.[0];
     if (!file) return;
     const importPrompt = hasUnsavedChanges()
-      ? 'Discard unsaved scoring methodology changes and replace all scoring methodologies in this workspace with the selected JSON? Saved jobs retain their original rules.'
-      : 'Replace all scoring methodologies in this workspace with the selected JSON? Saved jobs retain their original rules.';
+      ? 'Discard unsaved changes and import methodologies from this JSON? Methodologies with matching IDs will be replaced; other methodologies and the workspace Default are kept.'
+      : 'Import methodologies from this JSON? Methodologies with matching IDs will be replaced; other methodologies and the workspace Default are kept.';
     if (profileCollection && !await openProfileDialog({
-      title: 'Replace scoring methodologies?', description: importPrompt, confirmLabel: 'Replace profiles',
+      title: 'Import methodologies?', description: importPrompt, confirmLabel: 'Import methodologies',
     })) {
       importFile.value = '';
       return;
@@ -2359,15 +2324,13 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     body.append('package', file);
     importButton.disabled = true;
     try {
-      const response = await fetch(`${endpoint}/import`, {method: 'POST', credentials: 'same-origin', body});
+      const response = await fetch(`${endpoint}/import?mode=merge`, {method: 'POST', credentials: 'same-origin', body});
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.detail || 'Unable to import scoring methodologies.');
       setProfileCollection(payload);
       discardUnsavedChanges();
       render();
       setStatus(kpiStatus, 'Scoring methodologies imported into this workspace.', 'success');
-      setStatus(priorityStatus, 'GAP KPI priority imported.', 'success');
-      setStatus(hierarchyStatus, 'Scoring aggregation hierarchy imported.', 'success');
     } catch (error) {
       setStatus(kpiStatus, error.message || 'Unable to import scoring methodologies.', 'error');
     } finally {
@@ -2382,7 +2345,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     kpiDirty = true;
     if (target.matches('[data-methodology-title]')) {
       configuration.title = target.value;
-      setStatus(kpiStatus, 'Unsaved methodology title. Save the profile to apply it.');
+      setStatus(kpiStatus, 'Unsaved methodology title. Save the methodology to apply it.');
       return;
     }
     if (target.matches('[data-kpi-label]')) resizeKpiLabel(target);
@@ -2613,10 +2576,6 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       event.preventDefault();
     }
   });
-  priorityForm.addEventListener('submit', (event) => {
-    event.preventDefault();
-    savePriority();
-  });
 
   hierarchyForm?.addEventListener('click', (event) => {
     const button = event.target.closest('[data-hierarchy-move]');
@@ -2630,10 +2589,6 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     hierarchyDirty = true;
     refreshHierarchyButtons();
     setStatus(hierarchyStatus, 'Unsaved scoring aggregation hierarchy changes.');
-  });
-  hierarchyForm?.addEventListener('submit', (event) => {
-    event.preventDefault();
-    saveHierarchy();
   });
 
   requestJson('/api/workspace-config/scoring-source-levels').then((levels) => {

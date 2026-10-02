@@ -191,6 +191,21 @@ process.stdout.write(JSON.stringify(context.results));
 def test_results_controls_are_grouped_with_icons_and_unique_environment_heading():
     template = SCORING_TEMPLATE.read_text(encoding='utf-8')
     script = SCORING_SCRIPT.read_text(encoding='utf-8')
+    from lxml import html
+    tree = html.fromstring(template)
+    shortcut_navs = tree.xpath('//nav[@aria-label="Scoring configuration sections"]')
+    assert len(shortcut_navs) == 2
+    for nav in shortcut_navs:
+        kpi_shortcut = nav.xpath('./a[@data-config-shortcut="kpi"]')[0]
+        assert kpi_shortcut.get('href') == '/workspace-config#scoring-methodology-environments'
+        assert kpi_shortcut.xpath('./span')[0].text == 'Methodology Environments'
+        assert kpi_shortcut.xpath('./svg/path/@d') == [
+            'M2 17h16M3 17V7h5v10M5 10h1M5 13h1M12 3l-2 14M16 3l2 14M14 4v2m0 3v2m0 3v2',
+        ]
+        assert nav.xpath('./a[@data-config-shortcut="hierarchy"][@href="/workspace-config#scoring-aggregation-hierarchy"]')
+        gap_shortcut = nav.xpath('./a[@data-config-shortcut="gap"]')[0]
+        assert gap_shortcut.get('href') == '/workspace-config#scoring-gap-priority'
+        assert gap_shortcut.xpath('./span')[0].text == 'KPI Priorities'
     header = re.search(r'<div class="scoring-results-head">(.*?)<div class="scoring-result-tabs"', template, re.S)
     assert header
     markup = header.group(1)
@@ -1460,3 +1475,89 @@ process.stdout.write(JSON.stringify(result));
         assert result['categories'] == [['Voice', 3], ['Data', 2]]
         assert result['headers'] == [['CATEGORY', 'category'], ['KPI', 'kpi']]
         assert result['subtotals'] == [['Voice total'], ['Data total']]
+
+
+def test_calculation_match_controls_cover_pending_cache_and_stale_responses():
+    script = SCORING_SCRIPT.read_text(encoding='utf-8')
+    payload = {'snippets': {
+        name: _function_source(script, name)
+        for name in ('calculationPayload', 'updateCalculationMatch')
+    }}
+    program = r"""
+const vm = require('node:vm');
+const payload = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+const timers = [];
+const messages = [];
+const requests = [];
+const context = {
+  calculationMatchKey: '', calculationMatchRevision: 0, calculationMatchTimer: null,
+  submittingCalculation: false, jobsUrl: '/api/scoring/jobs',
+  calculateButton: {disabled: false}, recalculateButton: {disabled: false},
+  selectedLevels: () => ['City'], selectedDatasetIds: () => [12, 14],
+  scoringProfileSelect: {value: 'profile-a'}, nrFilter: {value: 'NSA'},
+  baselineInput: {value: 'Operator A'}, selectedContextFilters: () => ({Region: ['North']}),
+  normalizeStatus: job => job?.status || '', isActive: job => ['queued', 'processing'].includes(job?.status),
+  setMessage: (text, kind = '') => messages.push({text, kind}),
+  requestJson: (...args) => new Promise((resolve, reject) => requests.push({args, resolve, reject})),
+  window: {
+    setTimeout: callback => { timers.push(callback); return timers.length; },
+    clearTimeout: () => {},
+  },
+};
+vm.createContext(context);
+vm.runInContext(Object.values(payload.snippets).join('\n'), context);
+async function flush() { await new Promise(resolve => setImmediate(resolve)); }
+async function main() {
+  context.updateCalculationMatch(true);
+  const pending = [context.calculateButton.disabled, context.recalculateButton.disabled];
+  timers[0]();
+  requests[0].resolve({job: null});
+  await flush();
+  const noMatch = [context.calculateButton.disabled, context.recalculateButton.disabled, messages.at(-1)?.text];
+
+  context.calculationMatchKey = '';
+  context.updateCalculationMatch(true);
+  timers[1]();
+  requests[1].resolve({job: {id: 8, status: 'completed'}});
+  await flush();
+  const completed = [context.calculateButton.disabled, context.recalculateButton.disabled];
+
+  context.calculationMatchKey = '';
+  context.updateCalculationMatch(true);
+  timers[2]();
+  requests[2].resolve({job: {id: 9, status: 'queued'}});
+  await flush();
+  const active = [context.calculateButton.disabled, context.recalculateButton.disabled];
+
+  context.calculationMatchKey = '';
+  context.updateCalculationMatch(true);
+  const staleRevision = context.calculationMatchRevision;
+  timers[3]();
+  context.baselineInput.value = 'Operator B';
+  context.updateCalculationMatch(true);
+  timers[4]();
+  requests[4].resolve({job: null});
+  await flush();
+  const latestMessage = messages.at(-1)?.text;
+  requests[3].resolve({job: {id: 10, status: 'completed'}});
+  await flush();
+  const staleResponseIgnored = context.calculationMatchRevision > staleRevision
+    && context.calculateButton.disabled === false && context.recalculateButton.disabled === true
+    && messages.at(-1)?.text === latestMessage;
+  process.stdout.write(JSON.stringify({pending, noMatch, completed, active, staleResponseIgnored,
+    matchUrl: requests[0].args[0], matchPayload: JSON.parse(requests[0].args[1].body)}));
+}
+main().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+    result = _run_node_json(program, payload)
+    assert result['pending'] == [True, True]
+    assert result['noMatch'] == [False, True, 'Ready to calculate a new scoring job.']
+    assert result['completed'] == [True, False]
+    assert result['active'] == [True, True]
+    assert result['staleResponseIgnored'] is True
+    assert result['matchUrl'] == '/api/scoring/jobs/match'
+    assert result['matchPayload'] == {
+        'dataset_ids': [12, 14], 'aggregation_levels': ['Operator', 'City'],
+        'scoring_profile_id': 'profile-a', 'nr_mode': 'NSA', 'baseline_operator': 'Operator A',
+        'context_filters': {'Region': ['North']},
+    }

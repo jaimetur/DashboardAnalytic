@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import re
 import shutil
 import subprocess
 
@@ -27,6 +28,10 @@ def test_scoring_configuration_panel_exposes_methodology_and_weight_controls():
     assert 'Global weight (%) shows the KPI’s share of all environments' in template
     assert 'data-environment-total-points' in template
     assert 'data-environment-total-weight' in template
+    assert '<label>Scoring Methodology' in template
+    for label in ['Create Methodology', 'Duplicate Methodology', 'Rename Methodology', 'Delete Methodology',
+                  'Save Methodology', 'Import Methodology (JSON)', 'Export Methodology (JSON)']:
+        assert label in template
     assert "const profilesEndpoint = '/api/workspace-config/scoring-profiles';" in script
     assert 'latest.active_profile_id = profileId' in script
 
@@ -128,7 +133,7 @@ def test_scoring_config_panels_have_stable_ordered_deep_link_targets():
     script = PANEL_SCRIPT.read_text(encoding='utf-8')
 
     panel_ids = [
-        'scoring-kpi-configuration',
+        'scoring-methodology-environments',
         'scoring-aggregation-hierarchy',
         'scoring-gap-priority',
     ]
@@ -137,6 +142,10 @@ def test_scoring_config_panels_have_stable_ordered_deep_link_targets():
     assert 'window.addEventListener(\'hashchange\', openScoringConfigHashTarget)' in script
     assert 'target.open = true' in script
     assert 'target.scrollIntoView' in script
+    from lxml import html
+    tree = html.fromstring(template)
+    assert tree.xpath('//details[@id="scoring-methodology-environments"]')
+    assert "ancestor.tagName?.toLowerCase() === 'details'" in script
 
 
 def test_gap_priority_table_displays_kpi_category():
@@ -228,7 +237,7 @@ def test_gap_priority_controls_support_inline_position_editor():
 const fs = require('fs');
 const source = fs.readFileSync(SCRIPT_PATH, 'utf8');
 const setupStart = source.indexOf('  const movePriorityRow =');
-const setupEnd = source.indexOf("  priorityForm.addEventListener('submit'", setupStart);
+const setupEnd = source.indexOf("  hierarchyForm?.addEventListener('click'", setupStart);
 if (setupStart < 0 || setupEnd < 0) throw new Error('Priority handler block not found');
 const setup = source.slice(setupStart, setupEnd);
 function create(names) {
@@ -501,7 +510,8 @@ def test_scoring_gap_setup_parent_keeps_child_anchor_ids_and_opens_ancestors():
     script = PANEL_SCRIPT.read_text(encoding='utf-8')
 
     assert 'id="scoring-gap-analysis-setup"' in template
-    for panel_id in ['scoring-kpi-configuration', 'scoring-aggregation-hierarchy', 'scoring-gap-priority']:
+    for panel_id in ['scoring-kpi-configuration', 'scoring-methodology-environments',
+                     'scoring-aggregation-hierarchy', 'scoring-gap-priority']:
         assert f'id="{panel_id}"' in template
     assert "ancestor.tagName?.toLowerCase() === 'details'" in script
     assert 'if (window.location.hash) openScoringConfigHashTarget();' in script
@@ -528,7 +538,7 @@ def test_switching_profiles_does_not_mark_the_kpi_form_dirty():
 
 def test_environment_save_and_add_category_locations_and_source_dropdowns():
     template = PANEL_TEMPLATE.read_text(encoding='utf-8')
-    assert 'id="scoring-environment-controls-title">Environments</h4>' in template
+    assert '<h2 id="scoring-environment-controls-title">Methodology Environments</h2>' in template
     assert template.index('data-scoring-environment-source-fields') < template.rindex('data-scoring-kpi-save')
     assert template.rindex('data-scoring-kpi-save') > template.index('KPI Definitions, Scoring &amp; Thresholds')
     assert '<select data-environment-g1 required>' in template
@@ -541,34 +551,78 @@ def test_environment_save_and_add_category_locations_and_source_dropdowns():
     assert 'addKpi(peers.at(-1) || null, category, {categoryCreated: true})' in script
 
 
-def test_methodology_contains_environment_and_kpi_subpanels_with_one_complete_save():
+def test_methodology_layout_uses_one_form_and_four_shared_save_buttons():
     from lxml import html
 
     tree = html.fromstring(PANEL_TEMPLATE.read_text(encoding='utf-8'))
-    methodology = tree.xpath('//section[@aria-labelledby="scoring-methodology-controls-title"]')[0]
-    environments = methodology.xpath('.//details[@aria-labelledby="scoring-environment-controls-title"]')[0]
-    kpis = environments.xpath('.//details[@aria-labelledby="scoring-kpi-definitions-title"]')[0]
+    form = tree.xpath('//form[@data-scoring-kpi-form]')[0]
+    environments = form.xpath('.//details[@aria-labelledby="scoring-environment-controls-title"]')[0]
+    kpis = form.xpath('.//*[@data-scoring-kpi-panel]')[0]
+    hierarchy = form.xpath('.//*[@id="scoring-aggregation-hierarchy"]')[0]
+    priority = form.xpath('.//*[@id="scoring-gap-priority"]')[0]
     assert kpis.xpath('.//tbody[@data-scoring-kpi-rows]')
-    assert environments.get('open') is not None and kpis.get('open') is None
-    assert kpis.get('data-panel-state-key') is None
-    assert 'data-scoring-kpi-panel' in kpis.attrib
-    assert environments.xpath('./summary/h4') and kpis.xpath('./summary/h5')
-    assert [button.text_content() for button in methodology.xpath('.//button[@data-scoring-kpi-save]')] == ['Save Methodology Profile'] * 2
-    assert not environments.xpath('.//button[@data-scoring-kpi-save]')
-    delete_button = methodology.xpath('.//button[@data-scoring-profile-action="delete"]')[0]
-    assert 'data-scoring-kpi-save' in delete_button.getprevious().attrib
-    default_button = delete_button.getprevious().getprevious()
+    assert kpis.get('open') is None
+    title = kpis.xpath('./summary//h5[@data-scoring-kpi-title]')[0]
+    summary_text = title.getparent()
+    assert 'scoring-config-kpi-summary-text' in summary_text.get('class', '')
+    hint = summary_text.xpath('./span[@class="scoring-config-kpi-expand-hint"]')[0]
+    assert hint.text == 'Expand this panel to edit KPI specifications, thresholds and weights for the selected environment.'
+    assert environments.get('open') is not None
+    assert environments in kpis.iterancestors()
+    assert hierarchy.getparent() is priority.getparent()
+    assert all('scoring-config-section' in panel.get('class', '') for panel in [environments, hierarchy, priority])
+    assert not tree.xpath('//details[@id="scoring-kpi-configuration"]')
+    assert not tree.xpath('//*[@class and contains(@class, "scoring-config-methodology-group")]')
+    buttons = form.xpath('.//button[@data-scoring-kpi-save]')
+    assert len(buttons) == 4
+    assert [button.text_content().strip() for button in buttons] == ['Save Methodology'] * 4
+    assert all(button.get('type') == 'submit' and form in button.iterancestors() for button in buttons)
+    assert len(form.xpath('.//*[@data-scoring-kpi-status]')) == 1
+    status = form.xpath('.//*[@data-scoring-kpi-status]')[0]
+    assert 'scoring-config-save-bar' in status.getparent().get('class', '')
+    assert not status.getparent().xpath('.//button[@data-scoring-kpi-save]')
+    template = PANEL_TEMPLATE.read_text(encoding='utf-8')
+    assert template.index('data-scoring-kpi-status') < template.index('scoring-environment-controls-title')
+    assert environments.xpath('.//button[@data-scoring-kpi-save]')
+    assert hierarchy.xpath('.//button[@data-scoring-kpi-save]')
+    assert priority.xpath('.//button[@data-scoring-kpi-save]')
+    delete_button = form.xpath('.//button[@data-scoring-profile-action="delete"]')[0]
+    save_button = delete_button.getprevious()
+    default_button = save_button.getprevious()
     assert default_button.get('data-scoring-profile-action') == 'default'
     assert default_button.text_content() == 'Set Default'
+    assert save_button.get('data-scoring-kpi-save') is not None
     assert default_button.getprevious().get('data-scoring-profile-action') == 'rename'
-    assert 'scoring-config-methodology-group' in methodology.get('class')
     assert environments.xpath('.//h5[@data-scoring-kpi-title]')
+    assert '.scoring-config-panel .scoring-config-kpi-expand-hint { display: block;' in template
+    assert '.scoring-config-panel .scoring-config-kpi-group[open] .scoring-config-kpi-expand-hint { display: none; }' in template
+    script = PANEL_SCRIPT.read_text(encoding='utf-8')
+    assert "root.querySelector('[data-scoring-kpi-title]')" in script
+    header_selector = '.workspace-config-stack .scoring-config-subpanels > .scoring-config-section.collapsible-panel > summary.collapsible-summary'
+    assert f'{header_selector} {{' in template
+    assert f'{header_selector} :is(h2, .eyebrow) {{ color: #fff; }}' in template
+    assert f'{header_selector} .collapse-chip {{ background: #e2f1e9;' in template
+
+
+def test_methodology_import_export_controls_use_requested_colors():
+    template = PANEL_TEMPLATE.read_text(encoding='utf-8')
+    import_rules = list(re.finditer(
+        r'\.scoring-config-panel\s+\[data-scoring-config-import\]\s*\{([^}]*)\}', template,
+    ))
+    export_rules = list(re.finditer(
+        r'\.scoring-config-panel\s+\[data-scoring-config-export\]\s*\{([^}]*)\}', template,
+    ))
+    assert import_rules and export_rules
+    assert 'background: #f5d6d6' in import_rules[-1].group(1)
+    assert 'color: #783737' in import_rules[-1].group(1)
+    assert 'background: #267c79' in export_rules[-1].group(1)
+    assert 'color: #fff' in export_rules[-1].group(1)
 
 
 def test_methodology_save_commits_pending_hierarchy_and_clears_all_dirty_sections():
     script = PANEL_SCRIPT.read_text(encoding='utf-8')
     start = script.index('  const saveKpis = async () => {')
-    end = script.index('  const savePriority =', start)
+    end = script.index('  const hasUnsavedChanges =', start)
     program = '''
 const activeProfileId = 'methodology', environmentSelect = {value: 'City'};
 const kpiStatus = {}, kpiSave = {disabled: false};
@@ -578,24 +632,64 @@ const defaultHierarchy = ['Operator', 'Vendor', 'Region', 'City', 'Campaign'];
 const hierarchyDimensions = new Set(defaultHierarchy);
 const requested = ['Operator', 'City', 'Campaign', 'Region', 'Vendor'];
 const hierarchyRows = {querySelectorAll: () => requested.map(aggregationLevel => ({dataset:{aggregationLevel}}))};
-let configuration = {aggregation_hierarchy: defaultHierarchy};
-let savedId = '', verifySave = false;
-const readKpiRows = latest => ({...latest, scope:{environments:{City:{}, Train:{}}}, metrics:[{contexts:{City:{}, Train:{}}}], gap_priority:['K2','K1']});
+let configuration = {title: 'Old title', aggregation_hierarchy: defaultHierarchy};
+let savedId = '', verifySave = false, saveCalls = 0;
+const readKpiRows = latest => ({...latest, title: 'Updated methodology', scope:{environments:{City:{}, Train:{}}}, metrics:[{code:'K1', contexts:{City:{max_points: 7}, Train:{max_points: 4}}}], gap_priority:['K2','K1']});
 const saveConfiguration = async (update, profileId, preserveScope, verify) => {
-  savedId = profileId; verifySave = verify; configuration = update(configuration);
+  saveCalls += 1; savedId = profileId; verifySave = verify; configuration = update(configuration);
 };
 const setStatus = () => {}, render = () => {};
 ''' + script[start:end] + '''
-(async () => { await saveKpis(); console.log(JSON.stringify({configuration,kpiDirty,priorityDirty,hierarchyDirty,savedId,verifySave})); })();
+(async () => { await saveKpis(); console.log(JSON.stringify({configuration,kpiDirty,priorityDirty,hierarchyDirty,savedId,verifySave,saveCalls})); })();
 '''
     completed = subprocess.run(['node', '-e', program], capture_output=True, text=True, check=True)
     actual = json.loads(completed.stdout)
     assert actual['configuration']['aggregation_hierarchy'] == ['Operator', 'City', 'Campaign', 'Region', 'Vendor']
     assert set(actual['configuration']['scope']['environments']) == {'City', 'Train'}
     assert actual['configuration']['gap_priority'] == ['K2', 'K1']
+    assert actual['configuration']['title'] == 'Updated methodology'
+    assert actual['configuration']['metrics'][0]['contexts']['Train']['max_points'] == 4
     assert not any(actual[field] for field in ('kpiDirty', 'priorityDirty', 'hierarchyDirty'))
     assert actual['savedId'] == 'methodology'
     assert actual['verifySave'] is True
+    assert actual['saveCalls'] == 1
+
+
+@pytest.mark.skipif(not shutil.which('node'), reason='Node.js is required')
+def test_profile_export_tracks_selection_and_blocks_unsaved_changes():
+    script = PANEL_SCRIPT.read_text(encoding='utf-8')
+    render_start = script.index('  const renderProfileControls = () => {')
+    render_end = script.index('  const render = () => {', render_start)
+    click_start = script.index("  root.querySelector('[data-scoring-config-export]')?.addEventListener('click'", render_end)
+    click_end = script.index('\n  const importButton =', click_start)
+    fixture = '''
+const assert = require('node:assert/strict');
+let activeProfileId = 'first';
+let dirty = false;
+const endpoint = '/api/workspace-config/scoring-configuration';
+const profileCollection = {profiles: [{id: 'first'}, {id: 'second'}]};
+const currentProfile = () => profileCollection.profiles.find(profile => profile.id === activeProfileId);
+const exportLink = {href: '', attributes: {}, setAttribute(name, value) {this.attributes[name] = value;}, addEventListener(name, handler) {this.handler = handler;}};
+const root = {querySelector: () => exportLink};
+const profileSelect = null, methodologyTitleInput = null, profileActions = [];
+const hasUnsavedChanges = () => dirty;
+let message = '';
+const setStatus = (_status, value) => {message = value;};
+const kpiStatus = {};
+'''+script[render_start:render_end]+script[click_start:click_end]+'''
+renderProfileControls();
+assert.equal(exportLink.href, '/api/workspace-config/scoring-configuration/export?profile_id=first');
+activeProfileId = 'second';
+renderProfileControls();
+assert.equal(exportLink.href, '/api/workspace-config/scoring-configuration/export?profile_id=second');
+assert.equal(exportLink.attributes['aria-disabled'], 'false');
+dirty = true;
+let prevented = false;
+exportLink.handler({preventDefault() {prevented = true;}});
+assert.equal(prevented, true);
+assert.match(message, /Save the methodology before exporting its JSON/);
+'''
+    subprocess.run(['node', '-e', fixture], check=True, capture_output=True, text=True)
 
 
 @pytest.mark.skipif(not shutil.which('node'), reason='Node.js is required')

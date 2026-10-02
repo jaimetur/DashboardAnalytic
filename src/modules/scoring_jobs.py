@@ -613,19 +613,17 @@ def _row_to_job(
     return job
 
 
-def create_scoring_job(
+def _prepare_scoring_job(
     repository: Repository,
     dataset_ids: list[int],
     levels: list[str],
     nr_mode: str | None,
     *,
     baseline_operator: str = DEFAULT_BASELINE_OPERATOR,
-    force: bool = False,
-    username: str = 'system',
     context_filters: dict[str, list[str]] | None = None,
     scoring_profile_id: str | None = None,
-) -> tuple[dict[str, Any], bool]:
-    """Return a matching cached result or persist a new queued scoring job."""
+) -> tuple[str, str, str, list[int], dict[str, Any], str, list[str], str]:
+    """Prepare the canonical identity and snapshot shared by matching and submission."""
     normalized_ids = list(dict.fromkeys(int(dataset_id) for dataset_id in dataset_ids))
     normalized_context_filters = _normalize_context_filters(context_filters)
     vendor_catalogues = repository.cdr_catalogues_by_dataset(normalized_ids)
@@ -642,12 +640,12 @@ def create_scoring_job(
             scoring_profile = profile_getter()
         else:
             if not isinstance(scoring_profile_id, str):
-                raise ValueError('Scoring profile ID must be a non-empty identifier.')
+                raise ValueError('Scoring methodology ID must be a non-empty identifier.')
             scoring_profile = profile_getter(scoring_profile_id.strip())
         configuration = validate_scoring_configuration(scoring_profile['configuration'])
     else:
         if scoring_profile_id is not None:
-            raise ValueError('This workspace does not support selecting scoring profiles for a job.')
+            raise ValueError('This workspace does not support selecting scoring methodologies for a job.')
         configuration = _workspace_scoring_configuration(repository)
         scoring_profile = {'id': '', 'name': ''}
     sources, _campaigns, source_fingerprint = _source_snapshot(
@@ -688,6 +686,48 @@ def create_scoring_job(
         'aggregation_contract_version': AGGREGATION_CONTRACT_VERSION,
         'operator_mappings': operator_mappings,
     }
+    return (cache_key, version, source_fingerprint, normalized_ids, source_snapshot,
+            selected_mode, normalized_levels, baseline)
+
+
+def find_matching_scoring_job(
+    repository: Repository, dataset_ids: list[int], levels: list[str], nr_mode: str | None,
+    *, baseline_operator: str = DEFAULT_BASELINE_OPERATOR,
+    context_filters: dict[str, list[str]] | None = None,
+    scoring_profile_id: str | None = None,
+) -> dict[str, Any] | None:
+    """Find a saved calculation using the same identity as job submission."""
+    cache_key, *_ = _prepare_scoring_job(
+        repository, dataset_ids, levels, nr_mode, baseline_operator=baseline_operator,
+        context_filters=context_filters, scoring_profile_id=scoring_profile_id,
+    )
+    with repository.connection() as connection:
+        row = connection.execute(
+            "SELECT * FROM scoring_jobs WHERE cache_key = ? "
+            "ORDER BY status IN ('queued', 'processing') DESC, id DESC LIMIT 1",
+            (cache_key,),
+        ).fetchone()
+    return _row_to_job(row, include_snapshot=False) if row else None
+
+
+def create_scoring_job(
+    repository: Repository,
+    dataset_ids: list[int],
+    levels: list[str],
+    nr_mode: str | None,
+    *,
+    baseline_operator: str = DEFAULT_BASELINE_OPERATOR,
+    force: bool = False,
+    username: str = 'system',
+    context_filters: dict[str, list[str]] | None = None,
+    scoring_profile_id: str | None = None,
+) -> tuple[dict[str, Any], bool]:
+    """Reuse a matching result, requeue the existing job, or create a new calculation."""
+    (cache_key, version, source_fingerprint, normalized_ids, source_snapshot,
+     selected_mode, normalized_levels, baseline) = _prepare_scoring_job(
+        repository, dataset_ids, levels, nr_mode, baseline_operator=baseline_operator,
+        context_filters=context_filters, scoring_profile_id=scoring_profile_id,
+    )
     now = local_now_iso()
     with repository.connection() as connection:
         connection.execute('BEGIN IMMEDIATE')
@@ -706,6 +746,23 @@ def create_scoring_job(
         ).fetchone()
         if active_row:
             return _row_to_job(active_row), True
+        previous_row = connection.execute(
+            'SELECT * FROM scoring_jobs WHERE cache_key = ? ORDER BY id DESC LIMIT 1',
+            (cache_key,),
+        ).fetchone()
+        if previous_row:
+            connection.execute(
+                """UPDATE scoring_jobs SET status = 'queued', progress = 0,
+                   message = 'Waiting to calculate scoring', result_json = NULL,
+                   last_error = NULL, started_at = NULL, finished_at = NULL,
+                   updated_at = ?, created_by = ?, source_metadata_json = ?
+                   WHERE id = ?""",
+                (now, str(username or 'system'),
+                 json.dumps(source_snapshot, ensure_ascii=False, separators=(',', ':')),
+                 previous_row['id']),
+            )
+            job = connection.execute('SELECT * FROM scoring_jobs WHERE id = ?', (previous_row['id'],)).fetchone()
+            return _row_to_job(job), False
         cursor = connection.execute(
             """
             INSERT INTO scoring_jobs (

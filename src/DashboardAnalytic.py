@@ -14171,6 +14171,24 @@ def scoring_selection_put(
     return {'selection': selection, 'warnings': warnings, 'accepted': accepted}
 
 
+@app.post('/api/scoring/jobs/match')
+def scoring_jobs_match(payload: ScoringJobRequest, user: SessionUser = Depends(current_user)) -> dict[str, Any]:
+    from src.modules.scoring_jobs import find_matching_scoring_job
+    task_repository = scoring_repository(user)
+    try:
+        selected_ids = validate_complete_scoring_cdr_selection(
+            task_repository, payload.dataset_ids, payload.nr_mode, context_filters=payload.context_filters,
+        )
+        job = find_matching_scoring_job(
+            task_repository, selected_ids, payload.aggregation_levels, payload.nr_mode,
+            baseline_operator=payload.baseline_operator, context_filters=payload.context_filters,
+            scoring_profile_id=payload.scoring_profile_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {'job': job}
+
+
 @app.post('/api/scoring/jobs')
 def scoring_jobs_create(payload: ScoringJobRequest, user: SessionUser = Depends(current_user)) -> dict[str, Any]:
     task_repository = scoring_repository(user)
@@ -15842,7 +15860,7 @@ async def save_workspace_scoring_profiles(
         payload = await request.json()
         profiles = task_repository.replace_scoring_profiles(payload)
     except (json.JSONDecodeError, UnicodeDecodeError, TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc) or 'The scoring profiles are invalid.') from exc
+        raise HTTPException(status_code=400, detail=str(exc) or 'The scoring methodologies are invalid.') from exc
     task_repository.try_add_log(user.username, 'save_scoring_profiles', json.dumps({
         'active_profile_id': profiles['active_profile_id'],
         'profile_count': len(profiles['profiles']),
@@ -15851,22 +15869,31 @@ async def save_workspace_scoring_profiles(
 
 
 @app.get('/api/workspace-config/scoring-configuration/export')
-def export_workspace_scoring_configuration(user: SessionUser = Depends(config_editor_user)) -> Response:
+def export_workspace_scoring_configuration(
+    user: SessionUser = Depends(config_editor_user), profile_id: str | None = None,
+) -> Response:
     task_repository = scoring_repository(user)
     try:
         profiles = task_repository.get_scoring_profiles()
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if profile_id is not None:
+        profile = next((item for item in profiles['profiles'] if item['id'] == profile_id), None)
+        if profile is None:
+            raise HTTPException(status_code=404, detail='The selected scoring methodology no longer exists.')
+        profiles = {'active_profile_id': profile_id, 'profiles': [profile]}
     from src.modules.scoring_config import scoring_profiles_document
     content = json.dumps(scoring_profiles_document(profiles), ensure_ascii=False, indent=2)
     return Response(content, media_type='application/json', headers={
-        'Content-Disposition': 'attachment; filename="scoring-configuration.json"',
+        'Content-Disposition': 'attachment; filename="scoring-methodology.json"' if profile_id is not None
+        else 'attachment; filename="scoring-configuration.json"',
     })
 
 
 @app.post('/api/workspace-config/scoring-configuration/import')
 async def import_workspace_scoring_configuration(
     package: UploadFile = File(...), user: SessionUser = Depends(config_editor_user),
+    mode: str = 'replace',
 ) -> JSONResponse:
     task_repository = scoring_repository(user)
     from src.modules.scoring_config import unwrap_scoring_profiles_payload
@@ -15876,6 +15903,17 @@ async def import_workspace_scoring_configuration(
             raise ValueError('Scoring & GAP Analysis Configuration JSON must not exceed 4 MiB.')
         document = json.loads(payload.decode('utf-8'))
         profiles = unwrap_scoring_profiles_payload(document)
+        if mode not in {'replace', 'merge'}:
+            raise ValueError('Choose merge or replace for the scoring methodology import.')
+        if mode == 'merge':
+            if profiles is None:
+                raise ValueError('This JSON does not contain any methodologies to import.')
+            if task_repository.get_workspace_state(SCORING_CONFIGURATION_STATE_KEY):
+                current = task_repository.get_scoring_profiles()
+                incoming = {profile['id']: profile for profile in profiles['profiles']}
+                merged = [incoming.pop(profile['id'], profile) for profile in current['profiles']]
+                merged.extend(incoming.values())
+                profiles = {'active_profile_id': current['active_profile_id'], 'profiles': merged}
         if profiles is None:
             task_repository.set_workspace_state(SCORING_CONFIGURATION_STATE_KEY, '')
             result: dict[str, Any] = {'active_profile_id': None, 'profiles': []}

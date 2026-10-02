@@ -382,7 +382,7 @@
       </div>
     </div>
     <div class="scoring-controls-foot">
-      <label class="scoring-profile-choice">Scoring Methodology Profile
+      <label class="scoring-profile-choice">Scoring Methodology
         <select data-scoring-profile aria-label="Choose the scoring methodology for this calculation">
           {% set scoring_profile_options = scoring_profiles | default([], true) %}
           {% for profile in scoring_profile_options %}
@@ -401,9 +401,9 @@
       </div>
       <div class="scoring-results-tools scoring-calculation-shortcuts">
         <nav class="scoring-config-shortcuts scoring-results-config-shortcuts" aria-label="Scoring configuration sections">
-          <a data-config-shortcut="kpi" href="/workspace-config#scoring-kpi-configuration"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 5h14M3 10h14M3 15h14"/><circle cx="7" cy="5" r="2"/><circle cx="13" cy="10" r="2"/><circle cx="7" cy="15" r="2"/></svg><span>KPI configuration</span></a>
+          <a data-config-shortcut="kpi" href="/workspace-config#scoring-methodology-environments"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2 17h16M3 17V7h5v10M5 10h1M5 13h1M12 3l-2 14M16 3l2 14M14 4v2m0 3v2m0 3v2"/></svg><span>Methodology Environments</span></a>
           <a data-config-shortcut="hierarchy" href="/workspace-config#scoring-aggregation-hierarchy"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="7" y="2" width="6" height="4" rx="1"/><path d="M10 6v4M4 14v-4h12v4"/><rect x="1" y="14" width="6" height="4" rx="1"/><rect x="13" y="14" width="6" height="4" rx="1"/></svg><span>Aggregation hierarchy</span></a>
-          <a data-config-shortcut="gap" href="/workspace-config#scoring-gap-priority"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 4h9M8 10h6M8 16h3M3 2v5m-1-4 1-1 1 1M2 10h2m-2 5h2m0 0-2 3h2"/></svg><span>GAP priorities</span></a>
+          <a data-config-shortcut="gap" href="/workspace-config#scoring-gap-priority"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 4h9M8 10h6M8 16h3M3 2v5m-1-4 1-1 1 1M2 10h2m-2 5h2m0 0-2 3h2"/></svg><span>KPI Priorities</span></a>
         </nav>
       </div>
     </div>
@@ -434,9 +434,9 @@
         </div>
         <div class="scoring-results-tools">
           <nav class="scoring-config-shortcuts scoring-results-config-shortcuts" aria-label="Scoring configuration sections">
-            <a data-config-shortcut="kpi" href="/workspace-config#scoring-kpi-configuration"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 5h14M3 10h14M3 15h14"/><circle cx="7" cy="5" r="2"/><circle cx="13" cy="10" r="2"/><circle cx="7" cy="15" r="2"/></svg><span>KPI configuration</span></a>
+            <a data-config-shortcut="kpi" href="/workspace-config#scoring-methodology-environments"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2 17h16M3 17V7h5v10M5 10h1M5 13h1M12 3l-2 14M16 3l2 14M14 4v2m0 3v2m0 3v2"/></svg><span>Methodology Environments</span></a>
             <a data-config-shortcut="hierarchy" href="/workspace-config#scoring-aggregation-hierarchy"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="7" y="2" width="6" height="4" rx="1"/><path d="M10 6v4M4 14v-4h12v4"/><rect x="1" y="14" width="6" height="4" rx="1"/><rect x="13" y="14" width="6" height="4" rx="1"/></svg><span>Aggregation hierarchy</span></a>
-            <a data-config-shortcut="gap" href="/workspace-config#scoring-gap-priority"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 4h9M8 10h6M8 16h3M3 2v5m-1-4 1-1 1 1M2 10h2m-2 5h2m0 0-2 3h2"/></svg><span>GAP priorities</span></a>
+            <a data-config-shortcut="gap" href="/workspace-config#scoring-gap-priority"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 4h9M8 10h6M8 16h3M3 2v5m-1-4 1-1 1 1M2 10h2m-2 5h2m0 0-2 3h2"/></svg><span>KPI Priorities</span></a>
           </nav>
           <div class="scoring-export-actions" aria-label="Export selected job">
             <a href="#" data-export-scoring aria-disabled="true" tabindex="-1"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="2" y="2" width="12" height="15" rx="1"/><path d="M2 7h12M2 12h7M7 2v15M16 10v8m-3-3 3 3 3-3"/></svg><span>Scoring CSV</span></a>

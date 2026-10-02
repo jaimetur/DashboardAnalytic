@@ -648,29 +648,29 @@ def default_scoring_profile(configuration: object) -> dict[str, Any]:
 def validate_scoring_profiles(payload: object) -> dict[str, Any]:
     """Validate a complete workspace collection of named scoring profiles."""
     if not isinstance(payload, dict):
-        raise ValueError('Scoring profiles must be an object.')
+        raise ValueError('Scoring methodologies must be an object.')
     active_profile_id = payload.get('active_profile_id')
     profiles = payload.get('profiles')
     if not isinstance(profiles, list) or not 1 <= len(profiles) <= MAX_SCORING_PROFILES:
-        raise ValueError(f'Scoring profiles must contain between 1 and {MAX_SCORING_PROFILES} profiles.')
+        raise ValueError(f'Scoring methodologies must contain between 1 and {MAX_SCORING_PROFILES} methodologies.')
     normalized_profiles: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
     seen_names: set[str] = set()
     for profile in profiles:
         if not isinstance(profile, dict) or set(profile) != {'id', 'name', 'configuration'}:
-            raise ValueError('Each scoring profile must contain only id, name and configuration.')
+            raise ValueError('Each scoring methodology must contain only id, name and configuration.')
         profile_id = profile.get('id')
         if not isinstance(profile_id, str) or not _PROFILE_ID.fullmatch(profile_id):
-            raise ValueError('Scoring profile id must be a lowercase identifier of up to 64 characters.')
+            raise ValueError('Scoring methodology id must be a lowercase identifier of up to 64 characters.')
         if profile_id in seen_ids:
-            raise ValueError(f'Scoring profile id {profile_id} is duplicated.')
+            raise ValueError(f'Scoring methodology id {profile_id} is duplicated.')
         seen_ids.add(profile_id)
         name = profile.get('name')
         if not isinstance(name, str) or not name.strip() or len(name.strip()) > 80:
-            raise ValueError('Scoring profile name must contain between 1 and 80 characters.')
+            raise ValueError('Scoring methodology name must contain between 1 and 80 characters.')
         normalized_name = name.strip()
         if normalized_name.casefold() in seen_names:
-            raise ValueError(f'Scoring profile name {normalized_name} is duplicated.')
+            raise ValueError(f'Scoring methodology name {normalized_name} is duplicated.')
         seen_names.add(normalized_name.casefold())
         configuration = _normalize_legacy_kpi_codes(
             validate_scoring_configuration(profile.get('configuration')),
@@ -681,7 +681,7 @@ def validate_scoring_profiles(payload: object) -> dict[str, Any]:
             'configuration': configuration,
         })
     if not isinstance(active_profile_id, str) or active_profile_id not in seen_ids:
-        raise ValueError('The active scoring profile must reference an existing profile.')
+        raise ValueError('The active scoring methodology must reference an existing methodology.')
     return {'active_profile_id': active_profile_id, 'profiles': normalized_profiles}
 
 
@@ -776,10 +776,10 @@ def unwrap_scoring_profiles_payload(payload: object) -> dict[str, Any] | None:
         if version != PROFILE_COLLECTION_VERSION:
             raise ValueError('Unsupported scoring configuration file version.')
         if 'profiles' not in payload:
-            raise ValueError('This file does not contain a scoring profile collection.')
+            raise ValueError('This file does not contain a scoring methodology collection.')
         if payload.get('profiles') is None:
             if payload.get('active_profile_id') is not None:
-                raise ValueError('An empty scoring profile collection cannot have an active profile.')
+                raise ValueError('An empty scoring methodology collection cannot have an active methodology.')
             return None
         return validate_scoring_profiles({
             'active_profile_id': payload.get('active_profile_id'),

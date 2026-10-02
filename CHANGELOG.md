@@ -6,21 +6,21 @@
 ## Release: v0.5.0
 ### Release Date: 2026-10-02
 #### ⚠️ Breaking Changes:
-- Scoring configuration exchange uses version 3 with explicit environment `source_filters`; Tableau fields, duplicate environment mappings and reference metadata are removed. Export profiles again to create files in the new format.
+- Scoring configuration exchange uses version 3 with explicit environment `source_filters`; Tableau fields, duplicate environment mappings and reference metadata are removed. Export methodologies again to create files in the new format.
 
 #### 🌟 New Features:
 - **Scoring & GAP Analysis** calculates configurable NetCheck City/Road scores from Data, Voice and Speech CDRs. Persistent jobs reuse unchanged inputs, retain methodology snapshots and support deletion and CSV/PowerPoint exports.
-- **Methodology Profiles** provides workspace-stored KPI definitions, thresholds, interpolation anchors and Linear, Quadratic or Smooth curve mapping. Profiles have a configurable default and do not depend on local reference files.
+- **Scoring Methodologies** provide workspace-stored KPI definitions, thresholds, interpolation anchors and Linear, Quadratic or Smooth curve mapping. Methodologies have a configurable default and do not depend on local reference files.
 - Configurable **Environments** define CDR source matching, points, weights and KPI allocations. Environments can be created, renamed or deleted; reference-based point distribution preserves relative KPI weights, including zero-point allocations.
 - Scoring calculations support Operator, Vendor, Region, City and Campaign filters, Main Cities and per-job methodology selection. A configurable aggregation hierarchy controls grouping; campaigns are separated when selected and pooled otherwise.
 - **Scoring Tables**, **GAP Analysis** and **Scoring Charts** provide Summary/Breakdown tables, operator-versus-reference comparisons and Best Network charts by service/category, with maximum-allocation donuts.
-- **Scoring configuration transfers** support JSON/ZIP import/export, Admin JSON selection, workspace transfer and backup/restore, including profiles, KPI definitions, aggregation hierarchy and GAP priorities.
+- **Scoring configuration transfers** support JSON/ZIP, Admin imports, workspace transfers and backup/restore. Export Methodology (JSON) downloads the selected methodology; Admin exports/backups include all methodologies and the default. Import Methodology (JSON) adds or replaces matching methodology IDs while preserving other methodologies and the workspace default.
 - **Scoring PowerPoint export** includes covers, environment transitions, charts, Scoring tables and combined/individual GAP comparisons, with editable matrices and charts.
 
 #### 🚀 Enhancements:
-- **Methodology editor:** an editable methodology title, explicit CDR matching rules and nested, collapsible Environment/KPI panels, category and KPI reordering, inline SVG actions and a larger formula/filter editor. Save Methodology Profile commits the complete profile; Set Default selects future jobs' methodology and protects it from deletion.
+- **Methodology editor:** methodologies and titles sit directly in Scoring Setup, with matching dark green Environment, Hierarchy and GAP panels and nested pastel red KPI settings with a clear editing prompt when collapsed. Shortcuts open Methodology Environments, Aggregation hierarchy and KPI Priorities directly. All Save Methodology buttons commit the entire open methodology. Set Default selects future jobs’ methodology and protects it from deletion.
 - **Scoring setup:** category-aware GAP priority controls support first/last, up/down and direct-position moves. Aligned CDR filter selectors use cached values and concise labels; point distribution opens in a centered dialog.
-- **Scoring job navigation:** a dropdown and history cards show filters, CDR sources, methodology, GAP Reference and ordered aggregation levels; profile and reference values use bold, contrasting colors. Selecting a job restores its calculation inputs for relaunching. Saved selections persist across users/browsers; result tabs, scroll position and display choices restore within the browser session.
+- **Scoring job navigation:** a dropdown and history cards show filters, CDR sources, methodology, GAP Reference and ordered aggregation levels; methodology and reference values use bold, contrasting colors. Selecting a job restores its calculation inputs for relaunching. Saved selections persist across users/browsers; result tabs, scroll position and display choices restore within the browser session.
 - **Scoring responsiveness:** cached catalogues, indexed KPI lookups and on-demand result tabs avoid unnecessary source scans and repeated rendering. Export controls remain visible while results load.
 - **Environment results:** All Environments sums configured maxima and weighted contributions. Global raw KPIs are recalculated from pooled source rows; older jobs require recalculation to populate them. Incomplete coverage keeps original weights, and jobs initially select a complete environment when available.
 - **Coverage explanations:** one pale yellow Calculation notes card lists each affected combination, excluded KPI names and exact achievable maximum in larger bold text. Incomplete values and N/A* cells use bold red text; PowerPoint slide notes include the same coverage details.
@@ -39,8 +39,9 @@
 - Interactivity packet-error ratio honors IFNULL loss components while requiring a positive observed Packets_Sent denominator.
 - Road scoring uses the corrected Drive Connecting Roads environment name and Connecting Roads source selector.
 - GAP comparisons fall back to the reference operator's All vendor group when an exact vendor match is unavailable, preserving other aggregation boundaries and removing obsolete missing-baseline warnings.
-- Saving profiles verifies persisted environment names/source selectors and preserves pending environment edits when saving hierarchy or priorities. Switching after save no longer creates a false unsaved-change warning; historical result labels reflect environment renames without changing calculations.
+- Saving methodologies verifies persisted environment names/source selectors and preserves pending environment edits when saving hierarchy or priorities. Switching after save no longer creates a false unsaved-change warning; historical result labels reflect environment renames without changing calculations.
 - Scoring PowerPoint exports avoid malformed table/chart XML and allocation labels that caused repair prompts or blank slides.
+- Matching scoring selections enable Recalculate instead of Calculate; recalculation updates the existing job and replaces its results without adding a duplicate.
 
 #### 📚 Documentation:
 - Help documents the simplified Scoring format, environment matching, editable titles, jobs, aggregation, vendor filtering, coverage limits and CSV/PowerPoint exports.

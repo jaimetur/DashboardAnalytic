@@ -64,6 +64,7 @@ def test_scoring_calculation_selector_lists_profiles_and_defaults_to_active(clie
 
     page = client.get('/scoring')
     assert page.status_code == 200
+    assert '<label class="scoring-profile-choice">Scoring Methodology' in page.text
     parser = _ScoringProfileSelectParser()
     parser.feed(page.text)
     assert [profile['id'] for profile in parser.profiles] == [active_id, 'netcheck-alt']

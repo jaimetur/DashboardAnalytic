@@ -289,6 +289,35 @@ def test_scoring_json_import_export_uses_workspace_database(client):
     assert exported.json()['profiles'][0]['configuration']['metrics'][0]['contexts']['DriveCity']['max_points'] == 80
 
 
+def test_selected_profile_export_contains_only_that_profile(client):
+    _login(client)
+    _, repository = _workspace_repository()
+    profiles = repository.get_scoring_profiles()
+    second_profile = copy.deepcopy(profiles['profiles'][0])
+    second_profile.update({'id': 'netcheck-2025', 'name': 'NetCheck 2025'})
+    second_profile['configuration']['version'] = 'NetCheck 2025'
+    profiles['profiles'].append(second_profile)
+    saved_profiles = repository.replace_scoring_profiles(profiles)
+    second_profile = next(profile for profile in saved_profiles['profiles'] if profile['id'] == 'netcheck-2025')
+
+    response = client.get('/api/workspace-config/scoring-configuration/export?profile_id=netcheck-2025')
+
+    assert response.status_code == 200
+    assert response.headers['content-disposition'] == 'attachment; filename="scoring-methodology.json"'
+    assert response.json() == scoring_profiles_document({
+        'active_profile_id': 'netcheck-2025', 'profiles': [second_profile],
+    })
+
+
+def test_selected_profile_export_returns_not_found_for_missing_id(client):
+    _login(client)
+    _workspace_repository()
+
+    response = client.get('/api/workspace-config/scoring-configuration/export?profile_id=missing-profile')
+
+    assert response.status_code == 404
+
+
 def test_legacy_bare_json_and_v1_zip_import_create_a_single_default_profile(client, tmp_path: Path) -> None:
     _login(client)
     workspace, repository = _workspace_repository()
@@ -327,6 +356,67 @@ def test_legacy_bare_json_and_v1_zip_import_create_a_single_default_profile(clie
     assert restored_configuration['metrics'][0]['contexts']['Drive Connecting Roads'] == (
         default_scoring_profile(configuration)['configuration']['metrics'][0]['contexts']['DriveConnectionroad']
     )
+
+
+def test_json_profile_merge_replaces_matching_ids_and_preserves_default_and_other_profiles(client):
+    _login(client)
+    _, repository = _workspace_repository()
+    original = repository.get_scoring_profiles()
+    default_id = original['active_profile_id']
+    default = copy.deepcopy(original['profiles'][0])
+    untouched = copy.deepcopy(default)
+    untouched.update({'id': 'untouched', 'name': 'Untouched'})
+    untouched['configuration']['version'] = 'Untouched'
+    replaced = copy.deepcopy(default)
+    replaced.update({'id': 'replace-me', 'name': 'Old Name'})
+    replaced['configuration']['version'] = 'Old Version'
+    repository.replace_scoring_profiles({
+        'active_profile_id': default_id,
+        'profiles': [default, untouched, replaced],
+    })
+
+    incoming = copy.deepcopy(replaced)
+    incoming.update({'name': 'Imported Name'})
+    incoming['configuration']['version'] = 'Imported Version'
+    added = copy.deepcopy(incoming)
+    added.update({'id': 'new-profile', 'name': 'New Profile'})
+    added['configuration']['version'] = 'New Version'
+    document = {
+        'format': 'dashboard-analytic-scoring-configuration', 'version': 3,
+        'active_profile_id': 'new-profile', 'profiles': [incoming, added],
+    }
+
+    response = client.post(
+        '/api/workspace-config/scoring-configuration/import?mode=merge',
+        files={'package': ('profiles.json', json.dumps(document).encode(), 'application/json')},
+    )
+
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result['active_profile_id'] == default_id
+    assert [profile['id'] for profile in result['profiles']] == [default_id, 'untouched', 'replace-me', 'new-profile']
+    assert result['profiles'][0] == default
+    assert result['profiles'][1] == untouched
+    assert result['profiles'][2] == incoming
+    assert result['profiles'][3] == added
+
+
+def test_json_profile_merge_rejects_invalid_collection_without_changing_saved_profiles(client):
+    _login(client)
+    _, repository = _workspace_repository()
+    before = repository.get_scoring_profiles()
+    invalid = {
+        'format': 'dashboard-analytic-scoring-configuration', 'version': 3,
+        'active_profile_id': 'missing', 'profiles': [before['profiles'][0]],
+    }
+
+    response = client.post(
+        '/api/workspace-config/scoring-configuration/import?mode=merge',
+        files={'package': ('invalid.json', json.dumps(invalid).encode(), 'application/json')},
+    )
+
+    assert response.status_code == 400
+    assert repository.get_scoring_profiles() == before
 
 
 def test_legacy_kpi_ids_migrate_to_sequential_codes_without_changing_gap_order(client):

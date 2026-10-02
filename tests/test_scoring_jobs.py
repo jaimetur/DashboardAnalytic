@@ -167,11 +167,21 @@ def test_force_creates_a_fresh_calculation_and_method_baseline_are_cached(reposi
     _engine, calls = scoring_engine
     dataset_id = add_dataset(repository)
     first, _ = scoring_jobs.create_scoring_job(repository, [dataset_id], [], 'NSA')
+    active, reused_active = scoring_jobs.create_scoring_job(
+        repository, [dataset_id], [], 'NSA', force=True,
+    )
+    assert reused_active
+    assert active['id'] == first['id']
+    assert len(scoring_jobs.list_scoring_jobs(repository)) == 1
     scoring_jobs.run_scoring_job(repository, first['id'])
 
     forced, reused = scoring_jobs.create_scoring_job(repository, [dataset_id], [], 'NSA', force=True)
     assert not reused
-    assert forced['id'] != first['id']
+    assert forced['id'] == first['id']
+    assert forced['status'] == 'queued'
+    assert forced['result'] is None
+    assert forced['error'] == ''
+    assert len(scoring_jobs.list_scoring_jobs(repository)) == 1
     assert scoring_jobs.run_scoring_job(repository, forced['id'])['status'] == 'completed'
 
     other_baseline, reused = scoring_jobs.create_scoring_job(
@@ -180,6 +190,81 @@ def test_force_creates_a_fresh_calculation_and_method_baseline_are_cached(reposi
     assert not reused
     assert other_baseline['id'] != forced['id']
     assert len(calls) == 2
+
+
+def test_force_retries_failed_calculation_in_place(repository, scoring_engine):
+    _engine, _calls = scoring_engine
+    dataset_id = add_dataset(repository)
+    job, _ = scoring_jobs.create_scoring_job(repository, [dataset_id], [], 'NSA')
+    scoring_jobs.run_scoring_job(repository, job['id'])
+    with repository.connection() as connection:
+        connection.execute(
+            """UPDATE scoring_jobs SET status = 'failed', progress = 100,
+               result_json = ?, last_error = ?, started_at = ?, finished_at = ?, message = ?
+               WHERE id = ?""",
+            ('{"old":true}', 'previous error', '2026-01-01T00:00:00+00:00',
+             '2026-01-01T00:01:00+00:00', 'Failed', job['id']),
+        )
+
+    retry, reused = scoring_jobs.create_scoring_job(
+        repository, [dataset_id], [], 'NSA', force=True,
+    )
+
+    assert not reused
+    assert retry['id'] == job['id']
+    assert retry['status'] == 'queued'
+    assert retry['progress'] == 0
+    assert retry['result'] is None
+    assert retry['error'] == ''
+    assert retry['started_at'] == ''
+    assert retry['finished_at'] == ''
+    assert len(scoring_jobs.list_scoring_jobs(repository)) == 1
+    assert scoring_jobs.run_scoring_job(repository, retry['id'])['status'] == 'completed'
+
+
+def test_find_matching_scoring_job_is_read_only_and_tracks_canonical_identity(repository, scoring_engine):
+    _engine, _calls = scoring_engine
+    dataset_ids = add_complete_scoring_sources(repository, 'MatchIdentity')
+    filters = {'Region': ['South', 'North'], 'Vendor': ['Nokia', 'Ericsson']}
+    assert scoring_jobs.find_matching_scoring_job(
+        repository, dataset_ids, ['Region'], 'NSA', context_filters=filters,
+    ) is None
+    assert scoring_jobs.list_scoring_jobs(repository) == []
+
+    job, reused = scoring_jobs.create_scoring_job(
+        repository, dataset_ids, ['Region'], 'NSA', context_filters=filters,
+    )
+    assert not reused
+    match = scoring_jobs.find_matching_scoring_job(
+        repository, [*reversed(dataset_ids), dataset_ids[0]], ['Region'], 'NSA',
+        context_filters={'region': ['north', 'south'], 'vendor': ['ericsson', 'nokia']},
+    )
+    assert match['id'] == job['id']
+    assert match['cache_key'] == job['cache_key']
+    assert scoring_jobs.find_matching_scoring_job(
+        repository, dataset_ids, ['City'], 'NSA', context_filters=filters,
+    ) is None
+    assert scoring_jobs.find_matching_scoring_job(
+        repository, dataset_ids, ['Region'], 'NSA', baseline_operator='O2', context_filters=filters,
+    ) is None
+    assert len(scoring_jobs.list_scoring_jobs(repository)) == 1
+
+    original_configuration = repository.get_scoring_configuration()
+    changed_configuration = scoring_configuration()
+    changed_configuration['metrics'][0]['contexts']['DriveCity']['thresholds']['low'] += 1
+    repository.replace_scoring_configuration(changed_configuration)
+    assert scoring_jobs.find_matching_scoring_job(
+        repository, dataset_ids, ['Region'], 'NSA', context_filters=filters,
+    ) is None
+    repository.replace_scoring_configuration(original_configuration)
+    assert scoring_jobs.find_matching_scoring_job(
+        repository, dataset_ids, ['Region'], 'NSA', context_filters=filters,
+    )['id'] == job['id']
+    repository.update_dataset_profile(dataset_ids[0], processed_at=local_now_iso())
+    assert scoring_jobs.find_matching_scoring_job(
+        repository, dataset_ids, ['Region'], 'NSA', context_filters=filters,
+    ) is None
+    assert len(scoring_jobs.list_scoring_jobs(repository)) == 1
 
 
 def test_scoring_configuration_changes_cache_and_queued_job_keeps_its_snapshot(repository, scoring_engine):
@@ -330,7 +415,7 @@ def test_explicit_same_configuration_profile_uses_separate_cache_entry(repositor
 def test_unknown_explicit_profile_is_rejected(repository):
     dataset_id = add_dataset(repository)
 
-    with pytest.raises(ValueError, match='was not found'):
+    with pytest.raises(ValueError, match='Scoring methodology missing-profile was not found\\.'):
         scoring_jobs.create_scoring_job(
             repository, [dataset_id], ['Region'], 'NSA', scoring_profile_id='missing-profile',
         )

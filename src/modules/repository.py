@@ -2019,7 +2019,7 @@ class Repository:
         selected_id = profile_id or profiles['active_profile_id']
         profile = next((item for item in profiles['profiles'] if item['id'] == selected_id), None)
         if profile is None:
-            raise ValueError(f'Scoring profile {selected_id} was not found.')
+            raise ValueError(f'Scoring methodology {selected_id} was not found.')
         return profile
 
     def replace_scoring_profiles(self, payload: object) -> dict[str, Any]:

@@ -14,13 +14,24 @@
   .scoring-config-panel .scoring-config-intro { max-width: 1000px; margin: 0 0 1rem; color: var(--muted, #627480); }
   .scoring-config-panel .scoring-config-settings-group { box-sizing: border-box; display: grid; gap: 1rem; min-width: 0; margin: 1rem 0; padding: 1rem; border: 1px solid #c6dbe6; border-radius: .85rem; background: #f0f6fa; }
   .scoring-config-panel .scoring-config-settings-group > :is(h3, h4, h5) { margin: 0; padding: .45rem .7rem; border-radius: .45rem; background: #d7e8f3; color: #254f66; font-size: 1rem; }
-  .scoring-config-panel .scoring-config-methodology-group { background: #fff0f0; border-color: #e6bcbc; }
-  .scoring-config-panel .scoring-config-methodology-group > h3 { background: #f5d6d6; color: #783737; }
   .scoring-config-panel .scoring-config-environment-group { background: #eff7f4; border-color: #bdd7cc; }
   .scoring-config-panel .scoring-config-environment-group > h4 { background: #d6eae2; color: #285946; }
   .scoring-config-panel .scoring-config-settings-group > summary { cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .45rem .7rem; border-radius: .45rem; background: #d7e8f3; color: #254f66; }
   .scoring-config-panel .scoring-config-settings-group > summary > :is(h4, h5) { margin: 0; font-size: 1rem; }
   .scoring-config-panel .scoring-config-environment-group > summary { background: #d6eae2; color: #285946; }
+  .scoring-config-panel .scoring-config-section { overflow: visible; border: 1px solid #bdd7cc; border-radius: .85rem; background: #f3faf6; padding: 0; }
+  .workspace-config-stack .scoring-config-subpanels > .scoring-config-section.collapsible-panel > summary.collapsible-summary { padding: 1rem 1.25rem; background: linear-gradient(135deg, #2e6b52, #225b45); border-radius: .85rem .85rem 0 0; border-bottom-color: #225b45; color: #fff; }
+  .workspace-config-stack .scoring-config-subpanels > .scoring-config-section.collapsible-panel > summary.collapsible-summary :is(h2, .eyebrow) { color: #fff; }
+  .workspace-config-stack .scoring-config-subpanels > .scoring-config-section.collapsible-panel > summary.collapsible-summary .collapse-chip { background: #e2f1e9; border-color: #a8cdb9; color: #225b45; }
+  .scoring-config-panel .scoring-config-section > :is(.collapsible-panel-body, .scoring-config-subpanel-body) { padding: 1rem 1.25rem; }
+  .scoring-config-panel .scoring-config-kpi-group { background: #fff3f3; border-color: #dfb3b3; }
+  .scoring-config-panel .scoring-config-kpi-group > summary { background: #f5d6d6; color: #783737; }
+  .scoring-config-panel .scoring-config-kpi-group > summary .scoring-config-kpi-section-title { color: #783737; }
+  .scoring-config-panel .scoring-config-kpi-summary-text { min-width: 0; }
+  .scoring-config-panel .scoring-config-kpi-group > summary .scoring-config-kpi-summary-text h5 { margin: 0; font-size: 1rem; }
+  .scoring-config-panel .scoring-config-kpi-expand-hint { display: block; margin-top: .4rem; color: #783737; font-size: .85rem; line-height: 1.4; }
+  .scoring-config-panel .scoring-config-kpi-group[open] .scoring-config-kpi-expand-hint { display: none; }
+  .scoring-config-panel .scoring-config-kpi-group > summary .collapse-chip { background: #fce8e8; border-color: #dfb3b3; color: #783737; }
   .scoring-config-panel .scoring-config-subpanel-body { display: grid; gap: 1rem; min-width: 0; }
   .scoring-config-panel .scoring-config-settings-group .scoring-config-toolbar { justify-content: flex-start; align-items: end; margin: 0; }
   .scoring-config-panel .scoring-config-settings-group .inline-actions { margin: 0; display: flex; flex-wrap: wrap; gap: .65rem; }
@@ -28,8 +39,10 @@
   .scoring-config-panel .scoring-config-allocation-controls > button { align-self: start; margin-top: 1.5rem; }
   .scoring-config-panel [data-scoring-distribute-points] { background: #7752a3; border-color: #66448e; color: #fff; }
   .scoring-config-panel [data-scoring-distribute-points]:hover:not(:disabled) { background: #604085; }
-  .scoring-config-panel [data-scoring-config-export] { background: #dceaf8; border-color: #8eaecb; color: #254f76; font-weight: 700; }
-  .scoring-config-panel [data-scoring-config-export]:hover { background: #c4dcef; color: #173b5c; }
+  .scoring-config-panel [data-scoring-config-export] { background: #267c79; border-color: #267c79; color: #fff; font-weight: 700; }
+  .scoring-config-panel [data-scoring-config-export]:hover { background: #1a625f; color: #fff; }
+  .scoring-config-panel [data-scoring-config-import] { background: #f5d6d6; border-color: #dfb3b3; color: #783737; font-weight: 700; }
+  .scoring-config-panel [data-scoring-config-import]:hover { background: #ecc3c3; color: #672c2c; }
   .scoring-config-panel .scoring-config-weight-help { margin-top: .65rem; color: #47685b; }
   .scoring-config-panel .scoring-config-weight-help summary { cursor: pointer; font-weight: 650; }
   .scoring-config-panel .scoring-config-weight-help p { margin: .6rem 0 0; }
@@ -82,6 +95,8 @@
   .scoring-config-panel .scoring-config-environment-total input { box-sizing: border-box; width: 10rem; max-width: 100%; padding: .4rem .45rem; }
   .scoring-config-panel .scoring-config-environment-total small { color: var(--muted, #627480); font-variant-numeric: tabular-nums; }
   .scoring-config-panel .scoring-config-actions { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-top: 1rem; }
+  .scoring-config-panel .scoring-config-save-bar { margin: 0; }
+  .scoring-config-panel .scoring-config-save-bar:has(> .scoring-config-status:empty) { display: none; }
   .scoring-config-panel .scoring-config-status { flex: 1 1 20rem; min-height: 1.4em; margin: 0; }
   .scoring-config-panel .scoring-config-status.is-error { color: #a93226; }
   .scoring-config-panel .scoring-config-status.is-success { color: #19724b; }
@@ -171,7 +186,7 @@
   .scoring-config-panel .scoring-config-priority-table { width: 100%; min-width: 100%; border-collapse: collapse; }
   .scoring-config-panel .scoring-config-priority-table th,
   .scoring-config-panel .scoring-config-priority-table td { padding: .55rem .7rem; border-bottom: 1px solid var(--scoring-config-border); text-align: left; }
-  .scoring-config-panel .scoring-config-priority-table th { color: #334b58; }
+  .scoring-config-panel .scoring-config-priority-table thead th { background: #d6eae2; color: #225b45; border-bottom-color: #a8cdb9; }
   .scoring-config-panel .scoring-config-priority-actions { display: flex; gap: .35rem; }
   .scoring-config-panel .scoring-config-priority-actions button { min-width: 2.2rem; padding: .35rem .55rem; }
   #scoring-gap-priority .scoring-config-priority-table th:last-child,
@@ -190,11 +205,11 @@
   #scoring-gap-priority .scoring-config-position-editor [data-priority-position-cancel] { min-width: 2rem; margin: .15rem .15rem .15rem 0; padding: .2rem .35rem; background: #b34141; border-color: #b34141; }
   #scoring-gap-priority .scoring-config-position-error:not(:empty) { position: absolute; z-index: 1; top: 100%; left: 0; min-width: 10rem; padding: .3rem .45rem; border: 1px solid #b64b4b; border-radius: .35rem; background: #fff; color: #9a2525; font-size: .75rem; }
   #scoring-gap-priority .scoring-config-priority-actions button:disabled { opacity: .45; }
-  .scoring-config-panel .scoring-config-transfer-link { color: #245e69; font-weight: 650; }
+  .scoring-config-panel .scoring-config-transfer-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 1.25rem 1.5rem; margin: 1rem 0 0; }
+  .scoring-config-panel .scoring-config-transfer-actions > .inline-actions { margin: 0; min-width: 0; }
+  .scoring-config-panel .scoring-config-transfer-link { flex: 1 1 18rem; color: #245e69; font-weight: 650; }
   .scoring-config-panel .scoring-config-hierarchy-level { font-weight: 750; }
   .scoring-config-panel .scoring-config-hierarchy-required { margin-left: .45rem; color: #607681; font-size: .76rem; font-weight: 600; }
-  .scoring-config-panel [data-scoring-config-import] { background: #267c79; border-color: #267c79; color: #fff; }
-  .scoring-config-panel [data-scoring-config-import]:hover { background: #1a625f; }
   @container scoring-kpi-table (max-width: 1100px) {
     .scoring-config-panel .scoring-config-table,
     .scoring-config-panel .scoring-config-table tbody { display: block; width: 100%; }
@@ -234,44 +249,43 @@
       <span class="collapse-chip">Collapse</span>
     </summary>
     <div class="collapsible-panel-body">
-      <div class="scoring-config-subpanels">
-  <details id="scoring-kpi-configuration" class="panel collapsible-panel scoring-config-panel" open data-panel-state-key="workspace-config:scoring-kpi-configuration">
-    <summary class="collapsible-summary">
-      <div><p class="eyebrow">Scoring methodology</p><h2>Scoring Methodology &amp; KPI Configuration</h2></div>
-      <span class="collapse-chip">Collapse</span>
-    </summary>
-    <div class="collapsible-panel-body">
       {% if active_workspace %}
-      <p class="scoring-config-intro">Manage named scoring methodologies for <strong>“{{ active_workspace.name }}”</strong>. Edit KPI identity, category, source, formula, filters, environment weights, thresholds and score interpolation anchors.</p>
       <form class="scoring-config-form" data-scoring-kpi-form data-no-persist novalidate>
-        <section class="scoring-config-settings-group scoring-config-methodology-group" aria-labelledby="scoring-methodology-controls-title">
-          <h3 id="scoring-methodology-controls-title">Methodology Profiles</h3>
-          <label class="scoring-config-methodology-title">Methodology title<input type="text" data-methodology-title maxlength="256" disabled placeholder="Describe this methodology"></label>
+      <div class="scoring-config-subpanels">
+<div id="scoring-kpi-configuration">
+      <p class="scoring-config-intro">Manage named scoring methodologies for <strong>“{{ active_workspace.name }}”</strong>. Edit KPI identity, category, source, formula, filters, environment weights, thresholds and score interpolation anchors.</p>
           <div class="scoring-config-profile-controls" data-scoring-profile-controls>
-            <label>Scoring methodology profile
-              <select data-scoring-profile-select data-no-persist disabled aria-label="Scoring methodology profile">
+            <label>Scoring Methodology
+              <select data-scoring-profile-select data-no-persist disabled aria-label="Scoring Methodology">
                 <option>Loading methodologies…</option>
               </select>
             </label>
             <div class="scoring-config-profile-actions" aria-label="Scoring methodology actions">
-              <button type="button" class="ghost-link" data-scoring-profile-action="create" disabled><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg><span data-button-label>Create Profile</span></button>
-              <button type="button" class="ghost-link" data-scoring-profile-action="copy" disabled><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h12v12H8zM4 16V4h12" /></svg><span data-button-label>Dupicate Profile</span></button>
-              <button type="button" class="ghost-link" data-scoring-profile-action="rename" disabled><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 4 5 5-10 10-6 1 1-6zM13 6l5 5" /></svg><span data-button-label>Rename Profile</span></button>
+              <button type="button" class="ghost-link" data-scoring-profile-action="create" disabled><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg><span data-button-label>Create Methodology</span></button>
+              <button type="button" class="ghost-link" data-scoring-profile-action="copy" disabled><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h12v12H8zM4 16V4h12" /></svg><span data-button-label>Duplicate Methodology</span></button>
+              <button type="button" class="ghost-link" data-scoring-profile-action="rename" disabled><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 4 5 5-10 10-6 1 1-6zM13 6l5 5" /></svg><span data-button-label>Rename Methodology</span></button>
               <button type="button" class="ghost-link" data-scoring-profile-action="default" disabled><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9z" /></svg><span data-button-label>Set Default</span></button>
-              <button type="submit" data-scoring-kpi-save disabled><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h13l4 4v14H3V3zM7 3v6h10V3M7 21v-8h10v8" /></svg><span data-button-label>Save Methodology Profile</span></button>
-              <button type="button" class="ghost-link" data-scoring-profile-action="delete" disabled><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7" /></svg><span data-button-label>Delete Profile</span></button>
+              <button type="submit" data-scoring-kpi-save disabled><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h13l4 4v14H3V3zM7 3v6h10V3M7 21v-8h10v8" /></svg><span data-button-label>Save Methodology</span></button>
+              <button type="button" class="ghost-link" data-scoring-profile-action="delete" disabled><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7" /></svg><span data-button-label>Delete Methodology</span></button>
             </div>
           </div>
-          <p class="form-note">Set Default selects the methodology for future scoring jobs. The default profile is marked in the selector.</p>
+          <p class="form-note">Set Default selects the methodology for future scoring jobs. The default methodology is marked in the selector.</p>
+          <label class="scoring-config-methodology-title">Methodology title<input type="text" data-methodology-title maxlength="256" disabled placeholder="Describe this methodology"></label>
+      <div class="scoring-config-transfer-actions">
       <div class="inline-actions">
-        <button type="button" class="ghost-link" data-scoring-config-import><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5" /></svg><span data-button-label>Import JSON</span></button>
+        <button type="button" class="ghost-link" data-scoring-config-import><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5" /></svg><span data-button-label>Import Methodology (JSON)</span></button>
         <input type="file" accept=".json,application/json" data-scoring-config-file hidden>
-        <a class="ghost-link" href="/api/workspace-config/scoring-configuration/export" data-scoring-config-export><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m-5 5 5-5 5 5M4 16v5h16v-5" /></svg><span data-button-label>Export JSON</span></a>
+        <a class="ghost-link" href="/api/workspace-config/scoring-configuration/export" data-scoring-config-export><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m-5 5 5-5 5 5M4 16v5h16v-5" /></svg><span data-button-label>Export Methodology (JSON)</span></a>
       </div>
-          <a class="scoring-config-transfer-link" href="/admin">Import or export this configuration in Admin → Import / Export</a>
-        <details class="scoring-config-settings-group scoring-config-environment-group collapsible-panel" open data-panel-state-key="workspace-config:scoring-environments" aria-labelledby="scoring-environment-controls-title">
-          <summary>
-          <h4 id="scoring-environment-controls-title">Environments</h4>
+          <a class="scoring-config-transfer-link" href="/admin">Export all methodologies or back them up in Admin → Import / Export / Backup</a>
+      </div>
+</div>
+        <div class="scoring-config-actions scoring-config-save-bar">
+          <p class="scoring-config-status" data-scoring-kpi-status role="status" aria-live="polite"></p>
+        </div>
+        <details id="scoring-methodology-environments" class="panel scoring-config-section scoring-config-environment-group collapsible-panel" open data-panel-state-key="workspace-config:scoring-environments" aria-labelledby="scoring-environment-controls-title">
+          <summary class="collapsible-summary">
+          <div><p class="eyebrow">Methodology environments</p><h2 id="scoring-environment-controls-title">Methodology Environments</h2></div>
           <span class="collapse-chip">Collapse</span>
           </summary>
           <div class="scoring-config-subpanel-body">
@@ -319,7 +333,10 @@
           </details>
         <details class="scoring-config-settings-group scoring-config-kpi-group collapsible-panel" data-scoring-kpi-panel aria-labelledby="scoring-kpi-definitions-title">
         <summary>
+        <div class="scoring-config-kpi-summary-text">
         <h5 id="scoring-kpi-definitions-title" class="scoring-config-kpi-section-title" data-scoring-kpi-title>KPI Definitions, Scoring &amp; Thresholds</h5>
+        <span class="scoring-config-kpi-expand-hint">Expand this panel to edit KPI specifications, thresholds and weights for the selected environment.</span>
+        </div>
         <span class="collapse-chip">Collapse</span>
         </summary>
         <div class="scoring-config-subpanel-body">
@@ -357,66 +374,52 @@
 
         </div>
         </details>
+        <div class="scoring-config-actions"><button type="submit" data-scoring-kpi-save disabled><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h13l4 4v14H3V3zM7 3v6h10V3M7 21v-8h10v8" /></svg><span data-button-label>Save Methodology</span></button></div>
         </div>
         </details>
-        <div class="scoring-config-actions">
-          <p class="scoring-config-status" data-scoring-kpi-status role="status" aria-live="polite"></p>
-          <button type="submit" data-scoring-kpi-save disabled><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h13l4 4v14H3V3zM7 3v6h10V3M7 21v-8h10v8" /></svg><span data-button-label>Save Methodology Profile</span></button>
-        </div>
-        </section>
-      </form>
-      {% else %}<p class="form-note">Open a workspace before editing Scoring KPI Configuration.</p>{% endif %}
-    </div>
-  </details>
-
-  <details id="scoring-aggregation-hierarchy" class="panel collapsible-panel scoring-config-panel" open data-panel-state-key="workspace-config:scoring-aggregation-hierarchy">
+  <details id="scoring-aggregation-hierarchy" class="panel collapsible-panel scoring-config-panel scoring-config-section" open data-panel-state-key="workspace-config:scoring-aggregation-hierarchy">
     <summary class="collapsible-summary">
-      <div><p class="eyebrow">Scoring Aggregation Hierarchy</p><h2>Scoring Aggregation Hierarchy</h2></div>
+      <div><p class="eyebrow">Methodology Aggregation Hierarchy</p><h2>Methodology Aggregation Hierarchy</h2></div>
       <span class="collapse-chip">Collapse</span>
     </summary>
     <div class="collapsible-panel-body">
-      {% if active_workspace %}
       <p class="scoring-config-intro">Set the order used to group scoring results and filter values. Move each dimension into the desired hierarchy position. Operator remains required for every scoring job.</p>
-      <form data-scoring-hierarchy-form data-no-persist novalidate>
+      <div data-scoring-hierarchy-form>
         <div class="scoring-config-table-scroll" role="region" aria-label="Scoring aggregation hierarchy order" tabindex="0">
           <table class="scoring-config-priority-table">
             <thead><tr><th scope="col">Position</th><th scope="col">Aggregation level</th><th scope="col">Order</th></tr></thead>
             <tbody data-scoring-hierarchy-rows><tr><td colspan="3">Loading aggregation hierarchy…</td></tr></tbody>
           </table>
         </div>
-        <div class="scoring-config-actions">
-          <p class="scoring-config-status" data-scoring-hierarchy-status role="status" aria-live="polite"></p>
-          <button type="submit" data-scoring-hierarchy-save disabled><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h13l4 4v14H3V3zM7 3v6h10V3M7 21v-8h10v8" /></svg><span data-button-label>Save Aggregation Hierarchy</span></button>
-        </div>
-      </form>
-      {% else %}<p class="form-note">Open a workspace before editing Scoring Aggregation Hierarchy.</p>{% endif %}
+        <div class="scoring-config-actions"><button type="submit" data-scoring-kpi-save disabled><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h13l4 4v14H3V3zM7 3v6h10V3M7 21v-8h10v8" /></svg><span data-button-label>Save Methodology</span></button></div>
+
+      </div>
     </div>
   </details>
 
-  <details id="scoring-gap-priority" class="panel collapsible-panel scoring-config-panel" open data-panel-state-key="workspace-config:scoring-gap-priority">
+  <details id="scoring-gap-priority" class="panel collapsible-panel scoring-config-panel scoring-config-section" open data-panel-state-key="workspace-config:scoring-gap-priority">
     <summary class="collapsible-summary">
-      <div><p class="eyebrow">GAP Analysis</p><h2>GAP KPI Priority</h2></div>
+      <div><p class="eyebrow">Methodology KPIs Priorities for GAP analysis</p><h2>Methodology KPIs Priorities for GAP analysis</h2></div>
       <span class="collapse-chip">Collapse</span>
     </summary>
     <div class="collapsible-panel-body">
-      {% if active_workspace %}
       <p class="scoring-config-intro">Maintain the saved GAP KPI priority list. This list currently does not control GAP Analysis sorting: individual comparisons use ascending GAP, and multiple-operator comparisons use the KPI definition order. Move KPIs one step, to either end, or to a specific position, then save the complete priority list.</p>
-      <form data-scoring-priority-form data-no-persist novalidate>
+      <div data-scoring-priority-form>
         <div class="scoring-config-table-scroll" role="region" aria-label="GAP KPI priority order" tabindex="0">
           <table class="scoring-config-priority-table">
             <thead><tr><th scope="col">Priority</th><th scope="col">KPI</th><th scope="col">Category</th><th scope="col">Order</th></tr></thead>
             <tbody data-scoring-priority-rows><tr><td colspan="4">Loading GAP KPI priority…</td></tr></tbody>
           </table>
         </div>
-        <div class="scoring-config-actions">
-          <p class="scoring-config-status" data-scoring-priority-status role="status" aria-live="polite"></p>
-          <button type="submit" data-scoring-priority-save disabled><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h13l4 4v14H3V3zM7 3v6h10V3M7 21v-8h10v8" /></svg><span data-button-label>Save GAP KPI Priority</span></button>
-        </div>
-      </form>
-      {% else %}<p class="form-note">Open a workspace before editing GAP KPI Priority.</p>{% endif %}
+        <div class="scoring-config-actions"><button type="submit" data-scoring-kpi-save disabled><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h13l4 4v14H3V3zM7 3v6h10V3M7 21v-8h10v8" /></svg><span data-button-label>Save Methodology</span></button></div>
+
+      </div>
     </div>
   </details>
       </div>
+
+      </form>
+      {% else %}<p class="form-note">Open a workspace before editing Scoring &amp; GAP Analysis Setup.</p>{% endif %}
 
   <div class="confirm-overlay scoring-profile-dialog" data-scoring-profile-dialog hidden>
     <section class="confirm-panel" role="dialog" aria-modal="true" aria-labelledby="scoring-profile-dialog-title" aria-describedby="scoring-profile-dialog-copy" tabindex="-1">
