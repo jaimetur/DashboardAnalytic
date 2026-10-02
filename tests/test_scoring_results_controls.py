@@ -1341,7 +1341,7 @@ process.stdout.write(JSON.stringify({title: context.title, cdrSummary: context.c
     ]
     assert result['cdrSummary'] == 'data.csv, voice.csv'
     assert result['metadataCdrSummary'] == 'data.csv, voice.csv'
-    assert result['completeVendors'] == ['Ericsson', 'Nokia']
+    assert result['completeVendors'] == []
     assert result['subsetVendors'] == ['Nokia']
     assert result['submittedFilters'] == {'Vendor': ['Nokia', 'Ericsson']}
     assert result['partialVendors'] == ['Nokia']

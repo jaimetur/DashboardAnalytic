@@ -856,10 +856,10 @@
       const values = uniqueCatalogueValues(key === 'Vendor' ? rawValues.map(scoringVendorName) : rawValues);
       const datasetIds = valueOf(job, ['dataset_ids', 'cdr_ids'], []);
       const catalogueKey = catalogueKeyByLevel.get(key);
-      if (key !== 'Vendor' && values.length && Array.isArray(datasetIds) && datasetIds.length
+      if (values.length && Array.isArray(datasetIds) && datasetIds.length
           && datasetIds.every(id => Array.isArray(datasetCatalogues.get(String(id))?.[catalogueKey]))) {
         const available = new Set(datasetIds.flatMap(id => datasetCatalogues.get(String(id))[catalogueKey])
-          .map(item => String(item).trim().toLocaleLowerCase()).filter(Boolean));
+          .map(item => String(key === 'Vendor' ? scoringVendorName(item) : item).trim().toLocaleLowerCase()).filter(Boolean));
         const selected = new Set(values.map(item => item.toLocaleLowerCase()));
         if (available.size && available.size === selected.size && [...available].every(item => selected.has(item))) return [];
       }
