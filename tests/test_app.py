@@ -2582,7 +2582,8 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
         exported_dashboards = json.loads(archive.read('workspaces/Default/dashboards/dashboards.json'))
         assert exported_dashboards['dashboards']['exported-dashboard']['name'] == 'Exported Dashboard'
         exported_mappings = json.loads(archive.read('workspaces/Default/operator-mappings/operator-mappings.json'))
-        assert exported_mappings['version'] == 2
+        assert exported_mappings['version'] == 3
+        assert exported_mappings['spectrum_holdings'] == []
         assert exported_mappings['mappings'][0]['canonical'] == 'VF'
         assert exported_mappings['mappings'][0]['color'] == '#E15759'
         assert exported_mappings['vendor_mappings'][0]['canonical'] == 'Ericsson'
@@ -2668,10 +2669,12 @@ def test_auto_calculated_fields_export_does_not_materialize_active_cdrs(client, 
 
 def test_operator_mappings_export_and_import_replace_the_selected_workspace_groups(client) -> None:
     import src.DashboardAnalytic as app_module
+    from src.modules.network_insights import load_spectrum_holdings, save_spectrum_holdings
 
     login_super(client)
     app_module.repository.replace_operator_mapping_group(None, 'Portable Carrier', ['Portable Alias'])
     app_module.repository.replace_vendor_mapping_group(None, 'Portable Vendor', ['PV'], '#123456')
+    save_spectrum_holdings(app_module.repository, [{'operator': 'Portable Carrier', 'band': 'n78', 'bandwidth_mhz': 60}])
 
     exported = client.get('/admin/import-export/export?export_target=operator-mappings')
 
@@ -2682,7 +2685,8 @@ def test_operator_mappings_export_and_import_replace_the_selected_workspace_grou
     assert manifest['kind'] == 'operator-mappings'
     assert manifest['workspace_components'] == ['operator_mappings']
     assert payload['format'] == 'dashboard-analytic-operator-mappings'
-    assert payload['version'] == 2
+    assert payload['version'] == 3
+    assert payload['spectrum_holdings'][0]['band'] == 'n78'
     assert any(group['canonical'] == 'Portable Carrier' for group in payload['mappings'])
     assert any(
         group['canonical'] == 'Portable Vendor' and group['color'] == '#123456'
@@ -2691,6 +2695,7 @@ def test_operator_mappings_export_and_import_replace_the_selected_workspace_grou
 
     app_module.repository.delete_operator_mapping_group('Portable Carrier')
     app_module.repository.delete_vendor_mapping_group('Portable Vendor')
+    save_spectrum_holdings(app_module.repository, [])
     inspected = client.post(
         '/admin/import-export/inspect',
         files={'package': ('operator-mappings.zip', BytesIO(exported.content), 'application/zip')},
@@ -2712,6 +2717,7 @@ def test_operator_mappings_export_and_import_replace_the_selected_workspace_grou
     assert status_payload['status'] == 'ready'
     assert app_module.repository.list_operator_mappings()['portable alias'] == 'Portable Carrier'
     assert app_module.repository.list_vendor_mappings()['pv'] == 'Portable Vendor'
+    assert load_spectrum_holdings(app_module.repository)[0]['bandwidth_mhz'] == 60
 
 
 def test_main_cities_workspace_config_save_deduplicates_case_insensitively(client) -> None:
@@ -8919,6 +8925,7 @@ def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
     )
     assert [item['relative_path'] for item in help_documents[9:]] == [
         'scoring-gap-analysis.md',
+        'network-insights.md',
         'chart-builder.md',
         'query-builder.md',
         'app-logs.md',
@@ -8978,7 +8985,8 @@ def test_reporting_help_is_available_to_super_admins_and_ejaitur(client) -> None
         index = client.get('/api/documents/help-index').json()['documents']
         assert index[9]['relative_path'] == 'e2e-reporting.md'
         assert index[10]['relative_path'] == 'scoring-gap-analysis.md'
-        assert index[11]['relative_path'] == 'chart-builder.md'
+        assert index[11]['relative_path'] == 'network-insights.md'
+        assert index[12]['relative_path'] == 'chart-builder.md'
         assert client.get('/documents/view/help/e2e-reporting.md').status_code == 200
         assert client.get('/api/documents/help/e2e-reporting.md').status_code == 200
         home = client.get('/api/documents/help').json()['content']
@@ -8995,10 +9003,10 @@ def test_help_navigation_groups_unnumbered_documents() -> None:
     template = (Path(__file__).resolve().parents[1] / 'src/web_interface/templates/doc_view.html').read_text(encoding='utf-8')
     start = template.index('  function helpDocumentGroup(relativePath) {')
     end = template.index('\n  if (helpNavLists.length)', start)
-    script = template[start:end] + "\nconsole.log(JSON.stringify(['overview.md', 'configuration.md', 'docker-deployment.md', 'workspace-management.md', 'e2e-reporting.md', 'scoring-gap-analysis.md', 'query-builder.md', 'administrator-config.md', 'app-config.md', 'workspace-config.md', 'app-logs.md', 'project-structure.md'].map(helpDocumentGroup)));"
+    script = template[start:end] + "\nconsole.log(JSON.stringify(['overview.md', 'configuration.md', 'docker-deployment.md', 'workspace-management.md', 'e2e-reporting.md', 'scoring-gap-analysis.md', 'network-insights.md', 'query-builder.md', 'administrator-config.md', 'app-config.md', 'workspace-config.md', 'app-logs.md', 'project-structure.md'].map(helpDocumentGroup)));"
     result = subprocess.run([node_binary, '-e', script], text=True, capture_output=True, check=True)
     assert json.loads(result.stdout) == [
-        'General', 'General', 'General', 'Main Modules', 'Main Modules', 'Main Modules', 'Main Modules',
+        'General', 'General', 'General', 'Main Modules', 'Main Modules', 'Main Modules', 'Main Modules', 'Main Modules',
         'Administrative Modules', 'Administrative Modules', 'Administrative Modules',
         'Administrative Modules', 'Reference',
     ]

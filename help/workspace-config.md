@@ -1,6 +1,6 @@
 # Workspace Config
 
-Workspace Config is a dedicated page for settings owned by the active workspace: Report Templates Management, Main Cities, Operator & Vendor Maps and Scoring & GAP Analysis Setup. These settings remain workspace-scoped and are included in the applicable import, export, transfer, backup and restore workflows.
+Workspace Config is a dedicated page for settings owned by the active workspace: Report Templates Management, Main Cities, Operator & Vendor Maps (including Spectrum Holdings) and Scoring & GAP Analysis Setup. These settings remain workspace-scoped and are included in the applicable import, export, transfer, backup and restore workflows.
 
 > [!IMPORTANT]
 > **Workspace settings.** Every edit on this page belongs to the active workspace. Application Config controls shared runtime settings.
@@ -19,6 +19,7 @@ Open **Config → Workspace Config** from the main navigation at `/workspace-con
 | Report Template Editor | [Open section](#report-template-editor) |
 | Report Template reference | [Open section](#report-template-reference) |
 | Operator & Vendor Maps | [Open section](#operator-vendor-maps) |
+| Spectrum Holdings | [Open section](#spectrum-holdings) |
 | Main Cities | [Open section](#main-cities) |
 | Portable operations | [Open section](#portable-operations) |
 | Scoring & GAP Analysis Setup | [Open section](#scoring-gap-analysis-setup) |
@@ -273,7 +274,7 @@ Legend Position: Right
 
 With upper-bound mode, `Buckets < 2,5,20,100` evaluates each value against the limits in order and produces `below2`, `below5`, `below20`, `below100` or `Above`. Use `Buckets < 1,3,10,20` for the corresponding FDTT UDP UL distribution. `<=` is also accepted when boundary values must remain inside their named bucket.
 
-Explicit ranges such as `Buckets = 1,5,20` produce `<1`, `1-5`, `5-20` and `20+`. Stacked segments and legend entries always follow ascending numeric order, regardless of the order in which values appear in the CDR rows.
+Explicit ranges such as `Buckets = 1,5,20` produce `<1`, `1-5`, `5-20` and `20+`. Negative limits use `to`, so `Buckets = -110,-100,-90,-80` produces `< -110`, `-110 to -100`, `-100 to -90`, `-90 to -80` and `-80+` for RSRP. Stacked segments and legend entries always follow ascending numeric order, regardless of the order in which values appear in the CDR rows.
 
 #### Threshold Stacked Vertical Bars
 
@@ -288,6 +289,8 @@ Rows Aggregation: Operator
 Column Aggregation: Campaign
 Legend Position: Right
 ```
+
+The legend shows the configured threshold, for example `< 1.6` and `≥ 1.6`; `Threshold = -110` produces `< -110` and `≥ -110`.
 
 #### Scatter
 
@@ -383,7 +386,7 @@ Operator and Vendor aliases resolve to the canonical values configured in Worksp
 
 ## Operator & Vendor Maps
 
-The Operator & Vendor Maps panel contains Operator Maps and Vendor Maps as independently collapsible subpanels. Their light blue headers distinguish them from the dark parent header. Existing mapping controls and saved expansion states remain available inside each subpanel.
+The Operator & Vendor Maps panel contains Operator Maps, Vendor Maps and Spectrum Holdings as independently collapsible subpanels. Their light blue headers distinguish them from the dark parent header. Existing mapping controls and saved expansion states remain available inside each subpanel.
 
 ### Operator Maps
 
@@ -405,6 +408,23 @@ Renaming a canonical Vendor updates exact matching Report Template and saved Das
 
 Vendor order determines the chart sequence for Vendor dimensions and the Vendor portion of combined `Operator_Vendor` categories. The selected colour gives a Vendor a consistent chart identity, with related shades where multiple series need distinction. Aliases reconcile different source spellings for chart display and filters; they do not alter materialized CDR values. Group changes refresh chart caches without rematerializing source data.
 
+### Spectrum Holdings
+
+Spectrum Holdings list the licensed spectrum of each Operator for the **Spectrum** panel of [Network Insights](network-insights.md#spectrum). Enter one band per row with the header `Operator,Band,Duplex,Band Class,Bandwidth MHz,Notes`:
+
+```text
+Operator,Band,Duplex,Band Class,Bandwidth MHz,Notes
+Vodafone,B20,FDD,Low,20,2x10 MHz
+Vodafone,n78,TDD,High (TDD),90,
+```
+
+- **Operator** should match a canonical label of the Operator Maps.
+- **Band** uses LTE (`B20`) or NR (`n78`) names.
+- **Duplex** is `FDD`, `TDD` or `SDL`; **Band Class** is `Low`, `Mid` or `High (TDD)`. Both are inferred for known bands when left empty.
+- **Bandwidth MHz** is the total bandwidth held, for example `20` for 2×10 MHz FDD.
+
+Comma, semicolon and tab separators are accepted, so rows can be pasted from a spreadsheet. **Save Spectrum Holdings** validates every row and replaces all holdings of the workspace; an empty text area removes them. The table above the editor shows the MHz per Operator and band class.
+
 ## Main Cities
 
 The Main Cities panel appears before Operator & Vendor Maps and lists cities found in ready CDR datasets for the active workspace. Use the center buttons to move selected or all cities between the available list and the selected list, then choose **Save Main Cities**. The setting belongs to this workspace.
@@ -413,7 +433,7 @@ Dashboard's Default Filters City multiselect and the PowerPoint export City sele
 
 ## Portable operations
 
-Administrators use Admin's existing **Import / Export / Transfer** and **Backup Protection** controls to move or restore workspace settings. Main Cities is a portable component alongside Report Templates and Operator & Vendor Maps; full-workspace packages and database backups also retain the setting.
+Administrators use Admin's existing **Import / Export / Transfer** and **Backup Protection** controls to move or restore workspace settings. Main Cities is a portable component alongside Report Templates and Operator & Vendor Maps; full-workspace packages and database backups also retain the setting. Spectrum Holdings travel inside the Operator & Vendor Maps package (format version 3); importing an older package leaves the destination's Spectrum Holdings unchanged.
 
 For global runtime settings, see [Application Config](app-config.md). Admin's [Database Viewer](administrator-config.md#database-viewer) documents the underlying Operator and Vendor mapping tables.
 

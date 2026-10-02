@@ -1,0 +1,120 @@
+# Network Insights
+
+Analyse the network behind the measured performance: radio quality (RSRP and SINR), weak-coverage and high-interference areas on a map, observed and inventoried sites, licensed and observed spectrum, and network deployment (NNS, eMOCN scenarios, host networks and RAN vendors). Every view is calculated per Operator and can be grouped by Campaign, Region, City or CDR type.
+
+> [!NOTE]
+> **Radio views need no extra input.** RSRP, SINR, maps, observed eNodeBs and observed bands come from the processed CDRs. Site inventories and licensed spectrum are optional inputs that complete the Sites & Density, Spectrum and Network Deployment panels.
+
+## Choose your task
+
+| I want to… | Go to |
+| --- | --- |
+| Run an analysis | [Analysis Selection](#analysis-selection) |
+| Compare coverage and interference per Operator | [Overview and RF Quality](#overview-and-rf-quality) |
+| Locate weak-coverage or high-interference areas | [Coverage and Interference Maps](#coverage-and-interference-maps) |
+| Count sites and eNodeBs | [Sites and Density](#sites-and-density) |
+| Compare Low, Mid and High (TDD) spectrum | [Spectrum](#spectrum) |
+| Count NNS, eMOCN or shared sites | [Network Deployment](#network-deployment) |
+| Present RSRP and SINR slides in a Dashboard | [RF Quality template and Dashboard](#rf-quality-template-and-dashboard) |
+| Check which CDR fields are used | [Data sources](#data-sources) |
+| Know which inputs are still missing | [Pending inputs](#pending-inputs) |
+
+## Analysis Selection
+
+1. Open the workspace and the **Network Insights** tab, which follows **Scoring & GAP Analysis**.
+2. Choose **NR Mode**. The CDR lists show the ready Data, Voice and Speech CDRs of that mode; the two most recently uploaded CDRs of each type are selected.
+3. Choose **Technology** (LTE or NR) and **Group by** (Campaign, Region, City or CDR type).
+4. Adjust **Low coverage below** (default -110 dBm), **High interference below** (default 0 dB) and the **Map grid** size (default 250 m).
+5. Press **Analyse Network**.
+
+After the first analysis, **Operators**, **Regions** and **Cities** list the values found in the selected CDRs. Restrict them and press **Analyse Network** again. Leaving every value selected applies no restriction.
+
+> [!TIP]
+> The first analysis of a CDR copies its radio fields into the combined reporting tables and can take a minute. Later analyses of the same CDRs reuse them and the parsed samples, so changing filters, thresholds or the map Operator is fast.
+
+Operator names follow the workspace **Operator Maps**, including their colours; rows from ignored CDR sheets are excluded.
+
+## Overview and RF Quality
+
+The **Overview** shows one card per Operator with the median RSRP, the share of samples below the coverage threshold, the median SINR, the share of samples below the interference threshold, the observed eNodeBs and the number of samples. When the selection contains two or more campaigns, each indicator shows its change between the two latest campaigns: green when the indicator improves and red when it worsens.
+
+**RF Quality** contains:
+
+- the RSRP and SINR cumulative distributions, one curve per Operator; grouped analyses use a different line style per group;
+- a table per Operator and group with median and 10th-percentile RSRP and SINR, the low-coverage and high-interference shares and the quality-class distribution.
+
+| Class | RSRP (dBm) | SINR (dB) |
+| --- | --- | --- |
+| Excellent | ≥ -80 | ≥ 20 |
+| Good | -90 to -80 | 13 to 20 |
+| Fair | -100 to -90 | 5 to 13 |
+| Poor | -110 to -100 | 0 to 5 |
+| Very poor / Bad | < -110 | < 0 |
+
+Values outside physical ranges (RSRP outside -160 to -20 dBm, SINR outside -30 to 50 dB) are treated as missing.
+
+## Coverage and Interference Maps
+
+The maps show one Operator at a time over OpenStreetMap. Samples are grouped into square grid cells of the selected size, and each cell is coloured by its mean RSRP or SINR class. Cells need at least three located samples. Very dense selections use a coarser grid automatically to keep the map readable; the note above the maps shows the grid actually used.
+
+Below each map, the **Weakest coverage areas** and **Highest interference areas** tables rank the cells where at least half of the samples are below the threshold, by the number of affected samples. Select an area (its City) to zoom the map to it, and **Show Whole Area** to return. Drag a rectangle over a map to magnify it, then drag to pan.
+
+## Sites and Density
+
+The table counts, per Operator and group, the **observed eNodeBs** (distinct LTE eNodeB identities, Cell Identity ÷ 256, that served the measuring devices) and **observed cells**, with the samples per eNodeB. Observed eNodeBs depend on the route and do not equal the deployed sites.
+
+When a Vodafone or Three cell inventory is uploaded as a Vendor mapping dataset in Workspace, the panel also shows its total number of distinct sites and cells.
+
+## Spectrum
+
+**Licensed spectrum** aggregates the MHz configured in [Workspace Config → Spectrum Holdings](workspace-config.md#spectrum-holdings) per Operator into Low (below 1 GHz), Mid (1–3 GHz FDD/SDL) and High (TDD) bands. Without holdings, the panel shows a pending-input notice.
+
+**Spectrum observed in the measurements** shows the share of samples served on each LTE band (from the serving EARFCN or the band of the cell trace) and NR band, with the frequency, duplex mode, class and the most frequent downlink bandwidth. Bandwidths are reported only by CDR Data.
+
+## Network Deployment
+
+This panel reads the cell inventories uploaded as **Vendor mapping** datasets (Vodafone and Three) and counts distinct sites and cells grouped by eMOCN Scenario (for example S0, S1, NNS or S2), Host Network, Network, RAN Vendor, Region, Subregion, Site Type or Band. An inventory without the selected column shows its totals instead.
+
+## RF Quality template and Dashboard
+
+Every workspace that already has NSA Report Templates receives once, when the application first opens it, the NSA Report Template **NSA - RF Quality (RSRP & SINR)** and the E2E Dashboard **RF Quality (RSRP & SINR)** that uses it. New empty workspaces stay empty. The Dashboard has no saved CDR universe, so it always uses the two newest NSA CDRs of each type. The template contains:
+
+- RSRP and SINR CDFs (LTE and NR) for Data, Voice and Speech;
+- average LTE and NR RSRP and SINR bars per CDR type;
+- RSRP distributions in -110/-100/-90/-80 dBm buckets and SINR distributions in 0/5/13/20 dB buckets;
+- shares of samples below -110 dBm and below 0 dB.
+
+Edit, rename or delete them like any other template or Dashboard. A deleted copy is not recreated.
+
+## Data sources
+
+| Field | CDR Data | CDR Voice (A side) | CDR Speech |
+| --- | --- | --- | --- |
+| LTE RSRP / SINR | `LTE_PCell_RSRP_Avg`, `LTE_PCell_SINR_Avg` | `4G_RSRP_Avg_A`, `4G_SINR_Avg_A` | `Playing_RSRP_Avg`, `Playing_SINR_Avg` |
+| NR RSRP / SINR | `NR_PCell_RSRP_Avg`, `NR_PCell_SINR_Avg` | `NR_RSRP_Avg_A`, `NR_SINR_Avg_A` | `Playing_RSRP_NR_Avg`, `Playing_SINR_NR_Avg` |
+| Location | `Test_Start_Latitude/Longitude` | `Call_Start_Latitude/Longitude_A` | `Playing_Latitude/Longitude` |
+| Serving cells | `LAC_CID_xARFCN`, `Cell_ID` | `LAC_CID_xARFCN_A`, `Cell_ID_A` | `Cell_IDs_A`, `Playing_eNodeBId` |
+| Bands | `LTE_PCC_EARFCN`, `NR_DL_PCell_Band` | `E/U/ARFCN_A`, `NR_BAND_A` | `ARFCN_A` |
+
+Speech falls back to the `Recording_*` fields when the `Playing_*` fields are absent. Region and City use `Region`/`City`, or `G_Level_2`/`G_Level_4`.
+
+## Pending inputs
+
+| Input | Used by | How to provide it |
+| --- | --- | --- |
+| Site inventories for every Operator | Sites & Density, Network Deployment | Upload them as Vendor mapping datasets (Vodafone and Three are supported today) |
+| Surface of each Region and City | Site density per km² | Not yet configurable |
+| Licensed spectrum per Operator | Spectrum | [Workspace Config → Spectrum Holdings](workspace-config.md#spectrum-holdings) |
+| NNS site list, if it differs from the inventory eMOCN Scenario | Network Deployment | Include it in the uploaded inventory |
+
+## Persistence and transfers
+
+Network Insights stores no analysis results; every analysis is calculated on demand. Spectrum Holdings belong to the workspace and travel with the **Operator & Vendor Maps** export, transfers and backups. The bundled template and Dashboard travel with Report Templates and Dashboards.
+
+## Troubleshooting
+
+- **No ready CDRs** in a CDR list: check the NR Mode and that the CDRs finished processing.
+- **No samples match**: clear the Operator, Region or City restriction.
+- **A map is empty**: the selected CDRs carry no coordinates or no values for the selected Technology; the status line says which.
+- **NR curves are empty**: NSA CDRs report NR values only while the device is attached to NR; check the NR RSRP samples column in the RF Quality table.
+- **The Licensed spectrum panel shows Pending input**: add Spectrum Holdings in Workspace Config.

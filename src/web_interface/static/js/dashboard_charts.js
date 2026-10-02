@@ -923,6 +923,7 @@
       }
     }
     context.strokeStyle = '#B9CDC4'; context.lineWidth = 2; context.strokeRect(left, top, width, height);
+    const pointRadius = Math.max(1, Number(payload.point_radius) || 4);
     (payload.series || []).forEach(series => (series.points || []).forEach(point => {
       if (Number(point[0]) < rawX[0] || Number(point[0]) > rawX[1] || Number(point[1]) < rawY[0] || Number(point[1]) > rawY[1]) return;
       let x, y;
@@ -935,7 +936,7 @@
         x = left + (Number(point[0]) - xDomain[0]) / (xDomain[1] - xDomain[0]) * width;
         y = top + height - (Number(point[1]) - yDomain[0]) / (yDomain[1] - yDomain[0]) * height;
       }
-      context.fillStyle = series.colour; context.strokeStyle = '#FFFFFF'; context.lineWidth = 1; context.beginPath(); context.arc(x, y, 4, 0, Math.PI * 2); context.fill(); context.stroke();
+      context.fillStyle = series.colour; context.strokeStyle = '#FFFFFF'; context.lineWidth = 1; context.beginPath(); context.arc(x, y, pointRadius, 0, Math.PI * 2); context.fill(); context.stroke();
       drawConfiguredPointLabel(context, series.name, x, y, series.colour, payload.label_position, 13, payload.label_format);
       pushPointHit(state, transform, x, y, {label: series.name, series: `${payload.y_label} / ${payload.x_label}`, value: `${numericLabel(point[1])} / ${numericLabel(point[0])}`});
     }));

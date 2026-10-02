@@ -1,0 +1,286 @@
+from __future__ import annotations
+
+import json
+import math
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+import src.DashboardAnalytic as app_module
+from src.modules import network_insights as ni
+from src.modules.cdr_reporting import _explicit_bucket_labels, _osm_map_tile_geometry, _status_chart_categories
+from src.modules.repository import local_now_iso
+
+
+TEMPLATE_PATH = Path(__file__).resolve().parents[1] / 'assets' / 'report-templates' / 'nsa' / f'{ni.RF_QUALITY_TEMPLATE_NAME}.csv'
+
+
+def _login(client) -> None:
+    response = client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    assert response.status_code == 303
+
+
+def _add_ready_dataset(tmp_path: Path, name: str, kind: str, rows: pd.DataFrame, nr_mode: str | None = 'NSA') -> int:
+    repository = app_module.repository
+    source = tmp_path / name
+    source.write_text('test source', encoding='utf-8')
+    dataset_id, _created = repository.add_dataset(name, str(source), 'admin')
+    repository.replace_dataset_rows(dataset_id, rows)
+    repository.update_dataset_profile(
+        dataset_id, status='ready', progress=100, dataset_kind=kind, nr_mode=nr_mode,
+        row_count=len(rows), column_count=len(rows.columns), processed_at=local_now_iso(),
+    )
+    return dataset_id
+
+
+def _data_rows(campaign: str, rsrp_offset: float = 0.0) -> pd.DataFrame:
+    count = 12
+    return pd.DataFrame({
+        'Operator': ['EE'] * 6 + ['Vodafone UK'] * 6,
+        'Campaign': [campaign] * count,
+        'Region': ['North'] * count,
+        'City': ['Leeds'] * 6 + ['York'] * 6,
+        'Test_Start_Latitude': [53.80 + index * 0.0001 for index in range(count)],
+        'Test_Start_Longitude': [-1.55 + index * 0.0001 for index in range(count)],
+        'LTE_PCell_RSRP_Avg': [-85 + rsrp_offset, -95, -105, -115, -118, -90, -80, -82, -84, -86, -112, -999],
+        'LTE_PCell_SINR_Avg': [15, 10, 4, -2, -3, 22, 25, 18, 12, 8, -1, 6],
+        'NR_PCell_RSRP_Avg': [None] * count,
+        'NR_PCell_SINR_Avg': [None] * count,
+        'LAC_CID_xARFCN': ['[LTE E-UTRA 20, 100, 154067457, 6300]'] * 6 + ['[LTE E-UTRA 3, 200, 30001922, 1300]->[LTE E-UTRA 7, 200, 30001923, 2850]'] * 6,
+        'LTE_PCC_EARFCN': [6300] * 6 + [1300] * 6,
+        'LTE_DL_PCell_Bandwidth': [10] * 6 + [20] * 6,
+        'NR_DL_PCell_Band': [''] * count,
+    })
+
+
+def test_radio_identifiers_and_bands_are_parsed() -> None:
+    assert ni.lte_enodeb_from_eci('154067457') == 601826
+    assert ni.lte_enodeb_from_eci(12345) is None
+    assert ni.lte_band_for_earfcn('6300') == 'B20'
+    assert ni.lte_band_for_earfcn('1300') == 'B3'
+    assert ni.lte_band_for_earfcn('x') == ''
+    assert ni.band_class('B20') == 'Low'
+    assert ni.band_class('B3') == 'Mid'
+    assert ni.band_class('n78') == 'High (TDD)'
+    assert ni.nr_band_label('NR BAND 78->NR BAND 1') == 'n78'
+    assert ni.enodeb_label('L 601983') == '601983'
+    cells = ni.parse_cell_trace('[LTE E-UTRA 7, 12, 30001923, 2850]->[UMTS 1, 3, 456, 10700]')
+    assert cells[0] == {'technology': 'LTE', 'band': 'B7', 'cell': '30001923', 'channel': '2850'}
+    assert cells[1]['technology'] == 'UMTS'
+
+
+def test_samples_are_normalised_and_summarised_per_operator() -> None:
+    frame = _data_rows('Q1 2026')
+    columns = ni.resolve_source_columns(frame.columns, 'data')
+    samples = ni.normalise_samples(frame, 'data', columns)
+
+    assert samples['kind'].unique().tolist() == ['Data']
+    assert math.isnan(samples.loc[11, 'lte_rsrp'])  # -999 is a placeholder
+    assert samples.loc[0, 'enodebs'] == ('601826',)
+    assert samples.loc[6, 'cells'] == ('30001922', '30001923')
+    assert samples.loc[0, 'lte_band'] == 'B20'
+
+    rows = ni.rf_summary(samples, 'lte', None, -110, 0)
+    ee = next(row for row in rows if row['operator'] == 'EE')
+    assert ee['samples'] == 6
+    assert ee['low_coverage_share'] == pytest.approx(33.3)
+    assert ee['high_interference_share'] == pytest.approx(33.3)
+    assert ee['observed_enodebs'] == 1
+    assert sum(item['share'] for item in ee['rsrp_classes']) == pytest.approx(100, abs=0.2)
+
+    grouped = ni.rf_summary(samples, 'lte', 'city', -110, 0)
+    assert {(row['operator'], row['group']) for row in grouped} == {('EE', 'Leeds'), ('Vodafone UK', 'York')}
+
+    observed = ni.observed_spectrum(samples)
+    assert {(row['operator'], row['band'], row['band_class']) for row in observed} == {('EE', 'B20', 'Low'), ('Vodafone UK', 'B3', 'Mid')}
+    assert next(row for row in observed if row['band'] == 'B3')['typical_bandwidth_mhz'] == 20
+
+
+def test_grid_cells_rank_weak_areas_and_build_map_payload() -> None:
+    samples = pd.DataFrame({
+        'latitude': [51.5] * 4 + [51.6] * 4,
+        'longitude': [-0.1] * 4 + [-0.2] * 4,
+        'lte_rsrp': [-115, -118, -112, -90, -80, -85, -82, -84],
+        'city': ['London'] * 8,
+        'region': ['South'] * 8,
+    })
+    cells, grid = ni.grid_cells(samples, 'lte_rsrp', -110, 250, 3)
+    assert grid == 250
+    assert len(cells) == 2
+    ranked = ni.hotspots(cells)
+    assert len(ranked) == 1
+    assert ranked[0]['bad_share'] == 75
+    assert ranked[0]['city'] == 'London'
+
+    payload = ni.map_payload(cells, ni.RSRP_CLASSES, 'Coverage', 'dBm', _osm_map_tile_geometry)
+    assert payload['type'] == 'map'
+    assert [item['label'] for item in payload['legend']['items']][0] == 'Excellent (≥ -80 dBm)'
+    assert sum(len(series['points']) for series in payload['series']) == 2
+    assert ni.map_payload(pd.DataFrame(), ni.RSRP_CLASSES, 'Coverage', 'dBm', None)['type'] == 'empty'
+
+
+def test_spectrum_holdings_are_validated_parsed_and_summarised() -> None:
+    holdings = ni.parse_spectrum_csv('Operator\tBand\tDuplex\tBand Class\tBandwidth MHz\tNotes\nEE\tB20\t\t\t20\t2x10\nEE\tn78\t\t\t80\t\nO2\tB3\tFDD\tMid\t40\t')
+    assert holdings[0] == {'operator': 'EE', 'band': 'B20', 'duplex': 'FDD', 'band_class': 'Low', 'bandwidth_mhz': 20.0, 'notes': '2x10'}
+    assert holdings[1]['duplex'] == 'TDD' and holdings[1]['band_class'] == 'High (TDD)'
+    assert ni.parse_spectrum_csv(ni.spectrum_holdings_csv(holdings)) == holdings
+    assert ni.parse_spectrum_csv('Operator;Band;Bandwidth MHz\nEE;B1;30') == [
+        {'operator': 'EE', 'band': 'B1', 'duplex': 'FDD', 'band_class': 'Mid', 'bandwidth_mhz': 30.0, 'notes': ''},
+    ]
+    assert ni.parse_spectrum_csv('  ') == []
+    summary = {row['operator']: row for row in ni.licensed_spectrum_summary(holdings)}
+    assert summary['EE'] == {'operator': 'EE', 'Low': 20.0, 'Mid': 0.0, 'High (TDD)': 80.0, 'total': 100.0}
+    with pytest.raises(ValueError, match='bandwidth'):
+        ni.normalise_spectrum_holdings([{'operator': 'EE', 'band': 'B20', 'bandwidth_mhz': 'wide'}])
+    with pytest.raises(ValueError, match='band class'):
+        ni.normalise_spectrum_holdings([{'operator': 'EE', 'band': 'B99', 'bandwidth_mhz': 10}])
+
+
+def test_threshold_and_negative_bucket_labels_follow_the_configuration() -> None:
+    assert _explicit_bucket_labels([1, 5, 20]) == ['<1', '1-5', '5-20', '20+']
+    assert _explicit_bucket_labels([-110, -100, -90, -80]) == ['< -110', '-110 to -100', '-100 to -90', '-90 to -80', '-80+']
+    frame = pd.DataFrame({'value': [-115, -100, 1.2, 2.0]})
+    _result, labels, _colours = _status_chart_categories(frame, 'value', quality=True, threshold=-110)
+    assert labels == ('< -110', '≥ -110')
+    _result, labels, _colours = _status_chart_categories(frame, 'value', quality=True, threshold=1.6)
+    assert labels == ('< 1.6', '≥ 1.6')
+
+
+def test_bundled_rf_quality_template_is_valid() -> None:
+    catalogue = app_module.load_template_catalogue(TEMPLATE_PATH.read_bytes(), 'nsa')
+    assert len(catalogue) == 39
+    chart_types = {entry.chart_type for entry in catalogue}
+    assert {'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars'} <= chart_types
+
+
+def test_bundled_rf_quality_content_is_seeded_once(client) -> None:
+    from src.modules.e2e_dashboards import LEGACY_STATE_KEY, STATE_KEY
+
+    repository = app_module.repository
+    templates_root = TEMPLATE_PATH.parents[1]
+    assert ni.RF_QUALITY_TEMPLATE_NAME not in {str(row['name']) for row in repository.list_report_templates('nsa')}
+    assert repository.get_workspace_state(STATE_KEY) is None
+
+    added = ni.seed_bundled_rf_quality_content(repository, templates_root, STATE_KEY, LEGACY_STATE_KEY)
+    assert added == [ni.RF_QUALITY_TEMPLATE_NAME, ni.RF_QUALITY_DASHBOARD_NAME]
+    assert ni.RF_QUALITY_TEMPLATE_NAME in {str(row['name']) for row in repository.list_report_templates('nsa')}
+    dashboards = json.loads(repository.get_workspace_state(STATE_KEY))
+    seeded = [item for item in dashboards.values() if item['name'] == ni.RF_QUALITY_DASHBOARD_NAME]
+    assert len(seeded) == 1
+    assert seeded[0]['template'] == ni.RF_QUALITY_TEMPLATE_NAME and seeded[0]['technology'] == 'nsa'
+    assert 'datasets' not in seeded[0]
+
+    assert ni.seed_bundled_rf_quality_content(repository, templates_root, STATE_KEY, LEGACY_STATE_KEY) == []
+    repository.set_workspace_state(STATE_KEY, json.dumps({}))
+    assert ni.seed_bundled_rf_quality_content(repository, templates_root, STATE_KEY, LEGACY_STATE_KEY) == []
+    assert json.loads(repository.get_workspace_state(STATE_KEY)) == {}
+
+
+def test_bundled_rf_quality_content_skips_workspaces_without_a_library() -> None:
+    class EmptyWorkspace:
+        def __init__(self) -> None:
+            self.state: dict[str, str] = {}
+
+        def list_report_templates(self, technology: str) -> list[dict[str, str]]:
+            return []
+
+        def get_workspace_state(self, key: str) -> str | None:
+            return self.state.get(key)
+
+        def set_workspace_state(self, key: str, value: str) -> None:
+            self.state[key] = value
+
+    workspace = EmptyWorkspace()
+    assert ni.seed_bundled_rf_quality_content(workspace, TEMPLATE_PATH.parents[1], 'dashboards', 'legacy') == []
+    assert workspace.state == {}
+
+
+def test_network_insights_page_and_analysis(client, tmp_path) -> None:
+    _login(client)
+    _add_ready_dataset(tmp_path, 'CDR_Data_NSA_2026-Q1.xlsx', 'data', _data_rows('2026-Q1'))
+    _add_ready_dataset(tmp_path, 'CDR_Data_NSA_2026-Q2.xlsx', 'data', _data_rows('2026-Q2', rsrp_offset=5))
+
+    page = client.get('/network-insights')
+    assert page.status_code == 200
+    assert 'id="ni-config"' in page.text
+    assert 'module-tab-network-insights active' in page.text
+    config = json.loads(page.text.split('<script id="ni-config" type="application/json">', 1)[1].split('</script>', 1)[0])
+    ids = [row['id'] for row in config['datasets'] if row['kind'] == 'data']
+    assert len(ids) == 2
+
+    response = client.post('/api/network-insights/analysis', json={'datasets': {'data': ids}, 'technology': 'lte', 'group': 'campaign'})
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload['comparison'] == {'previous': '2026-Q1', 'latest': '2026-Q2'}
+    assert {row['operator'] for row in payload['overview']} == {'EE', 'VF'}
+    ee = next(row for row in payload['overview'] if row['operator'] == 'EE')
+    assert ee['deltas']['rsrp_median'] is not None
+    assert payload['charts']['rsrp_cdf']['type'] == 'cdf'
+    assert len(payload['charts']['rsrp_cdf']['series']) == 4
+    assert payload['maps']['coverage']['type'] == 'map'
+    assert payload['options']['cities'] == ['Leeds', 'York']
+    assert payload['spectrum']['licensed'] == []
+
+    filtered = client.post('/api/network-insights/analysis', json={
+        'datasets': {'data': ids}, 'technology': 'lte', 'group': 'city', 'cities': ['York'], 'map_operator': 'VF',
+    }).json()
+    assert {row['operator'] for row in filtered['rf_rows']} == {'VF'}
+    assert filtered['maps']['operator'] == 'VF'
+
+    empty = client.post('/api/network-insights/analysis', json={'datasets': {'data': ids}, 'operators': ['Nobody']})
+    assert empty.status_code == 400
+    assert client.post('/api/network-insights/analysis', json={'datasets': {}}).status_code == 400
+
+
+def test_network_deployment_counts_inventory_sites(client, tmp_path) -> None:
+    _login(client)
+    inventory = pd.DataFrame({
+        'Site_ID': ['S1', 'S1', 'S2', 'S3', 'S4'],
+        'CId___ECI': ['1', '2', '3', '4', '5'],
+        'eMOCNScenario': ['NNS', 'NNS', 'S1', 'NNS', ''],
+        'OP_Vendor': ['Ericsson', 'Ericsson', 'Nokia', 'Ericsson', 'Nokia'],
+    })
+    _add_ready_dataset(tmp_path, 'VF_inventory.xlsx', 'mapping_vodafone', inventory, nr_mode=None)
+
+    payload = client.get('/api/network-insights/deployment?group=scenario').json()
+    assert payload['group_label'] == 'eMOCN Scenario'
+    vodafone = payload['inventories'][0]
+    assert vodafone['operator'] == 'Vodafone'
+    assert {row['group']: row['sites'] for row in vodafone['rows']} == {'NNS': 2, 'S1': 1, 'Not set': 1}
+    assert vodafone['totals'] == {'sites': 4, 'cells': 5}
+    assert 'vendor' in vodafone['available_groups'] and 'band' not in vodafone['available_groups']
+
+
+def test_spectrum_holdings_api_workspace_config_and_archive(client) -> None:
+    _login(client)
+    saved = client.put('/api/network-insights/spectrum', json={'holdings': [{'operator': 'EE', 'band': 'n78', 'bandwidth_mhz': 80}]})
+    assert saved.status_code == 200
+    assert saved.json()['summary'][0]['High (TDD)'] == 80
+    assert client.put('/api/network-insights/spectrum', json={'holdings': [{'operator': 'EE'}]}).status_code == 400
+
+    form = client.post('/workspace-config/spectrum-holdings/save', data={
+        'holdings_csv': 'Operator,Band,Bandwidth MHz\nO2,B20,20\nO2,B40,40',
+    }, follow_redirects=False)
+    assert form.status_code == 303
+    assert 'spectrum_holdings_notice' in form.headers['location']
+    config_page = client.get('/workspace-config')
+    assert 'id="spectrum-holdings"' in config_page.text
+    assert 'O2,B40,TDD,High (TDD),40,' in config_page.text
+    invalid = client.post('/workspace-config/spectrum-holdings/save', data={'holdings_csv': 'Operator,Band\nO2,'}, follow_redirects=False)
+    assert 'spectrum_holdings_error' in invalid.headers['location']
+
+    workspace = app_module.active_workspace
+    archive = json.loads(app_module._operator_mappings_archive_payload(workspace))
+    assert archive['version'] == 3
+    assert [row['band'] for row in archive['spectrum_holdings']] == ['B20', 'B40']
+
+    ni.save_spectrum_holdings(app_module.repository, [])
+    app_module._restore_workspace_operator_mappings(workspace, json.dumps(archive).encode())
+    assert len(ni.load_spectrum_holdings(app_module.repository)) == 2
+
+    legacy = {key: value for key, value in archive.items() if key != 'spectrum_holdings'} | {'version': 2}
+    app_module._restore_workspace_operator_mappings(workspace, json.dumps(legacy).encode())
+    assert len(ni.load_spectrum_holdings(app_module.repository)) == 2
+    with pytest.raises(ValueError, match='Spectrum Holdings'):
+        app_module._restore_workspace_operator_mappings(workspace, json.dumps(archive | {'spectrum_holdings': [{'operator': 'EE'}]}).encode())

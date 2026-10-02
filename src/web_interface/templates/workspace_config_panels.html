@@ -207,6 +207,39 @@
     </div>
   </details>
 
+  <details id="spectrum-holdings" class="panel collapsible-panel operator-mappings-panel spectrum-holdings-panel" open data-panel-state-key="workspace-config:spectrum-holdings">
+    <summary class="collapsible-summary">
+      <div><p class="eyebrow">Network Insights</p><h2>Spectrum Holdings</h2></div>
+      <span class="collapse-chip">Collapse</span>
+    </summary>
+    <div class="collapsible-panel-body">
+      {% if active_workspace %}
+      <p class="lede">Licensed spectrum per Operator, aggregated by Network Insights into Low, Mid and High (TDD) bands. Use the canonical Operator labels of the Operator Maps.</p>
+      {% if spectrum_holdings_notice %}<div class="alert alert-success">{{ spectrum_holdings_notice }}</div>{% endif %}
+      {% if spectrum_holdings_error %}<div class="alert alert-error">{{ spectrum_holdings_error }}</div>{% endif %}
+      {% if spectrum_holdings_summary %}
+      <div class="table-wrap operator-mappings-table-wrap">
+        <table class="operator-mappings-table spectrum-holdings-summary">
+          <thead><tr><th>Operator</th>{% for band_class in spectrum_band_classes %}<th>{{ band_class }} (MHz)</th>{% endfor %}<th>Total (MHz)</th></tr></thead>
+          <tbody>
+            {% for row in spectrum_holdings_summary %}
+            <tr><td data-label="Operator">{{ row.operator }}</td>{% for band_class in spectrum_band_classes %}<td data-label="{{ band_class }} (MHz)">{{ '%g' | format(row[band_class]) }}</td>{% endfor %}<td data-label="Total (MHz)"><strong>{{ '%g' | format(row.total) }}</strong></td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="form-note"><strong>Pending input:</strong> no licensed spectrum is configured yet.</p>
+      {% endif %}
+      <form class="spectrum-holdings-form" action="/workspace-config/spectrum-holdings/save" method="post">
+        <label>Holdings (one band per row)<textarea name="holdings_csv" rows="10" spellcheck="false" placeholder="Operator,Band,Duplex,Band Class,Bandwidth MHz,Notes&#10;Vodafone,B20,FDD,Low,20,2x10 MHz">{{ spectrum_holdings_csv }}</textarea></label>
+        <button type="submit">Save Spectrum Holdings</button>
+      </form>
+      <p class="form-note">Columns: Operator, Band (for example B20 or n78), Duplex (FDD, TDD or SDL), Band Class (Low, Mid or High (TDD)), Bandwidth MHz (total for the Operator, e.g. 20 for 2×10 MHz FDD) and optional Notes. Duplex and Band Class are inferred for known bands when left empty. Rows can be pasted from a spreadsheet; saving replaces every holding of the workspace.</p>
+      {% else %}<p class="form-note">Open a workspace before managing Spectrum Holdings.</p>{% endif %}
+    </div>
+  </details>
+
       </div>
     </div>
   </details>

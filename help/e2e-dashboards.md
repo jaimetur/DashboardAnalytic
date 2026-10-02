@@ -41,6 +41,8 @@ Dashboards use the same template schema and renderer as Reporting. Detailed temp
 
 Names are unique within each NR Mode: an NSA and an SA Dashboard may share a name. The library sorts NSA first, then by name.
 
+Workspaces with NSA Report Templates receive once the NSA Dashboard **RF Quality (RSRP & SINR)** and its template **NSA - RF Quality (RSRP & SINR)**, with RSRP and SINR CDF, average, distribution and threshold slides per CDR type. It has no saved Dataset Universe, so it uses the newest NSA CDRs; edit or delete it like any other Dashboard. See [Network Insights](network-insights.md#rf-quality-template-and-dashboard).
+
 ### Row actions
 
 | Action | Effect |

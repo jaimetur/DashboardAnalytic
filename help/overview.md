@@ -6,7 +6,7 @@ Dashboard Analytic turns processed CDR datasets into interactive KPI analysis, r
 > **Workspace ownership.** Open the intended workspace before selecting datasets, methodologies or templates. Application Config and user accounts have a separate global scope.
 
 > [!TIP]
-> **Choose an analysis workflow.** Use Datasets Analysis for one CDR, Builders for ad-hoc exploration, E2E Dashboards for a complete template and Scoring & GAP Analysis for scoring comparisons.
+> **Choose an analysis workflow.** Use Datasets Analysis for one CDR, Builders for ad-hoc exploration, E2E Dashboards for a complete template, Scoring & GAP Analysis for scoring comparisons and Network Insights for radio quality, sites and spectrum.
 
 ## In this guide
 
@@ -20,6 +20,7 @@ Dashboard Analytic turns processed CDR datasets into interactive KPI analysis, r
 | Datasets Analysis | [Open section](#datasets-analysis) |
 | E2E Dashboards | [Open section](#e2e-dashboards) |
 | E2E Reporting | [Open section](#e2e-reporting) |
+| Network Insights | [Open section](#network-insights) |
 | Chart Builder | [Open section](#chart-builder) |
 | Query Builder | [Open section](#query-builder) |
 | App Logs | [Open section](#app-logs) |
@@ -35,7 +36,8 @@ Dashboard Analytic turns processed CDR datasets into interactive KPI analysis, r
 5. Create or open a saved **E2E Dashboard** to analyse a complete template interactively, reuse prepared selections and generate its PowerPoint. Use **Datasets Analysis**, **Chart Builder** or **Query Builder** for focused exploration, or **E2E Reporting** for the classic report and Chart Set workflow.
 6. Follow Dashboard preparation and generation in the floating task cards, **PPT Generation Jobs** and **Reports and Charts Jobs**.
 7. Use **Scoring & GAP Analysis** for saved NetCheck scores and GAP reference operator comparisons across selected CDRs and aggregation levels; CDR processing also queues default Operator scoring when compatible companion CDRs are available. See [Scoring & GAP Analysis](scoring-gap-analysis.md).
-8. Use **App Logs** for traceability and **Admin** for shared configuration.
+8. Use **Network Insights** to compare RSRP and SINR, map weak-coverage and high-interference areas and review sites, spectrum and network deployment. See [Network Insights](network-insights.md).
+9. Use **App Logs** for traceability and **Admin** for shared configuration.
 
 ## Header and navigation
 
@@ -54,7 +56,7 @@ The header is available throughout the authenticated application.
 
 ## Application and workspace configuration
 
-**Application Config** controls runtime settings shared by every workspace. The dedicated **Workspace Config** page groups Report Templates Management, Main Cities, Operator & Vendor Maps and Scoring & GAP Analysis Setup for the active workspace. These are separate scopes: changing a workspace template or chart mapping does not change application runtime settings. See [Application Config](app-config.md) and [Workspace Config](workspace-config.md).
+**Application Config** controls runtime settings shared by every workspace. The dedicated **Workspace Config** page groups Report Templates Management, Main Cities, Operator & Vendor Maps (including Spectrum Holdings) and Scoring & GAP Analysis Setup for the active workspace. These are separate scopes: changing a workspace template or chart mapping does not change application runtime settings. See [Application Config](app-config.md) and [Workspace Config](workspace-config.md).
 
 ## Background tasks and floating cards
 
@@ -218,6 +220,17 @@ E2E Reporting combines processed CDRs and a Report Template from the active work
 - Keeps the actions appropriate to each job: open, download, stop, retry, relaunch or delete.
 - Provides separate bulk deletion for Reports and Chart Sets.
 - Persists both job types in the workspace `generated_jobs` table.
+
+## Network Insights
+
+Network Insights analyses the radio fields of the selected Data, Voice and Speech CDRs of one NR Mode:
+
+- **Overview** cards per Operator with median RSRP/SINR, low-coverage and high-interference shares, observed eNodeBs and changes between the two latest campaigns.
+- **RF Quality** CDFs and quality-class tables, grouped by Campaign, Region, City or CDR type.
+- **Coverage & Interference Maps** with grid cells coloured by quality class and ranked weak areas.
+- **Sites & Density**, **Spectrum** and **Network Deployment** from observed cells, Spectrum Holdings and the uploaded Vodafone/Three cell inventories.
+
+See [Network Insights](network-insights.md).
 
 ## Chart Builder
 

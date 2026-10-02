@@ -2152,7 +2152,7 @@ def _catalog_column(
             frame["__catalog_rate_bucket"] = output
             return "__catalog_rate_bucket"
         edges = bucket_edges or [1, 5, 10, 25, 50]
-        labels = [f"<{edges[0]:g}"] + [f"{low:g}-{high:g}" for low, high in zip(edges, edges[1:])] + [f"{edges[-1]:g}+"]
+        labels = _explicit_bucket_labels(edges)
         frame["__catalog_rate_bucket"] = pd.cut(numeric, bins=[float("-inf"), *edges, float("inf")], labels=labels, right=False).astype("string")
         return "__catalog_rate_bucket"
     candidate = _column(frame, aliases.get(normalized, (name,)))
@@ -2382,6 +2382,20 @@ def _catalog_bucket_operator(entry: CatalogEntry) -> str:
     return condition.operator if condition else "="
 
 
+def _explicit_bucket_labels(edges: list[float]) -> list[str]:
+    """Name explicit ``Buckets = ...`` ranges, readable with negative values too.
+
+    Positive ranges keep the historical ``<1``, ``1-5`` and ``20+`` labels;
+    ranges with negative edges (RSRP or SINR in dB) read ``< -110`` and
+    ``-110 to -100`` instead of an ambiguous ``-110--100``.
+    """
+    def middle(low: float, high: float) -> str:
+        return f"{low:g} to {high:g}" if low < 0 or high < 0 else f"{low:g}-{high:g}"
+
+    first = f"< {edges[0]:g}" if edges[0] < 0 else f"<{edges[0]:g}"
+    return [first, *(middle(low, high) for low, high in zip(edges, edges[1:])), f"{edges[-1]:g}+"]
+
+
 def _throughput_distribution_domain(frame: pd.DataFrame) -> list[str]:
     """Return Tableau's low-to-high legend domain for throughput buckets."""
     configured = frame.attrs.get("catalogue_distribution_buckets")
@@ -2416,11 +2430,14 @@ def _distribution_buckets(frame: pd.DataFrame, *, legend: bool = False) -> list[
 
 
 def _range_bucket_sort_key(value: str) -> tuple[float, int] | None:
-    """Return the ascending position of a ``<low``, ``low-high`` or ``high+`` bucket."""
+    """Return the ascending position of a ``<low``, ``low-high`` or ``high+`` bucket.
+
+    Negative ranges use ``< -110`` and ``-110 to -100``.
+    """
     number = r"-?\d+(?:\.\d+)?(?:e[+-]?\d+)?"
-    if match := re.fullmatch(rf"<({number})", value):
+    if match := re.fullmatch(rf"<\s*({number})", value):
         return float(match.group(1)), 0
-    if match := re.fullmatch(rf"({number})-({number})", value):
+    if match := re.fullmatch(rf"({number})(?:-| to )({number})", value):
         return float(match.group(1)), 1
     if match := re.fullmatch(rf"({number})\+", value):
         return float(match.group(1)), 2
@@ -4295,8 +4312,10 @@ def _status_chart_categories(
     if quality:
         numeric = pd.to_numeric(result[state_column], errors="coerce")
         result = result.loc[numeric.notna()].copy()
-        result["state"] = numeric.loc[result.index].map(lambda value: "< 1.6" if value < threshold else "≥ 1.6")
-        return result, ("< 1.6", "≥ 1.6"), ("#C83E4D", "#2C9A62")
+        # Legends name the configured threshold (historically 1.6 for LQ).
+        below, above = f"< {threshold:g}", f"≥ {threshold:g}"
+        result["state"] = numeric.loc[result.index].map(lambda value: below if value < threshold else above)
+        return result, (below, above), ("#C83E4D", "#2C9A62")
     canonical_labels = {
         "completed": "Completed", "drop": "Dropped", "drops": "Dropped", "dropped": "Dropped",
         "failed": "Failed", "failure": "Failed", "failures": "Failed", "cutoff": "Cutoff",

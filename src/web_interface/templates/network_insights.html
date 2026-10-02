@@ -1,0 +1,104 @@
+{% extends 'base.html' %}
+{% block content %}
+<link rel="stylesheet" href="{{ static_path('css/network_insights.css') }}?v={{ asset_version('css/network_insights.css') }}">
+<section class="dashboard-stack spacious-stack network-insights" id="network-insights">
+  <article class="panel hero-panel ni-hero">
+    <p class="eyebrow">Network Insights</p>
+    <h2>Understand the network behind the performance</h2>
+    <p class="lede">Compare radio quality, observed sites, spectrum and network deployment per Operator, locate weak-coverage and high-interference areas on the map, and group every view by Campaign, Region or City.</p>
+  </article>
+
+  <details class="panel collapsible-panel ni-selection-panel" open data-panel-state-key="network-insights:selection">
+    <summary class="collapsible-summary"><div><p class="eyebrow">Common selection</p><h2>Analysis Selection</h2></div><span class="collapse-chip">Collapse</span></summary>
+    <div class="collapsible-panel-body">
+      <div class="ni-selection-grid">
+        <label>NR Mode<select id="ni-nr-mode"><option value="NSA">NSA</option><option value="SA">SA</option></select></label>
+        <label>Technology<select id="ni-technology">{% for key, label in network_insights_config.technologies.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
+        <label>Group by<select id="ni-group">{% for key, label in network_insights_config.groupings.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
+        <label>Low coverage below (dBm)<input type="number" id="ni-coverage-threshold" step="1" value="{{ network_insights_config.coverage_threshold|int }}"></label>
+        <label>High interference below (dB)<input type="number" id="ni-interference-threshold" step="0.5" value="{{ network_insights_config.interference_threshold|int }}"></label>
+        <label>Map grid (m)<select id="ni-grid"><option value="100">100 m</option><option value="250" selected>250 m</option><option value="500">500 m</option><option value="1000">1 km</option></select></label>
+      </div>
+      <div class="ni-dataset-groups" id="ni-datasets"></div>
+      <div class="ni-filter-grid">
+        <label>Operators<select id="ni-operators" multiple size="1" aria-label="Operators"></select></label>
+        <label>Regions<select id="ni-regions" multiple size="1" aria-label="Regions"></select></label>
+        <label>Cities<select id="ni-cities" multiple size="1" aria-label="Cities"></select></label>
+      </div>
+      <div class="ni-actions">
+        <button type="button" id="ni-analyse" class="ni-analyse">Analyse Network</button>
+        <p class="form-note" id="ni-status" role="status">Choose the CDRs and press Analyse Network. Operators, Regions and Cities fill in after the first analysis.</p>
+      </div>
+    </div>
+  </details>
+
+  <details class="panel collapsible-panel ni-panel" open data-panel-state-key="network-insights:overview">
+    <summary class="collapsible-summary"><div><p class="eyebrow">Main indicators</p><h2>Overview</h2></div><span class="collapse-chip">Collapse</span></summary>
+    <div class="collapsible-panel-body"><div id="ni-overview" class="ni-overview"><p class="form-note">No analysis yet.</p></div></div>
+  </details>
+
+  <details class="panel collapsible-panel ni-panel" open data-panel-state-key="network-insights:rf-quality">
+    <summary class="collapsible-summary"><div><p class="eyebrow">RSRP &amp; SINR</p><h2>RF Quality</h2></div><span class="collapse-chip">Collapse</span></summary>
+    <div class="collapsible-panel-body">
+      <div class="ni-chart-grid">
+        <div class="ni-chart-card"><canvas id="ni-rsrp-cdf" role="img" aria-label="RSRP cumulative distribution"></canvas></div>
+        <div class="ni-chart-card"><canvas id="ni-sinr-cdf" role="img" aria-label="SINR cumulative distribution"></canvas></div>
+      </div>
+      <div class="table-wrap ni-table-wrap"><table class="ni-table" id="ni-rf-table"><thead></thead><tbody><tr><td class="form-note">No analysis yet.</td></tr></tbody></table></div>
+      <p class="form-note">Quality classes — RSRP: Excellent ≥ -80, Good ≥ -90, Fair ≥ -100, Poor ≥ -110 dBm, Very poor below. SINR: Excellent ≥ 20, Good ≥ 13, Fair ≥ 5, Poor ≥ 0 dB, Bad below. Voice uses the measuring (A) side.</p>
+    </div>
+  </details>
+
+  <details class="panel collapsible-panel ni-panel" open data-panel-state-key="network-insights:maps">
+    <summary class="collapsible-summary"><div><p class="eyebrow">Weak coverage &amp; interference</p><h2>Coverage &amp; Interference Maps</h2></div><span class="collapse-chip">Collapse</span></summary>
+    <div class="collapsible-panel-body">
+      <div class="ni-map-toolbar">
+        <label>Operator<select id="ni-map-operator"></select></label>
+        <button type="button" id="ni-map-reset" class="ni-secondary-action">Show Whole Area</button>
+        <p class="form-note" id="ni-map-note"></p>
+      </div>
+      <div class="ni-map-grid">
+        <section class="ni-map-card"><h3>Coverage (mean RSRP per grid square)</h3><div class="ni-chart-card ni-map-canvas"><canvas id="ni-coverage-map" role="img" aria-label="Coverage map"></canvas></div>
+          <h4>Weakest coverage areas</h4><div class="table-wrap ni-hotspot-wrap"><table class="ni-table ni-hotspots" id="ni-coverage-hotspots"></table></div></section>
+        <section class="ni-map-card"><h3>Interference (mean SINR per grid square)</h3><div class="ni-chart-card ni-map-canvas"><canvas id="ni-interference-map" role="img" aria-label="Interference map"></canvas></div>
+          <h4>Highest interference areas</h4><div class="table-wrap ni-hotspot-wrap"><table class="ni-table ni-hotspots" id="ni-interference-hotspots"></table></div></section>
+      </div>
+      <p class="form-note">Areas are grid squares where at least half of the samples fall below the threshold, ranked by the number of affected samples. Select an area to zoom the map to it.</p>
+    </div>
+  </details>
+
+  <details class="panel collapsible-panel ni-panel" open data-panel-state-key="network-insights:sites">
+    <summary class="collapsible-summary"><div><p class="eyebrow">Observed and inventoried sites</p><h2>Sites &amp; Density</h2></div><span class="collapse-chip">Collapse</span></summary>
+    <div class="collapsible-panel-body">
+      <div class="table-wrap ni-table-wrap"><table class="ni-table" id="ni-sites-table"><tbody><tr><td class="form-note">No analysis yet.</td></tr></tbody></table></div>
+      <div id="ni-inventory-totals" class="ni-inventory-totals"></div>
+      <p class="form-note ni-pending">Observed eNodeBs are the distinct LTE eNodeBs (Cell Identity ÷ 256) that served the measuring devices along the route, not the deployed sites. Inventoried sites come from the Vodafone and Three cell inventories uploaded as Vendor mapping datasets. <strong>Pending input:</strong> site inventories for the other Operators and the surface of each Region and City, needed for densities per km².</p>
+    </div>
+  </details>
+
+  <details class="panel collapsible-panel ni-panel" open data-panel-state-key="network-insights:spectrum">
+    <summary class="collapsible-summary"><div><p class="eyebrow">Low, mid and high TDD bands</p><h2>Spectrum</h2></div><span class="collapse-chip">Collapse</span></summary>
+    <div class="collapsible-panel-body">
+      <h3 class="ni-subtitle">Licensed spectrum</h3>
+      <div id="ni-licensed" class="ni-licensed"></div>
+      <h3 class="ni-subtitle">Spectrum observed in the measurements</h3>
+      <div class="table-wrap ni-table-wrap"><table class="ni-table" id="ni-observed-spectrum"><tbody><tr><td class="form-note">No analysis yet.</td></tr></tbody></table></div>
+      <p class="form-note">Bands come from the serving EARFCN and NR band of each sample; typical bandwidths come from CDR Data, the only CDR type that reports them.</p>
+    </div>
+  </details>
+
+  <details class="panel collapsible-panel ni-panel" open data-panel-state-key="network-insights:deployment">
+    <summary class="collapsible-summary"><div><p class="eyebrow">NNS, eMOCN and shared networks</p><h2>Network Deployment</h2></div><span class="collapse-chip">Collapse</span></summary>
+    <div class="collapsible-panel-body">
+      <div class="ni-map-toolbar">
+        <label>Group by<select id="ni-deployment-group">{% for key, label in network_insights_config.deployment_groups.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
+        <p class="form-note" id="ni-deployment-status"></p>
+      </div>
+      <div id="ni-deployment" class="ni-deployment"></div>
+    </div>
+  </details>
+</section>
+<script id="ni-config" type="application/json">{{ network_insights_config | tojson }}</script>
+<script defer src="{{ static_path('js/dashboard_charts.js') }}?v={{ asset_version('js/dashboard_charts.js') }}"></script>
+<script defer src="{{ static_path('js/network_insights.js') }}?v={{ asset_version('js/network_insights.js') }}"></script>
+{% endblock %}

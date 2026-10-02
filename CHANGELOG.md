@@ -16,6 +16,8 @@
 - **Scoring Tables**, **GAP Analysis** and **Scoring Charts** provide Summary/Breakdown tables, operator-versus-reference comparisons and Best Network charts by service/category, with maximum-allocation donuts.
 - **Scoring configuration transfers** support JSON/ZIP, Admin imports, workspace transfers and backup/restore. Export Methodology (JSON) downloads the selected methodology; Admin exports/backups include all methodologies and the default. Import Methodology (JSON) adds or replaces matching methodology IDs while preserving other methodologies and the workspace default.
 - **Scoring PowerPoint export** includes covers, environment transitions, charts, Scoring tables and combined/individual GAP comparisons, with editable matrices and charts.
+- **Network Insights** analyses the radio fields of selected Data, Voice and Speech CDRs per Operator, grouped by Campaign, Region, City or CDR type: RSRP/SINR CDFs, quality classes, low-coverage and high-interference shares with changes between the two latest campaigns, coverage and interference grid maps with ranked weak areas, observed eNodeBs and bands, licensed spectrum by Low/Mid/High (TDD) class, and NNS/eMOCN/host-network/RAN-vendor site counts from the Vodafone and Three inventories. Licensed spectrum is configured in Workspace Config → Spectrum Holdings and travels with Operator & Vendor Maps exports, transfers and backups (package version 3; older packages remain importable).
+- Workspaces with NSA Report Templates receive once the NSA Report Template **NSA - RF Quality (RSRP & SINR)** and the E2E Dashboard **RF Quality (RSRP & SINR)**, with LTE/NR RSRP and SINR CDF, average, distribution and threshold slides per CDR type; deleted copies are not recreated.
 
 #### 🚀 Enhancements:
 - **Methodology editor:** methodologies and titles sit directly in Scoring Setup, with matching dark green Environment, Hierarchy and GAP panels and nested pastel red KPI settings with a clear editing prompt when collapsed. Shortcuts open Methodology Environments, Aggregation hierarchy and KPI Priorities directly. All Save Methodology buttons commit the entire open methodology. Set Default selects future jobs’ methodology and protects it from deletion.
@@ -42,11 +44,14 @@
 - Saving methodologies verifies persisted environment names/source selectors and preserves pending environment edits when saving hierarchy or priorities. Switching after save no longer creates a false unsaved-change warning; historical result labels reflect environment renames without changing calculations.
 - Scoring PowerPoint exports avoid malformed table/chart XML and allocation labels that caused repair prompts or blank slides.
 - Matching scoring selections enable Recalculate instead of Calculate, including jobs saved before engine updates; recalculation updates the existing job, its displayed date/time and results without adding a duplicate. Job lists show the latest calculations first.
+- Threshold Stacked Vertical Bars legends show the configured threshold instead of a fixed `1.6`, and explicit `Buckets` ranges with negative limits use readable, ordered labels such as `< -110`, `-110 to -100` and `-80+`.
+- Help for users without E2E Reporting access no longer lists E2E Reporting in the Product Overview index or the Datasets Analysis guide.
 
 #### 📚 Documentation:
 - Scoring & GAP Analysis help consolidates workflows, methodology configuration and source references into one structured guide, with practical GAP examples, comparison tables and colored information/tip/warning cards. Internal help links navigate in the same tab.
 - E2E Dashboards help uses task-based navigation, concise workflows, action tables and colored notices covering selections, Apply/Save, live views, exports, cache and portability.
 - Remaining Help chapters, README and contributor guidance use task indexes, shorter explanations, reference tables and visual notices; workspace/scoring configuration, source-value semantics and Dashboard cache guidance reflect current behaviour.
+- New Network Insights help chapter covers the analysis selection, panels, data sources and pending inputs; Workspace Config help documents Spectrum Holdings.
 
 ---
 

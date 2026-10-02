@@ -38,7 +38,7 @@ def wait_for_background_dataset_work(timeout: float = 30.0) -> None:
 
 
 @pytest.fixture()
-def client(tmp_path: Path) -> TestClient:
+def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     config_dir = tmp_path / "config"
     data_dir = tmp_path / "data"
     input_dir = data_dir / "input"
@@ -70,6 +70,8 @@ def client(tmp_path: Path) -> TestClient:
     app_module.repository.db_path = settings.database_path
     app_module.repository.set_global_database(settings.database_path)
     app_module.SESSIONS.clear()
+    # Bundled Network Insights content is seeded explicitly by the tests that need it.
+    monkeypatch.setattr(app_module, "seed_bundled_workspace_content", lambda task_repository: None)
 
     with TestClient(app_module.app) as test_client:
         original_post = test_client.post

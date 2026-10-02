@@ -357,6 +357,7 @@ HELP_NAVIGATION_DOCUMENTS = (
     'e2e-dashboards.md',
     'e2e-reporting.md',
     'scoring-gap-analysis.md',
+    'network-insights.md',
     'chart-builder.md',
     'query-builder.md',
     'app-logs.md',
@@ -373,6 +374,7 @@ HELP_DOCUMENT_LABELS = {
     'e2e-dashboards.md': 'E2E Dashboards',
     'e2e-reporting.md': 'E2E Reporting',
     'scoring-gap-analysis.md': 'Scoring & GAP Analysis',
+    'network-insights.md': 'Network Insights',
     'chart-builder.md': 'Chart Builder',
     'query-builder.md': 'Query Builder',
     'workspace-management.md': 'Workspace Management',
@@ -416,6 +418,8 @@ def filter_e2e_reporting_help_content(content: str, document_name: str) -> str:
                     skipping_reporting_section = False
                 else:
                     continue
+            if '(#e2e-reporting)' in line:
+                continue
             line = line.replace(
                 ', or **E2E Reporting** for the classic report and Chart Set workflow',
                 '',
@@ -486,6 +490,7 @@ def filter_e2e_reporting_help_content(content: str, document_name: str) -> str:
         )
     elif normalized_name == 'datasets-analysis.md':
         content = content.replace('- Template-driven reports belong to E2E Reporting instead.\n', '')
+        content = content.replace(' or the restricted E2E Reporting workflow', '')
     elif normalized_name == 'chart-builder.md':
         content = content.replace(
             'Use E2E Reporting for persistent Chart Sets and Report Template Editor for reusable definitions.',
@@ -2179,6 +2184,22 @@ def persist_report_template_for_request(
         TEMPLATE_SAVE_LOCK.release()
 
 
+def seed_bundled_workspace_content(task_repository: Repository) -> None:
+    """Add the bundled RF Quality template and Dashboard once per workspace."""
+    from src.modules.e2e_dashboards import LEGACY_STATE_KEY, STATE_KEY
+    from src.modules.network_insights import seed_bundled_rf_quality_content
+
+    try:
+        added = seed_bundled_rf_quality_content(
+            task_repository, PROJECT_ROOT / 'assets' / 'report-templates', STATE_KEY, LEGACY_STATE_KEY,
+        )
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        task_repository.try_add_log('system', 'bundled_content_failed', json.dumps({'error': str(exc)}))
+        return
+    if added:
+        task_repository.try_add_log('system', 'bundled_content_added', json.dumps({'items': added}))
+
+
 def synchronize_template_file_names(technology: str) -> None:
     """Migrate legacy CSVs once without recreating compatibility directories."""
     library_dir = settings.slides_templates_dir / 'library' / technology
@@ -2454,7 +2475,8 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
         _clear_chart_preview_caches()
         active_workspace = workspace
         if initialize:
-            if database_key not in INITIALIZED_WORKSPACE_DATABASES:
+            first_initialization = database_key not in INITIALIZED_WORKSPACE_DATABASES
+            if first_initialization:
                 repository.initialize()
                 recovered_scoring_ids = recover_interrupted_scoring_jobs(repository)
                 if recovered_scoring_ids:
@@ -2478,6 +2500,8 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
             # exact columns it needs lazily in ``_combined_reporting_frame``.
             for technology in TEMPLATE_NAMES:
                 synchronize_template_file_names(technology)
+            if first_initialization:
+                seed_bundled_workspace_content(repository)
         inconsistent_ids = repository.fail_inconsistent_ready_datasets()
         if inconsistent_ids:
             repository.try_add_log('system', 'recover_inconsistent_datasets', json.dumps({'dataset_ids': inconsistent_ids}))
@@ -4774,6 +4798,20 @@ def super_admin_user(user: SessionUser = Depends(current_user)) -> SessionUser:
     return user
 
 
+def spectrum_holdings_context(request: Request) -> dict[str, Any]:
+    from src.modules.network_insights import BAND_CLASSES, licensed_spectrum_summary, load_spectrum_holdings, spectrum_holdings_csv
+
+    holdings = load_spectrum_holdings(repository) if active_workspace else []
+    return {
+        'spectrum_holdings': holdings,
+        'spectrum_holdings_csv': spectrum_holdings_csv(holdings),
+        'spectrum_holdings_summary': licensed_spectrum_summary(holdings),
+        'spectrum_band_classes': BAND_CLASSES,
+        'spectrum_holdings_notice': request.query_params.get('spectrum_holdings_notice') or None,
+        'spectrum_holdings_error': request.query_params.get('spectrum_holdings_error') or None,
+    }
+
+
 def render_template(request: Request, template_name: str, context: dict[str, Any], status_code: int = 200) -> HTMLResponse:
     template_user = context.get('user')
     embedded_template_editor = bool(context.get('embedded_template_editor'))
@@ -6233,15 +6271,18 @@ DASHBOARD_STATE_KEY = 'e2e_dashboards_v2'
 
 
 def _operator_mappings_archive_payload(workspace: Workspace) -> bytes:
-    """Serialize complete Operator and Vendor chart mappings."""
+    """Serialize complete Operator and Vendor chart mappings and Spectrum Holdings."""
+    from src.modules.network_insights import load_spectrum_holdings
+
     task_repository = Repository(
         workspace.database_path, repository.global_db_path, workspace_registry.registry_path,
     )
     return json.dumps({
         'format': 'dashboard-analytic-operator-mappings',
-        'version': 2,
+        'version': 3,
         'mappings': task_repository.list_operator_mapping_groups(),
         'vendor_mappings': task_repository.list_vendor_mapping_groups(),
+        'spectrum_holdings': load_spectrum_holdings(task_repository),
     }, ensure_ascii=False, indent=2).encode('utf-8')
 
 
@@ -6266,19 +6307,30 @@ def _restore_workspace_operator_mappings(workspace: Workspace, payload: bytes) -
     if (
         not isinstance(document, dict)
         or document.get('format') != 'dashboard-analytic-operator-mappings'
-        or document.get('version') not in {1, 2}
+        or document.get('version') not in {1, 2, 3}
         or not isinstance(groups, list)
     ):
         raise ValueError(f'Operator & Vendor Maps for "{workspace.name}" are invalid.')
+    from src.modules.network_insights import normalise_spectrum_holdings, save_spectrum_holdings
+
+    version = document.get('version')
+    vendor_groups = document.get('vendor_mappings') if version >= 2 else None
+    spectrum_holdings = document.get('spectrum_holdings') if version >= 3 else None
+    if (version >= 2 and not isinstance(vendor_groups, list)) or (version >= 3 and not isinstance(spectrum_holdings, list)):
+        raise ValueError(f'Operator & Vendor Maps for "{workspace.name}" are invalid.')
+    try:
+        spectrum_holdings = normalise_spectrum_holdings(spectrum_holdings) if spectrum_holdings is not None else None
+    except ValueError as exc:
+        raise ValueError(f'Spectrum Holdings for "{workspace.name}" are invalid: {exc}') from exc
     task_repository = Repository(
         workspace.database_path, repository.global_db_path, workspace_registry.registry_path,
     )
     task_repository.replace_operator_mapping_groups(groups)
-    if document.get('version') == 2:
-        vendor_groups = document.get('vendor_mappings')
-        if not isinstance(vendor_groups, list):
-            raise ValueError(f'Operator & Vendor Maps for "{workspace.name}" are invalid.')
+    if vendor_groups is not None:
         task_repository.replace_vendor_mapping_groups(vendor_groups)
+    # Older archives predate Spectrum Holdings and leave them untouched.
+    if spectrum_holdings is not None:
+        save_spectrum_holdings(task_repository, spectrum_holdings)
     if active_workspace and workspace.id == active_workspace.id:
         ANALYSIS_CACHE.clear()
         DATAFRAME_CACHE.clear()
@@ -8843,6 +8895,7 @@ def render_admin_template(
             'vendor_mapping_groups': repository.list_vendor_mapping_groups() if active_workspace else [],
             'vendor_mapping_notice': request.query_params.get('vendor_mapping_notice') or None,
             'vendor_mapping_error': request.query_params.get('vendor_mapping_error') or None,
+            **spectrum_holdings_context(request),
             'recurring_backup': recurring_backup_settings(),
             'recurring_backup_status': recurring_backup_status(recurring_backup_settings()),
             'database_notice': database_notice,
@@ -18502,3 +18555,7 @@ from src.modules.e2e_dashboards import (
     install_dashboard_routes,
 )
 install_dashboard_routes(sys.modules[__name__])
+
+# Network Insights reuses the reporting helpers and the Canvas chart models.
+from src.modules.network_insights import install_network_insights_routes
+install_network_insights_routes(sys.modules[__name__])

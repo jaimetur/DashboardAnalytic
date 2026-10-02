@@ -39,6 +39,7 @@ After login, the application opens **Help Home** by default.
 - Preview complete datasets with pagination and Excel-style column filters.
 - Analyse one processed CDR in Datasets Analysis.
 - Calculate and revisit NetCheck scoring and operator GAP comparisons in Scoring & GAP Analysis, with CSV and PowerPoint exports.
+- Compare RSRP/SINR, map weak-coverage and high-interference areas, and review observed sites, spectrum and network deployment in Network Insights.
 - Explore template-driven Dashboards with synchronized adaptive filters in E2E Dashboards.
 - Create temporary ad-hoc charts in Chart Builder.
 - Generate NSA/SA PowerPoint reports and standalone Chart Sets.
@@ -104,9 +105,13 @@ Category totals show points, Environment-relative and global weights; Environmen
 
 Export CSV tables or editable PowerPoint matrices and charts. See [Scoring & GAP Analysis Help](help/scoring-gap-analysis.md).
 
+### Network Insights
+
+Analyse the network behind the measured performance from the radio fields of ready Data, Voice and Speech CDRs: RSRP and SINR distributions and quality classes per Operator, grouped by Campaign, Region, City or CDR type, with changes between the two latest campaigns. Coverage and interference maps locate grid areas below configurable thresholds. Sites & Density counts observed eNodeBs and inventoried sites, Spectrum compares licensed holdings (configured in Workspace Config) with the bands observed in the measurements, and Network Deployment counts NNS, eMOCN, host-network and RAN-vendor sites from the Vodafone and Three inventories. Workspaces with NSA Report Templates also receive an NSA RF Quality Report Template and Dashboard with RSRP/SINR CDF and bar slides. See [Network Insights Help](help/network-insights.md).
+
 ### Chart Builder
 
-Chart Builder is the ad-hoc chart editor immediately after Scoring & GAP Analysis in Help. It reuses Interactive Preview, filters sources by CDR Type, supports multiple processed datasets and creates temporary charts without modifying templates. See [Chart Builder Help](help/chart-builder.md) for examples.
+Chart Builder is the ad-hoc chart editor immediately after Network Insights in Help. It reuses Interactive Preview, filters sources by CDR Type, supports multiple processed datasets and creates temporary charts without modifying templates. See [Chart Builder Help](help/chart-builder.md) for examples.
 
 Chart Builder reuses the shared Interactive Preview for ad-hoc analysis.
 
@@ -130,7 +135,7 @@ Build read-only SQL in Assistance Mode or SQL Mode, inspect paginated results an
 ### Application Config and Workspace Config
 
 - **Application Config** stores runtime settings that apply across all workspaces. `user-editor`, `admin` and `super-admin` can use Config → Application Config; `user-viewer` cannot.
-- **Workspace Config** is selected from the Config dropdown and groups Report Templates Management, Operator Mappings and Vendor Mappings for the active workspace. Its Help chapter contains the Report Template Editor guide and complete Report Template reference. It uses Application Config's teal/navy palette and a Page Sections navigator. `user-editor`, `admin` and `super-admin` can manage these panels when a workspace is open; `user-viewer` cannot.
+- **Workspace Config** is selected from the Config dropdown and groups Report Templates Management, Operator Mappings, Vendor Mappings and Spectrum Holdings for the active workspace. Its Help chapter contains the Report Template Editor guide and complete Report Template reference. It uses Application Config's teal/navy palette and a Page Sections navigator. `user-editor`, `admin` and `super-admin` can manage these panels when a workspace is open; `user-viewer` cannot.
 - These scopes remain separate: Application Config values are global, while templates and chart mappings stay with their workspace and use the existing portable package formats.
 
 ### Administrator Config (Admin tab)
@@ -348,6 +353,7 @@ DashboardAnalytic/
 ├── tests/                  # Unit and integration tests
 ├── docker/                 # Dockerfiles, Compose and environment settings
 ├── assets/ppt-templates/   # PowerPoint master/layout file
+├── assets/report-templates/ # Bundled Report Templates added to workspaces
 ├── config/                 # Global application database
 ├── data/workspaces/        # Workspace registry and isolated workspace data
 ├── help/                   # Detailed in-app documentation
