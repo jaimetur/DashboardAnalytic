@@ -544,7 +544,7 @@ def add_maximum_allocation_donut(
         value = voice + data_points
         percent = value * 100 / center_total if center_total else 0
         legend_items.append((_environment_kind(environment), _global_color(environment, environment_allocations),
-                             _environment_display_label(environment),
+                             matrix.get('environment_labels', {}).get(environment, _environment_display_label(environment)),
                              f'{_legend_points(value)} pts ({percent:.1f}%)'))
     legend_items.append(('heading', 'Points per KPI Category:' if category_mode else 'Points per Service:'))
     if category_mode:

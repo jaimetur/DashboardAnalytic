@@ -1045,3 +1045,15 @@ def test_individual_gap_side_note_hierarchy_mean_marks_partial_coverage():
     ]
     _add_individual_gap_notes(slide, matrix, rows)
     assert 'Average KPI GAP: -1.00* points' in _slide_text(slide)
+
+
+def test_saved_environment_display_name_replaces_historical_name_in_ppt():
+    configuration = scoring_configuration()
+    configuration['scope']['environments']['DriveCity']['display_name'] = 'Drive - City QA'
+    presentation = _export(_result(), job_fields={'configuration': configuration})
+    slides = list(presentation.slides)
+    content = [slide for slide in slides if slide.slide_layout.name != 'Title Page']
+    assert content
+    for slide in content:
+        assert slide.shapes.title.text_frame.paragraphs[1].text == 'Drive - City QA'
+    assert any('Drive - City QA' in _slide_text(slide) for slide in slides)

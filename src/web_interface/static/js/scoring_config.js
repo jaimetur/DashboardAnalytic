@@ -30,13 +30,39 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
   const root = document.querySelector('[data-scoring-config]');
   if (!root) return;
 
+  const kpiPanel = root.querySelector('[data-scoring-kpi-panel]');
+  if (kpiPanel) {
+    const panelStateKey = 'dashboard-analytic:scoring-kpi-panel';
+    const persistKpiPanel = () => {
+      try {
+        window.sessionStorage.setItem(panelStateKey, kpiPanel.open ? 'open' : 'closed');
+      } catch (_error) {
+        // Panel state is optional when browser storage is unavailable.
+      }
+    };
+    try {
+      const navigation = window.performance.getEntriesByType('navigation')[0];
+      kpiPanel.open = navigation?.type === 'reload' && window.sessionStorage.getItem(panelStateKey) === 'open';
+    } catch (_error) {
+      kpiPanel.open = false;
+    }
+    persistKpiPanel();
+    kpiPanel.addEventListener('toggle', persistKpiPanel);
+    window.addEventListener('pagehide', persistKpiPanel);
+    window.addEventListener('pageshow', (event) => {
+      if (event.persisted) {
+        kpiPanel.open = false;
+        persistKpiPanel();
+      }
+    });
+  }
+
   const endpoint = '/api/workspace-config/scoring-configuration';
   const profilesEndpoint = '/api/workspace-config/scoring-profiles';
   const environmentSelect = root.querySelector('[data-scoring-environment]');
   const profileSelect = root.querySelector('[data-scoring-profile-select]');
   const profileActions = Array.from(root.querySelectorAll('[data-scoring-profile-action]'));
   const weightModeSelect = root.querySelector('[data-scoring-weight-mode]');
-  const addCategoryButton = root.querySelector('[data-scoring-add-category]');
   const environmentTotalPointsInput = root.querySelector('[data-environment-total-points]');
   const environmentTotalWeightInput = root.querySelector('[data-environment-total-weight]');
   const environmentTotalSummary = root.querySelector('[data-environment-total-summary]');
@@ -69,7 +95,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
   const kpiForm = root.querySelector('[data-scoring-kpi-form]');
   const kpiRows = root.querySelector('[data-scoring-kpi-rows]');
   const kpiStatus = root.querySelector('[data-scoring-kpi-status]');
-  const kpiSave = root.querySelector('[data-scoring-kpi-save]');
+  const kpiSaveButtons = Array.from(root.querySelectorAll('[data-scoring-kpi-save]'));
+  const setKpiSaveDisabled = (disabled) => kpiSaveButtons.forEach(button => { button.disabled = disabled; });
   const priorityForm = root.querySelector('[data-scoring-priority-form]');
   const priorityRows = root.querySelector('[data-scoring-priority-rows]');
   const priorityStatus = root.querySelector('[data-scoring-priority-status]');
@@ -123,6 +150,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
   const setStatus = (element, message, tone = '') => {
     if (!element) return;
     element.textContent = message;
+    element.classList.toggle('is-unsaved', element === kpiStatus && /^Unsaved\b/.test(message));
     element.classList.toggle('is-error', tone === 'error');
     element.classList.toggle('is-success', tone === 'success');
   };
@@ -192,10 +220,32 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     if (deleteEnvironmentButton) deleteEnvironmentButton.disabled = !configuration || entries.length <= 1;
   };
 
+  let environmentSourceLevels = {G_Level_1: [], G_Level_2: []};
+
+  const populateSourceLevelOptions = (select, field, selected) => {
+    if (!select) return;
+    const choices = [...new Set([...(environmentSourceLevels[field] || []), selected].filter(Boolean))]
+      .sort((left, right) => left.localeCompare(right));
+    select.replaceChildren();
+    const empty = document.createElement('option');
+    empty.value = '';
+    empty.textContent = field === 'G_Level_1' ? 'Choose G_Level_1' : 'All G_Level_2 values';
+    select.append(empty);
+    choices.forEach((value) => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = value;
+      select.append(option);
+    });
+    select.value = selected;
+  };
+
   const syncEnvironmentSourceFields = () => {
     const environment = configuration?.scope?.environments?.[environmentSelect.value] || {};
-    if (environmentG1Input && document.activeElement !== environmentG1Input) environmentG1Input.value = String(environment.g_level_1 || '');
-    if (environmentG2Input && document.activeElement !== environmentG2Input) environmentG2Input.value = String(environment.g_level_2 || '');
+    const title = root.querySelector('[data-scoring-kpi-title]');
+    if (title) title.textContent = `KPI Definitions, Scoring & Thresholds${environmentSelect.value ? ` (${environmentLabel(environmentSelect.value)})` : ''}`;
+    if (environmentG1Input && document.activeElement !== environmentG1Input) populateSourceLevelOptions(environmentG1Input, 'G_Level_1', String(environment.g_level_1 || ''));
+    if (environmentG2Input && document.activeElement !== environmentG2Input) populateSourceLevelOptions(environmentG2Input, 'G_Level_2', String(environment.g_level_2 || ''));
     if (environmentG1Input) environmentG1Input.disabled = !environmentSelect.value;
     if (environmentG2Input) environmentG2Input.disabled = !environmentSelect.value;
   };
@@ -221,11 +271,11 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     scope.environment_mapping = mapping;
   };
 
-  const currentProfile = (collection = profileCollection) => collection?.profiles?.find((profile) => profile.id === collection.active_profile_id) || null;
+  const currentProfile = (collection = profileCollection) => collection?.profiles?.find((profile) => profile.id === activeProfileId) || null;
 
   const setProfileCollection = (payload) => {
     profileCollection = normalizeProfileCollection(payload);
-    activeProfileId = profileCollection.active_profile_id;
+    if (!profileCollection.profiles.some(profile => profile.id === activeProfileId)) activeProfileId = profileCollection.active_profile_id;
     configuration = currentProfile()?.configuration || null;
     nextKpiNumber = normalizeNextKpiNumber(configuration);
     renderEnvironmentOptions();
@@ -234,24 +284,46 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
 
   const loadProfiles = () => requestJson(profilesEndpoint);
 
-  const enqueueProfileUpdate = (update) => {
+  const environmentSaveSignature = (collection) => JSON.stringify(collection.profiles.map(profile => [
+    profile.id, Object.entries(profile.configuration.scope.environments).map(([name, scope]) => [
+      name, scope.display_name || name, scope.g_level_1 || '', scope.g_level_2 || '',
+    ]).sort((left, right) => left[0].localeCompare(right[0])),
+  ]).sort((left, right) => left[0].localeCompare(right[0])));
+
+  const enqueueProfileUpdate = (update, preserveKpiScope = false, verifyEnvironmentSave = false) => {
     const work = saveQueue.then(async () => {
+      const draftScope = preserveKpiScope && kpiDirty ? clone(configuration?.scope) : null;
+      const draftProfileId = activeProfileId;
+      const draftEnvironment = environmentSelect.value;
       const latest = normalizeProfileCollection(await loadProfiles());
       const next = update(clone(latest));
       const saved = await requestJson(profilesEndpoint, {method: 'PUT', body: JSON.stringify(next)});
+      if (verifyEnvironmentSave) {
+        const persisted = normalizeProfileCollection(await loadProfiles());
+        if (environmentSaveSignature(persisted) !== environmentSaveSignature(next)) {
+          throw new Error('Environment changes could not be verified in saved configuration. Your edits remain unsaved; please retry Save.');
+        }
+      }
       setProfileCollection(saved);
+      if (draftScope && activeProfileId === draftProfileId) {
+        configuration.scope = draftScope;
+        renderEnvironmentOptions();
+        environmentSelect.value = draftEnvironment;
+        lastEnvironment = draftEnvironment;
+        syncEnvironmentSourceFields();
+      }
       return profileCollection;
     });
     saveQueue = work.catch(() => {});
     return work;
   };
 
-  const saveConfiguration = (update, profileId = activeProfileId) => enqueueProfileUpdate((latest) => {
+  const saveConfiguration = (update, profileId = activeProfileId, preserveKpiScope = false, verifyEnvironmentSave = false) => enqueueProfileUpdate((latest) => {
     const profile = latest.profiles.find((item) => item.id === profileId);
     if (!profile) throw new Error('The selected scoring methodology is no longer available.');
     profile.configuration = update(profile.configuration);
     return latest;
-  });
+  }, preserveKpiScope, verifyEnvironmentSave);
 
   const appendCell = (row, className = '', label = '') => {
     const cell = document.createElement('td');
@@ -723,12 +795,14 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     for (const [direction, pathData] of [
       ['up', 'M12 19V5m-5 5 5-5 5 5'],
       ['down', 'M12 5v14m-5-5 5 5 5-5'],
+      ['add', 'M4 4h16v7H4zM12 15v6m-3-3h6'],
     ]) {
       const button = document.createElement('button');
       button.type = 'button';
-      button.dataset.categoryMove = direction;
-      button.setAttribute('aria-label', `Move category ${category} ${direction}`);
-      button.title = `Move category ${direction}`;
+      if (direction === 'add') button.dataset.categoryAddBelow = '';
+      else button.dataset.categoryMove = direction;
+      button.setAttribute('aria-label', direction === 'add' ? 'Add category below' : `Move category ${category} ${direction}`);
+      button.title = direction === 'add' ? 'Add category below' : `Move category ${direction}`;
       const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       icon.setAttribute('viewBox', '0 0 24 24');
       icon.setAttribute('aria-hidden', 'true');
@@ -916,7 +990,14 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     closeCalculationDialog.className = 'ghost-link scoring-config-calculation-close';
     closeCalculationDialog.setAttribute('aria-label', `Close formula and filters for ${metric.kpi || metric.code}`);
     closeCalculationDialog.title = 'Close formula editor';
-    closeCalculationDialog.textContent = 'Close';
+    const closeIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    closeIcon.setAttribute('viewBox', '0 0 24 24');
+    closeIcon.setAttribute('aria-hidden', 'true');
+    closeIcon.classList.add('scoring-config-button-icon');
+    const closePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    closePath.setAttribute('d', 'm6 6 12 12M6 18 18 6');
+    closeIcon.append(closePath);
+    closeCalculationDialog.append(closeIcon, document.createTextNode('Close'));
     closeCalculationDialog.addEventListener('click', () => calculationDialog.close());
     dialogHeader.append(closeCalculationDialog);
     const sourceLabel = document.createElement('label');
@@ -1040,8 +1121,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     refreshKpiActionButtons();
     syncWeightMode();
     updateDerivedWeights();
-    if (kpiSave) kpiSave.disabled = false;
-    if (addCategoryButton) addCategoryButton.disabled = !configuration;
+    setKpiSaveDisabled(false);
     if (distributePointsButton) distributePointsButton.disabled = !configuration || !environmentKeys().length;
   };
 
@@ -1179,17 +1259,17 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       (profileCollection?.profiles || []).forEach((profile) => {
         const option = document.createElement('option');
         option.value = profile.id;
-        option.textContent = profile.id === profileCollection.active_profile_id ? `${profile.name} · Active` : profile.name;
-        option.selected = profile.id === profileCollection.active_profile_id;
+        option.textContent = profile.id === profileCollection.active_profile_id ? `${profile.name} · Default` : profile.name;
+        option.selected = profile.id === activeProfileId;
         profileSelect.append(option);
       });
       profileSelect.disabled = !profileCollection?.profiles?.length;
     }
     const hasProfile = Boolean(currentProfile());
     profileActions.forEach((button) => {
-      button.disabled = !hasProfile || (button.dataset.scoringProfileAction === 'delete' && (profileCollection?.profiles?.length || 0) <= 1);
+      button.disabled = !hasProfile || (button.dataset.scoringProfileAction === 'delete' && ((profileCollection?.profiles?.length || 0) <= 1 || activeProfileId === profileCollection?.active_profile_id))
+        || (button.dataset.scoringProfileAction === 'default' && activeProfileId === profileCollection?.active_profile_id);
     });
-    if (addCategoryButton) addCategoryButton.disabled = !configuration;
   };
 
   const render = () => {
@@ -1456,18 +1536,31 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
   const saveKpis = async () => {
     const profileId = activeProfileId;
     const environment = environmentSelect.value;
-    setStatus(kpiStatus, 'Saving KPI configuration…');
-    if (kpiSave) kpiSave.disabled = true;
+    setStatus(kpiStatus, 'Saving methodology profile…');
+    setKpiSaveDisabled(true);
     try {
-      await saveConfiguration((latest) => readKpiRows(latest, environment), profileId);
+      await saveConfiguration((latest) => {
+        const updated = readKpiRows(latest, environment);
+        if (hierarchyDirty) {
+          const levels = Array.from(hierarchyRows.querySelectorAll('tr[data-aggregation-level]'), (row) => row.dataset.aggregationLevel);
+          if (levels.length !== defaultHierarchy.length || new Set(levels).size !== defaultHierarchy.length
+              || levels.some((level) => !hierarchyDimensions.has(level))) {
+            throw new Error('The aggregation hierarchy must contain each dimension exactly once.');
+          }
+          updated.aggregation_hierarchy = levels;
+        }
+        return updated;
+      }, profileId, false, true);
       kpiDirty = false;
       priorityDirty = false;
+      hierarchyDirty = false;
+      hierarchyOrder = [...configuration.aggregation_hierarchy];
       render();
-      setStatus(kpiStatus, 'KPI configuration saved.', 'success');
+      setStatus(kpiStatus, 'Methodology profile saved, including all environments and KPI settings.', 'success');
     } catch (error) {
-      setStatus(kpiStatus, error.message || 'Unable to save KPI configuration.', 'error');
+      setStatus(kpiStatus, error.message || 'Unable to save methodology profile.', 'error');
     } finally {
-      if (kpiSave) kpiSave.disabled = false;
+      setKpiSaveDisabled(false);
     }
   };
 
@@ -1480,7 +1573,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       await saveConfiguration((latest) => {
         latest.gap_priority = [...codes];
         return latest;
-      }, profileId);
+      }, profileId, true);
       priorityDirty = false;
       renderPriorityRows();
       setStatus(priorityStatus, 'GAP KPI priority saved.', 'success');
@@ -1506,7 +1599,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       await saveConfiguration((latest) => {
         latest.aggregation_hierarchy = [...levels];
         return latest;
-      }, profileId);
+      }, profileId, true);
       hierarchyDirty = false;
       hierarchyOrder = [...levels];
       renderHierarchyRows();
@@ -1574,7 +1667,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       ? 'KPI category' : environmentCreate || environmentRename ? 'Scoring environment' : 'Scoring methodology';
     profileDialogTitle.textContent = title;
     profileDialogCopy.textContent = description;
-    profileDialogConfirm.textContent = confirmLabel;
+    profileDialogConfirm.querySelector('[data-button-label]').textContent = confirmLabel;
     if (profileDialogNameField) profileDialogNameField.hidden = !nameRequired;
     if (profileDialogDistribution) profileDialogDistribution.hidden = !distribution;
     if (profileDialogEnvironmentFields) profileDialogEnvironmentFields.hidden = !environmentCreate;
@@ -1600,10 +1693,11 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       if (profileDialogTotal) profileDialogTotal.value = environmentTotalFor(environmentSelect.value).toFixed(2);
     }
     if (profileDialogG1) {
-      profileDialogG1.value = initialG1 || (environmentCreate ? initialValue : '');
+      const reference = configuration?.scope?.environments?.[environmentSelect.value] || {};
+      populateSourceLevelOptions(profileDialogG1, 'G_Level_1', initialG1 || (environmentCreate ? String(reference.g_level_1 || '') : ''));
       profileDialogG1.dataset.manuallyEdited = 'false';
     }
-    if (profileDialogG2) profileDialogG2.value = initialG2;
+    if (profileDialogG2) populateSourceLevelOptions(profileDialogG2, 'G_Level_2', initialG2);
     if (profileDialogTotal) profileDialogTotal.required = distribution;
     if (profileDialogError) profileDialogError.textContent = '';
     profileDialog.hidden = false;
@@ -1699,9 +1793,6 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
   });
   profileDialogName?.addEventListener('input', () => {
     if (profileDialogError) profileDialogError.textContent = '';
-    if (profileDialogOptions?.environmentCreate && profileDialogG1?.dataset.manuallyEdited !== 'true') {
-      profileDialogG1.value = profileDialogName.value;
-    }
   });
   profileDialogG1?.addEventListener('input', () => {
     profileDialogG1.dataset.manuallyEdited = 'true';
@@ -1715,22 +1806,37 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     if (profileSelect) profileSelect.disabled = disabled || !profileCollection?.profiles?.length;
     profileActions.forEach((button) => {
       button.disabled = disabled || !currentProfile()
-        || (button.dataset.scoringProfileAction === 'delete' && profileCollection.profiles.length <= 1);
+        || (button.dataset.scoringProfileAction === 'delete' && (profileCollection.profiles.length <= 1 || activeProfileId === profileCollection.active_profile_id))
+        || (button.dataset.scoringProfileAction === 'default' && activeProfileId === profileCollection?.active_profile_id);
     });
   };
 
   const runProfileAction = async (action) => {
     setProfileControlsDisabled(true);
     try {
+      if (action === 'default') {
+        const profileId = activeProfileId;
+        await enqueueProfileUpdate((latest) => {
+          if (!latest.profiles.some(profile => profile.id === profileId)) throw new Error('The selected scoring methodology is no longer available.');
+          latest.active_profile_id = profileId;
+          return latest;
+        }, true);
+        setStatus(kpiStatus, `${kpiDirty ? 'Unsaved KPI changes. ' : ''}Default methodology: ${currentProfile()?.name || 'Scoring methodology'}.`, 'success');
+        return;
+      }
+      if (action === 'delete' && activeProfileId === profileCollection?.active_profile_id) {
+        setStatus(kpiStatus, 'Set another methodology as Default before deleting this profile.', 'error');
+        return;
+      }
       if (!await confirmProfileChange()) return;
       const active = currentProfile();
       let requestedName = null;
       if (action === 'create') requestedName = await openProfileDialog({
-        title: 'Create scoring methodology', description: 'Choose a unique name. The new methodology will become active.',
+        title: 'Create scoring methodology', description: 'Choose a unique name. The new methodology will open for editing.',
         confirmLabel: 'Create', initialValue: 'New methodology', nameRequired: true,
       });
       if (action === 'copy') requestedName = await openProfileDialog({
-        title: 'Copy scoring methodology', description: 'Choose a unique name. The copy will become active.',
+        title: 'Copy scoring methodology', description: 'Choose a unique name. The copy will open for editing.',
         confirmLabel: 'Copy', initialValue: `${active?.name || 'Scoring methodology'} copy`, nameRequired: true,
       });
       if (action === 'rename') requestedName = await openProfileDialog({
@@ -1751,22 +1857,26 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
         if (!confirmed) return;
       }
 
+      let selectedProfileId = activeProfileId;
       await enqueueProfileUpdate((latest) => {
-        const source = latest.profiles.find((profile) => profile.id === latest.active_profile_id);
-        if (!source) throw new Error('The active scoring methodology is no longer available.');
+        const source = latest.profiles.find((profile) => profile.id === activeProfileId);
+        if (!source) throw new Error('The selected scoring methodology is no longer available.');
         if (action === 'rename') {
           const target = latest.profiles.find((profile) => profile.id === source.id);
           target.name = requestedName;
         } else if (action === 'delete') {
+          if (latest.active_profile_id === source.id) throw new Error('Set another methodology as Default before deleting this profile.');
           latest.profiles = latest.profiles.filter((profile) => profile.id !== source.id);
-          latest.active_profile_id = latest.profiles[0].id;
+          selectedProfileId = latest.active_profile_id;
         } else {
           const id = createProfileId();
           latest.profiles.push({id, name: requestedName, configuration: clone(source.configuration)});
-          latest.active_profile_id = id;
+          selectedProfileId = id;
         }
         return latest;
       });
+      activeProfileId = selectedProfileId;
+      setProfileCollection(profileCollection);
       discardUnsavedChanges();
       render();
       setStatus(kpiStatus, action === 'delete' ? 'Scoring methodology deleted.' : `Scoring methodology ${action === 'rename' ? 'renamed' : action === 'copy' ? 'copied' : 'created'}.`, 'success');
@@ -1778,7 +1888,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     }
   };
 
-  const activateProfile = async (profileId) => {
+  const selectProfile = async (profileId) => {
     if (profileId === activeProfileId || !profileCollection?.profiles?.some((profile) => profile.id === profileId)) return;
     setProfileControlsDisabled(true);
     if (!await confirmProfileChange()) {
@@ -1786,18 +1896,17 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       setProfileControlsDisabled(false);
       return;
     }
-    setStatus(kpiStatus, 'Activating scoring methodology…');
+    setStatus(kpiStatus, 'Loading scoring methodology…');
     try {
-      await enqueueProfileUpdate((latest) => {
-        if (!latest.profiles.some((profile) => profile.id === profileId)) throw new Error('The selected scoring methodology is no longer available.');
-        latest.active_profile_id = profileId;
-        return latest;
-      });
+      const latest = normalizeProfileCollection(await loadProfiles());
+      if (!latest.profiles.some(profile => profile.id === profileId)) throw new Error('The selected scoring methodology is no longer available.');
+      activeProfileId = profileId;
+      setProfileCollection(latest);
       render();
-      setStatus(kpiStatus, `Active methodology: ${currentProfile()?.name || 'Scoring methodology'}.`, 'success');
+      setStatus(kpiStatus, `Selected methodology: ${currentProfile()?.name || 'Scoring methodology'}.`, 'success');
     } catch (error) {
       renderProfileControls();
-      setStatus(kpiStatus, error.message || 'Unable to activate scoring methodology.', 'error');
+      setStatus(kpiStatus, error.message || 'Unable to select scoring methodology.', 'error');
     } finally {
       setProfileControlsDisabled(false);
     }
@@ -1864,7 +1973,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     }
   };
 
-  const addCategory = async () => {
+  const addCategory = async (afterCategory = null) => {
     const category = await openProfileDialog({
       title: 'Add category',
       description: 'Create a category with its first KPI. Configure the KPI before saving.',
@@ -1873,7 +1982,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       categoryCreate: true,
     });
     if (category === null) return;
-    addKpi(null, category, {categoryCreated: true});
+    const peers = rowMetrics().filter(row => (row.querySelector('[data-kpi-category]')?.value.trim() || 'Other') === afterCategory)
+      .sort((left, right) => Number(left.dataset.orderIndex) - Number(right.dataset.orderIndex));
+    addKpi(peers.at(-1) || null, category, {categoryCreated: true});
   };
 
   const moveKpiWithinCategory = (row, direction) => {
@@ -2268,7 +2379,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
 
   kpiForm.addEventListener('input', (event) => {
     const target = event.target;
-    if (target.matches('[data-scoring-environment], [data-scoring-weight-mode]')) return;
+    if (target.matches('[data-scoring-environment], [data-scoring-weight-mode], [data-scoring-profile-select]')) return;
     kpiDirty = true;
     if (target.matches('[data-kpi-label]')) resizeKpiLabel(target);
     if (target.matches('[data-environment-total-points]')) {
@@ -2315,7 +2426,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
   });
   kpiForm.addEventListener('change', (event) => {
     const target = event.target;
-    if (target.matches('[data-scoring-environment], [data-scoring-weight-mode]')) return;
+    if (target.matches('[data-scoring-environment], [data-scoring-weight-mode], [data-scoring-profile-select]')) return;
     kpiDirty = true;
     if (target.matches('[data-max-points]')) commitPointInput(target);
     if (target.matches('[data-kpi-category]')) renderCategoryGroups();
@@ -2336,6 +2447,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
   kpiForm.addEventListener('click', (event) => {
     const button = event.target.closest('button');
     if (!button || !kpiRows.contains(button)) return;
+    if (button.hasAttribute('data-category-add-below')) {
+      addCategory(button.closest('tr[data-kpi-category-heading]').dataset.kpiCategoryHeading);
+      return;
+    }
     if (button.hasAttribute('data-category-move') && !button.disabled) {
       moveCategory(button.closest('tr[data-kpi-category-heading]'), button.dataset.categoryMove);
       return;
@@ -2383,12 +2498,11 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       : 'Edit maximum points directly. Changing an environment total distributes its points using the relative KPI weights.');
   });
 
-  addCategoryButton?.addEventListener('click', addCategory);
   distributePointsButton?.addEventListener('click', distributeEnvironmentPoints);
   createEnvironmentButton?.addEventListener('click', createEnvironment);
   renameEnvironmentButton?.addEventListener('click', renameEnvironment);
   deleteEnvironmentButton?.addEventListener('click', deleteEnvironment);
-  profileSelect?.addEventListener('change', () => activateProfile(profileSelect.value));
+  profileSelect?.addEventListener('change', () => selectProfile(profileSelect.value));
   profileActions.forEach((button) => button.addEventListener('click', () => runProfileAction(button.dataset.scoringProfileAction)));
 
   const movePriorityRow = (row, targetIndex) => {
@@ -2516,6 +2630,16 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     saveHierarchy();
   });
 
+  requestJson('/api/workspace-config/scoring-source-levels').then((levels) => {
+    environmentSourceLevels = levels;
+    syncEnvironmentSourceFields();
+    populateSourceLevelOptions(profileDialogG1, 'G_Level_1', profileDialogG1?.value || '');
+    populateSourceLevelOptions(profileDialogG2, 'G_Level_2', profileDialogG2?.value || '');
+  }).catch(() => {
+    const note = root.querySelector('[data-environment-source-note]');
+    if (note) note.textContent = 'Unable to load cached CDR source values. Saved source selectors remain available; reload to retry.';
+  });
+
   loadProfiles().then((loaded) => {
     setProfileCollection(loaded);
     render();
@@ -2524,7 +2648,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     setStatus(kpiStatus, error.message || 'Unable to load scoring methodologies.', 'error');
     setStatus(priorityStatus, error.message || 'Unable to load GAP KPI priority.', 'error');
     setStatus(hierarchyStatus, error.message || 'Unable to load scoring aggregation hierarchy.', 'error');
-    if (kpiSave) kpiSave.disabled = true;
+    setKpiSaveDisabled(true);
     if (prioritySave) prioritySave.disabled = true;
     if (hierarchySave) hierarchySave.disabled = true;
     if (window.location.hash) openScoringConfigHashTarget();

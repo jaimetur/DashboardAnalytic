@@ -631,6 +631,8 @@ def _set_shape_geometry(shape, height: int) -> None:
 
 def _scoring_environment_title(environment: str, configuration: dict) -> str:
     scope = configuration.get('scope', {}).get('environments', {}).get(environment, {})
+    if scope.get('display_name'):
+        return str(scope['display_name'])
     filters = [str(scope.get(key) or '').strip() for key in ('g_level_1', 'g_level_2')]
     filters = [value for value in filters if value]
     if filters:
@@ -1884,6 +1886,10 @@ def export_scoring_powerpoint(job: dict[str, Any], result: dict[str, Any], templ
     for matrix_key in ('score_tables', 'hierarchy_score_tables'):
         for matrix in views.get(matrix_key, []):
             matrix['environment_allocations'] = environment_allocations
+            matrix['environment_labels'] = {
+                name: str(scope.get('display_name') or _environment_display_label(name))
+                for name, scope in configuration.get('scope', {}).get('environments', {}).items()
+            }
     _add_scoring_intro_slides(presentation, job, result)
     subtitle = 'All Environments' if environment == 'all' else _scoring_environment_title(environment, configuration)
     matrices = views['score_tables']

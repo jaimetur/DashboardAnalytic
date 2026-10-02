@@ -759,9 +759,39 @@ def get_scoring_job(
         row = connection.execute('SELECT * FROM scoring_jobs WHERE id = ?', (int(job_id),)).fetchone()
     if row is None:
         return None
-    return _row_to_job(
+    job = _row_to_job(
         row, include_result=include_result, include_internal_snapshot=include_internal_snapshot,
     )
+    if include_result and not include_internal_snapshot:
+        _apply_current_environment_labels(repository, job)
+    return job
+
+
+def _apply_current_environment_labels(repository: Repository, job: dict[str, Any]) -> None:
+    """Project current profile labels without changing stored rules or environment keys."""
+    try:
+        profile = repository.get_scoring_profile(job.get('scoring_profile_id') or None)
+    except ValueError:
+        return
+    current = profile['configuration'].get('scope', {}).get('environments', {})
+
+    def source_identity(scope: dict[str, Any]) -> tuple[str, str]:
+        first = str(scope.get('g_level_1') or '').strip().casefold()
+        second = str(scope.get('g_level_2') or '').strip().casefold()
+        if second in {'connectionroad', 'connectingroads', 'connecting roads'}:
+            second = 'connecting roads'
+        return first, second
+
+    labels = {source_identity(scope): str(scope.get('display_name') or name)
+              for name, scope in current.items()}
+    for configuration in (job.get('configuration'), (job.get('result') or {}).get('configuration')):
+        if not isinstance(configuration, dict):
+            continue
+        for name, scope in configuration.get('scope', {}).get('environments', {}).items():
+            identity = source_identity(scope)
+            label = labels.get(identity) if identity[0] else None
+            if label and label != str(scope.get('display_name') or name):
+                scope['display_name'] = label
 
 
 def delete_scoring_job(repository: Repository, job_id: int) -> bool:

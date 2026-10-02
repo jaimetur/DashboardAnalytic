@@ -818,3 +818,34 @@ def test_workspace_database_backup_restore_keeps_completed_scoring_results(clien
     assert restored is not None
     assert restored['status'] == 'completed'
     assert restored['result']['scoring'] == completed['result']['scoring']
+
+
+def test_historical_jobs_use_current_environment_labels_without_rewriting_snapshots(repository, scoring_engine):
+    dataset_id = add_dataset(repository)
+    created, _ = scoring_jobs.create_scoring_job(repository, [dataset_id], ['Region'], 'NSA')
+    scoring_jobs.run_scoring_job(repository, created['id'])
+    original = scoring_jobs.get_scoring_job(repository, created['id'], include_result=True)
+    configuration = repository.get_scoring_configuration()
+    scope = configuration['scope']
+    scope['environments']['Drive - City'] = scope['environments'].pop('DriveCity')
+    scope['environments']['Drive - City']['display_name'] = 'Drive - City'
+    scope['environment_mapping'] = {
+        source: 'Drive - City' if target == 'DriveCity' else target
+        for source, target in scope['environment_mapping'].items()
+    }
+    for metric in configuration['metrics']:
+        metric['contexts']['Drive - City'] = metric['contexts'].pop('DriveCity')
+    repository.replace_scoring_configuration(configuration)
+
+    displayed = scoring_jobs.get_scoring_job(repository, created['id'], include_result=True)
+    assert displayed['configuration']['scope']['environments']['DriveCity']['display_name'] == 'Drive - City'
+    assert displayed['result']['configuration']['scope']['environments']['DriveCity']['display_name'] == 'Drive - City'
+    assert displayed['result']['scoring'] == original['result']['scoring']
+    assert displayed['configuration']['metrics'] == original['configuration']['metrics']
+    stored = scoring_jobs.get_scoring_job(repository, created['id'], include_result=True,
+                                           include_internal_snapshot=True)
+    assert stored['configuration'] == original['configuration']
+    assert stored['result'] == original['result']
+    new, reused = scoring_jobs.create_scoring_job(repository, [dataset_id], ['Region'], 'NSA')
+    assert not reused
+    assert 'Drive - City' in new['configuration']['scope']['environments']

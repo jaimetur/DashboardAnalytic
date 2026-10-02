@@ -4128,6 +4128,8 @@ def cache_cdr_catalogue(dataset_id: int, frame: pd.DataFrame, task_repository: R
         cities=values('city', 'g_level_4', 'g level 4'),
         campaigns=values('campaign'),
         operators=values('operator', 'operator_a', 'home_operator', 'home_operator_a'),
+        g_level_1=values('g_level_1'),
+        g_level_2=values('g_level_2'),
     )
 
 
@@ -4182,6 +4184,8 @@ def backfill_cdr_catalogues(dataset_ids: Iterable[int], task_repository: Reposit
             cities=distinct_values('city', 'g_level_4', 'g level 4'),
             campaigns=distinct_values('campaign'),
             operators=distinct_values('operator', 'operator_a', 'home_operator', 'home_operator_a'),
+            g_level_1=distinct_values('g_level_1'),
+            g_level_2=distinct_values('g_level_2'),
         )
 
 
@@ -8728,7 +8732,7 @@ def render_admin_template(
         'audit_logs': 'Audit log',
         'dashboard_filter_selections': 'Dashboard filter selections',
         'dashboard_ppt_jobs': 'Dashboard PPT jobs',
-        'cdr_catalogues': 'CDR Operator, Vendor, Region, City And Campaign Catalogues',
+        'cdr_catalogues': 'CDR Operator, Vendor, Region, City, Campaign And Source Level Catalogues',
         'dataset_profiles': 'Dataset profiles',
         'dataset_source_columns': 'Dataset source columns',
         'datasets': 'Datasets',
@@ -15778,6 +15782,27 @@ def get_workspace_scoring_configuration(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return JSONResponse(configuration, headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/api/workspace-config/scoring-source-levels')
+def get_workspace_scoring_source_levels(
+    user: SessionUser = Depends(config_editor_user),
+) -> JSONResponse:
+    task_repository = scoring_repository(user)
+    dataset_ids = [int(row['id']) for row in task_repository.list_datasets()
+                   if row['status'] == 'ready' and row['dataset_kind'] in CDR_DATASET_KINDS]
+    backfill_cdr_catalogues(dataset_ids, task_repository)
+    for dataset_id in task_repository.missing_cdr_source_level_ids(dataset_ids):
+        if not task_repository.dataset_rows_table_exists(dataset_id):
+            continue
+        columns = set(task_repository.list_dataset_row_columns(dataset_id))
+        task_repository.set_cdr_source_levels(
+            dataset_id,
+            _distinct_cdr_row_values(task_repository, dataset_id, columns, 'g_level_1'),
+            _distinct_cdr_row_values(task_repository, dataset_id, columns, 'g_level_2'),
+        )
+    return JSONResponse(task_repository.cdr_source_level_values(dataset_ids),
+                        headers={'Cache-Control': 'no-store'})
 
 
 @app.get('/api/workspace-config/scoring-profiles')

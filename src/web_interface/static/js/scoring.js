@@ -3844,6 +3844,9 @@
   }
 
   function allocationEnvironmentLabel(name) {
+    const savedLabel = typeof currentResults === 'undefined' ? null
+      : currentResults?.configuration?.scope?.environments?.[name]?.display_name;
+    if (savedLabel) return String(savedLabel);
     const normalized = String(name).replace(/[\s_-]/g, '').toLowerCase();
     if (normalized === 'drivecity') return 'Drive - City';
     if (['driveroad', 'driveconnectionroad', 'driveconnectingroads'].includes(normalized)) return 'Drive - Connecting Roads';
@@ -4139,6 +4142,9 @@
 
   function environmentLabel(environment) {
     if (environment === 'all' || environment === 'Combined') return 'All Environments';
+    const savedLabel = typeof currentResults === 'undefined' ? null
+      : currentResults?.configuration?.scope?.environments?.[environment]?.display_name;
+    if (savedLabel) return String(savedLabel);
     if (environment === 'DriveCity') return 'Drive City';
     if (environment === 'DriveConnectionroad') return 'Drive Connection Road';
     if (environment === 'Walk') return 'Walk';

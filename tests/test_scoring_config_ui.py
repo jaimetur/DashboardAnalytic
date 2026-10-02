@@ -35,7 +35,7 @@ def test_scoring_kpi_table_exposes_editable_category_formula_and_filter_controls
     template = PANEL_TEMPLATE.read_text(encoding='utf-8')
     script = PANEL_SCRIPT.read_text(encoding='utf-8')
 
-    assert 'data-scoring-add-category' in template
+    assert '[data-category-add-below]' in template
     assert 'data-scoring-add-kpi' not in template
     assert 'data-scoring-kpi-rows' in template
     assert 'KPI Definition</th>' in template
@@ -90,7 +90,7 @@ def test_kpi_categories_are_selectable_saved_and_created_with_a_first_kpi():
     assert "description: 'Create a category with its first KPI. Configure the KPI before saving.'" in script
     assert 'categoryCreate: true' in script
     assert 'categoryNameIsAvailable(name)' in script
-    assert 'addKpi(null, category, {categoryCreated: true});' in script
+    assert 'addKpi(peers.at(-1) || null, category, {categoryCreated: true});' in script
     assert 'metric.category = category;' in script
     assert 'latestConfiguration.metrics = submittedMetrics;' in script
     assert "appendCell(row).textContent = priorityMetric(code)?.category || 'Other';" in script
@@ -504,3 +504,241 @@ def test_scoring_gap_setup_parent_keeps_child_anchor_ids_and_opens_ancestors():
         assert f'id="{panel_id}"' in template
     assert "ancestor.tagName?.toLowerCase() === 'details'" in script
     assert 'if (window.location.hash) openScoringConfigHashTarget();' in script
+
+
+def test_switching_profiles_does_not_mark_the_kpi_form_dirty():
+    import json
+    import subprocess
+
+    script = PANEL_SCRIPT.read_text(encoding='utf-8')
+    guards = []
+    for event in ('input', 'change'):
+        start = script.index(f"  kpiForm.addEventListener('{event}', (event) => {{")
+        start = script.index('    const target = event.target;', start)
+        end = script.index('    kpiDirty = true;', start) + len('    kpiDirty = true;')
+        guards.append(script[start:end])
+    program = 'let kpiDirty = false;\n' + '\n'.join(
+        f"((event) => {{{guard}}})({{target: {{matches: selector => selector.includes('[data-scoring-profile-select]')}}}});"
+        for guard in guards
+    ) + '\nconsole.log(JSON.stringify({kpiDirty}));'
+    result = subprocess.run(['node', '-e', program], capture_output=True, text=True, check=True)
+    assert json.loads(result.stdout)['kpiDirty'] is False
+
+
+def test_environment_save_and_add_category_locations_and_source_dropdowns():
+    template = PANEL_TEMPLATE.read_text(encoding='utf-8')
+    assert 'id="scoring-environment-controls-title">Environments</h4>' in template
+    assert template.index('data-scoring-environment-source-fields') < template.rindex('data-scoring-kpi-save')
+    assert template.rindex('data-scoring-kpi-save') > template.index('KPI Definitions, Scoring &amp; Thresholds')
+    assert '<select data-environment-g1 required>' in template
+    assert '<select data-environment-g2>' in template
+    assert 'scoring-config-status.is-unsaved { color: #b42318; }' in template
+    assert 'data-scoring-add-category' not in template
+    assert '[data-category-add-below]' in template
+    script = PANEL_SCRIPT.read_text(encoding='utf-8')
+    assert "button.title = direction === 'add' ? 'Add category below'" in script
+    assert 'addKpi(peers.at(-1) || null, category, {categoryCreated: true})' in script
+
+
+def test_methodology_contains_environment_and_kpi_subpanels_with_one_complete_save():
+    from lxml import html
+
+    tree = html.fromstring(PANEL_TEMPLATE.read_text(encoding='utf-8'))
+    methodology = tree.xpath('//section[@aria-labelledby="scoring-methodology-controls-title"]')[0]
+    environments = methodology.xpath('.//details[@aria-labelledby="scoring-environment-controls-title"]')[0]
+    kpis = environments.xpath('.//details[@aria-labelledby="scoring-kpi-definitions-title"]')[0]
+    assert kpis.xpath('.//tbody[@data-scoring-kpi-rows]')
+    assert environments.get('open') is not None and kpis.get('open') is None
+    assert kpis.get('data-panel-state-key') is None
+    assert 'data-scoring-kpi-panel' in kpis.attrib
+    assert environments.xpath('./summary/h4') and kpis.xpath('./summary/h5')
+    assert [button.text_content() for button in methodology.xpath('.//button[@data-scoring-kpi-save]')] == ['Save Methodology Profile'] * 2
+    assert not environments.xpath('.//button[@data-scoring-kpi-save]')
+    delete_button = methodology.xpath('.//button[@data-scoring-profile-action="delete"]')[0]
+    assert 'data-scoring-kpi-save' in delete_button.getprevious().attrib
+    default_button = delete_button.getprevious().getprevious()
+    assert default_button.get('data-scoring-profile-action') == 'default'
+    assert default_button.text_content() == 'Set Default'
+    assert default_button.getprevious().get('data-scoring-profile-action') == 'rename'
+    assert 'scoring-config-methodology-group' in methodology.get('class')
+    assert environments.xpath('.//h5[@data-scoring-kpi-title]')
+
+
+def test_methodology_save_commits_pending_hierarchy_and_clears_all_dirty_sections():
+    script = PANEL_SCRIPT.read_text(encoding='utf-8')
+    start = script.index('  const saveKpis = async () => {')
+    end = script.index('  const savePriority =', start)
+    program = '''
+const activeProfileId = 'methodology', environmentSelect = {value: 'City'};
+const kpiStatus = {}, kpiSave = {disabled: false};
+const setKpiSaveDisabled = disabled => {kpiSave.disabled = disabled;};
+let kpiDirty = true, priorityDirty = true, hierarchyDirty = true, hierarchyOrder = [];
+const defaultHierarchy = ['Operator', 'Vendor', 'Region', 'City', 'Campaign'];
+const hierarchyDimensions = new Set(defaultHierarchy);
+const requested = ['Operator', 'City', 'Campaign', 'Region', 'Vendor'];
+const hierarchyRows = {querySelectorAll: () => requested.map(aggregationLevel => ({dataset:{aggregationLevel}}))};
+let configuration = {aggregation_hierarchy: defaultHierarchy};
+let savedId = '', verifySave = false;
+const readKpiRows = latest => ({...latest, scope:{environments:{City:{}, Train:{}}}, metrics:[{contexts:{City:{}, Train:{}}}], gap_priority:['K2','K1']});
+const saveConfiguration = async (update, profileId, preserveScope, verify) => {
+  savedId = profileId; verifySave = verify; configuration = update(configuration);
+};
+const setStatus = () => {}, render = () => {};
+''' + script[start:end] + '''
+(async () => { await saveKpis(); console.log(JSON.stringify({configuration,kpiDirty,priorityDirty,hierarchyDirty,savedId,verifySave})); })();
+'''
+    completed = subprocess.run(['node', '-e', program], capture_output=True, text=True, check=True)
+    actual = json.loads(completed.stdout)
+    assert actual['configuration']['aggregation_hierarchy'] == ['Operator', 'City', 'Campaign', 'Region', 'Vendor']
+    assert set(actual['configuration']['scope']['environments']) == {'City', 'Train'}
+    assert actual['configuration']['gap_priority'] == ['K2', 'K1']
+    assert not any(actual[field] for field in ('kpiDirty', 'priorityDirty', 'hierarchyDirty'))
+    assert actual['savedId'] == 'methodology'
+    assert actual['verifySave'] is True
+
+
+@pytest.mark.skipif(not shutil.which('node'), reason='Node.js is required')
+@pytest.mark.parametrize('navigation, saved, expected', [('navigate', 'open', False), ('reload', 'open', True), ('reload', 'closed', False), ('back_forward', 'open', False)])
+def test_kpi_panel_state_is_preserved_only_on_reload(navigation, saved, expected):
+    script = PANEL_SCRIPT.read_text(encoding='utf-8')
+    start = script.index("  const kpiPanel = root.querySelector('[data-scoring-kpi-panel]');")
+    end = script.index("  const endpoint =", start)
+    fixture = f'''
+const assert = require('node:assert/strict');
+const panelEvents = {{}};
+const windowEvents = {{}};
+const panel = {{open: false, addEventListener: (name, handler) => {{panelEvents[name] = handler;}}}};
+const root = {{querySelector: () => panel}};
+let stored = {json.dumps(saved)};
+const window = {{
+  performance: {{getEntriesByType: () => [{{type: {json.dumps(navigation)}}}]}},
+  sessionStorage: {{getItem: () => stored, setItem: (_key, value) => {{stored = value;}}}},
+  addEventListener: (name, handler) => {{windowEvents[name] = handler;}},
+}};
+{script[start:end]}
+assert.equal(panel.open, {json.dumps(expected)});
+panel.open = true;
+panelEvents.toggle();
+assert.equal(stored, 'open');
+windowEvents.pagehide();
+assert.equal(stored, 'open');
+windowEvents.pageshow({{persisted: true}});
+assert.equal(panel.open, false);
+assert.equal(stored, 'closed');
+'''
+    subprocess.run(['node', '-e', fixture], check=True, capture_output=True, text=True)
+
+
+@pytest.mark.skipif(not shutil.which('node'), reason='Node.js is required')
+def test_selecting_profile_does_not_change_default_or_write_profiles():
+    script = PANEL_SCRIPT.read_text(encoding='utf-8')
+    start = script.index('  const selectProfile = async (profileId) => {')
+    end = script.index('  const makeNewMetric =', start)
+    fixture = '''
+const assert = require('node:assert/strict');
+let activeProfileId = 'default';
+let profileCollection = {active_profile_id: 'default', profiles: [{id: 'default'}, {id: 'other'}]};
+const profileSelect = {value: 'other'};
+const kpiStatus = {};
+const setProfileControlsDisabled = () => {};
+const confirmProfileChange = async () => true;
+const setStatus = () => {};
+const loadProfiles = async () => profileCollection;
+const normalizeProfileCollection = value => value;
+const setProfileCollection = value => {profileCollection = value;};
+const render = () => {};
+const renderProfileControls = () => {};
+const currentProfile = () => ({name: 'Other'});
+const enqueueProfileUpdate = () => {throw new Error('Selecting must not write');};
+'''
+    fixture += script[start:end] + '''
+(async () => {
+  await selectProfile('other');
+  assert.equal(activeProfileId, 'other');
+  assert.equal(profileCollection.active_profile_id, 'default');
+})();
+'''
+    subprocess.run(['node', '-e', fixture], check=True, capture_output=True, text=True)
+
+
+@pytest.mark.skipif(not shutil.which('node'), reason='Node.js is required')
+@pytest.mark.parametrize('action', ['default', 'rename', 'copy', 'delete'])
+def test_profile_actions_target_selected_profile_and_change_default_explicitly(action):
+    script = PANEL_SCRIPT.read_text(encoding='utf-8')
+    start = script.index('  const runProfileAction = async (action) => {')
+    end = script.index('  const selectProfile =', start)
+    fixture = '''
+const assert = require('node:assert/strict');
+let activeProfileId = 'other';
+let profileCollection = {active_profile_id: 'default', profiles: [{id: 'default', name: 'Default', configuration: {}}, {id: 'other', name: 'Other', configuration: {}}]};
+let kpiDirty = true;
+const kpiStatus = {};
+const setProfileControlsDisabled = () => {};
+const confirmProfileChange = async () => true;
+const setStatus = () => {};
+const currentProfile = () => profileCollection.profiles.find(profile => profile.id === activeProfileId);
+const openProfileDialog = async () => 'Changed';
+const createProfileId = () => 'copy';
+const clone = value => structuredClone(value);
+const enqueueProfileUpdate = async (update) => {profileCollection = update(clone(profileCollection));};
+const setProfileCollection = () => {};
+const discardUnsavedChanges = () => {kpiDirty = false;};
+const render = () => {};
+const renderProfileControls = () => {};
+'''
+    fixture += script[start:end] + f'''
+(async () => {{
+  await runProfileAction({json.dumps(action)});
+  assert.equal(profileCollection.active_profile_id, {json.dumps('other' if action == 'default' else 'default')});
+  assert.equal(profileCollection.profiles[0].name, 'Default');
+  if ({json.dumps(action)} === 'default') assert.equal(kpiDirty, true);
+  if ({json.dumps(action)} === 'rename') assert.equal(profileCollection.profiles[1].name, 'Changed');
+  if ({json.dumps(action)} === 'copy') assert.equal(activeProfileId, 'copy');
+  if ({json.dumps(action)} === 'delete') assert.ok(!profileCollection.profiles.some(profile => profile.id === 'other'));
+}})();
+'''
+    subprocess.run(['node', '-e', fixture], check=True, capture_output=True, text=True)
+
+
+@pytest.mark.skipif(not shutil.which('node'), reason='Node.js is required')
+def test_default_profile_delete_is_disabled_and_rejected():
+    script = PANEL_SCRIPT.read_text(encoding='utf-8')
+    controls_start = script.index('  const setProfileControlsDisabled = (disabled) => {')
+    action_end = script.index('  const selectProfile =', controls_start)
+    fixture = '''
+const assert = require('node:assert/strict');
+let activeProfileId = 'default';
+let profileCollection = {active_profile_id: 'default', profiles: [{id: 'default'}, {id: 'other'}]};
+const profileSelect = {};
+const deleteButton = {dataset: {scoringProfileAction: 'delete'}};
+const profileActions = [deleteButton];
+const currentProfile = () => profileCollection.profiles.find(profile => profile.id === activeProfileId);
+const kpiStatus = {};
+const setStatus = () => {};
+const renderProfileControls = () => {};
+const confirmProfileChange = async () => {throw new Error('Delete must be rejected before confirmation');};
+const enqueueProfileUpdate = async () => {throw new Error('Default profile must not be deleted');};
+'''
+    fixture += script[controls_start:action_end] + '''
+(async () => {
+  setProfileControlsDisabled(false);
+  assert.equal(deleteButton.disabled, true);
+  await runProfileAction('delete');
+  assert.equal(profileCollection.profiles.length, 2);
+  assert.equal(deleteButton.disabled, true);
+  activeProfileId = 'other';
+  setProfileControlsDisabled(false);
+  assert.equal(deleteButton.disabled, false);
+})();
+'''
+    subprocess.run(['node', '-e', fixture], check=True, capture_output=True, text=True)
+
+
+def test_editor_text_actions_include_svg_icons():
+    from lxml import html
+
+    tree = html.fromstring(PANEL_TEMPLATE.read_text(encoding='utf-8'))
+    buttons = tree.xpath('//button')
+    assert buttons
+    assert all(button.xpath('./svg[@aria-hidden="true"]') for button in buttons)
+    assert tree.xpath('//a[@data-scoring-config-export]/svg')
