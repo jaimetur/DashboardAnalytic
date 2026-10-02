@@ -336,7 +336,7 @@
             <div class="scoring-dataset-group-head"><strong>{{ kind_label }}</strong><span data-kind-count="{{ kind }}">{{ kind_datasets | length }} available</span></div>
             <div class="scoring-dataset-list" data-kind-list="{{ kind }}">
               {% for dataset in kind_datasets %}
-              <label class="scoring-dataset-option" data-dataset-option data-dataset-kind="{{ dataset.dataset_kind }}" data-nr-mode="{{ dataset.nr_mode or '' }}" data-uploaded-at="{{ dataset.uploaded_at or dataset.created_at or '' }}" data-catalogue="{{ dataset.catalogue | default({}, true) | tojson | forceescape }}">
+              <label class="scoring-dataset-option" data-dataset-option data-dataset-kind="{{ dataset.dataset_kind }}" data-dataset-name="{{ dataset.original_name }}" data-nr-mode="{{ dataset.nr_mode or '' }}" data-uploaded-at="{{ dataset.uploaded_at or dataset.created_at or '' }}" data-catalogue="{{ dataset.catalogue | default({}, true) | tojson | forceescape }}">
                 <input type="checkbox" value="{{ dataset.id }}" data-dataset-id>
                 <span class="scoring-dataset-copy"><strong title="{{ dataset.original_name }}">{{ dataset.original_name }}</strong><small>{{ kind_label }}{% if dataset.campaign %} · {{ dataset.campaign }}{% endif %}{% if dataset.nr_mode %} · {{ dataset.nr_mode }}{% endif %}</small></span>
               </label>
@@ -346,7 +346,7 @@
           </section>
           {% endfor %}
         </div>
-        <p class="scoring-picker-note">The latest uploaded CDR for each type in the selected NR Mode is selected by default. You can add older datasets if needed.</p>
+        <p class="scoring-picker-note">The latest CDR for each type in the selected NR Mode is selected by default, using the date in its name when recognized, then upload date and ID. You can add older datasets if needed.</p>
       </div>
     </div>
     {% if scoring_incomplete_catalogue_datasets %}

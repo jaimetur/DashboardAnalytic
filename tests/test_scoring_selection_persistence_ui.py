@@ -100,7 +100,7 @@ def test_cdr_shortcuts_select_latest_two_or_all_visible_and_keep_gap_reference_i
     handler_start = script.index("  root.querySelectorAll('[data-scoring-select-datasets]').forEach(button => {")
     handler_end = script.index("\n\n  datasetInputs.forEach(input => input.addEventListener", handler_start)
     functions = '\n'.join(_function_source(script, name) for name in (
-        'selectLatestDatasetForEachKind', 'calculationSelectionFromControls',
+        'datasetNameDate', 'selectLatestDatasetForEachKind', 'calculationSelectionFromControls',
     ))
     handlers = script[handler_start:handler_end]
     program = r'''
@@ -166,6 +166,90 @@ main().catch(error => {console.error(error); process.exitCode = 1;});
     }
     assert result['updateCount'] == 3
     assert result['saveCount'] == 3
+
+
+def test_dataset_name_date_parses_supported_dates_and_rejects_invalid_calendar_values():
+    script = SCORING_SCRIPT.read_text(encoding='utf-8')
+    parser = _function_source(script, 'datasetNameDate')
+    program = parser + r'''
+const values = [
+  ['cdr_20260817.csv', Date.UTC(2026, 7, 17)],
+  ['cdr-20260817.csv', Date.UTC(2026, 7, 17)],
+  ['cdr_17-08-2026.csv', Date.UTC(2026, 7, 17)],
+  ['cdr-17082026.csv', Date.UTC(2026, 7, 17)],
+  ['cdr_2026-Q3.csv', Date.UTC(2026, 6, 1)],
+  ['cdr_Q3-2026.csv', Date.UTC(2026, 6, 1)],
+  ['cdr_2024-02-29.csv', Date.UTC(2024, 1, 29)],
+];
+const parsed = values.map(([name]) => datasetNameDate(name));
+const invalid = [
+  'cdr_2025-02-29.csv', 'cdr_2026-13-01.csv', 'cdr_2026-00-01.csv',
+  'cdr_2026-04-31.csv', 'cdr_2026-Q0.csv', 'cdr_Q5-2026.csv',
+].map(name => datasetNameDate(name));
+process.stdout.write(JSON.stringify({expected: values.map(([, timestamp]) => timestamp), parsed, invalid}));
+'''
+
+    result = _run_node_json(program, {})
+    assert result['parsed'] == result['expected']
+    assert all(value is None for value in result['invalid'])
+
+
+def test_latest_dataset_shortcuts_prioritize_filename_dates_then_upload_and_id_and_skip_hidden_nr():
+    script = SCORING_SCRIPT.read_text(encoding='utf-8')
+    handler_start = script.index("  root.querySelectorAll('[data-scoring-select-datasets]').forEach(button => {")
+    handler_end = script.index("\n\n  datasetInputs.forEach(input => input.addEventListener", handler_start)
+    functions = '\n'.join(_function_source(script, name) for name in (
+        'datasetNameDate', 'selectLatestDatasetForEachKind',
+    ))
+    handlers = script[handler_start:handler_end]
+    program = r'''
+const datasetInputs = [];
+const datasetOptions = [];
+const datasetKindOrder = ['data', 'voice', 'speech'];
+const selectedButtons = new Map();
+const buttons = ['latest', 'latest-two'].map(choice => ({
+  dataset: {scoringSelectDatasets: choice},
+  addEventListener: (_name, handler) => selectedButtons.set(choice, handler),
+}));
+const root = {querySelectorAll: () => buttons};
+const updateSelection = () => {};
+const scheduleSelectionSave = () => {};
+function addDataset(kind, id, name, uploadedAt, nrMode = 'NSA') {
+  const input = {value: String(id), checked: false};
+  const option = {hidden: nrMode !== 'NSA', dataset: {
+    datasetKind: kind, datasetName: name, uploadedAt, nrMode,
+  }, querySelector: () => input};
+  input.option = option;
+  datasetInputs.push(input);
+  datasetOptions.push(option);
+}
+addDataset('data', 1, 'cdr_2025-12-31.csv', '2026-12-01T00:00:00Z');
+addDataset('data', 2, 'cdr_2026-03-01.csv', '2026-02-01T00:00:00Z');
+addDataset('data', 3, 'cdr_2026-03-01.csv', '2026-02-01T00:00:00Z');
+addDataset('data', 6, 'cdr_2026-03-01.csv', '2026-02-02T00:00:00Z');
+addDataset('data', 4, 'cdr_2026-02-28.csv', '2026-03-01T00:00:00Z');
+addDataset('data', 5, '', '2026-02-15T00:00:00Z');
+addDataset('voice', 10, 'voice_invalid_date.csv', '2026-01-01T00:00:00Z');
+addDataset('voice', 11, '', '2026-01-01T00:00:00Z');
+addDataset('voice', 12, '', '2025-12-31T00:00:00Z');
+addDataset('speech', 14, '', '');
+addDataset('speech', 99, 'speech_2026-12-01.csv', '2026-12-01T00:00:00Z', 'SA');
+''' + functions + '\n' + handlers + r'''
+const selectedIds = () => datasetInputs
+  .filter(input => input.checked && !input.option.hidden).map(input => Number(input.value)).sort((a, b) => a - b);
+selectedButtons.get('latest-two')();
+const latestTwo = selectedIds();
+selectedButtons.get('latest')();
+const latestOne = selectedIds();
+selectLatestDatasetForEachKind(3);
+const latestThree = selectedIds();
+process.stdout.write(JSON.stringify({latestTwo, latestOne, latestThree}));
+'''
+
+    result = _run_node_json(program, {})
+    assert result['latestTwo'] == [3, 6, 10, 11, 14]
+    assert result['latestOne'] == [6, 11, 14]
+    assert result['latestThree'] == [2, 3, 6, 10, 11, 12, 14]
 
 
 def test_scoring_selection_saves_are_debounced_serialized_and_flushed_on_navigation():

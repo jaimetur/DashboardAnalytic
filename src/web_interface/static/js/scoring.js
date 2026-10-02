@@ -747,6 +747,30 @@
     }
   }
 
+  function datasetNameDate(name) {
+    const text = String(name || '');
+    const dateValue = (year, month, day) => {
+      const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+      return date.getUTCFullYear() === Number(year) && date.getUTCMonth() === Number(month) - 1
+        && date.getUTCDate() === Number(day) ? date.getTime() : NaN;
+    };
+    const formats = [
+      {pattern: /(?:^|\D)((?:19|20)\d{2})[-_. ]?(\d{2})[-_. ]?(\d{2})(?!\d)/g, yearFirst: true},
+      {pattern: /(?:^|\D)(\d{2})[-_. ]?(\d{2})[-_. ]?((?:19|20)\d{2})(?!\d)/g, yearFirst: false},
+    ];
+    for (const {pattern, yearFirst} of formats) {
+      for (const match of text.matchAll(pattern)) {
+        const timestamp = yearFirst ? dateValue(match[1], match[2], match[3]) : dateValue(match[3], match[2], match[1]);
+        if (Number.isFinite(timestamp)) return timestamp;
+      }
+    }
+    const yearQuarter = text.match(/(?:^|\D)((?:19|20)\d{2})[-_. ]*Q([1-4])(?!\d)/i);
+    if (yearQuarter) return dateValue(yearQuarter[1], (Number(yearQuarter[2]) - 1) * 3 + 1, 1);
+    const quarterYear = text.match(/(?:^|[^a-z0-9])Q([1-4])[-_. ]*((?:19|20)\d{2})(?!\d)/i);
+    if (quarterYear) return dateValue(quarterYear[2], (Number(quarterYear[1]) - 1) * 3 + 1, 1);
+    return NaN;
+  }
+
   function selectLatestDatasetForEachKind(count = 1) {
     for (const input of datasetInputs) input.checked = false;
     for (const kind of datasetKindOrder) {
@@ -754,6 +778,12 @@
       candidates.sort((left, right) => {
         const leftUploaded = Date.parse(left.dataset.uploadedAt || '');
         const rightUploaded = Date.parse(right.dataset.uploadedAt || '');
+        const leftNameDate = datasetNameDate(left.dataset.datasetName);
+        const rightNameDate = datasetNameDate(right.dataset.datasetName);
+        const leftDate = Number.isFinite(leftNameDate) ? leftNameDate : leftUploaded;
+        const rightDate = Number.isFinite(rightNameDate) ? rightNameDate : rightUploaded;
+        if (Number.isFinite(leftDate) && Number.isFinite(rightDate) && leftDate !== rightDate) return rightDate - leftDate;
+        if (Number.isFinite(leftDate) !== Number.isFinite(rightDate)) return Number.isFinite(leftDate) ? -1 : 1;
         const leftHasUploadDate = Number.isFinite(leftUploaded);
         const rightHasUploadDate = Number.isFinite(rightUploaded);
         if (leftHasUploadDate && rightHasUploadDate && leftUploaded !== rightUploaded) return rightUploaded - leftUploaded;
