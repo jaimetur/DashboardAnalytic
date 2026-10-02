@@ -248,12 +248,12 @@ def test_all_environment_ppt_finishes_each_full_block_aggregate_first(levels):
                        for paragraph in slide.shapes.title.text_frame.paragraphs)
         if slide.shapes.title and slide.shapes.title.text.startswith('Scoring Tables'):
             assert any(environment in text for environment in (
-                'All Environments', 'DriveCity', 'DriveConnectionroad',
+                'All Environments', 'Drive - City', 'Drive - Connecting Roads',
             ))
     selected = Presentation(BytesIO(export_scoring_powerpoint(job, result, TEMPLATE, environment='DriveCity')))
     assert [slide.shapes.title.text.split('\n')[0] for slide in selected.slides].count('Scoring Tables — Summary') == 1
     assert [slide.shapes.title.text.split('\n')[0] for slide in selected.slides].count('Scoring Tables — Breakdown') == 1
-    assert all('DriveCity' in slide.shapes.title.text for slide in list(selected.slides)[2:])
+    assert all('Drive - City' in slide.shapes.title.text for slide in list(selected.slides)[2:])
 
 
 def test_csv_environment_selection_filters_rows_and_rejects_unavailable_environment():

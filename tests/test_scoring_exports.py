@@ -360,7 +360,7 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
         'Scoring per Category', 'Scoring Tables — Summary', 'Scoring Tables — Breakdown',
     ]
     assert titles[7] == 'GAP Analysis — All vs EE'
-    assert presentation.slides[7].shapes.title.text.split('\n')[1] == 'Campaign: UK_Q2_2026 · Region: North · DriveCity'
+    assert presentation.slides[7].shapes.title.text.split('\n')[1] == 'Drive - City'
     assert all(title.startswith('GAP Analysis') for title in titles[7:])
     for slide in presentation.slides:
         if slide.shapes.title.text.startswith('GAP Analysis') and any(shape.has_table for shape in slide.shapes):
@@ -749,7 +749,7 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     best_network_slide = next(slide for slide, title in zip(presentation.slides, titles)
                               if title == 'Best Network Scoring per Service')
     assert best_network_slide.shapes.title.text == \
-        'Best Network Scoring per Service\nDriveCity'
+        'Best Network Scoring per Service\nDrive - City'
     assert str(best_network_slide.shapes.title.text_frame.paragraphs[0].font.color.rgb) == '17232D'
     assert best_network_slide.shapes.title.text_frame.paragraphs[1].font.size.pt == 14
     best_network_chart, environment_donut, donut = _charts_on_slide(best_network_slide)
@@ -805,7 +805,7 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     assert list(environment_donut.series[0].values) == pytest.approx([650.0])
     assert [category.label for category in donut.plots[0].categories] == ['Voice', 'Data']
     assert list(donut.series[0].values) == pytest.approx(expected_family_maximums)
-    assert 'DriveCity' in _slide_text(best_network_slide)
+    assert 'Drive - City' in _slide_text(best_network_slide)
     for family, maximum in zip(('Voice', 'Data'), expected_family_maximums, strict=True):
         compact_maximum = f'{maximum:.3f}'.rstrip('0').rstrip('.')
         assert f'{family}: {compact_maximum} pts' in _slide_text(best_network_slide)
@@ -820,7 +820,7 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
 
     chart_slide = next(slide for slide, title in zip(presentation.slides, titles)
                        if title == 'Best Network Scoring per Category')
-    assert chart_slide.shapes.title.text == 'Best Network Scoring per Category\nDriveCity'
+    assert chart_slide.shapes.title.text == 'Best Network Scoring per Category\nDrive - City'
     chart_group = next(shape for shape in chart_slide.shapes
                        if shape.name == 'Scoring Chart With Category Key')
     chart_shape = next(shape for shape in chart_group.shapes if shape.has_chart)
@@ -958,7 +958,8 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
         for cell in row.cells
     )
     assert all(any(shape.has_table for shape in slide.shapes) for slide in score_slides + gap_slides)
-    assert all('Average KPI GAP' not in _slide_text(slide) for slide in gap_slides)
+    assert all('Average KPI GAP' not in _slide_text(slide) for slide in all_gap_slides)
+    assert all('Average KPI GAP:' in _slide_text(slide) for slide in individual_gap_slides)
     hierarchy_text = '\n'.join(_slide_text(slide) for slide in score_slides + gap_slides)
     assert 'UK_Q2_2026' in hierarchy_text
     assert 'South' in hierarchy_text
@@ -993,3 +994,53 @@ def test_unselected_campaign_stays_metadata_without_becoming_a_hierarchy_header(
     presentation = _export(result, operator_mapping_groups=_mapping_groups(), job_fields=job_fields)
     intro_text = '\n'.join(_slide_text(presentation.slides[index]) for index in (0, 1))
     assert 'Campaigns: UK_Q2_2026' in intro_text
+
+
+@pytest.mark.parametrize('hierarchy', [False, True])
+def test_content_slide_subtitles_match_environment_transition(hierarchy):
+    result = _result()
+    fields = {'aggregation_contract_version': 2} if hierarchy else {}
+    if hierarchy:
+        result['aggregation_contract_version'] = 2
+    presentation = _export(result, job_fields=fields, environment='all')
+    environment_title = None
+    for slide in list(presentation.slides)[1:]:
+        title = slide.shapes.title.text.split('\n')[0]
+        if slide.slide_layout.name == 'Title Page':
+            environment_title = title
+        else:
+            assert slide.shapes.title.text_frame.paragraphs[1].text == environment_title
+    assert environment_title == 'Drive - City'
+
+
+@pytest.mark.parametrize('values, expected, color', [
+    ([-4, -2, None], '-3.00', 'CC2424'),
+    ([2, 4, None], '3.00', '228B22'),
+    ([-2, 2], '0.00', '263746'),
+    ([None], 'N/A', '263746'),
+])
+def test_individual_gap_side_note_average_and_color(values, expected, color):
+    from src.modules.scoring_exports import _add_individual_gap_notes, _slide
+
+    presentation = Presentation(TEMPLATE)
+    slide = _slide(presentation, 'GAP Analysis', 'Drive - City')
+    _add_individual_gap_notes(slide, {'note': 'Comparison explanation.'},
+                              [{'gap_points': value} for value in values])
+    paragraph = slide.shapes[-1].text_frame.paragraphs[2]
+    assert paragraph.text == f'Average KPI GAP: {expected} points'
+    assert str(paragraph.runs[1].font.color.rgb) == color
+    assert paragraph.runs[1].font.bold
+
+
+def test_individual_gap_side_note_hierarchy_mean_marks_partial_coverage():
+    from src.modules.scoring_exports import _add_individual_gap_notes, _slide
+
+    presentation = Presentation(TEMPLATE)
+    slide = _slide(presentation, 'GAP Analysis', 'All Environments')
+    matrix = {'note': 'Partial coverage.', 'hierarchy_columns': [{'id': 'a'}, {'id': 'b'}]}
+    rows = [
+        {'gaps': {'a': -2, 'b': None}, 'gap_partial': {'a': True}},
+        {'gaps': {'a': -4, 'b': 3}},
+    ]
+    _add_individual_gap_notes(slide, matrix, rows)
+    assert 'Average KPI GAP: -1.00* points' in _slide_text(slide)

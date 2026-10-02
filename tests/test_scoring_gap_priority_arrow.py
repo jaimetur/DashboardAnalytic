@@ -29,8 +29,8 @@ def test_priority_arrow_is_only_on_individual_gap_slides(levels, operators):
         assert len(table.rows) == header_rows + len(result['configuration']['metrics'])
         kpi_names = [row.cells[1].text for row in list(table.rows)[header_rows:]]
         assert not any(name.lower().endswith(' total') for name in kpi_names)
-        assert all('Average KPI GAP' not in shape.text
-                   for shape in slide.shapes if shape.has_text_frame)
+        assert any('Average KPI GAP:' in shape.text
+                   for shape in slide.shapes if shape.has_text_frame) == (not all_operators)
         visible_category_cells = [
             row.cells[0] for row in list(table.rows)[1:]
             if row.cells[0].text and row.cells[0].text != 'Category'

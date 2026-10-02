@@ -160,9 +160,9 @@ def _scope(context: dict[str, Any], *, environment_label: bool = False) -> str:
     )
 
 
-def _chart_subtitle(context: dict[str, Any]) -> str:
-    environment = str(context.get('environment') or '').strip()
-    return environment
+def _chart_subtitle(matrix: dict[str, Any]) -> str:
+    environment = str(matrix.get('context', {}).get('environment') or '').strip()
+    return matrix.get('environment_subtitle', _environment_display_label(environment))
 
 
 def _slide(presentation, title: str, subtitle: str):
@@ -218,6 +218,39 @@ def _text(slide, text: str, top: float, *, left: float = .55, width: float = 12.
         paragraph.font.color.rgb = RGBColor.from_string(color.lstrip('#'))
         paragraph.alignment = align
     return box
+
+
+def _add_individual_gap_notes(slide, matrix: dict, rows: list[dict]) -> None:
+    """Show the arithmetic mean of available KPI comparisons beside the table."""
+    if matrix.get('hierarchy_columns'):
+        comparisons = [
+            (row.get('gaps', {}).get(column['id']),
+             row.get('gap_partial', {}).get(column['id'], False))
+            for row in rows for column in matrix['hierarchy_columns']
+        ]
+    else:
+        comparisons = [(row.get('gap_points'), row.get('gap_partial', False)) for row in rows]
+    valid = [(float(value), partial) for value, partial in comparisons
+             if value is not None and isfinite(float(value))]
+    average = sum(value for value, _ in valid) / len(valid) if valid else None
+    value_text = _number(average) + ('*' if any(partial for _, partial in valid) else '')
+    box = _text(
+        slide, f'KPIs ordered by GAP\n\nAverage KPI GAP: {value_text} points\n\n'
+        f'Operator − reference\nGreen: positive\nRed: negative\n\n{matrix["note"]}',
+        1.8, left=10.2, width=2.5, height=4.65, size=13,
+    )
+    box.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    paragraph = box.text_frame.paragraphs[2]
+    paragraph.clear()
+    paragraph.add_run().text = 'Average KPI GAP: '
+    value_run = paragraph.add_run()
+    value_run.text = value_text
+    value_run.font.bold = True
+    value_run.font.color.rgb = RGBColor.from_string(
+        '228B22' if average is not None and average > 0 else
+        'CC2424' if average is not None and average < 0 else '263746'
+    )
+    paragraph.add_run().text = ' points'
 
 
 def _add_gap_priority_arrow(slide, table, *, header_rows: int = 1) -> None:
@@ -753,7 +786,7 @@ def _score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap
                            if show_gap_values and baseline in matrix['operators'] else [])
             for page_index, metrics in enumerate(metric_pages):
                 page_label = f' · KPIs {page_index + 1}/{len(metric_pages)}' if len(metric_pages) > 1 else ''
-                slide = _slide(presentation, title, _scope(matrix['context']) + page_label)
+                slide = _slide(presentation, title, _chart_subtitle(matrix) + page_label)
                 include_total = page_index == len(metric_pages) - 1
                 headers = ['CATEGORY', 'NETCHECK KPI' if is_summary else 'KPI',
                            *([] if is_summary else ['Type of KPI']), 'Score weight\n(%)', 'Max score',
@@ -922,7 +955,7 @@ def _fill_series(series, color: str) -> None:
 
 def _charts(presentation, matrices: list[dict]) -> None:
     for matrix in matrices:
-        slide = _slide(presentation, 'Scoring per Category', _chart_subtitle(matrix['context']))
+        slide = _slide(presentation, 'Scoring per Category', _chart_subtitle(matrix))
         categories = list(dict.fromkeys(row['category'] for row in matrix['rows']))
         data = CategoryChartData()
         data.categories = categories
@@ -991,7 +1024,7 @@ def _add_category_allocation_donut(slide, matrix: dict) -> None:
 
 def _stacked_category_chart(presentation, matrix: dict) -> None:
     """Compare KPI category contributions as one stacked bar per operator."""
-    slide = _slide(presentation, 'Best Network Scoring per Category', _chart_subtitle(matrix['context']))
+    slide = _slide(presentation, 'Best Network Scoring per Category', _chart_subtitle(matrix))
     categories = list(dict.fromkeys(row['category'] for row in matrix['rows']))
     operators = list(matrix['operators'])
     data = CategoryChartData()
@@ -1043,7 +1076,7 @@ def _stacked_category_chart(presentation, matrix: dict) -> None:
 def _best_network(presentation, matrices: list[dict]) -> None:
     voice_categories = {'CLASSIC CALLS', 'WHATSAPP CALLS', 'MULTI RAB'}
     for matrix in matrices:
-        slide = _slide(presentation, 'Best Network Scoring per Service', _chart_subtitle(matrix['context']))
+        slide = _slide(presentation, 'Best Network Scoring per Service', _chart_subtitle(matrix))
         hierarchy_columns = matrix.get('hierarchy_columns', [])
         if hierarchy_columns:
             chart_columns = hierarchy_columns
@@ -1179,7 +1212,7 @@ def _add_total_labels(chart) -> None:
 
 def _hierarchy_chart(presentation, matrix: dict) -> None:
     columns = matrix.get('hierarchy_columns', [])
-    slide = _slide(presentation, 'Best Network Scoring per Category', _chart_subtitle(matrix['context']))
+    slide = _slide(presentation, 'Best Network Scoring per Category', _chart_subtitle(matrix))
     data = CategoryChartData()
     _add_hierarchy_chart_categories(data, columns)
     categories = list(dict.fromkeys(row['category'] for row in matrix['rows']))
@@ -1243,7 +1276,7 @@ def _hierarchy_chart(presentation, matrix: dict) -> None:
 def _hierarchy_category_comparison_chart(presentation, matrix: dict) -> None:
     """Compare per-category hierarchy totals with one solid-color series per leaf."""
     columns = matrix.get('hierarchy_columns', [])
-    slide = _slide(presentation, 'Scoring per Category', _chart_subtitle(matrix['context']))
+    slide = _slide(presentation, 'Scoring per Category', _chart_subtitle(matrix))
     categories = list(dict.fromkeys(row['category'] for row in matrix['rows']))
     data = CategoryChartData()
     data.categories = categories
@@ -1494,7 +1527,7 @@ def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dic
         levels = matrix['hierarchy_levels']
         metrics = matrix['rows']
         plan = _score_column_plan(columns, gap_layout, show_gap_values=show_gap_values)
-        slide = _slide(presentation, title, _scope(matrix['context']))
+        slide = _slide(presentation, title, _chart_subtitle(matrix))
         header_rows = len(levels) + 2
         row_count = header_rows + len(metrics) + 1
         table_height = 5.0
@@ -1665,13 +1698,13 @@ def _hierarchy_gap_tables(presentation, matrices: list[dict], *,
         columns = matrix['hierarchy_columns']
         levels = matrix['hierarchy_levels']
         metrics = [row for row in matrix['rows'] if row.get('row_type') != 'category']
-        slide = _slide(presentation, title, _scope(matrix['context'], environment_label=False))
+        slide = _slide(presentation, title, _chart_subtitle(matrix))
         if not title.startswith('GAP Analysis — All vs '):
             _accent_gap_comparison_title(slide)
         header_rows = len(levels) + 1
         row_count = header_rows + len(metrics)
         table_height = 5.0
-        table_width = 12.03
+        table_width = 9.3 if show_priority else 12.03
         fixed_widths = [1.0, 2.55, .7]
         table = slide.shapes.add_table(row_count, 3 + len(columns), Inches(.65), Inches(1.55),
                                        Inches(table_width), Inches(table_height)).table
@@ -1725,8 +1758,9 @@ def _hierarchy_gap_tables(presentation, matrices: list[dict], *,
                               bold_categories=show_priority, alternate_colors=('#E6F0F7', '#D7E5EE'))
         _text(slide, matrix['note'], 7.05, height=.25, size=9)
         if show_priority:
+            _add_individual_gap_notes(slide, matrix, metrics)
             _add_gap_priority_arrow(slide, table, header_rows=header_rows)
-        _add_gap_color_scale(slide, matrix, left=.65, width=12.03)
+        _add_gap_color_scale(slide, matrix, left=.65, width=table_width)
 
 
 def _gap_summary_tables(presentation, matrices: list[dict]) -> None:
@@ -1738,7 +1772,7 @@ def _gap_summary_tables(presentation, matrices: list[dict]) -> None:
             page_label = f' · Page {page_index + 1}/{len(pages)}' if len(pages) > 1 else ''
             reference = _operator_label(matrix, matrix['baseline_operator'])
             slide = _slide(presentation, 'GAP Analysis — All vs ' + reference,
-                           _scope(matrix['context'], environment_label=False) + page_label)
+                           _chart_subtitle(matrix) + page_label)
             table = slide.shapes.add_table(len(rows) + 1, len(operators) + 3, Inches(.65), Inches(1.65),
                                            Inches(12.03), Inches(4.9)).table
             widths = [1.45, 4.05, 1.1] + [5.43 / max(1, len(operators))] * len(operators)
@@ -1781,7 +1815,7 @@ def _gap_tables(presentation, matrices: list[dict]) -> None:
         for page_index, rows in enumerate(pages):
             page_label = f' · Page {page_index + 1}/{len(pages)}' if len(pages) > 1 else ''
             comparison = f'{_operator_label(matrix, matrix["operator"])} vs {_operator_label(matrix, matrix["baseline_operator"])}'
-            subtitle = _scope(matrix['context'], environment_label=False) + page_label
+            subtitle = _chart_subtitle(matrix) + page_label
             slide = _slide(presentation, 'GAP Analysis — ' + comparison, subtitle)
             _accent_gap_comparison_title(slide)
             if not rows:
@@ -1815,10 +1849,7 @@ def _gap_tables(presentation, matrices: list[dict]) -> None:
                       size=metric_font, bold=subtotal)
                 _cell(table.cell(index, 3), _gap_number(row), color=row_color or row.get('gap_color', '#FFFF80'),
                       size=metric_font, bold=True)
-            _text(
-                slide, f'KPIs ordered by GAP\n\nOperator − reference\nGreen: positive\nRed: negative\n\n{matrix["note"]}',
-                1.8, left=10.2, width=2.5, height=3.9, size=13,
-            )
+            _add_individual_gap_notes(slide, matrix, rows)
             _merge_category_cells(table, rows, 1, include_subtotals=True, bold_categories=True,
                                   alternate_colors=('#E6F0F7', '#D7E5EE'))
             _add_gap_priority_arrow(slide, table)
@@ -1843,15 +1874,19 @@ def export_scoring_powerpoint(job: dict[str, Any], result: dict[str, Any], templ
     presentation = Presentation(template_path)
     _remove_all_slides(presentation)
     views = _export_environment_views(build_scoring_views(job, result, operator_mapping_groups), environment)
-    environment_allocations = maximum_allocations_from_configuration(
-        job.get('configuration') or result.get('configuration') or {},
-    )
+    configuration = job.get('configuration') or result.get('configuration') or {}
+    for matrix_key in ('score_tables', 'gap_summary_tables', 'gap_tables',
+                       'hierarchy_score_tables', 'hierarchy_gap_tables'):
+        for matrix in views.get(matrix_key, []):
+            matrix['environment_subtitle'] = _scoring_environment_title(
+                matrix['context']['environment'], configuration,
+            )
+    environment_allocations = maximum_allocations_from_configuration(configuration)
     for matrix_key in ('score_tables', 'hierarchy_score_tables'):
         for matrix in views.get(matrix_key, []):
             matrix['environment_allocations'] = environment_allocations
     _add_scoring_intro_slides(presentation, job, result)
-    levels = job.get('aggregation_levels') or job.get('levels') or ['Operator']
-    subtitle = ', '.join(levels)
+    subtitle = 'All Environments' if environment == 'all' else _scoring_environment_title(environment, configuration)
     matrices = views['score_tables']
     hierarchy_matrices = views.get('hierarchy_score_tables', [])
     use_hierarchy = bool(hierarchy_matrices) and len(hierarchy_matrices[0].get('hierarchy_levels', [])) > 1

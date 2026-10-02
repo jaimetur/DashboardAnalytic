@@ -63,7 +63,7 @@ def test_combined_hierarchy_projection_preserves_definition_order():
     assert [row['kpi_code'] for row in projected['rows']] == ['KPI-A', 'KPI-B', 'KPI-C']
 
 
-def test_individual_expanded_projection_reranks_kpis_and_places_subtotal_after_last_kpi():
+def test_individual_expanded_projection_reranks_kpis_and_omits_subtotals():
     source_rows = [
         _kpi('KPI-A1', 'Category A', 1.0),
         _kpi('KPI-B1', 'Category B', 5.0),
@@ -79,9 +79,7 @@ def test_individual_expanded_projection_reranks_kpis_and_places_subtotal_after_l
     assert [(row['row_type'], row['kpi_code'] or row['category']) for row in projected['rows']] == [
         ('kpi', 'KPI-A1'),
         ('kpi', 'KPI-A2'),
-        ('category', 'Category A'),
         ('kpi', 'KPI-B1'),
-        ('category', 'Category B'),
     ]
 
 
