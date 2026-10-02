@@ -1529,7 +1529,7 @@ def test_gap_total_footer_sums_columns_and_marks_missing_contributions():
     ]
     _add_gap_total_row(table, rows, ['q1', 'q2', 'missing'], size=9)
     assert table.cell(3, 0).text == 'Total KPI GAP'
-    assert [table.cell(3, col).text for col in (3, 4, 5)] == ['-6.00', '2.00*', 'N/A']
+    assert [table.cell(3, col).text for col in (3, 4, 5)] == ['-6.00', '2.00*', 'N/A*']
 
 
 def test_saved_environment_display_name_replaces_historical_name_in_ppt():

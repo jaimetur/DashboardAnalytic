@@ -2063,7 +2063,7 @@ def _hierarchy_gap_tables(presentation, matrices: list[dict], *,
                       size=leaf_font, bold=True)
         _merge_category_cells(table, metrics, header_rows, include_subtotals=True,
                               bold_categories=True, alternate_colors=('#E6F0F7', '#D7E5EE'))
-        table.rows[-1].height = Inches(.28)
+        table.rows[len(table.rows) - 1].height = Inches(.28)
         _add_gap_total_row(table, metrics, [column['id'] for column in columns], size=leaf_font)
         _text(slide, matrix['note'], 7.05, height=.25, size=9)
         if show_priority:
@@ -2115,7 +2115,7 @@ def _gap_summary_tables(presentation, matrices: list[dict]) -> None:
             _text(slide, matrix['note'], 7.12, height=.25, size=9)
             _merge_category_cells(table, rows, 1, include_subtotals=True, bold_categories=True,
                                   alternate_colors=('#E6F0F7', '#D7E5EE'))
-            table.rows[-1].height = Inches(.28)
+            table.rows[len(table.rows) - 1].height = Inches(.28)
             _add_gap_total_row(table, rows, operators, size=metric_font)
             _add_gap_color_scale(slide, matrix, left=.65, width=12.03)
 
@@ -2163,7 +2163,7 @@ def _gap_tables(presentation, matrices: list[dict]) -> None:
             _add_individual_gap_notes(slide, matrix, rows)
             _merge_category_cells(table, rows, 1, include_subtotals=True, bold_categories=True,
                                   alternate_colors=('#E6F0F7', '#D7E5EE'))
-            table.rows[-1].height = Inches(.28)
+            table.rows[len(table.rows) - 1].height = Inches(.28)
             _add_gap_total_row(table, rows, [None], size=metric_font)
             _add_gap_priority_arrow(slide, table)
             _add_gap_color_scale(slide, matrix, left=.65, width=9.3)
