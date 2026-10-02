@@ -1497,7 +1497,7 @@ def test_individual_gap_side_note_average_total_and_color(values, expected, tota
     assert str(paragraph.runs[1].font.color.rgb) == color
     assert paragraph.runs[1].font.bold
     total_paragraph = slide.shapes[-1].text_frame.paragraphs[4]
-    assert total_paragraph.text == f'Total KPI GAP: {total} points'
+    assert total_paragraph.text == f'Average total KPI GAP: {total} points'
     assert str(total_paragraph.runs[1].font.color.rgb) == color
     assert total_paragraph.runs[1].font.bold
 
@@ -1514,7 +1514,22 @@ def test_individual_gap_side_note_hierarchy_mean_marks_partial_coverage():
     ]
     _add_individual_gap_notes(slide, matrix, rows)
     assert 'Average KPI GAP: -1.00* points' in _slide_text(slide)
-    assert 'Total KPI GAP: -3.00* points' in _slide_text(slide)
+    assert 'Average total KPI GAP: -1.50* points' in _slide_text(slide)
+
+
+def test_gap_total_footer_sums_columns_and_marks_missing_contributions():
+    from src.modules.scoring_exports import _add_gap_total_row, _slide
+
+    presentation = Presentation(TEMPLATE)
+    slide = _slide(presentation, 'GAP Analysis', 'Drive - City')
+    table = slide.shapes.add_table(4, 6, 0, 0, 6000000, 3000000).table
+    rows = [
+        {'gaps': {'q1': -4, 'q2': 2, 'missing': None}},
+        {'gaps': {'q1': -2, 'q2': None, 'missing': None}},
+    ]
+    _add_gap_total_row(table, rows, ['q1', 'q2', 'missing'], size=9)
+    assert table.cell(3, 0).text == 'Total KPI GAP'
+    assert [table.cell(3, col).text for col in (3, 4, 5)] == ['-6.00', '2.00*', 'N/A']
 
 
 def test_saved_environment_display_name_replaces_historical_name_in_ppt():

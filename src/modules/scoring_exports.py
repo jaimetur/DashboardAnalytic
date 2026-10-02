@@ -234,7 +234,7 @@ def _text(slide, text: str, top: float, *, left: float = .55, width: float = 12.
 
 
 def _add_individual_gap_notes(slide, matrix: dict, rows: list[dict]) -> None:
-    """Show the mean and sum of available KPI comparisons beside the table."""
+    """Show the KPI mean and the mean of valid column totals beside the table."""
     if matrix.get('hierarchy_columns'):
         comparisons = [
             (row.get('gaps', {}).get(column['id']),
@@ -245,21 +245,31 @@ def _add_individual_gap_notes(slide, matrix: dict, rows: list[dict]) -> None:
         comparisons = [(row.get('gap_points'), row.get('gap_partial', False)) for row in rows]
     valid = [(float(value), partial) for value, partial in comparisons
              if value is not None and isfinite(float(value))]
-    total = sum(value for value, _ in valid) if valid else None
-    average = total / len(valid) if valid else None
+    summed_gap = sum(value for value, _ in valid) if valid else None
+    average = summed_gap / len(valid) if valid else None
+    if matrix.get('hierarchy_columns'):
+        valid_column_count = sum(
+            any(value is not None and isfinite(float(value))
+                for row in rows
+                for value in [row.get('gaps', {}).get(column['id'])])
+            for column in matrix['hierarchy_columns']
+        )
+    else:
+        valid_column_count = 1 if valid else 0
+    total = summed_gap / valid_column_count if valid_column_count else None
     marker = '*' if any(partial for _, partial in valid) else ''
     value_text = _number(average) + marker
     total_text = _number(total) + marker
     box = _text(
         slide, f'KPIs ordered by GAP\n\nAverage KPI GAP: {value_text} points\n\n'
-        f'Total KPI GAP: {total_text} points\n\n'
+        f'Average total KPI GAP: {total_text} points\n\n'
         f'Operator − reference\nGreen: positive\nRed: negative\n\n{matrix["note"]}',
         1.8, left=10.2, width=2.5, height=4.65, size=13,
     )
     box.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
     for index, label, value, text in (
         (2, 'Average KPI GAP: ', average, value_text),
-        (4, 'Total KPI GAP: ', total, total_text),
+        (4, 'Average total KPI GAP: ', total, total_text),
     ):
         paragraph = box.text_frame.paragraphs[index]
         paragraph.clear()
@@ -1970,6 +1980,24 @@ def _hierarchy_gap_projection(matrix: dict, columns: list[dict]) -> dict:
     return projected
 
 
+def _add_gap_total_row(table, rows: list[dict], column_ids: list[str | None], *, size: float) -> None:
+    """Sum valid KPI GAPs independently for each displayed column."""
+    index = len(table.rows) - 1
+    label = table.cell(index, 0)
+    label.merge(table.cell(index, 2))
+    _cell(label, 'Total KPI GAP', color='#D7E0E5', size=size, bold=True, left=True)
+    for offset, column_id in enumerate(column_ids, 3):
+        values = [row.get('gaps', {}).get(column_id) if column_id is not None
+                  else row.get('gap_points') for row in rows]
+        valid = [float(value) for value in values if value is not None and isfinite(float(value))]
+        partial = len(valid) < len(values) or any(
+            row.get('gap_partial', {}).get(column_id, False) if column_id is not None
+            else row.get('gap_partial', False) for row in rows
+        )
+        text = _number(sum(valid) if valid else None) + ('*' if valid and partial else '')
+        _cell(table.cell(index, offset), text, color='#D7E0E5', size=size, bold=True)
+
+
 def _hierarchy_gap_tables(presentation, matrices: list[dict], *,
                           title: str = 'GAP Analysis — All vs reference',
                           show_priority: bool = False) -> None:
@@ -1981,7 +2009,7 @@ def _hierarchy_gap_tables(presentation, matrices: list[dict], *,
         if not title.startswith('GAP Analysis — All vs '):
             _accent_gap_comparison_title(slide)
         header_rows = len(levels) + 1
-        row_count = header_rows + len(metrics)
+        row_count = header_rows + len(metrics) + 1
         table_height = 4.65
         table_width = 9.3 if show_priority else 12.03
         fixed_widths = [1.0, 2.55, .7]
@@ -1997,7 +2025,7 @@ def _hierarchy_gap_tables(presentation, matrices: list[dict], *,
         table.rows[len(levels)].height = Inches(subheader_height)
         available_body_height = table_height - header_level_height * len(levels) - subheader_height
         metric_font, body_heights = _hierarchy_metric_layout(
-            metrics, None, available_height=available_body_height,
+            metrics, None, available_height=available_body_height - .28,
             kpi_width=fixed_widths[1],
         )
         for row_index, row_height in enumerate(body_heights, header_rows):
@@ -2035,6 +2063,8 @@ def _hierarchy_gap_tables(presentation, matrices: list[dict], *,
                       size=leaf_font, bold=True)
         _merge_category_cells(table, metrics, header_rows, include_subtotals=True,
                               bold_categories=True, alternate_colors=('#E6F0F7', '#D7E5EE'))
+        table.rows[-1].height = Inches(.28)
+        _add_gap_total_row(table, metrics, [column['id'] for column in columns], size=leaf_font)
         _text(slide, matrix['note'], 7.05, height=.25, size=9)
         if show_priority:
             _add_individual_gap_notes(slide, matrix, metrics)
@@ -2052,7 +2082,7 @@ def _gap_summary_tables(presentation, matrices: list[dict]) -> None:
             reference = _operator_label(matrix, matrix['baseline_operator'])
             slide = _slide(presentation, 'GAP Analysis — All vs ' + reference,
                            _chart_subtitle(matrix) + page_label)
-            table = slide.shapes.add_table(len(rows) + 1, len(operators) + 3, Inches(.65), Inches(1.65),
+            table = slide.shapes.add_table(len(rows) + 2, len(operators) + 3, Inches(.65), Inches(1.65),
                                            Inches(12.03), Inches(4.55)).table
             widths = [1.45, 4.05, 1.1] + [5.43 / max(1, len(operators))] * len(operators)
             for column, width in zip(table.columns, widths):
@@ -2061,7 +2091,7 @@ def _gap_summary_tables(presentation, matrices: list[dict]) -> None:
                 f'{_operator_label(matrix, operator)} − {reference}' for operator in operators]
             table.rows[0].height = Inches(.43)
             metric_font, body_heights = _hierarchy_metric_layout(
-                rows, None, available_height=4.55 - .43, kpi_width=4.05,
+                rows, None, available_height=4.55 - .43 - .28, kpi_width=4.05,
             )
             for row, height in zip(list(table.rows)[1:], body_heights):
                 row.height = Inches(height)
@@ -2085,6 +2115,8 @@ def _gap_summary_tables(presentation, matrices: list[dict]) -> None:
             _text(slide, matrix['note'], 7.12, height=.25, size=9)
             _merge_category_cells(table, rows, 1, include_subtotals=True, bold_categories=True,
                                   alternate_colors=('#E6F0F7', '#D7E5EE'))
+            table.rows[-1].height = Inches(.28)
+            _add_gap_total_row(table, rows, operators, size=metric_font)
             _add_gap_color_scale(slide, matrix, left=.65, width=12.03)
 
 
@@ -2100,13 +2132,13 @@ def _gap_tables(presentation, matrices: list[dict]) -> None:
             if not rows:
                 _text(slide, 'No comparable KPI gaps are available. See the scoring matrix for missing values.', 1.8, height=1, size=16)
                 continue
-            table = slide.shapes.add_table(len(rows) + 1, 4, Inches(.65), Inches(1.65), Inches(9.3),
+            table = slide.shapes.add_table(len(rows) + 2, 4, Inches(.65), Inches(1.65), Inches(9.3),
                                            Inches(4.55)).table
             for column, width in zip(table.columns, (1.65, 4.45, 1.5, 1.7)):
                 column.width = Inches(width)
             table.rows[0].height = Inches(.43)
             metric_font, body_heights = _hierarchy_metric_layout(
-                rows, None, available_height=4.55 - .43, kpi_width=4.45,
+                rows, None, available_height=4.55 - .43 - .28, kpi_width=4.45,
             )
             for row, height in zip(list(table.rows)[1:], body_heights):
                 row.height = Inches(height)
@@ -2131,6 +2163,8 @@ def _gap_tables(presentation, matrices: list[dict]) -> None:
             _add_individual_gap_notes(slide, matrix, rows)
             _merge_category_cells(table, rows, 1, include_subtotals=True, bold_categories=True,
                                   alternate_colors=('#E6F0F7', '#D7E5EE'))
+            table.rows[-1].height = Inches(.28)
+            _add_gap_total_row(table, rows, [None], size=metric_font)
             _add_gap_priority_arrow(slide, table)
             _add_gap_color_scale(slide, matrix, left=.65, width=9.3)
             _text(slide, 'KPIs are ordered by GAP, from lowest to highest. GAP Priority does not affect this order.', 7.12, height=.25, size=9)

@@ -1687,6 +1687,31 @@
     row.append(td);
   }
 
+  function appendGapTotals(table, rows, columnIds) {
+    const footer = document.createElement('tfoot');
+    const row = document.createElement('tr');
+    row.className = 'scoring-total-row';
+    row.style.fontWeight = '700';
+    const label = document.createElement('td');
+    label.colSpan = 3;
+    label.textContent = 'Total KPI GAP';
+    label.style.backgroundColor = '#D7E0E5';
+    row.append(label);
+    for (const columnId of columnIds) {
+      const values = rows.map(item => columnId === null ? item?.gap_points : item?.gaps?.[columnId]);
+      const valid = values.filter(value => value !== null && value !== undefined && value !== ''
+        && Number.isFinite(Number(value))).map(Number);
+      const partial = valid.length < values.length || rows.some(item => columnId === null
+        ? item?.gap_partial === true : item?.gap_partial?.[columnId] === true);
+      addMatrixGapCell(row, valid.length ? valid.reduce((sum, value) => sum + value, 0) : null,
+        '#D7E0E5', partial);
+      row.lastElementChild.title = 'Sum of available KPI GAP points in this column.'
+        + (partial ? ' Incomplete coverage: some KPI contributions are missing or partial.' : '');
+    }
+    footer.append(row);
+    table.append(footer);
+  }
+
   function orderGapRows(rows, valuesForRow, sortByGap = true) {
     const gapMean = item => {
       const values = valuesForRow(item)
@@ -2548,6 +2573,7 @@
     }
     applyGapCategoryRunColors(tbody);
     table.append(thead, tbody);
+    appendGapTotals(table, rows, columns.map(column => column.id));
     wrapper.append(table);
     pane.append(wrapper);
     observeScoringValueCells(table, wrapper);
@@ -2699,6 +2725,7 @@
     });
     applyGapCategoryRunColors(tbody);
     table.append(thead, tbody);
+    appendGapTotals(table, rows, [null]);
     wrapper.append(table);
     pane.append(wrapper);
     observeScoringValueCells(table, wrapper);
@@ -2844,6 +2871,7 @@
     }
     applyGapCategoryRunColors(tbody);
     table.append(thead, tbody);
+    appendGapTotals(table, rows, comparisons);
 
     wrapper.append(table);
     pane.append(wrapper);
