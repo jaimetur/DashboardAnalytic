@@ -2,6 +2,22 @@
 
 Chart Builder is the ad-hoc chart editor. It uses the E2E Dashboard individual Canvas chart viewer embedded directly in the page, while its definition remains temporary: it never changes a stored template or creates a PowerPoint report.
 
+> [!NOTE]
+> **Temporary exploration.** Changes here create an ad-hoc chart. They do not modify a Report Template or generate a PowerPoint report.
+
+> [!TIP]
+> **Investigate empty charts.** Check the selected CDRs, filters and sample counts before changing the chart presentation.
+
+## In this guide
+
+| Task or topic | Go to |
+| --- | --- |
+| Workflow | [Open section](#workflow) |
+| Interactive Preview | [Open section](#interactive-preview) |
+| Example | [Open section](#example) |
+| Filter Builder | [Open section](#filter-builder) |
+| Performance and troubleshooting | [Open section](#performance-and-troubleshooting) |
+
 ## Workflow
 
 1. Open **Chart Builder** with a workspace active.

@@ -2,6 +2,20 @@
 
 App Logs records meaningful application and workspace events for operational review. It distinguishes the person associated with a workflow (**User**) from the account or process that performed each step (**Executed by**); automatic steps use `system`.
 
+> [!NOTE]
+> **Two different scopes.** App Events belongs to the active workspace. Execution Log shows output from the running server process.
+
+> [!IMPORTANT]
+> **Server restarts.** Execution Log capture resets when the server restarts; it is not a replacement for persisted workspace events.
+
+## In this guide
+
+| Task or topic | Go to |
+| --- | --- |
+| Access and workspace scope | [Open section](#access-and-workspace-scope) |
+| App Events | [Open section](#app-events) |
+| Execution Log | [Open section](#execution-log) |
+
 ## Access and workspace scope
 
 App Logs is available to authenticated users with the existing application roles. App Events show the active workspace's audit entries. Open a workspace in Workspace Management to review its events. When no workspace is active, the App Events table is unavailable; the live Execution Log still shows output from the running server process.

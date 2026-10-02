@@ -2,6 +2,22 @@
 
 Dashboard Analytic separates application settings, storage roots and Docker deployment variables. Source installations can set the three storage roots in `storage-paths.conf`; real environment variables take precedence. Docker deployments normally keep all settings in `docker/.env`.
 
+> [!IMPORTANT]
+> **Three storage roots.** Keep configuration, workspace data and writable assets on persistent storage. Code template/static overrides are separate settings.
+
+## In this guide
+
+| Task or topic | Go to |
+| --- | --- |
+| Runtime settings | [Open section](#runtime-settings) |
+| Application Config page | [Open section](#application-config-page) |
+| Storage roots | [Open section](#storage-roots) |
+| Code asset overrides | [Open section](#code-asset-overrides) |
+| Docker settings | [Open section](#docker-settings) |
+| Persistence layout | [Open section](#persistence-layout) |
+| Bootstrap accounts | [Open section](#bootstrap-accounts) |
+| Validation checklist | [Open section](#validation-checklist) |
+
 ## Runtime settings
 
 | Variable | Purpose | Default or typical value |
@@ -108,6 +124,9 @@ The starter Auto-calculated Field definitions remain a code asset at `assets/def
 For the complete workspace, output and cache tree, see [Project Structure → Persistent data layout](project-structure.md#persistent-data-layout).
 
 ## Bootstrap accounts
+
+> [!WARNING]
+> **Initial access.** Replace the bootstrap passwords and configure a private APP_SECRET_KEY before exposing the service.
 
 A brand-new empty `application.db` creates these accounts once:
 

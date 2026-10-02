@@ -1,6 +1,21 @@
 # Project structure
 
+## In this guide
+
+| Task or topic | Go to |
+| --- | --- |
+| Repository tree | [Open section](#repository-tree) |
+| Python application layer | [Open section](#python-application-layer) |
+| Browser layer | [Open section](#browser-layer) |
+| Persistent data layout | [Open section](#persistent-data-layout) |
+| Bundled assets | [Open section](#bundled-assets) |
+| Documentation | [Open section](#documentation) |
+| Tests, tooling and delivery | [Open section](#tests-tooling-and-delivery) |
+
 ## Repository tree
+
+> [!IMPORTANT]
+> **Source and runtime data.** Keep uploaded datasets, workspace databases, generated output and backups out of source control. The default runtime folders are excluded from Git and Docker build context. Cache files are regenerable; user data is not.
 
 ```text
 DashboardAnalytic/
@@ -139,7 +154,7 @@ Report Templates become CSV files only inside portable export, transfer and back
 - `help/help.md`: in-app Help index.
 - `help/overview.md`: product and module tour.
 - `help/technical-considerations.md`: data interpretation, persistence, caching and job semantics.
-- Remaining numbered Help files: focused operational and deployment guides.
+- Other Help chapters: focused operational and deployment guides.
 
 The Help navigation order and labels are curated in `src/DashboardAnalytic.py`. Renaming an article requires updating that list, incoming links and related tests.
 

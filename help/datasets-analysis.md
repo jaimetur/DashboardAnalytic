@@ -2,6 +2,26 @@
 
 Datasets Analysis provides on-demand KPI analysis for one processed CDR in the active workspace.
 
+> [!NOTE]
+> **One dataset at a time.** Use this module for a focused investigation of one processed Data, Voice or Speech CDR. Use E2E Dashboards for a complete template across multiple datasets.
+
+> [!TIP]
+> **Inspect before exporting.** Update Analysis after changing the controls, then inspect sample counts and the filtered records.
+
+## In this guide
+
+| Task or topic | Go to |
+| --- | --- |
+| Eligible datasets | [Open section](#eligible-datasets) |
+| Analysis workflow | [Open section](#analysis-workflow) |
+| Analysis Controls | [Open section](#analysis-controls) |
+| Dataset Summary | [Open section](#dataset-summary) |
+| Charts and Scorecards | [Open section](#charts-and-scorecards) |
+| Processed Metrics | [Open section](#processed-metrics) |
+| Preview and export | [Open section](#preview-and-export) |
+| Example investigation | [Open section](#example-investigation) |
+| Performance | [Open section](#performance) |
+
 ## Eligible datasets
 
 - CDR-Data
@@ -50,11 +70,37 @@ The table shows the calculated records for the active request. Use it to verify 
 
 ## Preview and export
 
-- **Preview Dataset** opens every stored CDR field in 100-row pages. Use the searchable Dataset selector to move to another ready Workspace dataset and the column search to narrow very wide tables. Each column header provides an Excel-style value menu loaded from the complete column; filters can be combined and cleared together. Field names can be referenced with any letter case and with spaces, underscores or hyphens interchangeably; `Subscriber` also resolves the legacy `Suscriber` spelling. Selected text values are case-insensitive. Every preview starts with yellow `Source_File`, `Source_Sheet` and `Dataset_Kind`, followed by Operator, Subscriber, Vendor and Vendor_Only, the other fixed fields, Auto-calculated Fields, other derived fields and finally the remaining source fields. Main CDR fields are blue and labelled `CDR-Main`, derived fields including Vendor and Vendor_Only are light green, and Auto-calculated Fields are purple. Stronger header colours distinguish headings from values. Use the multi-select label filter to show only Derived, Auto-calculated, `CDR-Main` or the active CDR type. Empty fixed, derived and Auto-calculated fields remain visible. Hover a label to see its rule, or select it to open the rule panel.
-- Campaign source text is preserved. Filters and chart labels also accept reordered country, year, quarter and SA/NSA forms and expose compact `YYYY-Qn`, `YYYY-Qn_SA` or `YYYY-Qn_NSA` values. Equality keeps base, SA and NSA campaigns separate. Campaign Year, Campaign Quarter, Period and Market use Campaign with a Benchmark fallback; Zone and City fall back to G Level 3 and G Level 4 only when their own source field is empty. Event Start/End values use `YYYY-MM-DD HH:MM:SS.ffffff`.
-- Dashboard filters do not overwrite the dataset.
-- Word and PowerPoint exports reflect the current Dashboard analysis.
-- Template-driven reports belong to E2E Reporting instead.
+### Inspect persisted rows
+
+**Preview Dataset** opens stored CDR fields in 100-row pages. Use the searchable Dataset selector to switch to another ready dataset.
+
+| Control | Effect |
+| --- | --- |
+| Column search / field selection | Narrow a wide table without removing rows. |
+| Column value menu | Filter using the complete column's distinct values. Filters on different columns combine. |
+| Label multiselect | Show selected field families: Derived, Auto-calculated, CDR-Main or source CDR type. |
+| Hover / select a field label | Read its rule in a tooltip or the complete rule panel. |
+
+| Field family | Preview appearance |
+| --- | --- |
+| Source_File, Source_Sheet, Dataset_Kind | Yellow origin fields, shown first. |
+| Main CDR fields | Blue, labelled CDR-Main. |
+| Derived fields, including Vendor and Vendor_Only | Light green. |
+| Auto-calculated Fields | Purple. |
+
+Empty fixed, derived and Auto-calculated fields remain visible. Stronger header colours distinguish labels from values. After origin fields, Preview groups the identity/fixed fields, Auto-calculated Fields, other derived fields and remaining source fields.
+
+### Read field values correctly
+
+- Field references ignore letter case and differences between spaces, underscores and hyphens. Subscriber also accepts the legacy Suscriber spelling.
+- Campaign source text is preserved. Recognised chart/filter labels can use YYYY-Qn, YYYY-Qn_SA or YYYY-Qn_NSA; equality keeps these three campaign forms separate.
+- Campaign Year, Campaign Quarter, Period and Market derive from Campaign with a Benchmark fallback.
+- Zone and City fall back to G_Level_3 and G_Level_4 when their source field is empty.
+- Event Start/End values use YYYY-MM-DD HH:MM:SS.ffffff.
+
+### Export the analysis
+
+Word and PowerPoint exports reflect the current analysis request. Analysis filters do not overwrite stored dataset rows. For a complete template-driven report, use E2E Dashboards or the restricted E2E Reporting workflow.
 
 ## Example investigation
 

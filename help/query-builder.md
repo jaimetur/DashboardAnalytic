@@ -2,7 +2,29 @@
 
 Query Builder runs read-only SQL against selected, processed Data, Voice and Speech CDRs in the active workspace. Use **Assistance Mode** to assemble common queries with form controls, or **SQL Mode** to edit SQL directly.
 
+> [!IMPORTANT]
+> **Read-only queries.** Run a single SELECT statement, optionally with WITH. Query Builder does not support database writes.
+
+> [!TIP]
+> **Preview is not execution.** Changing Assistance controls updates SQL. Use Run Query to refresh the results.
+
+## In this guide
+
+| Task or topic | Go to |
+| --- | --- |
+| Assistance Mode | [Open section](#assistance-mode) |
+| SQL Mode | [Open section](#sql-mode) |
+| Saved queries | [Open section](#saved-queries) |
+
 ## Assistance Mode
+
+| Action | SQL / results behaviour |
+| --- | --- |
+| Change assisted controls | Update the SQL preview; existing results remain until a new run. |
+| Run query | Execute the current valid selection and refresh results. |
+| Clear Query | Reset editor and results after confirmation; preserve saved queries. |
+| Copy | Copy headers and the current filtered page as tab-separated text. |
+| Export CSV | Download all filtered result rows and columns. |
 
 1. Open **Query Builder** with a workspace active.
 2. Select one or more ready source datasets and one or more **CDR types to use** represented by those sources.
@@ -13,15 +35,30 @@ Query Builder runs read-only SQL against selected, processed Data, Voice and Spe
 
 Use **Clear Query** to start over. After you confirm, it clears the SQL, source selections, filters, field selection, sorting, limit and current results. Cancel keeps the current query unchanged; saved queries are not deleted.
 
-The SQL preview updates live as you change the controls; the results table updates only after **Run query**. An incomplete filter does not erase the SQL preview: completed filters and other valid selections continue to appear, and the assistant explains what needs attention. At least one CDR type must remain selected; if you try to clear the last one, it is restored and the assistant explains why. If no source or output field is available, the preview displays what is needed to continue. **Run query**, **Save query** and **Export CSV** are disabled until the query has a valid selection and every filter is complete.
+The SQL preview updates live as you change the controls; the results table updates only after **Run query**. An incomplete filter does not erase the SQL preview: completed filters and other valid selections continue to appear, and the assistant explains what needs attention.
 
-The result panel reports the current page's row count and columns, plus the total number of matching rows. Results are paginated in batches of up to 50 rows. Navigation controls above and below the table let you jump to the first or last page, or move to the previous or next page. With **All rows**, the generated SQL has no row limit and the pages cover all matching rows. Use the filter button in a result column's header to search its distinct values, select the values to keep, and apply or clear the filter. The menu shows up to 200 values at a time; search to find additional values. Filters in different columns combine and apply to the full query result, including later pages. They reset when you run a new query. **Copy** copies the column headers and rows on the visible filtered page as tab-separated text. **Export CSV** downloads all rows and columns in the filtered result, without a row cap.
+At least one CDR type must remain selected; if you try to clear the last one, it is restored and the assistant explains why. If no source or output field is available, the preview displays what is needed to continue.
+
+**Run query**, **Save query** and **Export CSV** are disabled until the query has a valid selection and every filter is complete.
+
+> [!NOTE]
+> **Copy versus export.** Copy includes the visible page. CSV export includes all rows matching the result-column filters.
+
+The result panel reports the current page's row count and columns, plus the total number of matching rows. Results are paginated in batches of up to 50 rows. Navigation controls above and below the table let you jump to the first or last page, or move to the previous or next page.
+
+With **All rows**, the generated SQL has no row limit and the pages cover all matching rows. Use the filter button in a result column's header to search its distinct values, select the values to keep, and apply or clear the filter. The menu shows up to 200 values at a time; search to find additional values.
+
+Filters in different columns combine and apply to the full query result, including later pages. They reset when you run a new query. **Copy** copies the column headers and rows on the visible filtered page as tab-separated text. **Export CSV** downloads all rows and columns in the filtered result, without a row cap.
 
 For a `source_dataset_name` filter using **Is** or **Is not**, choose a name from the selected source datasets that match the selected CDR types. Other comparisons use a text value.
 
-When multiple CDR types are selected, Assistance Mode combines their results with `UNION ALL` and includes a `cdr_type` column to identify each row's source type. Each type contributes its own `SELECT` against the corresponding temporary view (`selected_data`, `selected_voice` or `selected_speech`); selected output fields remain aligned across the combined results, with unavailable fields returned as `NULL`. Filters apply to the combined results. Choose **AND** or **OR** for each condition after the first; mixed connectors are evaluated from top to bottom and grouped with parentheses.
+When multiple CDR types are selected, Assistance Mode combines their results with `UNION ALL` and includes a `cdr_type` column to identify each row's source type. Each type contributes its own `SELECT` against the corresponding temporary view (`selected_data`, `selected_voice` or `selected_speech`); selected output fields remain aligned across the combined results, with unavailable fields returned as `NULL`.
 
-Assistance Mode shows the generated SQL in a read-only preview. You can switch to **SQL Mode** and back while the preview still contains its initial guidance. Switch to **SQL Mode** to adjust the statement or create joins, common table expressions, aggregates or other SQL that the guided controls do not represent. When loading a saved query, SQL that matches the Assistance Mode controls is restored in **Assistance Mode**; custom or unsupported SQL remains in **SQL Mode**.
+Filters apply to the combined results. Choose **AND** or **OR** for each condition after the first; mixed connectors are evaluated from top to bottom and grouped with parentheses.
+
+Assistance Mode shows the generated SQL in a read-only preview. You can switch to **SQL Mode** and back while the preview still contains its initial guidance. Switch to **SQL Mode** to adjust the statement or create joins, common table expressions, aggregates or other SQL that the guided controls do not represent.
+
+When loading a saved query, SQL that matches the Assistance Mode controls is restored in **Assistance Mode**; custom or unsupported SQL remains in **SQL Mode**.
 
 ## SQL Mode
 

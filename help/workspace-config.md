@@ -1,8 +1,27 @@
 # Workspace Config
 
-Workspace Config is a dedicated page for settings owned by the active workspace: Report Templates Management, Main Cities, Operator & Vendor Maps (Operator Maps and Vendor Maps), Scoring Aggregation Hierarchy, Scoring KPI Configuration and GAP KPI Priority. These settings remain workspace-scoped and are included in the applicable import, export, transfer, backup and restore workflows.
+Workspace Config is a dedicated page for settings owned by the active workspace: Report Templates Management, Main Cities, Operator & Vendor Maps and Scoring & GAP Analysis Setup. These settings remain workspace-scoped and are included in the applicable import, export, transfer, backup and restore workflows.
+
+> [!IMPORTANT]
+> **Workspace settings.** Every edit on this page belongs to the active workspace. Application Config controls shared runtime settings.
+
+> [!TIP]
+> **Save versus export.** Save persists edits in the workspace. Export downloads a portable copy; it does not replace the Save action.
 
 Open **Config → Workspace Config** from the main navigation at `/workspace-config`. Template, mapping and Main Cities actions use routes below `/workspace-config/`. The page uses the same teal/navy palette as Application Config and its Page Sections navigator links to the panels.
+
+## In this guide
+
+| Task or topic | Go to |
+| --- | --- |
+| Access and active workspace | [Open section](#access-and-active-workspace) |
+| Report Templates Management | [Open section](#report-templates-management) |
+| Report Template Editor | [Open section](#report-template-editor) |
+| Report Template reference | [Open section](#report-template-reference) |
+| Operator & Vendor Maps | [Open section](#operator-vendor-maps) |
+| Main Cities | [Open section](#main-cities) |
+| Portable operations | [Open section](#portable-operations) |
+| Scoring & GAP Analysis Setup | [Open section](#scoring-gap-analysis-setup) |
 
 ## Access and active workspace
 
@@ -12,7 +31,9 @@ The Workspace Config section is available to `user-editor`, `admin` and `super-a
 
 Templates belong to the active workspace and are stored in that workspace database's `report_templates` table. Import, export, backup and transfer packages serialize them as portable CSV files, but those files are package artifacts rather than the live source of record. Obsolete `slides-templates` directories are removed by the current migration and portability flows.
 
-Report Templates Management supports NSA and SA templates, one default for each technology, and the editor described below. Template names are unique per NR Mode, so an NSA and an SA template may share a name. The library is sorted by NR Mode (NSA first) and then name; its columns show the NR Mode, creation and last update times, and **Last Updated by**, the user who last imported, edited, renamed, duplicated, promoted or moved the template.
+Report Templates Management supports NSA and SA templates, one default for each technology, and the editor described below. Template names are unique per NR Mode, so an NSA and an SA template may share a name.
+
+The library is sorted by NR Mode (NSA first) and then name; its columns show the NR Mode, creation and last update times, and **Last Updated by**, the user who last imported, edited, renamed, duplicated, promoted or moved the template.
 
 Available actions:
 
@@ -26,9 +47,13 @@ Available actions:
 - Export
 - Delete
 
-**New Template** creates a blank NSA definition and opens it for editing. Import accepts a CSV name or derives it from the filename, can convert a legacy catalogue when prompted and requires explicit overwrite confirmation for a case-insensitive name collision. Renaming saves when you leave the name field or press Enter; the field keeps its previous name and shows an error if the save fails. Duplicate creates `- Copy`; a non-default template can move between NSA and SA when no same-name target exists.
+**New Template** creates a blank NSA definition and opens it for editing. Import accepts a CSV name or derives it from the filename, can convert a legacy catalogue when prompted and requires explicit overwrite confirmation for a case-insensitive name collision.
 
-One template can be default for each technology within a workspace. Reporting initially selects that default but does not change it when a user chooses another template for one job. A default template cannot change type or be deleted until another template becomes default. New workspaces start without templates. The row Export action downloads that individual CSV; portable ZIP export is available under Import / Export / Transfer.
+Renaming saves when you leave the name field or press Enter; the field keeps its previous name and shows an error if the save fails. Duplicate creates `- Copy`; a non-default template can move between NSA and SA when no same-name target exists.
+
+One template can be default for each technology within a workspace. Reporting initially selects that default but does not change it when a user chooses another template for one job. A default template cannot change type or be deleted until another template becomes default. New workspaces start without templates.
+
+The row Export action downloads that individual CSV; portable ZIP export is available under Import / Export / Transfer.
 
 ## Report Template Editor
 
@@ -64,7 +89,9 @@ One template can be default for each technology within a workspace. Reporting in
 - **Update Template** applies preview values to the in-memory row; it does not save to disk.
 - **Auto-calculated Fields** opens the shared active-workspace field manager.
 
-**Save Template** validates and persists the complete grid atomically. Dashboard comment reconciliation runs separately when slide identity changes; any required combined CDR update also runs after the save response. The Dashboard viewer refreshes the saved template when the editor closes. A combined CDR update is queued only when a template adds a source field missing from that CDR table. Removing the last template reference leaves the existing column available for future reuse. Close, Escape and backdrop actions preserve the editor when unsaved changes still require a decision.
+**Save Template** validates and persists the complete grid atomically. Dashboard comment reconciliation runs separately when slide identity changes; any required combined CDR update also runs after the save response. The Dashboard viewer refreshes the saved template when the editor closes. A combined CDR update is queued only when a template adds a source field missing from that CDR table.
+
+Removing the last template reference leaves the existing column available for future reuse. Close, Escape and backdrop actions preserve the editor when unsaved changes still require a decision.
 
 ## Report Template reference
 
@@ -139,11 +166,17 @@ Automated rows support:
 
 Choose a KPI and at least one Rows or Column Aggregation dimension. `CDF Line` creates one curve per complete aggregation combination. Count charts retain empty combinations where required so comparisons remain aligned.
 
-Axis ranges are visual settings, not data filters, and are available to every chart family with a numeric axis. For example, `Axis X Range: [0.01,]` starts the horizontal axis at `0.01` while retaining its automatically calculated maximum; `[,30]` retains the automatic minimum and fixes the maximum at `30`. Empty range cells preserve the existing automatic behaviour. Percentage axes continue to use values from 0 to 100, while count, KPI, coordinate and scatter axes use their native units. Category axes and tables have no numeric domain to constrain.
+Axis ranges are visual settings, not data filters, and are available to every chart family with a numeric axis. For example, `Axis X Range: [0.01,]` starts the horizontal axis at `0.01` while retaining its automatically calculated maximum; `[,30]` retains the automatic minimum and fixes the maximum at `30`. Empty range cells preserve the existing automatic behaviour.
 
-`Label` is available to every chart family. For bars, `None` hides values, `Top` places them outside the bar, and `Up`, `Middle` and `Down` place them inside near the leading edge, centre or origin edge; horizontal bars map those directions to outside-right, inside-right, centre and inside-left. For CDF, scatter and map charts the same setting places point or endpoint labels around the plotted mark. An empty cell preserves each renderer's existing automatic behaviour.
+Percentage axes continue to use values from 0 to 100, while count, KPI, coordinate and scatter axes use their native units. Category axes and tables have no numeric domain to constrain.
 
-`Exclude Null/Empty` and `Exclude Zero` are independent and apply to every chart family. For scatter charts the exclusions are checked on both plotted axes; for CDF and Multi KPI CDF charts they are checked on each plotted metric before the cumulative distribution is calculated. This allows a CDF to begin at its first non-zero observation instead of merely hiding the zero-valued section with an axis range.
+`Label` is available to every chart family. For bars, `None` hides values, `Top` places them outside the bar, and `Up`, `Middle` and `Down` place them inside near the leading edge, centre or origin edge; horizontal bars map those directions to outside-right, inside-right, centre and inside-left.
+
+For CDF, scatter and map charts the same setting places point or endpoint labels around the plotted mark. An empty cell preserves each renderer's existing automatic behaviour.
+
+`Exclude Null/Empty` and `Exclude Zero` are independent and apply to every chart family. For scatter charts the exclusions are checked on both plotted axes; for CDF and Multi KPI CDF charts they are checked on each plotted metric before the cumulative distribution is calculated.
+
+This allows a CDF to begin at its first non-zero observation instead of merely hiding the zero-valued section with an axis range.
 
 ### Chart recipes
 
@@ -356,13 +389,19 @@ The Operator & Vendor Maps panel contains Operator Maps and Vendor Maps as indep
 
 The table groups raw Operator labels under one canonical identity for charts. Each row shows **Order**, **Colour**, **Canonical label**, **Mapped source labels** and **Actions**. Enter source aliases one per line; comma and semicolon separators are accepted too. The canonical label also maps to itself automatically, so it need not be repeated among the aliases. An alias cannot belong to two canonical groups.
 
-Use **Add canonical mapping** to create a group. Change its label, aliases or colour and press **Save** to update it. **Move up** and **Move down** set its position in Operator charts and in Subscriber dimensions; the first and last rows cannot move beyond the table. **Delete** removes the entire group, including its aliases, after confirmation. Canonical renames update exact matching references in Report Templates and saved Dashboards.
+Use **Add canonical mapping** to create a group. Change its label, aliases or colour and press **Save** to update it. **Move up** and **Move down** set its position in Operator charts and in Subscriber dimensions; the first and last rows cannot move beyond the table. **Delete** removes the entire group, including its aliases, after confirmation.
 
-The colour picker sets the group's chart theme colour; charts can derive related shades to distinguish campaigns or series. Order and colour are presentation choices, while aliases make source labels such as `Vodafone UK` resolve to the intended canonical Operator. These settings affect chart grouping, legends and template filters. They do not rewrite source workbooks, stored CDR rows or combined CDR tables. Saving, moving or deleting a group clears chart caches so later views use the new settings.
+Canonical renames update exact matching references in Report Templates and saved Dashboards.
+
+The colour picker sets the group's chart theme colour; charts can derive related shades to distinguish campaigns or series. Order and colour are presentation choices, while aliases make source labels such as `Vodafone UK` resolve to the intended canonical Operator. These settings affect chart grouping, legends and template filters.
+
+They do not rewrite source workbooks, stored CDR rows or combined CDR tables. Saving, moving or deleting a group clears chart caches so later views use the new settings.
 
 ### Vendor Maps
 
-The Vendor table has the same **Order**, **Colour**, **Canonical label**, **Mapped source labels** and **Actions** controls. Use **Add canonical mapping**, **Save**, **Move up**, **Move down** or confirmed **Delete** to manage a Vendor and all its aliases. Alias matching is case-insensitive, the canonical label maps to itself, and an alias cannot belong to two Vendor groups. Renaming a canonical Vendor updates exact matching Report Template and saved Dashboard references.
+The Vendor table has the same **Order**, **Colour**, **Canonical label**, **Mapped source labels** and **Actions** controls. Use **Add canonical mapping**, **Save**, **Move up**, **Move down** or confirmed **Delete** to manage a Vendor and all its aliases. Alias matching is case-insensitive, the canonical label maps to itself, and an alias cannot belong to two Vendor groups.
+
+Renaming a canonical Vendor updates exact matching Report Template and saved Dashboard references.
 
 Vendor order determines the chart sequence for Vendor dimensions and the Vendor portion of combined `Operator_Vendor` categories. The selected colour gives a Vendor a consistent chart identity, with related shades where multiple series need distinction. Aliases reconcile different source spellings for chart display and filters; they do not alter materialized CDR values. Group changes refresh chart caches without rematerializing source data.
 
@@ -380,10 +419,61 @@ For global runtime settings, see [Application Config](app-config.md). Admin's [D
 
 ## Scoring & GAP Analysis Setup
 
-The main Scoring & GAP Analysis Setup panel contains three subpanels with light blue headers, visually distinct from the dark main panel header. Scoring KPI Configuration comes first, followed by Scoring Aggregation Hierarchy and GAP KPI Priority. Reorder Operator, Vendor, Region, City and Campaign using the arrows; save the complete hierarchy. The default is Operator → Vendor → Region → City → Campaign. It controls the filter/aggregation panel order and hierarchical tables, charts and PPT outputs of new jobs. Operator remains mandatory for calculations wherever it appears in the chosen hierarchy. An unconfigured workspace requires an explicit import via **Import JSON** or Admin; **Export JSON** uses the same portable document format as the JSON inside configuration ZIP packages. Select a named methodology, create a copy for a new revision and activate the profile used by future jobs. Select an environment and edit the category-grouped KPIs: category, label, source CDR type, direction, mapping method, formula, filter JSON, thresholds, KPI type and score interpolation anchors. Mapping is a separate KPI-level selector with Linear, Quadratic and Smooth curve; existing profiles default to Linear. The method is retained in JSON/ZIP exchanges, transfers and backups. The **KPI Definitions, Scoring & Thresholds** heading introduces the KPI table and its highlighted Add Category button. Use the row Actions to add a KPI directly below that row in its category or move it up/down within that category. Larger violet arrows at the right of each category header move the whole category up/down while preserving its KPI order and draft edits; save the configuration to retain the category order. Add Category creates a named category with its first zero-point KPI; configure it before saving. Category is a dropdown of the methodology's current categories, allowing existing KPIs to move between groups. New definitions receive stable K-number identifiers; deleting or moving a row does not renumber the remaining definitions. Renaming a code in the table automatically updates its GAP priority reference when saved, without changing its priority. Add, delete or replace KPI definitions; at least one KPI must remain. The KPI Definition column's yellow pencil opens Edit formula and filters in a larger centered dialog with colored source/formula/filter sections; closing it retains draft edits until the configuration is saved. Calculation basis is read-only information derived from the formula, which controls the actual calculation; packet-loss expression controls appear only for the formula that uses them, with usage help. Category rows show summed points, relative Environment weights and global weights as separate green, blue and violet badges. KPI names are bold in a wider column and use one line when they fit and grow automatically for longer labels; fixed Ultra values can require a second row. Category names are highlighted badges. Circular SVG Actions stay on one row with tooltips and distinct colors: green for insertion, blue for moving and red for deletion. Max Points displays two decimal places while retaining full allocation precision for calculations and unchanged values when saving. Choose Points to change absolute allocations or Weight (%) to edit relative KPI weights, preserve the Environment total and redistribute other KPI weights proportionally. Edit the Environment allocation above the table; changing its global percentage preserves the grand total and redistributes other Environments. Create Environment opens a dialog for name, reference Environment, total points and source values `G_Level_1` / optional `G_Level_2`; it copies each KPI's rules and proportions from the reference, while the entered source values determine the CDR rows. Delete Environment removes the selected context from every KPI; keep at least one Environment with a positive overall allocation. Source values remain editable; overlapping source selections are rejected. These are draft changes until saved. Distribute points keeping percentages opens a viewport-centered dialog with a light backdrop to assign the selected Environment a chosen point total using the relative KPI weights of a reference Environment; review and save the draft. It does not copy thresholds or formulas. NetCheck 2026 includes Walk with zero points and editable relative weights. Colored column blocks distinguish points/weights (green), thresholds (amber), score mappings (violet) and identity/calculation (blue). Ultra may be absent, numeric or derived from the best minimum/maximum KPI in the comparison context. The workspace database is the authoritative source. Editable formulas and filters are checked against supported engine fields and operations; reference files are never loaded automatically. Save validates the complete configuration; invalid settings do not replace the saved configuration.
+A methodology defines the complete scoring setup: its title, environments, KPI definitions and weights, aggregation hierarchy and KPI priorities. Select or create a methodology before editing its settings.
 
-The header separates Methodology controls (profiles and portable operations) from Environment controls (selection, creation/renaming/deletion, points/weights, source matching and point distribution); a disclosure explains how points and weights work. The panels fit the available page width. The compact KPI table uses smaller fonts, balanced widths and darker grouped threshold/mapping headers, with Environment Weight (%) as the relative weight column and a centered KPI Definition pencil. Methodology controls have vertical spacing and explicit Rename Profile/Delete Profile labels; Profile and Environment deletion buttons are red; Export JSON is blue, Distribute points keeping percentages is violet and the formula editor Close button has a contrasting label. Environment allocation controls align their labels, and source guidance appears below the matching fields. On narrow panels it switches to labeled KPI cards to avoid horizontal scrolling; formula editing remains in a separate dialog. Operator and Vendor Maps give mapped source labels more space than canonical labels, and their creation forms put Colour first with aligned field labels.
+### Methodology controls
 
-GAP KPI Priority includes the category of each KPI and preserves an editable, transferable priority list. This list currently does not control GAP results or PowerPoint ordering: individual comparisons use signed GAP from lowest to highest, with unavailable values last; comparisons with multiple operators retain the default KPI definition order. KPI names are bold, and each row offers distinct-colored up/down, first/last and specific-position controls; the position button reveals a small inline field in reserved space on the right, keeping the table layout unchanged. Its green checkmark applies a whole number from 1 to the number of KPIs; the red cross cancels. Enter also applies the position; Escape or clicking the position button again closes the field without moving the KPI. Web and PowerPoint GAP tables show KPI rows only, without category subtotals or overall averages. Category cells group consecutive KPIs with alternating pale-blue block fills. Historical jobs retain their configuration snapshot; a changed configuration generates a new calculation/cache identity. Operator labels, order and colors continue to come from Operator Mappings.
+| Action | Result |
+| --- | --- |
+| Create / Duplicate Methodology | Start a new definition or use an existing methodology as the basis for a revision. |
+| Rename / edit title | Change the methodology identity or descriptive title. |
+| Set Default | Choose the saved methodology initially offered for future scoring jobs. |
+| Save Methodology | Validate and persist the complete methodology, including all three subpanels. |
+| Export Methodology (JSON) | Download the selected methodology only. |
+| Import Methodology (JSON) | Import a portable methodology document. |
+| Admin Export / Backup | Package every saved methodology and the default selection together. |
 
-Use the Scoring & GAP Analysis Configuration component in Import / Export / Transfer to move all saved profiles, their active selection, KPI definitions, aggregation hierarchy and GAP KPI priorities together. Main Cities appears before Operator & Vendor Maps in both Export and Backup selectors. Version-2 exports include the collection; legacy single-configuration packages remain importable. They are included in configuration backups and full workspace database backups and restored within the destination workspace. See [Scoring & GAP Analysis](scoring-gap-analysis.md) for interpolation, coverage, results and exports.
+> [!IMPORTANT]
+> **One save operation.** Save Methodology appears above the subpanels and inside each one for convenience. Every instance saves the same complete setup; there are no independent hierarchy or priority saves.
+
+The database is the source of record. Invalid edits do not replace the saved configuration. Historical jobs keep their methodology snapshot; changing the saved methodology changes the identity of subsequent calculations.
+
+### Methodology Environments
+
+Choose the environment to edit, or create, rename or delete one. Keep at least one environment with a positive overall allocation.
+
+| Setting | What it controls |
+| --- | --- |
+| CDR filters: G_Level_1 and optional G_Level_2 | Which source rows belong to the environment. Leave the optional second value empty to include all its values. Overlapping environment selections are rejected. |
+| Environment total | The maximum points allocated to that environment. |
+| Edit weights by Points | Edit absolute KPI allocations. |
+| Edit weights by Weight (%) | Edit relative shares while preserving the environment total and redistributing the other shares proportionally. |
+| Distribute points keeping percentages | Allocate a new total using a reference environment's relative KPI shares. Thresholds and formulas are not copied. |
+
+Creating an environment copies KPI rules and proportions from the selected reference; its own CDR filters determine the rows included. NetCheck 2026 includes Walk with zero initial points and editable relative weights.
+
+### KPI Definitions, Scoring & Thresholds
+
+Expand this subpanel to edit KPI specifications, thresholds and weights for the selected environment. Its pastel-red presentation separates the detailed KPI editor from the green setup panels.
+
+- Edit the category, label, source CDR type, direction and mapping curve: Linear, Quadratic or Smooth curve.
+- Use the KPI Definition pencil to edit the formula and filter JSON in a larger dialog. Closing the dialog retains the draft until Save Methodology.
+- Configure thresholds, KPI type and score interpolation anchors. Ultra can be absent, numeric or derived from the best valid KPI measurement in its comparison context.
+- Add or delete KPIs; at least one must remain. New KPIs receive stable K-number identifiers. Moving or deleting rows does not renumber other KPIs.
+- Move KPIs within their category, change their category or reorder whole categories. Category totals show points, environment-relative weights and global weights.
+- Renaming a KPI code updates its saved GAP priority reference without changing its priority.
+
+Max Points displays two decimal places while retaining full precision for calculation and unchanged allocations when saved. The formula determines the calculation basis; formulas and filters must use supported engine fields and operations.
+
+### Methodology Aggregation Hierarchy
+
+Reorder Operator, Vendor, Region, City and Campaign. Operator is mandatory for calculations. The hierarchy controls the selection panels and hierarchical result tables, charts and PowerPoint output.
+
+### Methodology KPIs Priorities for GAP analysis
+
+Maintain the transferable KPI priority list with up/down, first/last or specific-position controls. The position must be a whole number from 1 to the number of KPIs; Enter applies it and Escape cancels.
+
+> [!NOTE]
+> **Priority and result ordering.** The saved priority list does not currently determine GAP result order. Individual comparisons sort signed GAP from lowest to highest, with unavailable values last; All Operators retains KPI definition order.
+
+Web and PowerPoint GAP tables include a final sum for each comparison column. Individual PPT comparisons show Average KPI GAP and the average of the column GAP totals. These are distinct statistics; see the [complete Scoring & GAP Analysis guide](scoring-gap-analysis.md) for examples, coverage rules and JSON formats.

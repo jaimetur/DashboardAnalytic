@@ -2,6 +2,24 @@
 
 Docker Compose is the recommended service deployment. Production pulls a published image; development mounts source and enables reload.
 
+> [!IMPORTANT]
+> **Persist host storage.** Mount the configuration and data directories before recreating a container. Files kept only in the container layer do not survive its replacement.
+
+## In this guide
+
+| Task or topic | Go to |
+| --- | --- |
+| Before deployment | [Open section](#before-deployment) |
+| Production | [Open section](#production) |
+| Development | [Open section](#development) |
+| Example environment | [Open section](#example-environment) |
+| Persistence | [Open section](#persistence) |
+| Operations | [Open section](#operations) |
+| Safe upgrade | [Open section](#safe-upgrade) |
+| Build cache and stale-image checks | [Open section](#build-cache-and-stale-image-checks) |
+| Server-to-server connectivity | [Open section](#server-to-server-connectivity) |
+| Backup scope | [Open section](#backup-scope) |
+
 ## Before deployment
 
 - Install Docker Engine and Compose.
@@ -92,6 +110,9 @@ docker buildx imagetools inspect IMAGE_REPOSITORY:IMAGE_TAG
 ```
 
 ## Safe upgrade
+
+> [!TIP]
+> **Verify an upgrade.** Pull the intended image and recreate the container. Restarting an existing container alone does not install a newly pulled image.
 
 1. Back up the complete host config and data directories.
 2. Record the currently running image digest.

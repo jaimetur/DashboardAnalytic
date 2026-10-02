@@ -1,6 +1,17 @@
 # Product roadmap
 
+## In this guide
+
+| Task or topic | Go to |
+| --- | --- |
+| Available now | [Open section](#available-now) |
+| Planned product work | [Open section](#planned-product-work) |
+| Architecture considerations | [Open section](#architecture-considerations) |
+
 ## Available now
+
+> [!NOTE]
+> **Available versus planned.** The first section describes existing capabilities. Planned items are future work, not features available in the current release.
 
 - Named, access-controlled workspaces.
 - CDR ingestion, profiling, preview
@@ -21,7 +32,7 @@
 ## Planned product work
 
 - Non-qualified calls Analysis module.
-- Configuration datasets injestion to enrich CDR dataset and combine them to extract combined info using SQL Queries or Report Templates.
+- Configuration datasets ingestion to enrich CDR dataset and combine them to extract combined info using SQL Queries or Report Templates.
 - Additional validated KPI/chart contracts.
 - Smart Orchestrator Logs Reports.
 

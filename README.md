@@ -8,6 +8,29 @@ Dashboard Analytic is a multi-user web application for processing CDR datasets, 
 
 After login, the application opens **Help Home** by default.
 
+> [!NOTE]
+> **Choose the right guide.** This page is the product and deployment quick start. The Help chapters explain module workflows, examples and operational rules.
+
+> [!IMPORTANT]
+> **Keep runtime data persistent.** Back up configuration and workspace storage, replace bootstrap passwords and set a private APP_SECRET_KEY before exposing the service.
+
+## In this guide
+
+| Topic | Go to |
+| --- | --- |
+| Capabilities | [Open section](#capabilities) |
+| Modules and sections | [Open section](#modules-and-sections) |
+| Quick workflow | [Open section](#quick-workflow) |
+| Requirements | [Open section](#requirements) |
+| Run from source | [Open section](#run-from-source) |
+| Configuration | [Open section](#configuration) |
+| Default accounts | [Open section](#default-accounts) |
+| Docker deployment | [Open section](#docker-deployment) |
+| GitHub Actions and images | [Open section](#github-actions-and-images) |
+| Repository layout | [Open section](#repository-layout) |
+| Current limitations | [Open section](#current-limitations) |
+| More documentation | [Open section](#more-documentation) |
+
 ## Capabilities
 
 - Upload and process `CSV`, `XLS`, `XLSX` and `XLSM` files.
@@ -50,11 +73,19 @@ Datasets Analysis analyses one ready Data, Voice or Speech CDR.
 
 ### E2E Dashboards
 
-Create, save, duplicate, import and export workspace Dashboards from an NSA/SA Report Template. The editor separates **Select Dataset Universe** from **Select Dataset Filters**: Scope, CDRs and dates can be applied temporarily or saved as the Dashboard universe, while default, aliased and custom Auto-calculated Field filters can be applied, saved, reloaded or discarded independently. Each Dashboard only uses CDRs of its NR Mode (NSA or SA, set per CDR at upload and editable in the Workspace Datasets table). Switching scope automatically selects the newest CDR per type for Multivendor or the two newest per type for Operator Comparison. View Dashboard opens immediately and shows centred preparation progress until its navigable 16:9 slides and live Canvas charts are ready. Generate PPT uses the same prepared definition and waits for pending filter decisions. Dashboard queries read the workspace's combined CDR tables directly; reusable selection manifests and chart models avoid recalculating unchanged work, and a low-priority background worker pre-caches each Dashboard's standard universes (all CDRs and the newest one to four per type) without blocking opening or exporting. See [E2E Dashboards Help](help/e2e-dashboards.md) for the operational workflow and [Workspace Config → Report Template reference](help/workspace-config.md#report-template-reference) for template authoring, supported chart types and examples.
+Create, save, duplicate, import and export workspace Dashboards from an NSA/SA Report Template. The editor separates **Select Dataset Universe** from **Select Dataset Filters**: Scope, CDRs and dates can be applied temporarily or saved as the Dashboard universe, while default, aliased and custom Auto-calculated Field filters can be applied, saved, reloaded or discarded independently.
+
+Each Dashboard only uses CDRs of its NR Mode (NSA or SA, set per CDR at upload and editable in the Workspace Datasets table). Switching scope automatically selects the newest CDR per type for Multivendor or the two newest per type for Operator Comparison.
+
+View Dashboard opens immediately and shows centred preparation progress until its navigable 16:9 slides and live Canvas charts are ready. Generate PPT uses the same prepared definition and waits for pending filter decisions.
+
+Dashboard queries read the workspace's combined CDR tables directly; reusable selection manifests and chart models avoid recalculating unchanged work, and a low-priority background worker pre-caches each Dashboard's standard universes (all CDRs and the newest one to four per type) without blocking opening or exporting.
+
+See [E2E Dashboards Help](help/e2e-dashboards.md) for the operational workflow and [Workspace Config → Report Template reference](help/workspace-config.md#report-template-reference) for template authoring, supported chart types and examples.
 
 ### E2E Reporting
 
-E2E Reporting combines ready CDRs with a Report Template from the active workspace.
+E2E Reporting combines ready CDRs with a Report Template from the active workspace. It is available to super-admin accounts and EJAITUR.
 
 - **Reporting module**: choose NetCheck CDR Reports or the future Smart Orchestrator Logs workflow.
 - **NetCheck CDR Reports**: select Data, Voice and Speech campaigns, NSA/SA, template and Operator/Vendor Comparison.
@@ -63,7 +94,15 @@ E2E Reporting combines ready CDRs with a Report Template from the active workspa
 
 ### Scoring & GAP Analysis
 
-Calculate scoring from ready Data, Voice and Speech CDRs of one NR Mode, grouped by Operator and optional Vendor, Region, City or Campaign in a configurable hierarchy. The latest CDR of each type is preselected; automatic and dataset recalculations include compatible companions. Filter the selected CDRs by Operator, Vendor, Region, City (including Main Cities) and Campaign using cached values, in the configured hierarchy order. Persisted jobs retain their filters, scoring configuration, coverage and baseline GAP comparisons. Results offer reference-style KPI matrices, optional measured values, environment filtering, threshold/GAP colors and labeled charts with an enlarged view. Operator Mapping controls operator order and colors. Scoring Calculation lets each job select a saved methodology while defaulting to the workspace active profile. Workspace Config manages named scoring profiles with an active methodology, editable category-grouped KPI formulas/filters, additions/deletions, thresholds, weights, score mappings, aggregation hierarchy and GAP priority. Category totals show points, Environment-relative and global weights; Environment allocations and KPI shares support Points or Weight (%) editing, including Walk at zero points in NetCheck 2026 and custom Environments with explicit CDR matching; all profiles travel through import/export and backup/restore. Expanded and Summary results show category subtotals and mean KPI GAPs. Export CSV tables or editable PowerPoint matrices and charts. See [Scoring & GAP Analysis Help](help/scoring-gap-analysis.md).
+Calculate scoring from ready Data, Voice and Speech CDRs of one NR Mode, grouped by Operator and optional Vendor, Region, City or Campaign in a configurable hierarchy. The latest CDR of each type is preselected; automatic and dataset recalculations include compatible companions.
+
+Filter the selected CDRs by Operator, Vendor, Region, City (including Main Cities) and Campaign using cached values, in the configured hierarchy order. Persisted jobs retain their filters, scoring configuration, coverage and GAP reference comparisons. Results offer reference-style KPI matrices, optional measured values, environment filtering, threshold/GAP colors and labeled charts with an enlarged view. Operator Mapping controls operator order and colors.
+
+Scoring Calculation lets each job select a saved methodology while defaulting to the workspace default methodology. Workspace Config manages named scoring methodologies with a default selection, editable category-grouped KPI formulas/filters, additions/deletions, thresholds, weights, score mappings, aggregation hierarchy and GAP priority.
+
+Category totals show points, Environment-relative and global weights; Environment allocations and KPI shares support Points or Weight (%) editing, including Walk at zero points in NetCheck 2026 and custom Environments with explicit CDR matching; all methodologies travel through import/export and backup/restore. Expanded and Summary results show category subtotals and mean KPI GAPs.
+
+Export CSV tables or editable PowerPoint matrices and charts. See [Scoring & GAP Analysis Help](help/scoring-gap-analysis.md).
 
 ### Chart Builder
 
@@ -75,6 +114,10 @@ Chart Builder reuses the shared Interactive Preview for ad-hoc analysis.
 - Select one or more processed datasets of that type.
 - Configure title, chart type, KPI, filters, ordered Rows/Columns aggregations and legend.
 - Preview changes without creating a report or altering a template.
+
+### Query Builder
+
+Build read-only SQL in Assistance Mode or SQL Mode, inspect paginated results and save reusable workspace queries. Copy exports the visible page; CSV exports every row matching the result filters. See [Query Builder Help](help/query-builder.md).
 
 ### App Logs
 
@@ -135,7 +178,11 @@ Open `http://127.0.0.1:7279`.
 
 ### macOS launcher
 
-The project keeps `Dashboard Analytic.app` under `macos-launcher/`. It uses the Dashboard Analytic logo as its icon and a universal native executable for Apple Silicon and Intel Macs. Its control window starts the local server on port `7278` without opening the browser automatically. Use **Open in Browser** to open the configured local URL, **Restart Server** to stop the current process cleanly before starting its replacement, or **Stop Server and Quit**. Closing the window, pressing `⌘Q`, or choosing **Quit** in the Dock also stops the server cleanly. The launcher monitors forced application termination so the server cannot remain orphaned after its window disappears. It reuses a working project `.venv` when available; otherwise, including when that environment contains Intel-only packages, it creates the separate native `.dashboard-analytic-venv` environment and installs the dependencies. Python 3.12 or later must be available on the Mac.
+The project keeps `Dashboard Analytic.app` under `macos-launcher/`. It uses the Dashboard Analytic logo as its icon and a universal native executable for Apple Silicon and Intel Macs. Its control window starts the local server on port `7278` without opening the browser automatically.
+
+Use **Open in Browser** to open the configured local URL, **Restart Server** to stop the current process cleanly before starting its replacement, or **Stop Server and Quit**. Closing the window, pressing `⌘Q`, or choosing **Quit** in the Dock also stops the server cleanly. The launcher monitors forced application termination so the server cannot remain orphaned after its window disappears.
+
+It reuses a working project `.venv` when available; otherwise, including when that environment contains Intel-only packages, it creates the separate native `.dashboard-analytic-venv` environment and installs the dependencies. Python 3.12 or later must be available on the Mac.
 
 Build the complete installer from the project root:
 
@@ -313,7 +360,7 @@ DashboardAnalytic/
 - General analysis caches remain process-local; E2E Dashboard preview manifests and report-faithful compact chart models persist beside each workspace database and survive application restarts. Dashboard data itself is queried directly from the combined CDR tables.
 - SQLite is the current persistence model and may not suit very large concurrent deployments.
 - Smart Orchestrator Logs reporting is visible but not implemented.
-- Scoring starts from NetCheck 2026 Q2 Drive City/Road rules. Walk is supported at zero initial points with City-derived thresholds that require validation before allocation; additional environments require engine support.
+- Scoring starts from NetCheck 2026 Q2 Drive City/Road rules. Walk is supported at zero initial points with City-derived thresholds that require validation before allocation; custom environments can be configured using supported CDR fields and formula operations.
 
 ## More documentation
 

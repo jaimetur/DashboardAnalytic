@@ -4,26 +4,39 @@
 
 # Dashboard Analytic Help
 
+> [!TIP]
+> **Start with your task.** Choose a guide below, then use its task index or the Page Sections navigation to reach the relevant workflow.
+
 Use this Help centre for detailed workflows, examples and technical rules. For a shorter introduction and deployment quick start, open the **Readme** tab.
 
 Help Navigation groups chapters under General, Main Modules, Administrative Modules and Reference. Chapters outside your access are omitted.
 
+## In this guide
+
+| Task or topic | Go to |
+| --- | --- |
+| Choose where to start | [Open section](#choose-where-to-start) |
+| Documentation map | [Open section](#documentation-map) |
+| Fast troubleshooting | [Open section](#fast-troubleshooting) |
+
 ## Choose where to start
 
-- New to the product? Read [Product Overview](overview.md).
-- Comparing results with another tool? Read [Technical Considerations](technical-considerations.md).
-- Installing the service? Read [Deployment Configuration](configuration.md) and [Docker Deployment](docker-deployment.md).
-- Uploading data? Read the [Data Ingestion](workspace-management.md#data-ingestion) section in Workspace Management.
-- Analysing one dataset? Read [Datasets Analysis](datasets-analysis.md).
-- Exploring a complete template as a live dashboard or generating its PowerPoint? Read [E2E Dashboards](e2e-dashboards.md).
-- Generating persistent Reports or Chart Sets? Read [E2E Reporting](e2e-reporting.md).
-- Calculating NetCheck scores or comparing operator gaps? Read [Scoring & GAP Analysis](scoring-gap-analysis.md).
-- Building ad-hoc SQL queries with guided controls? Read [Query Builder](query-builder.md).
-- Authoring templates? Read [Workspace Config](workspace-config.md), including the [Report Template reference](workspace-config.md#report-template-reference).
-- Managing users and transfers? Read [Administrator Config](administrator-config.md).
-- Changing application-wide runtime settings? Read [Application Config](app-config.md).
-- Managing templates and chart mappings for a workspace? Read [Workspace Config](workspace-config.md).
-- Reviewing application and workspace activity? Read [App Logs](app-logs.md).
+| Your task | Recommended guide |
+| --- | --- |
+| New to the product | [Product Overview](overview.md) |
+| Comparing results with another tool | [Technical Considerations](technical-considerations.md) |
+| Installing the service | [Deployment Configuration](configuration.md) and [Docker Deployment](docker-deployment.md) |
+| Uploading data | the [Data Ingestion](workspace-management.md#data-ingestion) section in Workspace Management |
+| Analysing one dataset | [Datasets Analysis](datasets-analysis.md) |
+| Exploring a complete template as a live dashboard or generating its PowerPoint | [E2E Dashboards](e2e-dashboards.md) |
+| Generating persistent Reports or Chart Sets | [E2E Reporting](e2e-reporting.md) |
+| Calculating NetCheck scores or comparing operator gaps | [Scoring & GAP Analysis](scoring-gap-analysis.md) |
+| Building ad-hoc SQL queries with guided controls | [Query Builder](query-builder.md) |
+| Authoring templates | [Workspace Config](workspace-config.md), including the [Report Template reference](workspace-config.md#report-template-reference) |
+| Managing users and transfers | [Administrator Config](administrator-config.md) |
+| Changing application-wide runtime settings | [Application Config](app-config.md) |
+| Managing templates and chart mappings for a workspace | [Workspace Config](workspace-config.md) |
+| Reviewing application and workspace activity | [App Logs](app-logs.md) |
 
 ## Documentation map
 
@@ -40,7 +53,7 @@ Help Navigation groups chapters under General, Main Modules, Administrative Modu
 - [Query Builder](query-builder.md) — guided query design, SQL editing, execution and saved queries.
 - [App Logs](app-logs.md) — workspace events and live server output.
 - [Application Config](app-config.md) — application-wide runtime settings and their effect.
-- [Workspace Config](workspace-config.md) — workspace-owned Report Templates, Main Cities, Operator Maps and Vendor Maps.
+- [Workspace Config](workspace-config.md) — workspace-owned templates, Main Cities, chart mappings and scoring methodologies.
 - [Administrator Config](administrator-config.md) — users, portability, databases and datasets.
 - [Project Structure](project-structure.md) — source/browser layers, database ownership, persistent storage, caches and generated output.
 - [Roadmap](roadmap.md) — current limitations and planned work.

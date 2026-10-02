@@ -2,6 +2,33 @@
 
 This article collects rules that affect data interpretation, performance, persistence and generated output. Read it before comparing Dashboard Analytic with another analytical tool.
 
+> [!IMPORTANT]
+> **Source values and presentation.** Stored source values and chart labels are different layers. Canonical chart aliases do not rewrite uploaded workbooks or source Operator values.
+
+> [!NOTE]
+> **Compare equivalent selections.** Match CDRs, NR Mode, filters, aggregation levels and missing-value rules before comparing results with another tool.
+
+> [!TIP]
+> **Caches and backups.** Caches accelerate views and can be rebuilt. Preserve databases and raw input when a recoverable backup is required.
+
+## In this guide
+
+| Task or topic | Go to |
+| --- | --- |
+| Storage boundaries | [Open section](#storage-boundaries) |
+| Processed and derived columns | [Open section](#processed-and-derived-columns) |
+| Operator normalisation | [Open section](#operator-normalisation) |
+| NR Mode and radio-access selection | [Open section](#nr-mode-and-radio-access-selection) |
+| Test result semantics | [Open section](#test-result-semantics) |
+| Campaign ordering | [Open section](#campaign-ordering) |
+| Template execution semantics | [Open section](#template-execution-semantics) |
+| Multivendor calculation and remapping | [Open section](#multivendor-calculation-and-remapping) |
+| Interactive previews and Dashboard preparation | [Open section](#interactive-previews-and-dashboard-preparation) |
+| Filtered dataset preview | [Open section](#filtered-dataset-preview) |
+| Background jobs and output | [Open section](#background-jobs-and-output) |
+| Import, export and server transfer | [Open section](#import-export-and-server-transfer) |
+| Performance and scale | [Open section](#performance-and-scale) |
+
 ## Storage boundaries
 
 Dashboard Analytic separates global configuration from workspace data.
@@ -32,9 +59,9 @@ The workspace registry is local to the deployment. Full Environment imports rebu
 
 The importer preserves source fields and adds normalised fields used across modules. Common examples include:
 
-- `Campaign`, formatted as `yyyy-Qx` when year and quarter can be resolved.
-- `Operator`, normalised for stable display and comparison.
-- `vendor`, populated by the explicit vendor-mapping workflow.
+- `Campaign`, preserving source text; filters and chart labels can present recognised values as `YYYY-Qn`, `YYYY-Qn_SA` or `YYYY-Qn_NSA`.
+- `Operator`, preserving source values; configured aliases supply canonical labels for charts and comparisons.
+- `Vendor`, populated by explicit vendor mapping or the operator fallback, and `Vendor_Only`, which removes a recognised operator prefix.
 - `Call Family`, derived from call/session mode.
 - `Test Family`, derived from the available test type/name fields.
 - `Rate Bucket`, calculated for distribution charts from configured bucket limits.
@@ -43,7 +70,9 @@ Derived preview columns are visually distinguished from source columns. They do 
 
 ### Auto-calculated Fields and combined tables
 
-Auto-calculated Fields are workspace definitions. A field has a name, selected CDR sources, a fallback and either ordered case-insensitive `condition => result` rules or a nested Tableau-style `IF / THEN / ELSEIF / ELSE / END` expression. It is materialised only in the individual and combined CDR tables for its selected sources. The same parsed decision tree drives in-memory previews and parameterized SQLite materialization so nested-branch and fallback semantics remain identical.
+Auto-calculated Fields are workspace definitions. A field has a name, selected CDR sources, a fallback and either ordered case-insensitive `condition => result` rules or a nested Tableau-style `IF / THEN / ELSEIF / ELSE / END` expression. It is materialised only in the individual and combined CDR tables for its selected sources.
+
+The same parsed decision tree drives in-memory previews and parameterized SQLite materialization so nested-branch and fallback semantics remain identical.
 
 Combined reporting tables are intentionally compact. They always retain reporting-core fields, Preview filter fields, source fields required by applicable Auto-calculated Field rules and resulting calculated fields. Other template-requested source fields are added lazily when a chart/report first requires them. This avoids eagerly copying every source column for every template, which would make imports and template changes unnecessarily expensive.
 
@@ -155,7 +184,9 @@ vendor NOT CONTAINS (Mixed, Other);
 
 E2E Reporting, Chart Builder and Report Template Editor use the shared Interactive Preview. E2E Dashboards uses the same chart contracts in its live viewer, expanded viewer and historical Charts Panel, while preparing one synchronized dataset selection for the complete Dashboard.
 
-Live charts draw their Canvas models in the user's browser. Server-side Report, Chart Set and Dashboard exports send those same models through a persistent Node/Chromium renderer, which keeps chart geometry and semantic tooltips aligned with the interactive view. Docker includes these runtime dependencies; source deployments using `dashboard-canvas` need Node.js, a supported Chromium-family browser and the WebSocket module. `DASHBOARD_ANALYTIC_CHROMIUM` can select an explicit browser executable, while `DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER=pil` selects the legacy painter.
+Live charts draw their Canvas models in the user's browser. Server-side Report, Chart Set and Dashboard exports send those same models through a persistent Node/Chromium renderer, which keeps chart geometry and semantic tooltips aligned with the interactive view. Docker includes these runtime dependencies; source deployments using `dashboard-canvas` need Node.js, a supported Chromium-family browser and the WebSocket module.
+
+`DASHBOARD_ANALYTIC_CHROMIUM` can select an explicit browser executable, while `DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER=pil` selects the legacy painter.
 
 The shared preview cache separates expensive data work from presentation work:
 
@@ -176,7 +207,9 @@ E2E Dashboard persistence has additional layers:
 
 When a workspace opens, the application compares its saved cache signature with the current application and every Dashboard cache-format version. A mismatch deletes obsolete chart models, manifests and selection metadata, then records the current signature. Current-version artifacts remain available. The Workspace **Clear cache** action performs the same derived-data cleanup on demand without deleting definitions, datasets, combined CDR tables, templates or generated jobs.
 
-Dashboard pre-caching (the automatic warm-up of each Dashboard's standard universes, described in [E2E Dashboards](e2e-dashboards.md#preparation-lifecycle-and-cache)) runs on a dedicated low-priority thread, separate from the shared background scheduler used by datasets and exports. It shares one Dashboard work slot with foreground preparations and exports, always yields to them, and prefers Dashboards open in a browser. Chart models are generated only when the corresponding chart is viewed or included in a requested PPT.
+Dashboard pre-caching (the automatic warm-up of each Dashboard's standard universes, described in [E2E Dashboards](e2e-dashboards.md#preparation-lifecycle-and-cache)) runs on a dedicated low-priority thread, separate from the shared background scheduler used by datasets and exports. It shares one Dashboard work slot with foreground preparations and exports, always yields to them, and prefers Dashboards open in a browser.
+
+Chart models are generated only when the corresponding chart is viewed or included in a requested PPT.
 
 The combined-table revision in these cache keys advances only when rows are inserted or rebuilt. Adding or filling columns (for example when another Dashboard or template needs a new field) records a separate timestamp and keeps every prepared universe valid.
 

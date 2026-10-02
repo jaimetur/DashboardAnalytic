@@ -46,6 +46,7 @@
 #### 📚 Documentation:
 - Scoring & GAP Analysis help consolidates workflows, methodology configuration and source references into one structured guide, with practical GAP examples, comparison tables and colored information/tip/warning cards. Internal help links navigate in the same tab.
 - E2E Dashboards help uses task-based navigation, concise workflows, action tables and colored notices covering selections, Apply/Save, live views, exports, cache and portability.
+- Remaining Help chapters, README and contributor guidance use task indexes, shorter explanations, reference tables and visual notices; workspace/scoring configuration, source-value semantics and Dashboard cache guidance reflect current behaviour.
 
 ---
 

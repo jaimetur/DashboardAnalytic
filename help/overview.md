@@ -2,6 +2,30 @@
 
 Dashboard Analytic turns processed CDR datasets into interactive KPI analysis, reusable charts and template-driven PowerPoint reports. It is a multi-user application: datasets, generated output, Auto-calculated Fields and Report Templates are isolated by workspace, while users and access permissions are shared configuration.
 
+> [!NOTE]
+> **Workspace ownership.** Open the intended workspace before selecting datasets, methodologies or templates. Application Config and user accounts have a separate global scope.
+
+> [!TIP]
+> **Choose an analysis workflow.** Use Datasets Analysis for one CDR, Builders for ad-hoc exploration, E2E Dashboards for a complete template and Scoring & GAP Analysis for scoring comparisons.
+
+## In this guide
+
+| Task or topic | Go to |
+| --- | --- |
+| End-to-end workflow | [Open section](#end-to-end-workflow) |
+| Header and navigation | [Open section](#header-and-navigation) |
+| Application and workspace configuration | [Open section](#application-and-workspace-configuration) |
+| Background tasks and floating cards | [Open section](#background-tasks-and-floating-cards) |
+| Workspace | [Open section](#workspace) |
+| Datasets Analysis | [Open section](#datasets-analysis) |
+| E2E Dashboards | [Open section](#e2e-dashboards) |
+| E2E Reporting | [Open section](#e2e-reporting) |
+| Chart Builder | [Open section](#chart-builder) |
+| Query Builder | [Open section](#query-builder) |
+| App Logs | [Open section](#app-logs) |
+| Administrator Config | [Open section](#administrator-config) |
+| Roles at a glance | [Open section](#roles-at-a-glance) |
+
 ## End-to-end workflow
 
 1. Sign in and open a workspace.
@@ -10,7 +34,7 @@ Dashboard Analytic turns processed CDR datasets into interactive KPI analysis, r
 4. Optionally map Vodafone and Three vendor information.
 5. Create or open a saved **E2E Dashboard** to analyse a complete template interactively, reuse prepared selections and generate its PowerPoint. Use **Datasets Analysis**, **Chart Builder** or **Query Builder** for focused exploration, or **E2E Reporting** for the classic report and Chart Set workflow.
 6. Follow Dashboard preparation and generation in the floating task cards, **PPT Generation Jobs** and **Reports and Charts Jobs**.
-7. Use **Scoring & GAP Analysis** for saved NetCheck scores and baseline operator comparisons across selected CDRs and aggregation levels; CDR processing also queues default Operator scoring automatically. See [Scoring & GAP Analysis](scoring-gap-analysis.md).
+7. Use **Scoring & GAP Analysis** for saved NetCheck scores and GAP reference operator comparisons across selected CDRs and aggregation levels; CDR processing also queues default Operator scoring when compatible companion CDRs are available. See [Scoring & GAP Analysis](scoring-gap-analysis.md).
 8. Use **App Logs** for traceability and **Admin** for shared configuration.
 
 ## Header and navigation
@@ -30,7 +54,7 @@ The header is available throughout the authenticated application.
 
 ## Application and workspace configuration
 
-**Application Config** controls runtime settings shared by every workspace. The dedicated **Workspace Config** page groups Report Templates Management, Operator Mappings and Vendor Mappings for the active workspace. These are separate scopes: changing a workspace template or chart mapping does not change application runtime settings. See [Application Config](app-config.md) and [Workspace Config](workspace-config.md).
+**Application Config** controls runtime settings shared by every workspace. The dedicated **Workspace Config** page groups Report Templates Management, Main Cities, Operator & Vendor Maps and Scoring & GAP Analysis Setup for the active workspace. These are separate scopes: changing a workspace template or chart mapping does not change application runtime settings. See [Application Config](app-config.md) and [Workspace Config](workspace-config.md).
 
 ## Background tasks and floating cards
 
@@ -42,9 +66,13 @@ Floating cards group live tasks by execution context and keep their label, detai
 - **Blue — Other workspace**: work that continues for a different workspace after the user switches away from it.
 - **Red — System tasks**: deployment-wide work such as portable-package and server-transfer operations.
 
-Dashboard cards also group preparation and chart-model work under the Dashboard name and distinguish the active item from its queued position. An **Interrupt task** action appears when the job supports cancellation. Cards can be minimized without interrupting their tasks, retain that state while moving between modules or reloading the page, refresh automatically, and retain a completed task briefly so its final state is visible before the card disappears. Persistent generation jobs remain available in their module table after the floating notification closes.
+Cards identify the real active preparation or rendering task. An **Interrupt task** action appears when the job supports cancellation.
 
-Workspace data jobs run on the server in this order: Vendor and Region mapping datasets by ID, other datasets by ID, combined CDR table recreation, then Auto-calculated Field materialization. One data job runs per Workspace at a time. The server also caps total background concurrency to leave an interactive CPU available. Queued and processing datasets can be stopped individually or with **Stop All**; large CDR workers run in lower-priority processes and respond to the same Stop request.
+Cards can be minimized without interrupting their tasks, retain that state while moving between modules or reloading the page, refresh automatically, and retain a completed task briefly so its final state is visible before the card disappears. Persistent generation jobs remain available in their module table after the floating notification closes.
+
+Workspace data jobs run on the server in this order: Vendor and Region mapping datasets by ID, other datasets by ID, combined CDR table recreation, then Auto-calculated Field materialization. One data job runs per Workspace at a time. The server also caps total background concurrency to leave an interactive CPU available.
+
+Queued and processing datasets can be stopped individually or with **Stop All**; large CDR workers run in lower-priority processes and respond to the same Stop request.
 
 ## Workspace
 
@@ -61,7 +89,7 @@ Workspace is the entry point for data and storage management.
 
 - Upload `CSV`, `XLS`, `XLSX` and `XLSM` files.
 - Review the proposed type for every file in a batch.
-- Import CDR-Data, CDR-Voice, CDR-Speech, Smart Orchestrator Logs, VFUK mappings, 3UK mappings or generic datasets.
+- Import CDR-Data, CDR-Voice, CDR-Speech, VFUK mappings, 3UK mappings or generic datasets. Smart Orchestrator Logs is reserved for future support.
 - Optionally apply ready VFUK/3UK mappings while a CDR is processed.
 
 ### Queue and Status
@@ -77,7 +105,7 @@ Workspace is the entry point for data and storage management.
 
 - Create, edit, duplicate, delete, import and export Auto-calculated Fields from the Workspace panel.
 - A field is applied only to the CDR types selected in **Available for**.
-- Saving, importing or rematerializing fields starts a background job. The Materialization status panel shows its percentage and completion state.
+- Save persists field definitions. Save & Materialize, importing or rematerializing starts a background job. The Materialization status panel shows its percentage and completion state.
 - Existing combined `CDR-Data`, `CDR-Voice` and `CDR-Speech` tables appear at the bottom of Datasets. Preview them with the same filters as individual CDRs.
 - Use the circular **Recreate** action when a combined table needs rebuilding. It restores missing individual persisted rows from their source file when possible, then verifies contributed and total row counts.
 
@@ -115,7 +143,9 @@ Datasets Analysis analyses one processed CDR at a time.
 
 ## E2E Dashboards
 
-E2E Dashboards is the main analysis module and the complete template-driven workflow behind Dashboard Analytic. A saved Dashboard binds a name and NR Mode to a workspace Report Template, filters, hidden fields, slide comments and an optional saved Dataset Universe. Scope, selected Data/Voice/Speech CDRs and dates can be applied temporarily or saved independently from filters. The definition can be opened repeatedly, duplicated, exported or moved with its workspace without copying source rows into it.
+E2E Dashboards is the main analysis module and the complete template-driven workflow behind Dashboard Analytic. A saved Dashboard binds a name and NR Mode to a workspace Report Template, filters, hidden fields, slide comments and an optional saved Dataset Universe. Scope, selected Data/Voice/Speech CDRs and dates can be applied temporarily or saved independently from filters.
+
+The definition can be opened repeatedly, duplicated, exported or moved with its workspace without copying source rows into it.
 
 ### Manage Dashboards
 
@@ -134,7 +164,9 @@ E2E Dashboards is the main analysis module and the complete template-driven work
 
 ### Preparation and reuse
 
-The module prepares a **Filtered Universe** once and reuses it across every template chart. Its selection metadata contains counts, facets and reproducible SQL predicates; chart queries run directly against the combined CDR tables. Reusable preview manifests and versioned Canvas models avoid rebuilding unchanged work after reopening a Dashboard or restarting the application. Preparation starts only when a user opens, refreshes or exports a Dashboard; listing, saving, editing and opening a workspace never enqueue Dashboard warm-up work. One global gate permits only one explicitly requested Dashboard dataset-preparation phase at a time. Opening a workspace removes cache artifacts written by older application or cache-format versions.
+The module prepares a **Filtered Universe** once and reuses it across every template chart. Its selection metadata contains counts, facets and reproducible SQL predicates; chart queries run directly against the combined CDR tables. Reusable preview manifests and versioned Canvas models avoid rebuilding unchanged work after reopening a Dashboard or restarting the application.
+
+Foreground preparation runs when a user opens, refreshes or exports a Dashboard. Automatic low-priority pre-caching also prepares standard dataset universes, yielding to foreground work. Chart models are built when viewed or requested for export. One global gate permits only one explicitly requested Dashboard dataset-preparation phase at a time. Opening a workspace removes cache artifacts written by older application or cache-format versions.
 
 Status cards distinguish data loading, queued data, chart rendering, queued charts, Ready, missing charts and failures. The floating background-task card shows the same work while users move between modules.
 
@@ -154,7 +186,7 @@ The operational guide is [E2E Dashboards](e2e-dashboards.md). Template creation,
 
 ## E2E Reporting
 
-E2E Reporting combines processed CDRs and a Report Template from the active workspace.
+E2E Reporting combines processed CDRs and a Report Template from the active workspace. It is available to super-admin accounts and EJAITUR.
 
 ### Reporting module selector
 
@@ -238,8 +270,8 @@ The **Admin** tab opens Administrator Config for `admin` and `super-admin` roles
 
 ### Workspace Config
 
-- Manage workspace Report Templates, Operator Mappings and Vendor Mappings on the dedicated Workspace Config page.
-- Use its Page Sections navigator to jump between the three panels.
+- Manage workspace Report Templates, Main Cities, Operator & Vendor Maps and scoring methodologies on the dedicated Workspace Config page.
+- Use its Page Sections navigator to reach the required configuration panel.
 - Open a workspace to manage its templates and chart mappings.
 
 See [Workspace Config](workspace-config.md) for panel operations and portability.
