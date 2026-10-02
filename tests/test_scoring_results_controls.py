@@ -151,6 +151,43 @@ process.stdout.write(JSON.stringify(context.result));
     }
 
 
+def test_incomplete_web_values_render_na_star_in_red_bold():
+    script = SCORING_SCRIPT.read_text(encoding='utf-8')
+    payload = {
+        'snippets': {
+            'firstValue': _function_source(script, 'firstValue'),
+            'formatMatrixNumber': _function_source(script, 'formatMatrixNumber'),
+            'formatScoreCell': _function_source(script, 'formatScoreCell'),
+            'formatRawKpiValue': _function_source(script, 'formatRawKpiValue'),
+            'styleIncompleteValue': _function_source(script, 'styleIncompleteValue'),
+        },
+    }
+    program = r"""
+const vm = require('node:vm');
+const payload = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+const context = {};
+vm.createContext(context);
+vm.runInContext(Object.values(payload.snippets).join('\n') + `
+const cases = [
+  formatMatrixNumber(null),
+  formatScoreCell({points: 12.345, complete: false}).text,
+  formatRawKpiValue(null),
+];
+globalThis.results = cases.map(text => {
+  const element = {textContent: text, style: {}};
+  styleIncompleteValue(element);
+  return {text, color: element.style.color, fill: element.style.fill, fontWeight: element.style.fontWeight};
+});`, context);
+process.stdout.write(JSON.stringify(context.results));
+"""
+    result = _run_node_json(program, payload)
+    assert result == [
+        {'text': 'N/A*', 'color': '#c62828', 'fill': '#c62828', 'fontWeight': '700'},
+        {'text': '12.35*', 'color': '#c62828', 'fill': '#c62828', 'fontWeight': '700'},
+        {'text': 'N/A*', 'color': '#c62828', 'fill': '#c62828', 'fontWeight': '700'},
+    ]
+
+
 def test_results_controls_are_grouped_with_icons_and_unique_environment_heading():
     template = SCORING_TEMPLATE.read_text(encoding='utf-8')
     script = SCORING_SCRIPT.read_text(encoding='utf-8')
@@ -430,7 +467,7 @@ def test_scoring_chart_pairs_render_five_operator_two_category_views():
         'makeExpandableChartCard',
         'renderCharts', 'renderHierarchyCharts', 'svgElement', 'hierarchyChartColor',
         'hierarchyDisplayValue', 'hierarchyPathEntry', 'hierarchyPrefixKey', 'appendHierarchyAxisBands',
-        'hierarchyPathValueLabel', 'hierarchyPathFullLabel', 'chartFitWidth',
+        'hierarchyPathValueLabel', 'hierarchyPathFullLabel', 'chartFitWidth', 'styleIncompleteValue',
     )
     payload = {'snippets': {name: _function_source(script, name) for name in names}}
     program = r"""
@@ -445,6 +482,7 @@ class Element {
     this.style = {};
     this.dataset = {};
     this.className = '';
+    this.textContent = '';
     this.clientWidth = 1000;
     this.classList = {add: value => { this.className = `${this.className} ${value}`.trim(); }};
   }
@@ -919,6 +957,57 @@ def test_render_warnings_hides_only_legacy_campaign_pooling_notice():
     assert 'items.splice' not in body
 
 
+def test_calculation_notes_render_coverage_emphasis_in_one_card_above_result_tabs():
+    script = SCORING_SCRIPT.read_text(encoding='utf-8')
+    template = SCORING_TEMPLATE.read_text(encoding='utf-8')
+    renderer = _function_source(script, 'renderWarnings')
+    note = (
+        'VF_UK / Samsung / 2026-Q1: maximum achievable scoring 933.2645 of 1000 points. '
+        'Affected environments and scoring ceilings: DriveCity: 933.2645 of 650 points.'
+    )
+    program = r"""
+const vm = require('node:vm');
+const payload = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+class Element {
+  constructor(tagName) { this.tagName = tagName; this.children = []; this.hidden = false; this.className = ''; this._text = ''; }
+  append(...nodes) { this.children.push(...nodes); }
+  replaceChildren(...nodes) { this.children = nodes; this._text = ''; }
+  set textContent(value) { this._text = String(value); this.children = []; }
+  get textContent() { return this._text + this.children.map(child => child.textContent).join(''); }
+}
+const box = new Element('div');
+const list = new Element('ul');
+const root = {querySelector(selector) { return selector === '[data-warning-box]' ? box : list; }};
+const document = {
+  createElement(tagName) { return new Element(tagName); },
+  createTextNode(value) { const node = new Element('#text'); node.textContent = value; return node; },
+};
+const renderWarnings = new Function('root', 'document', 'displayValue', payload.renderer + '\nreturn renderWarnings;')(
+  root, document, value => String(value ?? ''));
+renderWarnings([payload.note]);
+process.stdout.write(JSON.stringify({
+  hidden: box.hidden,
+  noteText: list.children[0]?.textContent,
+  emphasis: list.children[0]?.children.map(child => ({tag: child.tagName, className: child.className, text: child.textContent})),
+}));
+"""
+    actual = _run_node_json(program, {'renderer': renderer, 'note': note})
+
+    assert actual['hidden'] is False
+    assert actual['noteText'] == note
+    emphasis = [part for part in actual['emphasis'] if part['tag'] == 'strong']
+    assert [part['text'] for part in emphasis] == [
+        'maximum achievable scoring 933.2645 of 1000 points',
+        '933.2645 of 650 points',
+    ]
+    assert all(part['className'] == 'scoring-warning-maximum' for part in emphasis)
+
+    assert template.count('data-warning-box') == 1
+    assert 'data-environment-warning' not in template
+    assert template.index('data-warning-box') < template.index('data-result-tab=')
+    assert '.scoring-warning-maximum { font-size: 1.15em; font-weight: 800; }' in template
+
+
 def test_scoring_view_state_round_trips_filters_and_false_checkboxes():
     script = SCORING_SCRIPT.read_text(encoding='utf-8')
     snippets = {
@@ -1015,6 +1104,7 @@ def test_raw_kpi_columns_are_hidden_in_summary_and_shown_in_expanded():
         'formatScoreCell', 'createKpiTypeCell', 'addMatrixScoreCell', 'operatorValue',
         'appendScoreGapCells', 'showGapValues', 'selectedGapLayout', 'tableForMode',
         'appendMatrixTable', 'renderScoringViews', 'summaryOperatorColors', 'appendOperatorRankingLegend',
+        'styleIncompleteValue',
         'applyGapCategoryRunColors',
     )
     payload = {'snippets': {name: _function_source(script, name) for name in names}}
@@ -1152,6 +1242,8 @@ def test_scoring_job_title_and_cdr_summary_use_saved_filters_and_source_names():
     snippets = [
         _constant_source(script, 'valueOf'),
         _function_source(script, 'uniqueCatalogueValues'),
+        _function_source(script, 'operatorGroupLabels'),
+        _function_source(script, 'scoringVendorName'),
         _function_source(script, 'firstValue'),
         _function_source(script, 'formatDate'),
         _function_source(script, 'selectedContextFilters'),
@@ -1180,6 +1272,7 @@ def test_scoring_job_title_and_cdr_summary_use_saved_filters_and_source_names():
 const vm = require('node:vm');
 const payload = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
 const context = {job: payload.job,
+  operatorGroups: [],
   catalogueKeyByLevel: new Map([['Vendor', 'vendors']]),
   datasetCatalogues: new Map([['1', {vendors: ['Nokia']}], ['2', {vendors: ['Ericsson']}]]),
   contextFilterDefinitions: [{key: 'Vendor'}],
@@ -1207,9 +1300,9 @@ process.stdout.write(JSON.stringify({title: context.title, cdrSummary: context.c
     ]
     assert result['cdrSummary'] == 'data.csv, voice.csv'
     assert result['metadataCdrSummary'] == 'data.csv, voice.csv'
-    assert result['completeVendors'] == []
+    assert result['completeVendors'] == ['Ericsson', 'Nokia']
     assert result['subsetVendors'] == ['Nokia']
-    assert result['submittedFilters'] == {'Vendor': []}
+    assert result['submittedFilters'] == {'Vendor': ['Nokia', 'Ericsson']}
     assert result['partialVendors'] == ['Nokia']
     assert result['legacyVendors'] == ['Ericsson']
     assert result['fallbackTitle'].split(' ● ')[1:] == [
@@ -1316,6 +1409,7 @@ def test_scoring_category_cells_span_kpis_and_subtotal_in_both_renderers():
         'formatMatrixNumber', 'createKpiTypeCell', 'showGapValues', 'selectedGapLayout',
         'appendScoreGapCells', 'hierarchyColumnEntries', 'hierarchyColumnIsReference',
         'appendMatrixTable', 'appendHierarchyMatrixTable', 'summaryOperatorColors',
+        'styleIncompleteValue',
         'applyGapCategoryRunColors',
     )
     payload = {'snippets': {name: _function_source(script, name) for name in names}}

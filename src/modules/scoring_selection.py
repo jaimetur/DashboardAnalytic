@@ -8,6 +8,7 @@ from typing import Any
 from src.modules.column_names import column_identity
 from src.modules.nr_mode import normalize_nr_mode
 from src.modules.repository import Repository
+from src.modules.scoring_vendors import scoring_vendor_name, scoring_vendor_operators
 from src.modules.scoring_config import DEFAULT_AGGREGATION_HIERARCHY
 
 
@@ -247,6 +248,12 @@ def _normalize_selection(
             warnings.append('The saved GAP reference operator is no longer available; a default operator was selected.')
 
     context_filters = _normalize_context_filters(raw_selection.get('context_filters'), hierarchy, warnings)
+    vendor_operators = scoring_vendor_operators(
+        repository.cdr_catalogues_by_dataset(dataset_ids), repository.list_operator_mapping_groups(),
+    )
+    context_filters['Vendor'] = sorted({
+        scoring_vendor_name(value, vendor_operators) for value in context_filters['Vendor']
+    }, key=str.casefold)
     return {
         'dataset_ids': dataset_ids,
         'aggregation_levels': aggregation_levels,

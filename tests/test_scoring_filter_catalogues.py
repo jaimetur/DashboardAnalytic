@@ -32,6 +32,40 @@ def test_scoring_page_reports_incomplete_catalogues_without_backfilling(scoring_
     assert scoring_api['client'].get('/scoring').status_code == 200
 
 
+def test_scoring_vendor_catalogue_uses_pure_labels_without_scanning_rows(scoring_api, monkeypatch):
+    repository = scoring_api['repository']
+    for dataset_id in scoring_api['complete_dataset_ids']:
+        repository.replace_cdr_catalogue(
+            dataset_id,
+            vendors=['3_Ericsson', 'EE_Ericsson', 'VF_UK_Huawei', 'Mixed_Vendor', 'EE', 'O2', 'VF_SA'],
+            regions=['North'], cities=['Leeds'], campaigns=['2026-Q2'],
+            operators=['3', 'EE', 'O2', 'VF_UK', 'VF_SA'],
+        )
+
+    def fail_if_scanned(*_args, **_kwargs):
+        raise AssertionError('Opening Scoring must use cached CDR catalogue values.')
+
+    monkeypatch.setattr(app_module, '_distinct_cdr_row_values', fail_if_scanned)
+    monkeypatch.setattr(Repository, 'list_dataset_row_columns', fail_if_scanned)
+    captured = {}
+    original_render = app_module.render_template
+
+    def capture_context(request, template_name, context):
+        captured.update(context)
+        return original_render(request, template_name, context)
+
+    monkeypatch.setattr(app_module, 'render_template', capture_context)
+    page = scoring_api['client'].get('/scoring')
+
+    assert page.status_code == 200
+    catalogue = next(
+        item['catalogue'] for item in captured['scoring_datasets']
+        if item['file_name'] == 'UK_Q2_2026_NSA_Data.csv'
+    )
+    assert catalogue['operators'] == ['3', 'EE', 'O2', 'VF_SA', 'VF_UK']
+    assert catalogue['vendors'] == ['Ericsson', 'Huawei', 'Mixed_Vendor']
+
+
 def test_operator_catalogue_replacement_preserves_unspecified_values_and_database_copy(scoring_api, tmp_path):
     repository = scoring_api['repository']
     dataset_id = scoring_api['dataset_id']

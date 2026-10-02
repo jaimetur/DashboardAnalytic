@@ -14,6 +14,7 @@ from typing import Any, Iterable
 import pandas as pd
 
 from src.modules.column_names import column_identity, resolve_column_name
+from src.modules.scoring_vendors import scoring_vendor_name, scoring_vendor_operators
 from src.modules.nr_mode import NR_MODES, normalize_nr_mode
 from src.modules.repository import Repository, local_now_iso
 from src.modules.scoring_config import (
@@ -627,6 +628,11 @@ def create_scoring_job(
     """Return a matching cached result or persist a new queued scoring job."""
     normalized_ids = list(dict.fromkeys(int(dataset_id) for dataset_id in dataset_ids))
     normalized_context_filters = _normalize_context_filters(context_filters)
+    vendor_catalogues = repository.cdr_catalogues_by_dataset(normalized_ids)
+    vendor_operators = scoring_vendor_operators(vendor_catalogues, repository.list_operator_mapping_groups())
+    normalized_context_filters['Vendor'] = sorted({
+        scoring_vendor_name(value, vendor_operators) for value in normalized_context_filters['Vendor']
+    }, key=str.casefold)
     resolved_context_filters = _expand_operator_context_filter(repository, normalized_context_filters)
     profile_getter = getattr(repository, 'get_scoring_profile', None)
     if callable(profile_getter):
@@ -829,6 +835,8 @@ def _load_source_frames(
     frames_by_kind: dict[str, list[pd.DataFrame]] = {}
     normalized_filters = _normalize_context_filters(context_filters)
     active_filters = {field: values for field, values in normalized_filters.items() if values}
+    catalogues = repository.cdr_catalogues_by_dataset([int(source['metadata']['dataset_id']) for source in sources])
+    vendor_operators = scoring_vendor_operators(catalogues, repository.list_operator_mapping_groups())
     total = max(1, len(sources))
     for index, source in enumerate(sources, start=1):
         dataset_id = int(source['metadata']['dataset_id'])
@@ -854,6 +862,22 @@ def _load_source_frames(
             if resolved_filter_column is None:
                 missing_filter_fields.append(field)
             else:
+                if field == 'Vendor':
+                    raw_vendors = catalogues.get(dataset_id, {}).get('vendors', [])
+                    if not raw_vendors:
+                        raw_vendors = repository.list_distinct_dataset_row_values(dataset_id, resolved_filter_column, limit=None)
+                    operator_column = resolve_column_name(columns, 'Operator')
+                    dataset_operators = catalogues.get(dataset_id, {}).get('operators', [])
+                    if not dataset_operators and operator_column:
+                        dataset_operators = repository.list_distinct_dataset_row_values(dataset_id, operator_column, limit=None)
+                    operators = [*vendor_operators, *dataset_operators]
+                    selected_vendors = {scoring_vendor_name(value, operators).casefold() for value in values}
+                    operator_identities = {str(value).strip().casefold() for value in operators if value}
+                    values = [value for value in raw_vendors
+                              if str(value).strip().casefold() in operator_identities
+                              or scoring_vendor_name(value, operators).casefold() in selected_vendors]
+                    if not values:
+                        missing_filter_fields.append(field)
                 dataset_filters[resolved_filter_column] = values
         if missing_filter_fields:
             frame = pd.DataFrame()

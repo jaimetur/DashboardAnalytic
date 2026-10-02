@@ -8,6 +8,7 @@ from typing import Iterable
 import pandas as pd
 
 from src.modules.column_names import column_identity, resolve_column_name
+from src.modules.scoring_vendors import scoring_vendor_group
 from src.modules.scoring_config import (
     configuration_hash,
     SUPPORTED_MAPPING_METHODS,
@@ -17,7 +18,7 @@ from src.modules.scoring_config import (
 
 # Semantic engine version only. Configuration identity is added to job versions
 # after the workspace snapshot has been supplied explicitly.
-METHOD_VERSION = 'campaign-gap-global-kpi-v5'
+METHOD_VERSION = 'campaign-gap-global-kpi-v7'
 AGGREGATION_CONTRACT_VERSION = 2
 _SHARED = ['Operator', 'Campaign', 'G_Level_1', 'G_Level_2']
 _LEVEL_SOURCE_ALIASES = {
@@ -302,6 +303,15 @@ def calculate_scoring(
             ), None)
             if resolved:
                 frame[field] = source[resolved]
+        if 'Vendor' in frame:
+            vendor_operators = [*normalized_operator_mappings, *normalized_operator_mappings.values()]
+            if 'Operator' in frame:
+                vendor_operators.extend(frame['Operator'].dropna().unique())
+            vendor_labels = {
+                value: scoring_vendor_group(value, vendor_operators)
+                for value in frame['Vendor'].dropna().unique()
+            }
+            frame['Vendor'] = frame['Vendor'].map(vendor_labels).fillna('All')
         if normalized_operator_mappings and 'Operator' in frame:
             frame['Operator'] = frame['Operator'].map(
                 lambda value: value if pd.isna(value) else normalized_operator_mappings.get(
@@ -409,12 +419,19 @@ def calculate_scoring(
     totals = _totals(rows, keys, config)
     if any(not row['complete_coverage'] for row in totals):
         warnings.append('Incomplete KPI or environment coverage: partial points are shown without renormalizing weights; a complete benchmark score is unavailable.')
+    def reference_for(row, records, identity):
+        candidates = [other for other in records
+                      if _is_baseline(str(other['operator']), baseline_operator, baseline_aliases)
+                      and other[identity] == row[identity]
+                      and all(other.get(key) == row.get(key) for key in keys if key not in {'operator', 'vendor'})]
+        exact = next((other for other in candidates if other.get('vendor') == row.get('vendor')), None)
+        return exact if exact is not None else next((other for other in candidates if other.get('vendor') == 'All'), None)
+
     gap = []
     for row in rows:
         if _is_baseline(str(row['operator']), baseline_operator, baseline_aliases):
             continue
-        baseline = next((other for other in rows if _is_baseline(str(other['operator']), baseline_operator, baseline_aliases)
-                         and other['kpi_code'] == row['kpi_code'] and all(other.get(key) == row.get(key) for key in keys if key != 'operator')), None)
+        baseline = reference_for(row, rows, 'kpi_code')
         if baseline is None:
             warnings.append(f'Baseline {baseline_operator} is unavailable for one or more comparison groups.')
         elif baseline['weighted_points'] is not None and row['weighted_points'] is not None:
@@ -427,9 +444,7 @@ def calculate_scoring(
     for row in totals:
         if _is_baseline(str(row['operator']), baseline_operator, baseline_aliases):
             continue
-        baseline = next((other for other in totals if _is_baseline(str(other['operator']), baseline_operator, baseline_aliases)
-                         and other['category'] == row['category']
-                         and all(other.get(key) == row.get(key) for key in keys if key != 'operator')), None)
+        baseline = reference_for(row, totals, 'category')
         if baseline is not None:
             complete = baseline['complete_coverage'] and row['complete_coverage']
             gap_totals.append({**{key: row.get(key) for key in keys}, 'category': row['category'],

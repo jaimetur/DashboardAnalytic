@@ -3,7 +3,7 @@ import pytest
 from tests.test_scoring_results_controls import SCORING_SCRIPT, _run_node_json
 
 
-def _coverage_case(totals, selected='all', apply_default=True, extra_environment=None):
+def _coverage_case(totals, selected='all', apply_default=True, extra_environment=None, coverage_notes=None):
     source = SCORING_SCRIPT.read_text()
     helpers = source[source.index('  const environmentOrder ='):source.index('  function chartRowsForEnvironment')]
     program = r'''
@@ -14,7 +14,7 @@ const environmentSelect = {options: [], replaceChildren() {this.options=[];}, ap
 const environmentControl = {};
 const formatChartNumber = value => String(value);
 ''' + helpers + r'''
-const data = {totals: payload.totals, aggregation_levels: ['Operator', 'City', 'Campaign'],
+const data = {totals: payload.totals, coverage_notes: payload.coverageNotes || {}, aggregation_levels: ['Operator', 'City', 'Campaign'],
  configuration: {scope: {environments: {DriveCity: {total_points: 650}, Roads: {total_points: 350}}}},
  warnings: ['Incomplete KPI or environment coverage: partial points are shown without renormalizing weights; a complete benchmark score is unavailable.', 'Independent source warning.']};
 if (payload.extraEnvironment) data.configuration.scope.environments[payload.extraEnvironment] = {total_points: 100};
@@ -25,7 +25,10 @@ process.stdout.write(JSON.stringify({selected: selectedEnvironment, selection, o
  warnings: scoringCoverageWarnings(data, job, selection.effective),
  cardWarnings: scoringCoverageWarnings({...data, warnings: []}, job, selection.effective, {concise: true})}));
 '''
-    return _run_node_json(program, {'totals': totals, 'selected': selected, 'applyDefault': apply_default, 'extraEnvironment': extra_environment})
+    return _run_node_json(program, {
+        'totals': totals, 'selected': selected, 'applyDefault': apply_default,
+        'extraEnvironment': extra_environment, 'coverageNotes': coverage_notes or {},
+    })
 
 
 def _total(environment, complete, available=650, maximum=650):
@@ -84,3 +87,34 @@ def test_warning_lists_every_environment_without_data():
         'Selected Environment has incomplete coverage because some of its Environments '
         '(Roads, Walk) have no data with the selected filters.'
     ]
+
+
+def test_context_specific_coverage_notes_replace_generic_web_warning():
+    q1 = (
+        'All Environments — Operator: VF_UK · Vendor: Samsung · Campaign: 2026-Q1. '
+        'Maximum achievable scoring: 933.2645 of 1000 points. '
+        'KPIs excluded from scoring because no valid measurements are available: '
+        'K7 — Classic Calls / Call Setup Time > 10 s [%] (DriveCity); '
+        'K10 — Classic Calls / Call Setup Time (DriveCity). Their weights are not redistributed.'
+    )
+    q2 = (
+        'All Environments — Operator: VF_UK · Vendor: Samsung · Campaign: 2026-Q2. '
+        'Maximum achievable scoring: 990.9 of 1000 points. '
+        'KPIs excluded from scoring because no valid measurements are available: '
+        'K11 — Classic Calls / Call Setup Success Ratio (DriveCity). Their weights are not redistributed.'
+    )
+    actual = _coverage_case(
+        [_total('DriveCity', True), _total('Combined', False, available=933.2645, maximum=1000)],
+        apply_default=False, coverage_notes={'Combined': [q1, q2]},
+    )
+    assert actual['warnings'] == ['Independent source warning.', q1, q2]
+    assert actual['cardWarnings'] == [q1, q2]
+
+
+def test_complete_environment_with_empty_context_notes_hides_stale_coverage_warning():
+    actual = _coverage_case(
+        [_total('DriveCity', True)], selected='DriveCity',
+        coverage_notes={'DriveCity': []},
+    )
+    assert actual['warnings'] == ['Independent source warning.']
+    assert actual['cardWarnings'] == []

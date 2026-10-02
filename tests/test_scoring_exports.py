@@ -216,6 +216,21 @@ def test_table_cell_border_markup_is_unique_and_schema_ordered_when_reused():
     assert fill_index > tags.index('lnB')
 
 
+def test_incomplete_ppt_table_values_are_na_star_red_and_bold():
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    table = slide.shapes.add_table(1, 2, Inches(1), Inches(1), Inches(3), Inches(1)).table
+
+    _cell(table.cell(0, 0), 'N/A')
+    _cell(table.cell(0, 1), '-1.25*')
+
+    for cell, expected in zip(table.rows[0].cells, ('N/A*', '-1.25*')):
+        assert cell.text == expected
+        paragraph = cell.text_frame.paragraphs[0]
+        assert paragraph.font.bold
+        assert str(paragraph.font.color.rgb) == 'C62828'
+
+
 def _assert_category_shade_bar(chart_group, chart_shape, categories):
     keys = [shape for shape in chart_group.shapes
             if shape.name == 'Scoring Chart Category Shade Key' and shape.has_table]
@@ -615,15 +630,17 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     signed_gaps = [
         float(table.cell(row, column).text)
         for row in range(1, 33) for column in gap_columns
-        if table.cell(row, column).text != 'N/A'
+        if not table.cell(row, column).text.startswith('N/A')
     ]
     assert any(value > 0 for value in signed_gaps)
     assert any(value < 0 for value in signed_gaps)
 
     c5_index = next(index for index, metric in enumerate(display_rows, 1) if metric['kpi_code'] == 'K1')
     missing_cell = table.cell(c5_index, operator_columns['O2 UK'])
-    assert missing_cell.text == 'N/A'
-    assert _rgb(missing_cell) == 'ECEFF1'
+    assert missing_cell.text == 'N/A*'
+    missing_paragraph = missing_cell.text_frame.paragraphs[0]
+    assert str(missing_paragraph.font.color.rgb) == 'C62828'
+    assert missing_paragraph.font.bold
 
     c9_index = next(index for index, metric in enumerate(display_rows, 1) if metric['kpi_code'] == 'K5')
     expected_bands = {'Vodafone UK': 'Low', 'O2 UK': 'Medium', 'Three UK': 'High', 'EE': 'UltraHigh'}
@@ -715,8 +732,10 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
             expected = row['gaps'][operator]
             cell = summary_table.cell(row_index, operator_index)
             if expected is None:
-                assert cell.text == 'N/A'
+                assert cell.text == 'N/A*'
                 assert _rgb(cell) == THRESHOLD_COLORS['Unavailable'].lstrip('#')
+                assert cell.text_frame.paragraphs[0].font.bold
+                assert str(cell.text_frame.paragraphs[0].font.color.rgb) == 'C62828'
             else:
                 assert float(cell.text) == pytest.approx(expected, abs=.0051)
                 assert _rgb(cell) == row['gap_colors'][operator].lstrip('#')

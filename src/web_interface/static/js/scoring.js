@@ -309,6 +309,17 @@
     return group ? String(group.canonical).trim() : raw;
   }
 
+  function scoringVendorName(value) {
+    const raw = String(value ?? '').trim();
+    const operators = uniqueCatalogueValues([
+      ...operatorGroups.flatMap(operatorGroupLabels),
+      ...[...datasetCatalogues.values()].flatMap(catalogue => catalogue.operators || []),
+    ]).sort((left, right) => right.length - left.length);
+    if (operators.some(operator => operator.toLocaleLowerCase() === raw.toLocaleLowerCase())) return raw;
+    const prefix = operators.find(operator => raw.toLocaleLowerCase().startsWith(`${operator.toLocaleLowerCase()}_`));
+    return prefix ? raw.slice(prefix.length + 1) : raw;
+  }
+
   function contextFilterOptions(key, catalogueValues) {
     if (key !== 'Operator') {
       return catalogueValues.map(value => ({value, label: value, color: ''}))
@@ -419,7 +430,7 @@
         .filter(option => !option.disabled && option.value)
         .map(option => String(option.value)) : [];
       const available = select ? [...select.options].filter(option => !option.disabled && option.value) : [];
-      return [key, available.length && values.length === available.length ? [] : values];
+      return [key, key !== 'Vendor' && available.length && values.length === available.length ? [] : values];
     }));
   }
 
@@ -748,10 +759,11 @@
       if (!filters || typeof filters !== 'object') continue;
       const value = firstValue(filters, [key], null);
       if (value === null || value === undefined) continue;
-      const values = uniqueCatalogueValues(Array.isArray(value) ? value : [value]);
+      const rawValues = Array.isArray(value) ? value : [value];
+      const values = uniqueCatalogueValues(key === 'Vendor' ? rawValues.map(scoringVendorName) : rawValues);
       const datasetIds = valueOf(job, ['dataset_ids', 'cdr_ids'], []);
       const catalogueKey = catalogueKeyByLevel.get(key);
-      if (values.length && Array.isArray(datasetIds) && datasetIds.length
+      if (key !== 'Vendor' && values.length && Array.isArray(datasetIds) && datasetIds.length
           && datasetIds.every(id => Array.isArray(datasetCatalogues.get(String(id))?.[catalogueKey]))) {
         const available = new Set(datasetIds.flatMap(id => datasetCatalogues.get(String(id))[catalogueKey])
           .map(item => String(item).trim().toLocaleLowerCase()).filter(Boolean));
@@ -1286,26 +1298,26 @@
   }
 
   function formatMatrixNumber(value, signed = false) {
-    if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) return 'N/A';
+    if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) return 'N/A*';
     const numeric = Number(value);
-    if (!Number.isFinite(numeric)) return 'N/A';
+    if (!Number.isFinite(numeric)) return 'N/A*';
     if (signed && numeric > 0) return `+${numeric.toFixed(2)}`;
     if (signed && numeric < 0) return `−${Math.abs(numeric).toFixed(2)}`;
     return numeric.toFixed(2);
   }
 
   function formatScoreCell(cell) {
-    if (!cell || typeof cell !== 'object') return {text: 'N/A', complete: false};
+    if (!cell || typeof cell !== 'object') return {text: 'N/A*', complete: false};
     const points = firstValue(cell, ['points', 'weighted_points', 'weighted_score'], null);
     const complete = firstValue(cell, ['complete', 'complete_coverage'], false) === true;
-    if (points === null || points === undefined || (typeof points === 'string' && points.trim() === '')) return {text: 'N/A', complete: false};
+    if (points === null || points === undefined || (typeof points === 'string' && points.trim() === '')) return {text: 'N/A*', complete: false};
     const numeric = Number(points);
-    if (!Number.isFinite(numeric)) return {text: 'N/A', complete: false};
+    if (!Number.isFinite(numeric)) return {text: 'N/A*', complete: false};
     return {text: `${numeric.toFixed(2)}${complete ? '' : '*'}`, complete};
   }
 
   function formatRawKpiValue(value) {
-    if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) return 'N/A';
+    if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) return 'N/A*';
     const numeric = Number(value);
     if (Number.isFinite(numeric)) return numeric.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
     return String(value);
@@ -1503,6 +1515,14 @@
     pane.append(container);
   }
 
+  function styleIncompleteValue(element) {
+    if (element.textContent === 'N/A') element.textContent = 'N/A*';
+    if (!element.textContent.endsWith('*')) return;
+    element.style.color = '#c62828';
+    element.style.fill = '#c62828';
+    element.style.fontWeight = '700';
+  }
+
   function addMatrixScoreCell(row, cell, className = '', isTotal = false, summaryColor = null) {
     const td = document.createElement('td');
     td.dataset.numeric = 'true';
@@ -1510,6 +1530,7 @@
     const formatted = formatScoreCell(cell);
     td.textContent = formatted.text;
     if (className) td.className = className;
+    styleIncompleteValue(td);
     const band = firstValue(cell, ['threshold_band', 'band'], '');
     const color = safeHexColor(firstValue(cell, ['color', 'threshold_color'], ''));
     if (!isTotal && color) td.style.backgroundColor = color;
@@ -1551,6 +1572,7 @@
     td.dataset.column = 'gap';
     const numeric = value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
     td.textContent = `${formatMatrixNumber(value, true)}${partial && numeric ? '*' : ''}`;
+    styleIncompleteValue(td);
     const safeColor = safeHexColor(color);
     if (safeColor) td.style.backgroundColor = safeColor;
     const partialNote = partialGapCoverage(partial, environments);
@@ -1788,11 +1810,13 @@
       weight.dataset.numeric = 'true';
       weight.dataset.column = 'weight';
       weight.textContent = formatMatrixNumber(item?.weight_percent);
+      styleIncompleteValue(weight);
       tr.append(weight);
       const maximum = document.createElement('td');
       maximum.dataset.numeric = 'true';
       maximum.dataset.column = 'maximum';
       maximum.textContent = formatMatrixNumber(item?.max_points);
+      styleIncompleteValue(maximum);
       tr.append(maximum);
 
       const values = item?.values && typeof item.values === 'object' ? item.values : {};
@@ -1809,6 +1833,7 @@
           const unit = firstValue(item, ['unit', 'units', 'measurement_unit'], '');
           cell.className = 'scoring-kpi-value-cell';
           cell.textContent = isCategoryRow ? '' : formatRawKpiValue(rawValue);
+          styleIncompleteValue(cell);
           cell.dataset.numeric = 'true';
           cell.title = isCategoryRow ? ''
             : `Raw ${item?.kpi || item?.kpi_code || 'KPI'} measurement for ${presentation.label}${unit ? ` (${unit})` : ''}: ${formatRawKpiValue(rawValue)}`;
@@ -1850,11 +1875,13 @@
       weight.dataset.numeric = 'true';
       weight.dataset.column = 'weight';
       weight.textContent = formatMatrixNumber(firstValue(total, ['weight_percent'], 100));
+      styleIncompleteValue(weight);
       row.append(weight);
       const maximum = document.createElement('td');
       maximum.dataset.numeric = 'true';
       maximum.dataset.column = 'maximum';
       maximum.textContent = formatMatrixNumber(firstValue(total, ['max_points'], null));
+      styleIncompleteValue(maximum);
       row.append(maximum);
       const values = total.values && typeof total.values === 'object' ? total.values : {};
       const summaryColors = isSummary ? summaryOperatorColors(values, operators.map(id => ({id}))) : new Map();
@@ -2166,11 +2193,13 @@
       weight.dataset.numeric = 'true';
       weight.dataset.column = 'weight';
       weight.textContent = formatMatrixNumber(item?.weight_percent);
+      styleIncompleteValue(weight);
       row.append(weight);
       const maximum = document.createElement('td');
       maximum.dataset.numeric = 'true';
       maximum.dataset.column = 'maximum';
       maximum.textContent = formatMatrixNumber(item?.max_points);
+      styleIncompleteValue(maximum);
       row.append(maximum);
       const values = item?.values && typeof item.values === 'object' ? item.values : {};
       const summaryColors = isSummary ? summaryOperatorColors(values, allColumns) : new Map();
@@ -2186,6 +2215,7 @@
           cell.className = 'scoring-kpi-value-cell';
           cell.dataset.column = 'kpi-value';
           cell.textContent = isCategoryRow ? '' : formatRawKpiValue(rawValue);
+          styleIncompleteValue(cell);
           cell.dataset.numeric = 'true';
           cell.title = isCategoryRow ? ''
             : `Raw ${item?.kpi || item?.kpi_code || 'KPI'} measurement for ${presentation.label}${unit ? ` (${unit})` : ''}: ${formatRawKpiValue(rawValue)}`;
@@ -2226,11 +2256,13 @@
       weight.dataset.numeric = 'true';
       weight.dataset.column = 'weight';
       weight.textContent = formatMatrixNumber(firstValue(total, ['weight_percent'], 100));
+      styleIncompleteValue(weight);
       row.append(weight);
       const maximum = document.createElement('td');
       maximum.dataset.numeric = 'true';
       maximum.dataset.column = 'maximum';
       maximum.textContent = formatMatrixNumber(firstValue(total, ['max_points'], null));
+      styleIncompleteValue(maximum);
       row.append(maximum);
       const values = total.values && typeof total.values === 'object' ? total.values : {};
       const summaryColors = isSummary ? summaryOperatorColors(values, allColumns) : new Map();
@@ -2553,6 +2585,7 @@
           const partial = item?.gap_partial === true;
           const numericGap = value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
           cell.textContent = `${formatMatrixNumber(value, true)}${partial && numericGap ? '*' : ''}`;
+          styleIncompleteValue(cell);
           cell.title = [
             'Signed GAP: compared operator weighted points minus baseline weighted points. Positive means the compared operator leads.',
             partialGapCoverage(partial, item?.gap_environments),
@@ -3105,6 +3138,7 @@
             segmentLabel.setAttribute('class', 'scoring-best-network-segment');
             segmentLabel.style.fontSize = `${fontSize}px`;
             segmentLabel.style.fill = categoryLegendTextColor(color);
+          styleIncompleteValue(segmentLabel);
             segmentLabel.textContent = segmentText;
             setChartTooltip(segmentLabel, tooltipParts.join('\n'));
             svg.append(segmentLabel);
@@ -3135,6 +3169,7 @@
           totalLabel.setAttribute('text-anchor', 'middle');
           totalLabel.setAttribute('class', 'scoring-chart-value scoring-best-network-total');
           totalLabel.textContent = `${formatChartNumber(total, {minimumFractionDigits: 1, maximumFractionDigits: 1})}${complete ? '' : '*'}`;
+          styleIncompleteValue(totalLabel);
           const hierarchyColumn = hierarchyColumnsById.get(String(category));
           const operatorName = hierarchyColumn
             ? String(hierarchyColumn.operator || firstValue(hierarchyColumn.styleSource, ['operator'], '') || '')
@@ -3197,6 +3232,7 @@
         value.setAttribute('y', String(Math.max(top + 14, barTop - 7 - (seriesIndex % 2) * 22)));
         value.setAttribute('text-anchor', 'middle'); value.setAttribute('class', 'scoring-chart-value');
         value.textContent = `${formatChartNumber(row.value, {maximumFractionDigits: Number.isInteger(row.value) ? 0 : 2})}${row.complete === false ? '*' : ''}`;
+        styleIncompleteValue(value);
         setChartTooltip(value, tooltipParts.join('\n'));
         svg.append(rect, value);
       });
@@ -3770,6 +3806,7 @@
           segmentLabel.textContent = segmentText;
           segmentLabel.style.fontSize = `${fontSize}px`;
           segmentLabel.style.fill = categoryLegendTextColor(color);
+          styleIncompleteValue(segmentLabel);
           setChartTooltip(segmentLabel, segmentTooltip);
           svg.append(segmentLabel);
         }
@@ -3777,6 +3814,7 @@
       }
       const totalLabel = svgElement(svg, 'text', {x: x + barWidth / 2, y: stackY - 12, 'text-anchor': 'middle', class: 'scoring-chart-value scoring-best-network-total'});
       totalLabel.textContent = hasPoints ? `${formatChartNumber(totalPoints, {minimumFractionDigits: 1, maximumFractionDigits: 1})}${complete ? '' : '*'}` : 'N/A';
+      styleIncompleteValue(totalLabel);
       setChartTooltip(totalLabel, [
         hasHierarchyAxis ? `Hierarchy: ${presentation.fullLabel}` : `Operator: ${presentation.fullLabel}`,
         'Voice and Data total',
@@ -4149,7 +4187,18 @@
     box.hidden = !visibleItems.length;
     for (const warning of visibleItems) {
       const item = document.createElement('li');
-      item.textContent = typeof warning === 'string' ? warning : displayValue(warning);
+      const message = typeof warning === 'string' ? warning : displayValue(warning);
+      const maximumPattern = /(?:maximum achievable scoring )?[0-9]+(?:\.[0-9]+)? of [0-9]+(?:\.[0-9]+)? points/g;
+      let offset = 0;
+      for (const match of message.matchAll(maximumPattern)) {
+        item.append(document.createTextNode(message.slice(offset, match.index)));
+        const maximum = document.createElement('strong');
+        maximum.className = 'scoring-warning-maximum';
+        maximum.textContent = match[0];
+        item.append(maximum);
+        offset = match.index + match[0].length;
+      }
+      item.append(document.createTextNode(message.slice(offset)));
       list.append(item);
     }
   }
@@ -4215,6 +4264,8 @@
     const totals = scoringCoverageTotals(payload, environment);
     if (!totals.length) return warnings;
     const visible = warnings.filter(warning => warning !== genericNotice);
+    const detailedNotes = payload?.coverage_notes?.[environment];
+    if (Array.isArray(detailedNotes)) return [...visible, ...detailedNotes];
     const incomplete = totals.filter(row => row.complete_coverage === false);
     if (!incomplete.length) return visible;
     const required = Object.entries(payload.configuration?.scope?.environments || {})
@@ -4263,14 +4314,6 @@
     message += ' Available points keep their original weights; missing contributions are not scaled up to a complete benchmark.';
     visible.push(message);
     return visible;
-  }
-
-  function renderEnvironmentCoverageWarning(payload, job, environment) {
-    const card = root.querySelector('[data-environment-warning]');
-    const copy = root.querySelector('[data-environment-warning-copy]');
-    const warnings = scoringCoverageWarnings({...payload, warnings: []}, job, environment, {concise: true});
-    card.hidden = !warnings.length;
-    copy.textContent = warnings.join(' ');
   }
 
   function syncResultEnvironment(tables, {payload = {}, applyCoverageDefault = false} = {}) {
@@ -4418,7 +4461,6 @@
     }
     const warnings = payload.warnings ?? job?.warnings ?? [];
     renderWarnings(scoringCoverageWarnings({...payload, warnings}, job, effectiveEnvironment));
-    renderEnvironmentCoverageWarning(payload, job, effectiveEnvironment);
     setExportLinks(jobIdOf(job || payload.job || {}), true);
   }
 
@@ -4434,7 +4476,6 @@
       pane.append(empty);
     }
     root.querySelector('[data-warning-box]').hidden = true;
-    root.querySelector('[data-environment-warning]').hidden = true;
     setExportLinks('', false);
   }
 

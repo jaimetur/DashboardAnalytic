@@ -63,6 +63,7 @@ from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_rep
 from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column, add_vfuk_gcid_column, apply_operator_mappings, ensure_fixed_cdr_fields, get_dataset_source_columns, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.geospatial import assign_regions, validate_region_mapping
 from src.modules.nr_mode import NR_MODES, dataset_nr_mode, infer_nr_mode, normalize_nr_mode
+from src.modules.scoring_vendors import normalize_scoring_vendor_result, scoring_vendor_name, scoring_vendor_names, scoring_vendor_operators
 from src.modules.scoring_jobs import (
     create_scoring_job,
     delete_scoring_job,
@@ -14020,6 +14021,12 @@ def _scoring_export_job_with_catalogue_defaults(
         if not dataset_ids:
             return export_job
         catalogues = task_repository.cdr_catalogues_by_dataset(dataset_ids)
+        vendor_operators = scoring_vendor_operators(catalogues, task_repository.list_operator_mapping_groups())
+        context_filters = dict(context_filters)
+        for key, value in context_filters.items():
+            if str(key).strip().casefold() == 'vendor' and isinstance(value, (list, tuple, set)):
+                context_filters[key] = sorted({scoring_vendor_name(item, vendor_operators) for item in value}, key=str.casefold)
+        export_job['context_filters'] = context_filters
         # A partial catalogue cannot prove that the saved list means "all".
         if (set(catalogues) != set(dataset_ids)
                 or task_repository.missing_cdr_catalogue_ids(dataset_ids)
@@ -14053,6 +14060,8 @@ def _scoring_export_job_with_catalogue_defaults(
             for item in value
             if item is not None and str(item).strip()
         }
+        if field == 'Vendor':
+            values = {scoring_vendor_name(item, vendor_operators) for item in values}
         if {item.casefold() for item in selected} == {item.casefold() for item in values}:
             normalized_filters[key] = []
     export_job['context_filters'] = normalized_filters
@@ -14096,11 +14105,13 @@ def scoring_page(request: Request, user: SessionUser = Depends(current_user)) ->
     incomplete_catalogue_ids.update(task_repository.missing_cdr_campaign_ids(dataset_ids))
     incomplete_catalogue_ids.update(task_repository.missing_cdr_operator_ids(dataset_ids))
     catalogues = task_repository.cdr_catalogues_by_dataset(dataset_ids)
+    vendor_operators = scoring_vendor_operators(catalogues, task_repository.list_operator_mapping_groups())
     datasets = []
     for row in ready_cdrs:
         item = dict(row)
         item['original_name'] = item['file_name']
-        item['catalogue'] = catalogues[item['id']]
+        item['catalogue'] = dict(catalogues[item['id']])
+        item['catalogue']['vendors'] = scoring_vendor_names(item['catalogue']['vendors'], vendor_operators)
         item['campaign'] = ', '.join(item['catalogue']['campaigns'])
         item['nr_mode'] = dataset_nr_mode(item['dataset_kind'], item['nr_mode'], item['file_name'])
         datasets.append(item)
@@ -14190,16 +14201,20 @@ def scoring_jobs_result(job_id: int, user: SessionUser = Depends(current_user)) 
     job = get_scoring_job(task_repository, job_id, include_result=True)
     if not job:
         raise HTTPException(status_code=404, detail='Scoring job not found.')
-    from src.modules.scoring_views import build_scoring_views, normalize_result_gaps
-    result = normalize_result_gaps(job.get('result') or {})
+    from src.modules.scoring_views import build_scoring_views, normalize_result_gaps, refresh_baseline_warning, scoring_coverage_notes
+    result = normalize_scoring_vendor_result(
+        normalize_result_gaps(job.get('result') or {}), task_repository.list_operator_mapping_groups(),
+    )
     views = {}
     if result.get('scoring') or result.get('score_rows'):
         try:
             fallback = (task_repository.get_scoring_configuration()
                         if not result.get('configuration') and not job.get('configuration') else None)
             views = build_scoring_views(job, result, task_repository.list_operator_mapping_groups(), fallback)
+            refresh_baseline_warning(result, views, str(job.get('baseline_operator') or 'EE'))
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+    result['coverage_notes'] = scoring_coverage_notes(result)
     return {'job': {key: value for key, value in job.items() if key != 'result'}, **result,
             'views': views}
 
@@ -14255,7 +14270,9 @@ def scoring_job_export(
     if job['status'] != 'completed':
         raise HTTPException(status_code=409, detail='The scoring job must finish before export.')
     from src.modules.scoring_views import normalize_result_gaps
-    result = normalize_result_gaps(job.get('result') or {})
+    result = normalize_scoring_vendor_result(
+        normalize_result_gaps(job.get('result') or {}), task_repository.list_operator_mapping_groups(),
+    )
     operator_mapping_groups = task_repository.list_operator_mapping_groups()
     export_configuration = job.get('configuration') or result.get('configuration')
     selected_environment = str(environment or 'all').strip() or 'all'

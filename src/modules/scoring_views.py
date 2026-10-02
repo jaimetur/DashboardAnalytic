@@ -7,6 +7,7 @@ import math
 import re
 from typing import Any
 
+from src.modules.scoring_vendors import normalize_scoring_vendor_result
 from src.modules.scoring_config import validate_scoring_configuration
 
 
@@ -62,6 +63,85 @@ def normalize_result_gaps(result: dict[str, Any] | None) -> dict[str, Any]:
     return normalized
 
 
+def scoring_coverage_notes(result: dict[str, Any]) -> dict[str, list[str]]:
+    """Explain each scoring ceiling and missing KPI contribution by its actual context."""
+    totals = _records(result.get('totals'))
+    records = _records(result.get('scoring', result.get('score_rows', [])))
+    configuration = result.get('configuration') or {}
+    environment_configuration = configuration.get('scope', {}).get('environments', {})
+    weighted_environments = [name for name, value in environment_configuration.items()
+                             if (_number(value.get('total_points')) or 0) > 0]
+    environments = list(dict.fromkeys(str(row.get('environment')) for row in totals))
+    notes = {environment: [] for environment in environments}
+    for total in totals:
+        if total.get('category') != 'Overall' or total.get('complete_coverage') is not False:
+            continue
+        environment = str(total.get('environment'))
+        selected_environments = weighted_environments if environment == 'Combined' else [environment]
+        context_fields = ('operator', 'vendor', 'region', 'city', 'campaign', 'dataset_type')
+        matches = [row for row in records
+                   if row.get('environment') in selected_environments
+                   and all(row.get(key) == total.get(key) for key in context_fields
+                           if key != 'dataset_type' or total.get(key) is not None)]
+        excluded = []
+        for row in matches:
+            if (_number(row.get('max_points')) or 0) > 0 and _number(row.get('weighted_points')) is None:
+                label = f"{row.get('category', '')}: {row.get('kpi', '')}"
+                if environment == 'Combined':
+                    label += f" ({row.get('environment', '')})"
+                if label not in excluded:
+                    excluded.append(label)
+        expected_metrics = _metrics_for_context(total, total.get('dataset_type') is not None,
+                                               configuration.get('metrics', []))
+        for name in selected_environments:
+            for metric in expected_metrics:
+                if (_number(metric.get('contexts', {}).get(name, {}).get('max_points')) or 0) <= 0:
+                    continue
+                if not any(row.get('environment') == name and row.get('kpi_code') == metric.get('code') for row in matches):
+                    label = f"{metric.get('category', '')}: {metric.get('kpi', '')}"
+                    label += f' ({name}; no matching rows)' if environment == 'Combined' else ' (no matching rows)'
+                    excluded.append(label)
+            if not expected_metrics and not any(row.get('environment') == name for row in matches):
+                excluded.append(f'All configured KPIs in {name} (no matching rows)')
+        context_labels = []
+        for key in context_fields:
+            value = total.get(key)
+            if value is not None and str(value).strip():
+                display = _hierarchy_display_value({'level': key.title(), 'value': value})
+                context_labels.append(display)
+        available = _number(total.get('available_points'))
+        maximum = _number(total.get('max_points'))
+        available_label = f'{available:.4f}'.rstrip('0').rstrip('.') if available is not None else ''
+        maximum_label = f'{maximum:.4f}'.rstrip('0').rstrip('.') if maximum is not None else ''
+        ceiling = (f'{available_label} of {maximum_label} points'
+                   if available is not None and maximum is not None else 'unavailable')
+        affected = []
+        if environment == 'Combined':
+            for name in selected_environments:
+                contribution = next((row for row in totals if row.get('environment') == name
+                                     and row.get('category') == 'Overall'
+                                     and all(row.get(key) == total.get(key) for key in context_fields)), None)
+                if contribution is not None and contribution.get('complete_coverage') is not False:
+                    continue
+                environment_available = _number(contribution.get('available_points')) if contribution else 0.0
+                environment_maximum = _number(contribution.get('max_points')) if contribution else sum(
+                    _number(metric.get('contexts', {}).get(name, {}).get('max_points')) or 0 for metric in expected_metrics
+                )
+                if environment_available is not None and environment_maximum is not None:
+                    available_text = f'{environment_available:.4f}'.rstrip('0').rstrip('.')
+                    maximum_text = f'{environment_maximum:.4f}'.rstrip('0').rstrip('.')
+                    affected.append(f'{name}: {available_text} of {maximum_text} points')
+        affected_text = f"Affected environments and scoring ceilings: {'; '.join(affected)}. " if affected else ''
+        excluded_text = '; '.join(excluded) or 'Required KPI contributions have no valid measurements'
+        notes[environment].append(
+            f"{' / '.join(context_labels)}: maximum achievable scoring {ceiling}. "
+            f'{affected_text}'
+            f'Excluded KPIs (no valid measurements): {excluded_text}. '
+            'Their weights are not redistributed.'
+        )
+    return notes
+
+
 def build_scoring_views(job: dict[str, Any] | None, result: dict[str, Any] | None,
                         operator_mapping_groups: list[dict[str, Any]] | None = None,
                         workspace_configuration: dict[str, Any] | None = None) -> dict[str, list[dict[str, Any]]]:
@@ -71,7 +151,7 @@ def build_scoring_views(job: dict[str, Any] | None, result: dict[str, Any] | Non
     environment with a positive scoring allocation in the same aggregation context.
     """
     job = job if isinstance(job, dict) else {}
-    result = result if isinstance(result, dict) else {}
+    result = normalize_scoring_vendor_result(result if isinstance(result, dict) else {}, operator_mapping_groups)
     configuration_payload = result.get('configuration')
     if configuration_payload is None:
         configuration_payload = job.get('configuration')
@@ -141,8 +221,10 @@ def build_scoring_views(job: dict[str, Any] | None, result: dict[str, Any] | Non
             )
             table['operator_styles'] = styles
             score_tables.append(table)
-            gap_summary_tables.append(_build_gap_summary_table(table, gap_priority_rank, baseline_aliases))
-            gap_tables.extend(_build_gap_tables(table, gap_priority_rank, baseline_aliases))
+    for table in score_tables:
+        _apply_all_vendor_reference(table, score_tables, baseline_aliases, gap_priority_rank)
+        gap_summary_tables.append(_build_gap_summary_table(table, gap_priority_rank, baseline_aliases))
+        gap_tables.extend(_build_gap_tables(table, gap_priority_rank, baseline_aliases))
 
     hierarchy_levels = _hierarchy_levels(job, result)
     hierarchy_score_tables, hierarchy_gap_tables = _build_hierarchy_tables(
@@ -229,6 +311,63 @@ def _hierarchy_leaf_id(path: list[dict[str, Any]]) -> str:
 
 def _hierarchy_context_key(path: list[dict[str, Any]]) -> str:
     return _hierarchy_leaf_id([entry for entry in path if entry['level'] != 'Operator'])
+
+
+def _hierarchy_reference_id(path: list[dict[str, Any]], references: dict[str, str]) -> str | None:
+    """Prefer the same vendor, then the reference operator's All vendor context."""
+    exact = references.get(_hierarchy_context_key(path))
+    if exact is not None:
+        return exact
+    if not any(entry['level'] == 'Vendor' for entry in path):
+        return None
+    fallback = [{**entry, 'value': 'All'} if entry['level'] == 'Vendor' else entry for entry in path]
+    return references.get(_hierarchy_context_key(fallback))
+
+
+def _apply_all_vendor_reference(table: dict, tables: list[dict], aliases: list[str], priority: dict) -> None:
+    """Populate scalar GAP cells from an All-vendor reference without adding score columns."""
+    context = table['context']
+    baseline = table['baseline_operator']
+    if context.get('vendor') in {None, 'All'} or baseline in table['operators']:
+        return
+    reference = next((candidate for candidate in tables
+                      if candidate['context'].get('vendor') == 'All'
+                      and all(candidate['context'].get(key) == value for key, value in context.items() if key != 'vendor')
+                      and any(_same_baseline_identity(operator, baseline, aliases) for operator in candidate['operators'])), None)
+    if reference is None:
+        return
+    reference_operator = _matching_baseline(reference['operators'], baseline, aliases)
+    reference_rows = {row['kpi_code']: row for row in reference['rows']}
+    for row in [*table['rows'], table['total']]:
+        reference_row = reference_rows.get(row.get('kpi_code')) if 'kpi_code' in row else reference['total']
+        reference_value = (reference_row or {}).get('values', {}).get(reference_operator)
+        for operator in table['operators']:
+            gap, partial, environments = _gap_with_coverage(
+                reference_value, row['values'].get(operator), operator, baseline, aliases, context['environment'],
+            )
+            row['gaps'][operator] = gap
+            row['gap_partial'][operator] = partial
+            row['gap_environments'][operator] = environments
+    scale = max((abs(gap) for row in table['rows'] for gap in row['gaps'].values() if gap is not None), default=0.0)
+    table['gap_scale_max'] = scale
+    for row in table['rows']:
+        row['gap_colors'] = {operator: gap_color(row['gaps'].get(operator), scale) for operator in table['operators']}
+    _attach_score_table_modes(table, priority)
+
+
+def refresh_baseline_warning(result: dict[str, Any], views: dict, baseline: str) -> None:
+    """Remove a legacy missing-context warning only when every comparison has a reference."""
+    tables = views.get('hierarchy_score_tables') or []
+    if not tables:
+        return
+    for table in tables:
+        references = {_hierarchy_context_key(column['path']): column['id']
+                      for column in table['hierarchy_columns'] if column['is_reference']}
+        if any(not column['is_reference'] and _hierarchy_reference_id(column['path'], references) is None
+               for column in table['hierarchy_columns']):
+            return
+    warning = f'Baseline {baseline} is unavailable for one or more comparison groups.'
+    result['warnings'] = [value for value in result.get('warnings', []) if value != warning]
 
 
 def _hierarchy_column_sort_key(column: dict[str, Any]) -> tuple[Any, ...]:
@@ -356,7 +495,7 @@ def _build_hierarchy_tables(
             row['gap_partial'] = {}
             row['gap_environments'] = {}
             for column in columns:
-                baseline_id = baseline_by_context.get(_hierarchy_context_key(column['path']))
+                baseline_id = _hierarchy_reference_id(column['path'], baseline_by_context)
                 (row['gaps'][column['id']], row['gap_partial'][column['id']],
                  row['gap_environments'][column['id']]) = _gap_with_coverage(
                     row['values'].get(baseline_id) if baseline_id else None,
@@ -383,7 +522,7 @@ def _build_hierarchy_tables(
         total_gap_partial = {}
         total_gap_environments = {}
         for column in columns:
-            baseline_id = baseline_by_context.get(_hierarchy_context_key(column['path']))
+            baseline_id = _hierarchy_reference_id(column['path'], baseline_by_context)
             baseline_total = total_values.get(baseline_id) if baseline_id else None
             current_total = total_values.get(column['id'])
             if environment == 'Combined':
@@ -466,7 +605,7 @@ def _build_hierarchy_tables(
             'gap_scale_max': gap_scale_max,
             'gap_scale_colors': {'zero': _GAP_NEUTRAL, 'positive': _GAP_POSITIVE_MAX, 'negative': _GAP_NEGATIVE_MAX},
             'note': _join_notes(
-                'GAP comparisons use the reference operator in the same selected context. Missing matches are N/A.',
+                'GAP comparisons retain every selected context level, using the same vendor first or the reference operator\'s All vendor group. Missing matches are N/A.',
                 _partial_gap_note(gap_rows, leaf_ids),
             ),
             'gap_direction': 'operator_minus_reference',

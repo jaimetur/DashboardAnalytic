@@ -23,8 +23,9 @@ from src.modules.cdr_reporting import (
     _named_slide_layout, _remove_all_slides, _set_slide_header,
     _set_structural_slide_text,
 )
+from src.modules.scoring_vendors import normalize_scoring_vendor_result
 from src.modules.scoring_views import (
-    THRESHOLD_COLORS, _gap_order_key, _hierarchy_display_value, build_scoring_views,
+    THRESHOLD_COLORS, _gap_order_key, _hierarchy_display_value, build_scoring_views, refresh_baseline_warning, scoring_coverage_notes,
 )
 from src.modules.scoring_pptx_allocation import (
     _environment_display_label, add_maximum_allocation_donut, category_maximum_allocations,
@@ -337,6 +338,11 @@ def _add_gap_color_scale(slide, matrix: dict, *, left: float, width: float, top:
 
 def _cell(cell, text: str, *, color: str = _WHITE, foreground: str = '#17232D',
           size: float = 9, bold: bool = False, left: bool = False) -> None:
+    if str(text) == 'N/A':
+        text = 'N/A*'
+    if str(text) == 'N/A*' or (str(text).endswith('*') and str(text)[:-1].replace('.', '').replace(',', '').lstrip('+-').isdigit()):
+        foreground = '#C62828'
+        bold = True
     cell.text = text
     cell.margin_left = cell.margin_right = Inches(.025)
     cell.margin_top = cell.margin_bottom = 0
@@ -2128,11 +2134,13 @@ def export_scoring_powerpoint(job: dict[str, Any], result: dict[str, Any], templ
     if gap_layout not in {'end', 'adjacent'}:
         raise ValueError('GAP layout must be end or adjacent.')
     job = dict(job)
+    result = normalize_scoring_vendor_result(result, operator_mapping_groups)
     if '_scoring_display_selections' not in job:
         job['_scoring_display_selections'] = prepare_scoring_display_selections(job, result, template_path)
     presentation = Presentation(template_path)
     _remove_all_slides(presentation)
     views = _export_environment_views(build_scoring_views(job, result, operator_mapping_groups), environment)
+    refresh_baseline_warning(result, views, str(job.get('baseline_operator') or 'EE'))
     configuration = job.get('configuration') or result.get('configuration') or {}
     for matrix_key in ('score_tables', 'gap_summary_tables', 'gap_tables',
                        'hierarchy_score_tables', 'hierarchy_gap_tables'):
@@ -2219,8 +2227,12 @@ def export_scoring_powerpoint(job: dict[str, Any], result: dict[str, Any], templ
     else:
         slide = _slide(presentation, 'Scoring Tables', subtitle)
         _text(slide, 'No scoring measurements are available for this saved job.', 1.8, height=1, size=16)
+    coverage_notes = scoring_coverage_notes(result)
+    coverage_details = [f"{'All Environments' if environment == 'Combined' else environment} — {note}"
+                        for environment, notes in coverage_notes.items() for note in notes]
     slide_warnings = [str(warning) for warning in result.get('warnings', [])
                       if str(warning) != _LEGACY_CAMPAIGN_WARNING]
+    slide_warnings.extend(coverage_details)
     for slide in presentation.slides:
         slide.notes_slide.notes_text_frame.text = '\n'.join(slide_warnings)
     output = BytesIO()
