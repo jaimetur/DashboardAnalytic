@@ -1478,13 +1478,14 @@ def test_content_slide_subtitles_match_environment_transition(hierarchy):
     assert environment_title == 'Drive - City'
 
 
-@pytest.mark.parametrize('values, expected, color', [
-    ([-4, -2, None], '-3.00', 'CC2424'),
-    ([2, 4, None], '3.00', '228B22'),
-    ([-2, 2], '0.00', '263746'),
-    ([None], 'N/A', '263746'),
+@pytest.mark.parametrize('values, expected, total, color', [
+    ([-4, -2, None], '-3.00', '-6.00', 'CC2424'),
+    ([2, 4, None], '3.00', '6.00', '228B22'),
+    ([-2, 2], '0.00', '0.00', '263746'),
+    ([None], 'N/A', 'N/A', '263746'),
+    ([-4, float('nan'), float('inf')], '-4.00', '-4.00', 'CC2424'),
 ])
-def test_individual_gap_side_note_average_and_color(values, expected, color):
+def test_individual_gap_side_note_average_total_and_color(values, expected, total, color):
     from src.modules.scoring_exports import _add_individual_gap_notes, _slide
 
     presentation = Presentation(TEMPLATE)
@@ -1495,6 +1496,10 @@ def test_individual_gap_side_note_average_and_color(values, expected, color):
     assert paragraph.text == f'Average KPI GAP: {expected} points'
     assert str(paragraph.runs[1].font.color.rgb) == color
     assert paragraph.runs[1].font.bold
+    total_paragraph = slide.shapes[-1].text_frame.paragraphs[4]
+    assert total_paragraph.text == f'Total KPI GAP: {total} points'
+    assert str(total_paragraph.runs[1].font.color.rgb) == color
+    assert total_paragraph.runs[1].font.bold
 
 
 def test_individual_gap_side_note_hierarchy_mean_marks_partial_coverage():
@@ -1509,6 +1514,7 @@ def test_individual_gap_side_note_hierarchy_mean_marks_partial_coverage():
     ]
     _add_individual_gap_notes(slide, matrix, rows)
     assert 'Average KPI GAP: -1.00* points' in _slide_text(slide)
+    assert 'Total KPI GAP: -3.00* points' in _slide_text(slide)
 
 
 def test_saved_environment_display_name_replaces_historical_name_in_ppt():

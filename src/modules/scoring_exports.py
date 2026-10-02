@@ -234,7 +234,7 @@ def _text(slide, text: str, top: float, *, left: float = .55, width: float = 12.
 
 
 def _add_individual_gap_notes(slide, matrix: dict, rows: list[dict]) -> None:
-    """Show the arithmetic mean of available KPI comparisons beside the table."""
+    """Show the mean and sum of available KPI comparisons beside the table."""
     if matrix.get('hierarchy_columns'):
         comparisons = [
             (row.get('gaps', {}).get(column['id']),
@@ -245,25 +245,33 @@ def _add_individual_gap_notes(slide, matrix: dict, rows: list[dict]) -> None:
         comparisons = [(row.get('gap_points'), row.get('gap_partial', False)) for row in rows]
     valid = [(float(value), partial) for value, partial in comparisons
              if value is not None and isfinite(float(value))]
-    average = sum(value for value, _ in valid) / len(valid) if valid else None
-    value_text = _number(average) + ('*' if any(partial for _, partial in valid) else '')
+    total = sum(value for value, _ in valid) if valid else None
+    average = total / len(valid) if valid else None
+    marker = '*' if any(partial for _, partial in valid) else ''
+    value_text = _number(average) + marker
+    total_text = _number(total) + marker
     box = _text(
         slide, f'KPIs ordered by GAP\n\nAverage KPI GAP: {value_text} points\n\n'
+        f'Total KPI GAP: {total_text} points\n\n'
         f'Operator − reference\nGreen: positive\nRed: negative\n\n{matrix["note"]}',
         1.8, left=10.2, width=2.5, height=4.65, size=13,
     )
     box.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
-    paragraph = box.text_frame.paragraphs[2]
-    paragraph.clear()
-    paragraph.add_run().text = 'Average KPI GAP: '
-    value_run = paragraph.add_run()
-    value_run.text = value_text
-    value_run.font.bold = True
-    value_run.font.color.rgb = RGBColor.from_string(
-        '228B22' if average is not None and average > 0 else
-        'CC2424' if average is not None and average < 0 else '263746'
-    )
-    paragraph.add_run().text = ' points'
+    for index, label, value, text in (
+        (2, 'Average KPI GAP: ', average, value_text),
+        (4, 'Total KPI GAP: ', total, total_text),
+    ):
+        paragraph = box.text_frame.paragraphs[index]
+        paragraph.clear()
+        paragraph.add_run().text = label
+        value_run = paragraph.add_run()
+        value_run.text = text
+        value_run.font.bold = True
+        value_run.font.color.rgb = RGBColor.from_string(
+            '228B22' if value is not None and value > 0 else
+            'CC2424' if value is not None and value < 0 else '263746'
+        )
+        paragraph.add_run().text = ' points'
 
 
 def _add_gap_priority_arrow(slide, table, *, header_rows: int = 1) -> None:
