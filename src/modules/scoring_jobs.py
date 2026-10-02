@@ -690,6 +690,34 @@ def _prepare_scoring_job(
             selected_mode, normalized_levels, baseline)
 
 
+def _matching_saved_job(connection: Any, cache_key: str, version: str,
+                        dataset_ids: list[int], source_fingerprint: str) -> Any:
+    """Match saved inputs even when an engine upgrade changed their cache digest."""
+    rows = connection.execute(
+        "SELECT * FROM scoring_jobs WHERE cache_key = ? OR source_fingerprint = ? "
+        "ORDER BY status IN ('queued', 'processing') DESC, id DESC",
+        (cache_key, source_fingerprint),
+    ).fetchall()
+    for row in rows:
+        if row['cache_key'] == cache_key:
+            return row
+        try:
+            job = _row_to_job(row, include_internal_snapshot=True)
+            if sorted(job['dataset_ids']) != sorted(dataset_ids) or not job.get('configuration'):
+                continue
+            saved_key, _ = _job_payload(
+                job['levels'], job['nr_mode'], job['baseline_operator'], version,
+                job['source_fingerprint'], configuration_hash(job['configuration']),
+                job['baseline_aliases'], job['context_filters'], job['resolved_context_filters'],
+                job['operator_mappings'], job['scoring_profile_id'], job['scoring_profile_name'],
+            )
+        except (ValueError, TypeError, KeyError):
+            continue
+        if saved_key == cache_key:
+            return row
+    return None
+
+
 def find_matching_scoring_job(
     repository: Repository, dataset_ids: list[int], levels: list[str], nr_mode: str | None,
     *, baseline_operator: str = DEFAULT_BASELINE_OPERATOR,
@@ -697,16 +725,12 @@ def find_matching_scoring_job(
     scoring_profile_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Find a saved calculation using the same identity as job submission."""
-    cache_key, *_ = _prepare_scoring_job(
+    cache_key, version, source_fingerprint, normalized_ids, *_ = _prepare_scoring_job(
         repository, dataset_ids, levels, nr_mode, baseline_operator=baseline_operator,
         context_filters=context_filters, scoring_profile_id=scoring_profile_id,
     )
     with repository.connection() as connection:
-        row = connection.execute(
-            "SELECT * FROM scoring_jobs WHERE cache_key = ? "
-            "ORDER BY status IN ('queued', 'processing') DESC, id DESC LIMIT 1",
-            (cache_key,),
-        ).fetchone()
+        row = _matching_saved_job(connection, cache_key, version, normalized_ids, source_fingerprint)
     return _row_to_job(row, include_snapshot=False) if row else None
 
 
@@ -746,20 +770,20 @@ def create_scoring_job(
         ).fetchone()
         if active_row:
             return _row_to_job(active_row), True
-        previous_row = connection.execute(
-            'SELECT * FROM scoring_jobs WHERE cache_key = ? ORDER BY id DESC LIMIT 1',
-            (cache_key,),
-        ).fetchone()
+        previous_row = _matching_saved_job(connection, cache_key, version, normalized_ids, source_fingerprint)
+        if previous_row and previous_row['status'] in ('queued', 'processing'):
+            return _row_to_job(previous_row), True
         if previous_row:
             connection.execute(
                 """UPDATE scoring_jobs SET status = 'queued', progress = 0,
                    message = 'Waiting to calculate scoring', result_json = NULL,
                    last_error = NULL, started_at = NULL, finished_at = NULL,
-                   updated_at = ?, created_by = ?, source_metadata_json = ?
+                   updated_at = ?, created_by = ?, source_metadata_json = ?,
+                   cache_key = ?, method_version = ?
                    WHERE id = ?""",
                 (now, str(username or 'system'),
                  json.dumps(source_snapshot, ensure_ascii=False, separators=(',', ':')),
-                 previous_row['id']),
+                 cache_key, version, previous_row['id']),
             )
             job = connection.execute('SELECT * FROM scoring_jobs WHERE id = ?', (previous_row['id'],)).fetchone()
             return _row_to_job(job), False

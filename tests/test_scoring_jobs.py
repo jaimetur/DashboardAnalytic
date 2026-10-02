@@ -222,6 +222,36 @@ def test_force_retries_failed_calculation_in_place(repository, scoring_engine):
     assert scoring_jobs.run_scoring_job(repository, retry['id'])['status'] == 'completed'
 
 
+@pytest.mark.parametrize('status', ['completed', 'queued', 'failed'])
+def test_engine_upgrade_matches_saved_inputs_and_recalculates_in_place(repository, scoring_engine, status):
+    dataset_id = add_dataset(repository)
+    job, _ = scoring_jobs.create_scoring_job(repository, [dataset_id], ['Region'], 'NSA')
+    with repository.connection() as connection:
+        connection.execute(
+            'UPDATE scoring_jobs SET cache_key = ?, method_version = ?, status = ? WHERE id = ?',
+            ('old-cache-format', 'previous-engine-version', status, job['id']),
+        )
+    match = scoring_jobs.find_matching_scoring_job(repository, [dataset_id], ['Region'], 'NSA')
+    assert match['id'] == job['id']
+    assert match['cache_key'] == 'old-cache-format'
+    assert scoring_jobs.find_matching_scoring_job(
+        repository, [dataset_id], ['City'], 'NSA',
+    ) is None
+    assert scoring_jobs.find_matching_scoring_job(
+        repository, [dataset_id], ['Region'], 'NSA', baseline_operator='O2',
+    ) is None
+    retry, reused = scoring_jobs.create_scoring_job(
+        repository, [dataset_id], ['Region'], 'NSA', force=True,
+    )
+    assert retry['id'] == job['id']
+    assert reused is (status == 'queued')
+    assert len(scoring_jobs.list_scoring_jobs(repository)) == 1
+    if not reused:
+        assert retry['cache_key'] == job['cache_key']
+        assert retry['method_version'] == job['method_version']
+        assert scoring_jobs.run_scoring_job(repository, retry['id'])['status'] == 'completed'
+
+
 def test_find_matching_scoring_job_is_read_only_and_tracks_canonical_identity(repository, scoring_engine):
     _engine, _calls = scoring_engine
     dataset_ids = add_complete_scoring_sources(repository, 'MatchIdentity')

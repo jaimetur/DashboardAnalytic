@@ -41,7 +41,7 @@
 - GAP comparisons fall back to the reference operator's All vendor group when an exact vendor match is unavailable, preserving other aggregation boundaries and removing obsolete missing-baseline warnings.
 - Saving methodologies verifies persisted environment names/source selectors and preserves pending environment edits when saving hierarchy or priorities. Switching after save no longer creates a false unsaved-change warning; historical result labels reflect environment renames without changing calculations.
 - Scoring PowerPoint exports avoid malformed table/chart XML and allocation labels that caused repair prompts or blank slides.
-- Matching scoring selections enable Recalculate instead of Calculate; recalculation updates the existing job and replaces its results without adding a duplicate.
+- Matching scoring selections enable Recalculate instead of Calculate, including jobs saved before engine updates; recalculation updates the existing job and replaces its results without adding a duplicate.
 
 #### 📚 Documentation:
 - Help documents the simplified Scoring format, environment matching, editable titles, jobs, aggregation, vendor filtering, coverage limits and CSV/PowerPoint exports.
