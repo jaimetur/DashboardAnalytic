@@ -5,11 +5,13 @@ from io import BytesIO, StringIO
 
 import pytest
 from pptx import Presentation
+from pptx.enum.text import PP_ALIGN
+from pptx.util import Inches
 
 from src.modules.scoring_exports import (
     _hierarchy_chart_color, _hierarchy_score_tables, _score_tables, _summary_extreme_columns,
     _summary_extreme_operators,
-    _table_for_mode, export_scoring_csv, export_scoring_powerpoint,
+    _table_for_mode, _score_total_label, export_scoring_csv, export_scoring_powerpoint,
 )
 from src.modules.scoring_views import build_scoring_views
 from tests.scoring_fixtures import scoring_configuration
@@ -94,18 +96,37 @@ def test_ppt_table_modes_include_bold_category_totals_and_keep_identical_charts(
     assert len(summary.rows) == 7 + 2
     for table in (summary, expanded):
         assert str(table.cell(0, 0).fill.fore_color.rgb) == '455B65'
-        category_fill = 'E6F0F7' if table is summary else 'DCE5E9'
+        category_fill = 'E3E6E7' if table is summary else 'DCE5E9'
         category_cells = [row.cells[0] for row in list(table.rows)[1:-1]
                           if row.cells[0].text and row.cells[0].text != 'TOTAL']
         assert category_cells
+        for cell in category_cells:
+            for paragraph in cell.text_frame.paragraphs:
+                assert paragraph.alignment == PP_ALIGN.LEFT
+                assert paragraph.runs
+                assert all(run.font.bold if run.font.bold is not None else paragraph.font.bold
+                           for run in paragraph.runs)
         assert all(str(cell.fill.fore_color.rgb) == category_fill for cell in category_cells)
         if table is expanded:
             _assert_row_matches_category_fill(table, len(table.rows) - 1, category_fill)
         else:
             assert str(table.cell(len(table.rows) - 1, 0).fill.fore_color.rgb) == 'D8DFE4'
-    assert all(summary.cell(index, 5).text_frame.paragraphs[0].font.bold for index in range(1, 8))
-    assert all(summary.cell(index, 1).text.endswith(' total') for index in range(1, 8))
-    assert expanded.cell(len(expanded.rows) - 1, 5).text == summary.cell(len(summary.rows) - 1, 4).text
+    assert all(summary.cell(index, 4).text_frame.paragraphs[0].font.bold for index in range(1, 8))
+    assert all(summary.cell(index, 0).text.endswith(' total') for index in range(1, 8))
+    assert expanded.cell(len(expanded.rows) - 1, 5).text == summary.cell(len(summary.rows) - 1, 3).text
+    summary_slide = presentations[0].slides[
+        next(index for index, slide in enumerate(presentations[0].slides)
+             if slide.shapes.title and slide.shapes.title.text.startswith('Scoring Tables'))
+    ]
+    score_table_shape = next(shape for shape in summary_slide.shapes
+                             if shape.has_table and len(shape.table.columns) == len(summary.columns))
+    legend_shapes = [shape for shape in summary_slide.shapes
+                     if shape.has_table and len(shape.table.columns) == 1 and len(shape.table.rows) == 1
+                     and shape.table.cell(0, 0).text in {'Best operator', 'Worst operator'}]
+    assert len(legend_shapes) == 2
+    assert all(shape.left >= Inches(10) for shape in legend_shapes)
+    assert all(shape.top + shape.height <= score_table_shape.top for shape in legend_shapes)
+    assert all(shape.left + shape.width <= presentations[0].slide_width for shape in legend_shapes)
     chart_values = [[list(series.values) for slide in presentation.slides for shape in _nested_shapes(slide.shapes)
                      if shape.has_chart for series in shape.chart.series] for presentation in presentations]
     assert chart_values[0] == chart_values[1]
@@ -240,7 +261,9 @@ def test_all_environment_ppt_finishes_each_full_block_aggregate_first(levels):
     assert titles.count('Scoring Tables — Summary') == 3
     assert titles.count('Scoring Tables — Breakdown') == 3
     assert titles.count('Best Network Scoring per Service') == 3
-    assert titles.count('Scoring per Category') == 3
+    category_count = len({metric['category'] for metric in result['configuration']['metrics']})
+    expected_category_slides = 3 if len(levels) == 1 else 3 * category_count
+    assert titles.count('Scoring per Category') == expected_category_slides
     for slide in presentation.slides:
         text = '\n'.join(shape.text for shape in slide.shapes if shape.has_text_frame)
         if slide.shapes.title:
@@ -328,20 +351,19 @@ def test_summary_tables_preserve_category_fill_extreme_highlights_and_legend(hie
     assert not any(band in all_slide_table_text for band in ('Low', 'Medium', 'High', 'UltraHigh', 'Unavailable'))
 
     if hierarchy:
-        score_columns = [index for index in range(5, len(table.columns))
+        score_columns = [index for index in range(4, len(table.columns))
                          if table.cell(len(matrix['hierarchy_levels']) + 1, index).text == 'Score']
         first_metric_row = len(matrix['hierarchy_levels']) + 2
         category_rows = [row_index for row_index in range(first_metric_row, len(table.rows) - 1)
-                         if table.cell(row_index, 1).text.endswith(' total')]
+                         if table.cell(row_index, 0).text.endswith(' total')]
     else:
-        score_columns = list(range(4, 4 + len(matrix['operators'])))
+        score_columns = list(range(3, 3 + len(matrix['operators'])))
         category_rows = [row_index for row_index in range(1, len(table.rows) - 1)
-                         if table.cell(row_index, 1).text.endswith(' total')]
+                         if table.cell(row_index, 0).text.endswith(' total')]
     assert category_rows
-    assert str(table.cell(0, 0).fill.fore_color.rgb) == str(table.cell(0, 1).fill.fore_color.rgb) == '455B65'
+    assert str(table.cell(0, 0).fill.fore_color.rgb) == '455B65'
     for row_index in category_rows:
-        assert str(table.cell(row_index, 0).fill.fore_color.rgb) == 'E6F0F7'
-        assert str(table.cell(row_index, 1).fill.fore_color.rgb) == 'E3E6E7'
+        assert str(table.cell(row_index, 0).fill.fore_color.rgb) == 'E3E6E7'
     assert str(table.cell(len(table.rows) - 1, 0).fill.fore_color.rgb) == 'D8DFE4'
     for row_index in [*category_rows, len(table.rows) - 1]:
         colors = [str(table.cell(row_index, column).fill.fore_color.rgb) for column in score_columns]
@@ -404,3 +426,18 @@ def test_ppt_score_numeric_font_uses_available_space_without_exceeding_cell_heig
                 font_sizes.append(size)
         if mode == 'summary':
             assert max(font_sizes) > 7.5
+
+
+@pytest.mark.parametrize('show_gap_values', [False, True])
+@pytest.mark.parametrize('points,complete,gap,partial', [
+    (100, True, 5, False), (80, False, 5, False),
+    (100, True, 5, True), (None, False, None, True),
+])
+def test_score_total_label_only_explains_visible_partial_values(show_gap_values, points, complete, gap, partial):
+    row = {'values': {'leaf': {'points': points, 'complete': complete}},
+           'gaps': {'leaf': gap}, 'gap_partial': {'leaf': partial}}
+    label = _score_total_label([row], ['leaf'], ['leaf'] if show_gap_values else [],
+                               show_gap_values=show_gap_values)
+    marked = (points is not None and not complete) or (show_gap_values and gap is not None and partial)
+    assert ('; * incomplete' in label) == marked
+    assert label.startswith('Weighted score')

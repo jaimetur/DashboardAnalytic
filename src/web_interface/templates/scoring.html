@@ -77,6 +77,8 @@
   .scoring-job-title-city { color: #966300; }
   .scoring-job-title-campaign { color: #b4234d; }
   .scoring-job-item-top .scoring-status { flex: 0 0 auto; }
+  .scoring-job-aggregation { display: flex; flex-wrap: wrap; align-items: baseline; gap: .3rem .5rem; align-self: flex-start; max-width: 100%; padding: .3rem .55rem; border: 1px solid #cbdce9; border-radius: .5rem; background: #edf4fa; color: #34566f; font-size: .75rem; line-height: 1.45; overflow-wrap: anywhere; }
+  .scoring-job-aggregation strong { font-weight: 800; }
   .scoring-job-meta { min-width: 0; color: var(--muted); font-size: .72rem; line-height: 1.45; white-space: normal; overflow-wrap: anywhere; }
   .scoring-status { display: inline-flex; align-items: center; gap: .3rem; padding: .2rem .48rem; border-radius: 999px; background: #e9eff1; color: #47606b; font-size: .68rem; font-weight: 800; text-transform: capitalize; white-space: nowrap; }
   .scoring-status[data-status="completed"] { background: #e2f4e9; color: #247048; }
@@ -176,54 +178,59 @@
   .scoring-gap-info > .scoring-gap-scale { margin: 0 0 0 auto; justify-content: flex-end; }
   .scoring-gap-scale-bar { display: inline-block; width: min(15rem,35vw); height: .62rem; border: 1px solid rgba(25,42,53,.12); border-radius: 999px; }
   .scoring-matrix-wrap { max-height: none; overflow-x: auto; overflow-y: visible; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
-  .scoring-table-wrap tbody tr.scoring-total-row > td { background-color: #E6F0F7; font-weight: 700; }
+  .scoring-table-wrap tbody tr.scoring-total-row > td { background-color: #edf3f8; font-weight: 700; }
   .scoring-comparison-table { width: max-content !important; min-width: 100%; border-collapse: collapse; table-layout: auto; font-size: .72rem !important; }
-  .scoring-comparison-table th, .scoring-comparison-table td { padding: .42rem .48rem !important; border: 1px solid #d8dddf !important; text-align: center !important; white-space: nowrap; }
-  .scoring-comparison-table th { position: static; background: #dedfe0; color: #263640; font-size: .85rem !important; font-weight: 800; vertical-align: middle; }
+  .scoring-comparison-table th, .scoring-comparison-table td { padding: .42rem .48rem !important; border: 1px solid #e2e8ed !important; text-align: center !important; white-space: nowrap; }
+  .scoring-comparison-table th { position: static; background: #edf2f6; color: #344858; font-size: .85rem !important; font-weight: 800; vertical-align: middle; }
   .scoring-comparison-table th[data-column="category"], .scoring-comparison-table td[data-column="category"] { min-width: 7.2rem; text-align: left !important; }
   .scoring-comparison-table th[data-column="kpi"], .scoring-comparison-table td[data-column="kpi"] { min-width: 12rem; max-width: 22rem; white-space: normal; text-align: left !important; }
-  .scoring-comparison-table .scoring-column-group { background: #465963; color: #fff; font-size: .9rem !important; letter-spacing: .025em; }
-  .scoring-comparison-table .scoring-adjacent-group { background: #465963; color: #fff; }
-  .scoring-comparison-table .scoring-gap-group { background: #ffff00 !important; color: #242424 !important; }
+  .scoring-comparison-table .scoring-column-group { background: #dce6ee; color: #344858; font-size: .9rem !important; letter-spacing: .025em; }
+  .scoring-comparison-table .scoring-adjacent-group { background: #dce6ee; color: #344858; }
+  .scoring-comparison-table .scoring-gap-group { background: #f4ecd5 !important; color: #655331 !important; }
   .scoring-comparison-table th.scoring-weight-header { background: #e7def4 !important; color: #51406d !important; }
-  .scoring-comparison-table th.scoring-maximum-header { background: #f8e4cd !important; color: #704b26 !important; }
+  .scoring-comparison-table th.scoring-maximum-header { background: #cce7e8 !important; color: #285f63 !important; }
   .scoring-comparison-table td[data-numeric="true"] { font-variant-numeric: tabular-nums; }
   .scoring-comparison-table :is(th,td)[data-column="weight"], .scoring-comparison-table :is(th,td)[data-column="maximum"], .scoring-comparison-table :is(th,td)[data-column="kpi-value"], .scoring-comparison-table :is(th,td)[data-column="score"], .scoring-comparison-table :is(th,td)[data-column="gap"] { text-align: center !important; }
-  .scoring-comparison-table td[data-column="weight"] { background: #e7f0e4; }
-  .scoring-comparison-table td[data-column="maximum"] { background: #fde8e8; }
+  .scoring-comparison-table td[data-column="weight"] { background: #f4f0f9; }
+  .scoring-comparison-table td[data-column="maximum"] { background: #e8f4f4; }
   .scoring-comparison-table th.scoring-kpi-value-header { background: #e6eaeb; color: #334854; }
   .scoring-comparison-table td.scoring-kpi-value-cell { background: #f3f5f6; font-variant-numeric: tabular-nums; }
-  .scoring-comparison-table th.scoring-operator-header { background: var(--operator-accent, #607d8b) !important; color: var(--operator-text, #ffffff) !important; }
-  .scoring-comparison-table .scoring-gap-header { background: #fff5a6 !important; }
-  .scoring-comparison-table th.scoring-gap-header { background: #ffff00 !important; color: #242424 !important; }
-  .scoring-comparison-table th.scoring-hierarchy-header { min-width: 8rem; max-width: 20rem; white-space: normal; background: #e1e9eb; color: #263f4b; }
-  .scoring-comparison-table th.scoring-hierarchy-header[data-hierarchy-depth="0"] { background: #cfdde0; }
-  .scoring-comparison-table th.scoring-hierarchy-header[data-hierarchy-depth="1"] { background: #d8e4e6; }
-  .scoring-comparison-table th.scoring-hierarchy-header.scoring-gap-header { background: #fff5a6 !important; }
-  .scoring-comparison-table th.scoring-gap-header.scoring-gap-operator-header { background: var(--operator-accent, #607d8b) !important; color: var(--operator-text, #ffffff) !important; }
+  .scoring-comparison-table th.scoring-operator-header { background: color-mix(in srgb, var(--operator-accent, #607d8b) 20%, #fff) !important; color: #263f4b !important; box-shadow: inset 0 3px var(--operator-accent, #607d8b); }
+  .scoring-comparison-table .scoring-gap-header { background: #f4ecd5 !important; }
+  .scoring-comparison-table th.scoring-gap-header { background: #f4ecd5 !important; color: #655331 !important; }
+  .scoring-comparison-table th.scoring-hierarchy-header { min-width: 8rem; max-width: 20rem; white-space: normal; background: #f1f5f8; color: #344858; }
+  .scoring-comparison-table th.scoring-hierarchy-header[data-hierarchy-depth="0"] { background: #e4ecf2; }
+  .scoring-comparison-table th.scoring-hierarchy-header[data-hierarchy-depth="1"] { background: #edf2f6; }
+  .scoring-comparison-table th.scoring-hierarchy-header.scoring-gap-header { background: #f4ecd5 !important; }
+  .scoring-comparison-table th.scoring-gap-header.scoring-gap-operator-header { background: color-mix(in srgb, var(--operator-accent, #607d8b) 20%, #fff) !important; color: #263f4b !important; box-shadow: inset 0 3px var(--operator-accent, #607d8b); }
   .scoring-comparison-table .scoring-category-cell { vertical-align: middle; background: #f0f2f3; color: #334854; font-weight: 800; }
-  .scoring-comparison-table tbody tr:nth-child(even) td { background-color: #f6f7f7; }
-  .scoring-comparison-table tbody tr:nth-child(even) td[data-column="weight"] { background-color: #e4eee1; }
-  .scoring-comparison-table tbody tr:nth-child(even) td[data-column="maximum"] { background-color: #f9dddd; }
-  .scoring-comparison-table tbody tr.scoring-category-subtotal > td { background-color: #E6F0F7 !important; font-weight: 700 !important; }
-  .scoring-comparison-table tbody tr > td.scoring-category-cell { background-color: #E6F0F7 !important; color: #334854; }
-  .scoring-comparison-table tbody tr:nth-child(even) td.scoring-category-cell { background-color: #E6F0F7 !important; }
+  .scoring-comparison-table tbody tr:nth-child(even) td { background-color: #f8fafc; }
+  .scoring-comparison-table tbody tr.scoring-category-subtotal > td { background-color: #edf3f8 !important; font-weight: 700 !important; }
+  .scoring-comparison-table tbody tr > td.scoring-category-cell { background-color: #edf3f8 !important; color: #334854; }
+  .scoring-comparison-table tbody tr:nth-child(even) td.scoring-category-cell { background-color: #edf3f8 !important; }
   .scoring-comparison-table td.scoring-gap-loss { color: #a43d2f; font-weight: 750; }
   .scoring-comparison-table td.scoring-gap-gain { color: #247048; font-weight: 750; }
   .scoring-comparison-table td.scoring-total-partial { color: #64747b; }
-  .scoring-comparison-table tfoot th, .scoring-comparison-table tfoot td { position: static; background: #E6F0F7 !important; color: #203744; font-weight: 850; border-top: 2px solid #9eaaae !important; }
-  .scoring-priority-table td[data-column="category"] { background: #E6F0F7 !important; color: #334854 !important; font-weight: 800; }
+  .scoring-comparison-table tfoot th, .scoring-comparison-table tfoot td { position: static; background: #edf3f8 !important; color: #203744; font-weight: 850; border-top: 2px solid #bccbd7 !important; }
+  .scoring-priority-table td[data-column="category"] { background: #edf3f8 !important; color: #334854 !important; font-weight: 800; }
   .scoring-priority-table td[data-column="gap"] { background: #fff5a6; font-weight: 800; text-align: center !important; }
-  .scoring-comparison-table td[data-column="type"][data-kpi-type="reliable"] { background: #d8efca !important; color: #286a35; font-weight: 750; }
-  .scoring-comparison-table td[data-column="type"][data-kpi-type="diff"] { background: #fff2cc !important; color: #684b0d; font-weight: 750; }
-  .scoring-comparison-table td[data-column="type"][data-kpi-type="neutral"] { background: #e6eaeb !important; color: #64747b; }
+  .scoring-comparison-table td[data-column="type"][data-kpi-type="reliable"] { background: #e1efdc !important; color: #3d6135; font-weight: 750; }
+  .scoring-comparison-table td[data-column="type"][data-kpi-type="diff"] { background: #f1e2ec !important; color: #754a67; font-weight: 750; }
+  .scoring-comparison-table td[data-column="type"][data-kpi-type="neutral"] { background: #f2f4f6 !important; color: #64747b; }
   .scoring-comparison-table tbody tr.scoring-category-subtotal > td,
-  .scoring-comparison-table tfoot tr > :is(th, td) { background-color: #E6F0F7 !important; }
+  .scoring-comparison-table tfoot tr > :is(th, td) { background-color: #edf3f8 !important; }
   .scoring-comparison-table tbody tr.scoring-category-subtotal > td[data-column="type"],
   .scoring-comparison-table tfoot tr > td[data-column="type"][data-kpi-type],
-  .scoring-comparison-table tfoot tr > td[data-column="gap"] { background-color: #E6F0F7 !important; }
+  .scoring-comparison-table tfoot tr > td[data-column="gap"] { background-color: #edf3f8 !important; }
   .scoring-comparison-table :is(tbody, tfoot) tr > td[data-column="score"][data-operator-rank="best"] { background-color: #C6EFCE !important; }
   .scoring-comparison-table :is(tbody, tfoot) tr > td[data-column="score"][data-operator-rank="worst"] { background-color: #FFC7CE !important; }
+  .scoring-comparison-table td:is([data-column="score"], [data-column="gap"]),
+  .scoring-legend-swatch { background-image: linear-gradient(rgba(255,255,255,.25), rgba(255,255,255,.25)); }
+  .scoring-gap-scale-bar { opacity: .75; }
+  .scoring-comparison-table :is(tbody, tfoot) tr > td[data-column="weight"] { background-color: #f4f0f9 !important; }
+  .scoring-comparison-table :is(tbody, tfoot) tr > td[data-column="maximum"] { background-color: #e8f4f4 !important; }
+  .scoring-comparison-table tbody tr.scoring-category-subtotal > td:is([data-column="weight"], [data-column="maximum"], [data-column="type"]),
+  .scoring-comparison-table tfoot tr > td:is([data-column="weight"], [data-column="maximum"], [data-column="type"]) { background-color: #edf3f8 !important; }
   .scoring-tone-0 { --operator-accent: #315f9a; }
   .scoring-tone-1 { --operator-accent: #bd4540; }
   .scoring-tone-2 { --operator-accent: #43835b; }

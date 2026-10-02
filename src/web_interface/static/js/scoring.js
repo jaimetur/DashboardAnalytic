@@ -806,7 +806,7 @@
 
   function jobLevels(job) {
     const levels = valueOf(job, ['aggregation_levels', 'levels'], []);
-    return Array.isArray(levels) ? levels.join(' · ') : String(levels || 'Operator');
+    return Array.isArray(levels) ? (levels.length ? levels.join(' → ') : 'Operator') : String(levels || 'Operator');
   }
 
   function progressValue(job) {
@@ -878,10 +878,18 @@
       statusBadge.textContent = status;
       top.append(title, statusBadge);
       button.append(top);
+      const aggregation = document.createElement('span');
+      aggregation.className = 'scoring-job-aggregation';
+      const aggregationLabel = document.createElement('span');
+      aggregationLabel.textContent = 'Aggregation levels:';
+      const aggregationLevels = document.createElement('strong');
+      aggregationLevels.textContent = jobLevels(job);
+      aggregation.append(aggregationLabel, aggregationLevels);
+      button.append(aggregation);
       const meta = document.createElement('span');
       meta.className = 'scoring-job-meta';
       const baseline = valueOf(job, ['baseline_operator'], 'EE');
-      meta.textContent = `${jobLevels(job)} · GAP baseline ${baseline}`;
+      meta.textContent = `GAP baseline: ${baseline}`;
       button.append(meta);
       const cdrNames = jobCdrNames(job);
       const cdrButton = document.createElement('button');
@@ -1552,7 +1560,7 @@
   }
 
   function applyGapCategoryRunColors(tbody) {
-    const colors = ['#E6F0F7', '#D7E5EE'];
+    const colors = ['#edf3f8', '#e3ecf3'];
     [...tbody.querySelectorAll('td.scoring-category-cell')].forEach((cell, index) => {
       cell.style.setProperty('background-color', colors[index % colors.length], 'important');
     });
@@ -1610,11 +1618,11 @@
     table.className = 'scoring-comparison-table';
     const thead = document.createElement('thead');
     const header = document.createElement('tr');
-    for (const [columnIndex, title] of ['CATEGORY', isSummary ? 'CATEGORY' : 'KPI', ...(!isSummary ? ['Type of KPI'] : []), 'Score weight (%)', 'Max score'].entries()) {
+    for (const [columnIndex, title] of [...(!isSummary ? ['CATEGORY'] : []), isSummary ? 'CATEGORY' : 'KPI', ...(!isSummary ? ['Type of KPI'] : []), 'Score weight (%)', 'Max score'].entries()) {
       const th = document.createElement('th');
       th.scope = 'col';
       th.rowSpan = 2;
-      th.dataset.column = columnIndex === 0 ? 'category'
+      th.dataset.column = columnIndex === 0 && !isSummary ? 'category'
         : ({CATEGORY: 'kpi', KPI: 'kpi', 'Type of KPI': 'type', 'Score weight (%)': 'weight', 'Max score': 'maximum'})[title];
       th.textContent = title;
       if (title === 'Score weight (%)') th.className = 'scoring-weight-header';
@@ -1730,7 +1738,7 @@
         tr.style.fontWeight = '700';
       }
       const run = categoryRuns.get(index);
-      if (run) {
+      if (run && !isSummary) {
         const category = document.createElement('td');
         category.className = 'scoring-category-cell';
         category.rowSpan = run.span;
@@ -1791,6 +1799,7 @@
       tbody.append(tr);
     });
 
+    if (!isSummary) applyGapCategoryRunColors(tbody);
     table.append(thead, tbody);
     const total = tableData?.total;
     if (total && typeof total === 'object') {
@@ -1800,7 +1809,7 @@
       category.scope = 'row';
       category.dataset.column = 'category';
       category.textContent = 'Total';
-      row.append(category);
+      if (!isSummary) row.append(category);
       const label = document.createElement('td');
       label.dataset.column = 'kpi';
       label.textContent = showGapValues() && total.gap_label ? `Weighted score · ${total.gap_label}` : 'Weighted score';
@@ -2093,7 +2102,7 @@
     table.className = 'scoring-comparison-table scoring-hierarchy-table';
     const thead = document.createElement('thead');
     appendHierarchyHeaders(thead, tableData, allColumns, [
-      ['CATEGORY', 'category'], [isSummary ? 'CATEGORY' : 'KPI', 'kpi'],
+      ...(!isSummary ? [['CATEGORY', 'category']] : []), [isSummary ? 'CATEGORY' : 'KPI', 'kpi'],
       ...(!isSummary ? [['Type of KPI', 'type']] : []),
       ['Score weight (%)', 'weight', 'scoring-weight-header'], ['Max score', 'maximum', 'scoring-maximum-header'],
     ], blocks);
@@ -2106,7 +2115,7 @@
         row.style.fontWeight = '700';
       }
       const category = String(item?.category || 'Other');
-      if (index === 0 || String(rows[index - 1]?.category || 'Other') !== category) {
+      if (!isSummary && (index === 0 || String(rows[index - 1]?.category || 'Other') !== category)) {
         let span = 1;
         while (index + span < rows.length && String(rows[index + span]?.category || 'Other') === category) span += 1;
         const categoryCell = document.createElement('td');
@@ -2166,6 +2175,7 @@
       );
       tbody.append(row);
     }
+    if (!isSummary) applyGapCategoryRunColors(tbody);
     table.append(thead, tbody);
     const total = tableData?.total;
     if (total && typeof total === 'object') {
@@ -2175,7 +2185,7 @@
       category.scope = 'row';
       category.dataset.column = 'category';
       category.textContent = 'Total';
-      row.append(category);
+      if (!isSummary) row.append(category);
       const label = document.createElement('td');
       label.dataset.column = 'kpi';
       label.textContent = showGapValues() && total.gap_label ? `Weighted score · ${total.gap_label}` : 'Weighted score';

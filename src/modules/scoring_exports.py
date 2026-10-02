@@ -12,7 +12,7 @@ from typing import Any
 from pptx import Presentation
 from pptx.chart.data import CategoryChartData
 from pptx.dml.color import RGBColor
-from pptx.enum.chart import XL_CHART_TYPE, XL_DATA_LABEL_POSITION, XL_LEGEND_POSITION, XL_TICK_MARK
+from pptx.enum.chart import XL_CHART_TYPE, XL_DATA_LABEL_POSITION, XL_LEGEND_POSITION, XL_TICK_MARK, XL_TICK_LABEL_POSITION
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE, PP_ALIGN
 from pptx.oxml.xmlchemy import OxmlElement
@@ -152,6 +152,17 @@ def _gap_number(row: dict, operator: str | None = None) -> str:
     return _number(value) + ('*' if value is not None and partial else '')
 
 
+def _score_total_label(rows: list[dict], score_ids: list[str], gap_ids: list[str], *, show_gap_values: bool) -> str:
+    """Include the partial-coverage legend only when a displayed value is marked."""
+    label = 'Weighted score / Average KPI GAP' if show_gap_values else 'Weighted score'
+    partial = any(
+        (value.get('points') is not None and not value.get('complete'))
+        for row in rows for key in score_ids
+        for value in [row.get('values', {}).get(key, {})]
+    ) or any('*' in _gap_number(row, key) for row in rows for key in gap_ids)
+    return label + ('; * incomplete' if partial else '')
+
+
 def _scope(context: dict[str, Any], *, environment_label: bool = False) -> str:
     return ' · '.join(
         str(value) if key == 'environment' and not environment_label
@@ -254,7 +265,7 @@ def _add_individual_gap_notes(slide, matrix: dict, rows: list[dict]) -> None:
 
 
 def _add_gap_priority_arrow(slide, table, *, header_rows: int = 1) -> None:
-    """Mark the displayed KPI order beside the table body."""
+    """Span the table from just below the Priority label to its bottom edge."""
     frame = table._graphic_frame
     label = _text(slide, 'Priority', frame.top.inches, left=frame.left.inches - .59,
                   width=.52, height=.28, size=7, color='#245A96', align=PP_ALIGN.CENTER)
@@ -266,7 +277,7 @@ def _add_gap_priority_arrow(slide, table, *, header_rows: int = 1) -> None:
     label.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
     label.text_frame.paragraphs[0].font.name = 'Arial'
     label.text_frame.paragraphs[0].font.bold = True
-    body_top = frame.top + sum(row.height for row in list(table.rows)[:header_rows])
+    body_top = label.top + label.height + Inches(.06)
     body_bottom = frame.top + frame.height
     arrow = slide.shapes.add_shape(
         MSO_SHAPE.DOWN_ARROW, frame.left - Inches(.38), body_top,
@@ -714,11 +725,11 @@ _SUMMARY_WORST_COLOR = '#FFC7CE'
 
 
 def _add_summary_operator_legend(slide) -> None:
-    """Explain the best and worst score highlights below Summary tables."""
+    """Explain the best and worst score highlights above Summary tables on the right."""
     for index, (label, color) in enumerate((('Best operator', _SUMMARY_BEST_COLOR),
                                             ('Worst operator', _SUMMARY_WORST_COLOR))):
         table = slide.shapes.add_table(
-            1, 1, Inches(.55 + index * 1.35), Inches(7.02), Inches(1.3), Inches(.18),
+            1, 1, Inches(10.1 + index * 1.35), Inches(1.25), Inches(1.3), Inches(.18),
         ).table
         _cell(table.cell(0, 0), label, color=color, size=8)
 
@@ -774,8 +785,6 @@ def _score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap
                                 show_gap_values=show_gap_values, title=title)
         return
 
-    total_label = ('Weighted score / Average KPI GAP; * incomplete' if show_gap_values
-                   else 'Weighted score; * incomplete')
     for matrix in matrices:
         metric_pages = [matrix['rows']]
         is_summary = matrix.get('table_mode') == 'summary'
@@ -787,10 +796,13 @@ def _score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap
             comparisons = ([name for name in operators if name != baseline]
                            if show_gap_values and baseline in matrix['operators'] else [])
             for page_index, metrics in enumerate(metric_pages):
+                total_label = _score_total_label(
+                    [*metrics, matrix['total']], operators, comparisons, show_gap_values=show_gap_values,
+                )
                 page_label = f' · KPIs {page_index + 1}/{len(metric_pages)}' if len(metric_pages) > 1 else ''
                 slide = _slide(presentation, title, _chart_subtitle(matrix) + page_label)
                 include_total = page_index == len(metric_pages) - 1
-                headers = ['CATEGORY', 'NETCHECK KPI' if is_summary else 'KPI',
+                headers = ['CATEGORY', 'CATEGORY' if is_summary else 'KPI',
                            *([] if is_summary else ['Type of KPI']), 'Score weight\n(%)', 'Max score',
                            *[_operator_label(matrix, name) for name in operators],
                            *[f'GAP {_operator_label(matrix, name)}\n− {_operator_label(matrix, baseline)}' for name in comparisons]]
@@ -828,7 +840,7 @@ def _score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap
                     best, worst = (_summary_extreme_operators(metric.get('values', {}))
                                    if matrix.get('table_mode') == 'summary' and subtotal else (set(), set()))
                     _cell(table.cell(row_index, 0), metric['category'], color=category_color,
-                          size=metric_font, left=True, bold=subtotal)
+                          size=metric_font, left=True, bold=True)
                     _cell(table.cell(row_index, 1), metric['kpi'], color=row_color or '#E7E8E9',
                           bold=True, left=True, size=metric_font)
                     if not is_summary:
@@ -859,9 +871,8 @@ def _score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap
                     if last > first:
                         cell = table.cell(first + 1, 0)
                         cell.merge(table.cell(last + 1, 0))
-                        subtotal = metrics[first].get('row_type') == 'category'
                         _cell(cell, metrics[first]['category'], color=category_color,
-                              size=metric_font, left=True, bold=subtotal)
+                              size=metric_font, left=True, bold=True)
                     first = last + 1
                 if include_total:
                     total = matrix['total']
@@ -885,6 +896,7 @@ def _score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap
                     for column, operator in enumerate(comparisons, fixed_count + len(operators)):
                         _cell(table.cell(index, column), _gap_number(total, operator), color=total_color, bold=True, size=numeric_font)
                 if is_summary:
+                    _remove_summary_category_column(table)
                     _add_summary_operator_legend(slide)
                 else:
                     for index, item in enumerate(legend):
@@ -1026,9 +1038,15 @@ def _add_category_allocation_donut(slide, matrix: dict) -> None:
 
 def _stacked_category_chart(presentation, matrix: dict) -> None:
     """Compare KPI category contributions as one stacked bar per operator."""
+    pages = _stacked_chart_pages(matrix)
+    if len(pages) > 1:
+        for page in pages:
+            _stacked_category_chart(presentation, page)
+        return
     slide = _slide(presentation, 'Best Network Scoring per Category', _chart_subtitle(matrix))
     categories = list(dict.fromkeys(row['category'] for row in matrix['rows']))
     operators = list(matrix['operators'])
+    _stacked_chart_page_note(slide, matrix)
     data = CategoryChartData()
     data.categories = [_operator_label(matrix, operator) for operator in operators]
     series_specs = []
@@ -1054,7 +1072,7 @@ def _stacked_category_chart(presentation, matrix: dict) -> None:
              if row['values'][operator]['points'] is not None) for operator in operators),
         default=0.0,
     )
-    _format_chart(chart, maximum=maximum, labels=XL_DATA_LABEL_POSITION.CENTER)
+    _format_chart(chart, maximum=matrix.get('_stacked_chart_maximum', maximum), labels=XL_DATA_LABEL_POSITION.CENTER)
     chart.legend.font.size = Pt(9)
     hidden_legend_entries = set()
     for series_index, (operator, category_index, hide_from_legend) in enumerate(series_specs):
@@ -1065,20 +1083,170 @@ def _stacked_category_chart(presentation, matrix: dict) -> None:
         if hide_from_legend:
             hidden_legend_entries.add(series_index)
     _hide_chart_legend_entries(chart, hidden_legend_entries | {len(series_specs)})
+    _format_stacked_segment_labels(chart)
     _add_total_labels(chart)
     category_key = _add_category_shade_bar(
         slide, categories, left=Inches(.55), top=Inches(6.38), width=chart_width, height=Inches(.4),
     )
-    chart_group = [chart_shape] + ([category_key] if category_key is not None else [])
+    hierarchy_grid = _add_chart_hierarchy_grid(slide, chart_shape, [
+        {'id': operator, 'operator': _operator_label(matrix, operator)} for operator in operators
+    ])
+    chart_group = [chart_shape] + ([category_key] if category_key is not None else []) + ([hierarchy_grid] if hierarchy_grid is not None else [])
     slide.shapes.add_group_shape(chart_group).name = 'Scoring Stacked Operator Chart'
     _add_category_allocation_donut(slide, matrix)
     _text(slide, matrix['coverage_note'], 6.95, size=9)
 
 
+def _stacked_chart_pages(matrix: dict, *, limit: int = 12) -> list[dict]:
+    """Keep preferred operators together and preserve hierarchy order within each page."""
+    columns = matrix.get('hierarchy_columns') or [
+        {'id': operator, 'operator': operator} for operator in matrix['operators']
+    ]
+    if len(columns) <= limit:
+        return [matrix]
+    grouped = {}
+    for column in columns:
+        grouped.setdefault(column['operator'], []).append(column)
+    preferred = {'3', 'three', 'threeuk', 'ee', 'vfuk', 'vodafoneuk'}
+    groups = sorted(grouped.items(), key=lambda group: (
+        ''.join(character for character in _operator_label(matrix, group[0]).lower() if character.isalnum()) not in preferred
+        and ''.join(character for character in str(group[0]).lower() if character.isalnum()) not in preferred,
+        list(grouped).index(group[0]),
+    ))
+    pages = []
+    current = []
+    for _, group in groups:
+        for start in range(0, len(group), limit):
+            chunk = group[start:start + limit]
+            if current and len(current) + len(chunk) > limit:
+                pages.append(current)
+                current = []
+            current.extend(chunk)
+    if current:
+        pages.append(current)
+    projected = []
+    positions = {column['id']: index for index, column in enumerate(columns)}
+    for index, page in enumerate(pages, 1):
+        page = sorted(page, key=lambda column: positions[column['id']])
+        item = dict(matrix)
+        item['operators'] = list(dict.fromkeys(column['operator'] for column in page))
+        if matrix.get('hierarchy_columns'):
+            item['hierarchy_columns'] = page
+        item['_stacked_chart_page'] = f'Page {index} of {len(pages)}'
+        item['_stacked_chart_maximum'] = max(
+            (value['points'] for value in matrix['total']['values'].values() if value['points'] is not None),
+            default=matrix['total']['max_points'],
+        )
+        projected.append(item)
+    return projected
+
+
+def _stacked_chart_page_note(slide, matrix: dict) -> None:
+    if matrix.get('_stacked_chart_page'):
+        _text(slide, matrix['_stacked_chart_page'], 1.42, left=.65, width=8.65, height=.2, size=9)
+
+
+def _add_chart_hierarchy_grid(slide, chart_shape, columns: list[dict]) -> Any:
+    """Align an editable aggregation grid with the chart's explicit plot area."""
+    if not columns:
+        return None
+    if not columns[0].get('path'):
+        columns = [dict(column, path=[{'level': 'Operator', 'value': column['operator']}])
+                   for column in columns]
+    depth = len(columns[0]['path'])
+    chart = chart_shape.chart
+    chart.category_axis.tick_label_position = XL_TICK_LABEL_POSITION.NONE
+    plot = chart._chartSpace.chart.plotArea
+    layout = plot.find('{http://schemas.openxmlformats.org/drawingml/2006/chart}layout')
+    if layout is None:
+        layout = OxmlElement('c:layout')
+        plot.insert(0, layout)
+    for child in list(layout):
+        layout.remove(child)
+    narrow_leaves = chart_shape.width.inches * .89 / len(columns) < .65
+    row_heights = [.30 if narrow_leaves and index == depth - 1 else .22 for index in range(depth)]
+    grid_height = sum(row_heights)
+    chart_shape.height -= Inches(grid_height + .1)
+    plot_left = .55 / chart_shape.width.inches
+    plot_width = 1 - .75 / chart_shape.width.inches
+    manual = OxmlElement('c:manualLayout')
+    for name, value in (('layoutTarget', 'inner'), ('xMode', 'edge'), ('yMode', 'edge'),
+                        ('wMode', 'factor'), ('hMode', 'factor'),
+                        ('x', str(plot_left)), ('y', '.13'), ('w', str(plot_width)), ('h', '.87')):
+        element = OxmlElement('c:' + name)
+        element.set('val', value)
+        manual.append(element)
+    layout.append(manual)
+    left = chart_shape.left + Inches(.55)
+    width = chart_shape.width - Inches(.75)
+    top = chart_shape.top + chart_shape.height
+    grid = slide.shapes.add_table(depth, len(columns), left, top, width, Inches(grid_height))
+    grid.name = 'Scoring Chart Aggregation Grid'
+    row_top = top / 914400
+    for row_index, depth_index in enumerate(reversed(range(depth))):
+        row = grid.table.rows[row_index]
+        row.height = Inches(row_heights[depth_index])
+        start = 0
+        while start < len(columns):
+            prefix = columns[start]['path'][:depth_index + 1]
+            end = start
+            while end + 1 < len(columns) and columns[end + 1]['path'][:depth_index + 1] == prefix:
+                end += 1
+            cell = grid.table.cell(row_index, start)
+            if end > start:
+                cell.merge(grid.table.cell(row_index, end))
+            value = str(_hierarchy_display_value(columns[start]['path'][depth_index]))
+            if narrow_leaves and depth_index == depth - 1 and len(value) == 7 and value[4:6] == '-Q':
+                value = value[:5] + '\n' + value[5:]
+            _cell(cell, value,
+                  color='#EDF3F7' if row_index % 2 == 0 else '#E1EBF1',
+                  foreground='#344858', size=8, bold=depth_index == 0)
+            start = end + 1
+        level = columns[0]['path'][depth_index]['level']
+        label = _text(slide, 'Category (0)' if level == 'Category' else level, row_top,
+                      left=chart_shape.left.inches, width=.51,
+                      height=row_heights[depth_index], size=7, color='#344858', align=PP_ALIGN.RIGHT)
+        label.name = 'Scoring Chart Aggregation Level ' + level
+        label.text_frame.margin_left = label.text_frame.margin_right = 0
+        label.text_frame.word_wrap = False
+        row_top += row_heights[depth_index]
+    return grid
+
+
+def _format_stacked_segment_labels(chart) -> None:
+    """Use contrasting labels and omit numbers that cannot fit thin segments."""
+    chart.plots[0].gap_width = 45
+    plot = chart._chartSpace.xpath('.//c:barChart')[0]
+    defaults = plot.find('{http://schemas.openxmlformats.org/drawingml/2006/chart}dLbls')
+    for series in list(chart.series)[:-1]:
+        labels = deepcopy(defaults)
+        color = _header_foreground(str(series.format.fill.fore_color.rgb)).lstrip('#')
+        for properties in labels.xpath('.//a:defRPr | .//a:rPr'):
+            for fill in properties.xpath('./a:solidFill'):
+                properties.remove(fill)
+            fill = OxmlElement('a:solidFill')
+            rgb = OxmlElement('a:srgbClr')
+            rgb.set('val', color)
+            fill.append(rgb)
+            properties.insert(0, fill)
+        for index, value in enumerate(series.values):
+            if value is not None and value < chart.value_axis.maximum_scale * .04:
+                point = OxmlElement('c:dLbl')
+                point_index = OxmlElement('c:idx')
+                point_index.set('val', str(index))
+                delete = OxmlElement('c:delete')
+                delete.set('val', '1')
+                point.extend((point_index, delete))
+                labels.insert(0, point)
+        category = series._element.find('{http://schemas.openxmlformats.org/drawingml/2006/chart}cat')
+        series._element.insert(series._element.index(category), labels)
+
+
 def _best_network(presentation, matrices: list[dict]) -> None:
     voice_categories = {'CLASSIC CALLS', 'WHATSAPP CALLS', 'MULTI RAB'}
-    for matrix in matrices:
+    for matrix in [page for source in matrices for page in _stacked_chart_pages(source)]:
         slide = _slide(presentation, 'Best Network Scoring per Service', _chart_subtitle(matrix))
+        _stacked_chart_page_note(slide, matrix)
         hierarchy_columns = matrix.get('hierarchy_columns', [])
         if hierarchy_columns:
             chart_columns = hierarchy_columns
@@ -1124,13 +1292,12 @@ def _best_network(presentation, matrices: list[dict]) -> None:
             Inches(8.65), Inches(4.25), data,
         )
         chart = chart_shape.chart
-        _format_chart(chart, maximum=max((value for value in totals if value is not None), default=0)
+        _format_chart(chart, maximum=matrix.get('_stacked_chart_maximum')
+                      or max((value for value in totals if value is not None), default=0)
                       or matrix['total']['max_points'], labels=XL_DATA_LABEL_POSITION.CENTER)
         chart.legend.font.size = Pt(8.5)
         if hierarchy_columns:
-            chart.category_axis.tick_labels.font.size = Pt(
-                min(7, max(5, 38 / max(1, len(chart_columns)) ** .5))
-            )
+            chart.category_axis.tick_labels.font.size = Pt(9)
         legend_hidden = set(range(voice_series_count)) | {2 * voice_series_count}
         _hide_chart_legend_entries(chart, legend_hidden)
         for operator_index, operator in enumerate(operators):
@@ -1141,6 +1308,7 @@ def _best_network(presentation, matrices: list[dict]) -> None:
             )
             _fill_series(chart.series[operator_index], voice_color)
             _fill_series(chart.series[voice_series_count + operator_index], color)
+        _format_stacked_segment_labels(chart)
         _add_total_labels(chart)
         service_heading = _text(slide, 'Service types', 6.22, left=.65, width=8.65,
                                 height=.22, size=9, color='#4A5B65')
@@ -1158,8 +1326,12 @@ def _best_network(presentation, matrices: list[dict]) -> None:
                 paragraph.font.size = Pt(9)
                 paragraph.font.color.rgb = RGBColor.from_string(
                     _header_foreground(color).lstrip('#'))
+        grid_columns = chart_columns if hierarchy_columns else [
+            dict(column, operator=_operator_label(matrix, column['operator'])) for column in chart_columns
+        ]
+        hierarchy_grid = _add_chart_hierarchy_grid(slide, chart_shape, grid_columns)
         slide.shapes.add_group_shape(
-            [chart_shape, service_heading, service_key],
+            [chart_shape, service_heading, service_key] + ([hierarchy_grid] if hierarchy_grid is not None else []),
         ).name = 'Scoring Best Network Service Chart'
         _add_family_allocation_donut(slide, matrix)
         _text(slide, matrix['coverage_note'], 7.03, size=9, height=.35)
@@ -1213,8 +1385,14 @@ def _add_total_labels(chart) -> None:
 
 
 def _hierarchy_chart(presentation, matrix: dict) -> None:
+    pages = _stacked_chart_pages(matrix)
+    if len(pages) > 1:
+        for page in pages:
+            _hierarchy_chart(presentation, page)
+        return
     columns = matrix.get('hierarchy_columns', [])
     slide = _slide(presentation, 'Best Network Scoring per Category', _chart_subtitle(matrix))
+    _stacked_chart_page_note(slide, matrix)
     data = CategoryChartData()
     _add_hierarchy_chart_categories(data, columns)
     categories = list(dict.fromkeys(row['category'] for row in matrix['rows']))
@@ -1249,12 +1427,12 @@ def _hierarchy_chart(presentation, matrix: dict) -> None:
         XL_CHART_TYPE.COLUMN_STACKED, Inches(.55), Inches(1.92), Inches(8.9), Inches(4.48), data,
     )
     chart = chart_shape.chart
-    _format_chart(chart, maximum=maximum, labels=XL_DATA_LABEL_POSITION.CENTER)
+    _format_chart(chart, maximum=matrix.get('_stacked_chart_maximum', maximum), labels=XL_DATA_LABEL_POSITION.CENTER)
     chart.has_legend = True
     chart.legend.position = XL_LEGEND_POSITION.TOP
     chart.legend.include_in_layout = False
     chart.legend.font.size = Pt(8)
-    chart.category_axis.tick_labels.font.size = Pt(min(7, max(5, 38 / max(1, len(columns)) ** .5)))
+    chart.category_axis.tick_labels.font.size = Pt(9)
     hidden_legend_entries = set()
     for series_index, (operator, category_index, hide_from_legend) in enumerate(series_specs):
         series = chart.series[series_index]
@@ -1263,60 +1441,58 @@ def _hierarchy_chart(presentation, matrix: dict) -> None:
         if hide_from_legend:
             hidden_legend_entries.add(series_index)
     _hide_chart_legend_entries(chart, hidden_legend_entries | {len(series_specs)})
+    _format_stacked_segment_labels(chart)
     _add_total_labels(chart)
 
     category_key = _add_category_shade_bar(
         slide, categories, left=Inches(.55), top=Inches(6.46),
-        width=presentation.slide_width - Inches(1.1), height=Inches(.4),
+        width=Inches(8.9), height=Inches(.4),
     )
-    chart_group = [chart_shape] + ([category_key] if category_key is not None else [])
+    hierarchy_grid = _add_chart_hierarchy_grid(slide, chart_shape, columns)
+    chart_group = [chart_shape] + ([category_key] if category_key is not None else []) + ([hierarchy_grid] if hierarchy_grid is not None else [])
     slide.shapes.add_group_shape(chart_group).name = 'Scoring Chart With Category Key'
     _add_category_allocation_donut(slide, matrix)
     _text(slide, matrix['coverage_note'], 7.06, size=8, height=.2)
 
 
 def _hierarchy_category_comparison_chart(presentation, matrix: dict) -> None:
-    """Compare per-category hierarchy totals with one solid-color series per leaf."""
-    columns = matrix.get('hierarchy_columns', [])
-    slide = _slide(presentation, 'Scoring per Category', _chart_subtitle(matrix))
+    """Show each category with readable hierarchy labels and one series per operator."""
     categories = list(dict.fromkeys(row['category'] for row in matrix['rows']))
-    data = CategoryChartData()
-    data.categories = categories
-    rows_by_category = {
-        category: [row for row in matrix['rows'] if row['category'] == category]
-        for category in categories
-    }
-    for column in columns:
-        values = []
-        for category in categories:
-            points = [row['values'][column['id']]['points'] for row in rows_by_category[category]
-                      if row['values'][column['id']]['points'] is not None]
-            values.append(sum(points) if points else None)
-        data.add_series(column.get('label') or column.get('operator') or column['id'], values)
-    maximum = max(
-        (sum(row['values'][column['id']]['points'] or 0
-             for row in rows_by_category[category]
-             if row['values'][column['id']]['points'] is not None)
-         for column in columns for category in categories),
-        default=0.0,
-    )
-    chart_width = presentation.slide_width - Inches(1.4)
-    chart_shape = slide.shapes.add_chart(
-        XL_CHART_TYPE.COLUMN_CLUSTERED, Inches(.7), Inches(1.65), chart_width, Inches(4.65), data,
-    )
-    chart = chart_shape.chart
-    _format_chart(chart, maximum=maximum)
-    chart.plots[0].gap_width = 120
-    chart.plots[0].overlap = -20
-    chart.plots[0].data_labels.font.size = Pt(8)
-    chart.legend.font.size = Pt(min(11, max(9, 115 / max(1, len(columns)) ** .5)))
-    for series, column in zip(chart.series, columns):
-        series.format.fill.solid()
-        series.format.fill.fore_color.rgb = RGBColor.from_string(
-            _operator_color(matrix, column['operator']).lstrip('#'),
+    for category in categories:
+        metrics = [row for row in matrix['rows'] if row['category'] == category]
+        maximum = max((sum(row['values'][column['id']]['points'] or 0 for row in metrics)
+                   for column in matrix['hierarchy_columns']), default=0.0)
+        columns = [dict(column, path=[{'level': 'Category', 'value': category}] + column['path'])
+                   for column in matrix['hierarchy_columns']]
+        operators = list(dict.fromkeys(column['operator'] for column in columns))
+        slide = _slide(presentation, 'Scoring per Category', _chart_subtitle(matrix))
+        heading = category
+        _text(slide, heading, 1.42, left=.7, width=11.9, height=.25, size=12, color='#4A5B65')
+        data = CategoryChartData()
+        _add_hierarchy_chart_categories(data, columns)
+        for operator in operators:
+            values = []
+            for column in columns:
+                points = [row['values'][column['id']]['points'] for row in metrics
+                          if row['values'][column['id']]['points'] is not None]
+                values.append(sum(points) if points and column['operator'] == operator else None)
+            data.add_series(_operator_label(matrix, operator), values)
+        chart_shape = slide.shapes.add_chart(
+            XL_CHART_TYPE.COLUMN_CLUSTERED, Inches(.7), Inches(1.8),
+            presentation.slide_width - Inches(1.4), Inches(4.85), data,
         )
-    slide.shapes.add_group_shape([chart_shape]).name = 'Scoring Hierarchy Category Comparison Chart'
-    _text(slide, matrix['coverage_note'], 6.95, size=9)
+        chart = chart_shape.chart
+        _format_chart(chart, maximum=maximum)
+        chart.plots[0].gap_width = 120
+        chart.plots[0].overlap = 100
+        chart.plots[0].data_labels.font.size = Pt(min(10, max(6, chart_shape.width.inches * .89 * 72 / max(1, len(columns)) / 3.2)))
+        chart.category_axis.tick_labels.font.size = Pt(9)
+        chart.legend.font.size = Pt(11)
+        for series, operator in zip(chart.series, operators):
+            _fill_series(series, _operator_color(matrix, operator))
+        hierarchy_grid = _add_chart_hierarchy_grid(slide, chart_shape, columns)
+        slide.shapes.add_group_shape([chart_shape, hierarchy_grid]).name = 'Scoring Hierarchy Category Comparison Chart'
+        _text(slide, matrix['coverage_note'], 6.95, size=9)
 
 
 def _add_category_shade_bar(slide, categories: list[str], *, left: int, top: int, width: int, height: int):
@@ -1517,8 +1693,6 @@ def _score_column_headers(table, plan: list[tuple[dict, str]], levels: list[str]
 
 def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap_layout: str = 'end',
                             show_gap_values: bool = True, title: str = 'Scoring Tables — Breakdown') -> None:
-    total_label = ('Weighted score / Average KPI GAP; * incomplete' if show_gap_values
-                   else 'Weighted score; * incomplete')
     for matrix in matrices:
         is_summary = matrix.get('table_mode') == 'summary'
         fixed_count = 4 if is_summary else 5
@@ -1528,6 +1702,12 @@ def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dic
         levels = matrix['hierarchy_levels']
         metrics = matrix['rows']
         plan = _score_column_plan(columns, gap_layout, show_gap_values=show_gap_values)
+        total_label = _score_total_label(
+            [*metrics, matrix['total']],
+            [column['id'] for column, kind in plan if kind == 'Score'],
+            [column['id'] for column, kind in plan if kind == 'GAP'],
+            show_gap_values=show_gap_values,
+        )
         slide = _slide(presentation, title, _chart_subtitle(matrix))
         header_rows = len(levels) + 2
         row_count = header_rows + len(metrics) + 1
@@ -1554,7 +1734,7 @@ def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dic
         _score_column_headers(table, plan, levels, gap_layout=gap_layout, leaf_width=leaf_width,
                               fixed_count=fixed_count)
         static_headers = [('CATEGORY', _GAP_SUMMARY_HEADER),
-                          ('NETCHECK KPI' if is_summary else 'KPI', _GAP_SUMMARY_HEADER),
+                          ('CATEGORY' if is_summary else 'KPI', _GAP_SUMMARY_HEADER),
                           *([] if is_summary else [('Type of KPI', _GAP_SUMMARY_HEADER)]),
                           ('Score weight\n(%)', '#4EA72E'), ('Max score', '#FF0000')]
         for index, (label, color) in enumerate(static_headers):
@@ -1580,7 +1760,7 @@ def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dic
                 metric.get('values', {}), [column for column, kind in plan if kind == 'Score'],
             ) if matrix.get('table_mode') == 'summary' and subtotal else (set(), set()))
             _cell(table.cell(row_offset, 0), metric['category'], color=category_color,
-                  size=data_font, left=True, bold=subtotal)
+                  size=data_font, left=True, bold=True)
             _cell(table.cell(row_offset, 1), metric['kpi'], color=row_color or '#E7E8E9',
                   bold=subtotal, left=True, size=metric_font)
             if not is_summary:
@@ -1620,8 +1800,9 @@ def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dic
                      _SUMMARY_WORST_COLOR if kind == 'Score' and column['id'] in worst else total_color)
             _cell(table.cell(total_index, index), text, color=color, size=numeric_font, bold=True)
         _merge_category_cells(table, metrics, header_rows,
-                              color=category_color, include_subtotals=True)
+                              color=category_color, include_subtotals=True, bold_categories=True)
         if is_summary:
+            _remove_summary_category_column(table)
             _add_summary_operator_legend(slide)
         else:
             for index, item in enumerate(legend):
@@ -1630,6 +1811,16 @@ def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dic
                 ).table
                 _cell(legend_table.cell(0, 0), item.get('band', ''), color=item['color'], size=8)
         _text(slide, matrix['coverage_note'], 7.27, size=8, height=.18)
+
+
+def _remove_summary_category_column(table) -> None:
+    """Retain category total labels in a single summary identity column."""
+    grid = table._tbl.tblGrid
+    removed_width = int(grid[0].get('w'))
+    grid.remove(grid[0])
+    grid[0].set('w', str(int(grid[0].get('w')) + removed_width))
+    for row in table._tbl.tr_lst:
+        row.remove(row.tc_lst[0])
 
 
 def _merge_category_cells(table, metrics: list[dict], start_row: int,
@@ -1704,7 +1895,7 @@ def _hierarchy_gap_tables(presentation, matrices: list[dict], *,
             _accent_gap_comparison_title(slide)
         header_rows = len(levels) + 1
         row_count = header_rows + len(metrics)
-        table_height = 5.0
+        table_height = 4.65
         table_width = 9.3 if show_priority else 12.03
         fixed_widths = [1.0, 2.55, .7]
         table = slide.shapes.add_table(row_count, 3 + len(columns), Inches(.65), Inches(1.55),
@@ -1744,7 +1935,7 @@ def _hierarchy_gap_tables(presentation, matrices: list[dict], *,
             subtotal = row.get('row_type') == 'category'
             row_color = _GAP_SUMMARY_CATEGORY if subtotal else None
             _cell(table.cell(row_offset, 0), row['category'], color=row_color or _GAP_SUMMARY_CATEGORY,
-                  foreground='#17232D', size=data_font, bold=True, left=show_priority)
+                  foreground='#17232D', size=data_font, bold=True, left=True)
             _cell(table.cell(row_offset, 1), row['kpi'], color=row_color or '#E6ECFA', size=metric_font, left=True,
                   bold=subtotal)
             _cell(table.cell(row_offset, 2), row['kpi_type'],
@@ -1756,7 +1947,7 @@ def _hierarchy_gap_tables(presentation, matrices: list[dict], *,
                       color=row_color or row['gap_colors'].get(leaf_id, THRESHOLD_COLORS['Unavailable']),
                       size=leaf_font, bold=True)
         _merge_category_cells(table, metrics, header_rows, include_subtotals=True,
-                              bold_categories=show_priority, alternate_colors=('#E6F0F7', '#D7E5EE'))
+                              bold_categories=True, alternate_colors=('#E6F0F7', '#D7E5EE'))
         _text(slide, matrix['note'], 7.05, height=.25, size=9)
         if show_priority:
             _add_individual_gap_notes(slide, matrix, metrics)
@@ -1775,7 +1966,7 @@ def _gap_summary_tables(presentation, matrices: list[dict]) -> None:
             slide = _slide(presentation, 'GAP Analysis — All vs ' + reference,
                            _chart_subtitle(matrix) + page_label)
             table = slide.shapes.add_table(len(rows) + 1, len(operators) + 3, Inches(.65), Inches(1.65),
-                                           Inches(12.03), Inches(4.9)).table
+                                           Inches(12.03), Inches(4.55)).table
             widths = [1.45, 4.05, 1.1] + [5.43 / max(1, len(operators))] * len(operators)
             for column, width in zip(table.columns, widths):
                 column.width = Inches(width)
@@ -1783,7 +1974,7 @@ def _gap_summary_tables(presentation, matrices: list[dict]) -> None:
                 f'{_operator_label(matrix, operator)} − {reference}' for operator in operators]
             table.rows[0].height = Inches(.43)
             metric_font, body_heights = _hierarchy_metric_layout(
-                rows, None, available_height=4.9 - .43, kpi_width=4.05,
+                rows, None, available_height=4.55 - .43, kpi_width=4.05,
             )
             for row, height in zip(list(table.rows)[1:], body_heights):
                 row.height = Inches(height)
@@ -1795,7 +1986,7 @@ def _gap_summary_tables(presentation, matrices: list[dict]) -> None:
                 subtotal = row.get('row_type') == 'category'
                 row_color = _GAP_SUMMARY_CATEGORY if subtotal else None
                 _cell(table.cell(index, 0), row['category'], color=row_color or _GAP_SUMMARY_CATEGORY,
-                      foreground='#17232D', size=metric_font, bold=True)
+                      foreground='#17232D', size=metric_font, bold=True, left=True)
                 _cell(table.cell(index, 1), row['kpi'], color=row_color or '#E6ECFA', size=metric_font,
                       left=True, bold=subtotal)
                 _cell(table.cell(index, 2), row['kpi_type'],
@@ -1805,7 +1996,7 @@ def _gap_summary_tables(presentation, matrices: list[dict]) -> None:
                     _cell(table.cell(index, column), _gap_number(row, operator),
                           color=row_color or row['gap_colors'][operator], size=metric_font, bold=True)
             _text(slide, matrix['note'], 7.12, height=.25, size=9)
-            _merge_category_cells(table, rows, 1, include_subtotals=True,
+            _merge_category_cells(table, rows, 1, include_subtotals=True, bold_categories=True,
                                   alternate_colors=('#E6F0F7', '#D7E5EE'))
             _add_gap_color_scale(slide, matrix, left=.65, width=12.03)
 
@@ -1823,12 +2014,12 @@ def _gap_tables(presentation, matrices: list[dict]) -> None:
                 _text(slide, 'No comparable KPI gaps are available. See the scoring matrix for missing values.', 1.8, height=1, size=16)
                 continue
             table = slide.shapes.add_table(len(rows) + 1, 4, Inches(.65), Inches(1.65), Inches(9.3),
-                                           Inches(4.9)).table
+                                           Inches(4.55)).table
             for column, width in zip(table.columns, (1.65, 4.45, 1.5, 1.7)):
                 column.width = Inches(width)
             table.rows[0].height = Inches(.43)
             metric_font, body_heights = _hierarchy_metric_layout(
-                rows, None, available_height=4.9 - .43, kpi_width=4.45,
+                rows, None, available_height=4.55 - .43, kpi_width=4.45,
             )
             for row, height in zip(list(table.rows)[1:], body_heights):
                 row.height = Inches(height)

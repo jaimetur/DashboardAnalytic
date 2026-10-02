@@ -24,7 +24,8 @@ def test_priority_arrow_is_only_on_individual_gap_slides(levels, operators):
         for name in ('GAP KPI Priority Arrow', 'GAP KPI Priority Label'):
             assert sum(shape.name == name for shape in slide.shapes) == (0 if all_operators else 1)
         assert any(shape.name.startswith('GAP Color Scale Segment ') for shape in slide.shapes)
-        table = next(shape.table for shape in slide.shapes if shape.has_table)
+        table_shape = next(shape for shape in slide.shapes if shape.has_table)
+        table = table_shape.table
         header_rows = len(levels) + 1 if len(levels) > 1 else 1
         assert len(table.rows) == header_rows + len(result['configuration']['metrics'])
         kpi_names = [row.cells[1].text for row in list(table.rows)[header_rows:]]
@@ -41,14 +42,21 @@ def test_priority_arrow_is_only_on_individual_gap_slides(levels, operators):
             'E6F0F7' if index % 2 == 0 else 'D7E5EE'
             for index in range(len(category_fills))
         ]
+        scale_heading = next(shape for shape in slide.shapes
+                             if shape.has_text_frame and shape.text == 'GAP color scale')
+        assert table_shape.top + table_shape.height < scale_heading.top
         if not all_operators:
-            for cell in visible_category_cells:
-                for paragraph in cell.text_frame.paragraphs:
-                    assert paragraph.alignment == PP_ALIGN.LEFT
-                    assert paragraph.runs
-                    assert all(
-                        run.font.bold if run.font.bold is not None else paragraph.font.bold
-                        for run in paragraph.runs
-                    )
+            label = next(shape for shape in slide.shapes if shape.name == 'GAP KPI Priority Label')
+            arrow = next(shape for shape in slide.shapes if shape.name == 'GAP KPI Priority Arrow')
+            assert arrow.top > label.top + label.height
+            assert arrow.top + arrow.height == table_shape.top + table_shape.height
+        for cell in visible_category_cells:
+            for paragraph in cell.text_frame.paragraphs:
+                assert paragraph.alignment == PP_ALIGN.LEFT
+                assert paragraph.runs
+                assert all(
+                    run.font.bold if run.font.bold is not None else paragraph.font.bold
+                    for run in paragraph.runs
+                )
     assert combined == 1
     assert individual == len(operators) - 1

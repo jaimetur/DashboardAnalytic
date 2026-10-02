@@ -34,7 +34,7 @@ def test_web_gap_headers_preserve_hierarchy_and_use_operator_fill():
     assert 'for (const block of gapBaseline ? [] : blocks)' in script
     assert '], blocks, baseline);' in script
     assert "th.style.setProperty('--operator-text', categoryLegendTextColor(presentation.color));" in script
-    assert 'th.scoring-gap-header.scoring-gap-operator-header { background: var(--operator-accent' in template
+    assert 'th.scoring-gap-header.scoring-gap-operator-header { background: color-mix(in srgb, var(--operator-accent' in template
 
 
 @pytest.mark.parametrize('levels', [['Operator'], ['Region', 'Operator']])

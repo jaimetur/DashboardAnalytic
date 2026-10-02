@@ -706,10 +706,10 @@ def test_reference_header_uses_operator_mapping_accent_without_yellow_marker():
     template = SCORING_TEMPLATE.read_text(encoding='utf-8')
     script = SCORING_SCRIPT.read_text(encoding='utf-8')
 
-    assert '.scoring-comparison-table th.scoring-operator-header { background: var(--operator-accent, #607d8b) !important; color: var(--operator-text, #ffffff) !important; }' in template
+    assert '.scoring-comparison-table th.scoring-operator-header { background: color-mix(in srgb, var(--operator-accent, #607d8b) 20%, #fff) !important; color: #263f4b !important; box-shadow: inset 0 3px var(--operator-accent, #607d8b); }' in template
     assert '.scoring-comparison-table th.scoring-reference-header' not in template
     assert '.scoring-comparison-table th.scoring-hierarchy-header.scoring-reference-header' not in template
-    assert '.scoring-comparison-table th.scoring-gap-header { background: #ffff00 !important; color: #242424 !important; }' in template
+    assert '.scoring-comparison-table th.scoring-gap-header { background: #f4ecd5 !important; color: #655331 !important; }' in template
     assert "function markReferenceHeader(header) {\n    header.classList.add('scoring-reference-header');" in script
     assert 'header.title = `${label} is the reference operator`;' in script
 
@@ -718,7 +718,7 @@ def test_operator_color_and_reference_markers_stay_on_operator_headers():
     template = SCORING_TEMPLATE.read_text(encoding='utf-8')
     script = SCORING_SCRIPT.read_text(encoding='utf-8')
 
-    assert '.scoring-comparison-table th.scoring-operator-header { background: var(--operator-accent, #607d8b) !important; color: var(--operator-text, #ffffff) !important; }' in template
+    assert '.scoring-comparison-table th.scoring-operator-header { background: color-mix(in srgb, var(--operator-accent, #607d8b) 20%, #fff) !important; color: #263f4b !important; box-shadow: inset 0 3px var(--operator-accent, #607d8b); }' in template
     assert 'border-bottom: 3px solid var(--operator-accent' not in template
     assert '.scoring-comparison-table th.scoring-reference-header' not in template
     assert '.scoring-comparison-table th.scoring-hierarchy-header.scoring-reference-header' not in template
@@ -787,10 +787,10 @@ def test_scoring_tab_is_plural_and_subtotals_and_totals_share_category_backgroun
     assert re.search(
         r'\.scoring-comparison-table tbody tr\.scoring-category-subtotal > td,\s*'
         r'\.scoring-comparison-table tfoot tr > :is\(th, td\)\s*'
-        r'\{\s*background-color:\s*#E6F0F7\s*!important;',
+        r'\{\s*background-color:\s*#edf3f8\s*!important;',
         template,
     )
-    assert '.scoring-table-wrap tbody tr.scoring-total-row > td { background-color: #E6F0F7;' in template
+    assert '.scoring-table-wrap tbody tr.scoring-total-row > td { background-color: #edf3f8;' in template
 
 
 def test_render_warnings_hides_only_legacy_campaign_pooling_notice():
@@ -902,6 +902,7 @@ def test_raw_kpi_columns_are_hidden_in_summary_and_shown_in_expanded():
         'formatScoreCell', 'createKpiTypeCell', 'addMatrixScoreCell', 'operatorValue',
         'appendScoreGapCells', 'showGapValues', 'selectedGapLayout', 'tableForMode',
         'appendMatrixTable', 'renderScoringViews', 'summaryOperatorColors', 'appendOperatorRankingLegend',
+        'applyGapCategoryRunColors',
     )
     payload = {'snippets': {name: _function_source(script, name) for name in names}}
     program = r"""
@@ -920,6 +921,7 @@ class Element {
   setAttribute(name, value) { this.attributes[name] = String(value); }
   append(...nodes) { this.children.push(...nodes); }
   replaceChildren(...nodes) { this.children = [...nodes]; }
+  querySelectorAll() { return descendants(this).filter(node => node.className === "scoring-category-cell"); }
 }
 const document = {createElement: tag => new Element(tag)};
 const table = {
@@ -1201,15 +1203,17 @@ def test_scoring_category_cells_span_kpis_and_subtotal_in_both_renderers():
         'formatMatrixNumber', 'createKpiTypeCell', 'showGapValues', 'selectedGapLayout',
         'appendScoreGapCells', 'hierarchyColumnEntries', 'hierarchyColumnIsReference',
         'appendMatrixTable', 'appendHierarchyMatrixTable', 'summaryOperatorColors',
+        'applyGapCategoryRunColors',
     )
     payload = {'snippets': {name: _function_source(script, name) for name in names}}
     program = r"""
 const vm = require('node:vm');
 const payload = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
 class Element {
-  constructor(tag) { this.tagName = tag; this.children = []; this.dataset = {}; this.style = {};
+  constructor(tag) { this.tagName = tag; this.children = []; this.dataset = {}; this.style = {setProperty() {}};
     this.className = ''; this.classList = {add: value => { this.className += ` ${value}`; }}; }
   append(...nodes) { this.children.push(...nodes); }
+  querySelectorAll() { return descendants(this).filter(node => node.className === "scoring-category-cell"); }
 }
 const context = {
   document: {createElement: tag => new Element(tag)}, showKpiValuesToggle: {checked: false},

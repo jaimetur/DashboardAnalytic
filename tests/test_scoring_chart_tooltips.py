@@ -93,7 +93,7 @@ def test_operator_accent_and_reference_marker_are_attached_to_operator_hierarchy
     assert "String(entry.level).toLocaleLowerCase() === 'operator'" in script
     assert 'th.classList.add(\'scoring-operator-header\');' in script
     assert 'hierarchyColumnIsReference(column)' in script
-    assert '.scoring-comparison-table th.scoring-operator-header { background: var(--operator-accent, #607d8b) !important; color: var(--operator-text, #ffffff) !important; }' in template
+    assert '.scoring-comparison-table th.scoring-operator-header { background: color-mix(in srgb, var(--operator-accent, #607d8b) 20%, #fff) !important; color: #263f4b !important; box-shadow: inset 0 3px var(--operator-accent, #607d8b); }' in template
     assert '.scoring-comparison-table th.scoring-hierarchy-header {' in template
     assert 'border-bottom' not in re.search(
         r'\.scoring-comparison-table th\.scoring-hierarchy-header\s*\{([^}]*)\}', template,
@@ -119,10 +119,10 @@ def test_scoring_subtotal_and_total_rows_share_the_category_background():
     assert re.search(
         r'\.scoring-comparison-table tbody tr\.scoring-category-subtotal > td,\s*'
         r'\.scoring-comparison-table tfoot tr > :is\(th, td\)\s*'
-        r'\{\s*background-color:\s*#E6F0F7\s*!important;',
+        r'\{\s*background-color:\s*#edf3f8\s*!important;',
         template,
     )
-    assert '.scoring-table-wrap tbody tr.scoring-total-row > td { background-color: #E6F0F7;' in template
+    assert '.scoring-table-wrap tbody tr.scoring-total-row > td { background-color: #edf3f8;' in template
 
 
 def test_stacked_chart_segment_labels_use_contrasting_plain_text():

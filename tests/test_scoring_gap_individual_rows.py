@@ -170,12 +170,13 @@ process.stdout.write(JSON.stringify(cells.map(cell => [cell.style.color, cell.st
 '''
     result = _run_node_json(program, {'runs': ['A', 'B', 'A', 'C']})
     assert result == [
-        ['#E6F0F7', 'important'], ['#D7E5EE', 'important'],
-        ['#E6F0F7', 'important'], ['#D7E5EE', 'important'],
+        ['#edf3f8', 'important'], ['#e3ecf3', 'important'],
+        ['#edf3f8', 'important'], ['#e3ecf3', 'important'],
     ]
     for name in ('renderGapViews', 'renderGapSummaryViews', 'renderHierarchyGapViews'):
         assert 'applyGapCategoryRunColors(tbody);' in _function_source(script, name)
-    assert 'applyGapCategoryRunColors(tbody);' not in _function_source(script, 'appendMatrixTable')
+    for name in ('appendMatrixTable', 'appendHierarchyMatrixTable'):
+        assert 'if (!isSummary) applyGapCategoryRunColors(tbody);' in _function_source(script, name)
 
 
 def test_chart_context_subtitles_omit_environment_without_changing_other_context_labels():
