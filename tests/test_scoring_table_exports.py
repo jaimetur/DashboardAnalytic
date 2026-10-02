@@ -302,18 +302,51 @@ def test_summary_extremes_keep_ties_and_ignore_missing_or_non_finite_values():
     assert _summary_extreme_operators({'a': {'points': 4}, 'b': {'points': None}}) == (set(), set())
 
 
-def test_hierarchy_summary_extremes_compare_operators_within_the_same_context():
+def test_hierarchy_summary_extremes_rank_all_columns_and_preserve_ties():
     columns = [
         {'id': 'north-a', 'path': [{'level': 'Operator', 'value': 'A'}, {'level': 'Region', 'value': 'North'}]},
         {'id': 'north-b', 'path': [{'level': 'Operator', 'value': 'B'}, {'level': 'Region', 'value': 'North'}]},
         {'id': 'south-a', 'path': [{'level': 'Operator', 'value': 'A'}, {'level': 'Region', 'value': 'South'}]},
         {'id': 'south-b', 'path': [{'level': 'Operator', 'value': 'B'}, {'level': 'Region', 'value': 'South'}]},
+        {'id': 'east-a', 'path': [{'level': 'Operator', 'value': 'A'}, {'level': 'Region', 'value': 'East'}]},
     ]
     values = {'north-a': {'points': 100}, 'north-b': {'points': 90},
-              'south-a': {'points': 10}, 'south-b': {'points': 20}}
+              'south-a': {'points': 10}, 'south-b': {'points': 100}, 'east-a': {'points': None}}
     best, worst = _summary_extreme_columns(values, columns)
     assert best == {'north-a', 'south-b'}
-    assert worst == {'north-b', 'south-a'}
+    assert worst == {'south-a'}
+
+
+@pytest.mark.parametrize('hierarchy', [False, True])
+@pytest.mark.parametrize('slide_width', [11, 14])
+def test_summary_operator_legend_right_edge_tracks_slide_width(hierarchy, slide_width):
+    job = _job()
+    if hierarchy:
+        job['aggregation_levels'] = ['Operator', 'Region', 'Campaign']
+    result = _result(operators=('EE', 'O2 UK'))
+    if hierarchy:
+        result.update({'aggregation_contract_version': 2, 'aggregation_levels': job['aggregation_levels']})
+    views = build_scoring_views(job, result)
+    matrix_key = 'hierarchy_score_tables' if hierarchy else 'score_tables'
+    matrix = next(item for item in views[matrix_key]
+                  if item['context'].get('environment') == 'DriveCity')
+    matrix = _table_for_mode(matrix, 'summary')
+    presentation = Presentation()
+    presentation.slide_width = Inches(slide_width)
+    if hierarchy:
+        _hierarchy_score_tables(presentation, [matrix], views.get('threshold_legend', []),
+                                show_gap_values=False, title='Scoring Tables — Summary')
+    else:
+        _score_tables(presentation, [matrix], views.get('threshold_legend', []),
+                      show_gap_values=False, title='Scoring Tables — Summary')
+    legend = [shape for shape in presentation.slides[0].shapes
+              if shape.has_table and len(shape.table.columns) == 1
+              and shape.table.cell(0, 0).text in {'Best operator', 'Worst operator'}]
+    score_table = next(shape for shape in presentation.slides[0].shapes
+                       if shape.has_table and len(shape.table.columns) > 1)
+    assert len(legend) == 2
+    assert abs(legend[-1].left + legend[-1].width - Inches(slide_width - .55)) <= 1
+    assert abs(legend[-1].left + legend[-1].width - (score_table.left + score_table.width)) <= 1
 
 
 @pytest.mark.parametrize('hierarchy', [False, True])

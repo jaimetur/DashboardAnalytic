@@ -1210,6 +1210,32 @@ process.stdout.write(JSON.stringify(sections.map(summarize)));
     assert script.count("tableData?._display_mode !== 'summary' && Boolean(showKpiValuesToggle?.checked)") == 2
 
 
+def test_summary_ranking_uses_all_hierarchy_columns_and_keeps_tied_extremes():
+    script = SCORING_SCRIPT.read_text(encoding='utf-8')
+    payload = {'summaryOperatorColors': _function_source(script, 'summaryOperatorColors'),
+               'operatorValue': _function_source(script, 'operatorValue'),
+               'firstValue': _function_source(script, 'firstValue')}
+    program = r"""
+const vm = require('node:vm');
+const payload = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+const context = {};
+vm.createContext(context);
+vm.runInContext(Object.values(payload).join('\n') + `
+  const columns = [
+    {id: 'north-a'}, {id: 'north-b'}, {id: 'south-a'}, {id: 'south-b'}, {id: 'east-a'},
+  ];
+  const values = {
+    'north-a': {points: 100}, 'north-b': {points: 90},
+    'south-a': {points: 10}, 'south-b': {points: 100}, 'east-a': {points: null},
+  };
+  globalThis.result = [...summaryOperatorColors(values, columns).entries()];`, context);
+process.stdout.write(JSON.stringify(context.result));
+"""
+    result = _run_node_json(program, payload)
+
+    assert result == [['north-a', '#C6EFCE'], ['south-a', '#FFC7CE'], ['south-b', '#C6EFCE']]
+
+
 def test_scoring_view_state_falls_back_to_all_when_saved_environment_is_unavailable():
     script = SCORING_SCRIPT.read_text(encoding='utf-8')
     helpers_start = script.index('  const environmentOrder =')
@@ -1383,7 +1409,7 @@ console.log(JSON.stringify({all, single, global: segments(globalSvg), one: segme
     assert 'Global:' not in result['singleText']
 
 
-def test_summary_operator_highlights_compare_only_matching_contexts_and_include_ties():
+def test_summary_operator_highlights_rank_all_columns_and_include_ties():
     script = SCORING_SCRIPT.read_text(encoding='utf-8')
     names = ('firstValue', 'operatorValue', 'summaryOperatorColors')
     payload = {'snippets': {name: _function_source(script, name) for name in names}}
@@ -1407,8 +1433,7 @@ process.stdout.write(JSON.stringify({ranked: context.ranked, equal: context.equa
 """
     result = _run_node_json(program, payload)
     assert dict(result['ranked']) == {
-        'A': '#C6EFCE', 'B': '#C6EFCE', 'C': '#FFC7CE', 'D': '#FFC7CE',
-        'E': '#C6EFCE', 'F': '#FFC7CE',
+        'C': '#FFC7CE', 'D': '#FFC7CE', 'E': '#C6EFCE',
     }
     assert result['equal'] == []
     assert result['missing'] == []

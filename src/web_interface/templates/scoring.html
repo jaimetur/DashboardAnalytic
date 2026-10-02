@@ -17,7 +17,9 @@
   .scoring-operator-option::before { content: '●'; flex: 0 0 auto; color: var(--scoring-operator-color,#6b7d86); font-size: .68rem; line-height: 1.4; }
   .scoring-dataset-filter-grid { grid-template-columns: minmax(0,1fr); }
   .scoring-dataset-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin: 0 0 .75rem; }
-  .scoring-dataset-actions button { padding: .4rem .7rem; font-size: .75rem; }
+  .scoring-dataset-actions button { display: inline-flex; align-items: center; gap: .4rem; padding: .4rem .7rem; border: 1px solid #397c61; background: #30765b; color: #fff; font-size: .75rem; }
+  .scoring-dataset-actions button:hover:not(:disabled) { background: #245d47; color: #fff; }
+  .scoring-dataset-actions button svg { flex: 0 0 auto; width: 1.1rem; height: 1.1rem; }
   .scoring-dataset-filter-grid > label { width: 100%; max-width: 15rem; }
   .scoring-dataset-filter-grid select[data-nr-filter] { min-height: 2.45rem; }
   .scoring-picker { min-width: 0; padding: .85rem; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.64); }
@@ -54,11 +56,17 @@
   .scoring-profile-choice { display: inline-flex; align-items: center; gap: .45rem; min-height: 2.25rem; padding: .3rem .55rem; border: 1px solid #8ab7b0; border-radius: 999px; background: #e6f3f0; color: #174f49; font-size: .75rem; font-weight: 800; }
   .scoring-profile-choice select { width: auto; min-width: 11rem; max-width: min(100%, 20rem); min-height: 1.8rem; padding: .2rem 1.7rem .2rem .45rem; border-color: rgba(23,79,73,.28); color: #173f3b; font-size: .76rem; font-weight: 700; }
   .scoring-actions { display: flex; flex-wrap: wrap; gap: .55rem; }
-  .scoring-actions .scoring-force-button { border: 1px solid rgba(16,49,74,.2); background: linear-gradient(135deg,#f4f7f8,#e5ecef); color: #234657; box-shadow: none; }
+  .scoring-actions .scoring-force-button { border: 1px solid #7145a0; background: linear-gradient(135deg,#8954bd,#69339d); color: #fff; box-shadow: 0 3px 8px rgba(105,51,157,.22); }
+  .scoring-actions .scoring-force-button:hover:not(:disabled) { background: linear-gradient(135deg,#7844ad,#59258b); }
+  .scoring-actions .scoring-force-button:disabled { box-shadow: none; }
   .scoring-note { min-height: 1.2rem; margin: 0; color: var(--muted); font-size: .82rem; }
   .scoring-note[data-kind="error"] { color: var(--danger); font-weight: 650; }
   .scoring-note[data-kind="success"] { color: var(--success); font-weight: 650; }
   .scoring-note[data-kind="warning"] { color: #795b20; font-weight: 650; }
+  .scoring-calculation-message { flex: 1 1 20rem; padding: .55rem .75rem; border: 1px solid #e7cb75; border-radius: 10px; background: #fff3c9; color: #765514; font-weight: 750; }
+  .scoring-calculation-message:empty { display: none; }
+  .scoring-calculation-message[data-kind="error"] { color: var(--danger); }
+  .scoring-calculation-message[data-kind="success"], .scoring-calculation-message[data-kind="warning"] { color: #765514; font-weight: 750; }
   .scoring-jobs-layout { display: grid; grid-template-columns: minmax(0,1fr); gap: 1rem; align-items: start; }
   .scoring-jobs-panel, .scoring-results-panel { min-width: 0; }
   .scoring-results-panel { position: relative; z-index: 2; overflow: visible; }
@@ -325,9 +333,9 @@
       <div class="scoring-picker">
         <div class="scoring-picker-head"><strong>CDR datasets</strong><span data-visible-count>{{ scoring_datasets | length }} available</span></div>
         <div class="scoring-dataset-actions" aria-label="CDR selection shortcuts">
-          <button type="button" class="ghost-link" data-scoring-select-datasets="all">Select all CDRs</button>
-          <button type="button" class="ghost-link" data-scoring-select-datasets="latest">Select latest of each type</button>
-          <button type="button" class="ghost-link" data-scoring-select-datasets="latest-two">Select latest two of each type</button>
+          <button type="button" data-scoring-select-datasets="all"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="2" y="2" width="16" height="16" rx="3"/><path d="m5 10 3 3 7-7"/></svg><span>Select all CDRs</span></button>
+          <button type="button" data-scoring-select-datasets="latest"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 2h8l4 4v12H4zM12 2v4h4"/><circle cx="10" cy="11" r="3"/><path d="M10 9v2l1.5 1"/></svg><span>Select latest of each type</span></button>
+          <button type="button" data-scoring-select-datasets="latest-two"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 5H1v14h12v-2M5 1h9l4 4v12H5zM14 1v4h4M9 9c0-2 4-2 4 0 0 1-1 2-4 4h4"/></svg><span>Select latest two of each type</span></button>
         </div>
         <div class="scoring-dataset-groups" data-dataset-list>
           {% for kind, kind_label in [('data', 'Data'), ('voice', 'Voice'), ('speech', 'Speech')] %}
@@ -406,13 +414,13 @@
           {% endfor %}
         </select>
       </label>
-      <p class="scoring-note" data-scoring-message role="status" aria-live="polite">Choose at least one CDR to calculate scoring.</p>
     </div>
     <div class="scoring-calculation-actions">
       <div class="scoring-actions">
         <button type="button" data-calculate-scoring disabled>Calculate Scoring</button>
         <button type="button" class="scoring-force-button" data-recalculate-scoring disabled>Recalculate</button>
       </div>
+      <p class="scoring-note scoring-calculation-message" data-scoring-message role="status" aria-live="polite">Choose at least one CDR to calculate scoring.</p>
       <div class="scoring-results-tools scoring-calculation-shortcuts">
         <nav class="scoring-config-shortcuts scoring-results-config-shortcuts" aria-label="Scoring configuration sections">
           <a data-config-shortcut="kpi" href="/workspace-config#scoring-methodology-environments"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2 17h16M3 17V7h5v10M5 10h1M5 13h1M12 3l-2 14M16 3l2 14M14 4v2m0 3v2m0 3v2"/></svg><span>Methodology Environments</span></a>

@@ -733,12 +733,12 @@ _SUMMARY_BEST_COLOR = '#C6EFCE'
 _SUMMARY_WORST_COLOR = '#FFC7CE'
 
 
-def _add_summary_operator_legend(slide) -> None:
+def _add_summary_operator_legend(slide, table_right: float) -> None:
     """Explain the best and worst score highlights above Summary tables on the right."""
     for index, (label, color) in enumerate((('Best operator', _SUMMARY_BEST_COLOR),
                                             ('Worst operator', _SUMMARY_WORST_COLOR))):
         table = slide.shapes.add_table(
-            1, 1, Inches(10.1 + index * 1.35), Inches(1.25), Inches(1.3), Inches(.18),
+            1, 1, Inches(table_right - 2.65 + index * 1.35), Inches(1.25), Inches(1.3), Inches(.18),
         ).table
         _cell(table.cell(0, 0), label, color=color, size=8)
 
@@ -769,21 +769,8 @@ def _summary_extreme_operators(values: dict[str, dict]) -> tuple[set[str], set[s
 
 
 def _summary_extreme_columns(values: dict[str, dict], columns: list[dict]) -> tuple[set[str], set[str]]:
-    """Rank hierarchy leaves only against operators in the same non-operator path."""
-    groups: dict[tuple[tuple[str, Any], ...], dict[str, dict]] = {}
-    for column in columns:
-        context = tuple(
-            (entry['level'], entry.get('value'))
-            for entry in column.get('path', []) if entry.get('level') != 'Operator'
-        )
-        groups.setdefault(context, {})[column['id']] = values.get(column['id'], {})
-    best_columns: set[str] = set()
-    worst_columns: set[str] = set()
-    for group in groups.values():
-        best, worst = _summary_extreme_operators(group)
-        best_columns.update(best)
-        worst_columns.update(worst)
-    return best_columns, worst_columns
+    """Rank all score leaves across the entire Summary row, preserving ties."""
+    return _summary_extreme_operators({column['id']: values.get(column['id'], {}) for column in columns})
 
 
 def _score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap_layout: str = 'end',
@@ -906,7 +893,7 @@ def _score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap
                         _cell(table.cell(index, column), _gap_number(total, operator), color=total_color, bold=True, size=numeric_font)
                 if is_summary:
                     _remove_summary_category_column(table)
-                    _add_summary_operator_legend(slide)
+                    _add_summary_operator_legend(slide, presentation.slide_width.inches - .55)
                 else:
                     for index, item in enumerate(legend):
                         legend_table = slide.shapes.add_table(1, 1, Inches(.55 + index * 1.15), Inches(7.02), Inches(1.1), Inches(.18)).table
@@ -1876,7 +1863,7 @@ def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dic
                               color=category_color, include_subtotals=True, bold_categories=True)
         if is_summary:
             _remove_summary_category_column(table)
-            _add_summary_operator_legend(slide)
+            _add_summary_operator_legend(slide, presentation.slide_width.inches - .55)
         else:
             for index, item in enumerate(legend):
                 legend_table = slide.shapes.add_table(

@@ -1537,26 +1537,20 @@
   }
 
   function summaryOperatorColors(values, columns) {
-    const groups = new Map();
+    const entries = [];
     for (const column of columns) {
-      const context = JSON.stringify((Array.isArray(column.path) ? column.path : [])
-        .filter(entry => String(entry?.level || '').toLowerCase() !== 'operator')
-        .map(entry => [entry.level, entry.value]));
       const cell = operatorValue(values, column.id);
       const points = firstValue(cell, ['points', 'weighted_points', 'weighted_score'], null);
       if (points === null || points === undefined || (typeof points === 'string' && !points.trim())) continue;
       const numeric = Number(points);
       if (!Number.isFinite(numeric)) continue;
-      if (!groups.has(context)) groups.set(context, []);
-      groups.get(context).push({id: column.id, points: numeric});
+      entries.push({id: column.id, points: numeric});
     }
     const colors = new Map();
-    for (const entries of groups.values()) {
-      if (entries.length < 2) continue;
+    if (entries.length >= 2) {
       const maximum = Math.max(...entries.map(entry => entry.points));
       const minimum = Math.min(...entries.map(entry => entry.points));
-      if (maximum === minimum) continue;
-      for (const entry of entries) {
+      for (const entry of maximum === minimum ? [] : entries) {
         if (entry.points === maximum) colors.set(entry.id, '#C6EFCE');
         else if (entry.points === minimum) colors.set(entry.id, '#FFC7CE');
       }
