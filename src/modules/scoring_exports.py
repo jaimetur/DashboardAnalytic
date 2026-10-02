@@ -1342,7 +1342,7 @@ def _best_network(presentation, matrices: list[dict]) -> None:
             maximums.append(sum(row['max_points'] or 0 for row in metrics))
 
         voice_series_count = len(operators)
-        for family in ('Voice', 'Data'):
+        for family in ('Data', 'Voice'):
             for operator in operators:
                 values = []
                 for column in chart_columns:
@@ -1368,7 +1368,7 @@ def _best_network(presentation, matrices: list[dict]) -> None:
         chart.legend.font.size = Pt(8.5)
         if hierarchy_columns:
             chart.category_axis.tick_labels.font.size = Pt(9)
-        legend_hidden = set(range(voice_series_count)) | {2 * voice_series_count}
+        legend_hidden = set(range(voice_series_count, 2 * voice_series_count)) | {2 * voice_series_count}
         _hide_chart_legend_entries(chart, legend_hidden)
         for operator_index, operator in enumerate(operators):
             color = _operator_color(matrix, operator).lstrip('#')
@@ -1376,8 +1376,8 @@ def _best_network(presentation, matrices: list[dict]) -> None:
             voice_color = '#{:02X}{:02X}{:02X}'.format(
                 *(round(channel + (255 - channel) * .45) for channel in channels)
             )
-            _fill_series(chart.series[operator_index], voice_color)
-            _fill_series(chart.series[voice_series_count + operator_index], color)
+            _fill_series(chart.series[operator_index], color)
+            _fill_series(chart.series[voice_series_count + operator_index], voice_color)
         _format_stacked_segment_labels(chart)
         _add_total_labels(chart)
         service_heading = _text(slide, 'Service types', 6.22, left=.65, width=8.65,
