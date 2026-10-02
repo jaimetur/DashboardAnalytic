@@ -43,7 +43,7 @@ def test_web_gap_hierarchy_headers_render_comparisons_without_extra_row(levels):
 
     script = SCORING_SCRIPT.read_text()
     functions = '\n'.join(_function_source(script, name) for name in (
-        'appendHierarchyHeaders', 'hierarchyLevelNames', 'hierarchyPathEntry', 'hierarchyPrefixKey',
+        'appendHierarchyHeaders', 'hierarchyLevelNames', 'hierarchyDisplayValue', 'hierarchyPathEntry', 'hierarchyPrefixKey',
     ))
     program = r'''
 const payload = JSON.parse(require('fs').readFileSync(0, 'utf8'));

@@ -180,7 +180,7 @@ process.stdout.write(JSON.stringify(cells.map(cell => [cell.style.color, cell.st
 
 def test_chart_context_subtitles_omit_environment_without_changing_other_context_labels():
     script = SCORING_SCRIPT.read_text(encoding='utf-8')
-    helper = _function_source(script, 'contextLabel')
+    helper = _function_source(script, 'hierarchyDisplayValue') + '\n' + _function_source(script, 'contextLabel')
     program = r'''
 const environmentLabel = value => value === 'Combined' ? 'All Environments' : value;
 const humanizeKey = value => value;

@@ -209,7 +209,10 @@
   const recalculateButton = root.querySelector('[data-recalculate-scoring]');
   const calculationPanel = root.querySelector('.scoring-controls');
   const message = root.querySelector('[data-scoring-message]');
-  const jobList = root.querySelector('[data-job-list]');
+  const jobLists = [...root.querySelectorAll('[data-job-list]')];
+  const jobList = jobLists[0];
+  const jobSelector = root.querySelector('[data-scoring-job-selector]');
+  const selectedJobCard = root.querySelector('[data-selected-job-card]');
   const environmentControl = root.querySelector('[data-result-environment-control]');
   const environmentSelect = root.querySelector('[data-result-environment]');
   const chartPane = root.querySelector('[data-result-pane="charts"]');
@@ -238,6 +241,7 @@
   let selectedJob = null;
   let selectedEnvironment = restoredScoringViewState.environment || 'all';
   let currentEffectiveEnvironment = null;
+  let environmentDefaultJobId = null;
   let currentResults = null;
   let currentResultsJobId = null;
   let activeResultTab = restoredScoringViewState.resultTab
@@ -721,14 +725,19 @@
     return [campaign || `${count || 'Selected'} CDR${count === 1 ? '' : 's'}`].filter(Boolean).join('');
   }
 
-  function jobCdrSummary(job) {
+  function jobCdrNames(job) {
     let names = valueOf(job, ['dataset_names', 'cdr_names', 'source_names'], null);
     if (!Array.isArray(names) || !names.length) {
       const metadata = job?.source_metadata;
       const entries = Array.isArray(metadata) ? metadata : (metadata && typeof metadata === 'object' ? Object.values(metadata) : []);
       names = entries.map(entry => firstValue(entry, ['name', 'dataset_name', 'cdr_name'], '')).filter(Boolean);
     }
-    if (Array.isArray(names) && names.length) return uniqueCatalogueValues(names).join(', ');
+    return Array.isArray(names) ? uniqueCatalogueValues(names) : [];
+  }
+
+  function jobCdrSummary(job) {
+    const names = jobCdrNames(job);
+    if (names.length) return names.join(', ');
     const ids = valueOf(job, ['dataset_ids', 'cdr_ids'], []);
     const count = Array.isArray(ids) ? ids.length : Number(valueOf(job, ['dataset_count'], 0));
     return `${count || 'Selected'} CDR${count === 1 ? '' : 's'}`;
@@ -762,10 +771,10 @@
     return [
       {dimension: 'neutral', value: formatDate(valueOf(job, ['created_at', 'submitted_at', 'started_at'], ''))},
       {dimension: 'nr-mode', value: valueOf(job, ['nr_mode'], 'All NR Modes')},
-      {dimension: 'operator', value: filterValue('Operator', 'All Operators')},
-      {dimension: 'vendor', value: filterValue('Vendor', 'All Vendors')},
       {dimension: 'region', value: filterValue('Region', 'All Regions')},
       {dimension: 'city', value: filterValue('City', 'All Cities')},
+      {dimension: 'operator', value: filterValue('Operator', 'All Operators')},
+      {dimension: 'vendor', value: filterValue('Vendor', 'All Vendors')},
       {dimension: 'campaign', value: campaignValue},
     ];
   }
@@ -814,16 +823,25 @@
     });
   }
 
+  function syncJobLists() {
+    for (const list of jobLists.slice(1)) {
+      list.replaceChildren(...Array.from(jobList.children, row => row.cloneNode(true)));
+    }
+  }
+
   function renderJobs() {
     const ordered = sortedJobs(jobs);
-    const countBadge = root.querySelector('[data-job-count]');
-    if (countBadge) countBadge.textContent = `${ordered.length} job${ordered.length === 1 ? '' : 's'}`;
+    for (const countBadge of root.querySelectorAll('[data-job-count]')) {
+      countBadge.textContent = `${ordered.length} job${ordered.length === 1 ? '' : 's'}`;
+    }
     jobList.replaceChildren();
+    selectedJobCard.textContent = ordered.length ? 'Select a scoring job' : 'No saved scoring jobs';
     if (!ordered.length) {
       const empty = document.createElement('div');
       empty.className = 'scoring-empty';
       empty.textContent = 'No scoring jobs have been run in this workspace.';
       jobList.append(empty);
+      syncJobLists();
       return;
     }
     for (const job of ordered) {
@@ -865,10 +883,15 @@
       const baseline = valueOf(job, ['baseline_operator'], 'EE');
       meta.textContent = `${jobLevels(job)} · GAP baseline ${baseline}`;
       button.append(meta);
-      const cdrMeta = document.createElement('span');
-      cdrMeta.className = 'scoring-job-meta';
-      cdrMeta.textContent = `CDRs: ${jobCdrSummary(job)}`;
-      button.append(cdrMeta);
+      const cdrNames = jobCdrNames(job);
+      const cdrButton = document.createElement('button');
+      cdrButton.type = 'button';
+      cdrButton.className = 'scoring-job-cdrs';
+      cdrButton.dataset.jobCdrs = id;
+      const cdrCount = cdrNames.length || (job.dataset_ids || []).length;
+      cdrButton.textContent = cdrCount ? `${cdrCount} CDR${cdrCount === 1 ? '' : 's'}` : 'Selected CDRs';
+      cdrButton.title = cdrNames.length ? cdrNames.join('\n') : jobCdrSummary(job);
+      cdrButton.setAttribute('aria-label', `Show CDRs for scoring job ${id}`);
       const profileName = valueOf(job, ['scoring_profile_name', 'profile_name'], '');
       if (profileName) {
         const profileMeta = document.createElement('span');
@@ -892,6 +915,9 @@
         detail.textContent = error;
         button.append(detail);
       }
+      if (id === selectedJobId) {
+        selectedJobCard.replaceChildren(...Array.from(button.children, child => child.cloneNode(true)), cdrButton.cloneNode(true));
+      }
       const row = document.createElement('div');
       row.className = 'scoring-job-row';
       const remove = document.createElement('button');
@@ -902,9 +928,10 @@
       remove.title = 'Delete scoring job and saved results';
       remove.setAttribute('aria-label', `Delete scoring job ${id}`);
       remove.disabled = deletingJobIds.has(id);
-      row.append(button, remove);
+      row.append(button, cdrButton, remove);
       jobList.append(row);
     }
+    syncJobLists();
   }
 
   async function requestJson(url, options = {}) {
@@ -984,7 +1011,9 @@
   function setExportLinks(jobId, enabled) {
     for (const [kind, selector] of [['scoring', '[data-export-scoring]'], ['gap', '[data-export-gap]'], ['ppt', '[data-export-ppt]']]) {
       const link = root.querySelector(selector);
-      link.hidden = !enabled;
+      link.hidden = false;
+      link.setAttribute('aria-disabled', String(!enabled));
+      link.tabIndex = enabled ? 0 : -1;
       const query = `table_mode=${encodeURIComponent(selectedTableMode())}&gap_layout=${encodeURIComponent(selectedGapLayout())}&environment=${encodeURIComponent(selectedEnvironment || 'all')}`;
       const gapOption = kind === 'ppt' ? `&show_gap_values=${showGapValues() ? 'true' : 'false'}` : '';
       link.href = enabled ? `${exportBase}/${encodeURIComponent(jobId)}/export/${kind}?${query}${gapOption}` : '#';
@@ -1095,7 +1124,8 @@
     if (!context || typeof context !== 'object') return '';
     const preferred = ['campaign', 'region', 'city', 'vendor', 'dataset_type', 'environment'];
     const entries = preferred.filter(key => context[key] !== null && context[key] !== undefined && context[key] !== '')
-      .map(key => [key, key === 'environment' ? environmentLabel(String(context[key])) : context[key]]);
+      .map(key => [key, key === 'environment' ? environmentLabel(String(context[key]))
+        : key === 'campaign' ? hierarchyDisplayValue({level: 'Campaign', value: context[key]}) : context[key]]);
     for (const [key, value] of Object.entries(context)) {
       if (!preferred.includes(key) && value !== null && value !== undefined && value !== '') entries.push([key, key === 'environment' ? environmentLabel(String(value)) : value]);
     }
@@ -1123,7 +1153,8 @@
 
     const preferred = ['campaign', 'region', 'city', 'vendor', 'dataset_type', 'environment'];
     const entries = preferred.filter(key => key !== 'environment' && context[key] !== null && context[key] !== undefined && context[key] !== '')
-      .map(key => [key, key === 'environment' ? environmentLabel(String(context[key])) : context[key]]);
+      .map(key => [key, key === 'environment' ? environmentLabel(String(context[key]))
+        : key === 'campaign' ? hierarchyDisplayValue({level: 'Campaign', value: context[key]}) : context[key]]);
     for (const [key, value] of Object.entries(context)) {
       if (!preferred.includes(key) && value !== null && value !== undefined && value !== '') entries.push([key, key === 'environment' ? environmentLabel(String(value)) : value]);
     }
@@ -1858,31 +1889,41 @@
     return [];
   }
 
+  function hierarchyDisplayValue(entry) {
+    const text = String(entry?.value ?? 'Not specified');
+    if (entry?.level !== 'Campaign') return text;
+    const yearFirst = text.match(/(?<!\d)((?:19|20)\d{2})[-_ ]*Q([1-4])(?!\d)/i);
+    if (yearFirst) return `${yearFirst[1]}-Q${yearFirst[2]}`;
+    const quarterFirst = text.match(/(?<![a-z0-9])Q([1-4])[-_ ]*((?:19|20)\d{2})(?!\d)/i);
+    return quarterFirst ? `${quarterFirst[2]}-Q${quarterFirst[1]}` : text;
+  }
+
   function hierarchyPathEntry(column, depth, levels) {
     const path = Array.isArray(column?.path) ? column.path : [];
     const expectedLevel = levels[depth] || '';
     const entry = path.find(item => String(item?.level || '') === expectedLevel) || path[depth] || {};
     return {
       level: String(entry?.level || expectedLevel || `Level ${depth + 1}`),
-      value: String(entry?.value ?? ''),
+      value: hierarchyDisplayValue(entry),
+      rawValue: String(entry?.value ?? ''),
     };
   }
 
   function hierarchyPathValueLabel(column) {
     const path = Array.isArray(column?.path) ? column.path : [];
     return path.map(entry => {
-      const value = String(entry?.value ?? '').trim();
+      const value = hierarchyDisplayValue(entry).trim();
       return value || 'Not specified';
     }).join(' · ');
   }
 
   function hierarchyPathFullLabel(column) {
     const path = Array.isArray(column?.path) ? column.path : [];
-    return String(column?.label || path.map(entry => {
+    return String(path.length ? path.map(entry => {
       const level = String(entry?.level || 'Level');
-      const value = String(entry?.value ?? '').trim() || 'Not specified';
+      const value = hierarchyDisplayValue(entry).trim() || 'Not specified';
       return `${level}: ${value}`;
-    }).join(' · '));
+    }).join(' · ') : column?.label || '');
   }
 
   function appendHierarchyAxisBands(svg, categories, levels, columnsById, categoryStarts, step, baselineY, left, right) {
@@ -1944,7 +1985,7 @@
   function hierarchyPrefixKey(column, depth, levels) {
     return JSON.stringify(Array.from({length: depth + 1}, (_, index) => {
       const entry = hierarchyPathEntry(column, index, levels);
-      return [entry.level, entry.value];
+      return [entry.level, entry.rawValue];
     }));
   }
 
@@ -2865,20 +2906,22 @@
       : Object.values(options.hierarchyColumns || {});
     const hierarchyColumnsById = new Map(hierarchyColumns.map(column => [String(column?.id ?? ''), column]));
     const hierarchyLevels = Array.isArray(options.hierarchyLevels) ? options.hierarchyLevels.map(String) : [];
-    const hasHierarchyAxis = stacked && hierarchyLevels.length > 0 && hierarchyColumnsById.size > 0;
+    const hasHierarchyAxis = hierarchyLevels.length > 0 && hierarchyColumnsById.size > 0;
     const groupKeys = categories.map(category => String(options.groupKeyForCategory?.(category) || ''));
-    const groupTransitions = hasHierarchyAxis
+    const groupTransitions = stacked && hasHierarchyAxis
       ? groupKeys.slice(1).filter((key, index) => key && groupKeys[index] && key !== groupKeys[index]).length : 0;
-    const categoryGroupGap = hasHierarchyAxis ? Math.max(0, Number(options.categoryGroupGap) || 14) : 0;
+    const categoryGroupGap = stacked && hasHierarchyAxis ? Math.max(0, Number(options.categoryGroupGap) || 14) : 0;
     const bestNetworkGeometry = stacked
       ? bestNetworkHorizontalGeometry(categories.length, groupTransitions, categoryGroupGap) : null;
     const requestedChartWidth = Number(options.fitWidth);
-    const width = bestNetworkGeometry?.width || (Number.isFinite(requestedChartWidth) && requestedChartWidth > 0
+    const clusteredHierarchyWidth = !stacked && hasHierarchyAxis
+      ? categories.length * (series.length * 84 + 28) + 138 : 0;
+    const width = bestNetworkGeometry?.width || clusteredHierarchyWidth || (Number.isFinite(requestedChartWidth) && requestedChartWidth > 0
       ? Math.max(720, Math.floor(requestedChartWidth))
       : Math.max(1180, categories.length * Math.max(168, series.length * 38 + 22) + 150));
     const baseHeight = 700;
     const left = bestNetworkGeometry?.left ?? 110, right = bestNetworkGeometry?.right ?? 28;
-    const baseBottom = Math.max(150, 24 + (hasHierarchyAxis ? hierarchyLevels.length * 32 : 0));
+    const baseBottom = Math.max(150, 80 + (hasHierarchyAxis ? hierarchyLevels.length * 32 : 0));
     const maxValue = stacked
       ? Math.max(0, ...categories.map(category => series.reduce((sum, seriesName) => {
         const row = rows.find(candidate => String(candidate.category) === String(category) && String(candidate.series) === seriesName);
@@ -2958,7 +3001,7 @@
     axisLabel.setAttribute('transform', `rotate(-90 22 ${axisTop + axisHeight / 2})`);
     axisLabel.textContent = options.axisLabel || 'Weighted score (points)';
     svg.append(axisLabel);
-    if (hasHierarchyAxis) {
+    if (stacked && hasHierarchyAxis) {
       appendHierarchyAxisBands(svg, categories, hierarchyLevels, hierarchyColumnsById, categoryStarts, step, baselineY, left, width - right);
     }
 
@@ -3069,6 +3112,11 @@
       const slotWidth = groupWidth / Math.max(series.length, 1);
       const barWidth = Math.min(48, slotWidth * .64);
       const groupStart = left + step * categoryIndex + (step - groupWidth) / 2;
+      if (hasHierarchyAxis) {
+        const starts = new Map(series.map((name, index) => [name, groupStart + index * slotWidth]));
+        appendHierarchyAxisBands(svg, series, hierarchyLevels, hierarchyColumnsById, starts, slotWidth,
+          baselineY, groupStart, groupStart + groupWidth);
+      }
       series.forEach((seriesName, seriesIndex) => {
         const row = rows.find(candidate => candidate.category === category && candidate.series === seriesName);
         if (!row) return;
@@ -3112,7 +3160,7 @@
         svg.append(rect, value);
       });
       }
-      if (!hasHierarchyAxis) {
+      if (!hasHierarchyAxis || !stacked) {
         const lines = [];
         const visibleCategory = options.categoryLabels?.[category] || category;
         const fullCategory = options.categoryTooltips?.[category] || visibleCategory;
@@ -3120,7 +3168,7 @@
         const label = document.createElementNS(svg.namespaceURI, 'text');
         const categoryStart = categoryStarts.get(String(category)) ?? left + step * categoryIndex;
         const labelX = categoryStart + step / 2;
-        label.setAttribute('x', String(labelX)); label.setAttribute('y', String(baselineY + 24));
+        label.setAttribute('x', String(labelX)); label.setAttribute('y', String(baselineY + 24 + (hasHierarchyAxis ? hierarchyLevels.length * 32 + 16 : 0)));
         label.setAttribute('text-anchor', 'middle'); label.setAttribute('class', 'scoring-chart-category');
         lines.forEach((line, lineIndex) => {
           const span = document.createElementNS(svg.namespaceURI, 'tspan');
@@ -3470,10 +3518,13 @@
       seriesStyles: clusteredSeriesStyles,
       seriesTooltips: clusteredSeriesTooltips,
       legendEntries: clusteredLegend,
-      fitWidth: chartFitWidth(pane),
+      hierarchyLevels: tableData.hierarchy_levels,
+      hierarchyColumns: columns,
     });
     clusteredChart.style.minWidth = '0';
-    clusteredChart.style.width = '100%';
+    const clusteredWidth = clusteredChart.viewBox.baseVal.width;
+    clusteredChart.style.width = `${100 * Math.max(clusteredWidth, chartFitWidth(pane)) / chartFitWidth(pane)}%`;
+    clusteredChart.style.maxWidth = 'none';
     pane.append(makeExpandableChartCard(
       'Scoring per Category', contextLabel(tableData.context, {environmentPrefix: false}), clusteredChart,
     ));
@@ -4094,16 +4145,103 @@
     return environment;
   }
 
-  function syncResultEnvironment(tables) {
+  function scoringCoverageTotals(payload, environment) {
+    const totals = Array.isArray(payload?.totals) ? payload.totals : [];
+    const matching = totals.filter(row => String(row.environment || '') === environment && Number(row.max_points) > 0);
+    const overall = matching.filter(row => row.category === 'Overall');
+    return overall.length ? overall : matching;
+  }
+
+  function scoringEnvironmentIsComplete(payload, tables, environment) {
+    const totals = scoringCoverageTotals(payload, environment);
+    if (totals.length) return totals.every(row => row.complete_coverage === true);
+    const matching = tables.filter(table => environmentOf(table) === environment
+      && (table.total?.max_points === undefined || Number(table.total.max_points) > 0));
+    const values = matching.flatMap(table => Object.values(table.total?.values || {}))
+      .filter(cell => cell.points !== null && cell.points !== undefined);
+    return values.length > 0 && values.every(cell => cell.complete === true);
+  }
+
+  function scoringCoverageWarnings(payload, job, environment, {concise = false} = {}) {
+    const genericNotice = 'Incomplete KPI or environment coverage: partial points are shown without renormalizing weights; a complete benchmark score is unavailable.';
+    const warnings = Array.isArray(payload?.warnings) ? payload.warnings : (payload?.warnings ? [payload.warnings] : []);
+    const totals = scoringCoverageTotals(payload, environment);
+    if (!totals.length) return warnings;
+    const visible = warnings.filter(warning => warning !== genericNotice);
+    const incomplete = totals.filter(row => row.complete_coverage === false);
+    if (!incomplete.length) return visible;
+    const required = Object.entries(payload.configuration?.scope?.environments || {})
+      .filter(([, config]) => Number(config.total_points) > 0).map(([name]) => name);
+    const missing = new Set();
+    const partial = new Set();
+    if (environment === 'Combined') {
+      for (const total of incomplete) {
+        for (const name of required) {
+          const contribution = scoringCoverageTotals(payload, name).find(row => row.operator === total.operator
+            && comparisonScopeFields.every(field => String(row[field] ?? '') === String(total[field] ?? '')));
+          if (!contribution) missing.add(name);
+          else if (contribution.complete_coverage === false) partial.add(name);
+        }
+      }
+    }
+    if (concise) {
+      const label = name => ['DriveConnectionroad', 'Drive Connecting Roads'].includes(name)
+        ? 'Drive - Connecting Roads' : environmentLabel(name);
+      const names = [...missing].map(label);
+      let message = names.length
+        ? `Selected Environment has incomplete coverage because ${names.length === 1 ? 'one of its Environments' : 'some of its Environments'} (${names.join(', ')}) ${names.length === 1 ? 'has' : 'have'} no data with the selected filters.`
+        : 'Selected Environment has incomplete coverage because required KPI data is missing with the selected filters.';
+      if (partial.size) message += ` Incomplete KPI data in: ${[...partial].map(label).join(', ')}.`;
+      visible.push(message);
+      return visible;
+    }
+    let message = `${environmentLabel(environment)} has incomplete coverage in ${incomplete.length} of ${totals.length} scoring groups (operator and selected aggregation levels).`;
+    if (missing.size) message += ` Missing weighted environments in one or more groups: ${[...missing].map(environmentLabel).join(', ')}.`;
+    if (partial.size) message += ` Environments with missing valid KPI measurements: ${[...partial].map(environmentLabel).join(', ')}.`;
+    if (!missing.size && !partial.size) message += ' One or more required KPI measurements are missing or have no valid samples.';
+    const available = incomplete.map(row => Number(row.available_points)).filter(Number.isFinite);
+    const maximum = incomplete.map(row => Number(row.max_points)).filter(Number.isFinite);
+    const range = values => {
+      const low = Math.min(...values), high = Math.max(...values);
+      return low === high ? formatChartNumber(low) : `${formatChartNumber(low)}–${formatChartNumber(high)}`;
+    };
+    if (available.length && maximum.length) message += ` Available maximum points: ${range(available)} of ${range(maximum)}; these are scoring weights, not earned scores.`;
+    const cities = job?.context_filters?.City || [];
+    if (missing.size && Array.isArray(cities) && cities.length) {
+      message += ` The saved City filter is ${cities.join(', ')}. Only matching City names are included; road routes with different City names are excluded.`;
+    }
+    if (environment === 'Combined' && (payload.aggregation_levels || job?.aggregation_levels || []).includes('City')) {
+      message += ' City is an aggregation level: cities and road routes are scored separately, and environment coverage is checked within each group.';
+    }
+    message += ' Available points keep their original weights; missing contributions are not scaled up to a complete benchmark.';
+    visible.push(message);
+    return visible;
+  }
+
+  function renderEnvironmentCoverageWarning(payload, job, environment) {
+    const card = root.querySelector('[data-environment-warning]');
+    const copy = root.querySelector('[data-environment-warning-copy]');
+    const warnings = scoringCoverageWarnings({...payload, warnings: []}, job, environment, {concise: true});
+    card.hidden = !warnings.length;
+    copy.textContent = warnings.join(' ');
+  }
+
+  function syncResultEnvironment(tables, {payload = {}, applyCoverageDefault = false} = {}) {
     const environments = availableScoreEnvironments(tables);
     if (!environments.length) {
       currentEffectiveEnvironment = null;
-      environmentSelect.replaceChildren();
-      environmentControl.hidden = true;
+      environmentSelect.disabled = true;
+      environmentControl.hidden = false;
       return {environments, effective: null, unavailable: false};
     }
     if (!environments.includes(selectedEnvironment)) {
       selectedEnvironment = 'all';
+    }
+    if (applyCoverageDefault && !scoringEnvironmentIsComplete(payload, tables, 'Combined')
+        && (selectedEnvironment === 'all' || !scoringEnvironmentIsComplete(payload, tables, selectedEnvironment))) {
+      const completeEnvironment = environments.find(environment => environment !== 'all'
+        && scoringEnvironmentIsComplete(payload, tables, environment));
+      if (completeEnvironment) selectedEnvironment = completeEnvironment;
     }
     const currentOptions = [...environmentSelect.options].map(option => option.value);
     if (JSON.stringify(currentOptions) !== JSON.stringify(environments)) {
@@ -4111,11 +4249,13 @@
       for (const environment of environments) {
         const option = document.createElement('option');
         option.value = environment;
-        option.textContent = environmentLabel(environment);
+        option.textContent = environment === 'all' ? 'All Environments'
+          : String(payload.configuration?.scope?.environments?.[environment]?.display_name || environment);
         environmentSelect.append(option);
       }
     }
     environmentSelect.value = selectedEnvironment;
+    environmentSelect.disabled = false;
     environmentControl.hidden = false;
     const combinedIsAvailable = tables.some(table => environmentOf(table) === 'Combined');
     const effective = selectedEnvironment === 'all'
@@ -4151,7 +4291,11 @@
     const allGapSummaryTables = normalizeRows(views.gap_summary_tables ?? payload.gap_summary_tables ?? payload.scoring_views?.gap_summary_tables ?? []);
     const allHierarchyScoreTables = normalizeRows(views.hierarchy_score_tables ?? []);
     const allHierarchyGapTables = normalizeRows(views.hierarchy_gap_tables ?? []);
-    const environmentSelection = syncResultEnvironment([...allScoreTables, ...allHierarchyScoreTables]);
+    const applyCoverageDefault = environmentDefaultJobId !== currentResultsJobId;
+    const environmentSelection = syncResultEnvironment([...allScoreTables, ...allHierarchyScoreTables], {
+      payload, applyCoverageDefault,
+    });
+    environmentDefaultJobId = currentResultsJobId;
     const effectiveEnvironment = environmentSelection.effective;
     const scoreTables = allScoreTables.filter(table => environmentOf(table) === effectiveEnvironment);
     const gapTables = allGapTables.filter(table => environmentOf(table) === effectiveEnvironment);
@@ -4226,11 +4370,14 @@
       }
     }
     const warnings = payload.warnings ?? job?.warnings ?? [];
-    renderWarnings(warnings);
+    renderWarnings(scoringCoverageWarnings({...payload, warnings}, job, effectiveEnvironment));
+    renderEnvironmentCoverageWarning(payload, job, effectiveEnvironment);
     setExportLinks(jobIdOf(job || payload.job || {}), true);
   }
 
   function renderNoResult(text) {
+    environmentControl.hidden = false;
+    environmentSelect.disabled = true;
     for (const pane of resultPanes) {
       disconnectScoringValueObservers(pane);
       pane.replaceChildren();
@@ -4240,6 +4387,7 @@
       pane.append(empty);
     }
     root.querySelector('[data-warning-box]').hidden = true;
+    root.querySelector('[data-environment-warning]').hidden = true;
     setExportLinks('', false);
   }
 
@@ -4328,6 +4476,7 @@
       empty.className = 'scoring-empty';
       empty.textContent = error.message || 'Scoring jobs could not be loaded.';
       jobList.append(empty);
+      syncJobLists();
       setMessage(error.message || 'Scoring jobs could not be loaded.', 'error');
     } finally {
       refreshInFlight = false;
@@ -4512,7 +4661,15 @@
   });
   calculateButton.addEventListener('click', () => createJob(false));
   recalculateButton.addEventListener('click', () => createJob(true));
-  jobList.addEventListener('click', async event => {
+  document.addEventListener('click', event => {
+    if (!jobSelector.contains(event.target)) jobSelector.open = false;
+  });
+  jobSelector.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    jobSelector.open = false;
+    jobSelector.querySelector('summary').focus();
+  });
+  for (const list of jobLists) list.addEventListener('click', async event => {
     const remove = event.target.closest('[data-delete-job-id]');
     if (remove) {
       deleteJob(remove.dataset.deleteJobId);
@@ -4525,13 +4682,38 @@
     userSelectedJob = true;
     selectedJobId = jobIdOf(job);
     selectedJob = job;
+    const fromDropdown = jobSelector.contains(button);
+    jobSelector.open = false;
+    if (fromDropdown) jobSelector.querySelector('summary').focus();
     persistScoringViewState();
     await loadJob(job, true);
-    if (selectedJobId === jobIdOf(job)) {
+    if (!fromDropdown && selectedJobId === jobIdOf(job)) {
       root.querySelector('.scoring-results-panel')?.scrollIntoView({behavior: 'smooth', block: 'start'});
     }
   });
   root.addEventListener('click', event => {
+    const cdrButton = event.target.closest('[data-job-cdrs]');
+    if (cdrButton) {
+      event.preventDefault();
+      const job = jobs.find(record => jobIdOf(record) === cdrButton.dataset.jobCdrs);
+      if (!job) return;
+      const copy = document.getElementById('info-copy');
+      const previousWhiteSpace = copy?.style.whiteSpace || '';
+      if (copy) copy.style.whiteSpace = 'pre-line';
+      showInfoDialog(jobCdrNames(job).join('\n') || jobCdrSummary(job), {
+        title: `Scoring job ${jobIdOf(job)} — CDRs`,
+        onClose: () => {
+          if (copy) copy.style.whiteSpace = previousWhiteSpace;
+          cdrButton.focus();
+        },
+      });
+      return;
+    }
+    const exportLink = event.target.closest('.scoring-export-actions a');
+    if (exportLink?.getAttribute('aria-disabled') === 'true') {
+      event.preventDefault();
+      return;
+    }
     const tab = event.target.closest('[data-result-tab]');
     if (!tab || !root.contains(tab)) return;
     const name = tab.dataset.resultTab;

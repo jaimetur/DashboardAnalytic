@@ -35,7 +35,7 @@ def _run_node_json(program: str, payload: dict) -> dict:
     return json.loads(completed.stdout)
 
 
-def test_results_environment_defaults_to_all_and_exports_selected_scope():
+def test_results_environment_stays_visible_while_loading_and_exports_selected_scope():
     template = SCORING_TEMPLATE.read_text(encoding='utf-8')
     script = SCORING_SCRIPT.read_text(encoding='utf-8')
 
@@ -47,7 +47,7 @@ def test_results_environment_defaults_to_all_and_exports_selected_scope():
     assert "actual[0]" not in script
     assert '&environment=${encodeURIComponent(selectedEnvironment || \'all\')}' in script
     assert 'All Environments' in script
-    assert 'defaults to all environments' in template
+    assert 'defaults to the first complete environment when all environments are incomplete' in template
 
 
 def test_best_network_chart_keeps_its_intrinsic_width_on_narrow_cards():
@@ -177,6 +177,7 @@ def test_results_controls_are_grouped_with_icons_and_unique_environment_heading(
 
     payload = {
         'snippets': {
+            'hierarchyDisplayValue': _function_source(script, 'hierarchyDisplayValue'),
             'appendContextHeader': _function_source(script, 'appendContextHeader'),
             'environmentLabel': _function_source(script, 'environmentLabel'),
             'humanizeKey': _function_source(script, 'humanizeKey'),
@@ -425,7 +426,7 @@ def test_scoring_chart_pairs_render_five_operator_two_category_views():
         'hierarchyColumnOperator', 'hierarchyColumnIsReference', 'chartOperatorLegend',
         'makeExpandableChartCard',
         'renderCharts', 'renderHierarchyCharts', 'svgElement', 'hierarchyChartColor',
-        'hierarchyPathEntry', 'hierarchyPrefixKey', 'appendHierarchyAxisBands',
+        'hierarchyDisplayValue', 'hierarchyPathEntry', 'hierarchyPrefixKey', 'appendHierarchyAxisBands',
         'hierarchyPathValueLabel', 'hierarchyPathFullLabel', 'chartFitWidth',
     )
     payload = {'snippets': {name: _function_source(script, name) for name in names}}
@@ -648,8 +649,12 @@ process.stdout.write(JSON.stringify({
         assert top['unavailable'] == 0
         assert bottom['unavailable'] == expected_missing
         assert set(bottom['barFills']) == set(result['palette'])
-        assert bottom['viewBoxWidth'] <= 1000
-        assert bottom['widthStyle'] == '100%'
+        if charts is result['wideHierarchy']:
+            assert bottom['viewBoxWidth'] >= 7 * 10 * 70
+            assert float(bottom['widthStyle'].removesuffix('%')) > 100
+        else:
+            assert bottom['viewBoxWidth'] <= 1000
+            assert bottom['widthStyle'] == '100%'
         assert bottom['minWidthStyle'] == '0'
 
     for comparison in result['sharedGeometry']:
@@ -1040,6 +1045,7 @@ def test_scoring_job_title_and_cdr_summary_use_saved_filters_and_source_names():
         _function_source(script, 'jobCampaigns'),
         _function_source(script, 'jobCardTitleSegments'),
         _function_source(script, 'jobCardTitle'),
+        _function_source(script, 'jobCdrNames'),
         _function_source(script, 'jobCdrSummary'),
     ]
     payload = {
@@ -1082,7 +1088,7 @@ process.stdout.write(JSON.stringify({title: context.title, cdrSummary: context.c
     result = _run_node_json(program, payload)
 
     assert result['title'].split(' ● ')[1:] == [
-        'NSA', 'All Operators', 'All Vendors', 'All Regions', 'All Cities', 'UK_Q2_2026',
+        'NSA', 'All Regions', 'All Cities', 'All Operators', 'All Vendors', 'UK_Q2_2026',
     ]
     assert result['cdrSummary'] == 'data.csv, voice.csv'
     assert result['metadataCdrSummary'] == 'data.csv, voice.csv'
@@ -1092,7 +1098,7 @@ process.stdout.write(JSON.stringify({title: context.title, cdrSummary: context.c
     assert result['partialVendors'] == ['Nokia']
     assert result['legacyVendors'] == ['Ericsson']
     assert result['fallbackTitle'].split(' ● ')[1:] == [
-        'SA', 'All Operators', 'All Vendors', 'All Regions', 'All Cities', 'UK_Q3_2026',
+        'SA', 'All Regions', 'All Cities', 'All Operators', 'All Vendors', 'UK_Q3_2026',
     ]
 
 

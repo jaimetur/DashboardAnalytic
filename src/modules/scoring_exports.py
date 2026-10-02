@@ -23,7 +23,7 @@ from src.modules.cdr_reporting import (
     _set_structural_slide_text,
 )
 from src.modules.scoring_views import (
-    THRESHOLD_COLORS, _gap_order_key, build_scoring_views,
+    THRESHOLD_COLORS, _gap_order_key, _hierarchy_display_value, build_scoring_views,
 )
 from src.modules.scoring_pptx_allocation import (
     _environment_display_label, add_maximum_allocation_donut, category_maximum_allocations,
@@ -1407,8 +1407,8 @@ def _add_hierarchy_chart_categories(data: CategoryChartData, columns: list[dict]
         parent = None
         prefix = ()
         for item in column.get('path', []):
-            value = 'Not specified' if item.get('value') is None else str(item['value'])
-            prefix += (value,)
+            value = _hierarchy_display_value(item)
+            prefix += (item.get('value'),)
             if prefix in nodes:
                 parent = nodes[prefix]
                 continue
@@ -1439,8 +1439,7 @@ def _hierarchy_header_groups(table, columns: list[dict], levels: list[str], *, s
             cell = table.cell(level_index, left_column)
             if right_column > left_column:
                 cell.merge(table.cell(level_index, right_column))
-            value = representative['path'][level_index].get('value')
-            label = value if value is not None else 'Not specified'
+            label = _hierarchy_display_value(representative['path'][level_index])
             if level == 'Operator' and gap_reference:
                 label = f'{label} − {gap_reference}'
             color = representative['color'] if level == 'Operator' else (header_color or '#E6ECFA')
@@ -1501,7 +1500,7 @@ def _score_column_headers(table, plan: list[tuple[dict, str]], levels: list[str]
             cell = table.cell(depth + 1, fixed_count + start)
             if end > start:
                 cell.merge(table.cell(depth + 1, fixed_count + end))
-            value = column['path'][depth].get('value')
+            value = _hierarchy_display_value(column['path'][depth])
             color = column['color'] if level == 'Operator' else '#E6ECFA'
             size = min(7, max(2.5, leaf_width * (end - start + 1) * 12))
             _cell(cell, str(value) if value is not None else 'Not specified', color=color,

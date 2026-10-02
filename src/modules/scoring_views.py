@@ -207,6 +207,19 @@ def _hierarchy_levels(job: dict[str, Any], result: dict[str, Any]) -> list[str]:
     return canonical
 
 
+def _hierarchy_display_value(entry: dict[str, Any]) -> str:
+    """Shorten quarter campaign labels without changing comparison identities."""
+    value = entry.get('value')
+    text = str(value) if value is not None else 'Not specified'
+    if entry.get('level') != 'Campaign':
+        return text
+    year_first = re.search(r'(?<!\d)((?:19|20)\d{2})[-_ ]*Q([1-4])(?!\d)', text, re.IGNORECASE)
+    if year_first:
+        return f'{year_first[1]}-Q{year_first[2]}'
+    quarter_first = re.search(r'(?<![a-z0-9])Q([1-4])[-_ ]*((?:19|20)\d{2})(?!\d)', text, re.IGNORECASE)
+    return f'{quarter_first[2]}-Q{quarter_first[1]}' if quarter_first else text
+
+
 def _hierarchy_leaf_id(path: list[dict[str, Any]]) -> str:
     return json.dumps(
         [[entry['level'], entry.get('value')] for entry in path],
@@ -278,7 +291,7 @@ def _build_hierarchy_tables(
                     path.append({'level': level, 'value': value})
                 leaf_id = _hierarchy_leaf_id(path)
                 label = ' · '.join(
-                    f'{item["level"]}: {item.get("value") if item.get("value") is not None else "Not specified"}'
+                    f'{item["level"]}: {_hierarchy_display_value(item)}'
                     for item in path
                 )
                 is_reference = _same_baseline_identity(canonical_operator, requested_baseline, baseline_aliases)
@@ -486,6 +499,9 @@ def _build_score_table(
     global_kpi_records: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     environment = context['environment']
+    metric_records = {name: {(_record_view_code(record), _operator_name(record)): record
+                             for record in records}
+                      for name, records in environment_records.items()}
     source_environments = combined_environments if environment == 'Combined' else [environment]
     source_rows = [row for source_environment in source_environments
                    for row in environment_records.get(source_environment, [])]
@@ -503,7 +519,7 @@ def _build_score_table(
         for operator in operators:
             if environment == 'Combined':
                 value = _combined_metric_value(
-                    code, operator, environment_records, combined_environments, metric,
+                    code, operator, environment_records, combined_environments, metric, metric_records,
                 )
                 global_record = _find_global_kpi_record(
                     code, operator, global_kpi_records or [],
@@ -513,7 +529,7 @@ def _build_score_table(
                     if global_unit is None:
                         global_unit = _field(global_record, 'unit', 'units', 'measurement_unit')
             else:
-                source = _find_metric_record(code, operator, environment_records.get(environment, []))
+                source = metric_records.get(environment, {}).get((code, operator))
                 value = _metric_value(source, metric, environment)
             row_values[operator] = value
         maximum = _metric_max_points(metric, environment, combined_environments)
@@ -1033,6 +1049,7 @@ def _metric_value(record: dict[str, Any] | None, metric: dict[str, Any], environ
 def _combined_metric_value(
     code: str, operator: str, environment_records: dict[str, list[dict[str, Any]]],
     combined_environments: list[str], metric: dict[str, Any],
+    metric_records: dict[str, dict[tuple[str | None, str | None], dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     metric_contexts = metric.get('contexts', {}) if isinstance(metric.get('contexts'), dict) else {}
     required_environments = [
@@ -1047,7 +1064,8 @@ def _combined_metric_value(
     environment_values = {}
     cells = []
     for environment in required_environments:
-        record = _find_metric_record(code, operator, environment_records.get(environment, []))
+        record = (metric_records.get(environment, {}).get((code, operator)) if metric_records is not None
+                  else _find_metric_record(code, operator, environment_records.get(environment, [])))
         cell = _metric_value(record, metric, environment)
         context = metric_contexts.get(environment)
         maximum = _number(context.get('max_points')) if isinstance(context, dict) else None
@@ -1537,7 +1555,7 @@ def _coverage_note(
     notes = []
     required = combined_environments or ['DriveCity', 'DriveConnectionroad']
     missing_environments = [name for name in required if name not in actual_environments]
-    if missing_environments and (environment == 'Combined' or environment in required):
+    if missing_environments and environment == 'Combined':
         notes.append(
             'All Environments is incomplete because weighted environments are missing: '
             + ', '.join(missing_environments)

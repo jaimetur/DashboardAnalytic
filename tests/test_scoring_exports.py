@@ -11,7 +11,7 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.util import Inches
 
 from src.modules.scoring_exports import _cell, _hierarchy_chart_color, export_scoring_powerpoint
-from src.modules.scoring_views import THRESHOLD_COLORS, build_scoring_views
+from src.modules.scoring_views import THRESHOLD_COLORS, _hierarchy_display_value, build_scoring_views
 from tests.scoring_fixtures import scoring_configuration
 
 
@@ -756,7 +756,7 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     best_network_categories = best_network_chart.plots[0].categories
     assert best_network_categories.depth == 3
     best_paths = best_network_categories.flattened_labels
-    assert ('EE', 'North', 'UK_Q2_2026') in best_paths
+    assert ('EE', 'North', '2026-Q2') in best_paths
     hierarchy_text = '\n'.join(
         line for line in _slide_text(best_network_slide).splitlines()
         if not (line.startswith(('Drive - City: ', 'Drive - Connecting Roads: ')) and ' pts (' in line)
@@ -776,7 +776,7 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
                 matching = [
                     row for row in scoring_rows
                     if row['operator'] == operator and row['region'] == path[1]
-                    and row['campaign'] == path[2]
+                    and _hierarchy_display_value({'level': 'Campaign', 'value': row['campaign']}) == path[2]
                     and metric_by_code[row['kpi_code']]['source_kind'] in family_source_kinds[family]
                 ]
                 expected.append(sum(row['weighted_points'] for row in matching) if matching else None)
@@ -788,7 +788,7 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     expected_best_total = []
     for path in best_paths:
         matching = [row for row in scoring_rows if row['operator'] == path[0]
-                    and row['region'] == path[1] and row['campaign'] == path[2]]
+                    and row['region'] == path[1] and _hierarchy_display_value({'level': 'Campaign', 'value': row['campaign']}) == path[2]]
         expected_best_total.append(sum(row['weighted_points'] for row in matching) if matching else None)
     _assert_sparse_series_values(best_series['Total'], expected_best_total)
     assert _legend_visible_series_names(best_network_chart) == list(MAPPED_OPERATOR_ORDER)
@@ -831,7 +831,7 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     chart_categories = chart.plots[0].categories
     assert chart_categories.depth == 3
     chart_paths = chart_categories.flattened_labels
-    assert ('EE', 'North', 'UK_Q2_2026') in chart_paths
+    assert ('EE', 'North', '2026-Q2') in chart_paths
     assert all(not re.search(r'\b(?:Operator|Vendor|Region|City|Campaign):', label)
                for path in chart_paths for label in path)
     categories = list(dict.fromkeys(row['category'] for row in scoring_rows))
@@ -848,7 +848,7 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
                 matching = [
                     row for row in scoring_rows
                     if row['operator'] == operator and row['region'] == path[1]
-                    and row['campaign'] == path[2] and row['category'] == category
+                    and _hierarchy_display_value({'level': 'Campaign', 'value': row['campaign']}) == path[2] and row['category'] == category
                 ]
                 expected.append(sum(row['weighted_points'] for row in matching) if matching else None)
             _assert_sparse_series_values(series, expected)
@@ -866,7 +866,7 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     for index, path in enumerate(chart_paths):
         expected_total = sum(
             row['weighted_points'] for row in scoring_rows
-            if row['operator'] == path[0] and row['region'] == path[1] and row['campaign'] == path[2]
+            if row['operator'] == path[0] and row['region'] == path[1] and _hierarchy_display_value({'level': 'Campaign', 'value': row['campaign']}) == path[2]
         )
         assert stacked_totals[index] == pytest.approx(expected_total)
     assert not chart._chartSpace.xpath('.//a:ln//a:srgbClr[@val="FFFF00"]')
@@ -944,7 +944,7 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
         assert all(kpi.casefold() != 'average kpi gap' for kpi in operator_gap_kpis)
         header_text = '\n'.join(cell.text for row in list(operator_gap_table.rows)[:4] for cell in row.cells)
         assert 'North' in header_text and 'South' in header_text
-        assert 'UK_Q2_2026' in header_text and 'UK_Q3_2026' in header_text
+        assert '2026-Q2' in header_text and '2026-Q3' in header_text
         assert not re.search(r'\b(?:Operator|Vendor|Region|City|Campaign):', header_text)
         gap_header = operator_gap_table.rows[len(['Operator', 'Region', 'Campaign'])]
         assert all(cell.text == 'GAP' for cell in list(gap_header.cells)[3:])
@@ -961,7 +961,8 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     assert all('Average KPI GAP' not in _slide_text(slide) for slide in all_gap_slides)
     assert all('Average KPI GAP:' in _slide_text(slide) for slide in individual_gap_slides)
     hierarchy_text = '\n'.join(_slide_text(slide) for slide in score_slides + gap_slides)
-    assert 'UK_Q2_2026' in hierarchy_text
+    assert '2026-Q2' in hierarchy_text
+    assert 'UK_Q2_2026' not in hierarchy_text
     assert 'South' in hierarchy_text
     assert not re.search(r'\b(?:Operator|Vendor|Region|City|Campaign):', hierarchy_text)
 
