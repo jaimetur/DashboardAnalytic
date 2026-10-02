@@ -747,7 +747,7 @@
     }
   }
 
-  function selectLatestDatasetForEachKind() {
+  function selectLatestDatasetForEachKind(count = 1) {
     for (const input of datasetInputs) input.checked = false;
     for (const kind of datasetKindOrder) {
       const candidates = datasetOptions.filter(option => !option.hidden && String(option.dataset.datasetKind || '').toLowerCase() === kind);
@@ -762,8 +762,10 @@
         const rightId = Number(right.querySelector('[data-dataset-id]')?.value || 0);
         return rightId - leftId;
       });
-      const newest = candidates[0]?.querySelector('[data-dataset-id]');
-      if (newest) newest.checked = true;
+      for (const option of candidates.slice(0, count)) {
+        const input = option.querySelector('[data-dataset-id]');
+        if (input) input.checked = true;
+      }
     }
   }
 
@@ -4741,6 +4743,22 @@
       updateSelection();
     }
   }
+
+  root.querySelectorAll('[data-scoring-select-datasets]').forEach(button => {
+    button.addEventListener('click', () => {
+      const choice = button.dataset.scoringSelectDatasets;
+      if (choice === 'all') {
+        for (const option of datasetOptions) {
+          const input = option.querySelector('[data-dataset-id]');
+          if (input) input.checked = !option.hidden;
+        }
+      } else {
+        selectLatestDatasetForEachKind(choice === 'latest-two' ? 2 : 1);
+      }
+      updateSelection();
+      scheduleSelectionSave();
+    });
+  });
 
   datasetInputs.forEach(input => input.addEventListener('change', () => {
     updateSelection();

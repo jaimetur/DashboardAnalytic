@@ -1,4 +1,5 @@
 from pathlib import Path
+from html.parser import HTMLParser
 
 from tests.test_scoring_results_controls import _function_source, _run_node_json
 
@@ -6,6 +7,27 @@ from tests.test_scoring_results_controls import _function_source, _run_node_json
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SCORING_TEMPLATE = PROJECT_ROOT / 'src/web_interface/templates/scoring.html'
 SCORING_SCRIPT = PROJECT_ROOT / 'src/web_interface/static/js/scoring.js'
+
+
+class _ScoringMarkupParser(HTMLParser):
+    _VOID_ELEMENTS = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'}
+
+    def __init__(self):
+        super().__init__()
+        self.stack = []
+        self.elements = []
+
+    def handle_starttag(self, tag, attrs):
+        attributes = dict(attrs)
+        self.elements.append((tag, attributes, tuple(self.stack)))
+        if tag not in self._VOID_ELEMENTS:
+            self.stack.append((tag, attributes))
+
+    def handle_endtag(self, tag):
+        for index in range(len(self.stack) - 1, -1, -1):
+            if self.stack[index][0] == tag:
+                del self.stack[index:]
+                break
 
 
 def test_scoring_selection_loads_from_server_before_enabling_controls():
@@ -35,6 +57,115 @@ def test_scoring_selection_roundtrips_explicit_empty_filters_and_methodology():
     assert "const requested = filters[key] ?? filters[key.toLowerCase()] ?? [];" in script
     assert "option.selected = !option.disabled && selected.has(option.value.toLocaleLowerCase())" in script
     assert '.scoring-note[data-kind="warning"]' in template
+
+
+def test_scoring_calculation_picker_orders_cdr_aggregation_and_gap_reference_controls():
+    template = SCORING_TEMPLATE.read_text(encoding='utf-8')
+    parser = _ScoringMarkupParser()
+    parser.feed(template)
+    elements = parser.elements
+
+    assert 'Select CDRs, filters, aggregation levels &amp; GAP reference' in template
+    assert template.index('<label>NR Mode') < template.index('<strong>CDR datasets</strong>')
+    assert template.index('<strong>CDR datasets</strong>') < template.index('<strong>Aggregation levels</strong>')
+    assert template.index('<strong>Aggregation levels</strong>') < template.index('id="scoring-gap-reference-title"')
+
+    buttons = [
+        (attrs, ancestors) for tag, attrs, ancestors in elements
+        if tag == 'button' and attrs.get('data-scoring-select-datasets')
+    ]
+    assert [attrs['data-scoring-select-datasets'] for attrs, _ancestors in buttons] == ['all', 'latest', 'latest-two']
+    for _attrs, ancestors in buttons:
+        assert any(
+            ancestor_attrs.get('class') == 'scoring-dataset-actions'
+            for _tag, ancestor_attrs in ancestors
+        )
+        assert any(
+            ancestor_attrs.get('class') == 'scoring-picker'
+            for _tag, ancestor_attrs in ancestors
+        )
+
+    gap_select = next(
+        (attrs, ancestors) for tag, attrs, ancestors in elements
+        if tag == 'select' and 'data-baseline-operator' in attrs
+    )
+    assert any(
+        ancestor_attrs.get('aria-labelledby') == 'scoring-gap-reference-title'
+        for _tag, ancestor_attrs in gap_select[1]
+    )
+
+
+def test_cdr_shortcuts_select_latest_two_or_all_visible_and_keep_gap_reference_in_selection():
+    script = SCORING_SCRIPT.read_text(encoding='utf-8')
+    handler_start = script.index("  root.querySelectorAll('[data-scoring-select-datasets]').forEach(button => {")
+    handler_end = script.index("\n\n  datasetInputs.forEach(input => input.addEventListener", handler_start)
+    functions = '\n'.join(_function_source(script, name) for name in (
+        'selectLatestDatasetForEachKind', 'calculationSelectionFromControls',
+    ))
+    handlers = script[handler_start:handler_end]
+    program = r'''
+const selectedIds = [];
+const datasetInputs = [];
+const datasetOptions = [];
+const datasetKindOrder = ['data', 'voice', 'speech'];
+const selectedButtons = new Map();
+let updateCount = 0, saveCount = 0;
+const root = {querySelectorAll: () => buttons};
+const buttons = ['all', 'latest', 'latest-two'].map(choice => ({
+  dataset: {scoringSelectDatasets: choice},
+  addEventListener: (_name, handler) => selectedButtons.set(choice, handler),
+}));
+const updateSelection = () => {updateCount += 1;};
+const scheduleSelectionSave = () => {saveCount += 1;};
+const selectedDatasetIds = () => datasetInputs
+  .filter(input => input.checked && !input.option.hidden).map(input => input.value);
+const selectedLevels = () => ['Operator', 'Region'];
+const selectedContextFilters = () => ({Region: [], City: [], Operator: [], Vendor: [], Campaign: []});
+const selectionFieldOrder = ['Region', 'City', 'Operator', 'Vendor', 'Campaign'];
+const nrFilter = {value: 'NSA'};
+const baselineInput = {value: 'GAP reference O2'};
+const scoringProfileSelect = {value: 'methodology-1'};
+const activeProfileId = 'methodology-1';
+function addDataset(kind, id, date, nrMode = 'NSA') {
+  const input = {value: String(id), checked: true};
+  const option = {hidden: nrMode !== 'NSA', dataset: {datasetKind: kind, uploadedAt: date, nrMode},
+    querySelector: () => input};
+  input.option = option;
+  datasetInputs.push(input); datasetOptions.push(option);
+  return input;
+}
+addDataset('data', 1, '2026-08-01T00:00:00Z');
+addDataset('data', 2, '2026-08-01T00:00:00Z');
+addDataset('data', 3, '2026-07-31T00:00:00Z');
+addDataset('data', 99, '2026-09-01T00:00:00Z', 'SA');
+addDataset('voice', 10, '');
+addDataset('voice', 11, '');
+addDataset('speech', 14, '');
+''' + functions + '\n' + handlers + r'''
+async function main() {
+  selectedButtons.get('latest-two')();
+  const latestTwo = [...selectedDatasetIds()].map(Number).sort((a, b) => a - b);
+  const savedCalculation = calculationSelectionFromControls();
+  selectedButtons.get('latest')();
+  const latestOne = [...selectedDatasetIds()].map(Number).sort((a, b) => a - b);
+  selectedButtons.get('all')();
+  const allVisible = [...selectedDatasetIds()].map(Number).sort((a, b) => a - b);
+  process.stdout.write(JSON.stringify({latestTwo, latestOne, allVisible, savedCalculation, updateCount, saveCount}));
+}
+main().catch(error => {console.error(error); process.exitCode = 1;});
+'''
+    result = _run_node_json(program, {})
+    assert result['latestTwo'] == [1, 2, 10, 11, 14]
+    assert result['latestOne'] == [2, 11, 14]
+    assert result['allVisible'] == [1, 2, 3, 10, 11, 14]
+    assert result['savedCalculation'] == {
+        'dataset_ids': [1, 2, 10, 11, 14], 'aggregation_levels': ['Operator', 'Region'],
+        'nr_mode': 'NSA', 'baseline_operator': 'GAP reference O2',
+        'scoring_profile_id': 'methodology-1',
+        'context_filters': {'Region': [], 'City': [], 'Operator': [], 'Vendor': [], 'Campaign': []},
+    }
+    assert result['updateCount'] == 3
+    assert result['saveCount'] == 3
 
 
 def test_scoring_selection_saves_are_debounced_serialized_and_flushed_on_navigation():

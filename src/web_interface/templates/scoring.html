@@ -15,6 +15,9 @@
   .scoring-context-filter-grid select[multiple] { width: 100%; min-height: 2.35rem; }
   .scoring-context-filter-note { margin: .45rem .1rem 0; color: var(--muted); font-size: .7rem; }
   .scoring-operator-option::before { content: '●'; flex: 0 0 auto; color: var(--scoring-operator-color,#6b7d86); font-size: .68rem; line-height: 1.4; }
+  .scoring-dataset-filter-grid { grid-template-columns: minmax(0,1fr); }
+  .scoring-dataset-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin: 0 0 .75rem; }
+  .scoring-dataset-actions button { padding: .4rem .7rem; font-size: .75rem; }
   .scoring-dataset-filter-grid > label { width: 100%; max-width: 15rem; }
   .scoring-dataset-filter-grid select[data-nr-filter] { min-height: 2.45rem; }
   .scoring-picker { min-width: 0; padding: .85rem; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.64); }
@@ -305,7 +308,7 @@
 
   <article class="panel scoring-controls" aria-labelledby="scoring-run-title">
     <div class="section-head tight-head">
-      <div><p class="eyebrow">Scoring Calculation</p><h3 id="scoring-run-title">Select CDRs and aggregation</h3></div>
+      <div><p class="eyebrow">Scoring Calculation</p><h3 id="scoring-run-title">Select CDRs, filters, aggregation levels &amp; GAP reference</h3></div>
       <span class="pill" data-selected-count>0 CDRs selected</span>
     </div>
     <div class="scoring-filter-grid scoring-dataset-filter-grid">
@@ -318,6 +321,11 @@
       </label>
       <div class="scoring-picker">
         <div class="scoring-picker-head"><strong>CDR datasets</strong><span data-visible-count>{{ scoring_datasets | length }} available</span></div>
+        <div class="scoring-dataset-actions" aria-label="CDR selection shortcuts">
+          <button type="button" class="ghost-link" data-scoring-select-datasets="all">Select all CDRs</button>
+          <button type="button" class="ghost-link" data-scoring-select-datasets="latest">Select latest of each type</button>
+          <button type="button" class="ghost-link" data-scoring-select-datasets="latest-two">Select latest two of each type</button>
+        </div>
         <div class="scoring-dataset-groups" data-dataset-list>
           {% for kind, kind_label in [('data', 'Data'), ('voice', 'Voice'), ('speech', 'Speech')] %}
           {% set kind_datasets = scoring_datasets | selectattr('dataset_kind', 'equalto', kind) | list %}
@@ -359,6 +367,19 @@
       </div>
       <p class="scoring-context-filter-note">Values come from the selected CDR catalogues. Leaving a filter empty includes all values. Main Cities uses the workspace city list.</p>
     </div>
+    <div class="scoring-picker">
+      <div class="scoring-picker-head"><strong>Aggregation levels</strong><span>Operator is required</span></div>
+      <div class="scoring-levels" data-aggregation-levels>
+        {% for level in aggregation_levels %}
+        <label class="scoring-level-option{% if level == 'Operator' %} is-required{% endif %}">
+          <input type="checkbox" value="{{ level }}" data-aggregation-level {% if level == 'Operator' %}checked disabled{% endif %}>
+          <span>{{ level }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="scoring-picker" aria-labelledby="scoring-gap-reference-title">
+      <div class="scoring-picker-head"><strong id="scoring-gap-reference-title">GAP Reference</strong></div>
     <div class="scoring-filter-grid">
       <label>GAP reference operator
         <select data-baseline-operator aria-describedby="scoring-gap-baseline-note">
@@ -370,16 +391,6 @@
       </label>
       <p class="scoring-note" id="scoring-gap-baseline-note">KPI GAP = compared operator weighted points minus reference weighted points for each KPI. Category and final GAP rows show the arithmetic mean of valid KPI GAPs.</p>
     </div>
-    <div class="scoring-picker">
-      <div class="scoring-picker-head"><strong>Aggregation levels</strong><span>Operator is required</span></div>
-      <div class="scoring-levels" data-aggregation-levels>
-        {% for level in aggregation_levels %}
-        <label class="scoring-level-option{% if level == 'Operator' %} is-required{% endif %}">
-          <input type="checkbox" value="{{ level }}" data-aggregation-level {% if level == 'Operator' %}checked disabled{% endif %}>
-          <span>{{ level }}</span>
-        </label>
-        {% endfor %}
-      </div>
     </div>
     <div class="scoring-controls-foot">
       <label class="scoring-profile-choice">Scoring Methodology
