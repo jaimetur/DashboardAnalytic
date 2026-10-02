@@ -33,7 +33,6 @@ from src.modules.scoring_pptx_allocation import (
 _FONT = 'Ericsson Hilda'
 _WHITE = '#FFFFFF'
 _NEUTRAL = '#ECEFF1'
-_CATEGORY_TOTAL = '#E3E6E7'
 _GAP_SUMMARY_HEADER = '#455B65'
 _GAP_SUMMARY_COMPARISON_HEADER = '#DDEBE6'
 _GAP_SUMMARY_CATEGORY = '#E6F0F7'
@@ -1387,7 +1386,8 @@ def _add_hierarchy_chart_categories(data: CategoryChartData, columns: list[dict]
 
 def _hierarchy_header_groups(table, columns: list[dict], levels: list[str], *, start_col: int,
                              leaf_width: int, header_rows: int, physical_column_width: float,
-                             leaf_label: str = 'Score', header_color: str | None = None) -> None:
+                             leaf_label: str = 'Score', header_color: str | None = None,
+                             gap_reference: str | None = None) -> None:
     for level_index, level in enumerate(levels):
         start = 0
         while start < len(columns):
@@ -1408,14 +1408,16 @@ def _hierarchy_header_groups(table, columns: list[dict], levels: list[str], *, s
                 cell.merge(table.cell(level_index, right_column))
             value = representative['path'][level_index].get('value')
             label = value if value is not None else 'Not specified'
-            color = header_color or (representative['color'] if level == 'Operator' else '#E6ECFA')
+            if level == 'Operator' and gap_reference:
+                label = f'{label} − {gap_reference}'
+            color = representative['color'] if level == 'Operator' else (header_color or '#E6ECFA')
             header_size = min(7.5, max(5.0, physical_column_width * leaf_width
                                       * (end - start + 1) * 12))
             _cell(cell, str(label), color=color, foreground=_header_foreground(color), size=header_size, bold=True)
             start = end + 1
     subheader_row = len(levels)
     for column_index, column in enumerate(columns):
-        color = header_color or column['color']
+        color = column['color']
         leaf_font_size = min(7.5, max(5.0, physical_column_width * 12))
         _cell(table.cell(subheader_row, start_col + column_index * leaf_width), leaf_label,
               color=color, foreground=_header_foreground(color), size=leaf_font_size, bold=True)
@@ -1690,7 +1692,7 @@ def _hierarchy_gap_tables(presentation, matrices: list[dict], *,
             table.rows[row_index].height = Inches(row_height)
         _hierarchy_header_groups(table, columns, levels, start_col=3, leaf_width=1,
                                  header_rows=header_rows, physical_column_width=leaf_width,
-                                 leaf_label='GAP',
+                                 leaf_label='GAP', gap_reference=_operator_label(matrix, matrix['baseline_operator']),
                                  header_color=_GAP_SUMMARY_COMPARISON_HEADER)
         data_font = min(7, metric_font)
         for index, label in enumerate(('Category', 'KPI', 'Type of KPI')):
@@ -1706,7 +1708,7 @@ def _hierarchy_gap_tables(presentation, matrices: list[dict], *,
         leaf_font = _hierarchy_content_font(gap_texts, leaf_width, maximum=data_font)
         for row_offset, row in enumerate(metrics, header_rows):
             subtotal = row.get('row_type') == 'category'
-            row_color = _CATEGORY_TOTAL if subtotal else None
+            row_color = _GAP_SUMMARY_CATEGORY if subtotal else None
             _cell(table.cell(row_offset, 0), row['category'], color=row_color or _GAP_SUMMARY_CATEGORY,
                   foreground='#17232D', size=data_font, bold=True, left=show_priority)
             _cell(table.cell(row_offset, 1), row['kpi'], color=row_color or '#E6ECFA', size=metric_font, left=True,
@@ -1751,11 +1753,12 @@ def _gap_summary_tables(presentation, matrices: list[dict]) -> None:
             for row, height in zip(list(table.rows)[1:], body_heights):
                 row.height = Inches(height)
             for index, header in enumerate(headers):
-                _cell(table.cell(0, index), header, color=_GAP_SUMMARY_COMPARISON_HEADER if index >= 3 else _GAP_SUMMARY_HEADER,
-                      foreground='#17232D' if index >= 3 else _WHITE, size=10, bold=True)
+                color = _operator_color(matrix, operators[index - 3]) if index >= 3 else _GAP_SUMMARY_HEADER
+                _cell(table.cell(0, index), header, color=color,
+                      foreground=_header_foreground(color), size=10, bold=True)
             for index, row in enumerate(rows, 1):
                 subtotal = row.get('row_type') == 'category'
-                row_color = _CATEGORY_TOTAL if subtotal else None
+                row_color = _GAP_SUMMARY_CATEGORY if subtotal else None
                 _cell(table.cell(index, 0), row['category'], color=row_color or _GAP_SUMMARY_CATEGORY,
                       foreground='#17232D', size=metric_font, bold=True)
                 _cell(table.cell(index, 1), row['kpi'], color=row_color or '#E6ECFA', size=metric_font,
@@ -1795,13 +1798,14 @@ def _gap_tables(presentation, matrices: list[dict]) -> None:
             for row, height in zip(list(table.rows)[1:], body_heights):
                 row.height = Inches(height)
             headers = ['Category', 'NETCHECK KPIs', 'Type of KPI',
-                       f'GAP operator −\n{_operator_label(matrix, matrix["baseline_operator"])}']
+                       f'{_operator_label(matrix, matrix["operator"])} − {_operator_label(matrix, matrix["baseline_operator"])}']
             for index, header in enumerate(headers):
-                _cell(table.cell(0, index), header, color=_GAP_SUMMARY_COMPARISON_HEADER if index == 3 else _GAP_SUMMARY_HEADER,
-                      foreground='#17232D' if index == 3 else _WHITE, size=11, bold=True)
+                color = _operator_color(matrix, matrix['operator']) if index == 3 else _GAP_SUMMARY_HEADER
+                _cell(table.cell(0, index), header, color=color,
+                      foreground=_header_foreground(color), size=11, bold=True)
             for index, row in enumerate(rows, 1):
                 subtotal = row.get('row_type') == 'category'
-                row_color = _CATEGORY_TOTAL if subtotal else None
+                row_color = _GAP_SUMMARY_CATEGORY if subtotal else None
                 _cell(table.cell(index, 0), row['category'], color=row_color or _GAP_SUMMARY_CATEGORY,
                       foreground='#17232D', size=metric_font, bold=True, left=True)
                 _cell(table.cell(index, 1), row['kpi'], color=row_color or '#E6ECFA', size=metric_font,

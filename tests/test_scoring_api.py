@@ -359,11 +359,15 @@ def test_scoring_configuration_api_round_trips_complete_validated_document(scori
     assert 'configuration' not in fetched.json()
 
     updated = deepcopy(original)
+    updated['metrics'] = list(reversed(updated['metrics']))
     updated['gap_priority'] = list(reversed(updated['gap_priority']))
     saved = client.put('/api/workspace-config/scoring-configuration', json=updated)
     assert saved.status_code == 200, saved.text
     assert saved.json() == repository.get_scoring_configuration()
     assert saved.json()['gap_priority'] == updated['gap_priority']
+    assert [metric['code'] for metric in saved.json()['metrics']] == [
+        metric['code'] for metric in updated['metrics']
+    ]
 
     invalid = deepcopy(updated)
     invalid['gap_priority'].append(invalid['gap_priority'][0])
@@ -581,19 +585,32 @@ def test_scoring_job_results_cache_force_and_exports(scoring_api):
     )
     assert 'Scoring & GAP Analysis' in slide_text
     assert '2026-Q2' in slide_text
-    scoring_slide = next(
-        slide for slide in presentation.slides
-        if any(shape.has_text_frame and 'Scoring Table' in shape.text for shape in slide.shapes)
-    )
-    scoring_table = next(shape.table for shape in scoring_slide.shapes if shape.has_table)
-    # The first row groups Score and GAP; the next rows show operator and region hierarchy.
-    assert scoring_table.cell(0, 5).text == 'Score'
-    assert scoring_table.cell(0, 9).text == 'GAP'
-    assert [scoring_table.cell(1, column).text for column in range(5, 9)] == [
-        'Three UK', 'O2', 'Vodafone UK', 'EE',
-    ]
-    assert all(scoring_table.cell(2, column).text == 'North' for column in range(5, 9))
-    assert str(scoring_table.cell(1, 5).fill.fore_color.rgb) == 'AABBCC'
+    scoring_slides = {}
+    for slide in presentation.slides:
+        title = next(
+            (shape.text for shape in slide.shapes if shape.has_text_frame
+             and shape.text.startswith('Scoring Tables — ')),
+            None,
+        )
+        if title:
+            mode = title.splitlines()[0].rsplit(' — ', 1)[-1]
+            scoring_slides.setdefault(mode, slide)
+    assert set(scoring_slides) == {'Summary', 'Breakdown'}
+    expected_operators = ['Three UK', 'O2', 'Vodafone UK', 'EE']
+    expected_headers = {
+        'Summary': ['CATEGORY', 'NETCHECK KPI', 'Score weight\n(%)', 'Max score'],
+        'Breakdown': ['CATEGORY', 'KPI', 'Type of KPI', 'Score weight\n(%)', 'Max score'],
+    }
+    for mode, fixed_count in [('Summary', 4), ('Breakdown', 5)]:
+        slide = scoring_slides[mode]
+        scoring_table = next(shape.table for shape in slide.shapes if shape.has_table)
+        assert [scoring_table.cell(0, column).text for column in range(fixed_count)] == expected_headers[mode]
+        assert [scoring_table.cell(1, column).text for column in range(fixed_count, fixed_count + 4)] == expected_operators
+        assert all(scoring_table.cell(2, column).text == 'North'
+                   for column in range(fixed_count, fixed_count + 4))
+        assert all(scoring_table.cell(3, column).text == 'Score'
+                   for column in range(fixed_count, fixed_count + 4))
+        assert str(scoring_table.cell(1, fixed_count).fill.fore_color.rgb) == 'AABBCC'
 
     forced = client.post('/api/scoring/jobs', json={**payload, 'force': True})
     assert forced.status_code == 200

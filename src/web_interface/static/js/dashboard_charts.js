@@ -77,7 +77,7 @@
   const numericLabel = value => {
     const number = Number(value);
     if (!Number.isFinite(number)) return String(value ?? '');
-    if (Math.abs(number) >= 1000) return number.toLocaleString(undefined, {maximumFractionDigits: 0});
+    if (Math.abs(number) >= 1000) return number.toLocaleString('en-US', {useGrouping: false, maximumFractionDigits: 0});
     return number.toFixed(2);
   };
   const transformPoint = (transform, x, y) => ({x: transform.x + x * transform.scale, y: transform.y + y * transform.scale});

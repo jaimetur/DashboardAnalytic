@@ -140,19 +140,19 @@ def test_combined_allocation_has_environment_outer_ring_and_one_family_ring():
         assert not text_properties or shape_index < text_properties[0]
     text = '\n'.join(shape.text for shape in slide.shapes if shape.has_text_frame).replace('\x0b', '\n')
     assert '46.00\nmax points' in text
-    assert 'Drive - City  32.00 pts (69.6%)' in text
-    assert 'Voice  17.00 pts (37.0%)' in text and 'Data  29.00 pts (63.0%)' in text
-    assert 'Drive - Connecting Roads  14.00 pts (30.4%)' in text
+    assert 'Drive - City: 32 pts (69.6%)' in text
+    assert 'Voice: 17 pts (37.0%)' in text and 'Data: 29 pts (63.0%)' in text
+    assert 'Drive - Connecting Roads: 14 pts (30.4%)' in text
     assert 'Points per Environment:' in text and 'Points per Service:' in text
     labels = [shape for shape in slide.shapes if shape.has_text_frame
-              and shape.text.startswith(('Drive - City', 'Drive - Connecting Roads', 'Voice  ', 'Data  '))]
+              and shape.text.startswith(('Drive - City', 'Drive - Connecting Roads', 'Voice: ', 'Data: '))]
     assert [shape.text.splitlines()[0] for shape in labels] == [
-        'Drive - City  32.00 pts (69.6%)', 'Drive - Connecting Roads  14.00 pts (30.4%)',
-        'Voice  17.00 pts (37.0%)', 'Data  29.00 pts (63.0%)',
+        'Drive - City: 32 pts (69.6%)', 'Drive - Connecting Roads: 14 pts (30.4%)',
+        'Voice: 17 pts (37.0%)', 'Data: 29 pts (63.0%)',
     ]
     assert all(first.top < second.top for first, second in zip(labels, labels[1:]))
     detail_run = labels[0].text_frame.paragraphs[0].runs[-1]
-    assert detail_run.text == '32.00 pts (69.6%)'
+    assert detail_run.text == '32 pts (69.6%)'
     assert str(detail_run.font.color.rgb) == '8A3D0A'
     chart_shape = next(shape for shape in slide.shapes if shape.has_chart)
     assert labels[-1].top >= chart_shape.top + chart_shape.height
@@ -248,8 +248,10 @@ def test_category_allocations_count_each_matrix_row_once_and_render_category_rin
     percentage_labels = [shape for shape in slide.shapes
                          if shape.name == 'Maximum Allocation Percentage Label']
     assert [shape.text_frame.text for shape in percentage_labels] == ['100.0%']
-    assert all(6.5 <= shape.text_frame.paragraphs[0].runs[0].font.size.pt <= 8.5
+    assert all(7.5 <= shape.text_frame.paragraphs[0].runs[0].font.size.pt <= 8.5
                for shape in percentage_labels)
+    chart_shapes = [shape for shape in slide.shapes if shape.has_chart]
+    _assert_percentage_glyph_fits(percentage_labels[0], chart_shapes[0], 72, 1, 0)
     chart_shape = charts[0]
     swatches = [shape for shape in slide.shapes if shape.name.startswith('Maximum Allocation Swatch')]
     assert len(swatches) == 3
@@ -276,19 +278,36 @@ def test_percentage_labels_hide_category_slices_that_are_too_small():
     assert percentage_labels == ['100.0%', '96.1%']
 
 
-def test_environment_segment_icons_are_larger_than_legend_icons():
+@pytest.mark.parametrize('environment', ['Combined', 'DriveCity'])
+@pytest.mark.parametrize('category_mode', [False, True])
+def test_saved_inner_ring_retains_fitting_35_65_percentages(environment, category_mode):
     presentation = Presentation()
     slide = presentation.slides.add_slide(presentation.slide_layouts[6])
     allocations = {'DriveCity': {'voice': 227.5, 'data': 422.5},
                    'DriveRoad': {'voice': 122.5, 'data': 227.5}}
+    total = 1000 if environment == 'Combined' else 650
     add_maximum_allocation_donut(
-        slide, {'context': {'environment': 'Combined'}}, allocations,
+        slide, {'context': {'environment': environment}}, allocations,
         left=1, top=1, width=3, height=5,
+        category_allocations={'Classic Calls': total * .35, 'Data': total * .65}
+        if category_mode else None,
     )
-    icons = [shape for shape in slide.shapes
-             if shape.name.startswith('Maximum Allocation Environment Segment Icon')]
-    assert len(icons) == 2
-    assert all(max(icon.width.inches, icon.height.inches) > .18 for icon in icons)
+    output = BytesIO()
+    presentation.save(output)
+    output.seek(0)
+    saved_slide = Presentation(output).slides[0]
+    charts = [shape for shape in saved_slide.shapes if shape.has_chart]
+    labels = [shape for shape in saved_slide.shapes
+              if shape.name == 'Maximum Allocation Percentage Label']
+
+    # The outer ring can contain the same percentages; require the separate
+    # inner labels as well, after a complete native PowerPoint round trip.
+    assert [label.text for label in labels] == (
+        ['65.0%', '35.0%', '35.0%', '65.0%'] if environment == 'Combined'
+        else ['100.0%', '35.0%', '65.0%']
+    )
+    _assert_percentage_glyph_fits(labels[-2], charts[1], 62, .35, 0)
+    _assert_percentage_glyph_fits(labels[-1], charts[1], 62, .65, .35 * 2 * math.pi)
 
 
 def test_saved_seven_category_widget_keeps_outer_and_major_inner_percentages():
@@ -327,3 +346,154 @@ def test_saved_seven_category_widget_keeps_outer_and_major_inner_percentages():
                if shape.has_text_frame and ' pts (' in shape.text]
     assert all(shape.top >= charts[0].top + charts[0].height for shape in legends)
     assert all(shape.top.inches + shape.height.inches <= 6.75 for shape in legends)
+
+
+@pytest.mark.parametrize('environment', ['Combined', 'DriveCity'])
+@pytest.mark.parametrize('category_mode', [False, True])
+def test_saved_allocation_matches_web_legend_and_center(environment, category_mode):
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    allocations = {'DriveCity': {'voice': 200, 'data': 300},
+                   'DriveRoad': {'voice': 100, 'data': 400}}
+    total = 1000 if environment == 'Combined' else 500
+    categories = {'Classic Calls': total * .2, 'WhatsApp Calls': total * .1,
+                  'Multi RAB': total * .1, 'File Transfer': total * .1,
+                  'Browsing': total * .1, 'Video': total * .1,
+                  'Interactivity': total * .1, 'Other': total * .2} if category_mode else None
+    add_maximum_allocation_donut(
+        slide, {'context': {'environment': environment}}, allocations,
+        left=1, top=1, width=3, height=5, category_allocations=categories,
+    )
+    output = BytesIO()
+    presentation.save(output)
+    output.seek(0)
+    saved_slide = Presentation(output).slides[0]
+    chart_shapes = [shape for shape in saved_slide.shapes if shape.has_chart]
+    charts = [shape.chart for shape in chart_shapes]
+    assert len(charts) == 2
+    assert sum(charts[0].series[0].values) == total
+    assert sum(charts[1].series[0].values) == total
+    percentage_labels = [shape for shape in saved_slide.shapes
+                         if shape.name == 'Maximum Allocation Percentage Label']
+    outer_shares = [.5, .5] if environment == 'Combined' else [1.0]
+    inner_shares = ([.2, .1, .1, .1, .1, .1, .1, .2] if category_mode else
+                    ([.3, .7] if environment == 'Combined' else [.4, .6]))
+    for label in percentage_labels:
+        label_x = label.left.inches + label.width.inches / 2
+        label_y = label.top.inches + label.height.inches / 2
+        candidate_rings = []
+        for chart_shape, hole, shares in zip(chart_shapes, (72, 62), (outer_shares, inner_shares)):
+            center_x = chart_shape.left.inches + chart_shape.width.inches / 2
+            center_y = chart_shape.top.inches + chart_shape.height.inches / 2
+            outer_radius = chart_shape.width.inches * .45
+            middle_radius = (outer_radius + outer_radius * hole / 100) / 2
+            distance = math.hypot(label_x - center_x, label_y - center_y)
+            candidate_rings.append((abs(distance - middle_radius), chart_shape, hole, shares))
+        _, chart_shape, hole, shares = min(candidate_rings, key=lambda item: item[0])
+        label_share = float(label.text_frame.text.rstrip('%')) / 100
+        matching = [share for share in shares if round(share * 100, 1) == round(label_share * 100, 1)]
+        assert matching
+        center_x = chart_shape.left.inches + chart_shape.width.inches / 2
+        center_y = chart_shape.top.inches + chart_shape.height.inches / 2
+        actual_angle = math.atan2(label_x - center_x, center_y - label_y)
+        starts = [sum(shares[:index]) * 2 * math.pi for index in range(len(shares))]
+        share, start_angle = min(
+            ((share, start) for share, start in zip(shares, starts) if share in matching),
+            key=lambda item: abs(math.atan2(math.sin(actual_angle - (item[1] + item[0] * math.pi)),
+                                            math.cos(actual_angle - (item[1] + item[0] * math.pi)))),
+        )
+        _assert_percentage_glyph_fits(label, chart_shape, hole, share, start_angle)
+    text_shapes = [shape for shape in saved_slide.shapes if shape.has_text_frame and shape.text]
+    legends = [shape for shape in text_shapes if ' pts (' in shape.text]
+    texts = [shape.text for shape in text_shapes]
+    assert ('Total Points: 1000 pts (100.0%)' in texts) == (environment == 'Combined')
+    assert ('Points per KPI Category:' if category_mode else 'Points per Service:') in texts
+    city_share = '50.0%' if environment == 'Combined' else '100.0%'
+    assert f'Drive - City: 500 pts ({city_share})' in texts
+    for shape in legends:
+        runs = shape.text_frame.paragraphs[0].runs
+        assert runs[0].text.endswith(': ')
+        assert str(runs[0].font.color.rgb) == '465565'
+        assert str(runs[1].font.color.rgb) == '8A3D0A'
+        assert runs[0].font.bold == shape.text.startswith('Total Points:')
+        assert shape.top + shape.height <= presentation.slide_height
+    if environment == 'Combined':
+        assert legends[0].left < legends[1].left
+        assert legends[0].top < legends[1].top
+    center = next(shape for shape in saved_slide.shapes if shape.name == 'Maximum Score Allocation Total')
+    number, unit = center.text_frame.paragraphs
+    assert number.text == f'{total:.2f}'
+    assert unit.text == 'max points'
+    assert number.font.bold and unit.font.bold
+    assert number.font.name == unit.font.name == 'Arial'
+    assert number.font.size.pt > unit.font.size.pt
+    assert str(number.font.color.rgb) == '1C3745'
+    assert str(unit.font.color.rgb) == '5C707A'
+    icons = [shape for shape in saved_slide.shapes if shape.name.startswith('Maximum Allocation Icon')]
+    assert len(icons) == len(legends)
+    segment_icons = [shape for shape in saved_slide.shapes
+                     if shape.name.startswith('Maximum Allocation Environment Segment Icon')]
+    assert len(segment_icons) == len(charts[0].plots[0].categories)
+    assert all(icon.width.inches == pytest.approx(.45) and icon.height.inches == pytest.approx(.45)
+               for icon in segment_icons)
+    slide_width = presentation.slide_width / 914400
+    slide_height = presentation.slide_height / 914400
+    outer_radius = chart_shapes[0].width.inches * .45
+    for icon in segment_icons:
+        left, top = icon.left.inches, icon.top.inches
+        right, bottom = left + icon.width.inches, top + icon.height.inches
+        assert 0 <= left < right <= slide_width
+        assert 0 <= top < bottom <= slide_height
+        center_x = chart_shapes[0].left.inches + chart_shapes[0].width.inches / 2
+        center_y = chart_shapes[0].top.inches + chart_shapes[0].height.inches / 2
+        closest_x = max(abs(left + icon.width.inches / 2 - center_x) - icon.width.inches / 2, 0)
+        closest_y = max(abs(top + icon.height.inches / 2 - center_y) - icon.height.inches / 2, 0)
+        assert math.hypot(closest_x, closest_y) - outer_radius == pytest.approx(.08, abs=.015)
+        assert all(right <= legend.left / 914400 or left >= (legend.left + legend.width) / 914400
+                   or bottom <= legend.top / 914400 or top >= (legend.top + legend.height) / 914400
+                   for legend in legends)
+    for icon in icons:
+        path = icon._element.spPr.find(qn('a:custGeom')).find(qn('a:pathLst')).find(qn('a:path'))
+        assert path.get('fill') == 'none'
+        assert path.get('w') == path.get('h') == '24000'
+        assert icon._element.spPr.find(qn('a:effectLst')) is not None
+        assert not list(icon._element.spPr.find(qn('a:effectLst')))
+        assert icon._element.spPr.find(qn('a:ln')).get('cap') == 'rnd'
+        assert all(reference.get('idx') == '0' for reference in icon._element.xpath('./p:style/a:effectRef'))
+    city = next(icon for icon in icons if icon.name.endswith('city'))
+    first_point = city._element.spPr.find(qn('a:custGeom')).find(qn('a:pathLst'))[0][0][0]
+    assert (first_point.get('x'), first_point.get('y')) == ('3000', '21000')
+    if category_mode:
+        multirab = next(icon for icon in icons if icon.name.endswith('multirab'))
+        assert len(multirab._element.xpath('.//a:arcTo')) == 2
+        voice = next(icon for icon in icons if icon.name.endswith('voice'))
+        assert len(voice._element.xpath('.//a:cubicBezTo')) == 3
+    swatches = [shape for shape in saved_slide.shapes if shape.name.startswith('Maximum Allocation Swatch')]
+    assert all(shape._element.spPr.find(qn('a:effectLst')) is not None for shape in swatches)
+
+
+def test_legend_preserves_fractional_points_without_unnecessary_zeroes():
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    add_maximum_allocation_donut(
+        slide, {'context': {'environment': 'DriveCity'}},
+        {'DriveCity': {'voice': 1.125, 'data': 2.5}}, left=1, top=1, width=3, height=5,
+    )
+    text = '\n'.join(shape.text for shape in slide.shapes if shape.has_text_frame)
+    assert 'Voice: 1.125 pts (31.0%)' in text
+    assert 'Data: 2.5 pts (69.0%)' in text
+
+
+def test_environment_segment_icons_are_larger_than_legend_icons():
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    allocations = {'DriveCity': {'voice': 227.5, 'data': 422.5},
+                   'DriveRoad': {'voice': 122.5, 'data': 227.5}}
+    add_maximum_allocation_donut(
+        slide, {'context': {'environment': 'Combined'}}, allocations,
+        left=1, top=1, width=3, height=5,
+    )
+    icons = [shape for shape in slide.shapes
+             if shape.name.startswith('Maximum Allocation Environment Segment Icon')]
+    assert len(icons) == 2
+    assert all(max(icon.width.inches, icon.height.inches) > .18 for icon in icons)

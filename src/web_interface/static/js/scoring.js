@@ -1040,6 +1040,7 @@
     const tbody = document.createElement('tbody');
     for (const row of rows) {
       const tr = document.createElement('tr');
+      if (['category', 'total'].includes(String(row?.row_type || '').toLocaleLowerCase())) tr.classList.add('scoring-total-row');
       for (const column of columns) {
         const isKpiType = ['kpi_type', 'type_of_kpi'].includes(String(column).toLocaleLowerCase());
         if (isKpiType) {
@@ -1886,7 +1887,7 @@
 
   function appendHierarchyAxisBands(svg, categories, levels, columnsById, categoryStarts, step, baselineY, left, right) {
     if (!levels.length || !categories.length) return;
-    const rowHeight = 23;
+    const rowHeight = 32;
     const top = baselineY + 16;
     const width = Math.max(0, right - left);
     svg.append(svgElement(svg, 'rect', {x: left, y: top, width, height: rowHeight * levels.length, fill: '#ffffff'}));
@@ -1913,21 +1914,19 @@
         const entry = firstColumn ? hierarchyPathEntry(firstColumn, depth, levels) : {level: levels[depth], value: ''};
         const value = entry.value || 'Not specified';
         const groupWidth = x2 - x1;
-        const maxCharacters = Math.max(5, Math.min(34, Math.floor(groupWidth / 7)));
+        const maxCharacters = Math.max(5, Math.min(34, Math.floor(groupWidth / 8)));
         const lines = wrappedSvgLabelLines(value, maxCharacters, 2);
         const label = svgElement(svg, 'text', {
           x: x1 + groupWidth / 2,
-          y: y + rowHeight / 2 + (lines.length > 1 ? -3 : 4),
+          y: y + rowHeight / 2 + (lines.length > 1 ? -4 : 5),
           'text-anchor': 'middle',
           class: 'scoring-chart-hierarchy-label',
           'aria-label': `${entry.level}: ${value}`,
         });
         label.setAttribute('fill', '#334b58');
-        label.setAttribute('font-size', '11');
-        label.setAttribute('font-weight', '650');
         label.setAttribute('pointer-events', 'auto');
         lines.forEach((line, lineIndex) => {
-          const span = svgElement(svg, 'tspan', {x: x1 + groupWidth / 2, dy: lineIndex ? '11' : '0'});
+          const span = svgElement(svg, 'tspan', {x: x1 + groupWidth / 2, dy: lineIndex ? '15' : '0'});
           span.textContent = line;
           label.append(span);
         });
@@ -1949,7 +1948,7 @@
     }));
   }
 
-  function appendHierarchyHeaders(thead, tableData, columns, fixedHeadings, blocks) {
+  function appendHierarchyHeaders(thead, tableData, columns, fixedHeadings, blocks, gapBaseline = null) {
     const levels = hierarchyLevelNames(tableData, columns);
     const depth = Math.max(levels.length, ...columns.map(column => Array.isArray(column.path) ? column.path.length : 0));
     const headerLevels = levels.length ? levels : Array.from({length: depth}, (_, index) => `Level ${index + 1}`);
@@ -1957,13 +1956,13 @@
     for (const [title, key, className = ''] of fixedHeadings) {
       const th = document.createElement('th');
       th.scope = 'col';
-      th.rowSpan = depth + 1;
+      th.rowSpan = depth + (gapBaseline ? 0 : 1);
       th.dataset.column = key;
       th.textContent = title;
       if (className) th.className = className;
       firstRow.append(th);
     }
-    for (const block of blocks) {
+    for (const block of gapBaseline ? [] : blocks) {
       if (!block.columns.length) continue;
       const th = document.createElement('th');
       th.scope = 'colgroup';
@@ -1972,10 +1971,10 @@
       th.textContent = block.label;
       firstRow.append(th);
     }
-    thead.append(firstRow);
+    if (!gapBaseline) thead.append(firstRow);
 
     for (let depthIndex = 0; depthIndex < depth; depthIndex += 1) {
-      const row = document.createElement('tr');
+      const row = gapBaseline && depthIndex === 0 ? firstRow : document.createElement('tr');
       for (const block of blocks) {
         if (!block.columns.length) continue;
         let start = 0;
@@ -2004,6 +2003,11 @@
             th.setAttribute('aria-label', fullLabel);
             if (presentation.color) {
               th.style.setProperty('--operator-accent', presentation.color);
+              th.style.setProperty('--operator-text', categoryLegendTextColor(presentation.color));
+            }
+            if (gapBaseline) {
+              th.textContent = `${canonicalOperatorName(entry.value) || entry.value} − ${gapBaseline}`;
+              th.classList.add('scoring-gap-operator-header');
               th.style.setProperty('--operator-text', categoryLegendTextColor(presentation.color));
             }
             if (hierarchyColumnIsReference(column)) {
@@ -2245,12 +2249,12 @@
     const comparisonLabel = comparison === 'all' ? `All vs ${baseline}` : `${selectedOperator} vs ${baseline}`;
     const scaleRows = rows.flatMap(item => columns.map(column => ({gap_points: firstValue(item?.gaps || {}, [column.id], null)})))
       .filter(item => item.gap_points !== null && item.gap_points !== undefined && Number.isFinite(Number(item.gap_points)));
-    appendContextHeader(pane, tableData, 'gap', `GAP Analysis — ${comparisonLabel}`);
+    appendContextHeader(pane, tableData, 'gap', 'GAP Analysis');
     if (operators.length) {
       const controls = document.createElement('div');
       controls.className = 'scoring-comparison-controls scoring-gap-comparison-controls';
       const label = document.createElement('label');
-      label.textContent = 'Operator comparison';
+      label.textContent = 'GAP comparison';
       const select = document.createElement('select');
       select.dataset.hierarchyGapOperator = '';
       select.dataset.hierarchyGapStateKey = comparisonStateKey;
@@ -2295,7 +2299,7 @@
     const thead = document.createElement('thead');
     appendHierarchyHeaders(thead, styleSource, columns, [
       ['Category', 'category'], ['KPI', 'kpi'], ['Type of KPI', 'type'],
-    ], blocks);
+    ], blocks, baseline);
     const tbody = document.createElement('tbody');
     for (let index = 0; index < rows.length; index += 1) {
       const item = rows[index];
@@ -2517,7 +2521,7 @@
     const controls = document.createElement('div');
     controls.className = 'scoring-comparison-controls scoring-gap-comparison-controls';
     const label = document.createElement('label');
-    label.textContent = 'Operator comparison';
+    label.textContent = 'GAP comparison';
     const select = document.createElement('select');
     select.dataset.gapSummaryOperator = '';
     select.dataset.gapSummaryStateKey = comparisonStateKey;
@@ -2585,6 +2589,7 @@
       th.textContent = `${presentation.label} − ${baseline}`;
       th.title = `${operator} weighted score minus reference ${baselineRaw} weighted score`;
       if (presentation.color) th.style.setProperty('--operator-accent', presentation.color);
+      th.style.setProperty('--operator-text', categoryLegendTextColor(presentation.color));
       header.append(th);
     }
     thead.append(header);
@@ -2698,9 +2703,13 @@
     return element;
   }
 
+  function formatChartNumber(value, options = {}) {
+    return Number(value).toLocaleString('en-US', {useGrouping: false, ...options});
+  }
+
   function formattedChartPoints(value) {
     const numeric = Number(value);
-    return Number.isFinite(numeric) ? numeric.toLocaleString(undefined, {maximumFractionDigits: 3}) : 'N/A';
+    return Number.isFinite(numeric) ? formatChartNumber(numeric, {maximumFractionDigits: 3}) : 'N/A';
   }
 
   function chartEnvironmentName(tableData) {
@@ -2785,6 +2794,62 @@
     return darkContrast >= whiteContrast ? '#203744' : '#ffffff';
   }
 
+  function stackedSegmentLabelSize(label, width, height) {
+    const size = Math.floor(Math.min(22, (width - 8) / (label.length * .68), (height - 5) / 1.2));
+    return size >= 10 ? size : 0;
+  }
+
+  function scoringChartScale(configuredMax, actualMax) {
+    const rawTarget = Math.max(0, Number(configuredMax) || 0, Number(actualMax) || 0);
+    const nearestInteger = Math.round(rawTarget);
+    const target = Math.abs(rawTarget - nearestInteger) <= 1e-9 * Math.max(1, rawTarget)
+      ? nearestInteger : rawTarget;
+    if (!target) return {maximum: 5, intervals: 5};
+    const exact = [];
+    if (Number.isInteger(target)) {
+      for (let intervals = 3; intervals <= 6; intervals += 1) {
+        if (target % intervals !== 0) continue;
+        const step = target / intervals;
+        const trailingZeros = (String(step).match(/0*$/) || [''])[0].length;
+        exact.push({maximum: target, intervals, trailingZeros});
+      }
+    }
+    if (exact.length) {
+      exact.sort((left, right) => right.trailingZeros - left.trailingZeros
+        || Math.abs(left.intervals - 5) - Math.abs(right.intervals - 5));
+      return exact[0];
+    }
+    const unit = 10 ** Math.max(0, Math.floor(Math.log10(target / 5)) - 1);
+    const candidates = Array.from({length: 4}, (_, index) => {
+      const intervals = index + 3;
+      const step = Math.ceil(target / intervals / unit) * unit;
+      return {maximum: step * intervals, intervals};
+    });
+    candidates.sort((left, right) => left.maximum - right.maximum
+      || Math.abs(left.intervals - 5) - Math.abs(right.intervals - 5));
+    return candidates[0];
+  }
+
+  function configuredChartMaximum(tableData) {
+    return (Array.isArray(tableData?.rows) ? tableData.rows : []).reduce((sum, row) => {
+      const points = Number(row?.max_points);
+      return sum + (Number.isFinite(points) ? points : 0);
+    }, 0);
+  }
+
+  function bestNetworkHorizontalGeometry(count, groupTransitions = 0, groupGap = 0) {
+    const left = 110, right = 36;
+    const width = Math.max(980, count * 85 + 128 + groupTransitions * groupGap);
+    const step = Math.max(1, (width - left - right - groupTransitions * groupGap) / Math.max(count, 1));
+    return {width, left, right, step, barWidth: Math.min(120, step * .7)};
+  }
+
+  function fitBestNetworkChartWidth(svg, positions, count, width, right) {
+    const visibleWidth = count > 10 ? positions[10] + right : width;
+    svg.style.width = `${100 * width / visibleWidth}%`;
+    svg.style.minWidth = '0';
+  }
+
   function makeSvgChart(title, rows, operatorTable, options = {}) {
     const stacked = Boolean(options.stacked);
     const categories = Array.isArray(options.categoryOrder)
@@ -2801,12 +2866,19 @@
     const hierarchyColumnsById = new Map(hierarchyColumns.map(column => [String(column?.id ?? ''), column]));
     const hierarchyLevels = Array.isArray(options.hierarchyLevels) ? options.hierarchyLevels.map(String) : [];
     const hasHierarchyAxis = stacked && hierarchyLevels.length > 0 && hierarchyColumnsById.size > 0;
+    const groupKeys = categories.map(category => String(options.groupKeyForCategory?.(category) || ''));
+    const groupTransitions = hasHierarchyAxis
+      ? groupKeys.slice(1).filter((key, index) => key && groupKeys[index] && key !== groupKeys[index]).length : 0;
+    const categoryGroupGap = hasHierarchyAxis ? Math.max(0, Number(options.categoryGroupGap) || 14) : 0;
+    const bestNetworkGeometry = stacked
+      ? bestNetworkHorizontalGeometry(categories.length, groupTransitions, categoryGroupGap) : null;
     const requestedChartWidth = Number(options.fitWidth);
-    const width = Number.isFinite(requestedChartWidth) && requestedChartWidth > 0
+    const width = bestNetworkGeometry?.width || (Number.isFinite(requestedChartWidth) && requestedChartWidth > 0
       ? Math.max(720, Math.floor(requestedChartWidth))
-      : Math.max(1180, categories.length * (stacked ? 150 : Math.max(168, series.length * 38 + 22)) + 150);
+      : Math.max(1180, categories.length * Math.max(168, series.length * 38 + 22) + 150));
     const baseHeight = 700;
-    const left = 86, right = 28, baseBottom = Math.max(150, 24 + (hasHierarchyAxis ? hierarchyLevels.length * 23 : 0));
+    const left = bestNetworkGeometry?.left ?? 110, right = bestNetworkGeometry?.right ?? 28;
+    const baseBottom = Math.max(150, 24 + (hasHierarchyAxis ? hierarchyLevels.length * 32 : 0));
     const maxValue = stacked
       ? Math.max(0, ...categories.map(category => series.reduce((sum, seriesName) => {
         const row = rows.find(candidate => String(candidate.category) === String(category) && String(candidate.series) === seriesName);
@@ -2814,12 +2886,9 @@
         return sum + (Number.isFinite(value) ? Math.max(0, value) : 0);
       }, 0)))
       : Math.max(0, ...rows.map(row => Number(row.value)).filter(Number.isFinite));
-    const scaleMaximum = maxValue > 0 ? maxValue * 1.16 : 1;
-    const groupKeys = categories.map(category => String(options.groupKeyForCategory?.(category) || ''));
-    const groupTransitions = hasHierarchyAxis
-      ? groupKeys.slice(1).filter((key, index) => key && groupKeys[index] && key !== groupKeys[index]).length : 0;
-    const categoryGroupGap = hasHierarchyAxis ? Math.max(0, Number(options.categoryGroupGap) || 14) : 0;
-    const step = Math.max(1, (width - left - right - categoryGroupGap * groupTransitions) / Math.max(categories.length, 1));
+    const scale = scoringChartScale(stacked ? configuredChartMaximum(operatorTable) : 0, maxValue);
+    const scaleMaximum = scale.maximum;
+    const step = bestNetworkGeometry?.step ?? Math.max(1, (width - left - right) / Math.max(categories.length, 1));
     const categoryStarts = new Map();
     let categoryCursor = left;
     categories.forEach((category, index) => {
@@ -2841,14 +2910,17 @@
     const height = baseHeight + categoryLegendHeight;
     const top = Math.max(76, 42 + legendRows.length * 20);
     const chartHeight = baseHeight - top - baseBottom;
+    const axisTop = top + 36;
+    const axisHeight = chartHeight - 36;
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
     svg.setAttribute('class', 'scoring-chart-svg');
     svg.setAttribute('role', 'img');
     svg.setAttribute('aria-label', title);
+    if (stacked) fitBestNetworkChartWidth(svg, categories.map(category => categoryStarts.get(String(category))), categories.length, width, right);
 
     legendRows.forEach((row, rowIndex) => {
-      let x = left;
+      let x = stacked ? left + Math.max(0, (width - left - right - (row.width - 22)) / 2) : left;
       for (const entry of row.entries) {
         const color = entry.color;
         const swatch = document.createElementNS(svg.namespaceURI, 'rect');
@@ -2865,34 +2937,34 @@
       }
     });
 
-    const baselineY = top + chartHeight;
-    for (let tickIndex = 0; tickIndex <= 4; tickIndex += 1) {
-      const value = scaleMaximum * (4 - tickIndex) / 4;
-      const y = top + chartHeight * tickIndex / 4;
+    const baselineY = axisTop + axisHeight;
+    for (let tickIndex = 0; tickIndex <= scale.intervals; tickIndex += 1) {
+      const value = scaleMaximum * (scale.intervals - tickIndex) / scale.intervals;
+      const y = axisTop + axisHeight * tickIndex / scale.intervals;
       const grid = document.createElementNS(svg.namespaceURI, 'line');
       grid.setAttribute('x1', String(left)); grid.setAttribute('x2', String(width - right));
       grid.setAttribute('y1', String(y)); grid.setAttribute('y2', String(y));
-      grid.setAttribute('stroke', tickIndex === 4 ? '#aeb9bd' : '#e1e7e8');
-      if (tickIndex !== 4) grid.setAttribute('stroke-dasharray', '4 5');
+      grid.setAttribute('stroke', tickIndex === scale.intervals ? '#aeb9bd' : '#e1e7e8');
+      if (tickIndex !== scale.intervals) grid.setAttribute('stroke-dasharray', '4 5');
       const tick = document.createElementNS(svg.namespaceURI, 'text');
       tick.setAttribute('x', String(left - 12)); tick.setAttribute('y', String(y + 4));
       tick.setAttribute('text-anchor', 'end'); tick.setAttribute('class', 'scoring-chart-tick');
-      tick.textContent = value.toLocaleString(undefined, {maximumFractionDigits: 2});
+      tick.textContent = formatChartNumber(Math.round(value), {maximumFractionDigits: 0});
       svg.append(grid, tick);
     }
     const axisLabel = document.createElementNS(svg.namespaceURI, 'text');
-    axisLabel.setAttribute('x', '22'); axisLabel.setAttribute('y', String(top + chartHeight / 2));
+    axisLabel.setAttribute('x', '22'); axisLabel.setAttribute('y', String(axisTop + axisHeight / 2));
     axisLabel.setAttribute('text-anchor', 'middle'); axisLabel.setAttribute('class', 'scoring-chart-axis-label');
-    axisLabel.setAttribute('transform', `rotate(-90 22 ${top + chartHeight / 2})`);
+    axisLabel.setAttribute('transform', `rotate(-90 22 ${axisTop + axisHeight / 2})`);
     axisLabel.textContent = options.axisLabel || 'Weighted score (points)';
     svg.append(axisLabel);
     if (hasHierarchyAxis) {
-      appendHierarchyAxisBands(svg, categories, hierarchyLevels, hierarchyColumnsById, categoryStarts, step, top + chartHeight, left, width - right);
+      appendHierarchyAxisBands(svg, categories, hierarchyLevels, hierarchyColumnsById, categoryStarts, step, baselineY, left, width - right);
     }
 
     categories.forEach((category, categoryIndex) => {
       if (stacked) {
-        const barWidth = Math.min(76, step * .58);
+        const barWidth = bestNetworkGeometry.barWidth;
         const categoryStart = categoryStarts.get(String(category)) ?? left + step * categoryIndex;
         const x = categoryStart + (step - barWidth) / 2;
         let stackY = baselineY;
@@ -2910,7 +2982,7 @@
           hasValue = true;
           total += numeric;
           complete = complete && row.complete !== false;
-          const segmentHeight = Math.max(0, numeric / scaleMaximum * chartHeight);
+          const segmentHeight = Math.max(0, numeric / scaleMaximum * axisHeight);
           const segmentY = stackY - segmentHeight;
           const configuredSegmentColor = typeof options.segmentColor === 'function'
             ? safeHexColor(options.segmentColor(category, seriesName, seriesIndex, row)) : '';
@@ -2939,13 +3011,17 @@
           ].filter(Boolean);
           setChartTooltip(rect, tooltipParts.join('\n'), true);
           svg.append(rect);
-          if (segmentHeight >= 24) {
+          const segmentText = formatChartNumber(numeric, {minimumFractionDigits: 1, maximumFractionDigits: 1});
+          const fontSize = stackedSegmentLabelSize(segmentText, barWidth, segmentHeight);
+          if (fontSize) {
             const segmentLabel = document.createElementNS(svg.namespaceURI, 'text');
             segmentLabel.setAttribute('x', String(x + barWidth / 2));
-            segmentLabel.setAttribute('y', String(segmentY + segmentHeight / 2 + 4));
+            segmentLabel.setAttribute('y', String(segmentY + segmentHeight / 2 + fontSize * .34));
             segmentLabel.setAttribute('text-anchor', 'middle');
             segmentLabel.setAttribute('class', 'scoring-best-network-segment');
-            segmentLabel.textContent = numeric.toLocaleString(undefined, {maximumFractionDigits: 1});
+            segmentLabel.style.fontSize = `${fontSize}px`;
+            segmentLabel.style.fill = categoryLegendTextColor(color);
+            segmentLabel.textContent = segmentText;
             setChartTooltip(segmentLabel, tooltipParts.join('\n'));
             svg.append(segmentLabel);
           }
@@ -2971,10 +3047,10 @@
         } else {
           const totalLabel = document.createElementNS(svg.namespaceURI, 'text');
           totalLabel.setAttribute('x', String(x + barWidth / 2));
-          totalLabel.setAttribute('y', String(Math.max(top + 14, stackY - 7)));
+          totalLabel.setAttribute('y', String(stackY - 10));
           totalLabel.setAttribute('text-anchor', 'middle');
-          totalLabel.setAttribute('class', 'scoring-chart-value');
-          totalLabel.textContent = `${total.toLocaleString(undefined, {maximumFractionDigits: 1})}${complete ? '' : '*'}`;
+          totalLabel.setAttribute('class', 'scoring-chart-value scoring-best-network-total');
+          totalLabel.textContent = `${formatChartNumber(total, {minimumFractionDigits: 1, maximumFractionDigits: 1})}${complete ? '' : '*'}`;
           const hierarchyColumn = hierarchyColumnsById.get(String(category));
           const operatorName = hierarchyColumn
             ? String(hierarchyColumn.operator || firstValue(hierarchyColumn.styleSource, ['operator'], '') || '')
@@ -3010,7 +3086,7 @@
           svg.append(unavailable);
           return;
         }
-        const barHeight = Math.max(0, row.value / scaleMaximum * chartHeight);
+        const barHeight = Math.max(0, row.value / scaleMaximum * axisHeight);
         const barTop = baselineY - barHeight;
         const color = presentations.get(seriesName).chartColor;
         const rect = document.createElementNS(svg.namespaceURI, 'rect');
@@ -3031,7 +3107,7 @@
         value.setAttribute('x', String(x + barWidth / 2));
         value.setAttribute('y', String(Math.max(top + 14, barTop - 7 - (seriesIndex % 2) * 22)));
         value.setAttribute('text-anchor', 'middle'); value.setAttribute('class', 'scoring-chart-value');
-        value.textContent = `${Number.isInteger(row.value) ? row.value.toLocaleString() : row.value.toLocaleString(undefined, {maximumFractionDigits: 2})}${row.complete === false ? '*' : ''}`;
+        value.textContent = `${formatChartNumber(row.value, {maximumFractionDigits: Number.isInteger(row.value) ? 0 : 2})}${row.complete === false ? '*' : ''}`;
         setChartTooltip(value, tooltipParts.join('\n'));
         svg.append(rect, value);
       });
@@ -3470,8 +3546,12 @@
     const hierarchyColumns = Array.isArray(tableData?.hierarchy_columns) ? tableData.hierarchy_columns : [];
     const hierarchyColumnsById = new Map(hierarchyColumns.map(column => [String(column?.id ?? ''), column]));
     const hasHierarchyAxis = hierarchyLevels.length > 0 && hierarchyColumnsById.size > 0;
-    const width = Math.max(980, data.operators.length * 85 + 128);
-    const left = 92, right = 36;
+    const groupKeys = data.operators.map(operator => hierarchyColumnOperator(hierarchyColumnsById.get(operator)));
+    const groupTransitions = hasHierarchyAxis
+      ? groupKeys.slice(1).filter((key, index) => key && groupKeys[index] && key !== groupKeys[index]).length : 0;
+    const categoryGroupGap = hasHierarchyAxis ? 14 : 0;
+    const geometry = bestNetworkHorizontalGeometry(data.operators.length, groupTransitions, categoryGroupGap);
+    const {width, left, right, step, barWidth} = geometry;
     const fallbackColors = ['#14867d', '#df7a45', '#5a82aa', '#8b63b1'];
     const barColors = new Map(data.operators.map((operator, index) => {
       const mapped = operatorPresentation(tableData, operator);
@@ -3506,18 +3586,16 @@
     const operatorLegendRows = chartLegendRows(operatorLegendEntries, width, left, right, fallbackColors[0]);
     const baseHeight = 620;
     const top = Math.max(72, 45 + operatorLegendRows.length * 20);
-    const height = baseHeight + Math.max(0, top - 72);
-    const groupKeys = data.operators.map(operator => hierarchyColumnOperator(hierarchyColumnsById.get(operator)));
-    const groupTransitions = hasHierarchyAxis
-      ? groupKeys.slice(1).filter((key, index) => key && groupKeys[index] && key !== groupKeys[index]).length : 0;
-    const categoryGroupGap = hasHierarchyAxis ? 14 : 0;
-    const bottom = Math.max(124, 32 + (hasHierarchyAxis ? hierarchyLevels.length * 23 : 0));
+    const chartHeight = baseHeight + Math.max(0, top - 72);
+    const height = chartHeight + 76;
+    const bottom = Math.max(124, 32 + (hasHierarchyAxis ? hierarchyLevels.length * 32 : 0));
     const plotHeight = baseHeight - 72 - bottom;
     const maxAllocation = data.allocation.Voice + data.allocation.Data;
     const maxActual = Math.max(0, ...data.operators.map(operator => ['Voice', 'Data'].reduce((sum, kind) => sum + (data.totals[operator][kind].value ?? 0), 0)));
-    const scaleValue = maxActual > 0 ? maxActual : maxAllocation;
-    const scaleMaximum = scaleValue > 0 ? scaleValue * 1.13 : 1;
-    const step = Math.max(1, (width - left - right - categoryGroupGap * groupTransitions) / Math.max(data.operators.length, 1));
+    const scale = scoringChartScale(maxAllocation, maxActual);
+    const scaleMaximum = scale.maximum;
+    const axisTop = top + 36;
+    const axisHeight = plotHeight - 36;
     const categoryStarts = new Map();
     let categoryCursor = left;
     data.operators.forEach((operator, index) => {
@@ -3528,20 +3606,14 @@
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
     svg.setAttribute('class', 'scoring-chart-svg scoring-best-network-bars');
-    const visibleWidth = data.operators.length > 10
-      ? categoryStarts.get(data.operators[10]) + right : width;
-    svg.style.width = `${100 * width / visibleWidth}%`;
-    svg.style.minWidth = '0';
+    fitBestNetworkChartWidth(svg, data.operators.map(operator => categoryStarts.get(operator)), data.operators.length, width, right);
     svg.style.maxWidth = 'none';
     svg.style.minHeight = '0';
     svg.setAttribute('role', 'img');
     svg.setAttribute('aria-label', 'Best Network Scoring per Service');
     if (operatorLegendRows.length) {
-      const legendTitle = svgElement(svg, 'text', {x: left, y: 13, class: 'scoring-chart-operator-legend-title'});
-      legendTitle.textContent = 'Operators';
-      svg.append(legendTitle);
       operatorLegendRows.forEach((row, rowIndex) => {
-        let x = left;
+        let x = left + Math.max(0, (width - left - right - (row.width - 22)) / 2);
         for (const entry of row.entries) {
           const y = 23 + rowIndex * 20;
           const swatch = svgElement(svg, 'rect', {x, y, width: 14, height: 14, rx: 3, fill: entry.color});
@@ -3554,24 +3626,23 @@
         }
       });
     }
-    const baselineY = top + plotHeight;
-    for (let tickIndex = 0; tickIndex <= 4; tickIndex += 1) {
-      const value = scaleMaximum * (4 - tickIndex) / 4;
-      const y = top + plotHeight * tickIndex / 4;
-      svg.append(svgElement(svg, 'line', {x1: left, x2: width - right, y1: y, y2: y, stroke: tickIndex === 4 ? '#aeb9bd' : '#e1e7e8', ...(tickIndex === 4 ? {} : {'stroke-dasharray': '4 5'})}));
+    const baselineY = axisTop + axisHeight;
+    for (let tickIndex = 0; tickIndex <= scale.intervals; tickIndex += 1) {
+      const value = scaleMaximum * (scale.intervals - tickIndex) / scale.intervals;
+      const y = axisTop + axisHeight * tickIndex / scale.intervals;
+      svg.append(svgElement(svg, 'line', {x1: left, x2: width - right, y1: y, y2: y, stroke: tickIndex === scale.intervals ? '#aeb9bd' : '#e1e7e8', ...(tickIndex === scale.intervals ? {} : {'stroke-dasharray': '4 5'})}));
       const tick = svgElement(svg, 'text', {x: left - 12, y: y + 4, 'text-anchor': 'end', class: 'scoring-chart-tick'});
-      tick.textContent = value.toLocaleString(undefined, {maximumFractionDigits: 2});
+      tick.textContent = formatChartNumber(Math.round(value), {maximumFractionDigits: 0});
       svg.append(tick);
     }
-    const axis = svgElement(svg, 'text', {x: 22, y: top + plotHeight / 2, 'text-anchor': 'middle', class: 'scoring-chart-axis-label', transform: `rotate(-90 22 ${top + plotHeight / 2})`});
+    const axis = svgElement(svg, 'text', {x: 22, y: axisTop + axisHeight / 2, 'text-anchor': 'middle', class: 'scoring-chart-axis-label', transform: `rotate(-90 22 ${axisTop + axisHeight / 2})`});
     axis.textContent = 'Weighted score (points)';
     svg.append(axis);
     if (hasHierarchyAxis) {
-      appendHierarchyAxisBands(svg, data.operators, hierarchyLevels, hierarchyColumnsById, categoryStarts, step, top + plotHeight, left, width - right);
+      appendHierarchyAxisBands(svg, data.operators, hierarchyLevels, hierarchyColumnsById, categoryStarts, step, baselineY, left, width - right);
     }
     data.operators.forEach((operator, index) => {
       const presentation = barColors.get(operator);
-      const barWidth = Math.min(92, step * .48);
       const x = (categoryStarts.get(operator) ?? left + step * index) + (step - barWidth) / 2;
       let stackY = baselineY;
       let totalPoints = 0;
@@ -3586,7 +3657,7 @@
         hasPoints = true;
         totalPoints += cell.value;
         complete = complete && cell.complete;
-        const segmentHeight = Math.max(0, cell.value / scaleMaximum * plotHeight);
+        const segmentHeight = Math.max(0, cell.value / scaleMaximum * axisHeight);
         const segmentY = stackY - segmentHeight;
         const color = kind === 'Data' ? presentation.color : lightenHexColor(presentation.color);
         const rect = svgElement(svg, 'rect', {x, y: segmentY, width: barWidth, height: segmentHeight, ...(hasHierarchyAxis ? {} : {rx: 3}), fill: color});
@@ -3600,17 +3671,20 @@
         ].filter(Boolean).join('\n');
         setChartTooltip(rect, segmentTooltip, true);
         svg.append(rect);
-        const segmentLabel = svgElement(svg, 'text', {x: x + barWidth / 2, y: segmentY + Math.max(13, segmentHeight / 2 + 4), 'text-anchor': 'middle', class: 'scoring-best-network-segment'});
-        segmentLabel.textContent = `${kind === 'Data' ? 'D' : 'V'} ${cell.value.toLocaleString(undefined, {maximumFractionDigits: 1})}${cell.complete ? '' : '*'}`;
-        const labelColor = readableTextColor(color) || '#17303c';
-        segmentLabel.style.fill = labelColor;
-        segmentLabel.style.stroke = labelColor === '#ffffff' ? 'rgba(0,0,0,.62)' : 'rgba(255,255,255,.88)';
-        setChartTooltip(segmentLabel, segmentTooltip);
-        svg.append(segmentLabel);
+        const segmentText = `${formatChartNumber(cell.value, {minimumFractionDigits: 1, maximumFractionDigits: 1})}${cell.complete ? '' : '*'}`;
+        const fontSize = stackedSegmentLabelSize(segmentText, barWidth, segmentHeight);
+        if (fontSize) {
+          const segmentLabel = svgElement(svg, 'text', {x: x + barWidth / 2, y: segmentY + segmentHeight / 2 + fontSize * .34, 'text-anchor': 'middle', class: 'scoring-best-network-segment'});
+          segmentLabel.textContent = segmentText;
+          segmentLabel.style.fontSize = `${fontSize}px`;
+          segmentLabel.style.fill = categoryLegendTextColor(color);
+          setChartTooltip(segmentLabel, segmentTooltip);
+          svg.append(segmentLabel);
+        }
         stackY = segmentY;
       }
-      const totalLabel = svgElement(svg, 'text', {x: x + barWidth / 2, y: Math.max(top + 18, stackY - 10), 'text-anchor': 'middle', class: 'scoring-chart-value'});
-      totalLabel.textContent = hasPoints ? `${totalPoints.toLocaleString(undefined, {maximumFractionDigits: 1})}${complete ? '' : '*'}` : 'N/A';
+      const totalLabel = svgElement(svg, 'text', {x: x + barWidth / 2, y: stackY - 12, 'text-anchor': 'middle', class: 'scoring-chart-value scoring-best-network-total'});
+      totalLabel.textContent = hasPoints ? `${formatChartNumber(totalPoints, {minimumFractionDigits: 1, maximumFractionDigits: 1})}${complete ? '' : '*'}` : 'N/A';
       setChartTooltip(totalLabel, [
         hasHierarchyAxis ? `Hierarchy: ${presentation.fullLabel}` : `Operator: ${presentation.fullLabel}`,
         'Voice and Data total',
@@ -3634,6 +3708,19 @@
         svg.append(operatorLabel);
       }
     });
+    svg.append(svgElement(svg, 'line', {x1: left, x2: width - right, y1: chartHeight + 3, y2: chartHeight + 3, stroke: '#d6dddf', 'stroke-width': 1}));
+    const serviceLegendTitle = svgElement(svg, 'text', {x: left, y: chartHeight + 17, class: 'scoring-chart-category-legend-title'});
+    serviceLegendTitle.textContent = 'Service types';
+    svg.append(serviceLegendTitle);
+    const bandWidth = width - left - right;
+    for (const [index, label, color] of [[0, 'Data', '#555555'], [1, 'Voice', '#c5c5c5']]) {
+      const segmentWidth = bandWidth / 2;
+      const segment = svgElement(svg, 'rect', {x: left + index * segmentWidth, y: chartHeight + 25, width: segmentWidth, height: 40, fill: color, stroke: '#ffffff', 'stroke-width': 1});
+      const text = svgElement(svg, 'text', {x: left + (index + .5) * segmentWidth, y: chartHeight + 50, 'text-anchor': 'middle', class: 'scoring-chart-category-legend-label'});
+      text.textContent = label;
+      text.style.fill = categoryLegendTextColor(color);
+      svg.append(segment, text);
+    }
     return svg;
   }
 
@@ -3757,18 +3844,23 @@
       addLegend('Voice', voiceColor, voiceTotal, 'Voice');
       addLegend('Data', dataColor, dataTotal, 'Data');
     }
-    const height = 350 + legendItems.reduce((sum, item) => sum + (item.heading ? 30 : item.lines.length * 22 + 8), 0) + 18;
-    svg.setAttribute('viewBox', `0 0 420 ${height}`);
+    const height = 480 + legendItems.reduce((sum, item) => sum + (item.heading ? 30 : item.lines.length * 22 + 8), 0) + 18;
+    svg.setAttribute('viewBox', `0 0 460 ${height}`);
     svg.setAttribute('class', 'scoring-chart-svg scoring-allocation-donut');
     svg.setAttribute('role', 'img');
-    svg.setAttribute('aria-label', categories ? 'Maximum score allocation by environment and category'
-      : 'Maximum score allocation by environment, Voice and Data');
-    const cx = 210;
-    const cy = 166;
-    const ringCount = 2;
-    const outerRadius = 140;
-    const thickness = Math.min(32, 74 / ringCount);
-    const ringGap = Math.min(2, 8 / ringCount);
+    svg.setAttribute('aria-label', categories ? 'Maximum score by environment and category'
+      : 'Maximum score by environment, Voice and Data');
+    const cx = 230;
+    const cy = 230;
+    const outerRadius = 156;
+    const outerHoleRadius = outerRadius * .72;
+    const ringGap = 2;
+    const innerOuterRadius = outerHoleRadius - ringGap;
+    const innerHoleRadius = innerOuterRadius - outerHoleRadius * (1 - .63);
+    const ringBounds = [
+      {outer: outerRadius, inner: outerHoleRadius},
+      {outer: innerOuterRadius, inner: innerHoleRadius},
+    ];
     const familyRing = {name: categories ? 'KPI categories' : combined ? 'Global Voice/Data' : environments[0].name, segments: categories || [
       {label: 'Voice', value: voiceTotal, color: voiceColor},
       {label: 'Data', value: dataTotal, color: dataColor},
@@ -3777,24 +3869,57 @@
       label: item.name, value: item.Voice + item.Data, color: item.color,
     }))}, familyRing];
     rings.forEach((ring, index) => {
-      const radius = outerRadius - index * (thickness + ringGap);
+      const {outer, inner} = ringBounds[index];
+      const radius = (outer + inner) / 2;
       const ringTotal = ring.segments.reduce((sum, segment) => sum + segment.value, 0);
       let angle = -Math.PI / 2;
       ring.segments.forEach(segment => {
         const span = ringTotal > 0 ? Math.PI * 2 * segment.value / ringTotal : 0;
         if (span <= 0) return;
         const mark = svgElement(svg, 'path', {
-          d: allocationSectorPath(cx, cy, radius + thickness / 2, radius - thickness / 2, angle, angle + span),
+          d: allocationSectorPath(cx, cy, outer, inner, angle, angle + span),
           fill: segment.color, stroke: 'none', 'data-allocation-segment': ring.name,
           'data-allocation-radius': radius, 'data-allocation-center': `${cx},${cy}`,
         });
         setChartTooltip(mark, `${ring.name}: ${segment.label}\nMaximum points: ${formattedChartPoints(segment.value)}\nShare of configured maximum: ${(ringTotal > 0 ? segment.value / ringTotal * 100 : 0).toFixed(1)}%`, true);
         svg.append(mark);
+        if (index === 0) {
+          const middle = angle + span / 2;
+          const iconSize = 42;
+          const iconRadius = outerRadius + 12 + iconSize / 2;
+          const iconX = cx + iconRadius * Math.cos(middle);
+          const iconY = cy + iconRadius * Math.sin(middle);
+          const icon = svgElement(svg, 'path', {
+            d: allocationIconPath(segment.label), fill: 'none', stroke: segment.color,
+            'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+            transform: `translate(${iconX - iconSize / 2} ${iconY - iconSize / 2}) scale(${iconSize / 24})`,
+            'data-allocation-environment-icon': segment.label,
+          });
+          setChartTooltip(icon, `Environment: ${allocationEnvironmentLabel(segment.label)}\nMaximum points: ${formattedChartPoints(segment.value)}`, true);
+          svg.append(icon);
+        }
         const percentage = segment.value / ringTotal * 100;
         const percentageLabel = `${percentage.toFixed(1)}%`;
-        const fontSize = 11;
-        if (radius * span >= percentageLabel.length * fontSize * .62 + 12 && thickness >= fontSize + 8) {
-          const middle = angle + span / 2;
+        const middle = angle + span / 2;
+        const centerX = radius * Math.cos(middle);
+        const centerY = radius * Math.sin(middle);
+        const fontSize = [14, 13, 12, 11].find((size) => {
+          const halfWidth = percentageLabel.length * size * .65 / 2;
+          const halfHeight = size * .6;
+          const nearestRadius = Math.hypot(Math.max(Math.abs(centerX) - halfWidth, 0),
+            Math.max(Math.abs(centerY) - halfHeight, 0));
+          return nearestRadius >= inner + 2
+            && [-halfWidth, halfWidth].every((dx) => [-halfHeight, halfHeight].every((dy) => {
+            const cornerX = centerX + dx;
+            const cornerY = centerY + dy;
+            const cornerRadius = Math.hypot(cornerX, cornerY);
+            const angleOffset = Math.atan2(Math.sin(Math.atan2(cornerY, cornerX) - middle),
+              Math.cos(Math.atan2(cornerY, cornerX) - middle));
+            return cornerRadius >= inner + 2 && cornerRadius <= outer - 2
+              && Math.abs(angleOffset) <= span / 2 - 2 / radius;
+          }));
+        });
+        if (fontSize) {
           const label = svgElement(svg, 'text', {
             x: cx + radius * Math.cos(middle), y: cy + radius * Math.sin(middle),
             'text-anchor': 'middle', 'dominant-baseline': 'central',
@@ -3809,14 +3934,14 @@
       });
     });
     const center = svgElement(svg, 'text', {x: cx, y: cy - 4, 'text-anchor': 'middle', class: 'scoring-allocation-total'});
-    center.textContent = total.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
-    const innerRadius = outerRadius - (ringCount - 1) * (thickness + ringGap) - thickness / 2;
+    center.textContent = formatChartNumber(total, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    const innerRadius = innerHoleRadius;
     center.setAttribute('style', `font-size:${Math.min(31, (innerRadius * 2 - 12) / (center.textContent.length * .65))}px`);
     const unit = svgElement(svg, 'text', {x: cx, y: cy + 20, 'text-anchor': 'middle', class: 'scoring-allocation-unit'});
     unit.textContent = 'max points';
     setChartTooltip(center, `Total configured maximum\nMaximum points: ${formattedChartPoints(total)}`);
     svg.append(center, unit);
-    let legendY = 350;
+    let legendY = 480;
     legendItems.forEach(item => {
       if (item.heading) {
         const heading = svgElement(svg, 'text', {x: 18, y: legendY, style: 'font-size:14px;font-weight:700'});
@@ -3857,7 +3982,7 @@
     const layout = document.createElement('div');
     layout.className = 'scoring-best-network-layout';
     pane.insertBefore(layout, card);
-    layout.append(card, makeExpandableChartCard('Maximum score allocation per environment & category',
+    layout.append(card, makeExpandableChartCard('Maximum score per environment & category',
       contextLabel(selected.context, {environmentPrefix: false}), makeMaximumAllocationDonut(allocations, categories)));
   }
 
@@ -3888,7 +4013,7 @@
     const configuration = selectedJob?.configuration || currentResults?.configuration || {};
     const allocations = maximumAllocationEnvironments(selected, allTables, configuration);
     const donut = makeMaximumAllocationDonut(allocations);
-    layout.append(makeExpandableChartCard('Maximum score allocation per environment & service', meta, donut));
+    layout.append(makeExpandableChartCard('Maximum score per environment & service', meta, donut));
     pane.insertBefore(layout, pane.querySelector(':scope > .scoring-best-network-layout, :scope > .scoring-chart-card'));
   }
 

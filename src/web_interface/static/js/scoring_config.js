@@ -718,6 +718,26 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     const name = document.createElement('span');
     name.className = 'scoring-config-category-name';
     name.textContent = category;
+    const moveActions = document.createElement('span');
+    moveActions.className = 'scoring-config-category-actions';
+    for (const [direction, pathData] of [
+      ['up', 'M12 19V5m-5 5 5-5 5 5'],
+      ['down', 'M12 5v14m-5-5 5 5 5-5'],
+    ]) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.categoryMove = direction;
+      button.setAttribute('aria-label', `Move category ${category} ${direction}`);
+      button.title = `Move category ${direction}`;
+      const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      icon.setAttribute('viewBox', '0 0 24 24');
+      icon.setAttribute('aria-hidden', 'true');
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', pathData);
+      icon.append(path);
+      button.append(icon);
+      moveActions.append(button);
+    }
     const totals = document.createElement('span');
     totals.className = 'scoring-config-category-total';
     const points = document.createElement('span');
@@ -729,7 +749,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     globalWeight.dataset.categoryGlobalWeight = '';
     globalWeight.title = 'Category points in the selected Environment as a percentage of the total points across all Environments.';
     totals.append(points, weight, globalWeight);
-    cell.append(name, totals);
+    cell.append(name, totals, moveActions);
     row.append(cell);
     return row;
   };
@@ -750,6 +770,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       grouped.get(category).sort((left, right) => Number(left.dataset.orderIndex) - Number(right.dataset.orderIndex)).forEach((row) => fragments.push(row));
     });
     kpiRows.replaceChildren(...fragments);
+    Array.from(kpiRows.querySelectorAll('tr[data-kpi-category-heading]')).forEach((heading, index) => {
+      heading.querySelector('[data-category-move="up"]').disabled = index === 0;
+      heading.querySelector('[data-category-move="down"]').disabled = index === orderedCategories.length - 1;
+    });
     refreshKpiLabelHeights();
     updateCategoryTotals();
     refreshKpiActionButtons();
@@ -1032,6 +1056,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     rows.forEach((row, index) => {
       row.querySelector('[data-priority-move="up"]').disabled = index === 0;
       row.querySelector('[data-priority-move="down"]').disabled = index === rows.length - 1;
+      row.querySelector('[data-priority-move="first"]').disabled = index === 0;
+      row.querySelector('[data-priority-move="last"]').disabled = index === rows.length - 1;
       row.querySelector('[data-priority-rank]').textContent = String(index + 1);
     });
     if (prioritySave) prioritySave.disabled = rows.length === 0;
@@ -1054,13 +1080,38 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       appendCell(row).textContent = priorityMetric(code)?.category || 'Other';
       const actions = document.createElement('div');
       actions.className = 'scoring-config-priority-actions';
-      for (const [direction, label] of [['up', 'Move up'], ['down', 'Move down']]) {
+      for (const [direction, label, symbol] of [
+        ['first', 'Move to first position', null],
+        ['up', 'Move up', '↑'],
+        ['down', 'Move down', '↓'],
+        ['last', 'Move to last position', null],
+        ['position', 'Move to position', '#'],
+      ]) {
         const button = document.createElement('button');
         button.type = 'button';
         button.dataset.priorityMove = direction;
         button.setAttribute('aria-label', `${label}: ${priorityLabel(code)}`);
         button.title = label;
-        button.textContent = direction === 'up' ? '↑' : '↓';
+        if (symbol) {
+          button.textContent = symbol;
+        } else {
+          const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+          icon.setAttribute('viewBox', '0 0 24 24');
+          icon.setAttribute('width', '18');
+          icon.setAttribute('height', '18');
+          icon.setAttribute('aria-hidden', 'true');
+          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          path.setAttribute('d', direction === 'first'
+            ? 'M4 4h16M12 20V8m-5 5 5-5 5 5'
+            : 'M4 20h16M12 4v12m-5-5 5 5 5-5');
+          path.setAttribute('fill', 'none');
+          path.setAttribute('stroke', 'currentColor');
+          path.setAttribute('stroke-width', '2');
+          path.setAttribute('stroke-linecap', 'round');
+          path.setAttribute('stroke-linejoin', 'round');
+          icon.append(path);
+          button.append(icon);
+        }
         actions.append(button);
       }
       appendCell(row).append(actions);
@@ -1841,6 +1892,21 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     setStatus(kpiStatus, 'Unsaved KPI order changes. KPI order is preserved when saved.');
   };
 
+  const moveCategory = (heading, direction) => {
+    const categories = Array.from(kpiRows.querySelectorAll('tr[data-kpi-category-heading]'), (row) => row.dataset.kpiCategoryHeading);
+    const index = categories.indexOf(heading.dataset.kpiCategoryHeading);
+    const neighborIndex = index + (direction === 'up' ? -1 : 1);
+    if (index < 0 || neighborIndex < 0 || neighborIndex >= categories.length) return;
+    [categories[index], categories[neighborIndex]] = [categories[neighborIndex], categories[index]];
+    const rows = rowMetrics();
+    kpiRows.replaceChildren(...categories.flatMap((category) => rows.filter((row) =>
+      (row.querySelector('[data-kpi-category]')?.value.trim() || 'Other') === category)));
+    rowMetrics().forEach((row, orderIndex) => { row.dataset.orderIndex = String(orderIndex); });
+    renderCategoryGroups();
+    kpiDirty = true;
+    setStatus(kpiStatus, 'Unsaved category order changes. Save the KPI configuration to apply this order.');
+  };
+
   const applyWeightEdit = (editedInput) => {
     const row = editedInput.closest('tr[data-kpi-code]');
     const targetPercent = Number(editedInput.value);
@@ -2270,6 +2336,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
   kpiForm.addEventListener('click', (event) => {
     const button = event.target.closest('button');
     if (!button || !kpiRows.contains(button)) return;
+    if (button.hasAttribute('data-category-move') && !button.disabled) {
+      moveCategory(button.closest('tr[data-kpi-category-heading]'), button.dataset.categoryMove);
+      return;
+    }
     if (button.hasAttribute('data-kpi-add-below')) {
       addKpi(button.closest('tr[data-kpi-code]'));
       return;
@@ -2321,17 +2391,107 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
   profileSelect?.addEventListener('change', () => activateProfile(profileSelect.value));
   profileActions.forEach((button) => button.addEventListener('click', () => runProfileAction(button.dataset.scoringProfileAction)));
 
-  priorityForm.addEventListener('click', (event) => {
-    const button = event.target.closest('[data-priority-move]');
-    if (!button || !priorityRows.contains(button)) return;
-    const row = button.closest('tr[data-kpi-code]');
-    const neighbor = button.dataset.priorityMove === 'up' ? row.previousElementSibling : row.nextElementSibling;
-    if (!row || !neighbor) return;
-    if (button.dataset.priorityMove === 'up') priorityRows.insertBefore(row, neighbor);
-    else priorityRows.insertBefore(neighbor, row);
+  const movePriorityRow = (row, targetIndex) => {
+    const rows = Array.from(priorityRows.querySelectorAll('tr[data-kpi-code]'));
+    const currentIndex = rows.indexOf(row);
+    if (targetIndex === undefined || targetIndex < 0 || targetIndex >= rows.length || targetIndex === currentIndex) return;
+    priorityRows.insertBefore(row, rows[targetIndex + (targetIndex > currentIndex ? 1 : 0)] || null);
     refreshPriorityButtons();
     priorityDirty = true;
     setStatus(priorityStatus, 'Unsaved GAP KPI priority changes.');
+  };
+
+  const applyPriorityPosition = (editor) => {
+    const input = editor.querySelector('[data-priority-position-input]');
+    const error = editor.querySelector('[data-priority-position-error]');
+    const count = priorityRows.querySelectorAll('tr[data-kpi-code]').length;
+    const value = input.value.trim();
+    if (!/^[1-9]\d*$/.test(value) || Number(value) > count) {
+      error.textContent = `Enter a whole number from 1 to ${count}.`;
+      input.setAttribute('aria-invalid', 'true');
+      input.focus();
+      return;
+    }
+    const row = editor.closest('tr[data-kpi-code]');
+    const positionButton = row.querySelector('[data-priority-move="position"]');
+    editor.remove();
+    movePriorityRow(row, Number(value) - 1);
+    positionButton.focus();
+  };
+
+  priorityForm.addEventListener('click', (event) => {
+    const applyButton = event.target.closest('[data-priority-position-apply]');
+    if (applyButton && priorityRows.contains(applyButton)) {
+      applyPriorityPosition(applyButton.closest('[data-priority-position-editor]'));
+      return;
+    }
+    const cancelButton = event.target.closest('[data-priority-position-cancel]');
+    if (cancelButton && priorityRows.contains(cancelButton)) {
+      const row = cancelButton.closest('tr[data-kpi-code]');
+      cancelButton.closest('[data-priority-position-editor]').remove();
+      row.querySelector('[data-priority-move="position"]').focus();
+      return;
+    }
+    const button = event.target.closest('[data-priority-move]');
+    if (!button || !priorityRows.contains(button)) return;
+    const row = button.closest('tr[data-kpi-code]');
+    if (!row) return;
+    const direction = button.dataset.priorityMove;
+    const existingEditor = priorityRows.querySelector('[data-priority-position-editor]');
+    if (existingEditor) {
+      const sameRow = existingEditor.closest('tr[data-kpi-code]') === row;
+      existingEditor.remove();
+      if (direction === 'position' && sameRow) return;
+    }
+    if (direction === 'position') {
+      const editor = document.createElement('span');
+      editor.className = 'scoring-config-position-editor';
+      editor.dataset.priorityPositionEditor = '';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.inputMode = 'numeric';
+      input.dataset.priorityPositionInput = '';
+      input.setAttribute('aria-label', `Position for ${priorityLabel(row.dataset.kpiCode)}`);
+      const errorId = `priority-position-error-${row.dataset.kpiCode.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+      input.setAttribute('aria-describedby', errorId);
+      input.value = String(Array.from(priorityRows.children).indexOf(row) + 1);
+      const apply = document.createElement('button');
+      apply.type = 'button';
+      apply.dataset.priorityPositionApply = '';
+      apply.setAttribute('aria-label', `Apply position for ${priorityLabel(row.dataset.kpiCode)}`);
+      apply.textContent = '✓';
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.dataset.priorityPositionCancel = '';
+      cancel.setAttribute('aria-label', `Cancel position change for ${priorityLabel(row.dataset.kpiCode)}`);
+      cancel.textContent = '×';
+      const error = document.createElement('span');
+      error.dataset.priorityPositionError = '';
+      error.id = errorId;
+      error.className = 'scoring-config-position-error';
+      error.setAttribute('role', 'alert');
+      editor.append(input, apply, cancel, error);
+      button.after(editor);
+      input.focus();
+      input.select();
+      return;
+    }
+    const rows = Array.from(priorityRows.querySelectorAll('tr[data-kpi-code]'));
+    const currentIndex = rows.indexOf(row);
+    movePriorityRow(row, { first: 0, up: currentIndex - 1, down: currentIndex + 1, last: rows.length - 1 }[direction]);
+  });
+  priorityForm.addEventListener('keydown', (event) => {
+    const editor = event.target.closest('[data-priority-position-editor]');
+    if (!editor) return;
+    if (event.key === 'Escape') {
+      const positionButton = editor.closest('tr[data-kpi-code]').querySelector('[data-priority-move="position"]');
+      editor.remove();
+      positionButton.focus();
+      event.preventDefault();
+    } else if (event.key === 'Enter' && event.target.matches('[data-priority-position-input]')) {
+      applyPriorityPosition(editor);
+      event.preventDefault();
+    }
   });
   priorityForm.addEventListener('submit', (event) => {
     event.preventDefault();

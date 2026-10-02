@@ -64,7 +64,7 @@ def test_best_network_chart_keeps_its_intrinsic_width_on_narrow_cards():
     assert "scroll.className = 'scoring-chart-scroll';" in script
     assert 'const baseHeight = 620;' in script
     assert 'const plotHeight = baseHeight - 72 - bottom;' in script
-    assert 'const scaleValue = maxActual > 0 ? maxActual : maxAllocation;' in script
+    assert 'const scale = scoringChartScale(maxAllocation, maxActual);' in script
 
 
 def test_best_network_charts_start_scoring_charts_and_legacy_tab_migrates():
@@ -76,10 +76,10 @@ def test_best_network_charts_start_scoring_charts_and_legacy_tab_migrates():
     assert "stored.result_tab === 'best-network' ? 'charts'" in script
     renderer = _function_source(script, 'renderBestNetworkChart')
     allocation_renderer = _function_source(script, 'renderCategoryAllocation')
-    assert allocation_renderer.index("makeExpandableChartCard('Maximum score allocation per environment & category'") >= 0
+    assert allocation_renderer.index("makeExpandableChartCard('Maximum score per environment & category'") >= 0
     assert "pane.insertBefore(layout, card)" in allocation_renderer
     assert renderer.index("makeExpandableChartCard('Best Network Scoring per Service'") < renderer.index(
-        "makeExpandableChartCard('Maximum score allocation per environment & service'"
+        "makeExpandableChartCard('Maximum score per environment & service'"
     )
     assert "pane.insertBefore(layout, pane.querySelector(':scope > .scoring-best-network-layout, :scope > .scoring-chart-card'))" in renderer
     assert "renderBestNetworkChart(chartPane, scoreTables, hierarchyScoreTable, allScoreTables)" in script
@@ -219,7 +219,7 @@ process.stdout.write(JSON.stringify(context.result));
 def test_category_allocation_donut_uses_configured_maxima_order_and_tooltips():
     script = SCORING_SCRIPT.read_text(encoding='utf-8')
     names = (
-        'maximumAllocationEnvironments', 'maximumAllocationCategories',
+        'formatChartNumber', 'maximumAllocationEnvironments', 'maximumAllocationCategories',
         'allocationEnvironmentLabel', 'allocationCategoryLabel', 'allocationIconPath', 'allocationSectorPath',
         'wrappedSvgLabelLines', 'safeHexColor', 'readableTextColor', 'makeMaximumAllocationDonut',
     )
@@ -279,6 +279,40 @@ const tinyChart = makeMaximumAllocationDonut([
 const singleEnvironmentChart = makeMaximumAllocationDonut([
   {name: 'DriveCity', Voice: 100, Data: 0, color: '#176E77'},
 ]);
+const walkConfiguration = {
+  scope: {environments: {
+    'Walk City': {total_points: 500}, 'Walk Connection Road': {total_points: 300}, 'Zero Walk': {total_points: 0},
+  }},
+  metrics: [
+    {source_kind: 'voice', contexts: {
+      'Walk City': {max_points: 300}, 'Walk Connection Road': {max_points: 200}, 'Zero Walk': {max_points: 0},
+    }},
+    {source_kind: 'data', contexts: {
+      'Walk City': {max_points: 200}, 'Walk Connection Road': {max_points: 100}, 'Zero Walk': {max_points: 0},
+    }},
+  ],
+};
+const walkEnvironments = maximumAllocationEnvironments({context: {environment: 'Combined'}}, [], walkConfiguration);
+const walkSingleEnvironment = maximumAllocationEnvironments({context: {environment: 'Walk City'}}, [], walkConfiguration);
+const walkChart = makeMaximumAllocationDonut(walkEnvironments);
+const walkSingleChart = makeMaximumAllocationDonut(walkSingleEnvironment);
+const environmentIcons = svg => svg.children.filter(item => item.attributes['data-allocation-environment-icon'])
+  .map(item => ({...item.attributes, tooltip: item.attributes['data-chart-tooltip']}));
+const legendYValues = svg => svg.children.filter(item => item.tagName === 'text'
+  && ['74', '94'].includes(item.attributes.x)).map(item => Number(item.attributes.y));
+const walkIcons = environmentIcons(walkChart);
+const walkSingleIcons = environmentIcons(walkSingleChart);
+const unpackIcon = icon => {
+  const [translation, scaleText] = icon.transform.split(' scale(');
+  const [x, y] = translation.slice('translate('.length, -1).split(' ');
+  const scale = Number(scaleText.slice(0, -1));
+  const iconSize = 24 * scale;
+  const centerX = Number(x) + iconSize / 2, centerY = Number(y) + iconSize / 2;
+  return {label: icon['data-allocation-environment-icon'], path: icon.d, scale: Number(scale),
+    centerX, centerY, iconSize, left: centerX - iconSize / 2, top: centerY - iconSize / 2,
+    right: centerX + iconSize / 2, bottom: centerY + iconSize / 2,
+    tooltip: icon.tooltip};
+};
 const fallback = maximumAllocationCategories(selected, [], {});
 globalThis.result = {
   environments: environments.map(item => [item.name, item.Voice, item.Data]),
@@ -303,6 +337,13 @@ globalThis.result = {
       })),
   icons: chart.children.filter(item => item.tagName === 'path' && item.attributes.transform).map(item => item.attributes.d),
   representativeIcons: [allocationIconPath('Classic Calls'), allocationIconPath('WhatsApp Calls')],
+  walkNames: walkEnvironments.map(item => item.name),
+  walkIcons: walkIcons.map(unpackIcon), walkSingleIcons: walkSingleIcons.map(unpackIcon),
+  walkViewBox: walkChart.attributes.viewBox, walkSingleViewBox: walkSingleChart.attributes.viewBox,
+  walkLegendY: Math.min(...legendYValues(walkChart)), walkSingleLegendY: Math.min(...legendYValues(walkSingleChart)),
+  walkLegendIconCount: walkChart.children.filter(item => item.tagName === 'path' && item.attributes.transform
+    && !item.attributes['data-allocation-environment-icon']).length,
+  expectedWalkPaths: [allocationIconPath('Walk City'), allocationIconPath('Walk Connection Road')],
 };`, context);
 process.stdout.write(JSON.stringify(context.result));
 """
@@ -311,10 +352,10 @@ process.stdout.write(JSON.stringify(context.result));
     assert result['environments'] == [['DriveCity', 50, 50], ['UrbanRoad', 15, 10]]
     assert result['categories'] == [['Calls', 65], ['Connectivity', 60]]
     assert result['fallback'] == [['Calls', 65], ['Connectivity', 60]]
-    assert result['viewBox'].startswith('0 0 420 ')
+    assert result['viewBox'].startswith('0 0 460 ')
     assert [segment[:3] for segment in result['segmentGeometry']] == [
-        ['Environments', '140', '210,166'], ['Environments', '140', '210,166'],
-        ['KPI categories', '106', '210,166'], ['KPI categories', '106', '210,166'],
+        ['Environments', '134.16', '230,230'], ['Environments', '134.16', '230,230'],
+        ['KPI categories', '89.54079999999999', '230,230'], ['KPI categories', '89.54079999999999', '230,230'],
     ]
     assert all(segment[3].startswith('M ') and ' A ' in segment[3] and ' Z' in segment[3]
                for segment in result['segmentGeometry'])
@@ -325,11 +366,38 @@ process.stdout.write(JSON.stringify(context.result));
     ]
     assert 'Maximum points: 100' in result['segmentTooltips'][0]
     assert [item['value'] for item in result['percentageLabels']] == ['80.0%', '20.0%', '52.0%', '48.0%']
-    assert all('font-size:11px' in item['style'] and 'font-weight:700' in item['style'] for item in result['percentageLabels'])
+    assert all(11 <= float(re.search(r'font-size:([\d.]+)px', item['style']).group(1)) <= 14
+               and 'font-weight:700' in item['style'] for item in result['percentageLabels'])
     assert all(' of configured maximum' in item['tooltip'] for item in result['percentageLabels'])
     assert '1.4%' not in result['tinyPercentageLabels']
     assert {'98.6%'} <= set(result['tinyPercentageLabels'])
     assert result['singleEnvironmentPercentages'] == ['100.0%', '100.0%']
+    assert result['walkNames'] == ['Walk City', 'Walk Connection Road']
+    assert [icon['label'] for icon in result['walkIcons']] == result['walkNames']
+    assert [icon['path'] for icon in result['walkIcons']] == result['expectedWalkPaths']
+    assert len(result['walkSingleIcons']) == 1
+    assert result['walkSingleIcons'][0]['label'] == 'Walk City'
+    assert result['walkSingleIcons'][0]['path'] == result['expectedWalkPaths'][0]
+    assert all(icon['iconSize'] == 42 and icon['scale'] == pytest.approx(42 / 24)
+               for icon in [*result['walkIcons'], *result['walkSingleIcons']])
+    for view_box, icons, legend_y in (
+        (result['walkViewBox'], result['walkIcons'], result['walkLegendY']),
+        (result['walkSingleViewBox'], result['walkSingleIcons'], result['walkSingleLegendY']),
+    ):
+        width, height = view_box.split()[2:]
+        width, height = int(width), int(height)
+        assert all(0 <= icon['left'] < icon['right'] <= width
+                   and 0 <= icon['top'] < icon['bottom'] < height for icon in icons)
+        assert max(icon['bottom'] for icon in icons) < legend_y
+        assert all(legend_y >= 480 for _icon in icons)
+        assert all(((icon['centerX'] - 230) ** 2 + (icon['centerY'] - 230) ** 2) ** .5
+                   == pytest.approx(189)
+                   for icon in icons)
+    assert result['walkLegendIconCount'] > len(result['walkIcons'])
+    assert all('Environment:' in icon['tooltip'] and 'Maximum points:' in icon['tooltip']
+               for icon in result['walkIcons'])
+    assert 'Walk Connection Road' in result['walkIcons'][1]['tooltip']
+    assert result['walkSingleLegendY'] >= 480
     assert [item['text'] for item in result['legend']] == [
         'Total Points: 125 pts (100.0%)', 'Points per Environment:', 'Drive - City: 100 pts (80.0%)',
         'UrbanRoad: 25 pts (20.0%)', 'Points per KPI Category:', 'Calls: 65 pts (52.0%)',
@@ -348,10 +416,14 @@ def test_scoring_chart_pairs_render_five_operator_two_category_views():
     script = SCORING_SCRIPT.read_text(encoding='utf-8')
     names = (
         'firstValue', 'isReferenceOperator', 'operatorPresentation', 'safeHexColor',
+        'scoringChartScale', 'configuredChartMaximum',
         'wrappedSvgLabelLines', 'setChartTooltip', 'formattedChartPoints',
         'chartEnvironmentName', 'categoryLegendGray', 'chartCategoryLegend', 'chartLegendTextWidth',
         'chartLegendRows', 'categoryLegendTextLines', 'categoryLegendTextColor',
-        'makeSvgChart', 'chartOperatorLegend', 'makeExpandableChartCard',
+        'formatChartNumber', 'stackedSegmentLabelSize', 'bestNetworkHorizontalGeometry',
+        'fitBestNetworkChartWidth', 'makeSvgChart', 'makeBestNetworkBars', 'lightenHexColor',
+        'hierarchyColumnOperator', 'hierarchyColumnIsReference', 'chartOperatorLegend',
+        'makeExpandableChartCard',
         'renderCharts', 'renderHierarchyCharts', 'svgElement', 'hierarchyChartColor',
         'hierarchyPathEntry', 'hierarchyPrefixKey', 'appendHierarchyAxisBands',
         'hierarchyPathValueLabel', 'hierarchyPathFullLabel', 'chartFitWidth',
@@ -445,7 +517,8 @@ const context = {
 };
 vm.createContext(context);
 vm.runInContext(Object.values(payload.snippets).join('\n') + `
-  globalThis.renderers = {renderCharts, renderHierarchyCharts};`, context);
+  globalThis.renderers = {renderCharts, renderHierarchyCharts, makeSvgChart, makeBestNetworkBars,
+    chartLegendRows, bestNetworkHorizontalGeometry};`, context);
 function inspect(target) {
   const svgs = descendants(target).filter(node => node.className === 'scoring-chart-svg');
   return svgs.map(svg => {
@@ -480,9 +553,69 @@ const wideHierarchyPane = pane();
 context.renderers.renderHierarchyCharts(wideHierarchyPane, {
   ...table, chartRows: hierarchyRows(categories), hierarchy_levels: ['Operator', 'City'], columns: hierarchyColumns,
 });
+function compareBestNetwork(count) {
+  const names = Array.from({length: count}, (_, index) => `Operator ${index + 1}`);
+  const styles = Object.fromEntries(names.map((name, index) => [name, {
+    label: name, color: palette[index % palette.length], position: index,
+  }]));
+  const source = {...table, operators: names, operator_styles: styles, rows: [{max_points: 90}]};
+  const rows = names.flatMap(operator => [
+    {category: operator, series: 'Data', value: 99.5, complete: true},
+    {category: operator, series: 'Voice', value: .5, complete: true},
+  ]);
+  const categorySvg = context.renderers.makeSvgChart('Best Network Scoring per Category', rows, source, {
+    stacked: true, categoryOrder: names, seriesOrder: ['Data', 'Voice'],
+    seriesStyles: {Data: {label: 'Data', color: '#555555'}, Voice: {label: 'Voice', color: '#c5c5c5'}},
+    legendEntries: names.map((name, index) => ({label: name, color: palette[index % palette.length]})),
+    categoryLegendEntries: [{label: 'Data', color: '#555555'}, {label: 'Voice', color: '#c5c5c5'}],
+    segmentColor: (_operator, kind) => kind === 'Data' ? '#555555' : '#c5c5c5',
+    operatorForCategory: operator => operator,
+  });
+  const serviceData = {
+    operators: names, allocation: {Data: 90, Voice: 0},
+    totals: Object.fromEntries(names.map(name => [name, {
+      Data: {value: 99.5, complete: true}, Voice: {value: .5, complete: true},
+    }])),
+  };
+  const serviceSvg = context.renderers.makeBestNetworkBars(source, serviceData);
+  const geometry = context.renderers.bestNetworkHorizontalGeometry(count);
+  const legendRows = context.renderers.chartLegendRows(names.map((name, index) => ({
+    label: name, color: palette[index % palette.length],
+  })), geometry.width, geometry.left, geometry.right, palette[0]);
+  const expectedLegendStarts = legendRows.map(row => geometry.left
+    + Math.max(0, (geometry.width - geometry.left - geometry.right - (row.width - 22)) / 2));
+  const measure = svg => {
+    const rects = svg.children.filter(node => node.tagName === 'rect'
+      && (node.attributes['data-chart-tooltip'] || '').includes('Weighted points:'));
+    const labels = svg.children.filter(node => node.className === 'scoring-best-network-segment');
+    const totals = svg.children.filter(node => node.className.includes('scoring-chart-value'));
+    const ticks = svg.children.filter(node => node.className === 'scoring-chart-tick').map(node => node.textContent);
+    const legendLabels = svg.children.filter(node => node.className === 'scoring-chart-legend')
+      .map(node => ({text: node.textContent, x: Number(node.attributes.x), y: Number(node.attributes.y)}));
+    const sharedText = svg.children.filter(node => [
+      'scoring-chart-axis-label', 'scoring-chart-tick', 'scoring-chart-operator-legend-title',
+      'scoring-chart-legend', 'scoring-chart-category-legend-title', 'scoring-chart-category-legend-label',
+    ].includes(node.className)).map(node => node.className).sort();
+    return {
+      viewBoxWidth: svg.viewBox.baseVal.width, widthStyle: svg.style.width,
+      viewBoxHeight: svg.viewBox.baseVal.height, ticks,
+      minWidthStyle: svg.style.minWidth,
+      positions: rects.filter((_node, index) => index % 2 === 0).map(node => Number(node.attributes.x)),
+      barWidths: [...new Set(rects.map(node => Number(node.attributes.width)))],
+      labelTexts: labels.map(node => node.textContent),
+      labelSizes: labels.map(node => node.style.fontSize),
+      totals: totals.map(node => node.textContent), totalY: totals.map(node => Number(node.attributes.y)),
+      barTop: Math.min(...rects.map(node => Number(node.attributes.y))), legendLabels,
+      hasOperatorsHeading: svg.children.some(node => node.textContent === 'Operators'), sharedText,
+    };
+  };
+  return {count, expectedLegendStarts, category: measure(categorySvg), service: measure(serviceSvg)};
+}
+const sharedGeometry = [5, 10, 14].map(compareBestNetwork);
 process.stdout.write(JSON.stringify({
   simple: inspect(simplePane), hierarchy: inspect(hierarchyPane),
   wideSimple: inspect(wideSimplePane), wideHierarchy: inspect(wideHierarchyPane), palette,
+  sharedGeometry,
 }));
 """
     result = _run_node_json(program, payload)
@@ -518,6 +651,50 @@ process.stdout.write(JSON.stringify({
         assert bottom['viewBoxWidth'] <= 1000
         assert bottom['widthStyle'] == '100%'
         assert bottom['minWidthStyle'] == '0'
+
+    for comparison in result['sharedGeometry']:
+        assert comparison['count'] in {5, 10, 14}
+        category, service = comparison['category'], comparison['service']
+        assert category['viewBoxWidth'] == service['viewBoxWidth']
+        assert category['widthStyle'] == service['widthStyle']
+        assert category['minWidthStyle'] == service['minWidthStyle'] == '0'
+        assert category['positions'] == service['positions']
+        assert len(category['barWidths']) == len(service['barWidths']) == 1
+        assert category['barWidths'] == service['barWidths']
+        assert category['labelTexts'] == service['labelTexts']
+        assert len(category['labelTexts']) == comparison['count']
+        assert all(text == '99.5' for text in category['labelTexts'])
+        assert category['labelSizes'] == service['labelSizes']
+        assert all(float(size.removesuffix('px')) <= 22 for size in category['labelSizes'])
+        assert category['totals'] == service['totals']
+        assert all(value.endswith('.0') for value in category['totals'])
+        assert category['ticks'] == service['ticks']
+        assert 4 <= len(category['ticks']) <= 7
+        assert all(value.isdigit() for value in category['ticks'])
+        tick_steps = [int(left) - int(right) for left, right in zip(category['ticks'], category['ticks'][1:])]
+        assert len(set(tick_steps)) == 1
+        assert int(category['ticks'][0]) >= 100
+        for view in (category, service):
+            assert all(0 < total_y < view['barTop'] for total_y in view['totalY'])
+            assert view['barTop'] < view['viewBoxHeight']
+        assert [(item['text'], item['x']) for item in category['legendLabels']] == [
+            (item['text'], item['x']) for item in service['legendLabels']
+        ]
+        assert not service['hasOperatorsHeading']
+        for view in (category, service):
+            legend_rows = {}
+            for item in view['legendLabels']:
+                legend_rows.setdefault(item['y'], []).append(item)
+            row_starts = [entries[0]['x'] - 21 for entries in legend_rows.values()]
+            assert row_starts == pytest.approx(comparison['expectedLegendStarts'])
+        if comparison['count'] <= 10:
+            assert category['widthStyle'] == service['widthStyle'] == '100%'
+        else:
+            assert float(category['widthStyle'].removesuffix('%')) > 100
+        for shared_class in ('scoring-chart-axis-label', 'scoring-chart-tick', 'scoring-chart-legend',
+                             'scoring-chart-category-legend-title', 'scoring-chart-category-legend-label'):
+            assert shared_class in category['sharedText']
+            assert shared_class in service['sharedText']
 
 
 def test_reference_header_uses_operator_mapping_accent_without_yellow_marker():
@@ -597,12 +774,18 @@ def test_gap_value_choice_is_sent_only_to_powerpoint_export():
     assert "const query = `table_mode=${encodeURIComponent(selectedTableMode())}&gap_layout=${encodeURIComponent(selectedGapLayout())}&environment=${encodeURIComponent(selectedEnvironment || 'all')}`;" in script
 
 
-def test_scoring_tab_is_plural_and_category_subtotals_have_gray_background():
+def test_scoring_tab_is_plural_and_subtotals_and_totals_share_category_background():
     template = SCORING_TEMPLATE.read_text(encoding='utf-8')
 
     assert 'data-result-tab="scoring">Scoring Tables</button>' in template
     assert 'data-result-tab="scoring">Scoring Table</button>' not in template
-    assert '.scoring-comparison-table tbody tr.scoring-category-subtotal > td { background-color: #e3e6e7 !important; font-weight: 700 !important; }' in template
+    assert re.search(
+        r'\.scoring-comparison-table tbody tr\.scoring-category-subtotal > td,\s*'
+        r'\.scoring-comparison-table tfoot tr > :is\(th, td\)\s*'
+        r'\{\s*background-color:\s*#E6F0F7\s*!important;',
+        template,
+    )
+    assert '.scoring-table-wrap tbody tr.scoring-total-row > td { background-color: #E6F0F7;' in template
 
 
 def test_render_warnings_hides_only_legacy_campaign_pooling_notice():
@@ -923,7 +1106,7 @@ def test_kpi_value_cells_are_blank_for_category_subtotals_in_both_table_modes():
 def test_allocation_donut_global_environment_rings_and_single_environment_radius():
     script = SCORING_SCRIPT.read_text(encoding='utf-8')
     functions = '\n'.join(_function_source(script, name) for name in (
-        'maximumAllocationEnvironments', 'allocationEnvironmentLabel', 'allocationCategoryLabel', 'allocationIconPath',
+        'formatChartNumber', 'maximumAllocationEnvironments', 'allocationEnvironmentLabel', 'allocationCategoryLabel', 'allocationIconPath',
         'allocationSectorPath', 'wrappedSvgLabelLines', 'safeHexColor', 'readableTextColor', 'makeMaximumAllocationDonut',
     ))
     program = functions + """
@@ -958,14 +1141,14 @@ console.log(JSON.stringify({all, single, global: segments(globalSvg), one: segme
     assert [item['fill'] for item in result['global'][2:]] == ['#4472C4', '#7030A0']
     assert len(result['one']) == 3
     assert [item['fill'] for item in result['one']] == ['#E6A81D', '#4472C4', '#7030A0']
-    assert result['one'][0]['data-allocation-radius'] == result['global'][0]['data-allocation-radius'] == 140
-    assert result['one'][0]['data-allocation-center'] == '210,166'
+    assert result['one'][0]['data-allocation-radius'] == result['global'][0]['data-allocation-radius'] == pytest.approx(134.16)
+    assert result['one'][0]['data-allocation-center'] == '230,230'
     assert result['one'][0]['d'].count(' A ') == 4
-    assert [item['data-allocation-radius'] for item in result['one'][1:]] == [106, 106]
+    assert [item['data-allocation-radius'] for item in result['one'][1:]] == pytest.approx([89.5408, 89.5408])
     assert result['global'][0]['data-allocation-radius'] > result['global'][2]['data-allocation-radius']
     assert len(result['single']) == 1 and result['single'][0]['color'] == '#E6A81D'
-    assert result['icons'] == 5
-    assert '1,000.00' in result['globalText']
+    assert result['icons'] == 7  # Five legend icons plus two exterior environment markers.
+    assert '1000.00' in result['globalText']
     assert '350.00' in result['singleText']
     assert 'Drive - Connecting Roads:' in result['singleText']
     assert 'Global:' not in result['singleText']

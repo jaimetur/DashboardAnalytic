@@ -294,7 +294,7 @@ def test_hierarchy_summary_extremes_compare_operators_within_the_same_context():
 
 
 @pytest.mark.parametrize('hierarchy', [False, True])
-def test_summary_tables_use_best_worst_legend_and_highlight_category_and_total(hierarchy):
+def test_summary_tables_preserve_category_fill_extreme_highlights_and_legend(hierarchy):
     operators = ('EE', 'O2 UK', 'Three UK', 'Vodafone UK')
     scores = {'EE': .6, 'O2 UK': .9, 'Three UK': .9, 'Vodafone UK': .3}
     job = _job()
@@ -327,7 +327,6 @@ def test_summary_tables_use_best_worst_legend_and_highlight_category_and_total(h
                             for row in shape.table.rows for cell in row.cells]
     assert not any(band in all_slide_table_text for band in ('Low', 'Medium', 'High', 'UltraHigh', 'Unavailable'))
 
-    best_color, worst_color = 'C6EFCE', 'FFC7CE'
     if hierarchy:
         score_columns = [index for index in range(5, len(table.columns))
                          if table.cell(len(matrix['hierarchy_levels']) + 1, index).text == 'Score']
@@ -339,10 +338,16 @@ def test_summary_tables_use_best_worst_legend_and_highlight_category_and_total(h
         category_rows = [row_index for row_index in range(1, len(table.rows) - 1)
                          if table.cell(row_index, 1).text.endswith(' total')]
     assert category_rows
-    for row_index in [category_rows[0], len(table.rows) - 1]:
-        fills = [str(table.cell(row_index, column).fill.fore_color.rgb) for column in score_columns]
-        assert fills.count(best_color) == 2
-        assert fills.count(worst_color) == 1
+    assert str(table.cell(0, 0).fill.fore_color.rgb) == str(table.cell(0, 1).fill.fore_color.rgb) == '455B65'
+    for row_index in category_rows:
+        assert str(table.cell(row_index, 0).fill.fore_color.rgb) == 'E6F0F7'
+        assert str(table.cell(row_index, 1).fill.fore_color.rgb) == 'E3E6E7'
+    assert str(table.cell(len(table.rows) - 1, 0).fill.fore_color.rgb) == 'D8DFE4'
+    for row_index in [*category_rows, len(table.rows) - 1]:
+        colors = [str(table.cell(row_index, column).fill.fore_color.rgb) for column in score_columns]
+        assert colors.count('C6EFCE') == 2  # Tied best operators.
+        assert colors.count('FFC7CE') == 1
+
 
 
 @pytest.mark.parametrize('mode', ['expanded', 'summary'])

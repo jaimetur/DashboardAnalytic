@@ -152,8 +152,12 @@
   .scoring-legend-copy strong { font-size: .68rem; }
   .scoring-legend-copy small { max-width: 18rem; color: var(--muted); font-size: .62rem; }
   .scoring-gap-scale { display: flex; align-items: center; flex-wrap: wrap; gap: .45rem; margin: 0 0 .55rem; color: #526570; font-size: .66rem; font-weight: 700; }
+  .scoring-gap-info { display: flex; align-items: center; flex-wrap: wrap; gap: .55rem 1rem; margin: 0 0 .55rem; }
+  .scoring-gap-info > .scoring-context-note { flex: 1 1 30rem; margin: 0; }
+  .scoring-gap-info > .scoring-gap-scale { margin: 0 0 0 auto; justify-content: flex-end; }
   .scoring-gap-scale-bar { display: inline-block; width: min(15rem,35vw); height: .62rem; border: 1px solid rgba(25,42,53,.12); border-radius: 999px; }
   .scoring-matrix-wrap { max-height: none; overflow-x: auto; overflow-y: visible; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+  .scoring-table-wrap tbody tr.scoring-total-row > td { background-color: #E6F0F7; font-weight: 700; }
   .scoring-comparison-table { width: max-content !important; min-width: 100%; border-collapse: collapse; table-layout: auto; font-size: .72rem !important; }
   .scoring-comparison-table th, .scoring-comparison-table td { padding: .42rem .48rem !important; border: 1px solid #d8dddf !important; text-align: center !important; white-space: nowrap; }
   .scoring-comparison-table th { position: static; background: #dedfe0; color: #263640; font-size: .85rem !important; font-weight: 800; vertical-align: middle; }
@@ -177,22 +181,28 @@
   .scoring-comparison-table th.scoring-hierarchy-header[data-hierarchy-depth="0"] { background: #cfdde0; }
   .scoring-comparison-table th.scoring-hierarchy-header[data-hierarchy-depth="1"] { background: #d8e4e6; }
   .scoring-comparison-table th.scoring-hierarchy-header.scoring-gap-header { background: #fff5a6 !important; }
+  .scoring-comparison-table th.scoring-gap-header.scoring-gap-operator-header { background: var(--operator-accent, #607d8b) !important; color: var(--operator-text, #ffffff) !important; }
   .scoring-comparison-table .scoring-category-cell { vertical-align: middle; background: #f0f2f3; color: #334854; font-weight: 800; }
   .scoring-comparison-table tbody tr:nth-child(even) td { background-color: #f6f7f7; }
   .scoring-comparison-table tbody tr:nth-child(even) td[data-column="weight"] { background-color: #e4eee1; }
   .scoring-comparison-table tbody tr:nth-child(even) td[data-column="maximum"] { background-color: #f9dddd; }
-  .scoring-comparison-table tbody tr.scoring-category-subtotal > td { background-color: #e3e6e7 !important; font-weight: 700 !important; }
+  .scoring-comparison-table tbody tr.scoring-category-subtotal > td { background-color: #E6F0F7 !important; font-weight: 700 !important; }
   .scoring-comparison-table tbody tr > td.scoring-category-cell { background-color: #E6F0F7 !important; color: #334854; }
   .scoring-comparison-table tbody tr:nth-child(even) td.scoring-category-cell { background-color: #E6F0F7 !important; }
   .scoring-comparison-table td.scoring-gap-loss { color: #a43d2f; font-weight: 750; }
   .scoring-comparison-table td.scoring-gap-gain { color: #247048; font-weight: 750; }
   .scoring-comparison-table td.scoring-total-partial { color: #64747b; }
-  .scoring-comparison-table tfoot th, .scoring-comparison-table tfoot td { position: static; background: #e6eaeb; color: #203744; font-weight: 850; border-top: 2px solid #9eaaae !important; }
+  .scoring-comparison-table tfoot th, .scoring-comparison-table tfoot td { position: static; background: #E6F0F7 !important; color: #203744; font-weight: 850; border-top: 2px solid #9eaaae !important; }
   .scoring-priority-table td[data-column="category"] { background: #E6F0F7 !important; color: #334854 !important; font-weight: 800; }
   .scoring-priority-table td[data-column="gap"] { background: #fff5a6; font-weight: 800; text-align: center !important; }
   .scoring-comparison-table td[data-column="type"][data-kpi-type="reliable"] { background: #d8efca !important; color: #286a35; font-weight: 750; }
   .scoring-comparison-table td[data-column="type"][data-kpi-type="diff"] { background: #fff2cc !important; color: #684b0d; font-weight: 750; }
   .scoring-comparison-table td[data-column="type"][data-kpi-type="neutral"] { background: #e6eaeb !important; color: #64747b; }
+  .scoring-comparison-table tbody tr.scoring-category-subtotal > td,
+  .scoring-comparison-table tfoot tr > :is(th, td) { background-color: #E6F0F7 !important; }
+  .scoring-comparison-table tbody tr.scoring-category-subtotal > td[data-column="type"],
+  .scoring-comparison-table tfoot tr > td[data-column="type"][data-kpi-type],
+  .scoring-comparison-table tfoot tr > td[data-column="gap"] { background-color: #E6F0F7 !important; }
   .scoring-comparison-table :is(tbody, tfoot) tr > td[data-column="score"][data-operator-rank="best"] { background-color: #C6EFCE !important; }
   .scoring-comparison-table :is(tbody, tfoot) tr > td[data-column="score"][data-operator-rank="worst"] { background-color: #FFC7CE !important; }
   .scoring-tone-0 { --operator-accent: #315f9a; }
@@ -205,23 +215,25 @@
   .scoring-best-network-layout { display: grid; grid-template-columns: minmax(0,2fr) minmax(17rem,1fr); gap: .8rem; align-items: stretch; }
   .scoring-best-network-layout .scoring-chart-card { min-width: 0; }
   .scoring-chart-card { min-width: 0; padding: 1rem; border: 1px solid var(--line); border-radius: 13px; background: rgba(255,255,255,.82); cursor: zoom-in; }
-  .scoring-chart-card h4 { margin: 0 0 .6rem; color: #245e5a; font-size: .85rem; }
+  .scoring-chart-card h4 { margin: 0 0 .6rem; color: #245e5a; font-size: 1.3rem; font-weight: 800; }
   .scoring-chart-svg { display: block; width: 100%; height: auto; min-height: 26rem; overflow: visible; }
   .scoring-chart-svg.scoring-best-network-bars { min-width: 0; max-width: none; min-height: 0; }
   .scoring-chart-svg.scoring-allocation-donut { min-height: 0; max-width: 100%; margin: 0 auto; }
   .scoring-chart-scroll { overflow-x: auto; overflow-y: hidden; }
   .scoring-chart-svg text { fill: #516570; font: 11px "IBM Plex Sans", "Segoe UI", sans-serif; }
   .scoring-chart-svg .scoring-chart-value { fill: #18384a; font-size: 15px; font-weight: 800; paint-order: stroke; stroke: #fff; stroke-width: 3px; stroke-linejoin: round; }
-  .scoring-chart-svg .scoring-chart-axis-label { fill: #445a65; font-size: 15px; font-weight: 750; }
-  .scoring-chart-svg .scoring-chart-tick { fill: #657780; font-size: 13px; }
+  .scoring-chart-svg .scoring-best-network-total { font-size: 26px; font-weight: 850; }
+  .scoring-chart-svg .scoring-chart-axis-label { fill: #445a65; font-size: 18px; font-weight: 750; }
+  .scoring-chart-svg .scoring-chart-tick { fill: #657780; font-size: 15px; }
   .scoring-chart-svg .scoring-chart-legend { fill: #334854; font-size: 15px; font-weight: 750; }
   .scoring-chart-svg .scoring-chart-operator-legend-title { fill: #43545c; font-size: 11px; font-weight: 800; }
   .scoring-chart-svg .scoring-chart-category-legend-title { fill: #43545c; font-size: 11px; font-weight: 800; }
   .scoring-chart-svg .scoring-chart-category-legend-segment { cursor: help; }
   .scoring-chart-svg .scoring-chart-category-legend-label { font-size: 12px; font-weight: 800; cursor: help; }
   .scoring-chart-svg [data-chart-tooltip]:focus-visible { outline: 2px solid rgba(11,122,117,.7); outline-offset: 2px; }
-  .scoring-chart-svg .scoring-chart-category { fill: #435964; font-size: 14px; font-weight: 650; }
-  .scoring-chart-svg .scoring-best-network-segment { fill: #17303c; font-size: 11px; font-weight: 800; paint-order: stroke; stroke: rgba(255,255,255,.8); stroke-width: 2px; stroke-linejoin: round; }
+  .scoring-chart-svg .scoring-chart-category { fill: #435964; font-size: 16px; font-weight: 650; }
+  .scoring-chart-svg .scoring-chart-hierarchy-label { fill: #334b58; font-size: 14px; font-weight: 650; }
+  .scoring-chart-svg .scoring-best-network-segment { fill: #17303c; font-size: 11px; font-weight: 800; }
   .scoring-chart-svg .scoring-allocation-total { fill: #1c3745; font-size: 25px; font-weight: 850; }
   .scoring-chart-svg .scoring-allocation-unit { fill: #5c707a; font-size: 12px; font-weight: 700; }
   .scoring-chart-svg .scoring-allocation-legend { fill: #3d535e; font-size: 13px; font-weight: 700; }

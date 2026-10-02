@@ -181,9 +181,16 @@ def _assert_sparse_series_values(series, expected_values):
 
 
 def _assert_gray_category_row(table, row_index):
-    category_fill = str(table.cell(row_index, 0).fill.fore_color.rgb).upper()
+    category_fill = _rgb(table.cell(row_index, 0)).upper()
     assert category_fill == 'DCE5E9'
-    assert all(str(table.cell(row_index, column).fill.fore_color.rgb).upper() == category_fill
+    assert all(_rgb(table.cell(row_index, column)).upper() == category_fill
+               for column in range(len(table.columns)))
+
+
+def _assert_row_matches_category_fill(table, row_index, expected_fill):
+    category_fill = _rgb(table.cell(row_index, 0)).upper()
+    assert category_fill == expected_fill
+    assert all(_rgb(table.cell(row_index, column)).upper() == category_fill
                for column in range(len(table.columns)))
 
 
@@ -276,6 +283,11 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
 
     total_row = len(table.rows) - 1
     assert table.cell(total_row, 0).text == 'TOTAL'
+    for scoring_matrix in matrices:
+        if _normalized_headers(scoring_matrix)[1] == 'NETCHECK KPI':
+            assert _rgb(scoring_matrix.cell(len(scoring_matrix.rows) - 1, 0)) == 'D8DFE4'
+        else:
+            _assert_row_matches_category_fill(scoring_matrix, len(scoring_matrix.rows) - 1, 'DCE5E9')
     assert table.cell(total_row, 3).text == '65.00%'
     assert table.cell(total_row, 4).text == '650.00'
     assert table.cell(total_row, 3).text != '100.00%'
@@ -334,7 +346,7 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     assert [float(gap_table.cell(row, 3).text) for row in range(1, len(gap_table.rows))] == pytest.approx(
         [row['gap_points'] for row in expected_gap_rows], abs=.0051,
     )
-    assert _rgb(gap_table.cell(0, 3)) == 'DDEBE6'
+    assert _rgb(gap_table.cell(0, 3)) == MAPPED_OPERATOR_COLORS[expected_gap_table['operator']].lstrip('#')
     assert all(_rgb(gap_table.cell(0, column)) == '455B65' for column in range(3))
     assert _rgb(gap_table.cell(1, 0)) == 'E6F0F7'
     reliable_rows = [row for row in range(1, len(gap_table.rows)) if gap_table.cell(row, 2).text == 'Reliable']
@@ -364,7 +376,7 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     transition_text = _slide_text(presentation.slides[1]).replace('\x0b', '\n')
     expected_filter_text = 'Non-Standalone\nAggregations & Filters:\nAggregation: Operator\nOperator: All Operators\nVendor: All Vendors\nRegion: All Regions\nCity: All Cities'
     assert expected_filter_text in cover_text
-    assert expected_filter_text in transition_text.replace(' · Environment: DriveCity', '')
+    assert expected_filter_text in transition_text
     assert 'Campaigns: UK_Q2_2026' in cover_text
     assert 'Campaigns: UK_Q2_2026' in transition_text
     assert next(shape for shape in presentation.slides[0].shapes if shape.name == 'Scoring Campaigns').top > Inches(5.66)
@@ -745,7 +757,11 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     assert best_network_categories.depth == 3
     best_paths = best_network_categories.flattened_labels
     assert ('EE', 'North', 'UK_Q2_2026') in best_paths
-    assert not re.search(r'\b(?:Operator|Vendor|Region|City|Campaign):', _slide_text(best_network_slide))
+    hierarchy_text = '\n'.join(
+        line for line in _slide_text(best_network_slide).splitlines()
+        if not (line.startswith(('Drive - City: ', 'Drive - Connecting Roads: ')) and ' pts (' in line)
+    )
+    assert not re.search(r'\b(?:Operator|Vendor|Region|City|Campaign):', hierarchy_text)
     metric_by_code = {metric['code']: metric for metric in result['configuration']['metrics']}
     family_source_kinds = {'Voice': {'voice', 'speech'}, 'Data': {'data'}}
     best_series = {series.name: series for series in best_network_chart.series}
@@ -790,8 +806,9 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     assert [category.label for category in donut.plots[0].categories] == ['Voice', 'Data']
     assert list(donut.series[0].values) == pytest.approx(expected_family_maximums)
     assert 'DriveCity' in _slide_text(best_network_slide)
-    assert f'Voice  {expected_family_maximums[0]:.2f}' in _slide_text(best_network_slide)
-    assert f'Data  {expected_family_maximums[1]:.2f}' in _slide_text(best_network_slide)
+    for family, maximum in zip(('Voice', 'Data'), expected_family_maximums, strict=True):
+        compact_maximum = f'{maximum:.3f}'.rstrip('0').rstrip('.')
+        assert f'{family}: {compact_maximum} pts' in _slide_text(best_network_slide)
     assert [str(point.format.fill.fore_color.rgb) for point in donut.series[0].points] == [
         '4472C4', '7030A0',
     ]
@@ -884,6 +901,7 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     for row_index, row in enumerate(export_views['hierarchy_score_tables'][0]['expanded_rows'], 5):
         if row.get('row_type') == 'category':
             _assert_gray_category_row(score_table, row_index)
+    _assert_row_matches_category_fill(score_table, len(score_table.rows) - 1, 'DCE5E9')
     for row in list(score_table.rows)[5:]:
         for cell in list(row.cells)[5:]:
             assert cell.text_frame.paragraphs[0].font.size.pt <= row.height.pt

@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import math
+import re
 from typing import Any
 
 from pptx.chart.data import CategoryChartData
 from pptx.dml.color import RGBColor
 from pptx.enum.chart import XL_CHART_TYPE
-from pptx.enum.shapes import MSO_CONNECTOR, MSO_SHAPE
+from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.oxml.xmlchemy import OxmlElement
 from pptx.oxml.ns import qn
@@ -26,6 +27,11 @@ def _number(value: Any) -> float:
     except (TypeError, ValueError):
         return 0.0
     return number if math.isfinite(number) and number > 0 else 0.0
+
+
+def _legend_points(value: float) -> str:
+    """Match the web legend's maximum of three fractional digits."""
+    return f'{value:.3f}'.rstrip('0').rstrip('.')
 
 
 def _metric_source_kind(metric: dict[str, Any]) -> str:
@@ -200,21 +206,23 @@ def _environment_display_label(environment: str) -> str:
 
 def _category_icon_kind(category: str) -> str:
     key = ''.join(character for character in category.casefold() if character.isalnum())
-    if key == 'classiccalls':
-        return 'voice'
-    if key == 'whatsappcalls':
+    if 'whatsapp' in key:
         return 'whatsapp'
+    if 'classic' in key or 'calls' in key or key == 'voice':
+        return 'voice'
+    if key == 'data':
+        return 'data'
     if 'multirab' in key:
         return 'multirab'
     if 'transfer' in key:
         return 'transfer'
-    if 'brows' in key or 'httphttps' in key:
+    if 'brows' in key:
         return 'browsing'
-    if 'video' in key or 'stream' in key:
+    if 'video' in key:
         return 'video'
-    if 'interactiv' in key:
+    if 'interactivity' in key:
         return 'interactivity'
-    return 'category'
+    return 'category' if key == 'category' else 'location'
 
 
 def _category_display_label(category: str) -> str:
@@ -267,192 +275,149 @@ def _allocation_chart(slide, categories, values, colors, left, top, size, hole):
     return chart
 
 
+# These paths match allocationIconPath in the web scoring interface.
+_ICON_PATHS = {
+    'whatsapp': 'M3 4h18v13H9l-6 4ZM8 7h3l1 3-2 1 3 3 1-2 3 1v3c-4 1-10-5-9-9Z',
+    'voice': 'M6 3h4l2 5-3 2c2 4 3 5 7 7l2-3 5 2v4c-1 3-5 2-8 0C7 16 2 7 6 3Z',
+    'multirab': 'M12 3v18M5 21l7-18 7 18M4 7a11 11 0 0 1 16 0M7 10a7 7 0 0 1 10 0',
+    'transfer': 'M7 3v17m-4-4 4 4 4-4M17 21V4m-4 4 4-4 4 4',
+    'browsing': 'M2 4h20v16H2ZM2 8h20M5 6h1m2 0h1m2 0h1M8 12l-3 2 3 2m8-4 3 2-3 2',
+    'video': 'M3 4h18v16H3ZM9 8l7 4-7 4Z',
+    'interactivity': 'M2 12h4l3-8 5 16 3-8h5',
+    'category': 'M3 3h7v7H3ZM14 3h7v7h-7ZM3 14h7v7H3ZM14 14h7v7h-7Z',
+    'data': 'M7 3h10v18H7ZM10 7h10m-3-3 3 3-3 3M14 16H4m3-3-3 3 3 3',
+    'city': 'M3 21V7h7v14M10 21V3h10v18M1 21h22M6 10v2m0 3v2m8-10h3m-3 4h3m-3 4h3',
+    'road': 'M5 21 9 3m10 18L15 3M12 3v3m0 3v3m0 3v3m0 2v1',
+    'location': 'M12 22s8-8 8-13a8 8 0 0 0-16 0c0 5 8 13 8 13ZM12 6a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z',
+}
+
+
+def _icon_geometry(kind: str):
+    """Translate the fixed web icon paths into editable DrawingML geometry.
+
+    Only the commands used by these paths are needed. Their circular arcs have
+    no rotation, so DrawingML arcTo preserves them without rasterization.
+    """
+    geometry = OxmlElement('a:custGeom')
+    for tag in ('avLst', 'gdLst', 'ahLst', 'cxnLst'):
+        geometry.append(OxmlElement(f'a:{tag}'))
+    rect = OxmlElement('a:rect')
+    for attr, value in (('l', '0'), ('t', '0'), ('r', 'w'), ('b', 'h')):
+        rect.set(attr, value)
+    geometry.append(rect)
+    paths = OxmlElement('a:pathLst')
+    path = OxmlElement('a:path')
+    path.set('w', '24000')
+    path.set('h', '24000')
+    path.set('fill', 'none')
+    paths.append(path)
+    geometry.append(paths)
+    tokens = re.findall(r'[A-Za-z]|[-+]?(?:\d*\.\d+|\d+)', _ICON_PATHS.get(kind, _ICON_PATHS['location']))
+    current = (0., 0.)
+    subpath = current
+    control = None
+    command = ''
+    index = 0
+
+    def point(element, coordinates):
+        node = OxmlElement('a:pt')
+        node.set('x', str(round(coordinates[0] * 1000)))
+        node.set('y', str(round(coordinates[1] * 1000)))
+        element.append(node)
+
+    while index < len(tokens):
+        if tokens[index].isalpha():
+            command = tokens[index]
+            index += 1
+        absolute = command.isupper()
+        op = command.upper()
+        if op == 'Z':
+            path.append(OxmlElement('a:close'))
+            current = subpath
+            control = None
+            continue
+        count = {'M': 2, 'L': 2, 'H': 1, 'V': 1, 'C': 6, 'S': 4, 'A': 7}[op]
+        values = [float(value) for value in tokens[index:index + count]]
+        index += count
+        origin = (0., 0.) if absolute else current
+        pairs = [(values[i] + origin[0], values[i + 1] + origin[1])
+                 for i in range(0, len(values) - 1, 2)] if op in {'M', 'L', 'C', 'S'} else []
+        if op in {'M', 'L', 'H', 'V'}:
+            endpoint = (pairs[-1] if pairs else
+                        (values[0] + origin[0], current[1]) if op == 'H' else
+                        (current[0], values[0] + origin[1]))
+            element = OxmlElement('a:moveTo' if op == 'M' else 'a:lnTo')
+            point(element, endpoint)
+            if op == 'M':
+                subpath = endpoint
+                command = 'L' if absolute else 'l'
+        elif op in {'C', 'S'}:
+            if op == 'S':
+                reflected = (2 * current[0] - control[0], 2 * current[1] - control[1]) if control else current
+                pairs.insert(0, reflected)
+            element = OxmlElement('a:cubicBezTo')
+            for coordinates in pairs:
+                point(element, coordinates)
+            endpoint = pairs[-1]
+        else:
+            radius, _, _, large, sweep, dx, dy = values
+            endpoint = (dx + origin[0], dy + origin[1])
+            vx, vy = (current[0] - endpoint[0]) / 2, (current[1] - endpoint[1]) / 2
+            factor = math.sqrt(max(0., (radius * radius - vx * vx - vy * vy) / (vx * vx + vy * vy)))
+            if bool(large) == bool(sweep):
+                factor = -factor
+            cx = (current[0] + endpoint[0]) / 2 + factor * vy
+            cy = (current[1] + endpoint[1]) / 2 - factor * vx
+            start = math.atan2(current[1] - cy, current[0] - cx)
+            finish = math.atan2(endpoint[1] - cy, endpoint[0] - cx)
+            span = (finish - start) % (2 * math.pi) if sweep else -((start - finish) % (2 * math.pi))
+            element = OxmlElement('a:arcTo')
+            element.set('wR', str(round(radius * 1000)))
+            element.set('hR', str(round(radius * 1000)))
+            element.set('stAng', str(round(math.degrees(start) * 60000)))
+            element.set('swAng', str(round(math.degrees(span) * 60000)))
+        path.append(element)
+        current = endpoint
+        control = pairs[-2] if op in {'C', 'S'} else None
+    return geometry
+
+
+def _remove_shape_effects(shape) -> None:
+    """Override theme effects so legend marks cannot inherit shadows."""
+    properties = shape._element.spPr
+    for tag in ('a:effectLst', 'a:effectDag'):
+        existing = properties.find(qn(tag))
+        if existing is not None:
+            properties.remove(existing)
+    properties.append(OxmlElement('a:effectLst'))
+    for reference in shape._element.xpath('./p:style/a:effectRef'):
+        reference.set('idx', '0')
+
+
 def _legend_icon(slide, kind: str, x: float, y: float, size: float, color: str) -> None:
-    """Draw a compact editable icon using native PowerPoint vector shapes."""
-    rgb = RGBColor.from_string(color)
-    if kind == 'city':
-        for offset, height in ((.06, .48), (.32, .68), (.61, .42)):
-            shape = slide.shapes.add_shape(
-                MSO_SHAPE.RECTANGLE, Inches(x + size * offset),
-                Inches(y + size * (1 - height)), Inches(size * .25), Inches(size * height),
-            )
-            shape.fill.background()
-            shape.line.color.rgb = rgb
-            shape.line.width = Pt(.7)
-    elif kind == 'road':
-        for xoff in (.32, .68):
-            line = slide.shapes.add_connector(
-                MSO_CONNECTOR.STRAIGHT, Inches(x + size * xoff), Inches(y + size * .08),
-                Inches(x + size * (.5 + (xoff - .5) * .65)), Inches(y + size * .92),
-            )
-            line.line.color.rgb = rgb
-            line.line.width = Pt(.8)
-        for offset in (.27, .52, .77):
-            line = slide.shapes.add_connector(
-                MSO_CONNECTOR.STRAIGHT, Inches(x + size * .5), Inches(y + size * offset),
-                Inches(x + size * .5), Inches(y + size * (offset + .08)),
-            )
-            line.line.color.rgb = rgb
-            line.line.width = Pt(.7)
-    elif kind == 'location':
-        pin = slide.shapes.add_shape(
-            MSO_SHAPE.TEAR, Inches(x + size * .16), Inches(y + size * .08),
-            Inches(size * .68), Inches(size * .82),
-        )
-        pin.rotation = 180
-        pin.fill.background()
-        pin.line.color.rgb = rgb
-        pin.line.width = Pt(.8)
-        dot = slide.shapes.add_shape(
-            MSO_SHAPE.OVAL, Inches(x + size * .42), Inches(y + size * .31),
-            Inches(size * .16), Inches(size * .16),
-        )
-        dot.fill.solid()
-        dot.fill.fore_color.rgb = rgb
-        dot.line.fill.background()
-    elif kind == 'voice':
-        phone = slide.shapes.add_shape(
-            MSO_SHAPE.ROUNDED_RECTANGLE, Inches(x + size * .27), Inches(y + size * .06),
-            Inches(size * .46), Inches(size * .88),
-        )
-        phone.fill.background()
-        phone.line.color.rgb = rgb
-        phone.line.width = Pt(.8)
-        for offset in (.2, .78):
-            line = slide.shapes.add_connector(
-                MSO_CONNECTOR.STRAIGHT, Inches(x + size * .42), Inches(y + size * offset),
-                Inches(x + size * .58), Inches(y + size * offset),
-            )
-            line.line.color.rgb = rgb
-            line.line.width = Pt(.7)
-    elif kind == 'whatsapp':
-        bubble = slide.shapes.add_shape(
-            MSO_SHAPE.OVAL, Inches(x + size * .12), Inches(y + size * .08),
-            Inches(size * .76), Inches(size * .72),
-        )
-        bubble.fill.background()
-        bubble.line.color.rgb = rgb
-        bubble.line.width = Pt(.8)
-        for offset in (.31, .47, .63):
-            dot = slide.shapes.add_shape(
-                MSO_SHAPE.OVAL, Inches(x + size * offset), Inches(y + size * .39),
-                Inches(size * .07), Inches(size * .07),
-            )
-            dot.fill.solid()
-            dot.fill.fore_color.rgb = rgb
-            dot.line.fill.background()
-    elif kind == 'multirab':
-        mast = slide.shapes.add_connector(
-            MSO_CONNECTOR.STRAIGHT, Inches(x + size * .5), Inches(y + size * .18),
-            Inches(x + size * .5), Inches(y + size * .91),
-        )
-        mast.line.color.rgb = rgb
-        mast.line.width = Pt(.9)
-        for yoff, half_width in ((.34, .32), (.52, .24), (.7, .16)):
-            beam = slide.shapes.add_connector(
-                MSO_CONNECTOR.STRAIGHT, Inches(x + size * (.5 - half_width)), Inches(y + size * yoff),
-                Inches(x + size * (.5 + half_width)), Inches(y + size * yoff),
-            )
-            beam.line.color.rgb = rgb
-            beam.line.width = Pt(.8)
-    elif kind == 'transfer':
-        for xoff, down in ((.32, False), (.68, True)):
-            shaft = slide.shapes.add_connector(
-                MSO_CONNECTOR.STRAIGHT, Inches(x + size * xoff), Inches(y + size * (.28 if down else .68)),
-                Inches(x + size * xoff), Inches(y + size * (.7 if down else .26)),
-            )
-            shaft.line.color.rgb = rgb
-            shaft.line.width = Pt(.9)
-            arrow = slide.shapes.add_shape(
-                MSO_SHAPE.ISOSCELES_TRIANGLE, Inches(x + size * (xoff - .13)),
-                Inches(y + size * (.58 if down else .1)), Inches(size * .26), Inches(size * .24),
-            )
-            arrow.rotation = 180 if down else 0
-            arrow.fill.solid()
-            arrow.fill.fore_color.rgb = rgb
-            arrow.line.fill.background()
-    elif kind == 'browsing':
-        window = slide.shapes.add_shape(
-            MSO_SHAPE.RECTANGLE, Inches(x + size * .08), Inches(y + size * .18),
-            Inches(size * .84), Inches(size * .65),
-        )
-        window.fill.background()
-        window.line.color.rgb = rgb
-        window.line.width = Pt(.8)
-        header = slide.shapes.add_connector(
-            MSO_CONNECTOR.STRAIGHT, Inches(x + size * .08), Inches(y + size * .38),
-            Inches(x + size * .92), Inches(y + size * .38),
-        )
-        header.line.color.rgb = rgb
-        header.line.width = Pt(.7)
-        for xoff in (.22, .34, .46):
-            dot = slide.shapes.add_shape(
-                MSO_SHAPE.OVAL, Inches(x + size * xoff), Inches(y + size * .25),
-                Inches(size * .045), Inches(size * .045),
-            )
-            dot.fill.solid()
-            dot.fill.fore_color.rgb = rgb
-            dot.line.fill.background()
-    elif kind == 'video':
-        screen = slide.shapes.add_shape(
-            MSO_SHAPE.RECTANGLE, Inches(x + size * .08), Inches(y + size * .18),
-            Inches(size * .84), Inches(size * .64),
-        )
-        screen.fill.background()
-        screen.line.color.rgb = rgb
-        screen.line.width = Pt(.8)
-        play = slide.shapes.add_shape(
-            MSO_SHAPE.ISOSCELES_TRIANGLE, Inches(x + size * .39), Inches(y + size * .32),
-            Inches(size * .34), Inches(size * .35),
-        )
-        play.rotation = 90
-        play.fill.solid()
-        play.fill.fore_color.rgb = rgb
-        play.line.fill.background()
-    elif kind == 'interactivity':
-        points = ((.08, .55), (.3, .55), (.4, .28), (.57, .76), (.69, .45), (.92, .45))
-        for (x1, y1), (x2, y2) in zip(points, points[1:]):
-            segment = slide.shapes.add_connector(
-                MSO_CONNECTOR.STRAIGHT, Inches(x + size * x1), Inches(y + size * y1),
-                Inches(x + size * x2), Inches(y + size * y2),
-            )
-            segment.line.color.rgb = rgb
-            segment.line.width = Pt(1)
-    elif kind == 'category':
-        for offset, height in ((.18, .35), (.4, .62), (.62, .82)):
-            bar = slide.shapes.add_shape(
-                MSO_SHAPE.RECTANGLE, Inches(x + size * offset), Inches(y + size * (1 - height)),
-                Inches(size * .13), Inches(size * height),
-            )
-            bar.fill.solid()
-            bar.fill.fore_color.rgb = rgb
-            bar.line.fill.background()
-    else:  # Data device with exchange arrows.
-        device = slide.shapes.add_shape(
-            MSO_SHAPE.RECTANGLE, Inches(x + size * .08), Inches(y + size * .17),
-            Inches(size * .84), Inches(size * .66),
-        )
-        device.fill.background()
-        device.line.color.rgb = rgb
-        device.line.width = Pt(.8)
-        for yoff, reverse in ((.42, False), (.61, True)):
-            x1, x2 = ((.25, .72) if not reverse else (.75, .28))
-            line = slide.shapes.add_connector(
-                MSO_CONNECTOR.STRAIGHT, Inches(x + size * x1), Inches(y + size * yoff),
-                Inches(x + size * x2), Inches(y + size * yoff),
-            )
-            line.line.color.rgb = rgb
-            line.line.width = Pt(.7)
+    """Draw the web icon as one editable, unfilled native vector path."""
+    shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(x), Inches(y), Inches(size), Inches(size))
+    shape.name = f'Maximum Allocation Icon {kind}'
+    properties = shape._element.spPr
+    preset = properties.find(qn('a:prstGeom'))
+    properties.replace(preset, _icon_geometry(kind))
+    shape.fill.background()
+    shape.line.color.rgb = RGBColor.from_string(color)
+    shape.line.width = Pt(.85)
+    shape.line._get_or_add_ln().set('cap', 'rnd')
+    shape.line._get_or_add_ln().append(OxmlElement('a:round'))
+    _remove_shape_effects(shape)
 
 
 def _environment_segment_icons(slide, allocations, environment_allocations,
-                               chart_left: float, chart_top: float, chart_size: float) -> None:
+                               chart_left: float, chart_top: float, chart_size: float) -> float:
     total = sum(voice + data_points for _, voice, data_points in allocations)
     if total <= 0:
-        return
-    size = .30
-    radius = chart_size * .45 + .18
+        return chart_top + chart_size
+    size = .45
+    radius = chart_size * .45 + size / 2 + .08
     angle = 0.0
+    marker_bottom = chart_top + chart_size
     for environment, voice, data_points in allocations:
         share = (voice + data_points) / total
         midpoint = math.radians(angle + share * 180)
@@ -466,7 +431,9 @@ def _environment_segment_icons(slide, allocations, environment_allocations,
             part.line.width = Pt(1.3)
         icon = parts[0] if len(parts) == 1 else slide.shapes.add_group_shape(parts)
         icon.name = f'Maximum Allocation Environment Segment Icon {environment}'
+        marker_bottom = max(marker_bottom, y + size)
         angle += share * 360
+    return marker_bottom
 
 
 def _legend_row(slide, x, y, width, height, icon, color, label, detail, bold=False, wrap=False):
@@ -478,6 +445,7 @@ def _legend_row(slide, x, y, width, height, icon, color, label, detail, bold=Fal
     swatch.fill.solid()
     swatch.fill.fore_color.rgb = RGBColor.from_string(color)
     swatch.line.fill.background()
+    _remove_shape_effects(swatch)
     textbox = slide.shapes.add_textbox(
         Inches(x + .32), Inches(y), Inches(max(.2, width - .32)), Inches(height),
     )
@@ -485,18 +453,22 @@ def _legend_row(slide, x, y, width, height, icon, color, label, detail, bold=Fal
     textbox.text_frame.word_wrap = wrap
     textbox.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
     paragraph = textbox.text_frame.paragraphs[0]
-    paragraph.font.name = 'Ericsson Hilda'
+    paragraph.font.name = 'Arial'
     paragraph.font.bold = bold
-    font_size = min(8.5, max(8.0, 8.5 * 42 / max(42, len(label) + len(detail) + 2)))
+    textbox.text_frame.margin_left = textbox.text_frame.margin_right = 0
+    textbox.text_frame.margin_top = textbox.text_frame.margin_bottom = 0
+    font_size = min(8.5, max(6.5, (width - .32) * 72 /
+                            (max(1, len(label) + len(detail) + 2) * .52)))
     paragraph.font.size = Pt(font_size)
     name_run = paragraph.add_run()
-    name_run.text = f'{label}  '
-    name_run.font.name = 'Ericsson Hilda'
+    name_run.text = f'{label}: '
+    name_run.font.name = 'Arial'
     name_run.font.size = Pt(font_size)
     name_run.font.bold = bold
+    name_run.font.color.rgb = RGBColor.from_string('465565')
     detail_run = paragraph.add_run()
     detail_run.text = detail
-    detail_run.font.name = 'Ericsson Hilda'
+    detail_run.font.name = 'Arial'
     detail_run.font.size = Pt(font_size)
     detail_run.font.bold = bold
     detail_run.font.color.rgb = RGBColor.from_string('8A3D0A')
@@ -516,9 +488,10 @@ def _allocation_legend_heading(slide, x, y, width, height, label):
     textbox.text_frame.word_wrap = False
     paragraph = textbox.text_frame.paragraphs[0]
     paragraph.text = label
-    paragraph.font.name = 'Ericsson Hilda'
+    paragraph.font.name = 'Arial'
     paragraph.font.bold = True
     paragraph.font.size = Pt(9)
+    paragraph.font.color.rgb = RGBColor.from_string('465565')
 
 
 def add_maximum_allocation_donut(
@@ -535,10 +508,10 @@ def add_maximum_allocation_donut(
     """Add an editable environment doughnut with an inner allocation ring.
 
     Geometry is in inches and describes the whole widget: the chart sits above
-    its legend, with per-environment maxima listed first. Combined matrices
-    show environment totals on the outer ring and allocation totals inside it;
-    a specific environment shows only its allocation ring. The
-    returned value is the outer native chart.
+    its legend, with a combined total followed by environment maxima. Both
+    combined and single-environment matrices show environment totals on the
+    outer ring and service or category totals on the inner ring. The returned
+    value is the outer native chart.
     """
     allocations = _selected_allocations(matrix, environment_allocations)
     if not allocations:
@@ -562,27 +535,31 @@ def add_maximum_allocation_donut(
         inner_totals = [allocations[0][1], allocations[0][2]]
 
     center_total = sum(voice + data_points for _, voice, data_points in allocations)
-    legend_items = [('heading', 'Points per Environment:')]
+    legend_items = []
+    if len(allocations) > 1:
+        legend_items.append(('location', '465565', 'Total Points',
+                             f'{_legend_points(center_total)} pts (100.0%)'))
+    legend_items.append(('heading', 'Points per Environment:'))
     for environment, voice, data_points in allocations:
         value = voice + data_points
         percent = value * 100 / center_total if center_total else 0
         legend_items.append((_environment_kind(environment), _global_color(environment, environment_allocations),
                              _environment_display_label(environment),
-                             f'{value:.2f} pts ({percent:.1f}%)'))
+                             f'{_legend_points(value)} pts ({percent:.1f}%)'))
     legend_items.append(('heading', 'Points per KPI Category:' if category_mode else 'Points per Service:'))
     if category_mode:
         for index, category in enumerate(inner_labels):
             value = inner_totals[index]
             percent = value * 100 / center_total if center_total else 0
             legend_items.append((_category_icon_kind(category), inner_colors[index], _category_display_label(category),
-                                 f'{value:.2f} pts ({percent:.1f}%)'))
+                                 f'{_legend_points(value)} pts ({percent:.1f}%)'))
     else:
         for index, (label, color, kind) in enumerate((
             ('Voice', _VOICE_COLOR, 'voice'), ('Data', _DATA_COLOR, 'data'),
         )):
             value = inner_totals[index]
             percent = value * 100 / center_total if center_total else 0
-            legend_items.append((kind, color, label, f'{value:.2f} pts ({percent:.1f}%)'))
+            legend_items.append((kind, color, label, f'{_legend_points(value)} pts ({percent:.1f}%)'))
 
     # Category legends have more rows; compact them to preserve enough chart
     # diameter for the environment and major category percentage labels.
@@ -596,13 +573,16 @@ def add_maximum_allocation_donut(
         [_global_color(environment, environment_allocations) for environment, _, _ in allocations],
         chart_left, chart_top, chart_size, 72,
     )
-    _environment_segment_icons(slide, allocations, environment_allocations,
-                               chart_left, chart_top, chart_size)
-    ring_size = chart_size * .72
+    marker_bottom = _environment_segment_icons(slide, allocations, environment_allocations,
+                                               chart_left, chart_top, chart_size)
+    # Move the inner ring inward by the same subtle fraction used in the web chart.
+    # The slightly smaller hole keeps its band width approximately unchanged.
+    ring_size = chart_size * (.72 - 2 / 156)
+    inner_hole = 62
     _allocation_chart(
         slide, inner_labels, inner_totals, inner_colors,
         chart_left + (chart_size - ring_size) / 2, chart_top + (chart_size - ring_size) / 2,
-        ring_size, 63,
+        ring_size, inner_hole,
     )
     _add_percentage_labels(slide, totals,
                            [_global_color(environment, environment_allocations)
@@ -610,23 +590,37 @@ def add_maximum_allocation_donut(
                            chart_left, chart_top, chart_size, 72)
     _add_percentage_labels(slide, inner_totals, inner_colors,
                            chart_left + (chart_size - ring_size) / 2,
-                           chart_top + (chart_size - ring_size) / 2, ring_size, 63)
+                           chart_top + (chart_size - ring_size) / 2, ring_size, inner_hole)
 
+    center_width = ring_size * inner_hole / 100 * .9 - .06
+    center_text = f'{center_total:.2f}'
+    total_size = max(2, min(20, center_width * 72 / (len(center_text) * .65)))
+    unit_size = max(1, min(8.5, total_size * 12 / 31))
+    center_height = (total_size + unit_size) * 1.35 / 72
     center = slide.shapes.add_textbox(
-        Inches(chart_left + (chart_size - .9) / 2), Inches(chart_top + (chart_size - .48) / 2),
-        Inches(.9), Inches(.48),
+        Inches(chart_left + (chart_size - center_width) / 2),
+        Inches(chart_top + (chart_size - center_height) / 2),
+        Inches(center_width), Inches(center_height),
     )
     center.name = 'Maximum Score Allocation Total'
-    center.text_frame.clear()
-    center.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
-    center.text_frame.word_wrap = True
-    paragraph = center.text_frame.paragraphs[0]
-    paragraph.alignment = PP_ALIGN.CENTER
-    paragraph.text = f'{center_total:.2f}\nmax points'
-    paragraph.font.name = 'Ericsson Hilda'
-    paragraph.font.size = Pt(10 if len(allocations) > 1 else 12)
+    frame = center.text_frame
+    frame.clear()
+    frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+    frame.word_wrap = False
+    frame.margin_left = frame.margin_right = 0
+    frame.margin_top = frame.margin_bottom = 0
+    for index, (text, size, color) in enumerate(((center_text, total_size, '1C3745'),
+                                                ('max points', unit_size, '5C707A'))):
+        paragraph = frame.paragraphs[0] if index == 0 else frame.add_paragraph()
+        paragraph.alignment = PP_ALIGN.CENTER
+        paragraph.space_before = paragraph.space_after = Pt(0)
+        paragraph.text = text
+        paragraph.font.name = 'Arial'
+        paragraph.font.size = Pt(size)
+        paragraph.font.bold = True
+        paragraph.font.color.rgb = RGBColor.from_string(color)
 
-    label_top = top + chart_size + .25
+    label_top = max(top + chart_size + .25, marker_bottom + .08)
     label_width = width
     label_y = label_top
     for item, label_height in zip(legend_items, legend_heights):
@@ -636,7 +630,9 @@ def add_maximum_allocation_donut(
             _allocation_legend_heading(slide, x + .12, y, label_width - .12, label_height, item[1])
         else:
             kind, color, label, detail = item
-            _legend_row(slide, x + .15, y, label_width - .15, label_height,
-                        kind, color, label, detail, bold=False, wrap=False)
+            global_row = label == 'Total Points'
+            indent = .12 if global_row else .26
+            _legend_row(slide, x + indent, y, label_width - indent, label_height,
+                        kind, color, label, detail, bold=global_row, wrap=False)
         label_y += label_height
     return chart

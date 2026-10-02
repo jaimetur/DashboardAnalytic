@@ -181,7 +181,8 @@ def test_code_column_is_the_single_editable_code_input_and_updates_gap_priority(
     assert "editFormulaButton.title = `Edit formula and filters for ${metric.kpi || metric.code}`;" in script
     assert 'codeMap.get(code)' in script
     assert "title: 'Changing this code also updates its saved GAP priority entry.'" in script
-    assert 'window.prompt' not in script
+    priority_handler_index = script.index("priorityForm.addEventListener('click', (event) => {")
+    assert 'window.prompt' not in script[:priority_handler_index]
     assert 'window.confirm' not in script
     assert 'const orderedCategories = Array.from(grouped.keys());' in script
     assert 'calculationDialog.showModal()' in script
@@ -215,6 +216,270 @@ def test_reference_distribution_allocates_100_points_in_reference_proportions():
     assert allocation['unchanged'] == pytest.approx(8.645)
     assert allocation['editedAtDisplay'] == pytest.approx(8.65)
     assert allocation['editedPrecise'] == pytest.approx(8.6457)
+
+
+def test_gap_priority_controls_support_inline_position_editor():
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node.js is unavailable for the GAP priority behavior check.')
+    script_source = json.dumps(str(PANEL_SCRIPT))
+    program = r"""
+const fs = require('fs');
+const source = fs.readFileSync(SCRIPT_PATH, 'utf8');
+const setupStart = source.indexOf('  const movePriorityRow =');
+const setupEnd = source.indexOf("  priorityForm.addEventListener('submit'", setupStart);
+if (setupStart < 0 || setupEnd < 0) throw new Error('Priority handler block not found');
+const setup = source.slice(setupStart, setupEnd);
+function create(names) {
+  const rows = names.map((name) => ({name, dataset: {kpiCode: name}, editor: null}));
+  const moveButtons = new Map();
+  for (const row of rows) {
+    for (const direction of ['first', 'up', 'down', 'last', 'position']) {
+      const button = {dataset: {priorityMove: direction}, focused: false, focus() { this.focused = true; }, closest: () => row};
+      if (direction === 'position') button.after = (editor) => { row.editor = editor; editor.row = row; editor.closest = () => row; };
+      moveButtons.set(`${row.name}:${direction}`, button);
+      if (direction === 'position') row.querySelector = (selector) => selector === '[data-priority-move="position"]' ? button : null;
+    }
+    row.after = (editor) => { row.editor = editor; editor.row = row; };
+  }
+  const priorityRows = {
+    children: rows,
+    querySelectorAll: () => rows,
+    querySelector: () => rows.find((row) => row.editor)?.editor || null,
+    contains: () => true,
+    insertBefore(item, reference) {
+      const oldIndex = rows.indexOf(item);
+      rows.splice(oldIndex, 1);
+      const newIndex = reference ? rows.indexOf(reference) : rows.length;
+      rows.splice(newIndex, 0, item);
+    }
+  };
+  const state = {statuses: [], refreshed: 0, prevented: false, handlers: {}};
+  const document = {createElement(tag) {
+    if (tag === 'input') return {value: '', dataset: {}, attributes: {}, focused: false, selected: false,
+      setAttribute(key, value) { this.attributes[key] = value; }, focus() { this.focused = true; }, select() { this.selected = true; }};
+    if (tag === 'button') return {dataset: {}, attributes: {}, textContent: '', focused: false,
+      setAttribute(key, value) { this.attributes[key] = value; }, focus() { this.focused = true; }, closest: (selector) => selector === '[data-priority-position-editor]' ? activeEditor : selector === 'tr[data-kpi-code]' ? activeEditor?.row : null};
+    if (tag === 'span') return {dataset: {}, setAttribute() {}, children: [], error: null, input: null, apply: null, cancel: null, row: null,
+      append(input, apply, cancel, error) { this.input = input; this.apply = apply; this.cancel = cancel; this.error = error; },
+      querySelector(selector) { return selector === '[data-priority-position-input]' ? this.input : this.error; },
+      closest: () => this.row,
+      remove() { if (this.row) this.row.editor = null; }};
+    throw new Error(`Unexpected element: ${tag}`);
+  }};
+  let activeEditor = null;
+  // Bind the editor reference through the button's closest method once each editor is created.
+  const originalCreate = document.createElement;
+  document.createElement = (tag) => {
+    const element = originalCreate(tag);
+    if (tag === 'button') element.closest = (selector) => selector === '[data-priority-position-editor]' ? activeEditor : selector === 'tr[data-kpi-code]' ? activeEditor?.row : null;
+    if (tag === 'span') {
+      const append = element.append;
+      element.append = (input, apply, cancel, error) => { append.call(element, input, apply, cancel, error); activeEditor = element; };
+    }
+    return element;
+  };
+  const context = {window: {}, document, priorityRows, priorityStatus: {}, priorityLabel: (code) => code,
+    priorityForm: {addEventListener(name, handler) { state.handlers[name] = handler; }},
+    setStatus: (...args) => state.statuses.push(args),
+    refreshPriorityButtons: () => state.refreshed++};
+  const vm = require('vm');
+  vm.runInNewContext(setup, context);
+  state.context = context;
+  const clickHandler = state.handlers.click;
+  const keydownHandler = state.handlers.keydown;
+  function clickMove(rowName, direction = 'position') {
+    const button = moveButtons.get(`${rowName}:${direction}`);
+    clickHandler({target: {closest: (selector) => selector === '[data-priority-move]' ? button : null}});
+    return button;
+  }
+  function clickApply(editor) {
+    const button = editor.apply;
+    clickHandler({target: {closest: (selector) => selector === '[data-priority-position-apply]' ? button : null}});
+  }
+  function clickCancel(editor) {
+    const button = editor.cancel;
+    clickHandler({target: {closest: (selector) => selector === '[data-priority-position-cancel]' ? button : null}});
+  }
+  function key(editor, key) {
+    state.prevented = false;
+    keydownHandler({key, target: {closest: (selector) => selector === '[data-priority-position-editor]' ? editor : null, matches: (selector) => key === 'Enter' && selector === '[data-priority-position-input]'},
+      preventDefault() { state.prevented = true; }});
+  }
+  return {rows, state, clickMove, clickApply, clickCancel, key, get editor() { return rows.find((row) => row.editor)?.editor || null; }, moveButtons};
+}
+function summary(harness) {
+  return {order: harness.rows.map((row) => row.name), editorOpen: Boolean(harness.editor), dirty: harness.state.context.priorityDirty === true,
+    statuses: harness.state.statuses, refreshed: harness.state.refreshed, prevented: harness.state.prevented};
+}
+const opening = create(['a', 'b', 'c', 'd']);
+opening.clickMove('c');
+const openInput = opening.editor.input;
+const opened = {...summary(opening), inputFocused: openInput.focused, inputSelected: openInput.selected, initialValue: openInput.value};
+openInput.value = '2';
+opening.clickApply(opening.editor);
+const applied = {...summary(opening), returnedFocus: opening.moveButtons.get('c:position').focused};
+const invalid = create(['a', 'b', 'c', 'd']);
+invalid.clickMove('c');
+const invalidEditor = invalid.editor;
+invalidEditor.input.value = '0';
+invalid.clickApply(invalidEditor);
+const rejected = {...summary(invalid), invalidValue: invalidEditor.input.attributes['aria-invalid'], error: invalidEditor.error.textContent, inputRefocused: invalidEditor.input.focused};
+const invalidLarge = create(['a', 'b', 'c', 'd']);
+invalidLarge.clickMove('c');
+invalidLarge.editor.input.value = '5';
+invalidLarge.clickApply(invalidLarge.editor);
+const rejectedLarge = {...summary(invalidLarge), error: invalidLarge.editor.error.textContent};
+const invalidDecimal = create(['a', 'b', 'c', 'd']);
+invalidDecimal.clickMove('c');
+invalidDecimal.editor.input.value = '1.5';
+invalidDecimal.clickApply(invalidDecimal.editor);
+const rejectedDecimal = {...summary(invalidDecimal), error: invalidDecimal.editor.error.textContent};
+const exclusive = create(['a', 'b', 'c', 'd']);
+exclusive.clickMove('c');
+exclusive.clickMove('b');
+const exclusiveEditor = {...summary(exclusive), editorRow: exclusive.editor.row.dataset.kpiCode};
+const toggled = create(['a', 'b', 'c', 'd']);
+toggled.clickMove('c');
+toggled.clickMove('c');
+const toggleCanceled = summary(toggled);
+const clickedCancel = create(['a', 'b', 'c', 'd']);
+clickedCancel.clickMove('b');
+const cancelEditor = clickedCancel.editor;
+clickedCancel.clickCancel(cancelEditor);
+const buttonCanceled = {...summary(clickedCancel), returnedFocus: clickedCancel.moveButtons.get('b:position').focused};
+const escaped = create(['a', 'b', 'c', 'd']);
+escaped.clickMove('c');
+escaped.key(escaped.editor, 'Escape');
+const escapeCanceled = {...summary(escaped), returnedFocus: escaped.moveButtons.get('c:position').focused};
+const entered = create(['a', 'b', 'c', 'd']);
+entered.clickMove('a');
+entered.editor.input.value = '3';
+entered.key(entered.editor, 'Enter');
+const enterApplied = {...summary(entered), returnedFocus: entered.moveButtons.get('a:position').focused};
+const ends = create(['a', 'b', 'c', 'd']);
+ends.clickMove('c', 'first');
+const movedFirst = summary(ends);
+const movedLastHarness = create(['a', 'b', 'c', 'd']);
+movedLastHarness.clickMove('b', 'last');
+const movedLast = summary(movedLastHarness);
+const movedUpHarness = create(['a', 'b', 'c', 'd']);
+movedUpHarness.clickMove('c', 'up');
+const movedUp = summary(movedUpHarness);
+const movedDownHarness = create(['a', 'b', 'c', 'd']);
+movedDownHarness.clickMove('b', 'down');
+const movedDown = summary(movedDownHarness);
+console.log(JSON.stringify({opened, applied, rejected, rejectedLarge, rejectedDecimal, exclusiveEditor, toggleCanceled, buttonCanceled, escapeCanceled, enterApplied, movedFirst, movedLast, movedUp, movedDown}));
+""".replace('SCRIPT_PATH', script_source)
+    completed = subprocess.run([node, '-e', program], capture_output=True, text=True)
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout)
+
+    assert result['opened']['order'] == ['a', 'b', 'c', 'd']
+    assert result['opened']['editorOpen'] is True
+    assert result['opened']['dirty'] is False
+    assert result['opened']['inputFocused'] and result['opened']['inputSelected']
+    assert result['opened']['initialValue'] == '3'
+    assert result['applied']['order'] == ['a', 'c', 'b', 'd']
+    assert result['applied']['editorOpen'] is False
+    assert result['applied']['dirty'] is True
+    assert result['applied']['returnedFocus'] is True
+    assert result['rejected']['order'] == ['a', 'b', 'c', 'd']
+    assert result['rejected']['editorOpen'] is True
+    assert result['rejected']['dirty'] is False
+    assert result['rejected']['invalidValue'] == 'true'
+    assert result['rejected']['error']
+    assert result['rejected']['inputRefocused'] is True
+    for key in ['rejectedLarge', 'rejectedDecimal']:
+        assert result[key]['editorOpen'] is True
+        assert result[key]['dirty'] is False
+        assert result[key]['error']
+    assert result['exclusiveEditor']['editorOpen'] is True
+    assert result['exclusiveEditor']['editorRow'] == 'b'
+    assert result['toggleCanceled']['editorOpen'] is False
+    assert result['toggleCanceled']['order'] == ['a', 'b', 'c', 'd']
+    assert result['buttonCanceled']['editorOpen'] is False
+    assert result['buttonCanceled']['order'] == ['a', 'b', 'c', 'd']
+    assert result['buttonCanceled']['dirty'] is False
+    assert result['buttonCanceled']['returnedFocus'] is True
+    assert result['escapeCanceled']['editorOpen'] is False
+    assert result['escapeCanceled']['order'] == ['a', 'b', 'c', 'd']
+    assert result['escapeCanceled']['prevented'] is True
+    assert result['escapeCanceled']['returnedFocus'] is True
+    assert result['enterApplied']['order'] == ['b', 'c', 'a', 'd']
+    assert result['enterApplied']['editorOpen'] is False
+    assert result['enterApplied']['prevented'] is True
+    assert result['enterApplied']['returnedFocus'] is True
+    assert result['movedFirst']['order'] == ['c', 'a', 'b', 'd']
+    assert result['movedLast']['order'] == ['a', 'c', 'd', 'b']
+    assert result['movedUp']['order'] == ['a', 'c', 'b', 'd']
+    assert result['movedDown']['order'] == ['a', 'c', 'b', 'd']
+
+
+def test_category_group_moves_preserve_kpi_order_drafts_and_boundary_positions():
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node.js is unavailable for the category-order behavior check.')
+    script_source = json.dumps(str(PANEL_SCRIPT))
+    program = r"""
+const fs = require('fs');
+const vm = require('vm');
+const source = fs.readFileSync(SCRIPT_PATH, 'utf8');
+const start = source.indexOf('  const moveCategory = (heading, direction) => {');
+const end = source.indexOf('  const applyWeightEdit =', start);
+if (start < 0 || end < 0) throw new Error('Category movement helper not found');
+const helper = source.slice(start, end);
+function run(direction, selectedCategory) {
+  const draft = {code: 'B2', formula: 'unsaved formula'};
+  const rows = [['A1', 'A'], ['A2', 'A'], ['B1', 'B'], ['B2', 'B'], ['C1', 'C']].map(([code, category], index) => ({
+    dataset: {kpiCode: code, orderIndex: String(index)}, category,
+    ...(code === 'B2' ? {_newMetricTemplate: draft} : {}),
+    querySelector: () => ({value: category})
+  }));
+  const headings = ['A', 'B', 'C'].map((category) => ({dataset: {kpiCategoryHeading: category}}));
+  const kpiRows = {children: [], querySelectorAll: () => kpiRows.children.filter((node) => node.dataset?.kpiCategoryHeading),
+    replaceChildren(...nodes) { this.children = nodes; }};
+  const state = {renders: 0, statuses: []};
+  const context = {kpiRows, kpiStatus: {}, kpiDirty: false,
+    rowMetrics: () => kpiRows.children.filter((node) => node.dataset?.kpiCode),
+    setStatus: (...args) => state.statuses.push(args),
+    renderCategoryGroups() {
+      state.renders++;
+      const groups = new Map();
+      context.rowMetrics().forEach((row) => { if (!groups.has(row.category)) groups.set(row.category, []); groups.get(row.category).push(row); });
+      kpiRows.replaceChildren(...Array.from(groups, ([category, group]) => [headings.find((item) => item.dataset.kpiCategoryHeading === category),
+        ...group.sort((left, right) => Number(left.dataset.orderIndex) - Number(right.dataset.orderIndex))]).flat());
+    }};
+  vm.createContext(context);
+  kpiRows.replaceChildren(headings[0], ...rows.slice(0, 2), headings[1], ...rows.slice(2, 4), headings[2], rows[4]);
+  const selected = headings.find((item) => item.dataset.kpiCategoryHeading === selectedCategory);
+  vm.runInContext(`${helper}\nmoveCategory(heading, direction);`, Object.assign(context, {heading: selected, direction}));
+  return {order: kpiRows.children.map((node) => node.dataset.kpiCategoryHeading || node.dataset.kpiCode),
+    metricOrder: context.rowMetrics().map((row) => row.dataset.kpiCode), indexes: context.rowMetrics().map((row) => Number(row.dataset.orderIndex)),
+    draftPreserved: rows[3]._newMetricTemplate === draft, dirty: context.kpiDirty, renders: state.renders, statuses: state.statuses.length};
+}
+console.log(JSON.stringify({up: run('up', 'B'), down: run('down', 'B'), firstBoundary: run('up', 'A'), lastBoundary: run('down', 'C')}));
+""".replace('SCRIPT_PATH', script_source)
+    completed = subprocess.run([node, '-e', program], capture_output=True, text=True)
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout)
+
+    assert result['up']['order'] == ['B', 'B1', 'B2', 'A', 'A1', 'A2', 'C', 'C1']
+    assert result['up']['metricOrder'] == ['B1', 'B2', 'A1', 'A2', 'C1']
+    assert result['up']['indexes'] == [0, 1, 2, 3, 4]
+    assert result['up']['draftPreserved'] is True
+    assert result['up']['dirty'] is True
+    assert result['up']['renders'] == 1
+    assert result['down']['order'] == ['A', 'A1', 'A2', 'C', 'C1', 'B', 'B1', 'B2']
+    assert result['down']['metricOrder'] == ['A1', 'A2', 'C1', 'B1', 'B2']
+    assert result['down']['indexes'] == [0, 1, 2, 3, 4]
+    assert result['down']['draftPreserved'] is True
+    assert result['down']['dirty'] is True
+    assert result['down']['renders'] == 1
+    for boundary in ['firstBoundary', 'lastBoundary']:
+        assert result[boundary]['order'] == ['A', 'A1', 'A2', 'B', 'B1', 'B2', 'C', 'C1']
+        assert result[boundary]['dirty'] is False
+        assert result[boundary]['renders'] == 0
 
 
 def test_max_points_editor_keeps_exact_values_behind_two_decimal_display():
