@@ -1,87 +1,637 @@
 # Scoring & GAP Analysis
 
-This workspace module calculates NetCheck KPI scoring and operator comparisons from processed Data, Voice and Speech CDRs. Its initial NetCheck 2026 definitions follow the supplied City/Road scoring workbook, Tableau Prep flow and methodology; the default workspace methodology supplies the rules for each new job. Scoring jobs are independent of Dashboard and Report Templates.
+Calculate KPI scores from processed Data, Voice and Speech CDRs, then compare each operator with a reference operator. Results belong to the workspace and do not require a Dashboard or Report Template.
+
+> [!NOTE]
+> **Start with a saved methodology.** It defines the environments, KPI formulas, thresholds and maximum points. The selected job keeps a snapshot of these rules.
+
+## Choose your task
+
+| I want to… | Go to |
+| --- | --- |
+| Calculate or recalculate a comparison | [Calculate and review](#calculate-and-review) |
+| Understand filters and aggregation | [Filters and aggregation](#filters-and-aggregation) |
+| Read scores, GAPs and coverage warnings | [Results and workspace settings](#results-and-workspace-settings) |
+| Change environments, KPIs or weights | [Methodology](#methodology) |
+| Edit formulas and scoring rules | [KPI definitions](#editing-replacing-adding-and-removing-kpis) |
+| Understand methodology JSON | [Portable JSON reference](#portable-json-reference) |
+| Inspect original KPI weights and sources | [Supported KPI allocation](#supported-kpi-allocation) |
+| Share results or preserve a workspace | [Persistence and exports](#persistence-and-exports) |
+| Resolve missing results | [Troubleshooting](#troubleshooting) |
 
 ## Calculate and review
 
-1. Open the workspace, import its methodology under **Workspace Config → Scoring & GAP Analysis Setup** if it is not configured yet, and finish processing the required CDRs.
-2. Open **Scoring & GAP Analysis**. The **Scoring methodology** dropdown starts with the last shared selection, or the workspace default on first use; choose another saved methodology for this calculation if required. This does not change the workspace default. Select **NSA** or **SA**. A job cannot combine both modes.
-3. NR Mode appears above **CDR datasets**. Its **Select all CDRs**, **Select latest of each type** and **Select latest two of each type** buttons replace the selection using only ready CDRs in the chosen NR Mode; latest is ordered by the date in the CDR name when recognized (YYYY-MM-DD, DD-MM-YYYY, compact dates or year/quarter). Missing name dates fall back to upload time; ties use upload time, then dataset ID. GAP Reference has its own subpanel below Aggregation levels. On first use, the Data, Voice and Speech subpanels select the latest ready CDR of each type for the chosen NR Mode. Select at least one of each type in every included campaign; calculation is disabled until the complete selection is available. Choose the aggregation dimensions. **Operator** is always included. The default hierarchy is **Operator → Vendor → Region → City → Campaign**; select the additional dimensions needed. Campaign replaces CDR/Dataset Type in new calculations. The aggregation and filter panels both follow the workspace hierarchy.
-4. Choose the reference operator in the **GAP reference operator** subpanel, whose explanation is centered vertically beside the dropdown populated from Operator Mapping. The default is **EE**, matching the supplied GAP presentation.
-5. Optionally restrict **Operators**, **Vendors**, **Regions**, **Cities** and **Campaigns**. Their choices combine the cached values of all selected CDRs. **Main Cities** selects the configured workspace cities present in that selection, as in E2E Dashboards. Empty selections mean all values; values within one field are combined with OR, and different fields with AND. Filters apply before KPI calculation, independently of aggregation. Keep at least one Data, Voice and Speech CDR for every included campaign.
-6. **Calculate Scoring** is enabled only when no matching job exists. For matching saved jobs, use the purple **Recalculate** button to update the same job and replace its results. Its displayed date/time becomes the recalculation submission time, and both the dropdown and history list show jobs newest first. Calculate, Recalculate and the three configuration shortcuts share the methodology selector row with matching heights and representative icons; smaller screens wrap the controls. Calculation status notices appear in a bold yellow box below the controls, spanning the full panel width and growing vertically to display long messages without truncation. Both buttons are disabled while an identical job is queued or running. Matching includes CDR content, NR Mode, filters, aggregation levels, GAP reference and the saved methodology; changed sources or methodology rules can create a distinct job. Jobs saved before an engine update are matched using their saved inputs, so recalculation updates the same job with the current engine.
-7. In **Scoring Results**, use the job-card dropdown aligned to the right below the configuration/export buttons. It fits the available width and wraps long titles. The open list overlays the following panel even before results have loaded. Open it to inspect job status and choose a saved job; the selected card stays visible and **Scoring Tables**, **GAP Analysis**, **Scoring Charts**, exports and calculation notes update to that job. Selecting an older job shows its original saved results and warnings, with current environment names from the same methodology in the web views and PowerPoint. Renaming environments changes their displayed names without rewriting historical rules or numeric results. On narrower screens the selector appears below the buttons across the available width. The full **Scoring Jobs** history remains below Scoring Results, with the same selection and delete actions. Job cards show All Vendors when the saved selection includes every available vendor, while partial selections list their vendor names. Each job card includes a CDR button with the complete source list available on hover and in a floating panel on click. When All Environments is incomplete, loading a job selects the first available environment with complete coverage, if one exists. All Environments remains available for manual selection. A single pale yellow Calculation notes card below the job selector and above the result tabs contains all applicable warnings. Coverage notices list each affected combination, its exact achievable maximum in larger bold text and the excluded KPI names; changing the environment updates the card. Environment options use their saved names. The Environment selector stays visible but disabled while results load. Result matrices index source KPI rows once per context rather than repeatedly scanning them during refresh. The three export buttons stay visible but disabled while the selected job has no available result, preserving the selector width.
-8. Open the job dropdown and use the **Delete scoring job** action on a job to remove it and its saved results after confirmation. Source CDRs remain available. Queued work is skipped; running work stops at the next processing checkpoint or discards its pending result. The same selection can then be calculated again.
+### 1. Prepare the inputs
 
-Calculation selections are shared by all users of the workspace and saved automatically: selected CDRs, NR Mode, methodology, reference operator, aggregation levels and filters. Returning from another page, browser or user session restores the latest saved selection, including intentionally empty selections. Removed/unready CDRs or deleted methodologies are reconciled with a visible notice. Workspace database backup/restore preserves this selection; methodology-only configuration transfers omit workspace-local CDR selections.
+1. Open the correct workspace and finish processing the required CDRs.
+2. If no methodology is configured, import one under **Workspace Config → Scoring & GAP Analysis Setup**.
+3. Open **Scoring & GAP Analysis** and expand **Select CDRs, filters, aggregation levels & GAP reference**.
+4. Choose **NSA** or **SA** above **CDR datasets**. A job cannot mix both modes.
 
-After a CDR finishes processing, the application queues its default Operator calculation when ready Data, Voice and Speech companions exist for its campaign and NR Mode. **Recalculate Scoring** in Workspace includes the selected CDR and the latest compatible companions of the other types, then opens the scoring module.
+> [!IMPORTANT]
+> Include at least one ready **Data**, **Voice** and **Speech** CDR for every campaign included in the calculation. Complete CDR selection does not guarantee complete KPI measurements: inspect Calculation notes after processing.
 
-The **Vendor** selector shows vendor names without their operator prefix and excludes operator-only fallback values used when no vendor is assigned. Selecting several vendors includes matching rows from every operator using any of those vendors (for example, Ericsson or Huawei), plus all rows from operators without an assigned vendor. An explicit **Operator** filter limits both groups and can exclude operators without vendors. Vendor aggregation, table headings and chart labels use vendor-only names in both the web view and PowerPoint; operators without an assigned vendor display **All** at the Vendor aggregation level; GAP comparisons prefer the same vendor across operators. If the reference operator has no matching vendor but has an **All** vendor group, that group is used as the reference while Campaign, Environment and every other selected level must still match. Existing CDR and catalogue identities remain unchanged, and saved selections with operator prefixes are accepted.
+### 2. Select CDRs
 
-CDR processing caches Operator, Vendor, Region, City and Campaign values. Opening the module and changing selections use those cached values without scanning the CDR rows. If an older dataset has an incomplete catalogue, reprocess it to refresh its filter choices. Results in hidden tabs are built when selected; refreshing the job list does not rebuild unchanged completed results. Refreshing the Scoring & GAP Analysis page restores its scroll position, active Scoring Results tab, Environment, Show KPI values, Show GAP values and GAP columns placement in the same browser session, separately for each user and workspace.
+Use the Data, Voice and Speech selectors, or replace the selection with a shortcut:
 
-Rows are pooled before KPI calculation within the same selected grouping. This avoids averaging previously calculated averages or percentiles from separate files. Select **Campaign** to score campaigns separately within the hierarchy. When Campaign is not selected, their raw rows are pooled before calculating KPIs, as in the supplied Prep flow. Changing the hierarchy never averages previously calculated KPI values. Historical jobs keep their original campaign separation and selected dimensions.
+| Button | Selection |
+| --- | --- |
+| **Select all CDRs** | All ready CDRs in the selected NR Mode |
+| **Select latest of each type** | The latest ready Data, Voice and Speech CDR |
+| **Select latest two of each type** | Up to two latest ready CDRs per type |
 
-Selecting a Scoring job restores its CDR selection, NR Mode, context filters, aggregation levels, GAP reference and methodology in **Select CDRs, filters, aggregation levels & GAP reference**, so it can be relaunched. Its CDR, context filter, aggregation and GAP reference subpanels share a pastel green palette. It also loads its output and scrolls directly to Scoring results. Automatic job refreshes do not overwrite calculation edits. Scoring calculation places its Methodology Environments, Aggregation hierarchy and KPI Priorities shortcuts at the bottom right, with the same icons, colors and styling as Scoring Results. The Scoring results header places Environment and visibility controls together on the left and six configuration/export actions in one row on the right, without a verbose metadata summary below its title. Scoring job titles show the creation date, NR Mode, Regions, Cities, Operators, Vendors and Campaign, separated by **●**. Each dimension segment and NR Mode has its own consistent color; date and separators stay neutral. Selecting every available filter value is saved as an unrestricted selection, except Vendor: explicit vendor selections remain saved by name. Job titles use All labels for unrestricted filters and for complete lists matching the saved job’s CDR catalogues; partial lists remain explicit. A compact CDR button replaces the source-name list on job cards: hover to see all names in a tooltip, or click to open the full list in a floating panel; the aggregation levels and GAP reference remain available in the job metadata. Job cards in the history and Results selector highlight **Aggregation levels** separately from **GAP Reference**, with arrows indicating their saved order. **GAP Reference** and **Scoring Methodology** display the reference operator and methodology name in bold, contrasting colors.
+“Latest” first uses a recognized date in the CDR name: year-quarter, YYYY-MM-DD, DD-MM-YYYY or a compact date. When no name date is recognized, upload time is used. Ties use upload time, then dataset ID.
+
+On first use, the module selects the latest ready CDR of each type for the chosen NR Mode.
+
+### 3. Set filters, aggregation and reference
+
+1. Restrict **Operators**, **Vendors**, **Regions**, **Cities** or **Campaigns** if needed.
+2. Choose the aggregation levels. **Operator** is always included; additional levels split the results into separate combinations.
+3. In **GAP reference operator**, select the operator to compare against. The initial reference is **EE**.
+4. Choose the saved **Scoring Methodology** beside Calculate and Recalculate.
+
+The configured hierarchy determines the order of the filter controls and aggregation headers. The initial order is **Operator → Vendor → Region → City → Campaign**.
+
+### 4. Calculate or recalculate
+
+| Situation | Action |
+| --- | --- |
+| No matching job exists | **Calculate Scoring** creates a job |
+| A matching job already exists | **Calculate Scoring** is disabled; **Recalculate** updates that job |
+| An identical job is queued or running | Both actions are disabled until it finishes |
+
+Matching checks the CDR content, NR Mode, filters, aggregation levels, GAP reference and saved methodology. A change to these inputs can produce a different job, even when its visible title looks similar.
+
+Recalculation keeps the job identifier, replaces its results and updates the displayed date/time to the recalculation submission time. Job lists show the latest calculations first.
+
+> [!TIP]
+> Read the **yellow message below the methodology selector** when an action is unavailable. It explains duplicate jobs, incomplete selections and other calculation conditions.
+
+### 5. Open a saved job
+
+Select a job in the **Scoring Results** dropdown or the **Scoring Jobs** history. The module loads its saved results and restores its calculation inputs so you can relaunch it.
+
+Job cards show filters, ordered aggregation levels, **GAP Reference** and **Scoring Methodology**. A complete vendor selection appears as **All Vendors**. Hover or click the **CDRs** button to inspect the source files.
+
+Deleting a job removes its saved results after confirmation; it does not delete its source CDRs. Running work stops at a processing checkpoint or discards its pending result.
+
+### What is remembered?
+
+- **Shared across workspace users and browsers:** CDRs, NR Mode, methodology, filters, aggregation and GAP reference. These calculation selections save automatically.
+- **Within the browser session:** result tab, environment, display controls, comparison selection and scroll position.
+- **Inside each job:** source metadata, rules, grouping, results and warnings captured for that calculation.
+
+Automatic job refreshes do not overwrite edits to the calculation controls. Removed or unready inputs produce a notice when a saved selection is restored.
+
+## Filters and aggregation
+
+### Filtering chooses rows; aggregation chooses groups
+
+| Control | Example | Effect |
+| --- | --- | --- |
+| Filter | City = Leeds and London | Include rows from either city |
+| Aggregation | Operator → City → Campaign | Calculate separate results for each operator/city/campaign combination |
+| Omit an aggregation level | Campaign not selected | Pool the selected campaigns' raw rows before calculating KPIs |
+
+Values within a filter combine with **OR**. Different filter fields combine with **AND**. An empty selection means all values. **Main Cities** selects configured workspace cities that exist in the selected CDRs.
+
+The engine pools raw rows before calculating ratios, averages, medians and P90. It does not average KPI results already calculated from separate files.
+
+> [!TIP]
+> Select **Campaign** when you want a separate column or bar for each campaign. Filtering two campaigns alone does not separate their results.
+
+### Vendor filtering
+
+The Vendor selector lists **vendor names only**, without operator prefixes. Operators with no assigned vendor are not listed as vendor choices.
+
+For example, selecting **Ericsson** and **Huawei** includes:
+
+- Matching Ericsson or Huawei rows from any selected operator.
+- All rows from selected operators that have no assigned vendor.
+
+The **Operator** filter can exclude either group. When Vendor is an aggregation level, operators without a vendor display **All** in that level. Web and PowerPoint use the same vendor labels.
+
+### How the GAP reference is matched
+
+Each comparison retains the selected environment and aggregation context. For vendor comparisons, the engine tries the same vendor first, then the reference operator's **All** vendor group.
+
+> [!NOTE]
+> **EE / All can be the reference for Ericsson, Huawei and other vendor groups.** Campaign, City, Region and other selected levels must still match. The fallback does not compare different cities or campaigns.
+
+No matching reference or no common valid environment contribution produces **N/A***.
+
+Filter choices use cached CDR catalogues. If an older CDR lacks expected choices, reprocess it to refresh its catalogue.
 
 ## Results and workspace settings
 
-The **Environment** dropdown applies to all result tabs and starts with **All Environments** on first use and restores the saved choice on refresh. This displays the Combined aggregate using all environments in the saved methodology. Each KPI maximum is the sum of its configured maximum points across those environments, including zero-point contributions; category maxima sum their KPI maxima and the overall maximum sums every category. Missing source coverage does not lower these maxima or switch the display to an individual environment: available measured contributions remain marked incomplete. GAPs use only valid environment contributions common to the operator and reference; a strict subset is marked partial with an asterisk. No common coverage or a missing reference leaf gives N/A. Missing measurements are never replaced with zero or renormalized. During Scoring processing, each global raw KPI is recalculated by applying its formula and filters to the pooled source rows matching the configured environments within the selected aggregation context. These measurements and their sample counts are saved with the result and displayed in the All Environments KPI Value columns; final environment values are never averaged. Weighted scores still sum the separately calculated environment points. Historical jobs without saved global measurements show N/A until recalculated. Choose DriveCity, Drive Connecting Roads, Walk or a custom environment to inspect its own contribution. Exporting All Environments includes the available aggregate first and then every individual environment; selecting one environment exports only that environment.
+### Choose an environment
 
-With several selected levels, Scoring and GAP tables show all available combinations in one matrix per Environment, with nested headers in hierarchy order. Headers display values without repeating dimension names. Web Scoring and GAP tables use neutral blue-gray headers, pale mapped operator headers with color accents and softened performance colors matched by their legends. Web Summary has one Category column; Breakdown alternates pale blue-gray Category blocks. Score weight (%) and Max score use lavender and turquoise headers with uniform lighter body fills. Reliable uses pastel green and Diff uses mauve pink; subtotal and total metadata cells retain their row fill. PowerPoint retains its existing table styling; Summary shows one CATEGORY column containing category total labels and a Best/Worst legend above the table on the right. For example, Operator → Region → Campaign groups each operator’s regions and then each region’s campaigns. Scoring and Best Network charts use separate axis rows for the selected levels, with child values nearest the bars and parent values centered below their groups, and follow Operator Mapping colors. The stacked chart in Scoring Charts explains its category shades with a continuous grayscale bar inside the chart, below the bars and hierarchy axis, with each category name wrapped inside its shaded segment. The category comparison chart below it uses category labels on the axis and omits the grayscale bar. The bar remains included in enlarged views and PowerPoint. All web chart numbers use a dot as the decimal separator regardless of browser language, including axes, labels, allocation legends and tooltips. Interior labels in the service and category stacked charts use larger plain numbers sized to fit inside each segment, without outlines, with dark or white text chosen to contrast with the fill, including enlarged views. Both Best Network charts share the same horizontal SVG scale, margins and wider bar-width rule so score labels, legends, axes and bars have consistent sizes, using the service chart’s text scale; bar width adapts to the available slot and long series retain horizontal scrolling. Chart titles, axis titles and axis labels use larger text, with enough space for hierarchical labels. The operator legend is centered above both Best Network charts, without an extra Operators heading. Donut charts are titled **Maximum score per environment & service** and **Maximum score per environment & category**. Their vertical axes use the selected environment’s configured maximum score and 3–6 equal intervals chosen for round integer ticks; the range expands when needed to include higher scores. Interior numbers fit their segments, with larger bold totals. Interior score labels and totals always show one decimal place (for example, `838.0`). Service labels omit the D/V prefixes; a grayscale legend below the service chart identifies Data as the dark part and Voice as the light part. Hover chart bars, stacked segments, total labels or allocation sectors to inspect their value and category/family, operator and aggregation context where applicable; the enlarged chart preserves these tooltips. GAPs compare a leaf with the reference at the same Vendor/Region/City/Campaign values; missing reference leaves remain N/A.
+The **Environment** selector applies to all result tabs and exports. An individual environment shows its own contribution; **All Environments** combines the configured environments.
 
-**Scoring Tables** displays **Summary** first (one row per category) and **Breakdown** below it (KPI rows plus a bold subtotal after each category). Summary highlights the highest and lowest valid operator scores in green and red for each category and the TOTAL, including tied extremes; equal scores and groups with fewer than two valid scores stay neutral. Hierarchical Summary rows rank all displayed score combinations together across the entire row, rather than separately by vendor, campaign or other aggregation values. The web Best operator/Worst operator legend appears above Summary, and the KPI score-band legend appears above Breakdown. PowerPoint Summary places its Best/Worst legend above the table on the right, matching Breakdown; both legends align exactly with the table’s right edge. Both use CATEGORY as their first header and merge each consecutive category group through its subtotal, without repeating the category name in a separate subtotal cell. Both are exported to PowerPoint; there is no Results mode selector. Individual GAP Analysis tables place **Type of KPI** before the GAP column. All PowerPoint content slide subtitles use the environment’s display name (for example Drive - City or Drive - Connecting Roads), matching its transition title; aggregate slides use All Environments. Web chart subtitles show the environment without an Environment prefix. Individual GAP slides put the operator comparison in the title with a copper accent. All GAP PowerPoint tables, including combined and individual comparisons and hierarchical views, use muted blue-gray metadata headers, mapped operator colors with contrasting text in comparison headers and pale blue category cells with dark text. The web Breakdown Category column alternates pale blue-gray fills at each category change. PowerPoint Breakdown uses muted blue-gray headers for its first three columns, matching GAP metadata headers, and a neutral blue-gray Category column. Scoring subtotal backgrounds follow the Category column, except PowerPoint Summary: it keeps gray category rows and a darker gray total row, with green best-operator and red worst-operator score cells and a matching legend. The Summary CATEGORY header retains its blue-gray fill. Individual GAP comparisons display KPIs by signed GAP from lowest to highest, with unavailable values last. Comparisons with multiple operators retain the default KPI definition order. GAP Priority remains saved in Workspace Config but does not control either order. All PowerPoint GAP and Scoring Breakdown Category values are bold and left-aligned, including single-KPI categories and merged cells. PowerPoint Scoring tables include the * incomplete legend only when a displayed score or GAP carries an asterisk. When a Best Network chart exceeds twenty bars or a Scoring per Category chart exceeds forty bars, the PowerPoint action asks whether to split charts across slides or keep all bars on one slide. Keeping all bars reduces label and grid font sizes to fit; Scoring per Category shows smaller integer bar labels above forty bars and hides them above seventy; grid values use one consistent font size per aggregation level, and level captions stay centered beside wrapped rows; splitting Best Network charts paginates at twenty bars, prioritizing 3, EE and VF_UK together when they fit, retaining aggregation order within each page and a common vertical scale, with normal horizontal-axis labels for a single aggregation level and editable grids aligned to bar centers and naming each level for multiple levels, wider bars and contrasting segment numbers; labels too small to fit are omitted while values remain in the editable chart. Non-hierarchical category charts split at twenty bars by grouping complete categories, never splitting a category across slides. Category grayscale keys have a fixed width confined to the chart area. When splitting is enabled, hierarchical Scoring per Category keeps each category complete on its own slide. Without splitting, all categories and their bars share one slide. Both layouts retain Category as level 0 above the saved aggregation hierarchy, an editable axis grid and one legend entry per operator. GAP tables reserve a separate bottom area for the color scale; the Priority arrow starts below its label and ends at the table bottom. GAP Category cells merge consecutive KPI rows of the same category and alternate pale-blue fills for each consecutive block in both the web tool and PowerPoint. All combined and individual GAP tables in the web tool and PowerPoint show KPI comparisons without category subtotals or an overall average row, followed by a bold Total KPI GAP footer summing each displayed column independently. The footer sums available values, marks missing or partial contributions with an asterisk, and shows N/A when a column has no valid comparisons; individual PowerPoint side notes show Average KPI GAP (the arithmetic mean) and Average total KPI GAP (the mean of the KPI sums for each displayed column). Each column represents one combination of the selected aggregation levels, such as city and campaign; columns with no valid GAPs are excluded from this mean. Average KPI GAP uses all available KPI comparisons on the slide. Both use the original weighted GAP points without applying KPI weights again, with negative values in red and positive values in green; partial coverage is marked with an asterisk and unavailable aggregates show N/A. Individual comparisons show a bold notice above the color scale on the right identifying the ascending GAP order; multiple-operator comparisons omit this notice. Category scoring points, maximum points and weights are sums. Raw KPI measurements have different units, so category raw-value cells are blank and final raw-value cells show N/A. The weighted Score total keeps its existing sum. Environment and visibility checkboxes share one row below the Scoring Results heading on the left, with the checkboxes to the right of Environment. Configuration shortcuts precede the CSV/PowerPoint exports in a single row on the right; all six actions have outlined SVG icons and coordinated gradient colors, with orange tones for PowerPoint. Each tab content heading uses a copper color, an em dash before the highlighted Environment badge and a horizontal divider underneath. Summary omits **Type of KPI**. PowerPoint Summary uses a single **CATEGORY** column containing category total labels; the web Summary retains its category-name header **CATEGORY**. Breakdown shows **Type of KPI** after the KPI name. Web Scoring and GAP use pastel green for **Reliable** and mauve pink for **Diff**; PowerPoint retains pale green and pastel yellow respectively. Category subtotals and final totals keep their neutral backgrounds. Weights and maximum points follow the type column, before operator scoring columns; PowerPoint preserves the type labels and its existing colors. **Show GAP values** starts unchecked on first use: the Scoring Tables omits GAP columns and hides their placement selector until enabled. GAP Analysis remains available independently. **GAP columns** defaults to **At the end** on first use; choose **Next to each score** to place each comparison beside its operator score. The reference operator never has a GAP column. PowerPoint follows Scoring Tables GAP visibility and the selected placement; its dedicated GAP Analysis slides remain included. Existing export URLs without `show_gap_values` retain GAP columns for compatibility. The KPI/GAP visibility checkboxes share one row below the Environment selector, with the GAP placement selector beside Show GAP values. The Environment control matches the checkbox panel width. The checkbox panel keeps the same height whether GAP values are enabled or disabled; its width fits the checkboxes and expands horizontally when the GAP placement selector is shown. **Show KPI values** adds the measured values in Breakdown only; Summary always omits raw KPI Value columns because measurements cannot be aggregated across KPIs. Breakdown shows the measured values for each operator before the scoring columns, under a shared **KPI Value** header, displayed with two decimals without changing calculation precision; the points columns share a **Score** header. A horizontal line directly below each operator name uses its mapped color; the reference operator uses its mapped color as well. Vendor, Region, City and Campaign headers retain their neutral backgrounds and have no operator marker. Tables grow to show all rows without an internal vertical scrollbar. Scoring Tables numeric text, including weight and maximum score, and GAP Analysis numeric text grow more prominently when cells have enough room and remain compact in dense tables. N/A cells use the same adaptive sizing as measured values, including subtotals and totals. Table headers use larger text. Operator Mapping supplies the operator labels, reference dropdown, column/series order and colors for the web views and PowerPoint; unmapped operators follow the configured operators alphabetically. Mapping updates apply when reopening saved results without changing their measured values.
+For the initial NetCheck 2026 allocation:
 
-KPI scoring cells use Low, Medium, High and UltraHigh threshold colors; unavailable or incomplete measurements use neutral cells. GAP cells use a shared scale for each comparison context, with negative deficits becoming red and positive advantages green; a nonlinear intensity scale makes smaller differences visible. Category total rows use neutral backgrounds; KPI rows retain the independent threshold and GAP scales. PowerPoint Summary uses gray Category cells for category totals and a darker gray final total. The KPI/GAP visibility controls appear only in Scoring Tables and keep their saved values when changing tabs. The Scoring Charts tab starts with **Best Network Scoring per Service** and its **Maximum score per environment & service** donut side by side. Below them, **Best Network Scoring per Category** has a **Maximum score per environment & category** donut beside its stacked chart, with environment shares outside and distinct category colors and configured category maxima inside. Both allocation donuts are larger and centered, with compact legends underneath listing environments first. Legend headings use **Points per Environment:** and **Points per Service:** or **Points per KPI Category:**, with indented entries, representative icons, maximum points and percentages of the total. Category legend names use title case, environment labels use Drive - City and Drive - Connecting Roads, and points/percentages use contrasting copper text; legend fonts adapt to keep each entry on one line. Web rings use filled sectors with clean radial joins, thick bands matching the reference presentation and a subtle gap between rings that preserves their widths. Both web and PowerPoint use larger percentage labels that adapt to the available space inside each ring and segment; small segments retain percentages in their legend. It has one stacked bar per operator/aggregation leaf: its category segments use ordered shades of that operator's mapped color and a grayscale category legend. **Scoring per Category** groups solid operator-colored bars by category for direct category comparisons, preserving every selected aggregation leaf, with compact group spacing, a responsive panel width, category axis labels and no grayscale legend. Both charts show weighted points, numeric labels, spaced mapped operator legends and category/value tooltips. Small allocations such as Multi RAB can form a thin segment without a numeric label; the legend and tooltip still identify them. Best Network Scoring per Service stacks Data below Voice in both web and PowerPoint and combines their points and a donut of their configured maximum allocation, following the reference presentation. Its bar chart fits up to ten bars in the visible card; larger comparisons retain at least ten visible bars before horizontal scrolling. Voice and Speech KPIs contribute to Voice; Data KPIs contribute to Data, independently of category names. Its maximum follows the selected environment and configured weights; missing inputs are not scaled to a full result. Both views show a legend in the mapped operator colors and support enlarged floating charts by double-click.
+| Environment | Configured maximum |
+| --- | ---: |
+| Drive - City | 650 points |
+| Drive - Connecting Roads | 350 points |
+| Walk | 0 initial points |
+| All Environments | 1,000 points |
 
-GAP Analysis initially selects **All vs reference**, displaying every compared operator in a single table in KPI definition order. The highlighted **GAP comparison** dropdown also offers individual operators and restores the selected comparison after a page refresh in the same browser tab, scoped to the saved job and comparison context. The content heading shows **GAP Analysis** and the Environment badge; the selected comparison appears in the dropdown. The GAP color scale sits to the right of the KPI GAP explanation in the same row, wrapping below when space is limited. GAP operator headers use their mapped operator color with contrasting text in both the web view and PowerPoint, and identify each comparison as **operator – reference**. The web table omits the redundant **All vs reference** group row while keeping selected aggregation levels. Missing comparisons remain N/A. Partial Score totals remain marked with an asterisk.
+Custom methodologies can change these allocations. When the combined result has incomplete coverage, opening a job prefers an available environment with complete coverage. You can still select All Environments.
 
-Under **Config → Workspace Config → Scoring & GAP Analysis Setup**, the methodology selector and editable title sit directly above three matching dark green panels: **Methodology Environments**, **Methodology Aggregation Hierarchy** and **Methodology KPIs Priorities for GAP analysis**. KPI definitions are a collapsible subpanel inside Environments. Use the hierarchy panel arrows to order all five dimensions and save before creating a job. The **Scoring Calculation** and **Scoring Results** panels link directly to each of these configuration sections, opening and scrolling to the selected panel. The selected dimensions follow this order in filters, aggregation controls, tables, charts and PowerPoint. Select a named scoring methodology to edit it, or use Create Methodology / Duplicate Methodology without changing the default. Click **Set Default**, next to Rename Methodology, to use the selected methodology for future scoring jobs; the selector marks it **Default**. Delete Methodology is disabled for the default methodology; set another methodology as Default before deleting it. Editor buttons include representative SVG icons before their labels. Changing the selector does not count as an unsaved edit. Edit its category-grouped KPI definitions and save when finished. The **KPI Definitions, Scoring & Thresholds** table supports moving whole categories up/down using the larger violet arrows on the right of each category header, adding a category below an existing one with the circular SVG button beside its category up/down controls (tooltip: **Add category below**), adding KPIs below a chosen row, moving them within their category, deleting and replacing KPIs, and editing categories, labels, formulas, filters, source types, direction, per-environment thresholds, maximum points, KPI types and interpolation anchors. Each category shows its total points, weight within its Environment and weight across all Environments. **Points** edits absolute allocations; **Weight (%)** edits a KPI's relative Environment share and proportionally redistributes the other KPIs, preserving the Environment total. A separate global-weight column is read-only. The Environment allocation is editable as points or a percentage of the grand total; changing its percentage preserves that grand total. Distribute Points assigns a chosen total to the selected Environment using the relative KPI shares of a reference Environment, through a floating dialog and an ordinary configuration save. Walk starts at zero points in NetCheck 2026, with editable relative weights ready for a future allocation. The expression validator only accepts supported fields and operations; arbitrary code is never executed. The priority panel shows each KPI’s category and orders category groups by their first priority KPI, then the KPIs within each group. Use the row controls to move a KPI up or down, to the first or last position, or to a specific position from 1 to the number of KPIs using the inline position field in reserved space on the right and its green checkmark (or Enter). The red cross cancels without moving the KPI; opening the field does not shift the table. Use **Save Methodology** in the methodology toolbar, Environments, Hierarchy or GAP Priority: every button commits the entire open methodology, including all environments, KPIs, hierarchy and priorities. Save settings before creating a new job. Jobs retain their calculation configuration, so changing settings changes the cache identity and new calculations while preserving historical jobs.
+### Scoring Tables
 
-**Import Methodology (JSON)** and **Export Methodology (JSON)** use the same portable format as the configuration document in ZIP packages. All methodologies, the default selection and their settings travel together through the **Scoring Configuration** import/export component, workspace transfers and configuration backups/restores. Legacy single-profile JSON and ZIP packages remain importable. Full workspace database backups also include them.
+| View | What it shows |
+| --- | --- |
+| **Summary** | Category totals and the weighted score total |
+| **Breakdown** | Each KPI, its maximum points and weight, plus category subtotals |
+| **Show KPI values** | Measured KPI values in Breakdown, before the Score columns |
+| **Show GAP values** | GAP columns at the end or next to each compared operator's score |
+
+Summary highlights the highest and lowest valid scores **across the whole displayed row**. Tied extremes can highlight several cells. Equal scores, or fewer than two valid scores, remain neutral.
+
+Breakdown score colors use **Low**, **Medium**, **High** and **UltraHigh** bands. Category totals remain neutral. Raw measurements are not summed across different KPIs because their units differ.
+
+GAP visibility starts unchecked. It affects Scoring Tables and its PowerPoint tables; dedicated GAP Analysis views remain available.
+
+### GAP Analysis
+
+**GAP = compared operator weighted points − reference operator weighted points.**
+
+| Value | Meaning |
+| --- | --- |
+| Positive / green | The compared operator leads the reference |
+| Negative / red | The compared operator trails the reference |
+| Zero | Equal weighted points |
+| **N/A*** | No valid comparison is available |
+
+**GAP comparison** offers **All vs reference** and each individual operator. Individual comparisons order KPI rows from lowest to highest GAP, with unavailable values last. All Operators retains KPI definition order. Saved GAP priorities do not control this display order.
+
+Every GAP table ends with **Total KPI GAP**, the sum of the valid KPI GAPs in **each column separately**, in web and PowerPoint.
+
+Individual PowerPoint slides also show:
+
+| Side note | Calculation |
+| --- | --- |
+| **Average KPI GAP** | Mean of all valid KPI GAP cells displayed on the slide |
+| **Average total KPI GAP** | Calculate each column's KPI sum, then average those column totals |
+
+Columns represent combinations of the selected levels, such as City and Campaign. Columns without any valid GAPs are excluded from the mean of totals.
+
+> [!IMPORTANT]
+> **Do not apply KPI weights again to GAP points.** Each KPI GAP already subtracts weighted scoring points. Totals sum those points; averages use them directly.
+
+**Example — two campaign columns:** Q1 totals −51.64 points and Q2 totals −87.08 points. The **Average total KPI GAP** is `(−51.64 − 87.08) / 2 = −69.36 points`. This differs from the mean per KPI.
+
+### Scoring Charts
+
+| Chart | Use it to… |
+| --- | --- |
+| **Best Network Scoring per Service** | Compare total points and Data/Voice contributions; Data stacks below Voice |
+| **Best Network Scoring per Category** | Compare category contributions within each operator/context stack |
+| **Scoring per Category** | Compare operators directly within each category |
+| **Maximum score allocation donuts** | Inspect configured environment, service and category maxima and shares |
+
+Voice and Speech KPIs contribute to **Voice**; Data KPIs contribute to **Data**, regardless of category names. Allocation donuts show **maximum available allocation**, not earned scores.
+
+Hover bars, segments, totals or donut sectors for values and context. Double-click charts for an enlarged view. Dense web charts scroll horizontally. Operator Mapping supplies labels, order and colors.
+
+A single aggregation level uses normal axis labels; multiple levels use separate header rows. Campaign labels display year-quarter, such as **2026-Q1**, while stored campaign names and CSV identifiers remain unchanged.
+
+### Incomplete coverage and achievable scoring
+
+The pale yellow **Calculation notes** card lists affected combinations, missing KPI names and the **exact maximum achievable score** after excluding their unavailable contributions.
+
+> [!WARNING]
+> **Missing points are not redistributed.** An incomplete result keeps the original weights and configured benchmark maximum. Available contributions are not scaled up to a complete score.
+
+Example: **VF_UK / Samsung / Q1: maximum 583.2645 of 650 points**, with the unavailable KPI names listed below. Another campaign can have a different achievable maximum because different KPIs are missing.
+
+- Incomplete numeric values appear **in bold red with `*`**.
+- Unavailable values appear **as N/A*** in the same style.
+- Total KPI GAP sums available contributions and carries `*` when a contribution is missing or partial.
+- All Environments GAP uses valid environment contributions common to both sides. A subset is partial; no common contribution is unavailable.
+- Tooltips explain partial GAP coverage; PowerPoint slide notes include the coverage details.
+
+All Environments raw KPI values are calculated from pooled source rows, not averaged from environment KPI values. Older jobs without these saved measurements show N/A until recalculated. Weighted scoring points still sum the separately calculated environment contributions.
 
 ## Methodology
 
-Scoring rules are read exclusively from the workspace database. The local, Git-ignored reference `assets/scoring/netcheck_2026.json` can be imported explicitly to initialize those rules. Its thresholds and weights come from `Netcheck_Score_Mapping_2026Q2_BestNetwork_Drive_City_Road.xlsx`; KPI definitions and filters come from `Join_NC_CDR_KPIsv3_all_UK.tfl`, with methodology context from `20260416 NET CHECK Press Benchmarking Package for Mobile Networks.pdf`.
+A methodology contains the complete environment, KPI, weighting, threshold, hierarchy and priority setup. Open **Workspace Config → Scoring & GAP Analysis Setup** to edit it. Calculation and Results shortcuts open the relevant sections directly.
 
-The original documents are reference material, not application dependencies. The reference JSON contains extracted rules in the same format as exported Scoring Configuration documents; its document names and spreadsheet/Prep references are provenance only. It is never loaded automatically. [Scoring methodology configuration](scoring-methodology.md) describes every field, the runtime consumers and the update/migration procedure for a future NetCheck methodology.
+### Named methodologies and portable JSON
 
-- `G_Level_1 = Drive` and `G_Level_2 = City` select the City mapping. `Drive` and `Connectionroad` select the Road mapping. Geography fields do not substitute for these environment fields.
-- KPI scores are piecewise linear between the workbook's threshold anchors and clipped to the allowed range. Low maps to 0%, Medium to 80%, and High to 100% for mappings without Ultra. With Ultra, the throughput P90 KPIs K20/K25 (formerly C25/C30) use High = 90%; the other supported mappings use High = 95%. Ultra maps to 100%. These per-KPI anchors follow the supplied workbook and can be changed in Workspace Config.
-- Dynamic best-value Ultra thresholds use all operators in the selected comparison context, following the PDF's best-achieved definition. The current Excel City cells J23/J28/J29 instead use M:O and exclude 3/EE, without a documented reason; Road uses K:O. This deliberate generalization supports arbitrary operator selections and is not literal parity with those City spreadsheet ranges. Source formula references retain the actual ranges for audit.
-- City and Road retain their prescribed 65%/35% contribution. Missing environments, CDR types, fields or valid samples do not cause the remaining points to be silently scaled to a full score.
-- KPI rows retain values, normalized scores, weighted points, maximum points and sample counts. Charts show weighted score points and use the reference operator and configured Operator Mapping order/colors. Coverage warnings explain missing or unsupported inputs.
-- GAP is **compared operator weighted points minus reference operator weighted points**, in the same units as the scoring table. A positive GAP means the operator has more points and is green; a negative GAP means it has fewer points and is red. Saved jobs from the earlier inverse convention are converted when read/exported without changing their stored measurements. Both sides must exist in the same comparison context; the module does not substitute the best operator when the baseline is absent. All Environments GAPs subtract the reference from the compared operator using only their common valid environment contributions. Partial comparisons and averages containing them have an asterisk, and their tooltip identifies the included environments. Disjoint coverage remains N/A.
+Open **Workspace Config → Scoring & GAP Analysis Setup**. Select a methodology or use **Create Methodology** / **Duplicate Methodology** to prepare another one.
 
-The supplied mapping applies to Drive City and Drive Connecting Roads. The Road environment matches `G_Level_1 = Drive` and `G_Level_2 = Connecting Roads`. Walk is supported with zero initial points; its initial City-derived thresholds require validation before assigning it points. Additional Environments can be created from a reference definition and matched using `G_Level_1` / optional `G_Level_2` dropdowns populated from all ready CDRs in the workspace, renamed or deleted in Workspace Config. The source values are cached per CDR in the existing CDR catalogues table during processing; older CDRs are backfilled once when the source choices are requested. Later requests read the cache. Existing saved source values remain selectable even when absent from current CDRs. These caches are preserved by workspace database backup/restore; configuration-only export transfers the saved source selectors, while available choices come from the destination workspace CDRs. The setup places the methodology controls directly above matching dark green Environments, Aggregation Hierarchy and Methodology KPIs Priorities for GAP analysis panels. Environments contains the pastel red, collapsible KPI Definitions, Scoring & Thresholds subpanel with the selected environment name in parentheses. The KPI subpanel starts collapsed and shows a prompt to expand it to edit KPI specifications, thresholds and weights for the selected environment. It retains its state on reload, and resets to collapsed when returning after leaving the page. Every Save Methodology button uses the same color and commits all environment/KPI edits, pending aggregation hierarchy and GAP priority changes. One shared save or unsaved-change status appears above the three panels; the methodology toolbar and each panel provide the same complete save action. Rename Environment preserves every KPI context, points, relative shares, thresholds and source-matching rules; save the methodology to apply the new name to future jobs, configuration exports and historical job display labels. Historical jobs retain their calculation rules and numeric results. Validate their copied thresholds for the new context. The NR selector separates dataset universes; it does not imply that another methodology has been provided for SA. Historical jobs over a single CDR type remain readable with partial coverage. New calculations require Data, Voice and Speech inputs; complete benchmark results also require the applicable measurements and City/Road coverage.
+The selector's name identifies the methodology. **Methodology title** is an optional editable description preserved in transfers.
 
-The PDF's Drive/Walk allocation includes scopes outside this workbook and totals 675 points; it is not the workbook's 650/350 two-environment scale. The implementation keeps the supplied Excel's 1,000-point allocation instead of mixing both methodologies.
+#### One complete save
 
-The reference PPT contains an earlier Q4 Drive City weighting: Classic Call Success has a 142.80-point maximum, compared with 73.4825 City points in the supplied Q2 workbook (113.05 City plus Road). Its table layout applies here, but the supported GAP convention is operator minus reference, and its absolute points are not a numeric golden for this mapping version.
+The toolbar and three sibling panels offer the same **Save Methodology** action:
+
+| Panel | Settings included in the save |
+| --- | --- |
+| **Methodology Environments** | All environments, allocations, KPI specifications and thresholds |
+| **Methodology Aggregation Hierarchy** | Ordered grouping dimensions |
+| **Methodology KPIs Priorities for GAP analysis** | Saved priority order |
+
+> [!NOTE]
+> **Save Methodology commits all pending settings together.** The buttons are convenient entry points to one complete save, not separate panel-specific saves. The shared status above the panels indicates saved or pending changes.
+
+Selecting a methodology does not change the workspace default. **Set Default** chooses the methodology used by future default/automatic calculations. You can choose another saved methodology for a manual job.
+
+The default methodology cannot be deleted until another is set as default. Completed jobs keep their captured rules and results after editing or deleting a methodology.
+
+#### Save versus export
+
+| Action | Scope | Result |
+| --- | --- | --- |
+| **Save Methodology** | Open methodology and all pending edits | Writes to the workspace database |
+| **Export Methodology (JSON)** | Selected saved methodology | Downloads a one-methodology document |
+| **Import Methodology (JSON)** | One methodology or a collection | Adds IDs and replaces matching IDs after confirmation, preserving other methodologies and the existing default |
+| **Admin Scoring Configuration export/import** | Complete collection and default | Transfers the workspace's methodology setup |
+| **Configuration backup / restore** | Included scoring configuration component | Preserves/restores the collection and default |
+| **Workspace database backup / restore** | Whole workspace database | Also preserves jobs, results and local calculation selections |
+
+> [!TIP]
+> Save pending edits before exporting. Duplicate a methodology before revising a benchmark, and export or back up the collection before replacing it through Admin.
+
+The editor import merges by methodology ID. Duplicate names with different IDs are rejected. Collection replacement through Admin replaces the destination collection; review its contents first.
+
+### Configure environments
+
+An environment defines **which CDR rows to include** and **how many points its KPIs can contribute**. It belongs to the selected methodology.
+
+#### Source-row matching
+
+Select the environment and use **CDR filters**:
+
+| Field | Meaning | Example |
+| --- | --- | --- |
+| **G_Level_1** | Required first-level source value | Drive |
+| **G_Level_2** | Optional second-level source value | City |
+
+With Drive and City selected, only rows matching **both** values are included. Leaving G_Level_2 empty includes every second-level value for the selected G_Level_1.
+
+These source values are different from geographic Region/City filters. Changing an environment's display name does not change its matching rule.
+
+> [!WARNING]
+> **Environment source rules cannot overlap.** Two environments cannot select the same first/second-level combination. An unrestricted second level also conflicts with a narrower environment using the same first level.
+
+Available choices come from ready workspace CDR catalogues. Saved source values remain selectable even when absent from current CDRs. Configuration exports carry the selected values; available choices at the destination come from its own CDRs.
+
+#### Create, rename or delete
+
+1. Use **Create Environment** and enter its name, reference environment, points and source filters.
+2. The new environment copies KPI thresholds and relative shares from the reference.
+3. Review the copied rules, then **Save Methodology**.
+
+**Rename Environment** preserves KPI contexts, weights, thresholds and source filters. Historical numeric results stay unchanged; supported result views can display the current environment name.
+
+**Delete Environment** removes its contexts from the draft. Keep at least one environment and a positive overall allocation. Names must be unique, ignoring case; **Combined** is reserved.
+
+> [!WARNING]
+> **Copied thresholds need review for their new context.** The initial Walk environment has zero points and City-derived rules. Validate it before assigning benchmark points.
+
+#### Environment allocation
+
+| Edit mode | Effect |
+| --- | --- |
+| **Points** | Set the environment's absolute allocation |
+| **Weight (%)** | Change its share while preserving the grand total and redistributing other environments proportionally |
+| **Distribute points keeping percentages** | Allocate a chosen total using a reference environment's relative KPI shares |
+
+Distribution changes points, not formulas or thresholds. Relative shares can be edited and retained even when an environment has zero points.
+
+### Editing, replacing, adding and removing KPIs
+
+#### Edit a definition
+
+1. Select the environment.
+2. Expand the pastel red **KPI Definitions, Scoring & Thresholds** subpanel.
+3. Edit the definition and its environment-specific scoring settings.
+4. Save the complete methodology, then calculate or recalculate a job.
+
+| Setting | What it controls |
+| --- | --- |
+| **Code** | Stable identity and priority references |
+| **KPI / Category** | Display labels and grouping |
+| **Source** | Data, Voice or Speech CDR rows |
+| **Formula / filters** | Measurement and eligible source rows |
+| **Direction** | Whether higher or lower measurements are better |
+| **Mapping** | Linear, Quadratic or Smooth curve interpolation |
+| **KPI Type** | Reliable / Diff display classification |
+| **Max points / weight** | The KPI's contribution to the environment |
+| **Thresholds / score anchors** | Measurement boundaries and normalized score awarded at each boundary |
+
+KPI Type is descriptive: it does not change the formula, mapping or GAP arithmetic. Calculation basis is read-only information derived from the formula; it does not set the denominator.
+
+#### Points and weights
+
+- **Points:** edit a KPI's absolute maximum.
+- **Weight (%):** edit its environment share; the environment total stays fixed and other KPI shares adjust proportionally.
+- **Global weight:** read-only KPI points divided by the total points across all environments.
+
+Category totals refresh from their KPI allocations. Setting a KPI to zero points keeps its definition without adding a scoring contribution.
+
+#### Add, move, replace or remove
+
+Category controls move whole categories or insert a category below the current one. KPI row controls insert a definition below that row, move it within its category or delete it.
+
+To replace a KPI, revise its label, formula, filters, source, thresholds and points. If you add a replacement as a new row, remove the old contribution deliberately to avoid counting both.
+
+**Example:** replace `PCT90(Mean_Data_Rate)` with `AVG(Mean_Data_Rate)`, rename the KPI to mean throughput and review its thresholds. Keep or change its FDTT/DL/Completed filters intentionally.
+
+Codes remain stable when rows move. New KPIs receive the next unused K number; deleted codes are not recycled. Renaming a code in the editor remaps its saved priority reference. When editing JSON manually, update `gap_priority` references too.
+
+#### Hierarchy and priorities
+
+The hierarchy contains **Operator**, **Vendor**, **Region**, **City** and **Campaign** exactly once. Its order controls the grouping/display sequence; jobs choose which additional levels to include.
+
+The priority editor supports moving a KPI up/down, to the first/last position or to a specified position. Category membership remains visible.
+
+> [!NOTE]
+> **GAP priorities are saved settings.** Current individual GAP tables sort by signed GAP, while All Operators uses KPI definition order. Editing priority does not change these display orders.
+
+#### Supported expression language and limits
+
+| Operation | Example |
+| --- | --- |
+| Average | `AVG(Call_Setup_Time)` |
+| Median | `MEDIAN(field)` |
+| 90th percentile | `PCT90(Mean_Data_Rate)` |
+| Sum / count | `SUM(field)` / `COUNT(field)` |
+| Supported conditional ratio | `100 * SUM(Call_Status == "Completed") / COUNT(Call_Status)` |
+
+Conditions support the implemented comparisons, `AND`, `CONTAINS(...)` and `IS NOT NULL`. Filters use JSON objects; values inside a field select its permitted source values:
+
+```json
+{
+  "Session_Type": ["CALL", "MultiRAB CALL"],
+  "Call_Status": ["Completed", "Dropped"]
+}
+```
+
+The Interactivity packet-error formula has explicit IFNULL behavior for lost, discarded, corrupted and unsent packets. Missing optional loss components count as zero in that formula. `Packets_Sent` remains required and its sum must be positive; missing or zero sent packets produce N/A.
+
+> [!CAUTION]
+> **Formulas use a supported expression allowlist.** Arbitrary Python, SQL or Tableau expressions are not executed. Other absent source fields do not become optional because the packet-loss formula supports IFNULL.
+
+Limits: **256 KPIs**, **32 environments** per methodology and **64 methodologies** per workspace. New fields or unsupported operations require engine support, not just a JSON edit.
+
+### Portable JSON reference
+
+#### Envelope and required content
+
+Exchange format **version 3** uses the same envelope for one methodology or a complete collection. A one-methodology export has one item in `profiles`; Admin exports can contain all items.
+
+The internal JSON names `profiles` and `active_profile_id` remain format identifiers. In the interface, these entities are called **methodologies**, and the active ID identifies the default.
+
+The following minimal example contains one KPI. A complete benchmark must include all intended KPI definitions and a context for every configured environment.
+
+```json
+{
+  "format": "dashboard-analytic-scoring-configuration",
+  "version": 3,
+  "active_profile_id": "netcheck-2026",
+  "profiles": [
+    {
+      "id": "netcheck-2026",
+      "name": "Netcheck 2026",
+      "configuration": {
+        "version": "2026Q2",
+        "title": "NetCheck 2026 scoring",
+        "scope": {
+          "environments": {
+            "Drive - City": {
+              "source_filters": {"G_Level_1": "Drive", "G_Level_2": "City"}
+            }
+          }
+        },
+        "metrics": [{
+          "code": "K1",
+          "category": "CLASSIC CALLS",
+          "kpi": "CALL SUCCESS RATIO [%]",
+          "source_kind": "voice",
+          "direction": "higher_is_better",
+          "kpi_type": "Reliable",
+          "calculation": {
+            "formula": "100 * SUM(Call_Status == \"Completed\") / COUNT(Call_Status)",
+            "filters": {"Session_Type": ["CALL"]}
+          },
+          "contexts": {
+            "Drive - City": {
+              "max_points": 650,
+              "thresholds": {"low": 85, "medium": 98, "high": 100, "ultra": null}
+            }
+          }
+        }],
+        "gap_priority": [],
+        "aggregation_hierarchy": ["Operator", "Vendor", "Region", "City", "Campaign"]
+      }
+    }
+  ]
+}
+```
+
+#### What is stored or derived?
+
+| Field | Meaning |
+| --- | --- |
+| `configuration.version` | Methodology revision; separate from exchange format version |
+| `title` | Optional editable description |
+| `scope.environments` | Names, explicit source filters and optional display names |
+| `metrics` | Nonempty collection of identified KPI definitions |
+| Metric `calculation` | Formula and source filters; the formula determines the denominator |
+| Metric `mapping_method` | `piecewise_linear`, `piecewise_quadratic` or `piecewise_smoothstep` |
+| Metric `contexts` | Each environment's thresholds, maximum points and optional score anchors |
+| `interpolation` | Optional default score anchors |
+| `aggregation_hierarchy` | All five dimensions in order |
+| `gap_priority` | KPI code order; removed codes are dropped and new codes appended |
+| `next_kpi_number` | High-water mark for generated codes |
+
+Environment totals and positive-point relative weights are derived from KPI maximum points, so exports do not duplicate them. Relative shares for zero-point environments are retained.
+
+Reference filenames, workbook cells, denominator descriptions and Tableau grouping keys are not needed for an operational methodology and are omitted. Optional mapping/anchor settings use supported defaults when omitted; retain explicit settings when customized.
+
+Version-2 exchange envelopes must be replaced with a new export. Existing supported workspace records are normalized on read; this is different from accepting an obsolete exchange envelope.
+
+> [!IMPORTANT]
+> JSON import/export, ZIP configuration packages, transfers and configuration backup/restore use the same methodology format. They do not transfer CDR-dependent job results unless the workspace database is included.
+
+### Reference Prep flow and implemented calculation
+
+#### From raw rows to points
+
+1. Apply environment source selectors and job filters.
+2. Group raw rows by the selected Operator/Vendor/Region/City/Campaign levels.
+3. Calculate each KPI from its formula and source filters.
+4. Map the measurement to a normalized score between 0 and 1.
+5. Multiply by the KPI's configured maximum points.
+6. Sum weighted points for categories, environments and total scoring.
+
+Operator aliases use the mapping snapshot saved with the job. When Campaign is not selected as an aggregation level, campaign rows are pooled before KPI calculation.
+
+Unlike the source Prep flow's inner joins, the application preserves groups with missing measurements as N/A and reports their incomplete coverage.
+
+#### Mapping methods and anchors
+
+For normalized position `t` between adjacent measurement thresholds:
+
+| Method | Interpolation fraction |
+| --- | --- |
+| **Linear** | `t` |
+| **Quadratic** | `t²` |
+| **Smooth curve** | `3t² − 2t³` |
+
+All methods preserve the configured threshold anchors, direction and score limits. Mapping and Direction are separate settings. The original NetCheck definitions use Linear.
+
+Default NetCheck anchors without Ultra are **Low = 0%**, **Medium = 80%**, **High = 100%**. With Ultra, K20/K25 use **High = 90%** and other supported mappings use **95%**; **Ultra = 100%**. Per-context anchors are editable.
+
+Dynamic best-value Ultra thresholds use all operators in the selected comparison context. Selecting a different operator scope can therefore change a dynamic threshold.
+
+#### Combined environments and coverage
+
+All Environments sums configured maxima and separately calculated environment points. Missing measurements do not reduce the configured benchmark or redistribute their allocations.
+
+Global raw KPI values are recalculated from pooled source rows across configured environments. They are not averages of environment KPI measurements. Zero-point environments can contribute raw measurements without adding weighted points.
+
+> [!WARNING]
+> **A zero-point environment does not cause incomplete weighted scoring.** A missing positive-point contribution does. Historical jobs without saved global raw measurements require recalculation to display those values.
+
+#### GAP calculations and aggregates
+
+GAP subtracts **reference weighted points** from **compared operator weighted points** within the same context. Vendor matching can use the reference operator's All group; other context levels still match.
+
+| Result | Calculation |
+| --- | --- |
+| KPI GAP | Operator KPI points − reference KPI points |
+| Scoring category/final GAP | Mean of valid original KPI comparisons |
+| GAP table footer | Sum of valid KPI GAPs in each column |
+| Individual PPT Average KPI GAP | Mean of valid displayed KPI GAP cells |
+| Individual PPT Average total KPI GAP | Mean of the displayed columns' KPI sums |
+
+The overall KPI mean uses original KPI rows, not an unweighted mean of category means. No aggregate applies KPI weights a second time.
+
+For All Environments, only valid environment contributions common to both sides are compared. A subset is marked partial; disjoint coverage or a missing reference gives N/A. Column totals with missing/partial contributions carry an asterisk.
+
+
+
 
 ## Persistence and exports
 
-The workspace SQLite **Scoring And GAP Analysis Jobs** table stores the selected CDR identifiers, source metadata, aggregation levels, selected scope filters, NR Mode, baseline, methodology version, job status and complete result. Filter selections participate in cache identity, regardless of selection order, and remain attached to historical jobs and their exports. Cache reuse checks the processed CDR metadata and supported dataset changes, including Database Management row edits. Old jobs remain historical snapshots after reprocessing.
+### Results exports
 
-- **Scoring CSV** and **GAP CSV** export the expanded results with UTF-8 column names and numeric values. `row_type` distinguishes `kpi`, `category` and `total`; final GAP values are the valid-KPI mean. Legacy URLs without `table_mode` retain their previous raw-result schema. The selected individual Environment filters the rows; All Environments preserves aggregate and individual rows. The appended `gap_partial` and `gap_environments` fields identify partial comparisons and their common contributing environments without changing existing numeric columns. All Environments table-mode Scoring CSV includes the saved global raw KPI in `kpi_value`. Legacy raw-result CSV retains its existing per-environment schema. CSV export does not recalculate KPIs.
-- **PowerPoint** exports the saved job using the configured `Template_CDR_analysis.pptx`. A **Scoring & GAP Analysis** cover and transition slide open the deck, showing **Non-Standalone** or **Standalone** as the NR Mode subtitle in both opening slides. The NR Mode occupies the slide subtitle placeholder. Aggregation, Operator, Vendor, Region and City occupy separate lines with white labels and bold yellow values in a dedicated **Aggregations & Filters:** block; Campaigns appears below the decorative line with a bold white label and bold yellow values. All intro lists use a maximum of 110 characters of list content, excluding the field label and truncation suffix. Long lines reduce their text size when necessary to stay inside the block without wrapping. Each list stays on one line: overflowing lists end after the last complete value that fits, followed by **, ...**. PowerPoint filenames use complete values from those displayed lists without ellipses; they may keep fewer values to fit the 245-byte UTF-8 limit including `.pptx`. Display truncation does not change the selected data or calculations. Files use `YYYYMMDD_HHMMSS - Scoring & GAP Analysis - NR Mode - Regions - Cities - Operators - Vendors - Campaigns.pptx`. Each filename selection uses the values displayed on the intro slides, including their campaign names, or the corresponding **All** label when no selection or campaign names are available. With **All Environments** selected, the aggregate with the full configured maxima is exported first, followed by each available individual environment. Each environment completes its entire slide block before the next begins: **Best Network Scoring per Service**, the stacked **Best Network Scoring per Category**, the grouped **Scoring per Category**, the **Scoring Tables — Summary**, the **Scoring Tables — Breakdown**, the combined **All vs reference GAP Analysis**, followed by signed **GAP Analysis** tables for each compared operator. All content slide subtitles and web chart subtitles identify the environment without the **Environment:** prefix; table headers and chart axes show the selected aggregation context. Campaign aggregation labels use year-quarter format, such as **2026-Q1**, in web tables/charts and PowerPoint; stored names, identifiers and CSV values remain unchanged. The web **Scoring per Category** chart displays every selected aggregation level below its bars and uses horizontal scrolling to keep adjacent values readable. Analysis slides use editable reference-style KPI matrices and prioritized signed GAP tables on white backgrounds, alongside charts with Operator Mapping colors and value labels. Best Network labels show both Voice/Data contributions and their total above each bar; a compact native operator legend sits above the plot. Best Network Scoring per Service uses one Voice/Data stack per selected aggregation leaf, bold total-score labels above the bars and a maximum-allocation donut reserved in the upper-right corner. Combined results use two rings: an outer ring split by environment maximum points (teal and yellow for the first two environments, with additional colors for others), and one inner ring showing summed Voice/Data maximum allocations in blue and violet. The Voice/Data percentages are calculated from the summed allocations rather than assuming all environments share the same proportions. Larger matching environment icons sit outside the outer-ring segments with a clear gap in both the web view and PowerPoint, including Walk - City and Walk - Connecting Roads. The maximum-point total and its label appear in bold in the center. Legends match the web view: combined results start with **Total Points**, followed by indented environment and service/category entries with matching labels, compact point values, total-share percentages, copper amounts and clean icons without shadows. A single environment also keeps the outer ring, filled entirely with its environment color; the inner ring shows services or categories, and the center shows that environment’s maximum. The web Scoring Charts view uses the same ring order, colors and legends. Hierarchical charts use operator-colored native series with category shades; their continuous grayscale category bar places each category name inside its shaded segment below all axis labels and is grouped with the editable chart as one movable/exportable object. Best Network keeps lighter Voice and solid Data operator colors, with an editable Service types grayscale key below the PowerPoint chart identifying dark Data and light Voice; its allocation donut labels the configured Voice/Data points and total. Covers and transitions use Aptos with explicit line spacing and separate vertical space for titles, metadata and campaigns. Transitions use the same Title Page layout and field positions as the cover, with a large white environment title and the bold yellow NR Mode subtitle directly beneath it. Content slides use the E2E Dashboard header format. Their Aggregations & Filters block matches the cover, with its detail lines indented below the heading. Analysis slides omit the long input/available-total text blocks; filters and campaign details remain on the opening slides. Transitions between environment blocks use the environment’s first and second configured filters separated by ** - ** as their title (for example, **Drive - City** or **Drive - Connecting Roads**) and only the NR Mode as their subtitle. They keep aggregation/filter details on separate lines and campaigns below the cover’s inherited divider at the same height and with the same style. With multiple aggregation levels, tables keep every selected combination together on one slide. Best Network charts follow the selected split/single-slide option; Scoring per Category keeps each category complete when splitting is enabled, or all categories together when splitting is disabled. Table fonts and chart labels adapt to the available space; many combinations reduce text size, so filters can narrow a presentation when needed. Only individual operator-versus-reference GAP slides include the blue downward **Priority** arrow and its label. Combined All-versus-reference slides omit both. Individual comparison slides display all Category values in bold, aligned left, including merged category cells. All GAP table slides retain the red–white–green color scale and numeric comparison limits, with zero and operator trails/leads labels. Coverage warnings are included in slide notes and incomplete values are marked.
-- Workspace duplication, workspace database exports, transfers, ZIP backups and restores carry saved jobs and results with the SQLite database. Configuration-only or template-only packages exclude these CDR-dependent results; use CSV/PPT for standalone result sharing.
-- Interrupted queued/running jobs are retained as failed jobs when recovered after restart. Recalculate to retry the same job; its results are replaced when the new attempt finishes.
-- Existing workspace job tables using the earlier `ready` status are migrated to `completed` when the workspace is initialized, preserving job identifiers and saved results.
+| Action | Contents |
+| --- | --- |
+| **Scoring CSV** | Expanded scoring results, category subtotals and totals |
+| **GAP CSV** | Expanded GAP results and their existing numeric fields |
+| **PowerPoint** | Saved results with editable tables and charts, covers and environment transitions |
+
+Selecting one environment exports that environment. **All Environments** exports the aggregate and available individual environments. Exports use saved job results; they do not recalculate KPIs.
+
+CSV preserves stored names, numeric values and its schema. Its existing category/final GAP aggregates remain valid-KPI means. The new **Total KPI GAP** footer is a web/PowerPoint display total; it does not redefine CSV GAP fields. `gap_partial` and `gap_environments` identify partial coverage.
+
+### What is in the PowerPoint?
+
+Each environment block contains:
+
+1. Best Network Scoring per Service and per Category.
+2. Scoring per Category.
+3. Scoring Tables — Summary and Breakdown.
+4. All Operators GAP comparison, then individual operator comparisons.
+
+Covers and transitions show white titles and field labels, with **bold yellow filter, aggregation and campaign values**. The **Campaigns:** label is bold white. Long lists can be shortened visually without changing the calculation.
+
+The export follows Scoring Tables GAP visibility and column placement. Dedicated GAP slides remain included. Individual slides include the Priority arrow, mean KPI GAP and column-averaged total; every GAP table includes its column totals and color scale.
+
+### Dense-chart options
+
+| Chart | Export asks whether to split when… |
+| --- | --- |
+| Best Network | More than 20 bars |
+| Scoring per Category | More than 40 bars |
+
+Keep all bars for one slide, or split for more readable charts. Splitting preserves complete category groups where applicable and a common Best Network scale. Scoring bar labels use smaller integers above 40 bars and are hidden above 70. Small stacked segments may omit labels; their values remain in the editable chart.
+
+> [!TIP]
+> Narrow filters or split charts when many combinations make labels too small. Dense tables keep their combinations together, so reducing the scope also improves table readability.
+
+### Save, export and backup are different
+
+| Action | Purpose |
+| --- | --- |
+| **Save Methodology** | Commit edits to the workspace database |
+| **Export Methodology (JSON)** | Download the selected saved methodology |
+| **Admin → Import / Export → Scoring Configuration** | Transfer the complete methodology collection and its default |
+| **Workspace database backup / restore** | Preserve methodologies, CDR-dependent jobs, results and shared selections |
+
+Configuration-only packages do not carry scoring jobs or workspace-local CDR selections. Workspace duplication, database exports, transfers and ZIP database backups preserve jobs with the workspace database.
+
+After a restart, interrupted jobs are retained as failed and can be recalculated. After CDR processing, compatible Data/Voice/Speech companions can trigger a default Operator calculation. **Recalculate Scoring** in Workspace opens the module with compatible selected inputs.
 
 ## Troubleshooting
 
-- No CDR is selectable: verify the active workspace, NR Mode and processing status.
-- A geographic or vendor grouping is unavailable: populate or map the corresponding source field first. Environment labels such as City/Road are not Region values.
-- No GAP appears: verify that the chosen baseline exists in the same campaign and geographic/vendor context, and that both sides have at least one common valid environment contribution for that KPI. Different Campaign or geographic values are not compared. Vendor comparisons use the same vendor first, then the reference operator’s All group when available.
-- A job reports that its CDR changed: wait for processing or mapping to finish, then calculate again.
-- A saved job reports a status CHECK constraint error: restart the application to apply the workspace schema migration, then recalculate. Failed jobs remain available for review or deletion until recalculated.
-- Results differ from another campaign's report: check the mapping version, filters, environment coverage, included operators and dynamic best-value thresholds.
+| Symptom | Check or action |
+| --- | --- |
+| No selectable CDRs | Verify workspace, NR Mode and ready processing status |
+| Calculate is disabled | Read the yellow notice; complete each campaign's three source types or use Recalculate for a matching job |
+| Expected vendor/city choices are missing | Check mappings and the selected CDRs; reprocess older incomplete catalogues |
+| GAP is N/A* | Verify the reference and matching context, including common valid environment coverage |
+| Maximum achievable points differ between columns | Read the excluded KPI list for each combination; unavailable contributions can differ |
+| Results differ from another report | Compare methodology revision, filters, aggregation, thresholds and coverage |
+| CDR changed during calculation | Wait for processing/mapping to finish and recalculate |
+| Older All Environments KPI values are N/A | Recalculate to save pooled global measurements |
+| Job failed after interruption | Recalculate the existing job; delete it only if no longer needed |
+
+> [!NOTE]
+> **NR Mode selects the dataset universe.** It does not supply a different SA methodology automatically. Validate copied or customized environment rules before using them for a new benchmark.
 
 ## Supported KPI allocation
 
-The table lists the original NetCheck 2026 maximum ranking points for each environment. Named workspace methodologies can replace, add or remove these KPI definitions and adjust the allocations. Ratio calculations use the configured filters and denominator. Interactivity packet-error ratio sums lost, discarded, corrupted and unsent packets (its IFNULL loss components can be null or omitted), divided by the observed positive sum of `Packets_Sent`; missing or zero sent packets produce N/A. Recalculate an older job to apply corrected calculation behavior; its saved measurements are not rewritten. The POLQA low-quality condition is `LQ <= 1.6` despite the source label; Call Setup Time uses `> 10 s` from Prep/Excel, while the older example PPT labels that threshold `> 15 s`.
+The initial NetCheck 2026 methodology contains 32 KPIs. The following source notes and allocation table describe the original rules; customized methodologies can change them.
+
+### NetCheck 2026 workbook verification
+
+#### Source documents
+
+| Reference | Role |
+| --- | --- |
+| `Netcheck_Score_Mapping_2026Q2_BestNetwork_Drive_City_Road.xlsx` | Thresholds, mapping anchors and maximum points |
+| `Join_NC_CDR_KPIsv3_all_UK.tfl` | Source formulas, filters and aggregation reference |
+| `20260416 NET CHECK Press Benchmarking Package for Mobile Networks.pdf` | Benchmark methodology context |
+| Earlier example PPT | Presentation layout reference |
+
+The Git-ignored local `assets/scoring/netcheck_2026.json` is an optional reference import. It is not distributed or loaded automatically. Workspace rules remain authoritative.
+
+#### Initial allocation and matching
+
+The workbook contains 32 KPI definitions in each of DriveCity and DriveConnectionroad, rows 4–35. Its maximum allocations were checked against the extracted rules; City totals **650** and Road **350** points.
+
+The current Road selector uses **G_Level_1 = Drive**, **G_Level_2 = Connecting Roads**. The workbook sheet name is provenance, not the current source selector. Known legacy Road definitions are corrected without changing their points; explicit customized names/selectors are preserved.
+
+Walk is a zero-point extension with City-derived starting thresholds. It needs validation before assigning points.
+
+#### Documented differences
+
+> [!NOTE]
+> **Reference documents are not interchangeable numerical baselines.** Match raw inputs, revision, filters, operator scope, aggregation and coverage before comparing results.
+
+- Dynamic City best-value Ultra ranges in the workbook exclude some operators; the application uses all selected operators, following the best-achieved definition.
+- Two City P90 operator formulas use High = 95% while the common formulas and Road use 90%. The application consistently uses 90% for K20/K25.
+- The PDF's Drive/Walk allocation totals 675 points; this mapping uses the workbook's 1,000-point City/Road allocation.
+- The earlier example PPT uses different Q4 weights; it supplies layout guidance, not a numeric golden for the current mapping.
+- POLQA low-quality calculation uses **LQ <= 1.6**, despite the source label. Call setup threshold uses **> 10 seconds**, rather than the older example PPT's > 15 seconds.
+
+The source Prep flow has 18 aggregation steps and 17 inner joins. The application calculates the supported formulas directly from processed rows and retains missing comparisons visibly.
+
+Regression fixtures cover representative formulas and mapping examples. Full numerical parity with an external Prep/Excel output still requires matching source data and an independently verified result.
+
+### Per-KPI reference points
+
+This is the **original NetCheck 2026 reference**, not a promise that a customized saved methodology uses these weights. Point values are shown to four decimal places.
 
 | Code | Category | KPI | City points | Road points |
 |---|---|---|---:|---:|
@@ -89,7 +639,7 @@ The table lists the original NetCheck 2026 maximum ranking points for each envir
 | K2 | CLASSIC CALLS | CALL SETUP TIME [s] | 8.6450 | 4.6550 |
 | K3 | CLASSIC CALLS | CALL SETUP TIME > 10 s [%] | 4.3225 | 2.3275 |
 | K4 | CLASSIC CALLS | POLQA < 1.6 [%] | 22.7500 | 12.2500 |
-| K5 | CLASSIC CALLS | POLQA [MOS | 7.5855 | 4.0845 |
+| K5 | CLASSIC CALLS | POLQA [MOS] | 7.5855 | 4.0845 |
 | K6 | CLASSIC CALLS | DISTURBED & IMPAIRED CALL [%] | 15.1645 | 8.1655 |
 | K7 | WHATSAPP CALLS | CALL SUCCESS RATIO [%] | 56.8750 | 30.6250 |
 | K8 | WHATSAPP CALLS | POLQA < 1.6 [%] | 14.7875 | 7.9625 |
@@ -117,9 +667,3 @@ The table lists the original NetCheck 2026 maximum ranking points for each envir
 | K30 | VIDEO STREAM | VIDEO STREAMING IRRITATING EXPERIENCE [%] | 27.0400 | 14.5600 |
 | K31 | INTERACTIVITY | INTERACTIVITY PACKET ERROR RATIO [%] | 5.0700 | 2.7300 |
 | K32 | INTERACTIVITY | INTERACTIVITY MEDIAN RTT [MS] | 20.2800 | 10.9200 |
-
-The CSV and PowerPoint buttons export the selected Environment (including all environments). PowerPoint includes both Summary and Breakdown Scoring Tables; CSV links use Breakdown rows. Existing CSV clients may still request `table_mode=summary`. Breakdown includes category subtotals, Summary includes category rows, and final GAP values remain valid-KPI means. PowerPoint also follows Scoring Tables GAP visibility and column placement. Cover and transition slides place **Aggregations & Filters:** closer to the decorative divider, at the same position in both layouts. CSV retains its numeric GAP fields and stable schema regardless of the display checkbox. Charts retain the original KPI contributions in either mode. PowerPoint charts omit vertical category-label separators; single-level axes disable hierarchy label dividers, and chart labels use Arial for clear, uncondensed numbers. Stacked charts use smaller white segment labels and larger bold black totals. Legacy CSV URLs without `table_mode` retain their raw-result columns for existing clients.
-
-Environment creation and renaming are saved with Save Methodology; success is reported only after rereading and verifying the saved environment names and source selectors. Saving from GAP Priority or Aggregation Hierarchy also commits pending environment and KPI edits as part of the complete methodology.
-
-Coverage notices identify each affected Operator/Vendor/Campaign/geographic combination, its maximum achievable scoring and the KPIs with no valid contribution. These missing weights are not redistributed. Displayed incomplete numeric values retain their asterisk and use bold red text in web and PowerPoint tables; unavailable cells display **N/A*** in the same style. PowerPoint slide notes contain the same scoring ceilings and excluded KPI details.

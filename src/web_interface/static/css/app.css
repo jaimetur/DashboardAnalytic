@@ -2251,6 +2251,16 @@ body[data-embedded-dataset-preview] > .shell > main { width: 100%; max-width: no
 .doc-markdown pre { overflow: auto; padding: 1rem; border-radius: 16px; background: #102131; color: #f3f7fb; }
 .doc-markdown pre code { background: transparent; color: inherit; padding: 0; }
 .doc-markdown blockquote { margin: 1rem 0; padding: 0.4rem 1rem; border-left: 4px solid rgba(11, 122, 117, 0.24); color: #445560; background: rgba(11, 122, 117, 0.04); }
+.doc-markdown .admonition { --notice-accent: #245a96; --notice-fill: #edf5ff; --notice-border: #bad2ee; margin: 1.2rem 0; padding: 1rem 1.15rem; border: 1px solid var(--notice-border); border-left: 5px solid var(--notice-accent); border-radius: 12px; background: var(--notice-fill); color: #263746; }
+.doc-markdown .admonition.tip { --notice-accent: #226849; --notice-fill: #edf8f0; --notice-border: #b5d9c3; }
+.doc-markdown .admonition.important { --notice-accent: #694195; --notice-fill: #f4eefa; --notice-border: #d2bce6; }
+.doc-markdown .admonition.warning { --notice-accent: #805b12; --notice-fill: #fff5d6; --notice-border: #e8cf83; }
+.doc-markdown .admonition.caution { --notice-accent: #9b3737; --notice-fill: #fff0f0; --notice-border: #e7b4b4; }
+.doc-markdown .admonition-title { display: flex; align-items: center; gap: .5rem; color: var(--notice-accent); font-weight: 800; font-size: .9rem; letter-spacing: .04em; }
+.doc-markdown .admonition-title::before { content: 'i'; display: inline-flex; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; border: 2px solid currentColor; border-radius: 50%; font-weight: 800; font-style: normal; line-height: 1; }
+.doc-markdown .admonition.tip .admonition-title::before { content: '✓'; }
+.doc-markdown .admonition.important .admonition-title::before, .doc-markdown .admonition.warning .admonition-title::before, .doc-markdown .admonition.caution .admonition-title::before { content: '!'; }
+.doc-markdown .admonition p { margin: .5rem 0 0; }
 .doc-markdown table { min-width: 0; }
 .doc-markdown img { display: block; width: auto; max-width: 100% !important; max-inline-size: 100% !important; height: auto !important; margin-inline: auto; border-radius: 12px; }
 .doc-layout { display: grid; grid-template-columns: 17rem minmax(0, 1fr); gap: 1rem; align-items: start; }

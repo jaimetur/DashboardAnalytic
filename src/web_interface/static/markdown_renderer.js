@@ -139,7 +139,8 @@
             html = html.replace(/\[!\[([^\]]*)\]\(([^)]+)\)\]\(([^)]+)\)/g, (_m, alt, imgUrl, linkUrl) => {
                 const resolvedLink = resolveUrl(linkUrl, false);
                 const resolvedImg = resolveUrl(imgUrl, true);
-                const isInternal = resolvedLink.startsWith("/") && !resolvedLink.startsWith("//");
+                const isInternal = resolvedLink.startsWith("#")
+                    || (resolvedLink.startsWith("/") && !resolvedLink.startsWith("//"));
                 const targetAttrs = isInternal ? "" : ` target="_blank" rel="noopener noreferrer"`;
                 return `<a href="${escapeHtml(resolvedLink)}"${targetAttrs}><img src="${escapeHtml(resolvedImg)}" alt="${escapeHtml(alt)}"></a>`;
             });
@@ -149,7 +150,8 @@
             );
             html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label, rawTarget) => {
                 const resolved = resolveUrl(parseMdTarget(rawTarget), false);
-                const isInternal = resolved.startsWith("/") && !resolved.startsWith("//");
+                const isInternal = resolved.startsWith("#")
+                    || (resolved.startsWith("/") && !resolved.startsWith("//"));
                 const targetAttrs = isInternal ? "" : ` target="_blank" rel="noopener noreferrer"`;
                 return `<a href="${escapeHtml(resolved)}"${targetAttrs}>${escapeHtml(label)}</a>`;
             });

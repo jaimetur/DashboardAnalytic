@@ -163,4 +163,4 @@ python -m pytest -q
 
 Keep databases, uploaded customer files, generated output, cache files and secrets out of source control.
 
-The database-backed scoring configuration and its import/update procedure are documented in [Scoring methodology configuration](scoring-methodology.md); reference source documents are not runtime dependencies.
+The database-backed scoring configuration and its import/update procedure are documented in [Scoring methodology configuration](scoring-gap-analysis.md#methodology); reference source documents are not runtime dependencies.

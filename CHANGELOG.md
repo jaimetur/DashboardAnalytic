@@ -44,7 +44,7 @@
 - Matching scoring selections enable Recalculate instead of Calculate, including jobs saved before engine updates; recalculation updates the existing job, its displayed date/time and results without adding a duplicate. Job lists show the latest calculations first.
 
 #### 📚 Documentation:
-- Help documents the simplified Scoring format, environment matching, editable titles, jobs, aggregation, vendor filtering, coverage limits and CSV/PowerPoint exports.
+- Scoring & GAP Analysis help consolidates workflows, methodology configuration and source references into one structured guide, with practical GAP examples, comparison tables and colored information/tip/warning cards. Internal help links navigate in the same tab.
 
 ---
 
