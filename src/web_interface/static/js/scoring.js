@@ -924,7 +924,7 @@
     return [...records].sort((left, right) => {
       const leftDate = new Date(valueOf(left, ['created_at', 'submitted_at', 'started_at'], 0)).getTime() || 0;
       const rightDate = new Date(valueOf(right, ['created_at', 'submitted_at', 'started_at'], 0)).getTime() || 0;
-      return rightDate - leftDate;
+      return rightDate - leftDate || Number(right.id || 0) - Number(left.id || 0);
     });
   }
 

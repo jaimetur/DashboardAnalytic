@@ -10,6 +10,7 @@
   .scoring-hero-badge { display: inline-flex; align-items: center; gap: .45rem; padding: .5rem .75rem; border: 1px solid rgba(255,255,255,.22); border-radius: 999px; background: rgba(4,36,54,.2); color: #fff; font-size: .78rem; font-weight: 750; white-space: nowrap; }
   .scoring-controls { display: grid; gap: 1rem; }
   .scoring-filter-grid { display: grid; grid-template-columns: minmax(12rem,15rem) minmax(0,1fr); gap: 1rem; align-items: start; }
+  .scoring-gap-reference-grid { align-items: center; }
   .scoring-context-filter-grid { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: .65rem; }
   .scoring-context-filter-grid > label { display: grid; min-width: 0; gap: .3rem; color: var(--muted); font-size: .76rem; font-weight: 750; }
   .scoring-context-filter-grid select[multiple] { width: 100%; min-height: 2.35rem; }
@@ -47,6 +48,10 @@
   .scoring-level-option { display: inline-flex; align-items: center; gap: .5rem; min-height: 2.45rem; padding: .48rem .72rem; border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.78); color: var(--text); font-size: .82rem; font-weight: 650; cursor: pointer; }
   .scoring-level-option.is-required { border-color: rgba(11,122,117,.32); background: rgba(11,122,117,.09); }
   .scoring-controls-foot { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+  .scoring-methodology-actions { display: flex; align-items: stretch; flex-wrap: wrap; gap: .55rem; }
+  .scoring-methodology-actions .scoring-actions { align-items: stretch; }
+  .scoring-methodology-actions .scoring-actions button { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; min-height: 2.25rem; padding: .3rem .75rem; font-size: .75rem; }
+  .scoring-methodology-actions .scoring-actions button svg { flex: 0 0 auto; width: 1.1rem; height: 1.1rem; }
   .scoring-config-shortcuts { display: flex; align-items: center; flex-wrap: wrap; gap: .35rem; }
   .scoring-config-shortcuts a { display: inline-flex; align-items: center; min-height: 1.8rem; padding: .28rem .58rem; border: 1px solid transparent; border-radius: 999px; font-size: .69rem; font-weight: 800; text-decoration: none; transition: filter .15s ease, border-color .15s ease; }
   .scoring-config-shortcuts a[data-config-shortcut="kpi"] { border-color: #8ab7b0; background: #e6f3f0; color: #174f49; }
@@ -63,7 +68,7 @@
   .scoring-note[data-kind="error"] { color: var(--danger); font-weight: 650; }
   .scoring-note[data-kind="success"] { color: var(--success); font-weight: 650; }
   .scoring-note[data-kind="warning"] { color: #795b20; font-weight: 650; }
-  .scoring-calculation-message { flex: 1 1 20rem; padding: .55rem .75rem; border: 1px solid #e7cb75; border-radius: 10px; background: #fff3c9; color: #765514; font-weight: 750; }
+  .scoring-calculation-message { box-sizing: border-box; flex: 0 0 100%; width: 100%; min-width: 0; height: auto; max-height: none; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; padding: .55rem .75rem; border: 1px solid #e7cb75; border-radius: 10px; background: #fff3c9; color: #765514; font-weight: 750; }
   .scoring-calculation-message:empty { display: none; }
   .scoring-calculation-message[data-kind="error"] { color: var(--danger); }
   .scoring-calculation-message[data-kind="success"], .scoring-calculation-message[data-kind="warning"] { color: #765514; font-weight: 750; }
@@ -300,9 +305,11 @@
   @media(max-width:1300px) { .scoring-warning-box { grid-row: 5; } .scoring-results-head { grid-template-columns: minmax(0,1fr); } .scoring-results-controls { grid-column: 1; } .scoring-job-selector { grid-column: 1; grid-row: 4; } .scoring-results-tools { grid-column: 1; grid-row: 3; justify-content: flex-start; width: 100%; overflow-x: auto; padding: .2rem 0; } .scoring-results-config-shortcuts, .scoring-results-tools > .scoring-export-actions { justify-content: flex-end; } }
   @media(max-width:900px) { .scoring-filter-grid,.scoring-jobs-layout { grid-template-columns: 1fr; } .scoring-job-list { max-height: 22rem; } }
   @media(max-width:600px) { .scoring-context-filter-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .scoring-dataset-list { grid-template-columns: 1fr; } .scoring-controls-foot { align-items: stretch; } .scoring-actions { width: 100%; } .scoring-actions button { flex: 1 1 100%; } .scoring-chart-expanded-dialog { width: calc(100vw - .5rem); height: calc(100dvh - .5rem); padding: .65rem; gap: .5rem; border-radius: 14px; } .scoring-chart-expanded-header h3 { font-size: 1rem; } .scoring-chart-expanded-header p:not(.eyebrow) { display: none; } }
-  .scoring-calculation-actions { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 1rem; }
-  .scoring-calculation-actions > .scoring-calculation-shortcuts { grid-column: auto; grid-row: auto; justify-content: flex-end; width: auto; max-width: 100%; margin-left: auto; padding: 0; overflow: visible; }
-  .scoring-calculation-shortcuts > .scoring-results-config-shortcuts { flex-wrap: wrap; justify-content: flex-end; }
+  .scoring-calculation-actions { display: flex; align-items: stretch; justify-content: space-between; flex-wrap: wrap; gap: 1rem; }
+  .scoring-calculation-actions > .scoring-calculation-shortcuts { align-items: stretch; grid-column: auto; grid-row: auto; justify-content: flex-end; width: auto; max-width: 100%; margin-left: auto; padding: 0; overflow: visible; }
+  .scoring-calculation-shortcuts > .scoring-results-config-shortcuts { flex-wrap: wrap; align-items: stretch; justify-content: flex-end; }
+  .scoring-calculation-actions .scoring-profile-choice, .scoring-calculation-actions .scoring-actions button, .scoring-calculation-shortcuts a { box-sizing: border-box; min-height: 2.45rem; }
+  .scoring-calculation-shortcuts a { align-self: stretch; }
 </style>
 
 <section class="dashboard-stack spacious-stack scoring-stack" data-scoring-workspace data-scoring-workspace-id="{{ active_workspace.id if active_workspace else '' }}" data-configuration-error="{{ scoring_configuration_error or '' }}" data-jobs-url="/api/scoring/jobs" data-selection-url="/api/scoring/selection" data-export-base="/scoring/jobs">
@@ -390,20 +397,19 @@
       </div>
     </div>
     <div class="scoring-picker" aria-labelledby="scoring-gap-reference-title">
-      <div class="scoring-picker-head"><strong id="scoring-gap-reference-title">GAP Reference</strong></div>
-    <div class="scoring-filter-grid">
-      <label>GAP reference operator
-        <select data-baseline-operator aria-describedby="scoring-gap-baseline-note">
+      <div class="scoring-picker-head"><strong id="scoring-gap-reference-title">GAP reference operator</strong></div>
+    <div class="scoring-filter-grid scoring-gap-reference-grid">
+        <select data-baseline-operator aria-labelledby="scoring-gap-reference-title" aria-describedby="scoring-gap-baseline-note">
           {% set scoring_options = scoring_operator_options | default([], true) %}
           {% if scoring_options %}
             {% for operator in scoring_options %}<option value="{{ operator.value }}" data-operator-color="{{ operator.color or '' }}" {% if operator.value | lower == 'ee' %}selected{% endif %}>{{ operator.label }}</option>{% endfor %}
           {% else %}<option value="EE" selected>EE</option>{% endif %}
         </select>
-      </label>
       <p class="scoring-note" id="scoring-gap-baseline-note">KPI GAP = compared operator weighted points minus reference weighted points for each KPI. Category and final GAP rows show the arithmetic mean of valid KPI GAPs.</p>
     </div>
     </div>
-    <div class="scoring-controls-foot">
+    <div class="scoring-controls-foot scoring-calculation-actions">
+      <div class="scoring-methodology-actions">
       <label class="scoring-profile-choice">Scoring Methodology
         <select data-scoring-profile aria-label="Choose the scoring methodology for this calculation">
           {% set scoring_profile_options = scoring_profiles | default([], true) %}
@@ -414,13 +420,12 @@
           {% endfor %}
         </select>
       </label>
-    </div>
-    <div class="scoring-calculation-actions">
       <div class="scoring-actions">
-        <button type="button" data-calculate-scoring disabled>Calculate Scoring</button>
-        <button type="button" class="scoring-force-button" data-recalculate-scoring disabled>Recalculate</button>
+        <button type="button" data-calculate-scoring disabled><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="4" y="1" width="12" height="18" rx="2"/><path d="M7 4h6v3H7zM7 11h1m4 0h1m-6 4h1m4 0h1"/></svg><span>Calculate Scoring</span></button>
+        <button type="button" class="scoring-force-button" data-recalculate-scoring disabled><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M16 7a7 7 0 0 0-12-2L2 7m0-5v5h5M4 13a7 7 0 0 0 12 2l2-2m0 5v-5h-5"/></svg><span>Recalculate</span></button>
       </div>
-      <p class="scoring-note scoring-calculation-message" data-scoring-message role="status" aria-live="polite">Choose at least one CDR to calculate scoring.</p>
+      </div>
+
       <div class="scoring-results-tools scoring-calculation-shortcuts">
         <nav class="scoring-config-shortcuts scoring-results-config-shortcuts" aria-label="Scoring configuration sections">
           <a data-config-shortcut="kpi" href="/workspace-config#scoring-methodology-environments"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2 17h16M3 17V7h5v10M5 10h1M5 13h1M12 3l-2 14M16 3l2 14M14 4v2m0 3v2m0 3v2"/></svg><span>Methodology Environments</span></a>
@@ -428,6 +433,7 @@
           <a data-config-shortcut="gap" href="/workspace-config#scoring-gap-priority"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 4h9M8 10h6M8 16h3M3 2v5m-1-4 1-1 1 1M2 10h2m-2 5h2m0 0-2 3h2"/></svg><span>KPI Priorities</span></a>
         </nav>
       </div>
+      <p class="scoring-note scoring-calculation-message" data-scoring-message role="status" aria-live="polite">Choose at least one CDR to calculate scoring.</p>
     </div>
   </article>
 

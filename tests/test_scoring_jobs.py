@@ -192,6 +192,29 @@ def test_force_creates_a_fresh_calculation_and_method_baseline_are_cached(reposi
     assert len(calls) == 2
 
 
+def test_recalculation_refreshes_displayed_timestamp_and_job_order(repository, scoring_engine, monkeypatch):
+    dataset_id = add_dataset(repository)
+    monkeypatch.setattr(scoring_jobs, 'local_now_iso', lambda: '2026-10-02T12:00:00+02:00')
+    first, _ = scoring_jobs.create_scoring_job(repository, [dataset_id], [], 'NSA')
+    scoring_jobs.run_scoring_job(repository, first['id'])
+    monkeypatch.setattr(scoring_jobs, 'local_now_iso', lambda: '2026-10-02T11:00:00+00:00')
+    second, _ = scoring_jobs.create_scoring_job(
+        repository, [dataset_id], [], 'NSA', baseline_operator='O2',
+    )
+    assert [job['id'] for job in scoring_jobs.list_scoring_jobs(repository)] == [second['id'], first['id']]
+
+    monkeypatch.setattr(scoring_jobs, 'local_now_iso', lambda: '2026-10-02T12:00:00+00:00')
+    recalculated, reused = scoring_jobs.create_scoring_job(repository, [dataset_id], [], 'NSA', force=True)
+    assert not reused
+    assert recalculated['id'] == first['id']
+    assert recalculated['created_at'] == '2026-10-02T12:00:00+00:00'
+    assert recalculated['updated_at'] == recalculated['created_at']
+    assert [job['id'] for job in scoring_jobs.list_scoring_jobs(repository)] == [first['id'], second['id']]
+    active, reused = scoring_jobs.create_scoring_job(repository, [dataset_id], [], 'NSA', force=True)
+    assert reused
+    assert active['created_at'] == recalculated['created_at']
+
+
 def test_force_retries_failed_calculation_in_place(repository, scoring_engine):
     _engine, _calls = scoring_engine
     dataset_id = add_dataset(repository)

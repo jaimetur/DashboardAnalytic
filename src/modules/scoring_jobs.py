@@ -778,10 +778,10 @@ def create_scoring_job(
                 """UPDATE scoring_jobs SET status = 'queued', progress = 0,
                    message = 'Waiting to calculate scoring', result_json = NULL,
                    last_error = NULL, started_at = NULL, finished_at = NULL,
-                   updated_at = ?, created_by = ?, source_metadata_json = ?,
+                   created_at = ?, updated_at = ?, created_by = ?, source_metadata_json = ?,
                    cache_key = ?, method_version = ?
                    WHERE id = ?""",
-                (now, str(username or 'system'),
+                (now, now, str(username or 'system'),
                  json.dumps(source_snapshot, ensure_ascii=False, separators=(',', ':')),
                  cache_key, version, previous_row['id']),
             )
@@ -814,7 +814,7 @@ def list_scoring_jobs(repository: Repository) -> list[dict[str, Any]]:
             'SELECT id, cache_key, method_version, source_fingerprint, dataset_ids_json, '
             'source_metadata_json, nr_mode, levels_json, baseline_operator, status, progress, '
             'message, last_error, created_by, created_at, started_at, updated_at, finished_at '
-            'FROM scoring_jobs ORDER BY id DESC'
+            'FROM scoring_jobs ORDER BY julianday(created_at) DESC, id DESC'
         ).fetchall()
     return [_row_to_job(row, include_snapshot=False) for row in rows]
 
