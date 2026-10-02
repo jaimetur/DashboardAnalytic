@@ -80,7 +80,10 @@ def test_mapping_workbook_samples_match_interpolated_scores(sample):
     metric_config = next(metric for metric in CONFIG['metrics'] if metric['code'] == sample['kpi_code'])
     context = metric_config['contexts'][sample['environment']]
 
-    assert sample['thresholds'] == context['thresholds']
+    expected_thresholds = deepcopy(sample['thresholds'])
+    if isinstance(expected_thresholds.get('ultra'), dict):
+        expected_thresholds['ultra'].pop('source_formula', None)
+    assert expected_thresholds == context['thresholds']
     assert sample['max_points'] == pytest.approx(context['max_points'])
     score = interpolate_score(
         sample['measured_value'], context['thresholds'], sample['dynamic_ultra_threshold'],
@@ -189,8 +192,7 @@ def test_campaign_environment_aliases_and_missing_coverage():
 
 def test_custom_environment_matches_explicit_g1_and_contributes_to_combined_totals():
     configuration = deepcopy(CONFIG)
-    configuration['scope']['environments']['Indoor'] = {'g_level_1': 'Indoor'}
-    configuration['scope']['environment_mapping']['Indoor'] = 'Indoor'
+    configuration['scope']['environments']['Indoor'] = {'source_filters': {'G_Level_1': 'Indoor'}}
     for item in configuration['metrics']:
         city = item['contexts']['DriveCity']
         indoor = deepcopy(city)

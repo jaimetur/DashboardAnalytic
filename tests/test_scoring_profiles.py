@@ -72,11 +72,8 @@ def test_workspace_profile_read_migrates_only_the_known_2026_environment(tmp_pat
     current_profile = next(profile for profile in loaded['profiles'] if profile['id'] == 'netcheck-2026')
     current_config = current_profile['configuration']
     source = current_config['scope']['environments']['Drive Connecting Roads']
-    assert source['g_level_1'] == 'Drive'
-    assert source['g_level_2'] == 'Connecting Roads'
-    assert source['sheet'] == 'DriveConnectionroad'
+    assert source['source_filters'] == {'G_Level_1': 'Drive', 'G_Level_2': 'Connecting Roads'}
     assert source['display_name'] == 'Drive Connecting Roads'
-    assert current_config['scope']['environment_mapping']['Drive + Connecting Roads'] == 'Drive Connecting Roads'
     assert 'DriveConnectionroad' not in current_config['scope']['environments']
 
     for original, migrated in zip(current['metrics'], current_config['metrics']):
@@ -85,7 +82,9 @@ def test_workspace_profile_read_migrates_only_the_known_2026_environment(tmp_pat
         assert migrated['contexts']['Walk'] == original['contexts']['Walk']
 
     historical_profile = next(profile for profile in loaded['profiles'] if profile['id'] == 'netcheck-2025')
-    assert historical_profile['configuration']['scope']['environments']['DriveConnectionroad']['g_level_2'] == 'Connectionroad'
+    assert historical_profile['configuration']['scope']['environments']['DriveConnectionroad']['source_filters'] == {
+        'G_Level_1': 'Drive', 'G_Level_2': 'Connectionroad',
+    }
     assert 'DriveConnectionroad' in historical_profile['configuration']['metrics'][0]['contexts']
 
 
@@ -93,20 +92,16 @@ def test_workspace_profile_read_migrates_legacy_key_with_correct_selector(tmp_pa
     repository = Repository(tmp_path / 'workspace.db')
     repository.initialize()
     configuration = scoring_configuration()
-    configuration['scope']['environments']['DriveConnectionroad']['g_level_2'] = 'Connecting Roads'
-    configuration['scope']['environment_mapping'] = {
-        'Drive + City': 'DriveCity',
-        'Drive + Connecting Roads': 'DriveConnectionroad',
-        'Walk': 'Walk',
-    }
+    configuration['scope']['environments']['DriveConnectionroad']['source_filters']['G_Level_2'] = 'Connecting Roads'
     repository.replace_scoring_profiles({
         'active_profile_id': 'netcheck-2026',
         'profiles': [default_scoring_profile(configuration)],
     })
 
     loaded = repository.get_scoring_profiles()['profiles'][0]['configuration']
-    assert loaded['scope']['environments']['Drive Connecting Roads']['g_level_2'] == 'Connecting Roads'
-    assert loaded['scope']['environment_mapping']['Drive + Connecting Roads'] == 'Drive Connecting Roads'
+    assert loaded['scope']['environments']['Drive Connecting Roads']['source_filters'] == {
+        'G_Level_1': 'Drive', 'G_Level_2': 'Connecting Roads',
+    }
     assert loaded['metrics'][0]['contexts']['Drive Connecting Roads'] == configuration['metrics'][0]['contexts']['DriveConnectionroad']
 
 
@@ -114,17 +109,14 @@ def test_workspace_profile_read_preserves_a_custom_road_selector(tmp_path):
     repository = Repository(tmp_path / 'workspace.db')
     repository.initialize()
     configuration = scoring_configuration()
-    configuration['scope']['environments']['DriveConnectionroad']['g_level_2'] = 'Alternative Road'
-    configuration['scope']['environment_mapping'] = {
-        'Drive + City': 'DriveCity',
-        'Drive + Alternative Road': 'DriveConnectionroad',
-        'Walk': 'Walk',
-    }
+    configuration['scope']['environments']['DriveConnectionroad']['source_filters']['G_Level_2'] = 'Alternative Road'
     repository.replace_scoring_profiles({
         'active_profile_id': 'netcheck-2026',
         'profiles': [default_scoring_profile(configuration)],
     })
 
     loaded = repository.get_scoring_profiles()['profiles'][0]['configuration']
-    assert loaded['scope']['environments']['DriveConnectionroad']['g_level_2'] == 'Alternative Road'
+    assert loaded['scope']['environments']['DriveConnectionroad']['source_filters'] == {
+        'G_Level_1': 'Drive', 'G_Level_2': 'Alternative Road',
+    }
     assert 'Drive Connecting Roads' not in loaded['scope']['environments']

@@ -99,7 +99,9 @@ def test_imported_workspace_config_survives_seed_file_unavailable_and_keeps_edit
     assert stored_c5['thresholds']['low'] == pytest.approx(87)
     assert stored_c5['score_mapping']['high_score'] == pytest.approx(0.95)
     assert loaded['gap_priority'][:2] == ['K2', 'K1']
-    assert loaded['scope']['environments']['Drive Connecting Roads']['g_level_2'] == 'Connecting Roads'
+    assert loaded['scope']['environments']['Drive Connecting Roads']['source_filters'] == {
+        'G_Level_1': 'Drive', 'G_Level_2': 'Connecting Roads',
+    }
     assert loaded['scope']['total_max_points'] == pytest.approx(
         sum(metric['contexts'][environment]['max_points']
             for metric in loaded['metrics'] for environment in ('DriveCity', 'Drive Connecting Roads')),
@@ -124,7 +126,7 @@ def test_invalid_stored_configuration_fails_without_resetting_database_value(rep
         (lambda config: _metric(config, 'K1')['calculation'].__setitem__('formula', 'AVG(__import__("os"))'), 'formula'),
         (lambda config: _metric(config, 'K1')['calculation']['filters'].__setitem__('Unknown_Field', ['x']), 'filter'),
         (lambda config: _metric(config, 'K20')['calculation']['filters'].__setitem__('Test_Name contains', 'FDTT'), 'list of text fragments'),
-        (lambda config: config['scope']['environments'].__setitem__('Unknown', {}), 'g_level_1'),
+        (lambda config: config['scope']['environments'].__setitem__('Unknown', {}), 'source_filters'),
         (lambda config: config['metrics'][0].__setitem__('direction', 'unknown'), 'direction'),
     ],
 )

@@ -183,14 +183,18 @@ def test_missing_road_keeps_city_gap_and_combined_marks_common_environment_gap_p
     presentation = Presentation(BytesIO(export_scoring_powerpoint(
         scalar_export_job, scalar_result, TEMPLATE, environment='all',
     )))
-    combined_gap_slide = next(
-        slide for slide in presentation.slides
-        if slide.shapes.title.text.startswith('GAP Analysis — All vs')
-        and 'All Environments' in slide.shapes.title.text
-        and 'Vendor: Nokia' in slide.shapes.title.text and 'Campaign: 2026-Q2' in slide.shapes.title.text
+    combined_gap_tables = [
+        shape.table
+        for slide in presentation.slides
+        if slide.shapes.title.text == 'GAP Analysis — All vs EE\nAll Environments'
+        for shape in slide.shapes if shape.has_table
+    ]
+    assert combined_gap_tables
+    expected_partial_gap = f"{scalar_row['gaps']['O2 UK']:.2f}*"
+    assert any(
+        cell.text == expected_partial_gap
+        for table in combined_gap_tables for row in table.rows for cell in row.cells
     )
-    combined_gap_table = next(shape.table for shape in combined_gap_slide.shapes if shape.has_table)
-    assert any(cell.text.endswith('*') for row in combined_gap_table.rows for cell in row.cells)
 
     without_reference = [row for row in _source_rows(('City', 'Connectionroad')) if row['Operator'] != 'EE']
     filtered_result, filtered_views = _calculate(without_reference)

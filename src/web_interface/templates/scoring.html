@@ -80,6 +80,8 @@
   .scoring-job-aggregation { display: flex; flex-wrap: wrap; align-items: baseline; gap: .3rem .5rem; align-self: flex-start; max-width: 100%; padding: .3rem .55rem; border: 1px solid #cbdce9; border-radius: .5rem; background: #edf4fa; color: #34566f; font-size: .75rem; line-height: 1.45; overflow-wrap: anywhere; }
   .scoring-job-aggregation strong { font-weight: 800; }
   .scoring-job-meta { min-width: 0; color: var(--muted); font-size: .72rem; line-height: 1.45; white-space: normal; overflow-wrap: anywhere; }
+  .scoring-job-meta .scoring-job-reference { color: #245bb0; font-weight: 700; }
+  .scoring-job-meta .scoring-job-profile { color: #6940ad; font-weight: 700; }
   .scoring-status { display: inline-flex; align-items: center; gap: .3rem; padding: .2rem .48rem; border-radius: 999px; background: #e9eff1; color: #47606b; font-size: .68rem; font-weight: 800; text-transform: capitalize; white-space: nowrap; }
   .scoring-status[data-status="completed"] { background: #e2f4e9; color: #247048; }
   .scoring-status[data-status="failed"] { background: #fde9e5; color: #a43d2f; }
@@ -380,7 +382,7 @@
       </div>
     </div>
     <div class="scoring-controls-foot">
-      <label class="scoring-profile-choice">Scoring methodology
+      <label class="scoring-profile-choice">Scoring Methodology Profile
         <select data-scoring-profile aria-label="Choose the scoring methodology for this calculation">
           {% set scoring_profile_options = scoring_profiles | default([], true) %}
           {% for profile in scoring_profile_options %}

@@ -329,9 +329,10 @@ def calculate_scoring(
         frame['environment'] = None
         environment_masks = {}
         for environment, context in config['scope']['environments'].items():
-            mask = frame['G_Level_1'] == context['g_level_1']
-            if 'g_level_2' in context:
-                mask &= frame['G_Level_2'] == context['g_level_2']
+            filters = context['source_filters']
+            mask = frame['G_Level_1'] == filters['G_Level_1']
+            if 'G_Level_2' in filters:
+                mask &= frame['G_Level_2'] == filters['G_Level_2']
             environment_masks[environment] = mask
             frame.loc[mask, 'environment'] = environment
         # Preserve one pooled copy per source row, while remembering every

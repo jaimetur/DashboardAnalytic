@@ -27,7 +27,9 @@ def test_scoring_calculation_views_and_export_use_only_the_persisted_configurati
     }
     repository.replace_scoring_configuration(imported_configuration)
     expected = repository.get_scoring_configuration()
-    assert expected['scope']['environments']['Drive Connecting Roads']['g_level_2'] == 'Connecting Roads'
+    assert expected['scope']['environments']['Drive Connecting Roads']['source_filters'] == {
+        'G_Level_1': 'Drive', 'G_Level_2': 'Connecting Roads',
+    }
     assert expected['metrics'][0]['contexts']['Drive Connecting Roads'] == (
         imported_configuration['metrics'][0]['contexts']['DriveConnectionroad']
     )

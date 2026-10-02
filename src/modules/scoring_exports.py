@@ -651,7 +651,9 @@ def _scoring_environment_title(environment: str, configuration: dict) -> str:
     scope = configuration.get('scope', {}).get('environments', {}).get(environment, {})
     if scope.get('display_name'):
         return str(scope['display_name'])
-    filters = [str(scope.get(key) or '').strip() for key in ('g_level_1', 'g_level_2')]
+    selectors = scope.get('source_filters') or {}
+    filters = [str(selectors.get(field) or scope.get(key) or '').strip()
+               for field, key in (('G_Level_1', 'g_level_1'), ('G_Level_2', 'g_level_2'))]
     filters = [value for value in filters if value]
     if filters:
         filters = ['Connecting Roads' if value.casefold() in {'connectionroad', 'connectingroads'}

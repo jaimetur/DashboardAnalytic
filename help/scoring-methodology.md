@@ -4,18 +4,18 @@ The workspace database is the authoritative source for scoring rules, weights, t
 
 `assets/scoring/netcheck_2026.json` is a local reference document excluded from Git. It is not distributed with the application or loaded automatically. To initialize an unconfigured workspace, explicitly import a Scoring Configuration JSON or ZIP package. Existing database configurations remain authoritative; invalid data produces an error instead of silently falling back to another methodology.
 
-The original Tableau Prep, Excel, PDF and example PPT are reference material and are not application dependencies. Source names and spreadsheet/Prep references in imported configurations describe provenance only. PowerPoint exports use the application's configured CDR template.
+The original Tableau Prep, Excel, PDF and example PPT are reference material and are not application dependencies. Portable configurations contain operational rules and an optional editable methodology title; reference documents are not exported. PowerPoint exports use the application's configured CDR template.
 
 ## Named methodologies and portable JSON
 
-Workspace Config stores a collection of named scoring profiles, with one active profile. A profile includes its KPI definitions, per-environment thresholds, maximum points, interpolation mappings, GAP priority and aggregation hierarchy. Existing single-configuration workspaces are treated as a single profile without changing their rules. Selecting a methodology makes it active; Create Profile and Copy Profile select the new copy as active. Edit the active methodology shown in the panel and select the required profile before creating a job; queued and completed jobs keep their captured profile and rule snapshot. The Scoring Calculation methodology dropdown defaults to that active profile but can select another profile for a single job without changing the workspace default. Automatic processing and dataset recalculation continue to use the workspace default. The job captures the chosen profile's rules and aggregation hierarchy.
+Workspace Config stores named profiles with an explicit Default selected using **Set Default**. Selecting, creating or duplicating a profile opens it for editing without changing the default. The **Methodology title** field is editable and saved with the complete profile. Scoring calculations can select another profile per job; automatic calculations use the default. Jobs retain their captured rules and hierarchy.
 
 The JSON exporter and configuration ZIP component carry the complete collection and its active selection:
 
 ```json
 {
   "format": "dashboard-analytic-scoring-configuration",
-  "version": 2,
+  "version": 3,
   "active_profile_id": "netcheck-2026",
   "profiles": [
     {
@@ -23,9 +23,32 @@ The JSON exporter and configuration ZIP component carry the complete collection 
       "name": "Netcheck 2026",
       "configuration": {
         "version": "2026Q2",
-        "scope": {},
-        "interpolation": {},
-        "metrics": [],
+        "title": "NetCheck 2026 scoring",
+        "scope": {
+          "environments": {
+            "Drive - City": {
+              "source_filters": {"G_Level_1": "Drive", "G_Level_2": "City"}
+            }
+          }
+        },
+        "metrics": [{
+          "code": "K1",
+          "category": "CLASSIC CALLS",
+          "kpi": "CALL SUCCESS RATIO [%]",
+          "source_kind": "voice",
+          "direction": "higher_is_better",
+          "kpi_type": "Reliable",
+          "calculation": {
+            "formula": "100 * SUM(Call_Status == \"Completed\") / COUNT(Call_Status)",
+            "filters": {"Session_Type": ["CALL"]}
+          },
+          "contexts": {
+            "Drive - City": {
+              "max_points": 650,
+              "thresholds": {"low": 85, "medium": 98, "high": 100, "ultra": null}
+            }
+          }
+        }],
         "gap_priority": [],
         "aggregation_hierarchy": ["Operator", "Vendor", "Region", "City", "Campaign"]
       }
@@ -34,11 +57,16 @@ The JSON exporter and configuration ZIP component carry the complete collection 
 }
 ```
 
-This abbreviated example illustrates the structure; each nonempty profile needs valid KPI definitions and matching definitions for every configured environment (legacy City/Road files acquire Walk at zero points). Profile `configuration.version` identifies the methodology revision; envelope `version` identifies the exchange format. Legacy version-1 envelopes with a single `configuration` and bare configuration JSON remain importable. Imports, exports, workspace transfers, configuration backups/restores and full workspace backups retain all profiles and the active selection. Importing a collection replaces the destination collection; export it first to keep a copy.
+This minimal one-KPI example illustrates exchange format **version 3**; a complete profile includes all its KPI definitions and a context for every configured environment. The methodology revision is `configuration.version`. JSON export/import in Workspace Config, configuration ZIP packages, Admin JSON imports, workspace transfers and configuration backup/restore use the same format. Full database backups preserve the complete saved profiles. Importing a collection replaces the destination collection.
+
+Environment rules are explicit `source_filters`: each field must equal its selected CDR value, and all specified filters must match (AND). `G_Level_1` is required; omitting `G_Level_2` includes any second-level value. The web editor groups the aligned **G_Level_1** and **G_Level_2** selectors under **CDR filters**, with one concise explanation of the optional second filter. The old `environment_mapping`, `environment_fields` and Tableau keys are absent. Existing workspace records are normalized on read; version-2 exchange envelopes must be replaced with a new export.
+
+Totals and positive-point relative weights are recalculated from KPI `max_points` rather than exported twice. Relative weights for zero-point environments are retained. Reference examples, file names, workbook cell addresses and denominator descriptions are omitted. The formula determines its denominator. Optional interpolation settings default to the standard score anchors; retain explicit per-context mappings to preserve customized anchors.
 
 | Configuration field | Meaning |
 | --- | --- |
-| `scope` | Configured environment keys and their `g_level_1` / optional `g_level_2` CDR matching values. An optional `display_name` records an explicit renamed label; `sheet` remains workbook provenance. Maximum allocations are derived from KPI points. |
+| `scope` | Environment names and explicit `source_filters`. Optional `display_name` preserves a custom display label. |
+| `title` | Optional editable methodology description, preserved by all transfers; does not affect numeric scoring. |
 | `interpolation` | Default anchors for definitions without explicit per-context mappings. |
 | `metrics` | A nonempty collection of uniquely identified KPI definitions, categories, source CDR types, directions, mapping methods, formulas, filters and KPI types. |
 | Metric `mapping_method` | `piecewise_linear`, `piecewise_quadratic` or `piecewise_smoothstep`. Older configurations default to Linear; the explicit choice travels with profiles, imports/exports, transfers and backups. |
@@ -46,16 +74,14 @@ This abbreviated example illustrates the structure; each nonempty profile needs 
 | `next_kpi_number` | Persisted high-water mark for automatic K-number identifiers; deletions do not recycle earlier codes. |
 | `aggregation_hierarchy` | All five dimensions exactly once, in display/grouping order. |
 | `gap_priority` | KPI codes in comparison priority order. Removed codes are dropped and new codes are appended. |
-| `sources`, source references, `discrepancies` | Optional descriptive provenance; no referenced files are opened. |
-| `validation_examples`, `gap_example` | Optional audit examples, never measurements injected into jobs. |
 
 ## Editing, replacing, adding and removing KPIs
 
-Formulas and filters are stored inside each profile under `metrics[].calculation`, in the workspace database. Workbook sheet/row provenance such as `source.workbook_sheet` or `source.row` is not used in calculation and is omitted from the table editor. Imported provenance can remain descriptive metadata for exchange compatibility. Formulas and filters are editable in the KPI table; the ignored reference JSON is not a runtime dependency.
+Formulas and filters are stored inside each profile under `metrics[].calculation`, in the workspace database. Workbook sheet/row provenance such as `source.workbook_sheet` or `source.row` is not used in calculation and is omitted from the table editor. Imported reference metadata is omitted from the saved operational configuration and new exports. Formulas and filters are editable in the KPI table; the ignored reference JSON is not a runtime dependency.
 
 1. Export the current collection or back up the workspace before revising a methodology. Select a profile or create a copy with a new name, for example **Netcheck 2025**.
 2. Select the environment. KPI rows are grouped by editable category and each category shows its summed maximum points, its weight within the environment and its global weight. Edit labels, category, KPI type, thresholds and score mappings directly.
-3. Edit the identifier in the Code column; open the KPI's calculation controls to edit its Data/Voice/Speech source, formula and filter JSON. Calculation basis shows read-only information derived from the formula; it does not control calculation. The formula itself determines the denominator. Imported denominator descriptions are retained as exchange metadata without an editable control. The higher/lower-is-better direction has its own visible selector. Mapping is a separate selector for the KPI’s scoring algorithm, applied in all its environments: Linear (the existing default), Quadratic or Smooth curve. Direction identifies better measurements; it does not select the mapping method. KPI codes identify definitions and priority references, rather than formulas. The original NetCheck definitions use K1–K32 in workbook order; legacy C5/C6-style identifiers are converted when loading the editable methodology, without rewriting historical jobs. New KPIs receive the next unused K number. Codes remain stable when moving or deleting rows, so deletions can leave gaps in the sequence. Renaming a code in the table automatically remaps its GAP priority reference on Save, retaining the same position. When hand-editing an exchange JSON, update `gap_priority` references alongside changed codes.
+3. Edit the identifier in the Code column; open the KPI's calculation controls to edit its Data/Voice/Speech source, formula and filter JSON. Calculation basis shows read-only information derived from the formula; it does not control calculation. The formula itself determines the denominator. Denominator descriptions are not part of the portable format. The higher/lower-is-better direction has its own visible selector. Mapping is a separate selector for the KPI’s scoring algorithm, applied in all its environments: Linear (the existing default), Quadratic or Smooth curve. Direction identifies better measurements; it does not select the mapping method. KPI codes identify definitions and priority references, rather than formulas. The original NetCheck definitions use K1–K32 in workbook order; legacy C5/C6-style identifiers are converted when loading the editable methodology, without rewriting historical jobs. New KPIs receive the next unused K number. Codes remain stable when moving or deleting rows, so deletions can leave gaps in the sequence. Renaming a code in the table automatically remaps its GAP priority reference on Save, retaining the same position. When hand-editing an exchange JSON, update `gap_priority` references alongside changed codes.
 4. Choose **Points** to edit absolute maximum points. Choose **Weight (%)** to edit a KPI's share of the selected environment. KPI weight editing preserves that environment's total and redistributes the other KPI weights proportionally. The separate global percentage is the KPI points divided by the total points of all environments. The environment allocation editor changes its total points; editing its global percentage preserves the grand total and redistributes the other environments proportionally. Relative weights remain editable even at zero environment points, ready for a later allocation. Use Distribute Points to open a dialog, choose a reference environment and enter the selected environment's total points. The selected environment receives that total multiplied by each reference KPI's relative share, including saved relative shares in a zero-point environment. Thresholds and formulas are unchanged. Review the draft distribution and save the KPI configuration. Category totals refresh with the edits.
 5. Use Add Category to create a category with its first zero-point KPI, or the Add action on a KPI row to insert a supported definition; the row action inserts directly below that row in the same category. Move Up/Down changes the order within its category. Alternatively, replace an existing definition's label, category, source, direction, formula, filters, thresholds and points. Each environment definition must remain valid. Delete a KPI to remove its row and contribution from future calculations; at least one KPI must remain. Set maximum points to zero instead to keep a non-contributing KPI visible.
 6. Set the GAP priority, whose table also shows each KPI's category, and save the profile. Replacing or deleting an identifier updates priority membership. Activate the profile intended for future jobs.
@@ -93,7 +119,7 @@ Regression tests cover representative raw-input calculations and extracted workb
 
 Import and export through **Workspace Config → Scoring KPI Configuration** or **Admin → Import / Export → Scoring Configuration**. Use a copied, inactive profile to prepare a revised methodology, update supported formulas and weights, verify it, then activate it. The same component transfers the profile collection, hierarchy and GAP priorities and restores them from configuration backups. An unconfigured workspace remains explicitly unconfigured instead of acquiring hidden defaults.
 
-For a future NetCheck revision, compare its formulas, filters and mapping anchors with verified examples, update the profile's methodology version in its exported/imported JSON if needed, and validate a new job. New KPI additions and removals are supported in the panel; unsupported fields, operations or environments require engine support first. Legacy reference files can be imported explicitly, and completed jobs retain their original settings.
+For a future NetCheck revision, compare its formulas, filters and mapping anchors with verified examples, update the profile's methodology version in its exported/imported JSON if needed, and validate a new job. New KPI additions and removals are supported in the panel; unsupported fields, operations or environments require engine support first. Completed jobs retain their original calculation settings; new exports use the simplified format.
 
 Regression tests use independent Python fixtures and do not depend on the ignored local JSON or original reference documents. A full benchmark parity check requires matching raw CDR inputs and a verified Prep/Excel output.
 

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import copy
-import json
-from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -24,7 +22,7 @@ def test_legacy_configuration_migrates_walk_with_zero_points_and_city_rules():
 
     assert legacy == original
     assert migrated['scope']['environments']['Walk'] == {
-        'sheet': 'Walk', 'g_level_1': 'Walk', 'total_points': 0.0, 'weight_share': 0.0,
+        'source_filters': {'G_Level_1': 'Walk'}, 'total_points': 0.0, 'weight_share': 0.0,
     }
     for source, result in zip(legacy['metrics'], migrated['metrics']):
         city = result['contexts']['DriveCity']
@@ -33,7 +31,8 @@ def test_legacy_configuration_migrates_walk_with_zero_points_and_city_rules():
         assert walk['thresholds'] == city['thresholds']
         assert walk['score_mapping'] == city['score_mapping']
         assert walk['weight_share'] == pytest.approx(city['weight_share'])
-        assert result['calculation'] == source['calculation']
+        assert result['calculation']['formula'] == source['calculation']['formula']
+        assert result['calculation']['filters'] == source['calculation']['filters']
     assert method_version_for_configuration(legacy) == (
         f"{legacy['version']}-{METHOD_VERSION}-{configuration_hash(legacy)[:16]}"
     )
@@ -92,10 +91,8 @@ def test_walk_matches_only_level_one_and_is_excluded_from_combined_weight():
     assert combined['score'] == 1
 
 
-def test_2026_seed_includes_zero_weight_walk_context():
-    path = Path(__file__).resolve().parents[1] / 'assets' / 'scoring' / 'netcheck_2026.json'
-    payload = json.loads(path.read_text(encoding='utf-8'))
-    configuration = validate_scoring_configuration(payload['configuration'])
+def test_initial_methodology_includes_zero_weight_walk_context():
+    configuration = validate_scoring_configuration(scoring_configuration())
 
     assert configuration['scope']['environments']['Walk']['total_points'] == 0
     assert configuration['scope']['environments']['Walk']['weight_share'] == 0

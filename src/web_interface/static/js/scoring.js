@@ -574,6 +574,18 @@
     }
   }
 
+  function restoreCalculationSelectionFromJob(job) {
+    applySavedCalculationSelection({
+      dataset_ids: job.dataset_ids || [],
+      aggregation_levels: job.aggregation_levels || job.levels || [],
+      nr_mode: job.nr_mode,
+      baseline_operator: job.baseline_operator,
+      scoring_profile_id: job.scoring_profile_id,
+      context_filters: job.context_filters || {},
+    });
+    scheduleSelectionSave();
+  }
+
   async function loadCalculationSelection() {
     if (calculationPanel) {
       calculationPanel.inert = true;
@@ -901,7 +913,11 @@
       const meta = document.createElement('span');
       meta.className = 'scoring-job-meta';
       const baseline = valueOf(job, ['baseline_operator'], 'EE');
-      meta.textContent = `GAP baseline: ${baseline}`;
+      meta.textContent = 'GAP Reference: ';
+      const referenceValue = document.createElement('strong');
+      referenceValue.className = 'scoring-job-reference';
+      referenceValue.textContent = baseline;
+      meta.append(referenceValue);
       button.append(meta);
       const cdrNames = jobCdrNames(job);
       const cdrButton = document.createElement('button');
@@ -916,7 +932,11 @@
       if (profileName) {
         const profileMeta = document.createElement('span');
         profileMeta.className = 'scoring-job-meta';
-        profileMeta.textContent = `Scoring methodology: ${profileName}`;
+        profileMeta.textContent = 'Scoring Methodology Profile: ';
+        const profileValue = document.createElement('strong');
+        profileValue.className = 'scoring-job-profile';
+        profileValue.textContent = profileName;
+        profileMeta.append(profileValue);
         button.append(profileMeta);
       }
       if (isActive(job)) {
@@ -4770,6 +4790,7 @@
     userSelectedJob = true;
     selectedJobId = jobIdOf(job);
     selectedJob = job;
+    restoreCalculationSelectionFromJob(job);
     const fromDropdown = jobSelector.contains(button);
     jobSelector.open = false;
     if (fromDropdown) jobSelector.querySelector('summary').focus();

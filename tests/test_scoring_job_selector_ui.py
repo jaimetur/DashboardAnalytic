@@ -108,7 +108,7 @@ def test_choosing_job_from_either_list_loads_selected_results(list_index):
     start = script.index("  for (const list of jobLists) list.addEventListener('click', async event => {")
     end = script.index("\n  root.addEventListener('click',", start)
     program = r'''
-let loaded, persisted = false, focused = false, deleted;
+let loaded, persisted = false, focused = false, deleted, restored;
 const handlers = [];
 const jobLists = [0, 1].map(() => ({addEventListener: (_name, callback) => {handlers.push(callback);}}));
 const jobs = [{id: '20'}, {id: '15'}];
@@ -117,12 +117,13 @@ let userSelectedJob = false, selectedJobId = '20', selectedJob = jobs[0];
 const root = {querySelector: () => ({scrollIntoView: () => {focused = true;}})};
 const jobSelector = {open: true, contains: () => LIST_INDEX === 0, querySelector: () => ({focus: () => {focused = true;}})};
 const persistScoringViewState = () => {persisted = true;};
+const restoreCalculationSelectionFromJob = job => {restored = job.id;};
 const loadJob = async (job, force) => {loaded = {id: job.id, force};};
 const deleteJob = id => {deleted = id;};
 ''' + f'\nconst LIST_INDEX = {list_index};\n' + script[start:end] + f'\nconst handler = handlers[{list_index}];\n' + r'''
 (async () => {
   await handler({target: {closest: selector => selector === '[data-job-id]' ? {dataset: {jobId: '15'}} : null}});
-  const selection = {loaded, persisted, focused, open: jobSelector.open, selectedJobId, userSelectedJob};
+  const selection = {loaded, persisted, focused, open: jobSelector.open, selectedJobId, userSelectedJob, restored};
   loaded = null;
   await handler({target: {closest: () => ({dataset: {deleteJobId: '20'}})}});
   process.stdout.write(JSON.stringify({selection, deleted, loaded}));
@@ -131,7 +132,7 @@ const deleteJob = id => {deleted = id;};
     result = _run_node_json(program, {})
     assert result['selection'] == {
         'loaded': {'id': '15', 'force': True}, 'persisted': True, 'focused': True,
-        'open': False, 'selectedJobId': '15', 'userSelectedJob': True,
+        'open': False, 'selectedJobId': '15', 'userSelectedJob': True, 'restored': '15',
     }
     assert result['deleted'] == '20' and result['loaded'] is None
 

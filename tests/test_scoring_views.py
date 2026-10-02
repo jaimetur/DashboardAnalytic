@@ -310,8 +310,7 @@ def test_custom_environment_names_are_preserved_and_included_in_combined_views()
     configuration = scoring_configuration()
     environments = configuration['scope']['environments']
     for name, g_level_1 in (('City', 'City'), ('Indoor', 'Indoor')):
-        environments[name] = {'sheet': name, 'g_level_1': g_level_1}
-        configuration['scope']['environment_mapping'][g_level_1] = name
+        environments[name] = {'source_filters': {'G_Level_1': g_level_1}}
         for metric in configuration['metrics']:
             context = copy.deepcopy(metric['contexts']['DriveCity'])
             context['max_points'] *= 0.1
@@ -365,8 +364,7 @@ def test_custom_environment_names_are_preserved_and_included_in_combined_views()
 def test_custom_environment_combined_view_is_shown_with_incomplete_coverage_notice():
     configuration = scoring_configuration()
     environments = configuration['scope']['environments']
-    environments['Indoor'] = {'sheet': 'Indoor', 'g_level_1': 'Indoor'}
-    configuration['scope']['environment_mapping']['Indoor'] = 'Indoor'
+    environments['Indoor'] = {'source_filters': {'G_Level_1': 'Indoor'}}
     for metric in configuration['metrics']:
         context = copy.deepcopy(metric['contexts']['DriveCity'])
         context['max_points'] *= 0.1
@@ -409,15 +407,10 @@ def _road_configuration_with_key(road_key, road_label):
         name for name in ('DriveConnectionroad', 'Drive Connecting Roads') if name in environments
     )
     road = environments.pop(existing_road_key)
-    road['g_level_2'] = road_label
+    road['source_filters']['G_Level_2'] = road_label
     environments[road_key] = road
     for metric in configuration['metrics']:
         metric['contexts'][road_key] = metric['contexts'].pop(existing_road_key)
-    configuration['scope']['environment_mapping'] = {
-        (f"{item['g_level_1']} + {item['g_level_2']}" if item.get('g_level_2') is not None
-         else item['g_level_1']): name
-        for name, item in environments.items()
-    }
     return validate_scoring_configuration(configuration)
 
 
@@ -450,8 +443,7 @@ def test_new_canonical_road_environment_alias_and_order_are_supported():
 def test_custom_environment_name_is_preserved_after_canonical_road_rename():
     configuration = _road_configuration_with_key('Drive Connecting Roads', 'Connecting Roads')
     environments = configuration['scope']['environments']
-    environments['Lab North'] = {'sheet': 'Lab North', 'g_level_1': 'Lab North'}
-    configuration['scope']['environment_mapping']['Lab North'] = 'Lab North'
+    environments['Lab North'] = {'source_filters': {'G_Level_1': 'Lab North'}}
     for metric in configuration['metrics']:
         context = copy.deepcopy(metric['contexts']['DriveCity'])
         context['max_points'] *= 0.1

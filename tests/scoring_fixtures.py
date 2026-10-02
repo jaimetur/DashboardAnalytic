@@ -1090,4 +1090,16 @@ def legacy_scoring_configuration() -> dict:
 
 def load_initial_scoring_configuration() -> dict:
     """Return the self-contained initial-methodology fixture without file I/O."""
-    return scoring_configuration()
+    configuration = scoring_configuration()
+    examples = deepcopy(_INITIAL_SCORING_CONFIGURATION.get('validation_examples', {}))
+    legacy_codes = [metric['code'] for metric in _INITIAL_SCORING_CONFIGURATION['metrics']]
+    code_map = {code: f'K{index}' for index, code in enumerate(legacy_codes, start=1)}
+    samples = [examples.get('mapping_workbook_sample'), *examples.get('mapping_workbook_samples', [])]
+    for sample in filter(None, samples):
+        if isinstance(sample.get('kpi_code'), str):
+            sample['kpi_code'] = code_map.get(sample['kpi_code'], sample['kpi_code'])
+        ultra = sample.get('thresholds', {}).get('ultra')
+        if isinstance(ultra, dict) and ultra.get('rule') == 'fixed':
+            sample['thresholds']['ultra'] = ultra['value']
+    configuration['validation_examples'] = examples
+    return configuration

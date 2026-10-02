@@ -6336,12 +6336,8 @@ def _scoring_configuration_archive_payload(workspace: Workspace) -> bytes:
     )
     profiles = (task_repository.get_scoring_profiles()
                 if task_repository.get_workspace_state(SCORING_CONFIGURATION_STATE_KEY) else None)
-    return json.dumps({
-        'format': 'dashboard-analytic-scoring-configuration',
-        'version': 2,
-        'active_profile_id': profiles['active_profile_id'] if profiles else None,
-        'profiles': profiles['profiles'] if profiles else None,
-    }, ensure_ascii=False, indent=2).encode('utf-8')
+    from src.modules.scoring_config import scoring_profiles_document
+    return json.dumps(scoring_profiles_document(profiles), ensure_ascii=False, indent=2).encode('utf-8')
 
 
 def _archive_workspace_scoring_configuration(
@@ -15861,10 +15857,8 @@ def export_workspace_scoring_configuration(user: SessionUser = Depends(config_ed
         profiles = task_repository.get_scoring_profiles()
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    content = json.dumps({
-        'format': 'dashboard-analytic-scoring-configuration', 'version': 2,
-        **profiles,
-    }, ensure_ascii=False, indent=2)
+    from src.modules.scoring_config import scoring_profiles_document
+    content = json.dumps(scoring_profiles_document(profiles), ensure_ascii=False, indent=2)
     return Response(content, media_type='application/json', headers={
         'Content-Disposition': 'attachment; filename="scoring-configuration.json"',
     })
@@ -16693,11 +16687,8 @@ def _retain_import_upload(upload_id: str, package_path: Path, user: SessionUser)
         # Normalize an explicitly uploaded JSON into the existing package workflow.
         with zipfile.ZipFile(package_path, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
             archive.writestr('manifest.json', json.dumps(manifest))
-            archive.writestr(archive_path, json.dumps({
-                'format': 'dashboard-analytic-scoring-configuration', 'version': 2,
-                'active_profile_id': profiles['active_profile_id'] if profiles else None,
-                'profiles': profiles['profiles'] if profiles else None,
-            }))
+            from src.modules.scoring_config import scoring_profiles_document
+            archive.writestr(archive_path, json.dumps(scoring_profiles_document(profiles)))
     manifest = read_import_manifest(package_path)
     kind = str(manifest.get('kind') or '')
     if kind not in {

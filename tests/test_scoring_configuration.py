@@ -47,24 +47,64 @@ def test_legacy_configuration_defaults_hierarchy_and_custom_order_changes_identi
     assert method_version_for_configuration(reordered) != method_version_for_configuration(configuration)
 
 
+def test_minimal_import_defaults_interpolation_and_uses_only_supported_methodology_fields():
+    configuration = scoring_configuration()
+    configuration.pop('interpolation')
+    configuration.pop('title')
+
+    validated = validate_scoring_configuration(configuration)
+
+    assert validated['title'] == ''
+    assert validated['interpolation']['method'] == 'piecewise_linear'
+    assert set(validated['scope']['environments']['DriveCity']) == {
+        'source_filters', 'total_points', 'weight_share',
+    }
+    assert validated['scope']['environments']['DriveCity']['source_filters'] == {
+        'G_Level_1': 'Drive', 'G_Level_2': 'City',
+    }
+    assert all(set(item['calculation']) in ({'formula', 'filters'}, {'formula', 'filters', 'totalpacketlost'})
+               for item in validated['metrics'])
+    assert all(not isinstance(context['thresholds'].get('ultra'), dict)
+               or 'source_formula' not in context['thresholds']['ultra']
+               for item in validated['metrics'] for context in item['contexts'].values())
+
+
+def test_empty_interpolation_object_uses_supported_default_anchors():
+    configuration = scoring_configuration()
+    configuration['interpolation'] = {}
+
+    validated = validate_scoring_configuration(configuration)
+
+    assert validated['interpolation']['medium_score'] == 0.8
+    assert validated['interpolation']['high_score_without_ultra'] == 1.0
+    assert validated['interpolation']['high_score_with_ultra'] == 0.95
+    assert validated['interpolation']['ultra_score'] == 1.0
+
+
+def test_methodology_title_is_persisted_but_does_not_change_scoring_identity():
+    configuration = scoring_configuration()
+    named = copy.deepcopy(configuration)
+    named['title'] = 'Urban Drive Quality'
+
+    validated = validate_scoring_configuration(named)
+
+    assert validated['title'] == 'Urban Drive Quality'
+    assert configuration_hash(validated) == configuration_hash(configuration)
+    assert method_version_for_configuration(validated) == method_version_for_configuration(configuration)
+
+
 def test_seed_fixture_has_kpi_specific_high_with_ultra_anchors():
     configuration = scoring_configuration()
-    expected = {'low_score': 0.0, 'medium_score': 0.8, 'high_score': 0.9, 'ultra_score': 1.0}
-    expected_source_formulas = {
-        'K20': {'DriveCity': '=MAX(M23:O23)', 'DriveConnectionroad': '=MAX(K23:O23)', 'Walk': '=MAX(M23:O23)'},
-        'K25': {'DriveCity': '=MAX(M28:O28)', 'DriveConnectionroad': '=MAX(K28:O28)', 'Walk': '=MAX(M28:O28)'},
-    }
-
     for code in ('K20', 'K25'):
         for context_name, context in metric(configuration, code)['contexts'].items():
-            assert context['score_mapping'] == expected
-            assert context['thresholds']['ultra']['source_formula'] == expected_source_formulas[code][context_name]
+            assert context['thresholds']['ultra']['rule'] == 'best_max'
+            assert 'source_formula' not in context['thresholds']['ultra']
     assert configuration['interpolation']['high_score_with_ultra'] == 0.95
     assert metric(configuration, 'K26')['contexts']['DriveCity']['score_mapping'] == {
         'low_score': 0.0, 'medium_score': 0.8, 'high_score': 0.95, 'ultra_score': 1.0,
     }
-    assert metric(configuration, 'K26')['contexts']['DriveCity']['thresholds']['ultra']['source_formula'] == '=MIN(M29:O29)'
-    assert metric(configuration, 'K26')['contexts']['DriveConnectionroad']['thresholds']['ultra']['source_formula'] == '=MIN(K29:O29)'
+    assert metric(configuration, 'K26')['contexts']['DriveCity']['thresholds']['ultra']['rule'] == 'best_min'
+    assert metric(configuration, 'K26')['contexts']['DriveConnectionroad']['thresholds']['ultra']['rule'] == 'best_min'
 
 
 def test_piecewise_interpolation_uses_custom_mapping_anchors_for_both_directions():
@@ -105,6 +145,14 @@ def test_validation_accepts_editable_thresholds_weights_types_anchors_and_priori
     assert method_version_for_configuration(validated) != method_version_for_configuration(scoring_configuration())
 
 
+def test_invalid_global_interpolation_anchor_order_is_rejected_with_explicit_context_mappings():
+    configuration = scoring_configuration()
+    configuration['interpolation']['high_score_with_ultra'] = 0.7
+
+    with pytest.raises(ValueError, match='interpolation anchors must increase'):
+        validate_scoring_configuration(configuration)
+
+
 @pytest.mark.parametrize(
     ('edit', 'message'),
     [
@@ -115,7 +163,7 @@ def test_validation_accepts_editable_thresholds_weights_types_anchors_and_priori
         (lambda c: c.__setitem__('gap_priority', ['K1'] * 32), 'unique KPI codes'),
         (lambda c: c.__setitem__('aggregation_hierarchy', ['Operator', 'Vendor', 'Region', 'City', 'City']), 'aggregation_hierarchy'),
         (lambda c: metric(c, 'K1')['calculation'].__setitem__('formula', 'AVG(Other)'), 'unsupported voice field'),
-        (lambda c: c['scope']['environments']['DriveCity'].__setitem__('g_level_2', 'Road'), 'environment_mapping'),
+        (lambda c: c['scope']['environments']['DriveCity']['source_filters'].__setitem__('G_Level_2', ''), 'non-empty'),
     ],
 )
 def test_validation_rejects_invalid_or_source_methodology_edits(edit, message):
@@ -124,6 +172,41 @@ def test_validation_rejects_invalid_or_source_methodology_edits(edit, message):
 
     with pytest.raises(ValueError, match=message):
         validate_scoring_configuration(configuration)
+
+
+@pytest.mark.parametrize(
+    ('filters', 'message'),
+    [
+        ({'Region': 'North'}, 'G_Level_1 and optional G_Level_2'),
+        ({'G_Level_1': ''}, 'source_filters.G_Level_1'),
+        ({'G_Level_1': 'Drive', 'G_Level_2': '  '}, 'source_filters.G_Level_2'),
+    ],
+)
+def test_source_filters_require_supported_fields_and_nonempty_values(filters, message):
+    configuration = scoring_configuration()
+    configuration['scope']['environments']['DriveCity']['source_filters'] = filters
+
+    with pytest.raises(ValueError, match=message):
+        validate_scoring_configuration(configuration)
+
+
+def test_source_filters_select_environment_rows_during_calculation():
+    from src.modules.scoring import calculate_scoring
+
+    configuration = scoring_configuration()
+    configuration['scope']['environments']['DriveCity']['source_filters']['G_Level_2'] = 'Urban'
+    source = pd.DataFrame({
+        'Operator': ['EE', 'EE'], 'Campaign': ['2026Q2', '2026Q2'],
+        'G_Level_1': ['Drive', 'Drive'], 'G_Level_2': ['Urban', 'City'],
+        'Session_Type': ['CALL', 'CALL'], 'Call_Status': ['Completed', 'Failed'],
+    })
+
+    result = calculate_scoring({'voice': source}, configuration=configuration)
+    city_kpi = next(row for row in result['scoring']
+                    if row['kpi_code'] == 'K1' and row['environment'] == 'DriveCity')
+
+    assert city_kpi['value'] == 100
+    assert city_kpi['sample_count'] == 1
 
 
 def test_validation_and_calculation_support_added_removed_and_reclassified_kpis():
@@ -139,10 +222,8 @@ def test_validation_and_calculation_support_added_removed_and_reclassified_kpis(
         'kpi': 'Completed Result Ratio',
         'kpi_type': 'Custom',
         'calculation': {
-            'source_kind': 'data',
             'formula': '100 * SUM(Test_Result == "Completed") / COUNT(Test_Result)',
             'filters': {},
-            'denominator': 'Available data test results',
         },
     })
     configuration['metrics'] = [existing, added]
@@ -189,10 +270,8 @@ def test_zero_weight_kpis_are_allowed_and_derived_totals_follow_configured_weigh
 def test_named_environments_are_dynamic_and_can_be_deleted_without_legacy_walk_migration():
     configuration = scoring_configuration()
     configuration['scope']['environments']['Indoor'] = {
-        'g_level_1': 'Indoor',
-        'g_level_2': 'Hall',
+        'source_filters': {'G_Level_1': 'Indoor', 'G_Level_2': 'Hall'},
     }
-    configuration['scope']['environment_mapping']['Indoor + Hall'] = 'Indoor'
     for item in configuration['metrics']:
         context = dict(item['contexts']['DriveCity'])
         context['max_points'] = 0
@@ -207,7 +286,6 @@ def test_named_environments_are_dynamic_and_can_be_deleted_without_legacy_walk_m
     assert sum(item['contexts']['Indoor']['weight_share'] for item in validated['metrics']) == pytest.approx(1)
 
     validated['scope']['environments'].pop('Walk')
-    validated['scope']['environment_mapping'].pop('Walk')
     for item in validated['metrics']:
         item['contexts'].pop('Walk')
     without_walk = validate_scoring_configuration(validated)
@@ -243,18 +321,17 @@ def test_kpi_allocator_survives_deletion_and_never_reuses_a_generated_code():
 def test_environment_source_selectors_must_not_overlap_or_use_combined_name():
     configuration = scoring_configuration()
     configuration['scope']['environments']['Combined'] = {
-        'g_level_1': 'Indoor',
+        'source_filters': {'G_Level_1': 'Indoor'},
     }
-    configuration['scope']['environment_mapping']['Indoor'] = 'Combined'
     for item in configuration['metrics']:
         item['contexts']['Combined'] = dict(item['contexts']['DriveCity'])
     with pytest.raises(ValueError, match='cannot be Combined'):
         validate_scoring_configuration(configuration)
 
     configuration['scope']['environments'].pop('Combined')
-    configuration['scope']['environment_mapping'].pop('Indoor')
-    configuration['scope']['environments']['Indoor'] = {'g_level_1': 'Walk'}
-    configuration['scope']['environment_mapping']['Walk'] = 'Indoor'
+    configuration['scope']['environments']['Indoor'] = {
+        'source_filters': {'G_Level_1': 'Walk'},
+    }
     for item in configuration['metrics']:
         item['contexts'].pop('Combined')
         item['contexts']['Indoor'] = dict(item['contexts']['Walk'])

@@ -14,10 +14,7 @@ def test_explicit_legacy_road_name_is_retained_after_user_rename(tmp_path):
     profile = default_scoring_profile(scoring_configuration())
     environment = profile['configuration']['scope']['environments']['DriveConnectionroad']
     environment['display_name'] = 'DriveConnectionroad'
-    environment['g_level_2'] = 'Connecting Roads'
-    profile['configuration']['scope']['environment_mapping'] = {
-        'Drive + City': 'DriveCity', 'Drive + Connecting Roads': 'DriveConnectionroad', 'Walk': 'Walk',
-    }
+    environment['source_filters']['G_Level_2'] = 'Connecting Roads'
     repository.replace_scoring_profiles({
         'active_profile_id': profile['id'], 'profiles': [profile],
     })
@@ -40,8 +37,9 @@ def test_migrated_road_selector_scores_connecting_roads_and_keeps_350_point_allo
 
     road_name = 'Drive Connecting Roads'
     road_environment = configuration['scope']['environments'][road_name]
-    assert road_environment['g_level_1'] == 'Drive'
-    assert road_environment['g_level_2'] == 'Connecting Roads'
+    assert road_environment['source_filters'] == {
+        'G_Level_1': 'Drive', 'G_Level_2': 'Connecting Roads',
+    }
     assert road_environment['total_points'] == pytest.approx(350)
     assert sum(metric['contexts'][road_name]['max_points'] for metric in configuration['metrics']) == pytest.approx(350)
 

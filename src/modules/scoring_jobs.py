@@ -782,8 +782,9 @@ def _apply_current_environment_labels(repository: Repository, job: dict[str, Any
     current = profile['configuration'].get('scope', {}).get('environments', {})
 
     def source_identity(scope: dict[str, Any]) -> tuple[str, str]:
-        first = str(scope.get('g_level_1') or '').strip().casefold()
-        second = str(scope.get('g_level_2') or '').strip().casefold()
+        filters = scope.get('source_filters') or {}
+        first = str(filters.get('G_Level_1') or scope.get('g_level_1') or '').strip().casefold()
+        second = str(filters.get('G_Level_2') or scope.get('g_level_2') or '').strip().casefold()
         if second in {'connectionroad', 'connectingroads', 'connecting roads'}:
             second = 'connecting roads'
         return first, second

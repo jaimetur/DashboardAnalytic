@@ -164,7 +164,7 @@ def test_scoring_environment_crud_and_context_drafts_are_available():
     assert 'metric.contexts = Object.fromEntries' in script
     assert 'environmentRename: true' in script
     assert 'applyEnvironmentMapping(latestConfiguration.scope)' in script
-    assert "mapping[g2 ? `${g1} + ${g2}` : g1] = key;" in script
+    assert 'environment.source_filters = {G_Level_1: g1, ...(g2 ? {G_Level_2: g2} : {})};' in script
     assert 'captureSelectedContext(row, lastEnvironment)' in script
     assert 'hydrateSelectedContext(row, lastEnvironment)' in script
     assert "description: `Delete “${environmentLabel(environment)}” and its KPI points, thresholds, and mappings from this methodology?`" in script
@@ -187,7 +187,8 @@ def test_code_column_is_the_single_editable_code_input_and_updates_gap_priority(
     assert 'const orderedCategories = Array.from(grouped.keys());' in script
     assert 'calculationDialog.showModal()' in script
     assert "denominatorLabel.textContent = 'Calculation basis (derived from formula)'" in script
-    assert "formula.trim() === originalFormula && storedDenominator ? storedDenominator : deriveDenominator(formula)" in script
+    assert 'const calculation = {formula, filters};' in script
+    assert 'calculation.totalpacketlost = totalPacketLossExpression;' in script
     assert "[data-scoring-config] [hidden] { display: none !important; }" in template
 
 

@@ -598,10 +598,10 @@ def test_scoring_job_results_cache_force_and_exports(scoring_api):
     assert set(scoring_slides) == {'Summary', 'Breakdown'}
     expected_operators = ['Three UK', 'O2', 'Vodafone UK', 'EE']
     expected_headers = {
-        'Summary': ['CATEGORY', 'NETCHECK KPI', 'Score weight\n(%)', 'Max score'],
+        'Summary': ['CATEGORY', 'Score weight\n(%)', 'Max score'],
         'Breakdown': ['CATEGORY', 'KPI', 'Type of KPI', 'Score weight\n(%)', 'Max score'],
     }
-    for mode, fixed_count in [('Summary', 4), ('Breakdown', 5)]:
+    for mode, fixed_count in [('Summary', 3), ('Breakdown', 5)]:
         slide = scoring_slides[mode]
         scoring_table = next(shape.table for shape in slide.shapes if shape.has_table)
         assert [scoring_table.cell(0, column).text for column in range(fixed_count)] == expected_headers[mode]

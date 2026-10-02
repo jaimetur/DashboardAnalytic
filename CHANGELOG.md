@@ -6,6 +6,7 @@
 ## Release: v0.5.0
 ### Release Date: 2026-10-02
 #### ⚠️ Breaking Changes:
+- Scoring configuration exchange uses version 3 with explicit environment `source_filters`; Tableau fields, duplicate environment mappings and reference metadata are removed. Export profiles again to create files in the new format.
 
 #### 🌟 New Features:
 - **Scoring & GAP Analysis** calculates configurable NetCheck City/Road scores from Data, Voice and Speech CDRs. Persistent jobs reuse unchanged inputs, retain methodology snapshots and support deletion and CSV/PowerPoint exports.
@@ -17,9 +18,9 @@
 - **Scoring PowerPoint export** includes covers, environment transitions, charts, Scoring tables and combined/individual GAP comparisons, with editable matrices and charts.
 
 #### 🚀 Enhancements:
-- **Methodology editor:** nested, collapsible Environment/KPI panels, category and KPI reordering, inline SVG actions and a larger formula/filter editor. Save Methodology Profile commits the complete profile; Set Default selects future jobs' methodology and protects it from deletion.
-- **Scoring setup:** category-aware GAP priority controls support first/last, up/down and direct-position moves. Source selectors use cached CDR values, and point distribution opens in a centered dialog.
-- **Scoring job navigation:** a dropdown and history cards show filters, CDR sources, methodology, GAP baseline and ordered aggregation levels. Saved calculation selections persist across users/browsers; result tabs, scroll position and display choices restore within the browser session.
+- **Methodology editor:** an editable methodology title, explicit CDR matching rules and nested, collapsible Environment/KPI panels, category and KPI reordering, inline SVG actions and a larger formula/filter editor. Save Methodology Profile commits the complete profile; Set Default selects future jobs' methodology and protects it from deletion.
+- **Scoring setup:** category-aware GAP priority controls support first/last, up/down and direct-position moves. Aligned CDR filter selectors use cached values and concise labels; point distribution opens in a centered dialog.
+- **Scoring job navigation:** a dropdown and history cards show filters, CDR sources, methodology, GAP Reference and ordered aggregation levels; profile and reference values use bold, contrasting colors. Selecting a job restores its calculation inputs for relaunching. Saved selections persist across users/browsers; result tabs, scroll position and display choices restore within the browser session.
 - **Scoring responsiveness:** cached catalogues, indexed KPI lookups and on-demand result tabs avoid unnecessary source scans and repeated rendering. Export controls remain visible while results load.
 - **Environment results:** All Environments sums configured maxima and weighted contributions. Global raw KPIs are recalculated from pooled source rows; older jobs require recalculation to populate them. Incomplete coverage keeps original weights, and jobs initially select a complete environment when available.
 - **Coverage explanations:** one pale yellow Calculation notes card lists each affected combination, excluded KPI names and exact achievable maximum in larger bold text. Incomplete values and N/A* cells use bold red text; PowerPoint slide notes include the same coverage details.
@@ -42,7 +43,7 @@
 - Scoring PowerPoint exports avoid malformed table/chart XML and allocation labels that caused repair prompts or blank slides.
 
 #### 📚 Documentation:
-- Help documents Scoring configuration, jobs, aggregation, vendor filtering, coverage limits and CSV/PowerPoint export behavior.
+- Help documents the simplified Scoring format, environment matching, editable titles, jobs, aggregation, vendor filtering, coverage limits and CSV/PowerPoint exports.
 
 ---
 

@@ -212,7 +212,6 @@ def test_legacy_job_configuration_snapshot_is_returned_without_walk_migration(re
     job, _reused = scoring_jobs.create_scoring_job(repository, [dataset_id], [], 'NSA')
     legacy = copy.deepcopy(job['configuration'])
     legacy['scope']['environments'].pop('Walk')
-    legacy['scope']['environment_mapping'].pop('Walk')
     for metric in legacy['metrics']:
         metric['contexts'].pop('Walk')
 
@@ -829,10 +828,6 @@ def test_historical_jobs_use_current_environment_labels_without_rewriting_snapsh
     scope = configuration['scope']
     scope['environments']['Drive - City'] = scope['environments'].pop('DriveCity')
     scope['environments']['Drive - City']['display_name'] = 'Drive - City'
-    scope['environment_mapping'] = {
-        source: 'Drive - City' if target == 'DriveCity' else target
-        for source, target in scope['environment_mapping'].items()
-    }
     for metric in configuration['metrics']:
         metric['contexts']['Drive - City'] = metric['contexts'].pop('DriveCity')
     repository.replace_scoring_configuration(configuration)

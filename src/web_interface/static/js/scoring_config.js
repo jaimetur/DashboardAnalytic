@@ -60,6 +60,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
   const endpoint = '/api/workspace-config/scoring-configuration';
   const profilesEndpoint = '/api/workspace-config/scoring-profiles';
   const environmentSelect = root.querySelector('[data-scoring-environment]');
+  const methodologyTitleInput = root.querySelector('[data-methodology-title]');
   const profileSelect = root.querySelector('[data-scoring-profile-select]');
   const profileActions = Array.from(root.querySelectorAll('[data-scoring-profile-action]'));
   const weightModeSelect = root.querySelector('[data-scoring-weight-mode]');
@@ -244,31 +245,28 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     const environment = configuration?.scope?.environments?.[environmentSelect.value] || {};
     const title = root.querySelector('[data-scoring-kpi-title]');
     if (title) title.textContent = `KPI Definitions, Scoring & Thresholds${environmentSelect.value ? ` (${environmentLabel(environmentSelect.value)})` : ''}`;
-    if (environmentG1Input && document.activeElement !== environmentG1Input) populateSourceLevelOptions(environmentG1Input, 'G_Level_1', String(environment.g_level_1 || ''));
-    if (environmentG2Input && document.activeElement !== environmentG2Input) populateSourceLevelOptions(environmentG2Input, 'G_Level_2', String(environment.g_level_2 || ''));
+    if (environmentG1Input && document.activeElement !== environmentG1Input) populateSourceLevelOptions(environmentG1Input, 'G_Level_1', String(environment.source_filters?.G_Level_1 || ''));
+    if (environmentG2Input && document.activeElement !== environmentG2Input) populateSourceLevelOptions(environmentG2Input, 'G_Level_2', String(environment.source_filters?.G_Level_2 || ''));
+    const note = root.querySelector('[data-environment-source-note]');
+    if (note) note.textContent = 'Only matching CDR rows are included. G_Level_2 is optional; leave it empty to include all values.';
     if (environmentG1Input) environmentG1Input.disabled = !environmentSelect.value;
     if (environmentG2Input) environmentG2Input.disabled = !environmentSelect.value;
   };
 
   const applyEnvironmentMapping = (scope) => {
     const entries = Object.entries(scope?.environments || {});
-    const mapping = {};
     const selectors = [];
     entries.forEach(([key, environment]) => {
-      const g1 = String(environment.g_level_1 || '').trim();
-      const g2 = String(environment.g_level_2 || '').trim();
+      const g1 = String(environment.source_filters?.G_Level_1 || '').trim();
+      const g2 = String(environment.source_filters?.G_Level_2 || '').trim();
       if (!g1) throw new Error(`Source G_Level_1 is required for ${key}.`);
       if (g1.length > 160 || g2.length > 160) throw new Error(`Source selectors for ${key} must be 160 characters or fewer.`);
       const overlaps = selectors.some((selector) => selector.g1.toLocaleLowerCase() === g1.toLocaleLowerCase()
         && (!selector.g2 || !g2 || selector.g2.toLocaleLowerCase() === g2.toLocaleLowerCase()));
       if (overlaps) throw new Error(`The source selector for ${key} overlaps another environment. Use a unique G_Level_1 or G_Level_2 combination.`);
       selectors.push({g1, g2});
-      environment.g_level_1 = g1;
-      if (g2) environment.g_level_2 = g2;
-      else delete environment.g_level_2;
-      mapping[g2 ? `${g1} + ${g2}` : g1] = key;
+      environment.source_filters = {G_Level_1: g1, ...(g2 ? {G_Level_2: g2} : {})};
     });
-    scope.environment_mapping = mapping;
   };
 
   const currentProfile = (collection = profileCollection) => collection?.profiles?.find((profile) => profile.id === activeProfileId) || null;
@@ -286,13 +284,14 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
 
   const environmentSaveSignature = (collection) => JSON.stringify(collection.profiles.map(profile => [
     profile.id, Object.entries(profile.configuration.scope.environments).map(([name, scope]) => [
-      name, scope.display_name || name, scope.g_level_1 || '', scope.g_level_2 || '',
+      name, scope.display_name || name, scope.source_filters?.G_Level_1 || '', scope.source_filters?.G_Level_2 || '',
     ]).sort((left, right) => left[0].localeCompare(right[0])),
   ]).sort((left, right) => left[0].localeCompare(right[0])));
 
   const enqueueProfileUpdate = (update, preserveKpiScope = false, verifyEnvironmentSave = false) => {
     const work = saveQueue.then(async () => {
       const draftScope = preserveKpiScope && kpiDirty ? clone(configuration?.scope) : null;
+      const draftTitle = configuration?.title || '';
       const draftProfileId = activeProfileId;
       const draftEnvironment = environmentSelect.value;
       const latest = normalizeProfileCollection(await loadProfiles());
@@ -307,6 +306,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       setProfileCollection(saved);
       if (draftScope && activeProfileId === draftProfileId) {
         configuration.scope = draftScope;
+        configuration.title = draftTitle;
+        if (methodologyTitleInput) methodologyTitleInput.value = draftTitle;
         renderEnvironmentOptions();
         environmentSelect.value = draftEnvironment;
         lastEnvironment = draftEnvironment;
@@ -1265,6 +1266,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       });
       profileSelect.disabled = !profileCollection?.profiles?.length;
     }
+    if (methodologyTitleInput) {
+      methodologyTitleInput.value = configuration?.title || '';
+      methodologyTitleInput.disabled = !currentProfile();
+    }
     const hasProfile = Boolean(currentProfile());
     profileActions.forEach((button) => {
       button.disabled = !hasProfile || (button.dataset.scoringProfileAction === 'delete' && ((profileCollection?.profiles?.length || 0) <= 1 || activeProfileId === profileCollection?.active_profile_id))
@@ -1393,6 +1398,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       throw new Error('A scoring methodology must contain at least one environment and a positive total of environment points.');
     }
     if (!selectedWeightInputsValid()) throw new Error('Correct the invalid weight percentage before saving.');
+    latestConfiguration.title = String(methodologyTitleInput?.value ?? configuration.title ?? '').trim();
     latestConfiguration.scope = clone(configuration.scope);
     applyEnvironmentMapping(latestConfiguration.scope);
     const entries = rows.map((row) => {
@@ -1413,11 +1419,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       }
       const type = readText(row, '[data-kpi-type]', `Type for ${label}`);
       const formula = readText(row, '[data-kpi-formula]', `Formula for ${label}`);
-      const originalFormula = String(metric.calculation?.formula || '').trim();
-      const storedDenominator = String(metric.calculation?.denominator || '').trim();
-      const denominator = formula.trim() === originalFormula && storedDenominator ? storedDenominator : deriveDenominator(formula);
       const filters = parseFilters(row, label);
-      const calculation = {...(metric.calculation || {}), source_kind: sourceKind, formula, filters, denominator};
+      const calculation = {formula, filters};
       if (formula.trim() === totalPacketLossFormula) calculation.totalpacketlost = totalPacketLossExpression;
       else delete calculation.totalpacketlost;
 
@@ -1694,7 +1697,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     }
     if (profileDialogG1) {
       const reference = configuration?.scope?.environments?.[environmentSelect.value] || {};
-      populateSourceLevelOptions(profileDialogG1, 'G_Level_1', initialG1 || (environmentCreate ? String(reference.g_level_1 || '') : ''));
+      populateSourceLevelOptions(profileDialogG1, 'G_Level_1', initialG1 || (environmentCreate ? String(reference.source_filters?.G_Level_1 || '') : ''));
       profileDialogG1.dataset.manuallyEdited = 'false';
     }
     if (profileDialogG2) populateSourceLevelOptions(profileDialogG2, 'G_Level_2', initialG2);
@@ -1735,8 +1738,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
         else if (!g1) error = 'Source G_Level_1 is required.';
         else if (g1.length > 160 || g2.length > 160) error = 'Source selectors must be 160 characters or fewer.';
         else if (environmentEntries().some(([, environment]) => {
-          const otherG1 = String(environment.g_level_1 || '').trim().toLocaleLowerCase();
-          const otherG2 = String(environment.g_level_2 || '').trim().toLocaleLowerCase();
+          const otherG1 = String(environment.source_filters?.G_Level_1 || '').trim().toLocaleLowerCase();
+          const otherG2 = String(environment.source_filters?.G_Level_2 || '').trim().toLocaleLowerCase();
           return otherG1 === g1.toLocaleLowerCase() && (!otherG2 || !g2 || otherG2 === g2.toLocaleLowerCase());
         })) error = 'The source selector overlaps another environment. Use a unique G_Level_1 or G_Level_2 combination.';
         if (error) {
@@ -2195,9 +2198,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     const newKey = result.name.trim();
     const scope = clone(configuration.scope || {});
     scope.environments = {...(scope.environments || {}), [newKey]: {
-      sheet: newKey,
-      g_level_1: result.g1.trim(),
-      ...(result.g2.trim() ? {g_level_2: result.g2.trim()} : {}),
+      source_filters: {G_Level_1: result.g1.trim(),
+        ...(result.g2.trim() ? {G_Level_2: result.g2.trim()} : {})},
     }};
     try {
       applyEnvironmentMapping(scope);
@@ -2256,9 +2258,6 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     });
     if (!confirmed) return;
     delete configuration.scope.environments[environment];
-    configuration.scope.environment_mapping = Object.fromEntries(
-      Object.entries(configuration.scope.environment_mapping || {}).filter(([, target]) => target !== environment),
-    );
     rowMetrics().forEach((row) => {
       delete row._contextDrafts?.[environment];
       delete row._contextPointDrafts?.[environment];
@@ -2381,6 +2380,11 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     const target = event.target;
     if (target.matches('[data-scoring-environment], [data-scoring-weight-mode], [data-scoring-profile-select]')) return;
     kpiDirty = true;
+    if (target.matches('[data-methodology-title]')) {
+      configuration.title = target.value;
+      setStatus(kpiStatus, 'Unsaved methodology title. Save the profile to apply it.');
+      return;
+    }
     if (target.matches('[data-kpi-label]')) resizeKpiLabel(target);
     if (target.matches('[data-environment-total-points]')) {
       const message = applyEnvironmentPointsEdit(target);
@@ -2398,17 +2402,19 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     }
     if (target.matches('[data-environment-g1]')) {
       const environment = configuration?.scope?.environments?.[environmentSelect.value];
-      if (environment) environment.g_level_1 = target.value;
+      if (environment) environment.source_filters.G_Level_1 = target.value;
+      syncEnvironmentSourceFields();
       setStatus(kpiStatus, 'Unsaved KPI changes. Save to apply this source selector.');
       return;
     }
     if (target.matches('[data-environment-g2]')) {
       const environment = configuration?.scope?.environments?.[environmentSelect.value];
       if (environment) {
-        if (target.value.trim()) environment.g_level_2 = target.value;
-        else delete environment.g_level_2;
+        if (target.value.trim()) environment.source_filters.G_Level_2 = target.value;
+        else delete environment.source_filters.G_Level_2;
       }
-      setStatus(kpiStatus, 'Unsaved KPI changes. Save to apply this source selector.');
+      syncEnvironmentSourceFields();
+      setStatus(kpiStatus, 'Unsaved KPI changes. Save to apply this source filter.');
       return;
     }
     if (target.matches('[data-kpi-formula]')) syncFormulaDependentControls(target.closest('tr[data-kpi-code]'));

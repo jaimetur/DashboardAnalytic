@@ -39,6 +39,7 @@
   .scoring-config-button-icon { width: 1.1rem; height: 1.1rem; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; vertical-align: middle; margin-right: .4rem; pointer-events: none; }
   .scoring-config-panel .scoring-config-profile-controls { display: flex; align-items: end; gap: .55rem; flex-wrap: wrap; width: 100%; }
   .scoring-config-panel .scoring-config-profile-controls label { display: grid; gap: .35rem; font-weight: 650; }
+  .scoring-config-panel .scoring-config-methodology-title { display: grid; gap: .35rem; font-weight: 650; margin-bottom: 1rem; }
   .scoring-config-panel .scoring-config-profile-controls select { min-width: 17rem; max-width: 100%; }
   .scoring-config-panel .scoring-config-profile-actions { display: flex; gap: .45rem; flex-wrap: wrap; }
   .scoring-config-panel .scoring-config-profile-actions button { background: #e7f1f1; border: 1px solid #9cb7b8; color: #174b50; font-weight: 700; }
@@ -55,7 +56,7 @@
   .scoring-config-panel .scoring-config-environment-actions button[data-scoring-environment-delete] { background: #b63a43; border-color: #9e2c35; color: #fff; }
   .scoring-config-panel .scoring-config-profile-actions button[data-scoring-profile-action="delete"]:hover:not(:disabled),
   .scoring-config-panel .scoring-config-environment-actions button[data-scoring-environment-delete]:hover:not(:disabled) { background: #962a32; color: #fff; }
-  .scoring-config-panel .scoring-config-source-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 14rem)); align-items: start; gap: .65rem; margin: 0; }
+  .scoring-config-panel .scoring-config-source-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 14rem)); align-items: end; gap: .65rem; margin: 0; }
   .scoring-config-panel .scoring-config-source-fields > small { grid-column: 1 / -1; color: #47685b; }
   .scoring-config-panel .scoring-config-source-fields label { display: grid; min-width: 0; gap: .3rem; font-weight: 650; }
   .scoring-config-panel .scoring-config-source-fields select { box-sizing: border-box; min-width: 0; width: 100%; max-width: 100%; padding: .4rem .45rem; }
@@ -236,7 +237,7 @@
       <div class="scoring-config-subpanels">
   <details id="scoring-kpi-configuration" class="panel collapsible-panel scoring-config-panel" open data-panel-state-key="workspace-config:scoring-kpi-configuration">
     <summary class="collapsible-summary">
-      <div><p class="eyebrow">Scoring methodology</p><h2>Scoring KPI Configuration</h2></div>
+      <div><p class="eyebrow">Scoring methodology</p><h2>Scoring Methodology &amp; KPI Configuration</h2></div>
       <span class="collapse-chip">Collapse</span>
     </summary>
     <div class="collapsible-panel-body">
@@ -245,6 +246,7 @@
       <form class="scoring-config-form" data-scoring-kpi-form data-no-persist novalidate>
         <section class="scoring-config-settings-group scoring-config-methodology-group" aria-labelledby="scoring-methodology-controls-title">
           <h3 id="scoring-methodology-controls-title">Methodology Profiles</h3>
+          <label class="scoring-config-methodology-title">Methodology title<input type="text" data-methodology-title maxlength="256" disabled placeholder="Describe this methodology"></label>
           <div class="scoring-config-profile-controls" data-scoring-profile-controls>
             <label>Scoring methodology profile
               <select data-scoring-profile-select data-no-persist disabled aria-label="Scoring methodology profile">
@@ -301,14 +303,15 @@
           </div>
             <button type="button" class="ghost-link" data-scoring-distribute-points disabled><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v6M5 15V9h14v6M2 15h6v6H2zM16 15h6v6h-6z" /></svg><span data-button-label>Distribute points keeping percentages</span></button>
           </div>
+        <p><strong>CDR filters</strong></p>
         <div class="scoring-config-source-fields" data-scoring-environment-source-fields>
-          <label>Source G_Level_1
+          <label>G_Level_1
             <select data-environment-g1 required><option value="">Choose G_Level_1</option></select>
           </label>
-          <label>Source G_Level_2 (optional)
+          <label>G_Level_2
             <select data-environment-g2><option value="">All G_Level_2 values</option></select>
           </label>
-          <small data-environment-source-note>Source selectors use cached CDR values and determine which workbook rows belong to this environment.</small>
+          <small data-environment-source-note>Only matching CDR rows are included. G_Level_2 is optional; leave it empty to include all values.</small>
         </div>
           <details class="scoring-config-weight-help">
             <summary>How points and weights work</summary>
@@ -432,10 +435,10 @@
         </label>
       </div>
       <div data-profile-dialog-environment-fields hidden>
-        <label>Source G_Level_1
+        <label>G_Level_1
           <select data-profile-dialog-g1><option value="">Choose G_Level_1</option></select>
         </label>
-        <label>Source G_Level_2 (optional)
+        <label>G_Level_2
           <select data-profile-dialog-g2><option value="">All G_Level_2 values</option></select>
         </label>
       </div>
