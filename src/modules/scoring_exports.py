@@ -1082,8 +1082,11 @@ def _best_network(presentation, matrices: list[dict]) -> None:
                 data.add_series(name, values)
         totals = [matrix['total']['values'][column['id']]['points'] for column in chart_columns]
         data.add_series('Total', totals)
-        chart = slide.shapes.add_chart(XL_CHART_TYPE.COLUMN_STACKED, Inches(.65), Inches(1.75),
-                                        Inches(8.65), Inches(4.75), data).chart
+        chart_shape = slide.shapes.add_chart(
+            XL_CHART_TYPE.COLUMN_STACKED, Inches(.65), Inches(1.75),
+            Inches(8.65), Inches(4.25), data,
+        )
+        chart = chart_shape.chart
         _format_chart(chart, maximum=max((value for value in totals if value is not None), default=0)
                       or matrix['total']['max_points'], labels=XL_DATA_LABEL_POSITION.CENTER)
         chart.legend.font.size = Pt(8.5)
@@ -1102,6 +1105,25 @@ def _best_network(presentation, matrices: list[dict]) -> None:
             _fill_series(chart.series[operator_index], voice_color)
             _fill_series(chart.series[voice_series_count + operator_index], color)
         _add_total_labels(chart)
+        service_heading = _text(slide, 'Service types', 6.22, left=.65, width=8.65,
+                                height=.22, size=9, color='#4A5B65')
+        service_heading.name = 'Scoring Chart Service Key Heading'
+        service_heading.text_frame.paragraphs[0].font.bold = True
+        service_key = _add_category_shade_bar(
+            slide, ['Data', 'Voice'], left=Inches(.65), top=Inches(6.48),
+            width=Inches(8.65), height=Inches(.35),
+        )
+        service_key.name = 'Scoring Chart Service Shade Key'
+        for index, color in enumerate(('555555', 'C4C4C4')):
+            cell = service_key.table.cell(0, index)
+            cell.fill.fore_color.rgb = RGBColor.from_string(color)
+            for paragraph in cell.text_frame.paragraphs:
+                paragraph.font.size = Pt(9)
+                paragraph.font.color.rgb = RGBColor.from_string(
+                    _header_foreground(color).lstrip('#'))
+        slide.shapes.add_group_shape(
+            [chart_shape, service_heading, service_key],
+        ).name = 'Scoring Best Network Service Chart'
         _add_family_allocation_donut(slide, matrix)
         _text(slide, matrix['coverage_note'], 7.03, size=9, height=.35)
 
