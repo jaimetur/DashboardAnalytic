@@ -87,7 +87,7 @@ def test_operator_accent_and_reference_marker_are_attached_to_operator_hierarchy
     assert "String(entry.level).toLocaleLowerCase() === 'operator'" in script
     assert 'th.classList.add(\'scoring-operator-header\');' in script
     assert 'hierarchyColumnIsReference(column)' in script
-    assert '.scoring-comparison-table .scoring-operator-header { border-bottom: 3px solid var(--operator-accent, #607d8b) !important; }' in template
+    assert '.scoring-comparison-table th.scoring-operator-header { background: var(--operator-accent, #607d8b) !important; color: var(--operator-text, #ffffff) !important; }' in template
     assert '.scoring-comparison-table th.scoring-hierarchy-header {' in template
     assert 'border-bottom' not in re.search(
         r'\.scoring-comparison-table th\.scoring-hierarchy-header\s*\{([^}]*)\}', template,

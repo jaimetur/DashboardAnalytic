@@ -524,7 +524,7 @@ def test_reference_header_uses_operator_mapping_accent_without_yellow_marker():
     template = SCORING_TEMPLATE.read_text(encoding='utf-8')
     script = SCORING_SCRIPT.read_text(encoding='utf-8')
 
-    assert '.scoring-comparison-table .scoring-operator-header { border-bottom: 3px solid var(--operator-accent, #607d8b) !important; }' in template
+    assert '.scoring-comparison-table th.scoring-operator-header { background: var(--operator-accent, #607d8b) !important; color: var(--operator-text, #ffffff) !important; }' in template
     assert '.scoring-comparison-table th.scoring-reference-header' not in template
     assert '.scoring-comparison-table th.scoring-hierarchy-header.scoring-reference-header' not in template
     assert '.scoring-comparison-table th.scoring-gap-header { background: #ffff00 !important; color: #242424 !important; }' in template
@@ -536,8 +536,8 @@ def test_operator_color_and_reference_markers_stay_on_operator_headers():
     template = SCORING_TEMPLATE.read_text(encoding='utf-8')
     script = SCORING_SCRIPT.read_text(encoding='utf-8')
 
-    assert '.scoring-comparison-table .scoring-operator-header { border-bottom: 3px solid var(--operator-accent, #607d8b) !important; }' in template
-    assert '.scoring-comparison-table th.scoring-gap-operator-header { border-bottom: 3px solid var(--operator-accent, #607d8b) !important; }' in template
+    assert '.scoring-comparison-table th.scoring-operator-header { background: var(--operator-accent, #607d8b) !important; color: var(--operator-text, #ffffff) !important; }' in template
+    assert 'border-bottom: 3px solid var(--operator-accent' not in template
     assert '.scoring-comparison-table th.scoring-reference-header' not in template
     assert '.scoring-comparison-table th.scoring-hierarchy-header.scoring-reference-header' not in template
     hierarchy_header_rule = re.search(
@@ -713,7 +713,7 @@ def test_raw_kpi_columns_are_hidden_in_summary_and_shown_in_expanded():
         'safeHexColor', 'readableTextColor', 'formatMatrixNumber', 'formatRawKpiValue',
         'formatScoreCell', 'createKpiTypeCell', 'addMatrixScoreCell', 'operatorValue',
         'appendScoreGapCells', 'showGapValues', 'selectedGapLayout', 'tableForMode',
-        'appendMatrixTable', 'renderScoringViews',
+        'appendMatrixTable', 'renderScoringViews', 'summaryOperatorColors', 'appendOperatorRankingLegend',
     )
     payload = {'snippets': {name: _function_source(script, name) for name in names}}
     program = r"""
@@ -739,7 +739,7 @@ const table = {
   operators: ['EE', 'O2'], baseline_operator: 'EE',
   operator_styles: {EE: {label: 'EE', color: '#17a09f'}, O2: {label: 'O2', color: '#0033a0'}},
   category_rows: [
-    {row_type: 'category', category: 'Voice', kpi: 'Voice', weight_percent: 100, max_points: 1000, values: {}},
+    {row_type: 'category', category: 'Voice', kpi: 'Voice', weight_percent: 100, max_points: 1000, values: {EE: {points: 850, complete: true}, O2: {points: 770, complete: true}}},
   ],
   expanded_rows: [
     {row_type: 'kpi', category: 'Voice', kpi: 'Call Setup', kpi_code: 'call_setup', kpi_type: 'Reliable', weight_percent: 50, max_points: 500,
@@ -747,7 +747,7 @@ const table = {
     {row_type: 'kpi', category: 'Voice', kpi: 'Drop Rate', kpi_code: 'drop_rate', kpi_type: 'Diff', weight_percent: 50, max_points: 500,
       values: {EE: {value: 1.2, points: 450, complete: true}, O2: {value: 2.3, points: 420, complete: true}}},
   ],
-  category_total: {weight_percent: 100, max_points: 1000},
+  category_total: {weight_percent: 100, max_points: 1000, values: {EE: {points: 850, complete: true}, O2: {points: 770, complete: false}}},
   expanded_total: {weight_percent: 100, max_points: 1000},
 };
 function descendants(node) { return [node, ...(node.children || []).flatMap(descendants)]; }
@@ -777,6 +777,8 @@ function summarize(section) {
     heading: nodes.find(node => node.className === 'scoring-table-section-title')?.textContent,
     valueGroups: nodes.filter(node => node.className.includes('scoring-kpi-value-group')).length,
     valueHeaders: nodes.filter(node => node.tagName === 'th' && node.className.includes('scoring-kpi-value-header')).length,
+    ranks: nodes.filter(node => node.dataset.operatorRank).map(node => [node.dataset.operatorRank, node.style.backgroundColor]),
+    rankingLegend: nodes.filter(node => node.className.includes('scoring-operator-ranking-legend')).length,
     rawCells: nodes.filter(node => node.tagName === 'td' && node.dataset.column === 'kpi-value').map(node => node.textContent),
   };
 }
@@ -785,11 +787,15 @@ process.stdout.write(JSON.stringify(sections.map(summarize)));
     results = _run_node_json(program, payload)
 
     assert [section['heading'] for section in results] == [
-        'Scoring Tables — Summary', 'Scoring Tables — Drill-down',
+        'Scoring Tables — Summary', 'Scoring Tables — Breakdown',
     ]
     assert results[0]['valueGroups'] == 0
     assert results[0]['valueHeaders'] == 0
     assert results[0]['rawCells'] == []
+    assert results[0]['ranks'] == [['best', '#C6EFCE'], ['worst', '#FFC7CE']] * 2
+    assert results[0]['rankingLegend'] == 1
+    assert results[1]['ranks'] == []
+    assert results[1]['rankingLegend'] == 0
     assert results[1]['valueGroups'] == 1
     assert results[1]['valueHeaders'] == 2
     assert results[1]['rawCells'] == ['12.35', '67.89', '1.20', '2.30', 'N/A', 'N/A']
@@ -963,3 +969,94 @@ console.log(JSON.stringify({all, single, global: segments(globalSvg), one: segme
     assert '350.00' in result['singleText']
     assert 'Drive - Connecting Roads:' in result['singleText']
     assert 'Global:' not in result['singleText']
+
+
+def test_summary_operator_highlights_compare_only_matching_contexts_and_include_ties():
+    script = SCORING_SCRIPT.read_text(encoding='utf-8')
+    names = ('firstValue', 'operatorValue', 'summaryOperatorColors')
+    payload = {'snippets': {name: _function_source(script, name) for name in names}}
+    program = r"""
+const vm = require('node:vm');
+const payload = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+const context = {};
+vm.createContext(context);
+vm.runInContext(Object.values(payload.snippets).join('\n') + `
+  const columns = ['A', 'B', 'C', 'D', 'E', 'F'].map((id, index) => ({
+    id, path: [{level: 'Operator', value: id}, {level: 'Region', value: index < 4 ? 'North' : 'South'}],
+  }));
+  const values = {A: {points: 10}, B: {points: 10}, C: {points: 2}, D: {points: 2},
+    E: {points: 100}, F: {points: 50, complete: false}};
+  globalThis.ranked = [...summaryOperatorColors(values, columns)];
+  globalThis.equal = [...summaryOperatorColors({A: {points: 2}, B: {points: 2}}, [{id: 'A'}, {id: 'B'}])];
+  globalThis.missing = [...summaryOperatorColors({A: {points: 0}, B: {points: null}, C: {points: 'bad'}},
+    [{id: 'A'}, {id: 'B'}, {id: 'C'}])];
+`, context);
+process.stdout.write(JSON.stringify({ranked: context.ranked, equal: context.equal, missing: context.missing}));
+"""
+    result = _run_node_json(program, payload)
+    assert dict(result['ranked']) == {
+        'A': '#C6EFCE', 'B': '#C6EFCE', 'C': '#FFC7CE', 'D': '#FFC7CE',
+        'E': '#C6EFCE', 'F': '#FFC7CE',
+    }
+    assert result['equal'] == []
+    assert result['missing'] == []
+    assert script.count('appendOperatorRankingLegend(summarySection);') == 2
+    assert script.count('appendThresholdLegend(expandedSection,') == 2
+    assert script.count('isSummary ? (summaryColors.get(') == 4
+
+
+def test_scoring_category_cells_span_kpis_and_subtotal_in_both_renderers():
+    script = SCORING_SCRIPT.read_text(encoding='utf-8')
+    names = (
+        'firstValue', 'operatorValue', 'operatorPresentation', 'safeHexColor', 'readableTextColor',
+        'formatMatrixNumber', 'createKpiTypeCell', 'showGapValues', 'selectedGapLayout',
+        'appendScoreGapCells', 'hierarchyColumnEntries', 'hierarchyColumnIsReference',
+        'appendMatrixTable', 'appendHierarchyMatrixTable', 'summaryOperatorColors',
+    )
+    payload = {'snippets': {name: _function_source(script, name) for name in names}}
+    program = r"""
+const vm = require('node:vm');
+const payload = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+class Element {
+  constructor(tag) { this.tagName = tag; this.children = []; this.dataset = {}; this.style = {};
+    this.className = ''; this.classList = {add: value => { this.className += ` ${value}`; }}; }
+  append(...nodes) { this.children.push(...nodes); }
+}
+const context = {
+  document: {createElement: tag => new Element(tag)}, showKpiValuesToggle: {checked: false},
+  showGapValuesToggle: {checked: false}, gapLayoutSelect: {value: 'end'},
+  observeScoringValueCells: () => {},
+  appendHierarchyHeaders: (thead, _data, _columns, definitions) => {
+    const row = new Element('tr');
+    for (const [label, column] of definitions) {
+      const th = new Element('th'); th.textContent = label; th.dataset.column = column; row.append(th);
+    }
+    thead.append(row);
+  },
+};
+vm.createContext(context);
+vm.runInContext(Object.values(payload.snippets).join('\n') + `
+  globalThis.renderers = [appendMatrixTable, appendHierarchyMatrixTable];`, context);
+const fixture = {_display_mode: 'expanded', operators: [], rows: [
+  {category: 'Voice', kpi: 'Call Setup'}, {category: 'Voice', kpi: 'Drop Rate'},
+  {category: 'Voice', kpi: 'Voice total', row_type: 'category'},
+  {category: 'Data', kpi: 'Throughput'}, {category: 'Data', kpi: 'Data total', row_type: 'category'},
+]};
+function descendants(node) { return [node, ...node.children.flatMap(descendants)]; }
+const result = context.renderers.map(render => {
+  const pane = new Element('div'); render(pane, fixture); const nodes = descendants(pane);
+  return {
+    categories: nodes.filter(node => node.tagName === 'td' && node.dataset.column === 'category')
+      .map(node => [node.textContent, node.rowSpan]),
+    headers: nodes.filter(node => node.tagName === 'th' && ['category', 'kpi'].includes(node.dataset.column))
+      .map(node => [node.textContent, node.dataset.column]),
+    subtotals: nodes.filter(node => node.className.includes('scoring-category-subtotal'))
+      .map(node => node.children.filter(child => child.dataset.column === 'kpi').map(child => child.textContent)),
+  };
+});
+process.stdout.write(JSON.stringify(result));
+"""
+    for result in _run_node_json(program, payload):
+        assert result['categories'] == [['Voice', 3], ['Data', 2]]
+        assert result['headers'] == [['CATEGORY', 'category'], ['KPI', 'kpi']]
+        assert result['subtotals'] == [['Voice total'], ['Data total']]

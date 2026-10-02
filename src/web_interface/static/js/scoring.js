@@ -1317,6 +1317,52 @@
     pane.append(container);
   }
 
+  function appendOperatorRankingLegend(pane) {
+    const container = document.createElement('div');
+    container.className = 'scoring-threshold-legend scoring-operator-ranking-legend';
+    for (const [label, color] of [['Best operator', '#C6EFCE'], ['Worst operator', '#FFC7CE']]) {
+      const item = document.createElement('span');
+      item.className = 'scoring-legend-item';
+      const swatch = document.createElement('span');
+      swatch.className = 'scoring-legend-swatch';
+      swatch.style.backgroundColor = color;
+      swatch.setAttribute('aria-hidden', 'true');
+      const copy = document.createElement('strong');
+      copy.textContent = label;
+      item.append(swatch, copy);
+      container.append(item);
+    }
+    pane.append(container);
+  }
+
+  function summaryOperatorColors(values, columns) {
+    const groups = new Map();
+    for (const column of columns) {
+      const context = JSON.stringify((Array.isArray(column.path) ? column.path : [])
+        .filter(entry => String(entry?.level || '').toLowerCase() !== 'operator')
+        .map(entry => [entry.level, entry.value]));
+      const cell = operatorValue(values, column.id);
+      const points = firstValue(cell, ['points', 'weighted_points', 'weighted_score'], null);
+      if (points === null || points === undefined || (typeof points === 'string' && !points.trim())) continue;
+      const numeric = Number(points);
+      if (!Number.isFinite(numeric)) continue;
+      if (!groups.has(context)) groups.set(context, []);
+      groups.get(context).push({id: column.id, points: numeric});
+    }
+    const colors = new Map();
+    for (const entries of groups.values()) {
+      if (entries.length < 2) continue;
+      const maximum = Math.max(...entries.map(entry => entry.points));
+      const minimum = Math.min(...entries.map(entry => entry.points));
+      if (maximum === minimum) continue;
+      for (const entry of entries) {
+        if (entry.points === maximum) colors.set(entry.id, '#C6EFCE');
+        else if (entry.points === minimum) colors.set(entry.id, '#FFC7CE');
+      }
+    }
+    return colors;
+  }
+
   function appendScoringGapScale(pane, tableData) {
     if (!showGapValues()) return;
     const maximum = Number(tableData?.gap_scale_max);
@@ -1369,7 +1415,7 @@
     pane.append(container);
   }
 
-  function addMatrixScoreCell(row, cell, className = '', isTotal = false) {
+  function addMatrixScoreCell(row, cell, className = '', isTotal = false, summaryColor = null) {
     const td = document.createElement('td');
     td.dataset.numeric = 'true';
     td.dataset.column = 'score';
@@ -1395,6 +1441,10 @@
         : `Partial score: expected KPI or environment coverage is incomplete. This is not a full score. ${bandLabel}${scoreLabel}`.trim();
     } else if (band || scoreLabel) {
       td.title = `${bandLabel}${scoreLabel}`.trim();
+    }
+    if (summaryColor !== null) {
+      td.style.backgroundColor = summaryColor;
+      if (summaryColor) td.dataset.operatorRank = summaryColor === '#C6EFCE' ? 'best' : 'worst';
     }
     row.append(td);
   }
@@ -1512,11 +1562,12 @@
     table.className = 'scoring-comparison-table';
     const thead = document.createElement('thead');
     const header = document.createElement('tr');
-    for (const title of ['Category', isSummary ? 'CATEGORY' : 'KPI', ...(!isSummary ? ['Type of KPI'] : []), 'Score weight (%)', 'Max score']) {
+    for (const [columnIndex, title] of ['CATEGORY', isSummary ? 'CATEGORY' : 'KPI', ...(!isSummary ? ['Type of KPI'] : []), 'Score weight (%)', 'Max score'].entries()) {
       const th = document.createElement('th');
       th.scope = 'col';
       th.rowSpan = 2;
-      th.dataset.column = ({Category: 'category', CATEGORY: 'kpi', KPI: 'kpi', 'Type of KPI': 'type', 'Score weight (%)': 'weight', 'Max score': 'maximum'})[title];
+      th.dataset.column = columnIndex === 0 ? 'category'
+        : ({CATEGORY: 'kpi', KPI: 'kpi', 'Type of KPI': 'type', 'Score weight (%)': 'weight', 'Max score': 'maximum'})[title];
       th.textContent = title;
       if (title === 'Score weight (%)') th.className = 'scoring-weight-header';
       if (title === 'Max score') th.className = 'scoring-maximum-header';
@@ -1589,6 +1640,7 @@
         th.style.backgroundColor = presentation.color;
         th.style.color = readableTextColor(presentation.color);
         th.style.setProperty('--operator-accent', presentation.color);
+        th.style.setProperty('--operator-text', readableTextColor(presentation.color));
       }
       if (isReferenceOperator(tableData, operator)) markReferenceHeader(th);
       operatorHeader.append(th);
@@ -1657,6 +1709,7 @@
       tr.append(maximum);
 
       const values = item?.values && typeof item.values === 'object' ? item.values : {};
+      const summaryColors = isSummary ? summaryOperatorColors(values, operators.map(id => ({id}))) : new Map();
       if (showKpiValues) {
         for (const operator of operators) {
           const cell = document.createElement('td');
@@ -1682,6 +1735,7 @@
       appendScoreGapCells(operators, nonBaseline, gapLayout,
         (operator, operatorIndex) => addMatrixScoreCell(
           tr, operatorValue(values, operator), `scoring-tone-${operatorIndex % 5}`, item?.row_type === 'category',
+          isSummary ? (summaryColors.get(operator) || '') : null,
         ),
         operator => addMatrixGapCell(tr, firstValue(gaps, [operator], null), firstValue(gapColors, [operator], ''),
           firstValue(gapPartial, [operator], false), firstValue(gapEnvironments, [operator], [])),
@@ -1715,6 +1769,7 @@
       maximum.textContent = formatMatrixNumber(firstValue(total, ['max_points'], null));
       row.append(maximum);
       const values = total.values && typeof total.values === 'object' ? total.values : {};
+      const summaryColors = isSummary ? summaryOperatorColors(values, operators.map(id => ({id}))) : new Map();
       if (showKpiValues) {
         operators.forEach(() => {
           const cell = document.createElement('td');
@@ -1731,7 +1786,7 @@
       const gapPartial = total.gap_partial && typeof total.gap_partial === 'object' ? total.gap_partial : {};
       const gapEnvironments = total.gap_environments && typeof total.gap_environments === 'object' ? total.gap_environments : {};
       appendScoreGapCells(operators, nonBaseline, gapLayout,
-        operator => addMatrixScoreCell(row, operatorValue(values, operator), '', true),
+        operator => addMatrixScoreCell(row, operatorValue(values, operator), '', true, isSummary ? (summaryColors.get(operator) || '') : null),
         operator => addMatrixGapCell(row, firstValue(gaps, [operator], null), firstValue(gapColors, [operator], ''),
           firstValue(gapPartial, [operator], false), firstValue(gapEnvironments, [operator], [])),
       );
@@ -1931,7 +1986,10 @@
             const fullLabel = hierarchyPathFullLabel(column) || presentation.label || th.textContent;
             th.title = fullLabel;
             th.setAttribute('aria-label', fullLabel);
-            if (presentation.color) th.style.setProperty('--operator-accent', presentation.color);
+            if (presentation.color) {
+              th.style.setProperty('--operator-accent', presentation.color);
+              th.style.setProperty('--operator-text', categoryLegendTextColor(presentation.color));
+            }
             if (hierarchyColumnIsReference(column)) {
               markReferenceHeader(th);
               th.title = `${fullLabel} is the reference operator`;
@@ -1974,7 +2032,7 @@
     table.className = 'scoring-comparison-table scoring-hierarchy-table';
     const thead = document.createElement('thead');
     appendHierarchyHeaders(thead, tableData, allColumns, [
-      ['Category', 'category'], [isSummary ? 'CATEGORY' : 'KPI', 'kpi'],
+      ['CATEGORY', 'category'], [isSummary ? 'CATEGORY' : 'KPI', 'kpi'],
       ...(!isSummary ? [['Type of KPI', 'type']] : []),
       ['Score weight (%)', 'weight', 'scoring-weight-header'], ['Max score', 'maximum', 'scoring-maximum-header'],
     ], blocks);
@@ -2014,6 +2072,7 @@
       maximum.textContent = formatMatrixNumber(item?.max_points);
       row.append(maximum);
       const values = item?.values && typeof item.values === 'object' ? item.values : {};
+      const summaryColors = isSummary ? summaryOperatorColors(values, allColumns) : new Map();
       if (showKpiValues) {
         for (const column of allColumns) {
           const cell = document.createElement('td');
@@ -2039,6 +2098,7 @@
       appendScoreGapCells(allColumns, nonBaseline, gapLayout,
         (column, columnIndex) => addMatrixScoreCell(
           row, operatorValue(values, column.id), `scoring-tone-${columnIndex % 5}`, item?.row_type === 'category',
+          isSummary ? (summaryColors.get(column.id) || '') : null,
         ),
         column => addMatrixGapCell(row, firstValue(gaps, [column.id], null), firstValue(gapColors, [column.id], ''),
           firstValue(gapPartial, [column.id], false), firstValue(gapEnvironments, [column.id], [])),
@@ -2071,6 +2131,7 @@
       maximum.textContent = formatMatrixNumber(firstValue(total, ['max_points'], null));
       row.append(maximum);
       const values = total.values && typeof total.values === 'object' ? total.values : {};
+      const summaryColors = isSummary ? summaryOperatorColors(values, allColumns) : new Map();
       if (showKpiValues) {
         allColumns.forEach(() => {
           const cell = document.createElement('td');
@@ -2087,7 +2148,7 @@
       const gapPartial = total.gap_partial && typeof total.gap_partial === 'object' ? total.gap_partial : {};
       const gapEnvironments = total.gap_environments && typeof total.gap_environments === 'object' ? total.gap_environments : {};
       appendScoreGapCells(allColumns, nonBaseline, gapLayout,
-        column => addMatrixScoreCell(row, operatorValue(values, column.id), '', true),
+        column => addMatrixScoreCell(row, operatorValue(values, column.id), '', true, isSummary ? (summaryColors.get(column.id) || '') : null),
         column => addMatrixGapCell(row, firstValue(gaps, [column.id], null), firstValue(gapColors, [column.id], ''),
           firstValue(gapPartial, [column.id], false), firstValue(gapEnvironments, [column.id], [])),
       );
@@ -2116,7 +2177,6 @@
       return;
     }
     appendContextHeader(pane, tableData, 'score', 'Scoring Tables');
-    appendThresholdLegend(pane, thresholdLegend.length ? thresholdLegend : tableData?.threshold_legend);
     appendScoringGapScale(pane, tableData);
     const summarySection = document.createElement('section');
     summarySection.className = 'scoring-table-mode-section';
@@ -2124,14 +2184,16 @@
     summaryHeading.className = 'scoring-table-section-title';
     summaryHeading.textContent = 'Scoring Tables — Summary';
     summarySection.append(summaryHeading);
+    appendOperatorRankingLegend(summarySection);
     appendHierarchyMatrixTable(summarySection, tableForMode(tableData, 'summary'));
     pane.append(summarySection);
     const expandedSection = document.createElement('section');
     expandedSection.className = 'scoring-table-mode-section';
     const expandedHeading = document.createElement('h4');
     expandedHeading.className = 'scoring-table-section-title';
-    expandedHeading.textContent = 'Scoring Tables — Drill-down';
+    expandedHeading.textContent = 'Scoring Tables — Breakdown';
     expandedSection.append(expandedHeading);
+    appendThresholdLegend(expandedSection, thresholdLegend.length ? thresholdLegend : tableData?.threshold_legend);
     appendHierarchyMatrixTable(expandedSection, tableForMode(tableData, 'expanded'));
     pane.append(expandedSection);
   }
@@ -2297,7 +2359,6 @@
     }
     const selected = appendComparisonSelector(pane, tables, 'score');
     appendContextHeader(pane, selected, 'score', 'Scoring Tables');
-    appendThresholdLegend(pane, thresholdLegend.length ? thresholdLegend : selected?.threshold_legend);
     appendScoringGapScale(pane, selected);
     const summarySection = document.createElement('section');
     summarySection.className = 'scoring-table-mode-section';
@@ -2305,14 +2366,16 @@
     summaryHeading.className = 'scoring-table-section-title';
     summaryHeading.textContent = 'Scoring Tables — Summary';
     summarySection.append(summaryHeading);
+    appendOperatorRankingLegend(summarySection);
     appendMatrixTable(summarySection, tableForMode(selected, 'summary'));
     pane.append(summarySection);
     const expandedSection = document.createElement('section');
     expandedSection.className = 'scoring-table-mode-section';
     const expandedHeading = document.createElement('h4');
     expandedHeading.className = 'scoring-table-section-title';
-    expandedHeading.textContent = 'Scoring Tables — Drill-down';
+    expandedHeading.textContent = 'Scoring Tables — Breakdown';
     expandedSection.append(expandedHeading);
+    appendThresholdLegend(expandedSection, thresholdLegend.length ? thresholdLegend : selected?.threshold_legend);
     appendMatrixTable(expandedSection, tableForMode(selected, 'expanded'));
     pane.append(expandedSection);
   }
@@ -4024,7 +4087,7 @@
         scoringPane.append(summaryHeading, summaryTable);
         const detailHeading = document.createElement('h4');
         detailHeading.className = 'scoring-table-section-title';
-        detailHeading.textContent = 'Scoring Tables — Drill-down';
+        detailHeading.textContent = 'Scoring Tables — Breakdown';
         const detailTable = document.createElement('div');
         detailTable.className = 'scoring-table-section';
         renderTable(detailTable, detailRows, 'No KPI detail rows are available.', {hideGapColumns: true});

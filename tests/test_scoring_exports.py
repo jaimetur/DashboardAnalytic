@@ -257,7 +257,7 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     assert [_rgb(matrices[0].cell(0, index)) for index in (0, 1)] == ['455B65', '455B65']
     table = matrices[-1]
     headers = _normalized_headers(table)
-    assert headers[:5] == ['NETCHECK KPIs', 'KPI', 'Type of KPI', 'Score weight (%)', 'Max score']
+    assert headers[:5] == ['CATEGORY', 'KPI', 'Type of KPI', 'Score weight (%)', 'Max score']
     assert [_rgb(table.cell(0, index)) for index in range(3)] == ['455B65'] * 3
     assert _rgb(table.cell(1, 0)) == 'DCE5E9'
     operator_columns = _operator_columns(table)
@@ -335,7 +335,7 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     assert titles[:2] == ['Scoring & GAP Analysis', 'Drive - City']
     assert titles[2:7] == [
         'Best Network Scoring per Service', 'Best Network Scoring per Category',
-        'Scoring per Category', 'Scoring Tables — Summary', 'Scoring Tables — Drill-down',
+        'Scoring per Category', 'Scoring Tables — Summary', 'Scoring Tables — Breakdown',
     ]
     assert titles[7] == 'GAP Analysis — All vs EE'
     assert presentation.slides[7].shapes.title.text.split('\n')[1] == 'Campaign: UK_Q2_2026 · Region: North · DriveCity'
@@ -514,9 +514,9 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     assert stacked_chart._chartSpace.xpath('.//c:lineChart/c:dLbls/c:dLblPos/@val') == ['t']
     assert stacked_chart._chartSpace.xpath('.//c:lineChart/c:dLbls/c:txPr//a:defRPr/@b') == ['1']
     reference_bottom = table.cell(0, operator_columns['EE'])._tc.get_or_add_tcPr().find('{http://schemas.openxmlformats.org/drawingml/2006/main}lnB')
-    assert int(reference_bottom.get('w')) > 4500
-    assert reference_bottom.find('.//{http://schemas.openxmlformats.org/drawingml/2006/main}srgbClr').get('val') == \
-        MAPPED_OPERATOR_COLORS['EE'].lstrip('#').upper()
+    metadata_bottom = table.cell(0, 0)._tc.get_or_add_tcPr().find('{http://schemas.openxmlformats.org/drawingml/2006/main}lnB')
+    assert reference_bottom.get('w') == metadata_bottom.get('w')
+    assert reference_bottom.find('.//{http://schemas.openxmlformats.org/drawingml/2006/main}srgbClr').get('val') == metadata_bottom.find('.//{http://schemas.openxmlformats.org/drawingml/2006/main}srgbClr').get('val')
 
     assert 'UK_Q2_2026' in '\n'.join(_slide_text(slide) for slide in presentation.slides)
     visible = '\n'.join(_slide_text(slide) for slide in presentation.slides)

@@ -37,6 +37,7 @@ _CATEGORY_TOTAL = '#E3E6E7'
 _GAP_SUMMARY_HEADER = '#455B65'
 _GAP_SUMMARY_COMPARISON_HEADER = '#DDEBE6'
 _GAP_SUMMARY_CATEGORY = '#E6F0F7'
+_SCORING_EXPANDED_CATEGORY = '#DCE5E9'
 _KPI_TYPE_COLORS = {'Reliable': '#D8EFCA', 'Diff': '#FFF2CC'}
 _LEGACY_CAMPAIGN_WARNING = 'Campaigns are scored separately; the supplied Tableau Prep flow pools campaigns.'
 _SCOPE_FILTER_FIELDS = ('Operator', 'Vendor', 'Region', 'City', 'Campaign')
@@ -678,6 +679,16 @@ _SUMMARY_BEST_COLOR = '#C6EFCE'
 _SUMMARY_WORST_COLOR = '#FFC7CE'
 
 
+def _add_summary_operator_legend(slide) -> None:
+    """Explain the best and worst score highlights below Summary tables."""
+    for index, (label, color) in enumerate((('Best operator', _SUMMARY_BEST_COLOR),
+                                            ('Worst operator', _SUMMARY_WORST_COLOR))):
+        table = slide.shapes.add_table(
+            1, 1, Inches(.55 + index * 1.35), Inches(7.02), Inches(1.3), Inches(.18),
+        ).table
+        _cell(table.cell(0, 0), label, color=color, size=8)
+
+
 def _summary_extreme_operators(values: dict[str, dict]) -> tuple[set[str], set[str]]:
     """Return tied best and worst operators when the values establish a ranking."""
     available = {}
@@ -722,7 +733,7 @@ def _summary_extreme_columns(values: dict[str, dict], columns: list[dict]) -> tu
 
 
 def _score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap_layout: str = 'end',
-                  show_gap_values: bool = True, title: str = 'Scoring Tables — Drill-down') -> None:
+                  show_gap_values: bool = True, title: str = 'Scoring Tables — Breakdown') -> None:
     if gap_layout == 'adjacent':
         matrices = [_scalar_matrix_as_hierarchy(matrix) for matrix in matrices]
         _hierarchy_score_tables(presentation, matrices, legend, gap_layout=gap_layout,
@@ -745,7 +756,7 @@ def _score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap
                 page_label = f' · KPIs {page_index + 1}/{len(metric_pages)}' if len(metric_pages) > 1 else ''
                 slide = _slide(presentation, title, _scope(matrix['context']) + page_label)
                 include_total = page_index == len(metric_pages) - 1
-                headers = ['CATEGORY' if is_summary else 'NETCHECK KPIs', 'NETCHECK KPI' if is_summary else 'KPI',
+                headers = ['CATEGORY', 'NETCHECK KPI' if is_summary else 'KPI',
                            *([] if is_summary else ['Type of KPI']), 'Score weight\n(%)', 'Max score',
                            *[_operator_label(matrix, name) for name in operators],
                            *[f'GAP {_operator_label(matrix, name)}\n− {_operator_label(matrix, baseline)}' for name in comparisons]]
@@ -776,15 +787,13 @@ def _score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap
                 for index, header in enumerate(headers):
                     _cell(table.cell(0, index), header, color=colors[index],
                           foreground=_header_foreground(colors[index]), size=8.5, bold=True)
-                for index, operator in enumerate(operators, fixed_count):
-                    _operator_bottom_border(table.cell(0, index),
-                                            _operator_color(matrix, operator))
+                category_color = _GAP_SUMMARY_CATEGORY if is_summary else _SCORING_EXPANDED_CATEGORY
                 for row_index, metric in enumerate(metrics, 1):
                     subtotal = metric.get('row_type') == 'category'
-                    row_color = _CATEGORY_TOTAL if subtotal else None
+                    row_color = ('#E3E6E7' if is_summary else category_color) if subtotal else None
                     best, worst = (_summary_extreme_operators(metric.get('values', {}))
                                    if matrix.get('table_mode') == 'summary' and subtotal else (set(), set()))
-                    _cell(table.cell(row_index, 0), metric['category'], color='#E6F0F7' if is_summary else '#DCE5E9',
+                    _cell(table.cell(row_index, 0), metric['category'], color=category_color,
                           size=metric_font, left=True, bold=subtotal)
                     _cell(table.cell(row_index, 1), metric['kpi'], color=row_color or '#E7E8E9',
                           bold=True, left=True, size=metric_font)
@@ -811,44 +820,38 @@ def _score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap
                 first = 0
                 while first < len(metrics):
                     last = first
-                    while (last + 1 < len(metrics) and metrics[last + 1]['category'] == metrics[first]['category']
-                           and metrics[last + 1].get('row_type') != 'category'):
+                    while last + 1 < len(metrics) and metrics[last + 1]['category'] == metrics[first]['category']:
                         last += 1
                     if last > first:
                         cell = table.cell(first + 1, 0)
                         cell.merge(table.cell(last + 1, 0))
                         subtotal = metrics[first].get('row_type') == 'category'
-                        _cell(cell, metrics[first]['category'], color='#E6F0F7' if is_summary else '#DCE5E9',
+                        _cell(cell, metrics[first]['category'], color=category_color,
                               size=metric_font, left=True, bold=subtotal)
                     first = last + 1
                 if include_total:
                     total = matrix['total']
                     index = count - 1
-                    _cell(table.cell(index, 0), 'TOTAL', color='#D8DFE4', bold=True, left=True, size=metric_font)
-                    _cell(table.cell(index, 1), total_label, color='#D8DFE4', size=metric_font, left=True)
+                    total_color = '#D8DFE4' if is_summary else category_color
+                    best, worst = (_summary_extreme_operators(total.get('values', {}))
+                                   if is_summary else (set(), set()))
+                    _cell(table.cell(index, 0), 'TOTAL', color=total_color, bold=True, left=True, size=metric_font)
+                    _cell(table.cell(index, 1), total_label, color=total_color, size=metric_font, left=True)
                     if not is_summary:
-                        _cell(table.cell(index, 2), '', color='#D8DFE4', size=metric_font)
+                        _cell(table.cell(index, 2), '', color=total_color, size=metric_font)
                     for column, value in ((weight_index, _number(total['weight_percent']) + '%'),
                                           (maximum_index, _number(total['max_points']))):
-                        _cell(table.cell(index, column), value, color='#D8DFE4', bold=True, size=numeric_font)
+                        _cell(table.cell(index, column), value, color=total_color, bold=True, size=numeric_font)
                     for column, operator in enumerate(operators, fixed_count):
                         value = total['values'][operator]
-                        best, worst = (_summary_extreme_operators(total.get('values', {}))
-                                       if matrix.get('table_mode') == 'summary' else (set(), set()))
                         score_color = (_SUMMARY_BEST_COLOR if operator in best else
-                                       _SUMMARY_WORST_COLOR if operator in worst else '#D8DFE4')
+                                       _SUMMARY_WORST_COLOR if operator in worst else total_color)
                         _cell(table.cell(index, column), _number(value['points']) + ('*' if value['points'] is not None and not value['complete'] else ''),
                               color=score_color, bold=True, size=numeric_font)
                     for column, operator in enumerate(comparisons, fixed_count + len(operators)):
-                        _cell(table.cell(index, column), _gap_number(total, operator), color='#D8DFE4', bold=True, size=numeric_font)
-                if matrix.get('table_mode') == 'summary':
-                    summary_legend = [('Best operator', _SUMMARY_BEST_COLOR),
-                                      ('Worst operator', _SUMMARY_WORST_COLOR)]
-                    for legend_index, (label, color) in enumerate(summary_legend):
-                        legend_table = slide.shapes.add_table(
-                            1, 1, Inches(.55 + legend_index * 1.35), Inches(7.02), Inches(1.3), Inches(.18),
-                        ).table
-                        _cell(legend_table.cell(0, 0), label, color=color, size=8)
+                        _cell(table.cell(index, column), _gap_number(total, operator), color=total_color, bold=True, size=numeric_font)
+                if is_summary:
+                    _add_summary_operator_legend(slide)
                 else:
                     for index, item in enumerate(legend):
                         legend_table = slide.shapes.add_table(1, 1, Inches(.55 + index * 1.15), Inches(7.02), Inches(1.1), Inches(.18)).table
@@ -1407,8 +1410,6 @@ def _hierarchy_header_groups(table, columns: list[dict], levels: list[str], *, s
             header_size = min(7.5, max(5.0, physical_column_width * leaf_width
                                       * (end - start + 1) * 12))
             _cell(cell, str(label), color=color, foreground=_header_foreground(color), size=header_size, bold=True)
-            if level == 'Operator':
-                _operator_bottom_border(cell, representative['color'])
             start = end + 1
     subheader_row = len(levels)
     for column_index, column in enumerate(columns):
@@ -1419,25 +1420,6 @@ def _hierarchy_header_groups(table, columns: list[dict], levels: list[str], *, s
         if leaf_width == 2:
             _cell(table.cell(subheader_row, start_col + column_index * leaf_width + 1), 'GAP',
                   color='#FFFF00', foreground='#17232D', size=leaf_font_size, bold=True)
-
-
-def _operator_bottom_border(cell, color: str) -> None:
-    properties = cell._tc.get_or_add_tcPr()
-    line = properties.find('{http://schemas.openxmlformats.org/drawingml/2006/main}lnB')
-    if line is None:
-        line = OxmlElement('a:lnB')
-        fill_properties = properties.find('{http://schemas.openxmlformats.org/drawingml/2006/main}solidFill')
-        properties.insert(properties.index(fill_properties) if fill_properties is not None else len(properties), line)
-    line.set('w', '38100')
-    fill = line.find('{http://schemas.openxmlformats.org/drawingml/2006/main}solidFill')
-    if fill is None:
-        fill = OxmlElement('a:solidFill')
-        line.append(fill)
-    rgb = fill.find('{http://schemas.openxmlformats.org/drawingml/2006/main}srgbClr')
-    if rgb is None:
-        rgb = OxmlElement('a:srgbClr')
-        fill.append(rgb)
-    rgb.set('val', color.lstrip('#').upper())
 
 
 def _score_column_plan(columns: list[dict], gap_layout: str, *, show_gap_values: bool = True) -> list[tuple[dict, str]]:
@@ -1487,8 +1469,6 @@ def _score_column_headers(table, plan: list[tuple[dict, str]], levels: list[str]
             size = min(7, max(2.5, leaf_width * (end - start + 1) * 12))
             _cell(cell, str(value) if value is not None else 'Not specified', color=color,
                   foreground=_header_foreground(color), size=size, bold=True)
-            if level == 'Operator':
-                _operator_bottom_border(cell, column['color'])
             start = end + 1
     for index, (column, kind) in enumerate(plan, fixed_count):
         color = '#FFFF00' if kind == 'GAP' else column['color']
@@ -1498,7 +1478,7 @@ def _score_column_headers(table, plan: list[tuple[dict, str]], levels: list[str]
 
 
 def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap_layout: str = 'end',
-                            show_gap_values: bool = True, title: str = 'Scoring Tables — Drill-down') -> None:
+                            show_gap_values: bool = True, title: str = 'Scoring Tables — Breakdown') -> None:
     total_label = ('Weighted score / Average KPI GAP; * incomplete' if show_gap_values
                    else 'Weighted score; * incomplete')
     for matrix in matrices:
@@ -1535,7 +1515,7 @@ def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dic
             table.rows[row_index].height = Inches(row_height)
         _score_column_headers(table, plan, levels, gap_layout=gap_layout, leaf_width=leaf_width,
                               fixed_count=fixed_count)
-        static_headers = [('CATEGORY' if is_summary else 'Category', _GAP_SUMMARY_HEADER),
+        static_headers = [('CATEGORY', _GAP_SUMMARY_HEADER),
                           ('NETCHECK KPI' if is_summary else 'KPI', _GAP_SUMMARY_HEADER),
                           *([] if is_summary else [('Type of KPI', _GAP_SUMMARY_HEADER)]),
                           ('Score weight\n(%)', '#4EA72E'), ('Max score', '#FF0000')]
@@ -1554,13 +1534,14 @@ def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dic
         numeric_font = _hierarchy_content_font(
             numeric_texts, leaf_width, maximum=min(11, min(body_heights) * 72 * .82),
         )
+        category_color = _GAP_SUMMARY_CATEGORY if is_summary else _SCORING_EXPANDED_CATEGORY
         for row_offset, metric in enumerate(metrics, header_rows):
             subtotal = metric.get('row_type') == 'category'
-            row_color = _CATEGORY_TOTAL if subtotal else None
+            row_color = ('#E3E6E7' if is_summary else category_color) if subtotal else None
             best, worst = (_summary_extreme_columns(
                 metric.get('values', {}), [column for column, kind in plan if kind == 'Score'],
             ) if matrix.get('table_mode') == 'summary' and subtotal else (set(), set()))
-            _cell(table.cell(row_offset, 0), metric['category'], color='#E6F0F7' if is_summary else '#DCE5E9',
+            _cell(table.cell(row_offset, 0), metric['category'], color=category_color,
                   size=data_font, left=True, bold=subtotal)
             _cell(table.cell(row_offset, 1), metric['kpi'], color=row_color or '#E7E8E9',
                   bold=subtotal, left=True, size=metric_font)
@@ -1586,28 +1567,24 @@ def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dic
                     _cell(table.cell(row_offset, index), _number(value['points']) + ('*' if partial else ''),
                           color=score_color, size=numeric_font, bold=subtotal)
         total_index = row_count - 1
+        total_color = '#D8DFE4' if is_summary else category_color
+        best, worst = (_summary_extreme_columns(
+            total.get('values', {}), [column for column, kind in plan if kind == 'Score'],
+        ) if is_summary else (set(), set()))
         for index, label in enumerate(('TOTAL', total_label, *([] if is_summary else ['']),
                                       _number(total['weight_percent']) + '%', _number(total['max_points']))):
-            _cell(table.cell(total_index, index), label, color='#D8DFE4', bold=True, left=index < 2, size=data_font)
-        total_best, total_worst = (_summary_extreme_columns(
-            total.get('values', {}), [column for column, kind in plan if kind == 'Score'],
-        ) if matrix.get('table_mode') == 'summary' else (set(), set()))
+            _cell(table.cell(total_index, index), label, color=total_color, bold=True, left=index < 2, size=data_font)
         for index, (column, kind) in enumerate(plan, fixed_count):
             value = total['values'][column['id']]
             text = (_gap_number(total, column['id']) if kind == 'GAP' else
                     _number(value['points']) + ('*' if value['points'] is not None and not value['complete'] else ''))
-            color = (_SUMMARY_BEST_COLOR if kind == 'Score' and column['id'] in total_best else
-                     _SUMMARY_WORST_COLOR if kind == 'Score' and column['id'] in total_worst else '#D8DFE4')
+            color = (_SUMMARY_BEST_COLOR if kind == 'Score' and column['id'] in best else
+                     _SUMMARY_WORST_COLOR if kind == 'Score' and column['id'] in worst else total_color)
             _cell(table.cell(total_index, index), text, color=color, size=numeric_font, bold=True)
         _merge_category_cells(table, metrics, header_rows,
-                              color='#E6F0F7' if is_summary else '#DCE5E9')
-        if matrix.get('table_mode') == 'summary':
-            summary_legend = [('Best operator', _SUMMARY_BEST_COLOR), ('Worst operator', _SUMMARY_WORST_COLOR)]
-            for index, (label, color) in enumerate(summary_legend):
-                legend_table = slide.shapes.add_table(
-                    1, 1, Inches(6.8 + index * 1.35), Inches(1.25), Inches(1.3), Inches(.18),
-                ).table
-                _cell(legend_table.cell(0, 0), label, color=color, size=8)
+                              color=category_color, include_subtotals=True)
+        if is_summary:
+            _add_summary_operator_legend(slide)
         else:
             for index, item in enumerate(legend):
                 legend_table = slide.shapes.add_table(
@@ -1899,7 +1876,7 @@ def export_scoring_powerpoint(job: dict[str, Any], result: dict[str, Any], templ
                 _hierarchy_chart(presentation, matrix)
                 _hierarchy_category_comparison_chart(presentation, matrix)
                 for mode, title in (('summary', 'Scoring Tables — Summary'),
-                                    ('expanded', 'Scoring Tables — Drill-down')):
+                                    ('expanded', 'Scoring Tables — Breakdown')):
                     _hierarchy_score_tables(
                         presentation, [_table_for_mode(matrix, mode)], views.get('threshold_legend', []),
                         gap_layout=gap_layout, show_gap_values=show_gap_values, title=title,
@@ -1939,7 +1916,7 @@ def export_scoring_powerpoint(job: dict[str, Any], result: dict[str, Any], templ
                 _stacked_category_chart(presentation, matrix)
                 _charts(presentation, [matrix])
                 for mode, title in (('summary', 'Scoring Tables — Summary'),
-                                    ('expanded', 'Scoring Tables — Drill-down')):
+                                    ('expanded', 'Scoring Tables — Breakdown')):
                     _score_tables(
                         presentation, [_table_for_mode(matrix, mode)], views.get('threshold_legend', []),
                         gap_layout=gap_layout, show_gap_values=show_gap_values, title=title,

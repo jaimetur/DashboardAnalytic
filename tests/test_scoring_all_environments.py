@@ -24,7 +24,7 @@ def _presentation(result):
 def _environment_matrix_slide(presentation, environment):
     for slide in presentation.slides:
         title = slide.shapes.title.text.split('\n')[0] if slide.shapes.title else ''
-        if title != 'Scoring Tables — Drill-down' or f'Environment: {environment}' not in _slide_text(slide):
+        if title != 'Scoring Tables — Breakdown' or f'Environment: {environment}' not in _slide_text(slide):
             continue
         matrix = next(
             shape.table for shape in slide.shapes

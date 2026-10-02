@@ -170,10 +170,9 @@
   .scoring-comparison-table td[data-column="maximum"] { background: #fde8e8; }
   .scoring-comparison-table th.scoring-kpi-value-header { background: #e6eaeb; color: #334854; }
   .scoring-comparison-table td.scoring-kpi-value-cell { background: #f3f5f6; font-variant-numeric: tabular-nums; }
-  .scoring-comparison-table .scoring-operator-header { border-bottom: 3px solid var(--operator-accent, #607d8b) !important; }
+  .scoring-comparison-table th.scoring-operator-header { background: var(--operator-accent, #607d8b) !important; color: var(--operator-text, #ffffff) !important; }
   .scoring-comparison-table .scoring-gap-header { background: #fff5a6 !important; }
   .scoring-comparison-table th.scoring-gap-header { background: #ffff00 !important; color: #242424 !important; }
-  .scoring-comparison-table th.scoring-gap-operator-header { border-bottom: 3px solid var(--operator-accent, #607d8b) !important; }
   .scoring-comparison-table th.scoring-hierarchy-header { min-width: 8rem; max-width: 20rem; white-space: normal; background: #e1e9eb; color: #263f4b; }
   .scoring-comparison-table th.scoring-hierarchy-header[data-hierarchy-depth="0"] { background: #cfdde0; }
   .scoring-comparison-table th.scoring-hierarchy-header[data-hierarchy-depth="1"] { background: #d8e4e6; }
@@ -194,6 +193,8 @@
   .scoring-comparison-table td[data-column="type"][data-kpi-type="reliable"] { background: #d8efca !important; color: #286a35; font-weight: 750; }
   .scoring-comparison-table td[data-column="type"][data-kpi-type="diff"] { background: #fff2cc !important; color: #684b0d; font-weight: 750; }
   .scoring-comparison-table td[data-column="type"][data-kpi-type="neutral"] { background: #e6eaeb !important; color: #64747b; }
+  .scoring-comparison-table :is(tbody, tfoot) tr > td[data-column="score"][data-operator-rank="best"] { background-color: #C6EFCE !important; }
+  .scoring-comparison-table :is(tbody, tfoot) tr > td[data-column="score"][data-operator-rank="worst"] { background-color: #FFC7CE !important; }
   .scoring-tone-0 { --operator-accent: #315f9a; }
   .scoring-tone-1 { --operator-accent: #bd4540; }
   .scoring-tone-2 { --operator-accent: #43835b; }

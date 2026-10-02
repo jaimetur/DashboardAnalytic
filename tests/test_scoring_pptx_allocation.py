@@ -1,9 +1,15 @@
+from io import BytesIO
+import math
+from types import SimpleNamespace
+
 from pptx import Presentation
 from pptx.enum.chart import XL_CHART_TYPE
 from pptx.oxml.ns import qn
+from pptx.util import Inches
 import pytest
 
 from src.modules.scoring_pptx_allocation import (
+    _add_percentage_labels,
     add_maximum_allocation_donut,
     category_maximum_allocations,
     maximum_allocations_from_configuration,
@@ -29,6 +35,66 @@ def _configuration():
             }},
         ],
     }
+
+
+def _assert_percentage_glyph_fits(label, chart_shape, hole, share, start_angle):
+    font_size = label.text_frame.paragraphs[0].runs[0].font.size.pt
+    text_width = sum(.556 if character.isdigit() else
+                     .278 if character == '.' else .889
+                     for character in label.text_frame.text) * font_size / 72
+    text_height = font_size * 1.2 / 72
+    center_x = chart_shape.left.inches + chart_shape.width.inches / 2
+    center_y = chart_shape.top.inches + chart_shape.height.inches / 2
+    label_x = label.left.inches + label.width.inches / 2
+    label_y = label.top.inches + label.height.inches / 2
+    outer_radius = chart_shape.width.inches * .45
+    inner_radius = outer_radius * hole / 100
+    middle_radius = (outer_radius + inner_radius) / 2
+    midpoint = start_angle + share * math.pi
+    expected_x = center_x + middle_radius * math.sin(midpoint)
+    expected_y = center_y - middle_radius * math.cos(midpoint)
+    assert label_x == pytest.approx(expected_x, abs=.02)
+    assert label_y == pytest.approx(expected_y, abs=.02)
+    padding = 1 / 72
+    for offset_x in (-text_width / 2, text_width / 2):
+        for offset_y in (-text_height / 2, text_height / 2):
+            x = label_x + offset_x - center_x
+            y = -(label_y + offset_y - center_y)
+            radius = math.hypot(x, y)
+            angle = math.atan2(x, y)
+            angle_error = abs(math.atan2(math.sin(angle - midpoint), math.cos(angle - midpoint)))
+            assert inner_radius + padding <= radius <= outer_radius - padding
+            assert angle_error <= share * math.pi - padding / middle_radius
+
+
+@pytest.mark.parametrize('size, values, expected_labels', [
+    (1.909, [35, 65], ['35.0%', '65.0%']),
+    (1.733, [20.3, 13.3, 1.4, 35.1, 13, 13, 3.9],
+     ['20.3%', '35.1%', '13.0%', '13.0%']),
+])
+def test_inner_percentage_labels_fit_native_ring_after_save(size, values, expected_labels):
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    _add_percentage_labels(slide, values, ['4472C4'] * len(values), 1, 1, size, 62)
+    output = BytesIO()
+    presentation.save(output)
+    output.seek(0)
+    labels = list(Presentation(output).slides[0].shapes)
+    assert [label.text for label in labels] == expected_labels
+    ring = SimpleNamespace(left=Inches(1), top=Inches(1),
+                           width=Inches(size), height=Inches(size))
+    total = sum(values)
+    label_index = 0
+    for index, value in enumerate(values):
+        if label_index >= len(labels):
+            break
+        if labels[label_index].text == f'{value / total * 100:.1f}%':
+            _assert_percentage_glyph_fits(
+                labels[label_index], ring, 62, value / total,
+                sum(values[:index]) / total * 2 * math.pi,
+            )
+            label_index += 1
+    assert label_index == len(labels)
 
 
 def test_configuration_allocations_sum_metrics_once_per_positive_environment():
@@ -181,8 +247,8 @@ def test_category_allocations_count_each_matrix_row_once_and_render_category_rin
     assert all(chart.chart.series[0]._element.find(qn('c:dLbls')) is None for chart in charts)
     percentage_labels = [shape for shape in slide.shapes
                          if shape.name == 'Maximum Allocation Percentage Label']
-    assert [shape.text_frame.text for shape in percentage_labels] == ['100.0%', '42.9%', '57.1%']
-    assert all(shape.text_frame.paragraphs[0].runs[0].font.size.pt == pytest.approx(7.5)
+    assert [shape.text_frame.text for shape in percentage_labels] == ['100.0%']
+    assert all(6.5 <= shape.text_frame.paragraphs[0].runs[0].font.size.pt <= 8.5
                for shape in percentage_labels)
     chart_shape = charts[0]
     swatches = [shape for shape in slide.shapes if shape.name.startswith('Maximum Allocation Swatch')]
@@ -223,3 +289,41 @@ def test_environment_segment_icons_are_larger_than_legend_icons():
              if shape.name.startswith('Maximum Allocation Environment Segment Icon')]
     assert len(icons) == 2
     assert all(max(icon.width.inches, icon.height.inches) > .18 for icon in icons)
+
+
+def test_saved_seven_category_widget_keeps_outer_and_major_inner_percentages():
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    categories = {'Classic Calls': 203, 'WhatsApp Calls': 133, 'Multi RAB': 14,
+                  'File Transfer': 351, 'Browsing': 130, 'Video': 130,
+                  'Interactivity': 39}
+    add_maximum_allocation_donut(
+        slide, {'context': {'environment': 'Combined'}},
+        {'DriveCity': {'voice': 227.5, 'data': 422.5},
+         'DriveRoad': {'voice': 122.5, 'data': 227.5}},
+        left=1, top=1.75, width=3, height=5, category_allocations=categories,
+    )
+    output = BytesIO()
+    presentation.save(output)
+    output.seek(0)
+    saved_slide = Presentation(output).slides[0]
+    charts = [shape for shape in saved_slide.shapes if shape.has_chart]
+    labels = [shape for shape in saved_slide.shapes
+              if shape.name == 'Maximum Allocation Percentage Label']
+    assert charts[0].width.inches >= 2.49 - .001
+    assert [label.text for label in labels] == [
+        '65.0%', '35.0%', '20.3%', '13.3%', '35.1%', '13.0%', '13.0%',
+    ]
+    for label, share, start in zip(labels[:2], [.65, .35], [0, .65 * 2 * math.pi]):
+        _assert_percentage_glyph_fits(label, charts[0], 72, share, start)
+    inner_hole = int(charts[1].chart.plots[0]._element.find(qn('c:holeSize')).get('val'))
+    for label, category_index in zip(labels[2:], [0, 1, 3, 4, 5]):
+        values = list(categories.values())
+        _assert_percentage_glyph_fits(
+            label, charts[1], inner_hole, values[category_index] / 1000,
+            sum(values[:category_index]) / 1000 * 2 * math.pi,
+        )
+    legends = [shape for shape in saved_slide.shapes
+               if shape.has_text_frame and ' pts (' in shape.text]
+    assert all(shape.top >= charts[0].top + charts[0].height for shape in legends)
+    assert all(shape.top.inches + shape.height.inches <= 6.75 for shape in legends)

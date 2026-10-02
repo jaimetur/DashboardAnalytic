@@ -41,28 +41,57 @@ def _add_percentage_labels(slide, values, colors, chart_left, chart_top, chart_s
     if total <= 0:
         return
     outer_radius = chart_size * .45
-    middle_radius = outer_radius * (1 + hole / 100) / 2
-    radial_width = outer_radius * (1 - hole / 100)
+    inner_radius = outer_radius * hole / 100
+    middle_radius = (outer_radius + inner_radius) / 2
     center_x = chart_left + chart_size / 2
     center_y = chart_top + chart_size / 2
     angle = 0.0
     for value, color in zip(values, colors):
         share = _number(value) / total
         label_text = f'{share * 100:.1f}%'
-        arc_length = 2 * math.pi * middle_radius * 72 * share
-        label_width = len(label_text) * 7.5 * .62 + 4
-        if radial_width * 72 < 9.5 or arc_length < label_width:
+        span = share * 2 * math.pi
+        midpoint = math.radians(angle + share * 180)
+        center_dx = middle_radius * math.sin(midpoint)
+        center_dy = -middle_radius * math.cos(midpoint)
+        padding = 1 / 72
+        fitted = None
+        for font_size in (8.5, 8.0, 7.5, 7.0, 6.5):
+            label_height = (font_size + 4) / 72
+            label_width_inches = max(.3, (len(label_text) * font_size * .62 + 6) / 72)
+            # Arial Bold advances differ substantially between digits, the
+            # decimal point and the percent sign. A uniform character width
+            # rejects labels that fit the narrow inner allocation band.
+            glyph_width = sum(.556 if character.isdigit() else
+                              .278 if character == '.' else .889
+                              for character in label_text) * font_size / 72
+            glyph_height = font_size * 1.2 / 72
+            if middle_radius * span < glyph_width + 2 * padding:
+                continue
+            half_width, half_height = glyph_width / 2, glyph_height / 2
+            closest_radius = math.hypot(max(abs(center_dx) - half_width, 0),
+                                        max(abs(center_dy) - half_height, 0))
+            if closest_radius < inner_radius + padding:
+                continue
+            corners = ((center_dx + x, center_dy + y)
+                       for x in (-half_width, half_width) for y in (-half_height, half_height))
+            if all(inner_radius + padding <= math.hypot(x, y) <= outer_radius - padding
+                   and abs(math.atan2(math.sin(math.atan2(x, -y) - midpoint),
+                                      math.cos(math.atan2(x, -y) - midpoint)))
+                   <= span / 2 - padding / middle_radius
+                   for x, y in corners):
+                fitted = (font_size, label_height, label_width_inches)
+                break
+        if fitted is None:
             angle += share * 360
             continue
-        midpoint = math.radians(angle + share * 180)
-        label_width_inches = max(.3, label_width / 72)
-        x = center_x + middle_radius * math.sin(midpoint) - label_width_inches / 2
-        y = center_y - middle_radius * math.cos(midpoint) - .09
+        font_size, label_height, label_width_inches = fitted
+        x = center_x + center_dx - label_width_inches / 2
+        y = center_y + center_dy - label_height / 2
         rgb = tuple(int(color[offset:offset + 2], 16) for offset in (0, 2, 4))
         luminance = .2126 * rgb[0] + .7152 * rgb[1] + .0722 * rgb[2]
         text_color = '333333' if luminance > 155 else 'FFFFFF'
         label = slide.shapes.add_textbox(
-            Inches(x), Inches(y), Inches(label_width_inches), Inches(.18),
+            Inches(x), Inches(y), Inches(label_width_inches), Inches(label_height),
         )
         label.name = 'Maximum Allocation Percentage Label'
         text_frame = label.text_frame
@@ -76,8 +105,8 @@ def _add_percentage_labels(slide, values, colors, chart_left, chart_top, chart_s
         paragraph.alignment = PP_ALIGN.CENTER
         run = paragraph.add_run()
         run.text = label_text
-        run.font.name = 'Ericsson Hilda'
-        run.font.size = Pt(7.5)
+        run.font.name = 'Arial'
+        run.font.size = Pt(font_size)
         run.font.bold = True
         run.font.color.rgb = RGBColor.from_string(text_color)
         angle += share * 360
@@ -441,7 +470,7 @@ def _environment_segment_icons(slide, allocations, environment_allocations,
 
 
 def _legend_row(slide, x, y, width, height, icon, color, label, detail, bold=False, wrap=False):
-    _legend_icon(slide, icon, x, y + max(.02, (height - .18) / 2), .18, color)
+    _legend_icon(slide, icon, x, y + max(0, (height - .18) / 2), .18, color)
     swatch = slide.shapes.add_shape(
         MSO_SHAPE.RECTANGLE, Inches(x + .20), Inches(y + (height - .09) / 2), Inches(.09), Inches(.09),
     )
@@ -555,7 +584,9 @@ def add_maximum_allocation_donut(
             percent = value * 100 / center_total if center_total else 0
             legend_items.append((kind, color, label, f'{value:.2f} pts ({percent:.1f}%)'))
 
-    legend_heights = [.22 for _ in legend_items]
+    # Category legends have more rows; compact them to preserve enough chart
+    # diameter for the environment and major category percentage labels.
+    legend_heights = [.18 if category_mode else .22 for _ in legend_items]
     chart_size = min(width * .90, height - .35 - sum(legend_heights))
     chart_left = left + (width - chart_size) / 2
     chart_top = top
