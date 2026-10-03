@@ -4141,6 +4141,7 @@ def cache_cdr_catalogue(dataset_id: int, frame: pd.DataFrame, task_repository: R
     task_repository.replace_cdr_catalogue(
         dataset_id,
         vendors=values('vendor'),
+        vendors_only=values('Vendor_Only'),
         regions=values('region', 'g_level_2', 'g level 2'),
         cities=values('city', 'g_level_4', 'g level 4'),
         campaigns=values('campaign'),
@@ -4197,6 +4198,7 @@ def backfill_cdr_catalogues(dataset_ids: Iterable[int], task_repository: Reposit
         task_repository.replace_cdr_catalogue(
             dataset_id,
             vendors=distinct_values('vendor'),
+            vendors_only=distinct_values('Vendor_Only'),
             regions=distinct_values('region', 'g_level_2', 'g level 2'),
             cities=distinct_values('city', 'g_level_4', 'g level 4'),
             campaigns=distinct_values('campaign'),
@@ -4823,6 +4825,15 @@ def render_template(request: Request, template_name: str, context: dict[str, Any
         'header_workspace_access': header_workspace_access,
         'header_workspace_sizes': {item.id: format_workspace_size(workspace_disk_usage(item)) for item in header_workspaces},
         'ignore_event_time_filtering': ignore_event_time_filtering(),
+        'vendor_filter_identities': {
+            'operators': {str(value): str(group['canonical'])
+                          for group in repository.list_operator_mapping_groups()
+                          for value in [group.get('canonical', ''), *group.get('aliases', [])] if value},
+            'vendors': {str(value): str(group['canonical'])
+                        for group in repository.list_vendor_mapping_groups()
+                        for value in [group.get('canonical', ''), *group.get('aliases', [])] if value},
+            'observed_operators': repository.cdr_catalogue_values().get('operators', []),
+        } if active_workspace and isinstance(template_user, SessionUser) else {},
         **context,
     }
     response = templates.TemplateResponse(request, template_name, payload, status_code=status_code)
@@ -8773,7 +8784,7 @@ def render_admin_template(
         'audit_logs': 'Audit log',
         'dashboard_filter_selections': 'Dashboard filter selections',
         'dashboard_ppt_jobs': 'Dashboard PPT jobs',
-        'cdr_catalogues': 'CDR Operator, Vendor, Region, City, Campaign And Source Level Catalogues',
+        'cdr_catalogues': 'CDR Operator, Vendor, Vendor Only, Region, City, Campaign And Source Level Catalogues',
         'dataset_profiles': 'Dataset profiles',
         'dataset_source_columns': 'Dataset source columns',
         'datasets': 'Datasets',

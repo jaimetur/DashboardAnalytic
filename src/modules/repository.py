@@ -191,6 +191,7 @@ CREATE TABLE IF NOT EXISTS dataset_source_columns (
 CREATE TABLE IF NOT EXISTS cdr_catalogues (
     dataset_id INTEGER PRIMARY KEY,
     vendors_json TEXT NOT NULL DEFAULT '[]',
+    vendors_only_json TEXT,
     regions_json TEXT NOT NULL DEFAULT '[]',
     cities_json TEXT NOT NULL DEFAULT '[]',
     campaigns_json TEXT,
@@ -820,7 +821,7 @@ class Repository:
             conn.execute("ALTER TABLE cdr_catalogues ADD COLUMN campaigns_json TEXT")
         if existing_columns and 'operators_json' not in existing_columns:
             conn.execute("ALTER TABLE cdr_catalogues ADD COLUMN operators_json TEXT")
-        for column in ('g_level_1_json', 'g_level_2_json'):
+        for column in ('vendors_only_json', 'g_level_1_json', 'g_level_2_json'):
             if existing_columns and column not in existing_columns:
                 conn.execute(f"ALTER TABLE cdr_catalogues ADD COLUMN {column} TEXT")
 
@@ -883,6 +884,7 @@ class Repository:
     def replace_cdr_catalogue(
         self, dataset_id: int, *, vendors: Iterable[str], regions: Iterable[str], cities: Iterable[str],
         campaigns: Iterable[str] | None = None, operators: Iterable[str] | None = None,
+        vendors_only: Iterable[str] | None = None,
         g_level_1: Iterable[str] | None = None, g_level_2: Iterable[str] | None = None,
     ) -> None:
         """Persist the lightweight universe catalogues derived from one CDR.
@@ -890,6 +892,7 @@ class Repository:
         Optional catalogue fields preserve their cached values when omitted.
         """
         normalized = self._catalogue_json
+        vendors_only_json = None if vendors_only is None else normalized(vendors_only)
         campaigns_json = None if campaigns is None else normalized(campaigns)
         operators_json = None if operators is None else normalized(operators)
         g_level_1_json = None if g_level_1 is None else normalized(g_level_1)
@@ -897,10 +900,11 @@ class Repository:
         with self.connection() as conn:
             conn.execute(
                 """
-                INSERT INTO cdr_catalogues (dataset_id, vendors_json, regions_json, cities_json, campaigns_json, operators_json, g_level_1_json, g_level_2_json, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO cdr_catalogues (dataset_id, vendors_json, vendors_only_json, regions_json, cities_json, campaigns_json, operators_json, g_level_1_json, g_level_2_json, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(dataset_id) DO UPDATE SET
                     vendors_json = excluded.vendors_json,
+                    vendors_only_json = COALESCE(excluded.vendors_only_json, cdr_catalogues.vendors_only_json),
                     regions_json = excluded.regions_json,
                     cities_json = excluded.cities_json,
                     campaigns_json = COALESCE(excluded.campaigns_json, cdr_catalogues.campaigns_json),
@@ -909,7 +913,7 @@ class Repository:
                     g_level_2_json = COALESCE(excluded.g_level_2_json, cdr_catalogues.g_level_2_json),
                     updated_at = excluded.updated_at
                 """,
-                (dataset_id, normalized(vendors), normalized(regions), normalized(cities), campaigns_json, operators_json, g_level_1_json, g_level_2_json, local_now_iso()),
+                (dataset_id, normalized(vendors), vendors_only_json, normalized(regions), normalized(cities), campaigns_json, operators_json, g_level_1_json, g_level_2_json, local_now_iso()),
             )
 
     def missing_cdr_source_level_ids(self, dataset_ids: Iterable[int]) -> list[int]:
@@ -977,7 +981,7 @@ class Repository:
         ids = list(dict.fromkeys(int(value) for value in dataset_ids))
         if not ids:
             return {}
-        fields = ('vendors', 'regions', 'cities', 'campaigns', 'operators')
+        fields = ('vendors', 'vendors_only', 'regions', 'cities', 'campaigns', 'operators')
         with self.connection() as conn:
             rows = conn.execute(
                 f"SELECT * FROM cdr_catalogues WHERE dataset_id IN ({','.join('?' for _ in ids)})", ids,
@@ -1003,6 +1007,26 @@ class Repository:
         catalogues = self.cdr_catalogues_by_dataset(dataset_ids)
         return {field: sorted({value for catalogue in catalogues.values() for value in catalogue[field]}, key=str.casefold)
                 for field in ('vendors', 'regions', 'cities', 'campaigns', 'operators')}
+
+    def missing_cdr_vendor_only_ids(self, dataset_ids: Iterable[int]) -> list[int]:
+        """Identify CDRs whose Vendor_Only cache has not been populated."""
+        ids = list(dict.fromkeys(int(value) for value in dataset_ids))
+        if not ids:
+            return []
+        with self.connection() as conn:
+            cached = {int(row[0]) for row in conn.execute(
+                f"SELECT dataset_id FROM cdr_catalogues WHERE vendors_only_json IS NOT NULL AND dataset_id IN ({','.join('?' for _ in ids)})", ids,
+            )}
+        return [dataset_id for dataset_id in ids if dataset_id not in cached]
+
+    def set_cdr_catalogue_vendor_only(self, dataset_id: int, vendors: Iterable[str]) -> None:
+        """Cache Vendor_Only independently, including an intentionally empty universe."""
+        with self.connection() as conn:
+            conn.execute(
+                'INSERT INTO cdr_catalogues (dataset_id, vendors_only_json, updated_at) VALUES (?, ?, ?) '
+                'ON CONFLICT(dataset_id) DO UPDATE SET vendors_only_json = excluded.vendors_only_json, updated_at = excluded.updated_at',
+                (dataset_id, self._catalogue_json(vendors), local_now_iso()),
+            )
 
     def missing_cdr_operator_ids(self, dataset_ids: Iterable[int]) -> list[int]:
         """Identify legacy catalogue rows that need a one-time Operator backfill."""

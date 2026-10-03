@@ -356,7 +356,8 @@
   function renderColumnFilterOptions(state) {
     state.options.replaceChildren();
     const seen = new Set();
-    for (const value of state.values) {
+    const choices = window.vendorOnlyFilterChoices?.(state.column, state.values) || state.values.map(value => ({value, label: scalarLabel(value)}));
+    for (const {value, label: displayLabel} of choices) {
       const key = scalarKey(value);
       if (seen.has(key)) continue;
       seen.add(key);
@@ -366,7 +367,7 @@
       checkbox.value = key;
       checkbox.checked = state.allValuesSelected || state.selectedValues.has(key);
       const text = document.createElement('span');
-      text.textContent = scalarLabel(value);
+      text.textContent = displayLabel || scalarLabel(value);
       checkbox.addEventListener('change', () => {
         if (state.allValuesSelected) {
           state.allValuesSelected = false;
@@ -451,7 +452,7 @@
     document.body.append(menu);
     const appliedValues = columnFilters.get(index) || [];
     const state = {
-      index, trigger, menu, search, options, status:statusText, note, empty,
+      index, column, trigger, menu, search, options, status:statusText, note, empty,
       values:[], truncated:false, search:'', requestToken:0,
       allValuesSelected:!columnFilters.has(index), selectionModified:false,
       selectedValues:new Set(appliedValues.map(scalarKey)),

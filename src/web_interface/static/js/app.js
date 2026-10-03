@@ -1,3 +1,35 @@
+function vendorOnlyFilterChoices(field, values, additionalOperators = []) {
+  const identity = value => String(value ?? '').toLocaleLowerCase().replace(/[^a-z0-9]/g, '');
+  let configured = {};
+  try { configured = JSON.parse(document.getElementById('vendor-filter-operators')?.textContent || '{}'); } catch {}
+  const operatorAliases = new Map(Object.entries(configured.operators || {}).map(([alias, canonical]) => [identity(alias), identity(canonical)]));
+  const vendorAliases = new Set(Object.keys(configured.vendors || {}).map(identity));
+  const operators = new Set([...(configured.observed_operators || []), ...additionalOperators]
+    .map(value => operatorAliases.get(identity(value)) || identity(value)));
+  for (const canonical of operatorAliases.values()) operators.add(canonical);
+  const entries = values.map(value => ({value, label: String(value ?? ''), operator: false}));
+  if (identity(field) !== 'vendoronly') return entries;
+  for (const entry of entries) {
+    const key = identity(entry.value);
+    const operatorKey = operatorAliases.get(key) || key;
+    entry.operator = Boolean(entry.label) && !vendorAliases.has(key) && operators.has(operatorKey);
+    if (entry.operator) entry.label += ' - All Vendors';
+  }
+  const rank = entry => {
+    if (entry.operator) return 4;
+    const key = identity(entry.value);
+    const canonical = Object.entries(configured.vendors || {}).find(([alias]) => identity(alias) === key)?.[1];
+    const vendorKey = identity(canonical || entry.value);
+    if (vendorKey === 'mixedvendor' || vendorKey === 'mixedvendors') return 1;
+    if (vendorKey === 'othervendor' || vendorKey === 'othervendors') return 2;
+    if (vendorKey === 'allvendor' || vendorKey === 'allvendors') return 3;
+    return 0;
+  };
+  return entries.sort((left, right) => rank(left) - rank(right)
+    || String(left.value ?? '').localeCompare(String(right.value ?? ''), undefined, {sensitivity: 'base'}));
+}
+window.vendorOnlyFilterChoices = vendorOnlyFilterChoices;
+
 function formatAxisValue(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return String(value);
@@ -1411,7 +1443,7 @@ const initializeServerDatasetPreview = (toolbar) => {
       toolbarNode.append(selectAllNone);
       const options = document.createElement('div');
       options.className = 'preview-column-filter-options';
-      values.forEach((value) => {
+      vendorOnlyFilterChoices(column, values).forEach(({value, label: displayLabel}) => {
         const option = document.createElement('label');
         option.className = 'preview-column-filter-option';
         const checkbox = document.createElement('input');
@@ -1420,7 +1452,7 @@ const initializeServerDatasetPreview = (toolbar) => {
         checkbox.checked = selectedValues.has(value);
         checkbox.setAttribute('data-preview-value-option', '');
         const caption = document.createElement('span');
-        caption.textContent = value || '(Blank)';
+        caption.textContent = displayLabel || '(Blank)';
         option.append(checkbox, caption);
         options.append(option);
       });
@@ -1893,7 +1925,7 @@ document.querySelectorAll('[data-preview-table-filters]').forEach((filters) => {
       checkbox.checked = selectedValues.has(value);
       checkbox.setAttribute('data-preview-value-option', '');
       const caption = document.createElement('span');
-      caption.textContent = value || '(Blank)';
+      caption.textContent = displayLabel || '(Blank)';
       option.append(checkbox, caption);
       options.append(option);
     });
@@ -2629,7 +2661,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
         const payload = response.ok ? await response.json() : { values: [] };
         if (request !== valueRequest) return;
         const available = Array.isArray(payload.values) ? payload.values : [];
-        list.replaceChildren(...available.map((item) => new Option(item, item)));
+        list.replaceChildren(...vendorOnlyFilterChoices(selectedField, available).map(({value, label}) => new Option(label, value)));
       } catch (_error) {
         // A value may always be entered manually if contextual values are unavailable.
       }
@@ -4736,6 +4768,37 @@ function setupSearchableSingleSelects() {
 
     const shell = document.createElement('div');
     shell.className = 'searchable-select-shell';
+    const richSlides = select.hasAttribute('data-slide-labels');
+    const trigger = richSlides ? document.createElement('button') : null;
+    const renderLabel = (target, option) => {
+      target.replaceChildren();
+      if (!richSlides || !option?.dataset.slideTitle) {
+        target.textContent = option?.textContent || option?.value || '';
+        return;
+      }
+      const span = (text, className) => {
+        const element = document.createElement('span');
+        element.className = className;
+        element.textContent = text;
+        return element;
+      };
+      target.append(span(`${option.dataset.slideNumber} · `, 'ds-slide-picker-number'),
+        span(option.dataset.slideTitle, 'ds-slide-picker-title'));
+      if (option.dataset.slideSubtitle) {
+        const separator = document.createElement('strong');
+        separator.className = 'ds-slide-picker-separator';
+        separator.textContent = ' ● ';
+        target.append(separator, span(option.dataset.slideSubtitle, 'ds-slide-picker-subtitle'));
+      }
+    };
+    if (trigger) {
+      shell.classList.add('ds-slide-picker');
+      trigger.type = 'button';
+      trigger.className = 'ds-slide-picker-trigger';
+      trigger.disabled = select.disabled;
+      trigger.setAttribute('aria-expanded', 'false');
+      trigger.setAttribute('aria-label', select.getAttribute('aria-label') || 'Slide');
+    }
     const input = document.createElement('input');
     input.type = 'search';
     input.className = 'searchable-select-input';
@@ -4745,14 +4808,20 @@ function setupSearchableSingleSelects() {
     const menu = document.createElement('div');
     menu.className = 'searchable-select-menu';
     menu.hidden = true;
+    const optionsContainer = richSlides ? document.createElement('div') : menu;
+    if (richSlides) {
+      optionsContainer.className = 'ds-slide-picker-options';
+      menu.append(input, optionsContainer);
+    }
 
     const syncInput = () => {
       const current = Array.from(select.options).find((option) => option.selected);
-      input.value = current?.textContent?.trim() || '';
+      input.value = richSlides ? '' : current?.textContent?.trim() || '';
+      if (trigger) renderLabel(trigger, current);
     };
     const renderOptions = (query = '') => {
       const normalized = query.trim().toLocaleLowerCase();
-      menu.replaceChildren();
+      optionsContainer.replaceChildren();
       const visibleOptions = Array.from(select.options).filter((option) => (
         !option.disabled && (!normalized || (option.textContent || '').toLocaleLowerCase().includes(normalized))
       ));
@@ -4771,7 +4840,7 @@ function setupSearchableSingleSelects() {
             item.classList.add('catalogue-layout-dynamic');
           }
         }
-        item.textContent = option.textContent || option.value;
+        renderLabel(item, option);
         item.setAttribute('aria-selected', String(option.selected));
         item.addEventListener('click', () => {
           select.value = option.value;
@@ -4779,25 +4848,28 @@ function setupSearchableSingleSelects() {
           select.dispatchEvent(new Event('input', { bubbles: true }));
           syncInput();
           menu.hidden = true;
+          trigger?.setAttribute('aria-expanded', 'false');
         });
-        menu.appendChild(item);
+        optionsContainer.appendChild(item);
       });
-      if (!menu.childElementCount) {
+      if (!optionsContainer.childElementCount) {
         const empty = document.createElement('p');
         empty.className = 'searchable-select-empty';
         empty.textContent = 'No matching values';
-        menu.appendChild(empty);
+        optionsContainer.appendChild(empty);
       }
     };
     const filterSingleSelect = () => {
       renderOptions(input.value);
       menu.hidden = false;
+      trigger?.setAttribute('aria-expanded', 'true');
     };
     input.addEventListener('focus', () => {
       // Replace the current selection when the user starts typing a search.
       input.select();
       renderOptions('');
       menu.hidden = false;
+      trigger?.setAttribute('aria-expanded', 'true');
     });
     input.addEventListener('input', filterSingleSelect);
     input.addEventListener('keyup', filterSingleSelect);
@@ -4805,19 +4877,45 @@ function setupSearchableSingleSelects() {
     input.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') { menu.hidden = true; input.blur(); }
     });
-    document.addEventListener('click', (event) => {
-      if (!shell.contains(event.target)) menu.hidden = true;
-    });
+    const closeOutside = (event) => {
+      if (!shell.contains(event.target)) {
+        menu.hidden = true;
+        trigger?.setAttribute('aria-expanded', 'false');
+      }
+    };
+    document.addEventListener('click', closeOutside);
+    if (trigger) {
+      trigger.addEventListener('click', () => {
+        const opening = menu.hidden;
+        menu.hidden = !opening;
+        trigger.setAttribute('aria-expanded', String(opening));
+        if (opening) { renderOptions(''); input.focus(); }
+      });
+      shell.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          menu.hidden = true;
+          trigger.setAttribute('aria-expanded', 'false');
+          trigger.focus();
+        } else if (event.key === 'ArrowDown' && event.target === input) {
+          event.preventDefault();
+          menu.querySelector('button')?.focus();
+        }
+      });
+    }
     select.addEventListener('change', syncInput);
     const rebuildOnOptionUpdate = () => {
       select.removeEventListener('searchable-select:options-updated', rebuildOnOptionUpdate);
+      select.removeEventListener('change', syncInput);
+      document.removeEventListener('click', closeOutside);
       shell.remove();
       select.classList.remove('searchable-select-native');
       delete select.dataset.searchableReady;
+      if (richSlides) setupSearchableSingleSelects();
     };
     select.addEventListener('searchable-select:options-updated', rebuildOnOptionUpdate);
     select.after(shell);
-    shell.append(input, menu);
+    if (trigger) shell.append(trigger, menu);
+    else shell.append(input, menu);
     syncInput();
   });
 }
@@ -4938,6 +5036,19 @@ function setupCustomMultiSelects() {
     select.dataset.multiselectReady = '1';
     select.classList.add('multiselect-native');
     normalizeExportTargetSelection(select);
+    const filterField = select.dataset.multiselectVendorOnly === 'true' ? 'Vendor_Only'
+      : select.dataset.filterFieldName || select.getAttribute('aria-label')?.replace(/ filter$/, '') || '';
+    let operatorValues = [];
+    try { operatorValues = JSON.parse(select.dataset.multiselectOperatorValues || '[]'); } catch {}
+    const filterChoices = vendorOnlyFilterChoices(filterField, Array.from(select.options).map(option => option.value), operatorValues);
+    if (String(filterField).toLowerCase().replace(/[^a-z0-9]/g, '') === 'vendoronly') {
+      const byValue = new Map(Array.from(select.options).map(option => [option.value, option]));
+      select.append(...filterChoices.map(choice => {
+        const option = byValue.get(choice.value);
+        option.textContent = choice.label;
+        return option;
+      }));
+    }
 
     const shell = document.createElement('div');
     shell.className = 'multiselect-shell';
@@ -5005,7 +5116,7 @@ function setupCustomMultiSelects() {
       const selectedOptions = enabledOptions.filter((option) => option.selected).map((option) => option.textContent?.trim()).filter(Boolean);
       const totalEnabled = enabledOptions.length;
       if (totalEnabled === 0) {
-        triggerLabel.textContent = 'No values';
+        triggerLabel.textContent = select.dataset.multiselectNoValuesLabel || 'No values';
       } else if (selectedOptions.length === 0) {
         triggerLabel.textContent = select.dataset.multiselectEmptyLabel || 'None Selected';
       } else if (dynamicAll && selectedOptions.length === totalEnabled) {
@@ -5069,7 +5180,8 @@ function setupCustomMultiSelects() {
         });
         dispatchNativeChange();
       });
-      menu.appendChild(presetButton);
+      if (select.dataset.multiselectPresetFirst === 'true') menu.insertBefore(presetButton, actionButton);
+      else menu.appendChild(presetButton);
     }
 
     const groupedOptions = select.dataset.multiselectGroups === 'true';

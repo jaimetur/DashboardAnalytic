@@ -98,3 +98,21 @@
 .network-insights .ds-live-chart-tooltip span{display:block}
 .network-insights .ds-chart-zoom-selection{position:absolute;z-index:4;box-sizing:border-box;border:2px solid #0f6f7d;background:rgba(15,111,125,.16);box-shadow:0 0 0 1px rgba(255,255,255,.8) inset;pointer-events:none}
 .network-insights .ds-chart-zoom-selection[hidden]{display:none!important}
+
+.network-insights .ni-selection-panel:has(.multiselect-menu:not([hidden])){position:relative;z-index:50;overflow:visible}
+.network-insights .ni-selection-panel:has(.multiselect-menu:not([hidden]))>.collapsible-panel-body{overflow:visible}
+
+.ni-filter-title{margin:1.2rem 0 .65rem;color:var(--ni-dark);font-size:1.3rem;font-weight:850}
+.ni-filter-grid{grid-template-columns:repeat(5,minmax(0,1fr));margin-top:0}
+.network-insights .ni-filter-grid .multiselect-trigger{padding:.65rem .85rem;border-color:var(--ni-border);border-radius:12px;box-shadow:none;background:#fff;color:var(--ni-dark)}
+.network-insights .ni-filter-grid .multiselect-menu{border-color:var(--ni-border);border-radius:12px;background:#fff;backdrop-filter:none;box-shadow:0 12px 28px #0b4f5c26;padding:.55rem}
+.network-insights :is(.ni-filter-grid,.ni-selection-grid) .multiselect-option{display:flex;align-items:center;justify-content:flex-start;gap:.6rem;min-height:2rem;padding:.4rem .5rem;border-radius:6px;font-size:.85rem;font-weight:600;line-height:1.3}
+.network-insights :is(.ni-filter-grid,.ni-selection-grid) .multiselect-option input{flex:0 0 1rem;width:1rem;height:1rem;min-width:1rem;margin:0;accent-color:var(--ni-color)}
+.network-insights .ni-filter-grid .multiselect-action{background:var(--ni-soft);color:var(--ni-dark);border-radius:7px}
+@media(max-width:1100px){.ni-filter-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:700px){.ni-filter-grid{grid-template-columns:1fr}}
+
+.network-insights :is(.ni-filter-grid,.ni-selection-grid) .multiselect-option span{min-width:0;color:var(--ni-dark);overflow-wrap:anywhere}
+.network-insights .ni-filter-grid .multiselect-search{padding:.5rem .65rem;border:1px solid var(--ni-border);border-radius:8px;font-size:.82rem}
+.network-insights .ni-filter-grid .multiselect-search:focus{outline:2px solid #0f6f7d55;outline-offset:1px;border-color:var(--ni-color)}
+.network-insights .ni-filter-grid .multiselect-action{padding:.5rem .65rem;font-size:.82rem}

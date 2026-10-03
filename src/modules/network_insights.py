@@ -67,13 +67,14 @@ RF_FIELD_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
 }
 DIMENSION_ALIASES = {
     'operator': ('Operator',),
+    'vendor': ('Vendor_Only',),
     'campaign': ('Campaign', 'Period'),
     'region': ('Region', 'G_Level_2'),
     'city': ('City', 'G_Level_4'),
     'source_sheet': ('source_sheet',),
 }
-GROUPINGS = {'campaign': 'Campaign', 'region': 'Region', 'city': 'City', 'kind': 'CDR type'}
-TECHNOLOGIES = {'lte': 'LTE', 'nr': 'NR'}
+GROUPINGS = {'operator': 'Operator', 'vendor': 'Vendor', 'region': 'Region', 'city': 'City', 'kind': 'CDR type', 'technology': 'Technology', 'campaign': 'Campaign'}
+TECHNOLOGIES = {'lte': 'LTE', 'nr': 'NR', 'lte_nr': 'LTE+NR'}
 
 # Default classification bands. Thresholds are user-adjustable in the module;
 # these defaults follow common drive-test reporting practice.
@@ -222,7 +223,7 @@ def normalise_samples(frame: pd.DataFrame, kind: str, columns: dict[str, str]) -
     """Return one tidy row per CDR sample with the logical radio fields."""
     result = pd.DataFrame(index=frame.index)
     result['kind'] = kind.title()
-    for field in ('operator', 'campaign', 'region', 'city'):
+    for field in ('operator', 'vendor', 'campaign', 'region', 'city'):
         source = columns.get(field)
         values = frame[source] if source in frame.columns else pd.Series('', index=frame.index)
         result[field] = values.fillna('').astype(str).str.strip()
@@ -303,8 +304,8 @@ def rf_summary(
     rows = []
     for key, part in samples.groupby(keys, sort=False, dropna=False):
         key = key if isinstance(key, tuple) else (key,)
-        rsrp_values = part[rsrp].dropna()
-        sinr_values = part[sinr].dropna()
+        rsrp_values = (pd.concat([part['lte_rsrp'], part['nr_rsrp']]) if technology == 'lte_nr' else part[rsrp]).dropna()
+        sinr_values = (pd.concat([part['lte_sinr'], part['nr_sinr']]) if technology == 'lte_nr' else part[sinr]).dropna()
         enodebs = {item for values in part['enodebs'] for item in values}
         cells = {item for values in part['cells'] for item in values}
         rows.append({
@@ -354,6 +355,25 @@ def cdf_payload(
     colours: dict[str, str], *, points: int = 120,
 ) -> dict[str, Any]:
     """Build a Canvas CDF model (one curve per Operator and group)."""
+    if value_column.startswith('lte_nr_'):
+        metric = value_column.removeprefix('lte_nr_')
+        models = [cdf_payload(samples, f'{radio}_{metric}', group, title, metric_label, colours, points=points)
+                  for radio in ('lte', 'nr')]
+        result = models[0]
+        for radio, model in zip(('LTE', 'NR'), models, strict=True):
+            for item in model['series']:
+                item['name'] += f' · {radio}'
+                if radio == 'NR':
+                    item['dash'] = [6, 4]
+            for item in model['legend']['items']:
+                item['label'] += f' · {radio}'
+                if radio == 'NR':
+                    item['dash'] = [6, 4]
+        result['series'] = [item for model in models for item in model['series']]
+        result['legend']['items'] = [item for model in models for item in model['legend']['items']]
+        result['type'] = 'cdf' if result['series'] else 'empty'
+        result['domain']['x'] = [min(model['domain']['x'][0] for model in models), max(model['domain']['x'][1] for model in models)]
+        return result
     series = []
     legend = []
     keys = ['operator', *([group] if group else [])]
@@ -636,32 +656,40 @@ def inventory_expression(columns: Iterable[str], field: str, quote) -> str | Non
     return parts[0] if len(parts) == 1 else f"COALESCE({', '.join(parts)})"
 
 
-def inventory_summary(task_repository: Any, dataset: dict[str, Any], group: str | None) -> dict[str, Any]:
-    """Distinct sites and cells of one inventory, optionally grouped."""
+def inventory_projection(task_repository: Any, dataset: dict[str, Any]) -> pd.DataFrame:
+    """Read only distinct identifiers and grouping fields from an inventory."""
     dataset_id = int(dataset['id'])
-    table = task_repository._quote_identifier(task_repository.dataset_rows_table_name(dataset_id))
     columns = task_repository.list_dataset_row_columns(dataset_id)
     quote = task_repository._quote_identifier
-    site = inventory_expression(columns, 'site', quote)
-    cell = inventory_expression(columns, 'cell', quote)
-    if not site:
-        return {'available_groups': [], 'rows': [], 'totals': None}
-    available_groups = [key for key in DEPLOYMENT_GROUPINGS if inventory_expression(columns, key, quote)]
-    group_expression = inventory_expression(columns, group, quote) if group in available_groups else None
-    select_group = f"COALESCE({group_expression}, 'Not set')" if group_expression else "'All'"
-    cell_count = f"COUNT(DISTINCT {cell})" if cell else '0'
+    expressions = {field: inventory_expression(columns, field, quote) for field in INVENTORY_FIELDS}
+    if not expressions['site']:
+        return pd.DataFrame()
+    selected = ', '.join(f'{expression} AS {quote(field)}'
+                         for field, expression in expressions.items() if expression)
+    table = quote(task_repository.dataset_rows_table_name(dataset_id))
     with task_repository.connection() as connection:
-        rows = connection.execute(
-            f'SELECT {select_group} AS grp, COUNT(DISTINCT {site}) AS sites, {cell_count} AS cells '
-            f'FROM {table} WHERE {site} IS NOT NULL GROUP BY grp ORDER BY sites DESC, grp',
-        ).fetchall()
-        totals = connection.execute(
-            f'SELECT COUNT(DISTINCT {site}) AS sites, {cell_count} AS cells FROM {table} WHERE {site} IS NOT NULL',
-        ).fetchone()
+        return pd.read_sql_query(
+            f"SELECT DISTINCT {selected} FROM {table} WHERE {expressions['site']} IS NOT NULL", connection)
+
+
+def inventory_summary(task_repository: Any, dataset: dict[str, Any], group: str | None,
+                      *, frame: pd.DataFrame | None = None) -> dict[str, Any]:
+    """Count distinct sites and cells using a reusable narrow inventory frame."""
+    if frame is None:
+        frame = inventory_projection(task_repository, dataset)
+    if 'site' not in frame.columns:
+        return {'available_groups': [], 'rows': [], 'totals': None}
+    available_groups = [key for key in DEPLOYMENT_GROUPINGS if key in frame.columns]
+    grouped = frame.assign(_group=frame[group].fillna('Not set') if group in available_groups else 'All')
+    counts = grouped.groupby('_group', sort=False)['site'].nunique().rename('sites').to_frame()
+    counts['cells'] = grouped.groupby('_group', sort=False)['cell'].nunique() if 'cell' in frame.columns else 0
+    counts = counts.reset_index().sort_values(['sites', '_group'], ascending=[False, True])
     return {
         'available_groups': available_groups,
-        'rows': [{'group': str(row['grp']), 'sites': int(row['sites'] or 0), 'cells': int(row['cells'] or 0)} for row in rows],
-        'totals': {'sites': int(totals['sites'] or 0), 'cells': int(totals['cells'] or 0)} if totals else None,
+        'rows': [{'group': str(row['_group']), 'sites': int(row['sites']), 'cells': int(row['cells'])}
+                 for row in counts.to_dict('records')],
+        'totals': {'sites': int(frame['site'].nunique()),
+                   'cells': int(frame['cell'].nunique()) if 'cell' in frame.columns else 0},
     }
 
 
@@ -687,12 +715,16 @@ def install_network_insights_routes(core: Any) -> None:
     app = core.app
     sample_cache: OrderedDict[str, pd.DataFrame] = OrderedDict()
     sample_cache_lock = Lock()
+    inventory_cache: OrderedDict[tuple, dict[str, Any]] = OrderedDict()
+    inventory_cache_lock = Lock()
 
     class AnalysisRequest(BaseModel):
         datasets: dict[str, list[int]] = Field(default_factory=dict)
         technology: str = 'lte'
-        group: str = 'campaign'
+        group: list[str] | str = Field(default_factory=lambda: ['campaign'])
         operators: list[str] = Field(default_factory=list)
+        vendors: list[str] = Field(default_factory=list)
+        campaigns: list[str] = Field(default_factory=list)
         regions: list[str] = Field(default_factory=list)
         cities: list[str] = Field(default_factory=list)
         coverage_threshold: float = DEFAULT_COVERAGE_THRESHOLD
@@ -736,7 +768,7 @@ def install_network_insights_routes(core: Any) -> None:
     def inventory_datasets(task_repository) -> list[dict[str, Any]]:
         return [
             {'id': int(row['id']), 'kind': row['dataset_kind'], 'operator': INVENTORY_DATASET_KINDS[row['dataset_kind']],
-             'file_name': str(row['file_name'])}
+             'file_name': str(row['file_name']), 'updated_at': str(row['updated_at'] or '')}
             for row in task_repository.list_datasets()
             if row['status'] == 'ready' and row['dataset_kind'] in INVENTORY_DATASET_KINDS
         ]
@@ -796,10 +828,12 @@ def install_network_insights_routes(core: Any) -> None:
         return core.render_template(request, 'network_insights.html', {
             'user': user,
             'network_insights_config': {
+                'selection_storage_key': f'network-insights:selection:{core.active_workspace.id}:{user.username}',
                 'datasets': ready_cdrs(task_repository),
                 'inventories': inventory_datasets(task_repository),
                 'deployment_groups': DEPLOYMENT_GROUPINGS,
                 'groupings': GROUPINGS,
+                'main_cities': task_repository.list_main_cities(),
                 'technologies': TECHNOLOGIES,
                 'coverage_threshold': DEFAULT_COVERAGE_THRESHOLD,
                 'interference_threshold': DEFAULT_INTERFERENCE_THRESHOLD,
@@ -812,35 +846,107 @@ def install_network_insights_routes(core: Any) -> None:
             },
         })
 
+    @app.post('/api/network-insights/filter-options')
+    def network_insights_filter_options(request: AnalysisRequest, vendor_only: bool = False, user=Depends(insights_user)):
+        task_repository = bound_repository()
+        available = {row['id']: row for row in ready_cdrs(task_repository)}
+        fields = ('vendor',) if vendor_only else ('operator', 'region', 'city', 'campaign')
+        values = {field: set() for field in fields}
+        mappings = task_repository.chart_mapping_settings()
+        selected = {dataset_id: kind for kind in NETWORK_INSIGHTS_KINDS
+                    for dataset_id in request.datasets.get(kind, [])
+                    if dataset_id in available and available[dataset_id]['kind'] == kind}
+        if vendor_only:
+            # One-time backfill for existing CDRs; future ingestion stores both formats.
+            for dataset_id in task_repository.missing_cdr_vendor_only_ids(selected):
+                columns = resolve_source_columns(task_repository.list_dataset_row_columns(dataset_id), selected[dataset_id])
+                column = columns.get('vendor')
+                vendor_values = task_repository.list_distinct_dataset_row_values(dataset_id, column, limit=None) if column else []
+                task_repository.set_cdr_catalogue_vendor_only(dataset_id, vendor_values)
+        catalogues = task_repository.cdr_catalogues_by_dataset(selected)
+        for catalogue in catalogues.values():
+            for field in values:
+                catalogue_key = 'vendors_only' if field == 'vendor' else 'cities' if field == 'city' else field + 's'
+                values[field].update(catalogue.get(catalogue_key, []))
+        if values.get('operator'):
+            frame = pd.DataFrame({'Operator': sorted(values['operator'])})
+            frame = core.apply_operator_mappings(frame, mappings.get('operator_mappings') or {})
+            frame.attrs.update(mappings)
+            frame = core.normalise_operator_aliases(frame)
+            values['operator'] = set(frame['Operator'].dropna().astype(str))
+        if 'campaign' in values:
+            values['campaign'] = {compact_campaign_value(value) or value for value in values['campaign']}
+        return {'options': {field + 's' if field != 'city' else 'cities': sorted(
+            (value for value in items if str(value).strip()), key=str.casefold,
+        ) for field, items in values.items()}}
+
     @app.post('/api/network-insights/analysis')
     def network_insights_analysis(request: AnalysisRequest, user=Depends(insights_user)):
         technology = request.technology if request.technology in TECHNOLOGIES else 'lte'
-        group = request.group if request.group in GROUPINGS else 'campaign'
+        requested_groups = [request.group] if isinstance(request.group, str) else request.group
+        groups = [field for field in GROUPINGS if field in requested_groups
+                  and (field != 'technology' or technology == 'lte_nr')]
+        group_label = ' → '.join(GROUPINGS[field] for field in groups) or 'All samples'
         task_repository = bound_repository()
         samples = load_samples(task_repository, request.datasets)
         if samples.empty:
             raise HTTPException(400, 'The selected CDRs have no samples.')
         options = {
             'operators': [value for value in dict.fromkeys(samples['operator']) if value],
+            'vendors': sorted({value for value in samples['vendor'] if value}, key=str.casefold),
             'regions': sorted({value for value in samples['region'] if value}, key=str.casefold),
             'cities': sorted({value for value in samples['city'] if value}, key=str.casefold),
             'campaigns': sorted({value for value in samples['campaign'] if value}, key=str.casefold),
         }
         filtered = samples
-        for field, values in (('operator', request.operators), ('region', request.regions), ('city', request.cities)):
+        for field, values in (('operator', request.operators), ('vendor', request.vendors), ('region', request.regions), ('city', request.cities), ('campaign', request.campaigns)):
             wanted = {str(value).casefold() for value in values if str(value).strip()}
             if wanted:
                 filtered = filtered.loc[filtered[field].str.casefold().isin(wanted)]
         if filtered.empty:
-            raise HTTPException(400, 'No samples match the selected Operators, Regions and Cities.')
-        group_column = 'kind' if group == 'kind' else group
+            raise HTTPException(400, 'No samples match the selected filters.')
+        filtered = filtered.copy()
+        if 'technology' in groups:
+            technology_frames = []
+            for radio in ('lte', 'nr'):
+                part = filtered.loc[filtered[[f'{radio}_rsrp', f'{radio}_sinr']].notna().any(axis=1)].copy()
+                part['technology'] = TECHNOLOGIES[radio]
+                other = 'nr' if radio == 'lte' else 'lte'
+                for metric in ('rsrp', 'sinr', 'bandwidth'):
+                    part[f'{other}_{metric}'] = math.nan
+                part[f'{other}_band'] = ''
+                technology_frames.append(part)
+            filtered = pd.concat(technology_frames, ignore_index=True)
+            if filtered.empty:
+                raise HTTPException(400, 'No LTE or NR radio measurements match the selected filters.')
+        original_operators = filtered['operator'].copy()
+        # Operator is a grouping dimension only when explicitly selected.
+        # Site/cell identifiers remain scoped by their source operator when pooled.
+        for field in ('enodebs', 'cells'):
+            filtered[field] = [tuple(f'{operator}:{value}' for value in values)
+                               for operator, values in zip(original_operators, filtered[field], strict=True)]
+        if groups:
+            grouping_values = filtered[groups].fillna('').astype(str)
+            labels = grouping_values[groups[0]].replace('', '(Empty)')
+            for field in groups[1:]:
+                labels = labels.str.cat(grouping_values[field].replace('', '(Empty)'), sep=' · ')
+        else:
+            labels = pd.Series('All samples', index=filtered.index)
+        filtered['operator'] = labels
+        group_column = None
         rsrp, sinr = f'{technology}_rsrp', f'{technology}_sinr'
         mapping_groups = task_repository.list_operator_mapping_groups()
-        colours = operator_colours(filtered['operator'], mapping_groups)
+        if 'operator' in groups:
+            source_colours = operator_colours(original_operators, mapping_groups)
+            colours = {label: source_colours[operator]
+                       for label, operator in zip(labels, original_operators, strict=True)}
+        else:
+            colours = operator_colours(filtered['operator'], [])
         overview = rf_summary(filtered, technology, None, request.coverage_threshold, request.interference_threshold)
+        overview.sort(key=lambda row: str(row['operator']).casefold())
         campaigns = [value for value in options['campaigns'] if value in set(filtered['campaign'])]
         comparison = None
-        if len(campaigns) >= 2:
+        if len(campaigns) >= 2 and 'campaign' not in groups:
             previous, latest = campaigns[-2], campaigns[-1]
             by_campaign = {
                 (row['operator'], row['group']): row
@@ -854,24 +960,31 @@ def install_network_insights_routes(core: Any) -> None:
                     for metric in ('rsrp_median', 'low_coverage_share', 'sinr_median', 'high_interference_share')
                 }
             comparison = {'previous': previous, 'latest': latest}
-        map_operators = list(dict.fromkeys(filtered['operator']))
+        map_operators = [row['operator'] for row in overview]
         map_operator = request.map_operator if request.map_operator in map_operators else (map_operators[0] if map_operators else '')
         operator_samples = filtered.loc[filtered['operator'] == map_operator]
+        if technology == 'lte_nr':
+            operator_samples = pd.concat([
+                operator_samples.assign(lte_nr_rsrp=operator_samples[f'{radio}_rsrp'],
+                                        lte_nr_sinr=operator_samples[f'{radio}_sinr'])
+                for radio in ('lte', 'nr')
+            ], ignore_index=True)
         coverage_cells, coverage_grid = grid_cells(operator_samples, rsrp, request.coverage_threshold, request.grid_metres, request.min_samples)
         interference_cells, interference_grid = grid_cells(operator_samples, sinr, request.interference_threshold, request.grid_metres, request.min_samples)
         technology_label = TECHNOLOGIES[technology]
         holdings = load_spectrum_holdings(task_repository)
         warnings = []
-        if filtered[rsrp].notna().sum() == 0:
+        rsrp_available = filtered[['lte_rsrp', 'nr_rsrp']].notna().any().any() if technology == 'lte_nr' else filtered[rsrp].notna().any()
+        if not rsrp_available:
             warnings.append(f'The selected CDRs carry no {technology_label} RSRP samples.')
         if filtered[['latitude', 'longitude']].dropna().empty:
             warnings.append('The selected CDRs carry no sample coordinates, so maps are unavailable.')
         return {
             'technology': technology, 'technology_label': technology_label,
-            'group': group, 'group_label': GROUPINGS[group],
+            'group': groups, 'group_label': group_label,
             'options': options, 'comparison': comparison,
             'overview': overview,
-            'rf_rows': rf_summary(filtered, technology, group_column, request.coverage_threshold, request.interference_threshold),
+            'rf_rows': overview,
             'charts': {
                 'rsrp_cdf': cdf_payload(filtered, rsrp, group_column, f'{technology_label} RSRP', 'RSRP (dBm)', colours),
                 'sinr_cdf': cdf_payload(filtered, sinr, group_column, f'{technology_label} SINR', 'SINR (dB)', colours),
@@ -896,7 +1009,22 @@ def install_network_insights_routes(core: Any) -> None:
         task_repository = bound_repository()
         results = []
         for dataset in inventory_datasets(task_repository):
-            summary = inventory_summary(task_repository, dataset, group if group in DEPLOYMENT_GROUPINGS else None)
+            # Profile revisions change after processing and supported table edits.
+            key = (str(Path(task_repository.db_path).resolve()), dataset['id'],
+                   dataset['file_name'], dataset['updated_at'])
+            with inventory_cache_lock:
+                cached = inventory_cache.get(key)
+                if cached is None:
+                    cached = {'frame': inventory_projection(task_repository, dataset), 'summaries': {}}
+                    inventory_cache[key] = cached
+                inventory_cache.move_to_end(key)
+                while len(inventory_cache) > 4:
+                    inventory_cache.popitem(last=False)
+                grouping = group if group in DEPLOYMENT_GROUPINGS else None
+                if grouping not in cached['summaries']:
+                    cached['summaries'][grouping] = inventory_summary(
+                        task_repository, dataset, grouping, frame=cached['frame'])
+                summary = cached['summaries'][grouping]
             results.append({**dataset, **summary})
         return {'group': group, 'group_label': DEPLOYMENT_GROUPINGS.get(group, 'All'), 'inventories': results}
 

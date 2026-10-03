@@ -48,7 +48,7 @@ from src.modules.cdr_reporting import (
     split_calculated_dimension_aliases,
 )
 
-from src.modules.rf_catalog_source import rf_source_columns, rf_union_source
+from src.modules.rf_catalog_source import RF_CATALOG_FIELDS, rf_source_columns, rf_union_source
 from src.modules.repository import Repository
 from src.modules.cdr_report_filenames import build_cdr_report_filename
 from src.modules.runtime_config import ignore_event_time_filtering
@@ -1253,7 +1253,7 @@ def install_dashboard_routes(core):
             selected_values = next((items for key, items in definition.filters.items() if identity(key) == identity(field)), [])
             if selected_values:
                 values &= {normalize(value) for value in selected_values}
-            if definition.scope == 'multivendor' and identity(field) in {'vendor', 'vendoronly'}:
+            if definition.scope == 'multivendor' and definition.vendor_comparison != 'vendor_only' and identity(field) in {'vendor', 'vendoronly'}:
                 values = {value for value in values if not any(term in value.casefold() for term in ('mixed', 'other'))}
             values_by_field[field] = sorted(values, key=str.casefold)
         vendor_families = {}
@@ -3617,6 +3617,15 @@ def install_dashboard_routes(core):
                     explicit.update(split_calculated_dimension_aliases(condition.column))
         selected = list(reported)
         selected.extend(('dataset_id', 'source_row_id'))
+        # RF companions use the same source selection. A stable projection of
+        # all radio fields lets RSRP/SINR and LTE/NR share the raw-frame cache,
+        # rather than rereading millions of observations for each measure.
+        radio_columns = (set(RF_CATALOG_FIELDS) if entry.source_kind == 'all'
+                         else rf_source_columns(entry.source_kind))
+        radio_identities = {identity(column) for column in radio_columns}
+        if any(identity(column) in radio_identities for column in catalog_kpi_fields(entry.kpi)):
+            selected.extend(radio_columns)
+            return sorted(set(selected), key=lambda column: (identity(column), column))
         return list(dict.fromkeys(selected))
 
     def chart_filter_sql(entry, columns, multivendor, task_repository):

@@ -544,3 +544,9 @@ For RF histograms, select **Operator**: the first definition is LTE and the seco
 
 > [!NOTE]
 > **Vendor comparison:** When **Report type** is **Multivendor Comparison**, the **Vendor comparison** selector appears to its right. **Vendor Only (All Operators Combined)** is the first and default option when opening the export dialog; it pools selected operators using the same `Vendor_Only` value. Choose **Operator - Vendor** to keep each operator separate. Campaigns remain separate. The job retains this choice for retries. Dynamic vendor grids use up to six columns per slide and keep operators of the same vendor together where possible.
+
+### Vendor-only filter labels
+
+Across the application, filters on `Vendor_Only` list actual vendors first, followed by Mixed Vendor(s), Other Vendor(s), then All Vendor(s). Operator-only identities follow with the display suffix ** - All Vendors**, based on canonical Operator identities, their configured aliases and cached CDR operators. Configured vendor identities take precedence, so actual vendors remain in the first group. The suffix is a display label: saved conditions and exported configurations retain the original values. This applies to Dashboard filters, Network Insights, data-preview column filters, Query Builder column filters and Report Template filter assistance.
+
+CDR catalogue caches retain both `Vendor` and `Vendor_Only` universes. CDR processing refreshes both from their source columns. The caches remain part of workspace database backups and restores; legacy catalogues preserve their existing Vendor values while Vendor_Only is backfilled once.

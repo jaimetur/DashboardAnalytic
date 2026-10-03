@@ -1820,3 +1820,18 @@
 .e2e-dashboards .ds-dashboard-action.ds-dashboard-ppt::after { flex:0 0 1.3rem; width:1.3rem; height:1.08rem; }
 
 .ds-ppt-scope-controls{display:flex;align-items:flex-start;gap:.85rem}.ds-ppt-scope-controls>.ds-scope-control{flex:1;min-width:0;width:auto;margin:0}.ds-ppt-vendor-comparison-control[hidden]{display:none}.ds-ppt-vendor-comparison-control .form-note{margin:0;white-space:normal;font-weight:400}@media(max-width:760px){.ds-ppt-scope-controls{flex-direction:column}.ds-ppt-scope-controls>.ds-scope-control{width:100%}}
+
+.ds-viewer-vendor-control[hidden]{display:none}.ds-viewer-vendor-control select{width:22rem}
+
+/* Distinct colours for slide titles and subtitles in the picker. */
+.ds-viewer-panel>.ds-actions>.ds-slide-picker { min-width:0; width:100%; max-width:32rem; }
+.e2e-dashboards .ds-slide-picker-trigger { width:100%; min-width:0; padding:.85rem 2.6rem .85rem 1rem!important; border:1px solid var(--ds-border); border-radius:14px!important; background:#fff; text-align:left; box-shadow:none; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ds-slide-picker .ds-slide-picker-number { color:#647580; }
+.ds-slide-picker .ds-slide-picker-title { color:#563487; }
+.ds-slide-picker .ds-slide-picker-subtitle { color:#087b7f; }
+.ds-slide-picker .ds-slide-picker-separator { color:#394b59; font-weight:900; }
+.ds-slide-picker .searchable-select-menu { width:max-content; min-width:100%; max-width:min(70rem,calc(100vw - 4rem)); max-height:min(32rem,60vh); z-index:100; background:#fff; }
+.e2e-dashboards .ds-slide-picker .searchable-select-option { display:block; padding:.65rem .8rem!important; border-radius:8px!important; background:transparent; text-align:left; box-shadow:none; font-weight:600; white-space:normal; }
+.e2e-dashboards .ds-slide-picker .searchable-select-option:hover { background:#f0ebf7; }
+.e2e-dashboards .ds-slide-picker .searchable-select-option[aria-selected="true"] { background:#e2f2f3; outline:1px solid #9ccacc; }
+.ds-slide-picker .searchable-select-input { position:sticky; top:0; background:#fff; }

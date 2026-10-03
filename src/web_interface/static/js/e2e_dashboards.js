@@ -734,6 +734,7 @@
           const control = document.createElement('select');
           control.multiple = true; control.size = 1; control.disabled = true;
           control.setAttribute('aria-label', `PowerPoint ${label} filter`);
+          control.dataset.filterFieldName = field;
           control.append(extraPlaceholder('Loading available values…'));
           section.append(node('h3', label), control);
           host.append(section);
@@ -2048,6 +2049,12 @@
       head.append(remove); facet.append(head);
       const values = document.createElement('select'); values.multiple = true; values.size = 1; values.dataset.multiselectAutoClose = '1000'; values.setAttribute('aria-label', `${label} filter`);
       values.dataset.multiselectDynamicAll = 'true';
+      if (identity(field) === identity('Vendor_Only')) {
+        values.dataset.multiselectVendorOnly = 'true';
+        values.dataset.multiselectOperatorValues = JSON.stringify(
+          Object.entries(facetOptions).filter(([name]) => identity(name) === identity('Operator')).flatMap(([, items]) => items),
+        );
+      }
       if (!custom && identity(field) === identity('City')) {
         values.dataset.multiselectPresetLabel = 'Main Cities';
         values.dataset.multiselectPresetValues = mainCities.join('|');
@@ -2411,8 +2418,13 @@
   function syncViewerScope() {
     const control = $('ds-viewer-scope');
     if (!control) return;
-    control.value = (appliedDashboardDefinition || definition)?.scope || 'single';
+    const viewer = appliedDashboardDefinition || definition;
+    control.value = viewer?.scope || 'single';
     control.disabled = !definition || Boolean(pptDashboardViewer) || filterActionBusy;
+    const vendorControl = $('ds-viewer-vendor-comparison');
+    $('ds-viewer-vendor-control').hidden = control.value !== 'multivendor';
+    vendorControl.value = viewer?.vendor_comparison || 'vendor_only';
+    vendorControl.disabled = control.disabled;
   }
   $('ds-viewer-scope').onchange = safe(async () => {
     const control = $('ds-viewer-scope');
@@ -2429,6 +2441,15 @@
     await $('ds-scope').onchange();
     await preparePart('universe');
     syncViewerScope();
+  });
+  $('ds-viewer-vendor-comparison').onchange = safe(async () => {
+    const control = $('ds-viewer-vendor-comparison');
+    const current = appliedDashboardDefinition || definition;
+    if (!definition || current?.scope !== 'multivendor' || control.value === current.vendor_comparison) return;
+    definition.vendor_comparison = control.value;
+    control.disabled = true;
+    try { await preparePart('universe'); }
+    finally { syncViewerScope(); }
   });
   bind('ds-apply-universe', async () => {
     if (!hasUnappliedUniverseChanges()) return;
@@ -2480,6 +2501,7 @@
     if (!definition) return;
     const selectedScope = $('ds-scope').value;
     if (selectedScope !== definition.scope) {
+      if (selectedScope === 'multivendor') definition.vendor_comparison = 'vendor_only';
       definition.datasets = latestDatasetsForScope(selectedScope, dashboardNrMode(definition));
       definition.date_from = 'Oldest';
       definition.date_to = 'Newest';
@@ -3584,6 +3606,7 @@
     $('ds-viewer-context').hidden = true;
     $('ds-slide').replaceChildren(option('', 'Loading slides…'));
     $('ds-slide').disabled = true;
+    $('ds-slide').dispatchEvent(new Event('searchable-select:options-updated'));
     $('ds-first').disabled = $('ds-prev').disabled = $('ds-next').disabled = $('ds-last').disabled = true;
     const stage = $('ds-charts');
     stage.classList.remove('ds-positioned', 'ds-structural-stage', 'ds-slide-transition');
@@ -3602,7 +3625,18 @@
     renderViewerContext();
     const viewer = viewerDefinition();
     $('ds-position').textContent = `${dashboardNrMode(viewer)} · ${viewer?.name || 'Dashboard'} · Slide ${slideIndex+1} / ${prepared.slides.length}`;
-    $('ds-slide').replaceChildren(...prepared.slides.map((item,index)=>option(String(index),`${item.number} · ${item.title || 'Dashboard'}`))); $('ds-slide').disabled = false; $('ds-slide').value = String(slideIndex);
+    $('ds-slide').replaceChildren(...prepared.slides.map((item, index) => {
+      const title = item.title || 'Dashboard';
+      const subtitle = String(item.subtitle || '').trim();
+      const choice = option(String(index), `${item.number} · ${title}${subtitle ? ` ● ${subtitle}` : ''}`);
+      choice.dataset.slideNumber = String(item.number);
+      choice.dataset.slideTitle = title;
+      choice.dataset.slideSubtitle = subtitle;
+      return choice;
+    }));
+    $('ds-slide').disabled = false;
+    $('ds-slide').value = String(slideIndex);
+    $('ds-slide').dispatchEvent(new Event('searchable-select:options-updated'));
     $('ds-first').disabled = $('ds-prev').disabled = slideIndex === 0;
     $('ds-next').disabled = $('ds-last').disabled = slideIndex === prepared.slides.length - 1;
     $('ds-slide-content').classList.toggle('ds-comments-right', /\bcomments\s+right\b/i.test(slide.layout || ''));

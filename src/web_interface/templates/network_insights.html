@@ -14,20 +14,23 @@
       <div class="ni-selection-grid">
         <label>NR Mode<select id="ni-nr-mode"><option value="NSA">NSA</option><option value="SA">SA</option></select></label>
         <label>Technology<select id="ni-technology">{% for key, label in network_insights_config.technologies.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
-        <label>Group by<select id="ni-group">{% for key, label in network_insights_config.groupings.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
+        <label>Group by<select id="ni-group" multiple size="1" data-multiselect-empty-label="All samples" aria-label="Group by">{% for key, label in network_insights_config.groupings.items() %}<option value="{{ key }}"{% if key == "campaign" %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
         <label>Low coverage below (dBm)<input type="number" id="ni-coverage-threshold" step="1" value="{{ network_insights_config.coverage_threshold|int }}"></label>
         <label>High interference below (dB)<input type="number" id="ni-interference-threshold" step="0.5" value="{{ network_insights_config.interference_threshold|int }}"></label>
         <label>Map grid (m)<select id="ni-grid"><option value="100">100 m</option><option value="250" selected>250 m</option><option value="500">500 m</option><option value="1000">1 km</option></select></label>
       </div>
-      <div class="ni-dataset-groups" id="ni-datasets"></div>
+      <h3 class="ni-filter-title">Filters:</h3>
       <div class="ni-filter-grid">
-        <label>Operators<select id="ni-operators" multiple size="1" aria-label="Operators"></select></label>
-        <label>Regions<select id="ni-regions" multiple size="1" aria-label="Regions"></select></label>
-        <label>Cities<select id="ni-cities" multiple size="1" aria-label="Cities"></select></label>
+        <label>Operators<select id="ni-operators" data-multiselect-no-values-label="Loading values…" data-multiselect-dynamic-all="true" multiple size="1" aria-label="Operators"></select></label>
+        <label>Vendors<select id="ni-vendors" data-multiselect-vendor-only="true" data-multiselect-no-values-label="Loading values…" data-multiselect-dynamic-all="true" multiple size="1" aria-label="Vendors"></select></label>
+        <label>Regions<select id="ni-regions" data-multiselect-no-values-label="Loading values…" data-multiselect-dynamic-all="true" multiple size="1" aria-label="Regions"></select></label>
+        <label>Cities<select id="ni-cities" data-multiselect-preset-label="Main Cities" data-multiselect-preset-first="true" data-multiselect-no-values-label="Loading values…" data-multiselect-dynamic-all="true" multiple size="1" aria-label="Cities"></select></label>
+        <label>Campaigns<select id="ni-campaigns" data-multiselect-no-values-label="Loading values…" data-multiselect-dynamic-all="true" multiple size="1" aria-label="Campaigns"></select></label>
       </div>
+      <div class="ni-dataset-groups" id="ni-datasets"></div>
       <div class="ni-actions">
         <button type="button" id="ni-analyse" class="ni-analyse">Analyse Network</button>
-        <p class="form-note" id="ni-status" role="status">Choose the CDRs and press Analyse Network. Operators, Regions and Cities fill in after the first analysis.</p>
+        <p class="form-note" id="ni-status" role="status">Choose the CDRs and press Analyse Network. Filter values load automatically for the selected CDRs.</p>
       </div>
     </div>
   </details>
@@ -53,7 +56,7 @@
     <summary class="collapsible-summary"><div><p class="eyebrow">Weak coverage &amp; interference</p><h2>Coverage &amp; Interference Maps</h2></div><span class="collapse-chip">Collapse</span></summary>
     <div class="collapsible-panel-body">
       <div class="ni-map-toolbar">
-        <label>Operator<select id="ni-map-operator"></select></label>
+        <label>Group<select id="ni-map-operator"></select></label>
         <button type="button" id="ni-map-reset" class="ni-secondary-action">Show Whole Area</button>
         <p class="form-note" id="ni-map-note"></p>
       </div>

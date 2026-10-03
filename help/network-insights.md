@@ -1,6 +1,8 @@
 # Network Insights
 
-Analyse the network behind the measured performance: radio quality (RSRP and SINR), weak-coverage and high-interference areas on a map, observed and inventoried sites, licensed and observed spectrum, and network deployment (NNS, eMOCN scenarios, host networks and RAN vendors). Every view is calculated per Operator and can be grouped by Campaign, Region, City or CDR type.
+Analyse the network behind the measured performance: radio quality (RSRP and SINR), weak-coverage and high-interference areas on a map, observed and inventoried sites, licensed and observed spectrum, and network deployment (NNS, eMOCN scenarios, host networks and RAN vendors). The **Filters:** section offers Operators, Vendors, Regions, Cities and Campaigns. **Main Cities** appears first in the Cities menu when configured in the workspace; selecting it applies the configured cities available in the selected CDRs. Values load automatically from the lightweight CDR catalogues without waiting for a full analysis. The selectors show **Loading values…** while the request is pending. The persistent CDR catalogue stores both Vendor and Vendor_Only universes. Vendor choices are read exclusively from the Vendor_Only cache, populated during CDR processing. Existing CDRs receive a one-time backfill when this cache is first requested. Vendor loading runs separately, so its initial lookup does not hold up Operators, Regions, Cities or Campaigns. These four filters use cached CDR catalogues; legacy CDRs need their catalogues populated during CDR processing.
+
+Measured views group only by the checked **Group by** dimensions: Campaign, Operator, Vendor, Region, City and CDR type. Multiple checked dimensions form a hierarchy in selector order. Campaign is always the last grouping dimension, including when Technology is available. Measured tables use alphabetical order by the selected hierarchy, keeping each operator/group and its technologies/campaigns together. The map Group selector follows the displayed table rows exactly, rather than the source CDR or campaign order. Operator is included only when checked; otherwise samples from selected operators sharing the other dimensions are combined. With no dimensions checked, the view pools all selected samples. Licensed spectrum and uploaded inventories retain their own reference dimensions.
 
 > [!NOTE]
 > **Radio views need no extra input.** RSRP, SINR, maps, observed eNodeBs and observed bands come from the processed CDRs. Site inventories and licensed spectrum are optional inputs that complete the Sites & Density, Spectrum and Network Deployment panels.
@@ -23,7 +25,8 @@ Analyse the network behind the measured performance: radio quality (RSRP and SIN
 
 1. Open the workspace and the **Network Insights** tab, which follows **Scoring & GAP Analysis**.
 2. Choose **NR Mode**. The CDR lists show the ready Data, Voice and Speech CDRs of that mode; the two most recently uploaded CDRs of each type are selected.
-3. Choose **Technology** (LTE or NR) and **Group by** (Campaign, Region, City or CDR type).
+3. Choose **Technology** (LTE, NR or LTE+NR) and **Group by** (Campaign, Operator, Vendor, Region, City or CDR type).
+   **Group by** is a multiple selection: choose one or more dimensions. **Operator** separates operators only when checked. **Vendor** splits each operator by vendor, using only `Vendor_Only`. The Vendors filter also uses only this field. Actual vendors appear first, followed by Mixed Vendor(s), Other Vendor(s), All Vendor(s), and then operator-only identities labelled **Operator - All Vendors**; labels do not change the stored filter values. CDRs without it contribute no vendor choices.
 4. Adjust **Low coverage below** (default -110 dBm), **High interference below** (default 0 dB) and the **Map grid** size (default 250 m).
 5. Press **Analyse Network**.
 
@@ -129,3 +132,19 @@ Network Insights stores no analysis results; every analysis is calculated on dem
 
 > [!NOTE]
 > **Vendor comparison:** Before generating a multivendor report, choose **Operator – Vendor** to keep each operator separate, or **Vendor only (Vendor_Only)** to pool selected operators using the same vendor. Campaigns remain separate. The job retains this choice for retries. Dynamic vendor grids use up to six columns per slide and keep operators of the same vendor together where possible.
+
+### LTE+NR selection
+
+**LTE+NR** shows LTE and NR CDF curves together, labelled by technology (NR uses dashed lines). Summary statistics and map grids pool valid radio measurements from both technologies; source sample and observed-site counts remain unduplicated. A source row can contain both an LTE and an NR measurement, so the RSRP/SINR measurement counts can exceed source sample counts. Select LTE or NR for technology-specific statistics and maps.
+
+The Overview, RF quality tables/CDFs, observed sites, observed spectrum and map group picker use the selected hierarchy. Site identifiers are scoped by source operator before counting pooled groups. Changes between the latest two campaigns are shown only when Campaign is not itself a grouping dimension.
+
+### Remembering selections
+
+Network Insights remembers the selected CDRs, NR Mode, Technology, grouping levels, filters, thresholds, map grid and deployment grouping in this browser, separately for each workspace and user. Reloading restores valid selections; removed CDRs or unavailable values are omitted. Analysis results are not stored by this preference: press **Analyse Network** to recalculate them. Browser selections are local preferences and are not included in workspace exports or backups.
+
+When **Technology** is **LTE+NR**, **Group by** also offers **Technology**. Checking it separates LTE and NR in the selected hierarchy for summaries, tables, charts and maps. The option is removed for LTE-only or NR-only analysis. A source row with measurements from both technologies contributes once to each technology group.
+
+Filters appear above the CDR dataset groups. By default, all ready CDRs of the selected NR Mode are checked. Your saved dataset selection takes precedence after you change it.
+
+Network Deployment reuses a narrow inventory projection and grouped counts while the inventory revision remains unchanged. Changing Group by discards older pending responses; processing or editing an inventory invalidates its cached counts. A timed-out request shows an error instead of remaining on the loading message.

@@ -434,8 +434,10 @@ def entry_dynamic_fields(entry: CatalogEntry) -> tuple[str, str]:
     return rows, columns
 
 
-def dynamic_chart_title(entry: CatalogEntry) -> str:
-    values = [value for value in (entry.dynamic_row_value, entry.dynamic_column_value) if value is not None]
+def dynamic_chart_title(entry: CatalogEntry, frame: pd.DataFrame | None = None) -> str:
+    fields = entry_dynamic_fields(entry)
+    values = [_vendor_only_display_info(value, frame)[1] if _normalise_catalog_name(field) == 'vendoronly' else value
+              for field, value in zip(fields, (entry.dynamic_row_value, entry.dynamic_column_value), strict=True) if value is not None]
     return entry.chart_title + (" – " + " / ".join(values) if values else "")
 
 
@@ -461,7 +463,11 @@ def expand_dynamic_layouts(
     vendor_families: dict[str, str] | None = None,
 ) -> list[CatalogEntry]:
     """Resolve both grid axes and paginate vendor families without mixing contexts."""
+    display_frame = pd.DataFrame()
+    display_frame.attrs.update(operator_mappings=operator_mappings or {}, vendor_mappings=vendor_mappings or {})
     def pages_for(field, values, bounded):
+        if vendor_comparison == 'vendor_only' and _normalise_catalog_name(field) == 'vendoronly':
+            values = sorted(values, key=lambda value: _vendor_only_display_sort_key(value, display_frame))
         if multivendor and _normalise_catalog_name(field) in {"vendor", "vendoronly"}:
             families = {}
             for value in values:
@@ -514,7 +520,7 @@ def expand_dynamic_layouts(
                                         dynamic_field=row_field or column_field if not both else '',
                                         dynamic_value=row_value if dynamic_rows and not dynamic_columns else column_value,
                                         slide_subtitle=(f"{source.slide_subtitle} · {page_index + 1}/{total_pages}" if total_pages > 1 else source.slide_subtitle))
-                        expanded.append(replace(clone, chart_title=dynamic_chart_title(clone)))
+                        expanded.append(replace(clone, chart_title=dynamic_chart_title(clone, display_frame)))
                 page_index += 1
         offset += total_pages - 1
     return expanded
@@ -1862,7 +1868,8 @@ def prepare_multivendor_catalog_entry(entry: CatalogEntry, vendor_comparison: st
 
     The stored template remains an operator-oriented definition.  For a
     multivendor run, grouping dimensions, display legends and titles are
-    transformed and unresolved Mixed/Other vendor groups are excluded. Existing
+    transformed; Operator–Vendor comparisons exclude unresolved Mixed/Other groups.
+    Vendor_Only comparisons retain those groups after the actual vendors. Existing
     ``Operator`` conditions remain untouched.  During filtering they resolve
     against the operator prefix of the materialised ``Operator_Vendor`` value.
     """
@@ -1915,7 +1922,7 @@ def prepare_multivendor_catalog_entry(entry: CatalogEntry, vendor_comparison: st
         and {value.casefold() for value in condition.values}.issuperset({"mixed", "other"})
         for condition in parse_catalog_filters(filters)
     )
-    if entry.source_kind and not has_vendor_exclusion:
+    if entry.source_kind and not vendor_only and not has_vendor_exclusion:
         filters = f"{filters.rstrip(';')}; {vendor_exclusion}" if filters else vendor_exclusion
 
     return replace(
@@ -2704,6 +2711,9 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
         if normalized_dimension == "campaign":
             campaign_labels = {value: _campaign_display_value(value) for value in values.unique()}
             values = values.map(campaign_labels)
+        if multivendor and entry.vendor_comparison == 'vendor_only' and normalized_dimension == 'vendoronly':
+            display_values = {value: _vendor_only_display_info(value, frame)[1] for value in values.unique()}
+            values = values.map(display_values)
         frame[target] = values
         requested = explicit_dimension_values.get(normalized_dimension)
         if requested:
@@ -2800,6 +2810,8 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
             return (bucket_order.index(str(value)) if str(value) in bucket_order else len(bucket_order),)
         if normalized_dimension == "campaign":
             return _campaign_sort_key(value)
+        if normalized_dimension == "vendoronly" and entry.vendor_comparison == "vendor_only":
+            return _vendor_only_display_sort_key(value, frame)
         if normalized_dimension == "vendor":
             return vendor_sort_key(value)
         if normalized_dimension in {"operator", "subscriber"}:
@@ -3478,6 +3490,39 @@ def _vendor_display_sort_key(value: object, frame: pd.DataFrame | None = None) -
     vendor_rank = int(vendor_group.get('position', 0)) if vendor_group else len(_mapping_groups(frame, 'vendor'))
     operator_rank, operator_label = _operator_display_sort_key(normalized_operator, frame)
     return operator_rank, operator_label, vendor_rank, normalized_vendor
+
+
+def _vendor_only_display_info(value: object, frame: pd.DataFrame | None = None) -> tuple[int, str]:
+    """Classify Vendor_Only display identities without changing stored values."""
+    text = re.sub(r'\s+- All Vendors$', '', str(value).strip(), flags=re.IGNORECASE)
+    identity = lambda item: re.sub(r'[^a-z0-9]', '', str(item).casefold())
+    key = identity(text)
+    domains = {}
+    for role in ('vendor', 'operator'):
+        aliases = {}
+        for group in _mapping_groups(frame, role):
+            for alias in [group.get('canonical'), *(group.get('aliases') or [])]:
+                if alias:
+                    aliases[identity(alias)] = str(group.get('canonical') or alias)
+        for alias, canonical in (frame.attrs.get(f'{role}_mappings', {}) if frame is not None else {}).items():
+            aliases[identity(alias)] = str(canonical)
+            aliases[identity(canonical)] = str(canonical)
+        domains[role] = aliases
+    vendor_key = identity(domains['vendor'].get(key, text))
+    if vendor_key in {'mixedvendor', 'mixedvendors'}:
+        return 1, text
+    if vendor_key in {'othervendor', 'othervendors'}:
+        return 2, text
+    if vendor_key in {'allvendor', 'allvendors'}:
+        return 3, text
+    if key not in domains['vendor'] and key in domains['operator']:
+        return 4, f'{text} - All Vendors'
+    return 0, text
+
+
+def _vendor_only_display_sort_key(value: object, frame: pd.DataFrame | None = None) -> tuple[int, str]:
+    rank, label = _vendor_only_display_info(value, frame)
+    return rank, label.casefold()
 
 
 def _multivendor_vendor_sort_key(value: object, frame: pd.DataFrame | None = None) -> tuple[object, ...]:
@@ -6695,6 +6740,8 @@ def catalog_chart_payload(
                 }
                 if roles & {"operator", "subscriber"}:
                     return (0, *_operator_display_sort_key(value, data))
+                if "vendoronly" in roles and entry.vendor_comparison == "vendor_only":
+                    return (0, *_vendor_only_display_sort_key(value, data))
                 if roles & {"vendor", "vendoronly", "operatorvendor"}:
                     if multivendor:
                         return (0, *_multivendor_vendor_sort_key(value, data))
@@ -7433,7 +7480,7 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
             for field in dynamic_fields:
                 column = _catalog_column(source_frame, field, False)
                 if column:
-                    values[field].update(str(value) for value in source_frame[column].dropna().unique() if not multivendor or _normalise_catalog_name(field) not in {"vendor", "vendoronly"} or not any(term in str(value).casefold() for term in ("mixed", "other")))
+                    values[field].update(str(value) for value in source_frame[column].dropna().unique() if not multivendor or vendor_comparison == "vendor_only" or _normalise_catalog_name(field) not in {"vendor", "vendoronly"} or not any(term in str(value).casefold() for term in ("mixed", "other")))
         catalog = expand_dynamic_layouts(catalog, {field: sorted(items, key=str.casefold) for field, items in values.items()}, multivendor=multivendor, operator_mappings=source_frame.attrs.get("operator_mappings", {}), vendor_mappings=source_frame.attrs.get("vendor_mappings", {}), vendor_comparison=vendor_comparison, vendor_families=vendor_families)
     render_catalog = [prepare_multivendor_catalog_entry(entry) if multivendor else entry for entry in catalog]
     for entry in render_catalog:

@@ -254,6 +254,7 @@
   </div>
   <div class="preview-badge-tooltip" data-preview-badge-tooltip role="tooltip" hidden><span data-preview-badge-tooltip-kind></span><strong data-preview-badge-tooltip-title></strong><p data-preview-badge-tooltip-rule></p></div>
   <div class="preview-filtering-status" data-preview-filtering-status role="status" aria-live="polite" hidden><span class="preview-filtering-spinner" aria-hidden="true"></span><strong data-preview-filtering-text>Filtering dataset…</strong></div>
+  <script id="vendor-filter-operators" type="application/json">{{ vendor_filter_identities | default({}) | tojson }}</script>
   <script src="{{ static_path('js/app.js') }}?v={{ asset_version('js/app.js') }}"></script>
   {% block extra_scripts %}{% endblock %}
 </body>

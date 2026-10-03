@@ -219,6 +219,8 @@ Open Dashboards take priority over closed ones. Foreground preparation and PPT e
 
 Combined CDR tables remain the source for filters and chart data. Selection records keep counts, facets and reproducible predicates; the cache does not copy CDR rows into a separate projection database.
 
+RF Dashboard charts read the materialized combined CDR tables; `CDR-All` pools those Data, Voice and Speech tables without rereading the original uploaded files. RF companion charts with identical source selections and SQL filters share a stable projection of the LTE/NR radio fields in the preview frame cache. Different selections or filters require separate frames. The first read and chart calculations still depend on the sample count.
+
 `.dashboard-data-cache` holds derived preview manifests, Canvas models and legacy image artifacts. Its keys include dataset revisions, selection, scope and renderer version. Older-version artifacts are removed when a workspace opens.
 
 > [!WARNING]
@@ -244,7 +246,7 @@ Campaign labels are compact, such as **2026-Q2** or **2026-Q2_SA**. Older CDRs m
 
 | Control | Use |
 | --- | --- |
-| Slide selector | Jump to a template slide |
+| Slide selector | Jump to a template slide; searchable choices show the number, a purple title and a teal subtitle separated by a bold ● |
 | **First / Previous / Next / Last** | Move through slides |
 | Left / Right Arrow | Navigate when focus is outside editable controls |
 | **Scope** | Switch Operator/Multivendor after confirmation |
@@ -442,4 +444,10 @@ Dashboards have their own Admin export/import/transfer/backup/restore component.
 > Clear cache is a recovery action for derived artifacts, not a substitute for fixing missing source data, Vendor mappings or an invalid template. Inspect the cause first.
 
 > [!NOTE]
+> **Viewer comparison:** In the Dashboard viewer, selecting **Multivendor Comparison** reveals **Vendor comparison** to the right of Scope. Choose **Vendor Only (All Operators Combined)** to pool operators sharing a vendor, or **Operator - Vendor** to keep their results separate. Changing this selector renders the Dashboard again immediately. Switching into multivendor scope defaults to Vendor Only; saved Dashboards retain their saved comparison. Use **Save Universe** to persist the choice.
+
 > **Vendor comparison:** When **Report type** is **Multivendor Comparison**, the **Vendor comparison** selector appears to its right. **Vendor Only (All Operators Combined)** is the first and default option when opening the export dialog; it pools selected operators using the same `Vendor_Only` value. Choose **Operator - Vendor** to keep each operator separate. Campaigns remain separate. The job retains this choice for retries. Dynamic vendor grids use up to six columns per slide and keep operators of the same vendor together where possible.
+
+### Vendor-only report ordering
+
+For **Vendor Only (All Operators Combined)**, web charts/tables and PowerPoint reports list actual vendors alphabetically, then Mixed Vendor(s), Other Vendor(s), All Vendor(s), and finally operator-only identities labelled **Operator - All Vendors**. This order also applies to dynamic chart grids. Mixed/Other groups remain visible unless an explicit template filter excludes them. Display labels preserve the underlying filter and dataset values.
