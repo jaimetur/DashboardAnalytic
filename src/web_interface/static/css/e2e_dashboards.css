@@ -1818,3 +1818,5 @@
 /* Generate PPT is a labelled library action right after Open Filters; its
    PPT icon keeps its wider proportions. */
 .e2e-dashboards .ds-dashboard-action.ds-dashboard-ppt::after { flex:0 0 1.3rem; width:1.3rem; height:1.08rem; }
+
+.ds-ppt-scope-controls{display:flex;align-items:flex-start;gap:.85rem}.ds-ppt-scope-controls>.ds-scope-control{flex:1;min-width:0;width:auto;margin:0}.ds-ppt-vendor-comparison-control[hidden]{display:none}.ds-ppt-vendor-comparison-control .form-note{margin:0;white-space:normal;font-weight:400}@media(max-width:760px){.ds-ppt-scope-controls{flex-direction:column}.ds-ppt-scope-controls>.ds-scope-control{width:100%}}

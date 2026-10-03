@@ -141,9 +141,9 @@ def test_layout_normalization_changes_only_layout_cells_and_keeps_csv_schema():
 
 @pytest.mark.parametrize('column_count', [13, 19])
 def test_recognized_legacy_catalog_schemas_upgrade_to_22_columns_without_losing_values(column_count):
-    from src.modules.cdr_reporting import CATALOG_HEADERS
+    from src.modules.cdr_reporting import CATALOG_HEADERS, PRE_LEGEND_FORMAT_CATALOG_HEADERS, RANGELESS_CATALOG_HEADERS
 
-    legacy_headers = CATALOG_HEADERS[:column_count]
+    legacy_headers = RANGELESS_CATALOG_HEADERS if column_count == 13 else PRE_LEGEND_FORMAT_CATALOG_HEADERS
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=legacy_headers, lineterminator='\n')
     writer.writeheader()
@@ -151,7 +151,7 @@ def test_recognized_legacy_catalog_schemas_upgrade_to_22_columns_without_losing_
         'Slide': '4', 'Slide Tittle': 'Legacy quality', 'Layout': 'Title and 2 columns + Comments right',
         'Chart Tittle': 'Completed calls', 'Source Dataset': 'CDR-Voice', 'KPI': 'Call_Status',
         'Chart type': '100% Stacked Vertical Bars',
-        **({'Legend Format': 'bold'} if 'Legend Format' in legacy_headers else {}),
+        **({'Label Format': 'bold'} if 'Label Format' in legacy_headers else {}),
     })
 
     migrated = normalize_catalog_layouts(output.getvalue().encode('utf-8')).decode('utf-8')
@@ -165,13 +165,15 @@ def test_recognized_legacy_catalog_schemas_upgrade_to_22_columns_without_losing_
     assert rows[0]['Chart Tittle'] == 'Completed calls'
     assert rows[0]['Dynamic Rows Field'] == rows[0]['Dynamic Columns Field'] == ''
     if column_count == 19:
-        assert rows[0]['Legend Format'] == 'bold'
+        assert rows[0]['Label Format'] == 'bold'
 
 
 def test_legacy_dynamic_field_migration_maps_to_the_declared_axis():
     from src.modules.cdr_reporting import CATALOG_HEADERS, catalogue_csv, parse_catalog_csv
 
-    old_headers = (*CATALOG_HEADERS[:-2], 'Dynamic Field')
+    from src.modules.cdr_reporting import SINGLE_DYNAMIC_CATALOG_HEADERS
+
+    old_headers = SINGLE_DYNAMIC_CATALOG_HEADERS
     old_rows = []
     for slide, layout, field in (
         (1, 'Title + dynamic rows + 2 columns + comments down', 'Vendor'),
@@ -196,9 +198,9 @@ def test_legacy_dynamic_field_migration_maps_to_the_declared_axis():
     restored = parse_catalog_csv(old_csv, 'nsa')
     normalized = list(csv.DictReader(io.StringIO(catalogue_csv(restored).decode('utf-8'))))
 
-    assert CATALOG_HEADERS[-2:] == ('Dynamic Rows Field', 'Dynamic Columns Field')
+    assert CATALOG_HEADERS[4:6] == ('Dynamic Rows Field', 'Dynamic Columns Field')
     assert len(CATALOG_HEADERS) == 22
-    assert migrated_reader.fieldnames[-2:] == ['Dynamic Rows Field', 'Dynamic Columns Field']
+    assert migrated_reader.fieldnames[4:6] == ['Dynamic Rows Field', 'Dynamic Columns Field']
     assert migrated_rows[0]['Dynamic Rows Field'] == 'Vendor'
     assert migrated_rows[2]['Dynamic Columns Field'] == 'Operator'
     assert normalized[0]['Dynamic Rows Field'] == 'Vendor'
@@ -222,10 +224,61 @@ def test_two_axis_dynamic_template_round_trips_both_fields():
     exported = catalogue_csv([entry])
     restored = parse_catalog_csv(exported, 'nsa')
 
-    assert CATALOG_HEADERS[-2:] == ('Dynamic Rows Field', 'Dynamic Columns Field')
+    assert CATALOG_HEADERS[4:6] == ('Dynamic Rows Field', 'Dynamic Columns Field')
     assert len(CATALOG_HEADERS) == 22
     assert b'Dynamic Field' not in exported
     assert (restored[0].dynamic_rows_field, restored[0].dynamic_columns_field) == ('Vendor_Only', 'Campaign')
+
+
+def test_catalogue_csv_accepts_reordered_headers_and_legacy_trailing_dynamic_headers():
+    from src.modules.cdr_reporting import (
+        CATALOG_HEADERS, TRAILING_DYNAMIC_CATALOG_HEADERS, CatalogEntry,
+        catalogue_csv, parse_catalog_csv,
+    )
+
+    entry = CatalogEntry(
+        slide=1, slide_title='Quality', slide_subtitle='',
+        layout='Title + dynamic rows + dynamic columns + comments down',
+        chart_title='Signal', cdr_source='CDR-Data', kpi='LTE_RSRP',
+        chart_type='Histogram Bars', legend='', filters='',
+        grouping_rows='Vendor_Only', grouping_columns='Campaign',
+        dynamic_rows_field='Vendor_Only', dynamic_columns_field='Campaign',
+    )
+    canonical_rows = list(csv.DictReader(io.StringIO(catalogue_csv([entry]).decode('utf-8'))))
+    canonical_row = canonical_rows[0]
+
+    reordered_headers = (*CATALOG_HEADERS[6:], *CATALOG_HEADERS[:6])
+    reordered = io.StringIO()
+    writer = csv.DictWriter(reordered, fieldnames=reordered_headers, lineterminator='\n')
+    writer.writeheader()
+    writer.writerow(canonical_row)
+    restored = parse_catalog_csv(reordered.getvalue(), 'nsa')
+    assert (restored[0].dynamic_rows_field, restored[0].dynamic_columns_field) == ('Vendor_Only', 'Campaign')
+
+    trailing_headers = TRAILING_DYNAMIC_CATALOG_HEADERS
+    trailing = io.StringIO()
+    writer = csv.DictWriter(trailing, fieldnames=trailing_headers, lineterminator='\n')
+    writer.writeheader()
+    writer.writerow(canonical_row)
+    restored_trailing = parse_catalog_csv(trailing.getvalue(), 'nsa')
+    assert (restored_trailing[0].dynamic_rows_field, restored_trailing[0].dynamic_columns_field) == ('Vendor_Only', 'Campaign')
+
+
+def test_catalogue_csv_rejects_duplicate_canonical_header_aliases():
+    from src.modules.cdr_reporting import CatalogEntry, catalogue_csv, parse_catalog_csv
+
+    exported = catalogue_csv([CatalogEntry(
+        slide=1, slide_title='Quality', slide_subtitle='', layout='Title + 1 rows + 1 columns',
+        chart_title='Signal', cdr_source='CDR-Data', kpi='LTE_RSRP',
+        chart_type='Histogram Bars', legend='', filters='',
+        grouping_rows='Operator', grouping_columns='Campaign',
+    )]).decode('utf-8')
+    header, *rows = exported.splitlines()
+    duplicate_header = header.replace('Source Dataset', 'Source Dataset,CDR source')
+    duplicate_row = rows[0].replace('CDR-Data', 'CDR-Data,CDR-Data', 1)
+
+    with pytest.raises(ValueError, match='duplicate column names or aliases'):
+        parse_catalog_csv('\n'.join([duplicate_header, duplicate_row]), 'nsa')
 
 
 @pytest.mark.parametrize(
@@ -261,11 +314,11 @@ def test_catalogue_csv_renames_source_dataset_and_accepts_the_legacy_header():
         grouping_rows='Operator', grouping_columns='Campaign',
     )
     current = catalogue_csv([entry])
-    assert current.splitlines()[0].decode('utf-8').split(',')[5] == 'Source Dataset'
+    assert current.splitlines()[0].decode('utf-8').split(',')[7] == 'Source Dataset'
 
     legacy = current.replace(b'Source Dataset', b'CDR source', 1)
     restored = parse_catalog_csv(legacy, 'nsa')
     exported = catalogue_csv(restored)
 
     assert restored[0].cdr_source == 'CDR-Voice'
-    assert exported.splitlines()[0].decode('utf-8').split(',')[5] == 'Source Dataset'
+    assert exported.splitlines()[0].decode('utf-8').split(',')[7] == 'Source Dataset'

@@ -528,12 +528,12 @@ def test_operator_histogram_campaign_bars_use_ordered_shades_and_exact_counts():
 
 def test_legacy_dynamic_template_field_is_optional_for_static_rows_and_required_for_dynamic_layouts():
     import csv, io
-    from src.modules.cdr_reporting import CATALOG_HEADERS, catalogue_csv, parse_catalog_csv
+    from src.modules.cdr_reporting import SINGLE_DYNAMIC_CATALOG_HEADERS, catalogue_csv, parse_catalog_csv
     catalogue = app_module.load_template_catalogue(TEMPLATE_PATH.read_bytes(), 'nsa')
     static = [entry for entry in catalogue if entry.chart_type != 'Histogram Bars']
     reader = csv.DictReader(io.StringIO(catalogue_csv(static).decode()))
     new_rows = list(reader)
-    headers = (*CATALOG_HEADERS[:-2], 'Dynamic Field')
+    headers = SINGLE_DYNAMIC_CATALOG_HEADERS
     output = io.StringIO(); writer = csv.DictWriter(output, headers, lineterminator='\n')
     writer.writeheader()
     writer.writerows({**{field: row[field] for field in headers[:-1]}, 'Dynamic Field': ''} for row in new_rows)

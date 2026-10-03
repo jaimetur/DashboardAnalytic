@@ -650,7 +650,7 @@
     syncMultivendorAvailability();
     scopeControl.value = remembered?.scope === 'multivendor' && !$('ds-ppt-dataset-scope').querySelector('option[value="multivendor"]').disabled ? 'multivendor' : 'single';
     const vendorComparison = $('ds-ppt-vendor-comparison');
-    vendorComparison.value = remembered?.vendor_comparison || dashboard.vendor_comparison || 'operator_vendor';
+    vendorComparison.value = 'vendor_only';
     vendorComparison.onchange = () => { rememberDialog(); updateSaveState(); };
     const choices = $('ds-ppt-dataset-choices'); choices.replaceChildren();
     const confirm = $('ds-ppt-dataset-confirm');
@@ -1131,11 +1131,11 @@
     if (!chooseScope && exportDefinition.scope === 'multivendor') {
       const choice = await window.showConfirmDialog(
         'Keep operators separate within each vendor, or pool all selected operators by Vendor_Only?',
-        {title: 'Choose vendor comparison', confirmLabel: 'Operator – Vendor', secondaryLabel: 'Vendor only', cancelLabel: 'Cancel', wideActions: true},
+        {title: 'Choose vendor comparison', confirmLabel: 'Vendor Only (All Operators Combined)', secondaryLabel: 'Operator - Vendor', cancelLabel: 'Cancel', wideActions: true},
       );
       if (choice !== 'confirm' && choice !== 'secondary') return;
       exportDefinition = structuredClone(exportDefinition);
-      exportDefinition.vendor_comparison = choice === 'secondary' ? 'vendor_only' : 'operator_vendor';
+      exportDefinition.vendor_comparison = choice === 'secondary' ? 'operator_vendor' : 'vendor_only';
       preparationToken = null;
     }
     // Queuing validates the universe and resolves the cover labels on the
