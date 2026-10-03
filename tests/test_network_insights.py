@@ -149,12 +149,17 @@ def test_threshold_and_negative_bucket_labels_follow_the_configuration() -> None
 
 def test_bundled_rf_quality_template_is_valid() -> None:
     catalogue = app_module.load_template_catalogue(TEMPLATE_PATH.read_bytes(), 'nsa')
-    assert len(catalogue) == 100
+    assert len(catalogue) == 116
     from src.modules.cdr_reporting import catalogue_csv, parse_catalog_csv
     restored = parse_catalog_csv(catalogue_csv(catalogue), 'nsa')
     assert [(entry.cdr_source, entry.chart_type, entry.kpi, entry.filters) for entry in restored] == [
         (entry.cdr_source, entry.chart_type, entry.kpi, entry.filters) for entry in catalogue
     ]
+    from pptx import Presentation
+    from src.modules.cdr_reporting import _named_slide_layout
+    presentation = Presentation(str(Path(__file__).resolve().parents[1] / 'assets' / 'ppt-templates' / 'Template_CDR_analysis.pptx'))
+    for layout_name in {entry.layout for entry in catalogue}:
+        assert _named_slide_layout(presentation, layout_name) is not None, layout_name
     chart_types = {entry.chart_type for entry in catalogue}
     assert {'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars'} <= chart_types
     maps = [entry for entry in catalogue if entry.chart_type == 'Map']
@@ -379,8 +384,8 @@ def test_combined_rf_source_pools_samples_instead_of_type_means() -> None:
     assert combined['CDR_Type'].tolist() == ['Data', 'Data', 'Data', 'Voice', 'Speech']
     catalogue = app_module.load_template_catalogue(TEMPLATE_PATH.read_bytes(), 'nsa')
     aggregate = [entry for entry in catalogue if entry.source_kind == 'all']
-    assert len({entry.slide for entry in aggregate}) == 10
-    assert len(aggregate) == 24
+    assert len({entry.slide for entry in aggregate}) == 12
+    assert len(aggregate) == 28
     entry = next(entry for entry in aggregate if entry.chart_type == 'Histogram Line' and entry.kpi == 'LTE_RSRP')
     model = catalog_chart_payload(combined, entry)
     assert model['series'][0]['samples'] == 5
@@ -403,3 +408,120 @@ def test_histogram_legacy_png_renderer_accepts_combined_rf_samples(monkeypatch) 
     image = Image.open(BytesIO(render_catalog_chart_preview(combined, entry)))
     assert image.width >= 1500
     assert image.height >= 900
+
+
+
+@pytest.mark.parametrize('layout,columns', [
+    ('2 rows + dynamic columns, comments down', True),
+    ('2 rows + dynamic columns, comments right', True),
+    ('2 columns + dynamic rows, comments down', False),
+    ('2 columns + dynamic rows, comments right', False),
+])
+def test_dynamic_histogram_grids_keep_radio_positions_and_all_operators(layout, columns):
+    from dataclasses import replace
+    from src.modules.cdr_reporting import expand_dynamic_layouts, _layout_chart_frames, _named_slide_layout, catalogue_csv, parse_catalog_csv
+    from pptx import Presentation
+    catalogue = app_module.load_template_catalogue(TEMPLATE_PATH.read_bytes(), 'nsa')
+    base = [entry for entry in catalogue if entry.chart_type == 'Histogram Bars'][:2]
+    base = [replace(entry, layout=layout) for entry in base]
+    expanded = expand_dynamic_layouts(base, {'Operator': ['A', 'B', 'C', 'D', 'E', 'F']})
+    assert len(expanded) == 12
+    assert len({entry.slide for entry in expanded}) == 1
+    if columns:
+        assert all(entry.chart_title.startswith('LTE ') for entry in expanded[:6])
+        assert all(entry.chart_title.startswith('NR ') for entry in expanded[6:])
+    else:
+        assert all(entry.chart_title.startswith('LTE ') for entry in expanded[::2])
+        assert all(entry.chart_title.startswith('NR ') for entry in expanded[1::2])
+    deck = Presentation('assets/ppt-templates/Template_CDR_analysis.pptx')
+    positions = _layout_chart_frames(_named_slide_layout(deck, expanded[0].layout))
+    assert len(positions) == 12
+    for count in (1, 2, 3, 4, 5, 6, 7):
+        actual = expand_dynamic_layouts(base, {'Operator': [str(index) for index in range(count)]})
+        assert len(actual) == count * 2
+        assert len(_layout_chart_frames(_named_slide_layout(deck, actual[0].layout))) == count * 2
+    restored = parse_catalog_csv(catalogue_csv(base), 'nsa')
+    assert [entry.dynamic_field for entry in restored] == ['Operator', 'Operator']
+    assert [entry.layout for entry in restored] == [layout, layout]
+
+
+def test_operator_histogram_campaign_bars_use_ordered_shades_and_exact_counts():
+    from src.modules.cdr_reporting import catalog_chart_payload, expand_dynamic_layouts
+    catalogue = app_module.load_template_catalogue(TEMPLATE_PATH.read_bytes(), 'nsa')
+    expanded = expand_dynamic_layouts(catalogue, {'Operator': ['EE', 'O2']})
+    entry = next(entry for entry in expanded if entry.chart_type == 'Histogram Bars' and entry.kpi == 'LTE_RSRP')
+    frame = pd.DataFrame({'Operator': ['EE'] * 6 + ['O2'],
+        'Campaign': ['2026-Q3', '2026-Q3', '2026-Q1', '2026-Q1', '2026-Q2', '2026-Q2', '2026-Q3'],
+        'LTE_RSRP': [-95, -90, -105, -100, -100, -95, -75]})
+    model = catalog_chart_payload(frame, entry)
+    assert model['histogram_bars'] is True
+    assert [item['name'] for item in model['series']] == ['2026-Q1', '2026-Q2', '2026-Q3']
+    assert all(item['samples'] == 2 and sum(item['counts']) == 2 for item in model['series'])
+    assert all(sum(item['bin_ratios']) == 1 for item in model['series'])
+    from PIL import ImageColor
+    channels = [ImageColor.getrgb(item['colour']) for item in model['series']]
+    assert all(channels[0][i] >= channels[1][i] >= channels[2][i] for i in range(3))
+    contour = next(row for row in catalogue if row.chart_type == 'Histogram Line' and row.kpi == 'LTE_RSRP')
+    newest = next(item for item in catalog_chart_payload(frame, contour)['series'] if item['key'] == ['EE', '2026-Q3'])
+    assert model['series'][-1]['colour'].lower() == newest['colour'].lower()
+
+
+def test_dynamic_template_column_is_optional_in_older_csv_and_required_for_dynamic_layouts():
+    import csv, io
+    from src.modules.cdr_reporting import catalogue_csv, parse_catalog_csv
+    catalogue = app_module.load_template_catalogue(TEMPLATE_PATH.read_bytes(), 'nsa')
+    static = [entry for entry in catalogue if entry.chart_type != 'Histogram Bars']
+    reader = csv.DictReader(io.StringIO(catalogue_csv(static).decode()))
+    headers = [field for field in reader.fieldnames if field != 'Dynamic Field']
+    output = io.StringIO(); writer = csv.DictWriter(output, headers, lineterminator='\n')
+    writer.writeheader(); writer.writerows({field: row[field] for field in headers} for row in reader)
+    restored = parse_catalog_csv(output.getvalue(), 'nsa')
+    assert len(restored) == len(static)
+    assert all(entry.dynamic_field == '' for entry in restored)
+    from dataclasses import replace
+    pair = [entry for entry in catalogue if entry.chart_type == 'Histogram Bars'][:2]
+    with pytest.raises(ValueError, match='requires Dynamic Field'):
+        parse_catalog_csv(catalogue_csv([replace(entry, dynamic_field='') for entry in pair]), 'nsa')
+
+
+def test_multivendor_dynamic_histograms_page_by_vendor_and_keep_template_indexes():
+    from dataclasses import replace
+    from src.modules.cdr_reporting import expand_dynamic_layouts
+
+    catalogue = app_module.load_template_catalogue(TEMPLATE_PATH.read_bytes(), 'nsa')
+    base = [
+        replace(entry, layout='2 rows + dynamic columns, comments down')
+        for entry in catalogue if entry.chart_type == 'Histogram Bars'
+    ][:2]
+    template_indexes = set(range(len(base)))
+    values = [
+        'EE_Ericsson', 'O2_Ericsson', '3_Huawei', 'VF_Huawei',
+        'A_NSN', 'B_NSN', 'C_Samsung',
+    ]
+
+    expanded = expand_dynamic_layouts(
+        base, {'Vendor': values}, multivendor=True, vendor_comparison='operator_vendor',
+    )
+
+    assert {entry.dynamic_field for entry in expanded} == {'Vendor'}
+    assert {entry.template_index for entry in expanded} == template_indexes
+    pages = {}
+    for entry in expanded:
+        pages.setdefault(entry.slide, []).append(entry)
+    assert sorted(len({entry.dynamic_value for entry in rows}) for rows in pages.values()) == [1, 6]
+    assert sorted(len(rows) for rows in pages.values()) == [2, 12]
+    page_by_vendor = {}
+    for slide, rows in pages.items():
+        for value in {entry.dynamic_value for entry in rows}:
+            page_by_vendor.setdefault(value.rsplit('_', 1)[1], set()).add(slide)
+    assert all(len(slides) == 1 for slides in page_by_vendor.values())
+    for rows in pages.values():
+        for index in template_indexes:
+            assert sum(entry.template_index == index for entry in rows) == len({entry.dynamic_value for entry in rows})
+
+    pooled = expand_dynamic_layouts(
+        base, {'Vendor_Only': ['Ericsson', 'Huawei']},
+        multivendor=True, vendor_comparison='vendor_only',
+    )
+    assert {entry.dynamic_field for entry in pooled} == {'Vendor_Only'}
+    assert {entry.dynamic_value for entry in pooled} == {'Ericsson', 'Huawei'}

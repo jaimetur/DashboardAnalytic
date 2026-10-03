@@ -555,6 +555,63 @@ def test_dashboard_template_change_preserves_saved_universe_and_filters(client):
     assert same_mode['datasets'] == {'data': [1], 'voice': [], 'speech': []}
 
 
+def test_dashboard_vendor_comparison_defaults_and_persists_vendor_only(client):
+    payload = setup_dashboard(client)
+    assert payload['vendor_comparison'] == 'operator_vendor'
+    payload.update(scope='multivendor', vendor_comparison='vendor_only')
+
+    response = client.put('/api/e2e-dashboards/vendor-pooling', json=payload)
+
+    assert response.status_code == 200, response.text
+    assert response.json()['definition']['vendor_comparison'] == 'vendor_only'
+    saved = json.loads(core.repository.get_workspace_state('e2e_dashboards_v2'))
+    assert saved['vendor-pooling']['vendor_comparison'] == 'vendor_only'
+
+
+def test_vendor_comparison_prompt_uses_confirm_and_secondary_choices():
+    root = Path(__file__).parents[1]
+    dashboard_script = (root / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
+    app_script = (root / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
+
+    assert "confirmLabel: 'Operator – Vendor', secondaryLabel: 'Vendor only'" in dashboard_script
+    assert "if (choice !== 'confirm' && choice !== 'secondary') return;" in dashboard_script
+    assert "exportDefinition.vendor_comparison = choice === 'secondary' ? 'vendor_only' : 'operator_vendor';" in dashboard_script
+    assert "const handleAccept = () => close(hasAlternatives ? 'confirm' : true);" in app_script
+    assert "const handleSecondary = () => close('secondary');" in app_script
+
+
+def test_dashboard_ppt_job_vendor_comparison_survives_retry_without_manifest(client, monkeypatch):
+    payload = setup_dashboard(client)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and core.repository.get_dataset(1)['status'] != 'ready':
+        time.sleep(0.05)
+    assert core.repository.get_dataset(1)['status'] == 'ready'
+    payload.update(scope='multivendor', vendor_comparison='vendor_only')
+    dashboard_id = 'vendor-only-ppt-retry'
+    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+    monkeypatch.setattr(core, 'submit_background_task', lambda *_args, **_kwargs: None)
+
+    queued = client.post(f'/api/e2e-dashboards/{dashboard_id}/export-ppt', json={'definition': payload})
+    assert queued.status_code == 202, queued.text
+    job_id = queued.json()['job_id']
+    with core.repository.connection() as connection:
+        row = connection.execute(
+            'SELECT vendor_comparison, output_path FROM dashboard_ppt_jobs WHERE id = ?', (job_id,),
+        ).fetchone()
+        connection.execute('UPDATE dashboard_ppt_jobs SET status = ? WHERE id = ?', ('failed', job_id))
+    assert row['vendor_comparison'] == 'vendor_only'
+    assert not (Path(row['output_path']).parent / 'dashboard-charts' / 'manifest.json').exists()
+
+    retried = client.post(f'/api/e2e-dashboards/ppt-jobs/{job_id}/retry')
+    assert retried.status_code == 202, retried.text
+    with core.repository.connection() as connection:
+        restored = connection.execute(
+            'SELECT vendor_comparison, status FROM dashboard_ppt_jobs WHERE id = ?', (job_id,),
+        ).fetchone()
+    assert restored['vendor_comparison'] == 'vendor_only'
+    assert restored['status'] == 'queued'
+
+
 def test_dashboard_library_ppt_scope_builds_its_automatic_dataset_universe(client):
     payload = setup_dashboard(client)
     deadline = time.monotonic() + 15
@@ -2121,6 +2178,7 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypa
     assert job['filters'] == [
         'CDR Data: sample.csv', 'Date: Oldest to Newest',
         'Operator: All Operators', 'Vendor: All Vendors', 'City: London',
+        'Vendor comparison: Operator – Vendor',
     ]
     assert job['duration_seconds'] is not None
     background_groups = client.get('/api/background-tasks').json()['groups']
@@ -3177,3 +3235,114 @@ def test_combined_rf_dashboard_keeps_samples_and_selected_geography(client):
         'filters': 'Bin Size = 5; LTE_RSRP >= -85',
     })
     assert preview.status_code == 200, preview.text
+
+
+def test_dynamic_histogram_dashboard_filters_operators_and_updates_source_template_row(client):
+    from src.modules.cdr_reporting import CatalogEntry, catalogue_csv
+    client.post('/login', data={'username': 'super', 'password': 'super123'})
+    content = (
+        'Operator,City,Campaign,Test_Start_Time,LTE_PCell_RSRP_Avg,NR_PCell_RSRP_Avg\n'
+        'A,London,UK_Q1_2026,2026-01-01,-100,-95\n'
+        'A,London,UK_Q2_2026,2026-04-01,-90,-85\n'
+        'B,London,UK_Q1_2026,2026-01-01,-105,\n'
+        'B,London,UK_Q2_2026,2026-04-01,-95,\n'
+        'C,Leeds,UK_Q1_2026,2026-01-01,-110,-100\n'
+    )
+    response = client.post('/datasets-analysis/upload', data={'dataset_kinds': 'data'}, files={
+        'dataset_files': ('Dynamic_RF_NSA.csv', BytesIO(content.encode()), 'text/csv'),
+    })
+    assert response.status_code == 200, response.text
+    dataset_id = max(int(row['id']) for row in core.repository.list_datasets())
+    entries = [CatalogEntry(
+        slide=1, slide_title='Dynamic histograms', slide_subtitle='',
+        layout='2 rows + dynamic columns, comments down', chart_title=f'{radio} RSRP',
+        cdr_source='CDR-Data', kpi=field, chart_type='Histogram Bars',
+        filters='Bin Size = 5', grouping_rows='Operator', grouping_columns='Campaign',
+        legend='Campaign', dynamic_field='Operator',
+    ) for radio, field in [('LTE', 'LTE_PCell_RSRP_Avg'), ('NR', 'NR_PCell_RSRP_Avg')]]
+    core.repository.add_report_template('nsa', 'Dynamic RF test', catalogue_csv(entries), is_default=False)
+    payload = DashboardDefinition(name='Dynamic RF', template='Dynamic RF test',
+                                  datasets={'data': [dataset_id]}, filters={'City': ['London']}).model_dump(mode='json')
+    prepared = client.post('/api/e2e-dashboards/prepare', json=payload)
+    assert prepared.status_code == 200, prepared.text
+    slide = prepared.json()['slides'][0]
+    assert slide['layout'] == 'Title and 2 rows and 2 columns + Comments down'
+    assert [chart['title'] for chart in slide['charts']] == ['LTE RSRP – A', 'LTE RSRP – B', 'NR RSRP – A', 'NR RSRP – B']
+    assert [chart['focus_row'] for chart in slide['charts']] == [0, 0, 1, 1]
+    token = prepared.json()['token']
+    model = client.get(f'/api/e2e-dashboards/chart/{token}/1').json()
+    assert all(item['key'][0] == 'B' for item in model['series'])
+    missing = client.get(f'/api/e2e-dashboards/chart/{token}/3').json()
+    assert missing['type'] == 'empty'
+    saved = client.post(f'/api/e2e-dashboards/chart/{token}/1/update-template', json={
+        'chart_title': 'LTE RSRP – B', 'filters': 'Bin Size = 10',
+    })
+    assert saved.status_code == 200, saved.text
+    restored = core.load_template_catalogue(core.repository.report_template_content('nsa', 'Dynamic RF test'), 'nsa')
+    assert len(restored) == 2
+    assert restored[0].filters == 'Bin Size = 10'
+    assert restored[0].chart_title == 'LTE RSRP'
+    assert restored[1].filters == 'Bin Size = 5'
+    for index in (0, 1):
+        context = client.get(f'/api/e2e-dashboards/chart/{token}/{index}/filter-context')
+        assert context.status_code == 200, context.text
+        assert context.json()['filters'] == 'Bin Size = 10'
+
+
+def test_dynamic_vendor_only_editor_keeps_operator_rows_after_bin_edit(client):
+    from src.modules.cdr_reporting import CatalogEntry, catalogue_csv
+    client.post('/login', data={'username': 'super', 'password': 'super123'})
+    response = client.post('/datasets-analysis/upload', data={'dataset_kinds': 'data'}, files={
+        'dataset_files': ('Dynamic_RF_NSA.csv', BytesIO(
+            b'Operator,City,Campaign,Test_Start_Time,LTE_PCell_RSRP_Avg,NR_PCell_RSRP_Avg\n'
+            b'A,London,UK_Q1_2026,2026-01-01,-100,-95\n'
+            b'A,London,UK_Q2_2026,2026-04-01,-90,-85\n'
+            b'B,London,UK_Q1_2026,2026-01-01,-105,\n'
+            b'B,London,UK_Q2_2026,2026-04-01,-95,\n'
+        ), 'text/csv'),
+    })
+    assert response.status_code == 200, response.text
+    dataset_id = max(int(row['id']) for row in core.repository.list_datasets())
+    with core.repository.connection() as connection:
+        connection.execute('UPDATE dataset_profiles SET vendor_mapping_applied = 1 WHERE dataset_id = ?', (dataset_id,))
+    core.repository.replace_cdr_catalogue(dataset_id, vendors=['A_Ericsson', 'B_Huawei'], regions=[], cities=['London'])
+    core.repository.replace_reporting_rows(dataset_id, 'data', pd.DataFrame({
+        'Operator': ['A', 'A', 'B', 'B'], 'Vendor': ['A_Ericsson', 'A_Ericsson', 'B_Huawei', 'B_Huawei'],
+        'Vendor_Only': ['Ericsson', 'Ericsson', 'Huawei', 'Huawei'], 'City': ['London'] * 4,
+        'Campaign': ['UK_Q1_2026', 'UK_Q2_2026', 'UK_Q1_2026', 'UK_Q2_2026'],
+        'Test_Start_Time': ['2026-01-01', '2026-04-01', '2026-01-01', '2026-04-01'],
+        'LTE_PCell_RSRP_Avg': [-100, -90, -105, -95], 'NR_PCell_RSRP_Avg': [-95, -85, None, None],
+    }))
+    entries = [CatalogEntry(
+        slide=1, slide_title='Dynamic histograms', slide_subtitle='',
+        layout='2 rows + dynamic columns, comments down', chart_title=f'{radio} RSRP',
+        cdr_source='CDR-Data', kpi=field, chart_type='Histogram Bars', filters='Bin Size = 5',
+        grouping_rows='Operator', grouping_columns='Campaign', legend='Campaign', dynamic_field='Operator',
+    ) for radio, field in [('LTE', 'LTE_PCell_RSRP_Avg'), ('NR', 'NR_PCell_RSRP_Avg')]]
+    core.repository.add_report_template('nsa', 'Dynamic RF vendor test', catalogue_csv(entries), is_default=False)
+    payload = DashboardDefinition(name='Dynamic RF vendor', template='Dynamic RF vendor test',
+                                  datasets={'data': [dataset_id]}, filters={'City': ['London']}).model_dump(mode='json')
+    ordinary = client.post('/api/e2e-dashboards/prepare', json=payload)
+    assert ordinary.status_code == 200, ordinary.text
+    vendor_payload = {**payload, 'scope': 'multivendor', 'vendor_comparison': 'vendor_only'}
+    vendor = client.post('/api/e2e-dashboards/prepare', json=vendor_payload)
+    assert vendor.status_code == 200, vendor.text
+    slide = vendor.json()['slides'][0]
+    assert [chart['title'] for chart in slide['charts']] == [
+        'LTE RSRP – Ericsson', 'LTE RSRP – Huawei', 'NR RSRP – Ericsson', 'NR RSRP – Huawei',
+    ]
+    token = vendor.json()['token']
+    saved = client.post(f'/api/e2e-dashboards/chart/{token}/1/update-template', json={
+        'chart_title': 'LTE RSRP – Huawei', 'filters': 'Bin Size = 10',
+    })
+    assert saved.status_code == 200, saved.text
+    restored = core.load_template_catalogue(core.repository.report_template_content('nsa', 'Dynamic RF vendor test'), 'nsa')
+    assert [entry.dynamic_field for entry in restored] == ['Operator', 'Operator']
+    assert [entry.grouping_rows for entry in restored] == ['Operator', 'Operator']
+    assert [entry.filters for entry in restored] == ['Bin Size = 10', 'Bin Size = 5']
+    for index in range(4):
+        context = client.get(f'/api/e2e-dashboards/chart/{token}/{index}/filter-context')
+        assert context.status_code == 200, context.text
+        assert context.json()['dynamic_field'] == 'Vendor_Only'
+        expected_filter = 'Bin Size = 10' if index < 2 else 'Bin Size = 5'
+        assert context.json()['filters'].startswith(expected_filter)

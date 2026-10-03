@@ -158,6 +158,7 @@
   syncMultivendorAvailability();
   const canonicalDashboardDefinition = value => {
     const definitionValue = structuredClone(value || {});
+    definitionValue.vendor_comparison ||= 'operator_vendor';
     definitionValue.datasets ||= {};
     for (const kind of ['data', 'voice', 'speech']) definitionValue.datasets[kind] ||= [];
     definitionValue.filters ||= {};
@@ -179,7 +180,7 @@
         return [kind, (saved.datasets[kind] || []).map(Number).filter(datasetId => available.has(datasetId))];
       }));
       return {
-        scope: saved.scope,
+        scope: saved.scope, vendor_comparison: saved.vendor_comparison || 'operator_vendor',
         datasets,
         date_from: /^\d{4}-\d{2}-\d{2}$/.test(String(saved.date_from || '')) || saved.date_from === 'Oldest' ? saved.date_from : 'Oldest',
         date_to: /^\d{4}-\d{2}-\d{2}$/.test(String(saved.date_to || '')) || saved.date_to === 'Newest' ? saved.date_to : 'Newest',
@@ -212,7 +213,7 @@
     try {
       const stored = JSON.parse(sessionStorage.getItem(universeStorageKey) || '{}');
       stored[activeId] = {
-        scope: definition.scope || 'single', datasets: structuredClone(definition.datasets || {}),
+        scope: definition.scope || 'single', vendor_comparison: definition.vendor_comparison || 'operator_vendor', datasets: structuredClone(definition.datasets || {}),
         date_from: definition.date_from || 'Oldest', date_to: definition.date_to || 'Newest',
       };
       sessionStorage.setItem(universeStorageKey, JSON.stringify(stored));
@@ -648,6 +649,9 @@
     const scopeControl = $('ds-ppt-dataset-scope');
     syncMultivendorAvailability();
     scopeControl.value = remembered?.scope === 'multivendor' && !$('ds-ppt-dataset-scope').querySelector('option[value="multivendor"]').disabled ? 'multivendor' : 'single';
+    const vendorComparison = $('ds-ppt-vendor-comparison');
+    vendorComparison.value = remembered?.vendor_comparison || dashboard.vendor_comparison || 'operator_vendor';
+    vendorComparison.onchange = () => { rememberDialog(); updateSaveState(); };
     const choices = $('ds-ppt-dataset-choices'); choices.replaceChildren();
     const confirm = $('ds-ppt-dataset-confirm');
     const operatorSection = $('ds-ppt-operator-section');
@@ -791,7 +795,7 @@
     let savingDashboardPart = false;
     const sameValues = (left, right) => left.length === right.length && left.every(value => right.includes(value));
     const dialogUniverse = () => ({
-      scope: scopeControl.value,
+      scope: scopeControl.value, vendor_comparison: vendorComparison.value,
       datasets: Object.fromEntries(Object.entries(selectedDatasets()).map(([kind, ids]) => [kind, [...ids].sort((a, b) => a - b)])),
       date_from: automaticFrom.checked ? 'Oldest' : dateFrom.value,
       date_to: automaticTo.checked ? 'Newest' : dateTo.value,
@@ -800,7 +804,8 @@
       const current = dialogUniverse();
       const saved = savedDashboard || {};
       const savedIds = kind => (saved.datasets?.[kind] || []).map(Number).sort((a, b) => a - b);
-      return current.scope !== (saved.scope === 'multivendor' ? 'multivendor' : 'single')
+      return current.vendor_comparison !== (saved.vendor_comparison || 'operator_vendor')
+        || current.scope !== (saved.scope === 'multivendor' ? 'multivendor' : 'single')
         || current.date_from !== String(saved.date_from || 'Oldest') || current.date_to !== String(saved.date_to || 'Newest')
         || ['data', 'voice', 'speech'].some(kind => !sameValues(current.datasets[kind] || [], savedIds(kind)));
     };
@@ -873,7 +878,7 @@
     };
     const rememberDialog = () => {
       const choice = {
-        scope: scopeControl.value, datasets: selectedDatasets(),
+        scope: scopeControl.value, vendor_comparison: vendorComparison.value, datasets: selectedDatasets(),
         date_from: automaticFrom.checked ? 'Oldest' : dateFrom.value,
         date_to: automaticTo.checked ? 'Newest' : dateTo.value,
       };
@@ -893,7 +898,7 @@
       updateConfirmState();
     };
     const exportUniverse = () => ({
-      ...structuredClone(dashboard), scope: scopeControl.value, datasets: selectedDatasets(),
+      ...structuredClone(dashboard), scope: scopeControl.value, vendor_comparison: vendorComparison.value, datasets: selectedDatasets(),
       date_from: automaticFrom.checked ? 'Oldest' : dateFrom.value,
       date_to: automaticTo.checked ? 'Newest' : dateTo.value,
       // Region availability belongs to the Dataset Universe, independently
@@ -997,6 +1002,7 @@
     };
     const renderChoices = (restoreDatasets = false) => {
       const scope = scopeControl.value;
+      $('ds-ppt-vendor-comparison-section').hidden = scope !== 'multivendor';
       const defaultDatasets = latestDatasetsForScope(scope, dashboardNrMode(dashboard));
       // Only CDRs of the Dashboard's NR Mode are listed; say so in the title.
       $('ds-ppt-cdr-title').textContent = `CDR datasets (${dashboardNrMode(dashboard)})`;
@@ -1041,7 +1047,7 @@
     dateFrom.oninput = () => { syncDateControls(); rememberDialog(); };
     dateTo.oninput = () => { syncDateControls(); rememberDialog(); };
     confirm.onclick = () => { for (const key of Object.keys(selectionControls)) rememberSelection(key); finish({
-      scope: scopeControl.value,
+      scope: scopeControl.value, vendor_comparison: vendorComparison.value,
       datasets: selectedDatasets(),
       date_from: automaticFrom.checked ? 'Oldest' : dateFrom.value,
       date_to: automaticTo.checked ? 'Newest' : dateTo.value,
@@ -1069,6 +1075,7 @@
       if (!universeChoice) return;
       exportDefinition = JSON.parse(JSON.stringify(item));
       exportDefinition.scope = universeChoice.scope;
+      exportDefinition.vendor_comparison = universeChoice.vendor_comparison;
       // The queued server worker prepares this explicit temporary universe;
       // never make the library button wait for a cache lookup or every chart
       // model before the job exists.
@@ -1120,6 +1127,16 @@
         {title: 'Generate Dashboard PPT', confirmLabel: 'Generate PPT'},
       );
       if (!accepted) return;
+    }
+    if (!chooseScope && exportDefinition.scope === 'multivendor') {
+      const choice = await window.showConfirmDialog(
+        'Keep operators separate within each vendor, or pool all selected operators by Vendor_Only?',
+        {title: 'Choose vendor comparison', confirmLabel: 'Operator – Vendor', secondaryLabel: 'Vendor only', cancelLabel: 'Cancel', wideActions: true},
+      );
+      if (choice !== 'confirm' && choice !== 'secondary') return;
+      exportDefinition = structuredClone(exportDefinition);
+      exportDefinition.vendor_comparison = choice === 'secondary' ? 'vendor_only' : 'operator_vendor';
+      preparationToken = null;
     }
     // Queuing validates the universe and resolves the cover labels on the
     // server, which can take a few seconds on a busy server: show it.
@@ -2316,7 +2333,7 @@
     sources(); facets();
   }
   const filterDefinitionFields = ['filters', 'custom_fields', 'hidden_filters'];
-  const universeDefinitionFields = ['scope', 'datasets', 'date_from', 'date_to'];
+  const universeDefinitionFields = ['scope', 'vendor_comparison', 'datasets', 'date_from', 'date_to'];
   const copyDefinitionFields = (target, source, fields) => {
     for (const field of fields) target[field] = structuredClone(source[field]);
     return target;
@@ -2938,13 +2955,13 @@
       fields: [
         // Keep this sequence aligned with the editable Report Template columns.
         ['chart_title', 'Chart Title'], ['cdr_source', 'CDR Type'], ['dataset_ids', 'Datasets'], ['kpi', 'KPI'], ['chart_type', 'Chart Type'],
-        ['filters', 'Filters'], ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
+        ['dynamic_field', 'Dynamic Field'], ['filters', 'Filters'], ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
         ['legend_format', 'Legend Format'], ['label_position', 'Label Position'], ['label_format', 'Label Format'],
         ['axis_x_range', 'Axis X Range'], ['axis_y_range', 'Axis Y Range'], ['exclude_null_empty', 'Exclude Null/Empty'], ['exclude_zero', 'Exclude Zero'],
       ],
       textFields: {chart_title: true}, editableGroupingInputs: true,
       formatPanelToggleOnFieldClick: true,
-      chartTypes: ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Histogram Line', 'Multi KPI CDF Lines', 'Scatter', 'Table', 'Dynamic Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'],
+      chartTypes: ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Histogram Line', 'Histogram Bars', 'Multi KPI CDF Lines', 'Scatter', 'Table', 'Dynamic Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'],
       legendPositions: ['', 'Top', 'Bottom', 'Left', 'Right'],
       labelPositions: ['', 'None', 'Top', 'Up', 'Middle', 'Down'],
       menuContainer: chartFilterPanel.closest('.ds-overlay') || expandedOverlayHost,

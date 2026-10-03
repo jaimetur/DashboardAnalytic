@@ -58,6 +58,7 @@
       <label>Report scope
         <select name="report_scope" data-report-scope><option value="single">Operator Comparison</option><option value="multivendor" disabled>Multivendor Comparison</option></select>
       </label>
+      <input type="hidden" name="vendor_comparison" value="operator_vendor">
       <div class="form-actions reporting-submit-action"><button type="submit">Generate PowerPoint Report</button><button type="button" class="report-charts-button" data-report-charts-button>Generate Report Charts</button></div>
       </form>
       <p id="cdr-selection-help" class="form-note">Select at least one CDR from any supported type. Types without a selection remain in the report as charts labelled Unavailable source type. Use Ctrl/Cmd-click to select several CDRs of the same type. Their processed rows are concatenated using the union of their columns, preserving Campaign values for cross-campaign comparisons. Choose Report Templates matching the selected technology; they apply only to this report and do not change the workspace default. Map Vendors from Workspace before choosing Multivendor. The common Template_CDR_analysis.pptx supplies masters and layouts for every report: the selected template creates each slide from scratch, fills its chart placeholders from the selected CDRs and keeps commentary areas blank for the analyst.</p>
@@ -303,6 +304,16 @@
 
     const reportForm = document.querySelector('[data-report-job-form]');
     const reportChartsButton = document.querySelector('[data-report-charts-button]');
+    const chooseVendorComparison = async () => {
+      if (scope.value !== 'multivendor') return true;
+      const choice = await showConfirmDialog(
+        'Keep operators separate within each vendor, or pool all selected operators by Vendor_Only?',
+        {title: 'Choose vendor comparison', confirmLabel: 'Operator – Vendor', secondaryLabel: 'Vendor only', cancelLabel: 'Cancel', wideActions: true},
+      );
+      if (choice !== 'confirm' && choice !== 'secondary') return false;
+      reportForm.elements.vendor_comparison.value = choice === 'secondary' ? 'vendor_only' : 'operator_vendor';
+      return true;
+    };
     const reportMulticampaignDialog = document.querySelector('[data-report-multicampaign-dialog]');
     const reportMulticampaignGroups = document.querySelector('[data-report-multicampaign-groups]');
     const reportMulticampaignError = document.querySelector('[data-report-multicampaign-error]');
@@ -1080,6 +1091,7 @@
     };
     reportForm?.addEventListener('submit', async (event) => {
       event.preventDefault();
+      if (!await chooseVendorComparison()) return;
       if (!reportForm.reportValidity() || !validateCdrSelection() || !(await reviewMultivendorCampaigns())) return;
       const confirmation = await showConfirmDialog(
         'Generate the PowerPoint report with the selected CDRs and Report Template?',
@@ -1562,7 +1574,7 @@
         }
         if (key === 'chart_type') {
           control = document.createElement('select');
-          ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Histogram Line', 'Scatter', 'Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'].forEach((value) => control.add(new Option(value, value, false, value.toLowerCase() === String(definition[key] || '').toLowerCase())));
+          ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Histogram Line', 'Histogram Bars', 'Scatter', 'Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'].forEach((value) => control.add(new Option(value, value, false, value.toLowerCase() === String(definition[key] || '').toLowerCase())));
         } else if (key === 'cdr_source') {
           control = document.createElement('select');
           ['CDR-Data', 'CDR-Voice', 'CDR-Speech', 'CDR-All'].forEach((value) => control.add(new Option(value, value, false, value.toLowerCase() === String(definition[key] || '').toLowerCase())));
@@ -1660,7 +1672,7 @@
         // Keep popovers within the active Chart Preview overlay so they are
         // neither hidden behind it nor detached from its stacking context.
         menuContainer: reportChartViewer,
-        chartTypes: ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Histogram Line', 'Multi KPI CDF Lines', 'Scatter', 'Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'],
+        chartTypes: ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Histogram Line', 'Histogram Bars', 'Multi KPI CDF Lines', 'Scatter', 'Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'],
         onChange: regenerate,
         onSourceChange: (next) => {
           const sourceKey = previewSourceKey(next.cdr_source);
@@ -2024,6 +2036,7 @@
       closeReportChartViewerData(true);
     }, true);
     reportChartsButton?.addEventListener('click', async () => {
+      if (!await chooseVendorComparison()) return;
       if (!reportForm?.reportValidity() || !validateCdrSelection()) return;
       if (!(await reviewMultivendorCampaigns())) return;
       const confirmation = await showConfirmDialog(

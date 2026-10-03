@@ -81,6 +81,7 @@ Every workspace that already has NSA Report Templates receives once, when the ap
 
 Each family (CDF/histograms, averages, classes, thresholds and maps) starts with an **All CDR types** slide. It pools valid Data, Voice and Speech observations per Operator and Campaign; it does not average the three type averages. LTE and NR stay separate, and missing technologies do not contribute samples. The existing type-specific slides follow the aggregate.
 
+- Grouped-bar histogram slides follow each CDF/contour slide for All CDR types, Data, Voice and Speech. Their `2 rows + dynamic columns, comments down` layout and `Dynamic Field = Operator` create one column per selected Operator on the same slide, with LTE above NR and comments beneath. Every bin has one bar per Campaign, ordered oldest to newest: the newest uses the Operator colour and older Campaigns use progressively lighter shades. Percentages use the same valid-sample denominator and bin widths as the contour histograms.
 - RSRP and SINR CDFs (LTE and NR) for Data, Voice and Speech, with contour histograms underneath in a two-by-two layout. RSRP uses 5 dB bins and SINR uses 1 dB bins; percentages are normalized per Operator and Campaign. Histograms reuse CDF colours and campaign line widths: newer campaigns are thicker, while multivendor operator comparisons retain their distinct line patterns;
 - average LTE and NR RSRP and SINR bars per CDR type;
 - separate LTE and NR RSRP distributions in -110/-100/-90/-80 dBm buckets and SINR distributions in 0/5/13/20 dB buckets, with red-to-green class colours matching the histogram background bands;
@@ -125,3 +126,6 @@ Network Insights stores no analysis results; every analysis is calculated on dem
 - **A map is empty**: the selected CDRs carry no coordinates or no values for the selected Technology; the status line says which.
 - **NR curves are empty**: NSA CDRs report NR values only while the device is attached to NR; check the NR RSRP samples column in the RF Quality table.
 - **The Licensed spectrum panel shows Pending input**: add Spectrum Holdings in Workspace Config.
+
+> [!NOTE]
+> **Vendor comparison:** Before generating a multivendor report, choose **Operator – Vendor** to keep each operator separate, or **Vendor only (Vendor_Only)** to pool selected operators using the same vendor. Campaigns remain separate. The job retains this choice for retries. Dynamic vendor grids use up to six columns per slide and keep operators of the same vendor together where possible.

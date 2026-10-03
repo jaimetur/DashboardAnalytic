@@ -157,6 +157,7 @@ Automated rows support:
 - `Count Stacked Horizontal Bars`
 - `CDF Line`
 - `Histogram Line`
+- `Histogram Bars`
 - `Multi KPI CDF Lines`
 - `Scatter`
 - `Map`
@@ -169,6 +170,8 @@ Automated rows support:
 Choose a KPI and at least one Rows or Column Aggregation dimension. `CDF Line` creates one curve per complete aggregation combination. Count charts retain empty combinations where required so comparisons remain aligned.
 
 The RF Quality template includes combined Data/Voice/Speech slides before each chart family. Its `CDR-All` source is virtual: it uses the selected physical datasets and creates no duplicate CDR dataset or database table. Templates containing this source are retained by JSON/CSV import/export, workspace transfers and backup/restore.
+
+`Histogram Bars` uses the same bins as `Histogram Line`, with side-by-side Campaign bars and lighter shades for older Campaigns. Paired LTE/NR rows can use a dynamic layout with `Dynamic Field = Operator` to show all selected Operators on one slide.
 
 `Histogram Line` draws an unfilled step contour for each aggregation combination. Set `Bin Size = 5` in Filters for 5-unit bins, or `Bin Size = 1` for 1-unit bins. The vertical axis shows the percentage of valid samples in each bin, normalized independently per series; series models retain sample counts. Histograms reuse CDF colours, progressive campaign widths and multivendor operator line patterns. Add four `Buckets = ...` thresholds for five red-to-green quality background bands. Add `Class Colours = Quality` to matching distribution charts to use those same five class colours. The existing template/JSON export, import and backup workflows preserve these chart settings.
 
@@ -504,3 +507,22 @@ Maintain the transferable KPI priority list with up/down, first/last or specific
 > **Priority and result ordering.** The saved priority list does not currently determine GAP result order. Individual comparisons sort signed GAP from lowest to highest, with unavailable values last; All Operators retains KPI definition order.
 
 Web and PowerPoint GAP tables include a final sum for each comparison column. Individual PPT comparisons show Average KPI GAP and the average of the column GAP totals. These are distinct statistics; see the [complete Scoring & GAP Analysis guide](scoring-gap-analysis.md) for examples, coverage rules and JSON formats.
+
+
+### Dynamic chart grids
+
+The optional **Dynamic Field** column tells a dynamic layout which source field to split into separate charts. Older CSV templates without this column remain supported; CSV exports include it, and template exports, transfers and backups preserve it.
+
+| Layout | Repeated dimension | Commentary |
+|---|---|---|
+| `2 rows + dynamic columns, comments right` | One column per distinct field value | Right |
+| `2 rows + dynamic columns, comments down` | One column per distinct field value | Below |
+| `2 columns + dynamic rows, comments right` | One row per distinct field value | Right |
+| `2 columns + dynamic rows, comments down` | One row per distinct field value | Below |
+
+Use two chart definitions with the same Layout and Dynamic Field on that slide. In a two-row layout, the first definition fills the top row and the second fills the bottom row. In a two-column layout, the first fills the left column and the second fills the right column. Distinct values come from the selected, filtered CDR universe. Empty or missing values are excluded. The native PPT template includes grids for one through six repeated values; larger grids are derived from the same chart and commentary geometry when needed. More columns or rows produce smaller charts.
+
+For RF histograms, select **Operator**: the first definition is LTE and the second NR, so each Operator occupies one column. Campaigns remain grouped inside each chart. Changing filters changes the number of columns; LTE and NR keep their corresponding positions even when one technology has no valid samples.
+
+> [!NOTE]
+> **Vendor comparison:** Before generating a multivendor report, choose **Operator – Vendor** to keep each operator separate, or **Vendor only (Vendor_Only)** to pool selected operators using the same vendor. Campaigns remain separate. The job retains this choice for retries. Dynamic vendor grids use up to six columns per slide and keep operators of the same vendor together where possible.

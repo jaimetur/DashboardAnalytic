@@ -765,6 +765,21 @@
         (high - low) / (xHigh - xLow) * plot.width, plot.height);
       context.globalAlpha = 1;
     });
+    if (payload.histogram_bars) {
+      const series = payload.series || [];
+      series.forEach((item, seriesIndex) => {
+        (item.bin_ratios || []).forEach((ratio, binIndex) => {
+          const left = Number(item.bin_edges[binIndex]), right = Number(item.bin_edges[binIndex + 1]);
+          const binWidth = (right - left) / (xHigh - xLow) * plot.width;
+          const width = binWidth * .85 / series.length;
+          const x = plot.left + (left - xLow) / (xHigh - xLow) * plot.width + binWidth * .075 + seriesIndex * width;
+          const height = Math.max(0, (ratio - yLow) / (yHigh - yLow) * plot.height);
+          const y = plot.top + plot.height - height;
+          context.fillStyle = item.colour; context.fillRect(x, y, width, height);
+          pushRectangleHit(state, transform, {x, y, width, height}, {label: `${left}–${right}`, series: item.name, value: tooltipPercent(ratio)});
+        });
+      });
+    } else {
     (payload.series || []).forEach(series => {
       const points = [];
       (series.x || []).forEach((value, index) => {
@@ -781,6 +796,7 @@
         if (!payload.histogram) endpointLabels.push({x: endpoint.x, y: endpoint.y, label: series.name || series.legend_name, colour: series.colour});
       }
     });
+    }
     context.restore();
     endpointLabels.forEach(item => drawConfiguredPointLabel(
       context, item.label, item.x, item.y, item.colour, payload.label_position, 13, payload.label_format,
@@ -1078,6 +1094,7 @@
   }
 
   function drawPayload(context, payload, state, transform) {
+    if (payload?.spacer) return;
     drawTitle(context, payload?.title || '');
     if (!payload || payload.type === 'empty') {
       context.fillStyle = '#61727D'; context.textAlign = 'left'; context.textBaseline = 'top'; font(context, 24);

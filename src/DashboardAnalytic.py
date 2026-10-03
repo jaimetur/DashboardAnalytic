@@ -58,7 +58,7 @@ from src.modules.analytics import build_analysis
 from src.modules.background_scheduler import BackgroundTaskScheduler
 from src.modules.auth import SessionUser, verify_password
 from src.modules.column_names import MAIN_CDR_FIELDS, PREVIEW_METADATA_FIELDS, VENDOR_FIELD_IDENTITIES, clean_column_name, column_identity, resolve_column_name
-from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalog_chart_payload, catalog_kpi_fields, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, is_empty_catalog_chart, materialize_calculated_dimensions, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_label_format, parse_label_position, parse_legend_position, parse_template_boolean, prepare_catalog_chart_preview_frame, prepare_multivendor_catalog_entry, preview_catalog_chart_data, render_catalog_chart_preview, render_catalog_chart_preview_with_hover, render_cdr_report, render_unavailable_source_chart, report_chart_renderer_name, reset_dashboard_canvas_renderer, split_calculated_dimension_aliases
+from src.modules.cdr_reporting import DYNAMIC_LAYOUTS, CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalog_chart_payload, catalog_kpi_fields, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, is_empty_catalog_chart, materialize_calculated_dimensions, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_label_format, parse_label_position, parse_legend_position, parse_template_boolean, prepare_catalog_chart_preview_frame, prepare_multivendor_catalog_entry, preview_catalog_chart_data, render_catalog_chart_preview, render_catalog_chart_preview_with_hover, render_cdr_report, render_unavailable_source_chart, report_chart_renderer_name, reset_dashboard_canvas_renderer, split_calculated_dimension_aliases
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column, add_vfuk_gcid_column, apply_operator_mappings, ensure_fixed_cdr_fields, get_dataset_source_columns, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.geospatial import assign_regions, validate_region_mapping
@@ -2346,7 +2346,7 @@ def catalogue_layout_names(technology: str) -> list[str]:
             if cached and cached[:2] == signature:
                 return list(cached[2])
         from pptx import Presentation
-        layouts = sorted({layout.name for layout in Presentation(template).slide_layouts if layout.name.strip()}, key=str.casefold)
+        layouts = sorted({*DYNAMIC_LAYOUTS, *(layout.name for layout in Presentation(template).slide_layouts if layout.name.strip())}, key=str.casefold)
         with CATALOGUE_LAYOUT_NAMES_CACHE_LOCK:
             CATALOGUE_LAYOUT_NAMES_CACHE[cache_key] = (*signature, layouts)
         return list(layouts)
@@ -2403,6 +2403,7 @@ def catalogue_editor_payload(technology: str | None, catalogue_id: str | None) -
             'Axis Y Range': entry.axis_y_range,
             'Exclude Null/Empty': 'Yes' if entry.exclude_null_empty else '',
             'Exclude Zero': 'Yes' if entry.exclude_zero else '',
+            'Dynamic Field': entry.dynamic_field,
         }
         for entry in entries
     ]
@@ -11739,6 +11740,8 @@ def reporting_query_columns(dataset_kind: str, catalog_entries: list[Any], multi
         # ``latitude vs longitude``. They are physical CDR columns, not one
         # combined column name.
         requested.update(catalog_kpi_fields(entry.kpi))
+        if entry.dynamic_field:
+            requested.add(entry.dynamic_field)
         requested.update(_legend_dimensions(entry.legend))
         requested.update(parse_catalog_grouping(entry.grouping_rows).dimensions)
         requested.update(parse_catalog_grouping(entry.grouping_columns).dimensions)
@@ -12101,7 +12104,7 @@ def _temporary_chart_definition_changes(editable: dict[str, Any]) -> dict[str, A
         'chart_title', 'cdr_source', 'kpi', 'chart_type', 'filters',
         'grouping_rows', 'grouping_columns', 'legend', 'legend_position', 'legend_format',
         'axis_x_range', 'axis_y_range',
-        'label_position', 'label_format', 'exclude_null_empty', 'exclude_zero',
+        'label_position', 'label_format', 'exclude_null_empty', 'exclude_zero', 'dynamic_field',
     }
     changes = {key: str(value or '') for key, value in editable.items() if key in allowed}
     if 'legend_position' in changes:
@@ -12172,7 +12175,7 @@ def temporary_chart_preview_context(source: str, identifier: str, chart_index: i
         'axis_x_range': entry.axis_x_range, 'axis_y_range': entry.axis_y_range,
         'label_position': entry.label_position,
         'label_format': entry.label_format,
-        'exclude_null_empty': entry.exclude_null_empty, 'exclude_zero': entry.exclude_zero,
+        'exclude_null_empty': entry.exclude_null_empty, 'exclude_zero': entry.exclude_zero, 'dynamic_field': entry.dynamic_field,
         'columns_by_source': columns,
     })
 
@@ -12612,6 +12615,7 @@ def _run_netcheck_report_job(
     report_id: int, task_repository: Repository, selected: dict[str, list[dict[str, Any]]],
     technology: str, multivendor: bool, catalog_entries: list[Any], template: Path,
     destination: Path, username: str, catalogue_name: str, generate_tooltips: bool = True,
+    vendor_comparison: str = "operator_vendor",
 ) -> None:
     """Serialize every report/chart render for one workspace."""
     workspace_key = str(task_repository.db_path.resolve())
@@ -12620,7 +12624,7 @@ def _run_netcheck_report_job(
     with workspace_lock:
         _run_netcheck_report_job_locked(
             report_id, task_repository, selected, technology, multivendor, catalog_entries,
-            template, destination, username, catalogue_name, generate_tooltips,
+            template, destination, username, catalogue_name, generate_tooltips, vendor_comparison,
         )
 
 
@@ -12628,6 +12632,7 @@ def _run_netcheck_report_job_locked(
     report_id: int, task_repository: Repository, selected: dict[str, list[dict[str, Any]]],
     technology: str, multivendor: bool, catalog_entries: list[Any], template: Path,
     destination: Path, username: str, catalogue_name: str, generate_tooltips: bool = True,
+    vendor_comparison: str = "operator_vendor",
 ) -> None:
     """Generate a report independently of the request/session that started it."""
     try:
@@ -12667,7 +12672,7 @@ def _run_netcheck_report_job_locked(
             frame_loader=load_frame,
             on_chart_rendered=chart_rendered,
             generate_tooltips=generate_tooltips,
-            reuse_existing_charts=True,
+            reuse_existing_charts=True, vendor_comparison=vendor_comparison,
         )
         gc.collect()
         _ensure_report_job_active(task_repository, report_id)
@@ -13193,6 +13198,7 @@ def generate_netcheck_cdr_report(
     speech_dataset_id: list[int] = Form([]),
     technology: str = Form(...),
     report_scope: str = Form('single'),
+    vendor_comparison: str = Form('operator_vendor'),
     slides_templates: str = Form(''),
     generate_tooltips: bool = Form(True),
     user: SessionUser = Depends(current_user),
@@ -13202,6 +13208,8 @@ def generate_netcheck_cdr_report(
         raise HTTPException(status_code=400, detail='Choose NSA or SA for the CDR report.')
     if report_scope not in {'single', 'multivendor'}:
         raise HTTPException(status_code=400, detail='Choose a valid report scope.')
+    if vendor_comparison not in {'operator_vendor', 'vendor_only'}:
+        raise HTTPException(status_code=400, detail='Choose Operator – Vendor or Vendor only.')
     multivendor = report_scope == 'multivendor'
     selected = {
         'data': _optional_reporting_datasets(data_dataset_id, 'data'),
@@ -13245,12 +13253,12 @@ def generate_netcheck_cdr_report(
         dataset_ids=dataset_ids, dataset_names=_report_dataset_names(selected),
         slide_count=len({entry.slide for entry in catalog_entries}), template_name=selected_catalogue['name'],
         output_file=file_name, output_path=destination, created_by=user.username,
-        generate_tooltips=generate_tooltips,
+        generate_tooltips=generate_tooltips, vendor_comparison=vendor_comparison,
     )
     task_repository = Repository(Path(repository.db_path))
     submit_background_task(
         _run_netcheck_report_job, report_id, task_repository, selected, technology, multivendor,
-        catalog_entries, template, destination, user.username, selected_catalogue['name'], generate_tooltips,
+        catalog_entries, template, destination, user.username, selected_catalogue['name'], generate_tooltips, vendor_comparison,
     )
     repository.add_log(user.username, 'generate_powerpoint_report_requested', json.dumps({
         'report_id': report_id, 'technology': technology, 'scope': report_scope,
@@ -13267,6 +13275,7 @@ def generate_netcheck_cdr_charts(
     speech_dataset_id: list[int] = Form([]),
     technology: str = Form(...),
     report_scope: str = Form('single'),
+    vendor_comparison: str = Form('operator_vendor'),
     slides_templates: str = Form(''),
     generate_tooltips: bool = Form(True),
     user: SessionUser = Depends(current_user),
@@ -13277,6 +13286,8 @@ def generate_netcheck_cdr_charts(
         raise HTTPException(status_code=400, detail='Choose NSA or SA for the CDR report.')
     if report_scope not in {'single', 'multivendor'}:
         raise HTTPException(status_code=400, detail='Choose a valid report scope.')
+    if vendor_comparison not in {'operator_vendor', 'vendor_only'}:
+        raise HTTPException(status_code=400, detail='Choose Operator – Vendor or Vendor only.')
     multivendor = report_scope == 'multivendor'
     selected = {
         'data': _optional_reporting_datasets(data_dataset_id, 'data'),
@@ -13304,7 +13315,7 @@ def generate_netcheck_cdr_charts(
     job_id = repository.create_report_chart_job(
         technology=technology, scope=report_scope, dataset_ids=dataset_ids,
         dataset_names=_report_dataset_names(selected), template_name=selected_catalogue['name'], created_by=user.username,
-        generate_tooltips=generate_tooltips,
+        generate_tooltips=generate_tooltips, vendor_comparison=vendor_comparison,
     )
     task_repository = Repository(Path(repository.db_path), repository.global_db_path)
     output_dir = Path(settings.output_dir)
@@ -13315,7 +13326,7 @@ def generate_netcheck_cdr_charts(
     }))
     submit_background_task(
         _run_report_chart_job, job_id, task_repository, dataset_ids, technology, report_scope,
-        selected_catalogue['name'], output_dir, user.username, generate_tooltips,
+        selected_catalogue['name'], output_dir, user.username, generate_tooltips, vendor_comparison,
     )
     return JSONResponse({'job_id': job_id, 'status': 'queued'}, status_code=status.HTTP_202_ACCEPTED)
 
@@ -13323,6 +13334,7 @@ def generate_netcheck_cdr_charts(
 def _run_report_chart_job(
     job_id: int, task_repository: Repository, dataset_ids: dict[str, list[int]], technology: str,
     report_scope: str, template_name: str, output_dir: Path, username: str, generate_tooltips: bool = True,
+    vendor_comparison: str = "operator_vendor",
 ) -> None:
     """Render one persisted Chart Set without holding the HTTP request open."""
     workspace_key = str(task_repository.db_path.resolve())
@@ -13347,6 +13359,8 @@ def _run_report_chart_job(
             if not metadata or not _template_row_content(metadata):
                 raise ValueError('The Report Template used by this Chart Set is no longer available.')
             catalog_entries = load_template_catalogue(_template_row_content(metadata), technology, task_repository=task_repository)
+            if multivendor:
+                catalog_entries = [prepare_multivendor_catalog_entry(entry, vendor_comparison) for entry in catalog_entries]
             _ensure_report_job_active(task_repository, job_id, chart_job=True)
             task_repository.update_report_chart_job(job_id, status='processing', progress=12)
             selected['all'] = [row for kind in ('data', 'voice', 'speech') for row in selected[kind]]
@@ -14015,7 +14029,7 @@ def retry_report_chart_job(job_id: int, user: SessionUser = Depends(current_user
     generate_tooltips = bool(previous['generate_tooltips'])
     submit_background_task(
         _run_report_chart_job, job_id, task_repository, normalized_ids, technology,
-        str(previous['scope'] or 'single'), template_name, output_dir, user.username, generate_tooltips,
+        str(previous['scope'] or 'single'), template_name, output_dir, user.username, generate_tooltips, str(previous['vendor_comparison'] or 'operator_vendor'),
     )
     repository.add_log(user.username, 'retry_report_chart_job', json.dumps({
         'job_id': job_id, 'reused': True, 'relaunched': previous_status == 'ready',
@@ -14615,7 +14629,7 @@ def retry_report_job(report_id: int, user: SessionUser = Depends(current_user)) 
     submit_background_task(
         _run_netcheck_report_job, report_id, task_repository, selected, technology, multivendor,
         catalog_entries, settings.ppt_templates_dir / TEMPLATE_NAMES[technology], destination,
-        user.username, template_option['name'], generate_tooltips,
+        user.username, template_option['name'], generate_tooltips, str(previous['vendor_comparison'] or 'operator_vendor'),
     )
     repository.add_log(user.username, 'retry_report_job', json.dumps({
         'report_id': report_id, 'reused': True, 'generate_tooltips': generate_tooltips,

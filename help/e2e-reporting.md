@@ -104,3 +104,6 @@ Reports, Chart Sets, Dashboard exports and interactive previews share the Dashbo
 - Empty chart: inspect the filtered dataset and the template row referenced in [Workspace Config → Report Template reference](workspace-config.md#report-template-reference).
 - Invalid template: use the editor's `Slide: n - Chart: n` validation message.
 - Failed or interrupted job: inspect App Logs, then retry the existing job.
+
+> [!NOTE]
+> **Vendor comparison:** Multivendor exports ask whether to compare **Operator – Vendor** identities or pool selected operators by **Vendor_Only**. The selection is retained in the generated job for retries.

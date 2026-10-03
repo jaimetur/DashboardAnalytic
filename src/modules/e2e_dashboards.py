@@ -41,7 +41,7 @@ from src.modules.cdr_reporting import (
     _catalog_spec, _clear_commentary, _layout_chart_frames, _legend_dimensions, _named_slide_layout,
     _remove_all_slides, _remove_template_chart_placeholders, _render_dashboard_payload,
     _set_commentary, _set_slide_header, _set_structural_slide_text, catalog_chart_payload,
-    catalog_kpi_fields,
+    catalog_kpi_fields, expand_dynamic_layouts, _normalise_operator_label, _normalise_vendor, prepare_multivendor_catalog_entry,
     ensure_vendor_group, normalise_operator_aliases, parse_catalog_filters,
     parse_catalog_grouping,
     prepare_catalog_chart_preview_frame, render_catalog_chart_preview, render_unavailable_source_chart,
@@ -67,6 +67,7 @@ class DashboardDefinition(BaseModel):
     template_technology: Literal['nsa', 'sa'] = 'nsa'
     technology: Literal['nsa', 'sa'] = 'nsa'
     scope: Literal['single', 'multivendor'] = 'single'
+    vendor_comparison: Literal['operator_vendor', 'vendor_only'] = 'operator_vendor'
     datasets: dict[str, list[int]] = Field(default_factory=dict)
     filters: dict[str, list[str]] = Field(default_factory=dict)
     custom_fields: list[str] = Field(default_factory=list)
@@ -113,6 +114,7 @@ class DashboardChartFilterPreviewRequest(BaseModel):
     label_format: str | None = None
     exclude_null_empty: str | bool | None = None
     exclude_zero: str | bool | None = None
+    dynamic_field: str | None = None
 
 
 class DashboardComments(BaseModel):
@@ -353,6 +355,8 @@ def install_dashboard_routes(core):
             columns = {str(row['name']) for row in connection.execute(
                 f'PRAGMA table_info({DASHBOARD_PPT_JOBS_TABLE})'
             ).fetchall()}
+            if 'vendor_comparison' not in columns:
+                connection.execute(f"ALTER TABLE {DASHBOARD_PPT_JOBS_TABLE} ADD COLUMN vendor_comparison TEXT NOT NULL DEFAULT 'operator_vendor'")
             if 'scope' not in columns:
                 connection.execute(
                     f"ALTER TABLE {DASHBOARD_PPT_JOBS_TABLE} ADD COLUMN scope TEXT NOT NULL DEFAULT 'single'"
@@ -483,6 +487,8 @@ def install_dashboard_routes(core):
         except (TypeError, json.JSONDecodeError):
             filters = []
         filters = dashboard_ppt_job_filters_with_all_selections(filters)
+        if str(row['scope']) == 'multivendor':
+            filters.append('Vendor comparison: ' + ('Vendor only (Vendor_Only)' if row['vendor_comparison'] == 'vendor_only' else 'Operator – Vendor'))
         cover = dashboard_ppt_job_cover(row, {})
         if charts_ready and (not cover['regions'] or not cover['cities']):
             try:
@@ -868,7 +874,7 @@ def install_dashboard_routes(core):
             charts_dir.mkdir(parents=True, exist_ok=True)
             manifest = []
             focus_rows = {
-                entry_index: editor_index
+                entry_index: (_entry.template_index if _entry.template_index is not None else editor_index)
                 for editor_index, (entry_index, _entry) in enumerate(
                     sorted(enumerate(snapshot.entries), key=lambda item: (item[1].slide, item[0]))
                 )
@@ -1228,7 +1234,48 @@ def install_dashboard_routes(core):
             raise HTTPException(400, 'The start date must not follow the end date.')
         if set(definition.datasets) - set(KINDS):
             raise HTTPException(400, 'Unsupported dataset type.')
-        return catalogue(definition, task_repository)
+        entries = catalogue(definition, task_repository)
+        return entries
+
+    def expand_dashboard_layouts(entries, definition, options, task_repository):
+        effective_entries = [prepare_multivendor_catalog_entry(entry, definition.vendor_comparison) if definition.scope == "multivendor" else entry for entry in entries]
+        dynamic_fields = {entry.dynamic_field for entry in effective_entries if entry.dynamic_field}
+        mappings = task_repository.chart_mapping_settings()['operator_mappings']
+        values_by_field = {}
+        for field in dynamic_fields:
+            vendor_mappings = task_repository.chart_mapping_settings()['vendor_mappings']
+            normalize = ((lambda value: _normalise_operator_label(value, mappings)) if identity(field) == 'operator' else
+                         (lambda value: _normalise_vendor(value, mappings, vendor_mappings)) if identity(field) in {'vendor', 'vendoronly'} else str)
+            raw_values = next((values for key, values in options.items() if identity(key) == identity(field)), [])
+            values = {normalize(value) for value in raw_values if str(value).strip()}
+            selected_values = next((items for key, items in definition.filters.items() if identity(key) == identity(field)), [])
+            if selected_values:
+                values &= {normalize(value) for value in selected_values}
+            if definition.scope == 'multivendor' and identity(field) in {'vendor', 'vendoronly'}:
+                values = {value for value in values if not any(term in value.casefold() for term in ('mixed', 'other'))}
+            values_by_field[field] = sorted(values, key=str.casefold)
+        vendor_families = {}
+        if definition.scope == 'multivendor' and definition.vendor_comparison == 'operator_vendor':
+            settings = task_repository.chart_mapping_settings()
+            with task_repository.connection() as connection:
+                for kind, ids in definition.datasets.items():
+                    if not ids:
+                        continue
+                    columns = task_repository.list_reporting_row_columns(kind)
+                    vendor_column = resolve_sql_column(columns, 'Vendor')
+                    family_column = resolve_sql_column(columns, 'Vendor_Only')
+                    if not vendor_column or not family_column:
+                        continue
+                    quote = task_repository._quote_identifier
+                    rows = connection.execute(
+                        f'SELECT DISTINCT {quote(vendor_column)}, {quote(family_column)} FROM {quote(task_repository.reporting_rows_table_name(kind))} '
+                        f'WHERE dataset_id IN ({", ".join("?" for _ in ids)})', ids,
+                    ).fetchall()
+                    for vendor, family in rows:
+                        if vendor and family:
+                            vendor_families[_normalise_vendor(vendor, mappings, settings['vendor_mappings'])] = str(family)
+        return expand_dynamic_layouts(entries, values_by_field, multivendor=definition.scope == 'multivendor',
+                                      operator_mappings=mappings, vendor_mappings=task_repository.chart_mapping_settings()['vendor_mappings'], vendor_comparison=definition.vendor_comparison, vendor_families=vendor_families)
 
     @app.get('/e2e-dashboards', response_class=HTMLResponse)
     def page(request: Request, user=Depends(dashboard_user)):
@@ -1381,7 +1428,7 @@ def install_dashboard_routes(core):
                 candidate is not None
                 and candidate.workspace == workspace
                 and candidate.owner in {user.username, '*'}
-                and (export_definition is None or candidate.definition.scope == export_definition.scope)
+                and (export_definition is None or candidate.definition.scope == export_definition.scope and candidate.definition.vendor_comparison == export_definition.vendor_comparison)
             ):
                 snapshot = candidate
         dashboard_name = str(raw_definition.get('name') or dashboard_id)
@@ -1398,6 +1445,7 @@ def install_dashboard_routes(core):
             'dashboard_name': dashboard_name, 'template_name': str(raw_definition.get('template') or ''),
             'nr_mode': nr_mode_label.casefold(), 'scope': scope, 'filters_json': '[]',
             'output_file': output_file, 'output_path': str(destination),
+            'vendor_comparison': raw_definition.get('vendor_comparison') or 'operator_vendor',
         }
         if reuse_job_id is None:
             with task_repository.connection() as connection:
@@ -1413,6 +1461,7 @@ def install_dashboard_routes(core):
                     ),
                 )
                 job_id = int(cursor.lastrowid)
+            update_dashboard_ppt_job(task_repository, job_id, vendor_comparison=common['vendor_comparison'])
             previous_output = ''
         else:
             job_id = int(reuse_job_id)
@@ -1768,7 +1817,7 @@ def install_dashboard_routes(core):
             'axis_x_range': entry.axis_x_range, 'axis_y_range': entry.axis_y_range,
             'label_position': entry.label_position,
             'label_format': entry.label_format,
-            'exclude_null_empty': entry.exclude_null_empty, 'exclude_zero': entry.exclude_zero,
+            'exclude_null_empty': entry.exclude_null_empty, 'exclude_zero': entry.exclude_zero, 'dynamic_field': entry.dynamic_field,
             'template_available': template_available, 'datasets_by_source': datasets_by_source,
             'columns_by_source': columns_by_source, 'columns': columns,
         })
@@ -1941,6 +1990,7 @@ def install_dashboard_routes(core):
             selected_regions = json.loads(str(row['regions_json'] or '[]'))
         except (TypeError, json.JSONDecodeError):
             selected_regions = []
+        retry_definition.vendor_comparison = str(row['vendor_comparison'] or 'operator_vendor')
         queue_dashboard_ppt_export(
             str(row['dashboard_id']), user, reuse_job_id=job_id,
             export_definition=retry_definition,
@@ -2569,12 +2619,20 @@ def install_dashboard_routes(core):
                 (cache_key,),
             ).fetchone()
             if cached:
+                options = json.loads(cached['options_json'])
+                missing_fields = [field for field in fields if field not in options]
+                if missing_fields:
+                    options.update(combined_filter_options(
+                        definition, selected_by_kind, missing_fields, task_repository, connection,
+                    ))
+                    connection.execute('UPDATE dashboard_filter_selections SET options_json = ? WHERE id = ?',
+                                       (json.dumps(options), cached['id']))
                 if callable(progress):
                     progress(78, 'Restoring cached row counts and filter options')
                 connection.execute('UPDATE dashboard_filter_selections SET last_accessed_at = CURRENT_TIMESTAMP WHERE id = ?', (cached['id'],))
                 return (
                     int(cached['id']), cache_key,
-                    json.loads(cached['options_json']), json.loads(cached['row_counts_json']),
+                    options, json.loads(cached['row_counts_json']),
                     json.loads(cached['universe_row_counts_json']), True,
                 )
             known_counts = known_full_row_counts if isinstance(known_full_row_counts, dict) else None
@@ -2830,6 +2888,8 @@ def install_dashboard_routes(core):
                     available = task_repository.list_dataset_row_columns(int(dataset['id']))
                     requested = [column for column in available if identity(column) in {identity(field) for field in rf_source_columns(kind)}]
                     task_repository.copy_dataset_rows_to_reporting(int(dataset['id']), kind, requested)
+        if any(entry.dynamic_field for entry in entries):
+            ensure_combined_filter_columns(definition, task_repository, dimensions, selected_by_kind, chart_entries=entries)
         selected_source_rows = {
             kind: sum(int(dataset.get('row_count') or 0) for dataset in selected)
             for kind, selected in selected_by_kind.items()
@@ -2846,6 +2906,7 @@ def install_dashboard_routes(core):
         hidden_filter_keys = {identity(field) for field in definition.hidden_filters}
         fields = {field for field in ADAPTATIVE_FILTER_FIELDS if identity(field) not in hidden_filter_keys}
         fields.update(definition.custom_fields)
+        fields.update((prepare_multivendor_catalog_entry(entry, definition.vendor_comparison).dynamic_field if definition.scope == "multivendor" else entry.dynamic_field) for entry in entries if entry.dynamic_field)
         fields = sorted(fields, key=str.casefold)
         use_profile_options = bool(
             date_bounds
@@ -2864,11 +2925,13 @@ def install_dashboard_routes(core):
         )
         report(82, 'Preparing the Dashboard slide structure and chart positions')
         slides = OrderedDict()
+        entries = expand_dashboard_layouts(entries, definition, options, task_repository)
         slide_entries_by_number: dict[int, list] = defaultdict(list)
         for entry in entries:
             slide_entries_by_number[entry.slide].append(entry)
         deck = Presentation(core.settings.ppt_templates_dir / 'Template_CDR_analysis.pptx')
         for editor_index, (index, entry) in enumerate(sorted(enumerate(entries), key=lambda item: (item[1].slide, item[0]))):
+            editor_index = entry.template_index if entry.template_index is not None else editor_index
             slide = slides.setdefault(entry.slide, {
                 'number': entry.slide,
                 'comment_key': dashboard_slide_comment_key(slide_entries_by_number[entry.slide]),
@@ -2987,6 +3050,7 @@ def install_dashboard_routes(core):
             if selection is None:
                 return None
             payload = manifest['payload']
+            entries = expand_dashboard_layouts(entries, definition, payload.get('options', {}), task_repository)
             if not isinstance(payload, dict) or not isinstance(payload.get('slides'), list):
                 return None
         except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError, sqlite3.Error):
@@ -3539,6 +3603,8 @@ def install_dashboard_routes(core):
     def chart_query_columns(entry, multivendor):
         reported = core.reporting_query_columns(entry.source_kind, [entry], multivendor)
         explicit = set(catalog_kpi_fields(entry.kpi))
+        if entry.dynamic_field:
+            explicit.add(entry.dynamic_field)
         explicit.update(_legend_dimensions(entry.legend))
         explicit.update(parse_catalog_grouping(entry.grouping_rows).dimensions)
         explicit.update(parse_catalog_grouping(entry.grouping_columns).dimensions)
@@ -3560,7 +3626,7 @@ def install_dashboard_routes(core):
         quote = lambda value: '"' + str(value).replace('"', '""') + '"'
         for condition in parse_catalog_filters(entry.filters):
             normalized = identity(condition.column)
-            if normalized in {'threshold', 'buckets', 'binsize', 'classcolours'}:
+            if normalized in {'threshold', 'buckets', 'binsize', 'classcolours', 'histogramoperator'}:
                 continue
             if multivendor and normalized in {'operator', 'vendor', 'vendorv3'}:
                 complete = False
@@ -3992,7 +4058,7 @@ def install_dashboard_routes(core):
             # model independent.
             filtered_key = sha256(repr((
                 raw_key, entry.cdr_source, entry.kpi, entry.filters,
-                entry.calculated_dimensions, snapshot.multivendor,
+                entry.calculated_dimensions, snapshot.multivendor, entry.dynamic_field, entry.dynamic_value,
             )).encode()).hexdigest()
             with lock:
                 prepared_frame = snapshot.filtered_frames.get(filtered_key)
@@ -4187,7 +4253,7 @@ def install_dashboard_routes(core):
             'axis_x_range': entry.axis_x_range, 'axis_y_range': entry.axis_y_range,
             'label_position': entry.label_position,
             'label_format': entry.label_format,
-            'exclude_null_empty': entry.exclude_null_empty, 'exclude_zero': entry.exclude_zero,
+            'exclude_null_empty': entry.exclude_null_empty, 'exclude_zero': entry.exclude_zero, 'dynamic_field': entry.dynamic_field,
             'template_available': template_available,
             'datasets_by_source': datasets_by_source, 'columns_by_source': columns_by_source,
             'columns': columns_by_source.get(f'cdr-{entry.source_kind}', [str(column) for column in columns if identity(column) not in hidden]),
@@ -4205,7 +4271,7 @@ def install_dashboard_routes(core):
             key: value for key, value in request.model_dump().items()
             if value is not None and key in {
                 'filters', 'chart_title', 'cdr_source', 'kpi', 'chart_type', 'grouping_rows',
-                'grouping_columns', 'legend', 'legend_position', 'legend_format', 'axis_x_range', 'axis_y_range', 'label_position', 'label_format', 'exclude_null_empty', 'exclude_zero',
+                'grouping_columns', 'legend', 'legend_position', 'legend_format', 'axis_x_range', 'axis_y_range', 'label_position', 'label_format', 'exclude_null_empty', 'exclude_zero', 'dynamic_field',
             }
         }
         # The template owns these required chart attributes. Custom dropdowns
@@ -4405,13 +4471,14 @@ def install_dashboard_routes(core):
         if template is None:
             raise HTTPException(404, 'The Report Template used by this chart is no longer available.')
         entries = catalogue(snapshot.definition, task_repository)
-        if index >= len(entries):
+        source_index = _entry.template_index if _entry.template_index is not None else index
+        if source_index >= len(entries):
             raise HTTPException(404, 'The chart row is no longer available in the Report Template.')
         changes = {
             key: value for key, value in request.model_dump().items()
             if value is not None and key in {
                 'filters', 'chart_title', 'cdr_source', 'kpi', 'chart_type', 'grouping_rows',
-                'grouping_columns', 'legend', 'legend_position', 'legend_format', 'axis_x_range', 'axis_y_range', 'label_position', 'label_format', 'exclude_null_empty', 'exclude_zero',
+                'grouping_columns', 'legend', 'legend_position', 'legend_format', 'axis_x_range', 'axis_y_range', 'label_position', 'label_format', 'exclude_null_empty', 'exclude_zero', 'dynamic_field',
             }
         }
         for key in ('cdr_source', 'kpi', 'chart_type'):
@@ -4438,13 +4505,18 @@ def install_dashboard_routes(core):
                     changes[key] = core.parse_template_boolean(changes[key], label)
                 except ValueError as exc:
                     raise HTTPException(400, str(exc)) from exc
-        updated_entry = replace(entries[index], **changes)
+        if changes.get("chart_title") == _entry.chart_title and _entry.dynamic_value is not None:
+            changes["chart_title"] = entries[source_index].chart_title
+        for field in ('dynamic_field', 'grouping_rows', 'grouping_columns', 'legend'):
+            if field in changes and changes[field] == getattr(_entry, field):
+                changes[field] = getattr(entries[source_index], field)
+        updated_entry = replace(entries[source_index], **changes)
         try:
             core.parse_axis_range(updated_entry.axis_x_range, 'x')
             core.parse_axis_range(updated_entry.axis_y_range, 'y')
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        entries[index] = updated_entry
+        entries[source_index] = updated_entry
         try:
             task_repository.set_report_template_content(
                 technology, template_name, core.catalogue_csv(entries), updated_by=user.username,
@@ -4463,22 +4535,29 @@ def install_dashboard_routes(core):
                     candidate.workspace == snapshot.workspace
                     and candidate.definition.template_technology == technology
                     and candidate.definition.template == template_name
-                    and index < len(candidate.entries)
                 )
             ]
             for candidate in matching_snapshots:
-                candidate.entries[index] = updated_entry
-                candidate.chart_frames.pop(index, None)
-                candidate.chart_payloads.pop(index, None)
-                for slide in candidate.payload.get('slides', []):
-                    for chart in slide.get('charts', []):
-                        if chart.get('index') == index:
-                            chart.update({
-                                'title': updated_entry.chart_title,
-                                'source': updated_entry.source_kind,
-                                'cdr_source': updated_entry.cdr_source,
-                                'chart_type': updated_entry.chart_type,
-                            })
+                for chart_index, current in enumerate(candidate.entries):
+                    current_source = current.template_index if current.template_index is not None else chart_index
+                    if current_source != source_index:
+                        continue
+                    effective_update = (prepare_multivendor_catalog_entry(updated_entry, candidate.definition.vendor_comparison)
+                                        if candidate.multivendor else updated_entry)
+                    replacement = replace(
+                        effective_update, slide=current.slide, layout=current.layout, template_index=current.template_index,
+                        dynamic_value=current.dynamic_value,
+                        chart_title=(f"{effective_update.chart_title} – {current.dynamic_value}" if current.dynamic_value is not None else effective_update.chart_title),
+                    )
+                    candidate.entries[chart_index] = replacement
+                    candidate.chart_frames.pop(chart_index, None)
+                    candidate.chart_payloads.pop(chart_index, None)
+                    candidate.filtered_frames.clear()
+                    for slide in candidate.payload.get('slides', []):
+                        for chart in slide.get('charts', []):
+                            if chart.get('index') == chart_index:
+                                chart.update({'title': replacement.chart_title, 'source': replacement.source_kind,
+                                              'cdr_source': replacement.cdr_source, 'chart_type': replacement.chart_type})
         task_repository.add_log(user.username, 'update_dashboard_chart_template', json.dumps({
             'technology': technology, 'template': template_name, 'chart_index': index,
         }))

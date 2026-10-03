@@ -50,7 +50,14 @@ CDR_REPORT_VERSION = "2026-09-22-v14"
 REPORTING_KINDS = {"data", "voice", "speech"}
 COMMENT_HINTS = ("having ", "observed", "shows ", "similar performance", "worse ", "improvement", "degradation", "gap ")
 VISUAL_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position", "Legend Format", "Label Position", "Label Format", "Axis X Range", "Axis Y Range")
-CATALOG_HEADERS = (*VISUAL_CATALOG_HEADERS, "Exclude Null/Empty", "Exclude Zero")
+PRE_DYNAMIC_CATALOG_HEADERS = (*VISUAL_CATALOG_HEADERS, "Exclude Null/Empty", "Exclude Zero")
+CATALOG_HEADERS = (*PRE_DYNAMIC_CATALOG_HEADERS, "Dynamic Field")
+DYNAMIC_LAYOUTS = (
+    "2 rows + dynamic columns, comments right",
+    "2 rows + dynamic columns, comments down",
+    "2 columns + dynamic rows, comments right",
+    "2 columns + dynamic rows, comments down",
+)
 # Templates created before configurable visual settings remain valid and
 # acquire empty Label/axis cells the next time they are saved in the editor.
 RANGELESS_CATALOG_HEADERS = CATALOG_HEADERS[:13]
@@ -67,7 +74,7 @@ LEGACY_CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", 
 CATALOG_SOURCE_KINDS = {"cdr-data": "data", "cdr-voice": "voice", "cdr-speech": "speech", "cdr-all": "all"}
 CHART_TYPES = {
     "100% stacked vertical bars", "count stacked horizontal bars", "cdf line", "multi kpi cdf lines", "scatter", "table", "dynamic table",
-    "distribution stacked vertical bars", "threshold stacked vertical bars", "average vertical bars", "median vertical bars", "map", "histogram line",
+    "distribution stacked vertical bars", "threshold stacked vertical bars", "average vertical bars", "median vertical bars", "map", "histogram line", "histogram bars",
 }
 BAR_CHART_TYPES = {
     "100% stacked vertical bars", "count stacked horizontal bars",
@@ -267,6 +274,7 @@ def _catalogue_header_key(value: str) -> str:
 
 
 CATALOG_HEADER_ALIASES = {
+    "dynamicfield": "Dynamic Field",
     "slide": "Slide",
     "slidetittle": "Slide Tittle",
     "slidetitle": "Slide Tittle",
@@ -402,6 +410,10 @@ class CatalogEntry:
     label_format: str = ""
     exclude_null_empty: bool = False
     exclude_zero: bool = False
+    dynamic_field: str = ""
+    dynamic_value: str | None = None
+    template_index: int | None = None
+    vendor_comparison: str = "operator_vendor"
 
     @property
     def source_kind(self) -> str | None:
@@ -411,6 +423,62 @@ class CatalogEntry:
     def structural_type(self) -> str | None:
         value = self.chart_type.strip().casefold()
         return value if value in STRUCTURAL_SLIDE_TYPES else None
+
+
+def expand_dynamic_layouts(
+    entries: list[CatalogEntry], values_by_field: dict[str, list[str]], *,
+    multivendor: bool = False, operator_mappings: dict[str, str] | None = None,
+    vendor_mappings: dict[str, str] | None = None,
+    vendor_comparison: str = "operator_vendor",
+    vendor_families: dict[str, str] | None = None,
+) -> list[CatalogEntry]:
+    """Resolve dynamic grids and keep vendor families together on six-value pages."""
+    slides = defaultdict(list)
+    for index, entry in enumerate(entries):
+        effective = prepare_multivendor_catalog_entry(entry, vendor_comparison) if multivendor else entry
+        slides[entry.slide].append(replace(effective, template_index=index))
+    expanded = []
+    offset = 0
+    for number, rows in sorted(slides.items()):
+        header = rows[0]
+        if header.layout.casefold() not in {name.casefold() for name in DYNAMIC_LAYOUTS}:
+            expanded.extend(replace(row, slide=number + offset) for row in rows)
+            continue
+        if len(rows) != 2 or any(row.dynamic_field != header.dynamic_field or row.layout != header.layout for row in rows):
+            raise ValueError(f"Slide {number}: a dynamic layout needs two chart definitions with the same Layout and Dynamic Field.")
+        values = values_by_field.get(header.dynamic_field, [])
+        if not values:
+            continue
+        pages = [values]
+        if multivendor and _normalise_catalog_name(header.dynamic_field) in {"vendor", "vendoronly"}:
+            families = {}
+            for value in values:
+                _operator, _separator, vendor = _split_operator_vendor(value, operator_mappings, vendor_mappings)
+                families.setdefault((vendor_families or {}).get(value, vendor or value), []).append(value)
+            pages = []
+            current = []
+            for family in families.values():
+                if current and len(current) + len(family) > 6:
+                    pages.append(current); current = []
+                while len(family) > 6:
+                    pages.append(family[:6]); family = family[6:]
+                current.extend(family)
+            if current:
+                pages.append(current)
+        dynamic_columns = header.layout.casefold().startswith("2 rows")
+        comments = "right" if header.layout.casefold().endswith("right") else "down"
+        for page_index, page_values in enumerate(pages):
+            layout = (f"Title and 2 rows and {len(page_values)} columns + Comments {comments}" if dynamic_columns else
+                      f"Title and 2 columns and {len(page_values)} rows + Comments {comments}")
+            pairs = [(row, value) for row in rows for value in page_values] if dynamic_columns else [(row, value) for value in page_values for row in rows]
+            for row, value in pairs:
+                expanded.append(replace(
+                    row, slide=number + offset + page_index, layout=layout, dynamic_value=value,
+                    chart_title=f"{row.chart_title} – {value}",
+                    slide_subtitle=(f"{row.slide_subtitle} · {page_index + 1}/{len(pages)}" if len(pages) > 1 else row.slide_subtitle),
+                ))
+        offset += len(pages) - 1
+    return expanded
 
 
 def parse_catalog_filters(value: str) -> tuple[FilterCondition, ...]:
@@ -1062,7 +1130,7 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
     fieldnames = tuple(reader.fieldnames or ())
     accepted_schemas = {
         _canonical_catalog_headers(schema)
-        for schema in (CATALOG_HEADERS, PRE_LEGEND_FORMAT_CATALOG_HEADERS, PRE_LABEL_FORMAT_CATALOG_HEADERS, PRE_LABEL_COLOR_CATALOG_HEADERS, PRE_LABEL_COLOR_RANGELESS_CATALOG_HEADERS, VISUAL_CATALOG_HEADERS, RANGELESS_CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, OLDER_CATALOG_HEADERS, LEGACY_ROWS_COLUMNS_HEADERS, LEGACY_CATALOG_HEADERS)
+        for schema in (CATALOG_HEADERS, PRE_DYNAMIC_CATALOG_HEADERS, PRE_LEGEND_FORMAT_CATALOG_HEADERS, PRE_LABEL_FORMAT_CATALOG_HEADERS, PRE_LABEL_COLOR_CATALOG_HEADERS, PRE_LABEL_COLOR_RANGELESS_CATALOG_HEADERS, VISUAL_CATALOG_HEADERS, RANGELESS_CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, OLDER_CATALOG_HEADERS, LEGACY_ROWS_COLUMNS_HEADERS, LEGACY_CATALOG_HEADERS)
     }
     if _canonical_catalog_headers(fieldnames) not in accepted_schemas:
         raise ValueError("The report template must use exactly these columns: " + ", ".join(CATALOG_HEADERS))
@@ -1106,7 +1174,10 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
             label_format=parse_label_format(row.get("Label Format") or ""),
             exclude_null_empty=parse_template_boolean(row.get("Exclude Null/Empty") or "", "Exclude Null/Empty"),
             exclude_zero=parse_template_boolean(row.get("Exclude Zero") or "", "Exclude Zero"),
+            dynamic_field=(row.get("Dynamic Field") or "").strip(),
         )
+        if entry.layout.casefold() in {name.casefold() for name in DYNAMIC_LAYOUTS} and not entry.dynamic_field:
+            raise ValueError(f"Slide {entry.slide}: a dynamic layout requires Dynamic Field.")
         if entry.source_kind:
             chart_positions[entry.slide] += 1
         editor_location = f"Slide: {entry.slide} - Chart: {chart_positions[entry.slide]}" if entry.source_kind else f"Slide: {entry.slide}"
@@ -1161,6 +1232,9 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
     for entry in entries:
         entries_by_slide[entry.slide].append(entry)
     for slide_number, slide_entries in entries_by_slide.items():
+        if slide_entries[0].layout.casefold() in {name.casefold() for name in DYNAMIC_LAYOUTS}:
+            if len(slide_entries) != 2 or len({(entry.layout.casefold(), entry.dynamic_field) for entry in slide_entries}) != 1:
+                raise ValueError(f"Slide {slide_number}: a dynamic layout needs two chart definitions with the same Layout and Dynamic Field.")
         structural_entries = [entry for entry in slide_entries if entry.structural_type]
         if structural_entries and len(slide_entries) != 1:
             raise ValueError(
@@ -1281,6 +1355,7 @@ def catalogue_csv(entries: list[CatalogEntry]) -> bytes:
             "Axis Y Range": entry.axis_y_range,
             "Exclude Null/Empty": "Yes" if entry.exclude_null_empty else "",
             "Exclude Zero": "Yes" if entry.exclude_zero else "",
+            "Dynamic Field": entry.dynamic_field,
         })
     return output.getvalue().encode("utf-8")
 
@@ -1732,7 +1807,7 @@ def _replace_operator_label(value: str, replacement: str) -> str:
     return _replace_word(_replace_word(value, "Operators", f"{replacement}s"), "Operator", replacement)
 
 
-def prepare_multivendor_catalog_entry(entry: CatalogEntry) -> CatalogEntry:
+def prepare_multivendor_catalog_entry(entry: CatalogEntry, vendor_comparison: str | None = None) -> CatalogEntry:
     """Apply the report-only multivendor wording and grouping interpretation.
 
     The stored template remains an operator-oriented definition.  For a
@@ -1741,6 +1816,8 @@ def prepare_multivendor_catalog_entry(entry: CatalogEntry) -> CatalogEntry:
     ``Operator`` conditions remain untouched.  During filtering they resolve
     against the operator prefix of the materialised ``Operator_Vendor`` value.
     """
+    vendor_comparison = vendor_comparison or entry.vendor_comparison
+    vendor_only = vendor_comparison == "vendor_only"
     def vendor_grouping(value: str) -> str:
         """Expand comparison identities into Vendor then Operator levels."""
         dimensions = parse_catalog_grouping(value).dimensions
@@ -1748,6 +1825,10 @@ def prepare_multivendor_catalog_entry(entry: CatalogEntry) -> CatalogEntry:
         for dimension in dimensions:
             normalized = _normalise_catalog_name(dimension)
             if normalized in {"operator", "vendor"}:
+                if vendor_only:
+                    if "Vendor_Only" not in expanded:
+                        expanded.append("Vendor_Only")
+                    continue
                 if not any(_normalise_catalog_name(item) == "vendor" for item in expanded):
                     expanded.append("Vendor")
                 if not any(_normalise_catalog_name(item) == "operator" for item in expanded):
@@ -1766,6 +1847,10 @@ def prepare_multivendor_catalog_entry(entry: CatalogEntry) -> CatalogEntry:
         expanded: list[str] = []
         for dimension in dimensions:
             if _normalise_catalog_name(dimension) in {"operator", "vendor"}:
+                if vendor_only:
+                    if "Vendor_Only" not in expanded:
+                        expanded.append("Vendor_Only")
+                    continue
                 if "Vendor" not in expanded:
                     expanded.extend(("Vendor", "Operator"))
             else:
@@ -1794,6 +1879,8 @@ def prepare_multivendor_catalog_entry(entry: CatalogEntry) -> CatalogEntry:
         grouping_rows=vendor_grouping(entry.grouping_rows),
         grouping_columns=vendor_grouping(entry.grouping_columns),
         filters=filters,
+        dynamic_field=("Vendor_Only" if vendor_only else "Vendor") if _normalise_catalog_name(entry.dynamic_field) in {"operator", "vendor"} else entry.dynamic_field,
+        vendor_comparison=vendor_comparison,
     )
 
 
@@ -2249,6 +2336,21 @@ def _cdf_campaign_line_widths(
     return widths
 
 
+def _select_dynamic_chart_frame(frame: pd.DataFrame, entry: CatalogEntry) -> pd.DataFrame:
+    """Keep the source samples belonging to one resolved dynamic chart."""
+    if entry.dynamic_value is None:
+        return frame
+    column = _catalog_column(frame, entry.dynamic_field, False)
+    if not column:
+        return frame.iloc[:0].copy()
+    values = frame[column].astype(str)
+    if _normalise_catalog_name(entry.dynamic_field) == "operator":
+        values = values.map(lambda value: _normalise_operator_label(value, frame.attrs.get("operator_mappings", {})))
+    elif _normalise_catalog_name(entry.dynamic_field) in {"vendor", "vendoronly"}:
+        values = values.map(lambda value: _normalise_vendor(value, frame.attrs.get("operator_mappings", {}), frame.attrs.get("vendor_mappings", {})))
+    return frame[values.eq(entry.dynamic_value)].copy()
+
+
 def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor: bool, metric: str | None) -> pd.DataFrame:
     result = frame.copy()
     operator_mappings = result.attrs.get('operator_mappings', {})
@@ -2259,7 +2361,7 @@ def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor
     result.attrs["catalogue_calculated_dimensions"] = entry.calculated_dimensions
     result.attrs["catalogue_cdr_source"] = entry.cdr_source
     for condition in parse_catalog_filters(entry.filters):
-        if _normalise_catalog_name(condition.column) in {"threshold", "buckets", "binsize", "classcolours"}:
+        if _normalise_catalog_name(condition.column) in {"threshold", "buckets", "binsize", "classcolours", "histogramoperator"}:
             continue
         # A Vendor Comparison materialises values as Operator_Vendor. Template
         # Operator filters therefore match that value's operator prefix (for
@@ -2706,7 +2808,7 @@ def preview_catalog_chart_data(
     bucket_edges = _catalog_bucket_edges(entry)
     bucket_operator = _catalog_bucket_operator(entry)
     for condition in parse_catalog_filters(entry.filters):
-        if _normalise_catalog_name(condition.column) not in {'threshold', 'buckets', 'binsize', 'classcolours'}:
+        if _normalise_catalog_name(condition.column) not in {'threshold', 'buckets', 'binsize', 'classcolours', 'histogramoperator'}:
             include(_catalog_column(grouped, condition.column, False, metric, bucket_edges, bucket_operator, operator_as_vendor=False), f'Filter · {condition.column}')
     for axis, grouping in (('Rows Aggregation', entry.grouping_rows), ('Column Aggregation', entry.grouping_columns)):
         for dimension in parse_catalog_grouping(grouping).dimensions:
@@ -5293,7 +5395,17 @@ def _render_histogram_model(model: dict[str, object]) -> BytesIO:
         points = [(left + (x - low) / (high - low) * width,
                    top + height - (y - y_low) / (y_high - y_low) * height)
                   for x, y in zip(series["x"], series["y"], strict=True)]
-        _draw_patterned_polyline(draw, points, series["colour"], series["width"], tuple(series["dash"]))
+        if model.get("histogram_bars"):
+            series_index = model["series"].index(series)
+            for bin_index, ratio in enumerate(series["bin_ratios"]):
+                x = left + (series["bin_edges"][bin_index] - low) / (high - low) * width
+                bin_width = (series["bin_edges"][bin_index + 1] - series["bin_edges"][bin_index]) / (high - low) * width
+                bar_width = bin_width * .85 / len(model["series"])
+                x += bin_width * .075 + series_index * bar_width
+                y = top + height - (ratio - y_low) / (y_high - y_low) * height
+                draw.rectangle((x, y, x + bar_width, top + height), fill=series["colour"])
+        else:
+            _draw_patterned_polyline(draw, points, series["colour"], series["width"], tuple(series["dash"]))
     draw.text((left, top - 28), "Samples per bin (%)", fill="#405765", font=_font(18, True))
     draw.text((left + width / 2 - 90, top + height + 31), str(model["metric"]),
               fill="#405765", font=_font(20, True))
@@ -5720,6 +5832,7 @@ def prepare_catalog_chart_preview_frame(
     filtered = filtered if template_filters_applied else _apply_catalog_filters(
         filtered, render_entry, multivendor, metric,
     )
+    filtered = _select_dynamic_chart_frame(filtered, render_entry)
     return _exclude_chart_values(filtered, render_entry, spec, multivendor), render_entry
 
 
@@ -5887,6 +6000,10 @@ def catalog_chart_payload(
     ordering, colours, legend resolution and logical 1600 x 900 geometry. The
     browser only performs the inexpensive final paint and tooltip hit testing.
     """
+    if entry.chart_type.casefold() == "histogram bars":
+        if any(condition.column == "Histogram Operator" and condition.values == ("__unused_slot__",)
+               for condition in parse_catalog_filters(entry.filters)):
+            return {"type": "empty", "title": "", "message": "", "spacer": True, "legend": {"items": []}}
     render_entry = prepare_multivendor_catalog_entry(entry) if multivendor else entry
     spec = _catalog_spec(render_entry)
     title = render_entry.chart_title or render_entry.slide_title
@@ -5903,6 +6020,7 @@ def catalog_chart_payload(
         filtered, _group, _period = _source_for_spec({render_entry.source_kind: source_frame}, spec, multivendor)
         metric = _metric_column(filtered, spec)
         filtered = _apply_catalog_filters(filtered, render_entry, multivendor, metric)
+    filtered = _select_dynamic_chart_frame(filtered, render_entry)
     filtered.attrs["catalogue_calculated_dimensions"] = render_entry.calculated_dimensions
     filtered.attrs["catalogue_cdr_source"] = render_entry.cdr_source
     filtered = _exclude_chart_values(filtered, render_entry, spec, multivendor)
@@ -6135,8 +6253,28 @@ def catalog_chart_payload(
             "panels": panels,
         }
 
-    if chart_type in {"cdf line", "histogram line"}:
-        model = cdf_model(metric, title, histogram=chart_type == "histogram line") if metric else None
+    if chart_type in {"cdf line", "histogram line", "histogram bars"}:
+        if chart_type == "histogram bars":
+            operator_filter = next((condition.values[0] for condition in parse_catalog_filters(render_entry.filters)
+                                    if _normalise_catalog_name(condition.column) == "histogramoperator"), None)
+            operator_column = _column(data, ("Operator",))
+            if operator_filter and operator_column:
+                data = data[data[operator_column].map(lambda value: _normalise_operator_label(value, data.attrs.get("operator_mappings", {}))).eq(operator_filter)].copy()
+            if data.empty:
+                return empty("No valid samples for this operator and technology")
+        model = cdf_model(metric, title, histogram=chart_type != "cdf line") if metric else None
+        if model and chart_type == "histogram bars":
+            model["histogram_bars"] = True
+            model["quality_bands"] = []
+            series = sorted(model["series"], key=lambda item: _campaign_sort_key(str(item["key"][-1])))
+            for index, item in enumerate(series):
+                colour = ImageColor.getrgb(item["colour"])
+                lightness = .65 * (len(series) - 1 - index) / max(1, len(series) - 1)
+                item["colour"] = "#" + "".join(f"{round(channel + (255 - channel) * lightness):02X}" for channel in colour)
+                item["legend_name"] = item["name"] = str(item["key"][-1])
+                item["bin_ratios"] = [count / item["samples"] for count in item["counts"]]
+            model["series"] = series
+            model["legend"]["items"] = [{"label": item["name"], "colour": item["colour"], "width": 4} for item in series]
         return model or empty("No valid samples for this KPI and technology filter")
 
     if spec["kind"] in {"status_100", "quality_100"} and metric:
@@ -6755,7 +6893,7 @@ def _chart_for_catalog_entry(
         # A partial CDR upload should leave only the affected chart empty, not fail the report.
         return _empty_chart(chart_title)
     chart_type = entry.chart_type.casefold()
-    if chart_type == "histogram line":
+    if chart_type in {"histogram line", "histogram bars"}:
         return _render_histogram_model(catalog_chart_payload(frame, entry, prefiltered=True))
     if chart_type != "distribution stacked vertical bars" and "__catalog_stack" in frame.columns:
         frame[period] = frame[period].astype(str) + " · " + frame["__catalog_stack"].astype(str)
@@ -7021,12 +7159,68 @@ def _combined_frame(frames: list[tuple[int, int, int, int]]) -> tuple[int, int, 
     return left, top, right - left, bottom - top
 
 
+def _create_grid_slide_layout(presentation: Presentation, rows: int, columns: int, comments: str, name: str):
+    """Derive a native grid from the template's chart and commentary geometry."""
+    from copy import deepcopy
+    from pptx.parts.slide import SlideLayoutPart
+    from pptx.slide import SlideLayout
+    from pptx.opc.constants import CONTENT_TYPE
+    from pptx.oxml.xmlchemy import OxmlElement
+    source_name = "Title and 1 column + Comments right" if comments == "right" else "Title and 1 column + Comments"
+    source = next((layout for layout in presentation.slide_layouts if layout.name == source_name), None)
+    if source is None:
+        return None
+    element = deepcopy(source._element)
+    element.cSld.set("name", name)
+    package = presentation.part.package
+    master = source.slide_master
+    part = SlideLayoutPart(package.next_partname("/ppt/slideLayouts/slideLayout%d.xml"), CONTENT_TYPE.PML_SLIDE_LAYOUT, package, element)
+    part.relate_to(master.part, RT.SLIDE_MASTER)
+    relationship = master.part.relate_to(part, RT.SLIDE_LAYOUT)
+    layout_id = OxmlElement("p:sldLayoutId")
+    layout_id.set("id", str(max(int(node.get("id")) for node in master._element.sldLayoutIdLst) + 1))
+    layout_id.set("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id", relationship)
+    master._element.sldLayoutIdLst.append(layout_id)
+    layout = SlideLayout(element, part)
+    chart = next(shape for shape in layout.placeholders if shape.placeholder_format.type == 7 and shape.placeholder_format.idx != 10)
+    left, top, width, height = chart.left, chart.top, chart.width, chart.height
+    original = deepcopy(chart._element)
+    chart._element.getparent().remove(chart._element)
+    max_id = max(shape.shape_id for shape in layout.shapes)
+    max_idx = max(shape.placeholder_format.idx for shape in layout.placeholders)
+    gap = int(Inches(.10))
+    cell_width, cell_height = (width - gap * (columns - 1)) // columns, (height - gap * (rows - 1)) // rows
+    for row in range(rows):
+        for column in range(columns):
+            index = row * columns + column + 1
+            shape = deepcopy(original)
+            shape.nvSpPr.cNvPr.set("id", str(max_id + index))
+            shape.nvSpPr.cNvPr.set("name", f"Chart {row + 1}-{column + 1}")
+            shape.nvSpPr.nvPr.ph.set("idx", str(max_idx + index))
+            transform = shape.spPr.get_or_add_xfrm()
+            transform.off.set("x", str(left + column * (cell_width + gap)))
+            transform.off.set("y", str(top + row * (cell_height + gap)))
+            transform.ext.set("cx", str(cell_width)); transform.ext.set("cy", str(cell_height))
+            layout.shapes._spTree.insert_element_before(shape, "p:extLst")
+    return layout
+
+
 def _named_slide_layout(presentation: Presentation, layout_name: str):
     """Resolve a template layout name against the template slide master."""
     expected = layout_name.strip().casefold()
+    if expected in {name.casefold() for name in DYNAMIC_LAYOUTS}:
+        direction = "rows" if expected.startswith("2 rows") else "columns"
+        other = "columns" if direction == "rows" else "rows"
+        comments = "right" if expected.endswith("right") else "down"
+        expected = f"Title and 2 {direction} and 3 {other} + Comments {comments}".casefold()
     for layout in presentation.slide_layouts:
         if layout.name.strip().casefold() == expected:
             return layout
+    grid = re.fullmatch(r"title and (\d+) (rows|columns) and (\d+) (columns|rows) \+ comments (right|down)", expected)
+    if grid:
+        first, direction, second, _other, comments = grid.groups()
+        rows, columns = (int(first), int(second)) if direction == "rows" else (int(second), int(first))
+        return _create_grid_slide_layout(presentation, rows, columns, comments, layout_name)
     return None
 
 
@@ -7098,7 +7292,8 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
                       chart_output_dir: Path | None = None,
                       frame_loader: Callable[[str], pd.DataFrame] | None = None,
                       on_chart_rendered: Callable[[CatalogEntry, int, bool], None] | None = None,
-                      generate_tooltips: bool = True, reuse_existing_charts: bool = False) -> Path:
+                      generate_tooltips: bool = True, reuse_existing_charts: bool = False,
+                      vendor_comparison: str = "operator_vendor") -> Path:
     if not template.exists():
         raise FileNotFoundError(f"Reporting template not found: {template.name}")
     if not catalog:
@@ -7135,6 +7330,8 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
     if 'all' not in cached_frames and frame_loader is None and any(entry.source_kind == 'all' for entry in catalog):
         from src.modules.rf_catalog_source import pool_rf_frames
         cached_frames['all'] = pool_rf_frames({kind: frame for kind, frame in cached_frames.items() if kind in ('data', 'voice', 'speech')})
+    if multivendor:
+        catalog = [prepare_multivendor_catalog_entry(entry, vendor_comparison) for entry in catalog]
     presentation = Presentation(template)
     _remove_all_slides(presentation)
     rendered_charts: list[dict[str, object]] = []
@@ -7146,6 +7343,7 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
         key = (
             id(source_frame), prepared_entry.source_kind, prepared_entry.cdr_source,
             prepared_entry.kpi, prepared_entry.filters, prepared_entry.calculated_dimensions,
+            prepared_entry.dynamic_field, prepared_entry.dynamic_value,
         )
         prepared = prepared_frames.get(key)
         if prepared is None:
@@ -7161,6 +7359,22 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
         return prepared, prepared_entry
 
     catalogue_slides: dict[int, list[CatalogEntry]] = defaultdict(list)
+    effective_catalog = [prepare_multivendor_catalog_entry(entry) if multivendor else entry for entry in catalog]
+    dynamic_fields = {entry.dynamic_field for entry in effective_catalog if entry.dynamic_field}
+    if dynamic_fields:
+        values = {field: set() for field in dynamic_fields}
+        vendor_families = {}
+        for source in dict.fromkeys(entry.source_kind for entry in catalog if entry.source_kind):
+            source_frame = frame_for(source)
+            vendor_column = _catalog_column(source_frame, 'Vendor', False)
+            family_column = _catalog_column(source_frame, 'Vendor_Only', False)
+            if vendor_column and family_column:
+                vendor_families.update({str(vendor): str(family) for vendor, family in source_frame[[vendor_column, family_column]].drop_duplicates().itertuples(index=False, name=None) if pd.notna(vendor) and pd.notna(family)})
+            for field in dynamic_fields:
+                column = _catalog_column(source_frame, field, False)
+                if column:
+                    values[field].update(str(value) for value in source_frame[column].dropna().unique() if not multivendor or _normalise_catalog_name(field) not in {"vendor", "vendoronly"} or not any(term in str(value).casefold() for term in ("mixed", "other")))
+        catalog = expand_dynamic_layouts(catalog, {field: sorted(items, key=str.casefold) for field, items in values.items()}, multivendor=multivendor, operator_mappings=source_frame.attrs.get("operator_mappings", {}), vendor_mappings=source_frame.attrs.get("vendor_mappings", {}), vendor_comparison=vendor_comparison, vendor_families=vendor_families)
     render_catalog = [prepare_multivendor_catalog_entry(entry) if multivendor else entry for entry in catalog]
     for entry in render_catalog:
         catalogue_slides[entry.slide].append(entry)

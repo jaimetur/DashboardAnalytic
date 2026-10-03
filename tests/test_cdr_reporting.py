@@ -435,6 +435,54 @@ def test_vendor_only_removes_equivalent_operator_alias_prefixes() -> None:
     assert vendor_only_value('Huawei', 'Vodafone UK') == 'Huawei'
 
 
+@pytest.mark.parametrize('chart_type', ['CDF Line', 'Threshold Stacked Vertical Bars', 'Histogram Bars'])
+def test_vendor_only_grouping_pools_two_operators_for_radio_quality_charts(chart_type) -> None:
+    entry = CatalogEntry(
+        slide=1, slide_title='', slide_subtitle='',
+        layout='2 rows + dynamic columns, comments down', chart_title='RSRP',
+        cdr_source='CDR-All', kpi='LTE_RSRP', chart_type=chart_type,
+        legend='Operator', filters='', grouping_rows='Operator',
+        grouping_columns='Campaign', legend_position='Right', dynamic_field='Operator',
+    )
+    prepared = prepare_multivendor_catalog_entry(entry, 'vendor_only')
+    frame = chart_frame({
+        'Operator': ['EE', 'EE', 'O2', 'O2', 'VF'],
+        'Vendor': ['EE_Ericsson', 'EE_Ericsson', 'O2_Ericsson', 'O2_Ericsson', 'VF_Huawei'],
+        'Vendor_Only': ['Ericsson', 'Ericsson', 'Ericsson', 'Ericsson', 'Huawei'],
+        'Campaign': ['2026-Q1'] * 5,
+        'LTE_RSRP': [-110, -100, -90, -80, -70],
+    })
+
+    grouped, primary, _series = _apply_catalog_grouping(frame, prepared, True, 'LTE_RSRP')
+
+    assert prepared.dynamic_field == 'Vendor_Only'
+    assert grouped[primary].drop_duplicates().tolist() == ['Ericsson', 'Huawei']
+
+
+def test_chart_set_jobs_persist_vendor_comparison_and_keep_it_on_retry(tmp_path) -> None:
+    from src.modules.repository import Repository
+
+    repository = Repository(tmp_path / 'workspace.db')
+    repository.initialize()
+    job_options = {
+        'technology': 'nsa', 'scope': 'multivendor',
+        'dataset_ids': {'data': [1], 'voice': [2], 'speech': [3]},
+        'dataset_names': {'data': ['Data'], 'voice': ['Voice'], 'speech': ['Speech']},
+        'template_name': 'Template', 'created_by': 'admin',
+    }
+
+    default_id = repository.create_report_chart_job(**job_options)
+    pooled_id = repository.create_report_chart_job(**job_options, vendor_comparison='vendor_only')
+    assert repository.get_report_chart_job(default_id)['vendor_comparison'] == 'operator_vendor'
+    assert repository.get_report_chart_job(pooled_id)['vendor_comparison'] == 'vendor_only'
+
+    repository.update_report_chart_job(pooled_id, status='failed', finished=True)
+    assert repository.retry_report_chart_job(pooled_id) is True
+    retried = repository.get_report_chart_job(pooled_id)
+    assert retried['status'] == 'queued'
+    assert retried['vendor_comparison'] == 'vendor_only'
+
+
 def test_reporting_cache_repairs_an_empty_requested_source_column(tmp_path) -> None:
     repository = Repository(tmp_path / 'workspace.db')
     repository.replace_dataset_rows(1, pd.DataFrame({'RAT': ['EN-DC'], 'G_Level_4': ['London']}))
