@@ -3134,3 +3134,46 @@ def test_report_template_changes_record_the_last_editor(client):
     assert row['updated_by'] == 'super'
     page = client.get('/workspace-config')
     assert '<th>NR Mode</th><th>Created</th><th>Last Updated</th><th>Last Updated by</th>' in page.text
+
+
+def test_combined_rf_dashboard_keeps_samples_and_selected_geography(client):
+    client.post('/login', data={'username': 'super', 'password': 'super123'})
+    sources = [
+        ('data', 'LTE_PCell_RSRP_Avg', [-100, -90, -80]),
+        ('voice', '4G_RSRP_Avg_A', [-60]),
+        ('speech', 'Playing_RSRP_Avg', [-70]),
+    ]
+    datasets = {}
+    for kind, field, values in sources:
+        content = 'Operator,City,Campaign,Test_Start_Time,' + field + '\n'
+        content += ''.join(f'EE,London,UK_Q1_2026,2026-01-01,{value}\n' for value in values)
+        content += f'EE,Leeds,UK_Q1_2026,2026-01-01,-120\n'
+        response = client.post('/datasets-analysis/upload', data={'dataset_kinds': kind}, files={
+            'dataset_files': (f'RF_{kind}_NSA.csv', BytesIO(content.encode()), 'text/csv'),
+        })
+        assert response.status_code == 200, response.text
+        datasets[kind] = [max(int(row['id']) for row in core.repository.list_datasets())]
+    core.repository.add_report_template('nsa', 'Pooled RF test', (
+        'Slide,Slide tittle,Slide Subtittle,Layout,Chart Tittle,CDR source,KPI,Chart type,Filters,Rows Aggregation,Column Aggregation,Legend,Legend Position\n'
+        '1,Combined RF,,Title and 1 column + Comments,RSRP,CDR-All,LTE_RSRP,Histogram Line,Bin Size = 5,Operator,Campaign,Operator,Right\n'
+    ).encode(), is_default=False)
+    payload = DashboardDefinition(name='Pooled RF', template='Pooled RF test', datasets=datasets,
+                                  filters={'City': ['London']}).model_dump(mode='json')
+    prepared = client.post('/api/e2e-dashboards/prepare', json=payload)
+    assert prepared.status_code == 200, prepared.text
+    assert prepared.json()['slides'][0]['charts'][0]['available'] is True
+    token = prepared.json()['token']
+    rendered = client.get(f'/api/e2e-dashboards/chart/{token}/0')
+    assert rendered.status_code == 200, rendered.text
+    assert 'series' in rendered.json(), rendered.json()
+    series = rendered.json()['series'][0]
+    assert series['samples'] == 5
+    assert sum(series['counts']) == 5
+    context = client.get(f'/api/e2e-dashboards/chart/{token}/0/filter-context')
+    assert context.status_code == 200, context.text
+    assert 'LTE_RSRP' in context.json()['columns_by_source']['cdr-all']
+    assert len(context.json()['dataset_ids']) == 3
+    preview = client.post(f'/api/e2e-dashboards/chart/{token}/0/filter-preview', json={
+        'filters': 'Bin Size = 5; LTE_RSRP >= -85',
+    })
+    assert preview.status_code == 200, preview.text

@@ -48,6 +48,7 @@ from src.modules.cdr_reporting import (
     split_calculated_dimension_aliases,
 )
 
+from src.modules.rf_catalog_source import rf_source_columns, rf_union_source
 from src.modules.repository import Repository
 from src.modules.cdr_report_filenames import build_cdr_report_filename
 from src.modules.runtime_config import ignore_event_time_filtering
@@ -802,7 +803,7 @@ def install_dashboard_routes(core):
                 raise RuntimeError('The prepared Dashboard snapshot has expired.')
             indexes = [
                 index for index, entry in enumerate(snapshot.entries)
-                if entry.source_kind in selected_sources(snapshot.definition, task_repository)
+                if dashboard_datasets(snapshot.definition, entry.source_kind, task_repository)
             ]
             chart_model_errors: dict[int, str] = {}
             for position, index in enumerate(indexes):
@@ -874,7 +875,7 @@ def install_dashboard_routes(core):
             }
             chart_total = sum(
                 1 for entries in grouped.values() for _index, entry in entries
-                if entry.source_kind and snapshot.definition.datasets.get(entry.source_kind)
+                if entry.source_kind and dashboard_datasets(snapshot.definition, entry.source_kind, task_repository)
             )
             rendered = 0
             for slide_number in sorted(grouped):
@@ -901,7 +902,7 @@ def install_dashboard_routes(core):
                     continue
                 chart_entries = [
                     (index, entry) for index, entry in slide_entries
-                    if entry.source_kind and snapshot.definition.datasets.get(entry.source_kind)
+                    if entry.source_kind and dashboard_datasets(snapshot.definition, entry.source_kind, task_repository)
                 ]
                 if not chart_entries:
                     continue
@@ -1748,6 +1749,10 @@ def install_dashboard_routes(core):
                 column for column in source_columns if identity(column) not in hidden
             }, key=str.casefold)
         columns = columns_by_source.get(f'cdr-{entry.source_kind}', [])
+        datasets_by_source['cdr-all'] = [row for source in KINDS for row in datasets_by_source[f'cdr-{source}']]
+        columns_by_source['cdr-all'] = sorted({*rf_union_source(task_repository, [kind for kind in KINDS if dashboard_datasets(definition, kind, task_repository)])[1]}, key=str.casefold)
+        if entry.source_kind == 'all':
+            columns = columns_by_source['cdr-all']
         template_available = user.role in {'user-editor', 'admin', 'super-admin'} and any(
             str(item['name']) == definition.template
             for item in task_repository.list_report_templates(definition.template_technology)
@@ -1755,7 +1760,7 @@ def install_dashboard_routes(core):
         return JSONResponse({
             'token': token, 'chart_index': entry_index, 'cdr_source': entry.cdr_source,
             'chart_type': entry.chart_type, 'chart_title': entry.chart_title, 'kpi': entry.kpi,
-            'dataset_ids': [str(value) for value in definition.datasets.get(entry.source_kind, [])],
+            'dataset_ids': [str(row['id']) for row in dashboard_datasets(definition, entry.source_kind, task_repository)],
             'filters': entry.filters, 'grouping_rows': entry.grouping_rows,
             'grouping_columns': entry.grouping_columns, 'legend': entry.legend,
             'legend_position': entry.legend_position,
@@ -2093,6 +2098,8 @@ def install_dashboard_routes(core):
 
     def dashboard_datasets(definition, kind, task_repository):
         """Return the selected CDRs of one kind that match the Dashboard's NR Mode."""
+        if kind == 'all':
+            return [row for source in KINDS for row in dashboard_datasets(definition, source, task_repository)]
         datasets = definition.get('datasets', {}) if isinstance(definition, dict) else definition.datasets
         nr_mode = dashboard_nr_mode(definition)
         return [
@@ -2815,6 +2822,14 @@ def install_dashboard_routes(core):
         entries = validate(definition, task_repository)
         dimensions = core.load_repository_calculated_dimensions(task_repository)
         selected_by_kind = selected_sources(definition, task_repository)
+        if any(entry.source_kind == 'all' for entry in entries):
+            # A virtual source needs the physical RF fields of every selected
+            # CDR type, including templates added after CDR ingestion.
+            for kind, datasets in selected_by_kind.items():
+                for dataset in datasets:
+                    available = task_repository.list_dataset_row_columns(int(dataset['id']))
+                    requested = [column for column in available if identity(column) in {identity(field) for field in rf_source_columns(kind)}]
+                    task_repository.copy_dataset_rows_to_reporting(int(dataset['id']), kind, requested)
         selected_source_rows = {
             kind: sum(int(dataset.get('row_count') or 0) for dataset in selected)
             for kind, selected in selected_by_kind.items()
@@ -2868,7 +2883,7 @@ def install_dashboard_routes(core):
                 slide['charts'].append({
                     'index': index, 'title': entry.chart_title, 'source': entry.source_kind,
                     'cdr_source': entry.cdr_source, 'chart_type': entry.chart_type,
-                    'available': entry.source_kind in selected_by_kind, 'focus_row': editor_index,
+                    'available': bool(selected_by_kind) if entry.source_kind == 'all' else entry.source_kind in selected_by_kind, 'focus_row': editor_index,
                 })
         for slide in slides.values():
             bounds = _layout_chart_frames(_named_slide_layout(deck, slide['layout']))
@@ -3513,6 +3528,9 @@ def install_dashboard_routes(core):
         selected = dashboard_datasets(snapshot.definition, kind, task_repository)
         if not selected:
             raise HTTPException(400, 'Unavailable source type: select a matching CDR dataset.')
+        if kind == 'all':
+            table, columns = rf_union_source(task_repository, [source for source in KINDS if dashboard_datasets(snapshot.definition, source, task_repository)])
+            return Path(snapshot.workspace), table, columns
         columns = task_repository.list_reporting_row_columns(kind)
         if not columns:
             raise ValueError(f'The selected {kind.title()} CDRs have no materialised reporting columns.')
@@ -3542,7 +3560,7 @@ def install_dashboard_routes(core):
         quote = lambda value: '"' + str(value).replace('"', '""') + '"'
         for condition in parse_catalog_filters(entry.filters):
             normalized = identity(condition.column)
-            if normalized in {'threshold', 'buckets'}:
+            if normalized in {'threshold', 'buckets', 'binsize', 'classcolours'}:
                 continue
             if multivendor and normalized in {'operator', 'vendor', 'vendorv3'}:
                 complete = False
@@ -3638,7 +3656,8 @@ def install_dashboard_routes(core):
         select_clause = ", ".join(quote(column) for column in selected_columns)
         if aggregation_columns:
             select_clause += ', COUNT(*) AS "__catalog_weight"'
-        query = f'SELECT {select_clause} FROM {quote(table_name)} WHERE {where}'
+        source = table_name if table_name.startswith('(') else quote(table_name)
+        query = f'SELECT {select_clause} FROM {source} WHERE {where}'
         if aggregation_columns:
             query += f' GROUP BY {", ".join(quote(column) for column in selected_columns)}'
         connection = sqlite3.connect(database_path, timeout=120.0)
@@ -3672,7 +3691,7 @@ def install_dashboard_routes(core):
     def chart_dataset_column_classes(snapshot, entry, columns):
         task_repository = Repository(Path(snapshot.workspace), core.repository.global_db_path)
         datasets = []
-        for dataset_id in snapshot.definition.datasets.get(entry.source_kind, []):
+        for dataset_id in [row['id'] for row in dashboard_datasets(snapshot.definition, entry.source_kind, task_repository)]:
             dataset = task_repository.get_dataset(int(dataset_id))
             if dataset:
                 datasets.append(core.serialize_dataset_row(dataset))
@@ -3681,7 +3700,7 @@ def install_dashboard_routes(core):
     def chart_dataset_column_metadata(snapshot, entry, columns):
         task_repository = Repository(Path(snapshot.workspace), core.repository.global_db_path)
         datasets = []
-        for dataset_id in snapshot.definition.datasets.get(entry.source_kind, []):
+        for dataset_id in [row['id'] for row in dashboard_datasets(snapshot.definition, entry.source_kind, task_repository)]:
             dataset = task_repository.get_dataset(int(dataset_id))
             if dataset:
                 datasets.append(core.serialize_dataset_row(dataset))
@@ -3723,7 +3742,7 @@ def install_dashboard_routes(core):
     ):
         """Read one exact chart-data page without rebuilding its full DataFrame."""
         spec = _catalog_spec(entry)
-        if spec.get('operators'):
+        if entry.source_kind == 'all' or spec.get('operators'):
             return None
         # This SQL-only pagination path reads physical CDR values. Chart frames
         # intentionally replace Operator aliases (and their derived Subscriber
@@ -4147,6 +4166,8 @@ def install_dashboard_routes(core):
             columns_by_source[source] = sorted({
                 column for column in source_columns if identity(column) not in hidden
             }, key=str.casefold)
+        datasets_by_source['cdr-all'] = [row for kind in KINDS for row in datasets_by_source[f'cdr-{kind}']]
+        columns_by_source['cdr-all'] = [str(column) for column in columns if identity(column) not in hidden]
         template_available = user.role in {'user-editor', 'admin', 'super-admin'} and any(
             str(row['name']) == snapshot.definition.template
             for row in task_repository.list_report_templates(snapshot.definition.template_technology)
@@ -4156,7 +4177,7 @@ def install_dashboard_routes(core):
             'chart_type': entry.chart_type,
             'chart_title': entry.chart_title,
             'kpi': entry.kpi,
-            'dataset_ids': [str(value) for value in snapshot.definition.datasets.get(entry.source_kind, [])],
+            'dataset_ids': [str(row['id']) for row in dashboard_datasets(snapshot.definition, entry.source_kind, task_repository)],
             'filters': entry.filters,
             'grouping_rows': entry.grouping_rows,
             'grouping_columns': entry.grouping_columns,
@@ -4227,9 +4248,12 @@ def install_dashboard_routes(core):
         if request.dataset_ids is not None:
             values = request.dataset_ids if isinstance(request.dataset_ids, list) else str(request.dataset_ids).split(',')
             try:
-                preview_definition.datasets[preview_entry.source_kind] = list(dict.fromkeys(
-                    int(str(value).strip()) for value in values if str(value).strip()
-                ))
+                ids = list(dict.fromkeys(int(str(value).strip()) for value in values if str(value).strip()))
+                if preview_entry.source_kind == 'all':
+                    for kind in KINDS:
+                        preview_definition.datasets[kind] = [value for value in ids if (task_repository.get_dataset(value) and str(task_repository.get_dataset(value)['dataset_kind']).casefold() == kind)]
+                else:
+                    preview_definition.datasets[preview_entry.source_kind] = ids
             except ValueError as exc:
                 raise HTTPException(400, 'Selected datasets must have valid identifiers.') from exc
         # An expanded chart may introduce any available field. Materialize it
@@ -4241,7 +4265,7 @@ def install_dashboard_routes(core):
         selected = dashboard_datasets(preview_definition, preview_entry.source_kind, task_repository)
         ensure_combined_filter_columns(
             preview_definition, task_repository, snapshot.dimensions,
-            {preview_entry.source_kind: selected}, [preview_entry],
+            selected_sources(preview_definition, task_repository), [preview_entry],
         )
         database_path, table_name, source_columns = reporting_source(
             preview_snapshot, preview_entry.source_kind, task_repository,

@@ -107,7 +107,7 @@ This is the canonical authoring reference for templates used by both [E2E Dashbo
 | `Slide Subtittle` | Optional shared slide subtitle. |
 | `Layout` | Exact layout name from `Template_CDR_analysis.pptx`. |
 | `Chart Tittle` | Optional title drawn inside the chart. |
-| `CDR source` | `CDR-Data`, `CDR-Voice` or `CDR-Speech`; leave blank for structural slides. |
+| `CDR source` | `CDR-Data`, `CDR-Voice`, `CDR-Speech` or `CDR-All`; leave blank for structural slides. `CDR-All` pools selected RF observations using `LTE_RSRP`, `NR_RSRP`, `LTE_SINR`, `NR_SINR`, `Latitude` and `Longitude`, retaining Operator/Campaign context. |
 | `KPI` | Processed CDR field or metric expression to render. |
 | `Chart type` | Automated chart type or structural slide type. |
 | `Filters` | Conditions applied before aggregation, one per line and terminated with `;`. |
@@ -156,6 +156,7 @@ Automated rows support:
 - `100% Stacked Vertical Bars`
 - `Count Stacked Horizontal Bars`
 - `CDF Line`
+- `Histogram Line`
 - `Multi KPI CDF Lines`
 - `Scatter`
 - `Map`
@@ -166,6 +167,10 @@ Automated rows support:
 - `Threshold Stacked Vertical Bars`
 
 Choose a KPI and at least one Rows or Column Aggregation dimension. `CDF Line` creates one curve per complete aggregation combination. Count charts retain empty combinations where required so comparisons remain aligned.
+
+The RF Quality template includes combined Data/Voice/Speech slides before each chart family. Its `CDR-All` source is virtual: it uses the selected physical datasets and creates no duplicate CDR dataset or database table. Templates containing this source are retained by JSON/CSV import/export, workspace transfers and backup/restore.
+
+`Histogram Line` draws an unfilled step contour for each aggregation combination. Set `Bin Size = 5` in Filters for 5-unit bins, or `Bin Size = 1` for 1-unit bins. The vertical axis shows the percentage of valid samples in each bin, normalized independently per series; series models retain sample counts. Histograms reuse CDF colours, progressive campaign widths and multivendor operator line patterns. Add four `Buckets = ...` thresholds for five red-to-green quality background bands. Add `Class Colours = Quality` to matching distribution charts to use those same five class colours. The existing template/JSON export, import and backup workflows preserve these chart settings.
 
 Axis ranges are visual settings, not data filters, and are available to every chart family with a numeric axis. For example, `Axis X Range: [0.01,]` starts the horizontal axis at `0.01` while retaining its automatically calculated maximum; `[,30]` retains the automatic minimum and fixes the maximum at `30`. Empty range cells preserve the existing automatic behaviour.
 

@@ -3194,8 +3194,8 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       ],
       textFields: {chart_title: true},
       // Keep these option sets identical to the persisted Chart Viewer.
-      chartTypes: ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Multi KPI CDF Lines', 'Scatter', 'Table', 'Dynamic Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'],
-      cdrSources: ['CDR-Data', 'CDR-Voice', 'CDR-Speech'],
+      chartTypes: ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Histogram Line', 'Multi KPI CDF Lines', 'Scatter', 'Table', 'Dynamic Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'],
+      cdrSources: ['CDR-Data', 'CDR-Voice', 'CDR-Speech', 'CDR-All'],
       legendPositions: ['', 'Top', 'Bottom', 'Left', 'Right'],
       labelPositions: ['', 'None', 'Top', 'Up', 'Middle', 'Down'],
       onChange: regenerate,
@@ -5596,7 +5596,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
   const kpiDefinition = parseKpiDefinition(definition.kpi);
   const sourceKey = (source) => {
     const normalized = String(source || '').trim().toLowerCase();
-    return ({data: 'cdr-data', voice: 'cdr-voice', speech: 'cdr-speech'})[normalized] || (normalized.startsWith('cdr-') ? normalized : `cdr-${normalized}`);
+    return ({data: 'cdr-data', voice: 'cdr-voice', speech: 'cdr-speech', all: 'cdr-all'})[normalized] || (normalized.startsWith('cdr-') ? normalized : `cdr-${normalized}`);
   };
   const columnsFor = (source) => Array.from(new Set((options.columnsBySource || {})[sourceKey(source)] || [])).sort((left, right) => left.localeCompare(right));
   const valuesFor = (value, key) => new Set(String(value || '').split(key === 'legend' ? ',' : /\s*×\s*|\s+\bx\b\s+/i).map((item) => item.trim()).filter(Boolean));
@@ -5809,7 +5809,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
     }
     const control = document.createElement('select');
     if (key === 'chart_type') (options.chartTypes || []).forEach((value) => control.add(new Option(value, value, false, normalisePreviewValue(value) === normalisePreviewValue(definition[key]))));
-    else if (key === 'cdr_source') (options.cdrSources || ['CDR-Data', 'CDR-Voice', 'CDR-Speech']).forEach((value) => control.add(new Option(value, value, false, sourceKey(value) === sourceKey(definition[key]))));
+    else if (key === 'cdr_source') (options.cdrSources || ['CDR-Data', 'CDR-Voice', 'CDR-Speech', 'CDR-All']).forEach((value) => control.add(new Option(value, value, false, sourceKey(value) === sourceKey(definition[key]))));
     else if (key === 'dataset_ids') {
       control.multiple = true;
       const selected = new Set(Array.isArray(definition[key]) ? definition[key].map(String) : String(definition[key] || '').split(',').map((value) => value.trim()).filter(Boolean));

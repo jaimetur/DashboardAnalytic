@@ -2929,7 +2929,7 @@
   const createExpandedChartFilterControls = context => {
     const sourceKey = source => {
       const normalized = String(source || '').trim().toLocaleLowerCase();
-      return ({data: 'cdr-data', voice: 'cdr-voice', speech: 'cdr-speech'})[normalized]
+      return ({data: 'cdr-data', voice: 'cdr-voice', speech: 'cdr-speech', all: 'cdr-all'})[normalized]
         || (normalized.startsWith('cdr-') ? normalized : `cdr-${normalized}`);
     };
     const columnsBySource = context.columns_by_source || {[sourceKey(context.cdr_source)]: context.columns || []};
@@ -2944,7 +2944,7 @@
       ],
       textFields: {chart_title: true}, editableGroupingInputs: true,
       formatPanelToggleOnFieldClick: true,
-      chartTypes: ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Multi KPI CDF Lines', 'Scatter', 'Table', 'Dynamic Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'],
+      chartTypes: ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Histogram Line', 'Multi KPI CDF Lines', 'Scatter', 'Table', 'Dynamic Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'],
       legendPositions: ['', 'Top', 'Bottom', 'Left', 'Right'],
       labelPositions: ['', 'None', 'Top', 'Up', 'Middle', 'Down'],
       menuContainer: chartFilterPanel.closest('.ds-overlay') || expandedOverlayHost,

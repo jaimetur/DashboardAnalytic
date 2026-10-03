@@ -149,20 +149,34 @@ def test_threshold_and_negative_bucket_labels_follow_the_configuration() -> None
 
 def test_bundled_rf_quality_template_is_valid() -> None:
     catalogue = app_module.load_template_catalogue(TEMPLATE_PATH.read_bytes(), 'nsa')
-    assert len(catalogue) == 64
+    assert len(catalogue) == 100
+    from src.modules.cdr_reporting import catalogue_csv, parse_catalog_csv
+    restored = parse_catalog_csv(catalogue_csv(catalogue), 'nsa')
+    assert [(entry.cdr_source, entry.chart_type, entry.kpi, entry.filters) for entry in restored] == [
+        (entry.cdr_source, entry.chart_type, entry.kpi, entry.filters) for entry in catalogue
+    ]
     chart_types = {entry.chart_type for entry in catalogue}
     assert {'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars'} <= chart_types
     maps = [entry for entry in catalogue if entry.chart_type == 'Map']
-    assert len(maps) == 12
-    assert {entry.source_kind for entry in maps} == {'data', 'voice', 'speech'}
+    assert len(maps) == 16
+    assert {entry.source_kind for entry in maps} == {'data', 'voice', 'speech', 'all'}
     assert all(len(entry.kpi.split(' vs ')) == 3 for entry in maps)
     for chart_type in ('Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars'):
         nr_entries = [entry for entry in catalogue if entry.chart_type == chart_type and entry.chart_title.startswith('NR ')]
-        assert len(nr_entries) == 6
-        assert {entry.source_kind for entry in nr_entries} == {'data', 'voice', 'speech'}
+        assert len(nr_entries) == 8
+        assert {entry.source_kind for entry in nr_entries} == {'data', 'voice', 'speech', 'all'}
         assert all((entry.kpi.startswith('NR_') or '_NR_' in entry.kpi) and entry.exclude_null_empty for entry in nr_entries)
         assert all(f'{entry.kpi} >=' in entry.filters and f'{entry.kpi} <=' in entry.filters for entry in nr_entries)
     assert catalogue[-1].layout == 'Black logo end slide'
+    cdf_slides = {entry.slide for entry in catalogue if entry.chart_type == 'CDF Line'}
+    assert len(cdf_slides) == 8
+    for slide in cdf_slides:
+        entries = [entry for entry in catalogue if entry.slide == slide]
+        assert len(entries) == 4
+        assert all(entry.layout == 'Title and 2 columns and 2 rows + Comments right' for entry in entries)
+        assert [entry.chart_type for entry in entries[:2]] == ['CDF Line', 'CDF Line']
+        assert all(entry.chart_type == 'Histogram Line' for entry in entries[2:])
+        assert all(entry.grouping_rows == 'Operator' and entry.grouping_columns == 'Campaign' for entry in entries[2:])
 
 
 @pytest.mark.parametrize('field,values,edges', [
@@ -192,6 +206,29 @@ def test_quality_maps_use_measurement_buckets_without_replacing_coordinates(fiel
     }
     points = [point for series in model['series'] for point in series['points']]
     assert sorted(point[1] for point in points) == pytest.approx([51.5, 51.51, 51.52, 51.53, 51.54])
+
+
+def test_rf_histogram_counts_samples_in_ordered_quality_ranges() -> None:
+    from src.modules.cdr_reporting import catalog_chart_payload
+
+    catalogue = app_module.load_template_catalogue(TEMPLATE_PATH.read_bytes(), 'nsa')
+    entry = next(entry for entry in catalogue if entry.chart_type == 'Histogram Line' and entry.kpi == 'NR_PCell_RSRP_Avg')
+    frame = pd.DataFrame({
+        'Operator': ['EE'] * 9,
+        'Campaign': ['2026-Q1'] * 9,
+        'NR_PCell_RSRP_Avg': [-115, -105, -100, -95, -85, -75, None, 'invalid', 0],
+    })
+    model = catalog_chart_payload(frame, entry)
+    assert model['histogram'] is True
+    assert model['bin_size'] == 5
+    series = model['series'][0]
+    assert sum(series['counts']) == series['samples'] == 6
+    assert series['counts'][series['bin_edges'].index(-100)] == 1
+    assert series['counts'][series['bin_edges'].index(-95)] == 1
+    assert sum(series['counts']) / series['samples'] == 1
+    assert [band['colour'] for band in model['quality_bands']] == [
+        '#D7263D', '#F08A24', '#F2C230', '#8BC34A', '#2E8B57',
+    ]
 
 
 def test_bundled_rf_quality_content_is_seeded_once(client) -> None:
@@ -324,3 +361,45 @@ def test_spectrum_holdings_api_workspace_config_and_archive(client) -> None:
     assert len(ni.load_spectrum_holdings(app_module.repository)) == 2
     with pytest.raises(ValueError, match='Spectrum Holdings'):
         app_module._restore_workspace_operator_mappings(workspace, json.dumps(archive | {'spectrum_holdings': [{'operator': 'EE'}]}).encode())
+
+
+def test_combined_rf_source_pools_samples_instead_of_type_means() -> None:
+    from src.modules.rf_catalog_source import pool_rf_frames
+    from src.modules.cdr_reporting import catalog_chart_payload
+
+    frames = {
+        'data': pd.DataFrame({'Operator': ['EE'] * 3, 'Campaign': ['2026-Q1'] * 3,
+                              'LTE_PCell_RSRP_Avg': [-100, -90, -80], 'NR_PCell_RSRP_Avg': [-95, None, None]}),
+        'voice': pd.DataFrame({'Operator': ['EE'], 'Campaign': ['2026-Q1'], '4G_RSRP_Avg_A': [-60]}),
+        'speech': pd.DataFrame({'Operator': ['EE'], 'Campaign': ['2026-Q1'], 'Playing_RSRP_Avg': [-70]}),
+    }
+    combined = pool_rf_frames(frames)
+    assert combined['LTE_RSRP'].mean() == -80
+    assert combined['NR_RSRP'].count() == 1
+    assert combined['CDR_Type'].tolist() == ['Data', 'Data', 'Data', 'Voice', 'Speech']
+    catalogue = app_module.load_template_catalogue(TEMPLATE_PATH.read_bytes(), 'nsa')
+    aggregate = [entry for entry in catalogue if entry.source_kind == 'all']
+    assert len({entry.slide for entry in aggregate}) == 10
+    assert len(aggregate) == 24
+    entry = next(entry for entry in aggregate if entry.chart_type == 'Histogram Line' and entry.kpi == 'LTE_RSRP')
+    model = catalog_chart_payload(combined, entry)
+    assert model['series'][0]['samples'] == 5
+    assert sum(model['series'][0]['counts']) == 5
+
+
+def test_histogram_legacy_png_renderer_accepts_combined_rf_samples(monkeypatch) -> None:
+    from PIL import Image
+    from io import BytesIO
+    from src.modules.cdr_reporting import render_catalog_chart_preview
+    from src.modules.rf_catalog_source import pool_rf_frames
+
+    monkeypatch.setenv('DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER', 'pil')
+    catalogue = app_module.load_template_catalogue(TEMPLATE_PATH.read_bytes(), 'nsa')
+    entry = next(entry for entry in catalogue if entry.source_kind == 'all' and entry.chart_type == 'Histogram Line' and entry.kpi == 'LTE_RSRP')
+    combined = pool_rf_frames({'data': pd.DataFrame({
+        'Operator': ['EE'] * 4, 'Campaign': ['2026-Q1', '2026-Q1', '2026-Q2', '2026-Q2'],
+        'LTE_PCell_RSRP_Avg': [-115, -95, -90, -85],
+    })})
+    image = Image.open(BytesIO(render_catalog_chart_preview(combined, entry)))
+    assert image.width >= 1500
+    assert image.height >= 900

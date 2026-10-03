@@ -1077,9 +1077,10 @@ def test_interactive_cdf_model_uses_reporting_hierarchy_palette_and_legend() -> 
     assert all(series['x'] and series['y'] and series['samples'] == 2 for series in model['series'])
 
 
-def test_interactive_cdf_model_uses_progressive_campaign_widths() -> None:
+@pytest.mark.parametrize('chart_type', ['CDF Line', 'Histogram Line'])
+def test_interactive_cdf_model_uses_progressive_campaign_widths(chart_type) -> None:
     entry = CatalogEntry(
-        1, 'Data', '', '', 'Rate CDF', 'CDR-Data', 'Rate', 'CDF Line',
+        1, 'Data', '', '', 'Rate CDF', 'CDR-Data', 'Rate', chart_type,
         'Operator, Campaign', '', 'Operator', 'Campaign', 'Top',
     )
     campaigns = ['2026-Q1', '2026-Q2', '2026-Q3', '2026-Q4']
@@ -1121,9 +1122,10 @@ def test_multi_cdf_payload_bounds_high_cardinality_identifier_groups() -> None:
     assert all({series['key'][-1] for series in panel['series']} == {'EE', 'VF'} for panel in model['panels'])
 
 
-def test_multivendor_cdf_legend_keeps_operator_and_vendor_for_each_curve() -> None:
+@pytest.mark.parametrize('chart_type', ['CDF Line', 'Histogram Line'])
+def test_multivendor_cdf_legend_keeps_operator_and_vendor_for_each_curve(chart_type) -> None:
     entry = CatalogEntry(
-        1, 'Speech', '', '', 'Interactivity', 'CDR-Speech', 'LQ', 'CDF Line',
+        1, 'Speech', '', '', 'Interactivity', 'CDR-Speech', 'LQ', chart_type,
         'Operator', '', 'Operator', 'Campaign', 'Bottom',
     )
     frame = chart_frame({

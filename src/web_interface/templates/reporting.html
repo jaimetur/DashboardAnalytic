@@ -1437,7 +1437,7 @@
     ];
     const previewSourceKey = (source) => {
       const normalized = String(source || '').trim().toLowerCase();
-      return ({data: 'cdr-data', voice: 'cdr-voice', speech: 'cdr-speech'})[normalized] || normalized || 'cdr-data';
+      return ({data: 'cdr-data', voice: 'cdr-voice', speech: 'cdr-speech', all: 'cdr-all'})[normalized] || normalized || 'cdr-data';
     };
     const previewColumns = (definition, source = definition.cdr_source) => (
       Array.from(new Set((definition.columns_by_source || {})[previewSourceKey(source)] || [])).sort((left, right) => left.localeCompare(right))
@@ -1562,10 +1562,10 @@
         }
         if (key === 'chart_type') {
           control = document.createElement('select');
-          ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Scatter', 'Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'].forEach((value) => control.add(new Option(value, value, false, value.toLowerCase() === String(definition[key] || '').toLowerCase())));
+          ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Histogram Line', 'Scatter', 'Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'].forEach((value) => control.add(new Option(value, value, false, value.toLowerCase() === String(definition[key] || '').toLowerCase())));
         } else if (key === 'cdr_source') {
           control = document.createElement('select');
-          ['CDR-Data', 'CDR-Voice', 'CDR-Speech'].forEach((value) => control.add(new Option(value, value, false, value.toLowerCase() === String(definition[key] || '').toLowerCase())));
+          ['CDR-Data', 'CDR-Voice', 'CDR-Speech', 'CDR-All'].forEach((value) => control.add(new Option(value, value, false, value.toLowerCase() === String(definition[key] || '').toLowerCase())));
         } else if (key === 'legend_position') {
           control = document.createElement('select');
           ['Top', 'Bottom', 'Left', 'Right'].forEach((value) => control.add(new Option(value, value, false, value.toLowerCase() === String(definition[key] || '').toLowerCase())));
@@ -1660,7 +1660,7 @@
         // Keep popovers within the active Chart Preview overlay so they are
         // neither hidden behind it nor detached from its stacking context.
         menuContainer: reportChartViewer,
-        chartTypes: ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Multi KPI CDF Lines', 'Scatter', 'Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'],
+        chartTypes: ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Histogram Line', 'Multi KPI CDF Lines', 'Scatter', 'Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'],
         onChange: regenerate,
         onSourceChange: (next) => {
           const sourceKey = previewSourceKey(next.cdr_source);

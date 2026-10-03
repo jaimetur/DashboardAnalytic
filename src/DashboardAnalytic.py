@@ -1298,7 +1298,10 @@ def workspace_template_fields(task_repository: Repository, kind: str) -> list[st
                 # the reconciliation of the remaining valid templates.
                 continue
             for entry in entries:
-                if entry.source_kind != kind:
+                if entry.source_kind == 'all' and kind in ('data', 'voice', 'speech'):
+                    from src.modules.rf_catalog_source import rf_source_columns
+                    requested.extend(rf_source_columns(kind))
+                if entry.source_kind not in {kind, 'all'}:
                     continue
                 requested.extend(catalog_kpi_fields(entry.kpi))
                 try:
@@ -11669,6 +11672,11 @@ def datasets_analysis(
     )
 
 
+def _reporting_kind_matches(actual_kind: str, expected_kind: str) -> bool:
+    """Accept physical CDR types for the virtual pooled RF source."""
+    return actual_kind == expected_kind or (expected_kind == 'all' and actual_kind in {'data', 'voice', 'speech'})
+
+
 def _reporting_dataset(
     dataset_id: int,
     expected_kind: str,
@@ -11681,7 +11689,7 @@ def _reporting_dataset(
     payload = serialize_dataset_row(dataset)
     if not payload['is_ready']:
         raise HTTPException(status_code=400, detail=f"{payload['file_name']} has not finished processing.")
-    if payload.get('dataset_kind') != expected_kind:
+    if not _reporting_kind_matches(payload.get('dataset_kind'), expected_kind):
         raise HTTPException(status_code=400, detail=f"{payload['file_name']} is not a {expected_kind.title()} CDR.")
     payload = refresh_selected_dataset_if_stale(payload, task_repository) or payload
     return payload
@@ -11722,7 +11730,10 @@ def reporting_query_columns(dataset_kind: str, catalog_entries: list[Any], multi
         'Type_of_Test', 'Test_Name', 'test_name', 'Test_Type', 'test_type',
     }
     for entry in catalog_entries:
-        if entry.source_kind != dataset_kind:
+        if entry.source_kind == 'all' and dataset_kind in ('data', 'voice', 'speech'):
+            from src.modules.rf_catalog_source import rf_source_columns
+            requested.update(rf_source_columns(dataset_kind))
+        if entry.source_kind not in {dataset_kind, 'all'}:
             continue
         # Scatter and Map KPIs declare their two coordinates as
         # ``latitude vs longitude``. They are physical CDR columns, not one
@@ -11800,6 +11811,12 @@ def _combined_reporting_frame(
 ) -> pd.DataFrame:
     """Load selected campaigns in one query from their shared CDR table."""
     task_repository = task_repository or repository
+    if len({str(dataset['dataset_kind']) for dataset in datasets}) > 1:
+        from src.modules.rf_catalog_source import pool_rf_frames
+        return pool_rf_frames({kind: _combined_reporting_frame(
+            [dataset for dataset in datasets if dataset['dataset_kind'] == kind],
+            technology, catalog_entries, multivendor, task_repository,
+        ) for kind in ('data', 'voice', 'speech') if any(dataset['dataset_kind'] == kind for dataset in datasets)})
     dataset_kind = str(datasets[0]['dataset_kind'])
     dataset_ids = [int(dataset['id']) for dataset in datasets]
     columns = reporting_query_columns(dataset_kind, catalog_entries, multivendor)
@@ -11824,7 +11841,11 @@ def _combined_reporting_frame(
     # failure instant. Treating that sample RAT as a report-wide NSA/SA filter
     # silently removes valid attempts and corrupts completion percentages.
     # Voice and Speech still require call/session classification by technology.
-    return combined if dataset_kind == 'data' else classify_sessions(combined, technology)
+    combined = combined if dataset_kind == 'data' else classify_sessions(combined, technology)
+    if any(entry.source_kind == 'all' for entry in catalog_entries):
+        from src.modules.rf_catalog_source import pool_rf_frames
+        combined = pool_rf_frames({dataset_kind: combined})
+    return combined
 
 
 def _clear_chart_preview_caches() -> None:
@@ -12006,6 +12027,7 @@ def _temporary_chart_preview_context(
     try:
         dataset_ids = json.loads(row['dataset_ids_json'] or '{}')
         selected_ids = {kind: [int(value) for value in dataset_ids.get(kind, [])] for kind in ('data', 'voice', 'speech')}
+        selected_ids['all'] = [value for kind in ('data', 'voice', 'speech') for value in selected_ids[kind]]
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail='The selected Chart Set has invalid CDR references.') from exc
     technology = str(row['technology'] or '').strip().lower()
@@ -12113,7 +12135,7 @@ def _temporary_preview_dataset_ids(editable: dict[str, Any], selected_ids: dict[
         raise HTTPException(status_code=400, detail='Choose valid processed CDR datasets.') from exc
     available = {
         int(row['id']) for row in repository.list_datasets()
-        if row['status'] == 'ready' and str(row['dataset_kind'] or '').casefold() == source_kind
+        if row['status'] == 'ready' and _reporting_kind_matches(str(row['dataset_kind'] or '').casefold(), source_kind)
     }
     if not requested or any(dataset_id not in available for dataset_id in requested):
         raise HTTPException(status_code=400, detail=f'Choose one or more processed {source_kind.title()} CDR datasets.')
@@ -12137,11 +12159,12 @@ def temporary_chart_preview_context(source: str, identifier: str, chart_index: i
         kind = str(row['dataset_kind'] or '').casefold()
         if row['status'] == 'ready' and kind in {'data', 'voice', 'speech'}:
             datasets_by_source[f'cdr-{kind}'].append({'value': str(row['id']), 'label': str(row['file_name'])})
+    datasets_by_source['cdr-all'] = [row for kind in ('data', 'voice', 'speech') for row in datasets_by_source[f'cdr-{kind}']]
     return JSONResponse({
         'slide': entry.slide, 'chart_title': entry.chart_title, 'template_row_index': template_row_index,
         'source_available': bool(selected_ids.get(entry.source_kind or '')), 'cdr_source': entry.cdr_source,
         'dataset_ids': [str(value) for value in selected_ids.get(entry.source_kind or '', [])],
-        'dataset_ids_by_source': {f'cdr-{kind}': [str(value) for value in values] for kind, values in selected_ids.items()},
+        'dataset_ids_by_source': {f'cdr-{kind}': [str(value) for value in values] for kind, values in selected_ids.items() if kind != 'all' or entry.source_kind == 'all'},
         'datasets_by_source': datasets_by_source,
         'kpi': entry.kpi, 'chart_type': entry.chart_type, 'filters': entry.filters,
         'grouping_rows': entry.grouping_rows, 'grouping_columns': entry.grouping_columns,
@@ -13326,6 +13349,7 @@ def _run_report_chart_job(
             catalog_entries = load_template_catalogue(_template_row_content(metadata), technology, task_repository=task_repository)
             _ensure_report_job_active(task_repository, job_id, chart_job=True)
             task_repository.update_report_chart_job(job_id, status='processing', progress=12)
+            selected['all'] = [row for kind in ('data', 'voice', 'speech') for row in selected[kind]]
             chart_entries = [entry for entry in catalog_entries if entry.source_kind]
             if not chart_entries:
                 raise ValueError('The selected Report Template does not contain automated CDR charts.')
@@ -13343,7 +13367,7 @@ def _run_report_chart_job(
                     if generate_tooltips and selected_renderer == 'pil' else None
                 )
                 try:
-                    for kind in ('data', 'voice', 'speech'):
+                    for kind in ('data', 'voice', 'speech', 'all'):
                         entries = [
                             (order, entry) for order, entry in enumerate(chart_entries)
                             if entry.source_kind == kind
@@ -17778,7 +17802,7 @@ async def preview_report_template_chart(
         selected_datasets = [
             serialize_dataset_row(dataset)
             for dataset in repository.list_datasets()
-            if str(dataset['dataset_kind'] or '').casefold() == entry.source_kind and dataset['status'] == 'ready'
+            if _reporting_kind_matches(str(dataset['dataset_kind'] or '').casefold(), entry.source_kind) and dataset['status'] == 'ready'
         ]
         if not selected_datasets:
             raise HTTPException(status_code=400, detail=f'No processed {entry.cdr_source} datasets are available in the active workspace.')
@@ -17877,7 +17901,7 @@ async def preview_report_template_chart_image(
         raise HTTPException(status_code=400, detail='Only chart rows with a CDR source can be previewed.')
     selected_datasets: list[dict[str, Any]] = []
     for dataset in repository.list_datasets():
-        if str(dataset['dataset_kind'] or '').casefold() != entry.source_kind or dataset['status'] != 'ready':
+        if not _reporting_kind_matches(str(dataset['dataset_kind'] or '').casefold(), entry.source_kind) or dataset['status'] != 'ready':
             continue
         selected_datasets.append(serialize_dataset_row(dataset))
     if not selected_datasets:

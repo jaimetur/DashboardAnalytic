@@ -757,6 +757,14 @@
     const yLow = Number(payload.domain?.y?.[0] ?? 0), yHigh = Number(payload.domain?.y?.[1] ?? 1);
     const endpointLabels = [];
     context.save(); context.beginPath(); context.rect(plot.left, plot.top, plot.width, plot.height); context.clip();
+    (payload.quality_bands || []).forEach(band => {
+      const low = Math.max(xLow, Number(band.low)), high = Math.min(xHigh, Number(band.high));
+      if (high <= low) return;
+      context.fillStyle = band.colour; context.globalAlpha = .10;
+      context.fillRect(plot.left + (low - xLow) / (xHigh - xLow) * plot.width, plot.top,
+        (high - low) / (xHigh - xLow) * plot.width, plot.height);
+      context.globalAlpha = 1;
+    });
     (payload.series || []).forEach(series => {
       const points = [];
       (series.x || []).forEach((value, index) => {
@@ -770,7 +778,7 @@
         context.setLineDash([]);
         pushLineHit(state, transform, points, {label: payload.metric, series: series.name || series.legend_name});
         const endpoint = points.at(-1);
-        endpointLabels.push({x: endpoint.x, y: endpoint.y, label: series.name || series.legend_name, colour: series.colour});
+        if (!payload.histogram) endpointLabels.push({x: endpoint.x, y: endpoint.y, label: series.name || series.legend_name, colour: series.colour});
       }
     });
     context.restore();
@@ -788,6 +796,7 @@
       context.fillStyle = '#4E6271'; context.textAlign = 'center'; font(context, 16, true); context.fillText(value.toFixed(1), x, plot.top + plot.height + 7);
     }
     context.fillStyle = '#405765'; context.textAlign = 'center'; font(context, 20, true); context.fillText(String(payload.metric || ''), plot.left + plot.width / 2, plot.top + plot.height + 31);
+    if (payload.y_label) verticalLabel(context, payload.y_label, Math.max(18, plot.left - 65), plot.top + plot.height / 2, '#405765', 18);
     drawLegend(context, payload.legend, {fontSize: 11, sideX: legendLayout(payload.legend, 11).position === 'right' ? plot.left + plot.width + 25 : undefined});
   }
 

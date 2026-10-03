@@ -79,9 +79,11 @@ This panel reads the cell inventories uploaded as **Vendor mapping** datasets (V
 
 Every workspace that already has NSA Report Templates receives once, when the application first opens it, the NSA Report Template **NSA - RF Quality (RSRP & SINR)** and the E2E Dashboard **RF Quality (RSRP & SINR)** that uses it. New empty workspaces stay empty. The Dashboard has no saved CDR universe, so it always uses the two newest NSA CDRs of each type. The template contains:
 
-- RSRP and SINR CDFs (LTE and NR) for Data, Voice and Speech;
+Each family (CDF/histograms, averages, classes, thresholds and maps) starts with an **All CDR types** slide. It pools valid Data, Voice and Speech observations per Operator and Campaign; it does not average the three type averages. LTE and NR stay separate, and missing technologies do not contribute samples. The existing type-specific slides follow the aggregate.
+
+- RSRP and SINR CDFs (LTE and NR) for Data, Voice and Speech, with contour histograms underneath in a two-by-two layout. RSRP uses 5 dB bins and SINR uses 1 dB bins; percentages are normalized per Operator and Campaign. Histograms reuse CDF colours and campaign line widths: newer campaigns are thicker, while multivendor operator comparisons retain their distinct line patterns;
 - average LTE and NR RSRP and SINR bars per CDR type;
-- separate LTE and NR RSRP distributions in -110/-100/-90/-80 dBm buckets and SINR distributions in 0/5/13/20 dB buckets;
+- separate LTE and NR RSRP distributions in -110/-100/-90/-80 dBm buckets and SINR distributions in 0/5/13/20 dB buckets, with red-to-green class colours matching the histogram background bands;
 - separate LTE and NR shares of samples below -110 dBm and below 0 dB, calculated from valid measurements of each technology;
 - LTE and NR coverage (RSRP) and quality (SINR) maps for Data, Voice and Speech, coloured from red to green using the same quality ranges; maps combine the measured samples in the selected Operator, Campaign and geographical filters, rather than estimating unmeasured coverage;
 - the same black-logo closing slide as the NSA NetCheck template.

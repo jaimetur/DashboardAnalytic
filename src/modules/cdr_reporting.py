@@ -64,10 +64,10 @@ PREVIOUS_CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout"
 OLDER_CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Legend", "Filters", "Grouping_Rows", "Grouping_Columns")
 LEGACY_ROWS_COLUMNS_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "CDR source", "KPI", "Chart type", "Filters", "Grouping_Rows", "Grouping_Columns")
 LEGACY_CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "CDR source", "KPI", "Chart type", "Filters", "Grouping")
-CATALOG_SOURCE_KINDS = {"cdr-data": "data", "cdr-voice": "voice", "cdr-speech": "speech"}
+CATALOG_SOURCE_KINDS = {"cdr-data": "data", "cdr-voice": "voice", "cdr-speech": "speech", "cdr-all": "all"}
 CHART_TYPES = {
     "100% stacked vertical bars", "count stacked horizontal bars", "cdf line", "multi kpi cdf lines", "scatter", "table", "dynamic table",
-    "distribution stacked vertical bars", "threshold stacked vertical bars", "average vertical bars", "median vertical bars", "map",
+    "distribution stacked vertical bars", "threshold stacked vertical bars", "average vertical bars", "median vertical bars", "map", "histogram line",
 }
 BAR_CHART_TYPES = {
     "100% stacked vertical bars", "count stacked horizontal bars",
@@ -2259,7 +2259,7 @@ def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor
     result.attrs["catalogue_calculated_dimensions"] = entry.calculated_dimensions
     result.attrs["catalogue_cdr_source"] = entry.cdr_source
     for condition in parse_catalog_filters(entry.filters):
-        if _normalise_catalog_name(condition.column) in {"threshold", "buckets"}:
+        if _normalise_catalog_name(condition.column) in {"threshold", "buckets", "binsize", "classcolours"}:
             continue
         # A Vendor Comparison materialises values as Operator_Vendor. Template
         # Operator filters therefore match that value's operator prefix (for
@@ -2383,6 +2383,19 @@ def _catalog_bucket_operator(entry: CatalogEntry) -> str:
     return condition.operator if condition else "="
 
 
+RF_QUALITY_CLASS_COLOURS = ("#D7263D", "#F08A24", "#F2C230", "#8BC34A", "#2E8B57")
+
+
+def _catalog_bin_size(entry: CatalogEntry) -> float:
+    """Read the numeric interval width of a sample histogram."""
+    condition = next((item for item in parse_catalog_filters(entry.filters)
+                      if _normalise_catalog_name(item.column) == "binsize"), None)
+    size = float(condition.values[0]) if condition else 1.0
+    if not math.isfinite(size) or size <= 0:
+        raise ValueError(f"Slide {entry.slide}: Bin Size must be a positive finite number.")
+    return size
+
+
 def _explicit_bucket_labels(edges: list[float]) -> list[str]:
     """Name explicit ``Buckets = ...`` ranges, readable with negative values too.
 
@@ -2465,6 +2478,13 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
     bucket_operator = _catalog_bucket_operator(entry)
     frame.attrs.pop("catalogue_map_colour_metric", None)
     frame.attrs.pop("catalogue_map_bucket_colours", None)
+    if bucket_edges and len(bucket_edges) == 4 and any(
+        _normalise_catalog_name(item.column) == "classcolours" and item.values[0].casefold() == "quality"
+        for item in parse_catalog_filters(entry.filters)
+    ):
+        frame.attrs["catalogue_map_bucket_colours"] = dict(zip(
+            _explicit_bucket_labels(bucket_edges), RF_QUALITY_CLASS_COLOURS, strict=True,
+        ))
     if entry.chart_type.casefold() == "map":
         colour_fields = _catalog_spec(entry).get("colour_metric", ())
         colour_metric = _column(frame, colour_fields) if colour_fields else None
@@ -2475,7 +2495,7 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
             if bucket_edges and len(bucket_edges) == 4:
                 frame.attrs["catalogue_map_bucket_colours"] = dict(zip(
                     _explicit_bucket_labels(bucket_edges),
-                    ("#D7263D", "#F08A24", "#F2C230", "#8BC34A", "#2E8B57"),
+                    RF_QUALITY_CLASS_COLOURS,
                     strict=True,
                 ))
     # Multivendor data stores the effective comparison identity as one
@@ -2616,9 +2636,9 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
         """Order ordinary aggregation values alphabetically and mapped identities by rank."""
         normalized_dimension = _normalise_catalog_name(dimension)
         map_bucket_colours = frame.attrs.get("catalogue_map_bucket_colours", {})
-        if normalized_dimension in {"ratebucket", "valuebucket"} and map_bucket_colours:
-            bucket_order = list(map_bucket_colours)
-            return (bucket_order.index(str(value)) if str(value) in map_bucket_colours else len(bucket_order),)
+        if normalized_dimension in {"ratebucket", "valuebucket"} and (map_bucket_colours or bucket_edges):
+            bucket_order = list(map_bucket_colours) if map_bucket_colours else _explicit_bucket_labels(bucket_edges)
+            return (bucket_order.index(str(value)) if str(value) in bucket_order else len(bucket_order),)
         if normalized_dimension == "campaign":
             return _campaign_sort_key(value)
         if normalized_dimension == "vendor":
@@ -2686,7 +2706,7 @@ def preview_catalog_chart_data(
     bucket_edges = _catalog_bucket_edges(entry)
     bucket_operator = _catalog_bucket_operator(entry)
     for condition in parse_catalog_filters(entry.filters):
-        if _normalise_catalog_name(condition.column) not in {'threshold', 'buckets'}:
+        if _normalise_catalog_name(condition.column) not in {'threshold', 'buckets', 'binsize', 'classcolours'}:
             include(_catalog_column(grouped, condition.column, False, metric, bucket_edges, bucket_operator, operator_as_vendor=False), f'Filter · {condition.column}')
     for axis, grouping in (('Rows Aggregation', entry.grouping_rows), ('Column Aggregation', entry.grouping_columns)):
         for dimension in parse_catalog_grouping(grouping).dimensions:
@@ -5238,6 +5258,51 @@ def _render_cdf_line(
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0); return output
 
 
+def _render_histogram_model(model: dict[str, object]) -> BytesIO:
+    """Paint the shared histogram model when the legacy PNG renderer is selected."""
+    if model.get("type") == "empty":
+        return _empty_chart(str(model.get("title", "Histogram")))
+    image, draw = _canvas(str(model.get("title", "Histogram")))
+    legend = model["legend"]
+    items = legend["items"]
+    rows = max(1, math.ceil(len(items) / _horizontal_legend_columns(
+        [item["label"] for item in items], 11, line_markers=True,
+    )))
+    left, top, width, height = _cdf_plot_geometry(legend["position"], rows)
+    low, high = model["domain"]["x"]
+    y_low, y_high = model["domain"]["y"]
+    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    shade = ImageDraw.Draw(overlay)
+    for band in model.get("quality_bands", []):
+        band_low, band_high = max(low, band["low"]), min(high, band["high"])
+        if band_high > band_low:
+            shade.rectangle((left + (band_low - low) / (high - low) * width, top,
+                             left + (band_high - low) / (high - low) * width, top + height),
+                            fill=(*ImageColor.getrgb(band["colour"]), 25))
+    image = Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
+    draw = ImageDraw.Draw(image)
+    for tick in range(6):
+        y = top + height - tick / 5 * height
+        draw.line((left, y, left + width, y), fill="#E4E9ED", width=1)
+        draw.text((left - 80, y - 10), f"{(y_low + (y_high - y_low) * tick / 5) * 100:.1f}%",
+                  fill="#4E6271", font=_font(18, True))
+        x = left + tick / 5 * width
+        draw.text((x - 18, top + height + 7), f"{low + (high - low) * tick / 5:.1f}",
+                  fill="#4E6271", font=_font(16, True))
+    for series in model["series"]:
+        points = [(left + (x - low) / (high - low) * width,
+                   top + height - (y - y_low) / (y_high - y_low) * height)
+                  for x, y in zip(series["x"], series["y"], strict=True)]
+        _draw_patterned_polyline(draw, points, series["colour"], series["width"], tuple(series["dash"]))
+    draw.text((left, top - 28), "Samples per bin (%)", fill="#405765", font=_font(18, True))
+    draw.text((left + width / 2 - 90, top + height + 31), str(model["metric"]),
+              fill="#405765", font=_font(20, True))
+    _draw_chart_legend(draw, [(item["label"], item["colour"], item["width"], tuple(item.get("dash", ())))
+                              for item in items], legend["position"], font_size=11, line_markers=True)
+    output = BytesIO(); image.save(output, format="PNG"); output.seek(0)
+    return output
+
+
 def _osm_world_coordinates(latitude: float, longitude: float, zoom: int) -> tuple[float, float]:
     """Convert WGS84 coordinates to global Web-Mercator pixels."""
     latitude = max(-85.05112878, min(85.05112878, latitude))
@@ -5875,7 +5940,7 @@ def catalog_chart_payload(
             "message": message,
         }
 
-    def cdf_model(candidate_metric: str, candidate_title: str) -> dict[str, object] | None:
+    def cdf_model(candidate_metric: str, candidate_title: str, *, histogram: bool = False) -> dict[str, object] | None:
         campaign_column = _period_column(data)
         grouping_columns = _chart_axis_hierarchy(data) or list(dict.fromkeys(
             [*([group] if group else []), *([period] if period and period != group else [])]
@@ -5968,6 +6033,16 @@ def catalog_chart_payload(
         (low, high), (y_low, y_high) = _cdf_domains(
             low, automatic_high, render_entry.axis_x_range, render_entry.axis_y_range,
         )
+        bin_edges: list[float] = []
+        histogram_maximum = 0.0
+        if histogram:
+            bin_size = _catalog_bin_size(render_entry)
+            low = math.floor(low / bin_size) * bin_size
+            high = max(math.ceil(high / bin_size) * bin_size, low + bin_size)
+            bin_count = math.ceil((high - low) / bin_size)
+            if bin_count > 400:
+                raise ValueError(f"Slide {render_entry.slide}: reduce the histogram range or increase Bin Size to use at most 400 bins.")
+            bin_edges = [low + index * bin_size for index in range(bin_count + 1)]
         colours = _series_colours(combinations, grouping_columns, numeric, line_chart=True)
         line_dashes = _series_line_dashes(combinations, grouping_columns, numeric)
         line_widths = _cdf_campaign_line_widths(
@@ -5978,7 +6053,18 @@ def catalog_chart_payload(
         payload_series = []
         fallback_legend = []
         for index, (combination, values, campaigns) in enumerate(series_rows):
-            visible_points = _cdf_visible_points(values, low, high)
+            if histogram:
+                counts = [bisect_left(values, right) - bisect_left(values, left)
+                          for left, right in zip(bin_edges[:-1], bin_edges[1:], strict=True)]
+                counts[-1] += bisect_right(values, bin_edges[-1]) - bisect_left(values, bin_edges[-1])
+                ratios = [count / len(values) for count in counts]
+                histogram_maximum = max(histogram_maximum, *ratios)
+                visible_points = [(low, 0.0)]
+                for left, right, ratio in zip(bin_edges[:-1], bin_edges[1:], ratios, strict=True):
+                    visible_points.extend(((left, ratio), (right, ratio)))
+                visible_points.append((high, 0.0))
+            else:
+                visible_points = _cdf_visible_points(values, low, high)
             if not visible_points:
                 continue
             sampled = _interactive_sample(visible_points, INTERACTIVE_CHART_POINTS_PER_SERIES)
@@ -6000,6 +6086,7 @@ def catalog_chart_payload(
                 "x": [point[0] for _source_index, point in sampled],
                 "y": [point[1] for _source_index, point in sampled],
                 "samples": len(values),
+                **({"counts": counts, "bin_edges": bin_edges} if histogram else {}),
             })
             fallback_legend.append((full_label, colour, line_width))
         model = _chart_payload_base(
@@ -6014,6 +6101,22 @@ def catalog_chart_payload(
             "domain": {"x": [low, high], "y": [y_low, y_high]},
             "series": payload_series,
         })
+        if histogram:
+            edges = _catalog_bucket_edges(render_entry) or []
+            model.update({
+                "histogram": True,
+                "bin_size": _catalog_bin_size(render_entry),
+                "y_label": "Samples per bin (%)",
+                "domain": {"x": [low, high], "y": _configured_axis_domain(
+                    render_entry, "y", 0.0, max(histogram_maximum * 1.12, .01), percentage=True,
+                )},
+                "quality_bands": [
+                    {"low": left, "high": right, "colour": colour}
+                    for left, right, colour in zip(
+                        [low, *edges], [*edges, high], RF_QUALITY_CLASS_COLOURS, strict=True,
+                    )
+                ] if len(edges) == 4 else [],
+            })
         return model
 
     if spec["kind"] == "multi_cdf":
@@ -6032,8 +6135,8 @@ def catalog_chart_payload(
             "panels": panels,
         }
 
-    if chart_type == "cdf line":
-        model = cdf_model(metric, title) if metric else None
+    if chart_type in {"cdf line", "histogram line"}:
+        model = cdf_model(metric, title, histogram=chart_type == "histogram line") if metric else None
         return model or empty("No valid samples for this KPI and technology filter")
 
     if spec["kind"] in {"status_100", "quality_100"} and metric:
@@ -6652,6 +6755,8 @@ def _chart_for_catalog_entry(
         # A partial CDR upload should leave only the affected chart empty, not fail the report.
         return _empty_chart(chart_title)
     chart_type = entry.chart_type.casefold()
+    if chart_type == "histogram line":
+        return _render_histogram_model(catalog_chart_payload(frame, entry, prefiltered=True))
     if chart_type != "distribution stacked vertical bars" and "__catalog_stack" in frame.columns:
         frame[period] = frame[period].astype(str) + " · " + frame["__catalog_stack"].astype(str)
     def finish(chart: BytesIO) -> BytesIO:
@@ -7020,9 +7125,16 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
         if source not in cached_frames:
             if frame_loader is None:
                 raise ValueError(f'No CDR frame is available for {source}.')
-            cached_frames[source] = normalise_operator_aliases(frame_loader(source))
+            if source == 'all':
+                from src.modules.rf_catalog_source import pool_rf_frames
+                cached_frames[source] = pool_rf_frames({kind: frame_loader(kind) for kind in ('data', 'voice', 'speech')})
+            else:
+                cached_frames[source] = normalise_operator_aliases(frame_loader(source))
         active_source = source
         return cached_frames[source]
+    if 'all' not in cached_frames and frame_loader is None and any(entry.source_kind == 'all' for entry in catalog):
+        from src.modules.rf_catalog_source import pool_rf_frames
+        cached_frames['all'] = pool_rf_frames({kind: frame for kind, frame in cached_frames.items() if kind in ('data', 'voice', 'speech')})
     presentation = Presentation(template)
     _remove_all_slides(presentation)
     rendered_charts: list[dict[str, object]] = []
