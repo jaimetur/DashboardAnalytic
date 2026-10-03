@@ -45,7 +45,7 @@ Operator Comparison initially selects the two newest CDRs of each type, or the o
 
 ## Report Template selection
 
-Choose an NSA/SA Report Template from the active workspace. Each template controls slides, layouts, CDR sources, chart types, KPIs, filters, aggregations and legends. Authorised users manage and edit templates in Workspace Config; new workspaces have none until a template is created or imported.
+Choose an NSA/SA Report Template from the active workspace. Each template controls slides, layouts, source datasets, chart types, KPIs, filters, aggregations and legends. Authorised users manage and edit templates in Workspace Config; new workspaces have none until a template is created or imported.
 
 For the complete schema, supported chart types, examples, Filter Builder language, aggregations, legends, multi-chart slides and colour rules, see [Workspace Config → Report Template reference](workspace-config.md#report-template-reference).
 

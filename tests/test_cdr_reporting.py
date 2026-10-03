@@ -814,7 +814,7 @@ def test_catalogue_label_format_is_validated_and_serialised() -> None:
         parse_label_format('["blue"]')
     row = {
         'Slide': '8', 'Slide Tittle': 'Failures', 'Slide Subtittle': '', 'Layout': 'Title and 1 column + Comments',
-        'Chart Tittle': 'Failures', 'CDR source': 'CDR-Voice', 'KPI': 'Call_Status',
+        'Chart Tittle': 'Failures', 'Source Dataset': 'CDR-Voice', 'KPI': 'Call_Status',
         'Chart type': 'Count Stacked Horizontal Bars', 'Filters': '', 'Rows Aggregation': 'Operator',
         'Column Aggregation': '', 'Legend': '', 'Legend Position': 'Top', 'Label Position': 'Down',
         'Label Format': '["#1a2b3c", "Verdana", "Large", "Bold"]', 'Axis X Range': '', 'Axis Y Range': '',
@@ -832,7 +832,7 @@ def test_catalogue_label_format_is_validated_and_serialised() -> None:
 def test_catalogue_legend_format_is_validated_and_serialised() -> None:
     row = {
         'Slide': '8', 'Slide Tittle': 'Failures', 'Slide Subtittle': '', 'Layout': 'Title and 1 column + Comments',
-        'Chart Tittle': 'Failures', 'CDR source': 'CDR-Voice', 'KPI': 'Call_Status',
+        'Chart Tittle': 'Failures', 'Source Dataset': 'CDR-Voice', 'KPI': 'Call_Status',
         'Chart type': 'Count Stacked Horizontal Bars', 'Filters': '', 'Rows Aggregation': 'Operator',
         'Column Aggregation': '', 'Legend': '', 'Legend Position': 'Top',
         'Legend Format': '["#1a2b3c", "Verdana", "Large", "Bold"]', 'Label Position': '', 'Label Format': '',

@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Callable, Iterable, Mapping
 
 import pandas as pd
-from src.modules.report_layouts import DYNAMIC_LAYOUTS, canonical_layout_name, grid_layout_name
+from src.modules.report_layouts import DYNAMIC_LAYOUTS, canonical_layout_name, grid_layout_name, dynamic_layout_axes
 from src.modules.column_names import MAIN_CDR_FIELDS, column_identity, compact_campaign_value, resolve_column_name, vendor_only_value
 import certifi
 from PIL import Image, ImageColor, ImageDraw, ImageFont
@@ -50,22 +50,24 @@ TEMPLATE_NAMES = {
 CDR_REPORT_VERSION = "2026-09-22-v14"
 REPORTING_KINDS = {"data", "voice", "speech"}
 COMMENT_HINTS = ("having ", "observed", "shows ", "similar performance", "worse ", "improvement", "degradation", "gap ")
-VISUAL_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position", "Legend Format", "Label Position", "Label Format", "Axis X Range", "Axis Y Range")
+VISUAL_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "Source Dataset", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position", "Legend Format", "Label Position", "Label Format", "Axis X Range", "Axis Y Range")
 PRE_DYNAMIC_CATALOG_HEADERS = (*VISUAL_CATALOG_HEADERS, "Exclude Null/Empty", "Exclude Zero")
-CATALOG_HEADERS = (*PRE_DYNAMIC_CATALOG_HEADERS, "Dynamic Field")
+SINGLE_DYNAMIC_CATALOG_HEADERS = (*PRE_DYNAMIC_CATALOG_HEADERS, "Dynamic Field")
+TRAILING_DYNAMIC_CATALOG_HEADERS = (*PRE_DYNAMIC_CATALOG_HEADERS, "Dynamic Rows Field", "Dynamic Columns Field")
+CATALOG_HEADERS = (*PRE_DYNAMIC_CATALOG_HEADERS[:4], "Dynamic Rows Field", "Dynamic Columns Field", *PRE_DYNAMIC_CATALOG_HEADERS[4:])
 # Templates created before configurable visual settings remain valid and
 # acquire empty Label/axis cells the next time they are saved in the editor.
-RANGELESS_CATALOG_HEADERS = CATALOG_HEADERS[:13]
-PRE_LEGEND_FORMAT_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position", "Label Position", "Label Format", "Axis X Range", "Axis Y Range", "Exclude Null/Empty", "Exclude Zero")
-PRE_LABEL_COLOR_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position", "Label", "Axis X Range", "Axis Y Range", "Exclude Null/Empty", "Exclude Zero")
+RANGELESS_CATALOG_HEADERS = VISUAL_CATALOG_HEADERS[:13]
+PRE_LEGEND_FORMAT_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "Source Dataset", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position", "Label Position", "Label Format", "Axis X Range", "Axis Y Range", "Exclude Null/Empty", "Exclude Zero")
+PRE_LABEL_COLOR_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "Source Dataset", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position", "Label", "Axis X Range", "Axis Y Range", "Exclude Null/Empty", "Exclude Zero")
 PRE_LABEL_COLOR_RANGELESS_CATALOG_HEADERS = PRE_LABEL_COLOR_CATALOG_HEADERS[:16]
-PRE_LABEL_FORMAT_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position", "Label", "Label Color", "Axis X Range", "Axis Y Range", "Exclude Null/Empty", "Exclude Zero")
+PRE_LABEL_FORMAT_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "Source Dataset", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position", "Label", "Label Color", "Axis X Range", "Axis Y Range", "Exclude Null/Empty", "Exclude Zero")
 # Import the two immediately preceding schemas too, so existing templates remain
 # usable after the aggregation columns were renamed and the legend was repositioned.
-PREVIOUS_CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Legend", "Filters", "Grouping_Rows", "Grouping_Columns", "Legend Position")
-OLDER_CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Legend", "Filters", "Grouping_Rows", "Grouping_Columns")
-LEGACY_ROWS_COLUMNS_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "CDR source", "KPI", "Chart type", "Filters", "Grouping_Rows", "Grouping_Columns")
-LEGACY_CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "CDR source", "KPI", "Chart type", "Filters", "Grouping")
+PREVIOUS_CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "Chart Tittle", "Source Dataset", "KPI", "Chart type", "Legend", "Filters", "Grouping_Rows", "Grouping_Columns", "Legend Position")
+OLDER_CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "Chart Tittle", "Source Dataset", "KPI", "Chart type", "Legend", "Filters", "Grouping_Rows", "Grouping_Columns")
+LEGACY_ROWS_COLUMNS_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "Source Dataset", "KPI", "Chart type", "Filters", "Grouping_Rows", "Grouping_Columns")
+LEGACY_CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "Source Dataset", "KPI", "Chart type", "Filters", "Grouping")
 CATALOG_SOURCE_KINDS = {"cdr-data": "data", "cdr-voice": "voice", "cdr-speech": "speech", "cdr-all": "all"}
 CHART_TYPES = {
     "100% stacked vertical bars", "count stacked horizontal bars", "cdf line", "multi kpi cdf lines", "scatter", "table", "dynamic table",
@@ -270,6 +272,8 @@ def _catalogue_header_key(value: str) -> str:
 
 CATALOG_HEADER_ALIASES = {
     "dynamicfield": "Dynamic Field",
+    "dynamicrowsfield": "Dynamic Rows Field",
+    "dynamiccolumnsfield": "Dynamic Columns Field",
     "slide": "Slide",
     "slidetittle": "Slide Tittle",
     "slidetitle": "Slide Tittle",
@@ -278,7 +282,8 @@ CATALOG_HEADER_ALIASES = {
     "layout": "Layout",
     "charttittle": "Chart Tittle",
     "charttitle": "Chart Tittle",
-    "cdrsource": "CDR source",
+    "cdrsource": "Source Dataset",
+    "sourcedataset": "Source Dataset",
     "kpi": "KPI",
     "charttype": "Chart type",
     "legend": "Legend",
@@ -397,6 +402,11 @@ class CatalogEntry:
     label_format: str = ""
     exclude_null_empty: bool = False
     exclude_zero: bool = False
+    dynamic_rows_field: str = ""
+    dynamic_columns_field: str = ""
+    dynamic_row_value: str | None = None
+    dynamic_column_value: str | None = None
+    # Legacy single-axis constructors remain readable; exports use the two explicit fields.
     dynamic_field: str = ""
     dynamic_value: str | None = None
     template_index: int | None = None
@@ -412,6 +422,37 @@ class CatalogEntry:
         return value if value in STRUCTURAL_SLIDE_TYPES else None
 
 
+def entry_dynamic_fields(entry: CatalogEntry) -> tuple[str, str]:
+    """Return explicit row/column fields, including the legacy single-axis form."""
+    rows, columns = entry.dynamic_rows_field, entry.dynamic_columns_field
+    if not rows and not columns and entry.dynamic_field:
+        dynamic_rows, dynamic_columns = dynamic_layout_axes(entry.layout)
+        if dynamic_rows and not dynamic_columns:
+            rows = entry.dynamic_field
+        else:
+            columns = entry.dynamic_field
+    return rows, columns
+
+
+def dynamic_chart_title(entry: CatalogEntry) -> str:
+    values = [value for value in (entry.dynamic_row_value, entry.dynamic_column_value) if value is not None]
+    return entry.chart_title + (" – " + " / ".join(values) if values else "")
+
+
+def validate_dynamic_slide(rows: list[CatalogEntry]) -> None:
+    header = rows[0]
+    dynamic_rows, dynamic_columns = dynamic_layout_axes(header.layout)
+    row_field, column_field = entry_dynamic_fields(header)
+    if (dynamic_rows and not row_field) or (dynamic_columns and not column_field):
+        required = 'Dynamic Rows Field and Dynamic Columns Field' if dynamic_rows and dynamic_columns else 'Dynamic Rows Field' if dynamic_rows else 'Dynamic Columns Field'
+        raise ValueError(f"Slide {header.slide}: this layout requires {required}.")
+    count = 1 if dynamic_rows and dynamic_columns else 2
+    if len(rows) != count or len({(row.layout, entry_dynamic_fields(row)) for row in rows}) != 1:
+        raise ValueError(f"Slide {header.slide}: this dynamic layout needs {count} chart definition(s) with the same Layout and dynamic fields.")
+    if dynamic_rows and dynamic_columns and column_identity(row_field) == column_identity(column_field):
+        raise ValueError(f"Slide {header.slide}: dynamic row and column fields must be different.")
+
+
 def expand_dynamic_layouts(
     entries: list[CatalogEntry], values_by_field: dict[str, list[str]], *,
     multivendor: bool = False, operator_mappings: dict[str, str] | None = None,
@@ -419,32 +460,14 @@ def expand_dynamic_layouts(
     vendor_comparison: str = "operator_vendor",
     vendor_families: dict[str, str] | None = None,
 ) -> list[CatalogEntry]:
-    """Resolve dynamic grids and keep vendor families together on six-value pages."""
-    slides = defaultdict(list)
-    for index, entry in enumerate(entries):
-        effective = prepare_multivendor_catalog_entry(entry, vendor_comparison) if multivendor else entry
-        effective = replace(effective, layout=canonical_layout_name(effective.layout))
-        slides[entry.slide].append(replace(effective, template_index=index))
-    expanded = []
-    offset = 0
-    for number, rows in sorted(slides.items()):
-        header = rows[0]
-        if header.layout.casefold() not in {name.casefold() for name in DYNAMIC_LAYOUTS}:
-            expanded.extend(replace(row, slide=number + offset) for row in rows)
-            continue
-        if len(rows) != 2 or any(row.dynamic_field != header.dynamic_field or row.layout != header.layout for row in rows):
-            raise ValueError(f"Slide {number}: a dynamic layout needs two chart definitions with the same Layout and Dynamic Field.")
-        values = values_by_field.get(header.dynamic_field, [])
-        if not values:
-            continue
-        pages = [values]
-        if multivendor and _normalise_catalog_name(header.dynamic_field) in {"vendor", "vendoronly"}:
+    """Resolve both grid axes and paginate vendor families without mixing contexts."""
+    def pages_for(field, values, bounded):
+        if multivendor and _normalise_catalog_name(field) in {"vendor", "vendoronly"}:
             families = {}
             for value in values:
                 _operator, _separator, vendor = _split_operator_vendor(value, operator_mappings, vendor_mappings)
                 families.setdefault((vendor_families or {}).get(value, vendor or value), []).append(value)
-            pages = []
-            current = []
+            pages, current = [], []
             for family in families.values():
                 if current and len(current) + len(family) > 6:
                     pages.append(current); current = []
@@ -453,20 +476,48 @@ def expand_dynamic_layouts(
                 current.extend(family)
             if current:
                 pages.append(current)
-        dynamic_columns = header.layout.casefold().startswith("title + 2 rows")
-        comments = ("right" if header.layout.casefold().endswith("right") else "down") if "comments" in header.layout.casefold() else ""
-        for page_index, page_values in enumerate(pages):
-            layout = grid_layout_name(2, len(page_values), comments) if dynamic_columns else grid_layout_name(len(page_values), 2, comments)
-            pairs = [(row, value) for row in rows for value in page_values] if dynamic_columns else [(row, value) for value in page_values for row in rows]
-            for row, value in pairs:
-                expanded.append(replace(
-                    row, slide=number + offset + page_index, layout=layout, dynamic_value=value,
-                    chart_title=f"{row.chart_title} – {value}",
-                    slide_subtitle=(f"{row.slide_subtitle} · {page_index + 1}/{len(pages)}" if len(pages) > 1 else row.slide_subtitle),
-                ))
-        offset += len(pages) - 1
-    return expanded
+            return pages
+        return [values[index:index + 6] for index in range(0, len(values), 6)] if bounded else [values]
 
+    slides = defaultdict(list)
+    for index, entry in enumerate(entries):
+        effective = prepare_multivendor_catalog_entry(entry, vendor_comparison) if multivendor else entry
+        slides[entry.slide].append(replace(effective, layout=canonical_layout_name(effective.layout), template_index=index))
+    expanded, offset = [], 0
+    for number, definitions in sorted(slides.items()):
+        header = definitions[0]
+        if header.layout not in DYNAMIC_LAYOUTS:
+            expanded.extend(replace(row, slide=number + offset) for row in definitions)
+            continue
+        validate_dynamic_slide(definitions)
+        dynamic_rows, dynamic_columns = dynamic_layout_axes(header.layout)
+        row_field, column_field = entry_dynamic_fields(header)
+        row_values = values_by_field.get(row_field, []) if dynamic_rows else [None, None]
+        column_values = values_by_field.get(column_field, []) if dynamic_columns else [None, None]
+        if not row_values or not column_values:
+            continue
+        both = dynamic_rows and dynamic_columns
+        row_pages = pages_for(row_field, row_values, both) if dynamic_rows else [row_values]
+        column_pages = pages_for(column_field, column_values, both) if dynamic_columns else [column_values]
+        total_pages = len(row_pages) * len(column_pages)
+        comments = ("right" if header.layout.endswith("right") else "down") if "comments" in header.layout else ""
+        page_index = 0
+        for page_rows in row_pages:
+            for page_columns in column_pages:
+                layout = grid_layout_name(len(page_rows), len(page_columns), comments)
+                for r, row_value in enumerate(page_rows):
+                    for c, column_value in enumerate(page_columns):
+                        source = definitions[0] if both else definitions[r] if dynamic_columns else definitions[c]
+                        clone = replace(source, slide=number + offset + page_index, layout=layout,
+                                        dynamic_rows_field=row_field, dynamic_columns_field=column_field,
+                                        dynamic_row_value=row_value, dynamic_column_value=column_value,
+                                        dynamic_field=row_field or column_field if not both else '',
+                                        dynamic_value=row_value if dynamic_rows and not dynamic_columns else column_value,
+                                        slide_subtitle=(f"{source.slide_subtitle} · {page_index + 1}/{total_pages}" if total_pages > 1 else source.slide_subtitle))
+                        expanded.append(replace(clone, chart_title=dynamic_chart_title(clone)))
+                page_index += 1
+        offset += total_pages - 1
+    return expanded
 
 def parse_catalog_filters(value: str) -> tuple[FilterCondition, ...]:
     """Parse `Column OP value; ...` syntax without needing a particular CDR schema."""
@@ -912,10 +963,10 @@ def parse_calculated_dimensions(payload: object) -> tuple[CalculatedDimension, .
         if raw_sources is None:
             raw_sources = list(CATALOG_SOURCE_KINDS)
         if not isinstance(raw_sources, list):
-            raise ValueError(f"Auto-calculated field '{name}' must define its CDR sources as a list.")
+            raise ValueError(f"Auto-calculated field '{name}' must define its source datasets as a list.")
         sources = tuple(dict.fromkeys(str(value).strip().casefold() for value in raw_sources if str(value).strip()))
         if not sources or any(source not in CATALOG_SOURCE_KINDS for source in sources):
-            raise ValueError(f"Auto-calculated field '{name}' contains an unsupported CDR source.")
+            raise ValueError(f"Auto-calculated field '{name}' contains an unsupported Source Dataset.")
         expression_text = str(item.get("expression") or "").strip()
         expression = parse_calculated_dimension_expression(expression_text) if expression_text else None
         raw_rules = item.get("rules") or []
@@ -1115,12 +1166,15 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
         text = content
     reader = csv.DictReader(io.StringIO(text))
     fieldnames = tuple(reader.fieldnames or ())
+    canonical_headers = _canonical_catalog_headers(fieldnames)
+    if len(set(canonical_headers)) != len(canonical_headers):
+        raise ValueError("The report template must not contain duplicate column names or aliases.")
     accepted_schemas = {
-        _canonical_catalog_headers(schema)
-        for schema in (CATALOG_HEADERS, PRE_DYNAMIC_CATALOG_HEADERS, PRE_LEGEND_FORMAT_CATALOG_HEADERS, PRE_LABEL_FORMAT_CATALOG_HEADERS, PRE_LABEL_COLOR_CATALOG_HEADERS, PRE_LABEL_COLOR_RANGELESS_CATALOG_HEADERS, VISUAL_CATALOG_HEADERS, RANGELESS_CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, OLDER_CATALOG_HEADERS, LEGACY_ROWS_COLUMNS_HEADERS, LEGACY_CATALOG_HEADERS)
+        frozenset(_canonical_catalog_headers(schema))
+        for schema in (CATALOG_HEADERS, TRAILING_DYNAMIC_CATALOG_HEADERS, SINGLE_DYNAMIC_CATALOG_HEADERS, PRE_DYNAMIC_CATALOG_HEADERS, PRE_LEGEND_FORMAT_CATALOG_HEADERS, PRE_LABEL_FORMAT_CATALOG_HEADERS, PRE_LABEL_COLOR_CATALOG_HEADERS, PRE_LABEL_COLOR_RANGELESS_CATALOG_HEADERS, VISUAL_CATALOG_HEADERS, RANGELESS_CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, OLDER_CATALOG_HEADERS, LEGACY_ROWS_COLUMNS_HEADERS, LEGACY_CATALOG_HEADERS)
     }
-    if _canonical_catalog_headers(fieldnames) not in accepted_schemas:
-        raise ValueError("The report template must use exactly these columns: " + ", ".join(CATALOG_HEADERS))
+    if frozenset(canonical_headers) not in accepted_schemas:
+        raise ValueError("The report template must use these columns in any order: " + ", ".join(CATALOG_HEADERS))
     entries: list[CatalogEntry] = []
     chart_positions: defaultdict[int, int] = defaultdict(int)
     for line_number, row in enumerate(reader, start=2):
@@ -1144,7 +1198,7 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
             slide_subtitle=(row.get("Slide Subtittle") or "").strip().replace("\\n", "\n"),
             layout=canonical_layout_name(row.get("Layout") or ""),
             chart_title=(row.get("Chart Tittle") or "").strip().replace("\\n", "\n"),
-            cdr_source=(row.get("CDR source") or "").strip(),
+            cdr_source=(row.get("Source Dataset") or "").strip(),
             kpi=(row.get("KPI") or "").strip(),
             chart_type=(row.get("Chart type") or "").strip(),
             legend=(row.get("Legend") or "").strip(),
@@ -1161,10 +1215,10 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
             label_format=parse_label_format(row.get("Label Format") or ""),
             exclude_null_empty=parse_template_boolean(row.get("Exclude Null/Empty") or "", "Exclude Null/Empty"),
             exclude_zero=parse_template_boolean(row.get("Exclude Zero") or "", "Exclude Zero"),
+            dynamic_rows_field=(row.get("Dynamic Rows Field") or "").strip(),
+            dynamic_columns_field=(row.get("Dynamic Columns Field") or "").strip(),
             dynamic_field=(row.get("Dynamic Field") or "").strip(),
         )
-        if entry.layout.casefold() in {name.casefold() for name in DYNAMIC_LAYOUTS} and not entry.dynamic_field:
-            raise ValueError(f"Slide {entry.slide}: a dynamic layout requires Dynamic Field.")
         if entry.source_kind:
             chart_positions[entry.slide] += 1
         editor_location = f"Slide: {entry.slide} - Chart: {chart_positions[entry.slide]}" if entry.source_kind else f"Slide: {entry.slide}"
@@ -1184,21 +1238,21 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
                     "legend, filter or grouping values."
                 )
         if entry.source_kind and not entry.slide_title:
-            raise ValueError(f"Catalog row {line_number} requires Slide Tittle for a CDR source.")
+            raise ValueError(f"Catalog row {line_number} requires Slide Tittle for a Source Dataset.")
         if entry.source_kind and not entry.layout:
-            raise ValueError(f"Catalog row {line_number} requires Layout for a CDR source.")
+            raise ValueError(f"Catalog row {line_number} requires Layout for a Source Dataset.")
         if entry.cdr_source and entry.cdr_source.casefold() not in CATALOG_SOURCE_KINDS:
-            raise ValueError(f"Catalog row {line_number} has unsupported CDR source '{entry.cdr_source}'.")
+            raise ValueError(f"Catalog row {line_number} has unsupported Source Dataset '{entry.cdr_source}'.")
         if not entry.source_kind and not entry.structural_type and entry.chart_type.casefold() not in PRESERVED_CHART_TYPES:
             raise ValueError(
                 f"Catalog row {line_number} must define a supported CDR chart, Title Slide or Transition Slide."
             )
         if entry.source_kind and (not entry.kpi or not entry.chart_type):
-            raise ValueError(f"Catalog row {line_number} requires KPI and Chart type for a CDR source.")
+            raise ValueError(f"Catalog row {line_number} requires KPI and Chart type for a Source Dataset.")
         if entry.source_kind and entry.chart_type.casefold() not in CHART_TYPES:
             raise ValueError(f"Catalog row {line_number} has unsupported Chart type '{entry.chart_type}'.")
         if entry.source_kind and not (entry.grouping_rows or entry.grouping_columns):
-            raise ValueError(f"Catalog row {line_number} requires Rows Aggregation or Column Aggregation for a CDR source.")
+            raise ValueError(f"Catalog row {line_number} requires Rows Aggregation or Column Aggregation for a Source Dataset.")
         try:
             if validate_filters:
                 parse_catalog_filters(entry.filters)
@@ -1220,8 +1274,7 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
         entries_by_slide[entry.slide].append(entry)
     for slide_number, slide_entries in entries_by_slide.items():
         if slide_entries[0].layout.casefold() in {name.casefold() for name in DYNAMIC_LAYOUTS}:
-            if len(slide_entries) != 2 or len({(entry.layout.casefold(), entry.dynamic_field) for entry in slide_entries}) != 1:
-                raise ValueError(f"Slide {slide_number}: a dynamic layout needs two chart definitions with the same Layout and Dynamic Field.")
+            validate_dynamic_slide(slide_entries)
         structural_entries = [entry for entry in slide_entries if entry.structural_type]
         if structural_entries and len(slide_entries) != 1:
             raise ValueError(
@@ -1252,6 +1305,8 @@ def convert_catalog_csv(content: bytes | str, technology: str) -> bytes:
     header_map: dict[str, str] = {}
     for original in original_headers:
         canonical = CATALOG_HEADER_ALIASES.get(_catalogue_header_key(original))
+        if canonical and canonical in header_map:
+            raise ValueError("The report template must not contain duplicate column names or aliases.")
         if canonical and canonical not in header_map:
             header_map[canonical] = original
     if "Slide" not in header_map:
@@ -1261,9 +1316,16 @@ def convert_catalog_csv(content: bytes | str, technology: str) -> bytes:
     for row in reader:
         converted = {header: "" for header in CATALOG_HEADERS}
         for canonical, original in header_map.items():
-            if canonical == "Grouping":
+            if canonical in {"Grouping", "Dynamic Field"}:
                 continue
             converted[canonical] = (row.get(original) or "").strip()
+        legacy_dynamic = (row.get(header_map.get("Dynamic Field", "")) or "").strip()
+        if legacy_dynamic:
+            dynamic_rows, dynamic_columns = dynamic_layout_axes(converted["Layout"])
+            if dynamic_rows and not converted["Dynamic Rows Field"]:
+                converted["Dynamic Rows Field"] = legacy_dynamic
+            if dynamic_columns and not converted["Dynamic Columns Field"]:
+                converted["Dynamic Columns Field"] = legacy_dynamic
         legacy_grouping = (row.get(header_map.get("Grouping", "")) or "").strip()
         if legacy_grouping:
             dimensions = parse_catalog_grouping(legacy_grouping).dimensions
@@ -1277,12 +1339,12 @@ def convert_catalog_csv(content: bytes | str, technology: str) -> bytes:
     # determined by the number of automated charts represented by that slide.
     charts_per_slide: dict[str, int] = defaultdict(int)
     for row in converted_rows:
-        if row["CDR source"].strip().casefold() in CATALOG_SOURCE_KINDS:
+        if row["Source Dataset"].strip().casefold() in CATALOG_SOURCE_KINDS:
             charts_per_slide[row["Slide"].strip()] += 1
     for row in converted_rows:
         if (
             not row["Layout"].strip()
-            and row["CDR source"].strip().casefold() in CATALOG_SOURCE_KINDS
+            and row["Source Dataset"].strip().casefold() in CATALOG_SOURCE_KINDS
         ):
             row["Layout"] = _default_catalogue_layout(technology, charts_per_slide[row["Slide"].strip()])
 
@@ -1327,7 +1389,7 @@ def catalogue_csv(entries: list[CatalogEntry]) -> bytes:
             "Slide Subtittle": entry.slide_subtitle.replace("\n", "\\n"),
             "Layout": canonical_layout_name(entry.layout),
             "Chart Tittle": entry.chart_title.replace("\n", "\\n"),
-            "CDR source": entry.cdr_source,
+            "Source Dataset": entry.cdr_source,
             "KPI": entry.kpi,
             "Chart type": entry.chart_type,
             "Filters": entry.filters,
@@ -1342,7 +1404,8 @@ def catalogue_csv(entries: list[CatalogEntry]) -> bytes:
             "Axis Y Range": entry.axis_y_range,
             "Exclude Null/Empty": "Yes" if entry.exclude_null_empty else "",
             "Exclude Zero": "Yes" if entry.exclude_zero else "",
-            "Dynamic Field": entry.dynamic_field,
+            "Dynamic Rows Field": entry_dynamic_fields(entry)[0],
+            "Dynamic Columns Field": entry_dynamic_fields(entry)[1],
         })
     return output.getvalue().encode("utf-8")
 
@@ -1867,6 +1930,8 @@ def prepare_multivendor_catalog_entry(entry: CatalogEntry, vendor_comparison: st
         grouping_columns=vendor_grouping(entry.grouping_columns),
         filters=filters,
         dynamic_field=("Vendor_Only" if vendor_only else "Vendor") if _normalise_catalog_name(entry.dynamic_field) in {"operator", "vendor"} else entry.dynamic_field,
+        dynamic_rows_field=("Vendor_Only" if vendor_only else "Vendor") if _normalise_catalog_name(entry_dynamic_fields(entry)[0]) in {"operator", "vendor"} else entry_dynamic_fields(entry)[0],
+        dynamic_columns_field=("Vendor_Only" if vendor_only else "Vendor") if _normalise_catalog_name(entry_dynamic_fields(entry)[1]) in {"operator", "vendor"} else entry_dynamic_fields(entry)[1],
         vendor_comparison=vendor_comparison,
     )
 
@@ -2325,18 +2390,23 @@ def _cdf_campaign_line_widths(
 
 def _select_dynamic_chart_frame(frame: pd.DataFrame, entry: CatalogEntry) -> pd.DataFrame:
     """Keep the source samples belonging to one resolved dynamic chart."""
-    if entry.dynamic_value is None:
-        return frame
-    column = _catalog_column(frame, entry.dynamic_field, False)
-    if not column:
-        return frame.iloc[:0].copy()
-    values = frame[column].astype(str)
-    if _normalise_catalog_name(entry.dynamic_field) == "operator":
-        values = values.map(lambda value: _normalise_operator_label(value, frame.attrs.get("operator_mappings", {})))
-    elif _normalise_catalog_name(entry.dynamic_field) in {"vendor", "vendoronly"}:
-        values = values.map(lambda value: _normalise_vendor(value, frame.attrs.get("operator_mappings", {}), frame.attrs.get("vendor_mappings", {})))
-    return frame[values.eq(entry.dynamic_value)].copy()
-
+    row_field, column_field = entry_dynamic_fields(entry)
+    selections = [(row_field, entry.dynamic_row_value), (column_field, entry.dynamic_column_value)]
+    if all(value is None for _field, value in selections) and entry.dynamic_value is not None:
+        selections = [(row_field or column_field, entry.dynamic_value)]
+    for field, selected in selections:
+        if selected is None:
+            continue
+        column = _catalog_column(frame, field, False)
+        if not column:
+            return frame.iloc[:0].copy()
+        values = frame[column].astype(str)
+        if _normalise_catalog_name(field) == "operator":
+            values = values.map(lambda value: _normalise_operator_label(value, frame.attrs.get("operator_mappings", {})))
+        elif _normalise_catalog_name(field) in {"vendor", "vendoronly"}:
+            values = values.map(lambda value: _normalise_vendor(value, frame.attrs.get("operator_mappings", {}), frame.attrs.get("vendor_mappings", {})))
+        frame = frame[values.eq(selected)].copy()
+    return frame
 
 def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor: bool, metric: str | None) -> pd.DataFrame:
     result = frame.copy()
@@ -2779,7 +2849,7 @@ def preview_catalog_chart_data(
     without asking users to reproduce report logic by hand.
     """
     if not entry.source_kind:
-        raise ValueError('Only chart rows with a CDR source can be previewed.')
+        raise ValueError('Only chart rows with a Source Dataset can be previewed.')
     spec = _catalog_spec(entry)
     metric = _metric_column(frame, spec)
     filtered = _apply_catalog_filters(frame, entry, False, metric)
@@ -2876,7 +2946,7 @@ def render_catalog_chart_preview(
 ) -> bytes:
     """Render the same PNG chart used by a report for editor/report previews."""
     if not entry.source_kind:
-        raise ValueError('Only chart rows with a CDR source can be previewed.')
+        raise ValueError('Only chart rows with a Source Dataset can be previewed.')
     render_entry = prepare_multivendor_catalog_entry(entry) if multivendor else entry
     render_frame = frame if prefiltered else normalise_operator_aliases(frame)
     if report_chart_renderer_name(renderer) == "dashboard-canvas":
@@ -2915,7 +2985,7 @@ def render_catalog_chart_preview_with_hover(
             ),
         )
     if not entry.source_kind:
-        raise ValueError('Only chart rows with a CDR source can be previewed.')
+        raise ValueError('Only chart rows with a Source Dataset can be previewed.')
     render_entry = prepare_multivendor_catalog_entry(entry) if multivendor else entry
     render_frame = frame if prefiltered else normalise_operator_aliases(frame)
     payload = catalog_chart_payload(
@@ -7196,10 +7266,13 @@ def _named_slide_layout(presentation: Presentation, layout_name: str):
     """Resolve a template layout name against the template slide master."""
     canonical = canonical_layout_name(layout_name)
     expected = canonical.casefold()
+    for layout in presentation.slide_layouts:
+        if canonical_layout_name(layout.name).casefold() == expected:
+            return layout
     if canonical in DYNAMIC_LAYOUTS:
-        dynamic_columns = expected.startswith("title + 2 rows")
+        dynamic_rows, dynamic_columns = dynamic_layout_axes(canonical)
         comments = ("right" if expected.endswith("right") else "down") if "comments" in expected else ""
-        canonical = grid_layout_name(2, 3, comments) if dynamic_columns else grid_layout_name(3, 2, comments)
+        canonical = grid_layout_name(3 if dynamic_rows else 2, 3 if dynamic_columns else 2, comments)
         expected = canonical.casefold()
     for layout in presentation.slide_layouts:
         if canonical_layout_name(layout.name).casefold() == expected:
@@ -7330,7 +7403,7 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
         key = (
             id(source_frame), prepared_entry.source_kind, prepared_entry.cdr_source,
             prepared_entry.kpi, prepared_entry.filters, prepared_entry.calculated_dimensions,
-            prepared_entry.dynamic_field, prepared_entry.dynamic_value,
+            entry_dynamic_fields(prepared_entry), prepared_entry.dynamic_row_value, prepared_entry.dynamic_column_value, prepared_entry.dynamic_value,
         )
         prepared = prepared_frames.get(key)
         if prepared is None:
@@ -7347,7 +7420,7 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
 
     catalogue_slides: dict[int, list[CatalogEntry]] = defaultdict(list)
     effective_catalog = [prepare_multivendor_catalog_entry(entry) if multivendor else entry for entry in catalog]
-    dynamic_fields = {entry.dynamic_field for entry in effective_catalog if entry.dynamic_field}
+    dynamic_fields = {field for entry in effective_catalog for field in entry_dynamic_fields(entry) if field}
     if dynamic_fields:
         values = {field: set() for field in dynamic_fields}
         vendor_families = {}

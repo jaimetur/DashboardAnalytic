@@ -77,11 +77,11 @@ This panel reads the cell inventories uploaded as **Vendor mapping** datasets (V
 
 ## RF Quality template and Dashboard
 
-Every workspace that already has NSA Report Templates receives once, when the application first opens it, the NSA Report Template **NSA - RF Quality (RSRP & SINR)** and the E2E Dashboard **RF Quality (RSRP & SINR)** that uses it. New empty workspaces stay empty. The Dashboard has no saved CDR universe, so it always uses the two newest NSA CDRs of each type. The template contains:
+The existing **NSA - RF Quality (RSRP & SINR)** template and **RF Quality (RSRP & SINR)** Dashboard are workspace content. The application does not install them automatically. Import them from another workspace or create them in the editors. A Dashboard without a saved CDR universe uses the two newest NSA CDRs of each type. The template contains:
 
 Each family (CDF/histograms, averages, classes, thresholds and maps) starts with an **All CDR types** slide. It pools valid Data, Voice and Speech observations per Operator and Campaign; it does not average the three type averages. LTE and NR stay separate, and missing technologies do not contribute samples. The existing type-specific slides follow the aggregate.
 
-- Grouped-bar histogram slides follow each CDF/contour slide for All CDR types, Data, Voice and Speech. Their `2 rows + dynamic columns, comments down` layout and `Dynamic Field = Operator` create one column per selected Operator on the same slide, with LTE above NR and comments beneath. Every bin has one bar per Campaign, ordered oldest to newest: the newest uses the Operator colour and older Campaigns use progressively lighter shades. Percentages use the same valid-sample denominator and bin widths as the contour histograms.
+- Grouped-bar histogram slides follow each CDF/contour slide for All CDR types, Data, Voice and Speech. Their `Title + 2 rows + dynamic columns + comments down` layout and `Dynamic Columns Field = Operator` create one column per selected Operator on the same slide, with LTE above NR and comments beneath. Every bin has one bar per Campaign, ordered oldest to newest: the newest uses the Operator colour and older Campaigns use progressively lighter shades. Percentages use the same valid-sample denominator and bin widths as the contour histograms.
 - RSRP and SINR CDFs (LTE and NR) for Data, Voice and Speech, with contour histograms underneath in a two-by-two layout. RSRP uses 5 dB bins and SINR uses 1 dB bins; percentages are normalized per Operator and Campaign. Histograms reuse CDF colours and campaign line widths: newer campaigns are thicker, while multivendor operator comparisons retain their distinct line patterns;
 - average LTE and NR RSRP and SINR bars per CDR type;
 - separate LTE and NR RSRP distributions in -110/-100/-90/-80 dBm buckets and SINR distributions in 0/5/13/20 dB buckets, with red-to-green class colours matching the histogram background bands;
@@ -117,7 +117,7 @@ Speech falls back to the `Recording_*` fields when the `Playing_*` fields are ab
 
 ## Persistence and transfers
 
-Network Insights stores no analysis results; every analysis is calculated on demand. Spectrum Holdings belong to the workspace and travel with the **Operator & Vendor Maps** export, transfers and backups. The bundled template and Dashboard travel with Report Templates and Dashboards.
+Network Insights stores no analysis results; every analysis is calculated on demand. Spectrum Holdings belong to the workspace and travel with the **Operator & Vendor Maps** export, transfers and backups. Workspace templates and Dashboards travel with Report Templates and Dashboards.
 
 ## Troubleshooting
 

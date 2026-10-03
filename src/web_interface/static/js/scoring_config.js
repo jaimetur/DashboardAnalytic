@@ -2598,7 +2598,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     populateSourceLevelOptions(profileDialogG2, 'G_Level_2', profileDialogG2?.value || '');
   }).catch(() => {
     const note = root.querySelector('[data-environment-source-note]');
-    if (note) note.textContent = 'Unable to load cached CDR source values. Saved source selectors remain available; reload to retry.';
+    if (note) note.textContent = 'Unable to load cached Source Dataset values. Saved source selectors remain available; reload to retry.';
   });
 
   loadProfiles().then((loaded) => {

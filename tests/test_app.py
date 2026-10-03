@@ -1283,6 +1283,57 @@ def test_catalogue_editor_offers_result_group_for_every_cdr_source(client) -> No
     assert all('Result Group' in values for values in columns.values())
 
 
+def test_cdr_all_assistance_fields_union_every_individual_source(client) -> None:
+    import src.DashboardAnalytic as app_module
+    from src.modules.rf_catalog_source import RF_CATALOG_FIELDS
+
+    columns = app_module.catalogue_editor_columns([], ())
+
+    assert set().union(columns['cdr-data'], columns['cdr-voice'], columns['cdr-speech']) <= set(columns['cdr-all'])
+    assert set(RF_CATALOG_FIELDS) | {'CDR_Type'} <= set(columns['cdr-all'])
+
+
+def test_cdr_all_filter_value_assistance_reads_every_source_dataset(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    datasets = [
+        {'id': 1, 'dataset_kind': 'data', 'status': 'ready'},
+        {'id': 2, 'dataset_kind': 'voice', 'status': 'ready'},
+        {'id': 3, 'dataset_kind': 'speech', 'status': 'ready'},
+        {'id': 4, 'dataset_kind': 'data', 'status': 'processing'},
+    ]
+    dataset_kinds = {item['id']: item['dataset_kind'] for item in datasets}
+    monkeypatch.setattr(app_module.repository, 'list_datasets', lambda: datasets)
+    monkeypatch.setattr(app_module.repository, 'dataset_rows_table_exists', lambda _dataset_id: True)
+    monkeypatch.setattr(
+        app_module.repository, 'list_distinct_dataset_row_values',
+        lambda dataset_id, column, limit=200: [f"{dataset_kinds[dataset_id]}:{column}"],
+    )
+
+    response = client.get('/workspace-config/catalogue-filter-values', params={
+        'source': 'cdr-all', 'column': 'Operator',
+    })
+
+    assert response.status_code == 200
+    assert response.json()['values'] == ['data:Operator', 'speech:Operator', 'voice:Operator']
+
+    rf_values = client.get('/workspace-config/catalogue-filter-values', params={
+        'source': 'cdr-all', 'column': 'LTE_RSRP',
+    })
+    assert rf_values.status_code == 200
+    assert rf_values.json()['values'] == [
+        'data:LTE_PCell_RSRP_Avg', 'speech:Playing_RSRP_Avg',
+        'speech:Recording_RSRP_Avg', 'voice:4G_RSRP_Avg_A',
+    ]
+
+    cdr_types = client.get('/workspace-config/catalogue-filter-values', params={
+        'source': 'cdr-all', 'column': 'CDR_Type',
+    })
+    assert cdr_types.status_code == 200
+    assert cdr_types.json()['values'] == ['Data', 'Speech', 'Voice']
+
+
 def test_catalogue_editor_offers_declarative_distribution_bucket_fields(client) -> None:
     import src.DashboardAnalytic as app_module
 

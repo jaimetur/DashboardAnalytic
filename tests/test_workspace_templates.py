@@ -33,8 +33,10 @@ def test_report_template_migration_canonicalizes_existing_csv_layouts(tmp_path):
     repo = Repository(database, tmp_path / 'application.db')
     repo.initialize()
     legacy = (
-        'Slide,Layout,Chart Type\n'
-        '1,Title and 2 columns and 2 rows + Comments right,Average Vertical Bars\n'
+        'Slide,Layout,Dynamic Field\n'
+        '1,Title and 2 columns and 2 rows + Comments right,\n'
+        '2,Title + dynamic rows + 2 columns + comments down,Vendor\n'
+        '3,Title + 2 rows + dynamic columns + comments right,Operator\n'
     ).encode('utf-8')
     with repo.connection() as conn:
         conn.execute(
@@ -44,7 +46,11 @@ def test_report_template_migration_canonicalizes_existing_csv_layouts(tmp_path):
 
     repo.initialize()
 
-    assert b'Title + 2 rows + 2 columns + comments right' in repo.report_template_content('nsa', 'Legacy')
+    migrated = repo.report_template_content('nsa', 'Legacy').decode('utf-8')
+    assert 'Title + 2 rows + 2 columns + comments right' in migrated
+    assert 'Dynamic Rows Field,Dynamic Columns Field' in migrated
+    assert '2,Title + dynamic rows + 2 columns + comments down,Vendor,' in migrated
+    assert '3,Title + 2 rows + dynamic columns + comments right,,Operator' in migrated
 
 
 def test_legacy_library_migration_is_independent_and_idempotent(tmp_path):

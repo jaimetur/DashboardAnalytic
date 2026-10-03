@@ -41,7 +41,7 @@ from src.modules.cdr_reporting import (
     _catalog_spec, _clear_commentary, _layout_chart_frames, _legend_dimensions, _named_slide_layout,
     _remove_all_slides, _remove_template_chart_placeholders, _render_dashboard_payload,
     _set_commentary, _set_slide_header, _set_structural_slide_text, catalog_chart_payload,
-    catalog_kpi_fields, expand_dynamic_layouts, _normalise_operator_label, _normalise_vendor, prepare_multivendor_catalog_entry,
+    catalog_kpi_fields, expand_dynamic_layouts, entry_dynamic_fields, dynamic_chart_title, _normalise_operator_label, _normalise_vendor, prepare_multivendor_catalog_entry,
     ensure_vendor_group, normalise_operator_aliases, parse_catalog_filters,
     parse_catalog_grouping,
     prepare_catalog_chart_preview_frame, render_catalog_chart_preview, render_unavailable_source_chart,
@@ -114,6 +114,8 @@ class DashboardChartFilterPreviewRequest(BaseModel):
     label_format: str | None = None
     exclude_null_empty: str | bool | None = None
     exclude_zero: str | bool | None = None
+    dynamic_rows_field: str | None = None
+    dynamic_columns_field: str | None = None
     dynamic_field: str | None = None
 
 
@@ -1239,7 +1241,7 @@ def install_dashboard_routes(core):
 
     def expand_dashboard_layouts(entries, definition, options, task_repository):
         effective_entries = [prepare_multivendor_catalog_entry(entry, definition.vendor_comparison) if definition.scope == "multivendor" else entry for entry in entries]
-        dynamic_fields = {entry.dynamic_field for entry in effective_entries if entry.dynamic_field}
+        dynamic_fields = {field for entry in effective_entries for field in entry_dynamic_fields(entry) if field}
         mappings = task_repository.chart_mapping_settings()['operator_mappings']
         values_by_field = {}
         for field in dynamic_fields:
@@ -1817,7 +1819,7 @@ def install_dashboard_routes(core):
             'axis_x_range': entry.axis_x_range, 'axis_y_range': entry.axis_y_range,
             'label_position': entry.label_position,
             'label_format': entry.label_format,
-            'exclude_null_empty': entry.exclude_null_empty, 'exclude_zero': entry.exclude_zero, 'dynamic_field': entry.dynamic_field,
+            'exclude_null_empty': entry.exclude_null_empty, 'exclude_zero': entry.exclude_zero, 'dynamic_rows_field': entry_dynamic_fields(entry)[0], 'dynamic_columns_field': entry_dynamic_fields(entry)[1],
             'template_available': template_available, 'datasets_by_source': datasets_by_source,
             'columns_by_source': columns_by_source, 'columns': columns,
         })
@@ -2874,7 +2876,7 @@ def install_dashboard_routes(core):
                 progress(percent, detail)
 
         workspace = workspace or workspace_key()
-        report(5, 'Validating the Dashboard template and selected CDR sources')
+        report(5, 'Validating the Dashboard template and selected source datasets')
         ensure_not_cancelled()
         task_repository = Repository(Path(workspace), core.repository.global_db_path)
         entries = validate(definition, task_repository)
@@ -2888,7 +2890,7 @@ def install_dashboard_routes(core):
                     available = task_repository.list_dataset_row_columns(int(dataset['id']))
                     requested = [column for column in available if identity(column) in {identity(field) for field in rf_source_columns(kind)}]
                     task_repository.copy_dataset_rows_to_reporting(int(dataset['id']), kind, requested)
-        if any(entry.dynamic_field for entry in entries):
+        if any(any(entry_dynamic_fields(entry)) for entry in entries):
             ensure_combined_filter_columns(definition, task_repository, dimensions, selected_by_kind, chart_entries=entries)
         selected_source_rows = {
             kind: sum(int(dataset.get('row_count') or 0) for dataset in selected)
@@ -2906,7 +2908,7 @@ def install_dashboard_routes(core):
         hidden_filter_keys = {identity(field) for field in definition.hidden_filters}
         fields = {field for field in ADAPTATIVE_FILTER_FIELDS if identity(field) not in hidden_filter_keys}
         fields.update(definition.custom_fields)
-        fields.update((prepare_multivendor_catalog_entry(entry, definition.vendor_comparison).dynamic_field if definition.scope == "multivendor" else entry.dynamic_field) for entry in entries if entry.dynamic_field)
+        fields.update(field for entry in entries for field in entry_dynamic_fields(prepare_multivendor_catalog_entry(entry, definition.vendor_comparison) if definition.scope == "multivendor" else entry) if field)
         fields = sorted(fields, key=str.casefold)
         use_profile_options = bool(
             date_bounds
@@ -3603,8 +3605,7 @@ def install_dashboard_routes(core):
     def chart_query_columns(entry, multivendor):
         reported = core.reporting_query_columns(entry.source_kind, [entry], multivendor)
         explicit = set(catalog_kpi_fields(entry.kpi))
-        if entry.dynamic_field:
-            explicit.add(entry.dynamic_field)
+        explicit.update(field for field in entry_dynamic_fields(entry) if field)
         explicit.update(_legend_dimensions(entry.legend))
         explicit.update(parse_catalog_grouping(entry.grouping_rows).dimensions)
         explicit.update(parse_catalog_grouping(entry.grouping_columns).dimensions)
@@ -4058,7 +4059,7 @@ def install_dashboard_routes(core):
             # model independent.
             filtered_key = sha256(repr((
                 raw_key, entry.cdr_source, entry.kpi, entry.filters,
-                entry.calculated_dimensions, snapshot.multivendor, entry.dynamic_field, entry.dynamic_value,
+                entry.calculated_dimensions, snapshot.multivendor, entry_dynamic_fields(entry), entry.dynamic_row_value, entry.dynamic_column_value, entry.dynamic_value,
             )).encode()).hexdigest()
             with lock:
                 prepared_frame = snapshot.filtered_frames.get(filtered_key)
@@ -4253,7 +4254,7 @@ def install_dashboard_routes(core):
             'axis_x_range': entry.axis_x_range, 'axis_y_range': entry.axis_y_range,
             'label_position': entry.label_position,
             'label_format': entry.label_format,
-            'exclude_null_empty': entry.exclude_null_empty, 'exclude_zero': entry.exclude_zero, 'dynamic_field': entry.dynamic_field,
+            'exclude_null_empty': entry.exclude_null_empty, 'exclude_zero': entry.exclude_zero, 'dynamic_rows_field': entry_dynamic_fields(entry)[0], 'dynamic_columns_field': entry_dynamic_fields(entry)[1],
             'template_available': template_available,
             'datasets_by_source': datasets_by_source, 'columns_by_source': columns_by_source,
             'columns': columns_by_source.get(f'cdr-{entry.source_kind}', [str(column) for column in columns if identity(column) not in hidden]),
@@ -4271,7 +4272,7 @@ def install_dashboard_routes(core):
             key: value for key, value in request.model_dump().items()
             if value is not None and key in {
                 'filters', 'chart_title', 'cdr_source', 'kpi', 'chart_type', 'grouping_rows',
-                'grouping_columns', 'legend', 'legend_position', 'legend_format', 'axis_x_range', 'axis_y_range', 'label_position', 'label_format', 'exclude_null_empty', 'exclude_zero', 'dynamic_field',
+                'grouping_columns', 'legend', 'legend_position', 'legend_format', 'axis_x_range', 'axis_y_range', 'label_position', 'label_format', 'exclude_null_empty', 'exclude_zero', 'dynamic_rows_field', 'dynamic_columns_field', 'dynamic_field',
             }
         }
         # The template owns these required chart attributes. Custom dropdowns
@@ -4478,7 +4479,7 @@ def install_dashboard_routes(core):
             key: value for key, value in request.model_dump().items()
             if value is not None and key in {
                 'filters', 'chart_title', 'cdr_source', 'kpi', 'chart_type', 'grouping_rows',
-                'grouping_columns', 'legend', 'legend_position', 'legend_format', 'axis_x_range', 'axis_y_range', 'label_position', 'label_format', 'exclude_null_empty', 'exclude_zero', 'dynamic_field',
+                'grouping_columns', 'legend', 'legend_position', 'legend_format', 'axis_x_range', 'axis_y_range', 'label_position', 'label_format', 'exclude_null_empty', 'exclude_zero', 'dynamic_rows_field', 'dynamic_columns_field', 'dynamic_field',
             }
         }
         for key in ('cdr_source', 'kpi', 'chart_type'):
@@ -4505,9 +4506,9 @@ def install_dashboard_routes(core):
                     changes[key] = core.parse_template_boolean(changes[key], label)
                 except ValueError as exc:
                     raise HTTPException(400, str(exc)) from exc
-        if changes.get("chart_title") == _entry.chart_title and _entry.dynamic_value is not None:
+        if changes.get("chart_title") == _entry.chart_title and any(value is not None for value in (_entry.dynamic_row_value, _entry.dynamic_column_value, _entry.dynamic_value)):
             changes["chart_title"] = entries[source_index].chart_title
-        for field in ('dynamic_field', 'grouping_rows', 'grouping_columns', 'legend'):
+        for field in ('dynamic_rows_field', 'dynamic_columns_field', 'dynamic_field', 'grouping_rows', 'grouping_columns', 'legend'):
             if field in changes and changes[field] == getattr(_entry, field):
                 changes[field] = getattr(entries[source_index], field)
         updated_entry = replace(entries[source_index], **changes)
@@ -4547,8 +4548,9 @@ def install_dashboard_routes(core):
                     replacement = replace(
                         effective_update, slide=current.slide, layout=current.layout, template_index=current.template_index,
                         dynamic_value=current.dynamic_value,
-                        chart_title=(f"{effective_update.chart_title} – {current.dynamic_value}" if current.dynamic_value is not None else effective_update.chart_title),
+                        dynamic_row_value=current.dynamic_row_value, dynamic_column_value=current.dynamic_column_value,
                     )
+                    replacement = replace(replacement, chart_title=dynamic_chart_title(replacement))
                     candidate.entries[chart_index] = replacement
                     candidate.chart_frames.pop(chart_index, None)
                     candidate.chart_payloads.pop(chart_index, None)

@@ -7,13 +7,13 @@
   </article>
   <article class="panel" data-page-panel-label="Query editor">
     <div class="section-head"><div><p class="eyebrow">Sources</p><h2>Selected CDR tables</h2></div></div>
-    <label>CDR sources <span class="form-label-hint">Select one or more ready CDRs</span>
+    <label>Source Datasets <span class="form-label-hint">Select one or more ready CDRs</span>
       <select data-sql-datasets multiple size="8">{% for dataset in datasets %}<option value="{{ dataset.id }}">{{ dataset.kind | upper }} · {{ dataset.name }}</option>{% endfor %}</select>
     </label>
     <p class="form-note">The query can use <code>selected_data</code>, <code>selected_voice</code> and <code>selected_speech</code>. Each view adds <code>source_dataset_id</code>, <code>source_dataset_name</code> and <code>source_row_id</code>; all source CDR columns remain available.</p>
     <div class="query-builder-mode" role="group" aria-label="Query editor mode"><button type="button" data-sql-mode="assisted" aria-pressed="true">Assistance Mode</button><button type="button" data-sql-mode="sql" aria-pressed="false">SQL Mode</button></div>
     <div class="query-builder-assistant" data-sql-assistant>
-      <p class="form-note">Select CDR sources above, then choose what to show. The SQL preview updates as you build the query.</p>
+      <p class="form-note">Select source datasets above, then choose what to show. The SQL preview updates as you build the query.</p>
       <div class="query-builder-assistant-grid">
         <fieldset class="query-builder-type-picker"><legend>CDR types to use</legend><div data-sql-types></div><span class="form-label-hint">Select one or more types. Results include a cdr_type field.</span></fieldset>
         <div class="inline-actions query-builder-row-limit-actions"><label>Maximum rows <input data-sql-limit type="number" min="1" max="100000" value="100"></label><label class="query-builder-all-fields"><input data-sql-all-rows type="checkbox"> All rows</label></div>
@@ -53,7 +53,7 @@
       <p class="eyebrow">Saved query</p><h3 id="query-builder-edit-title">Edit saved query</h3>
       <label>Name <input data-sql-edit-name></label>
       <label>Description <input data-sql-edit-description></label>
-      <label>CDR sources <select data-sql-edit-sources multiple size="7">{% for dataset in datasets %}<option value="{{ dataset.id }}">{{ dataset.kind | upper }} · {{ dataset.name }}</option>{% endfor %}</select></label>
+      <label>Source Datasets <select data-sql-edit-sources multiple size="7">{% for dataset in datasets %}<option value="{{ dataset.id }}">{{ dataset.kind | upper }} · {{ dataset.name }}</option>{% endfor %}</select></label>
       <p class="form-note" data-sql-edit-status aria-live="polite"></p>
       <div class="confirm-actions"><button type="button" class="ghost-link" data-sql-edit-cancel>Cancel</button><button type="button" class="query-builder-primary-action" data-sql-edit-save>Save changes</button></div>
     </div>
@@ -204,7 +204,7 @@
   function buildAssistedSql() {
     if (mode !== 'assisted') return;
     const kinds = selectedKinds();
-    if (!kinds.length) { editor.value = '-- Select at least one CDR source to preview SQL.'; lastGeneratedSql = editor.value; assistantValid = false; assistantStatus.textContent = 'Select at least one CDR source to begin.'; syncActionAvailability(); return; }
+    if (!kinds.length) { editor.value = '-- Select at least one Source Dataset to preview SQL.'; lastGeneratedSql = editor.value; assistantValid = false; assistantStatus.textContent = 'Select at least one Source Dataset to begin.'; syncActionAvailability(); return; }
     const columns = availableColumns();
     const chosen = allFields.checked ? [] : [...fieldsPicker.selectedOptions].map(option => option.value);
     if (!allFields.checked && !chosen.length) { editor.value = '-- Select at least one field to generate SQL.'; lastGeneratedSql = editor.value; assistantValid = false; assistantStatus.textContent = 'Select at least one field to show.'; syncActionAvailability(); return; }

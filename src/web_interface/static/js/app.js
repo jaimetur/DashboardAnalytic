@@ -2429,7 +2429,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   const catalogueHeaders = Array.from(table.querySelectorAll('thead th[data-catalogue-field]'))
     .map((cell) => cell.dataset.catalogueField);
   const fieldColumns = new Set(['Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend']);
-  const assistedFields = new Set(['Layout', 'CDR source', 'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position', 'Legend Format', 'Label Position', 'Label Format', 'Axis X Range', 'Axis Y Range', 'Exclude Null/Empty', 'Exclude Zero']);
+  const assistedFields = new Set(['Dynamic Rows Field', 'Dynamic Columns Field', 'Layout', 'Source Dataset', 'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position', 'Legend Format', 'Label Position', 'Label Format', 'Axis X Range', 'Axis Y Range', 'Exclude Null/Empty', 'Exclude Zero']);
   const groupingColumns = new Set(['Rows Aggregation', 'Column Aggregation']);
   const validationAlert = document.querySelector('[data-catalogue-validation-alert]');
   const validationMessage = validationAlert?.querySelector('[data-catalogue-validation-message]');
@@ -2508,7 +2508,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       const slide = rowValue(row, 'Slide') || '?';
       const chart = rows.filter((candidate) => (
         rowValue(candidate, 'Slide') === slide
-        && rowValue(candidate, 'CDR source')
+        && rowValue(candidate, 'Source Dataset')
         && rows.indexOf(candidate) <= rows.indexOf(row)
       )).length || 1;
       invalid = `Slide: ${slide} - Chart: ${chart} -> ${error}`;
@@ -2523,18 +2523,21 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (field === 'Legend Position') return suggestions.legend_positions || [];
     if (field === 'Label Position') return suggestions.label_positions || [];
     if (field === 'Exclude Null/Empty' || field === 'Exclude Zero') return suggestions.boolean_values || ['', 'Yes'];
-    if (field === 'CDR source') return Object.keys(suggestions.columns || {}).map((source) => source.replace(/^cdr-/, 'CDR-').replace(/(^|-)\w/g, (letter) => letter.toUpperCase()));
-    if (fieldColumns.has(field) || field === 'KPI') {
+    if (field === 'Source Dataset') return Object.keys(suggestions.columns || {}).map((source) => source.replace(/^cdr-/, 'CDR-').replace(/(^|-)\w/g, (letter) => letter.toUpperCase()));
+    if (fieldColumns.has(field) || field === 'KPI' || field === 'Dynamic Rows Field' || field === 'Dynamic Columns Field') {
       const row = cell.closest('tr');
-      const source = row?.querySelector('[data-catalogue-field="CDR source"]')?.textContent.trim().toLocaleLowerCase();
-      return suggestions.columns?.[source] || [];
+      const source = row?.querySelector('[data-catalogue-field="Source Dataset"]')?.textContent.trim().toLocaleLowerCase();
+      const fields = suggestions.columns?.[source] || [];
+      return field.startsWith('Dynamic ') ? ['', ...fields] : fields;
     }
     return [];
   };
   const helperCopy = (field) => {
     if (field === 'Layout') return 'Choose one of the layouts defined by the selected PowerPoint template. It replaces the current value.';
     if (field === 'Chart type') return 'Choose one supported chart type. It replaces the current value.';
-    if (field === 'CDR source') return 'Choose the CDR source used to create this chart. It replaces the current value.';
+    if (field === 'Source Dataset') return 'Choose the Source Dataset used to create this chart. It replaces the current value.';
+    if (field === 'Dynamic Rows Field') return 'Choose the source field whose distinct values create grid rows. Leave empty when rows are fixed.';
+    if (field === 'Dynamic Columns Field') return 'Choose the source field whose distinct values create grid columns. Leave empty when columns are fixed.';
     if (field === 'KPI') return 'Choose a processed field and, optionally, an explicit aggregation. COUNT counts non-empty rows; COUNTD counts distinct values.';
     if (field === 'Legend') return 'Select one or more CDR fields to use as the displayed legend labels. Values are stored as a comma-separated list.';
     if (field === 'Legend Position') return 'Leave this empty when the chart has no legend, or choose where the legend is drawn.';
@@ -2550,7 +2553,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (field === 'Column Aggregation') return 'Select one or more dimensions for comparison series or table columns. They are appended with ×.';
     return 'This value can be edited directly. Select Layout, Chart type, Filters or Grouping for contextual suggestions.';
   };
-  const selectedSource = (cell) => cell?.closest('tr')?.querySelector('[data-catalogue-field="CDR source"]')?.textContent.trim().toLocaleLowerCase() || '';
+  const selectedSource = (cell) => cell?.closest('tr')?.querySelector('[data-catalogue-field="Source Dataset"]')?.textContent.trim().toLocaleLowerCase() || '';
   const filterOperators = [
     ['=', 'Equals (=)'], ['!=', 'Not equal (!=)'], ['CONTAINS', 'Contains'], ['NOT CONTAINS', 'Not contains'],
     ['IN', 'In list (IN)'], ['NOT IN', 'Not in list (NOT IN)'], ['<', 'Less than (<)'], ['<=', 'Less than or equal (≤)'],
@@ -2787,7 +2790,10 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       (existing) => normaliseOptionValue(existing) === normaliseOptionValue(value),
     );
     if (values.length || existingValues.size) {
-      const orderedValues = [
+      const orderedValues = field === 'Layout' ? [
+        ...new Set(values),
+        ...Array.from(existingValues).filter((value) => !values.some((candidate) => normaliseOptionValue(candidate) === normaliseOptionValue(value))),
+      ] : [
         ...existingValues,
         ...values.filter((value) => !hasExistingValue(value)),
       ];
@@ -2975,7 +2981,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
         const chartActions = document.createElement('td');
         chartActions.className = 'catalogue-chart-actions';
         chartActions.dataset.catalogueChartActions = '';
-        chartActions.append(...actionButtonRows('chart', Boolean(String(source['CDR source'] || '').trim())));
+        chartActions.append(...actionButtonRows('chart', Boolean(String(source['Source Dataset'] || '').trim())));
         row.append(chartActions);
       }
       const cell = document.createElement('td');
@@ -3167,13 +3173,14 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     return [control.name, Array.from(control.selectedOptions).map((option) => option.value).filter(Boolean).join(separator)];
   }));
   const previewDefinitionFromRow = (row) => ({
-    chart_type: rowValue(row, 'Chart type'), chart_title: rowValue(row, 'Chart Tittle'), cdr_source: rowValue(row, 'CDR source'),
+    chart_type: rowValue(row, 'Chart type'), chart_title: rowValue(row, 'Chart Tittle'), cdr_source: rowValue(row, 'Source Dataset'),
     kpi: rowValue(row, 'KPI'), filters: rowValue(row, 'Filters'), grouping_rows: rowValue(row, 'Rows Aggregation'),
     grouping_columns: rowValue(row, 'Column Aggregation'), legend: rowValue(row, 'Legend'), legend_position: rowValue(row, 'Legend Position'), legend_format: rowValue(row, 'Legend Format'),
     axis_x_range: rowValue(row, 'Axis X Range'), axis_y_range: rowValue(row, 'Axis Y Range'),
     label_position: rowValue(row, 'Label Position'),
     label_format: rowValue(row, 'Label Format'),
     exclude_null_empty: rowValue(row, 'Exclude Null/Empty'), exclude_zero: rowValue(row, 'Exclude Zero'),
+    dynamic_rows_field: rowValue(row, 'Dynamic Rows Field'), dynamic_columns_field: rowValue(row, 'Dynamic Columns Field'),
   });
   const renderChartPreviewSandbox = (row, definition = null) => {
     if (!chartPreviewSandbox || !chartPreviewFields) return;
@@ -3187,8 +3194,8 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       columnsBySource: suggestions.columns,
       fields: [
         // Keep this sequence aligned with the editable Report Template columns.
-        ['chart_title', 'Chart Tittle'], ['cdr_source', 'CDR Source'], ['kpi', 'KPI'], ['chart_type', 'Chart Type'],
-        ['filters', 'Filters'], ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
+        ['chart_title', 'Chart Tittle'], ['cdr_source', 'Source Dataset'], ['kpi', 'KPI'], ['chart_type', 'Chart Type'],
+        ['dynamic_rows_field', 'Dynamic Rows Field'], ['dynamic_columns_field', 'Dynamic Columns Field'], ['filters', 'Filters'], ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
         ['legend_format', 'Legend Format'], ['label_position', 'Label Position'], ['label_format', 'Label Format'],
         ['axis_x_range', 'Axis X Range'], ['axis_y_range', 'Axis Y Range'], ['exclude_null_empty', 'Exclude Null/Empty'], ['exclude_zero', 'Exclude Zero'],
       ],
@@ -3255,7 +3262,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       {title: 'Update Template?', confirmLabel: 'Update Template', tone: 'warning'},
     );
     if (!accepted) return;
-    const mapping = {chart_title: 'Chart Tittle', chart_type: 'Chart type', cdr_source: 'CDR source', kpi: 'KPI', filters: 'Filters', grouping_rows: 'Rows Aggregation', grouping_columns: 'Column Aggregation', legend: 'Legend', legend_position: 'Legend Position', legend_format: 'Legend Format', label_position: 'Label Position', label_format: 'Label Format', axis_x_range: 'Axis X Range', axis_y_range: 'Axis Y Range', exclude_null_empty: 'Exclude Null/Empty', exclude_zero: 'Exclude Zero'};
+    const mapping = {dynamic_rows_field: 'Dynamic Rows Field', dynamic_columns_field: 'Dynamic Columns Field', chart_title: 'Chart Tittle', chart_type: 'Chart type', cdr_source: 'Source Dataset', kpi: 'KPI', filters: 'Filters', grouping_rows: 'Rows Aggregation', grouping_columns: 'Column Aggregation', legend: 'Legend', legend_position: 'Legend Position', legend_format: 'Legend Format', label_position: 'Label Position', label_format: 'Label Format', axis_x_range: 'Axis X Range', axis_y_range: 'Axis Y Range', exclude_null_empty: 'Exclude Null/Empty', exclude_zero: 'Exclude Zero'};
     Object.entries(previewDefinition()).forEach(([key, value]) => {
       const cell = Array.from(chartPreviewRow.querySelectorAll('[data-catalogue-field]')).find((item) => item.dataset.catalogueField === mapping[key]);
       if (!cell) return;
@@ -3639,7 +3646,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     window.requestAnimationFrame(() => {
       const focused = document.activeElement;
       const assistanceFocused = helper.contains(focused);
-      if (editedCell?.dataset.catalogueField === 'CDR source' && !assistanceFocused) normaliseCatalogueRows();
+      if (editedCell?.dataset.catalogueField === 'Source Dataset' && !assistanceFocused) normaliseCatalogueRows();
       if (!focused?.closest?.('[data-catalogue-field]') && !assistanceFocused) hideCellAssistance();
     });
   });
@@ -3659,12 +3666,12 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (!activeCell) return;
     const field = activeCell.dataset.catalogueField || '';
     const selected = Array.from(options.selectedOptions).map((option) => option.value);
-    if (!selected.length || (!['Legend Position', 'Legend Format', 'Label Position', 'Label Format', 'Exclude Null/Empty', 'Exclude Zero'].includes(field) && !selected.some(Boolean))) return;
+    if (!selected.length || (!['Legend Position', 'Legend Format', 'Label Position', 'Label Format', 'Exclude Null/Empty', 'Exclude Zero', 'Dynamic Rows Field', 'Dynamic Columns Field'].includes(field) && !selected.some(Boolean))) return;
     const current = activeCell.textContent.trim();
     if (field === 'KPI') {
       const operation = kpiAggregation?.value || '';
       activeCell.textContent = operation ? `${operation}(${selected[0]})` : selected[0];
-    } else if (field === 'Layout' || field === 'CDR source' || field === 'Legend Position' || field === 'Legend Format' || field === 'Label Position' || field === 'Label Format' || field === 'Exclude Null/Empty' || field === 'Exclude Zero') {
+    } else if (field === 'Dynamic Rows Field' || field === 'Dynamic Columns Field' || field === 'Layout' || field === 'Source Dataset' || field === 'Legend Position' || field === 'Legend Format' || field === 'Label Position' || field === 'Label Format' || field === 'Exclude Null/Empty' || field === 'Exclude Zero') {
       activeCell.textContent = selected[0];
     } else if (field === 'Chart type') {
       activeCell.textContent = displayChartType(selected[0]);
@@ -4033,8 +4040,8 @@ document.querySelectorAll('[data-catalogue-import-form]').forEach((form) => {
   let templateLibrary = {};
   try { templateLibrary = JSON.parse(form.dataset.catalogueTemplateLibrary || '{}'); } catch (_error) { templateLibrary = {}; }
   const currentHeaders = [
-    'Slide', 'Slide Tittle', 'Slide Subtittle', 'Layout', 'Chart Tittle', 'CDR source',
-    'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position', 'Legend Format', 'Label Position', 'Label Format', 'Axis X Range', 'Axis Y Range',
+    'Slide', 'Slide Tittle', 'Slide Subtittle', 'Layout', 'Dynamic Rows Field', 'Dynamic Columns Field', 'Chart Tittle', 'Source Dataset',
+    'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position', 'Legend Format', 'Label Position', 'Label Format', 'Axis X Range', 'Axis Y Range', 'Exclude Null/Empty', 'Exclude Zero',
   ];
   const normalizedHeader = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
   const hasCurrentSchema = async (selected) => {
@@ -4045,7 +4052,8 @@ document.querySelectorAll('[data-catalogue-import-form]').forEach((form) => {
     if (!headerLine) return false;
     const headers = headerLine.split(',').map((header) => normalizedHeader(header.replace(/^"|"$/g, '')));
     return headers.length === currentHeaders.length
-      && headers.every((header, index) => header === normalizedHeader(currentHeaders[index]));
+      && new Set(headers).size === headers.length
+      && currentHeaders.every((header) => headers.includes(normalizedHeader(header)));
   };
   file?.addEventListener('change', () => {
     const selected = file.files?.[0];
@@ -4748,7 +4756,7 @@ function setupSearchableSingleSelects() {
       const visibleOptions = Array.from(select.options).filter((option) => (
         !option.disabled && (!normalized || (option.textContent || '').toLocaleLowerCase().includes(normalized))
       ));
-      if (select.closest('[data-catalogue-editor]')) {
+      if (select.closest('[data-catalogue-editor]') && select.closest('.catalogue-editor-helper')?.dataset.catalogueAssistanceField !== 'Layout') {
         visibleOptions.sort((left, right) => Number(right.selected) - Number(left.selected)
           || String(left.textContent || '').localeCompare(String(right.textContent || '')));
       }
@@ -4756,6 +4764,13 @@ function setupSearchableSingleSelects() {
         const item = document.createElement('button');
         item.type = 'button';
         item.className = 'searchable-select-option';
+        if (select.closest('.catalogue-editor-helper')?.dataset.catalogueAssistanceField === 'Layout') {
+          if (['Title Page', 'Title Only', 'Transition', 'Black logo end slide'].includes(option.value)) {
+            item.classList.add('catalogue-layout-structural');
+          } else if (option.value.includes('dynamic rows') || option.value.includes('dynamic columns')) {
+            item.classList.add('catalogue-layout-dynamic');
+          }
+        }
         item.textContent = option.textContent || option.value;
         item.setAttribute('aria-selected', String(option.selected));
         item.addEventListener('click', () => {
@@ -5580,7 +5595,7 @@ function setupEdgeNavigatorReveal() {
 function createInteractiveChartPreviewControls(fieldsElement, definition, options = {}) {
   if (!fieldsElement) return {definition: () => ({})};
   const fields = options.fields || [
-    ['cdr_source', 'CDR Source'], ['kpi', 'KPI'], ['chart_type', 'Chart Type'], ['filters', 'Filters'],
+    ['cdr_source', 'Source Dataset'], ['kpi', 'KPI'], ['chart_type', 'Chart Type'], ['filters', 'Filters'],
     ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'], ['legend_format', 'Legend Format'],
     ['label_position', 'Label Position'], ['label_format', 'Label Format'], ['axis_x_range', 'Axis X Range'], ['axis_y_range', 'Axis Y Range'],
     ['exclude_null_empty', 'Exclude Null/Empty'], ['exclude_zero', 'Exclude Zero'],
@@ -5645,7 +5660,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
   const setupSelects = (root = fieldsElement) => {
     // Filter-condition selects are dynamic and do not have a name. Include
     // them explicitly so Column and Operator receive the same searchable,
-    // single-value dropdown used by KPI and CDR Source in every preview host.
+    // single-value dropdown used by KPI and Source Dataset in every preview host.
     root.querySelectorAll('select[name], select[data-preview-kpi-aggregation], select[data-report-chart-filter-select], .report-chart-filter-condition select').forEach((select) => {
       if (select.classList.contains('report-chart-preview-select-native')) return;
       const shell = document.createElement('div'); shell.className = 'report-chart-preview-select';

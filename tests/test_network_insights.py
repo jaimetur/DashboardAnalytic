@@ -13,7 +13,7 @@ from src.modules.cdr_reporting import _explicit_bucket_labels, _osm_map_tile_geo
 from src.modules.repository import local_now_iso
 
 
-TEMPLATE_PATH = Path(__file__).resolve().parents[1] / 'assets' / 'report-templates' / 'nsa' / f'{ni.RF_QUALITY_TEMPLATE_NAME}.csv'
+TEMPLATE_PATH = Path(__file__).resolve().parent / 'fixtures' / 'rf-quality-template.csv'
 
 
 def _login(client) -> None:
@@ -236,48 +236,6 @@ def test_rf_histogram_counts_samples_in_ordered_quality_ranges() -> None:
     ]
 
 
-def test_bundled_rf_quality_content_is_seeded_once(client) -> None:
-    from src.modules.e2e_dashboards import LEGACY_STATE_KEY, STATE_KEY
-
-    repository = app_module.repository
-    templates_root = TEMPLATE_PATH.parents[1]
-    assert ni.RF_QUALITY_TEMPLATE_NAME not in {str(row['name']) for row in repository.list_report_templates('nsa')}
-    assert repository.get_workspace_state(STATE_KEY) is None
-
-    added = ni.seed_bundled_rf_quality_content(repository, templates_root, STATE_KEY, LEGACY_STATE_KEY)
-    assert added == [ni.RF_QUALITY_TEMPLATE_NAME, ni.RF_QUALITY_DASHBOARD_NAME]
-    assert ni.RF_QUALITY_TEMPLATE_NAME in {str(row['name']) for row in repository.list_report_templates('nsa')}
-    dashboards = json.loads(repository.get_workspace_state(STATE_KEY))
-    seeded = [item for item in dashboards.values() if item['name'] == ni.RF_QUALITY_DASHBOARD_NAME]
-    assert len(seeded) == 1
-    assert seeded[0]['template'] == ni.RF_QUALITY_TEMPLATE_NAME and seeded[0]['technology'] == 'nsa'
-    assert 'datasets' not in seeded[0]
-
-    assert ni.seed_bundled_rf_quality_content(repository, templates_root, STATE_KEY, LEGACY_STATE_KEY) == []
-    repository.set_workspace_state(STATE_KEY, json.dumps({}))
-    assert ni.seed_bundled_rf_quality_content(repository, templates_root, STATE_KEY, LEGACY_STATE_KEY) == []
-    assert json.loads(repository.get_workspace_state(STATE_KEY)) == {}
-
-
-def test_bundled_rf_quality_content_skips_workspaces_without_a_library() -> None:
-    class EmptyWorkspace:
-        def __init__(self) -> None:
-            self.state: dict[str, str] = {}
-
-        def list_report_templates(self, technology: str) -> list[dict[str, str]]:
-            return []
-
-        def get_workspace_state(self, key: str) -> str | None:
-            return self.state.get(key)
-
-        def set_workspace_state(self, key: str, value: str) -> None:
-            self.state[key] = value
-
-    workspace = EmptyWorkspace()
-    assert ni.seed_bundled_rf_quality_content(workspace, TEMPLATE_PATH.parents[1], 'dashboards', 'legacy') == []
-    assert workspace.state == {}
-
-
 def test_network_insights_page_and_analysis(client, tmp_path) -> None:
     _login(client)
     _add_ready_dataset(tmp_path, 'CDR_Data_NSA_2026-Q1.xlsx', 'data', _data_rows('2026-Q1'))
@@ -423,7 +381,10 @@ def test_dynamic_histogram_grids_keep_radio_positions_and_all_operators(layout, 
     from pptx import Presentation
     catalogue = app_module.load_template_catalogue(TEMPLATE_PATH.read_bytes(), 'nsa')
     base = [entry for entry in catalogue if entry.chart_type == 'Histogram Bars'][:2]
-    base = [replace(entry, layout=layout) for entry in base]
+    base = [replace(
+        entry, layout=layout, dynamic_rows_field='' if columns else 'Operator',
+        dynamic_columns_field='Operator' if columns else '', dynamic_field='',
+    ) for entry in base]
     expanded = expand_dynamic_layouts(base, {'Operator': ['A', 'B', 'C', 'D', 'E', 'F']})
     assert len(expanded) == 12
     assert len({entry.slide for entry in expanded}) == 1
@@ -441,7 +402,12 @@ def test_dynamic_histogram_grids_keep_radio_positions_and_all_operators(layout, 
         assert len(actual) == count * 2
         assert len(_layout_chart_frames(_named_slide_layout(deck, actual[0].layout))) == count * 2
     restored = parse_catalog_csv(catalogue_csv(base), 'nsa')
-    assert [entry.dynamic_field for entry in restored] == ['Operator', 'Operator']
+    if columns:
+        assert [entry.dynamic_columns_field for entry in restored] == ['Operator', 'Operator']
+        assert [entry.dynamic_rows_field for entry in restored] == ['', '']
+    else:
+        assert [entry.dynamic_rows_field for entry in restored] == ['Operator', 'Operator']
+        assert [entry.dynamic_columns_field for entry in restored] == ['', '']
     from src.modules.report_layouts import canonical_layout_name
     assert [entry.layout for entry in restored] == [canonical_layout_name(layout)] * 2
 
@@ -464,7 +430,12 @@ def test_dynamic_grids_without_comments_expand_to_matching_frames(dynamic_layout
 
     catalogue = app_module.load_template_catalogue(TEMPLATE_PATH.read_bytes(), 'nsa')
     base = [
-        replace(entry, layout=dynamic_layout)
+        replace(
+            entry, layout=dynamic_layout,
+            dynamic_rows_field='' if dynamic_layout.startswith('Title + 2 rows') else 'Operator',
+            dynamic_columns_field='Operator' if dynamic_layout.startswith('Title + 2 rows') else '',
+            dynamic_field='',
+        )
         for entry in catalogue if entry.chart_type == 'Histogram Bars'
     ][:2]
 
@@ -477,6 +448,61 @@ def test_dynamic_grids_without_comments_expand_to_matching_frames(dynamic_layout
     assert layout is not None
     assert 'comments' not in layout.name.casefold()
     assert len(_layout_chart_frames(layout)) == 6
+
+
+def test_two_axis_dynamic_expansion_filters_vendor_only_and_paginates_grid_frames():
+    from src.modules.cdr_reporting import (
+        CatalogEntry,
+        _layout_chart_frames,
+        _named_slide_layout,
+        _select_dynamic_chart_frame,
+        expand_dynamic_layouts,
+    )
+    from pptx import Presentation
+
+    definition = CatalogEntry(
+        slide=1, slide_title='Vendor campaign quality', slide_subtitle='',
+        layout='Title + dynamic rows + dynamic columns + comments down',
+        chart_title='Signal', cdr_source='CDR-Data', kpi='LTE_RSRP',
+        chart_type='Histogram Bars', legend='', filters='',
+        grouping_rows='Vendor', grouping_columns='Campaign',
+        dynamic_rows_field='Vendor', dynamic_columns_field='Campaign',
+    )
+    source = pd.DataFrame({
+        'Vendor_Only': ['Ericsson', 'Ericsson', 'Huawei', 'Huawei'],
+        'Campaign': ['Q1', 'Q2', 'Q1', 'Q2'],
+        'LTE_RSRP': [-100, -95, -90, -85],
+    })
+    pair = expand_dynamic_layouts([definition], {
+        'Vendor_Only': ['Ericsson', 'Huawei'], 'Campaign': ['Q1', 'Q2'],
+    }, multivendor=True, vendor_comparison='vendor_only')
+    selected = _select_dynamic_chart_frame(
+        source, next(entry for entry in pair if entry.dynamic_row_value == 'Ericsson' and entry.dynamic_column_value == 'Q2'),
+    )
+    assert selected[['Vendor_Only', 'Campaign', 'LTE_RSRP']].to_dict('records') == [
+        {'Vendor_Only': 'Ericsson', 'Campaign': 'Q2', 'LTE_RSRP': -95},
+    ]
+
+    vendors = [f'Vendor {index}' for index in range(7)]
+    campaigns = [f'Q{index}' for index in range(7)]
+    paged = expand_dynamic_layouts([definition], {
+        'Vendor_Only': vendors, 'Campaign': campaigns,
+    }, multivendor=True, vendor_comparison='vendor_only')
+    assert len(paged) == 49
+    pages = {}
+    for entry in paged:
+        pages.setdefault(entry.slide, []).append(entry)
+    assert len(pages) == 4
+    deck = Presentation('assets/ppt-templates/Template_CDR_analysis.pptx')
+    page_dimensions = []
+    for entries in pages.values():
+        row_count = len({entry.dynamic_row_value for entry in entries})
+        column_count = len({entry.dynamic_column_value for entry in entries})
+        page_dimensions.append((row_count, column_count))
+        layout = _named_slide_layout(deck, entries[0].layout)
+        assert layout is not None
+        assert len(_layout_chart_frames(layout)) == row_count * column_count
+    assert sorted(page_dimensions) == [(1, 1), (1, 6), (6, 1), (6, 6)]
 
 
 def test_operator_histogram_campaign_bars_use_ordered_shades_and_exact_counts():
@@ -500,22 +526,25 @@ def test_operator_histogram_campaign_bars_use_ordered_shades_and_exact_counts():
     assert model['series'][-1]['colour'].lower() == newest['colour'].lower()
 
 
-def test_dynamic_template_column_is_optional_in_older_csv_and_required_for_dynamic_layouts():
+def test_legacy_dynamic_template_field_is_optional_for_static_rows_and_required_for_dynamic_layouts():
     import csv, io
-    from src.modules.cdr_reporting import catalogue_csv, parse_catalog_csv
+    from src.modules.cdr_reporting import CATALOG_HEADERS, catalogue_csv, parse_catalog_csv
     catalogue = app_module.load_template_catalogue(TEMPLATE_PATH.read_bytes(), 'nsa')
     static = [entry for entry in catalogue if entry.chart_type != 'Histogram Bars']
     reader = csv.DictReader(io.StringIO(catalogue_csv(static).decode()))
-    headers = [field for field in reader.fieldnames if field != 'Dynamic Field']
+    new_rows = list(reader)
+    headers = (*CATALOG_HEADERS[:-2], 'Dynamic Field')
     output = io.StringIO(); writer = csv.DictWriter(output, headers, lineterminator='\n')
-    writer.writeheader(); writer.writerows({field: row[field] for field in headers} for row in reader)
+    writer.writeheader()
+    writer.writerows({**{field: row[field] for field in headers[:-1]}, 'Dynamic Field': ''} for row in new_rows)
     restored = parse_catalog_csv(output.getvalue(), 'nsa')
     assert len(restored) == len(static)
     assert all(entry.dynamic_field == '' for entry in restored)
     from dataclasses import replace
     pair = [entry for entry in catalogue if entry.chart_type == 'Histogram Bars'][:2]
-    with pytest.raises(ValueError, match='requires Dynamic Field'):
-        parse_catalog_csv(catalogue_csv([replace(entry, dynamic_field='') for entry in pair]), 'nsa')
+    missing = [replace(entry, dynamic_field='', dynamic_rows_field='', dynamic_columns_field='') for entry in pair]
+    with pytest.raises(ValueError, match='requires Dynamic .* Field'):
+        parse_catalog_csv(catalogue_csv(missing), 'nsa')
 
 
 def test_multivendor_dynamic_histograms_page_by_vendor_and_keep_template_indexes():

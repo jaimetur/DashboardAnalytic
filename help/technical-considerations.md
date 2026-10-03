@@ -70,7 +70,7 @@ Derived preview columns are visually distinguished from source columns. They do 
 
 ### Auto-calculated Fields and combined tables
 
-Auto-calculated Fields are workspace definitions. A field has a name, selected CDR sources, a fallback and either ordered case-insensitive `condition => result` rules or a nested Tableau-style `IF / THEN / ELSEIF / ELSE / END` expression. It is materialised only in the individual and combined CDR tables for its selected sources.
+Auto-calculated Fields are workspace definitions. A field has a name, selected source datasets, a fallback and either ordered case-insensitive `condition => result` rules or a nested Tableau-style `IF / THEN / ELSEIF / ELSE / END` expression. It is materialised only in the individual and combined CDR tables for its selected sources.
 
 The same parsed decision tree drives in-memory previews and parameterized SQLite materialization so nested-branch and fallback semantics remain identical.
 

@@ -2955,7 +2955,7 @@
       fields: [
         // Keep this sequence aligned with the editable Report Template columns.
         ['chart_title', 'Chart Title'], ['cdr_source', 'CDR Type'], ['dataset_ids', 'Datasets'], ['kpi', 'KPI'], ['chart_type', 'Chart Type'],
-        ['dynamic_field', 'Dynamic Field'], ['filters', 'Filters'], ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
+        ['dynamic_rows_field', 'Dynamic Rows Field'], ['dynamic_columns_field', 'Dynamic Columns Field'], ['filters', 'Filters'], ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
         ['legend_format', 'Legend Format'], ['label_position', 'Label Position'], ['label_format', 'Label Format'],
         ['axis_x_range', 'Axis X Range'], ['axis_y_range', 'Axis Y Range'], ['exclude_null_empty', 'Exclude Null/Empty'], ['exclude_zero', 'Exclude Zero'],
       ],

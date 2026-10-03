@@ -59,7 +59,7 @@ from src.modules.background_scheduler import BackgroundTaskScheduler
 from src.modules.auth import SessionUser, verify_password
 from src.modules.column_names import MAIN_CDR_FIELDS, PREVIEW_METADATA_FIELDS, VENDOR_FIELD_IDENTITIES, clean_column_name, column_identity, resolve_column_name
 from src.modules.report_layouts import canonical_layout_name, selectable_layout_name
-from src.modules.cdr_reporting import DYNAMIC_LAYOUTS, CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalog_chart_payload, catalog_kpi_fields, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, is_empty_catalog_chart, materialize_calculated_dimensions, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_label_format, parse_label_position, parse_legend_position, parse_template_boolean, prepare_catalog_chart_preview_frame, prepare_multivendor_catalog_entry, preview_catalog_chart_data, render_catalog_chart_preview, render_catalog_chart_preview_with_hover, render_cdr_report, render_unavailable_source_chart, report_chart_renderer_name, reset_dashboard_canvas_renderer, split_calculated_dimension_aliases
+from src.modules.cdr_reporting import entry_dynamic_fields, DYNAMIC_LAYOUTS, CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalog_chart_payload, catalog_kpi_fields, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, is_empty_catalog_chart, materialize_calculated_dimensions, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_label_format, parse_label_position, parse_legend_position, parse_template_boolean, prepare_catalog_chart_preview_frame, prepare_multivendor_catalog_entry, preview_catalog_chart_data, render_catalog_chart_preview, render_catalog_chart_preview_with_hover, render_cdr_report, render_unavailable_source_chart, report_chart_renderer_name, reset_dashboard_canvas_renderer, split_calculated_dimension_aliases
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column, add_vfuk_gcid_column, apply_operator_mappings, ensure_fixed_cdr_fields, get_dataset_source_columns, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.geospatial import assign_regions, validate_region_mapping
@@ -2188,22 +2188,6 @@ def persist_report_template_for_request(
         TEMPLATE_SAVE_LOCK.release()
 
 
-def seed_bundled_workspace_content(task_repository: Repository) -> None:
-    """Add the bundled RF Quality template and Dashboard once per workspace."""
-    from src.modules.e2e_dashboards import LEGACY_STATE_KEY, STATE_KEY
-    from src.modules.network_insights import seed_bundled_rf_quality_content
-
-    try:
-        added = seed_bundled_rf_quality_content(
-            task_repository, PROJECT_ROOT / 'assets' / 'report-templates', STATE_KEY, LEGACY_STATE_KEY,
-        )
-    except (OSError, ValueError, sqlite3.Error) as exc:
-        task_repository.try_add_log('system', 'bundled_content_failed', json.dumps({'error': str(exc)}))
-        return
-    if added:
-        task_repository.try_add_log('system', 'bundled_content_added', json.dumps({'items': added}))
-
-
 def synchronize_template_file_names(technology: str) -> None:
     """Migrate legacy CSVs once without recreating compatibility directories."""
     library_dir = settings.slides_templates_dir / 'library' / technology
@@ -2296,6 +2280,8 @@ def catalogue_editor_columns(datasets: Iterable[Any] | None = None, calculated_d
         if source not in columns or dataset['status'] != 'ready':
             continue
         columns[source].update(str(column) for column in repository.list_dataset_row_columns(dataset['id']))
+    from src.modules.rf_catalog_source import RF_CATALOG_FIELDS
+    columns['cdr-all'] = set().union(*columns.values()) | set(RF_CATALOG_FIELDS) | {'CDR_Type'}
     result: dict[str, list[str]] = {}
     for source, values in columns.items():
         # A source can expose the same field with presentation and physical
@@ -2305,7 +2291,7 @@ def catalogue_editor_columns(datasets: Iterable[Any] | None = None, calculated_d
         unique: dict[str, str] = {}
         calculated = {
             dimension.name for dimension in calculated_dimensions
-            if source in dimension.sources
+            if source in dimension.sources or (source == 'cdr-all' and any(item in columns for item in dimension.sources))
         }
         for value in sorted(values | calculated, key=lambda item: ("_" in item, item.casefold())):
             unique.setdefault(column_identity(value), value)
@@ -2347,7 +2333,9 @@ def catalogue_layout_names(technology: str) -> list[str]:
             if cached and cached[:2] == signature:
                 return list(cached[2])
         from pptx import Presentation
-        layouts = sorted({*DYNAMIC_LAYOUTS, *(canonical_layout_name(layout.name) for layout in Presentation(template).slide_layouts if selectable_layout_name(canonical_layout_name(layout.name)))}, key=str.casefold)
+        available = {canonical_layout_name(layout.name) for layout in Presentation(template).slide_layouts if selectable_layout_name(canonical_layout_name(layout.name))}
+        first = ['Title Page', 'Title Only', 'Transition', 'Black logo end slide', *DYNAMIC_LAYOUTS]
+        layouts = [name for name in first if name in available or name in DYNAMIC_LAYOUTS] + sorted(available.difference(first), key=str.casefold)
         with CATALOGUE_LAYOUT_NAMES_CACHE_LOCK:
             CATALOGUE_LAYOUT_NAMES_CACHE[cache_key] = (*signature, layouts)
         return list(layouts)
@@ -2390,7 +2378,7 @@ def catalogue_editor_payload(technology: str | None, catalogue_id: str | None) -
             'Slide Subtittle': entry.slide_subtitle,
             'Layout': entry.layout,
             'Chart Tittle': entry.chart_title,
-            'CDR source': entry.cdr_source,
+            'Source Dataset': entry.cdr_source,
             'KPI': entry.kpi,
             'Chart type': entry.chart_type,
             'Filters': entry.filters,
@@ -2404,7 +2392,8 @@ def catalogue_editor_payload(technology: str | None, catalogue_id: str | None) -
             'Axis Y Range': entry.axis_y_range,
             'Exclude Null/Empty': 'Yes' if entry.exclude_null_empty else '',
             'Exclude Zero': 'Yes' if entry.exclude_zero else '',
-            'Dynamic Field': entry.dynamic_field,
+            'Dynamic Rows Field': entry_dynamic_fields(entry)[0],
+            'Dynamic Columns Field': entry_dynamic_fields(entry)[1],
         }
         for entry in entries
     ]
@@ -2505,8 +2494,6 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
             # exact columns it needs lazily in ``_combined_reporting_frame``.
             for technology in TEMPLATE_NAMES:
                 synchronize_template_file_names(technology)
-            if first_initialization:
-                seed_bundled_workspace_content(repository)
         inconsistent_ids = repository.fail_inconsistent_ready_datasets()
         if inconsistent_ids:
             repository.try_add_log('system', 'recover_inconsistent_datasets', json.dumps({'dataset_ids': inconsistent_ids}))
@@ -11741,8 +11728,7 @@ def reporting_query_columns(dataset_kind: str, catalog_entries: list[Any], multi
         # ``latitude vs longitude``. They are physical CDR columns, not one
         # combined column name.
         requested.update(catalog_kpi_fields(entry.kpi))
-        if entry.dynamic_field:
-            requested.add(entry.dynamic_field)
+        requested.update(field for field in entry_dynamic_fields(entry) if field)
         requested.update(_legend_dimensions(entry.legend))
         requested.update(parse_catalog_grouping(entry.grouping_rows).dimensions)
         requested.update(parse_catalog_grouping(entry.grouping_columns).dimensions)
@@ -12105,7 +12091,7 @@ def _temporary_chart_definition_changes(editable: dict[str, Any]) -> dict[str, A
         'chart_title', 'cdr_source', 'kpi', 'chart_type', 'filters',
         'grouping_rows', 'grouping_columns', 'legend', 'legend_position', 'legend_format',
         'axis_x_range', 'axis_y_range',
-        'label_position', 'label_format', 'exclude_null_empty', 'exclude_zero', 'dynamic_field',
+        'label_position', 'label_format', 'exclude_null_empty', 'exclude_zero', 'dynamic_rows_field', 'dynamic_columns_field', 'dynamic_field',
     }
     changes = {key: str(value or '') for key, value in editable.items() if key in allowed}
     if 'legend_position' in changes:
@@ -12176,7 +12162,7 @@ def temporary_chart_preview_context(source: str, identifier: str, chart_index: i
         'axis_x_range': entry.axis_x_range, 'axis_y_range': entry.axis_y_range,
         'label_position': entry.label_position,
         'label_format': entry.label_format,
-        'exclude_null_empty': entry.exclude_null_empty, 'exclude_zero': entry.exclude_zero, 'dynamic_field': entry.dynamic_field,
+        'exclude_null_empty': entry.exclude_null_empty, 'exclude_zero': entry.exclude_zero, 'dynamic_rows_field': entry_dynamic_fields(entry)[0], 'dynamic_columns_field': entry_dynamic_fields(entry)[1],
         'columns_by_source': columns,
     })
 
@@ -12197,7 +12183,7 @@ async def temporary_chart_preview(request: Request, user: SessionUser = Depends(
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=f'Invalid chart preview request: {exc}') from exc
     if not entry.source_kind:
-        raise HTTPException(status_code=400, detail='Choose a valid CDR Source.')
+        raise HTTPException(status_code=400, detail='Choose a valid Source Dataset.')
     preview_dataset_ids = _temporary_preview_dataset_ids(editable, selected_ids, entry.source_kind)
     frame_key, frame = _shared_reporting_preview_frame(
         preview_dataset_ids, entry, template_entries, technology, multivendor,
@@ -12235,7 +12221,7 @@ def _temporary_chart_preview_hover_targets(payload: dict[str, Any]) -> list[dict
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=f'Invalid chart hover request: {exc}') from exc
     if not entry.source_kind:
-        raise HTTPException(status_code=400, detail='Choose a valid CDR Source.')
+        raise HTTPException(status_code=400, detail='Choose a valid Source Dataset.')
     frame_key, frame = _shared_reporting_preview_frame(
         preview_dataset_ids, entry, template_entries, technology, multivendor,
     )
@@ -12393,7 +12379,7 @@ async def temporary_chart_preview_data(request: Request, user: SessionUser = Dep
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=f'Invalid chart data request: {exc}') from exc
     if not entry.source_kind:
-        raise HTTPException(status_code=400, detail='Choose a valid CDR Source.')
+        raise HTTPException(status_code=400, detail='Choose a valid Source Dataset.')
     try:
         preview_dataset_ids = _temporary_preview_dataset_ids(editable, selected_ids, entry.source_kind)
         preview_datasets = [
@@ -12766,7 +12752,7 @@ def _chart_builder_context(payload: dict[str, Any]) -> tuple[pd.DataFrame, Catal
     """Build an ad-hoc chart from explicitly selected ready CDRs."""
     selected_ids = {int(value) for value in payload.get('dataset_ids', [])}
     if not selected_ids:
-        raise HTTPException(status_code=400, detail='Select at least one processed CDR Source.')
+        raise HTTPException(status_code=400, detail='Select at least one processed Source Dataset.')
     selected_datasets: list[dict[str, Any]] = []
     dataset_columns: dict[int, list[str]] = {}
     for dataset in repository.list_datasets():
@@ -12776,7 +12762,7 @@ def _chart_builder_context(payload: dict[str, Any]) -> tuple[pd.DataFrame, Catal
         selected_datasets.append(item)
         dataset_columns[int(dataset['id'])] = repository.list_dataset_row_columns(int(dataset['id']))
     if not selected_datasets:
-        raise HTTPException(status_code=400, detail='The selected CDR Sources are not ready.')
+        raise HTTPException(status_code=400, detail='The selected Source Datasets are not ready.')
     definition = payload.get('definition') if isinstance(payload.get('definition'), dict) else {}
     entry = CatalogEntry(
         slide=1, slide_title='Chart Builder', slide_subtitle='', layout='',
@@ -12809,7 +12795,7 @@ def _chart_builder_context(payload: dict[str, Any]) -> tuple[pd.DataFrame, Catal
             for dataset_id, columns in dataset_columns.items() if columns
         ]
         if not frames:
-            raise HTTPException(status_code=400, detail='The selected CDR Sources are not ready.')
+            raise HTTPException(status_code=400, detail='The selected Source Datasets are not ready.')
         mapping_settings = repository.chart_mapping_settings()
         operator_mappings = mapping_settings['operator_mappings']
         result = apply_operator_mappings(
@@ -17334,8 +17320,8 @@ def catalogue_filter_values(
 ) -> JSONResponse:
     """Return values only for the field currently being configured in the editor."""
     normalized_source = source.strip().casefold()
-    if normalized_source not in {'cdr-data', 'cdr-voice', 'cdr-speech'} or not column.strip():
-        raise HTTPException(status_code=400, detail='Unsupported CDR source or filter field.')
+    if normalized_source not in {'cdr-data', 'cdr-voice', 'cdr-speech', 'cdr-all'} or not column.strip():
+        raise HTTPException(status_code=400, detail='Unsupported Source Dataset or filter field.')
     kind = normalized_source.removeprefix('cdr-')
     values: set[str] = set()
     definition = None
@@ -17346,18 +17332,28 @@ def catalogue_filter_values(
             definition = next((
                 item for item in load_workspace_calculated_dimensions()
                 if _normalise_catalogue_dimension_name(item.name) == _normalise_catalogue_dimension_name(column)
-                and normalized_source in item.sources
+                and (normalized_source in item.sources or (kind == 'all' and any(source in {'cdr-data', 'cdr-voice', 'cdr-speech'} for source in item.sources)))
             ), None)
     if definition:
         values.update(rule.value for rule in definition.rules)
         if definition.default:
             values.add(definition.default)
     for dataset in repository.list_datasets():
-        if str(dataset['dataset_kind'] or '').casefold() != kind or dataset['status'] != 'ready':
+        dataset_kind = str(dataset['dataset_kind'] or '').casefold()
+        if (dataset_kind != kind and not (kind == 'all' and dataset_kind in {'data', 'voice', 'speech'})) or dataset['status'] != 'ready':
             continue
         if not repository.dataset_rows_table_exists(dataset['id']):
             continue
         requested_columns = definition.default_from if definition else (column,)
+        if kind == 'all' and not definition:
+            from src.modules.rf_catalog_source import RF_CATALOG_FIELDS
+            from src.modules.network_insights import RF_FIELD_ALIASES
+            logical = next((value for key, value in RF_CATALOG_FIELDS.items() if column_identity(key) == column_identity(column)), None)
+            if logical:
+                requested_columns = RF_FIELD_ALIASES[logical][dataset_kind]
+            elif column_identity(column) == column_identity('CDR_Type'):
+                values.add(dataset_kind.title())
+                continue
         for requested_column in requested_columns:
             values.update(repository.list_distinct_dataset_row_values(dataset['id'], requested_column, limit=200))
     return JSONResponse({'values': sorted(values, key=str.casefold)[:200]})
@@ -17798,7 +17794,7 @@ async def preview_report_template_chart(
     except (ValueError, TypeError, IndexError) as exc:
         raise HTTPException(status_code=400, detail=f'Unable to preview this chart: {exc}') from exc
     if not entry.source_kind:
-        raise HTTPException(status_code=400, detail='Only chart rows with a CDR source can be previewed.')
+        raise HTTPException(status_code=400, detail='Only chart rows with a Source Dataset can be previewed.')
 
     try:
         page = max(0, int(payload.get('page') or 0))
@@ -17913,7 +17909,7 @@ async def preview_report_template_chart_image(
     except (ValueError, TypeError, IndexError) as exc:
         raise HTTPException(status_code=400, detail=f'Unable to preview this chart: {exc}') from exc
     if not entry.source_kind:
-        raise HTTPException(status_code=400, detail='Only chart rows with a CDR source can be previewed.')
+        raise HTTPException(status_code=400, detail='Only chart rows with a Source Dataset can be previewed.')
     selected_datasets: list[dict[str, Any]] = []
     for dataset in repository.list_datasets():
         if not _reporting_kind_matches(str(dataset['dataset_kind'] or '').casefold(), entry.source_kind) or dataset['status'] != 'ready':

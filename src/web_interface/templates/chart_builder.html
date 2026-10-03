@@ -3,7 +3,7 @@
 <section class="dashboard-stack spacious-stack reporting-stack">
   <article class="panel hero-panel chart-builder-hero" style="background:linear-gradient(135deg,#b85b20,#e99b45)!important;color:#fff">
     <p class="eyebrow">Chart Builder</p><h2>Ad-Hoc Analysis</h2>
-    <p class="lede">Select one or more processed CDR Sources, then build and refine a temporary chart.</p>
+    <p class="lede">Select one or more processed Source Datasets, then build and refine a temporary chart.</p>
   </article>
   <article class="panel" data-page-panel-label="Interactive Preview">
     <div class="section-head tight-head">
@@ -15,7 +15,7 @@
     <label class="chart-builder-sources">CDR Type
       <select data-chart-builder-type><option value="data">Data</option><option value="voice">Voice</option><option value="speech">Speech</option></select>
     </label>
-    <label class="chart-builder-sources">CDR Source <span class="form-label-hint">Select one or more processed CDRs</span>
+    <label class="chart-builder-sources">Source Dataset <span class="form-label-hint">Select one or more processed CDRs</span>
       <select data-chart-builder-sources multiple size="6">{% for dataset in datasets %}<option value="{{ dataset.id }}" data-kind="{{ dataset.kind }}" data-columns='{{ dataset.columns | tojson }}'>{{ dataset.name }}</option>{% endfor %}</select>
     </label>
     <div class="chart-builder-layout">
@@ -25,7 +25,7 @@
           <button type="button" class="ds-viewer-icon-action ds-viewer-refresh-action" data-chart-builder-refresh title="Refresh chart" aria-label="Refresh chart"></button>
         </header>
         <div class="chart-builder-canvas ds-chart-expanded-canvas" data-chart-builder-canvas>
-          <div class="ds-chart-message" data-chart-builder-message>Select CDR Sources and configure the Interactive Preview.</div>
+          <div class="ds-chart-message" data-chart-builder-message>Select Source Datasets and configure the Interactive Preview.</div>
           <canvas data-chart-builder-chart role="img" aria-label="Ad-hoc chart" hidden></canvas>
           <button type="button" class="ds-chart-expanded-pan ds-chart-expanded-pan-left" data-chart-builder-pan="left" title="Move view left" aria-label="Move view left" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5 8 12l7 7"/></svg></button>
           <button type="button" class="ds-chart-expanded-pan ds-chart-expanded-pan-right" data-chart-builder-pan="right" title="Move view right" aria-label="Move view right" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>
@@ -127,7 +127,7 @@
   document.querySelectorAll('[data-chart-builder-pan]').forEach((button) => button.addEventListener('click', () => { globalThis.panDashboardChart?.(canvas, button.dataset.chartBuilderPan); syncNavigation(); }));
   canvas.addEventListener('dashboardchartzoom', syncNavigation); canvas.addEventListener('dashboardchartpan', syncNavigation);
   document.querySelector('[data-chart-builder-refresh]').addEventListener('click', preview);
-  type.addEventListener('change', () => { filterSources(); render(); canvas.hidden = true; zoom.hidden = true; message.hidden = false; message.textContent = 'Select one or more processed CDR Sources.'; });
+  type.addEventListener('change', () => { filterSources(); render(); canvas.hidden = true; zoom.hidden = true; message.hidden = false; message.textContent = 'Select one or more processed Source Datasets.'; });
   sources.addEventListener('change', () => { render(); queue(); });
   // The shared controls include native selects hidden behind searchable menus.
   // Delegate both events so every visible editor change reaches this preview.

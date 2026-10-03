@@ -41,7 +41,7 @@ Dashboards use the same template schema and renderer as Reporting. Detailed temp
 
 Names are unique within each NR Mode: an NSA and an SA Dashboard may share a name. The library sorts NSA first, then by name.
 
-Workspaces with NSA Report Templates receive once the NSA Dashboard **RF Quality (RSRP & SINR)** and its template **NSA - RF Quality (RSRP & SINR)**, with separate LTE and NR RSRP/SINR CDF, average, distribution, threshold and quality-map slides for Data, Voice and Speech, followed by the NSA NetCheck black-logo closing slide. Each chart family starts with an All CDR types slide pooling valid Data, Voice and Speech observations, followed by the separate types; LTE and NR remain separate. CDF slides use a two-by-two layout with LTE and NR above their contour histograms (5 dB RSRP bins; 1 dB SINR bins). Histograms show percentages per series, match CDF colours and campaign widths, and retain multivendor line patterns; red-to-green background bands match the quality-class slides. Grouped-bar histogram slides follow each CDF/contour slide for All CDR types, Data, Voice and Speech. Their `Title + 2 rows + dynamic columns + comments down` layout and `Dynamic Field = Operator` create one column per selected Operator on the same slide, with LTE above NR and comments beneath. Every bin has one bar per Campaign, ordered oldest to newest: the newest uses the Operator colour and older Campaigns use progressively lighter shades. Percentages use the same valid-sample denominator and bin widths as the contour histograms. NR shares use valid NR measurements and do not measure availability across the entire route. It has no saved Dataset Universe, so it uses the newest NSA CDRs; edit or delete it like any other Dashboard. See [Network Insights](network-insights.md#rf-quality-template-and-dashboard).
+An existing or imported Dashboard **RF Quality (RSRP & SINR)** can use the workspace template **NSA - RF Quality (RSRP & SINR)**, with separate LTE and NR RSRP/SINR CDF, average, distribution, threshold and quality-map slides for Data, Voice and Speech, followed by the NSA NetCheck black-logo closing slide. Each chart family starts with an All CDR types slide pooling valid Data, Voice and Speech observations, followed by the separate types; LTE and NR remain separate. CDF slides use a two-by-two layout with LTE and NR above their contour histograms (5 dB RSRP bins; 1 dB SINR bins). Histograms show percentages per series, match CDF colours and campaign widths, and retain multivendor line patterns; red-to-green background bands match the quality-class slides. Grouped-bar histogram slides follow each CDF/contour slide for All CDR types, Data, Voice and Speech. Their `Title + 2 rows + dynamic columns + comments down` layout and `Dynamic Columns Field = Operator` create one column per selected Operator on the same slide, with LTE above NR and comments beneath. Every bin has one bar per Campaign, ordered oldest to newest: the newest uses the Operator colour and older Campaigns use progressively lighter shades. Percentages use the same valid-sample denominator and bin widths as the contour histograms. NR shares use valid NR measurements and do not measure availability across the entire route. It has no saved Dataset Universe, so it uses the newest NSA CDRs; edit or delete it like any other Dashboard. See [Network Insights](network-insights.md#rf-quality-template-and-dashboard).
 
 ### Row actions
 
@@ -83,7 +83,7 @@ In the viewer, **Dashboard Filters** opens the same controls in a floating panel
 
 | Column | Controls | Saved by |
 | --- | --- | --- |
-| **Select Dataset Universe** | Scope, CDR sources and dates | Save Universe |
+| **Select Dataset Universe** | Scope, source datasets and dates | Save Universe |
 | **Select Dataset Filters** | Default filters, additional fields and hidden filters | Save Filters |
 
 Each column has its own applied/unsaved state. Saving filters does not save the universe, and saving the universe does not replace the saved filters.
@@ -121,7 +121,7 @@ Select one or more Data, Voice and Speech CDRs. Each selector lists only inputs 
 
 | Count | What it represents |
 | --- | --- |
-| **Dataset Universe** | Rows contributed by the selected CDR sources |
+| **Dataset Universe** | Rows contributed by the selected source datasets |
 | **Filtered Universe** | Rows remaining after dates and Dashboard filters |
 | **Chart rows** | Rows remaining after that chart's template filters as well |
 

@@ -103,7 +103,7 @@ def test_dashboard_library_can_change_nr_mode_and_template_with_confirmation_con
 
     app_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
     assert "activeCell.textContent = operation ? `${operation}(${selected[0]})` : selected[0];" in app_script
-    assert "if (editedCell?.dataset.catalogueField === 'CDR source' && !assistanceFocused) normaliseCatalogueRows();" in app_script
+    assert "if (editedCell?.dataset.catalogueField === 'Source Dataset' && !assistanceFocused) normaliseCatalogueRows();" in app_script
     assert "const sessionMarker = document.body.dataset.authenticatedSession || 'anonymous';" in app_script
     assert "${sessionScoped ? `:${sessionMarker}` : ''}" in app_script
 
@@ -3337,12 +3337,13 @@ def test_dynamic_vendor_only_editor_keeps_operator_rows_after_bin_edit(client):
     })
     assert saved.status_code == 200, saved.text
     restored = core.load_template_catalogue(core.repository.report_template_content('nsa', 'Dynamic RF vendor test'), 'nsa')
-    assert [entry.dynamic_field for entry in restored] == ['Operator', 'Operator']
+    assert [entry.dynamic_columns_field for entry in restored] == ['Operator', 'Operator']
     assert [entry.grouping_rows for entry in restored] == ['Operator', 'Operator']
     assert [entry.filters for entry in restored] == ['Bin Size = 10', 'Bin Size = 5']
     for index in range(4):
         context = client.get(f'/api/e2e-dashboards/chart/{token}/{index}/filter-context')
         assert context.status_code == 200, context.text
-        assert context.json()['dynamic_field'] == 'Vendor_Only'
+        assert context.json()['dynamic_rows_field'] == ''
+        assert context.json()['dynamic_columns_field'] == 'Vendor_Only'
         expected_filter = 'Bin Size = 10' if index < 2 else 'Bin Size = 5'
         assert context.json()['filters'].startswith(expected_filter)

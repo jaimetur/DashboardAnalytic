@@ -71,7 +71,6 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     app_module.repository.set_global_database(settings.database_path)
     app_module.SESSIONS.clear()
     # Bundled Network Insights content is seeded explicitly by the tests that need it.
-    monkeypatch.setattr(app_module, "seed_bundled_workspace_content", lambda task_repository: None)
 
     with TestClient(app_module.app) as test_client:
         original_post = test_client.post

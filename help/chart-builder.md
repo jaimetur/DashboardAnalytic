@@ -29,7 +29,7 @@ Chart Builder is the ad-hoc chart editor. It uses the E2E Dashboard individual C
 7. Choose a Legend and Legend Position when required.
 8. Enter a Chart Title and review the regenerated preview.
 
-The CDR Source selector is filtered by CDR Type and shows only processed datasets of that type.
+The Source Dataset selector is filtered by CDR Type and shows only processed datasets of that type.
 
 ## Interactive Preview
 

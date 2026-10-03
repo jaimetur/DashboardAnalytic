@@ -107,7 +107,7 @@ This is the canonical authoring reference for templates used by both [E2E Dashbo
 | `Slide Subtittle` | Optional shared slide subtitle. |
 | `Layout` | Select `Title Page`, `Title Only`, or a grid named `Title + N rows + M columns`, optionally followed by `+ comments down` or `+ comments right`. Dynamic grids also appear in the selector. |
 | `Chart Tittle` | Optional title drawn inside the chart. |
-| `CDR source` | `CDR-Data`, `CDR-Voice`, `CDR-Speech` or `CDR-All`; leave blank for structural slides. `CDR-All` pools selected RF observations using `LTE_RSRP`, `NR_RSRP`, `LTE_SINR`, `NR_SINR`, `Latitude` and `Longitude`, retaining Operator/Campaign context. |
+| `Source Dataset` | `CDR-Data`, `CDR-Voice`, `CDR-Speech` or `CDR-All`; leave blank for structural slides. `CDR-All` pools selected RF observations using `LTE_RSRP`, `NR_RSRP`, `LTE_SINR`, `NR_SINR`, `Latitude` and `Longitude`, retaining Operator/Campaign context. |
 | `KPI` | Processed CDR field or metric expression to render. |
 | `Chart type` | Automated chart type or structural slide type. |
 | `Filters` | Conditions applied before aggregation, one per line and terminated with `;`. |
@@ -127,7 +127,7 @@ For multi-chart slides, the editor visually groups `Slide`, `Slide Tittle`, `Sli
 
 ### Structural slides
 
-Use one row without `CDR source` or KPI fields. A structural row cannot share its slide number with chart rows.
+Use one row without `Source Dataset` or KPI fields. A structural row cannot share its slide number with chart rows.
 
 - `Title Slide` normally uses `Title Page` and fills title/subtitle placeholders.
 - `Transition Slide` normally uses `Title Only` and creates a section divider.
@@ -171,7 +171,7 @@ Choose a KPI and at least one Rows or Column Aggregation dimension. `CDF Line` c
 
 The RF Quality template includes combined Data/Voice/Speech slides before each chart family. Its `CDR-All` source is virtual: it uses the selected physical datasets and creates no duplicate CDR dataset or database table. Templates containing this source are retained by JSON/CSV import/export, workspace transfers and backup/restore.
 
-`Histogram Bars` uses the same bins as `Histogram Line`, with side-by-side Campaign bars and lighter shades for older Campaigns. Paired LTE/NR rows can use a dynamic layout with `Dynamic Field = Operator` to show all selected Operators on one slide.
+`Histogram Bars` uses the same bins as `Histogram Line`, with side-by-side Campaign bars and lighter shades for older Campaigns. Paired LTE/NR rows can use a dynamic layout with `Dynamic Columns Field = Operator` to show all selected Operators on one slide.
 
 `Histogram Line` draws an unfilled step contour for each aggregation combination. Set `Bin Size = 5` in Filters for 5-unit bins, or `Bin Size = 1` for 1-unit bins. The vertical axis shows the percentage of valid samples in each bin, normalized independently per series; series models retain sample counts. Histograms reuse CDF colours, progressive campaign widths and multivendor operator line patterns. Add four `Buckets = ...` thresholds for five red-to-green quality background bands. Add `Class Colours = Quality` to matching distribution charts to use those same five class colours. The existing template/JSON export, import and backup workflows preserve these chart settings.
 
@@ -196,7 +196,7 @@ The examples show chart-specific cells. Add the shared `Slide`, titles and `Layo
 Use for proportions, success ratios and categorical quality splits. KPI categories become stack segments.
 
 ```text
-CDR source: CDR-Voice
+Source Dataset: CDR-Voice
 KPI: Call_Status
 Chart type: 100% Stacked Vertical Bars
 Filters: Call Family IN (VoLTE, MultiRAB); Operator IN (Vodafone, 3, EE)
@@ -211,7 +211,7 @@ Use for event or failure counts. Rows form horizontal categories and the KPI nor
 Column hierarchy headers keep complete aggregation values in both the Dashboard canvas and exported PowerPoint chart. Each successive level uses a smaller font, which can shrink further to fit narrow columns; the final header row has its own space above the data.
 
 ```text
-CDR source: CDR-Data
+Source Dataset: CDR-Data
 KPI: Test_Result
 Chart type: Count Stacked Horizontal Bars
 Filters: Test Family IN (FDFS, FDTT); Test_Result IN (Failed, Dropped)
@@ -225,7 +225,7 @@ Legend Position: Bottom
 Use for continuous metrics such as throughput, duration, latency or MOS.
 
 ```text
-CDR source: CDR-Data
+Source Dataset: CDR-Data
 KPI: Mean_Data_Rate
 Chart type: CDF Line
 Filters: Test_Result = Completed; Test_Name CONTAINS FDFS; Direction = DL
@@ -241,7 +241,7 @@ With two operators and two campaigns this produces four curves. With multiple ca
 Separate continuous KPI names with `|`. The renderer keeps the shared filters, aggregations and legend and places one CDF panel per measure.
 
 ```text
-CDR source: CDR-Data
+Source Dataset: CDR-Data
 KPI: NR_PCell_SINR_Avg | LTE_PCell_SINR_Avg
 Chart type: Multi KPI CDF Lines
 Filters: Test_Result = Completed; Test_Name = FDTT http DL MT
@@ -255,7 +255,7 @@ Legend Position: Right
 Use Average for mean values or Median when outliers should have less influence.
 
 ```text
-CDR source: CDR-Speech
+Source Dataset: CDR-Speech
 KPI: LQ
 Chart type: Average Vertical Bars
 Filters: Call_Status = Completed; Call Family = WhatsApp
@@ -271,7 +271,7 @@ Change only `Chart type` to `Median Vertical Bars` for the median.
 Use explicit numeric ranges with `Buckets = ...`, or ordered upper bounds with `Buckets < ...` / `Buckets <= ...`. Upper-bound mode generates `belowN` categories plus `Above`; use `Rate Bucket` as the final column aggregation.
 
 ```text
-CDR source: CDR-Data
+Source Dataset: CDR-Data
 KPI: Mean_Data_Rate
 Chart type: Distribution Stacked Vertical Bars
 Filters: Test_Result = Completed; Test_Name = FDTT http DL MT; Buckets < 2,5,20,100
@@ -289,7 +289,7 @@ Explicit ranges such as `Buckets = 1,5,20` produce `<1`, `1-5`, `5-20` and `20+`
 Use for a below/above distribution around one threshold.
 
 ```text
-CDR source: CDR-Speech
+Source Dataset: CDR-Speech
 KPI: LQ
 Chart type: Threshold Stacked Vertical Bars
 Filters: Call_Status = Completed; Call Family = VoLTE; Threshold = 1.6
@@ -305,7 +305,7 @@ The legend shows the configured threshold, for example `< 1.6` and `≥ 1.6`; `T
 Use `Metric vs Dimension` to compare a KPI with a radio or quality dimension.
 
 ```text
-CDR source: CDR-Speech
+Source Dataset: CDR-Speech
 KPI: LQ vs Playing_RSRP_NR_Avg
 Chart type: Scatter
 Filters: Call_Status = Completed; Call Family = WhatsApp
@@ -321,7 +321,7 @@ Use latitude and longitude in `Latitude vs Longitude` order. Aggregations and le
 To colour a radio-quality map by a measured value, use `Latitude vs Longitude vs Measure`, set **Rows Aggregation** and **Legend** to `Value Bucket`, and define four ascending thresholds with `Buckets = ...`. For example, RSRP uses `Buckets = -110,-100,-90,-80`, and SINR uses `Buckets = 0,5,13,20`. These five ranges use red, orange, yellow, light green and green. Missing measurements are excluded when **Exclude Null/Empty** is enabled. Two-field maps retain their existing grouping colours.
 
 ```text
-CDR source: CDR-Data
+Source Dataset: CDR-Data
 KPI: Test_Start_Latitude vs Test_Start_Longitude
 Chart type: Map
 Filters: G_Level_4 = London
@@ -336,7 +336,7 @@ Legend Position: Right
 Use when exact values are more useful than a chart. Rows and columns form the axes; KPI supplies the aggregated cell value.
 
 ```text
-CDR source: CDR-Voice
+Source Dataset: CDR-Voice
 KPI: Call_Setup_Time
 Chart type: Table
 Filters: Call_Status = Completed
@@ -511,22 +511,34 @@ Web and PowerPoint GAP tables include a final sum for each comparison column. In
 
 ### Chart layouts
 
-The editor offers uniform grids with comments below or to the right and matching grids without comments. Only these grids, the six dynamic layouts, `Title Page` and `Title Only` are selectable. Other native layouts remain internal to existing structural slides. Legacy grid names are normalized in saved templates and when importing older CSV/JSON files; exports and backups retain the canonical names. Grids without comments use the full chart area.
+The editor offers **121 layouts**: every combination of **1–6 rows × 1–6 columns**, each without comments, with comments below, or with comments to the right (108 fixed grids), plus nine dynamic layouts and `Title Page`, `Title Only`, `Transition` and `Black logo end slide`. The physical layouts appear immediately after `Black Title Page` in the same order as the selector, excluding the virtual dynamic options.
+
+Names follow `Title + N rows + M columns`, optionally followed by `+ comments down` or `+ comments right`. The 108 fixed grids and four structural layouts exist physically in the reference PPT. `Source Dataset = CDR-All` exposes the union of Data, Voice and Speech fields, including normalized RF fields and `CDR_Type`, in cell assistance. The nine dynamic options are virtual: the renderer selects a fixed grid from the distinct values of their row and column fields. The widened Layout cell-assistance selector lists Title Page, Title Only, Transition and Black logo end slide first, followed by the nine dynamic grids and then the fixed grids. Long names stay on one line; narrow screens can scroll horizontally. Structural layouts have blue shading, dynamic layouts purple shading and the selected option yellow shading; selection retains its position without a duplicate at the top. Other native layouts remain internal to structural slides. Historic layout names are normalized on import and in stored templates; exports use the canonical names. Grids without comments use the full chart area.
 
 ### Dynamic chart grids
 
-The optional **Dynamic Field** column tells a dynamic layout which source field to split into separate charts. Older CSV templates without this column remain supported; CSV exports include it, and template exports, transfers and backups preserve it.
+CSV imports identify columns by name and accept them in any order; duplicate names or aliases are rejected. The editor and exported CSV place **Dynamic Rows Field** and **Dynamic Columns Field** immediately after **Layout**. Use these fields to choose which source field creates the rows and columns. A dynamic layout requires a non-empty field for each dynamic axis; the parser rejects missing fields. Leave the field for a fixed axis empty. CSV exports include both columns; template import/export, transfers, backup and restore preserve them. Older CSVs with `Dynamic Field` remain importable: its value is assigned to the dynamic axis declared by the layout.
 
 | Layout | Repeated dimension | Commentary |
 |---|---|---|
-| `Title + 2 rows + dynamic columns` | One column per distinct field value | None |
-| `Title + dynamic rows + 2 columns` | One row per distinct field value | None |
-| `Title + 2 rows + dynamic columns + comments right` | One column per distinct field value | Right |
-| `Title + 2 rows + dynamic columns + comments down` | One column per distinct field value | Below |
-| `Title + dynamic rows + 2 columns + comments right` | One row per distinct field value | Right |
-| `Title + dynamic rows + 2 columns + comments down` | One row per distinct field value | Below |
+| `Title + 2 rows + dynamic columns` | Columns | None |
+| `Title + 2 rows + dynamic columns + comments down` | Columns | Below |
+| `Title + 2 rows + dynamic columns + comments right` | Columns | Right |
+| `Title + dynamic rows + 2 columns` | Rows | None |
+| `Title + dynamic rows + 2 columns + comments down` | Rows | Below |
+| `Title + dynamic rows + 2 columns + comments right` | Rows | Right |
+| `Title + dynamic rows + dynamic columns` | Rows and columns | None |
+| `Title + dynamic rows + dynamic columns + comments down` | Rows and columns | Below |
+| `Title + dynamic rows + dynamic columns + comments right` | Rows and columns | Right |
 
-Use two chart definitions with the same Layout and Dynamic Field on that slide. In a two-row layout, the first definition fills the top row and the second fills the bottom row. In a two-column layout, the first fills the left column and the second fills the right column. Distinct values come from the selected, filtered CDR universe. Empty or missing values are excluded. The native PPT template includes grids for one through six repeated values; larger grids are derived from the same chart and commentary geometry when needed. More columns or rows produce smaller charts.
+- **Two fixed rows:** use two chart definitions on the slide with the same Layout and Dynamic Columns Field. The first fills the top row and the second the bottom row.
+- **Two fixed columns:** use two chart definitions with the same Layout and Dynamic Rows Field. The first fills the left column and the second the right column.
+- **Both axes dynamic:** use one chart definition and two different fields, for example `Region` for rows and `Operator` for columns. Each chart includes only samples matching both values.
+
+Distinct values come from the selected, filtered CDR universe; empty values are excluded. Both-axis grids paginate at six rows and six columns. Multivendor grids also paginate at six repeated values, keeping operators of the same vendor together where possible. Larger ordinary single-axis grids can be derived from the native geometry; charts become smaller as the grid grows.
+
+> [!TIP]
+> **Readability:** a 6 × 6 grid fits 36 charts, but gives each chart little space. Prefer fewer charts when labels or distributions need close inspection.
 
 For RF histograms, select **Operator**: the first definition is LTE and the second NR, so each Operator occupies one column. Campaigns remain grouped inside each chart. Changing filters changes the number of columns; LTE and NR keep their corresponding positions even when one technology has no valid samples.
 
