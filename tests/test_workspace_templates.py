@@ -28,6 +28,25 @@ def test_new_workspaces_have_empty_independent_template_libraries(tmp_path):
         assert repo.list_report_templates('nsa') == []
 
 
+def test_report_template_migration_canonicalizes_existing_csv_layouts(tmp_path):
+    database = tmp_path / 'workspace.db'
+    repo = Repository(database, tmp_path / 'application.db')
+    repo.initialize()
+    legacy = (
+        'Slide,Layout,Chart Type\n'
+        '1,Title and 2 columns and 2 rows + Comments right,Average Vertical Bars\n'
+    ).encode('utf-8')
+    with repo.connection() as conn:
+        conn.execute(
+            "INSERT INTO report_templates (technology, name, content, is_default) VALUES ('nsa', 'Legacy', ?, 0)",
+            (legacy,),
+        )
+
+    repo.initialize()
+
+    assert b'Title + 2 rows + 2 columns + comments right' in repo.report_template_content('nsa', 'Legacy')
+
+
 def test_legacy_library_migration_is_independent_and_idempotent(tmp_path):
     legacy = tmp_path / 'shared'
     template = legacy / 'library/nsa/Existing.csv'

@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Callable, Iterable, Mapping
 
 import pandas as pd
+from src.modules.report_layouts import DYNAMIC_LAYOUTS, canonical_layout_name, grid_layout_name
 from src.modules.column_names import MAIN_CDR_FIELDS, column_identity, compact_campaign_value, resolve_column_name, vendor_only_value
 import certifi
 from PIL import Image, ImageColor, ImageDraw, ImageFont
@@ -52,12 +53,6 @@ COMMENT_HINTS = ("having ", "observed", "shows ", "similar performance", "worse 
 VISUAL_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position", "Legend Format", "Label Position", "Label Format", "Axis X Range", "Axis Y Range")
 PRE_DYNAMIC_CATALOG_HEADERS = (*VISUAL_CATALOG_HEADERS, "Exclude Null/Empty", "Exclude Zero")
 CATALOG_HEADERS = (*PRE_DYNAMIC_CATALOG_HEADERS, "Dynamic Field")
-DYNAMIC_LAYOUTS = (
-    "2 rows + dynamic columns, comments right",
-    "2 rows + dynamic columns, comments down",
-    "2 columns + dynamic rows, comments right",
-    "2 columns + dynamic rows, comments down",
-)
 # Templates created before configurable visual settings remain valid and
 # acquire empty Label/axis cells the next time they are saved in the editor.
 RANGELESS_CATALOG_HEADERS = CATALOG_HEADERS[:13]
@@ -322,16 +317,8 @@ def _canonical_catalog_headers(headers: Iterable[str]) -> tuple[str, ...]:
 def _default_catalogue_layout(technology: str, chart_count: int) -> str:
     """Choose the standard template layout when a legacy Report Template omitted it."""
     if technology == "nsa":
-        return {
-            1: "Title and 1 column + Comments",
-            2: "Title and 2 columns + Comments",
-            3: "Title and 3 columns + Comments",
-        }.get(chart_count, "Title and 2 columns and 2 rows + Comments right")
-    return {
-        1: "Title and 1 column",
-        2: "Title and 2 columns",
-        3: "Title and 3 columns",
-    }.get(chart_count, "Title and 4 columns")
+        return grid_layout_name(1, chart_count, "down") if chart_count <= 3 else grid_layout_name(2, 2, "right")
+    return grid_layout_name(1, min(chart_count, 4))
 
 
 @dataclass(frozen=True)
@@ -436,6 +423,7 @@ def expand_dynamic_layouts(
     slides = defaultdict(list)
     for index, entry in enumerate(entries):
         effective = prepare_multivendor_catalog_entry(entry, vendor_comparison) if multivendor else entry
+        effective = replace(effective, layout=canonical_layout_name(effective.layout))
         slides[entry.slide].append(replace(effective, template_index=index))
     expanded = []
     offset = 0
@@ -465,11 +453,10 @@ def expand_dynamic_layouts(
                 current.extend(family)
             if current:
                 pages.append(current)
-        dynamic_columns = header.layout.casefold().startswith("2 rows")
-        comments = "right" if header.layout.casefold().endswith("right") else "down"
+        dynamic_columns = header.layout.casefold().startswith("title + 2 rows")
+        comments = ("right" if header.layout.casefold().endswith("right") else "down") if "comments" in header.layout.casefold() else ""
         for page_index, page_values in enumerate(pages):
-            layout = (f"Title and 2 rows and {len(page_values)} columns + Comments {comments}" if dynamic_columns else
-                      f"Title and 2 columns and {len(page_values)} rows + Comments {comments}")
+            layout = grid_layout_name(2, len(page_values), comments) if dynamic_columns else grid_layout_name(len(page_values), 2, comments)
             pairs = [(row, value) for row in rows for value in page_values] if dynamic_columns else [(row, value) for value in page_values for row in rows]
             for row, value in pairs:
                 expanded.append(replace(
@@ -1155,7 +1142,7 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
             slide=slide,
             slide_title=(row.get("Slide Tittle") or "").strip().replace("\\n", "\n"),
             slide_subtitle=(row.get("Slide Subtittle") or "").strip().replace("\\n", "\n"),
-            layout=(row.get("Layout") or "").strip(),
+            layout=canonical_layout_name(row.get("Layout") or ""),
             chart_title=(row.get("Chart Tittle") or "").strip().replace("\\n", "\n"),
             cdr_source=(row.get("CDR source") or "").strip(),
             kpi=(row.get("KPI") or "").strip(),
@@ -1338,7 +1325,7 @@ def catalogue_csv(entries: list[CatalogEntry]) -> bytes:
             "Slide": entry.slide,
             "Slide Tittle": entry.slide_title.replace("\n", "\\n"),
             "Slide Subtittle": entry.slide_subtitle.replace("\n", "\\n"),
-            "Layout": entry.layout,
+            "Layout": canonical_layout_name(entry.layout),
             "Chart Tittle": entry.chart_title.replace("\n", "\\n"),
             "CDR source": entry.cdr_source,
             "KPI": entry.kpi,
@@ -6988,7 +6975,7 @@ def _clear_commentary(slide) -> None:
     for shape in slide.shapes:
         if not getattr(shape, "has_text_frame", False):
             continue
-        if getattr(shape, "is_placeholder", False) and shape.placeholder_format.idx == 10:
+        if getattr(shape, "is_placeholder", False) and shape.placeholder_format.idx == 10 and "comments" in slide.slide_layout.name.casefold():
             shape.text_frame.clear()
             continue
         text = shape.text.strip().lower()
@@ -6999,7 +6986,7 @@ def _clear_commentary(slide) -> None:
 def _set_commentary(slide, comments: list[str] | tuple[str, ...]) -> None:
     """Write saved Dashboard notes into the layout's commentary placeholder."""
     values = [str(comment).strip() for comment in comments if str(comment).strip()]
-    if not values:
+    if not values or "comments" not in slide.slide_layout.name.casefold():
         return
     placeholder = next(
         (
@@ -7139,12 +7126,12 @@ def _remove_template_chart_placeholders(slide) -> None:
     The supplied templates encode their sample Tableau exports as picture
     placeholders rather than regular picture shapes.  Removing only regular
     images therefore left the old chart under the new one.  Index 0 is the
-    master title and index 10 is the deliberately blank analyst-comments area.
+    master title; index 10 is the analyst-comments area on commentary layouts.
     """
     for shape in list(slide.shapes):
         if not getattr(shape, "is_placeholder", False):
             continue
-        if shape.placeholder_format.idx in {0, 10}:
+        if shape.placeholder_format.idx == 0 or (shape.placeholder_format.idx == 10 and "comments" in slide.slide_layout.name.casefold()):
             continue
         shape._element.getparent().remove(shape._element)
 
@@ -7166,8 +7153,8 @@ def _create_grid_slide_layout(presentation: Presentation, rows: int, columns: in
     from pptx.slide import SlideLayout
     from pptx.opc.constants import CONTENT_TYPE
     from pptx.oxml.xmlchemy import OxmlElement
-    source_name = "Title and 1 column + Comments right" if comments == "right" else "Title and 1 column + Comments"
-    source = next((layout for layout in presentation.slide_layouts if layout.name == source_name), None)
+    source_name = grid_layout_name(1, 1, comments)
+    source = next((layout for layout in presentation.slide_layouts if canonical_layout_name(layout.name) == source_name), None)
     if source is None:
         return None
     element = deepcopy(source._element)
@@ -7182,7 +7169,7 @@ def _create_grid_slide_layout(presentation: Presentation, rows: int, columns: in
     layout_id.set("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id", relationship)
     master._element.sldLayoutIdLst.append(layout_id)
     layout = SlideLayout(element, part)
-    chart = next(shape for shape in layout.placeholders if shape.placeholder_format.type == 7 and shape.placeholder_format.idx != 10)
+    chart = next(shape for shape in layout.placeholders if shape.placeholder_format.type == 7 and (not comments or shape.placeholder_format.idx != 10))
     left, top, width, height = chart.left, chart.top, chart.width, chart.height
     original = deepcopy(chart._element)
     chart._element.getparent().remove(chart._element)
@@ -7207,20 +7194,20 @@ def _create_grid_slide_layout(presentation: Presentation, rows: int, columns: in
 
 def _named_slide_layout(presentation: Presentation, layout_name: str):
     """Resolve a template layout name against the template slide master."""
-    expected = layout_name.strip().casefold()
-    if expected in {name.casefold() for name in DYNAMIC_LAYOUTS}:
-        direction = "rows" if expected.startswith("2 rows") else "columns"
-        other = "columns" if direction == "rows" else "rows"
-        comments = "right" if expected.endswith("right") else "down"
-        expected = f"Title and 2 {direction} and 3 {other} + Comments {comments}".casefold()
+    canonical = canonical_layout_name(layout_name)
+    expected = canonical.casefold()
+    if canonical in DYNAMIC_LAYOUTS:
+        dynamic_columns = expected.startswith("title + 2 rows")
+        comments = ("right" if expected.endswith("right") else "down") if "comments" in expected else ""
+        canonical = grid_layout_name(2, 3, comments) if dynamic_columns else grid_layout_name(3, 2, comments)
+        expected = canonical.casefold()
     for layout in presentation.slide_layouts:
-        if layout.name.strip().casefold() == expected:
+        if canonical_layout_name(layout.name).casefold() == expected:
             return layout
-    grid = re.fullmatch(r"title and (\d+) (rows|columns) and (\d+) (columns|rows) \+ comments (right|down)", expected)
+    grid = re.fullmatch(r"Title \+ (\d+) rows \+ (\d+) columns(?: \+ comments (right|down))?", canonical)
     if grid:
-        first, direction, second, _other, comments = grid.groups()
-        rows, columns = (int(first), int(second)) if direction == "rows" else (int(second), int(first))
-        return _create_grid_slide_layout(presentation, rows, columns, comments, layout_name)
+        rows, columns, comments = grid.groups()
+        return _create_grid_slide_layout(presentation, int(rows), int(columns), comments or "", canonical)
     return None
 
 
@@ -7266,7 +7253,7 @@ def _layout_chart_frames(layout) -> list[tuple[int, int, int, int]]:
     frames = [
         (shape.left, shape.top, shape.width, shape.height)
         for shape in layout.placeholders
-        if shape.placeholder_format.type == 7 and shape.placeholder_format.idx != 10
+        if shape.placeholder_format.type == 7 and ("comments" not in layout.name.casefold() or shape.placeholder_format.idx != 10)
     ]
     # PowerPoint layouts commonly differ by one or two EMU between placeholders
     # that are visually on the same row. A strict (top, left) sort therefore

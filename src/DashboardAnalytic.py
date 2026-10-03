@@ -58,6 +58,7 @@ from src.modules.analytics import build_analysis
 from src.modules.background_scheduler import BackgroundTaskScheduler
 from src.modules.auth import SessionUser, verify_password
 from src.modules.column_names import MAIN_CDR_FIELDS, PREVIEW_METADATA_FIELDS, VENDOR_FIELD_IDENTITIES, clean_column_name, column_identity, resolve_column_name
+from src.modules.report_layouts import canonical_layout_name, selectable_layout_name
 from src.modules.cdr_reporting import DYNAMIC_LAYOUTS, CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalog_chart_payload, catalog_kpi_fields, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, is_empty_catalog_chart, materialize_calculated_dimensions, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_label_format, parse_label_position, parse_legend_position, parse_template_boolean, prepare_catalog_chart_preview_frame, prepare_multivendor_catalog_entry, preview_catalog_chart_data, render_catalog_chart_preview, render_catalog_chart_preview_with_hover, render_cdr_report, render_unavailable_source_chart, report_chart_renderer_name, reset_dashboard_canvas_renderer, split_calculated_dimension_aliases
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column, add_vfuk_gcid_column, apply_operator_mappings, ensure_fixed_cdr_fields, get_dataset_source_columns, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
@@ -2346,7 +2347,7 @@ def catalogue_layout_names(technology: str) -> list[str]:
             if cached and cached[:2] == signature:
                 return list(cached[2])
         from pptx import Presentation
-        layouts = sorted({*DYNAMIC_LAYOUTS, *(layout.name for layout in Presentation(template).slide_layouts if layout.name.strip())}, key=str.casefold)
+        layouts = sorted({*DYNAMIC_LAYOUTS, *(canonical_layout_name(layout.name) for layout in Presentation(template).slide_layouts if selectable_layout_name(canonical_layout_name(layout.name)))}, key=str.casefold)
         with CATALOGUE_LAYOUT_NAMES_CACHE_LOCK:
             CATALOGUE_LAYOUT_NAMES_CACHE[cache_key] = (*signature, layouts)
         return list(layouts)

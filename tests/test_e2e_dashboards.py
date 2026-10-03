@@ -3266,7 +3266,7 @@ def test_dynamic_histogram_dashboard_filters_operators_and_updates_source_templa
     prepared = client.post('/api/e2e-dashboards/prepare', json=payload)
     assert prepared.status_code == 200, prepared.text
     slide = prepared.json()['slides'][0]
-    assert slide['layout'] == 'Title and 2 rows and 2 columns + Comments down'
+    assert slide['layout'] == 'Title + 2 rows + 2 columns + comments down'
     assert [chart['title'] for chart in slide['charts']] == ['LTE RSRP – A', 'LTE RSRP – B', 'NR RSRP – A', 'NR RSRP – B']
     assert [chart['focus_row'] for chart in slide['charts']] == [0, 0, 1, 1]
     token = prepared.json()['token']

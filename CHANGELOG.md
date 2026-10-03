@@ -38,6 +38,7 @@
 - **Workspace configuration:** Main Cities precedes the renamed Operator & Vendor Maps panels. Mapping panels collapse independently; export/backup labels match, and the Backup content menu wraps descriptions on smaller screens.
 - **Radio-quality maps:** Map KPIs accept an optional third measure after latitude/longitude; Value Bucket grouping and four configured thresholds colour measured quality from red to green in the Dashboard and PPT.
 - **Multivendor comparisons:** choose Operator–Vendor or pooled Vendor_Only before export; retries retain the choice. Dynamic slides paginate at six values while keeping operators of the same vendor together where possible.
+- **Report Template layouts:** grid names use `Title + N rows + M columns`, with matching variants without comments or with `comments down/right`. The editor lists only these grids, six dynamic layouts, Title Page and Title Only; existing templates and imported legacy names are normalized.
 
 #### 🐛 Bug fixes:
 - Interactivity packet-error ratio honors IFNULL loss components while requiring a positive observed Packets_Sent denominator.

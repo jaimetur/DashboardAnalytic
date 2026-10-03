@@ -717,7 +717,7 @@ def test_catalogue_converter_assigns_layouts_for_missing_legacy_layouts() -> Non
 
     entries = parse_catalog_csv(convert_catalog_csv(legacy, 'nsa'), 'nsa')
 
-    assert {entry.layout for entry in entries} == {'Title and 2 columns + Comments'}
+    assert {entry.layout for entry in entries} == {'Title + 1 rows + 2 columns + comments down'}
 
 
 def test_vendor_group_fills_unmapped_operators_in_the_official_vendor_field() -> None:
@@ -3098,9 +3098,9 @@ def test_nsa_catalogue_splits_template_screenshots_into_individual_charts() -> N
     slide_thirteen = [entry for entry in entries if entry.slide == 13]
 
     assert len(slide_ten) == 2
-    assert {entry.layout for entry in slide_ten} == {'Title and 2 columns + Comments'}
+    assert {entry.layout for entry in slide_ten} == {'Title + 1 rows + 2 columns + comments down'}
     assert len(slide_thirteen) == 3
-    assert {entry.layout for entry in slide_thirteen} == {'Title and 3 columns + Comments'}
+    assert {entry.layout for entry in slide_thirteen} == {'Title + 1 rows + 3 columns + comments down'}
     assert {slide: sum(entry.slide == slide for entry in entries) for slide in range(12, 17)} == {
         12: 2, 13: 3, 14: 3, 15: 4, 16: 2,
     }
@@ -3146,7 +3146,7 @@ def test_catalogue_rows_use_matching_master_image_placeholders(tmp_path) -> None
     generated = Presentation(destination)
     assert len(generated.slides) == 1
     slide = generated.slides[0]
-    assert slide.slide_layout.name == 'Title and 2 rows + Comments right'
+    assert slide.slide_layout.name == 'Title + 2 rows + 1 columns + comments right'
     pictures = sorted((shape for shape in slide.shapes if hasattr(shape, 'image')), key=lambda shape: shape.top)
     assert len(pictures) >= 2
     assert pictures[0].top < pictures[1].top
@@ -3173,6 +3173,30 @@ def test_catalogue_rows_use_matching_master_image_placeholders(tmp_path) -> None
     assert all((tmp_path / 'charts' / chart['hover_file']).is_file() for chart in manifest['charts'])
 
 
+def test_grid_layout_without_comments_keeps_placeholder_ten_as_a_chart() -> None:
+    from src.modules.cdr_reporting import (
+        _clear_commentary,
+        _named_slide_layout,
+        _remove_template_chart_placeholders,
+        _set_commentary,
+    )
+
+    presentation = Presentation('assets/ppt-templates/Template_CDR_analysis.pptx')
+    layout = _named_slide_layout(presentation, 'Title + 1 rows + 1 columns')
+    assert layout is not None
+    slide = presentation.slides.add_slide(layout)
+    chart_placeholder = next(shape for shape in slide.placeholders if shape.placeholder_format.idx == 10)
+    original_xml = chart_placeholder._element.xml
+
+    _clear_commentary(slide)
+    _set_commentary(slide, ['Keep this chart placeholder'])
+    assert next(shape for shape in slide.placeholders if shape.placeholder_format.idx == 10)._element.xml == original_xml
+
+    _remove_template_chart_placeholders(slide)
+
+    assert not any(shape.placeholder_format.idx == 10 for shape in slide.placeholders)
+
+
 def test_layout_only_template_builds_one_new_slide_per_catalogue_number(tmp_path) -> None:
     template = Path('assets/ppt-templates/Template_CDR_analysis.pptx')
     assert len(Presentation(template).slides) == 0
@@ -3196,7 +3220,7 @@ def test_layout_only_template_builds_one_new_slide_per_catalogue_number(tmp_path
     generated = Presentation(destination)
     assert len(generated.slides) == 3
     assert [slide.slide_layout.name for slide in generated.slides] == [
-        'Title Page', 'Title Only', 'Title and 1 column + Comments',
+        'Title Page', 'Title Only', 'Title + 1 rows + 1 columns + comments down',
     ]
     assert generated.slides[0].placeholders[0].text == 'Quarterly report'
     assert generated.slides[0].placeholders[1].text == 'NSA analysis'

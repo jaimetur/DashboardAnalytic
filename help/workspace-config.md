@@ -105,7 +105,7 @@ This is the canonical authoring reference for templates used by both [E2E Dashbo
 | `Slide` | Positive slide number. Rows are sorted by this value; rows with the same number form one slide. |
 | `Slide Tittle` | Shared slide title. The historical `Tittle` spelling is part of the CSV schema. |
 | `Slide Subtittle` | Optional shared slide subtitle. |
-| `Layout` | Exact layout name from `Template_CDR_analysis.pptx`. |
+| `Layout` | Select `Title Page`, `Title Only`, or a grid named `Title + N rows + M columns`, optionally followed by `+ comments down` or `+ comments right`. Dynamic grids also appear in the selector. |
 | `Chart Tittle` | Optional title drawn inside the chart. |
 | `CDR source` | `CDR-Data`, `CDR-Voice`, `CDR-Speech` or `CDR-All`; leave blank for structural slides. `CDR-All` pools selected RF observations using `LTE_RSRP`, `NR_RSRP`, `LTE_SINR`, `NR_SINR`, `Latitude` and `Longitude`, retaining Operator/Campaign context. |
 | `KPI` | Processed CDR field or metric expression to render. |
@@ -509,16 +509,22 @@ Maintain the transferable KPI priority list with up/down, first/last or specific
 Web and PowerPoint GAP tables include a final sum for each comparison column. Individual PPT comparisons show Average KPI GAP and the average of the column GAP totals. These are distinct statistics; see the [complete Scoring & GAP Analysis guide](scoring-gap-analysis.md) for examples, coverage rules and JSON formats.
 
 
+### Chart layouts
+
+The editor offers uniform grids with comments below or to the right and matching grids without comments. Only these grids, the six dynamic layouts, `Title Page` and `Title Only` are selectable. Other native layouts remain internal to existing structural slides. Legacy grid names are normalized in saved templates and when importing older CSV/JSON files; exports and backups retain the canonical names. Grids without comments use the full chart area.
+
 ### Dynamic chart grids
 
 The optional **Dynamic Field** column tells a dynamic layout which source field to split into separate charts. Older CSV templates without this column remain supported; CSV exports include it, and template exports, transfers and backups preserve it.
 
 | Layout | Repeated dimension | Commentary |
 |---|---|---|
-| `2 rows + dynamic columns, comments right` | One column per distinct field value | Right |
-| `2 rows + dynamic columns, comments down` | One column per distinct field value | Below |
-| `2 columns + dynamic rows, comments right` | One row per distinct field value | Right |
-| `2 columns + dynamic rows, comments down` | One row per distinct field value | Below |
+| `Title + 2 rows + dynamic columns` | One column per distinct field value | None |
+| `Title + dynamic rows + 2 columns` | One row per distinct field value | None |
+| `Title + 2 rows + dynamic columns + comments right` | One column per distinct field value | Right |
+| `Title + 2 rows + dynamic columns + comments down` | One column per distinct field value | Below |
+| `Title + dynamic rows + 2 columns + comments right` | One row per distinct field value | Right |
+| `Title + dynamic rows + 2 columns + comments down` | One row per distinct field value | Below |
 
 Use two chart definitions with the same Layout and Dynamic Field on that slide. In a two-row layout, the first definition fills the top row and the second fills the bottom row. In a two-column layout, the first fills the left column and the second fills the right column. Distinct values come from the selected, filtered CDR universe. Empty or missing values are excluded. The native PPT template includes grids for one through six repeated values; larger grids are derived from the same chart and commentary geometry when needed. More columns or rows produce smaller charts.
 

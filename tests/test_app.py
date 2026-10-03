@@ -8405,6 +8405,39 @@ def test_admin_imports_report_catalogue(client) -> None:
     assert 'id="info-overlay"' in confirmation.text
 
 
+def test_legacy_layout_alias_is_canonicalized_through_template_import_and_export(client) -> None:
+    import csv
+    import io
+    import src.DashboardAnalytic as app_module
+    from src.modules.cdr_reporting import CATALOG_HEADERS
+
+    login(client)
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=CATALOG_HEADERS, lineterminator='\n')
+    writer.writeheader()
+    writer.writerow({
+        'Slide': '1', 'Slide Tittle': 'Quality',
+        'Layout': 'Title and 2 columns and 2 rows + Comments right',
+        'Chart type': 'Average Vertical Bars',
+    })
+    original_csv = output.getvalue().encode('utf-8')
+
+    imported = client.post(
+        '/workspace-config/report-templates/nsa',
+        data={'catalogue_name': 'Legacy layout'},
+        files={'catalogue_file': ('legacy-layout.csv', BytesIO(original_csv), 'text/csv')},
+        follow_redirects=False,
+    )
+
+    assert imported.status_code == 303
+    stored = app_module.reporting_catalog_content('nsa')
+    assert b'Title + 2 rows + 2 columns + comments right' in stored
+    exported = client.get('/workspace-config/report-templates/nsa/export')
+    assert exported.status_code == 200
+    assert b'Title + 2 rows + 2 columns + comments right' in exported.content
+    assert b'Title and 2 columns and 2 rows + Comments right' not in exported.content
+
+
 def test_admin_import_preserves_hyphens_in_uploaded_template_name(client) -> None:
     from src.modules.cdr_reporting import CATALOG_HEADERS
     import src.DashboardAnalytic as app_module

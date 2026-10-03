@@ -20,6 +20,7 @@ import pandas as pd
 from src.modules.auth import hash_password
 from src.modules.column_names import MAIN_CDR_FIELDS, clean_column_name, column_identity
 from src.modules.nr_mode import NR_MODE_DATASET_KINDS, infer_nr_mode, normalize_nr_mode
+from src.modules.report_layouts import normalize_catalog_layouts
 from src.modules.runtime_config import ignore_event_time_filtering
 
 
@@ -1277,6 +1278,12 @@ class Repository:
             conn.execute("ALTER TABLE report_templates ADD COLUMN updated_at TEXT")
         if 'updated_by' not in columns:
             conn.execute("ALTER TABLE report_templates ADD COLUMN updated_by TEXT NOT NULL DEFAULT ''")
+        for row in conn.execute("SELECT technology, name, content FROM report_templates").fetchall():
+            content = bytes(row['content'] or b'')
+            normalized = normalize_catalog_layouts(content)
+            if normalized != content:
+                conn.execute("UPDATE report_templates SET content = ? WHERE technology = ? AND name = ?",
+                             (sqlite3.Binary(normalized), row['technology'], row['name']))
         now = local_now_iso()
         if conn.execute("SELECT 1 FROM report_templates WHERE created_at IS NULL LIMIT 1").fetchone():
             conn.execute("UPDATE report_templates SET created_at = ? WHERE created_at IS NULL", (now,))
@@ -1320,14 +1327,14 @@ class Repository:
             now = local_now_iso()
             conn.execute(
                 "INSERT INTO report_templates (technology, name, content, is_default, created_at, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (technology, name, sqlite3.Binary(content), int(is_default), now, now, updated_by or ''),
+                (technology, name, sqlite3.Binary(normalize_catalog_layouts(content)), int(is_default), now, now, updated_by or ''),
             )
 
     def set_report_template_content(self, technology: str, name: str, content: bytes, *, updated_by: str | None = None) -> None:
         with self.connection() as conn:
             result = conn.execute(
                 "UPDATE report_templates SET content = ?, updated_at = ?, updated_by = COALESCE(?, updated_by) WHERE technology = ? AND name = ?",
-                (sqlite3.Binary(content), local_now_iso(), updated_by, technology, name),
+                (sqlite3.Binary(normalize_catalog_layouts(content)), local_now_iso(), updated_by, technology, name),
             )
             if not result.rowcount:
                 raise ValueError('Report Template was not found.')

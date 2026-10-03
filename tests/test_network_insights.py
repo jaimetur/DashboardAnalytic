@@ -178,7 +178,7 @@ def test_bundled_rf_quality_template_is_valid() -> None:
     for slide in cdf_slides:
         entries = [entry for entry in catalogue if entry.slide == slide]
         assert len(entries) == 4
-        assert all(entry.layout == 'Title and 2 columns and 2 rows + Comments right' for entry in entries)
+        assert all(entry.layout == 'Title + 2 rows + 2 columns + comments right' for entry in entries)
         assert [entry.chart_type for entry in entries[:2]] == ['CDF Line', 'CDF Line']
         assert all(entry.chart_type == 'Histogram Line' for entry in entries[2:])
         assert all(entry.grouping_rows == 'Operator' and entry.grouping_columns == 'Campaign' for entry in entries[2:])
@@ -442,7 +442,41 @@ def test_dynamic_histogram_grids_keep_radio_positions_and_all_operators(layout, 
         assert len(_layout_chart_frames(_named_slide_layout(deck, actual[0].layout))) == count * 2
     restored = parse_catalog_csv(catalogue_csv(base), 'nsa')
     assert [entry.dynamic_field for entry in restored] == ['Operator', 'Operator']
-    assert [entry.layout for entry in restored] == [layout, layout]
+    from src.modules.report_layouts import canonical_layout_name
+    assert [entry.layout for entry in restored] == [canonical_layout_name(layout)] * 2
+
+
+@pytest.mark.parametrize(
+    'dynamic_layout,expected_layout',
+    [
+        ('Title + 2 rows + dynamic columns', 'Title + 2 rows + 3 columns'),
+        ('Title + dynamic rows + 2 columns', 'Title + 3 rows + 2 columns'),
+    ],
+)
+def test_dynamic_grids_without_comments_expand_to_matching_frames(dynamic_layout, expected_layout):
+    from dataclasses import replace
+    from pptx import Presentation
+    from src.modules.cdr_reporting import (
+        _layout_chart_frames,
+        _named_slide_layout,
+        expand_dynamic_layouts,
+    )
+
+    catalogue = app_module.load_template_catalogue(TEMPLATE_PATH.read_bytes(), 'nsa')
+    base = [
+        replace(entry, layout=dynamic_layout)
+        for entry in catalogue if entry.chart_type == 'Histogram Bars'
+    ][:2]
+
+    expanded = expand_dynamic_layouts(base, {'Operator': ['A', 'B', 'C']})
+
+    assert len(expanded) == 6
+    assert {entry.layout for entry in expanded} == {expected_layout}
+    deck = Presentation('assets/ppt-templates/Template_CDR_analysis.pptx')
+    layout = _named_slide_layout(deck, expected_layout)
+    assert layout is not None
+    assert 'comments' not in layout.name.casefold()
+    assert len(_layout_chart_frames(layout)) == 6
 
 
 def test_operator_histogram_campaign_bars_use_ordered_shades_and_exact_counts():
