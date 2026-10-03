@@ -312,6 +312,7 @@
       );
       if (choice !== 'confirm' && choice !== 'secondary') return false;
       reportForm.elements.vendor_comparison.value = choice === 'secondary' ? 'vendor_only' : 'operator_vendor';
+      if (choice === 'confirm') retainLatestSelectedCdrPerType();
       return true;
     };
     const reportMulticampaignDialog = document.querySelector('[data-report-multicampaign-dialog]');
@@ -450,11 +451,10 @@
       });
     };
     scope.addEventListener('change', () => {
-      retainLatestSelectedCdrPerType();
       restoreLatestOperatorComparisonCdrs();
     });
     const hasMulticampaignMultivendorSelection = () => (
-      scope?.value === 'multivendor' && selectedCdrsByType().some(({options}) => options.length > 1)
+      scope?.value === 'multivendor' && reportForm.elements.vendor_comparison.value === 'operator_vendor' && selectedCdrsByType().some(({options}) => options.length > 1)
     );
     const reviewMultivendorCampaigns = () => {
       if (!hasMulticampaignMultivendorSelection()) return Promise.resolve(true);

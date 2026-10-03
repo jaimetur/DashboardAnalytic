@@ -141,10 +141,10 @@
   const dashboardNrMode = value => String(value?.technology || value?.template_technology || 'nsa').toUpperCase() === 'SA' ? 'SA' : 'NSA';
   const datasetsForNrMode = (kind, nrMode) => (config.datasets?.[kind] || [])
     .filter(row => !row.nr_mode || String(row.nr_mode).toUpperCase() === nrMode);
-  const latestDatasetsForScope = (scope, nrMode = 'NSA') => Object.fromEntries(['data', 'voice', 'speech'].map(kind => [kind,
+  const latestDatasetsForScope = (scope, nrMode = 'NSA', vendorComparison = 'operator_vendor') => Object.fromEntries(['data', 'voice', 'speech'].map(kind => [kind,
     [...datasetsForNrMode(kind, nrMode)]
       .sort((left, right) => datasetRecency(right) - datasetRecency(left) || Number(right.id) - Number(left.id))
-      .slice(0, scope === 'multivendor' ? 1 : 2)
+      .slice(0, scope === 'multivendor' && vendorComparison === 'operator_vendor' ? 1 : 2)
       .map(row => Number(row.id)),
   ]));
   const multivendorAvailable = Boolean(config.multivendor_available);
@@ -650,8 +650,8 @@
     syncMultivendorAvailability();
     scopeControl.value = remembered?.scope === 'multivendor' && !$('ds-ppt-dataset-scope').querySelector('option[value="multivendor"]').disabled ? 'multivendor' : 'single';
     const vendorComparison = $('ds-ppt-vendor-comparison');
-    vendorComparison.value = 'vendor_only';
-    vendorComparison.onchange = () => { rememberDialog(); updateSaveState(); };
+    vendorComparison.value = remembered?.vendor_comparison || 'vendor_only';
+    let previousVendorComparison = vendorComparison.value;
     const choices = $('ds-ppt-dataset-choices'); choices.replaceChildren();
     const confirm = $('ds-ppt-dataset-confirm');
     const operatorSection = $('ds-ppt-operator-section');
@@ -1004,10 +1004,10 @@
     const renderChoices = (restoreDatasets = false) => {
       const scope = scopeControl.value;
       $('ds-ppt-vendor-comparison-section').hidden = scope !== 'multivendor';
-      const defaultDatasets = latestDatasetsForScope(scope, dashboardNrMode(dashboard));
+      const defaultDatasets = latestDatasetsForScope(scope, dashboardNrMode(dashboard), vendorComparison.value);
       // Only CDRs of the Dashboard's NR Mode are listed; say so in the title.
       $('ds-ppt-cdr-title').textContent = `CDR datasets (${dashboardNrMode(dashboard)})`;
-      $('ds-ppt-dataset-copy').textContent = scope === 'multivendor'
+      $('ds-ppt-dataset-copy').textContent = scope === 'multivendor' && vendorComparison.value === 'operator_vendor'
         ? 'The newest CDR of each type is selected by default. Choose the CDRs to include in this vendor comparison.'
         : 'The two newest CDRs of each type are selected by default. Choose the CDRs to include in this operator comparison.';
       choices.replaceChildren();
@@ -1039,6 +1039,19 @@
     $('ds-ppt-dataset-cancel').onclick = () => finish(null);
     choices.onchange = () => { rememberDialog(); updateConfirmState(); void refreshGeography(); };
     scopeControl.onchange = () => { renderChoices(); rememberDialog(); void refreshGeography(); };
+    vendorComparison.onchange = () => {
+      const defaults = latestDatasetsForScope(scopeControl.value, dashboardNrMode(dashboard), previousVendorComparison);
+      const current = selectedDatasets();
+      const automatic = ['data', 'voice', 'speech'].every(kind =>
+        JSON.stringify([...(current[kind] || [])].sort((a, b) => a - b))
+        === JSON.stringify([...defaults[kind]].sort((a, b) => a - b)));
+      if (!automatic) remembered = {...(remembered || {}), datasets: current};
+      rememberDialog();
+      renderChoices(!automatic);
+      previousVendorComparison = vendorComparison.value;
+      rememberDialog();
+      void refreshGeography();
+    };
     operatorControl.onchange = () => rememberSelection('operators');
     vendorControl.onchange = () => rememberSelection('vendors');
     regionControl.onchange = () => rememberSelection('regions');
@@ -2433,7 +2446,7 @@
     if (!definition || next === current) return;
     const label = next === 'multivendor' ? 'Multivendor Comparison' : 'Operator Comparison';
     const accepted = await window.showConfirmDialog(
-      `Change the Scope to ${label}? Every Dashboard chart will be rendered again, and the Dataset Universe switches to the newest ${next === 'multivendor' ? 'CDR' : 'two CDRs'} of each type for this scope.`,
+      `Change the Scope to ${label}? Every Dashboard chart will be rendered again, and the Dataset Universe switches to the newest two CDRs of each type for this scope.`,
       {title: 'Change Dashboard Scope', confirmLabel: 'Change Scope', tone: 'warning'},
     );
     if (!accepted) { control.value = current; return; }
@@ -2446,7 +2459,15 @@
     const control = $('ds-viewer-vendor-comparison');
     const current = appliedDashboardDefinition || definition;
     if (!definition || current?.scope !== 'multivendor' || control.value === current.vendor_comparison) return;
+    const defaults = latestDatasetsForScope('multivendor', dashboardNrMode(current), current.vendor_comparison);
+    const automatic = ['data', 'voice', 'speech'].every(kind =>
+      JSON.stringify([...(current.datasets?.[kind] || [])].sort((a, b) => a - b))
+      === JSON.stringify([...defaults[kind]].sort((a, b) => a - b)));
     definition.vendor_comparison = control.value;
+    if (automatic) {
+      definition.datasets = latestDatasetsForScope('multivendor', dashboardNrMode(definition), control.value);
+      sources();
+    }
     control.disabled = true;
     try { await preparePart('universe'); }
     finally { syncViewerScope(); }
@@ -2486,7 +2507,7 @@
       definition.template_technology = definition.technology = $('ds-nr-mode').value; definition.template = selected.name;
       // CDRs of the previous NR Mode no longer belong to this Dashboard.
       if (dashboardNrMode(definition) !== previousNrMode) {
-        definition.datasets = latestDatasetsForScope(definition.scope || 'single', dashboardNrMode(definition));
+        definition.datasets = latestDatasetsForScope(definition.scope || 'single', dashboardNrMode(definition), definition.vendor_comparison);
         sources();
       }
       changed();
@@ -2502,7 +2523,7 @@
     const selectedScope = $('ds-scope').value;
     if (selectedScope !== definition.scope) {
       if (selectedScope === 'multivendor') definition.vendor_comparison = 'vendor_only';
-      definition.datasets = latestDatasetsForScope(selectedScope, dashboardNrMode(definition));
+      definition.datasets = latestDatasetsForScope(selectedScope, dashboardNrMode(definition), definition.vendor_comparison);
       definition.date_from = 'Oldest';
       definition.date_to = 'Newest';
     }

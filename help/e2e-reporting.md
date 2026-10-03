@@ -41,7 +41,7 @@ Select Scope:
 - **Multivendor Comparison** requires Vendor mapping for every selected CDR.
 - In Multivendor, Operator aggregation resolves to the mapped operator/vendor comparison field; an Operator template filter still applies to the physical Operator column.
 
-Operator Comparison initially selects the two newest CDRs of each type, or the only available one. Changing to Multivendor keeps one selected CDR per type. An existing single selection is preserved even when it is not the newest.
+Operator Comparison initially selects the two newest CDRs of each type, or the only available one. Multivendor **Operator - Vendor** keeps one selected CDR per type after choosing that comparison mode. **Vendor Only** retains the same selection as Operator Comparison, without reducing it to one CDR. An existing single selection is preserved even when it is not the newest.
 
 ## Report Template selection
 

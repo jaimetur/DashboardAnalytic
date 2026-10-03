@@ -1192,7 +1192,7 @@ def install_dashboard_routes(core):
             # The default universe uses the latest CDRs of the Dashboard's own
             # NR Mode; CDRs of the other NR Mode are never selected.
             ordered = ordered_ready_datasets(task_repository, dashboard_nr_mode(effective))
-            count = 1 if effective['scope'] == 'multivendor' else 2
+            count = 1 if effective['scope'] == 'multivendor' and effective.get('vendor_comparison', 'operator_vendor') == 'operator_vendor' else 2
             effective['datasets'] = {
                 kind: [int(row['id']) for row in ordered[kind][:count]] for kind in KINDS
             }
