@@ -16,7 +16,7 @@ from typing import Any, Iterable
 
 import pandas as pd
 
-from src.modules.column_names import column_identity, compact_campaign_value
+from src.modules.column_names import column_identity, compact_campaign_value, vendor_filter_values
 
 
 NETWORK_INSIGHTS_KINDS = ('data', 'voice', 'speech')
@@ -900,6 +900,8 @@ def install_network_insights_routes(core: Any) -> None:
         }
         filtered = samples
         for field, values in (('operator', request.operators), ('vendor', request.vendors), ('region', request.regions), ('city', request.cities), ('campaign', request.campaigns)):
+            if field == 'vendor':
+                values = vendor_filter_values(values, samples['operator'].dropna().unique())
             wanted = {str(value).casefold() for value in values if str(value).strip()}
             if wanted:
                 filtered = filtered.loc[filtered[field].str.casefold().isin(wanted)]

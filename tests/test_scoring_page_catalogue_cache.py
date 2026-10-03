@@ -50,6 +50,7 @@ def test_scoring_page_uses_cached_catalogues_without_scanning_cdr_rows(
         repository.replace_cdr_catalogue(
             dataset_id,
             vendors=['Nokia'], regions=['North'], cities=['Leeds'],
+            vendors_only=['Nokia'] if catalogue_state == 'cached' else None,
             campaigns=['2026-Q2'] if catalogue_state == 'cached' else None,
             operators=['EE'] if catalogue_state == 'cached' else None,
         )

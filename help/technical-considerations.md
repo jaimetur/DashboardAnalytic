@@ -61,7 +61,7 @@ The importer preserves source fields and adds normalised fields used across modu
 
 - `Campaign`, preserving source text; filters and chart labels can present recognised values as `YYYY-Qn`, `YYYY-Qn_SA` or `YYYY-Qn_NSA`.
 - `Operator`, preserving source values; configured aliases supply canonical labels for charts and comparisons.
-- `Vendor`, populated by explicit vendor mapping or the operator fallback, and `Vendor_Only`, which removes a recognised operator prefix.
+- `Vendor`, populated by explicit vendor mapping or the operator fallback, and `Vendor_Only`, which removes a recognised operator prefix for real vendors and stores `Operator - All` for operators without an assigned vendor.
 - `Call Family`, derived from call/session mode.
 - `Test Family`, derived from the available test type/name fields.
 - `Rate Bucket`, calculated for distribution charts from configured bucket limits.

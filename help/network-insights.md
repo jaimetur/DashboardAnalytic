@@ -26,7 +26,7 @@ Measured views group only by the checked **Group by** dimensions: Campaign, Oper
 1. Open the workspace and the **Network Insights** tab, which follows **Scoring & GAP Analysis**.
 2. Choose **NR Mode**. The CDR lists show the ready Data, Voice and Speech CDRs of that mode; the two most recently uploaded CDRs of each type are selected.
 3. Choose **Technology** (LTE, NR or LTE+NR) and **Group by** (Campaign, Operator, Vendor, Region, City or CDR type).
-   **Group by** is a multiple selection: choose one or more dimensions. **Operator** separates operators only when checked. **Vendor** splits each operator by vendor, using only `Vendor_Only`. The Vendors filter also uses only this field. Actual vendors appear first, followed by Mixed Vendor(s), Other Vendor(s), All Vendor(s), and then operator-only identities labelled **Operator - All Vendors**; labels do not change the stored filter values. CDRs without it contribute no vendor choices.
+   **Group by** is a multiple selection: choose one or more dimensions. **Operator** separates operators only when checked. **Vendor** splits each operator by vendor, using only `Vendor_Only`. The Vendors filter also uses only this field. Actual vendors appear first, followed by Mixed Vendor(s), Other Vendor(s), All Vendor(s), and then operator-only identities labelled **Operator - All**; vendor mapping stores this operator-only identity, including the suffix, in `Vendor_Only`. CDRs without it contribute no vendor choices.
 4. Adjust **Low coverage below** (default -110 dBm), **High interference below** (default 0 dB) and the **Map grid** size (default 250 m).
 5. Press **Analyse Network**.
 

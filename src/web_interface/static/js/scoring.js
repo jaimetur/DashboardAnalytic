@@ -314,7 +314,7 @@
   }
 
   function scoringVendorName(value) {
-    const raw = String(value ?? '').trim();
+    const raw = String(value ?? '').replace(/\s+- All(?: Vendors)?$/i, '').trim();
     const operators = uniqueCatalogueValues([
       ...operatorGroups.flatMap(operatorGroupLabels),
       ...[...datasetCatalogues.values()].flatMap(catalogue => catalogue.operators || []),
@@ -325,6 +325,10 @@
   }
 
   function contextFilterOptions(key, catalogueValues) {
+    if (key === 'Vendor') {
+      return (window.vendorOnlyFilterChoices?.('Vendor_Only', catalogueValues) || catalogueValues.map(value => ({value, label: value})))
+        .map(choice => ({...choice, color: ''}));
+    }
     if (key !== 'Operator') {
       return catalogueValues.map(value => ({value, label: value, color: ''}))
         .sort((left, right) => left.label.localeCompare(right.label, undefined, {sensitivity: 'base'}));
@@ -364,7 +368,7 @@
     for (const {key, catalogueKey} of contextFilterDefinitions) {
       const select = contextFilterSelects.get(key);
       if (!select) continue;
-      const selectedValues = new Set([...select.selectedOptions].map(option => option.value).filter(Boolean));
+      const selectedValues = new Set([...select.selectedOptions].map(option => key === 'Vendor' ? scoringVendorName(option.value) : option.value).filter(Boolean));
       const rawValues = [];
       for (const datasetId of selectedIds) {
         const values = datasetCatalogues.get(String(datasetId))?.[catalogueKey];
@@ -395,7 +399,7 @@
           const option = document.createElement('option');
           option.value = entry.value;
           option.textContent = entry.label;
-          option.selected = selectedValues.has(entry.value);
+          option.selected = selectedValues.has(key === 'Vendor' ? scoringVendorName(entry.value) : entry.value);
           if (entry.color) {
             option.dataset.operatorColor = entry.color;
             option.style.color = entry.color;

@@ -43,6 +43,7 @@ def test_scoring_vendor_name_removes_known_operator_prefixes_and_keeps_vendor_un
     assert scoring_vendor_name('EE_Ericsson', operators) == 'Ericsson'
     assert scoring_vendor_name('VF_UK_Huawei', operators) == 'Huawei'
     assert scoring_vendor_name('Mixed_Vendor', operators) == 'Mixed_Vendor'
+    assert scoring_vendor_name('VF_SA_Ericsson', ['Vodafone UK', 'VF_SA']) == 'Ericsson'
 
 
 def test_scoring_engine_groups_prefixed_vendor_rows_and_gap_by_pure_vendor():
@@ -172,7 +173,7 @@ def test_vendor_filter_selects_all_matching_operator_prefixes_and_outputs_legacy
         {'canonical': 'Three UK', 'aliases': ['3'], 'color': '#AABBCC'},
         {'canonical': 'Vodafone UK', 'aliases': ['VF_UK'], 'color': '#DDEEFF'},
     ])
-    expected_operators = {'3', 'EE', 'VF_UK', 'O2'}
+    expected_operators = {'3', 'EE', 'VF_UK'}
     source_rows = [
         {'Operator': '3', 'Vendor': '3_Ericsson', 'Region': 'North', 'City': 'Leeds',
          'Campaign': '2026-Q2', 'score': 1},
@@ -180,15 +181,22 @@ def test_vendor_filter_selects_all_matching_operator_prefixes_and_outputs_legacy
          'Campaign': '2026-Q2', 'score': 1},
         {'Operator': 'VF_UK', 'Vendor': 'VF_UK_Huawei', 'Region': 'North', 'City': 'Leeds',
          'Campaign': '2026-Q2', 'score': 1},
+        {'Operator': 'VF_UK', 'Vendor': 'VF_UK', 'Region': 'North', 'City': 'Leeds',
+         'Campaign': '2026-Q2', 'score': 1},
         {'Operator': 'O2', 'Vendor': 'O2', 'Region': 'North', 'City': 'Leeds',
          'Campaign': '2026-Q2', 'score': 1},
         {'Operator': 'Nokia Test', 'Vendor': 'Nokia', 'Region': 'North', 'City': 'Leeds',
          'Campaign': '2026-Q2', 'score': 1},
     ]
     for dataset_id in scoring_api['complete_dataset_ids']:
-        repository.replace_dataset_rows(dataset_id, pd.DataFrame(source_rows))
+        frame = pd.DataFrame(source_rows)
+        frame['Vendor_Only'] = [
+            'Ericsson', 'Ericsson', 'Huawei', 'Vodafone UK - All', 'O2 - All', 'Nokia',
+        ]
+        repository.replace_dataset_rows(dataset_id, frame)
         repository.replace_cdr_catalogue(
             dataset_id, vendors=['3_Ericsson', 'EE_Ericsson', 'VF_UK_Huawei', 'O2', 'Nokia'],
+            vendors_only=['Ericsson', 'Huawei', 'Vodafone UK - All', 'O2 - All', 'Nokia'],
             regions=['North'], cities=['Leeds'], campaigns=['2026-Q2'],
             operators=['3', 'EE', 'VF_UK', 'O2'],
         )
@@ -202,11 +210,24 @@ def test_vendor_filter_selects_all_matching_operator_prefixes_and_outputs_legacy
     job = response.json()['job']
     assert job['context_filters']['Vendor'] == ['Ericsson', 'Huawei']
     completed = scoring_jobs.run_scoring_job(repository, job['id'])
-    assert completed['status'] == 'completed', completed.get('last_error')
+    assert completed['status'] == 'completed', completed.get('error')
     frames = scoring_api['calls'][0]['frames']
     source_frames = frames.values() if isinstance(frames, dict) else [item[-1] for item in frames]
     actual_operators = {operator for frame in source_frames for operator in frame['Operator']}
     assert actual_operators == expected_operators
+
+    alias_filter_response = scoring_api['client'].post('/api/scoring/jobs', json={
+        'dataset_ids': scoring_api['complete_dataset_ids'], 'nr_mode': 'NSA',
+        'aggregation_levels': ['Operator'],
+        'context_filters': {'Vendor': ['VF_UK - All Vendors']},
+    })
+    assert alias_filter_response.status_code == 200, alias_filter_response.text
+    alias_filter_job = alias_filter_response.json()['job']
+    alias_filter = scoring_jobs.run_scoring_job(repository, alias_filter_job['id'])
+    assert alias_filter['status'] == 'completed', alias_filter.get('error')
+    alias_frames = scoring_api['calls'][1]['frames']
+    alias_source_frames = alias_frames.values() if isinstance(alias_frames, dict) else [item[-1] for item in alias_frames]
+    assert {operator for frame in alias_source_frames for operator in frame['Operator']} == {'VF_UK'}
 
     operator_scoped_response = scoring_api['client'].post('/api/scoring/jobs', json={
         'dataset_ids': scoring_api['complete_dataset_ids'], 'nr_mode': 'NSA',
@@ -217,7 +238,7 @@ def test_vendor_filter_selects_all_matching_operator_prefixes_and_outputs_legacy
     operator_scoped_job = operator_scoped_response.json()['job']
     operator_scoped = scoring_jobs.run_scoring_job(repository, operator_scoped_job['id'])
     assert operator_scoped['status'] == 'completed', operator_scoped.get('last_error')
-    scoped_frames = scoring_api['calls'][1]['frames']
+    scoped_frames = scoring_api['calls'][2]['frames']
     scoped_source_frames = scoped_frames.values() if isinstance(scoped_frames, dict) else [item[-1] for item in scoped_frames]
     scoped_operators = {operator for frame in scoped_source_frames for operator in frame['Operator']}
     assert scoped_operators == {'3', 'EE', 'VF_UK'}
@@ -280,7 +301,7 @@ def test_legacy_all_vendor_baseline_warning_is_refreshed_for_api_and_ppt(scoring
     assert response.status_code == 200, response.text
     job = response.json()['job']
     completed = scoring_jobs.run_scoring_job(repository, job['id'])
-    assert completed['status'] == 'completed', completed.get('last_error')
+    assert completed['status'] == 'completed', completed.get('error')
 
     saved = scoring_jobs.get_scoring_job(repository, job['id'], include_result=True)['result']
     vendor_by_operator = {

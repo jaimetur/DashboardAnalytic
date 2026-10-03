@@ -202,7 +202,7 @@ Vendor mapping is required only for Vendor Comparison.
 3. Confirm the VFUK and/or 3UK mapping.
 4. Wait for processing to finish.
 
-Use **Clear Vendors** before remapping with a newer file.
+Use **Clear Vendors** before remapping with a newer file. Mapping stores the vendor name in `Vendor_Only`; operators without an assigned vendor use `Operator - All`. The mapped value is retained in individual and combined CDRs and their dataset exports. Existing processed CDRs receive the new stored identity when mapped again.
 
 The detailed GCID formulas and first/last-cell resolution rules are documented in [Technical Considerations](technical-considerations.md#multivendor-calculation-and-remapping).
 
@@ -220,7 +220,7 @@ Preview opens persisted rows in a separate view.
 - `PINNED` marks origin, Main, Derived and Auto-calculated fields that remain available across dataset views. `UN_PINNED` marks source-only fields that are present only when supplied by the selected dataset.
 - Hover over a `Derived`, `Auto-calculated` or `Analysis-derived` badge to see a formatted tooltip with the field's calculation rule. Select the badge to open the complete rule in a floating details panel.
 - Use **Filter Labels** to select one or more labels and show only their columns. **All Labels** restores every column category; this column display filter does not change the dataset rows.
-- Mapping previews highlight `GCID` and vendor fields.
+- Mapping previews highlight `GCID` and vendor fields. Their vendor selector uses `Vendor_Only`; legacy inventories materialize this derived column from mapped Vendor values and workspace operator aliases. Preview column filters also use `Vendor_Only`. Vendor choices list real vendors first, then Mixed, Other and All groups, then operator-only identities labelled **Operator - All**. The derived column is included with dataset rows in applicable workspace transfers and backups.
 
 ### Smart Orchestrator Logs
 

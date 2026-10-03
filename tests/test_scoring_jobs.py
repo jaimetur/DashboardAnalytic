@@ -61,6 +61,7 @@ def add_dataset(repository: Repository, name: str = 'UK_Q2_2026_NSA_Data.csv', *
         'Region': ['North', 'South'],
         'City': ['Leeds', 'London'],
         'Vendor': ['Nokia', 'Ericsson'],
+        'Vendor_Only': ['Nokia', 'Ericsson'],
         'Dataset_Kind': [kind, kind],
         'score': [3.0, 4.0],
         'unused_payload': ['large', 'field'],
@@ -72,7 +73,7 @@ def add_dataset(repository: Repository, name: str = 'UK_Q2_2026_NSA_Data.csv', *
         row_count=len(frame), column_count=len(frame.columns), processed_at=local_now_iso(),
     )
     repository.replace_cdr_catalogue(
-        dataset_id, vendors=['Nokia', 'Ericsson'], regions=['North', 'South'],
+        dataset_id, vendors=['Nokia', 'Ericsson'], vendors_only=['Nokia', 'Ericsson'], regions=['North', 'South'],
         cities=['Leeds', 'London'], campaigns=['2026-Q2'],
     )
     return dataset_id
@@ -87,6 +88,7 @@ def add_complete_scoring_sources(repository: Repository, prefix: str = 'Scoped')
             'Region': ['North'] * 5,
             'City': ['Leeds', 'Manchester', 'Leeds', 'Leeds', 'Leeds'],
             'Vendor': ['Nokia', 'Nokia', 'Nokia', 'Ericsson', 'Nokia'],
+            'Vendor_Only': ['Nokia', 'Nokia', 'Nokia', 'Ericsson', 'Nokia'],
             'Campaign': ['2026-Q2', '2026-Q2', '2026-Q2', '2026-Q2', '2026-Q1'],
             'Dataset_Kind': [kind] * 5,
             'score': [3.0, 4.0, 5.0, 6.0, 7.0],
@@ -97,6 +99,25 @@ def add_complete_scoring_sources(repository: Repository, prefix: str = 'Scoped')
         )
         dataset_ids.append(dataset_id)
     return dataset_ids
+
+
+def test_legacy_operator_alias_filter_matches_current_all_suffix(repository):
+    dataset_id = add_dataset(repository)
+    repository.replace_operator_mapping_groups([
+        {'canonical': 'Vodafone UK', 'aliases': ['VF_UK'], 'color': '#FF0000'},
+    ])
+    repository.replace_dataset_rows(dataset_id, pd.DataFrame({
+        'Operator': ['Vodafone UK', 'Vodafone UK'],
+        'Vendor': ['Vodafone UK', 'Vodafone UK_Ericsson'],
+        'Vendor_Only': ['Vodafone UK - All', 'Ericsson'],
+    }))
+
+    matched = repository.load_dataset_rows(
+        dataset_id, ['Operator', 'Vendor_Only'], {'Vendor_Only': ['VF_UK - All Vendors']},
+    )
+
+    assert matched['Operator'].tolist() == ['Vodafone UK']
+    assert matched['Vendor_Only'].tolist() == ['Vodafone UK - All']
 
 
 def test_scoring_jobs_persist_results_and_reuse_completed_cache(repository, scoring_engine):
@@ -570,7 +591,7 @@ def test_scoring_context_filters_are_pushed_down_and_persisted(repository, scori
         assert dataset_filters['Region'] == ['North']
         assert dataset_filters['City'] == ['Leeds']
         assert dataset_filters['Operator'] == ['VF_UK', 'Vodafone UK']
-        assert dataset_filters['Vendor'] == ['Nokia']
+        assert dataset_filters['Vendor_Only'] == ['Nokia']
         assert dataset_filters['Campaign'] == ['2026-Q2']
 
 

@@ -104,6 +104,8 @@ NR Mode follows the shared reporting rule: Voice/Speech sessions are classified 
 
 ### Dataset Universe and dates
 
+**Select Comparison Scope** shows **Vendor comparison** beside Scope when Multivendor Comparison is chosen. Vendor Only (All Operators Combined) is first and is the default when entering multivendor scope. Choosing it selects the two newest CDRs per type, just like Operator Comparison; choosing Operator - Vendor selects only the newest per type. This mode change resets automatic date bounds. You can then adjust the CDR selection and use Apply Universe or Save Universe.
+
 Select one or more Data, Voice and Speech CDRs. Each selector lists only inputs of the Dashboard's NR Mode, for example **CDR Data (NSA)**. Older saved references to the other NR Mode are not used.
 
 | Date setting | Meaning |
@@ -131,7 +133,7 @@ An empty chart can coexist with a nonempty Filtered Universe: its source type or
 
 ### Default filters and aliases
 
-The default order is **Market → Region → City → Campaign → Operator → Vendor → RAT → Session Type → Call Status**. Technology is not an adaptive filter because NR Mode belongs to the definition.
+The default order is **Market → Region → City → Campaign → Operator → Vendor → RAT → Session Type → Call Status**. The built-in **Vendor** selector filters `Vendor_Only`, using cached per-CDR values. Its choices list real vendors first, followed by Mixed Vendor(s), Other Vendor(s), All Vendor(s), and operators without vendors labelled **Operator - All**. Vendor mapping stores operator-only identities as `Operator - All` in `Vendor_Only`. Existing operator-only values without the suffix remain supported. All vendor filters, including PPT export, expanded charts and template filters, use `Vendor_Only`. Legacy `Vendor` filter names are accepted as aliases; saved operator-prefixed values are resolved to the vendor name using workspace operator aliases. The comparison mode still controls whether charts group by Operator–Vendor or Vendor Only. Technology is not an adaptive filter because NR Mode belongs to the definition.
 
 | Visible filter | Source columns in priority order |
 | --- | --- |
@@ -450,8 +452,8 @@ Dashboards have their own Admin export/import/transfer/backup/restore component.
 
 ### Vendor-only report ordering
 
-For **Vendor Only (All Operators Combined)**, web charts/tables and PowerPoint reports list actual vendors alphabetically, then Mixed Vendor(s), Other Vendor(s), All Vendor(s), and finally operator-only identities labelled **Operator - All Vendors**. This order also applies to dynamic chart grids. Mixed/Other groups remain visible unless an explicit template filter excludes them. Display labels preserve the underlying filter and dataset values.
+For **Vendor Only (All Operators Combined)**, web charts/tables and PowerPoint reports list actual vendors alphabetically, then Mixed Vendor(s), Other Vendor(s), All Vendor(s), and finally operator-only identities labelled **Operator - All**. This order also applies to dynamic chart grids. Mixed/Other groups remain visible unless an explicit template filter excludes them. Vendor mapping persists `Operator - All` in `Vendor_Only` for operators without an assigned vendor. Existing values without the suffix remain compatible.
 
-In multivendor charts, operator-only identities such as **EE - All Vendors** retain the colour assigned to that operator in Operator mappings. This applies to web and newly generated PPT charts; the display suffix does not create a new colour identity. Real vendors retain their configured vendor colours.
+In multivendor charts, operator-only identities such as **EE - All** retain the colour assigned to that operator in Operator mappings. This applies to web and newly generated PPT charts; the display suffix does not create a new colour identity. Real vendors retain their configured vendor colours.
 
 Default CDR selection uses the two newest inputs of each type for **Operator Comparison** and multivendor **Vendor Only**, or the only available input. Only multivendor **Operator - Vendor** defaults to one newest CDR per type. Changing the vendor comparison updates an unchanged default selection; saved or manually modified universes are retained.

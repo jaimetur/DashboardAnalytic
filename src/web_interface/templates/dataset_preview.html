@@ -31,7 +31,7 @@
       {% endif %}
       {% if vendor_filter_options %}
       <label>Vendor
-        <select name="mapping_vendor" aria-label="Mapping vendor filter">
+        <select name="mapping_vendor" aria-label="Mapping vendor filter" data-searchable-select data-multiselect-vendor-only="true">
           <option value="">All vendors</option>
           {% for vendor in vendor_filter_options %}
           <option value="{{ vendor }}"{% if vendor == selected_mapping_vendor %} selected{% endif %}>{{ vendor }}</option>

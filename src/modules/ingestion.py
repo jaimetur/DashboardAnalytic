@@ -14,7 +14,7 @@ try:
 except ImportError:  # pragma: no cover - packaged installations include it.
     pycountry = None
 
-from src.modules.column_names import campaign_parts, clean_column_name, column_identity, resolve_column_name, vendor_only_value
+from src.modules.column_names import campaign_parts, clean_column_name, column_identity, resolve_column_name, mapped_vendor_only_value
 
 
 CDR_IGNORED_SHEETS = {
@@ -240,7 +240,7 @@ def ensure_fixed_cdr_fields(dataset: pd.DataFrame) -> pd.DataFrame:
     operators = dataset[operator].fillna('').astype(str).str.strip()
     vendors = dataset[vendor].fillna('').astype(str).str.strip()
     dataset[vendor_only] = [
-        vendor_only_value(value, prefix)
+        mapped_vendor_only_value(value, prefix)
         for value, prefix in zip(vendors, operators, strict=False)
     ]
     technology_fields = ('Technology', 'RAT', 'RAT_A', 'L2_Call_Mode_A', 'Playing_Technology')

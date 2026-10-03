@@ -252,12 +252,20 @@ def test_network_insights_page_and_analysis(client, tmp_path) -> None:
     response = client.post('/api/network-insights/analysis', json={'datasets': {'data': ids}, 'technology': 'lte', 'group': 'campaign'})
     assert response.status_code == 200, response.text
     payload = response.json()
-    assert payload['comparison'] == {'previous': '2026-Q1', 'latest': '2026-Q2'}
-    assert {row['operator'] for row in payload['overview']} == {'EE', 'VF'}
-    ee = next(row for row in payload['overview'] if row['operator'] == 'EE')
+    assert payload['comparison'] is None
+
+    operator_comparison = client.post('/api/network-insights/analysis', json={
+        'datasets': {'data': ids}, 'technology': 'lte', 'group': 'operator',
+    })
+    assert operator_comparison.status_code == 200, operator_comparison.text
+    assert operator_comparison.json()['comparison'] == {'previous': '2026-Q1', 'latest': '2026-Q2'}
+    assert {row['operator'] for row in payload['overview']} == {'2026-Q1', '2026-Q2'}
+    operator_payload = operator_comparison.json()
+    assert {row['operator'] for row in operator_payload['overview']} == {'EE', 'VF'}
+    ee = next(row for row in operator_payload['overview'] if row['operator'] == 'EE')
     assert ee['deltas']['rsrp_median'] is not None
     assert payload['charts']['rsrp_cdf']['type'] == 'cdf'
-    assert len(payload['charts']['rsrp_cdf']['series']) == 4
+    assert len(payload['charts']['rsrp_cdf']['series']) == 2
     assert payload['maps']['coverage']['type'] == 'map'
     assert payload['options']['cities'] == ['Leeds', 'York']
     assert payload['spectrum']['licensed'] == []
@@ -265,8 +273,8 @@ def test_network_insights_page_and_analysis(client, tmp_path) -> None:
     filtered = client.post('/api/network-insights/analysis', json={
         'datasets': {'data': ids}, 'technology': 'lte', 'group': 'city', 'cities': ['York'], 'map_operator': 'VF',
     }).json()
-    assert {row['operator'] for row in filtered['rf_rows']} == {'VF'}
-    assert filtered['maps']['operator'] == 'VF'
+    assert {row['operator'] for row in filtered['rf_rows']} == {'York'}
+    assert filtered['maps']['operator'] == 'York'
 
     empty = client.post('/api/network-insights/analysis', json={'datasets': {'data': ids}, 'operators': ['Nobody']})
     assert empty.status_code == 400

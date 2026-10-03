@@ -35,7 +35,7 @@ SCORING_CONTEXT_FILTER_COLUMNS = {
     'Region': ('Region', 'g_level_2'),
     'City': ('City', 'g_level_4'),
     'Operator': ('Operator',),
-    'Vendor': ('Vendor',),
+    'Vendor': ('Vendor_Only',),
     'Campaign': ('Campaign',),
 }
 
@@ -922,6 +922,8 @@ def _load_source_frames(
     total = max(1, len(sources))
     for index, source in enumerate(sources, start=1):
         dataset_id = int(source['metadata']['dataset_id'])
+        if active_filters.get('Vendor'):
+            repository.ensure_vendor_only_column(dataset_id)
         columns = repository.list_dataset_row_columns(dataset_id)
         requested = required_columns(str(source['metadata']['kind']), source['levels'])
         if any(column_identity(level) == 'datasettype' for level in source['levels']):
@@ -945,21 +947,7 @@ def _load_source_frames(
                 missing_filter_fields.append(field)
             else:
                 if field == 'Vendor':
-                    raw_vendors = catalogues.get(dataset_id, {}).get('vendors', [])
-                    if not raw_vendors:
-                        raw_vendors = repository.list_distinct_dataset_row_values(dataset_id, resolved_filter_column, limit=None)
-                    operator_column = resolve_column_name(columns, 'Operator')
-                    dataset_operators = catalogues.get(dataset_id, {}).get('operators', [])
-                    if not dataset_operators and operator_column:
-                        dataset_operators = repository.list_distinct_dataset_row_values(dataset_id, operator_column, limit=None)
-                    operators = [*vendor_operators, *dataset_operators]
-                    selected_vendors = {scoring_vendor_name(value, operators).casefold() for value in values}
-                    operator_identities = {str(value).strip().casefold() for value in operators if value}
-                    values = [value for value in raw_vendors
-                              if str(value).strip().casefold() in operator_identities
-                              or scoring_vendor_name(value, operators).casefold() in selected_vendors]
-                    if not values:
-                        missing_filter_fields.append(field)
+                    values = [scoring_vendor_name(value, vendor_operators) for value in values]
                 dataset_filters[resolved_filter_column] = values
         if missing_filter_fields:
             frame = pd.DataFrame()

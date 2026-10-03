@@ -104,14 +104,11 @@ The engine pools raw rows before calculating ratios, averages, medians and P90. 
 
 ### Vendor filtering
 
-The Vendor selector lists **vendor names only**, without operator prefixes. Operators with no assigned vendor are not listed as vendor choices.
+The Vendor selector filters the physical `Vendor_Only` column using cached per-CDR values. Choices appear in this order: real vendors, Mixed Vendor(s), Other Vendor(s), All Vendor(s), then operators without assigned vendors labelled **Operator - All**.
 
-For example, selecting **Ericsson** and **Huawei** includes:
+Selecting **Ericsson** and **Huawei** includes only those vendor identities from the selected operators. To include an operator with no assigned vendor, also select its **Operator - All** choice, or leave the Vendor filter unrestricted. Vendor mapping stores the suffix in `Vendor_Only`; legacy operator-only values without it remain supported.
 
-- Matching Ericsson or Huawei rows from any selected operator.
-- All rows from selected operators that have no assigned vendor.
-
-The **Operator** filter can exclude either group. When Vendor is an aggregation level, operators without a vendor display **All** in that level. Web and PowerPoint use the same vendor labels.
+Legacy saved operator-prefixed selections are normalized to vendor names. The **Operator** filter remains independent. When Vendor is an aggregation level, operators without a vendor still display **All** in that level; web and PowerPoint retain the existing comparison and reference behavior.
 
 ### How the GAP reference is matched
 

@@ -25,7 +25,7 @@ from typing import Literal
 from uuid import uuid4
 
 import pandas as pd
-from src.modules.column_names import column_identity, compact_campaign_value
+from src.modules.column_names import column_identity, compact_campaign_value, vendor_filter_column, vendor_filter_value, vendor_filter_values
 from src.modules.nr_mode import DEFAULT_NR_MODE, dataset_nr_mode, normalize_nr_mode
 from fastapi import BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
@@ -153,7 +153,7 @@ def dataset_matches_nr_mode(dataset, nr_mode) -> bool:
 
 
 FILTER_COLUMNS = {
-    'Market': ('market',), 'Operator': ('operator',), 'Vendor': ('vendor',),
+    'Market': ('market',), 'Operator': ('operator',), 'Vendor': ('Vendor_Only',),
     'Region': ('Region', 'G_Level_2', 'G Level 2'),
     'City': ('City', 'G_Level_4', 'G Level 4'), 'Campaign': ('Campaign', 'campaign'),
     'Session Type': ('session_type',),
@@ -161,10 +161,10 @@ FILTER_COLUMNS = {
     'Call Status': ('Call_Status', 'call_status', 'status'),
 }
 ADAPTATIVE_FILTER_FIELDS = (
-    'Market', 'Region', 'City', 'Campaign', 'Operator', 'Vendor', 'RAT', 'Session Type', 'Call Status',
+    'Market', 'Region', 'City', 'Campaign', 'Operator', 'Vendor_Only', 'RAT', 'Session Type', 'Call Status',
 )
-DASHBOARD_RENDER_CACHE_VERSION = 18
-DASHBOARD_SELECTION_CACHE_VERSION = 13
+DASHBOARD_RENDER_CACHE_VERSION = 21
+DASHBOARD_SELECTION_CACHE_VERSION = 15
 # Pre-cached universes: every CDR plus the latest 1..N CDRs of each type.
 DASHBOARD_WARMUP_LATEST_COUNTS = 4
 # A Dashboard reported open by the browser within this period is pre-cached first.
@@ -174,7 +174,7 @@ DASHBOARD_OPEN_PRIORITY_SECONDS = 30.0
 DASHBOARD_FRAME_CACHE_SNAPSHOTS = max(1, int(os.environ.get('DASHBOARD_ANALYTIC_DASHBOARD_FRAME_CACHE_SNAPSHOTS') or 3))
 DASHBOARD_SELECTION_CACHE_LIMIT = 128
 DASHBOARD_PROFILE_SELECTION_THRESHOLD = 100_000
-DASHBOARD_CHART_MODEL_CACHE_VERSION = 16
+DASHBOARD_CHART_MODEL_CACHE_VERSION = 19
 DASHBOARD_CHART_MODEL_DISK_LIMIT = 500
 DASHBOARD_CHART_RENDER_WORKERS = max(1, min(2, (os.cpu_count() or 2) - 1))
 DASHBOARD_PREVIEW_MANIFEST_VERSION = 8
@@ -198,6 +198,7 @@ def preview_manifest_cache_dir(workspace: str | Path) -> Path:
 
 
 def resolve_filter_column(frame, field):
+    field = vendor_filter_column(field)
     columns = {identity(column): column for column in frame.columns}
     aliases = next((values for label, values in FILTER_COLUMNS.items() if identity(label) == identity(field)), (field,))
     candidates = [columns[identity(alias)] for alias in aliases if identity(alias) in columns]
@@ -209,6 +210,7 @@ def resolve_filter_column(frame, field):
 
 def filter_value_series(frame, field):
     """Resolve geographic aliases per row, skipping empty higher-priority values."""
+    field = vendor_filter_column(field)
     columns = {identity(column): column for column in frame.columns}
     aliases = next((values for label, values in FILTER_COLUMNS.items() if identity(label) == identity(field)), (field,))
     candidates = [columns[identity(alias)] for alias in aliases if identity(alias) in columns]
@@ -234,6 +236,9 @@ def filter_mask(frame, definition, exclude=None):
         field_values = filter_value_series(frame, field)
         if field_values is None:
             return pd.Series(False, index=frame.index)
+        if identity(vendor_filter_column(field)) == 'vendoronly':
+            mappings = frame.attrs.get('operator_mappings', {})
+            values = vendor_filter_values(values, mappings)
         accepted = {str(value).strip().casefold() for value in values}
         mask &= field_values.astype(str).str.strip().str.casefold().isin(accepted)
     concrete_from = definition.date_from if isinstance(definition.date_from, date) and not ignore_event_time_filtering() else None
@@ -432,11 +437,12 @@ def install_dashboard_routes(core):
             # The Campaigns line already reads "Campaign: …" or "Campaigns: …".
             if selection_labels.get('Campaign'):
                 lines.append(selection_labels['Campaign'])
-            for field in ('Operator', 'Vendor', 'Region', 'City'):
+            for field in ('Operator', 'Vendor_Only', 'Region', 'City'):
                 if selection_labels.get(field):
-                    lines.append(f'{field}: {selection_labels[field]}')
+                    label = 'Vendor' if identity(field) == 'vendoronly' else field
+                    lines.append(f'{label}: {selection_labels[field]}')
         for field, values in filters.items():
-            if selection_labels is not None and identity(field) in {'campaign', 'operator', 'vendor', 'region', 'city'}:
+            if selection_labels is not None and identity(field) in {'campaign', 'operator', 'vendor', 'vendoronly', 'region', 'city'}:
                 continue
             if isinstance(values, (list, tuple, set)):
                 selected = [str(value).strip() for value in values if str(value).strip()]
@@ -445,7 +451,7 @@ def install_dashboard_routes(core):
             else:
                 selected = []
             if selected:
-                label = re.sub(r'[_-]+', ' ', str(field)).strip().title() or 'Filter'
+                label = 'Vendor' if identity(vendor_filter_column(field)) == 'vendoronly' else re.sub(r'[_-]+', ' ', str(field)).strip().title() or 'Filter'
                 lines.append(f'{label}: {", ".join(selected)}')
         return lines
 
@@ -581,7 +587,7 @@ def install_dashboard_routes(core):
     def dashboard_ppt_selection_values(
         filters: dict, field: str, requested: list[str], available: list[str],
     ) -> list[str]:
-        configured = next((values for key, values in filters.items() if identity(key) == identity(field)), None)
+        configured = next((values for key, values in filters.items() if identity(vendor_filter_column(key)) == identity(vendor_filter_column(field))), None)
         values = configured if configured is not None else requested or available
         if isinstance(values, (list, tuple, set)):
             values = list(dict.fromkeys(str(value).strip() for value in values if str(value).strip()))
@@ -596,6 +602,7 @@ def install_dashboard_routes(core):
         # of the Dashboard's own filter options (which a saved "select every
         # value" filter comes from), ignoring case and surrounding spaces.
         selected = {str(value).strip().casefold() for value in values if str(value).strip()}
+        field = 'Vendor' if identity(vendor_filter_column(field)) == 'vendoronly' else field
         all_label = {'Operator': 'All Operators', 'Vendor': 'All Vendors', 'Region': 'All Regions', 'City': 'All Cities'}[field]
         # No specific Operator or Vendor means the export is not restricted
         # by them. Region and City stay blank so covers and file names only
@@ -1141,21 +1148,21 @@ def install_dashboard_routes(core):
             elif field_key == identity('Region'):
                 region_values = list(values or []) + region_values
             elif field_key not in retired_filter_keys:
-                migrated_filters[field] = values
+                migrated_filters[vendor_filter_column(field)] = values
         if region_values:
             migrated_filters['Region'] = list(dict.fromkeys(region_values))
         normalized['filters'] = migrated_filters
         custom_fields = normalized.get('custom_fields')
         normalized['custom_fields'] = [
-            field for field in custom_fields or []
+            vendor_filter_column(field) for field in custom_fields or []
             if identity(field) not in retired_filter_keys and identity(field) != identity('Region')
         ]
         default_keys = {identity(field) for field in ADAPTATIVE_FILTER_FIELDS}
         hidden_filters = normalized.get('hidden_filters')
         normalized['hidden_filters'] = [
-            field for field in hidden_filters or []
+            vendor_filter_column(field) for field in hidden_filters or []
             if identity(field) not in retired_filter_keys
-            and (not reset_defaults or identity(field) not in default_keys)
+            and (not reset_defaults or identity(vendor_filter_column(field)) not in default_keys)
         ]
         return normalized
 
@@ -1186,7 +1193,7 @@ def install_dashboard_routes(core):
 
     def runtime_dashboard_definition(definition, task_repository):
         """Add a fresh default universe to a persisted Dashboard definition."""
-        effective = dict(definition)
+        effective = normalize_dashboard_filters(definition)
         effective.setdefault('scope', 'single')
         if 'datasets' not in effective:
             # The default universe uses the latest CDRs of the Dashboard's own
@@ -1417,7 +1424,7 @@ def install_dashboard_routes(core):
         explicit_selections = {
             field: list(dict.fromkeys(str(value).strip() for value in selected if str(value).strip()))
             for field, selected in (
-                ('Operator', selected_operators), ('Vendor', selected_vendors),
+                ('Operator', selected_operators), ('Vendor_Only', selected_vendors),
                 ('Region', selected_regions), ('City', selected_cities),
             ) if selected is not None
         }
@@ -1513,7 +1520,7 @@ def install_dashboard_routes(core):
                 raw_filters = dict(raw_definition.get('filters') or {})
                 for field, selected in explicit_selections.items():
                     for existing in list(raw_filters):
-                        if identity(existing) == identity(field):
+                        if identity(vendor_filter_column(existing)) == identity(vendor_filter_column(field)):
                             del raw_filters[existing]
                     if selected:
                         raw_filters[field] = selected
@@ -1539,10 +1546,10 @@ def install_dashboard_routes(core):
                 ['Operator', 'Region', 'City'], task_repository,
             )
             available = {
-                'Operator': profile_options['Operator'], 'Vendor': catalogue['vendors'],
+                'Operator': profile_options['Operator'], 'Vendor_Only': catalogue['vendors'],
                 'Region': catalogue['regions'], 'City': catalogue['cities'],
             }
-            requested = {field: explicit_selections.get(field, []) for field in ('Operator', 'Vendor', 'Region', 'City')}
+            requested = {field: explicit_selections.get(field, []) for field in ('Operator', 'Vendor_Only', 'Region', 'City')}
             filters = raw_definition.get('filters') or {}
             selections = {
                 field: dashboard_ppt_selection_values(filters, field, requested[field], values)
@@ -1871,7 +1878,8 @@ def install_dashboard_routes(core):
         snapshot, entry, _ = snapshot_chart(
             token, entry_index, user, include_frame=False, expected_workspace=workspace,
         )
-        selected_column_filters = parse_chart_column_filters(column_filters)
+        filter_column = vendor_filter_column(filter_column) if filter_column else ''
+        selected_column_filters = {vendor_filter_column(key): values for key, values in parse_chart_column_filters(column_filters).items()}
         if not download:
             projected_page = reporting_chart_data_page(
                 snapshot, entry, page, selected_column_filters, include_filter_values, filter_column,
@@ -1997,7 +2005,7 @@ def install_dashboard_routes(core):
             str(row['dashboard_id']), user, reuse_job_id=job_id,
             export_definition=retry_definition,
             selected_operators=saved_selections.get('Operator') if isinstance(saved_selections.get('Operator'), list) else None,
-            selected_vendors=saved_selections.get('Vendor') if isinstance(saved_selections.get('Vendor'), list) else None,
+            selected_vendors=saved_selections.get('Vendor_Only', saved_selections.get('Vendor')),
             selected_regions=saved_selections.get('Region') if isinstance(saved_selections.get('Region'), list) else selected_regions,
             selected_cities=saved_selections.get('City') if isinstance(saved_selections.get('City'), list) else None,
         )
@@ -2197,11 +2205,14 @@ def install_dashboard_routes(core):
 
     def resolve_sql_column(columns, field):
         lookup = {identity(column): column for column in columns}
+        if identity(field) == 'vendor' and 'vendor' in lookup:
+            return lookup['vendor']
         aliases = next((values for label, values in FILTER_COLUMNS.items() if identity(label) == identity(field)), (field,))
         return next((lookup[identity(alias)] for alias in aliases if identity(alias) in lookup), None)
 
     def filter_sql_value_expression(task_repository, columns, field):
         """Return a text value expression with row-level fallback aliases."""
+        field = vendor_filter_column(field)
         lookup = {identity(column): column for column in columns}
         aliases = next((values for label, values in FILTER_COLUMNS.items() if identity(label) == identity(field)), (field,))
         resolved = list(dict.fromkeys(
@@ -2219,6 +2230,7 @@ def install_dashboard_routes(core):
 
     def filter_sql_normalized_expression(task_repository, columns, field):
         """Return an indexed normalized expression when one physical column owns the filter."""
+        field = vendor_filter_column(field)
         lookup = {identity(column): column for column in columns}
         aliases = next((values for label, values in FILTER_COLUMNS.items() if identity(label) == identity(field)), (field,))
         resolved = list(dict.fromkeys(
@@ -2237,6 +2249,10 @@ def install_dashboard_routes(core):
         clauses, params = [], []
         excluded = identity(exclude) if exclude else ''
         for field_name, values in definition.filters.items():
+            if identity(field_name) in {'vendor', 'vendoronly'}:
+                groups = task_repository.list_operator_mapping_groups()
+                operators = [item for group in groups for item in [group.get('canonical'), *(group.get('aliases') or [])] if item]
+                values = vendor_filter_values(values, task_repository.list_operator_mappings())
             if identity(field_name) == excluded:
                 continue
             normalized_expression = filter_sql_normalized_expression(
@@ -2547,6 +2563,9 @@ def install_dashboard_routes(core):
         """Load large-dashboard facet values from selected CDR profiles."""
         options = {field_name: set() for field_name in fields}
         incomplete_fields = set()
+        dataset_ids = [int(dataset['id']) for selected in selected_by_kind.values() for dataset in selected]
+        vendor_catalogues = task_repository.cdr_catalogues_by_dataset(dataset_ids)
+        missing_vendor_catalogues = set(task_repository.missing_cdr_vendor_only_ids(dataset_ids))
         for selected in selected_by_kind.values():
             for dataset in selected:
                 try:
@@ -2555,6 +2574,9 @@ def install_dashboard_routes(core):
                     stored = {}
                 lookup = {identity(column): values for column, values in stored.items()} if isinstance(stored, dict) else {}
                 for field_name in fields:
+                    if identity(field_name) in {identity('Vendor'), identity('Vendor_Only')} and int(dataset['id']) not in missing_vendor_catalogues:
+                        options[field_name].update(vendor_catalogues.get(int(dataset['id']), {}).get('vendors_only', []))
+                        continue
                     aliases = next((values for label, values in FILTER_COLUMNS.items() if identity(label) == identity(field_name)), (field_name,))
                     resolved = next((
                         column for alias in aliases
@@ -2563,7 +2585,7 @@ def install_dashboard_routes(core):
                     if resolved is None:
                         continue
                     lookup_keys = list(dict.fromkeys([
-                        identity(resolved), identity(field_name),
+                        identity(resolved), identity(vendor_filter_column(field_name)),
                         *(identity(alias) for alias in aliases),
                     ]))
                     values = next((lookup[key] for key in lookup_keys if isinstance(lookup.get(key), list)), None)
@@ -2778,6 +2800,8 @@ def install_dashboard_routes(core):
             return {'vendors': [], 'regions': [], 'cities': []}
         core.backfill_cdr_catalogues(selected_ids, task_repository)
         catalogue = dict(task_repository.cdr_catalogue_values(selected_ids))
+        cached = task_repository.cdr_catalogues_by_dataset(selected_ids)
+        catalogue['vendors'] = sorted({value for item in cached.values() for value in (item.get('vendors_only') or [])}, key=str.casefold)
         missing = [(field, key) for field, key in (('Region', 'regions'), ('City', 'cities')) if not catalogue.get(key)]
         if missing:
             fallback = profile_filter_options(
@@ -3616,7 +3640,7 @@ def install_dashboard_routes(core):
                 for condition in rule.conditions:
                     explicit.update(split_calculated_dimension_aliases(condition.column))
         selected = list(reported)
-        selected.extend(('dataset_id', 'source_row_id'))
+        selected.extend(('dataset_id', 'source_row_id', 'Vendor_Only'))
         # RF companions use the same source selection. A stable projection of
         # all radio fields lets RSRP/SINR and LTE/NR share the raw-frame cache,
         # rather than rereading millions of observations for each measure.
@@ -3650,6 +3674,9 @@ def install_dashboard_routes(core):
                 complete = False
                 continue
             values = [str(value) for value in condition.values]
+            if normalized == 'vendoronly':
+                mappings = task_repository.list_operator_mappings()
+                values = vendor_filter_values(values, mappings)
             if normalized == 'operator':
                 workspace_mappings = task_repository.list_operator_mappings()
                 canonical_values = {
@@ -3788,9 +3815,12 @@ def install_dashboard_routes(core):
         result = frame
         lookup = {identity(column): column for column in frame.columns}
         for requested, values in column_filters.items():
-            column = lookup.get(identity(requested))
+            column = lookup.get(identity(vendor_filter_column(requested)))
             if column is None or not values:
                 return result.iloc[0:0]
+            if identity(vendor_filter_column(requested)) == 'vendoronly':
+                mappings = frame.attrs.get('operator_mappings', {})
+                values = vendor_filter_values(values, mappings)
             accepted = {str(value).strip().casefold() for value in values}
             result = result.loc[
                 result[column].map(
@@ -4888,7 +4918,8 @@ def install_dashboard_routes(core):
         user=Depends(dashboard_user),
     ):
         snapshot, entry, _ = snapshot_chart(token, index, user, include_frame=False)
-        selected_column_filters = parse_chart_column_filters(column_filters)
+        filter_column = vendor_filter_column(filter_column) if filter_column else ''
+        selected_column_filters = {vendor_filter_column(key): values for key, values in parse_chart_column_filters(column_filters).items()}
         if not download:
             projected_page = reporting_chart_data_page(
                 snapshot, entry, page, selected_column_filters, include_filter_values, filter_column,

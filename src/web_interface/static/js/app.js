@@ -1,3 +1,15 @@
+function normalizeVendorFilterValue(value) {
+  let configured = {};
+  try { configured = JSON.parse(document.getElementById('vendor-filter-operators')?.textContent || '{}'); } catch {}
+  const text = String(value ?? '').replace(/\s+- All(?: Vendors)?$/i, ' - All').trim();
+  const operators = [...new Set([...Object.keys(configured.operators || {}), ...Object.values(configured.operators || {}), ...(configured.observed_operators || [])])].sort((a, b) => b.length - a.length);
+  const bare = text.replace(/\s+- All$/i, '');
+  if (operators.some(operator => String(operator).toLocaleLowerCase() === bare.toLocaleLowerCase())) return text;
+  const prefix = operators.find(operator => text.toLocaleLowerCase().startsWith(String(operator).toLocaleLowerCase() + '_'));
+  return prefix ? text.slice(prefix.length + 1) : text;
+}
+window.normalizeVendorFilterValue = normalizeVendorFilterValue;
+
 function vendorOnlyFilterChoices(field, values, additionalOperators = []) {
   const identity = value => String(value ?? '').toLocaleLowerCase().replace(/[^a-z0-9]/g, '');
   let configured = {};
@@ -8,12 +20,13 @@ function vendorOnlyFilterChoices(field, values, additionalOperators = []) {
     .map(value => operatorAliases.get(identity(value)) || identity(value)));
   for (const canonical of operatorAliases.values()) operators.add(canonical);
   const entries = values.map(value => ({value, label: String(value ?? ''), operator: false}));
-  if (identity(field) !== 'vendoronly') return entries;
+  if (!['vendor', 'vendoronly', 'vendorv3', 'operatorvendor', 'opvendor'].includes(identity(field))) return entries;
   for (const entry of entries) {
-    const key = identity(entry.value);
+    entry.label = entry.label.replace(/\s+- All(?: Vendors)?$/i, '');
+    const key = identity(entry.label);
     const operatorKey = operatorAliases.get(key) || key;
     entry.operator = Boolean(entry.label) && !vendorAliases.has(key) && operators.has(operatorKey);
-    if (entry.operator) entry.label += ' - All Vendors';
+    if (entry.operator) entry.label += ' - All';
   }
   const rank = entry => {
     if (entry.operator) return 4;
@@ -2628,12 +2641,13 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     field.dataset.searchableSelect = '';
     field.setAttribute('aria-label', 'Filter field');
     field.append(new Option('Choose field', ''));
-    fields.forEach((value) => field.add(new Option(value, value)));
+    const vendorField = value => ['vendor', 'vendorv3', 'operatorvendor', 'opvendor'].includes(String(value).toLowerCase().replace(/[^a-z0-9]/g, '')) ? 'Vendor_Only' : value;
+    [...new Set(fields.map(vendorField))].forEach(value => field.add(new Option(value, value)));
     const normalizedOption = (select, requested) => {
       const normalize = (value) => String(value || '').toLocaleLowerCase().replace(/[^a-z0-9]+/g, '');
       return Array.from(select.options).find((option) => normalize(option.value) === normalize(requested))?.value || requested || '';
     };
-    field.value = normalizedOption(field, condition.field);
+    field.value = normalizedOption(field, vendorField(condition.field));
     const operator = document.createElement('select');
     operator.dataset.filterOperator = '';
     operator.dataset.searchableSelect = '';
@@ -4764,6 +4778,14 @@ function setupSearchableSingleSelects() {
   document.querySelectorAll('select[data-searchable-select]:not([multiple])').forEach((select) => {
     if (select.dataset.searchableReady === '1') return;
     select.dataset.searchableReady = '1';
+    if (select.dataset.multiselectVendorOnly === 'true') {
+      const current = select.value;
+      const options = new Map([...select.options].map(option => [option.value, option]));
+      select.replaceChildren(...vendorOnlyFilterChoices('Vendor_Only', [...options.keys()]).map(({value, label}) => {
+        const option = options.get(value); option.textContent = value ? label : 'All vendors'; return option;
+      }));
+      select.value = current;
+    }
     select.classList.add('searchable-select-native');
 
     const shell = document.createElement('div');

@@ -52,6 +52,7 @@ def _add_ready_cdr(
         'Region': ['North', 'North'],
         'City': ['Leeds', 'Leeds'],
         'Vendor': ['Nokia', 'Nokia'],
+        'Vendor_Only': ['Nokia', 'Nokia'],
         'Dataset_Kind': [kind, kind],
         'Environment': ['City', 'City'],
         'Campaign': [campaign, campaign],
@@ -64,7 +65,7 @@ def _add_ready_cdr(
         row_count=len(rows), column_count=len(rows.columns), processed_at=local_now_iso(),
     )
     repository.replace_cdr_catalogue(
-        dataset_id, vendors=['Nokia'], regions=['North'], cities=['Leeds'], campaigns=[campaign],
+        dataset_id, vendors=['Nokia'], vendors_only=['Nokia'], regions=['North'], cities=['Leeds'], campaigns=[campaign],
     )
     return dataset_id
 

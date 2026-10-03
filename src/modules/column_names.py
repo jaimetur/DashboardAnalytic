@@ -95,3 +95,50 @@ def resolve_column_name(columns: Iterable[object], requested: object) -> str | N
         return case_match
     requested_identity = column_identity(requested_text)
     return next((column for column in available if column_identity(column) == requested_identity), None)
+
+
+def vendor_filter_column(column: object) -> str:
+    """Route legacy vendor filter names to the operator-independent field."""
+    return 'Vendor_Only' if column_identity(column) in {'vendor', 'vendorv3', 'operatorvendor', 'opvendor'} else str(column)
+
+
+def vendor_filter_value(value: object, operators=()) -> str:
+    """Normalize legacy composite filter values using configured operator aliases."""
+    text = re.sub(r'\s+- All(?: Vendors)?$', '', str(value or '').strip(), flags=re.IGNORECASE)
+    names = sorted({str(item).strip() for item in operators if item}, key=len, reverse=True)
+    if text.casefold() in {name.casefold() for name in names}:
+        return text
+    for operator in names:
+        if text.casefold().startswith(operator.casefold() + '_'):
+            return text[len(operator) + 1:]
+    for operator in names:
+        stripped = vendor_only_value(text, operator)
+        if stripped != text:
+            return stripped
+    return text
+
+
+def mapped_vendor_only_value(vendor: object, operator: object = '') -> str:
+    """Persist the operator-only identity with an explicit All suffix."""
+    operator_text = '' if operator is None else str(operator).strip()
+    text = '' if vendor is None else str(vendor).strip()
+    if re.search(r'\s+- All(?: Vendors)?$', text, flags=re.IGNORECASE):
+        return re.sub(r'\s+- All(?: Vendors)?$', ' - All', text, flags=re.IGNORECASE)
+    if operator_text and (not text or column_identity(text) == column_identity(operator_text)):
+        return f'{operator_text} - All'
+    return vendor_only_value(text, operator_text)
+
+
+def vendor_filter_values(values, operators=()) -> list[str]:
+    """Match current and legacy operator-only values during cache transitions."""
+    mappings = {str(alias).strip().casefold(): str(canonical).strip() for alias, canonical in operators.items()} if isinstance(operators, dict) else {}
+    operators = [*mappings.keys(), *mappings.values()] if mappings else list(operators)
+    names = {str(operator).strip().casefold() for operator in operators if operator}
+    result = []
+    for value in values:
+        text = vendor_filter_value(value, operators)
+        result.append(text)
+        if text.casefold() in names or re.search(r'\s+- All(?: Vendors)?$', str(value), flags=re.IGNORECASE):
+            canonical = mappings.get(text.casefold(), text)
+            result.extend((canonical, f'{canonical} - All', f'{canonical} - All Vendors', f'{text} - All', f'{text} - All Vendors'))
+    return list(dict.fromkeys(result))

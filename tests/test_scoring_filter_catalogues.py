@@ -38,6 +38,7 @@ def test_scoring_vendor_catalogue_uses_pure_labels_without_scanning_rows(scoring
         repository.replace_cdr_catalogue(
             dataset_id,
             vendors=['3_Ericsson', 'EE_Ericsson', 'VF_UK_Huawei', 'Mixed_Vendor', 'EE', 'O2', 'VF_SA'],
+            vendors_only=['Ericsson', 'Huawei', 'Mixed_Vendor', 'EE - All', 'O2 - All', 'VF_SA - All'],
             regions=['North'], cities=['Leeds'], campaigns=['2026-Q2'],
             operators=['3', 'EE', 'O2', 'VF_UK', 'VF_SA'],
         )
@@ -63,7 +64,7 @@ def test_scoring_vendor_catalogue_uses_pure_labels_without_scanning_rows(scoring
         if item['file_name'] == 'UK_Q2_2026_NSA_Data.csv'
     )
     assert catalogue['operators'] == ['3', 'EE', 'O2', 'VF_SA', 'VF_UK']
-    assert catalogue['vendors'] == ['Ericsson', 'Huawei', 'Mixed_Vendor']
+    assert catalogue['vendors'] == ['EE - All', 'Ericsson', 'Huawei', 'Mixed_Vendor', 'O2 - All', 'VF_SA - All']
 
 
 def test_operator_catalogue_replacement_preserves_unspecified_values_and_database_copy(scoring_api, tmp_path):
@@ -72,7 +73,9 @@ def test_operator_catalogue_replacement_preserves_unspecified_values_and_databas
     app_module.cache_cdr_catalogue(
         dataset_id, repository.load_dataset_rows(dataset_id, ['Operator', 'City', 'Campaign'], {}), repository,
     )
-    repository.replace_cdr_catalogue(dataset_id, vendors=['Ericsson'], regions=['West'], cities=['York'])
+    repository.replace_cdr_catalogue(
+        dataset_id, vendors=['Ericsson'], vendors_only=['Ericsson'], regions=['West'], cities=['York'],
+    )
     catalogue = repository.cdr_catalogues_by_dataset([dataset_id])[dataset_id]
     assert catalogue['operators'] == ['EE', 'O2']
     assert catalogue['campaigns'] == ['2026-Q2']
@@ -95,6 +98,7 @@ def test_scoring_export_labels_collapse_full_catalogue_filters_and_preserve_inco
     repository = scoring_api['repository']
     repository.replace_cdr_catalogue(
         scoring_api['dataset_id'], vendors=['Nokia'], regions=['North'], cities=['Leeds'],
+        vendors_only=['Nokia'],
         campaigns=['2026-Q2'], operators=['O2'],
     )
     complete = {'dataset_ids': [scoring_api['dataset_id']], 'context_filters': {
@@ -140,7 +144,7 @@ def test_scoring_api_filters_before_calculation_and_ppt_preserves_scope(scoring_
     job = response.json()['job']
     assert job['context_filters']['City'] == ['Leeds']
     completed = scoring_jobs.run_scoring_job(scoring_api['repository'], job['id'])
-    assert completed['status'] == 'completed', completed.get('last_error')
+    assert completed['status'] == 'completed', completed.get('error')
     frames = scoring_api['calls'][0]['frames']
     source_frames = frames.values() if isinstance(frames, dict) else [item[-1] for item in frames]
     assert all(set(frame['Operator']) == {'O2'} for frame in source_frames)
@@ -162,19 +166,19 @@ def test_scoring_ppt_export_labels_full_selected_catalogues_as_all(scoring_api):
     repository = scoring_api['repository']
     selected_ids = scoring_api['complete_dataset_ids']
     repository.replace_cdr_catalogue(
-        selected_ids[0], vendors=['Nokia'], regions=['North'], cities=['Leeds'],
+        selected_ids[0], vendors=['Nokia'], vendors_only=['Nokia'], regions=['North'], cities=['Leeds'],
         campaigns=['2026-Q2'], operators=['EE', 'O2'],
     )
     for dataset_id in selected_ids[1:]:
         repository.replace_cdr_catalogue(
-            dataset_id, vendors=['Nokia'], regions=['North'], cities=['Leeds'],
+            dataset_id, vendors=['Nokia'], vendors_only=['Nokia'], regions=['North'], cities=['Leeds'],
             campaigns=['2026-Q2'], operators=['EE', 'O2'],
         )
     unrelated_id = scoring_api['add_ready_cdr'](
         name='Other_Q3_2026_NSA_Data.csv', campaign='2026-Q3',
     )
     repository.replace_cdr_catalogue(
-        unrelated_id, vendors=['Huawei'], regions=['South'], cities=['London'],
+        unrelated_id, vendors=['Huawei'], vendors_only=['Huawei'], regions=['South'], cities=['London'],
         campaigns=['2026-Q3'], operators=['Three UK'],
     )
     selected_catalogues = repository.cdr_catalogues_by_dataset(selected_ids)
@@ -183,7 +187,7 @@ def test_scoring_ppt_export_labels_full_selected_catalogues_as_all(scoring_api):
                        for value in catalogue[catalogue_field]}, key=str.casefold)
         for field, catalogue_field in {
             'Region': 'regions', 'City': 'cities', 'Operator': 'operators',
-            'Vendor': 'vendors', 'Campaign': 'campaigns',
+            'Vendor': 'vendors_only', 'Campaign': 'campaigns',
         }.items()
     }
     response = scoring_api['client'].post('/api/scoring/jobs', json={

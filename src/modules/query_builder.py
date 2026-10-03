@@ -11,6 +11,7 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any, Callable
 
+from src.modules.column_names import column_identity, vendor_filter_column
 
 MAX_PREVIEW_ROWS = 50
 MAX_FILTER_VALUES = 500
@@ -103,6 +104,15 @@ def validate_query(database_path: Path, datasets: list[dict[str, Any]], query: s
         connection.close()
 
 
+def _vendor_filter_index(columns: list[str], index: int) -> int:
+    if vendor_filter_column(columns[index]) != 'Vendor_Only':
+        return index
+    resolved = next((i for i, column in enumerate(columns) if column_identity(column) == 'vendoronly'), None)
+    if resolved is None:
+        raise ValueError('Include Vendor_Only in the query results to filter vendors.')
+    return resolved
+
+
 def _normalize_column_filters(
     column_filters: Any,
     columns: list[str],
@@ -113,6 +123,8 @@ def _normalize_column_filters(
         return []
     if not isinstance(column_filters, list):
         raise ValueError('Column filters must be a list.')
+    if exclude_index is not None:
+        exclude_index = _vendor_filter_index(columns, exclude_index)
     normalized: list[tuple[int, list[Any]]] = []
     seen: set[int] = set()
     for item in column_filters:
@@ -121,6 +133,7 @@ def _normalize_column_filters(
         index = item.get('index')
         if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(columns):
             raise ValueError('A column filter refers to an invalid result column.')
+        index = _vendor_filter_index(columns, index)
         if index in seen:
             raise ValueError('A result column can only have one filter.')
         seen.add(index)
@@ -284,7 +297,7 @@ def query_column_values(
             raise ValueError('Select a valid result column.')
         filters = _normalize_column_filters(column_filters, columns, exclude_index=column_index)
         result_query, parameters = _filtered_query(query, columns, filters) if filters else (query, [])
-        selected_column = _quote(columns[column_index])
+        selected_column = _quote(columns[_vendor_filter_index(columns, column_index)])
         search_clause = ''
         if search:
             search_clause = f' WHERE instr(casefold(CAST(_query_builder_filter_rows.{selected_column} AS TEXT)), casefold(?)) > 0'

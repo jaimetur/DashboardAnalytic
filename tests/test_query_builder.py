@@ -186,3 +186,28 @@ def test_query_builder_filter_values_ignores_own_filter_and_supports_search(clie
     })
     assert empty_filter.status_code == 200
     assert empty_filter.json() == {'values': [], 'truncated': False}
+
+
+def test_vendor_result_filters_use_vendor_only_and_preserve_exported_columns(tmp_path: Path) -> None:
+    from src.modules.query_builder import execute_query, iter_query_csv, query_column_values
+
+    database_path = tmp_path / 'query-builder-vendors.sqlite'
+    with sqlite3.connect(database_path) as connection:
+        connection.execute('CREATE TABLE dataset_rows_1 (Vendor TEXT, Vendor_Only TEXT)')
+        connection.executemany('INSERT INTO dataset_rows_1 VALUES (?, ?)', [
+            ('EE_Ericsson', 'Ericsson'), ('Vodafone_Huawei', 'Huawei'), ('O2', 'O2 - All'),
+        ])
+    datasets = [{'id': 1, 'name': 'data.csv', 'kind': 'data'}]
+    query = 'SELECT Vendor, Vendor_Only FROM selected_data ORDER BY source_row_id'
+    values, truncated = query_column_values(database_path, datasets, query, 0)
+    assert values == ['Ericsson', 'Huawei', 'O2 - All']
+    assert truncated is False
+    filters = [{'index': 0, 'values': ['Ericsson']}]
+    columns, rows, *_ = execute_query(database_path, datasets, query, column_filters=filters)
+    assert columns == ['Vendor', 'Vendor_Only']
+    assert rows == [('EE_Ericsson', 'Ericsson')]
+    assert ''.join(iter_query_csv(database_path, datasets, query, column_filters=filters)) == (
+        'Vendor,Vendor_Only\r\nEE_Ericsson,Ericsson\r\n'
+    )
+    with pytest.raises(ValueError, match='Include Vendor_Only'):
+        query_column_values(database_path, datasets, 'SELECT Vendor FROM selected_data', 0)

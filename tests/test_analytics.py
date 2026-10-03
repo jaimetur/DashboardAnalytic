@@ -241,6 +241,18 @@ def test_operator_mapping_updates_derived_subscriber_but_preserves_source_subscr
     assert mapped_explicit['Subscriber'].tolist() == ['Customer A']
 
 
+def test_normalised_operator_without_vendor_uses_operator_all_identity() -> None:
+    normalized = _normalise_dataset(
+        pd.DataFrame({
+            'Operator': ['O2', 'Vodafone UK'],
+            'Vendor': ['O2', 'Vodafone UK_Ericsson'],
+        }),
+        Path('data.csv'),
+    )
+
+    assert normalized['Vendor_Only'].tolist() == ['O2 - All', 'Ericsson']
+
+
 def test_build_analysis_returns_voice_specific_kpis_and_aggregation() -> None:
     df = pd.DataFrame({
         "dataset_kind": ["voice", "voice", "voice"],

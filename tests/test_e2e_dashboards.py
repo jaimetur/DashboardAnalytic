@@ -4,7 +4,7 @@ import shutil
 import subprocess
 import time
 import zipfile
-from io import BytesIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from threading import Event, Thread
 
@@ -573,9 +573,9 @@ def test_vendor_comparison_prompt_uses_confirm_and_secondary_choices():
     dashboard_script = (root / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
     app_script = (root / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
 
-    assert "confirmLabel: 'Operator – Vendor', secondaryLabel: 'Vendor only'" in dashboard_script
+    assert "confirmLabel: 'Vendor Only (All Operators Combined)', secondaryLabel: 'Operator - Vendor'" in dashboard_script
     assert "if (choice !== 'confirm' && choice !== 'secondary') return;" in dashboard_script
-    assert "exportDefinition.vendor_comparison = choice === 'secondary' ? 'vendor_only' : 'operator_vendor';" in dashboard_script
+    assert "exportDefinition.vendor_comparison = choice === 'secondary' ? 'operator_vendor' : 'vendor_only';" in dashboard_script
     assert "const handleAccept = () => close(hasAlternatives ? 'confirm' : true);" in app_script
     assert "const handleSecondary = () => close('secondary');" in app_script
 
@@ -649,7 +649,7 @@ def test_dashboard_library_geography_options_are_loaded_in_one_request(client):
     assert response.status_code == 200, response.text
     assert response.json() == {
         'campaigns': [], 'campaigns_pending': False,
-        'operators': ['A', 'B'], 'vendors': [], 'regions': [], 'cities': ['Leeds', 'London'],
+        'operators': ['A', 'B'], 'vendors': ['A - All', 'B - All'], 'regions': [], 'cities': ['Leeds', 'London'],
     }
 
 
@@ -939,9 +939,11 @@ def test_dashboard_ppt_dialog_selections_override_saved_dashboard_filters(client
     assert output_file.endswith(' - Operator Comparison - South.pptx')
     # The dialog selections travel with the job and override the saved filters.
     assert submitted[0][6] == {
-        'Operator': ['B'], 'Vendor': ['Vendor B'], 'Region': ['South'], 'City': ['Leeds'],
+        'Operator': ['B'], 'Vendor_Only': ['Vendor B'], 'Region': ['South'], 'City': ['Leeds'],
     }
-    assert client.get('/api/e2e-dashboards').json()[dashboard_id]['filters'] == payload['filters']
+    expected_saved_filters = {**payload['filters']}
+    expected_saved_filters['Vendor_Only'] = expected_saved_filters.pop('Vendor')
+    assert client.get('/api/e2e-dashboards').json()[dashboard_id]['filters'] == expected_saved_filters
 
 
 def test_dashboard_ppt_all_labels_only_consider_the_selected_cdrs(client):
@@ -1819,7 +1821,7 @@ def test_dashboards_lifecycle_and_layout(client):
     selection_key_source = dashboard_module[dashboard_module.index('def persistent_selection_key'):dashboard_module.index('def selected_date_bounds')]
     assert "'scope': definition.scope," not in selection_key_source
     assert "'schema': DASHBOARD_SELECTION_CACHE_VERSION," in selection_key_source
-    assert 'DASHBOARD_SELECTION_CACHE_VERSION = 13' in dashboard_module
+    assert 'DASHBOARD_SELECTION_CACHE_VERSION = 15' in dashboard_module
     assert "kind: sorted([" in selection_key_source
     assert "kind: sorted(set(dataset_ids))" in selection_key_source
     assert "field: sorted(set(values))" in selection_key_source
@@ -1869,11 +1871,11 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "function resetAutomaticDatesForDatasetChange()" in dashboard_script
     assert "definition[key] = automaticValue;" in dashboard_script
     assert "input.value = dateInputDisplayValue(key, automaticValue);" in dashboard_script
-    assert "const latestDatasetsForScope = (scope, nrMode = 'NSA') =>" in dashboard_script
-    assert ".slice(0, scope === 'multivendor' ? 1 : 2)" in dashboard_script
+    assert "const latestDatasetsForScope = (scope, nrMode = 'NSA', vendorComparison = 'operator_vendor') =>" in dashboard_script
+    assert ".slice(0, scope === 'multivendor' && vendorComparison === 'operator_vendor' ? 1 : 2)" in dashboard_script
     assert "datasetRecency(right) - datasetRecency(left)" in dashboard_script
     assert "if (selectedScope !== definition.scope)" in dashboard_script
-    assert "definition.datasets = latestDatasetsForScope(selectedScope, dashboardNrMode(definition));" in dashboard_script
+    assert "definition.datasets = latestDatasetsForScope(selectedScope, dashboardNrMode(definition), definition.vendor_comparison);" in dashboard_script
     assert "chooseScopeDatasets" not in dashboard_script
     assert 'async function restorePrepared(id) {' in dashboard_script
     assert 'const preparedPayloads = new Map();' in dashboard_script
@@ -2044,7 +2046,7 @@ def test_dashboards_lifecycle_and_layout(client):
     result = client.post('/api/e2e-dashboards/prepare', json=payload)
     assert result.status_code == 200, result.text
     preview = result.json()
-    assert preview['filter_fields'] == ['Market', 'Region', 'City', 'Campaign', 'Operator', 'Vendor', 'RAT', 'Session Type', 'Call Status']
+    assert preview['filter_fields'] == ['Market', 'Region', 'City', 'Campaign', 'Operator', 'Vendor_Only', 'RAT', 'Session Type', 'Call Status']
     assert 'Technology' not in preview['options']
     assert preview['options']['Operator'] == ['A', 'B']
     assert preview['options']['City'] == ['Leeds', 'London']
@@ -3179,10 +3181,17 @@ def test_dashboard_names_are_unique_per_nr_mode(client):
 
 
 def test_report_template_changes_record_the_last_editor(client):
+    import csv
     from src.modules.cdr_reporting import CATALOG_HEADERS
 
     client.post('/login', data={'username': 'super', 'password': 'super123'})
-    content = (','.join(CATALOG_HEADERS) + '\n1,T,,Title Page,,,,Title Slide,,,,,\n').encode()
+    row = {header: '' for header in CATALOG_HEADERS}
+    row.update({'Slide': '1', 'Slide Tittle': 'T', 'Layout': 'Title Page', 'Chart type': 'Title Slide'})
+    buffer = StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=CATALOG_HEADERS)
+    writer.writeheader()
+    writer.writerow(row)
+    content = buffer.getvalue().encode()
     response = client.post(
         '/workspace-config/report-templates/sa', data={'catalogue_name': 'Editor audit'},
         files={'catalogue_file': ('x.csv', BytesIO(content), 'text/csv')}, follow_redirects=False,

@@ -57,7 +57,7 @@ from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
 from src.modules.background_scheduler import BackgroundTaskScheduler
 from src.modules.auth import SessionUser, verify_password
-from src.modules.column_names import MAIN_CDR_FIELDS, PREVIEW_METADATA_FIELDS, VENDOR_FIELD_IDENTITIES, clean_column_name, column_identity, resolve_column_name
+from src.modules.column_names import MAIN_CDR_FIELDS, PREVIEW_METADATA_FIELDS, VENDOR_FIELD_IDENTITIES, clean_column_name, column_identity, resolve_column_name, vendor_filter_column, vendor_filter_value, vendor_filter_values
 from src.modules.report_layouts import canonical_layout_name, selectable_layout_name
 from src.modules.cdr_reporting import entry_dynamic_fields, DYNAMIC_LAYOUTS, CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalog_chart_payload, catalog_kpi_fields, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, is_empty_catalog_chart, materialize_calculated_dimensions, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_label_format, parse_label_position, parse_legend_position, parse_template_boolean, prepare_catalog_chart_preview_frame, prepare_multivendor_catalog_entry, preview_catalog_chart_data, render_catalog_chart_preview, render_catalog_chart_preview_with_hover, render_cdr_report, render_unavailable_source_chart, report_chart_renderer_name, reset_dashboard_canvas_renderer, split_calculated_dimension_aliases
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
@@ -3970,6 +3970,13 @@ def rebuild_dataset_artifacts(
         df = add_vfuk_gcid_column(df)
     elif forced_dataset_kind == 'mapping_three':
         df = add_three_gcid_column(df)
+    if forced_dataset_kind in {'mapping_vodafone', 'mapping_three'}:
+        from src.modules.column_names import vendor_filter_value
+        vendor_column = resolve_column_name(df.columns, 'Vendor') or resolve_column_name(df.columns, 'OP_Vendor') or resolve_column_name(df.columns, 'OP/ Vendor')
+        if vendor_column and not resolve_column_name(df.columns, 'Vendor_Only'):
+            operators = [value for group in task_repository.list_operator_mapping_groups() for value in [group.get('canonical'), *(group.get('aliases') or [])] if value]
+            labels = {value: vendor_filter_value(value, operators) for value in df[vendor_column].dropna().unique()}
+            df['Vendor_Only'] = df[vendor_column].map(labels).fillna('')
     dataset_kind = df['dataset_kind'].iloc[0] if 'dataset_kind' in df.columns and not df.empty else (forced_dataset_kind or infer_dataset_kind(df, dataset_path.name))
     auto_vendor_mapping_applied = False
     auto_vendor_mapping_error: str | None = None
@@ -4187,7 +4194,13 @@ def backfill_cdr_campaigns(dataset_ids: Iterable[int], task_repository: Reposito
 def backfill_cdr_catalogues(dataset_ids: Iterable[int], task_repository: Repository | None = None) -> None:
     """Populate catalogue rows once for CDRs processed before catalogue caching."""
     task_repository = task_repository or repository
-    for dataset_id in task_repository.missing_cdr_catalogue_ids(dataset_ids):
+    dataset_ids = list(dataset_ids)
+    missing_catalogues = task_repository.missing_cdr_catalogue_ids(dataset_ids)
+    for dataset_id in task_repository.missing_cdr_vendor_only_ids(dataset_ids):
+        task_repository.ensure_vendor_only_column(dataset_id)
+        column = task_repository.resolve_dataset_row_column_name(dataset_id, "Vendor_Only")
+        task_repository.set_cdr_catalogue_vendor_only(dataset_id, task_repository.list_distinct_dataset_row_values(dataset_id, column, limit=None) if column else [])
+    for dataset_id in missing_catalogues:
         if not task_repository.dataset_rows_table_exists(dataset_id):
             continue
         columns = set(task_repository.list_dataset_row_columns(dataset_id))
@@ -11186,9 +11199,13 @@ def _apply_preview_column_filters(
 ) -> pd.DataFrame:
     result = frame
     for requested, values in column_filters.items():
-        column = resolve_column_name(result.columns, requested)
+        column = resolve_column_name(result.columns, vendor_filter_column(requested))
         if column is None:
             continue
+        if column_identity(column) == 'vendoronly':
+            operator_column = resolve_column_name(result.columns, 'Operator')
+            operators = result[operator_column].dropna().unique() if operator_column else []
+            values = vendor_filter_values(values, operators)
         accepted = {str(value).strip().casefold() for value in values}
         if not accepted:
             return result.iloc[0:0]
@@ -11202,7 +11219,7 @@ def _apply_preview_column_filters(
 
 def _preview_filter_values(frame: pd.DataFrame, requested_column: str) -> list[str]:
     """Return every distinct value available after the other column filters."""
-    column = resolve_column_name(frame.columns, requested_column)
+    column = resolve_column_name(frame.columns, vendor_filter_column(requested_column))
     if column is None:
         return []
     return sorted(
@@ -11260,8 +11277,11 @@ def preview_dataset(
     available_columns.extend(
         field for field in (*PREVIEW_METADATA_FIELDS, *MAIN_CDR_FIELDS) if column_identity(field) not in available_identities
     )
+    if dataset['dataset_kind'] in {'mapping_vodafone', 'mapping_three'}:
+        repository.ensure_vendor_only_column(dataset_id)
+        available_columns = list(dict.fromkeys([*available_columns, *repository.list_dataset_row_columns(dataset_id)]))
     vendor_preview_column = next(
-        (column for column in ('Vendor', 'OP/ Vendor', 'OP_Vendor') if column in available_columns),
+        (column for column in ('Vendor_Only',) if column in available_columns),
         None,
     ) if dataset['dataset_kind'] in {'mapping_vodafone', 'mapping_three'} else None
     vendor_preview_columns = {vendor_preview_column} if vendor_preview_column else set()
@@ -14116,13 +14136,14 @@ def _scoring_export_job_with_catalogue_defaults(
         if (set(catalogues) != set(dataset_ids)
                 or task_repository.missing_cdr_catalogue_ids(dataset_ids)
                 or task_repository.missing_cdr_operator_ids(dataset_ids)
-                or task_repository.missing_cdr_campaign_ids(dataset_ids)):
+                or task_repository.missing_cdr_campaign_ids(dataset_ids)
+                or task_repository.missing_cdr_vendor_only_ids(dataset_ids)):
             return export_job
     except (TypeError, ValueError):
         return export_job
     catalogue_fields = {
         'Region': 'regions', 'City': 'cities', 'Operator': 'operators',
-        'Vendor': 'vendors', 'Campaign': 'campaigns',
+        'Vendor': 'vendors_only', 'Campaign': 'campaigns',
     }
     normalized_filters = dict(context_filters)
     for field, catalogue_field in catalogue_fields.items():
@@ -14189,6 +14210,7 @@ def scoring_page(request: Request, user: SessionUser = Depends(current_user)) ->
     incomplete_catalogue_ids = set(task_repository.missing_cdr_catalogue_ids(dataset_ids))
     incomplete_catalogue_ids.update(task_repository.missing_cdr_campaign_ids(dataset_ids))
     incomplete_catalogue_ids.update(task_repository.missing_cdr_operator_ids(dataset_ids))
+    incomplete_catalogue_ids.update(task_repository.missing_cdr_vendor_only_ids(dataset_ids))
     catalogues = task_repository.cdr_catalogues_by_dataset(dataset_ids)
     vendor_operators = scoring_vendor_operators(catalogues, task_repository.list_operator_mapping_groups())
     datasets = []
@@ -14196,7 +14218,7 @@ def scoring_page(request: Request, user: SessionUser = Depends(current_user)) ->
         item = dict(row)
         item['original_name'] = item['file_name']
         item['catalogue'] = dict(catalogues[item['id']])
-        item['catalogue']['vendors'] = scoring_vendor_names(item['catalogue']['vendors'], vendor_operators)
+        item['catalogue']['vendors'] = list(item['catalogue'].get('vendors_only') or [])
         item['campaign'] = ', '.join(item['catalogue']['campaigns'])
         item['nr_mode'] = dataset_nr_mode(item['dataset_kind'], item['nr_mode'], item['file_name'])
         datasets.append(item)
@@ -17330,6 +17352,7 @@ def catalogue_filter_values(
     user: SessionUser = Depends(config_editor_user),
 ) -> JSONResponse:
     """Return values only for the field currently being configured in the editor."""
+    column = vendor_filter_column(column)
     normalized_source = source.strip().casefold()
     if normalized_source not in {'cdr-data', 'cdr-voice', 'cdr-speech', 'cdr-all'} or not column.strip():
         raise HTTPException(status_code=400, detail='Unsupported Source Dataset or filter field.')

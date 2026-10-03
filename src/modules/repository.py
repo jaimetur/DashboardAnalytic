@@ -18,7 +18,7 @@ from typing import Any, Iterable, Iterator, Literal
 import pandas as pd
 
 from src.modules.auth import hash_password
-from src.modules.column_names import MAIN_CDR_FIELDS, clean_column_name, column_identity
+from src.modules.column_names import MAIN_CDR_FIELDS, clean_column_name, column_identity, vendor_filter_column, vendor_filter_value, vendor_filter_values, mapped_vendor_only_value
 from src.modules.nr_mode import NR_MODE_DATASET_KINDS, infer_nr_mode, normalize_nr_mode
 from src.modules.report_layouts import normalize_catalog_layouts
 from src.modules.runtime_config import ignore_event_time_filtering
@@ -2618,6 +2618,32 @@ class Repository:
             ).fetchone()
             return self._table_columns(conn, table_name) if exists else []
 
+    def ensure_vendor_only_column(self, dataset_id: int) -> None:
+        """Materialize missing Vendor_Only for legacy CDRs and vendor inventories."""
+        columns = self.list_dataset_row_columns(dataset_id)
+        lookup = {column_identity(column): column for column in columns}
+        if 'vendoronly' in lookup:
+            return
+        source = next((lookup[key] for key in ('vendor', 'vendorv3', 'operatorvendor', 'opvendor') if key in lookup), None)
+        if not source:
+            return
+        operators = [value for group in self.list_operator_mapping_groups()
+                     for value in [group.get('canonical'), *(group.get('aliases') or [])] if value]
+        operator_column = lookup.get('operator')
+        operator_expression = self._quote_identifier(operator_column) if operator_column else "''"
+        table = self._quote_identifier(self.dataset_rows_table_name(dataset_id))
+        with self.connection() as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            current_columns = connection.execute(f'PRAGMA table_info({table})').fetchall()
+            if any(column_identity(row['name']) == 'vendoronly' for row in current_columns):
+                return
+            connection.create_function('vendor_filter_identity', 2,
+                lambda value, operator: mapped_vendor_only_value(vendor_filter_value(value, [*operators, operator]), operator or (str(value).strip() if str(value).strip().casefold() in {str(name).casefold() for name in operators} else '')))
+            connection.execute(f'ALTER TABLE {table} ADD COLUMN "Vendor_Only" TEXT')
+            connection.execute(f'UPDATE {table} SET "Vendor_Only" = vendor_filter_identity({self._quote_identifier(source)}, {operator_expression})')
+            connection.execute('UPDATE dataset_profiles SET column_count = ?, updated_at = ? WHERE dataset_id = ?',
+                               (len(columns) + 1, local_now_iso(), int(dataset_id)))
+
     def dataset_row_count(self, dataset_id: int) -> int:
         table_name = self.dataset_rows_table_name(dataset_id)
         with self.connection() as conn:
@@ -2703,13 +2729,15 @@ class Repository:
         if not selected_columns:
             return pd.DataFrame(), 0, [] if filter_column else None
 
+        mappings = self.list_operator_mappings() if any(vendor_filter_column(key) == 'Vendor_Only' for key in filters) else {}
+        operators = mappings
         where_clauses: list[str] = []
         params: list[Any] = []
         for key, raw_values in filters.items():
-            resolved = self._resolve_dataset_row_column_name(existing_columns, key)
+            resolved = self._resolve_dataset_row_column_name(existing_columns, vendor_filter_column(key))
             if not resolved:
                 continue
-            values = [str(value).strip().lower() for value in raw_values]
+            values = [str(value).strip().lower() for value in (vendor_filter_values(raw_values, operators) if vendor_filter_column(key) == 'Vendor_Only' else raw_values)]
             if not values:
                 where_clauses.append('0 = 1')
                 continue
@@ -2738,7 +2766,7 @@ class Repository:
             )
             filter_values: list[str] | None = None
             resolved_filter_column = (
-                self._resolve_dataset_row_column_name(existing_columns, filter_column)
+                self._resolve_dataset_row_column_name(existing_columns, vendor_filter_column(filter_column))
                 if filter_column else None
             )
             if resolved_filter_column:
@@ -2746,10 +2774,10 @@ class Repository:
                 facet_clauses: list[str] = []
                 facet_params: list[Any] = []
                 for key, raw_values in filters.items():
-                    resolved = self._resolve_dataset_row_column_name(existing_columns, key)
+                    resolved = self._resolve_dataset_row_column_name(existing_columns, vendor_filter_column(key))
                     if not resolved or resolved == resolved_filter_column:
                         continue
-                    values = [str(value).strip().lower() for value in raw_values]
+                    values = [str(value).strip().lower() for value in (vendor_filter_values(raw_values, operators) if vendor_filter_column(key) == 'Vendor_Only' else raw_values)]
                     if not values:
                         facet_clauses.append('0 = 1')
                         continue
@@ -2774,6 +2802,8 @@ class Repository:
         self, dataset_id: int, columns: list[str], filters: dict[str, list[str]],
         page: int, page_size: int, filter_column: str | None = None,
     ) -> tuple[pd.DataFrame, int, list[str] | None]:
+        if any(vendor_filter_column(field) == 'Vendor_Only' for field in [*filters, filter_column or '']):
+            self.ensure_vendor_only_column(dataset_id)
         return self._load_table_preview_page(
             self.dataset_rows_table_name(dataset_id), set(self.list_dataset_row_columns(dataset_id)),
             columns, filters, page, page_size, filter_column,
@@ -3211,6 +3241,9 @@ class Repository:
             if key in {'aggregation', 'extra_filters', 'date_from', 'date_to'} or value in (None, '') or not resolved_key:
                 continue
             values = value if isinstance(value, (list, tuple, set)) else [value]
+            if column_identity(resolved_key) == 'vendoronly':
+                mappings = self.list_operator_mappings()
+                values = vendor_filter_values(values, mappings)
             if str(key).casefold() == 'gcid':
                 integer_values: list[int] = []
                 for item in values:

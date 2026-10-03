@@ -156,11 +156,13 @@
     selectedKinds().forEach(kind => columnsForKind(kind).forEach(column => columns.add(column)));
     return [...columns];
   };
+  const vendorFilterField = field => ['vendor', 'vendorv3', 'operatorvendor', 'opvendor'].includes(String(field).toLowerCase().replace(/[^a-z0-9]/g, '')) ? 'Vendor_Only' : field;
+  const availableFilterColumns = () => [...new Set(availableColumns().map(vendorFilterField))];
   const refreshFields = () => {
     const columns = availableColumns();
     setOptions(fieldsPicker, columns);
     setOptions(sortField, columns, 'No sorting');
-    filters.querySelectorAll('[data-sql-filter-field]').forEach(select => setOptions(select, columns, 'Choose field'));
+    filters.querySelectorAll('[data-sql-filter-field]').forEach(select => setOptions(select, availableFilterColumns(), 'Choose field'));
     filters.querySelectorAll('.query-builder-filter').forEach(updateFilterValueControl);
     if (!allFields.checked && !fieldsPicker.selectedOptions.length) selectDefaultFields();
     buildAssistedSql();
@@ -194,7 +196,7 @@
     row.innerHTML = '<select data-sql-filter-connector aria-label="Connect with previous filter"><option value="AND">AND</option><option value="OR">OR</option></select><select data-sql-filter-field aria-label="Filter field"></select><select data-sql-filter-operator aria-label="Filter comparison"><option value="eq">Is</option><option value="ne">Is not</option><option value="contains">Contains</option><option value="starts">Starts with</option><option value="gt">Greater than (number)</option><option value="lt">Less than (number)</option><option value="empty">Is empty</option><option value="not_empty">Is not empty</option></select><input data-sql-filter-value aria-label="Filter value" placeholder="Value"><select data-sql-filter-dataset-value aria-label="Dataset name" hidden><option value="">Choose dataset</option></select><button type="button" class="query-builder-secondary-action" data-sql-remove-filter aria-label="Remove filter">Remove</button>';
     filters.append(row);
     refreshFilterConnectors();
-    setOptions(row.querySelector('[data-sql-filter-field]'), availableColumns(), 'Choose field');
+    setOptions(row.querySelector('[data-sql-filter-field]'), availableFilterColumns(), 'Choose field');
     updateFilterValueControl(row);
     row.querySelector('[data-sql-remove-filter]').addEventListener('click', () => { invalidateQueryResults(); row.remove(); refreshFilterConnectors(); buildAssistedSql(); });
     row.addEventListener('input', () => { updateFilterValueControl(row); invalidateQueryResults(); buildAssistedSql(); }); row.addEventListener('change', () => { updateFilterValueControl(row); invalidateQueryResults(); buildAssistedSql(); });

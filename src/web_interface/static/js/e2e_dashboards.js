@@ -162,8 +162,16 @@
     definitionValue.datasets ||= {};
     for (const kind of ['data', 'voice', 'speech']) definitionValue.datasets[kind] ||= [];
     definitionValue.filters ||= {};
+    for (const field of Object.keys(definitionValue.filters)) {
+      if (!['vendor', 'vendoronly', 'vendorv3', 'operatorvendor', 'opvendor'].includes(identity(field))) continue;
+      const values = definitionValue.filters[field];
+      delete definitionValue.filters[field];
+      definitionValue.filters.Vendor_Only = [...new Set((values || []).map(value => window.normalizeVendorFilterValue?.(value) ?? value))];
+    }
     definitionValue.custom_fields ||= [];
+    definitionValue.custom_fields = [...new Set(definitionValue.custom_fields.map(field => ['vendor', 'vendorv3', 'operatorvendor', 'opvendor'].includes(identity(field)) ? 'Vendor_Only' : field))];
     definitionValue.hidden_filters ||= [];
+    definitionValue.hidden_filters = definitionValue.hidden_filters.map(field => ['vendor', 'vendorv3', 'operatorvendor', 'opvendor'].includes(identity(field)) ? 'Vendor_Only' : field);
     definitionValue.slide_comments ||= {};
     if (!definitionValue.date_from) definitionValue.date_from = 'Oldest';
     if (!definitionValue.date_to) definitionValue.date_to = 'Newest';
@@ -659,6 +667,7 @@
     const operatorCopy = $('ds-ppt-operator-copy');
     const vendorSection = $('ds-ppt-vendor-section');
     const vendorControl = $('ds-ppt-dataset-vendor');
+    vendorControl.dataset.multiselectVendorOnly = 'true';
     const vendorCopy = $('ds-ppt-vendor-copy');
     const regionSection = $('ds-ppt-region-section');
     const regionControl = $('ds-ppt-dataset-region');
@@ -688,7 +697,7 @@
     };
     // Dashboard Filters start from the values saved in the Dashboard; a field
     // it does not filter starts with every value of the selected CDRs.
-    const selectionFields = {operators: 'Operator', vendors: 'Vendor', regions: 'Region', cities: 'City'};
+    const selectionFields = {operators: 'Operator', vendors: 'Vendor_Only', regions: 'Region', cities: 'City'};
     // Save Universe and Save Filters update this saved definition.
     let savedDashboard = dashboard;
     const savedDashboardSelection = field => {
@@ -943,19 +952,19 @@
         if (request !== geographyRequest) return;
         for (const [field, key, rawValues] of [
           ['Operator', 'operators', geography.operators || []],
-          ['Vendor', 'vendors', geography.vendors || []],
+          ['Vendor_Only', 'vendors', geography.vendors || []],
           ['Region', 'regions', geography.regions || []], ['City', 'cities', geography.cities || []],
         ]) {
           const values = rawValues.map(String).map(value => value.trim()).filter(Boolean);
           const isOperator = field === 'Operator';
-          const isVendor = field === 'Vendor';
+          const isVendor = field === 'Vendor_Only';
           const isRegion = field === 'Region';
           const section = isOperator ? operatorSection : isVendor ? vendorSection : isRegion ? regionSection : citySection;
           const control = isOperator ? operatorControl : isVendor ? vendorControl : isRegion ? regionControl : cityControl;
           const copy = isOperator ? operatorCopy : isVendor ? vendorCopy : isRegion ? regionCopy : cityCopy;
           const previous = selectionState[key];
           if (values.length <= 1) {
-            const label = field === 'Operator' ? 'Operator' : field === 'Vendor' ? 'Vendor' : field === 'Region' ? 'Region' : 'City';
+            const label = field === 'Operator' ? 'Operator' : field === 'Vendor_Only' ? 'Vendor' : field === 'Region' ? 'Region' : 'City';
             section.hidden = false;
             control.disabled = true;
             control.replaceChildren();
@@ -979,7 +988,7 @@
           }));
           control.dispatchEvent(new Event('multiselect:options-updated'));
           selectionState[key] = {values: [...selected], all: selected.size === values.length};
-          copy.textContent = `Select one or more ${field === 'Operator' ? 'Operators' : field === 'Vendor' ? 'Vendors' : field === 'Region' ? 'Regions' : 'Cities'} to include in this PowerPoint export.`;
+          copy.textContent = `Select one or more ${field === 'Operator' ? 'Operators' : field === 'Vendor_Only' ? 'Vendors' : field === 'Region' ? 'Regions' : 'Cities'} to include in this PowerPoint export.`;
         }
         rememberDialog();
         if (extraFilters.size) void loadExtraFilterOptions();
@@ -2023,6 +2032,15 @@
     const scopeControl = $('ds-scope');
     scopeControl.value = definition.scope || 'single';
     updateFilterControlState(scopeControl.closest('.ds-scope-control'), scopeState());
+    const vendorControl = $('ds-universe-vendor-comparison');
+    $('ds-universe-vendor-control').hidden = definition.scope !== 'multivendor';
+    vendorControl.value = definition.vendor_comparison || 'operator_vendor';
+    updateFilterControlState($('ds-universe-vendor-control'), filterControlState(
+      definition.vendor_comparison || 'operator_vendor',
+      appliedDefinition().vendor_comparison || 'operator_vendor',
+      savedDashboardDefinition().vendor_comparison || 'operator_vendor',
+      (left, right) => left === right,
+    ));
     for (const [key, label] of [['date_from', 'Date from'], ['date_to', 'Date to']]) host.append(datePicker(key, label));
     globalThis.setupCustomMultiSelects?.();
   }
@@ -2042,7 +2060,7 @@
       const selected = Array.isArray(definition.filters[field])
         ? definition.filters[field].map(value => String(value)) : [];
       const custom = definition.custom_fields.includes(field);
-      const label = custom ? field : field === 'technology_primary' ? 'Technology' : field.replaceAll('_',' ').replace(/\b\w/g, letter => letter.toUpperCase());
+      const label = ['vendor', 'vendoronly'].includes(identity(field)) ? 'Vendor' : custom ? field : field === 'technology_primary' ? 'Technology' : field.replaceAll('_',' ').replace(/\b\w/g, letter => letter.toUpperCase());
       const aliases = Object.entries(filterAliases).find(([name]) => identity(name) === identity(field))?.[1] || [];
       if (aliases.length > 1) {
         const aliasTooltip = `Supported columns by priority:\n${aliases.map((alias, index) => `${index + 1}. ${alias}`).join('\n')}`;
@@ -2062,7 +2080,7 @@
       head.append(remove); facet.append(head);
       const values = document.createElement('select'); values.multiple = true; values.size = 1; values.dataset.multiselectAutoClose = '1000'; values.setAttribute('aria-label', `${label} filter`);
       values.dataset.multiselectDynamicAll = 'true';
-      if (identity(field) === identity('Vendor_Only')) {
+      if (['vendor', 'vendoronly'].includes(identity(field))) {
         values.dataset.multiselectVendorOnly = 'true';
         values.dataset.multiselectOperatorValues = JSON.stringify(
           Object.entries(facetOptions).filter(([name]) => identity(name) === identity('Operator')).flatMap(([, items]) => items),
@@ -2517,6 +2535,17 @@
   $('ds-template').onchange = () => {
     if (definition) { setTemplate($('ds-template').value); changed(); }
     else syncNewDashboardNameFromTemplate();
+  };
+  $('ds-universe-vendor-comparison').onchange = () => {
+    if (!definition || definition.scope !== 'multivendor') return;
+    const comparison = $('ds-universe-vendor-comparison').value;
+    if (comparison === definition.vendor_comparison) return;
+    definition.vendor_comparison = comparison;
+    definition.datasets = latestDatasetsForScope('multivendor', dashboardNrMode(definition), comparison);
+    definition.date_from = 'Oldest';
+    definition.date_to = 'Newest';
+    sources();
+    filterChanged();
   };
   $('ds-scope').onchange = safe(async () => {
     if (!definition) return;

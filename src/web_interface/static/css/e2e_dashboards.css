@@ -1835,3 +1835,9 @@
 .e2e-dashboards .ds-slide-picker .searchable-select-option:hover { background:#f0ebf7; }
 .e2e-dashboards .ds-slide-picker .searchable-select-option[aria-selected="true"] { background:#e2f2f3; outline:1px solid #9ccacc; }
 .ds-slide-picker .searchable-select-input { position:sticky; top:0; background:#fff; }
+
+.ds-universe-scope-controls { display:flex; align-items:flex-start; gap:.85rem; }
+.ds-universe-scope-controls>.ds-scope-control { flex:1; min-width:0; }
+.ds-universe-scope-controls>.ds-scope-control[hidden] { display:none; }
+.ds-universe-scope-controls select { text-overflow:ellipsis; }
+@media(max-width:760px) { .ds-universe-scope-controls { flex-direction:column; } .ds-universe-scope-controls>.ds-scope-control { width:100%; } }

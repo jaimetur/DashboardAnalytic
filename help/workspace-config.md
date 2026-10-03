@@ -350,15 +350,17 @@ Legend Position: Top
 Conditions are joined with logical AND and separated by `;`. Column matching is case-insensitive.
 
 ```text
-Call Family IN (VoLTE, MultiRAB); Direction = DL; vendor NOT CONTAINS (Mixed, Other)
+Call Family IN (VoLTE, MultiRAB); Direction = DL; Vendor_Only NOT CONTAINS (Mixed, Other)
 ```
 
 | Operator | Example |
 | --- | --- |
 | Equals / not equal | `Call_Status = Completed`, `Operator != EE` |
 | List inclusion / exclusion | `Operator IN (VF, O2, 3, EE)`, `Campaign NOT IN (2025-Q4)` |
-| Contains / not contains | `Test_Name CONTAINS FDFS`, `vendor NOT CONTAINS (Mixed, Other)` |
+| Contains / not contains | `Test_Name CONTAINS FDFS`, `Vendor_Only NOT CONTAINS (Mixed, Other)` |
 | Numeric comparison | `LQ < 1.6`, `Mean_Data_Rate >= 20` |
+
+Vendor filters target `Vendor_Only`. Import accepts legacy `Vendor`, `Vendor V3`, `Operator_Vendor` and `OP_Vendor` filter field names; CSV export writes `Vendor_Only`. Operator-prefixed filter values are resolved using workspace operator aliases when the report runs. This alias handling applies to filter fields, while aggregation fields keep their selected comparison semantics.
 
 `IN`, `NOT IN`, `CONTAINS` and `NOT CONTAINS` accept comma-separated values. Parentheses are optional in Filter Builder input. A comma separates values within one condition; use `;` between independent conditions. `Threshold = 1.6` configures threshold charts and `Buckets = 1,5,20,100` configures distribution ranges.
 
@@ -547,8 +549,8 @@ For RF histograms, select **Operator**: the first definition is LTE and the seco
 
 ### Vendor-only filter labels
 
-Across the application, filters on `Vendor_Only` list actual vendors first, followed by Mixed Vendor(s), Other Vendor(s), then All Vendor(s). Operator-only identities follow with the display suffix ** - All Vendors**, based on canonical Operator identities, their configured aliases and cached CDR operators. Configured vendor identities take precedence, so actual vendors remain in the first group. The suffix is a display label: saved conditions and exported configurations retain the original values. This applies to Dashboard filters, Network Insights, data-preview column filters, Query Builder column filters and Report Template filter assistance.
+Across the application, filters on `Vendor_Only` list actual vendors first, followed by Mixed Vendor(s), Other Vendor(s), then All Vendor(s). Operator-only identities follow with the display suffix ** - All**, based on canonical Operator identities, their configured aliases and cached CDR operators. Configured vendor identities take precedence, so actual vendors remain in the first group. Vendor mapping stores `Operator - All` in `Vendor_Only` for operator-only identities. Dataset exports, combined CDRs, transfers and backups preserve that value; legacy operator-only values without the suffix remain supported. This applies to Dashboard filters, Network Insights, data-preview column filters, Query Builder column filters and Report Template filter assistance.
 
 CDR catalogue caches retain both `Vendor` and `Vendor_Only` universes. CDR processing refreshes both from their source columns. The caches remain part of workspace database backups and restores; legacy catalogues preserve their existing Vendor values while Vendor_Only is backfilled once.
 
-Operator mapping colours also apply to operators without a vendor in multivendor charts, including Vendor_Only labels displayed as **Operator - All Vendors**. Vendor mapping colours apply to actual vendors.
+Operator mapping colours also apply to operators without a vendor in multivendor charts, including Vendor_Only labels displayed as **Operator - All**. Vendor mapping colours apply to actual vendors.

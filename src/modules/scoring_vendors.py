@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import re
 from collections.abc import Iterable
 from typing import Any
 
@@ -10,7 +11,7 @@ from src.modules.column_names import column_identity, vendor_only_value
 
 def scoring_vendor_name(value: object, operators: Iterable[object] = ()) -> str:
     """Remove known operator prefixes, including operator names with underscores."""
-    text = '' if value is None else str(value).strip()
+    text = re.sub(r'\s+- All(?: Vendors)?$', '', '' if value is None else str(value).strip(), flags=re.IGNORECASE)
     names = sorted({str(operator).strip() for operator in operators if operator}, key=len, reverse=True)
     if text.casefold() in {name.casefold() for name in names}:
         return text
