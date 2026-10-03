@@ -310,6 +310,8 @@ Legend Position: Bottom
 
 Use latitude and longitude in `Latitude vs Longitude` order. Aggregations and legend determine point grouping and colour.
 
+To colour a radio-quality map by a measured value, use `Latitude vs Longitude vs Measure`, set **Rows Aggregation** and **Legend** to `Value Bucket`, and define four ascending thresholds with `Buckets = ...`. For example, RSRP uses `Buckets = -110,-100,-90,-80`, and SINR uses `Buckets = 0,5,13,20`. These five ranges use red, orange, yellow, light green and green. Missing measurements are excluded when **Exclude Null/Empty** is enabled. Two-field maps retain their existing grouping colours.
+
 ```text
 CDR source: CDR-Data
 KPI: Test_Start_Latitude vs Test_Start_Longitude

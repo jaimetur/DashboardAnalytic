@@ -81,10 +81,15 @@ Every workspace that already has NSA Report Templates receives once, when the ap
 
 - RSRP and SINR CDFs (LTE and NR) for Data, Voice and Speech;
 - average LTE and NR RSRP and SINR bars per CDR type;
-- RSRP distributions in -110/-100/-90/-80 dBm buckets and SINR distributions in 0/5/13/20 dB buckets;
-- shares of samples below -110 dBm and below 0 dB.
+- separate LTE and NR RSRP distributions in -110/-100/-90/-80 dBm buckets and SINR distributions in 0/5/13/20 dB buckets;
+- separate LTE and NR shares of samples below -110 dBm and below 0 dB, calculated from valid measurements of each technology;
+- LTE and NR coverage (RSRP) and quality (SINR) maps for Data, Voice and Speech, coloured from red to green using the same quality ranges; maps combine the measured samples in the selected Operator, Campaign and geographical filters, rather than estimating unmeasured coverage;
+- the same black-logo closing slide as the NSA NetCheck template.
 
 Edit, rename or delete them like any other template or Dashboard. A deleted copy is not recreated.
+
+> [!IMPORTANT]
+> NSA uses an LTE anchor and can also provide NR radio measurements. Each chart reads its technology-specific CDR field. NR percentages describe the available valid NR measurements; missing NR values do not count as good coverage or establish NR availability along the entire route. SINR reflects signal quality against both interference and noise.
 
 ## Data sources
 

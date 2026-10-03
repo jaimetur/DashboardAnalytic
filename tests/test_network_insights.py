@@ -149,9 +149,49 @@ def test_threshold_and_negative_bucket_labels_follow_the_configuration() -> None
 
 def test_bundled_rf_quality_template_is_valid() -> None:
     catalogue = app_module.load_template_catalogue(TEMPLATE_PATH.read_bytes(), 'nsa')
-    assert len(catalogue) == 39
+    assert len(catalogue) == 64
     chart_types = {entry.chart_type for entry in catalogue}
     assert {'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars'} <= chart_types
+    maps = [entry for entry in catalogue if entry.chart_type == 'Map']
+    assert len(maps) == 12
+    assert {entry.source_kind for entry in maps} == {'data', 'voice', 'speech'}
+    assert all(len(entry.kpi.split(' vs ')) == 3 for entry in maps)
+    for chart_type in ('Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars'):
+        nr_entries = [entry for entry in catalogue if entry.chart_type == chart_type and entry.chart_title.startswith('NR ')]
+        assert len(nr_entries) == 6
+        assert {entry.source_kind for entry in nr_entries} == {'data', 'voice', 'speech'}
+        assert all((entry.kpi.startswith('NR_') or '_NR_' in entry.kpi) and entry.exclude_null_empty for entry in nr_entries)
+        assert all(f'{entry.kpi} >=' in entry.filters and f'{entry.kpi} <=' in entry.filters for entry in nr_entries)
+    assert catalogue[-1].layout == 'Black logo end slide'
+
+
+@pytest.mark.parametrize('field,values,edges', [
+    ('RSRP', [-115, -105, -95, -85, -75], '-110,-100,-90,-80'),
+    ('SINR', [-1, 0, 5, 13, 20], '0,5,13,20'),
+])
+def test_quality_maps_use_measurement_buckets_without_replacing_coordinates(field, values, edges) -> None:
+    from src.modules.cdr_reporting import CatalogEntry, catalog_chart_payload
+
+    entry = CatalogEntry(
+        slide=1, slide_title='RF map', slide_subtitle='', layout='Title and 1 column + Comments',
+        chart_title='Quality', cdr_source='CDR-Data', kpi=f'Latitude vs Longitude vs {field}',
+        chart_type='Map', legend='Value Bucket', filters=f'Buckets = {edges}',
+        grouping_rows='Value Bucket', grouping_columns='',
+        legend_position='Right', exclude_null_empty=True,
+    )
+    frame = pd.DataFrame({
+        'Latitude': [51.5 + index * .01 for index in range(7)],
+        'Longitude': [-.1] * 7,
+        field: [*values, None, 'invalid'],
+    })
+    model = catalog_chart_payload(frame, entry)
+    assert model['type'] == 'map'
+    assert sum(len(series['points']) for series in model['series']) == 5
+    assert {series['colour'] for series in model['series']} == {
+        '#D7263D', '#F08A24', '#F2C230', '#8BC34A', '#2E8B57',
+    }
+    points = [point for series in model['series'] for point in series['points']]
+    assert sorted(point[1] for point in points) == pytest.approx([51.5, 51.51, 51.52, 51.53, 51.54])
 
 
 def test_bundled_rf_quality_content_is_seeded_once(client) -> None:

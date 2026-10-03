@@ -2138,6 +2138,7 @@ def _catalog_column(
         "radioband": ("NR_Band", "LTE_Band", "Band", "Radio_Band"),
     }
     if normalized in {"ratebucket", "valuebucket"}:
+        metric = frame.attrs.get("catalogue_map_colour_metric") or metric
         if not metric:
             return None
         numeric = pd.to_numeric(frame[metric], errors="coerce")
@@ -2462,6 +2463,21 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
     column_spec = parse_catalog_grouping(entry.grouping_columns)
     bucket_edges = _catalog_bucket_edges(entry)
     bucket_operator = _catalog_bucket_operator(entry)
+    frame.attrs.pop("catalogue_map_colour_metric", None)
+    frame.attrs.pop("catalogue_map_bucket_colours", None)
+    if entry.chart_type.casefold() == "map":
+        colour_fields = _catalog_spec(entry).get("colour_metric", ())
+        colour_metric = _column(frame, colour_fields) if colour_fields else None
+        if colour_fields and not colour_metric:
+            raise ValueError(f"Slide {entry.slide}: map colour measure '{colour_fields[0]}' does not exist in {entry.cdr_source}.")
+        if colour_metric:
+            frame.attrs["catalogue_map_colour_metric"] = colour_metric
+            if bucket_edges and len(bucket_edges) == 4:
+                frame.attrs["catalogue_map_bucket_colours"] = dict(zip(
+                    _explicit_bucket_labels(bucket_edges),
+                    ("#D7263D", "#F08A24", "#F2C230", "#8BC34A", "#2E8B57"),
+                    strict=True,
+                ))
     # Multivendor data stores the effective comparison identity as one
     # ``Operator_Vendor`` field. Materialise its two display levels here so
     # every chart can render Vendor first and its individual Operators below.
@@ -2599,6 +2615,10 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
     def dimension_sort_key(dimension: str, value: object) -> tuple[object, ...]:
         """Order ordinary aggregation values alphabetically and mapped identities by rank."""
         normalized_dimension = _normalise_catalog_name(dimension)
+        map_bucket_colours = frame.attrs.get("catalogue_map_bucket_colours", {})
+        if normalized_dimension in {"ratebucket", "valuebucket"} and map_bucket_colours:
+            bucket_order = list(map_bucket_colours)
+            return (bucket_order.index(str(value)) if str(value) in map_bucket_colours else len(bucket_order),)
         if normalized_dimension == "campaign":
             return _campaign_sort_key(value)
         if normalized_dimension == "vendor":
@@ -3317,6 +3337,14 @@ def _series_colours(
     """
     if not keys:
         return {}
+    map_colours = frame.attrs.get("catalogue_map_bucket_colours", {})
+    if map_colours:
+        mapped = {
+            key: next((map_colours[str(value)] for value in key if str(value) in map_colours), None)
+            for key in keys
+        }
+        if all(mapped.values()):
+            return mapped
 
     def semantic_outcome(key: tuple[object, ...]) -> tuple[str, str] | None:
         for value in reversed(key):
@@ -5599,7 +5627,8 @@ def _catalog_spec(entry: CatalogEntry) -> dict:
         spec["x_metric"] = metric_parts[1:] or ("Playing_RSRP_NR_Avg", "NR_RSRP_Avg")
     elif chart_type == "map":
         spec["kind"] = "map"
-        spec["x_metric"] = metric_parts[1:] or ("Test_Start_Longitude", "Test Start Longitude")
+        spec["x_metric"] = metric_parts[1:2] or ("Test_Start_Longitude", "Test Start Longitude")
+        spec["colour_metric"] = metric_parts[2:3]
     elif chart_type == "count stacked horizontal bars":
         spec["kind"] = "failure_count"
     elif "100%" in chart_type or chart_type == "threshold stacked vertical bars":
@@ -5646,6 +5675,9 @@ def _exclude_chart_values(
         resolved = _column(frame, spec.get("x_metric", ()))
         if resolved:
             columns.append(resolved)
+        colour_metric = _column(frame, spec.get("colour_metric", ()))
+        if colour_metric:
+            columns.append(colour_metric)
     mask = pd.Series(True, index=frame.index)
     for column in dict.fromkeys(columns):
         series = frame[column]
@@ -5653,6 +5685,8 @@ def _exclude_chart_values(
         numeric = pd.to_numeric(series, errors="coerce")
         if entry.exclude_null_empty:
             mask &= populated
+            if column == _column(frame, spec.get("colour_metric", ())):
+                mask &= numeric.notna()
         if entry.exclude_zero:
             mask &= ~(numeric.notna() & numeric.eq(0))
     result = frame.loc[mask].copy()
