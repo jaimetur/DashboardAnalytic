@@ -451,3 +451,5 @@ Dashboards have their own Admin export/import/transfer/backup/restore component.
 ### Vendor-only report ordering
 
 For **Vendor Only (All Operators Combined)**, web charts/tables and PowerPoint reports list actual vendors alphabetically, then Mixed Vendor(s), Other Vendor(s), All Vendor(s), and finally operator-only identities labelled **Operator - All Vendors**. This order also applies to dynamic chart grids. Mixed/Other groups remain visible unless an explicit template filter excludes them. Display labels preserve the underlying filter and dataset values.
+
+In multivendor charts, operator-only identities such as **EE - All Vendors** retain the colour assigned to that operator in Operator mappings. This applies to web and newly generated PPT charts; the display suffix does not create a new colour identity. Real vendors retain their configured vendor colours.

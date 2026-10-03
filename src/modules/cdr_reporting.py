@@ -3334,6 +3334,8 @@ def _mapping_prefix_group(
 def _operator_colour(label: object, frame: pd.DataFrame | None = None) -> str | None:
     """Return the workspace theme colour for an Operator identity."""
     text = str(label or '').strip()
+    # Operator-only Vendor_Only labels retain their workspace Operator theme.
+    text = re.sub(r'\s+- All Vendors(?=$|\s*[·|/])', '', text, flags=re.IGNORECASE)
     group = _mapping_group(text, 'operator', frame)
     if group is None:
         group = _mapping_prefix_group(text, 'operator', frame)
@@ -3446,7 +3448,7 @@ def _dimension_roles(frame: pd.DataFrame, axis_columns: list[str]) -> list[set[s
 
 def _vendor_label(value: object, frame: pd.DataFrame | None = None) -> str:
     """Extract everything after the longest configured Operator prefix."""
-    text = str(value).strip()
+    text = re.sub(r'\s+- All Vendors$', '', str(value).strip(), flags=re.IGNORECASE)
     if _mapping_group(text, 'operator', frame):
         return text
     prefix_matches: list[str] = []
