@@ -596,3 +596,28 @@ def test_multivendor_dynamic_histograms_page_by_vendor_and_keep_template_indexes
     )
     assert {entry.dynamic_field for entry in pooled} == {'Vendor_Only'}
     assert {entry.dynamic_value for entry in pooled} == {'Ericsson', 'Huawei'}
+
+
+def test_grouped_cdf_curves_differ_by_line_style_and_lte_nr_stays_separate(client, tmp_path) -> None:
+    _login(client)
+    frames = [_data_rows('2026-Q1'), _data_rows('2026-Q2', rsrp_offset=5)]
+    for frame in frames:
+        frame['NR_PCell_RSRP_Avg'] = frame['LTE_PCell_RSRP_Avg'] - 8
+    ids = [_add_ready_dataset(tmp_path, f'CDR_Data_NSA_{campaign}.xlsx', 'data', frame)
+           for campaign, frame in zip(('2026-Q1', '2026-Q2'), frames, strict=True)]
+
+    grouped = client.post('/api/network-insights/analysis', json={
+        'datasets': {'data': ids}, 'technology': 'lte', 'group': ['operator', 'campaign'],
+    }).json()
+    styles = {(series['colour'], str(series['dash'])) for series in grouped['charts']['rsrp_cdf']['series']}
+    assert len(styles) == len(grouped['charts']['rsrp_cdf']['series']) == 4
+
+    # LTE and NR RSRP are never pooled: LTE+NR always groups by Technology.
+    combined = client.post('/api/network-insights/analysis', json={
+        'datasets': {'data': ids}, 'technology': 'lte_nr', 'group': ['operator'],
+    }).json()
+    assert combined['group'] == ['operator', 'technology']
+    medians = {row['operator']: row['rsrp_median'] for row in combined['overview']}
+    assert medians['EE · NR'] == medians['EE · LTE'] - 8
+    names = [series['name'] for series in combined['charts']['rsrp_cdf']['series']]
+    assert sorted(names) == ['EE · LTE', 'EE · NR', 'VF · LTE', 'VF · NR']

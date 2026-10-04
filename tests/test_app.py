@@ -521,7 +521,7 @@ process.stdout.write(JSON.stringify(result));
     )
     result = json.loads(completed.stdout)
 
-    assert 'Select at least one CDR source' in result['initialPreview']
+    assert 'Select at least one Source Dataset' in result['initialPreview']
     assert result['initialDefaultFields'] == ['cdr_type', 'source_dataset_name']
     assert 'FROM "selected_data"' in result['singleTypePreview']
     assert result['lastTypeWasRestored']
@@ -604,7 +604,7 @@ process.stdout.write(vm.runInNewContext(script, context));
     )
     result = json.loads(completed.stdout)
     assert result['initialReturn']['mode'] == 'assisted'
-    assert result['initialReturn']['preview'] == '-- Select at least one CDR source to preview SQL.'
+    assert result['initialReturn']['preview'] == '-- Select at least one Source Dataset to preview SQL.'
     assert result['initialReturn']['status'] == ''
     assert result['sqlLabel'] == 'SQL Query'
     assert result['manualReturn']['mode'] == 'sql'
@@ -2092,7 +2092,7 @@ def test_workspace_calculated_dimensions_panel_exports_and_imports_json(client) 
     assert current_definitions.json()['dimensions'] == app_module.calculated_dimensions_json(
         app_module.load_workspace_calculated_dimensions()
     )
-    assert {'cdr-data', 'cdr-voice', 'cdr-speech'} == set(current_definitions.json()['columns'])
+    assert {'cdr-data', 'cdr-voice', 'cdr-speech', 'cdr-all'} == set(current_definitions.json()['columns'])
     assert 'RAT' in current_definitions.json()['columns']['cdr-data']
 
     status = client.get('/api/workspace/auto-calculated-fields/materialization')
@@ -2327,6 +2327,24 @@ def test_reporting_deletion_requires_admin(client) -> None:
 def login_super(client) -> None:
     response = client.post("/login", data={"username": "super", "password": "super123"}, follow_redirects=False)
     assert response.status_code == 303
+
+
+def legacy_template_csv(*rows: str) -> bytes:
+    """Build a canonical template from rows written in the pre-dynamic column order."""
+    import csv
+    import io
+    from src.modules.cdr_reporting import CATALOG_HEADERS, PRE_DYNAMIC_CATALOG_HEADERS
+    from src.modules.report_layouts import canonical_layout_name
+
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=CATALOG_HEADERS, lineterminator='\n')
+    writer.writeheader()
+    for values in csv.reader(rows):
+        row = dict.fromkeys(CATALOG_HEADERS, '')
+        row.update(zip(PRE_DYNAMIC_CATALOG_HEADERS, values))
+        row['Layout'] = canonical_layout_name(row['Layout'])
+        writer.writerow(row)
+    return output.getvalue().encode('utf-8')
 
 
 def test_login_page_loads(client) -> None:
@@ -4956,7 +4974,7 @@ def test_dashboard_library_ppt_export_selects_scope_cdrs_explicitly() -> None:
     assert "$('ds-ppt-cdr-title').textContent = `CDR datasets (${dashboardNrMode(dashboard)})`;" in script
     assert template.index('id="ds-ppt-dates-title"') < template.index('id="ds-ppt-dataset-cancel"') < template.index('id="ds-ppt-dataset-confirm"')
     assert "const chooseDashboardPptUniverse = (dashboard, dashboardId)" in script
-    assert ".slice(0, scope === 'multivendor' ? 1 : 2)" in script
+    assert ".slice(0, scope === 'multivendor' && vendorComparison === 'operator_vendor' ? 1 : 2)" in script
     assert "const savedDateFrom = String(remembered?.date_from || dashboard?.date_from || 'Oldest');" in script
     assert "const savedDateTo = String(remembered?.date_to || dashboard?.date_to || 'Newest');" in script
     assert 'const universeChoice = await chooseDashboardPptUniverse(item, id);' in script
@@ -6149,7 +6167,7 @@ def test_canonical_mapping_renames_update_all_templates_and_dashboards_exactly(c
     assert renamed_entry.chart_title == 'VF_UK and VF_SA by Ericsson'
     assert renamed_entry.filters == (
         'Operator IN (VF_UK, VF_SA); '
-        'Vendor IN (VF_UK_Ericsson, VF_SA_Ericsson, Ericsson)'
+        'Vendor_Only IN (VF_UK_Ericsson, VF_SA_Ericsson, Ericsson)'
     )
     dashboard = json.loads(app_module.repository.get_workspace_state('e2e_dashboards_v2'))['mapping-dashboard']
     assert dashboard['name'] == 'VF_UK vs VF_SA'
@@ -6172,7 +6190,7 @@ def test_canonical_mapping_renames_update_all_templates_and_dashboards_exactly(c
     assert renamed_entry.chart_title == 'VF_UK and VF_SA by ERI'
     assert renamed_entry.filters == (
         'Operator IN (VF_UK, VF_SA); '
-        'Vendor IN (VF_UK_ERI, VF_SA_ERI, ERI)'
+        'Vendor_Only IN (VF_UK_ERI, VF_SA_ERI, ERI)'
     )
     dashboard = json.loads(app_module.repository.get_workspace_state('e2e_dashboards_v2'))['mapping-dashboard']
     assert dashboard['filters']['Vendor'] == ['VF_UK_ERI', 'VF_SA_ERI', 'ERI']
@@ -8430,10 +8448,7 @@ def test_admin_imports_report_catalogue(client) -> None:
     import src.DashboardAnalytic as app_module
 
     login(client)
-    content = (
-        ','.join(CATALOG_HEADERS)
-            + '\n8,Completed Call Ratio,Voice quality,Title and 1 column + Comments,Completed call ratio,CDR-Voice,Call_Status,100% Stacked Vertical Bars,Call Family = VoLTE,Operator,Campaign,Completed/Dropped/Failed,,,,,,,,\n'
-    ).encode('utf-8')
+    content = legacy_template_csv('8,Completed Call Ratio,Voice quality,Title and 1 column + Comments,Completed call ratio,CDR-Voice,Call_Status,100% Stacked Vertical Bars,Call Family = VoLTE,Operator,Campaign,Completed/Dropped/Failed,,,,,,,,')
 
     response = client.post(
         '/workspace-config/report-templates/nsa',
@@ -8494,10 +8509,7 @@ def test_admin_import_preserves_hyphens_in_uploaded_template_name(client) -> Non
     import src.DashboardAnalytic as app_module
 
     login(client)
-    content = (
-        ','.join(CATALOG_HEADERS)
-        + '\n1,Imported template,,Title and 1 column + Comments,,,,Title Slide,,,,,\n'
-    ).encode('utf-8')
+    content = legacy_template_csv('1,Imported template,,Title and 1 column + Comments,,,,Title Slide,,,,,')
     response = client.post(
         '/workspace-config/slides-templates/import', data={'template_type': 'nsa', 'catalogue_name': ''},
         files={'catalogue_file': ('NSA Slide Template - Gabriele.csv', BytesIO(content), 'text/csv')},
@@ -8513,8 +8525,8 @@ def test_importing_an_existing_template_requires_explicit_overwrite(client) -> N
     import src.DashboardAnalytic as app_module
 
     login(client)
-    original = (','.join(CATALOG_HEADERS) + '\n' + ','.join(['1', 'Original', '', 'Title and 1 column + Comments', '', '', '', 'Title Slide', '', '', '', '', '']) + '\n').encode('utf-8')
-    replacement = (','.join(CATALOG_HEADERS) + '\n' + ','.join(['1', 'Replacement', '', 'Title and 1 column + Comments', '', '', '', 'Title Slide', '', '', '', '', '']) + '\n').encode('utf-8')
+    original = legacy_template_csv('1,Original,,Title and 1 column + Comments,,,,Title Slide,,,,,')
+    replacement = legacy_template_csv('1,Replacement,,Title and 1 column + Comments,,,,Title Slide,,,,,')
     created = client.post(
         '/workspace-config/slides-templates/import', data={'template_type': 'nsa', 'catalogue_name': 'Shared Template'},
         files={'catalogue_file': ('Shared Template.csv', BytesIO(original), 'text/csv')}, follow_redirects=False,
@@ -8567,8 +8579,8 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     import src.DashboardAnalytic as app_module
 
     login(client)
-    first = (','.join(CATALOG_HEADERS) + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,\n').encode('utf-8')
-    second = (','.join(CATALOG_HEADERS) + '\n8,Second,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,\n').encode('utf-8')
+    first = legacy_template_csv('8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,')
+    second = legacy_template_csv('8,Second,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,')
 
     for name, content in [('Baseline Q4', first), ('Updated Q4', second)]:
         response = client.post(
@@ -8626,7 +8638,7 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert embedded_editor.text.index('data-catalogue-chart-preview-manage-dimensions') < embedded_editor.text.index('data-catalogue-chart-preview-close')
     assert 'data-catalogue-row-index="0"' in embedded_editor.text
     assert 'data-catalogue-reenumerate' in embedded_editor.text
-    assert 'Title and 1 column + Comments' in embedded_editor.text
+    assert 'Title + 1 rows + 1 columns + comments down' in embedded_editor.text
     assert 'catalogue-editor-catalogue-picker" aria-label="Workspace templates" hidden' in embedded_editor.text
 
     app_script = (app_module.PROJECT_ROOT / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
@@ -8682,11 +8694,10 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert len(copied_entries) == 3
     assert sorted({entry.slide for entry in copied_entries}) == [1, 2]
 
-    edited = (
-        ','.join(CATALOG_HEADERS)
-        + '\n9,Late,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,Right\n'
-        + '\n8,Edited,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,Right\n'
-    )
+    edited = legacy_template_csv(
+        '9,Late,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,Right',
+        '8,Edited,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,Right',
+    ).decode('utf-8')
     saved = client.post('/workspace-config/report-templates/nsa/Baseline%20Q4/save', data={'catalogue_content': edited}, follow_redirects=False)
     assert saved.status_code == 303
     saved_editor = client.get('/workspace-config/report-templates/nsa/Baseline%20Q4/editor')
@@ -8807,10 +8818,7 @@ def test_admin_renaming_named_catalogue_renames_its_csv_file(client) -> None:
     import src.DashboardAnalytic as app_module
 
     login(client)
-    content = (
-        ','.join(CATALOG_HEADERS)
-        + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,\n'
-    ).encode('utf-8')
+    content = legacy_template_csv('8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,')
     imported = client.post(
         '/workspace-config/report-templates/nsa',
         data={'catalogue_name': 'Original catalogue'},
@@ -8855,10 +8863,7 @@ def test_admin_duplicates_template_using_the_source_template_name(client) -> Non
     import src.DashboardAnalytic as app_module
 
     login(client)
-    content = (
-        ','.join(CATALOG_HEADERS)
-        + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,\n'
-    ).encode('utf-8')
+    content = legacy_template_csv('8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,')
     imported = client.post(
         '/workspace-config/report-templates/nsa',
         data={'catalogue_name': 'Regional NSA Template'},
@@ -8882,10 +8887,7 @@ def test_template_registry_does_not_rescan_legacy_csv_directories(client) -> Non
     login(client)
     library_dir = app_module.settings.slides_templates_dir / 'library' / 'nsa'
     library_dir.mkdir(parents=True, exist_ok=True)
-    content = (
-        ','.join(CATALOG_HEADERS)
-        + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,\n'
-    ).encode('utf-8')
+    content = legacy_template_csv('8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,')
     (library_dir / 'Historic baseline.csv').write_bytes(content)
 
     assert all(
@@ -8909,10 +8911,7 @@ def test_admin_importer_selects_template_type_and_moves_a_named_template(client)
     import src.DashboardAnalytic as app_module
 
     login(client)
-    content = (
-        ','.join(CATALOG_HEADERS)
-        + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,\n'
-    ).encode('utf-8')
+    content = legacy_template_csv('8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,')
     imported_sa = client.post(
         '/workspace-config/slides-templates/import',
         data={'template_type': 'sa', 'catalogue_name': 'SA imported template'},

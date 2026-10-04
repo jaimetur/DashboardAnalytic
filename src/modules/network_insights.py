@@ -304,8 +304,8 @@ def rf_summary(
     rows = []
     for key, part in samples.groupby(keys, sort=False, dropna=False):
         key = key if isinstance(key, tuple) else (key,)
-        rsrp_values = (pd.concat([part['lte_rsrp'], part['nr_rsrp']]) if technology == 'lte_nr' else part[rsrp]).dropna()
-        sinr_values = (pd.concat([part['lte_sinr'], part['nr_sinr']]) if technology == 'lte_nr' else part[sinr]).dropna()
+        rsrp_values = part[rsrp].dropna()
+        sinr_values = part[sinr].dropna()
         enodebs = {item for values in part['enodebs'] for item in values}
         cells = {item for values in part['cells'] for item in values}
         rows.append({
@@ -352,28 +352,14 @@ def operator_colours(operators: Iterable[str], mapping_groups: Iterable[dict[str
 
 def cdf_payload(
     samples: pd.DataFrame, value_column: str, group: str | None, title: str, metric_label: str,
-    colours: dict[str, str], *, points: int = 120,
+    colours: dict[str, str], *, points: int = 120, dash_groups: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Build a Canvas CDF model (one curve per Operator and group)."""
-    if value_column.startswith('lte_nr_'):
-        metric = value_column.removeprefix('lte_nr_')
-        models = [cdf_payload(samples, f'{radio}_{metric}', group, title, metric_label, colours, points=points)
-                  for radio in ('lte', 'nr')]
-        result = models[0]
-        for radio, model in zip(('LTE', 'NR'), models, strict=True):
-            for item in model['series']:
-                item['name'] += f' · {radio}'
-                if radio == 'NR':
-                    item['dash'] = [6, 4]
-            for item in model['legend']['items']:
-                item['label'] += f' · {radio}'
-                if radio == 'NR':
-                    item['dash'] = [6, 4]
-        result['series'] = [item for model in models for item in model['series']]
-        result['legend']['items'] = [item for model in models for item in model['legend']['items']]
-        result['type'] = 'cdf' if result['series'] else 'empty'
-        result['domain']['x'] = [min(model['domain']['x'][0] for model in models), max(model['domain']['x'][1] for model in models)]
-        return result
+    """Build a Canvas CDF model (one curve per Operator and group).
+
+    ``dash_groups`` maps each Operator label to its secondary grouping value,
+    so curves sharing an Operator colour use a different line style per value.
+    """
+    dash_values = sorted(set(dash_groups.values()), key=str.casefold) if dash_groups else []
     series = []
     legend = []
     keys = ['operator', *([group] if group else [])]
@@ -388,7 +374,12 @@ def cdf_payload(
         x = [round(float(values.quantile(q)), 2) for q in quantiles]
         lows.append(x[0]); highs.append(x[-1])
         name = ' · '.join(str(item) for item in key if str(item))
-        dash = SERIES_DASHES[group_values.index(key[1]) % len(SERIES_DASHES)] if group else []
+        if group:
+            dash = SERIES_DASHES[group_values.index(key[1]) % len(SERIES_DASHES)]
+        elif dash_groups and key[0] in dash_groups:
+            dash = SERIES_DASHES[dash_values.index(dash_groups[key[0]]) % len(SERIES_DASHES)]
+        else:
+            dash = []
         colour = colours.get(key[0], OPERATOR_FALLBACK_COLOURS[0])
         series.append({'name': name, 'colour': colour, 'width': 3, 'dash': dash, 'x': x, 'y': quantiles})
         legend.append({'label': name, 'colour': colour, 'width': 3, 'dash': dash})
@@ -721,7 +712,7 @@ def install_network_insights_routes(core: Any) -> None:
     class AnalysisRequest(BaseModel):
         datasets: dict[str, list[int]] = Field(default_factory=dict)
         technology: str = 'lte'
-        group: list[str] | str = Field(default_factory=lambda: ['campaign'])
+        group: list[str] | str = Field(default_factory=lambda: ['operator', 'campaign'])
         operators: list[str] = Field(default_factory=list)
         vendors: list[str] = Field(default_factory=list)
         campaigns: list[str] = Field(default_factory=list)
@@ -884,8 +875,11 @@ def install_network_insights_routes(core: Any) -> None:
     def network_insights_analysis(request: AnalysisRequest, user=Depends(insights_user)):
         technology = request.technology if request.technology in TECHNOLOGIES else 'lte'
         requested_groups = [request.group] if isinstance(request.group, str) else request.group
-        groups = [field for field in GROUPINGS if field in requested_groups
-                  and (field != 'technology' or technology == 'lte_nr')]
+        # LTE+NR always separates the technologies: LTE RSRP/SINR and NR
+        # SS-RSRP/SS-SINR use different reference signals and are never pooled.
+        groups = [field for field in GROUPINGS
+                  if (field == 'technology' and technology == 'lte_nr')
+                  or (field != 'technology' and field in requested_groups)]
         group_label = ' → '.join(GROUPINGS[field] for field in groups) or 'All samples'
         task_repository = bound_repository()
         samples = load_samples(task_repository, request.datasets)
@@ -921,6 +915,9 @@ def install_network_insights_routes(core: Any) -> None:
             filtered = pd.concat(technology_frames, ignore_index=True)
             if filtered.empty:
                 raise HTTPException(400, 'No LTE or NR radio measurements match the selected filters.')
+            # Each row now carries one technology, so its values form one column.
+            for metric in ('rsrp', 'sinr'):
+                filtered[f'lte_nr_{metric}'] = filtered[f'lte_{metric}'].fillna(filtered[f'nr_{metric}'])
         original_operators = filtered['operator'].copy()
         # Operator is a grouping dimension only when explicitly selected.
         # Site/cell identifiers remain scoped by their source operator when pooled.
@@ -936,6 +933,12 @@ def install_network_insights_routes(core: Any) -> None:
             labels = pd.Series('All samples', index=filtered.index)
         filtered['operator'] = labels
         group_column = None
+        # Curves sharing an Operator colour differ by line style per secondary group.
+        secondary = [field for field in groups if field != 'operator']
+        dash_groups = None
+        if 'operator' in groups and secondary:
+            secondary_labels = filtered[secondary].fillna('').astype(str).agg(' · '.join, axis=1)
+            dash_groups = dict(zip(labels, secondary_labels, strict=True))
         rsrp, sinr = f'{technology}_rsrp', f'{technology}_sinr'
         mapping_groups = task_repository.list_operator_mapping_groups()
         if 'operator' in groups:
@@ -965,12 +968,6 @@ def install_network_insights_routes(core: Any) -> None:
         map_operators = [row['operator'] for row in overview]
         map_operator = request.map_operator if request.map_operator in map_operators else (map_operators[0] if map_operators else '')
         operator_samples = filtered.loc[filtered['operator'] == map_operator]
-        if technology == 'lte_nr':
-            operator_samples = pd.concat([
-                operator_samples.assign(lte_nr_rsrp=operator_samples[f'{radio}_rsrp'],
-                                        lte_nr_sinr=operator_samples[f'{radio}_sinr'])
-                for radio in ('lte', 'nr')
-            ], ignore_index=True)
         coverage_cells, coverage_grid = grid_cells(operator_samples, rsrp, request.coverage_threshold, request.grid_metres, request.min_samples)
         interference_cells, interference_grid = grid_cells(operator_samples, sinr, request.interference_threshold, request.grid_metres, request.min_samples)
         technology_label = TECHNOLOGIES[technology]
@@ -988,8 +985,8 @@ def install_network_insights_routes(core: Any) -> None:
             'overview': overview,
             'rf_rows': overview,
             'charts': {
-                'rsrp_cdf': cdf_payload(filtered, rsrp, group_column, f'{technology_label} RSRP', 'RSRP (dBm)', colours),
-                'sinr_cdf': cdf_payload(filtered, sinr, group_column, f'{technology_label} SINR', 'SINR (dB)', colours),
+                'rsrp_cdf': cdf_payload(filtered, rsrp, group_column, f'{technology_label} RSRP', 'RSRP (dBm)', colours, dash_groups=dash_groups),
+                'sinr_cdf': cdf_payload(filtered, sinr, group_column, f'{technology_label} SINR', 'SINR (dB)', colours, dash_groups=dash_groups),
             },
             'maps': {
                 'operator': map_operator, 'operators': map_operators,

@@ -30,8 +30,10 @@
   const syncTechnologyGrouping = () => {
     const control = $('ni-group');
     const existing = [...control.options].find(option => option.value === 'technology');
+    // LTE+NR always separates the technologies; their RSRP/SINR are never pooled.
     if ($('ni-technology').value === 'lte_nr') {
-      if (!existing) control.add(new Option('Technology', 'technology'), [...control.options].find(option => option.value === 'campaign') || null);
+      if (existing) existing.selected = true;
+      else control.add(new Option('Technology', 'technology', true, true), [...control.options].find(option => option.value === 'campaign') || null);
     } else if (existing) existing.remove();
     control.dispatchEvent(new Event('multiselect:options-updated'));
   };

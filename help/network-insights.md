@@ -1,8 +1,6 @@
 # Network Insights
 
-Analyse the network behind the measured performance: radio quality (RSRP and SINR), weak-coverage and high-interference areas on a map, observed and inventoried sites, licensed and observed spectrum, and network deployment (NNS, eMOCN scenarios, host networks and RAN vendors). The **Filters:** section offers Operators, Vendors, Regions, Cities and Campaigns. **Main Cities** appears first in the Cities menu when configured in the workspace; selecting it applies the configured cities available in the selected CDRs. Values load automatically from the lightweight CDR catalogues without waiting for a full analysis. The selectors show **Loading values…** while the request is pending. The persistent CDR catalogue stores both Vendor and Vendor_Only universes. Vendor choices are read exclusively from the Vendor_Only cache, populated during CDR processing. Existing CDRs receive a one-time backfill when this cache is first requested. Vendor loading runs separately, so its initial lookup does not hold up Operators, Regions, Cities or Campaigns. These four filters use cached CDR catalogues; legacy CDRs need their catalogues populated during CDR processing.
-
-Measured views group only by the checked **Group by** dimensions: Campaign, Operator, Vendor, Region, City and CDR type. Multiple checked dimensions form a hierarchy in selector order. Campaign is always the last grouping dimension, including when Technology is available. Measured tables use alphabetical order by the selected hierarchy, keeping each operator/group and its technologies/campaigns together. The map Group selector follows the displayed table rows exactly, rather than the source CDR or campaign order. Operator is included only when checked; otherwise samples from selected operators sharing the other dimensions are combined. With no dimensions checked, the view pools all selected samples. Licensed spectrum and uploaded inventories retain their own reference dimensions.
+Analyse the network behind the measured performance: radio quality (RSRP and SINR), weak-coverage and high-interference areas on a map, observed and inventoried sites, licensed and observed spectrum, and network deployment (NNS, eMOCN scenarios, host networks and RAN vendors). Results are grouped by the dimensions checked in **Group by**; Operator and Campaign are checked by default.
 
 > [!NOTE]
 > **Radio views need no extra input.** RSRP, SINR, maps, observed eNodeBs and observed bands come from the processed CDRs. Site inventories and licensed spectrum are optional inputs that complete the Sites & Density, Spectrum and Network Deployment panels.
@@ -24,13 +22,26 @@ Measured views group only by the checked **Group by** dimensions: Campaign, Oper
 ## Analysis Selection
 
 1. Open the workspace and the **Network Insights** tab, which follows **Scoring & GAP Analysis**.
-2. Choose **NR Mode**. The CDR lists show the ready Data, Voice and Speech CDRs of that mode; the two most recently uploaded CDRs of each type are selected.
-3. Choose **Technology** (LTE, NR or LTE+NR) and **Group by** (Campaign, Operator, Vendor, Region, City or CDR type).
-   **Group by** is a multiple selection: choose one or more dimensions. **Operator** separates operators only when checked. **Vendor** splits each operator by vendor, using only `Vendor_Only`. The Vendors filter also uses only this field. Actual vendors appear first, followed by Mixed Vendor(s), Other Vendor(s), All Vendor(s), and then operator-only identities labelled **Operator - All**; vendor mapping stores this operator-only identity, including the suffix, in `Vendor_Only`. CDRs without it contribute no vendor choices.
-4. Adjust **Low coverage below** (default -110 dBm), **High interference below** (default 0 dB) and the **Map grid** size (default 250 m).
-5. Press **Analyse Network**.
+2. Choose **NR Mode**. All ready Data, Voice and Speech CDRs of that mode are selected; clear the ones you do not need.
+3. Restrict **Operators**, **Vendors**, **Regions**, **Cities** or **Campaigns** in **Filters:** if needed. Their values load automatically from the selected CDRs; **Main Cities** appears first in Cities when configured. Leaving every value selected applies no restriction.
+4. Choose **Technology** (LTE, NR or LTE+NR) and **Group by** (Operator, Vendor, Region, City, CDR type and Campaign).
+5. Adjust **Low coverage below** (default -110 dBm), **High interference below** (default 0 dB) and the **Map grid** size (default 250 m).
+6. Press **Analyse Network**.
 
-After the first analysis, **Operators**, **Regions** and **Cities** list the values found in the selected CDRs. Restrict them and press **Analyse Network** again. Leaving every value selected applies no restriction.
+### Grouping
+
+**Group by** accepts several dimensions; they form a hierarchy in the selector order, with Campaign last. Each Overview card, table row, CDF curve and map group is one combination, for example `EE · 2026-Q2`.
+
+- Keep **Operator** checked to compare operators. Uncheck it to pool the selected operators, for example to compare vendors across operators with **Vendor** checked.
+- **Vendor** uses `Vendor_Only`: actual vendors, then Mixed, Other and All Vendor(s), then operators without a mapped vendor as **Operator - All**.
+- With no dimension checked, all selected samples form one group.
+- Curves of the same Operator share its colour and use a different line style for each Campaign or other secondary group.
+- The change between the two latest campaigns appears only when Campaign is not a grouping dimension.
+- eNodeBs and cells are counted per source operator, also when operators are pooled.
+
+### LTE+NR
+
+**LTE+NR** always adds **Technology** to the grouping, so LTE and NR results appear side by side and are never pooled: LTE RSRP/SINR and NR SS-RSRP/SS-SINR use different reference signals. A sample with both measurements contributes once to each technology. Select LTE or NR to analyse one technology.
 
 > [!TIP]
 > The first analysis of a CDR copies its radio fields into the combined reporting tables and can take a minute. Later analyses of the same CDRs reuse them and the parsed samples, so changing filters, thresholds or the map Operator is fast.
@@ -39,12 +50,12 @@ Operator names follow the workspace **Operator Maps**, including their colours; 
 
 ## Overview and RF Quality
 
-The **Overview** shows one card per Operator with the median RSRP, the share of samples below the coverage threshold, the median SINR, the share of samples below the interference threshold, the observed eNodeBs and the number of samples. When the selection contains two or more campaigns, each indicator shows its change between the two latest campaigns: green when the indicator improves and red when it worsens.
+The **Overview** shows one card per group with the median RSRP, the share of samples below the coverage threshold, the median SINR, the share of samples below the interference threshold, the observed eNodeBs and the number of samples. When the selection contains two or more campaigns and Campaign is not grouped, each indicator shows its change between the two latest campaigns: green when the indicator improves and red when it worsens.
 
 **RF Quality** contains:
 
-- the RSRP and SINR cumulative distributions, one curve per Operator; grouped analyses use a different line style per group;
-- a table per Operator and group with median and 10th-percentile RSRP and SINR, the low-coverage and high-interference shares and the quality-class distribution.
+- the RSRP and SINR cumulative distributions, one curve per group, coloured by Operator with a line style per secondary group;
+- a table per group with median and 10th-percentile RSRP and SINR, the low-coverage and high-interference shares and the quality-class distribution.
 
 | Class | RSRP (dBm) | SINR (dB) |
 | --- | --- | --- |
@@ -58,13 +69,13 @@ Values outside physical ranges (RSRP outside -160 to -20 dBm, SINR outside -30 t
 
 ## Coverage and Interference Maps
 
-The maps show one Operator at a time over OpenStreetMap. Samples are grouped into square grid cells of the selected size, and each cell is coloured by its mean RSRP or SINR class. Cells need at least three located samples. Very dense selections use a coarser grid automatically to keep the map readable; the note above the maps shows the grid actually used.
+The maps show one group at a time (selected in **Group**) over OpenStreetMap. Samples are grouped into square grid cells of the selected size, and each cell is coloured by its mean RSRP or SINR class. Cells need at least three located samples. Very dense selections use a coarser grid automatically to keep the map readable; the note above the maps shows the grid actually used.
 
 Below each map, the **Weakest coverage areas** and **Highest interference areas** tables rank the cells where at least half of the samples are below the threshold, by the number of affected samples. Select an area (its City) to zoom the map to it, and **Show Whole Area** to return. Drag a rectangle over a map to magnify it, then drag to pan.
 
 ## Sites and Density
 
-The table counts, per Operator and group, the **observed eNodeBs** (distinct LTE eNodeB identities, Cell Identity ÷ 256, that served the measuring devices) and **observed cells**, with the samples per eNodeB. Observed eNodeBs depend on the route and do not equal the deployed sites.
+The table counts, per group, the **observed eNodeBs** (distinct LTE eNodeB identities, Cell Identity ÷ 256, that served the measuring devices) and **observed cells**, with the samples per eNodeB. Observed eNodeBs depend on the route and do not equal the deployed sites.
 
 When a Vodafone or Three cell inventory is uploaded as a Vendor mapping dataset in Workspace, the panel also shows its total number of distinct sites and cells.
 
@@ -72,7 +83,7 @@ When a Vodafone or Three cell inventory is uploaded as a Vendor mapping dataset 
 
 **Licensed spectrum** aggregates the MHz configured in [Workspace Config → Spectrum Holdings](workspace-config.md#spectrum-holdings) per Operator into Low (below 1 GHz), Mid (1–3 GHz FDD/SDL) and High (TDD) bands. Without holdings, the panel shows a pending-input notice.
 
-**Spectrum observed in the measurements** shows the share of samples served on each LTE band (from the serving EARFCN or the band of the cell trace) and NR band, with the frequency, duplex mode, class and the most frequent downlink bandwidth. Bandwidths are reported only by CDR Data.
+**Spectrum observed in the measurements** shows the share of samples served on each LTE band (from the serving EARFCN or the band of the cell trace) and NR band, with the frequency, duplex mode, class and the most frequent downlink bandwidth. Bandwidths are reported only by CDR Data. Observed bands follow the grouping: keep Operator checked to see each operator's own bands.
 
 ## Network Deployment
 
@@ -120,31 +131,14 @@ Speech falls back to the `Recording_*` fields when the `Playing_*` fields are ab
 
 ## Persistence and transfers
 
-Network Insights stores no analysis results; every analysis is calculated on demand. Spectrum Holdings belong to the workspace and travel with the **Operator & Vendor Maps** export, transfers and backups. Workspace templates and Dashboards travel with Report Templates and Dashboards.
+Analyses are calculated on demand. Spectrum Holdings belong to the workspace and travel with the **Operator & Vendor Maps** export, transfers and backups. Workspace templates and Dashboards travel with Report Templates and Dashboards.
+
+Network Insights remembers the selected CDRs, NR Mode, Technology, grouping, filters, thresholds, map grid and deployment grouping in this browser, separately for each workspace and user. Unavailable CDRs or values are omitted when restored. These browser preferences are not included in workspace exports or backups.
 
 ## Troubleshooting
 
 - **No ready CDRs** in a CDR list: check the NR Mode and that the CDRs finished processing.
-- **No samples match**: clear the Operator, Region or City restriction.
+- **No samples match**: clear the Operator, Vendor, Region, City or Campaign restriction.
 - **A map is empty**: the selected CDRs carry no coordinates or no values for the selected Technology; the status line says which.
 - **NR curves are empty**: NSA CDRs report NR values only while the device is attached to NR; check the NR RSRP samples column in the RF Quality table.
 - **The Licensed spectrum panel shows Pending input**: add Spectrum Holdings in Workspace Config.
-
-> [!NOTE]
-> **Vendor comparison:** Before generating a multivendor report, choose **Operator – Vendor** to keep each operator separate, or **Vendor only (Vendor_Only)** to pool selected operators using the same vendor. Campaigns remain separate. The job retains this choice for retries. Dynamic vendor grids use up to six columns per slide and keep operators of the same vendor together where possible.
-
-### LTE+NR selection
-
-**LTE+NR** shows LTE and NR CDF curves together, labelled by technology (NR uses dashed lines). Summary statistics and map grids pool valid radio measurements from both technologies; source sample and observed-site counts remain unduplicated. A source row can contain both an LTE and an NR measurement, so the RSRP/SINR measurement counts can exceed source sample counts. Select LTE or NR for technology-specific statistics and maps.
-
-The Overview, RF quality tables/CDFs, observed sites, observed spectrum and map group picker use the selected hierarchy. Site identifiers are scoped by source operator before counting pooled groups. Changes between the latest two campaigns are shown only when Campaign is not itself a grouping dimension.
-
-### Remembering selections
-
-Network Insights remembers the selected CDRs, NR Mode, Technology, grouping levels, filters, thresholds, map grid and deployment grouping in this browser, separately for each workspace and user. Reloading restores valid selections; removed CDRs or unavailable values are omitted. Analysis results are not stored by this preference: press **Analyse Network** to recalculate them. Browser selections are local preferences and are not included in workspace exports or backups.
-
-When **Technology** is **LTE+NR**, **Group by** also offers **Technology**. Checking it separates LTE and NR in the selected hierarchy for summaries, tables, charts and maps. The option is removed for LTE-only or NR-only analysis. A source row with measurements from both technologies contributes once to each technology group.
-
-Filters appear above the CDR dataset groups. By default, all ready CDRs of the selected NR Mode are checked. Your saved dataset selection takes precedence after you change it.
-
-Network Deployment reuses a narrow inventory projection and grouped counts while the inventory revision remains unchanged. Changing Group by discards older pending responses; processing or editing an inventory invalidates its cached counts. A timed-out request shows an error instead of remaining on the loading message.

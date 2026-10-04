@@ -27,13 +27,15 @@ def test_priority_arrow_is_only_on_individual_gap_slides(levels, operators):
         table_shape = next(shape for shape in slide.shapes if shape.has_table)
         table = table_shape.table
         header_rows = len(levels) + 1 if len(levels) > 1 else 1
-        assert len(table.rows) == header_rows + len(result['configuration']['metrics'])
-        kpi_names = [row.cells[1].text for row in list(table.rows)[header_rows:]]
+        # KPI rows are followed by the Total KPI GAP row.
+        assert len(table.rows) == header_rows + len(result['configuration']['metrics']) + 1
+        assert table.cell(len(table.rows) - 1, 0).text == 'Total KPI GAP'
+        kpi_names = [row.cells[1].text for row in list(table.rows)[header_rows:-1]]
         assert not any(name.lower().endswith(' total') for name in kpi_names)
         assert any('Average KPI GAP:' in shape.text
                    for shape in slide.shapes if shape.has_text_frame) == (not all_operators)
         visible_category_cells = [
-            row.cells[0] for row in list(table.rows)[1:]
+            row.cells[0] for row in list(table.rows)[1:-1]
             if row.cells[0].text and row.cells[0].text != 'Category'
         ]
         category_fills = [str(cell.fill.fore_color.rgb).upper() for cell in visible_category_cells]

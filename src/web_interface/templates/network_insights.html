@@ -14,7 +14,7 @@
       <div class="ni-selection-grid">
         <label>NR Mode<select id="ni-nr-mode"><option value="NSA">NSA</option><option value="SA">SA</option></select></label>
         <label>Technology<select id="ni-technology">{% for key, label in network_insights_config.technologies.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
-        <label>Group by<select id="ni-group" multiple size="1" data-multiselect-empty-label="All samples" aria-label="Group by">{% for key, label in network_insights_config.groupings.items() %}<option value="{{ key }}"{% if key == "campaign" %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+        <label>Group by<select id="ni-group" multiple size="1" data-multiselect-empty-label="All samples" aria-label="Group by">{% for key, label in network_insights_config.groupings.items() %}<option value="{{ key }}"{% if key in ("operator", "campaign") %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
         <label>Low coverage below (dBm)<input type="number" id="ni-coverage-threshold" step="1" value="{{ network_insights_config.coverage_threshold|int }}"></label>
         <label>High interference below (dB)<input type="number" id="ni-interference-threshold" step="0.5" value="{{ network_insights_config.interference_threshold|int }}"></label>
         <label>Map grid (m)<select id="ni-grid"><option value="100">100 m</option><option value="250" selected>250 m</option><option value="500">500 m</option><option value="1000">1 km</option></select></label>

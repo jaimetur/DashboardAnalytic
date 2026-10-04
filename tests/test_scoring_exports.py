@@ -662,11 +662,13 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
                          if row.get('row_type') != 'category'
                          and row['kpi'].casefold() != 'average kpi gap']
     assert all(not row['kpi'].casefold().endswith(' total') for row in expected_gap_rows)
-    assert len(gap_table.rows) == len(expected_gap_rows) + 1
-    assert [gap_table.cell(row, 1).text for row in range(1, len(gap_table.rows))] == [
+    # Header, one row per KPI and the closing Total KPI GAP row.
+    assert len(gap_table.rows) == len(expected_gap_rows) + 2
+    assert gap_table.cell(len(gap_table.rows) - 1, 0).text == 'Total KPI GAP'
+    assert [gap_table.cell(row, 1).text for row in range(1, len(gap_table.rows) - 1)] == [
         row['kpi'] for row in expected_gap_rows
     ]
-    assert [float(gap_table.cell(row, 3).text) for row in range(1, len(gap_table.rows))] == pytest.approx(
+    assert [float(gap_table.cell(row, 3).text) for row in range(1, len(gap_table.rows) - 1)] == pytest.approx(
         [row['gap_points'] for row in expected_gap_rows], abs=.0051,
     )
     assert _rgb(gap_table.cell(0, 3)) == MAPPED_OPERATOR_COLORS[expected_gap_table['operator']].lstrip('#')
@@ -722,9 +724,10 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
                         if row.get('row_type') != 'category'
                         and row['kpi'].casefold() != 'average kpi gap']
     assert all(not row['kpi'].casefold().endswith(' total') for row in summary_gap_rows)
-    assert len(summary_table.rows) == len(summary_gap_rows) + 1
+    assert len(summary_table.rows) == len(summary_gap_rows) + 2
+    assert summary_table.cell(len(summary_table.rows) - 1, 0).text == 'Total KPI GAP'
     assert len(summary_table.columns) == len(summary_view['operators']) + 3
-    assert [summary_table.cell(row, 1).text for row in range(1, len(summary_table.rows))] == [
+    assert [summary_table.cell(row, 1).text for row in range(1, len(summary_table.rows) - 1)] == [
         row['kpi'] for row in summary_gap_rows
     ]
     for row_index, row in enumerate(summary_gap_rows, 1):
@@ -1014,7 +1017,7 @@ def test_intro_slides_show_all_canonical_scope_filters_without_overlapping_campa
                    for paragraph in filters_shape.text_frame.paragraphs[1:])
         assert filters_shape.top >= subtitle_shape.top + subtitle_shape.height
         assert filters_shape.top + filters_shape.height < campaign_shape.top
-        assert all(str(paragraph.font.color.rgb) == 'CCEEF4'
+        assert all(str(paragraph.font.color.rgb) == 'FFFFFF'
                    for paragraph in filters_shape.text_frame.paragraphs)
         assert subtitle_shape.text == 'Non-Standalone'
         assert mode_paragraph.font.size.pt == 18
@@ -1386,10 +1389,11 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
                           if row.get('row_type') != 'category'
                           and row['kpi'].casefold() != 'average kpi gap']
     assert all(not row['kpi'].casefold().endswith(' total') for row in hierarchy_gap_rows)
-    assert len(all_gap_tables[0].rows) == 4 + len(METRICS)
+    assert len(all_gap_tables[0].rows) == 4 + len(METRICS) + 1
     assert len(all_gap_tables[0].columns) == 3 + 3 * len(contexts)
     for table in all_gap_tables:
-        assert [table.cell(row_index, 1).text for row_index in range(4, len(table.rows))] == [
+        assert table.cell(len(table.rows) - 1, 0).text == 'Total KPI GAP'
+        assert [table.cell(row_index, 1).text for row_index in range(4, len(table.rows) - 1)] == [
             row['kpi'] for row in hierarchy_gap_rows
         ]
     assert not any(cell.text == 'EE' for table in all_gap_tables
@@ -1398,10 +1402,10 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     expected_gap_kpis = {metric['kpi'] for metric in METRICS}
     for slide in individual_gap_slides:
         operator_gap_table = next(shape.table for shape in slide.shapes if shape.has_table)
-        assert len(operator_gap_table.rows) == 4 + len(METRICS)
+        assert len(operator_gap_table.rows) == 4 + len(METRICS) + 1
         assert len(operator_gap_table.columns) == 3 + len(contexts)
         operator_gap_kpis = [operator_gap_table.cell(row_index, 1).text
-                             for row_index in range(4, len(operator_gap_table.rows))]
+                             for row_index in range(4, len(operator_gap_table.rows) - 1)]
         assert len(operator_gap_kpis) == len(METRICS)
         assert set(operator_gap_kpis) == expected_gap_kpis
         assert all(not kpi.casefold().endswith(' total') for kpi in operator_gap_kpis)

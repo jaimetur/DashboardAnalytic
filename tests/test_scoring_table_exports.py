@@ -133,8 +133,9 @@ def test_ppt_table_modes_include_bold_category_totals_and_keep_identical_charts(
     all_gap_slides = [slide for slide in presentations[1].slides
                       if slide.shapes.title.text.split('\n')[0] == 'GAP Analysis — All vs EE']
     table = next(shape.table for shape in all_gap_slides[0].shapes if shape.has_table)
-    assert len(table.rows) == 1 + len(scoring_configuration()['metrics'])
-    gap_kpis = [table.cell(row, 1).text for row in range(1, len(table.rows))]
+    assert len(table.rows) == 1 + len(scoring_configuration()['metrics']) + 1
+    assert table.cell(len(table.rows) - 1, 0).text == 'Total KPI GAP'
+    gap_kpis = [table.cell(row, 1).text for row in range(1, len(table.rows) - 1)]
     assert all(not kpi.casefold().endswith(' total') for kpi in gap_kpis)
     assert all(kpi.casefold() != 'average kpi gap' for kpi in gap_kpis)
 
