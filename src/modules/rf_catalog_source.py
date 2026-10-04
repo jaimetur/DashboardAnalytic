@@ -42,6 +42,16 @@ def pool_rf_frames(frames: dict[str, pd.DataFrame]) -> pd.DataFrame:
     return combined
 
 
+class RFUnionSource(str):
+    """The UNION ALL source text, plus its per-type branches for efficient queries.
+
+    A filtered query over the compound subquery cannot use the per-dataset
+    index and computes every column; querying each branch separately can.
+    """
+
+    branches: tuple[str, ...] = ()
+
+
 def rf_union_source(repository, kinds: list[str]) -> tuple[str, list[str]]:
     """Build a read-only UNION ALL over materialized CDR tables, retaining raw samples."""
     schemas = {kind: repository.list_reporting_row_columns(kind) for kind in kinds}
@@ -69,4 +79,6 @@ def rf_union_source(repository, kinds: list[str]) -> tuple[str, list[str]]:
                 expression = quote(actual) if actual else 'NULL'
             expressions.append(f'{expression} AS {quote(target)}')
         queries.append(f'SELECT {", ".join(expressions)} FROM {quote(repository.reporting_rows_table_name(kind))}')
-    return '(' + ' UNION ALL '.join(queries) + ')', columns
+    source = RFUnionSource('(' + ' UNION ALL '.join(queries) + ')')
+    source.branches = tuple(queries)
+    return source, columns

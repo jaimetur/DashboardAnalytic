@@ -2969,10 +2969,11 @@ class Repository:
                 # existing field in one pass through the selected dataset and,
                 # only when needed, one pass through its source table.
                 if existing_pairs:
+                    # EXISTS stops at the first non-NULL value, so populated
+                    # fields cost one indexed lookup instead of a full scan.
                     target_presence = conn.execute(
-                        f"SELECT {', '.join(f'MAX(CASE WHEN {self._quote_identifier(target)} IS NOT NULL THEN 1 ELSE 0 END) AS present_{index}' for index, (target, _source) in enumerate(existing_pairs))} "
-                        f"FROM {quoted_target} WHERE dataset_id = ?",
-                        (dataset_id,),
+                        f"SELECT {', '.join(f'EXISTS(SELECT 1 FROM {quoted_target} WHERE dataset_id = ? AND {self._quote_identifier(target)} IS NOT NULL) AS present_{index}' for index, (target, _source) in enumerate(existing_pairs))}",
+                        (dataset_id,) * len(existing_pairs),
                     ).fetchone()
                     missing_pairs = [
                         pair for index, pair in enumerate(existing_pairs)
@@ -2980,8 +2981,7 @@ class Repository:
                     ]
                     if missing_pairs:
                         source_presence = conn.execute(
-                            f"SELECT {', '.join(f'MAX(CASE WHEN {self._quote_identifier(source)} IS NOT NULL THEN 1 ELSE 0 END) AS present_{index}' for index, (_target, source) in enumerate(missing_pairs))} "
-                            f"FROM {self._quote_identifier(source_table)}"
+                            f"SELECT {', '.join(f'EXISTS(SELECT 1 FROM {self._quote_identifier(source_table)} WHERE {self._quote_identifier(source)} IS NOT NULL) AS present_{index}' for index, (_target, source) in enumerate(missing_pairs))}"
                         ).fetchone()
                         columns_to_refresh.extend(
                             pair for index, pair in enumerate(missing_pairs)

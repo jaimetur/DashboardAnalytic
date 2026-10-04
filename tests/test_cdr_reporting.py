@@ -519,7 +519,7 @@ def test_reporting_cache_checks_requested_columns_in_bounded_table_scans(tmp_pat
 
     presence_queries = [
         statement for statement in repository.statements
-        if statement.startswith('SELECT MAX(CASE WHEN')
+        if statement.startswith('SELECT EXISTS(')
     ]
     assert len(presence_queries) == 2
     assert '"first" IS NOT NULL' in presence_queries[0]

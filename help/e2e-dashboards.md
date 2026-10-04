@@ -260,6 +260,8 @@ Changing Scope renders the charts again and selects the default CDR universe for
 
 Title and Transition slides preserve the template text and branded typography. A title cover shows Campaigns above its decorative divider, with Scope, Regions and Cities beneath it, matching PPT. Chart rows preserve template order and placeholder geometry.
 
+In grids with three or more rows or four or more columns, each chart's title appears as text above the chart, in the viewer and in the PPT, so it stays readable in small cells. Dynamic grids show the row or column value (for example the Operator) in bold before the title, such as **EE** · LTE RSRP histogram.
+
 Layouts ending in **comments right** place comments beside the charts; **comments down** places them below. Layouts without comments use the full chart area. Narrow screens wrap actions and adapt navigation to the available space.
 
 ### Live and expanded chart controls

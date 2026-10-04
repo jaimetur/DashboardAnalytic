@@ -441,6 +441,20 @@ def dynamic_chart_title(entry: CatalogEntry, frame: pd.DataFrame | None = None) 
     return entry.chart_title + (" – " + " / ".join(values) if values else "")
 
 
+def chart_title_parts(entry: CatalogEntry) -> tuple[str, str]:
+    """Split a resolved dynamic chart title into its dynamic values and base title."""
+    values = [str(value) for value in (entry.dynamic_row_value, entry.dynamic_column_value) if value is not None]
+    if not values and entry.dynamic_value is not None:
+        values = [str(entry.dynamic_value)]
+    title = entry.chart_title
+    if values:
+        # Vendor values may be displayed differently; recover them from the title suffix.
+        separator = title.rfind(" – ")
+        if separator > 0:
+            return title[separator + 3:], title[:separator]
+    return "", title
+
+
 def validate_dynamic_slide(rows: list[CatalogEntry]) -> None:
     header = rows[0]
     dynamic_rows, dynamic_columns = dynamic_layout_axes(header.layout)
@@ -1573,7 +1587,7 @@ def normalise_operator_aliases(frame: pd.DataFrame, mappings: dict[str, str] | N
         return _normalise_operator_label(value, configured)
     for column in result.columns:
         if _normalise_catalog_name(str(column)) == "operator":
-            result[column] = result[column].map(mapped)
+            result[column] = _map_distinct_values(result[column], mapped)
     for vendor_column in [
         column for column in result.columns
         if _normalise_catalog_name(str(column)) in {"vendor", "vendoronly", "operatorvendor"}
@@ -1582,11 +1596,23 @@ def normalise_operator_aliases(frame: pd.DataFrame, mappings: dict[str, str] | N
             if pd.isna(value) or not str(value).strip():
                 return value
             return _normalise_vendor(value, configured, vendor_mappings)
-        result[vendor_column] = result[vendor_column].map(mapped_vendor)
+        result[vendor_column] = _map_distinct_values(result[vendor_column], mapped_vendor)
     result.attrs['operator_aliases_normalized'] = True
     result.attrs['operator_mappings'] = configured
     result.attrs['vendor_mappings'] = vendor_mappings
     return result
+
+
+def _map_distinct_values(series: pd.Series, function: Callable[[object], object]) -> pd.Series:
+    """Apply ``function`` once per distinct non-missing value; missing values stay unchanged.
+
+    Operator and Vendor columns repeat a few labels over millions of samples.
+    """
+    present = series.notna()
+    if not present.any():
+        return series
+    mapping = {value: function(value) for value in pd.unique(series[present])}
+    return series.map(mapping).where(present, series)
 
 
 def _split_global_cells(value: object) -> list[str]:

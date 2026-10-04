@@ -259,22 +259,23 @@ def test_network_insights_page_and_analysis(client, tmp_path) -> None:
     })
     assert operator_comparison.status_code == 200, operator_comparison.text
     assert operator_comparison.json()['comparison'] == {'previous': '2026-Q1', 'latest': '2026-Q2'}
-    assert {row['operator'] for row in payload['overview']} == {'2026-Q1', '2026-Q2'}
+    # Operator is always grouped unless Vendor replaces it.
+    assert {row['operator'] for row in payload['overview']} == {'EE · 2026-Q1', 'EE · 2026-Q2', 'VF · 2026-Q1', 'VF · 2026-Q2'}
     operator_payload = operator_comparison.json()
     assert {row['operator'] for row in operator_payload['overview']} == {'EE', 'VF'}
     ee = next(row for row in operator_payload['overview'] if row['operator'] == 'EE')
     assert ee['deltas']['rsrp_median'] is not None
     assert payload['charts']['rsrp_cdf']['type'] == 'cdf'
-    assert len(payload['charts']['rsrp_cdf']['series']) == 2
+    assert len(payload['charts']['rsrp_cdf']['series']) == 4
     assert payload['maps']['coverage']['type'] == 'map'
     assert payload['options']['cities'] == ['Leeds', 'York']
     assert payload['spectrum']['licensed'] == []
 
     filtered = client.post('/api/network-insights/analysis', json={
-        'datasets': {'data': ids}, 'technology': 'lte', 'group': 'city', 'cities': ['York'], 'map_operator': 'VF',
+        'datasets': {'data': ids}, 'technology': 'lte', 'group': 'city', 'cities': ['York'], 'map_operator': 'VF · York',
     }).json()
-    assert {row['operator'] for row in filtered['rf_rows']} == {'York'}
-    assert filtered['maps']['operator'] == 'York'
+    assert {row['operator'] for row in filtered['rf_rows']} == {'VF · York'}
+    assert filtered['maps']['operator'] == 'VF · York'
 
     empty = client.post('/api/network-insights/analysis', json={'datasets': {'data': ids}, 'operators': ['Nobody']})
     assert empty.status_code == 400
@@ -609,6 +610,14 @@ def test_grouped_cdf_curves_differ_by_line_style_and_lte_nr_stays_separate(clien
     grouped = client.post('/api/network-insights/analysis', json={
         'datasets': {'data': ids}, 'technology': 'lte', 'group': ['operator', 'campaign'],
     }).json()
+    # Operator is always grouped unless Vendor replaces it.
+    assert client.post('/api/network-insights/analysis', json={
+        'datasets': {'data': ids}, 'technology': 'lte', 'group': ['campaign'],
+    }).json()['group'] == ['operator', 'campaign']
+    pooled = client.post('/api/network-insights/analysis', json={
+        'datasets': {'data': ids}, 'technology': 'lte', 'group': ['vendor'],
+    }).json()
+    assert pooled['group'] == ['vendor']
     styles = {(series['colour'], str(series['dash'])) for series in grouped['charts']['rsrp_cdf']['series']}
     assert len(styles) == len(grouped['charts']['rsrp_cdf']['series']) == 4
 

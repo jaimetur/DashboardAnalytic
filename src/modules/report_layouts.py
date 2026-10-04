@@ -49,6 +49,15 @@ def canonical_layout_name(value: str) -> str:
     return name
 
 
+def compact_grid_layout(layout: str) -> bool:
+    """Grids with three or more rows or four or more columns have small cells.
+
+    Their chart titles are drawn outside the chart image at a readable size.
+    """
+    match = re.fullmatch(r"Title \+ (\d+) rows \+ (\d+) columns(?: \+ comments (?:down|right))?", canonical_layout_name(layout or ''))
+    return bool(match) and (int(match.group(1)) >= 3 or int(match.group(2)) >= 4)
+
+
 def selectable_layout_name(value: str) -> bool:
     return value in {'Title Page', 'Title Only', 'Transition', 'Black logo end slide', *DYNAMIC_LAYOUTS} or bool(re.fullmatch(
         r"Title \+ [1-9]\d* rows \+ [1-9]\d* columns(?: \+ comments (?:down|right))?", value,

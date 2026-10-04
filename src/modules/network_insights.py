@@ -877,6 +877,9 @@ def install_network_insights_routes(core: Any) -> None:
         requested_groups = [request.group] if isinstance(request.group, str) else request.group
         # LTE+NR always separates the technologies: LTE RSRP/SINR and NR
         # SS-RSRP/SS-SINR use different reference signals and are never pooled.
+        # Operator can only be left out when Vendor groups the samples instead.
+        if 'vendor' not in requested_groups:
+            requested_groups = ['operator', *requested_groups]
         groups = [field for field in GROUPINGS
                   if (field == 'technology' and technology == 'lte_nr')
                   or (field != 'technology' and field in requested_groups)]

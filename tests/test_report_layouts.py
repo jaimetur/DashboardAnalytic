@@ -322,3 +322,21 @@ def test_catalogue_csv_renames_source_dataset_and_accepts_the_legacy_header():
 
     assert restored[0].cdr_source == 'CDR-Voice'
     assert exported.splitlines()[0].decode('utf-8').split(',')[7] == 'Source Dataset'
+
+
+def test_compact_grids_and_dynamic_title_parts():
+    from dataclasses import replace
+    from src.modules.cdr_reporting import CatalogEntry, chart_title_parts
+    from src.modules.report_layouts import compact_grid_layout
+
+    assert compact_grid_layout('Title + 2 rows + 6 columns + comments down')
+    assert compact_grid_layout('Title + 5 rows + 2 columns')
+    assert not compact_grid_layout('Title + 1 rows + 3 columns + comments down')
+    assert not compact_grid_layout('Title + 2 rows + 2 columns + comments right')
+    assert not compact_grid_layout('Title Page')
+    entry = CatalogEntry(
+        4, 'RSRP', '', 'Title + 2 rows + 6 columns + comments down', 'LTE RSRP histogram – Data – EE',
+        'CDR-Data', 'LTE_PCell_RSRP_Avg', 'Histogram Bars', '', 'Operator', 'Campaign', 'Campaign', 'Right',
+    )
+    assert chart_title_parts(replace(entry, dynamic_column_value='EE')) == ('EE', 'LTE RSRP histogram – Data')
+    assert chart_title_parts(entry) == ('', 'LTE RSRP histogram – Data – EE')

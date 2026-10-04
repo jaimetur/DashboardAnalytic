@@ -158,15 +158,28 @@ if pycountry is not None:
 COUNTRY_NAME_TO_CODE.update({'united kingdom': 'UK', 'great britain': 'UK', 'england': 'UK'})
 
 
+# Longest country names first, so "united kingdom" wins over shorter names.
+_COUNTRY_NAME_PATTERNS = tuple(
+    (re.compile(rf'(?:^|[_\- ]){re.escape(country_name)}(?:$|[_\- ])'), code)
+    for country_name, code in sorted(COUNTRY_NAME_TO_CODE.items(), key=lambda item: -len(item[0]))
+)
+_COUNTRY_CODE_PATTERN = re.compile(r'(?:^|[_\- ])([A-Za-z]{2})(?=$|[_\- ])')
+
+
 def _campaign_market(value: object) -> object:
     text = '' if value is None else str(value).strip()
+    return _campaign_market_text(text)
+
+
+@lru_cache(maxsize=4096)
+def _campaign_market_text(text: str) -> object:
     if text.casefold() in {'<na>', 'nan', 'nat', 'none'}:
         return pd.NA
     lowered = text.casefold()
-    for country_name, code in sorted(COUNTRY_NAME_TO_CODE.items(), key=lambda item: -len(item[0])):
-        if re.search(rf'(?:^|[_\- ]){re.escape(country_name)}(?:$|[_\- ])', lowered):
+    for pattern, code in _COUNTRY_NAME_PATTERNS:
+        if pattern.search(lowered):
             return code
-    code_matches = list(re.finditer(r'(?:^|[_\- ])([A-Za-z]{2})(?=$|[_\- ])', text))
+    code_matches = list(_COUNTRY_CODE_PATTERN.finditer(text))
     country_codes = [match.group(1).upper() for match in code_matches if match.group(1).upper() in ISO_COUNTRY_CODES]
     non_mode_codes = [code for code in country_codes if code != 'SA']
     if non_mode_codes:
@@ -206,8 +219,8 @@ def ensure_fixed_cdr_fields(dataset: pd.DataFrame) -> pd.DataFrame:
     benchmark_values = dataset[benchmark]
 
     def extracted(part: str) -> pd.Series:
-        primary = campaign_values.map(lambda value: _parse_campaign_dimension(value, part))
-        fallback = benchmark_values.map(lambda value: _parse_campaign_dimension(value, part))
+        primary = campaign_values.map({value: _parse_campaign_dimension(value, part) for value in pd.unique(campaign_values)})
+        fallback = benchmark_values.map({value: _parse_campaign_dimension(value, part) for value in pd.unique(benchmark_values)})
         return primary.where(primary.notna(), fallback)
 
     year = _ensure_dataset_field(dataset, 'Campaign_Year', ('Campaign_Year',))
@@ -226,8 +239,9 @@ def ensure_fixed_cdr_fields(dataset: pd.DataFrame) -> pd.DataFrame:
     ]
     market = _ensure_dataset_field(dataset, 'Market', ('Market',))
     existing_market = dataset[market].copy()
-    primary_market = campaign_values.map(_campaign_market)
-    fallback_market = benchmark_values.map(_campaign_market)
+    # Campaign labels repeat on every row: derive each distinct label once.
+    primary_market = campaign_values.map({value: _campaign_market(value) for value in pd.unique(campaign_values)})
+    fallback_market = benchmark_values.map({value: _campaign_market(value) for value in pd.unique(benchmark_values)})
     parsed_market = primary_market.where(primary_market.notna(), fallback_market)
     dataset[market] = parsed_market.where(parsed_market.notna(), existing_market)
     _ensure_dataset_field(dataset, 'Region', ('Region',))
@@ -239,10 +253,10 @@ def ensure_fixed_cdr_fields(dataset: pd.DataFrame) -> pd.DataFrame:
     vendor_only = _ensure_dataset_field(dataset, 'Vendor_Only', ('Vendor_Only',))
     operators = dataset[operator].fillna('').astype(str).str.strip()
     vendors = dataset[vendor].fillna('').astype(str).str.strip()
-    dataset[vendor_only] = [
-        mapped_vendor_only_value(value, prefix)
-        for value, prefix in zip(vendors, operators, strict=False)
-    ]
+    vendor_only_values = {
+        pair: mapped_vendor_only_value(*pair) for pair in set(zip(vendors, operators, strict=False))
+    }
+    dataset[vendor_only] = [vendor_only_values[pair] for pair in zip(vendors, operators, strict=False)]
     technology_fields = ('Technology', 'RAT', 'RAT_A', 'L2_Call_Mode_A', 'Playing_Technology')
     for field in technology_fields:
         _ensure_dataset_field(dataset, field, technology_fields)
@@ -278,7 +292,11 @@ def apply_operator_mappings(dataset: pd.DataFrame, mappings: dict[str, str]) -> 
     for column in result.columns:
         if column_identity(column) != 'operator':
             continue
-        result[column] = result[column].map(lambda value: canonical_operator_value(value, mappings))
+        # Map each distinct label once; missing values keep their original form.
+        values = result[column]
+        present = values.notna()
+        canonical = {value: canonical_operator_value(value, mappings) for value in pd.unique(values[present])}
+        result[column] = values.map(canonical).where(present, values)
     if subscriber_is_derived and operator_column and subscriber_column:
         result[subscriber_column] = result[operator_column]
     return result

@@ -1841,3 +1841,8 @@
 .ds-universe-scope-controls>.ds-scope-control[hidden] { display:none; }
 .ds-universe-scope-controls select { text-overflow:ellipsis; }
 @media(max-width:760px) { .ds-universe-scope-controls { flex-direction:column; } .ds-universe-scope-controls>.ds-scope-control { width:100%; } }
+
+.ds-chart-cell-title{position:absolute;z-index:2;top:0;left:0;right:0;height:2.5rem;box-sizing:border-box;padding:.3rem .5rem 0;overflow:hidden;color:#1d3345;font-size:.74rem;font-weight:650;line-height:1.15;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.ds-chart-cell-title strong{color:#4c3277;font-weight:900}
+.ds-chart-compact canvas{top:2.5rem;height:calc(100% - 2.5rem)}
+.ds-chart-compact .ds-chart-brand{display:none}

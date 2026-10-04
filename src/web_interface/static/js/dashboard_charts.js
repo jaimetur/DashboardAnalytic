@@ -1095,7 +1095,8 @@
 
   function drawPayload(context, payload, state, transform) {
     if (payload?.spacer) return;
-    drawTitle(context, payload?.title || '');
+    // Small grid cells show their title outside the chart at a readable size.
+    if (!payload?.hide_title) drawTitle(context, payload?.title || '');
     if (!payload || payload.type === 'empty') {
       context.fillStyle = '#61727D'; context.textAlign = 'left'; context.textBaseline = 'top'; font(context, 24);
       context.fillText(payload?.message || 'No chart data available', 50, 440); return;

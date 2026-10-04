@@ -45,8 +45,9 @@ from src.modules.cdr_reporting import (
     ensure_vendor_group, normalise_operator_aliases, parse_catalog_filters,
     parse_catalog_grouping,
     prepare_catalog_chart_preview_frame, render_catalog_chart_preview, render_unavailable_source_chart,
-    split_calculated_dimension_aliases,
+    split_calculated_dimension_aliases, chart_title_parts, _select_dynamic_chart_frame,
 )
+from src.modules.report_layouts import compact_grid_layout
 
 from src.modules.rf_catalog_source import RF_CATALOG_FIELDS, rf_source_columns, rf_union_source
 from src.modules.repository import Repository
@@ -281,6 +282,8 @@ class Snapshot:
     cancelled: object = None
     # Operator/Vendor mapping fingerprint the cached frames were built with.
     mapping_key: str = ''
+    # Last time a user opened one of its charts; background warm-ups leave it at 0.
+    viewed_at: float = 0.0
 
 
 def install_dashboard_routes(core):
@@ -710,6 +713,32 @@ def install_dashboard_routes(core):
         for index, (name, value, color) in enumerate(details):
             add_line(name, value, color, 16, first_top + Inches(0.38 * index), Inches(0.34))
 
+    def add_dashboard_cell_title(slide, entry, placement):
+        """Write a small-cell chart title as slide text and return the remaining chart frame."""
+        from pptx.dml.color import RGBColor
+        from pptx.util import Emu, Pt
+
+        left, top, width, height = placement
+        size = 10 if width >= Emu(2_400_000) else 9
+        title_height = min(int(height * .3), int(Pt(size) * 2.6))
+        box = slide.shapes.add_textbox(left, top, width, title_height)
+        box.name = 'Chart Title'
+        frame = box.text_frame
+        frame.word_wrap = True
+        frame.margin_left = frame.margin_right = Pt(2)
+        frame.margin_top = frame.margin_bottom = 0
+        label, base = chart_title_parts(entry)
+        paragraph = frame.paragraphs[0]
+        for text, bold in ((label, True), ((' · ' if label else '') + base, False)):
+            if not text:
+                continue
+            run = paragraph.add_run()
+            run.text = text
+            run.font.size = Pt(size)
+            run.font.bold = bold
+            run.font.color.rgb = RGBColor(0x1D, 0x33, 0x45)
+        return left, top + title_height, width, height - title_height
+
     def add_dashboard_chart_picture(slide, png: bytes, placement) -> None:
         """Fill a same-ratio chart placeholder without PowerPoint cropping or distortion."""
         left, top, width, height = placement
@@ -930,9 +959,13 @@ def install_dashboard_routes(core):
                 _clear_commentary(slide)
                 _set_commentary(slide, comments)
                 _remove_template_chart_placeholders(slide)
+                compact_titles = compact_grid_layout(header.layout)
                 for chart_number, ((index, entry), placement) in enumerate(zip(chart_entries, placements, strict=False), 1):
                     if not run_is_active():
                         return
+                    if compact_titles:
+                        # Small grid cells: a readable text title above a title-less chart image.
+                        placement = add_dashboard_cell_title(slide, entry, placement)
                     update_dashboard_ppt_job(
                         task_repository, job_id,
                         progress=91 + round(rendered * 4 / max(chart_total, 1)), chart_count=rendered,
@@ -950,6 +983,8 @@ def install_dashboard_routes(core):
                         try:
                             model_path = canvas_model_path(snapshot, entry)
                             payload = json.loads(model_path.read_text(encoding='utf-8'))
+                            if compact_titles:
+                                payload = {**payload, 'hide_title': True}
                             png, hover_targets = _render_dashboard_payload(
                                 payload, width=render_width, height=render_height,
                             )
@@ -2965,12 +3000,15 @@ def install_dashboard_routes(core):
                 'subtitle': entry.slide_subtitle,
                 'layout': entry.layout,
                 'structural_type': entry.structural_type or '',
+                'compact_titles': compact_grid_layout(entry.layout),
                 'charts': [],
                 'focus_row': editor_index,
             })
             if not entry.structural_type:
+                title_label, title_base = chart_title_parts(entry)
                 slide['charts'].append({
-                    'index': index, 'title': entry.chart_title, 'source': entry.source_kind,
+                    'index': index, 'title': entry.chart_title, 'title_label': title_label, 'title_base': title_base,
+                    'source': entry.source_kind,
                     'cdr_source': entry.cdr_source, 'chart_type': entry.chart_type,
                     'available': bool(selected_by_kind) if entry.source_kind == 'all' else entry.source_kind in selected_by_kind, 'focus_row': editor_index,
                 })
@@ -3759,10 +3797,20 @@ def install_dashboard_routes(core):
         select_clause = ", ".join(quote(column) for column in selected_columns)
         if aggregation_columns:
             select_clause += ', COUNT(*) AS "__catalog_weight"'
-        source = table_name if table_name.startswith('(') else quote(table_name)
-        query = f'SELECT {select_clause} FROM {source} WHERE {where}'
-        if aggregation_columns:
-            query += f' GROUP BY {", ".join(quote(column) for column in selected_columns)}'
+        group_by = f' GROUP BY {", ".join(quote(column) for column in selected_columns)}' if aggregation_columns else ''
+        branches = getattr(table_name, 'branches', ())
+        if branches:
+            # Filter each CDR type separately: SQLite flattens each simple
+            # subquery, uses the dataset index and computes only the needed columns.
+            query = ' UNION ALL '.join(f'SELECT {select_clause} FROM ({branch}) WHERE {where}{group_by}' for branch in branches)
+            parameters = list(parameters) * len(branches)
+            if aggregation_columns:
+                columns_text = ", ".join(quote(column) for column in selected_columns)
+                query = (f'SELECT {columns_text}, SUM("__catalog_weight") AS "__catalog_weight" '
+                         f'FROM ({query}) GROUP BY {columns_text}')
+        else:
+            source = table_name if table_name.startswith('(') else quote(table_name)
+            query = f'SELECT {select_clause} FROM {source} WHERE {where}{group_by}'
         connection = sqlite3.connect(database_path, timeout=120.0)
         try:
             return pd.read_sql_query(query, connection, params=parameters)
@@ -4021,9 +4069,15 @@ def install_dashboard_routes(core):
         this bound, many opened universes could exhaust server memory.
         """
         with lock:
-            recent = list(snapshots.values())[-DASHBOARD_FRAME_CACHE_SNAPSHOTS:]
-            for snapshot in list(snapshots.values())[:-DASHBOARD_FRAME_CACHE_SNAPSHOTS]:
-                if snapshot in recent:
+            # Snapshots a user is viewing keep their frames first, so background
+            # warm-ups of other Dashboards cannot evict the open Dashboard and
+            # force every remaining chart to reread its CDR rows.
+            ordered = list(snapshots.values())
+            viewed = sorted((item for item in ordered if item.viewed_at), key=lambda item: item.viewed_at)
+            unviewed = [item for item in ordered if not item.viewed_at]
+            recent = [*viewed[-DASHBOARD_FRAME_CACHE_SNAPSHOTS:], *unviewed[-1:]]
+            for snapshot in ordered:
+                if any(snapshot is item for item in recent):
                     continue
                 if snapshot.frames or snapshot.filtered_frames or snapshot.chart_frames:
                     snapshot.frames.clear()
@@ -4059,14 +4113,25 @@ def install_dashboard_routes(core):
             template_where, template_parameters, template_filters_applied = chart_filter_sql(
                 entry, source_columns, snapshot.multivendor, task_repository,
             )
+            if entry.source_kind == 'all':
+                # Every RF chart over the combined CDR types then shares one
+                # loaded frame; its own filters are applied in memory below.
+                template_where, template_parameters, template_filters_applied = '', [], False
             if template_where:
                 where = f'({where}) AND ({template_where})'
                 parameters.extend(template_parameters)
             aggregation_columns = chart_aggregation_columns(
                 entry, source_columns, snapshot.multivendor, template_filters_applied,
             )
+            # Key on the physical columns actually read: requested names that do
+            # not exist in the source (such as Bin Size) do not change the frame.
+            source_lookup = {identity(column): column for column in source_columns}
+            read_columns = sorted({
+                source_lookup[identity(column)] for column in (aggregation_columns or requested_columns)
+                if identity(column) in source_lookup
+            })
             raw_key = sha256(json.dumps({
-                'kind': entry.source_kind, 'columns': requested_columns, 'where': where, 'parameters': parameters,
+                'kind': entry.source_kind, 'columns': read_columns, 'where': where, 'parameters': parameters,
                 'aggregation_columns': aggregation_columns,
                 'chart_mappings': task_repository.chart_mapping_settings(),
             }, sort_keys=True, default=str).encode()).hexdigest()
@@ -4096,9 +4161,13 @@ def install_dashboard_routes(core):
             # same source, KPI and template filters. Share that expensive
             # filtering pass while keeping each chart's aggregation and visual
             # model independent.
+            # Cells of a dynamic grid share one filtered frame; each cell then
+            # keeps only its own row/column values, which is a pure row filter.
+            dynamic_cell = any(value is not None for value in (entry.dynamic_row_value, entry.dynamic_column_value, entry.dynamic_value))
+            base_entry = replace(entry, dynamic_row_value=None, dynamic_column_value=None, dynamic_value=None) if dynamic_cell else entry
             filtered_key = sha256(repr((
                 raw_key, entry.cdr_source, entry.kpi, entry.filters,
-                entry.calculated_dimensions, snapshot.multivendor, entry_dynamic_fields(entry), entry.dynamic_row_value, entry.dynamic_column_value, entry.dynamic_value,
+                entry.calculated_dimensions, snapshot.multivendor, entry_dynamic_fields(entry),
             )).encode()).hexdigest()
             with lock:
                 prepared_frame = snapshot.filtered_frames.get(filtered_key)
@@ -4110,13 +4179,16 @@ def install_dashboard_routes(core):
                     if prepared_frame is None:
                         try:
                             prepared_frame = prepare_catalog_chart_preview_frame(
-                                raw_frame, entry, multivendor=snapshot.multivendor,
+                                raw_frame, base_entry, multivendor=snapshot.multivendor,
                                 template_filters_applied=template_filters_applied,
                             )[0]
                         except ValueError as exc:
                             raise HTTPException(400, str(exc)) from exc
                         with lock:
                             prepared_frame = snapshot.filtered_frames.setdefault(filtered_key, prepared_frame)
+            if dynamic_cell:
+                render_entry = prepare_multivendor_catalog_entry(entry) if snapshot.multivendor else entry
+                prepared_frame = _select_dynamic_chart_frame(prepared_frame, render_entry)
             with lock:
                 frame = snapshot.chart_frames.setdefault(index, prepared_frame)
             release_idle_snapshot_frames()
@@ -4209,7 +4281,13 @@ def install_dashboard_routes(core):
 
     @app.get('/api/e2e-dashboards/chart/{token}/{index}')
     def interactive_chart(token: str, index: int, user=Depends(dashboard_user)):
-        payload = chart_model(token, index, user)
+        with lock:
+            snapshot = snapshots.get(token)
+            if snapshot is not None:
+                snapshot.viewed_at = monotonic()
+        # Background warm-ups pause while the open Dashboard builds a chart.
+        with foreground_dashboard_work(workspace_key()):
+            payload = chart_model(token, index, user)
         # The server already maintains a bounded persistent model cache. A
         # second browser cache can outlive a renderer change or an explicit
         # Dashboard refresh and reintroduce an obsolete ordering/model.

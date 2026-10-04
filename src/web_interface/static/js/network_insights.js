@@ -38,6 +38,17 @@
     control.dispatchEvent(new Event('multiselect:options-updated'));
   };
   syncTechnologyGrouping();
+  // Operator stays checked unless Vendor is checked.
+  const enforceOperatorGrouping = () => {
+    const control = $('ni-group');
+    const option = value => [...control.options].find(item => item.value === value);
+    if (option('operator') && !option('operator').selected && !option('vendor')?.selected) {
+      option('operator').selected = true;
+      control.dispatchEvent(new Event('multiselect:options-updated'));
+    }
+  };
+  enforceOperatorGrouping();
+  $('ni-group').addEventListener('change', enforceOperatorGrouping);
   const kinds = [['data', 'CDR Data'], ['voice', 'CDR Voice'], ['speech', 'CDR Speech']];
   const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[character]));
   const number = (value, digits = 1) => (value === null || value === undefined || !Number.isFinite(Number(value)) ? '—' : Number(value).toFixed(digits));

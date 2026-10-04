@@ -32,9 +32,8 @@ Analyse the network behind the measured performance: radio quality (RSRP and SIN
 
 **Group by** accepts several dimensions; they form a hierarchy in the selector order, with Campaign last. Each Overview card, table row, CDF curve and map group is one combination, for example `EE · 2026-Q2`.
 
-- Keep **Operator** checked to compare operators. Uncheck it to pool the selected operators, for example to compare vendors across operators with **Vendor** checked.
+- **Operator** is always checked unless **Vendor** is checked. With Vendor checked, uncheck Operator to pool the selected operators by vendor, or keep it to split each operator by vendor.
 - **Vendor** uses `Vendor_Only`: actual vendors, then Mixed, Other and All Vendor(s), then operators without a mapped vendor as **Operator - All**.
-- With no dimension checked, all selected samples form one group.
 - Curves of the same Operator share its colour and use a different line style for each Campaign or other secondary group.
 - The change between the two latest campaigns appears only when Campaign is not a grouping dimension.
 - eNodeBs and cells are counted per source operator, also when operators are pooled.

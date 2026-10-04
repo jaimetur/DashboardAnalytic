@@ -3692,9 +3692,21 @@
     $('ds-slide-content').classList.toggle('ds-comments-right', /\bcomments\s+right\b/i.test(slide.layout || ''));
     const stage = $('ds-charts'); stage.classList.remove('ds-slide-transition'); stage.replaceChildren(); stage.classList.toggle('ds-positioned',slide.charts.length > 0 && slide.charts.every(chart=>chart.position)); stage.classList.toggle('ds-structural-stage', !slide.charts.length);
     if (!slide.charts.length) structuralDashboard(stage, slide);
+    // Grids with 3+ rows or 4+ columns (manifests prepared earlier carry only the layout name).
+    const gridSize = /^Title \+ (\d+) rows \+ (\d+) columns/i.exec(String(slide.layout || ''));
+    const compactTitles = slide.compact_titles ?? Boolean(gridSize && (Number(gridSize[1]) >= 3 || Number(gridSize[2]) >= 4));
     for (const chart of slide.charts) {
       const card = node('article',undefined,'ds-chart'); card.setAttribute('aria-label',chart.title); card.tabIndex = 0;
       const brand = dashboardViewerBrand('ds-chart-brand'); card.append(brand);
+      if (compactTitles) {
+        // Small grid cells: a readable title above a title-less chart.
+        card.classList.add('ds-chart-compact');
+        const heading = node('div', undefined, 'ds-chart-cell-title');
+        heading.title = chart.title || '';
+        if (chart.title_label) heading.append(node('strong', chart.title_label), document.createTextNode(' · '));
+        heading.append(document.createTextNode(chart.title_base || chart.title || ''));
+        card.append(heading);
+      }
       let renderedPayload = null;
       if (chart.position) {
         const [left,top,width,height] = chart.position;
@@ -3726,7 +3738,7 @@
           renderedPayload = payload;
           canvas.hidden = false;
           requestAnimationFrame(() => {
-            try { globalThis.renderDashboardChart(canvas, payload); zoom.hidden = false; message.remove(); }
+            try { globalThis.renderDashboardChart(canvas, compactTitles ? {...payload, hide_title: true} : payload); zoom.hidden = false; message.remove(); }
             catch (error) { canvas.hidden = true; message.textContent = error.message || `Unable to render ${chart.title || 'chart'}.`; }
           });
         }).catch(error => {
