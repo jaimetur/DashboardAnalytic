@@ -217,13 +217,15 @@ Open Dashboards take priority over closed ones. Foreground preparation and PPT e
 > [!TIP]
 > You do not need to wait for every background universe to finish. Opening or exporting a Dashboard prepares the requested universe if it is not already reusable.
 
+When nobody has used the application for five minutes, it also builds the charts of each Dashboard's default universe (its saved universe, or the newest CDRs), open Dashboards first, and stores them as ready Canvas models. Opening that Dashboard later shows the stored charts immediately. This work stops between charts as soon as anyone uses the application and continues after the next quiet period.
+
 ### What Clear cache removes
 
 Combined CDR tables remain the source for filters and chart data. Selection records keep counts, facets and reproducible predicates; the cache does not copy CDR rows into a separate projection database.
 
-RF Dashboard charts read the materialized combined CDR tables; `CDR-All` pools those Data, Voice and Speech tables without rereading the original uploaded files. RF companion charts with identical source selections and SQL filters share a stable projection of the LTE/NR radio fields in the preview frame cache. Different selections or filters require separate frames. The first read and chart calculations still depend on the sample count.
+Dashboard charts read the materialized combined CDR tables; `CDR-All` pools the Data, Voice and Speech tables without rereading the original uploaded files. CDF, histogram, average, median, distribution, threshold and stacked-bar charts that only use physical fields read them grouped: identical rows are returned once with their count and expanded again before charting, so every chart receives exactly the same rows. Charts reading the same fields share that read, and charts with the same source, filters and measure share one filtering pass. Maps, scatter plots and tables that only use physical fields read just those fields, ungrouped and in the original row order. Charts using calculated fields, multivendor reports and the chart data table views read the complete rows.
 
-`.dashboard-data-cache` holds derived preview manifests, Canvas models and legacy image artifacts. Its keys include dataset revisions, selection, scope and renderer version. Older-version artifacts are removed when a workspace opens.
+`.dashboard-data-cache` holds derived preview manifests, Canvas models, stored source reads and legacy image artifacts. Their keys include dataset revisions, selection, scope and renderer version, so other sessions, restarts and PPT exports reuse a read until the selected CDRs change. Older-version artifacts are removed when a workspace opens.
 
 > [!WARNING]
 > **Workspace Clear cache cancels active user-requested work and removes derived cache only.** It preserves Dashboard definitions, combined CDRs, templates and generated jobs. Nothing rebuilds automatically until requested again.

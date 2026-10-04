@@ -3315,7 +3315,8 @@ def _matches(frame: pd.DataFrame, column: str | None, tokens: tuple[str, ...] | 
 
 
 def _source_for_spec(frames: dict[str, pd.DataFrame], spec: dict, multivendor: bool) -> tuple[pd.DataFrame, str | None, str | None]:
-    frame = frames[spec["source"]].copy()
+    # Only read here; the selected rows below are returned as a new frame.
+    frame = frames[spec["source"]]
     session_column = _column(frame, ("Session_Type", "session_type", "Test_Name", "Test_Type"))
     test_column = _column(frame, ("Test_Name", "test_name", "Type_of_Test", "Test_Type"))
     direction_column = _column(frame, ("Direction", "direction", "Call_Direction"))

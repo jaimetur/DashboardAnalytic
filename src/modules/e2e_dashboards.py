@@ -173,6 +173,18 @@ DASHBOARD_OPEN_PRIORITY_SECONDS = 30.0
 # Only the most recently used Dashboard snapshots keep their chart frames in
 # memory; older snapshots rebuild them on demand from the combined tables.
 DASHBOARD_FRAME_CACHE_SNAPSHOTS = max(1, int(os.environ.get('DASHBOARD_ANALYTIC_DASHBOARD_FRAME_CACHE_SNAPSHOTS') or 3))
+# Grouped compact reads for eligible charts; 0 restores complete reads.
+DASHBOARD_COMPACT_READS = os.environ.get('DASHBOARD_ANALYTIC_COMPACT_READS', '1') != '0'
+# Source reads persisted beside the workspace so other sessions, restarts and
+# exports reuse them. Very large complete reads are not persisted.
+DASHBOARD_FRAME_CACHE_VERSION = 1
+# Dashboard source reads: larger page cache, memory-mapped I/O and a sequential
+# scan when the selected CDRs hold at least this share of a combined table.
+DASHBOARD_READ_CACHE_KIB = 262_144
+DASHBOARD_READ_MMAP_BYTES = 2 * 1024 ** 3
+DASHBOARD_SEQUENTIAL_SCAN_SHARE = 0.2
+DASHBOARD_FRAME_DISK_LIMIT = 400
+DASHBOARD_FRAME_DISK_MAX_CELLS = 20_000_000
 DASHBOARD_SELECTION_CACHE_LIMIT = 128
 DASHBOARD_PROFILE_SELECTION_THRESHOLD = 100_000
 DASHBOARD_CHART_MODEL_CACHE_VERSION = 19
@@ -186,6 +198,10 @@ def dashboard_cache_dir(workspace: str | Path) -> Path:
     return Path(workspace).parent / '.dashboard-data-cache'
 
 
+def frame_cache_dir(workspace: str | Path) -> Path:
+    return dashboard_cache_dir(workspace) / 'frames'
+
+
 def canvas_model_cache_dir(workspace: str | Path) -> Path:
     return dashboard_cache_dir(workspace) / 'charts-canvas'
 
@@ -196,6 +212,21 @@ def pil_chart_cache_dir(workspace: str | Path) -> Path:
 
 def preview_manifest_cache_dir(workspace: str | Path) -> Path:
     return dashboard_cache_dir(workspace) / 'dashboard-previews'
+
+
+# Template "filters" that configure a chart instead of selecting rows.
+CHART_SETTING_FILTERS = frozenset({'threshold', 'buckets', 'binsize', 'classcolours', 'histogramoperator'})
+# Chart types whose models only depend on the multiset of rows, so SQLite can
+# group identical rows and the loader expands them back before charting.
+COMPACT_READ_CHART_TYPES = frozenset({
+    'cdf line', 'histogram line', 'histogram bars', 'average vertical bars', 'median vertical bars',
+    'distribution stacked vertical bars', 'threshold stacked vertical bars',
+    '100% stacked vertical bars', 'count stacked horizontal bars',
+})
+# Fields the chart pipeline always consults and fields derived from the measure.
+COMPACT_READ_IMPLICIT_FIELDS = ('Operator', 'operator', 'Campaign', 'period', 'Period', 'Quarter')
+COMPACT_READ_DERIVED_FIELDS = frozenset({'ratebucket', 'valuebucket'})
+COMPACT_READ_VENDOR_FIELDS = frozenset({'vendor', 'vendoronly', 'vendorv3', 'operatorvendor', 'opvendor'})
 
 
 def resolve_filter_column(frame, field):
@@ -1930,7 +1961,7 @@ def install_dashboard_routes(core):
                     'column_metadata': chart_dataset_column_metadata(snapshot, entry, visible.columns),
                     'page_size': 100, 'unfiltered_total': chart_total,
                 }
-        _, _, frame = snapshot_chart(token, entry_index, user, expected_workspace=workspace)
+        _, _, frame = snapshot_chart(token, entry_index, user, expected_workspace=workspace, complete=True)
         frame = unique_chart_dataset_rows(snapshot, entry, frame)
         chart_total = len(frame)
         values_frame = apply_chart_column_filters(
@@ -3429,7 +3460,79 @@ def install_dashboard_routes(core):
             if isinstance(raw_definition, dict):
                 schedule_dashboard_warmup(workspace, dashboard_id, raw_definition, 'system')
 
-    core.register_idle_dashboard_warmup(warm_idle_dashboard_caches)
+    idle_chart_worker: dict[str, object] = {'thread': None}
+
+    def application_in_use() -> bool:
+        return core.application_idle_seconds() < core.IDLE_DASHBOARD_WARMUP_SECONDS
+
+    def wait_until_application_idle() -> bool:
+        """Pause background chart work while anyone uses the application."""
+        while application_in_use() or dashboard_foreground_work.get(workspace_key()):
+            if core.APP_SHUTTING_DOWN.wait(5):
+                return False
+        return not core.APP_SHUTTING_DOWN.is_set()
+
+    def precompute_idle_dashboard_charts(workspace: str) -> None:
+        """Build and persist the default universe's chart models while the app is idle.
+
+        Opening a Dashboard then reads finished models instead of computing them.
+        Work pauses between charts as soon as a user request arrives and
+        resumes after the next quiet period.
+        """
+        system_user = SimpleNamespace(username='system', role='super-admin')
+        task_repository = Repository(Path(workspace), core.repository.global_db_path)
+        with lock:
+            dashboards = read_dashboards(task_repository)
+        # Dashboards open in a browser first, then the library order.
+        ordered = sorted(dashboards.items(), key=lambda item: not dashboard_is_open((workspace, item[0])))
+        for dashboard_id, raw_definition in ordered:
+            if not isinstance(raw_definition, dict) or not wait_until_application_idle():
+                continue
+            if workspace != workspace_key():
+                return
+            try:
+                definition = DashboardDefinition.model_validate(runtime_dashboard_definition(raw_definition, task_repository))
+                payload = restore_matching_preview_manifest(workspace, dashboard_id, definition)
+                if payload is None:
+                    with dashboard_work_gate:
+                        payload = build_preview(definition, system_user, workspace=workspace, cancelled=application_in_use)
+                with lock:
+                    snapshot = snapshots.get(payload['token'])
+                if snapshot is None:
+                    continue
+                for index, entry in enumerate(snapshot.entries):
+                    if not entry.source_kind or canvas_model_path(snapshot, entry).is_file():
+                        continue
+                    if not wait_until_application_idle() or workspace != workspace_key():
+                        return
+                    chart_model(payload['token'], index, system_user, expected_workspace=workspace)
+            except (HTTPException, RuntimeError):
+                # Invalid universes and preparations interrupted by a user are skipped.
+                continue
+            except Exception as exc:
+                # Optional idle work must never disturb the application.
+                try:
+                    task_repository.add_log('system', 'precompute_dashboard_charts_failed', json.dumps({
+                        'dashboard_id': dashboard_id, 'error': str(exc),
+                    }))
+                except Exception:
+                    pass
+
+    def start_idle_chart_precompute() -> None:
+        thread = idle_chart_worker.get('thread')
+        if thread is not None and thread.is_alive():
+            return
+        workspace = workspace_key()
+        thread = Thread(target=precompute_idle_dashboard_charts, args=(workspace,), daemon=True,
+                        name='dashboard-idle-charts')
+        idle_chart_worker['thread'] = thread
+        thread.start()
+
+    def warm_idle_dashboard_caches_and_charts() -> None:
+        warm_idle_dashboard_caches()
+        start_idle_chart_precompute()
+
+    core.register_idle_dashboard_warmup(warm_idle_dashboard_caches_and_charts)
 
     def run_direct_preparation(preparation_id, definition, dashboard_id, workspace, user, cancellation):
         """Prepare one requested Dashboard universe and return its preview payload."""
@@ -3781,9 +3884,109 @@ def install_dashboard_routes(core):
             return None
         return list(dict.fromkeys(resolved))
 
+    def reporting_read_connection(database_path):
+        """Read connection with a larger page cache and memory-mapped I/O."""
+        connection = sqlite3.connect(database_path, timeout=120.0)
+        connection.execute(f'PRAGMA cache_size=-{DASHBOARD_READ_CACHE_KIB}')
+        connection.execute(f'PRAGMA mmap_size={DASHBOARD_READ_MMAP_BYTES}')
+        return connection
+
+    def selection_share(database_path, table, where, parameters) -> float:
+        """Share of a table's rows matched by the dataset part of a selection."""
+        connection = sqlite3.connect(database_path, timeout=120.0)
+        try:
+            dataset_clause = re.match(r'\s*\(?(dataset_id IN \([?, ]+\))', where)
+            if not dataset_clause:
+                return 0.0
+            count = dataset_clause.group(1).count('?')
+            selected = connection.execute(
+                f'SELECT count(*) FROM "{table}" WHERE {dataset_clause.group(1)}', list(parameters)[:count],
+            ).fetchone()[0]
+            total = connection.execute(f'SELECT count(*) FROM "{table}"').fetchone()[0]
+            return selected / total if total else 0.0
+        except sqlite3.Error:
+            return 0.0
+        finally:
+            connection.close()
+
+    def sequential_scan_source(database_path, branch, where, parameters):
+        match = re.search(r'FROM "(reporting_rows_[a-z]+)"$', branch)
+        if match and selection_share(database_path, match.group(1), where, parameters) >= DASHBOARD_SEQUENTIAL_SCAN_SHARE:
+            return branch + ' NOT INDEXED'
+        return branch
+
+    def sequential_scan_table(database_path, table_name, where, parameters):
+        if selection_share(database_path, table_name, where, parameters) >= DASHBOARD_SEQUENTIAL_SCAN_SHARE:
+            return '"' + str(table_name).replace('"', '""') + '" NOT INDEXED'
+        return table_name
+
+    def read_cached_frame(cache_path):
+        if cache_path is None or not cache_path.is_file():
+            return None
+        try:
+            frame = pd.read_pickle(cache_path)
+            cache_path.touch()
+            return frame
+        except Exception:
+            cache_path.unlink(missing_ok=True)
+            return None
+
+    def write_cached_frame(cache_path, frame):
+        """Persist a source read atomically and keep the newest files only."""
+        if cache_path is None or frame.size > DASHBOARD_FRAME_DISK_MAX_CELLS:
+            return
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = cache_path.with_suffix(f'.{uuid4().hex}.tmp')
+            frame.to_pickle(temporary)
+            temporary.replace(cache_path)
+            cached = sorted(cache_path.parent.glob('*.pkl'), key=lambda path: path.stat().st_mtime, reverse=True)
+            for stale in cached[DASHBOARD_FRAME_DISK_LIMIT:]:
+                stale.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    def compact_chart_columns(entry, source_columns, multivendor):
+        """Return the only physical columns a chart reads, or None when unknown.
+
+        Charts referencing calculated or semantic fields keep the complete read.
+        Order-independent chart types read these columns grouped; the others
+        read them ungrouped, in the same row order as the complete read.
+        """
+        if multivendor:
+            return None
+        by_identity = defaultdict(list)
+        for column in source_columns:
+            by_identity[identity(column)].append(column)
+        calculated = {identity(dimension.name) for dimension in entry.calculated_dimensions}
+        referenced = [
+            *catalog_kpi_fields(entry.kpi),
+            *(field for field in entry_dynamic_fields(entry) if field),
+            *_legend_dimensions(entry.legend),
+            *parse_catalog_grouping(entry.grouping_rows).dimensions,
+            *parse_catalog_grouping(entry.grouping_columns).dimensions,
+            *(condition.column for condition in parse_catalog_filters(entry.filters)
+              if identity(condition.column) not in CHART_SETTING_FILTERS),
+        ]
+        selected = []
+        for name in referenced:
+            key = identity(name)
+            if key in calculated:
+                return None
+            if key in by_identity:
+                selected.extend(by_identity[key])
+            elif key not in COMPACT_READ_DERIVED_FIELDS:
+                return None
+        if any(identity(name) in COMPACT_READ_VENDOR_FIELDS for name in referenced):
+            for key in COMPACT_READ_VENDOR_FIELDS:
+                selected.extend(by_identity.get(key, []))
+        for name in COMPACT_READ_IMPLICIT_FIELDS:
+            selected.extend(by_identity.get(identity(name), []))
+        return sorted(set(selected), key=lambda column: (identity(column), column))
+
     def load_reporting_frame(
         database_path, table_name, source_columns, requested_columns, where, parameters,
-        aggregation_columns=None,
+        aggregation_columns=None, expand_groups=False, cache_path=None,
     ):
         lookup = {identity(column): column for column in source_columns}
         selected_columns = []
@@ -3793,12 +3996,25 @@ def install_dashboard_routes(core):
                 selected_columns.append(actual)
         if not selected_columns:
             return pd.DataFrame()
+        cached = read_cached_frame(cache_path)
+        if cached is not None:
+            return expand_grouped_rows(cached) if expand_groups and not aggregation_columns else cached
         quote = lambda column: '"' + str(column).replace('"', '""') + '"'
         select_clause = ", ".join(quote(column) for column in selected_columns)
         if aggregation_columns:
             select_clause += ', COUNT(*) AS "__catalog_weight"'
-        group_by = f' GROUP BY {", ".join(quote(column) for column in selected_columns)}' if aggregation_columns else ''
+        elif expand_groups:
+            # Identical rows travel once with their count and are expanded
+            # below, so the chart receives exactly the same rows.
+            select_clause += ', COUNT(*) AS "__catalog_rows"'
+        group_by = f' GROUP BY {", ".join(quote(column) for column in selected_columns)}' if aggregation_columns or expand_groups else ''
         branches = getattr(table_name, 'branches', ())
+        if expand_groups and not aggregation_columns:
+            # Grouped reads do not depend on row order: when the selection
+            # covers much of a table, a sequential scan avoids random row lookups.
+            branches = tuple(sequential_scan_source(database_path, branch, where, parameters) for branch in branches) if branches else ()
+            if not branches and not table_name.startswith('('):
+                table_name = sequential_scan_table(database_path, table_name, where, parameters)
         if branches:
             # Filter each CDR type separately: SQLite flattens each simple
             # subquery, uses the dataset index and computes only the needed columns.
@@ -3809,13 +4025,21 @@ def install_dashboard_routes(core):
                 query = (f'SELECT {columns_text}, SUM("__catalog_weight") AS "__catalog_weight" '
                          f'FROM ({query}) GROUP BY {columns_text}')
         else:
-            source = table_name if table_name.startswith('(') else quote(table_name)
+            source = table_name if table_name.startswith('(') or table_name.endswith(' NOT INDEXED') else quote(table_name)
             query = f'SELECT {select_clause} FROM {source} WHERE {where}{group_by}'
-        connection = sqlite3.connect(database_path, timeout=120.0)
+        connection = reporting_read_connection(database_path)
         try:
-            return pd.read_sql_query(query, connection, params=parameters)
+            frame = pd.read_sql_query(query, connection, params=parameters)
         finally:
             connection.close()
+        write_cached_frame(cache_path, frame)
+        return expand_grouped_rows(frame) if expand_groups and not aggregation_columns else frame
+
+    def expand_grouped_rows(frame):
+        """Repeat each grouped row by its count, restoring every source row."""
+        frame = frame.copy()
+        counts = frame.pop('__catalog_rows').to_numpy()
+        return frame.loc[frame.index.repeat(counts)].reset_index(drop=True)
 
     def parse_chart_column_filters(encoded):
         try:
@@ -4085,7 +4309,13 @@ def install_dashboard_routes(core):
                     snapshot.chart_frames.clear()
                     snapshot.frame_locks.clear()
 
-    def snapshot_chart(token, index, user, *, include_frame=True, expected_workspace: str | None = None):
+    def snapshot_chart(token, index, user, *, include_frame=True, expected_workspace: str | None = None, complete=False):
+        """Return a chart's snapshot, entry and prepared rows.
+
+        ``complete`` returns every source column, as the chart dataset views
+        need, instead of the compact grouped read used to build chart models.
+        """
+        frame_key = ('complete', index) if complete else index
         with lock:
             snapshot = snapshots.get(token)
             if snapshot is not None:
@@ -4098,7 +4328,7 @@ def install_dashboard_routes(core):
         if not include_frame:
             return snapshot, entry, None
         with lock:
-            frame = snapshot.chart_frames.get(index)
+            frame = snapshot.chart_frames.get(frame_key)
         if frame is None:
             task_repository = Repository(Path(snapshot.workspace), core.repository.global_db_path)
             selected = dashboard_datasets(snapshot.definition, entry.source_kind, task_repository)
@@ -4123,6 +4353,23 @@ def install_dashboard_routes(core):
             aggregation_columns = chart_aggregation_columns(
                 entry, source_columns, snapshot.multivendor, template_filters_applied,
             )
+            compact_columns = None if complete or aggregation_columns or not DASHBOARD_COMPACT_READS else compact_chart_columns(
+                entry, source_columns, snapshot.multivendor,
+            )
+            grouped_read = bool(compact_columns) and entry.chart_type.casefold() in COMPACT_READ_CHART_TYPES
+            if compact_columns and not grouped_read:
+                # Row order matters (for example map point order): keep the
+                # complete read's filters and order, only with fewer columns.
+                requested_columns = compact_columns
+            elif compact_columns:
+                # Template filters run in memory on the compact rows, so charts
+                # reading the same fields share one grouped read.
+                where, parameters = selection_where(
+                    task_repository, entry.source_kind, [int(row['id']) for row in selected], snapshot.definition,
+                    columns=source_columns,
+                )
+                template_filters_applied = False
+                requested_columns = compact_columns
             # Key on the physical columns actually read: requested names that do
             # not exist in the source (such as Bin Size) do not change the frame.
             source_lookup = {identity(column): column for column in source_columns}
@@ -4132,7 +4379,7 @@ def install_dashboard_routes(core):
             })
             raw_key = sha256(json.dumps({
                 'kind': entry.source_kind, 'columns': read_columns, 'where': where, 'parameters': parameters,
-                'aggregation_columns': aggregation_columns,
+                'aggregation_columns': aggregation_columns, 'compact': grouped_read,
                 'chart_mappings': task_repository.chart_mapping_settings(),
             }, sort_keys=True, default=str).encode()).hexdigest()
             with lock:
@@ -4143,9 +4390,14 @@ def install_dashboard_routes(core):
                     with lock:
                         raw_frame = snapshot.frames.get(raw_key)
                     if raw_frame is None:
+                        # The selection key fingerprints the CDR versions and
+                        # combined-table revisions, like the chart-model cache.
+                        cache_path = frame_cache_dir(snapshot.workspace) / (sha256(
+                            f'{DASHBOARD_FRAME_CACHE_VERSION}:{snapshot.selection_key}:{raw_key}'.encode()
+                        ).hexdigest() + '.pkl') if snapshot.selection_key else None
                         raw_frame = load_reporting_frame(
                             database_path, table_name, source_columns, requested_columns, where, parameters,
-                            aggregation_columns,
+                            aggregation_columns, expand_groups=grouped_read, cache_path=cache_path,
                         )
                         if snapshot.multivendor:
                             raw_frame = ensure_vendor_group(raw_frame)
@@ -4165,9 +4417,22 @@ def install_dashboard_routes(core):
             # keeps only its own row/column values, which is a pure row filter.
             dynamic_cell = any(value is not None for value in (entry.dynamic_row_value, entry.dynamic_column_value, entry.dynamic_value))
             base_entry = replace(entry, dynamic_row_value=None, dynamic_column_value=None, dynamic_value=None) if dynamic_cell else entry
+            # The filtered rows depend only on what the filtering pipeline reads:
+            # source, effective filters (chart-setting pseudo filters such as Bin
+            # Size are ignored there), calculated fields, the measured column and
+            # the exclusion flags. Chart types sharing them (a CDF and its
+            # histogram, classes or thresholds) reuse one filtering pass.
+            filter_spec = _catalog_spec(base_entry)
+            effective_filters = tuple(
+                condition for condition in parse_catalog_filters(base_entry.filters)
+                if identity(condition.column) not in CHART_SETTING_FILTERS
+            )
             filtered_key = sha256(repr((
-                raw_key, entry.cdr_source, entry.kpi, entry.filters,
-                entry.calculated_dimensions, snapshot.multivendor, entry_dynamic_fields(entry),
+                raw_key, entry.cdr_source, effective_filters, filter_spec.get('metric'),
+                entry.exclude_null_empty, entry.exclude_zero,
+                (filter_spec.get('kind'), filter_spec.get('x_metric'), filter_spec.get('colour_metric'))
+                if entry.exclude_null_empty or entry.exclude_zero else None,
+                entry.calculated_dimensions, snapshot.multivendor, entry.vendor_comparison, entry_dynamic_fields(entry),
             )).encode()).hexdigest()
             with lock:
                 prepared_frame = snapshot.filtered_frames.get(filtered_key)
@@ -4190,7 +4455,7 @@ def install_dashboard_routes(core):
                 render_entry = prepare_multivendor_catalog_entry(entry) if snapshot.multivendor else entry
                 prepared_frame = _select_dynamic_chart_frame(prepared_frame, render_entry)
             with lock:
-                frame = snapshot.chart_frames.setdefault(index, prepared_frame)
+                frame = snapshot.chart_frames.setdefault(frame_key, prepared_frame)
             release_idle_snapshot_frames()
         return snapshot, entry, frame
 
@@ -4217,6 +4482,7 @@ def install_dashboard_routes(core):
                 # only the Canvas payload would immediately rebuild it from
                 # that stale frame after an Admin mapping change.
                 snapshot.chart_frames.pop(index, None)
+                snapshot.chart_frames.pop(('complete', index), None)
                 # Filtered/raw frames are mapping-dependent too, but reloading
                 # them re-reads every CDR row of the chart's type. Drop them
                 # only when the workspace mappings changed since they were
@@ -4670,6 +4936,7 @@ def install_dashboard_routes(core):
                     replacement = replace(replacement, chart_title=dynamic_chart_title(replacement))
                     candidate.entries[chart_index] = replacement
                     candidate.chart_frames.pop(chart_index, None)
+                    candidate.chart_frames.pop(('complete', chart_index), None)
                     candidate.chart_payloads.pop(chart_index, None)
                     candidate.filtered_frames.clear()
                     for slide in candidate.payload.get('slides', []):
@@ -5013,7 +5280,7 @@ def install_dashboard_routes(core):
                     'column_metadata': chart_dataset_column_metadata(snapshot, entry, visible.columns),
                     'page_size': 100, 'unfiltered_total': chart_total,
                 }
-        _, _, frame = snapshot_chart(token, index, user)
+        _, _, frame = snapshot_chart(token, index, user, complete=True)
         frame = unique_chart_dataset_rows(snapshot, entry, frame)
         chart_total = len(frame)
         values_frame = apply_chart_column_filters(

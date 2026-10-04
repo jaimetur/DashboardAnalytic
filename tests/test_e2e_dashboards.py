@@ -2,6 +2,7 @@ import json
 import re
 import shutil
 import subprocess
+import threading
 import time
 import zipfile
 from io import BytesIO, StringIO
@@ -3356,3 +3357,85 @@ def test_dynamic_vendor_only_editor_keeps_operator_rows_after_bin_edit(client):
         assert context.json()['dynamic_columns_field'] == 'Vendor_Only'
         expected_filter = 'Bin Size = 10' if index < 2 else 'Bin Size = 5'
         assert context.json()['filters'].startswith(expected_filter)
+
+
+def _compact_read_dashboard(client):
+    from src.modules.cdr_reporting import CatalogEntry, catalogue_csv
+    client.post('/login', data={'username': 'super', 'password': 'super123'})
+    common = dict(slide_subtitle='', cdr_source='CDR-Data', grouping_rows='Operator', grouping_columns='Campaign', legend='Campaign')
+    entries = [
+        CatalogEntry(slide=1, slide_title='RSRP', layout='Title + 1 rows + 2 columns', chart_title='CDF',
+                     kpi='LTE_PCell_RSRP_Avg', chart_type='CDF Line', filters='LTE_PCell_RSRP_Avg >= -160', **common),
+        CatalogEntry(slide=1, slide_title='RSRP', layout='Title + 1 rows + 2 columns', chart_title='Histogram',
+                     kpi='LTE_PCell_RSRP_Avg', chart_type='Histogram Line', filters='Bin Size = 5', **common),
+        CatalogEntry(slide=2, slide_title='RSRP', layout='Title + 1 rows + 3 columns', chart_title='Average',
+                     kpi='LTE_PCell_RSRP_Avg', chart_type='Average Vertical Bars', filters='', **common),
+        CatalogEntry(slide=2, slide_title='RSRP', layout='Title + 1 rows + 3 columns', chart_title='Classes',
+                     kpi='LTE_PCell_RSRP_Avg', chart_type='Distribution Stacked Vertical Bars',
+                     filters='Buckets = -110,-100,-90,-80', **{**common, 'grouping_columns': 'Campaign × Rate Bucket', 'legend': 'Rate Bucket'}),
+        CatalogEntry(slide=2, slide_title='RSRP', layout='Title + 1 rows + 3 columns', chart_title='Threshold',
+                     kpi='LTE_PCell_RSRP_Avg', chart_type='Threshold Stacked Vertical Bars', filters='Threshold = -100', **common),
+    ]
+    # Registered before the upload, so the combined CDR table includes its fields.
+    core.repository.add_report_template('nsa', 'Compact reads test', catalogue_csv(entries), is_default=False)
+    rows = ['Operator,City,Campaign,Test_Start_Time,LTE_PCell_RSRP_Avg,Call_Status']
+    for index in range(240):
+        operator = 'ABC'[index % 3]
+        campaign = 'UK_Q1_2026' if index % 2 else 'UK_Q2_2026'
+        # Many repeated measurements, so grouped reads collapse rows.
+        rows.append(f'{operator},London,{campaign},2026-0{1 + index % 6}-01,{-80 - (index % 17) * 2.5},{"Completed" if index % 5 else "Failed"}')
+    response = client.post('/datasets-analysis/upload', data={'dataset_kinds': 'data'}, files={
+        'dataset_files': ('Compact_reads_NSA.csv', BytesIO('\n'.join(rows).encode()), 'text/csv'),
+    })
+    assert response.status_code == 200, response.text
+    # The combined CDR table is rebuilt in the background after an upload.
+    deadline = time.monotonic() + 30
+    while not core.BACKGROUND_TASK_SCHEDULER.is_idle and time.monotonic() < deadline:
+        time.sleep(0.05)
+    dataset_id = max(int(row['id']) for row in core.repository.list_datasets())
+    return DashboardDefinition(name='Compact reads', template='Compact reads test',
+                               datasets={'data': [dataset_id]}).model_dump(mode='json')
+
+
+def test_compact_grouped_reads_produce_identical_chart_models(client, monkeypatch):
+    import src.modules.e2e_dashboards as dashboards_module
+
+    payload = _compact_read_dashboard(client)
+    prepared = client.post('/api/e2e-dashboards/prepare', json=payload)
+    assert prepared.status_code == 200, prepared.text
+    token = prepared.json()['token']
+    indexes = [chart['index'] for slide in prepared.json()['slides'] for chart in slide['charts']]
+    assert len(indexes) == 5
+    compact = [client.post(f'/api/e2e-dashboards/chart/{token}/{index}/refresh').json() for index in indexes]
+    # The grouped reads were persisted with their row counts (240 rows -> fewer groups).
+    grouped = [pd.read_pickle(path) for path in dashboards_module.frame_cache_dir(core.repository.db_path).glob('*.pkl')]
+    assert grouped and all('__catalog_rows' in frame.columns for frame in grouped)
+    assert all(len(frame) < frame['__catalog_rows'].sum() == 240 for frame in grouped)
+    monkeypatch.setattr(dashboards_module, 'DASHBOARD_COMPACT_READS', False)
+    complete = [client.post(f'/api/e2e-dashboards/chart/{token}/{index}/refresh').json() for index in indexes]
+    assert all(model['type'] != 'empty' for model in complete)
+    assert compact == complete
+
+
+def test_idle_chart_precompute_waits_for_quiet_periods_and_persists_models(client, monkeypatch):
+    import src.modules.e2e_dashboards as dashboards_module
+
+    payload = _compact_read_dashboard(client)
+    saved = client.put('/api/e2e-dashboards/idle-precompute', json=payload)
+    assert saved.status_code == 200, saved.text
+    model_dir = dashboards_module.canvas_model_cache_dir(core.repository.db_path)
+    shutil.rmtree(model_dir, ignore_errors=True)
+
+    # A user request just happened: the background work must wait.
+    monkeypatch.setattr(core, 'IDLE_DASHBOARD_WARMUP_SECONDS', 3600)
+    core.IDLE_DASHBOARD_WARMUP_CALLBACK()
+    worker = next(thread for thread in threading.enumerate() if thread.name == 'dashboard-idle-charts')
+    time.sleep(0.5)
+    assert worker.is_alive()
+    assert not list(model_dir.glob('*.json'))
+
+    # Once the application is quiet the charts are built and persisted.
+    monkeypatch.setattr(core, 'IDLE_DASHBOARD_WARMUP_SECONDS', 0)
+    worker.join(30)
+    assert not worker.is_alive()
+    assert len(list(model_dir.glob('*.json'))) >= 5

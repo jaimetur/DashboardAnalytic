@@ -2687,6 +2687,12 @@ PASSIVE_APPLICATION_REQUEST_PATHS = {
 }
 
 
+def application_idle_seconds() -> float:
+    """Seconds since the last user request that was not a background poll."""
+    with APPLICATION_ACTIVITY_LOCK:
+        return monotonic() - LAST_INTERACTIVE_APPLICATION_ACTIVITY
+
+
 def register_idle_dashboard_warmup(callback: Callable[[], None]) -> None:
     """Register the Dashboard module's low-priority idle warm-up callback."""
     global IDLE_DASHBOARD_WARMUP_CALLBACK
