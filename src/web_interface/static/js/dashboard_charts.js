@@ -93,6 +93,14 @@
     const point = transformPoint(transform, x, y);
     state.hits.push({kind: 'point', x: point.x, y: point.y, ...details});
   };
+  // Aggregation labels of an axis (any level): right-clicking one offers the
+  // same Keep only / Hide / Show actions as a legend entry.
+  const pushAxisHit = (axis, level, value, x, y, width, height) => {
+    const text = String(value ?? '');
+    if (!legendHitTarget || !text || text === '(all)') return;
+    const start = transformPoint(legendHitTarget.transform, x, y), scale = legendHitTarget.transform.scale;
+    (legendHitTarget.state.axisHits ||= []).push({axis, level, value: text, x: start.x, y: start.y, width: width * scale, height: height * scale});
+  };
   const pushLineHit = (state, transform, points, details) => {
     state.hits.push({kind: 'line', points: points.map(point => ({...point, ...transformPoint(transform, point.x, point.y)})), ...details});
   };
@@ -240,29 +248,6 @@
     context.save(); context.translate(x, y); context.scale(width / measured, 1); context.fillText(label, 0, 0); context.restore();
   }
 
-  function drawFittedAggregationHeader(context, value, centre, y, width, format = {}, level = 0, maximumSize = Infinity) {
-    const label = String(value ?? '');
-    const available = Math.max(width - 8, 1);
-    let size = Math.min(aggregationSize(format, level), maximumSize);
-    const setFont = () => {
-      if (format.configured) labelFont(context, size, format, false, false);
-      else context.font = `800 ${size}px ${FONT_FAMILY}`;
-    };
-    setFont();
-    while (size > 9 && textWidth(context, label) > available) { size -= 1; setFont(); }
-    const measured = textWidth(context, label);
-    if (measured <= available) { context.fillText(label, centre, y); return size; }
-    context.save(); context.translate(centre, y); context.scale(available / measured, 1); context.fillText(label, 0, 0); context.restore();
-    return size;
-  }
-
-  function rotatedLabel(context, value, centreX, bottomY, colour, size, bold = true, angle = 45, format = {}) {
-    context.save(); context.translate(centreX, bottomY); context.rotate(-Math.PI * angle / 180);
-    context.fillStyle = format.configured && format.color ? format.color : colour; context.textAlign = 'center'; context.textBaseline = 'bottom';
-    if (format.configured) labelFont(context, size, format, false, false); else font(context, size, bold);
-    context.fillText(String(value), 0, 0); context.restore();
-  }
-
   function verticalLabel(context, value, centreX, centreY, colour, size, bold = true, format = {}) {
     context.save(); context.translate(centreX, centreY); context.rotate(-Math.PI / 2);
     context.fillStyle = colour; context.textAlign = 'center'; context.textBaseline = 'middle'; labelFont(context, size, format, bold);
@@ -405,51 +390,156 @@
     return spans;
   }
 
-  function drawTopColumnSeparators(context, keys, axisColumns, left, width, top, bottom) {
+  function drawTopColumnSeparators(context, keys, axisColumns, left, width, top, bottom, axis = null) {
     if (keys.length < 2) return;
     // The x-axis can begin with row aggregation fields. They are still visible
     // header levels in bar charts, so the first hierarchy field is the outer
     // boundary and each child boundary begins below its parent header.
-    const outerLevel = 0, headerTop = top - 30 * (keys[0]?.length || 1) - 8;
+    const outerLevel = 0, headerTop = axis ? top - axis.headerHeight : top - 30 * (keys[0]?.length || 1) - 8;
+    const levelTop = level => headerTop + (axis
+      ? axis.headers.slice(0, level).reduce((sum, header) => sum + header.height, 0)
+      : level * 30);
     for (let index = 1; index < keys.length; index += 1) {
       let changed = keys[index - 1].findIndex((value, level) => String(value) !== String(keys[index][level]));
       if (changed < 0) continue;
       const x = left + index * width / keys.length;
       if (changed === outerLevel) line(context, x, headerTop, x, bottom, '#AEBBC4', 2);
-      else dashedVertical(context, x, headerTop + changed * 30, bottom);
+      else dashedVertical(context, x, levelTop(changed), bottom);
     }
   }
 
-  function labelAngle(context, value, availableWidth, size) {
-    font(context, size, true); const measured = textWidth(context, value);
-    if (measured + 8 <= availableWidth) return 0;
-    // A 45° label occupies its text width and height projected onto the
-    // column. Use 90° only when that diagonal footprint still overflows.
-    return (measured + size) * Math.SQRT1_2 + 8 <= availableWidth ? 45 : 90;
+  // Axis labels: the canvas scales geometry separately along x and y but
+  // paints text with the smaller scale. Measured text widths are converted
+  // into logical units along each axis before deciding how a label fits.
+  function textRatios(context) {
+    const transform = context.getTransform();
+    const horizontal = Math.hypot(transform.a, transform.b) || 1, vertical = Math.hypot(transform.c, transform.d) || 1;
+    const text = Math.min(horizontal, vertical);
+    return {x: text / horizontal, y: text / vertical};
   }
 
-  function bottomAxisReserve(context, keys, width, size = 22) {
-    const itemWidth = width / Math.max(keys.length, 1);
-    const angles = keys.map(key => labelAngle(context, String(key.at(-1) ?? '').slice(0, 18), itemWidth, size));
-    return angles.includes(90) ? 118 : angles.includes(45) ? 90 : 46;
+  const AXIS_LABEL_MINIMUM_SIZE = 12;
+  const AXIS_LINE_HEIGHT = 1.15;
+
+  function axisFont(context, format = {}, size = AGGREGATION_TITLE_SIZE) {
+    if (format.configured) labelFont(context, size, format, false, false);
+    else context.font = `800 ${size}px ${FONT_FAMILY}`;
   }
 
-  function drawHierarchicalAxisLabels(context, keys, left, width, top, bottom, format = {}) {
-    if (!keys.length) return;
-    const levels = keys[0].length, itemWidth = width / keys.length;
-    for (let level = 0; level < Math.max(levels - 1, 0); level += 1) {
-      for (const [start, end, rawValue] of hierarchySpans(keys, level)) {
-        const centre = left + ((start + end) / 2) * itemWidth, value = rawValue.slice(0, 20), y = top - 30 * (levels - level), available = (end - start) * itemWidth;
-        const size = aggregationSize(format, level), angle = labelAngle(context, value, available, size);
-        if (angle) rotatedLabel(context, value, centre, y + 24, '#566A78', size, true, angle, format);
-        else { context.fillStyle = format.configured && format.color ? format.color : '#566A78'; context.textAlign = 'center'; context.textBaseline = 'top'; aggregationFont(context, format, level); context.fillText(value, centre, y); }
-        line(context, left + start * itemWidth, y + 24, left + end * itemWidth, y + 24, '#CDD7DE', 1);
+  // A label on one line, or on two lines broken near its middle at a space,
+  // " - " or "-" (for example "Mixed / Vendor" or "2026- / Q1").
+  function axisLabelLines(value) {
+    const text = String(value ?? '');
+    const options = [[text]];
+    const breaks = [...text.matchAll(/ - | · | |-/g)];
+    if (breaks.length) {
+      const middle = text.length / 2;
+      const best = breaks.sort((left, right) => Math.abs(left.index - middle) - Math.abs(right.index - middle))[0];
+      const separator = best[0];
+      const first = (separator === '-' || separator === ' - ' ? text.slice(0, best.index + separator.trimEnd().length + (separator === ' - ' ? 1 : 0)) : text.slice(0, best.index)).trim();
+      const second = text.slice(best.index + separator.length).trim();
+      if (first && second) options.push([first, second]);
+    }
+    return options;
+  }
+
+  // One plan for every label of an axis level, so they share a size: one
+  // line, then two lines, then a smaller font, then vertical text, and as a
+  // last resort the smallest font condensed to its column. Never truncated.
+  function axisLevelPlan(context, entries, maximumHeight, format = {}, level = 0) {
+    const ratios = textRatios(context), base = aggregationSize(format, level);
+    const minimum = Math.min(base, Math.max(AXIS_LABEL_MINIMUM_SIZE, Math.round(base * .5)));
+    const labels = entries.map(entry => ({value: String(entry.value ?? ''), width: Math.max(1, Number(entry.width) || 1)})).filter(entry => entry.value);
+    const lineHeight = size => size * AXIS_LINE_HEIGHT * ratios.y;
+    const widthOf = (text, size) => { axisFont(context, format, size); return textWidth(context, text) * ratios.x; };
+    const plan = (mode, size, lines) => ({
+      mode, size, lines,
+      height: mode === 'vertical'
+        ? Math.max(0, ...labels.map(label => { axisFont(context, format, size); return textWidth(context, label.value) * ratios.y; })) + 6
+        : Math.max(1, ...[...lines.values()].map(item => item.length)) * lineHeight(size) + 4,
+    });
+    if (!labels.length) return plan('horizontal', base, new Map());
+    const horizontalAt = (size, maximumLines) => {
+      const lines = new Map();
+      for (const label of labels) {
+        const option = axisLabelLines(label.value).find(candidate => candidate.length <= maximumLines
+          && candidate.every(line => widthOf(line, size) <= label.width - 6)
+          && candidate.length * lineHeight(size) <= maximumHeight);
+        if (!option) return null;
+        lines.set(label.value, option);
+      }
+      return lines;
+    };
+    const readable = Math.max(minimum, Math.round(base * .7));
+    for (let size = base; size >= readable; size -= 1) {
+      for (const maximumLines of [1, 2]) {
+        const lines = horizontalAt(size, maximumLines);
+        if (lines) return plan('horizontal', size, lines);
       }
     }
+    for (let size = base; size >= minimum; size -= 1) {
+      const fits = labels.every(label => { axisFont(context, format, size); return textWidth(context, label.value) * ratios.y <= maximumHeight - 6 && lineHeight(size) * ratios.x / ratios.y <= label.width; });
+      if (fits) return plan('vertical', size, new Map(labels.map(label => [label.value, [label.value]])));
+    }
+    for (let size = readable - 1; size >= minimum; size -= 1) {
+      const lines = horizontalAt(size, 2);
+      if (lines) return plan('horizontal', size, lines);
+    }
+    return plan('condensed', minimum, new Map(labels.map(label => [label.value, [label.value]])));
+  }
+
+  // Draw one planned label centred on centreX, starting at topY.
+  function drawAxisLabel(context, plan, value, centreX, topY, width, colour, format = {}) {
+    const text = String(value ?? '');
+    if (!text) return;
+    const ratios = textRatios(context);
+    context.save();
+    axisFont(context, format, plan.size);
+    context.fillStyle = format.configured && format.color ? format.color : colour;
+    if (plan.mode === 'vertical') {
+      const length = textWidth(context, text) * ratios.y;
+      context.translate(centreX, topY + length); context.rotate(-Math.PI / 2);
+      context.textAlign = 'left'; context.textBaseline = 'middle'; context.fillText(text, 0, 0);
+    } else {
+      context.textAlign = 'center'; context.textBaseline = 'top';
+      (plan.lines.get(text) || [text]).forEach((line, index) => {
+        const y = topY + index * plan.size * AXIS_LINE_HEIGHT * ratios.y, measured = textWidth(context, line) * ratios.x, available = Math.max(width - 6, 1);
+        if (measured <= available) { context.fillText(line, centreX, y); return; }
+        context.save(); context.translate(centreX, y); context.scale(available / measured, 1); context.fillText(line, 0, 0); context.restore();
+      });
+    }
+    context.restore();
+  }
+
+  // Label plans and reserved heights of a column hierarchy: the upper levels
+  // above the plot and the leaf level below it.
+  function hierarchicalAxisPlans(context, keys, width, format = {}) {
+    const levels = keys[0]?.length || 0, itemWidth = width / Math.max(keys.length, 1);
+    const headers = [];
+    for (let level = 0; level < Math.max(levels - 1, 0); level += 1) {
+      const plan = axisLevelPlan(context, hierarchySpans(keys, level).map(([start, end, value]) => ({value, width: (end - start) * itemWidth})), 64, format, level);
+      headers.push({plan, height: Math.max(30, plan.height + 8)});
+    }
+    const leaf = axisLevelPlan(context, keys.map(key => ({value: key.at(-1), width: itemWidth})), 150, format);
+    return {headers, leaf, headerHeight: headers.reduce((sum, header) => sum + header.height, 0) + 38, leafHeight: Math.max(46, leaf.height + 16)};
+  }
+
+  function drawHierarchicalAxisLabels(context, keys, left, width, top, bottom, format = {}, axis = hierarchicalAxisPlans(context, keys, width, format)) {
+    if (!keys.length) return;
+    const levels = keys[0].length, itemWidth = width / keys.length;
+    let y = top - axis.headerHeight + 8;
+    axis.headers.forEach(({plan, height}, level) => {
+      for (const [start, end, value] of hierarchySpans(keys, level)) {
+        const available = (end - start) * itemWidth;
+        drawAxisLabel(context, plan, value, left + (start + end) / 2 * itemWidth, y + Math.max(0, (height - 6 - plan.height) / 2), available, '#566A78', format);
+        line(context, left + start * itemWidth, y + height - 6, left + end * itemWidth, y + height - 6, '#CDD7DE', 1);
+        pushAxisHit('column', level, value, left + start * itemWidth, y - 4, available, height);
+      }
+      y += height;
+    });
     keys.forEach((key, index) => {
-      const size = aggregationSize(format), value = String(key.at(-1) ?? '').slice(0, 18), centre = left + (index + .5) * itemWidth, angle = labelAngle(context, value, itemWidth, size);
-      if (angle) rotatedLabel(context, value, centre, angle === 45 ? bottom + 82 : bottom + 112, '#62727E', size, true, angle, format);
-      else { context.fillStyle = format.configured && format.color ? format.color : '#62727E'; context.textAlign = 'center'; context.textBaseline = 'top'; aggregationFont(context, format); context.fillText(value, centre, bottom + 11); }
+      drawAxisLabel(context, axis.leaf, key.at(-1), left + (index + .5) * itemWidth, bottom + 11, itemWidth, '#62727E', format);
+      pushAxisHit('column', levels - 1, key.at(-1), left + index * itemWidth, bottom + 4, itemWidth, axis.leaf.height + 10);
     });
   }
 
@@ -521,77 +611,113 @@
     items.forEach((item, index) => drawItem(item, x, 112 + index * (size + 14), 24));
   }
 
-  // Remove the series, bars or stacked segments of hidden legend items.
-  // A legend item controls the data elements with its label; otherwise the
-  // element in the same position, or the elements drawn in its colour.
-  function legendHiddenPayload(payload, hidden) {
-    if (!payload || !hidden?.size) return payload;
+  // Hidden legend state of a canvas: hidden labels or aggregation values, and
+  // labels explicitly shown although one of their levels is hidden.
+  const emptyLegendState = () => ({hidden: new Set(), shown: new Set()});
+  const legendStateMatchers = state => {
+    const hidden = state?.hidden || new Set(), shown = state?.shown || new Set();
+    const valueHidden = value => hidden.has(value) && !shown.has(value);
+    // "VF_SA" hides every series or category with VF_SA at any level, such
+    // as "VF_SA · 2026-Q1" or "London · VF_SA · 2026-Q2".
+    const labelHidden = label => {
+      const text = String(label ?? '');
+      return !shown.has(text) && (valueHidden(text) || text.split(' · ').some(valueHidden));
+    };
+    const keyHidden = key => {
+      const parts = (Array.isArray(key) ? key : [key]).map(value => String(value ?? '')).filter(Boolean);
+      const joined = parts.join(' · ');
+      return Boolean(parts.length) && !shown.has(joined) && (labelHidden(joined) || parts.some(valueHidden));
+    };
+    return {hidden, labelHidden, keyHidden};
+  };
+
+  // Remove the series, categories, bars or stacked segments of hidden legend
+  // entries and aggregation values, so the chart closes the gaps. A legend
+  // entry controls the data elements with its label; otherwise the element in
+  // the same position, or the elements drawn in its colour.
+  function legendHiddenPayload(payload, state) {
+    const {hidden, labelHidden, keyHidden} = legendStateMatchers(state);
+    if (!payload || !hidden.size) return payload;
     const result = {...payload};
-    if (Array.isArray(payload.panels)) result.panels = payload.panels.map(panel => legendHiddenPayload(panel, hidden));
+    if (Array.isArray(payload.panels)) result.panels = payload.panels.map(panel => legendHiddenPayload(panel, state));
     const items = (payload.legend?.items || []).filter(item => item.colour);
-    if (!items.length) return result;
-    result.legend = {...payload.legend, items: payload.legend.items.map(item => (
-      item.colour && hidden.has(String(item.label)) ? {...item, hidden: true} : item
-    ))};
+    const hiddenItems = items.filter(item => labelHidden(item.label));
+    if (payload.legend?.items) {
+      result.legend = {...payload.legend, items: payload.legend.items.map(item => (
+        item.colour && labelHidden(item.label) ? {...item, hidden: true} : item
+      ))};
+    }
     const hiddenIndexes = (elements, name) => {
       const names = elements.map(element => String(name(element) ?? ''));
-      const indexes = new Set();
+      const indexes = new Set(names.map((value, index) => (value && labelHidden(value) ? index : -1)).filter(index => index >= 0));
       items.forEach((item, itemIndex) => {
         const label = String(item.label);
-        if (!hidden.has(label)) return;
-        if (names.includes(label)) names.forEach((value, index) => { if (value === label) indexes.add(index); });
-        else if (elements.length === items.length) indexes.add(itemIndex);
+        if (!labelHidden(label) || names.includes(label)) return;
+        if (elements.length === items.length) indexes.add(itemIndex);
         else elements.forEach((element, index) => {
           if (element?.colour === item.colour && (element.width === undefined || Number(element.width) === Number(item.width))) indexes.add(index);
         });
       });
       return indexes;
     };
+    const pick = (values, indexes) => indexes.map(index => values?.[index]);
     if (Array.isArray(payload.series)) {
       const indexes = hiddenIndexes(payload.series, series => series.name ?? series.legend_name);
-      result.series = payload.series.filter((_series, index) => !indexes.has(index));
+      result.series = payload.series.filter((series, index) => !indexes.has(index) && !(series.key && keyHidden(series.key)));
     }
     if (Array.isArray(payload.bars)) {
       const indexes = hiddenIndexes(payload.bars, bar => bar.legend);
-      result.bars = payload.bars.map((bar, index) => indexes.has(index) ? {...bar, hidden: true} : bar);
+      result.bars = payload.bars.filter((bar, index) => !indexes.has(index) && !keyHidden(bar.key));
     }
-    const hiddenItems = items.filter(item => hidden.has(String(item.label)));
-    // Grouped mean bars keep their slots: hidden values are not drawn.
-    if (payload.type === 'mean_bar' && payload.mode === 'hierarchy' && Array.isArray(payload.cells)) {
-      const rowKeys = payload.row_keys || [], columnKeys = payload.column_keys || [];
-      const isHidden = (rowIndex, columnIndex) => hiddenItems.some(item => {
-        const label = String(item.label), keys = [...(rowKeys[rowIndex] || []), ...(columnKeys[columnIndex] || [])].map(String);
-        return keys.includes(label) || payload.cell_colours?.[rowIndex]?.[columnIndex] === item.colour;
-      });
-      result.cells = payload.cells.map((row, rowIndex) => (row || []).map((value, columnIndex) => (
-        isHidden(rowIndex, columnIndex) ? Number.NaN : value
-      )));
+    // Row/column hierarchies (100% bars, failures, grouped averages) drop every
+    // row and column with a hidden value at any of their levels.
+    if (Array.isArray(payload.row_keys) && Array.isArray(payload.column_keys) && Array.isArray(payload.cells)) {
+      let rows = payload.row_keys.map((_key, index) => index).filter(index => !keyHidden(payload.row_keys[index]));
+      let columns = payload.column_keys.map((_key, index) => index).filter(index => !keyHidden(payload.column_keys[index]));
+      let cellHidden = () => false;
+      if (payload.type === 'mean_bar') {
+        // Average bars are coloured by legend entry, which may not be a level.
+        cellHidden = (row, column) => hiddenItems.some(item => payload.cell_colours?.[row]?.[column] === item.colour
+          || [...(payload.row_keys[row] || []), ...(payload.column_keys[column] || [])].map(String).includes(String(item.label)));
+        columns = columns.filter(column => rows.some(row => !cellHidden(row, column)));
+        rows = rows.filter(row => columns.some(column => !cellHidden(row, column)));
+      }
+      result.row_keys = pick(payload.row_keys, rows);
+      result.column_keys = pick(payload.column_keys, columns);
+      result.cells = rows.map(row => columns.map(column => (cellHidden(row, column) ? Number.NaN : payload.cells[row]?.[column])));
+      if (Array.isArray(payload.cell_colours)) result.cell_colours = rows.map(row => pick(payload.cell_colours[row], columns));
+    } else if (Array.isArray(payload.categories) && Array.isArray(payload.cells)) {
+      const kept = payload.categories.map((_category, index) => index).filter(index => !keyHidden(payload.categories[index]));
+      result.categories = pick(payload.categories, kept);
+      result.cells = pick(payload.cells, kept);
+    } else if (Array.isArray(payload.keys) && Array.isArray(payload.cells)) {
+      const kept = payload.keys.map((_key, index) => index).filter(index => !keyHidden(payload.keys[index]));
+      result.keys = pick(payload.keys, kept);
+      result.cells = pick(payload.cells, kept);
     }
-    // Tables drop the rows and value columns labelled with a hidden item.
+    // Tables drop the rows and value columns labelled with a hidden value.
     if (payload.type === 'table' && Array.isArray(payload.rows)) {
-      const labels = new Set(hiddenItems.map(item => String(item.label)));
-      const mentions = value => String(value ?? '').split(' · ').some(part => labels.has(part));
       const rowDimensions = Math.max(1, Number(payload.row_dimension_count) || 1);
       const headers = payload.headers || [];
-      const hiddenColumns = new Set(headers.map((header, index) => index >= rowDimensions && mentions(header) ? index : -1).filter(index => index >= 0));
+      const hiddenColumns = new Set(headers.map((header, index) => index >= rowDimensions && keyHidden(String(header).split(' · ')) ? index : -1).filter(index => index >= 0));
       result.rows = payload.rows
-        .filter(row => !row.slice(0, rowDimensions).some(mentions))
+        .filter(row => !row.slice(0, rowDimensions).some(value => keyHidden(String(value ?? '').split(' · '))))
         .map(row => row.filter((_value, index) => !hiddenColumns.has(index)));
       if (hiddenColumns.size) {
         result.headers = headers.filter((_header, index) => !hiddenColumns.has(index));
         if (Array.isArray(payload.column_keys)) result.column_keys = payload.column_keys.filter((_key, index) => !hiddenColumns.has(index + rowDimensions));
       }
     }
-    // Stacked charts keep their categories and drop the hidden segments.
+    // Stacked charts drop the hidden segments of the remaining categories.
     const segments = Array.isArray(payload.states) ? payload.states : (Array.isArray(payload.buckets) ? payload.buckets : null);
-    if (segments && Array.isArray(payload.cells)) {
+    if (segments && Array.isArray(result.cells)) {
       const indexes = hiddenIndexes(segments, segment => segment?.name ?? segment?.label ?? segment);
       const clear = values => {
         if (!Array.isArray(values)) return values;
         if (values.some(Array.isArray)) return values.map(clear);
         return values.map((value, index) => indexes.has(index) ? 0 : value);
       };
-      if (indexes.size) result.cells = clear(payload.cells);
+      if (indexes.size) result.cells = clear(result.cells);
     }
     return result;
   }
@@ -601,7 +727,9 @@
     const stackLabelColour = payload.label_format?.color || stackedChartLabelColour(states, payload.cells);
     if (payload.mode === 'flat') {
       const categories = payload.categories || [], layout = legendLayout(payload.legend, 16);
-      const left = layout.left, top = layout.top, width = layout.right - left, height = Math.max(180, layout.bottom - top - 80);
+      const left = layout.left, top = layout.top, width = layout.right - left, slotWidth = width / Math.max(categories.length, 1);
+      const categoryPlan = axisLevelPlan(context, categories.map(category => ({value: category, width: slotWidth})), 150, payload.legend_format);
+      const height = Math.max(180, layout.bottom - top - Math.max(60, categoryPlan.height + 16));
       const yDomain = expandedDomain(payload.domain?.y), ySpan = yDomain[1] - yDomain[0];
       const barWidth = Math.max(24, Math.min(220, Math.floor(width / Math.max(categories.length * 1.25, 1))));
       categories.forEach((category, index) => {
@@ -620,9 +748,8 @@
           if (segmentHeight > 0) pushRectangleHit(state, transform, {x, y, width: barWidth, height: segmentHeight}, {label: category, series: series.name, value: tooltipPercent(ratio)});
           running += ratio;
         });
-        const label = String(category).slice(0, 24); aggregationFont(context, payload.legend_format);
-        if (textWidth(context, label) > width / categories.length - 8) rotatedLabel(context, label, x + barWidth / 2, top + height + 75, '#5A6B78', AGGREGATION_TITLE_SIZE, true, 45, payload.legend_format);
-        else { context.fillStyle = payload.legend_format?.configured && payload.legend_format.color ? payload.legend_format.color : '#5A6B78'; context.textAlign = 'left'; context.fillText(label, x - 4, top + height + 8); }
+        pushAxisHit('column', 0, category, x - 12, top + height + 4, slotWidth, categoryPlan.height + 10);
+        drawAxisLabel(context, categoryPlan, category, x + barWidth / 2, top + height + 8, slotWidth, '#5A6B78', payload.legend_format);
       });
       for (let tick = 0; tick <= 5; tick += 1) {
         const value = yDomain[0] + ySpan * tick / 5, y = top + height - tick / 5 * height; line(context, left - 20, y, left + width, y, '#E4E9ED');
@@ -640,26 +767,35 @@
     const upperLevels = Math.max((columnKeys[0]?.length || 1) - 1, 0), headerBandHeight = Math.min(32, 112 / Math.max(upperLevels, 1));
     const layout = legendLayout(payload.legend), rowOrigin = layout.position === 'left' ? layout.left : 24;
     const chartLeft = Math.max(rowOrigin + 121, Math.min(rowOrigin + 696, rowOrigin + Math.min(rowLabelWidths.reduce((sum, value) => sum + value, 0), 600) + 68));
-    const chartTop = layout.top + upperLevels * headerBandHeight + 8, chartRight = layout.right - 10;
-    const chartHeight = Math.max(180, layout.bottom - chartTop - 90), chartWidth = chartRight - chartLeft;
-    const rowHeight = chartHeight / rowKeys.length, columnWidth = chartWidth / columnKeys.length, barWidth = Math.max(18, Math.min(250, columnWidth * .72));
+    const chartRight = layout.right - 10, chartWidth = chartRight - chartLeft, columnWidth = chartWidth / Math.max(columnKeys.length, 1);
+    // Column labels get the room they need: wrapped, smaller or vertical, never cut.
+    const headerPlans = Array.from({length: upperLevels}, (_value, level) => {
+      const plan = axisLevelPlan(context, hierarchySpans(columnKeys, level).map(([start, end, value]) => ({value, width: (end - start) * columnWidth})), 64, payload.legend_format, level);
+      return {plan, height: Math.max(headerBandHeight, plan.height + 6)};
+    });
+    const headerOffset = level => headerPlans.slice(0, level).reduce((sum, header) => sum + header.height, 0);
+    const leafPlan = payload.single_column ? null : axisLevelPlan(context, columnKeys.map(key => ({value: key.at(-1), width: columnWidth})), 150, payload.legend_format);
+    const chartTop = layout.top + headerOffset(upperLevels) + 8;
+    const chartHeight = Math.max(180, layout.bottom - chartTop - (leafPlan ? Math.max(60, leafPlan.height + 16) : 60));
+    const rowHeight = chartHeight / rowKeys.length, barWidth = Math.max(18, Math.min(250, columnWidth * .72));
     const yDomain = expandedDomain(payload.domain?.y), ySpan = yDomain[1] - yDomain[0];
-    const headerTop = chartTop - upperLevels * headerBandHeight - 8;
+    const headerTop = chartTop - headerOffset(upperLevels) - 8;
     const rowLabelTotal = Math.max(rowLabelWidths.reduce((sum, value) => sum + value, 0), 1);
     const rowLabelFactor = Math.min((chartLeft - rowOrigin - 68) / rowLabelTotal, 1);
     const nestedRowStart = level => rowOrigin + rowLabelWidths.slice(0, level).reduce((sum, value) => sum + value * rowLabelFactor, 0);
-    for (let level = 0; level < upperLevels; level += 1) {
-      const bandTop = headerTop + level * headerBandHeight;
+    headerPlans.forEach(({plan, height}, level) => {
+      const bandTop = headerTop + headerOffset(level);
       hierarchySpans(columnKeys, level).forEach(([start, end, value]) => {
-        const left = chartLeft + start * columnWidth, right = chartLeft + end * columnWidth, caption = fittedText(context, value, right - left - 10);
-        context.fillStyle = payload.legend_format?.configured && payload.legend_format.color ? payload.legend_format.color : '#405765'; context.textAlign = 'center'; aggregationFont(context, payload.legend_format, level); context.fillText(caption, (left + right) / 2, bandTop + 2);
-        line(context, left, bandTop + headerBandHeight - 3, right, bandTop + headerBandHeight - 3, '#BCC8D0');
+        const left = chartLeft + start * columnWidth, right = chartLeft + end * columnWidth;
+        drawAxisLabel(context, plan, value, (left + right) / 2, bandTop + Math.max(2, (height - 4 - plan.height) / 2), right - left, '#405765', payload.legend_format);
+        line(context, left, bandTop + height - 3, right, bandTop + height - 3, '#BCC8D0');
+        pushAxisHit('column', level, value, left, bandTop, right - left, height);
       });
-    }
+    });
     for (let index = 1; index < columnKeys.length; index += 1) {
       let changed = columnKeys[index - 1].findIndex((value, level) => value !== columnKeys[index][level]);
       if (changed < 0) changed = columnKeys[index].length - 1;
-      const x = chartLeft + index * columnWidth, lineTop = headerTop + Math.min(changed, upperLevels) * headerBandHeight;
+      const x = chartLeft + index * columnWidth, lineTop = headerTop + headerOffset(Math.min(changed, upperLevels));
       if (changed === 0) line(context, x, lineTop, x, chartTop + chartHeight, '#AEBBC4', 2); else dashedVertical(context, x, lineTop, chartTop + chartHeight);
     }
     rowKeys.forEach((rowKey, rowIndex) => {
@@ -697,17 +833,16 @@
         const visible = width * factor;
         hierarchySpans(rowKeys, level).forEach(([start, end, value]) => {
           drawFullHierarchyLabel(context, value, x + 4, chartTop + (start + end) / 2 * rowHeight - aggregationSize(payload.legend_format, level) / 2, visible - 8, rowLabelSize, '#405765', payload.legend_format, level);
+          pushAxisHit('row', level, value, x, chartTop + start * rowHeight, visible, (end - start) * rowHeight);
         });
         x += visible; line(context, x, chartTop, x, chartTop + chartHeight, '#D7DEE3');
       });
     }
-    if (!payload.single_column) {
-      const captions = columnKeys.map(key => String(key.at(-1) ?? '')); aggregationFont(context, payload.legend_format);
-      const rotate = captions.some(caption => textWidth(context, caption) + 8 > columnWidth);
-      captions.forEach((caption, index) => {
+    if (leafPlan) {
+      columnKeys.forEach((key, index) => {
         const centre = chartLeft + (index + .5) * columnWidth;
-        if (rotate) rotatedLabel(context, caption.slice(0, 24), centre, chartTop + chartHeight + 90, '#4E6271', AGGREGATION_TITLE_SIZE, true, 45, payload.legend_format);
-        else { context.fillStyle = payload.legend_format?.configured && payload.legend_format.color ? payload.legend_format.color : '#4E6271'; context.textAlign = 'center'; context.fillText(fittedText(context, caption, columnWidth - 8), centre, chartTop + chartHeight + 10); }
+        drawAxisLabel(context, leafPlan, key.at(-1), centre, chartTop + chartHeight + 10, columnWidth, '#4E6271', payload.legend_format);
+        pushAxisHit('column', key.length - 1, key.at(-1), centre - columnWidth / 2, chartTop + chartHeight + 4, columnWidth, leafPlan.height + 10);
       });
     }
     drawLegend(context, payload.legend);
@@ -749,29 +884,34 @@
     const rowLabelArea = rowLevels ? Math.min(440, Math.max(230, rowLabelTotal + rowLabelGap * (rowLevels - 1))) : 0;
     const rowLabelFactor = Math.min((rowLabelArea - rowLabelGap * (rowLevels - 1)) / rowLabelTotal, 1);
     const chartLeft = rowOrigin + rowLabelArea + (rowLevels ? 56 : 110);
-    const headerTop = layout.top, baseChartTop = headerTop + upperLevels * headerBandHeight + 8;
-    const leafHeaderHeight = Math.max(34, aggregationSize(payload.legend_format) + 8);
+    const chartWidth = layout.right - chartLeft - 10, columnWidth = chartWidth / columnKeys.length;
+    // Column labels get the room they need: wrapped, smaller or vertical, never cut.
+    const headerPlans = Array.from({length: upperLevels}, (_value, level) => {
+      const plan = axisLevelPlan(context, hierarchySpans(columnKeys, level).map(([start, end, value]) => ({value, width: (end - start) * columnWidth})), 64, payload.legend_format, level);
+      return {plan, height: Math.max(headerBandHeight, plan.height + 8)};
+    });
+    const headerOffset = level => headerPlans.slice(0, level).reduce((sum, header) => sum + header.height, 0);
+    const leafPlan = axisLevelPlan(context, columnKeys.map(key => ({value: key.at(-1), width: columnWidth})), 120, payload.legend_format, upperLevels);
+    const headerTop = layout.top, baseChartTop = headerTop + headerOffset(upperLevels) + 8;
+    const leafHeaderHeight = Math.max(34, leafPlan.height + 10);
     const chartTop = baseChartTop + leafHeaderHeight;
-    const chartHeight = Math.max(180, layout.bottom - chartTop - 40), chartWidth = layout.right - chartLeft - 10;
+    const chartHeight = Math.max(180, layout.bottom - chartTop - 40);
     const xDomain = expandedDomain(payload.domain?.x), xSpan = xDomain[1] - xDomain[0];
-    const leafLabelY = baseChartTop - 10, rowHeight = chartHeight / rowKeys.length, columnWidth = chartWidth / columnKeys.length;
-    const parentHeaderSizes = Array(columnKeys.length).fill(Infinity);
-    for (let level = 0; level < upperLevels; level += 1) {
-      const y = headerTop + level * headerBandHeight;
+    const leafLabelY = baseChartTop + Math.max(0, (leafHeaderHeight - 8 - leafPlan.height) / 2), rowHeight = chartHeight / rowKeys.length;
+    headerPlans.forEach(({plan, height}, level) => {
+      const y = headerTop + headerOffset(level);
       hierarchySpans(columnKeys, level).forEach(([start, end, value]) => {
         const centre = chartLeft + (start + end) / 2 * columnWidth;
-        const maximumSize = Math.min(...parentHeaderSizes.slice(start, end)) - 1;
-        context.fillStyle = payload.legend_format?.configured && payload.legend_format.color ? payload.legend_format.color : '#566A78'; context.textAlign = 'center';
-        const size = drawFittedAggregationHeader(context, value, centre, y, (end - start) * columnWidth, payload.legend_format, level, maximumSize);
-        parentHeaderSizes.fill(size, start, end);
-        line(context, chartLeft + start * columnWidth, y + headerBandHeight - 4, chartLeft + end * columnWidth, y + headerBandHeight - 4, '#C8D2D9');
+        drawAxisLabel(context, plan, value, centre, y + Math.max(0, (height - 6 - plan.height) / 2), (end - start) * columnWidth, '#566A78', payload.legend_format);
+        pushAxisHit('column', level, value, chartLeft + start * columnWidth, y, (end - start) * columnWidth, height);
+        line(context, chartLeft + start * columnWidth, y + height - 4, chartLeft + end * columnWidth, y + height - 4, '#C8D2D9');
       });
-    }
+    });
     columnKeys.forEach((key, index) => {
       const centre = chartLeft + (index + .5) * columnWidth, cellLeft = chartLeft + index * columnWidth;
-      context.fillStyle = payload.legend_format?.configured && payload.legend_format.color ? payload.legend_format.color : '#4E6271'; context.textAlign = 'center';
-      drawFittedAggregationHeader(context, key.at(-1), centre, leafLabelY, columnWidth, payload.legend_format, upperLevels, parentHeaderSizes[index] - 1);
-      if (index) { let changed = columnKeys[index - 1].findIndex((value, level) => value !== key[level]); if (changed < 0) changed = key.length - 1; const lineTop = changed === 0 ? headerTop : headerTop + Math.min(changed, upperLevels) * headerBandHeight; if (changed === 0) line(context, cellLeft, lineTop, cellLeft, chartTop + chartHeight + 25, '#AEBBC4', 2); else dashedVertical(context, cellLeft, lineTop, chartTop + chartHeight + 25); } else line(context, cellLeft, headerTop, cellLeft, chartTop + chartHeight + 25, '#AEBBC4', 2);
+      drawAxisLabel(context, leafPlan, key.at(-1), centre, leafLabelY, columnWidth, '#4E6271', payload.legend_format);
+      pushAxisHit('column', key.length - 1, key.at(-1), cellLeft, leafLabelY - 4, columnWidth, leafPlan.height + 8);
+      if (index) { let changed = columnKeys[index - 1].findIndex((value, level) => value !== key[level]); if (changed < 0) changed = key.length - 1; const lineTop = changed === 0 ? headerTop : headerTop + headerOffset(Math.min(changed, upperLevels)); if (changed === 0) line(context, cellLeft, lineTop, cellLeft, chartTop + chartHeight + 25, '#AEBBC4', 2); else dashedVertical(context, cellLeft, lineTop, chartTop + chartHeight + 25); } else line(context, cellLeft, headerTop, cellLeft, chartTop + chartHeight + 25, '#AEBBC4', 2);
       context.fillStyle = '#566A78'; context.textAlign = 'left'; font(context, 13, true); context.fillText(numericLabel(xDomain[0]), cellLeft + 3, chartTop + chartHeight + 7); context.textAlign = 'right'; context.fillText(numericLabel(xDomain[1]), cellLeft + columnWidth - 3, chartTop + chartHeight + 7);
     });
     const nestedRowStart = level => rowOrigin + rowLabelWidths.slice(0, level).reduce((sum, width) => sum + width * rowLabelFactor + rowLabelGap, 0);
@@ -779,6 +919,7 @@
       const labelLeft = nestedRowStart(level), labelWidth = rowLabelWidths[level] * rowLabelFactor;
       hierarchySpans(rowKeys, level).forEach(([start, end, value]) => {
         drawFullHierarchyLabel(context, value, labelLeft + 3, chartTop + (start + end) / 2 * rowHeight - aggregationSize(payload.legend_format, level) / 2, labelWidth - 6, rowLabelSize, '#405765', payload.legend_format, level);
+        pushAxisHit('row', level, value, labelLeft, chartTop + start * rowHeight, labelWidth, (end - start) * rowHeight);
       });
       if (level < rowLevels - 1) line(context, labelLeft + labelWidth + rowLabelGap / 2, chartTop, labelLeft + labelWidth + rowLabelGap / 2, chartTop + chartHeight, '#D7DEE3');
     }
@@ -799,10 +940,11 @@
   function drawDistribution(context, payload, state, transform) {
     const keys = payload.keys || [], buckets = payload.buckets || [];
     const stackLabelColour = payload.label_format?.color || stackedChartLabelColour(buckets, payload.cells);
-    const layout = legendLayout(payload.legend), hierarchyHeight = 30 * (keys[0]?.length || 1) + 8;
-    const left = layout.left, top = layout.top + hierarchyHeight, width = layout.right - left;
+    const layout = legendLayout(payload.legend), left = layout.left, width = layout.right - left;
+    const axis = hierarchicalAxisPlans(context, keys, width, payload.legend_format);
+    const top = layout.top + axis.headerHeight;
     const usableBottom = layout.position === 'bottom' ? layout.bottom : 884;
-    const height = Math.max(180, usableBottom - top - bottomAxisReserve(context, keys, width));
+    const height = Math.max(180, usableBottom - top - axis.leafHeight);
     const yDomain = expandedDomain(payload.domain?.y), ySpan = yDomain[1] - yDomain[0];
     const barWidth = Math.max(24, Math.min(220, Math.floor(width / Math.max(keys.length * 1.25, 1))));
     for (let tick = 0; tick <= 5; tick += 1) {
@@ -830,8 +972,8 @@
         running += ratio;
       });
     });
-    drawTopColumnSeparators(context, keys, payload.axis_columns || [], left, width, top, top + height);
-    drawHierarchicalAxisLabels(context, keys, left, width, top, top + height, payload.legend_format); drawLegend(context, payload.legend);
+    drawTopColumnSeparators(context, keys, payload.axis_columns || [], left, width, top, top + height, axis);
+    drawHierarchicalAxisLabels(context, keys, left, width, top, top + height, payload.legend_format, axis); drawLegend(context, payload.legend);
   }
 
   function cdfGeometry(legend) {
@@ -920,16 +1062,25 @@
       const rowKeys = payload.row_keys || [[]], columnKeys = payload.column_keys || [[]];
       const layout = legendLayout(payload.legend), rowOrigin = layout.position === 'left' ? layout.left : 24;
       const rowLevels = rowKeys[0]?.length || 0, labelWidth = rowLevels ? Math.min(140, Math.max(72, (layout.right - rowOrigin) / (rowLevels + 5))) : 0;
-      const chartLeft = rowOrigin + rowLevels * labelWidth + 56, chartRight = layout.right - 12;
-      const upperLevels = Math.max((columnKeys[0]?.length || 1) - 1, 0), headerHeight = upperLevels * 28;
-      const chartTop = layout.top + headerHeight + 8, chartHeight = Math.max(180, layout.bottom - chartTop - 20), chartWidth = chartRight - chartLeft;
-      const rowHeight = chartHeight / Math.max(rowKeys.length, 1), columnWidth = chartWidth / Math.max(columnKeys.length, 1);
-      const yDomain = expandedDomain(payload.domain?.y), ySpan = yDomain[1] - yDomain[0];
-      for (let level = 0; level < upperLevels; level += 1) hierarchySpans(columnKeys, level).forEach(([start, end, value]) => {
-        const left = chartLeft + start * columnWidth, right = chartLeft + end * columnWidth;
-        context.fillStyle = payload.legend_format?.configured && payload.legend_format.color ? payload.legend_format.color : '#405765'; context.textAlign = 'center'; aggregationFont(context, payload.legend_format, level); context.fillText(fittedText(context, value, right - left - 8), (left + right) / 2, layout.top + level * 28);
-        line(context, left, layout.top + (level + 1) * 28 - 3, right, layout.top + (level + 1) * 28 - 3, '#C8D2D9');
+      const chartLeft = rowOrigin + rowLevels * labelWidth + 56, chartRight = layout.right - 12, chartWidth = chartRight - chartLeft;
+      const columnWidth = chartWidth / Math.max(columnKeys.length, 1);
+      const upperLevels = Math.max((columnKeys[0]?.length || 1) - 1, 0);
+      // Column labels get the room they need: wrapped, smaller or vertical, never cut.
+      const headerPlans = Array.from({length: upperLevels}, (_value, level) => {
+        const plan = axisLevelPlan(context, hierarchySpans(columnKeys, level).map(([start, end, value]) => ({value, width: (end - start) * columnWidth})), 64, payload.legend_format, level);
+        return {plan, height: Math.max(28, plan.height + 6)};
       });
+      const headerOffset = level => headerPlans.slice(0, level).reduce((sum, header) => sum + header.height, 0);
+      const leafPlan = axisLevelPlan(context, columnKeys.map(key => ({value: key.at(-1), width: columnWidth})), 150, payload.legend_format);
+      const chartTop = layout.top + headerOffset(upperLevels) + 8, chartHeight = Math.max(180, layout.bottom - chartTop - Math.max(30, leafPlan.height + 10));
+      const rowHeight = chartHeight / Math.max(rowKeys.length, 1);
+      const yDomain = expandedDomain(payload.domain?.y), ySpan = yDomain[1] - yDomain[0];
+      headerPlans.forEach(({plan, height}, level) => hierarchySpans(columnKeys, level).forEach(([start, end, value]) => {
+        const left = chartLeft + start * columnWidth, right = chartLeft + end * columnWidth, bandTop = layout.top + headerOffset(level);
+        drawAxisLabel(context, plan, value, (left + right) / 2, bandTop + Math.max(0, (height - 4 - plan.height) / 2), right - left, '#405765', payload.legend_format);
+        line(context, left, bandTop + height - 3, right, bandTop + height - 3, '#C8D2D9');
+        pushAxisHit('column', level, value, left, bandTop - 2, right - left, height);
+      }));
       for (let columnIndex = 0; columnIndex < columnKeys.length; columnIndex += 1) {
         const cellLeft = chartLeft + columnIndex * columnWidth;
         if (!columnIndex) {
@@ -938,7 +1089,7 @@
         }
         let changed = columnKeys[columnIndex - 1].findIndex((value, level) => value !== columnKeys[columnIndex][level]);
         if (changed < 0) changed = columnKeys[columnIndex].length - 1;
-        const lineTop = layout.top + Math.min(changed, upperLevels) * 28;
+        const lineTop = layout.top + headerOffset(Math.min(changed, upperLevels));
         if (changed === 0) line(context, cellLeft, lineTop, cellLeft, chartTop + chartHeight + 22, '#AEBBC4', 2);
         else dashedVertical(context, cellLeft, lineTop, chartTop + chartHeight + 22);
       }
@@ -947,7 +1098,7 @@
         const top = chartTop + rowIndex * rowHeight, bottom = top + rowHeight, next = rowKeys[rowIndex + 1];
         const changed = next ? rowKey.findIndex((value, level) => value !== next[level]) : 0;
         if (next && changed > 0) dashedHorizontal(context, bottom, rowOrigin + changed * labelWidth, chartRight); else line(context, rowOrigin, bottom, chartRight, bottom, '#AEBBC4', 2);
-        rowKey.forEach((value, level) => { context.fillStyle = payload.legend_format?.configured && payload.legend_format.color ? payload.legend_format.color : '#405765'; context.textAlign = 'left'; aggregationFont(context, payload.legend_format, level); context.fillText(fittedText(context, value, labelWidth - 8), rowOrigin + level * labelWidth + 4, top + rowHeight / 2 - 8); });
+        rowKey.forEach((value, level) => { context.fillStyle = payload.legend_format?.configured && payload.legend_format.color ? payload.legend_format.color : '#405765'; context.textAlign = 'left'; aggregationFont(context, payload.legend_format, level); context.fillText(fittedText(context, value, labelWidth - 8), rowOrigin + level * labelWidth + 4, top + rowHeight / 2 - 8); pushAxisHit('row', level, value, rowOrigin + level * labelWidth, top, labelWidth, rowHeight); });
         columnKeys.forEach((columnKey, columnIndex) => {
           // A combination without valid samples has no bar, not a zero bar.
           const raw = payload.cells?.[rowIndex]?.[columnIndex]; if (raw === null || raw === undefined) return;
@@ -959,16 +1110,19 @@
           context.fillStyle = colour; context.fillRect(x, y, width, height); const label = value.toFixed(2);
           drawConfiguredBarLabel(context, label, x, y, width, height, colour, 19, payload.label_position, 'vertical', () => { if (!(height >= 36 && drawInsideBarLabel(context, label, x, y, width, height, payload.label_format?.color || '#FFFFFF', 19, payload.label_format))) { context.fillStyle = payload.label_format?.color || colour; context.textAlign = 'center'; labelFont(context, 18, payload.label_format); context.fillText(label, x + width / 2, Math.max(top + 2, y - 22)); } }, payload.label_format);
           pushRectangleHit(state, transform, {x, y, width, height}, {label: displayKey([...rowKey, ...columnKey]), series: payload.aggregation || 'mean', value: label});
-          if (rowIndex === rowKeys.length - 1) { context.fillStyle = payload.legend_format?.configured && payload.legend_format.color ? payload.legend_format.color : '#4E6271'; context.textAlign = 'center'; aggregationFont(context, payload.legend_format); context.fillText(fittedText(context, String(columnKey.at(-1) || ''), columnWidth - 8), cellLeft + columnWidth / 2, bottom + 3); }
         });
+      });
+      columnKeys.forEach((columnKey, columnIndex) => {
+        drawAxisLabel(context, leafPlan, columnKey.at(-1), chartLeft + (columnIndex + .5) * columnWidth, chartTop + chartHeight + 4, columnWidth, '#4E6271', payload.legend_format);
+        pushAxisHit('column', columnKey.length - 1, columnKey.at(-1), chartLeft + columnIndex * columnWidth, chartTop + chartHeight + 2, columnWidth, leafPlan.height + 6);
       });
       drawLegend(context, payload.legend); return;
     }
     const bars = payload.bars || [], keys = bars.map(bar => bar.key);
-    const layout = legendLayout(payload.legend), hierarchyHeight = 30 * (keys[0]?.length || 1) + 8;
-    const left = Math.max(105, layout.left), top = layout.top + hierarchyHeight;
-    const width = layout.right - left, usableBottom = layout.position === 'bottom' ? layout.bottom : 884;
-    const baseline = Math.max(top + 180, usableBottom - bottomAxisReserve(context, keys, width));
+    const layout = legendLayout(payload.legend), left = Math.max(105, layout.left), width = layout.right - left;
+    const axis = hierarchicalAxisPlans(context, keys, width, payload.legend_format);
+    const top = layout.top + axis.headerHeight, usableBottom = layout.position === 'bottom' ? layout.bottom : 884;
+    const baseline = Math.max(top + 180, usableBottom - axis.leafHeight);
     const yDomain = expandedDomain(payload.domain?.y), ySpan = yDomain[1] - yDomain[0], plotHeight = baseline - top;
     const zeroY = baseline - (clamp(0, yDomain[0], yDomain[1]) - yDomain[0]) / ySpan * plotHeight;
     const barWidth = Math.min(260, Math.max(32, width / Math.max(bars.length * 1.22, 1)));
@@ -985,8 +1139,8 @@
       }, payload.label_format);
       pushRectangleHit(state, transform, {x, y, width: barWidth, height}, {label: displayKey(bar.key), series: bar.legend, value: Number(bar.value).toFixed(2)});
     });
-    drawTopColumnSeparators(context, keys, payload.axis_columns || [], left, width, top, baseline);
-    drawHierarchicalAxisLabels(context, keys, left, width, top, baseline, payload.legend_format); verticalLabel(context, payload.metric || '', layout.position === 'left' ? left - 28 : 42, (top + baseline) / 2, '#405765', 21); drawLegend(context, payload.legend, {sideX: layout.position === 'right' ? left + width + 25 : undefined});
+    drawTopColumnSeparators(context, keys, payload.axis_columns || [], left, width, top, baseline, axis);
+    drawHierarchicalAxisLabels(context, keys, left, width, top, baseline, payload.legend_format, axis); verticalLabel(context, payload.metric || '', layout.position === 'left' ? left - 28 : 42, (top + baseline) / 2, '#405765', 21); drawLegend(context, payload.legend, {sideX: layout.position === 'right' ? left + width + 25 : undefined});
   }
 
   function expandedDomain(domain) {
@@ -1211,7 +1365,9 @@
   function draw(canvas, payload) {
     const context = prepareCanvas(canvas), state = {canvas, hits: []};
     context.fillStyle = '#FFFFFF'; context.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
-    drawPayload(context, legendHiddenPayload(payload, hiddenLegendItems.get(canvas)), state, {x: 0, y: 0, scale: 1}); renderStates.set(canvas, state);
+    const visible = legendHiddenPayload(payload, hiddenLegendItems.get(canvas));
+    state.drawnPayload = visible;
+    drawPayload(context, visible, state, {x: 0, y: 0, scale: 1}); renderStates.set(canvas, state);
     const view = views.get(canvas);
     const titleHeight = 40 * Math.min(view?.scaleX || 1, view?.scaleY || 1) * (view?.zoom || 1);
     canvas.dispatchEvent(new CustomEvent('dashboardchartlayout', {detail: {titleTop: 20, titleHeight}}));
@@ -1483,23 +1639,91 @@
     return state.legendHits.find(hit => x >= hit.x && x <= hit.x + hit.width && y >= hit.y && y <= hit.y + hit.height) || null;
   }
 
+  const legendLabels = canvas => [...new Set((renderStates.get(canvas)?.legendHits || []).map(hit => hit.label))];
+  const hiddenLegendLabels = canvas => {
+    const {labelHidden} = legendStateMatchers(hiddenLegendItems.get(canvas));
+    return legendLabels(canvas).filter(labelHidden);
+  };
+
+  function setHiddenLegendItems(canvas, hidden, shown = []) {
+    hiddenLegendItems.set(canvas, {hidden: new Set((hidden || []).map(String)), shown: new Set((shown || []).map(String))});
+    const payload = models.get(canvas); if (payload) draw(canvas, payload);
+  }
+
+  function axisItemAt(canvas, event) {
+    const view = views.get(canvas), state = renderStates.get(canvas), bounds = canvas.getBoundingClientRect();
+    if (!view || !bounds.width) return null;
+    const x = ((event.clientX - bounds.left) / view.scaleX - view.originX) / view.zoom;
+    const y = ((event.clientY - bounds.top) / view.scaleY - view.originY) / view.zoom;
+    const hit = (state?.axisHits || []).find(item => x >= item.x && x <= item.x + item.width && y >= item.y && y <= item.y + item.height);
+    if (hit) return hit;
+    // Table headers and row labels are aggregation values too.
+    const cell = tableCellAt(canvas, event), drawn = state?.drawnPayload;
+    if (!cell || !drawn) return null;
+    const rowDimensions = Math.max(1, Number(drawn.row_dimension_count) || 1);
+    if (cell.kind === 'header' && cell.column >= rowDimensions) return {axis: 'table-column', level: 0, value: String(drawn.headers?.[cell.column] ?? '')};
+    if (cell.kind === 'row' && cell.column < rowDimensions) return {axis: 'table-row', level: cell.column, value: String(drawn.rows?.[cell.row]?.[cell.column] ?? '')};
+    return null;
+  }
+
+  // Every value of one axis level in the complete model, hidden ones included,
+  // so Keep only, Hide All and Show All cover the whole level.
+  function axisLevelValues(payload, axis, level) {
+    const unique = values => [...new Set(values.map(value => String(value ?? '')).filter(value => value && value !== '(all)'))];
+    if (!payload) return [];
+    if (axis === 'row') return unique((payload.row_keys || []).map(key => key?.[level]));
+    if (axis === 'table-row') return unique((payload.rows || []).map(row => row?.[level]));
+    if (axis === 'table-column') return unique((payload.headers || []).slice(Math.max(1, Number(payload.row_dimension_count) || 1)));
+    if (Array.isArray(payload.column_keys)) return unique(payload.column_keys.map(key => key?.[level]));
+    if (Array.isArray(payload.keys)) return unique(payload.keys.map(key => key?.[level]));
+    if (Array.isArray(payload.categories)) return unique(payload.categories);
+    return unique((payload.bars || []).map(bar => bar.key?.[level]));
+  }
+
   function attachLegendToggle(canvas) {
     if (canvas.dataset.legendToggleReady) return; canvas.dataset.legendToggleReady = 'true';
     canvas.addEventListener('click', event => {
       const hit = legendItemAt(canvas, event); if (!hit) return;
       event.preventDefault(); event.stopPropagation();
-      const hidden = new Set(hiddenLegendItems.get(canvas) || []);
-      if (hidden.has(hit.label)) hidden.delete(hit.label); else hidden.add(hit.label);
-      hiddenLegendItems.set(canvas, hidden);
-      const payload = models.get(canvas); if (payload) draw(canvas, payload);
-      canvas.dispatchEvent(new CustomEvent('dashboardchartlegend', {detail: {hidden: [...hidden]}}));
+      const current = hiddenLegendItems.get(canvas) || emptyLegendState();
+      const hidden = new Set(current.hidden), shown = new Set(current.shown);
+      const wasHidden = legendStateMatchers(current).labelHidden(hit.label);
+      if (wasHidden) {
+        hidden.delete(hit.label);
+        // Shown explicitly when another level of it remains hidden.
+        if (legendStateMatchers({hidden, shown}).labelHidden(hit.label)) shown.add(hit.label);
+      } else {
+        shown.delete(hit.label);
+        hidden.add(hit.label);
+      }
+      setHiddenLegendItems(canvas, [...hidden], [...shown]);
+      canvas.dispatchEvent(new CustomEvent('dashboardchartlegend', {detail: {
+        label: hit.label, labelHidden: !wasHidden, labels: legendLabels(canvas), hiddenLabels: hiddenLegendLabels(canvas),
+      }}));
+    });
+    // Hosts that offer legend actions (Keep only, Exclude...) opt in with
+    // data-legend-menu; elsewhere the browser keeps its own context menu.
+    canvas.addEventListener('contextmenu', event => {
+      if (canvas.dataset.legendMenu !== 'true') return;
+      const hit = legendItemAt(canvas, event), axis = hit ? null : axisItemAt(canvas, event);
+      if (!hit && !axis?.value) return;
+      event.preventDefault(); event.stopPropagation();
+      const {labelHidden} = legendStateMatchers(hiddenLegendItems.get(canvas));
+      const label = hit ? hit.label : axis.value;
+      const labels = hit ? legendLabels(canvas) : axisLevelValues(models.get(canvas), axis.axis, axis.level);
+      const hiddenLabels = labels.filter(labelHidden);
+      canvas.dispatchEvent(new CustomEvent('dashboardchartlegendmenu', {detail: {
+        label, labelHidden: labelHidden(label), labels, hiddenLabels, axis: axis?.axis || 'legend', level: axis?.level ?? null,
+        clientX: event.clientX, clientY: event.clientY,
+      }}));
     });
     // Toggling an item twice must not open the expanded chart.
     canvas.addEventListener('dblclick', event => { if (legendItemAt(canvas, event)) event.stopPropagation(); });
     canvas.addEventListener('pointermove', event => {
       const overLegend = Boolean(legendItemAt(canvas, event));
+      const overAxis = !overLegend && canvas.dataset.legendMenu === 'true' && Boolean((renderStates.get(canvas)?.axisHits || []).length) && Boolean(axisItemAt(canvas, event));
       canvas.classList.toggle('ds-chart-legend-hover', overLegend);
-      canvas.style.cursor = overLegend ? 'pointer' : '';
+      canvas.style.cursor = overLegend ? 'pointer' : (overAxis ? 'context-menu' : '');
     });
   }
 
@@ -1588,12 +1812,21 @@
   }) : null;
 
   globalThis.renderDashboardChart = (canvas, payload) => {
+    // A model can carry the legend entries to show hidden (PPT exports).
+    if (Array.isArray(payload?.hidden_legend_items)) {
+      hiddenLegendItems.set(canvas, {
+        hidden: new Set(payload.hidden_legend_items.map(String)),
+        shown: new Set((payload.shown_legend_items || []).map(String)),
+      });
+    }
     models.set(canvas, payload); draw(canvas, payload); attachTooltip(canvas); attachTableReordering(canvas); attachPan(canvas); attachLegendToggle(canvas);
     if (resizeObserver && !observed.has(canvas)) { observed.add(canvas); resizeObserver.observe(canvas); }
   };
   globalThis.getDashboardChartHits = canvas => structuredClone(renderStates.get(canvas)?.hits || []);
   globalThis.getDashboardChartLegendHits = canvas => structuredClone(renderStates.get(canvas)?.legendHits || []);
-  globalThis.getDashboardChartHiddenLegendItems = canvas => [...(hiddenLegendItems.get(canvas) || [])];
+  globalThis.getDashboardChartHiddenLegendItems = hiddenLegendLabels;
+  globalThis.setDashboardChartHiddenLegendItems = setHiddenLegendItems;
+  globalThis.getDashboardChartLegendLabels = legendLabels;
   globalThis.setDashboardChartZoom = setChartZoom;
   globalThis.getDashboardChartZoom = canvas => cameraFor(canvas).zoom;
   globalThis.panDashboardChart = panChart;

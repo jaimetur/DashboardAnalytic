@@ -1622,10 +1622,25 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "event.data?.type === 'dashboard-analytic:template-saved'" in dashboard_script
     chart_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/dashboard_charts.js').read_text(encoding='utf-8')
     assert "const percent = (value, digits = 1) => `${(Number(value) * 100).toFixed(digits)}%`;" in chart_script
-    # Clicking a legend entry hides or shows its series for every chart type.
-    assert 'function legendHiddenPayload(payload, hidden) {' in chart_script
-    assert 'drawPayload(context, legendHiddenPayload(payload, hiddenLegendItems.get(canvas)), state' in chart_script
+    # Clicking a legend entry hides or shows its series for every chart type;
+    # a hidden value also hides the rows and columns where it is a level.
+    assert 'function legendHiddenPayload(payload, state) {' in chart_script
+    assert 'const visible = legendHiddenPayload(payload, hiddenLegendItems.get(canvas));' in chart_script
+    assert 'drawPayload(context, visible, state, {x: 0, y: 0, scale: 1});' in chart_script
+    assert "return !shown.has(text) && (valueHidden(text) || text.split(' · ').some(valueHidden));" in chart_script
+    assert 'function axisItemAt(canvas, event)' in chart_script
+    assert "pushAxisHit('column', level, value, left, bandTop - 2, right - left, height);" in chart_script
     assert 'attachLegendToggle(canvas);' in chart_script
+    # Legend and axis menus act on the whole Dashboard; a hidden value's Show
+    # submenu opens only while the pointer moves over it.
+    assert "action(menu, 'Keep only', `Show only ${target} in every slide of the Dashboard`" in dashboard_script
+    assert "entry.addEventListener('pointermove', event => { if (event.pointerType !== 'touch') open(); });" in dashboard_script
+    assert "parent.addEventListener('focus', open);" not in dashboard_script
+    assert 'Apply to all dashboard' not in dashboard_script
+    # Hidden dynamic values remove their grid cards and reflow the slide.
+    assert 'function slideCards(slide) {' in dashboard_script
+    assert 'const positions = prepared?.grid_layouts?.[result.layout];' in dashboard_script
+    assert "if (slide && !$('ds-viewer').hidden && slideCardsSignature(slide) !== renderedSlideCards) renderSlide();" in dashboard_script
     assert 'if (legendItemAt(canvas, event)) return false;' in chart_script
     assert 'if (bar.hidden) return;' in chart_script
     assert 'function drawInsideHorizontalBarLabel(' in chart_script
@@ -1652,8 +1667,9 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "right: position === 'right' ? LOGICAL_WIDTH - sideLegendWidth - 20 : 1540" in chart_script
     assert "top: position === 'top' ? 80 + rows * rowHeight + 18 : 82" in chart_script
     assert "bottom: position === 'bottom' ? 900 - rows * rowHeight - 22 : 860" in chart_script
-    assert "function labelAngle(context, value, availableWidth, size)" in chart_script
-    assert "function bottomAxisReserve(context, keys, width, size = 22)" in chart_script
+    # Axis labels wrap, shrink or turn vertical with reserved room; never truncated.
+    assert "function axisLevelPlan(context, entries, maximumHeight, format = {}, level = 0)" in chart_script
+    assert "function hierarchicalAxisPlans(context, keys, width, format = {})" in chart_script
     assert "function hierarchyRowLabelSize()" in chart_script
     assert "function drawFullHierarchyLabel(context, value, x, y, width, size" in chart_script
     assert "const aggregationFont = (context, format = {}, level = 0) =>" in chart_script
@@ -1667,10 +1683,10 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "const usableBottom = layout.position === 'bottom' ? layout.bottom : 884;" in chart_script
     assert 'Math.min(250, columnWidth * .72)' in chart_script
     assert "const colour = payload.cell_colours?.[rowIndex]?.[columnIndex] || '#4E79A7';" in chart_script
-    assert "context.textAlign = 'center'; aggregationFont(context, payload.legend_format, level); context.fillText(fittedText(context, value" in chart_script
-    assert "aggregationFont(context, payload.legend_format); context.fillText(fittedText(context, String(columnKey.at(-1)" in chart_script
-    assert "line(context, left, layout.top + (level + 1) * 28 - 3, right" in chart_script
-    assert "const lineTop = layout.top + Math.min(changed, upperLevels) * 28;" in chart_script
+    assert "drawAxisLabel(context, plan, value, (left + right) / 2, bandTop + Math.max(0, (height - 4 - plan.height) / 2), right - left, '#405765', payload.legend_format);" in chart_script
+    assert "drawAxisLabel(context, leafPlan, columnKey.at(-1), chartLeft + (columnIndex + .5) * columnWidth, chartTop + chartHeight + 4, columnWidth, '#4E6271', payload.legend_format);" in chart_script
+    assert "line(context, left, bandTop + height - 3, right, bandTop + height - 3, '#C8D2D9');" in chart_script
+    assert "const lineTop = layout.top + headerOffset(Math.min(changed, upperLevels));" in chart_script
     assert "else dashedVertical(context, cellLeft, lineTop, chartTop + chartHeight + 22);" in chart_script
     assert 'function drawOutsideBarLabel(context, value, x, y, colour, size = 12, format = {})' in chart_script
     assert "context.fillStyle = 'rgba(255, 255, 255, 0.94)'" in chart_script
@@ -3601,3 +3617,129 @@ def test_column_cache_preparation_counts_match_sqlite(client, monkeypatch, chang
     assert bool(counted) == bool(changes)
     monkeypatch.setattr(dashboards_module, 'DASHBOARD_COLUMN_CACHE', False)
     assert cached == prepared_universe()
+
+
+def test_ppt_export_keeps_legend_entries_hidden_in_the_viewer(client):
+    payload = setup_dashboard(client)
+    dashboard_id = 'legend-ppt'
+    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+    prepared = client.post(f'/api/e2e-dashboards/prepare?dashboard_id={dashboard_id}', json=payload).json()
+    slide = next(slide for slide in prepared['slides'] if slide['charts'])
+    first = slide['charts'][0]
+    first_key = f"{slide['number']}|{first['title']}|0"
+    # Hidden in every chart, except the first chart, where it is shown again.
+    legend = {'dashboard': {'A': True}, 'charts': {first_key: {'A': False}}}
+
+    def exported_models(response):
+        assert response.status_code == 202, response.text
+        job_id = response.json()['job_id']
+        deadline = time.monotonic() + 30
+        job = None
+        while time.monotonic() < deadline:
+            job = next(item for item in client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
+            if job['status'] in {'ready', 'failed'}:
+                break
+            time.sleep(0.05)
+        assert job is not None and job['status'] == 'ready', job
+        with core.repository.connection() as connection:
+            row = connection.execute('SELECT output_path FROM dashboard_ppt_jobs WHERE id = ?', (job_id,)).fetchone()
+        charts_dir = Path(row['output_path']).parent / 'dashboard-charts'
+        return job_id, [json.loads(path.read_text(encoding='utf-8')) for path in sorted(charts_dir.glob('*.model.json'))]
+
+    job_id, models = exported_models(client.post(f'/api/e2e-dashboards/{dashboard_id}/export-ppt', json={
+        'definition': payload, 'preparation_token': prepared['token'], 'legend_visibility': legend,
+    }))
+    with_a = [model for model in models if any(item.get('label') == 'A' and item.get('colour') for item in model['legend']['items'])]
+    assert len(with_a) >= 2
+    assert with_a[0].get('hidden_legend_items') is None
+    assert all(model.get('hidden_legend_items') == ['A'] for model in with_a[1:])
+    # A relaunched job keeps the legend state it was created with.
+    _job_id, relaunched = exported_models(client.post(f'/api/e2e-dashboards/ppt-jobs/{job_id}/retry'))
+    assert [model.get('hidden_legend_items') for model in relaunched] == [model.get('hidden_legend_items') for model in models]
+
+
+def test_dynamic_grid_reflow_helpers():
+    from types import SimpleNamespace
+    from src.modules.e2e_dashboards import dynamic_card_hidden, dynamic_chart_values, legend_value_hidden, reflowed_dynamic_grid
+
+    # Hidden values close whole grid columns or rows; the others keep their order.
+    assert reflowed_dynamic_grid('Title + 2 rows + 4 columns', [False, True, False, False] * 2) == (
+        'Title + 2 rows + 3 columns', [0, None, 1, 2, 3, None, 4, 5],
+    )
+    assert reflowed_dynamic_grid('Title + 3 rows + 2 columns + comments right', [False, False, True, True, False, False]) == (
+        'Title + 2 rows + 2 columns + comments right', [0, 1, None, None, 2, 3],
+    )
+    assert reflowed_dynamic_grid('Title + 1 rows + 2 columns', [True, True]) == ('', [None, None])
+    assert reflowed_dynamic_grid('Title + 1 rows + 2 columns', [False, False]) is None
+    assert reflowed_dynamic_grid('Title + 1 rows + 2 columns', [True]) is None
+    # Same matching as the Canvas renderer: any " · " level, unless shown again.
+    assert legend_value_hidden(['VF_SA'], [], 'London · VF_SA')
+    assert not legend_value_hidden(['VF_SA'], ['VF_SA'], 'VF_SA')
+    vendor_only = SimpleNamespace(dynamic_row_value=None, dynamic_column_value='VF', dynamic_value='VF', chart_title='LTE – VF - All')
+    assert dynamic_chart_values(vendor_only) == [['VF', 'VF - All']]
+    assert dynamic_card_hidden(dynamic_chart_values(vendor_only), ['VF - All'], [])
+    both = SimpleNamespace(dynamic_row_value='London', dynamic_column_value='EE', dynamic_value='EE', chart_title='LTE – London / EE')
+    assert dynamic_chart_values(both) == [['London'], ['EE']]
+
+
+def test_hidden_dynamic_values_close_their_grid_cards_in_the_ppt(client):
+    from src.modules.cdr_reporting import CatalogEntry, catalogue_csv
+    client.post('/login', data={'username': 'super', 'password': 'super123'})
+    response = client.post('/datasets-analysis/upload', data={'dataset_kinds': 'data'}, files={
+        'dataset_files': ('Dynamic_Grid_NSA.csv', BytesIO(
+            b'Operator,City,Campaign,Test_Start_Time,LTE_PCell_RSRP_Avg,NR_PCell_RSRP_Avg\n'
+            b'A,London,UK_Q1_2026,2026-01-01,-100,-95\n'
+            b'B,London,UK_Q1_2026,2026-01-01,-105,-97\n'
+            b'C,London,UK_Q1_2026,2026-01-01,-110,-100\n'
+        ), 'text/csv'),
+    })
+    assert response.status_code == 200, response.text
+    dataset_id = max(int(row['id']) for row in core.repository.list_datasets())
+    entries = [CatalogEntry(
+        slide=1, slide_title='Dynamic histograms', slide_subtitle='',
+        layout='2 rows + dynamic columns, comments down', chart_title=f'{radio} RSRP',
+        cdr_source='CDR-Data', kpi=field, chart_type='Histogram Bars', filters='Bin Size = 5',
+        grouping_rows='Operator', grouping_columns='Campaign', legend='Campaign', dynamic_field='Operator',
+    ) for radio, field in [('LTE', 'LTE_PCell_RSRP_Avg'), ('NR', 'NR_PCell_RSRP_Avg')]]
+    core.repository.add_report_template('nsa', 'Dynamic grid legend test', catalogue_csv(entries), is_default=False)
+    payload = DashboardDefinition(name='Dynamic grid', template='Dynamic grid legend test',
+                                  datasets={'data': [dataset_id]}).model_dump(mode='json')
+    dashboard_id = 'dynamic-grid-legend'
+    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+    prepared = client.post(f'/api/e2e-dashboards/prepare?dashboard_id={dashboard_id}', json=payload).json()
+    slide = prepared['slides'][0]
+    assert slide['layout'] == 'Title + 2 rows + 3 columns + comments down'
+    assert [chart['dynamic_values'] for chart in slide['charts']] == [[['A']], [['B']], [['C']]] * 2
+    smaller = 'Title + 2 rows + 2 columns + comments down'
+    assert len(prepared['grid_layouts'][smaller]) == 4
+
+    def exported(legend):
+        response = client.post(f'/api/e2e-dashboards/{dashboard_id}/export-ppt', json={
+            'definition': payload, 'preparation_token': prepared['token'], 'legend_visibility': legend,
+        })
+        assert response.status_code == 202, response.text
+        job_id = response.json()['job_id']
+        deadline = time.monotonic() + 30
+        job = None
+        while time.monotonic() < deadline:
+            job = next(item for item in client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs'] if item['id'] == job_id)
+            if job['status'] in {'ready', 'failed'}:
+                break
+            time.sleep(0.05)
+        assert job is not None and job['status'] == 'ready', job
+        with core.repository.connection() as connection:
+            output = Path(connection.execute('SELECT output_path FROM dashboard_ppt_jobs WHERE id = ?', (job_id,)).fetchone()['output_path'])
+        return output, json.loads((output.parent / 'dashboard-charts' / 'manifest.json').read_text(encoding='utf-8'))
+
+    # Hiding Operator B removes its grid column from the PPT and its viewer.
+    output, manifest = exported({'dashboard': {'B': True}})
+    assert [chart['title'] for chart in manifest['charts']] == ['LTE RSRP – A', 'LTE RSRP – C', 'NR RSRP – A', 'NR RSRP – C']
+    viewer_slide = manifest['slides'][0]
+    assert viewer_slide['layout'] == smaller
+    assert [chart['position'] for chart in viewer_slide['charts']] == prepared['grid_layouts'][smaller]
+    grid_slides = [item for item in Presentation(output).slides if item.slide_layout.name == smaller]
+    assert len(grid_slides) == 1
+    assert sum(shape.shape_type == MSO_SHAPE_TYPE.PICTURE for shape in grid_slides[0].shapes) == 4
+    # A slide whose cards are all hidden is left out.
+    _output, manifest = exported({'dashboard': {'A': True, 'B': True, 'C': True}})
+    assert manifest['charts'] == [] and manifest['slides'] == []

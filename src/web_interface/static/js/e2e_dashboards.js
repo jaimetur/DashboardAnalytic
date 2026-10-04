@@ -1168,6 +1168,8 @@
       await api(`/${encodeURIComponent(id)}/export-ppt`, 'POST', {
         definition: exportDefinition,
         preparation_token: preparationToken,
+        // Legend entries hidden in the viewer are exported hidden as well.
+        legend_visibility: legendVisibilityPayload(id),
         ...(chooseScope ? {
           selected_operators: selectedOperators,
           selected_vendors: selectedVendors,
@@ -2654,6 +2656,202 @@
     while (renderedChartPayloads.size > 160) renderedChartPayloads.delete(renderedChartPayloads.keys().next().value);
     while (chartPayloads.size > 160) chartPayloads.delete(chartPayloads.keys().next().value);
   };
+  // Legend entries hidden in the viewer, per Dashboard: a Dashboard-wide state
+  // and per-chart states keyed by slide, chart title and occurrence (the keys
+  // the PPT export uses too). They last for the browser session.
+  const legendVisibilityStates = new Map();
+  const legendCharts = new Map();
+  const legendVisibilityStorageKey = id => `dashboard-analytic:e2e-dashboards:${config.workspace}:legend:${authenticatedSession}:${id}`;
+  const legendVisibility = (id = activeId) => {
+    if (!legendVisibilityStates.has(id)) {
+      let stored = {};
+      try { stored = JSON.parse(sessionStorage.getItem(legendVisibilityStorageKey(id)) || '{}') || {}; } catch (_error) { stored = {}; }
+      legendVisibilityStates.set(id, {
+        dashboard: new Map(Object.entries(stored.dashboard || {})),
+        charts: new Map(Object.entries(stored.charts || {}).map(([key, states]) => [key, new Map(Object.entries(states || {}))])),
+      });
+    }
+    return legendVisibilityStates.get(id);
+  };
+  const legendVisibilityPayload = (id = activeId) => {
+    const state = legendVisibility(id);
+    return {
+      dashboard: Object.fromEntries(state.dashboard),
+      charts: Object.fromEntries([...state.charts].filter(([, states]) => states.size).map(([key, states]) => [key, Object.fromEntries(states)])),
+    };
+  };
+  const saveLegendVisibility = (id = activeId) => {
+    try { sessionStorage.setItem(legendVisibilityStorageKey(id), JSON.stringify(legendVisibilityPayload(id))); } catch (_error) { /* Session storage is optional. */ }
+  };
+  const chartLegendKey = chart => {
+    for (const slide of prepared?.slides || []) {
+      const charts = slide.charts || [];
+      const position = charts.findIndex(item => item.index === chart?.index);
+      if (position < 0) continue;
+      const occurrence = charts.slice(0, position).filter(item => String(item.title || '') === String(chart.title || '')).length;
+      return `${slide.number}|${chart.title || ''}|${occurrence}`;
+    }
+    return '';
+  };
+  // Hidden and explicitly shown labels of one chart: its own choices first,
+  // then the Dashboard-wide ones. The renderer hides every series, row or
+  // column with a hidden value at any aggregation level.
+  const chartLegendLists = chart => {
+    const state = legendVisibility(), states = state.charts.get(chartLegendKey(chart)) || new Map();
+    const hidden = [], shown = [];
+    states.forEach((value, label) => (value ? hidden : shown).push(label));
+    state.dashboard.forEach((value, label) => { if (!states.has(label)) (value ? hidden : shown).push(label); });
+    return {hidden, shown};
+  };
+  // The live viewer applies the session's legend state; PPT models carry theirs.
+  const withLegendState = (chart, payload) => {
+    if (pptDashboardViewer || !payload) return payload;
+    const {hidden, shown} = chartLegendLists(chart);
+    return {...payload, hidden_legend_items: hidden, shown_legend_items: shown};
+  };
+  const applyChartLegendLists = (canvas, chart) => {
+    const {hidden, shown} = chartLegendLists(chart);
+    globalThis.setDashboardChartHiddenLegendItems?.(canvas, hidden, shown);
+  };
+  const refreshLegendCanvases = () => {
+    legendCharts.forEach((chart, canvas) => {
+      if (!canvas.isConnected) { legendCharts.delete(canvas); return; }
+      applyChartLegendLists(canvas, chart);
+    });
+  };
+  // Hidden labels that remove a dynamic grid card (Operator, Vendor, ... per
+  // card) from its slide; empty when the card stays. Mirrors the renderer: a
+  // value is hidden by itself or by any of its " · " levels.
+  const dynamicCardHiddenBy = chart => {
+    if (pptDashboardViewer || !Array.isArray(chart?.dynamic_values) || !chart.dynamic_values.length) return [];
+    const {hidden, shown} = chartLegendLists(chart);
+    const hiddenLabels = new Set(hidden), shownLabels = new Set(shown);
+    return [...new Set(chart.dynamic_values.flat().map(String).filter(value => !shownLabels.has(value))
+      .flatMap(value => [value, ...value.split(' · ')].filter(part => hiddenLabels.has(part) && !shownLabels.has(part))))];
+  };
+  const gridLayoutPattern = /^Title \+ (\d+) rows \+ (\d+) columns(?: \+ comments (down|right))?$/i;
+  // Cards of a slide and their positions: hidden dynamic cards leave the slide
+  // and the others fill the smaller grid that the PPT export uses.
+  function slideCards(slide) {
+    const result = {cards: slide.charts.map(chart => ({chart, position: chart.position})), layout: slide.layout || '', hiddenBy: []};
+    const hiddenBy = slide.charts.map(dynamicCardHiddenBy);
+    const grid = gridLayoutPattern.exec(result.layout);
+    if (!grid || !hiddenBy.some(labels => labels.length)) return result;
+    const rows = Number(grid[1]), columns = Number(grid[2]), comments = grid[3] || '';
+    if (rows * columns !== slide.charts.length) return result;
+    const hiddenCard = card => hiddenBy[card].length > 0;
+    const visibleRows = [...Array(rows).keys()].filter(row => [...Array(columns).keys()].some(column => !hiddenCard(row * columns + column)));
+    const visibleColumns = [...Array(columns).keys()].filter(column => [...Array(rows).keys()].some(row => !hiddenCard(row * columns + column)));
+    result.layout = visibleRows.length ? `Title + ${visibleRows.length} rows + ${visibleColumns.length} columns${comments ? ` + comments ${comments}` : ''}` : '';
+    const positions = prepared?.grid_layouts?.[result.layout];
+    result.cards = slide.charts.flatMap((chart, card) => {
+      if (hiddenCard(card)) return [];
+      const cell = visibleRows.indexOf(Math.floor(card / columns)) * visibleColumns.length + visibleColumns.indexOf(card % columns);
+      return [{chart, position: positions?.[cell] || chart.position}];
+    });
+    result.hiddenBy = [...new Set(hiddenBy.flat())];
+    return result;
+  }
+  let renderedSlideCards = '';
+  const slideCardsSignature = slide => {
+    const {cards, layout} = slideCards(slide);
+    return `${slide.number}|${layout}|${cards.map(card => card.chart.index).join(',')}`;
+  };
+  // Hiding or showing a legend entry or an axis value applies to the whole
+  // Dashboard (every slide, the expanded viewer and its PPT export).
+  const setDashboardLegendStates = states => {
+    const state = legendVisibility();
+    states.forEach((hidden, label) => {
+      state.dashboard.set(label, hidden);
+      state.charts.forEach(chartStates => chartStates.delete(label));
+    });
+    saveLegendVisibility();
+    refreshLegendCanvases();
+    const slide = prepared?.slides?.[slideIndex];
+    if (slide && !$('ds-viewer').hidden && slideCardsSignature(slide) !== renderedSlideCards) renderSlide();
+  };
+  let legendMenu = null;
+  const closeLegendMenu = () => { legendMenu?.remove(); legendMenu = null; };
+  function openLegendMenu(canvas, chart, detail) {
+    closeLegendMenu();
+    const labels = detail.labels || [], target = String(detail.label), hiddenLabels = new Set(detail.hiddenLabels || []);
+    const axis = detail.axis && detail.axis !== 'legend';
+    const menu = node('div', undefined, 'ds-legend-menu');
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', `${axis ? 'Axis' : 'Legend'} actions for ${target}`);
+    const action = (container, label, title, handler) => {
+      const button = node('button', label, 'ds-legend-menu-item');
+      button.type = 'button'; button.title = title; button.setAttribute('role', 'menuitem');
+      button.onclick = event => { event.stopPropagation(); closeLegendMenu(); handler(); };
+      container.append(button);
+      return button;
+    };
+    const scope = axis ? 'value of this axis level' : 'legend entry';
+    action(menu, 'Keep only', `Show only ${target} in every slide of the Dashboard`, () => setDashboardLegendStates(new Map(labels.map(label => [label, label !== target]))));
+    if (detail.labelHidden) action(menu, 'Show', `Show ${target} in every slide of the Dashboard`, () => setDashboardLegendStates(new Map([[target, false]])));
+    else action(menu, 'Hide', `Hide ${target} in every slide of the Dashboard`, () => setDashboardLegendStates(new Map([[target, true]])));
+    action(menu, 'Hide All', `Hide every ${scope} in every slide of the Dashboard`, () => setDashboardLegendStates(new Map(labels.map(label => [label, true]))));
+    action(menu, 'Show All', `Show every ${scope} in every slide of the Dashboard`, () => setDashboardLegendStates(new Map(labels.map(label => [label, false]))));
+    // Hidden values no longer appear on the axis: list them with a Show
+    // submenu that only opens while the pointer moves over the value (or
+    // with ArrowRight, Enter or a click from the keyboard or touch).
+    const hiddenValues = axis ? labels.filter(label => label !== target && hiddenLabels.has(label)) : [];
+    if (hiddenValues.length) {
+      menu.append(node('div', 'Hidden values', 'ds-legend-menu-heading'));
+      hiddenValues.forEach(value => {
+        const entry = node('div', undefined, 'ds-legend-menu-entry');
+        const parent = node('button', value, 'ds-legend-menu-item ds-legend-menu-parent');
+        parent.type = 'button'; parent.setAttribute('role', 'menuitem'); parent.setAttribute('aria-haspopup', 'menu'); parent.setAttribute('aria-expanded', 'false');
+        const submenu = node('div', undefined, 'ds-legend-menu ds-legend-submenu');
+        submenu.setAttribute('role', 'menu');
+        action(submenu, 'Show', `Show ${value} in every slide of the Dashboard`, () => setDashboardLegendStates(new Map([[value, false]])));
+        const close = () => { entry.classList.remove('ds-legend-menu-open'); parent.setAttribute('aria-expanded', 'false'); };
+        const open = () => {
+          if (entry.classList.contains('ds-legend-menu-open')) return;
+          menu.querySelectorAll('.ds-legend-menu-open').forEach(other => { other.classList.remove('ds-legend-menu-open'); other.firstElementChild?.setAttribute('aria-expanded', 'false'); });
+          entry.classList.add('ds-legend-menu-open'); parent.setAttribute('aria-expanded', 'true');
+          submenu.classList.remove('ds-legend-submenu-left');
+          if (submenu.getBoundingClientRect().right > window.innerWidth - 8) submenu.classList.add('ds-legend-submenu-left');
+        };
+        // pointermove needs a real movement: a menu that appears under a
+        // still pointer never opens a submenu on its own.
+        entry.addEventListener('pointermove', event => { if (event.pointerType !== 'touch') open(); });
+        entry.addEventListener('pointerleave', close);
+        parent.onclick = event => { event.stopPropagation(); if (entry.classList.contains('ds-legend-menu-open')) close(); else open(); };
+        parent.addEventListener('keydown', event => { if (event.key === 'ArrowRight') { open(); submenu.querySelector('button')?.focus(); event.preventDefault(); } });
+        submenu.addEventListener('keydown', event => { if (event.key === 'ArrowLeft') { close(); parent.focus(); event.preventDefault(); } });
+        entry.append(parent, submenu);
+        menu.append(entry);
+      });
+    }
+    document.body.append(menu);
+    // Like native context menus, open towards the free side of the pointer
+    // instead of sliding the menu underneath it.
+    const {width, height} = menu.getBoundingClientRect();
+    const left = detail.clientX + width > window.innerWidth - 8 ? detail.clientX - width : detail.clientX;
+    const top = detail.clientY + height > window.innerHeight - 8 ? detail.clientY - height : detail.clientY;
+    menu.style.left = `${Math.max(8, Math.min(left, window.innerWidth - width - 8))}px`;
+    menu.style.top = `${Math.max(8, Math.min(top, window.innerHeight - height - 8))}px`;
+    legendMenu = menu;
+    menu.querySelector('button')?.focus();
+  }
+  document.addEventListener('pointerdown', event => { if (legendMenu && !legendMenu.contains(event.target)) closeLegendMenu(); }, true);
+  document.addEventListener('keydown', event => { if (event.key === 'Escape' && legendMenu) { event.stopPropagation(); closeLegendMenu(); } }, true);
+  window.addEventListener('resize', closeLegendMenu);
+  function enableLegendActions(canvas, chart) {
+    if (pptDashboardViewer) { legendCharts.delete(canvas); canvas.dataset.legendMenu = 'false'; return; }
+    legendCharts.set(canvas, chart);
+    canvas.dataset.legendMenu = 'true';
+    if (canvas.dataset.legendStateReady) return;
+    canvas.dataset.legendStateReady = 'true';
+    canvas.addEventListener('dashboardchartlegend', event => {
+      if (!legendCharts.has(canvas)) return;
+      setDashboardLegendStates(new Map([[event.detail.label, Boolean(event.detail.labelHidden)]]));
+    });
+    canvas.addEventListener('dashboardchartlegendmenu', event => {
+      const target = legendCharts.get(canvas); if (target) openLegendMenu(canvas, target, event.detail);
+    });
+  }
   function loadChartPayload(chart, priority = 'high') {
     const url = chartPayloadUrl(chart);
     const rendered = renderedChartPayloads.get(url);
@@ -3183,7 +3381,7 @@
         expandedZoom.reset();
       }
       canvas.hidden = false;
-      globalThis.renderDashboardChart(canvas, payload);
+      globalThis.renderDashboardChart(canvas, withLegendState(chart, payload));
       if (live) liveChartRender(payload);
       message.hidden = true;
       // Applying a temporary Chart Definition changes the current viewer
@@ -3257,7 +3455,8 @@
   $('ds-chart-expanded-data').onclick = safe(async () => { if (expandedChart) await openChartDataset(expandedChart); });
   const expandedCharts = () => expandedChartMode === 'ppt'
     ? dashboardPptCharts
-    : prepared?.slides.flatMap(slide => slide.charts).filter(chart => chart.available) || [];
+    : prepared?.slides.flatMap(slide => slide.charts)
+      .filter(chart => chart.available && (chart.index === expandedChart?.index || !dynamicCardHiddenBy(chart).length)) || [];
   const expandedChartSlide = chart => expandedChartMode === 'ppt'
     ? {number: chart?.slide}
     : prepared?.slides.find(slide => slide.charts.some(item => item.index === chart?.index));
@@ -3517,7 +3716,14 @@
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     if (request !== expandedChartRequest || contextKey !== currentContextKey() || $('ds-chart-expanded-overlay').hidden) return;
     try {
-      globalThis.renderDashboardChart(canvas, payload);
+      if (mode === 'ppt') {
+        legendCharts.delete(canvas); canvas.dataset.legendMenu = 'false';
+        // The canvas is reused: never carry another chart's hidden entries.
+        globalThis.renderDashboardChart(canvas, {...payload, hidden_legend_items: payload?.hidden_legend_items || []});
+      } else {
+        enableLegendActions(canvas, chart);
+        globalThis.renderDashboardChart(canvas, withLegendState(chart, payload));
+      }
       expandedZoom.hidden = false;
       message.hidden = true;
       scheduleNearbyExpandedChartPreload(contextKey, chart);
@@ -3675,6 +3881,7 @@
   }
   function renderSlide() {
     if (!prepared) return; slideIndex = Math.max(0,Math.min(slideIndex,prepared.slides.length-1));
+    closeLegendMenu();
     if (liveChartFilterToggle) resetChartDefinitionSurface();
     const slide = prepared.slides[slideIndex]; if (!slide) return;
     const preloadToken = prepared.token;
@@ -3699,12 +3906,22 @@
     $('ds-first').disabled = $('ds-prev').disabled = slideIndex === 0;
     $('ds-next').disabled = $('ds-last').disabled = slideIndex === prepared.slides.length - 1;
     $('ds-slide-content').classList.toggle('ds-comments-right', /\bcomments\s+right\b/i.test(slide.layout || ''));
-    const stage = $('ds-charts'); stage.classList.remove('ds-slide-transition'); stage.replaceChildren(); stage.classList.toggle('ds-positioned',slide.charts.length > 0 && slide.charts.every(chart=>chart.position)); stage.classList.toggle('ds-structural-stage', !slide.charts.length);
+    const {cards, layout: cardLayout, hiddenBy} = slideCards(slide);
+    renderedSlideCards = slideCardsSignature(slide);
+    const stage = $('ds-charts'); stage.classList.remove('ds-slide-transition'); stage.replaceChildren(); stage.classList.toggle('ds-positioned',cards.length > 0 && cards.every(card=>card.position)); stage.classList.toggle('ds-structural-stage', !slide.charts.length);
     if (!slide.charts.length) structuralDashboard(stage, slide);
+    else if (!cards.length) {
+      // Every dynamic card is hidden: the PPT export leaves this slide out.
+      const notice = node('div', undefined, 'ds-hidden-slide-notice');
+      notice.append(node('p', `Every chart on this slide is hidden (${hiddenBy.join(', ')}). The PPT export leaves this slide out.`));
+      const show = node('button', 'Show hidden values', 'btn ds-hidden-slide-show'); show.type = 'button';
+      show.onclick = () => setDashboardLegendStates(new Map(hiddenBy.map(label => [label, false])));
+      notice.append(show); stage.append(notice);
+    }
     // Grids with 3+ rows or 4+ columns (manifests prepared earlier carry only the layout name).
-    const gridSize = /^Title \+ (\d+) rows \+ (\d+) columns/i.exec(String(slide.layout || ''));
-    const compactTitles = slide.compact_titles ?? Boolean(gridSize && (Number(gridSize[1]) >= 3 || Number(gridSize[2]) >= 4));
-    for (const chart of slide.charts) {
+    const gridSize = /^Title \+ (\d+) rows \+ (\d+) columns/i.exec(cardLayout);
+    const compactTitles = (cardLayout === (slide.layout || '') ? slide.compact_titles : undefined) ?? Boolean(gridSize && (Number(gridSize[1]) >= 3 || Number(gridSize[2]) >= 4));
+    for (const {chart, position} of cards) {
       const card = node('article',undefined,'ds-chart'); card.setAttribute('aria-label',chart.title); card.tabIndex = 0;
       const brand = dashboardViewerBrand('ds-chart-brand'); card.append(brand);
       if (compactTitles) {
@@ -3717,8 +3934,8 @@
         card.append(heading);
       }
       let renderedPayload = null;
-      if (chart.position) {
-        const [left,top,width,height] = chart.position;
+      if (position) {
+        const [left,top,width,height] = position;
         Object.assign(card.style,{left:`${left}%`,top:`${top}%`,width:`${width}%`,height:`${height}%`});
         card.style.setProperty('--ds-chart-left', `${left}%`);
         card.style.setProperty('--ds-chart-top', `${top}%`);
@@ -3747,7 +3964,9 @@
           renderedPayload = payload;
           canvas.hidden = false;
           requestAnimationFrame(() => {
-            try { globalThis.renderDashboardChart(canvas, compactTitles ? {...payload, hide_title: true} : payload); zoom.hidden = false; message.remove(); }
+            enableLegendActions(canvas, chart);
+            const legendPayload = withLegendState(chart, payload);
+            try { globalThis.renderDashboardChart(canvas, compactTitles ? {...legendPayload, hide_title: true} : legendPayload); zoom.hidden = false; message.remove(); }
             catch (error) { canvas.hidden = true; message.textContent = error.message || `Unable to render ${chart.title || 'chart'}.`; }
           });
         }).catch(error => {

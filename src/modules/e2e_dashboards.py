@@ -47,7 +47,7 @@ from src.modules.cdr_reporting import (
     prepare_catalog_chart_preview_frame, render_catalog_chart_preview, render_unavailable_source_chart,
     split_calculated_dimension_aliases, chart_title_parts, _select_dynamic_chart_frame,
 )
-from src.modules.report_layouts import compact_grid_layout
+from src.modules.report_layouts import canonical_layout_name, compact_grid_layout, grid_layout_name
 
 from src.modules.dashboard_column_cache import (
     CacheSource, ColumnCache, Segment, SelectionTerms, StaleSegment, count_rows, default_disk_bytes, default_memory_bytes,
@@ -85,6 +85,9 @@ class DashboardDefinition(BaseModel):
 class DashboardPptExportRequest(BaseModel):
     definition: DashboardDefinition | None = None
     preparation_token: str | None = None
+    # Legend entries hidden in the viewer: {"dashboard": {label: hidden},
+    # "charts": {chart key: {label: hidden}}}; the PPT shows them hidden too.
+    legend_visibility: dict[str, object] | None = None
     selected_operators: list[str] | None = None
     selected_vendors: list[str] | None = None
     selected_regions: list[str] | None = None
@@ -303,6 +306,74 @@ def filter_frame(frame, definition, exclude=None):
     return frame.loc[filter_mask(frame, definition, exclude)]
 
 
+
+def dynamic_chart_values(entry) -> list[list[str]]:
+    """Dynamic values of a grid card, each with its displayed form.
+
+    Vendor_Only grids display operator-only values as "<Operator> - All", so
+    both forms identify the card when a value is hidden in a legend or axis.
+    """
+    values = [str(value) for value in (entry.dynamic_row_value, entry.dynamic_column_value) if value is not None]
+    if not values and entry.dynamic_value is not None:
+        values = [str(entry.dynamic_value)]
+    label, _title = chart_title_parts(entry)
+    displayed = label.split(' / ') if len(values) > 1 else [label]
+    if len(displayed) != len(values):
+        displayed = values
+    return [list(dict.fromkeys(item for item in pair if item)) for pair in zip(values, displayed)]
+
+
+def legend_value_hidden(hidden, shown, value: str) -> bool:
+    """Whether a label is hidden by itself or by any of its " · " levels.
+
+    Mirrors the Canvas renderer so the viewer, the PPT and its viewer agree.
+    """
+    hidden, shown = set(hidden), set(shown)
+    return value not in shown and any(
+        part in hidden and part not in shown for part in (value, *value.split(' · '))
+    )
+
+
+def dynamic_card_hidden(values: list[list[str]], hidden, shown) -> bool:
+    """A dynamic grid card disappears when any of its dynamic values is hidden."""
+    return any(legend_value_hidden(hidden, shown, value) for candidates in values for value in candidates)
+
+
+GRID_LAYOUT_PATTERN = re.compile(r'Title \+ (\d+) rows \+ (\d+) columns(?: \+ comments (down|right))?')
+
+
+def reflowed_dynamic_grid(layout: str, hidden_cards: list[bool]) -> tuple[str, list[int | None]] | None:
+    """Close the rows and columns of hidden dynamic grid cards.
+
+    Returns the smaller grid layout ('' when every card is hidden) and, per
+    card in row-major order, its new cell or None when hidden. Returns None
+    when nothing is hidden or the slide is not a complete grid.
+    """
+    match = GRID_LAYOUT_PATTERN.fullmatch(canonical_layout_name(layout or ''))
+    if not match or not any(hidden_cards):
+        return None
+    rows, columns, comments = int(match.group(1)), int(match.group(2)), match.group(3) or ''
+    if rows * columns != len(hidden_cards):
+        return None
+    visible_rows = [row for row in range(rows) if not all(hidden_cards[row * columns:(row + 1) * columns])]
+    visible_columns = [column for column in range(columns) if not all(hidden_cards[column::columns])]
+    cells = [
+        None if hidden else visible_rows.index(card // columns) * len(visible_columns) + visible_columns.index(card % columns)
+        for card, hidden in enumerate(hidden_cards)
+    ]
+    return (grid_layout_name(len(visible_rows), len(visible_columns), comments) if visible_rows else ''), cells
+
+
+def normalized_frame_positions(frames) -> list[list[float]]:
+    """Chart frames as percentages of their combined bounds, as the viewer lays them out."""
+    if not frames:
+        return []
+    left, top = min(frame[0] for frame in frames), min(frame[1] for frame in frames)
+    width = max(frame[0] + frame[2] for frame in frames) - left
+    height = max(frame[1] + frame[3] for frame in frames) - top
+    return [[(x - left) / width * 100, (y - top) / height * 100, w / width * 100, h / height * 100] for x, y, w, h in frames]
+
+
 @dataclass
 class Snapshot:
     workspace: str
@@ -394,6 +465,7 @@ def install_dashboard_routes(core):
                 regions_json TEXT NOT NULL DEFAULT '[]',
                 selections_json TEXT NOT NULL DEFAULT '{{}}',
                 filters_json TEXT NOT NULL DEFAULT '[]',
+                legend_visibility_json TEXT NOT NULL DEFAULT '{{}}',
                 output_file TEXT NOT NULL,
                 output_path TEXT NOT NULL,
                 created_by TEXT NOT NULL,
@@ -435,6 +507,10 @@ def install_dashboard_routes(core):
                 connection.execute(
                     f"ALTER TABLE {DASHBOARD_PPT_JOBS_TABLE} ADD COLUMN started_at TEXT"
                 )
+            if 'legend_visibility_json' not in columns:
+                connection.execute(
+                    f"ALTER TABLE {DASHBOARD_PPT_JOBS_TABLE} ADD COLUMN legend_visibility_json TEXT NOT NULL DEFAULT '{{}}'"
+                )
             if first_check:
                 connection.execute(
                     f'''UPDATE {DASHBOARD_PPT_JOBS_TABLE}
@@ -461,6 +537,48 @@ def install_dashboard_routes(core):
                 f'UPDATE {DASHBOARD_PPT_JOBS_TABLE} SET {assignments} WHERE id = ?',
                 (*changes.values(), job_id),
             )
+
+    def normalized_legend_visibility(value) -> dict[str, dict]:
+        """Keep a bounded {"dashboard": {label: hidden}, "charts": {key: {label: hidden}}} state."""
+        def states(raw) -> dict[str, bool]:
+            if not isinstance(raw, dict):
+                return {}
+            return {str(label)[:300]: bool(hidden) for label, hidden in list(raw.items())[:2000]}
+
+        value = value if isinstance(value, dict) else {}
+        charts = value.get('charts') if isinstance(value.get('charts'), dict) else {}
+        return {
+            'dashboard': states(value.get('dashboard')),
+            'charts': {str(key)[:600]: states(raw) for key, raw in list(charts.items())[:2000] if states(raw)},
+        }
+
+    def chart_legend_keys(entries) -> dict[int, str]:
+        """Stable chart keys (slide, title, occurrence) shared by the viewer and the PPT."""
+        keys = {}
+        occurrences: dict[tuple[int, str], int] = defaultdict(int)
+        for index, entry in sorted(enumerate(entries), key=lambda item: (item[1].slide, item[0])):
+            if entry.structural_type:
+                continue
+            title = str(entry.chart_title or '')
+            occurrence = occurrences[(entry.slide, title)]
+            occurrences[(entry.slide, title)] += 1
+            keys[index] = f'{entry.slide}|{title}|{occurrence}'
+        return keys
+
+    def chart_legend_lists(visibility, chart_key) -> tuple[list[str], list[str]]:
+        """Hidden and explicitly shown legend labels or values of one chart.
+
+        The chart's own choices come first, then the Dashboard-wide ones. The
+        renderer hides every series, row or column with a hidden value at any
+        aggregation level, exactly as the viewer does.
+        """
+        chart_states = visibility.get('charts', {}).get(chart_key, {}) if chart_key else {}
+        hidden = [label for label, value in chart_states.items() if value]
+        shown = [label for label, value in chart_states.items() if not value]
+        for label, value in visibility.get('dashboard', {}).items():
+            if label not in chart_states:
+                (hidden if value else shown).append(label)
+        return hidden, shown
 
     def dashboard_filter_lines(definition: dict, task_repository, selection_labels: dict[str, str] | None = None) -> list[str]:
         lines = []
@@ -949,9 +1067,38 @@ def install_dashboard_routes(core):
             update_dashboard_ppt_job(task_repository, job_id, progress=90, last_error='')
             presentation = Presentation(core.settings.ppt_templates_dir / 'Template_CDR_analysis.pptx')
             _remove_all_slides(presentation)
+            # Legend entries hidden in the viewer stay hidden in the PPT charts.
+            job_row = dashboard_ppt_job(task_repository, job_id)
+            try:
+                legend_visibility = normalized_legend_visibility(json.loads(str(job_row['legend_visibility_json'] or '{}')))
+            except (KeyError, IndexError, TypeError, ValueError):
+                legend_visibility = normalized_legend_visibility({})
+            legend_keys = chart_legend_keys(snapshot.entries)
             grouped = defaultdict(list)
             for index, entry in enumerate(snapshot.entries):
                 grouped[entry.slide].append((index, entry))
+            # Dynamic grid cards whose value is hidden leave the slide and the
+            # remaining cards fill a smaller grid, exactly as in the viewer; a
+            # slide whose cards are all hidden is left out.
+            hidden_entries: set[int] = set()
+            reflowed_layouts: dict[int, str] = {}
+            reflowed_cells: dict[int, dict[int, int]] = {}
+            for slide_number, slide_entries in grouped.items():
+                cards = [(index, entry) for index, entry in slide_entries if not entry.structural_type]
+                hidden_cards = []
+                for index, entry in cards:
+                    values = dynamic_chart_values(entry)
+                    hidden_cards.append(bool(values) and dynamic_card_hidden(
+                        values, *chart_legend_lists(legend_visibility, legend_keys.get(index)),
+                    ))
+                reflow = reflowed_dynamic_grid(slide_entries[0][1].layout, hidden_cards)
+                if reflow is None:
+                    continue
+                reflowed_layouts[slide_number], cells = reflow
+                hidden_entries.update(index for (index, _entry), cell in zip(cards, cells) if cell is None)
+                reflowed_cells[slide_number] = {
+                    index: cell for (index, _entry), cell in zip(cards, cells) if cell is not None
+                }
             charts_dir = destination.parent / 'dashboard-charts'
             charts_dir.mkdir(parents=True, exist_ok=True)
             manifest = []
@@ -962,8 +1109,9 @@ def install_dashboard_routes(core):
                 )
             }
             chart_total = sum(
-                1 for entries in grouped.values() for _index, entry in entries
-                if entry.source_kind and dashboard_datasets(snapshot.definition, entry.source_kind, task_repository)
+                1 for entries in grouped.values() for index, entry in entries
+                if index not in hidden_entries
+                and entry.source_kind and dashboard_datasets(snapshot.definition, entry.source_kind, task_repository)
             )
             rendered = 0
             for slide_number in sorted(grouped):
@@ -990,20 +1138,24 @@ def install_dashboard_routes(core):
                     continue
                 chart_entries = [
                     (index, entry) for index, entry in slide_entries
-                    if entry.source_kind and dashboard_datasets(snapshot.definition, entry.source_kind, task_repository)
+                    if index not in hidden_entries
+                    and entry.source_kind and dashboard_datasets(snapshot.definition, entry.source_kind, task_repository)
                 ]
                 if not chart_entries:
                     continue
-                layout = _named_slide_layout(presentation, header.layout)
+                layout_name = reflowed_layouts.get(slide_number) or header.layout
+                layout = _named_slide_layout(presentation, layout_name)
                 placements = _layout_chart_frames(layout)
                 if layout is None or len(placements) < len(chart_entries):
                     raise ValueError(f'Slide {slide_number}: the PowerPoint layout has insufficient chart placeholders.')
+                if slide_number in reflowed_cells:
+                    placements = [placements[reflowed_cells[slide_number][index]] for index, _entry in chart_entries]
                 slide = presentation.slides.add_slide(layout)
                 _set_slide_header(slide, header.slide_title, header.slide_subtitle)
                 _clear_commentary(slide)
                 _set_commentary(slide, comments)
                 _remove_template_chart_placeholders(slide)
-                compact_titles = compact_grid_layout(header.layout)
+                compact_titles = compact_grid_layout(layout_name)
                 for chart_number, ((index, entry), placement) in enumerate(zip(chart_entries, placements, strict=False), 1):
                     if not run_is_active():
                         return
@@ -1029,6 +1181,9 @@ def install_dashboard_routes(core):
                             payload = json.loads(model_path.read_text(encoding='utf-8'))
                             if compact_titles:
                                 payload = {**payload, 'hide_title': True}
+                            hidden_items, shown_items = chart_legend_lists(legend_visibility, legend_keys.get(index))
+                            if hidden_items:
+                                payload = {**payload, 'hidden_legend_items': hidden_items, 'shown_legend_items': shown_items}
                             png, hover_targets = _render_dashboard_payload(
                                 payload, width=render_width, height=render_height,
                             )
@@ -1069,6 +1224,25 @@ def install_dashboard_routes(core):
                     )
             if not run_is_active():
                 return
+            viewer_slides = []
+            for slide in snapshot.payload.get('slides', []):
+                number = slide.get('number')
+                if number not in reflowed_layouts:
+                    viewer_slides.append(slide)
+                    continue
+                layout_name = reflowed_layouts[number]
+                if not layout_name:
+                    continue
+                positions = normalized_frame_positions(_layout_chart_frames(_named_slide_layout(presentation, layout_name)))
+                charts = []
+                for chart in slide.get('charts', []):
+                    cell = reflowed_cells[number].get(chart.get('index'))
+                    if cell is None:
+                        continue
+                    charts.append({**chart, 'position': positions[cell]} if cell < len(positions) else dict(chart))
+                viewer_slides.append({
+                    **slide, 'layout': layout_name, 'compact_titles': compact_grid_layout(layout_name), 'charts': charts,
+                })
             (charts_dir / 'manifest.json').write_text(
                 json.dumps({
                     'generate_tooltips': True,
@@ -1078,7 +1252,7 @@ def install_dashboard_routes(core):
                     # Keep the exact viewer slide structure alongside the
                     # immutable PNG/Canvas assets so a completed PPT job can
                     # later be opened as its own Dashboard snapshot.
-                    'slides': snapshot.payload.get('slides', []),
+                    'slides': viewer_slides,
                     'charts': manifest,
                     # The exact cover lines, so the job's viewer snapshot shows
                     # the same Campaigns, Scope, Regions and Cities as the PPT cover.
@@ -1325,6 +1499,34 @@ def install_dashboard_routes(core):
         entries = catalogue(definition, task_repository)
         return entries
 
+    def add_dynamic_grid_metadata(payload, entries, deck=None) -> None:
+        """Add each grid card's dynamic values and the smaller grids it can reflow to.
+
+        Hiding a dynamic value removes its grid row or column; the viewer lays
+        the remaining cards out on the same smaller grid the PPT export uses.
+        """
+        grids = set()
+        for slide in payload.get('slides', []):
+            for chart in slide.get('charts', []):
+                index = chart.get('index')
+                values = dynamic_chart_values(entries[index]) if isinstance(index, int) and 0 <= index < len(entries) else []
+                if values:
+                    chart['dynamic_values'] = values
+            grid = GRID_LAYOUT_PATTERN.fullmatch(canonical_layout_name(slide.get('layout') or ''))
+            if grid and any(chart.get('dynamic_values') for chart in slide.get('charts', [])):
+                grids.add((int(grid.group(1)), int(grid.group(2)), grid.group(3) or ''))
+        names = {
+            grid_layout_name(rows, columns, comments)
+            for row_limit, column_limit, comments in grids
+            for rows in range(1, row_limit + 1) for columns in range(1, column_limit + 1)
+        }
+        if names and deck is None:
+            deck = Presentation(core.settings.ppt_templates_dir / 'Template_CDR_analysis.pptx')
+        payload['grid_layouts'] = {
+            name: normalized_frame_positions(_layout_chart_frames(_named_slide_layout(deck, name)))
+            for name in sorted(names)
+        }
+
     def expand_dashboard_layouts(entries, definition, options, task_repository):
         effective_entries = [prepare_multivendor_catalog_entry(entry, definition.vendor_comparison) if definition.scope == "multivendor" else entry for entry in entries]
         dynamic_fields = {field for entry in effective_entries for field in entry_dynamic_fields(entry) if field}
@@ -1488,7 +1690,7 @@ def install_dashboard_routes(core):
         dashboard_id, user, *, reuse_job_id=None, export_definition: DashboardDefinition | None = None,
         preparation_token: str | None = None, selected_operators: list[str] | None = None,
         selected_vendors: list[str] | None = None, selected_regions: list[str] | None = None,
-        selected_cities: list[str] | None = None,
+        selected_cities: list[str] | None = None, legend_visibility: dict | None = None,
     ):
         """Create the export job immediately; all preparation runs in the background job."""
         task_repository = bound_repository()
@@ -1558,6 +1760,12 @@ def install_dashboard_routes(core):
                 task_repository, job_id, **common, created_at=datetime.now(timezone.utc).isoformat(),
                 status='queued', progress=0, slide_count=0, chart_count=0,
                 last_error='', started_at=None, finished_at=None,
+            )
+        if legend_visibility is not None:
+            # A relaunched job keeps the legend state it was created with.
+            update_dashboard_ppt_job(
+                task_repository, job_id,
+                legend_visibility_json=json.dumps(normalized_legend_visibility(legend_visibility), ensure_ascii=False),
             )
         run_token = uuid4().hex
         with lock:
@@ -1692,6 +1900,7 @@ def install_dashboard_routes(core):
             selected_vendors=request.selected_vendors if request else None,
             selected_regions=request.selected_regions if request else None,
             selected_cities=request.selected_cities if request else None,
+            legend_visibility=request.legend_visibility if request else None,
         )
         return JSONResponse({'job_id': job_id, 'status': 'queued'}, status_code=202)
 
@@ -3110,20 +3319,18 @@ def install_dashboard_routes(core):
             })
             if not entry.structural_type:
                 title_label, title_base = chart_title_parts(entry)
-                slide['charts'].append({
+                chart = {
                     'index': index, 'title': entry.chart_title, 'title_label': title_label, 'title_base': title_base,
                     'source': entry.source_kind,
                     'cdr_source': entry.cdr_source, 'chart_type': entry.chart_type,
                     'available': bool(selected_by_kind) if entry.source_kind == 'all' else entry.source_kind in selected_by_kind, 'focus_row': editor_index,
-                })
+                }
+                slide['charts'].append(chart)
         for slide in slides.values():
-            bounds = _layout_chart_frames(_named_slide_layout(deck, slide['layout']))
-            if bounds and len(bounds) >= len(slide['charts']):
-                left, top = min(b[0] for b in bounds), min(b[1] for b in bounds)
-                width = max(b[0] + b[2] for b in bounds) - left
-                height = max(b[1] + b[3] for b in bounds) - top
-                for chart, (x, y, w, h) in zip(slide['charts'], bounds):
-                    chart['position'] = [(x-left)/width*100, (y-top)/height*100, w/width*100, h/height*100]
+            positions = normalized_frame_positions(_layout_chart_frames(_named_slide_layout(deck, slide['layout'])))
+            if positions and len(positions) >= len(slide['charts']):
+                for chart, position in zip(slide['charts'], positions):
+                    chart['position'] = position
         token = uuid4().hex
         payload = {
             'slides': list(slides.values()), 'options': options,
@@ -3134,6 +3341,7 @@ def install_dashboard_routes(core):
             'rows_exact': rows_exact,
             'date_bounds': date_bounds,
         }
+        add_dynamic_grid_metadata(payload, entries, deck)
         with lock:
             snapshots[token] = Snapshot(
                 workspace, user.username, entries, {}, definition.scope == 'multivendor',
@@ -3221,6 +3429,10 @@ def install_dashboard_routes(core):
             entries = expand_dashboard_layouts(entries, definition, payload.get('options', {}), task_repository)
             if not isinstance(payload, dict) or not isinstance(payload.get('slides'), list):
                 return None
+            if 'grid_layouts' not in payload:
+                # Universes prepared by earlier versions gain the dynamic grid
+                # metadata without being prepared again.
+                add_dynamic_grid_metadata(payload, entries)
         except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError, sqlite3.Error):
             return None
         if not materialize:

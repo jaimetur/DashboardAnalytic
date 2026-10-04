@@ -272,6 +272,8 @@ Title and Transition slides preserve the template text and branded typography. A
 
 In grids with three or more rows or four or more columns, each chart's title appears as text above the chart, in the viewer and in the PPT, so it stays readable in small cells. Dynamic grids show the row or column value (for example the Operator) in bold before the title, such as **EE** · LTE RSRP histogram.
 
+Axis labels and aggregation headers are never truncated, in the viewer or in the PPT. Each axis level wraps onto two lines, uses a smaller size or turns vertical, and the chart reserves the room it needs.
+
 Layouts ending in **comments right** place comments beside the charts; **comments down** places them below. Layouts without comments use the full chart area. Narrow screens wrap actions and adapt navigation to the available space.
 
 ### Live and expanded chart controls
@@ -285,9 +287,12 @@ Hover or focus a chart for **Dataset**, **Expand**, **Refresh**, **Zoom** and **
 | Drag a rectangle at 100% | Zoom into the selected plot area |
 | Drag when zoomed | Pan the chart |
 | Direction arrows when zoomed | Move the camera; arrows disable at boundaries |
-| Click a legend entry | Hide or show that series, bar or stacked segment; a hidden entry stays faded and struck through |
+| Click a legend entry | Hide or show that value in every slide of the Dashboard; a hidden entry stays faded and struck through |
+| Right-click a legend entry or an axis label | **Keep only**, **Hide** or **Show**, **Hide All** and **Show All** for that legend or axis level; an axis menu also lists its hidden values, each opening a **Show** submenu when the pointer moves over it |
 
-Hiding a legend entry changes only the view of that chart: axes, categories and the other values stay as they are, so a stacked 100% bar shows a gap instead of rescaling. Hidden entries reset when the chart is drawn again on another slide or in the expanded viewer, and PPT exports always contain every series.
+Hiding a value applies to the whole Dashboard. Every series, bar, stacked segment, row, column and category where the value appears, at any aggregation level, disappears and the chart closes the gap: hiding Operator VF_SA also hides each VF_SA Campaign, for example. In dynamic grids, the cards of a hidden value (such as an Operator) leave the slide and the remaining cards fill a smaller grid. A slide whose cards are all hidden offers **Show hidden values** and is left out of the PPT.
+
+The legend state lasts for the browser session and also applies in the expanded viewer. **Generate PPT** exports the charts as you see them, and the PPT job's viewer shows the same state. Relaunching a PPT job keeps the state it was created with. In Network Insights, clicking a legend entry hides or shows it in that chart only.
 
 The expanded viewer retains Dashboard filters, chart navigation and a red Close control. Compact portrait/landscape layouts fit navigation and the chart to the viewport; the Comments drawer stays accessible at the bottom.
 

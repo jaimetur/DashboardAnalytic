@@ -5060,7 +5060,9 @@ def test_ppt_job_can_open_its_immutable_dashboard_snapshot() -> None:
     script = (root / 'web_interface' / 'static' / 'js' / 'e2e_dashboards.js').read_text(encoding='utf-8')
     styles = (root / 'web_interface' / 'static' / 'css' / 'e2e_dashboards.css').read_text(encoding='utf-8')
 
-    assert "'slides': snapshot.payload.get('slides', [])" in dashboard_source
+    # The snapshot keeps the viewer slides as exported, with hidden dynamic cards removed.
+    assert "for slide in snapshot.payload.get('slides', []):" in dashboard_source
+    assert "'slides': viewer_slides," in dashboard_source
     assert "'viewer_available': bool(slides)" in dashboard_source
     assert "jobAction('View Dashboard snapshot', 'report-job-dashboard-button'" in script
     assert 'async function openDashboardPptViewer(job)' in script
