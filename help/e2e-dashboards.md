@@ -204,7 +204,11 @@ The viewer opens immediately with a yellow **Preparing Dashboard dataset** card 
 | **Pre-Caching Universe n/m** | Preparing reusable universe n of m |
 | **Waiting** | Background pre-caching is queued or paused |
 | **Loading data / Rendering** | Foreground preparation is active |
-| **Ready** | Reusable universes are prepared |
+| **Data Cached · Charts n/m** | Every reusable universe is prepared; n of the m charts of the default universe are rendered, and the rest render when viewed or while the application is idle |
+| **Rendering Charts n/m** | The background worker is rendering this Dashboard's charts |
+| **Ready** | Every reusable universe is prepared and every chart of the default universe is rendered |
+
+The chart counts refer to the default universe (the saved universe, or the newest CDRs) in the Dashboard's saved comparison mode.
 
 Open Filters, View Dashboard and PPT export remain available during background pre-caching.
 
@@ -212,7 +216,7 @@ Open Filters, View Dashboard and PPT export remain available during background p
 
 The library can prepare up to five universes: all ready CDRs, and the newest one, two, three and four per type. These use the Dashboard's NR Mode, saved scope/filters/template and automatic dates; duplicate universes are skipped.
 
-One background worker handles one Dashboard at a time, in creation order (oldest first). Foreground preparation and PPT export pause this low-priority work, which resumes afterward. An incompatible universe is skipped until the workspace data changes.
+One background worker handles one Dashboard at a time, in creation order (oldest first). Foreground preparation and PPT export pause this low-priority work at its next step, so opening a Dashboard never waits for another Dashboard's pre-caching; the work resumes afterward. An incompatible universe is skipped until the workspace data changes.
 
 > [!TIP]
 > You do not need to wait for every background universe to finish. Opening or exporting a Dashboard prepares the requested universe if it is not already reusable.
@@ -227,14 +231,14 @@ Combined CDR tables remain the source for filters and chart data. Selection reco
 
 Dashboard charts read the materialized combined CDR tables through a per-CDR column cache. Each column a chart needs is read from SQLite once per CDR, together with the Dashboard filter columns (the default filters, the Dashboard's custom fields and the event date). Any combination of CDRs, dates, filters and comparison mode is then assembled in memory without querying the CDRs again. `CDR-All` pools the Data, Voice and Speech tables without rereading the original uploaded files.
 
-The assembled rows are exactly the rows SQLite returns, with the same values and types. Maps, scatter plots, tables and chart data views also keep SQLite's row order. When SQLite would return them in an order the cache cannot reproduce, for example while filtering a single City, those charts read SQLite directly. Charts reading the same fields share one read, and charts with the same source, filters and measure share one filtering pass.
+Preparing a changed universe also counts its rows from these cached filter columns, and reuses the distinct filter values of each CDR until that CDR changes, instead of reading the CDRs again. The assembled rows are exactly the rows SQLite returns, with the same values and types. Maps, scatter plots, tables and chart data views also keep SQLite's row order. When SQLite would return them in an order the cache cannot reproduce, for example while filtering a single City, those charts read SQLite directly. Charts reading the same fields share one read, and charts with the same source, filters and measure share one filtering pass.
 
 `.dashboard-data-cache` holds derived preview manifests, Canvas models, the per-CDR column cache and legacy image artifacts. Their keys include dataset revisions, selection, scope and renderer version, so other sessions, restarts and PPT exports reuse them until the CDRs change. The column cache keeps up to 8 GB on disk and 1 GB in memory by default, removing the least recently used CDRs first. `DASHBOARD_ANALYTIC_COLUMN_CACHE_DISK_MB` and `DASHBOARD_ANALYTIC_COLUMN_CACHE_MEMORY_MB` change these limits. Older-version artifacts are removed when a workspace opens.
 
 > [!WARNING]
 > **Workspace Clear cache cancels active user-requested work and removes derived cache only.** It preserves Dashboard definitions, combined CDRs, templates and generated jobs. Nothing rebuilds automatically until requested again.
 
-Canvas models are created when a chart is viewed, refreshed or requested for PPT. After a visible slide loads, nearby slides silently prefetch in the order next, previous, two ahead, two behind. Opening an individual chart uses the chart sequence instead. Closing the viewer stops scheduling further work.
+Canvas models are created when a chart is viewed, refreshed or requested for PPT. The charts of the open slide are calculated first and appear as each one is ready. After they load, nearby slides silently prefetch one chart at a time in the order next, previous, two ahead, two behind. A prefetch waits while the charts of a newly opened slide are calculated, so moving to another slide never queues it behind prefetched charts. Opening an individual chart uses the chart sequence instead. Closing the viewer stops scheduling further work.
 
 ## View Dashboard
 
@@ -281,6 +285,9 @@ Hover or focus a chart for **Dataset**, **Expand**, **Refresh**, **Zoom** and **
 | Drag a rectangle at 100% | Zoom into the selected plot area |
 | Drag when zoomed | Pan the chart |
 | Direction arrows when zoomed | Move the camera; arrows disable at boundaries |
+| Click a legend entry | Hide or show that series, bar or stacked segment; a hidden entry stays faded and struck through |
+
+Hiding a legend entry changes only the view of that chart: axes, categories and the other values stay as they are, so a stacked 100% bar shows a gap instead of rescaling. Hidden entries reset when the chart is drawn again on another slide or in the expanded viewer, and PPT exports always contain every series.
 
 The expanded viewer retains Dashboard filters, chart navigation and a red Close control. Compact portrait/landscape layouts fit navigation and the chart to the viewport; the Comments drawer stays accessible at the bottom.
 

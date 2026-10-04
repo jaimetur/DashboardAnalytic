@@ -26,6 +26,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Callable, Iterable, Mapping
 
+import numpy as np
 import pandas as pd
 from src.modules.report_layouts import DYNAMIC_LAYOUTS, canonical_layout_name, grid_layout_name, dynamic_layout_axes
 from src.modules.column_names import MAIN_CDR_FIELDS, column_identity, compact_campaign_value, resolve_column_name, vendor_only_value, vendor_filter_column, vendor_filter_value, mapped_vendor_only_value
@@ -2868,8 +2869,8 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
     # A multivendor hierarchy must therefore always receive the full stable
     # multi-column sort so Vendor remains the outer group in every renderer.
     if hierarchy:
-        sort_columns: list[str] = []
-        for index, (column, dimension) in enumerate(hierarchy):
+        rank_arrays: list[np.ndarray] = []
+        for column, dimension in hierarchy:
             values = frame[column].drop_duplicates().tolist()
             values = sorted(values, key=lambda value, dimension=dimension: dimension_sort_key(dimension, value))
             configured = configured_dimension_values.get(column)
@@ -2881,13 +2882,23 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
             else:
                 configured_dimension_values[column] = list(values)
             ranks = {value: rank for rank, value in enumerate(values)}
-            sort_column = f"__catalog_sort_{index}"
-            frame[sort_column] = frame[column].map(ranks)
-            sort_columns.append(sort_column)
+            rank_arrays.append(_value_ranks(frame[column], ranks))
         preserved_attrs = frame.attrs.copy()
-        frame = frame.sort_values(sort_columns, kind="stable").drop(columns=sort_columns)
+        # One stable lexicographic permutation, the same order sort_values
+        # gives, without adding and sorting temporary rank columns.
+        order = np.lexsort(tuple(reversed(rank_arrays))) if rank_arrays and len(frame) else np.arange(len(frame))
+        frame = frame.take(order)
         frame.attrs = preserved_attrs
     return frame, primary, series
+
+
+def _value_ranks(series: pd.Series, ranks: dict[object, int]) -> np.ndarray:
+    """``series.map(ranks)`` as float ranks, mapping each distinct value once."""
+    if series.isna().any():
+        return series.map(ranks).to_numpy(dtype=np.float64, na_value=np.nan)
+    codes, uniques = pd.factorize(series, use_na_sentinel=False)
+    unique_ranks = pd.Series(uniques, dtype=object).map(ranks).to_numpy(dtype=np.float64, na_value=np.nan)
+    return unique_ranks[codes]
 
 
 def preview_catalog_chart_data(
@@ -6009,7 +6020,8 @@ def _exclude_chart_values(
     mask = pd.Series(True, index=frame.index)
     for column in dict.fromkeys(columns):
         series = frame[column]
-        populated = series.notna() & series.astype(str).str.strip().ne("")
+        # A number is never blank text, so numeric columns only need notna().
+        populated = series.notna() if series.dtype.kind in "iufb" else series.notna() & series.astype(str).str.strip().ne("")
         numeric = pd.to_numeric(series, errors="coerce")
         if entry.exclude_null_empty:
             mask &= populated
@@ -6888,7 +6900,8 @@ def catalog_chart_payload(
         values = data[[*axes, metric]].copy()
         values.attrs = data.attrs.copy()
         aggregation = spec.get("aggregation") or ("median" if chart_type == "median vertical bars" else "mean")
-        means = _aggregate_metric(values, axes, metric, aggregation)
+        # A group without any valid sample has no bar (its mean is undefined).
+        means = _aggregate_metric(values, axes, metric, aggregation).dropna()
         if means.empty:
             return empty("No valid samples for this KPI and technology filter")
         # A column-only hierarchy still needs the matrix model. Rendering it
@@ -6899,7 +6912,7 @@ def catalog_chart_payload(
             render_columns = column_hierarchy or ["__catalog_single_column"]
             if render_columns == ["__catalog_single_column"]:
                 values["__catalog_single_column"] = "(all)"
-                means = _aggregate_metric(values, [*row_hierarchy, *render_columns], metric, aggregation)
+                means = _aggregate_metric(values, [*row_hierarchy, *render_columns], metric, aggregation).dropna()
             row_keys = _hierarchical_unique_keys(values, row_hierarchy) if row_hierarchy else [()]
             column_keys = _hierarchical_unique_keys(values, render_columns)
             lookup = {key if len(axes) > 1 else key[0]: float(value) for key, value in means.items()}

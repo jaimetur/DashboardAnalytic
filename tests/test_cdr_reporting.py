@@ -1389,6 +1389,28 @@ def test_static_distribution_draws_horizontal_white_percentage_labels_inside_seg
     assert {item.kwargs['font'].size for item in visible} == {14}
 
 
+def test_interactive_mean_model_omits_groups_without_valid_samples() -> None:
+    entry = CatalogEntry(
+        1, 'Browsing', '', '', 'Browsing time', 'CDR-Data', 'Duration',
+        'Average Vertical Bars', 'Vendor', '', 'Vendor', 'Campaign', 'Right',
+    )
+    frame = chart_frame({
+        'Vendor': ['VF_Ericsson'] * 2 + ['VF_Huawei'] * 2,
+        'Campaign': ['UK_Q1_2026', 'UK_Q2_2026'] * 2,
+        'Duration': [1.5, 2.5, 3.0, None],
+    })
+
+    model = catalog_chart_payload(frame, entry, prefiltered=True)
+
+    # The JSON response rejects NaN: a group without samples has no bar.
+    json.dumps(model, allow_nan=False)
+    assert [(bar['key'], bar['value']) for bar in model['bars']] == [
+        (['VF_Ericsson', '2026-Q1'], pytest.approx(1.5)),
+        (['VF_Ericsson', '2026-Q2'], pytest.approx(2.5)),
+        (['VF_Huawei', '2026-Q1'], pytest.approx(3.0)),
+    ]
+
+
 def test_interactive_mean_model_uses_reporting_aggregation_and_vendor_palette() -> None:
     entry = CatalogEntry(
         1, 'Speech', '', '', 'Average POLQA', 'CDR-Speech', 'LQ',

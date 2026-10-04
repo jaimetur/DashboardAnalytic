@@ -580,22 +580,7 @@ def read_frame(
         physical_terms = [source.physical(expression) for expression in terms.expressions()]
         extra = [source.physical(expression) for expression in (prefetch(source) if prefetch else ())]
         parts = cache.segment_parts(connect, segment, [*physical_columns, *physical_terms], extra)
-        mask = np.ones(part_length(parts[ROWID]), dtype=bool)
-        for expression, allowed in terms.values:
-            if expression is None:
-                mask[:] = False
-            else:
-                mask &= match_values(parts[source.physical(expression)], allowed)
-        if terms.date:
-            expression, low, high = terms.date
-            if expression is None:
-                mask[:] = False
-            else:
-                mask &= match_range(parts[source.physical(expression)], low, high)
-        if terms.excluded_sheets:
-            expression, excluded = terms.excluded_sheets
-            mask &= keep_sheets(parts[source.physical(expression)], excluded)
-        positions = np.flatnonzero(mask)
+        positions = np.flatnonzero(selection_mask(parts, source, terms))
         if order == 'dataset_date_rowid' and len(positions):
             ranks = _date_ranks(parts[ORDER_DATE])[positions]
             positions = positions[np.argsort(ranks, kind='stable')]
@@ -620,6 +605,47 @@ def read_frame(
         permutation = np.concatenate(permutation)
         arrays = [array[permutation] for array in arrays]
     return frame_from_columns(names, arrays, total)
+
+
+def selection_mask(parts: dict[str, tuple], source: CacheSource, terms: SelectionTerms) -> np.ndarray:
+    """Rows of one CDR segment that satisfy the universe's predicates."""
+    mask = np.ones(part_length(parts[ROWID]), dtype=bool)
+    for expression, allowed in terms.values:
+        if expression is None:
+            mask[:] = False
+        else:
+            mask &= match_values(parts[source.physical(expression)], allowed)
+    if terms.date:
+        expression, low, high = terms.date
+        if expression is None:
+            mask[:] = False
+        else:
+            mask &= match_range(parts[source.physical(expression)], low, high)
+    if terms.excluded_sheets:
+        expression, excluded = terms.excluded_sheets
+        mask &= keep_sheets(parts[source.physical(expression)], excluded)
+    return mask
+
+
+def count_rows(
+    cache: ColumnCache,
+    connect: Callable[[], sqlite3.Connection],
+    segments: Sequence[Segment],
+    universe: SelectionTerms,
+    selection: SelectionTerms,
+    prefetch: Callable[[CacheSource], Iterable[str]] | None = None,
+) -> tuple[int, int]:
+    """Count the universe rows and those that also satisfy the selection."""
+    universe_rows = selected_rows = 0
+    for segment in segments:
+        source = segment.source
+        expressions = [source.physical(expression) for expression in (*universe.expressions(), *selection.expressions())]
+        extra = [source.physical(expression) for expression in (prefetch(source) if prefetch else ())]
+        parts = cache.segment_parts(connect, segment, expressions, extra)
+        universe_mask = selection_mask(parts, source, universe)
+        universe_rows += int(universe_mask.sum())
+        selected_rows += int((universe_mask & selection_mask(parts, source, selection)).sum())
+    return universe_rows, selected_rows
 
 
 def default_memory_bytes() -> int:

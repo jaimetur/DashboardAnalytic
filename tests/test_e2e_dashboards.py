@@ -481,13 +481,14 @@ def test_dashboard_background_warmup_prepares_the_five_automatic_date_universes(
     dashboard_status = {}
     while time.monotonic() < deadline:
         dashboard_status = client.get('/api/e2e-dashboards/statuses').json()[dashboard_id]
-        if dashboard_status['state'] == 'ready':
+        if dashboard_status['state'] != 'loading-data':
             break
-        assert dashboard_status['state'] == 'loading-data'
         assert dashboard_status['label'].startswith('Pre-Caching Universe ')
         time.sleep(0.05)
 
-    assert dashboard_status == {'state': 'ready', 'label': 'Ready'}
+    # Every universe is cached; the charts render when viewed or while idle.
+    assert dashboard_status['state'] == 'charts-queued'
+    assert dashboard_status['label'].startswith('Data Cached · Charts')
     manifests = [
         json.loads(path.read_text(encoding='utf-8'))
         for path in (Path(core.repository.db_path).parent / '.dashboard-data-cache' / 'dashboard-previews').glob('*.json')
@@ -1621,6 +1622,12 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "event.data?.type === 'dashboard-analytic:template-saved'" in dashboard_script
     chart_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/dashboard_charts.js').read_text(encoding='utf-8')
     assert "const percent = (value, digits = 1) => `${(Number(value) * 100).toFixed(digits)}%`;" in chart_script
+    # Clicking a legend entry hides or shows its series for every chart type.
+    assert 'function legendHiddenPayload(payload, hidden) {' in chart_script
+    assert 'drawPayload(context, legendHiddenPayload(payload, hiddenLegendItems.get(canvas)), state' in chart_script
+    assert 'attachLegendToggle(canvas);' in chart_script
+    assert 'if (legendItemAt(canvas, event)) return false;' in chart_script
+    assert 'if (bar.hidden) return;' in chart_script
     assert 'function drawInsideHorizontalBarLabel(' in chart_script
     assert "const tooltipPercent = value => `${(Number(value) * 100).toFixed(2)}%`;" in chart_script
     assert 'value: tooltipPercent(ratio)' in chart_script
@@ -1808,8 +1815,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "heading.append(node('span', name.toUpperCase(), 'ds-active-dashboard-name'))" in dashboard_script
     assert 'setActiveDashboardHeading(definition.name);' in dashboard_script
     assert "setActiveDashboardHeading('');" in dashboard_script
-    assert "if (activePrepared) dashboardStatuses.set(id, {state: 'ready', label: 'Ready'});" in dashboard_script
-    assert "setDashboardStatus(activeId, 'ready', 'Ready');" in dashboard_script
+    assert "if (activePrepared) dashboardStatuses.set(id, ['ready', 'rendering', 'charts-queued'].includes(value?.state) ? value : {state: 'charts-queued', label: 'Data Cached'});" in dashboard_script
+    assert "setDashboardStatus(activeId, 'charts-queued', 'Data Cached');" in dashboard_script
     assert "view.dataset.dashboardViewId = id;" in dashboard_script
     assert 'button.disabled = false;' in dashboard_script
     assert "const setViewEnabled = enabled => { $('ds-view').disabled = !definition; syncDashboardViewActions(); syncDashboardPptActions(); };" in dashboard_script
@@ -1840,7 +1847,11 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'const proximityIndexes = (length, origin) =>' in dashboard_script
     assert 'if (origin + distance < length) indexes.push(origin + distance);' in dashboard_script
     assert 'if (origin - distance >= 0) indexes.push(origin - distance);' in dashboard_script
-    assert "charts.map(chart => loadChartPayload(chart, 'low'))" in dashboard_script
+    # Neighbouring slides preload one chart at a time, as deferrable requests,
+    # and a visible chart is requested again with high priority.
+    assert "await loadChartPayload(chart, 'low').catch(() => undefined);" in dashboard_script
+    assert "if (!request || (priority === 'high' && request.chartPriority === 'low')) {" in dashboard_script
+    assert "priority=low" in dashboard_script
     assert "await loadChartPayload(charts[target], 'low').catch(() => undefined);" in dashboard_script
     assert 'scheduleNearbySlidePreload(preloadToken, preloadOrigin, visibleLoads);' in dashboard_script
     assert 'scheduleNearbyExpandedChartPreload(contextKey, chart);' in dashboard_script
@@ -2252,11 +2263,7 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypa
     assert charts_payload['charts'][0]['focus_row'] == 0
     chart_model = client.get(charts_payload['charts'][0]['payload_url'])
     assert chart_model.status_code == 200
-    import src.modules.e2e_dashboards as dashboards_module
-    monkeypatch.setattr(
-        dashboards_module, 'prepare_catalog_chart_preview_frame',
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError('The combined table should serve dataset pages.')),
-    )
+    # Charts read only their own columns; a dataset page reads every field.
     chart_data = client.get(f"/api/e2e-dashboards{charts_payload['charts'][0]['data_url']}")
     assert chart_data.status_code == 200
     assert chart_data.json()['total'] == 2
@@ -2448,6 +2455,10 @@ def test_direct_dashboard_preparation_separates_queue_and_execution_timestamps(c
     original = core.Repository.list_dataset_row_columns
 
     def delayed(repository, *args, **kwargs):
+        # Only the preparation under test waits; background pre-caching left
+        # by earlier tests must not stand in for it.
+        if threading.current_thread().name == 'dashboard-cache-warmup':
+            return original(repository, *args, **kwargs)
         entered.set()
         assert release.wait(5)
         return original(repository, *args, **kwargs)
@@ -2506,7 +2517,7 @@ def test_applying_filters_prepares_only_data_and_renders_charts_on_demand(client
     core.repository.set_workspace_state('e2e_dashboards_v2', json.dumps({'filtered-dashboard': payload}))
     uncached = client.get('/api/e2e-dashboards/statuses')
     assert uncached.status_code == 200
-    assert uncached.json()['filtered-dashboard']['state'] in {'loading-data', 'ready'}
+    assert uncached.json()['filtered-dashboard']['state'] in {'loading-data', 'charts-queued', 'ready'}
 
     calls = []
     original = dashboards_module.catalog_chart_payload
@@ -2523,7 +2534,8 @@ def test_applying_filters_prepares_only_data_and_renders_charts_on_demand(client
     assert not list(cache_dir.glob('*.json'))
     assert calls == []
     assert client.get('/api/e2e-dashboards/statuses').json()['filtered-dashboard'] == {
-        'state': 'ready', 'label': 'Ready',
+        'state': 'charts-queued', 'label': 'Data Cached · Charts 0/3',
+        'detail': 'Data cached; charts render when viewed or while the application is idle',
     }
 
     token = response.json()['token']
@@ -2533,6 +2545,10 @@ def test_applying_filters_prepares_only_data_and_renders_charts_on_demand(client
     first_models = {path.name for path in cache_dir.glob('*.json')}
     assert len(first_models) == 3
     assert len(calls) == 3
+    # Data and every chart of the default universe are ready.
+    assert client.get('/api/e2e-dashboards/statuses').json()['filtered-dashboard'] == {
+        'state': 'ready', 'label': 'Ready', 'detail': 'Data cached and all 3 charts rendered',
+    }
 
     payload['filters'] = {'City': ['London']}
     filtered = client.post('/api/e2e-dashboards/prepare?dashboard_id=filtered-dashboard', json=payload)
@@ -2549,7 +2565,7 @@ def test_applying_filters_prepares_only_data_and_renders_charts_on_demand(client
 
     core.repository.update_dataset_profile(1, progress=100)
     refreshed_status = client.get('/api/e2e-dashboards/statuses').json()['filtered-dashboard']
-    assert refreshed_status['state'] in {'loading-data', 'ready'}
+    assert refreshed_status['state'] in {'loading-data', 'charts-queued', 'ready'}
 
 
 def test_adding_a_dataset_builds_a_new_chart_model_with_every_campaign(client):
@@ -3515,3 +3531,73 @@ def test_background_work_builds_one_dashboard_at_a_time_in_creation_order(client
     assert _wait_for(lambda: len(finished) == 3), finished
     assert [dashboard_id for dashboard_id, _thread in finished] == ['first', 'second', 'third']
     assert {thread for _dashboard_id, thread in finished} == {'dashboard-cache-warmup'}
+
+
+def test_preloaded_charts_wait_for_the_visible_slide(client, monkeypatch):
+    import src.modules.e2e_dashboards as dashboards_module
+
+    payload = setup_dashboard(client)
+    preview = client.post('/api/e2e-dashboards/prepare', json=payload).json()
+    token = preview['token']
+    indexes = [chart['index'] for slide in preview['slides'] for chart in slide['charts'] if chart['available']]
+    assert len(indexes) >= 2
+    visible_started, release = threading.Event(), threading.Event()
+    original = dashboards_module.catalog_chart_payload
+    order = []
+
+    def gated(frame, entry, *args, **kwargs):
+        order.append(entry.chart_title)
+        if len(order) == 1:
+            visible_started.set()
+            assert release.wait(10)
+        return original(frame, entry, *args, **kwargs)
+
+    monkeypatch.setattr(dashboards_module, 'catalog_chart_payload', gated)
+    results = {}
+    visible = threading.Thread(target=lambda: results.setdefault('visible', client.get(f'/api/e2e-dashboards/chart/{token}/{indexes[0]}')))
+    visible.start()
+    assert visible_started.wait(10)
+    preload = threading.Thread(target=lambda: results.setdefault('preload', client.get(f'/api/e2e-dashboards/chart/{token}/{indexes[1]}?priority=low')))
+    preload.start()
+    time.sleep(0.8)
+    # The preload is held while the visible chart is being calculated.
+    assert 'preload' not in results and len(order) == 1
+    release.set()
+    visible.join(10)
+    preload.join(10)
+    assert results['visible'].status_code == 200
+    assert results['preload'].status_code == 200
+    assert len(order) == 2
+    # A preload of a chart that is already calculated is served at once.
+    assert client.get(f'/api/e2e-dashboards/chart/{token}/{indexes[0]}?priority=low').status_code == 200
+    assert len(order) == 2
+
+
+@pytest.mark.parametrize('changes', [
+    {},
+    {'filters': {'Operator': ['A', 'C']}},
+    {'filters': {'Campaign': ['UK_Q1_2026'], 'City': ['London']}, 'date_from': '2026-02-01', 'date_to': '2026-05-31'},
+])
+def test_column_cache_preparation_counts_match_sqlite(client, monkeypatch, changes):
+    import src.modules.e2e_dashboards as dashboards_module
+
+    payload = {**_compact_read_dashboard(client), **changes}
+    # The first preparation caches every CDR's filter columns.
+    assert client.post('/api/e2e-dashboards/prepare', json=payload).status_code == 200
+
+    def prepared_universe():
+        with core.repository.connection() as connection:
+            connection.execute('DELETE FROM dashboard_filter_selections')
+        response = client.post('/api/e2e-dashboards/prepare', json=payload)
+        assert response.status_code == 200, response.text
+        body = response.json()
+        return {key: value for key, value in body.items() if key not in {'token', 'selection_id'}}
+
+    counted = []
+    original_count = dashboards_module.count_rows
+    monkeypatch.setattr(dashboards_module, 'count_rows', lambda *args, **kwargs: counted.append(1) or original_count(*args, **kwargs))
+    cached = prepared_universe()
+    # A complete, unfiltered universe already knows its counts.
+    assert bool(counted) == bool(changes)
+    monkeypatch.setattr(dashboards_module, 'DASHBOARD_COLUMN_CACHE', False)
+    assert cached == prepared_universe()

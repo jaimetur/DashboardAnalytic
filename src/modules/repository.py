@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import functools
 import sqlite3
 import shutil
 import re
@@ -360,6 +362,32 @@ class UserRecord:
     password_hash: str
     role: str
     active: bool
+
+
+# Chart mapping reads are memoised for a moment: one Dashboard chart reads
+# them several times. A mapping change in this process invalidates the memo
+# at once; changes made by another process apply within seconds.
+CHART_MAPPING_MEMO_SECONDS = 2.0
+_chart_mapping_memo: dict[tuple[str, str, str], tuple[float, int, Any]] = {}
+_chart_mapping_memo_lock = Lock()
+_chart_mapping_generation = 0
+
+
+def invalidate_chart_mapping_memo() -> None:
+    global _chart_mapping_generation
+    with _chart_mapping_memo_lock:
+        _chart_mapping_generation += 1
+        _chart_mapping_memo.clear()
+
+
+def _invalidates_chart_mappings(method):
+    @functools.wraps(method)
+    def wrapper(*args, **kwargs):
+        try:
+            return method(*args, **kwargs)
+        finally:
+            invalidate_chart_mapping_memo()
+    return wrapper
 
 
 class Repository:
@@ -2145,13 +2173,31 @@ class Repository:
     def list_vendor_mappings(self) -> dict[str, str]:
         return self._list_chart_mappings('vendor')
 
+    def _memoised_chart_mapping_read(self, name: str, mapping_type: str, read):
+        key = (str(self.db_path), name, mapping_type)
+        now = monotonic()
+        with _chart_mapping_memo_lock:
+            generation = _chart_mapping_generation
+            cached = _chart_mapping_memo.get(key)
+            if cached and cached[1] == generation and now - cached[0] < CHART_MAPPING_MEMO_SECONDS:
+                return copy.deepcopy(cached[2])
+        value = read()
+        with _chart_mapping_memo_lock:
+            if _chart_mapping_generation == generation:
+                _chart_mapping_memo[key] = (now, generation, value)
+        return copy.deepcopy(value)
+
     def _list_chart_mappings(self, mapping_type: str) -> dict[str, str]:
         table = self._chart_mapping_table(mapping_type)
-        with self.connection() as conn:
-            rows = conn.execute(
-                f'SELECT source_value, canonical_value FROM {table} ORDER BY source_value COLLATE NOCASE'
-            ).fetchall()
-        return {str(row['source_value']).strip().casefold(): str(row['canonical_value']).strip() for row in rows}
+
+        def read():
+            with self.connection() as conn:
+                rows = conn.execute(
+                    f'SELECT source_value, canonical_value FROM {table} ORDER BY source_value COLLATE NOCASE'
+                ).fetchall()
+            return {str(row['source_value']).strip().casefold(): str(row['canonical_value']).strip() for row in rows}
+
+        return self._memoised_chart_mapping_read('mappings', mapping_type, read)
 
     def list_operator_mapping_groups(self) -> list[dict[str, Any]]:
         return self._list_chart_mapping_groups('operator')
@@ -2167,6 +2213,9 @@ class Repository:
 
     def _list_chart_mapping_groups(self, mapping_type: str) -> list[dict[str, Any]]:
         """Return editable aliases, colour and explicit chart order."""
+        return self._memoised_chart_mapping_read('groups', mapping_type, lambda: self._read_chart_mapping_groups(mapping_type))
+
+    def _read_chart_mapping_groups(self, mapping_type: str) -> list[dict[str, Any]]:
         table = self._chart_mapping_table(mapping_type)
         with self.connection() as conn:
             rows = conn.execute(
@@ -2209,6 +2258,7 @@ class Repository:
     ) -> None:
         self._replace_chart_mapping_group('vendor', original_canonical, canonical_value, aliases, color)
 
+    @_invalidates_chart_mappings
     def _replace_chart_mapping_group(
         self, mapping_type: str, original_canonical: str | None, canonical_value: str,
         aliases: Iterable[object], color: str | None,
@@ -2291,6 +2341,7 @@ class Repository:
     def delete_vendor_mapping_group(self, canonical_value: str) -> None:
         self._delete_chart_mapping_group('vendor', canonical_value)
 
+    @_invalidates_chart_mappings
     def _delete_chart_mapping_group(self, mapping_type: str, canonical_value: str) -> None:
         table = self._chart_mapping_table(mapping_type)
         canonical = str(canonical_value).strip()
@@ -2309,6 +2360,7 @@ class Repository:
             )
             self._compact_chart_mapping_positions(conn, mapping_type)
 
+    @_invalidates_chart_mappings
     def move_chart_mapping_group(self, mapping_type: str, canonical_value: str, direction: str) -> None:
         if direction not in {'up', 'down'}:
             raise ValueError('Choose a valid mapping direction.')
@@ -2359,6 +2411,7 @@ class Repository:
     def replace_vendor_mapping_groups(self, groups: Iterable[dict[str, Any]]) -> None:
         self._replace_chart_mapping_groups('vendor', groups)
 
+    @_invalidates_chart_mappings
     def _replace_chart_mapping_groups(self, mapping_type: str, groups: Iterable[dict[str, Any]]) -> None:
         """Replace every mapping group with one validated portable payload."""
         table = self._chart_mapping_table(mapping_type)

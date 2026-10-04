@@ -1889,7 +1889,8 @@
       const payload = await api(statusPath, 'POST', statusDefinitions);
       for (const [id, value] of Object.entries(payload || {})) {
         const activePrepared = id === activeId && Boolean(prepared?.slides?.length) && !dashboardNeedsRefresh();
-        if (activePrepared) dashboardStatuses.set(id, {state: 'ready', label: 'Ready'});
+        // The open Dashboard's data is prepared; its charts may still be pending.
+        if (activePrepared) dashboardStatuses.set(id, ['ready', 'rendering', 'charts-queued'].includes(value?.state) ? value : {state: 'charts-queued', label: 'Data Cached'});
         else if (!dashboardPreparationTokens.has(id)) dashboardStatuses.set(id, value);
       }
       for (const id of [...dashboardStatuses.keys()]) if (!dashboards[id]) dashboardStatuses.delete(id);
@@ -2226,7 +2227,7 @@
     updateDirtyState();
     sources();
     if (hasOpenFacetMenu()) refreshFacetsAfterMenusClose(); else facets();
-    setDashboardStatus(activeId, 'ready', 'Ready');
+    setDashboardStatus(activeId, 'charts-queued', 'Data Cached');
     syncViewerScope();
     setViewEnabled(Boolean(payload.slides?.length));
     setPreparationRows(payload);
@@ -2658,8 +2659,11 @@
     const rendered = renderedChartPayloads.get(url);
     if (rendered) return Promise.resolve(rendered);
     let request = chartPayloads.get(url);
-    if (!request) {
-      request = fetch(url, {cache: 'no-store', credentials: 'same-origin', priority}).then(async response => {
+    // A visible chart never waits behind its own background preload: the
+    // server defers preloads while visible charts are being calculated.
+    if (!request || (priority === 'high' && request.chartPriority === 'low')) {
+      const requestUrl = priority === 'low' ? `${url}${url.includes('?') ? '&' : '?'}priority=low` : url;
+      request = fetch(requestUrl, {cache: 'no-store', credentials: 'same-origin', priority}).then(async response => {
         const contentType = response.headers.get('content-type') || '';
         if (!contentType.includes('application/json')) {
           if (response.redirected || response.url.includes('/login')) throw new Error('Your session has expired. Please sign in again.');
@@ -2671,6 +2675,7 @@
         while (renderedChartPayloads.size > 160) renderedChartPayloads.delete(renderedChartPayloads.keys().next().value);
         return payload;
       });
+      request.chartPriority = priority;
       chartPayloads.set(url, request);
       while (chartPayloads.size > 160) chartPayloads.delete(chartPayloads.keys().next().value);
       request.catch(() => { if (chartPayloads.get(url) === request) chartPayloads.delete(url); });
@@ -2722,8 +2727,12 @@
           || $('ds-viewer').hidden
           || !$('ds-chart-expanded-overlay').hidden
         ) return;
-        const charts = (slides[target]?.charts || []).filter(chart => chart.available);
-        await Promise.allSettled(charts.map(chart => loadChartPayload(chart, 'low')));
+        // One chart at a time, so preloads never occupy the browser's
+        // connections that the charts of a newly opened slide need.
+        for (const chart of (slides[target]?.charts || []).filter(item => item.available)) {
+          if (request !== slidePreloadRequest || prepared?.token !== token || $('ds-viewer').hidden) return;
+          await loadChartPayload(chart, 'low').catch(() => undefined);
+        }
         await yieldForSilentPreload();
       }
     });

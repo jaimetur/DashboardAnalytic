@@ -13,6 +13,10 @@
   const cameraStates = new WeakMap();
   const nativeFillTexts = new WeakMap();
   const renderStates = new WeakMap();
+  // Legend items a viewer hid by clicking them, per canvas.
+  const hiddenLegendItems = new WeakMap();
+  // The render state and transform that legend hit regions are recorded in.
+  let legendHitTarget = null;
   const tableDragStates = new WeakMap();
   const observed = new WeakSet();
   const mapTiles = new Map();
@@ -487,26 +491,109 @@
     if (!layout.hasLegend) return;
     const lineMarkers = Boolean(legend.line_markers), markerSize = LEGEND_MARKER_SIZE, format = legend?.format || {};
     const legendLineWidth = width => Math.max(Number(width) > 1 ? Number(width) + 2 : Number(width), 3);
+    const drawItem = (item, x, y, maximumLength) => {
+      const textOnly = !item.colour, textX = textOnly ? x : x + (lineMarkers ? 43 : 32), text = String(item.label).slice(0, maximumLength);
+      // A hidden series keeps a faded, struck-through entry to show it again.
+      const alpha = context.globalAlpha;
+      if (item.hidden) context.globalAlpha = alpha * .35;
+      if (lineMarkers && !textOnly) line(context, x, y + 11, x + 34, y + 11, item.colour, legendLineWidth(item.width), item.dash);
+      else if (!textOnly) { context.fillStyle = item.colour; context.fillRect(x, y, markerSize, markerSize); }
+      context.fillStyle = format.configured && format.color ? format.color : '#263B4A'; context.textAlign = 'left'; context.textBaseline = 'top'; if (format.configured) labelFont(context, size, format, false, false); else font(context, size, true);
+      context.fillText(text, textX, y - 1);
+      const width = textWidth(context, text);
+      if (item.hidden) line(context, textX, y + size / 2, textX + width, y + size / 2, context.fillStyle, Math.max(1.5, size / 12));
+      context.globalAlpha = alpha;
+      if (!textOnly && legendHitTarget) {
+        const start = transformPoint(legendHitTarget.transform, x - 4, y - 6), scale = legendHitTarget.transform.scale;
+        (legendHitTarget.state.legendHits ||= []).push({
+          label: String(item.label), x: start.x, y: start.y, width: (textX - x + width + 8) * scale, height: (size + 12) * scale,
+        });
+      }
+    };
     if (position === 'top' || position === 'bottom') {
       const startY = position === 'top' ? 80 : 900 - layout.rows * rowHeight - 8;
       items.forEach((item, index) => {
-        const x = 100 + (index % columns) * (1400 / columns), y = startY + Math.floor(index / columns) * rowHeight;
-        const textOnly = !item.colour;
-        if (lineMarkers && !textOnly) line(context, x, y + 11, x + 34, y + 11, item.colour, legendLineWidth(item.width), item.dash);
-        else if (!textOnly) { context.fillStyle = item.colour; context.fillRect(x, y, markerSize, markerSize); }
-        context.fillStyle = format.configured && format.color ? format.color : '#263B4A'; context.textAlign = 'left'; context.textBaseline = 'top'; if (format.configured) labelFont(context, size, format, false, false); else font(context, size, true);
-        context.fillText(String(item.label).slice(0, 28), textOnly ? x : x + (lineMarkers ? 43 : 32), y - 1);
+        drawItem(item, 100 + (index % columns) * (1400 / columns), startY + Math.floor(index / columns) * rowHeight, 28);
       });
       return;
     }
     const x = options.sideX ?? layout.sideX;
-    items.forEach((item, index) => {
-      const y = 112 + index * (size + 14), textOnly = !item.colour;
-      if (lineMarkers && !textOnly) line(context, x, y + 11, x + 34, y + 11, item.colour, legendLineWidth(item.width), item.dash);
-      else if (!textOnly) { context.fillStyle = item.colour; context.fillRect(x, y, markerSize, markerSize); }
-      context.fillStyle = format.configured && format.color ? format.color : '#263B4A'; context.textAlign = 'left'; context.textBaseline = 'top'; if (format.configured) labelFont(context, size, format, false, false); else font(context, size, true);
-      context.fillText(String(item.label).slice(0, 24), textOnly ? x : x + (lineMarkers ? 43 : 32), y - 1);
-    });
+    items.forEach((item, index) => drawItem(item, x, 112 + index * (size + 14), 24));
+  }
+
+  // Remove the series, bars or stacked segments of hidden legend items.
+  // A legend item controls the data elements with its label; otherwise the
+  // element in the same position, or the elements drawn in its colour.
+  function legendHiddenPayload(payload, hidden) {
+    if (!payload || !hidden?.size) return payload;
+    const result = {...payload};
+    if (Array.isArray(payload.panels)) result.panels = payload.panels.map(panel => legendHiddenPayload(panel, hidden));
+    const items = (payload.legend?.items || []).filter(item => item.colour);
+    if (!items.length) return result;
+    result.legend = {...payload.legend, items: payload.legend.items.map(item => (
+      item.colour && hidden.has(String(item.label)) ? {...item, hidden: true} : item
+    ))};
+    const hiddenIndexes = (elements, name) => {
+      const names = elements.map(element => String(name(element) ?? ''));
+      const indexes = new Set();
+      items.forEach((item, itemIndex) => {
+        const label = String(item.label);
+        if (!hidden.has(label)) return;
+        if (names.includes(label)) names.forEach((value, index) => { if (value === label) indexes.add(index); });
+        else if (elements.length === items.length) indexes.add(itemIndex);
+        else elements.forEach((element, index) => {
+          if (element?.colour === item.colour && (element.width === undefined || Number(element.width) === Number(item.width))) indexes.add(index);
+        });
+      });
+      return indexes;
+    };
+    if (Array.isArray(payload.series)) {
+      const indexes = hiddenIndexes(payload.series, series => series.name ?? series.legend_name);
+      result.series = payload.series.filter((_series, index) => !indexes.has(index));
+    }
+    if (Array.isArray(payload.bars)) {
+      const indexes = hiddenIndexes(payload.bars, bar => bar.legend);
+      result.bars = payload.bars.map((bar, index) => indexes.has(index) ? {...bar, hidden: true} : bar);
+    }
+    const hiddenItems = items.filter(item => hidden.has(String(item.label)));
+    // Grouped mean bars keep their slots: hidden values are not drawn.
+    if (payload.type === 'mean_bar' && payload.mode === 'hierarchy' && Array.isArray(payload.cells)) {
+      const rowKeys = payload.row_keys || [], columnKeys = payload.column_keys || [];
+      const isHidden = (rowIndex, columnIndex) => hiddenItems.some(item => {
+        const label = String(item.label), keys = [...(rowKeys[rowIndex] || []), ...(columnKeys[columnIndex] || [])].map(String);
+        return keys.includes(label) || payload.cell_colours?.[rowIndex]?.[columnIndex] === item.colour;
+      });
+      result.cells = payload.cells.map((row, rowIndex) => (row || []).map((value, columnIndex) => (
+        isHidden(rowIndex, columnIndex) ? Number.NaN : value
+      )));
+    }
+    // Tables drop the rows and value columns labelled with a hidden item.
+    if (payload.type === 'table' && Array.isArray(payload.rows)) {
+      const labels = new Set(hiddenItems.map(item => String(item.label)));
+      const mentions = value => String(value ?? '').split(' · ').some(part => labels.has(part));
+      const rowDimensions = Math.max(1, Number(payload.row_dimension_count) || 1);
+      const headers = payload.headers || [];
+      const hiddenColumns = new Set(headers.map((header, index) => index >= rowDimensions && mentions(header) ? index : -1).filter(index => index >= 0));
+      result.rows = payload.rows
+        .filter(row => !row.slice(0, rowDimensions).some(mentions))
+        .map(row => row.filter((_value, index) => !hiddenColumns.has(index)));
+      if (hiddenColumns.size) {
+        result.headers = headers.filter((_header, index) => !hiddenColumns.has(index));
+        if (Array.isArray(payload.column_keys)) result.column_keys = payload.column_keys.filter((_key, index) => !hiddenColumns.has(index + rowDimensions));
+      }
+    }
+    // Stacked charts keep their categories and drop the hidden segments.
+    const segments = Array.isArray(payload.states) ? payload.states : (Array.isArray(payload.buckets) ? payload.buckets : null);
+    if (segments && Array.isArray(payload.cells)) {
+      const indexes = hiddenIndexes(segments, segment => segment?.name ?? segment?.label ?? segment);
+      const clear = values => {
+        if (!Array.isArray(values)) return values;
+        if (values.some(Array.isArray)) return values.map(clear);
+        return values.map((value, index) => indexes.has(index) ? 0 : value);
+      };
+      if (indexes.size) result.cells = clear(payload.cells);
+    }
+    return result;
   }
 
   function drawStatus(context, payload, state, transform) {
@@ -862,7 +949,9 @@
         if (next && changed > 0) dashedHorizontal(context, bottom, rowOrigin + changed * labelWidth, chartRight); else line(context, rowOrigin, bottom, chartRight, bottom, '#AEBBC4', 2);
         rowKey.forEach((value, level) => { context.fillStyle = payload.legend_format?.configured && payload.legend_format.color ? payload.legend_format.color : '#405765'; context.textAlign = 'left'; aggregationFont(context, payload.legend_format, level); context.fillText(fittedText(context, value, labelWidth - 8), rowOrigin + level * labelWidth + 4, top + rowHeight / 2 - 8); });
         columnKeys.forEach((columnKey, columnIndex) => {
-          const value = Number(payload.cells?.[rowIndex]?.[columnIndex]); if (!Number.isFinite(value)) return;
+          // A combination without valid samples has no bar, not a zero bar.
+          const raw = payload.cells?.[rowIndex]?.[columnIndex]; if (raw === null || raw === undefined) return;
+          const value = Number(raw); if (!Number.isFinite(value)) return;
           const cellLeft = chartLeft + columnIndex * columnWidth, plotTop = top + 4, plotBottom = bottom - 10, plotHeight = Math.max(1, plotBottom - plotTop);
           const valueY = plotBottom - (value - yDomain[0]) / ySpan * plotHeight, zeroY = plotBottom - (clamp(0, yDomain[0], yDomain[1]) - yDomain[0]) / ySpan * plotHeight;
           const width = Math.max(14, Math.min(columnWidth * .68, 110)), x = cellLeft + (columnWidth - width) / 2, y = Math.max(plotTop, Math.min(valueY, zeroY)), height = Math.max(0, Math.min(plotBottom, Math.max(valueY, zeroY)) - y);
@@ -884,6 +973,7 @@
     const zeroY = baseline - (clamp(0, yDomain[0], yDomain[1]) - yDomain[0]) / ySpan * plotHeight;
     const barWidth = Math.min(260, Math.max(32, width / Math.max(bars.length * 1.22, 1)));
     bars.forEach((bar, index) => {
+      if (bar.hidden) return;
       const valueY = baseline - (Number(bar.value) - yDomain[0]) / ySpan * plotHeight, x = left + (index + .5) * width / bars.length - barWidth / 2;
       const y = Math.max(top, Math.min(valueY, zeroY)), height = Math.max(0, Math.min(baseline, Math.max(valueY, zeroY)) - y);
       context.fillStyle = bar.colour; context.fillRect(x, y, barWidth, height);
@@ -1095,6 +1185,12 @@
 
   function drawPayload(context, payload, state, transform) {
     if (payload?.spacer) return;
+    const previousLegendTarget = legendHitTarget;
+    legendHitTarget = {state, transform};
+    try { drawPayloadContent(context, payload, state, transform); } finally { legendHitTarget = previousLegendTarget; }
+  }
+
+  function drawPayloadContent(context, payload, state, transform) {
     // Small grid cells show their title outside the chart at a readable size.
     if (!payload?.hide_title) drawTitle(context, payload?.title || '');
     if (!payload || payload.type === 'empty') {
@@ -1115,7 +1211,7 @@
   function draw(canvas, payload) {
     const context = prepareCanvas(canvas), state = {canvas, hits: []};
     context.fillStyle = '#FFFFFF'; context.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
-    drawPayload(context, payload, state, {x: 0, y: 0, scale: 1}); renderStates.set(canvas, state);
+    drawPayload(context, legendHiddenPayload(payload, hiddenLegendItems.get(canvas)), state, {x: 0, y: 0, scale: 1}); renderStates.set(canvas, state);
     const view = views.get(canvas);
     const titleHeight = 40 * Math.min(view?.scaleX || 1, view?.scaleY || 1) * (view?.zoom || 1);
     canvas.dispatchEvent(new CustomEvent('dashboardchartlayout', {detail: {titleTop: 20, titleHeight}}));
@@ -1379,10 +1475,39 @@
     canvas.dispatchEvent(new CustomEvent('dashboardchartzoom', {detail: {zoom: camera.zoom}}));
   }
 
+  function legendItemAt(canvas, event) {
+    const view = views.get(canvas), state = renderStates.get(canvas), bounds = canvas.getBoundingClientRect();
+    if (!view || !state?.legendHits?.length || !bounds.width) return null;
+    const x = ((event.clientX - bounds.left) / view.scaleX - view.originX) / view.zoom;
+    const y = ((event.clientY - bounds.top) / view.scaleY - view.originY) / view.zoom;
+    return state.legendHits.find(hit => x >= hit.x && x <= hit.x + hit.width && y >= hit.y && y <= hit.y + hit.height) || null;
+  }
+
+  function attachLegendToggle(canvas) {
+    if (canvas.dataset.legendToggleReady) return; canvas.dataset.legendToggleReady = 'true';
+    canvas.addEventListener('click', event => {
+      const hit = legendItemAt(canvas, event); if (!hit) return;
+      event.preventDefault(); event.stopPropagation();
+      const hidden = new Set(hiddenLegendItems.get(canvas) || []);
+      if (hidden.has(hit.label)) hidden.delete(hit.label); else hidden.add(hit.label);
+      hiddenLegendItems.set(canvas, hidden);
+      const payload = models.get(canvas); if (payload) draw(canvas, payload);
+      canvas.dispatchEvent(new CustomEvent('dashboardchartlegend', {detail: {hidden: [...hidden]}}));
+    });
+    // Toggling an item twice must not open the expanded chart.
+    canvas.addEventListener('dblclick', event => { if (legendItemAt(canvas, event)) event.stopPropagation(); });
+    canvas.addEventListener('pointermove', event => {
+      const overLegend = Boolean(legendItemAt(canvas, event));
+      canvas.classList.toggle('ds-chart-legend-hover', overLegend);
+      canvas.style.cursor = overLegend ? 'pointer' : '';
+    });
+  }
+
   function selectionStartAllowed(canvas, event) {
     const view = views.get(canvas);
     const bounds = canvas.getBoundingClientRect();
     if (!view || !bounds.height) return false;
+    if (legendItemAt(canvas, event)) return false;
     const logicalY = (event.clientY - bounds.top) / view.scaleY;
     // The chart title occupies the top band. Selection zoom starts only in
     // the plot and data-label area, never under titles or floating controls.
@@ -1463,10 +1588,12 @@
   }) : null;
 
   globalThis.renderDashboardChart = (canvas, payload) => {
-    models.set(canvas, payload); draw(canvas, payload); attachTooltip(canvas); attachTableReordering(canvas); attachPan(canvas);
+    models.set(canvas, payload); draw(canvas, payload); attachTooltip(canvas); attachTableReordering(canvas); attachPan(canvas); attachLegendToggle(canvas);
     if (resizeObserver && !observed.has(canvas)) { observed.add(canvas); resizeObserver.observe(canvas); }
   };
   globalThis.getDashboardChartHits = canvas => structuredClone(renderStates.get(canvas)?.hits || []);
+  globalThis.getDashboardChartLegendHits = canvas => structuredClone(renderStates.get(canvas)?.legendHits || []);
+  globalThis.getDashboardChartHiddenLegendItems = canvas => [...(hiddenLegendItems.get(canvas) || [])];
   globalThis.setDashboardChartZoom = setChartZoom;
   globalThis.getDashboardChartZoom = canvas => cameraFor(canvas).zoom;
   globalThis.panDashboardChart = panChart;
