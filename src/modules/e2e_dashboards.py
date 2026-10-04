@@ -49,6 +49,9 @@ from src.modules.cdr_reporting import (
 )
 from src.modules.report_layouts import compact_grid_layout
 
+from src.modules.dashboard_column_cache import (
+    CacheSource, ColumnCache, Segment, SelectionTerms, StaleSegment, default_disk_bytes, default_memory_bytes, read_frame,
+)
 from src.modules.rf_catalog_source import RF_CATALOG_FIELDS, rf_source_columns, rf_union_source
 from src.modules.repository import Repository
 from src.modules.cdr_report_filenames import build_cdr_report_filename
@@ -168,13 +171,14 @@ DASHBOARD_RENDER_CACHE_VERSION = 21
 DASHBOARD_SELECTION_CACHE_VERSION = 15
 # Pre-cached universes: every CDR plus the latest 1..N CDRs of each type.
 DASHBOARD_WARMUP_LATEST_COUNTS = 4
-# A Dashboard reported open by the browser within this period is pre-cached first.
-DASHBOARD_OPEN_PRIORITY_SECONDS = 30.0
 # Only the most recently used Dashboard snapshots keep their chart frames in
 # memory; older snapshots rebuild them on demand from the combined tables.
 DASHBOARD_FRAME_CACHE_SNAPSHOTS = max(1, int(os.environ.get('DASHBOARD_ANALYTIC_DASHBOARD_FRAME_CACHE_SNAPSHOTS') or 3))
 # Grouped compact reads for eligible charts; 0 restores complete reads.
 DASHBOARD_COMPACT_READS = os.environ.get('DASHBOARD_ANALYTIC_COMPACT_READS', '1') != '0'
+# Per-CDR column cache: any universe or comparison mode is assembled from it in
+# memory; 0 restores SQLite reads for every chart.
+DASHBOARD_COLUMN_CACHE = os.environ.get('DASHBOARD_ANALYTIC_COLUMN_CACHE', '1') != '0'
 # Source reads persisted beside the workspace so other sessions, restarts and
 # exports reuse them. Very large complete reads are not persisted.
 DASHBOARD_FRAME_CACHE_VERSION = 1
@@ -204,6 +208,10 @@ def frame_cache_dir(workspace: str | Path) -> Path:
 
 def canvas_model_cache_dir(workspace: str | Path) -> Path:
     return dashboard_cache_dir(workspace) / 'charts-canvas'
+
+
+def column_cache_dir(workspace: str | Path) -> Path:
+    return dashboard_cache_dir(workspace) / 'columns'
 
 
 def pil_chart_cache_dir(workspace: str | Path) -> Path:
@@ -327,16 +335,17 @@ def install_dashboard_routes(core):
     initialized_ppt_job_databases: set[str] = set()
     dashboard_ppt_runs: dict[tuple[str, int], str] = {}
     dashboard_ppt_data_tokens: dict[tuple[str, int, str], str] = {}
-    # Dashboard cache warm-up (pre-caching of the standard universes) runs on
-    # its own low-priority thread, never on the shared application scheduler.
-    # Open Dashboards are pre-cached before closed ones, and any foreground
-    # Dashboard preparation or PPT export pauses the warm-up until it ends.
+    # Dashboard background work (pre-caching of the standard universes and,
+    # while the application is idle, chart models and CDR columns) runs on one
+    # low-priority thread, never on the shared application scheduler. It
+    # handles one Dashboard at a time in creation order, and any foreground
+    # Dashboard preparation or PPT export pauses it until it ends.
     dashboard_warmup_condition = Condition(lock)
     dashboard_warmup_queue: dict[tuple[str, str], dict[str, object]] = {}
     dashboard_warmup_checked: set[tuple[str, str]] = set()
     dashboard_warmup_cancellations: dict[tuple[str, str], dict[str, object]] = {}
     dashboard_warmup_running: dict[str, object] = {'key': None, 'thread': None}
-    dashboard_open_dashboards: dict[tuple[str, str], float] = {}
+    dashboard_chart_requests: set[tuple[str, str]] = set()
     dashboard_foreground_work: dict[str, int] = {}
     dashboard_warmup_sequence = count()
     dashboard_status_cache: dict[tuple[str, str], tuple[str, int, int]] = {}
@@ -2310,14 +2319,16 @@ def install_dashboard_routes(core):
         value_expression = filter_sql_value_expression(task_repository, columns, field)
         return f"LOWER(TRIM({value_expression}))" if value_expression is not None else None
 
-    def selection_filter_where(task_repository, columns, definition, exclude=None):
-        """Build only the user-selected Dashboard filter predicates."""
-        clauses, params = [], []
+    def selection_filter_terms(task_repository, columns, definition, exclude=None):
+        """Return each user-selected Dashboard filter as (normalized SQL or None, values).
+
+        A ``None`` expression selects no row. SQLite queries and the per-CDR
+        column cache both evaluate these terms, so they always agree.
+        """
+        terms = []
         excluded = identity(exclude) if exclude else ''
         for field_name, values in definition.filters.items():
             if identity(field_name) in {'vendor', 'vendoronly'}:
-                groups = task_repository.list_operator_mapping_groups()
-                operators = [item for group in groups for item in [group.get('canonical'), *(group.get('aliases') or [])] if item]
                 values = vendor_filter_values(values, task_repository.list_operator_mappings())
             if identity(field_name) == excluded:
                 continue
@@ -2325,18 +2336,50 @@ def install_dashboard_routes(core):
                 task_repository, columns, field_name,
             )
             if normalized_expression is None or not values:
+                terms.append((None, ()))
+                continue
+            terms.append((normalized_expression, tuple(str(value).strip().lower() for value in values)))
+        return terms
+
+    def selection_filter_where(task_repository, columns, definition, exclude=None):
+        """Build only the user-selected Dashboard filter predicates."""
+        clauses, params = [], []
+        for normalized_expression, values in selection_filter_terms(task_repository, columns, definition, exclude):
+            if normalized_expression is None:
                 clauses.append('0')
                 continue
             value_placeholders = ', '.join('?' for _ in values)
             clauses.append(f"{normalized_expression} IN ({value_placeholders})")
-            params.extend(str(value).strip().lower() for value in values)
+            params.extend(values)
         return ' AND '.join(f'({clause})' for clause in clauses) or '1', params
+
+    def selection_date_expression(task_repository, columns):
+        date_column = next((resolve_sql_column(columns, candidate) for candidate in ('event_start_time', 'Test_Start_Time', 'Timestamp', 'Date') if resolve_sql_column(columns, candidate)), None)
+        return f"date(CAST({task_repository._quote_identifier(date_column)} AS TEXT))" if date_column else None
+
+    def selection_date_term(task_repository, columns, definition):
+        """Return the universe's (event-date SQL or None, low, high) bounds, if any."""
+        concrete_from = definition.date_from if isinstance(definition.date_from, date) and not ignore_event_time_filtering() else None
+        concrete_to = definition.date_to if isinstance(definition.date_to, date) and not ignore_event_time_filtering() else None
+        if not concrete_from and not concrete_to:
+            return None
+        return (
+            selection_date_expression(task_repository, columns),
+            concrete_from.isoformat() if concrete_from else None,
+            concrete_to.isoformat() if concrete_to else None,
+        )
+
+    def selection_sheet_term(task_repository, columns):
+        """Return the (source sheet column, ignored sheet keys) exclusion, if any."""
+        source_sheet = resolve_sql_column(columns, 'source_sheet')
+        if source_sheet and core.CDR_IGNORED_SHEET_KEYS:
+            return task_repository._quote_identifier(source_sheet), sorted(core.CDR_IGNORED_SHEET_KEYS)
+        return None
 
     def selection_where(
         task_repository, kind, dataset_ids, definition, exclude=None, *, columns=None, include_dataset_scope=True,
     ):
         columns = columns or task_repository.list_reporting_row_columns(kind)
-        quote = task_repository._quote_identifier
         clauses = []
         params = []
         if include_dataset_scope:
@@ -2349,25 +2392,39 @@ def install_dashboard_routes(core):
         if filter_where != '1':
             clauses.append(filter_where)
             params.extend(filter_params)
-        concrete_from = definition.date_from if isinstance(definition.date_from, date) and not ignore_event_time_filtering() else None
-        concrete_to = definition.date_to if isinstance(definition.date_to, date) and not ignore_event_time_filtering() else None
-        if concrete_from or concrete_to:
-            date_column = next((resolve_sql_column(columns, candidate) for candidate in ('event_start_time', 'Test_Start_Time', 'Timestamp', 'Date') if resolve_sql_column(columns, candidate)), None)
-            if date_column is None:
+        date_term = selection_date_term(task_repository, columns, definition)
+        if date_term is not None:
+            date_expression, low, high = date_term
+            if date_expression is None:
                 clauses.append('0')
             else:
-                if concrete_from:
-                    clauses.append(f"date(CAST({quote(date_column)} AS TEXT)) >= date(?)")
-                    params.append(concrete_from.isoformat())
-                if concrete_to:
-                    clauses.append(f"date(CAST({quote(date_column)} AS TEXT)) <= date(?)")
-                    params.append(concrete_to.isoformat())
-        source_sheet = resolve_sql_column(columns, 'source_sheet')
-        if source_sheet and core.CDR_IGNORED_SHEET_KEYS:
-            ignored = sorted(core.CDR_IGNORED_SHEET_KEYS)
-            clauses.append(f"({quote(source_sheet)} IS NULL OR LOWER(TRIM(CAST({quote(source_sheet)} AS TEXT))) NOT IN ({', '.join('?' for _ in ignored)}))")
+                if low:
+                    clauses.append(f"{date_expression} >= date(?)")
+                    params.append(low)
+                if high:
+                    clauses.append(f"{date_expression} <= date(?)")
+                    params.append(high)
+        sheet_term = selection_sheet_term(task_repository, columns)
+        if sheet_term is not None:
+            source_sheet, ignored = sheet_term
+            clauses.append(f"({source_sheet} IS NULL OR LOWER(TRIM(CAST({source_sheet} AS TEXT))) NOT IN ({', '.join('?' for _ in ignored)}))")
             params.extend(ignored)
         return ' AND '.join(f'({clause})' for clause in clauses) or '1', params
+
+    def selection_cache_terms(task_repository, columns, definition):
+        """The universe's row predicates for the per-CDR column cache."""
+        date_term = selection_date_term(task_repository, columns, definition)
+        sheet_term = selection_sheet_term(task_repository, columns)
+        return SelectionTerms(
+            values=tuple(
+                (expression, frozenset(values))
+                for expression, values in selection_filter_terms(task_repository, columns, definition)
+            ),
+            date=date_term,
+            excluded_sheets=(
+                (f'LOWER(TRIM(CAST({sheet_term[0]} AS TEXT)))', frozenset(sheet_term[1])) if sheet_term else None
+            ),
+        )
 
     def dashboard_combined_requested_columns(definition, dimensions, kind):
         default_filter_keys = {identity(field) for field in ADAPTATIVE_FILTER_FIELDS}
@@ -3252,33 +3309,27 @@ def install_dashboard_routes(core):
             definitions.append(definition)
         return definitions
 
-    def dashboard_is_open(key) -> bool:
-        """Whether a Dashboard was reported open by a browser recently."""
-        seen_at = dashboard_open_dashboards.get(key)
-        return seen_at is not None and monotonic() - seen_at < DASHBOARD_OPEN_PRIORITY_SECONDS
+    def dashboard_creation_rank(workspace: str, dashboard_id: str) -> int:
+        """Position of a Dashboard in creation order (the saved library order)."""
+        try:
+            stored = json.loads(
+                Repository(Path(workspace), core.repository.global_db_path).get_workspace_state(STATE_KEY) or '{}'
+            )
+        except (OSError, sqlite3.Error, TypeError, ValueError):
+            stored = {}
+        identifiers = list(stored) if isinstance(stored, dict) else []
+        return identifiers.index(dashboard_id) if dashboard_id in identifiers else len(identifiers)
 
     def warmup_priority(key, entry) -> tuple:
-        return (0 if dashboard_is_open(key) else 1, int(entry.get('sequence') or 0))
+        # One Dashboard at a time, in creation order.
+        return (int(entry.get('rank') or 0), int(entry.get('sequence') or 0))
 
     def warmup_should_yield(key) -> bool:
         """Whether the running warm-up must pause for more important work."""
         state = dashboard_warmup_cancellations.get(key) or {}
         if state.get('requested') or core.APP_SHUTTING_DOWN.is_set():
             return True
-        if dashboard_foreground_work.get(key[0]):
-            return True
-        # A closed Dashboard yields as soon as an open Dashboard is waiting.
-        return not dashboard_is_open(key) and any(
-            dashboard_is_open(queued_key) for queued_key in dashboard_warmup_queue
-        )
-
-    def mark_dashboard_open(workspace: str, dashboard_id: str | None) -> None:
-        """Give an open Dashboard's warm-up priority over closed Dashboards."""
-        if not dashboard_id:
-            return
-        with dashboard_warmup_condition:
-            dashboard_open_dashboards[(workspace, dashboard_id)] = monotonic()
-            dashboard_warmup_condition.notify_all()
+        return bool(dashboard_foreground_work.get(key[0]))
 
     @contextmanager
     def foreground_dashboard_work(workspace: str):
@@ -3297,24 +3348,36 @@ def install_dashboard_routes(core):
                 dashboard_warmup_condition.notify_all()
 
     def schedule_dashboard_warmup(
-        workspace: str, dashboard_id: str, raw_definition: dict, username: str, *, force: bool = False,
+        workspace: str, dashboard_id: str, raw_definition: dict, username: str, *,
+        force: bool = False, charts: bool = False,
     ) -> None:
-        """Queue missing standard universes without delaying an interactive open."""
+        """Queue a Dashboard's background work without delaying an interactive open.
+
+        Missing standard universes are prepared whenever needed. ``charts``
+        also builds its chart models in every comparison mode, and caches its
+        columns for the other CDRs, the next time the application is idle.
+        """
         key = (workspace, dashboard_id)
         with dashboard_warmup_condition:
-            if not force and key in dashboard_warmup_checked:
+            if not force and not charts and key in dashboard_warmup_checked:
                 return
             if force:
                 dashboard_warmup_checked.discard(key)
             queued = dashboard_warmup_queue.get(key)
             running = dashboard_warmup_running['key'] == key
             if queued is not None and not force:
+                queued['charts'] = bool(queued.get('charts') or charts)
                 return
             if running and not force:
+                if charts:
+                    dashboard_chart_requests.add(key)
                 return
             dashboard_warmup_queue[key] = {
                 'definition': dict(raw_definition), 'username': username,
                 'sequence': queued['sequence'] if queued else next(dashboard_warmup_sequence),
+                'rank': dashboard_creation_rank(workspace, dashboard_id),
+                'universes': True,
+                'charts': bool(charts or (queued and queued.get('charts'))),
             }
             state = dashboard_warmup_cancellations.setdefault(key, {
                 'requested': False, 'completed': 0, 'total': 0, 'active': False,
@@ -3337,9 +3400,11 @@ def install_dashboard_routes(core):
         """Return the next runnable warm-up, waiting while none is runnable."""
         with dashboard_warmup_condition:
             while not core.APP_SHUTTING_DOWN.is_set():
+                # Chart models wait for an idle application; universes do not.
                 runnable = [
                     (warmup_priority(key, entry), key) for key, entry in dashboard_warmup_queue.items()
                     if not dashboard_foreground_work.get(key[0])
+                    and (entry.get('universes', True) or not application_in_use())
                 ]
                 if runnable:
                     _priority, key = min(runnable)
@@ -3360,12 +3425,19 @@ def install_dashboard_routes(core):
                 return
             key, entry, state = item
             finished = False
+            charts_pending = bool(entry.get('charts'))
             try:
-                finished = run_dashboard_warmup(key, entry, state)
+                finished = run_dashboard_warmup(key, entry, state) if entry.get('universes', True) else True
+                with lock:
+                    charts_pending = charts_pending or key in dashboard_chart_requests
+                    dashboard_chart_requests.discard(key)
+                if finished and charts_pending and not application_in_use():
+                    charts_pending = not run_dashboard_charts(key, entry)
             except Exception as exc:
                 # Automatic cache work must never make saving or listing a
                 # Dashboard fail, but its failure is still auditable.
                 finished = True
+                charts_pending = False
                 try:
                     Repository(Path(key[0]), core.repository.global_db_path).add_log(
                         str(entry.get('username') or 'system'), 'prewarm_dashboard_cache_failed',
@@ -3379,14 +3451,18 @@ def install_dashboard_routes(core):
                     state['active'] = False
                     if key in dashboard_warmup_queue:
                         # A newer definition was scheduled while this ran.
-                        pass
+                        queued = dashboard_warmup_queue[key]
+                        queued['charts'] = bool(queued.get('charts') or charts_pending)
                     elif finished:
                         dashboard_warmup_checked.add(key)
                         dashboard_warmup_cancellations.pop(key, None)
+                        if charts_pending:
+                            # Resume the chart models during the next idle period.
+                            dashboard_warmup_queue[key] = {**entry, 'universes': False, 'charts': True}
                     else:
                         # Paused for more important work: resume later from the
                         # first universe that still lacks a persisted cache.
-                        dashboard_warmup_queue[key] = entry
+                        dashboard_warmup_queue[key] = {**entry, 'charts': charts_pending}
                     dashboard_warmup_condition.notify_all()
 
     def warmup_universe_identity(definition) -> str:
@@ -3452,85 +3528,134 @@ def install_dashboard_routes(core):
         return True
 
     def warm_idle_dashboard_caches() -> None:
-        """Queue pending Dashboard warm-ups after a quiet application period."""
+        """Queue every Dashboard's background work after a quiet application period."""
         workspace = workspace_key()
         with lock:
             dashboards = read_dashboards(bound_repository())
         for dashboard_id, raw_definition in dashboards.items():
             if isinstance(raw_definition, dict):
-                schedule_dashboard_warmup(workspace, dashboard_id, raw_definition, 'system')
-
-    idle_chart_worker: dict[str, object] = {'thread': None}
+                schedule_dashboard_warmup(workspace, dashboard_id, raw_definition, 'system', charts=True)
 
     def application_in_use() -> bool:
         return core.application_idle_seconds() < core.IDLE_DASHBOARD_WARMUP_SECONDS
 
-    def wait_until_application_idle() -> bool:
-        """Pause background chart work while anyone uses the application."""
-        while application_in_use() or dashboard_foreground_work.get(workspace_key()):
-            if core.APP_SHUTTING_DOWN.wait(5):
-                return False
-        return not core.APP_SHUTTING_DOWN.is_set()
+    def dashboard_comparison_modes(raw_definition: dict) -> list[tuple[str, str]]:
+        """The saved comparison mode first, then Operator and both Vendor Comparisons."""
+        saved = (
+            'multivendor' if raw_definition.get('scope') == 'multivendor' else 'single',
+            'vendor_only' if raw_definition.get('vendor_comparison') == 'vendor_only' else 'operator_vendor',
+        )
+        return list(dict.fromkeys([
+            saved, ('single', saved[1]), ('multivendor', 'vendor_only'), ('multivendor', 'operator_vendor'),
+        ]))
 
-    def precompute_idle_dashboard_charts(workspace: str) -> None:
-        """Build and persist the default universe's chart models while the app is idle.
+    def run_dashboard_charts(key, entry) -> bool:
+        """Build a Dashboard's chart models in every comparison mode while the application is idle.
 
-        Opening a Dashboard then reads finished models instead of computing them.
-        Work pauses between charts as soon as a user request arrives and
-        resumes after the next quiet period.
+        The default universe is built as Operator Comparison and as Vendor
+        Comparison with Vendor_Only and with Operator–Vendor identities. The
+        columns its charts read are then cached for every other CDR, so changing
+        CDRs, dates, filters or the mode reuses them. Returns False when the
+        application is used before the work ends; finished charts are kept.
         """
+        workspace, dashboard_id = key
         system_user = SimpleNamespace(username='system', role='super-admin')
         task_repository = Repository(Path(workspace), core.repository.global_db_path)
-        with lock:
-            dashboards = read_dashboards(task_repository)
-        # Dashboards open in a browser first, then the library order.
-        ordered = sorted(dashboards.items(), key=lambda item: not dashboard_is_open((workspace, item[0])))
-        for dashboard_id, raw_definition in ordered:
-            if not isinstance(raw_definition, dict) or not wait_until_application_idle():
-                continue
-            if workspace != workspace_key():
-                return
+        raw_definition = dict(entry['definition'])
+
+        def interrupted() -> bool:
+            return application_in_use() or workspace != workspace_key() or core.APP_SHUTTING_DOWN.is_set()
+
+        built = []
+        for scope, vendor_comparison in dashboard_comparison_modes(raw_definition):
+            if interrupted():
+                return False
             try:
-                definition = DashboardDefinition.model_validate(runtime_dashboard_definition(raw_definition, task_repository))
+                definition = DashboardDefinition.model_validate(runtime_dashboard_definition(
+                    {**raw_definition, 'scope': scope, 'vendor_comparison': vendor_comparison}, task_repository,
+                ))
                 payload = restore_matching_preview_manifest(workspace, dashboard_id, definition)
                 if payload is None:
                     with dashboard_work_gate:
-                        payload = build_preview(definition, system_user, workspace=workspace, cancelled=application_in_use)
+                        payload = build_preview(definition, system_user, workspace=workspace, cancelled=interrupted)
+                    with lock:
+                        snapshot = snapshots.get(payload['token'])
+                    if snapshot is not None:
+                        persist_preview_manifest(
+                            workspace, dashboard_id,
+                            dashboard_preview_fingerprint(snapshot.definition.model_dump(mode='json'), task_repository),
+                            payload['token'],
+                        )
                 with lock:
                     snapshot = snapshots.get(payload['token'])
                 if snapshot is None:
                     continue
-                for index, entry in enumerate(snapshot.entries):
-                    if not entry.source_kind or canvas_model_path(snapshot, entry).is_file():
+                for index, chart_entry in enumerate(snapshot.entries):
+                    if not chart_entry.source_kind or canvas_model_path(snapshot, chart_entry).is_file():
                         continue
-                    if not wait_until_application_idle() or workspace != workspace_key():
-                        return
+                    if interrupted():
+                        return False
                     chart_model(payload['token'], index, system_user, expected_workspace=workspace)
+                built.append(snapshot)
             except (HTTPException, RuntimeError):
-                # Invalid universes and preparations interrupted by a user are skipped.
-                continue
-            except Exception as exc:
-                # Optional idle work must never disturb the application.
-                try:
-                    task_repository.add_log('system', 'precompute_dashboard_charts_failed', json.dumps({
-                        'dashboard_id': dashboard_id, 'error': str(exc),
-                    }))
-                except Exception:
-                    pass
+                # Unavailable modes (for example without mapped Vendors) and
+                # preparations interrupted by a user are skipped.
+                if interrupted():
+                    return False
+        for snapshot in built:
+            if not warm_dashboard_column_cache(snapshot, task_repository, interrupted):
+                return False
+        task_repository.add_log('system', 'precompute_dashboard_charts', json.dumps({
+            'dashboard_id': dashboard_id, 'modes': len(built),
+        }))
+        return True
 
-    def start_idle_chart_precompute() -> None:
-        thread = idle_chart_worker.get('thread')
-        if thread is not None and thread.is_alive():
-            return
-        workspace = workspace_key()
-        thread = Thread(target=precompute_idle_dashboard_charts, args=(workspace,), daemon=True,
-                        name='dashboard-idle-charts')
-        idle_chart_worker['thread'] = thread
-        thread.start()
+    def warm_dashboard_column_cache(snapshot, task_repository, interrupted) -> bool:
+        """Cache a Dashboard's chart columns for every ready CDR of its NR Mode, newest first."""
+        if not DASHBOARD_COLUMN_CACHE:
+            return True
+        workspace = snapshot.workspace
+        ordered = ordered_ready_datasets(task_repository, dashboard_nr_mode(snapshot.definition))
+        everything = snapshot.definition.model_copy(update={
+            'datasets': {kind: [int(row['id']) for row in rows] for kind, rows in ordered.items()},
+        })
+        requested_by_kind: dict[str, set[str]] = defaultdict(set)
+        for chart_entry in snapshot.entries:
+            if chart_entry.source_kind:
+                # Complete reads cover compact charts, data views and both modes.
+                for multivendor in (False, True):
+                    requested_by_kind[chart_entry.source_kind].update(chart_query_columns(chart_entry, multivendor))
+        cache = workspace_column_cache(workspace)
+        quote = task_repository._quote_identifier
+        for kind, requested in requested_by_kind.items():
+            try:
+                database_path, table_name, source_columns = reporting_source(
+                    SimpleNamespace(definition=everything, workspace=workspace), kind, task_repository,
+                )
+            except (HTTPException, ValueError):
+                continue
+            lookup = {identity(column): column for column in source_columns}
+            columns = sorted({lookup[identity(column)] for column in requested if identity(column) in lookup})
+            prefetch = cache_prefetch_expressions(task_repository, source_columns, everything)
+            connect = lambda path=database_path: reporting_read_connection(path)
+            for segment in sorted(column_cache_segments(task_repository, kind, table_name, everything),
+                                  key=lambda item: -item.dataset_id):
+                if interrupted():
+                    return False
+                source = segment.source
+                try:
+                    cache.ensure(
+                        connect, segment, [source.physical(quote(column)) for column in columns],
+                        [source.physical(expression) for expression in prefetch],
+                    )
+                except StaleSegment:
+                    cache.invalidate(segment)
+                except (sqlite3.Error, OSError, ValueError, KeyError):
+                    continue
+        return True
 
     def warm_idle_dashboard_caches_and_charts() -> None:
         warm_idle_dashboard_caches()
-        start_idle_chart_precompute()
 
     core.register_idle_dashboard_warmup(warm_idle_dashboard_caches_and_charts)
 
@@ -3617,7 +3742,6 @@ def install_dashboard_routes(core):
         preparation_id = preparation_id or f'dashboard-preparation:{uuid4().hex}'
         workspace = workspace_key()
         cancellation = {'requested': False}
-        mark_dashboard_open(workspace, dashboard_id)
         with lock:
             # A newer request from the same user supersedes that user's
             # earlier preparation; other users' preparations are unaffected.
@@ -4041,6 +4165,169 @@ def install_dashboard_routes(core):
         counts = frame.pop('__catalog_rows').to_numpy()
         return frame.loc[frame.index.repeat(counts)].reset_index(drop=True)
 
+    column_caches: dict[str, ColumnCache] = {}
+    column_cache_prefetch: OrderedDict = OrderedDict()
+
+    def workspace_column_cache(workspace) -> ColumnCache:
+        """The active workspace's per-CDR column cache; other workspaces release theirs."""
+        key = str(workspace)
+        with lock:
+            cache = column_caches.get(key)
+            if cache is None:
+                for other in list(column_caches):
+                    column_caches.pop(other).forget()
+                cache = column_caches[key] = ColumnCache(
+                    column_cache_dir(workspace), memory_bytes=default_memory_bytes(), disk_bytes=default_disk_bytes(),
+                )
+            return cache
+
+    def forget_column_caches() -> None:
+        with lock:
+            for cache in column_caches.values():
+                cache.forget()
+
+    def plain_reporting_query(table_name, selected_columns, where, parameters):
+        """The ungrouped query ``load_reporting_frame`` runs for these columns."""
+        quote = lambda column: '"' + str(column).replace('"', '""') + '"'
+        select_clause = ", ".join(quote(column) for column in selected_columns)
+        branches = getattr(table_name, 'branches', ())
+        if branches:
+            query = ' UNION ALL '.join(f'SELECT {select_clause} FROM ({branch}) WHERE {where}' for branch in branches)
+            return query, list(parameters) * len(branches)
+        source = table_name if table_name.startswith('(') else quote(table_name)
+        return f'SELECT {select_clause} FROM {source} WHERE {where}', list(parameters)
+
+    planned_row_orders: OrderedDict = OrderedDict()
+
+    def planned_row_order(database_path, query, parameters):
+        """The row order of SQLite's plan for a query, when the column cache reproduces it.
+
+        Searching a per-dataset index visits the CDRs in ascending order and,
+        within each, the event date (date index) and table order; a full scan
+        returns table order. Charts whose rows follow any other plan keep
+        reading from SQLite, so their row order never changes.
+        """
+        key = (str(database_path), query, tuple(parameters))
+        with lock:
+            if key in planned_row_orders:
+                planned_row_orders.move_to_end(key)
+                return planned_row_orders[key]
+        order = sqlite_plan_row_order(database_path, query, parameters)
+        with lock:
+            planned_row_orders[key] = order
+            while len(planned_row_orders) > 512:
+                planned_row_orders.popitem(last=False)
+        return order
+
+    def sqlite_plan_row_order(database_path, query, parameters):
+        connection = reporting_read_connection(database_path)
+        try:
+            plan = [str(row[3]) for row in connection.execute(f'EXPLAIN QUERY PLAN {query}', parameters).fetchall()]
+        except sqlite3.Error:
+            return None
+        finally:
+            connection.close()
+        modes = set()
+        for detail in plan:
+            if detail in {'COMPOUND QUERY', 'LEFT-MOST SUBQUERY', 'UNION ALL'}:
+                continue
+            match = re.fullmatch(r'SEARCH (reporting_rows_[a-z]+) USING INDEX (\S+) \(dataset_id=\?(?: AND .*)?\)', detail)
+            if match and match.group(2) == f'idx_{match.group(1)}_dataset_event_time_date':
+                modes.add('dataset_date_rowid')
+            elif match and match.group(2) == f'idx_{match.group(1)}_dataset_id_rows':
+                modes.add('dataset_rowid')
+            elif re.fullmatch(r'SCAN reporting_rows_[a-z]+', detail):
+                modes.add('rowid')
+            else:
+                return None
+        return modes.pop() if len(modes) == 1 else None
+
+    def cache_prefetch_expressions(task_repository, columns, definition):
+        """Filter expressions cached with every CDR, so later filter changes skip SQLite."""
+        fields = tuple(dict.fromkeys((*ADAPTATIVE_FILTER_FIELDS, 'Vendor', *definition.custom_fields)))
+        key = (tuple(columns), fields)
+        with lock:
+            cached = column_cache_prefetch.get(key)
+            if cached is not None:
+                column_cache_prefetch.move_to_end(key)
+                return cached
+        expressions = [filter_sql_normalized_expression(task_repository, columns, field) for field in fields]
+        expressions.append(selection_date_expression(task_repository, columns))
+        sheet_term = selection_sheet_term(task_repository, columns)
+        if sheet_term:
+            expressions.append(f'LOWER(TRIM(CAST({sheet_term[0]} AS TEXT)))')
+        result = tuple(dict.fromkeys(expression for expression in expressions if expression))
+        with lock:
+            column_cache_prefetch[key] = result
+            while len(column_cache_prefetch) > 64:
+                column_cache_prefetch.popitem(last=False)
+        return result
+
+    def column_cache_sources(task_repository, kind, table_name, definition):
+        """Return (source, selected CDR rows) for each combined table behind a chart source."""
+        projections = getattr(table_name, 'branch_projections', ())
+        sources = projections or ((kind, str(table_name), ()),)
+        result = []
+        for source_kind, table, projection in sources:
+            physical = task_repository.list_reporting_row_columns(source_kind)
+            source = CacheSource(
+                source_kind, table, tuple(projection),
+                has_event_time=any(str(column).casefold() == 'event_start_time' for column in physical),
+            )
+            result.append((source, dashboard_datasets(definition, source_kind, task_repository)))
+        return result
+
+    def column_cache_segments(task_repository, kind, table_name, definition):
+        """Cache segments of the selected CDRs, keyed by their data revision."""
+        dimensions = sha256(json.dumps(
+            task_repository.list_calculated_dimensions(), sort_keys=True, default=str,
+        ).encode()).hexdigest()
+        segments = []
+        for source, rows in column_cache_sources(task_repository, kind, table_name, definition):
+            # Same revision contract as every Dashboard cache: the CDR version,
+            # its combined table's row and column revisions and the calculated
+            # dimensions, so a cached column is never stale.
+            revision = [
+                task_repository.get_workspace_state(f'combined_reporting_updated_{source.kind}'),
+                task_repository.get_workspace_state(f'combined_reporting_columns_updated_{source.kind}'),
+                dimensions,
+            ]
+            for row in sorted(rows, key=lambda item: int(item['id'])):
+                version = json.dumps([
+                    row.get('updated_at'), row.get('processed_at'), row.get('normalization_version'),
+                    row.get('row_count'), *revision,
+                ], default=str)
+                segments.append(Segment(source, int(row['id']), version))
+        return segments
+
+    def column_cache_frame(snapshot, kind, task_repository, database_path, table_name, source_columns,
+                           requested_columns, terms, order):
+        """Assemble a chart's source rows from the per-CDR column cache."""
+        lookup = {identity(column): column for column in source_columns}
+        selected_columns = []
+        for requested in requested_columns:
+            actual = lookup.get(identity(requested))
+            if actual and actual not in selected_columns:
+                selected_columns.append(actual)
+        if not selected_columns:
+            return pd.DataFrame()
+        quote = task_repository._quote_identifier
+        segments = column_cache_segments(task_repository, kind, table_name, snapshot.definition)
+        prefetch = cache_prefetch_expressions(task_repository, source_columns, snapshot.definition)
+        cache = workspace_column_cache(snapshot.workspace)
+        connect = lambda: reporting_read_connection(database_path)
+        for _attempt in range(2):
+            try:
+                return read_frame(
+                    cache, connect, segments, [(column, quote(column)) for column in selected_columns],
+                    terms, order, prefetch=lambda _source: prefetch,
+                )
+            except StaleSegment:
+                # Rows changed under an unchanged revision: rebuild the CDRs.
+                for segment in segments:
+                    cache.invalidate(segment)
+        raise StaleSegment('The selected CDR rows keep changing.')
+
     def parse_chart_column_filters(encoded):
         try:
             payload = json.loads(encoded or '{}')
@@ -4377,9 +4664,39 @@ def install_dashboard_routes(core):
                 source_lookup[identity(column)] for column in (aggregation_columns or requested_columns)
                 if identity(column) in source_lookup
             })
+            # The per-CDR column cache returns the rows SQLite would return for
+            # any universe or comparison mode. Order-independent charts take them
+            # in table order; the others only when the column cache reproduces
+            # SQLite's plan order, so no chart's row order changes.
+            cache_order = None
+            if DASHBOARD_COLUMN_CACHE and not aggregation_columns:
+                ordered_columns = list(dict.fromkeys(
+                    source_lookup[identity(column)] for column in requested_columns if identity(column) in source_lookup
+                ))
+                if ordered_columns:
+                    # A chart and its data table view then share one frame.
+                    cache_order = planned_row_order(
+                        database_path, *plain_reporting_query(table_name, ordered_columns, where, parameters),
+                    )
+                if cache_order is None and not complete and entry.chart_type.casefold() in COMPACT_READ_CHART_TYPES:
+                    cache_order = 'dataset_rowid'
+            cache_terms = None
+            if cache_order:
+                # Template filters then run in memory on the cached rows.
+                template_filters_applied = False
+                cache_terms = selection_cache_terms(task_repository, source_columns, snapshot.definition)
+                selection_identity = {
+                    'datasets': sorted(int(row['id']) for row in selected),
+                    'values': [[expression, sorted(values)] for expression, values in cache_terms.values],
+                    'date': cache_terms.date,
+                    'sheets': [cache_terms.excluded_sheets[0], sorted(cache_terms.excluded_sheets[1])] if cache_terms.excluded_sheets else None,
+                    'order': cache_order,
+                }
+            else:
+                selection_identity = {'where': where, 'parameters': parameters}
             raw_key = sha256(json.dumps({
-                'kind': entry.source_kind, 'columns': read_columns, 'where': where, 'parameters': parameters,
-                'aggregation_columns': aggregation_columns, 'compact': grouped_read,
+                'kind': entry.source_kind, 'columns': read_columns, **selection_identity,
+                'aggregation_columns': aggregation_columns, 'compact': grouped_read and not cache_order,
                 'chart_mappings': task_repository.chart_mapping_settings(),
             }, sort_keys=True, default=str).encode()).hexdigest()
             with lock:
@@ -4390,15 +4707,29 @@ def install_dashboard_routes(core):
                     with lock:
                         raw_frame = snapshot.frames.get(raw_key)
                     if raw_frame is None:
-                        # The selection key fingerprints the CDR versions and
-                        # combined-table revisions, like the chart-model cache.
-                        cache_path = frame_cache_dir(snapshot.workspace) / (sha256(
-                            f'{DASHBOARD_FRAME_CACHE_VERSION}:{snapshot.selection_key}:{raw_key}'.encode()
-                        ).hexdigest() + '.pkl') if snapshot.selection_key else None
-                        raw_frame = load_reporting_frame(
-                            database_path, table_name, source_columns, requested_columns, where, parameters,
-                            aggregation_columns, expand_groups=grouped_read, cache_path=cache_path,
-                        )
+                        if cache_order:
+                            try:
+                                raw_frame = column_cache_frame(
+                                    snapshot, entry.source_kind, task_repository, database_path, table_name,
+                                    source_columns, requested_columns, cache_terms, cache_order,
+                                )
+                            except (sqlite3.Error, StaleSegment, OSError, ValueError, KeyError):
+                                # SQLite remains the source of truth; its rows are
+                                # filtered again in memory, which changes nothing.
+                                raw_frame = load_reporting_frame(
+                                    database_path, table_name, source_columns, requested_columns, where, parameters,
+                                    aggregation_columns, expand_groups=grouped_read,
+                                )
+                        else:
+                            # The selection key fingerprints the CDR versions and
+                            # combined-table revisions, like the chart-model cache.
+                            cache_path = frame_cache_dir(snapshot.workspace) / (sha256(
+                                f'{DASHBOARD_FRAME_CACHE_VERSION}:{snapshot.selection_key}:{raw_key}'.encode()
+                            ).hexdigest() + '.pkl') if snapshot.selection_key else None
+                            raw_frame = load_reporting_frame(
+                                database_path, table_name, source_columns, requested_columns, where, parameters,
+                                aggregation_columns, expand_groups=grouped_read, cache_path=cache_path,
+                            )
                         if snapshot.multivendor:
                             raw_frame = ensure_vendor_group(raw_frame)
                         mapping_settings = task_repository.chart_mapping_settings()
@@ -4997,7 +5328,6 @@ def install_dashboard_routes(core):
     def dashboard_status_payload(requested_definitions=None, username='system', active_dashboard_id=None):
         """Return pre-caching states and keep every standard universe queued."""
         workspace = workspace_key()
-        mark_dashboard_open(workspace, active_dashboard_id)
         task_repository = Repository(Path(workspace), core.repository.global_db_path)
         dashboards = read_dashboards(task_repository)
         result = {}
@@ -5107,6 +5437,9 @@ def install_dashboard_routes(core):
                 if key[0] == database_path:
                     state['requested'] = True
             dashboard_warmup_condition.notify_all()
+            column_cache = column_caches.pop(database_path, None)
+        if column_cache is not None:
+            column_cache.forget()
         return []
 
     def invalidate_workspace_chart_models(workspace: str | Path) -> None:

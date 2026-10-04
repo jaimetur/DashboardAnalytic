@@ -3397,7 +3397,7 @@ def _compact_read_dashboard(client):
                                datasets={'data': [dataset_id]}).model_dump(mode='json')
 
 
-def test_compact_grouped_reads_produce_identical_chart_models(client, monkeypatch):
+def test_cached_and_grouped_reads_produce_identical_chart_models(client, monkeypatch):
     import src.modules.e2e_dashboards as dashboards_module
 
     payload = _compact_read_dashboard(client)
@@ -3406,6 +3406,9 @@ def test_compact_grouped_reads_produce_identical_chart_models(client, monkeypatc
     token = prepared.json()['token']
     indexes = [chart['index'] for slide in prepared.json()['slides'] for chart in slide['charts']]
     assert len(indexes) == 5
+    cached = [client.post(f'/api/e2e-dashboards/chart/{token}/{index}/refresh').json() for index in indexes]
+    assert list(dashboards_module.column_cache_dir(core.repository.db_path).rglob('*.pkl'))
+    monkeypatch.setattr(dashboards_module, 'DASHBOARD_COLUMN_CACHE', False)
     compact = [client.post(f'/api/e2e-dashboards/chart/{token}/{index}/refresh').json() for index in indexes]
     # The grouped reads were persisted with their row counts (240 rows -> fewer groups).
     grouped = [pd.read_pickle(path) for path in dashboards_module.frame_cache_dir(core.repository.db_path).glob('*.pkl')]
@@ -3414,7 +3417,53 @@ def test_compact_grouped_reads_produce_identical_chart_models(client, monkeypatc
     monkeypatch.setattr(dashboards_module, 'DASHBOARD_COMPACT_READS', False)
     complete = [client.post(f'/api/e2e-dashboards/chart/{token}/{index}/refresh').json() for index in indexes]
     assert all(model['type'] != 'empty' for model in complete)
-    assert compact == complete
+    assert cached == compact == complete
+
+
+@pytest.mark.parametrize('changes', [
+    {'filters': {'Operator': ['A', 'C']}},
+    {'filters': {'Campaign': ['UK_Q1_2026']}},
+    {'date_from': '2026-02-01', 'date_to': '2026-04-30'},
+    {'filters': {'Operator': ['B'], 'City': ['London']}, 'date_from': '2026-03-01'},
+])
+def test_column_cache_serves_changed_universes_without_sqlite(client, monkeypatch, changes):
+    import src.modules.e2e_dashboards as dashboards_module
+
+    payload = _compact_read_dashboard(client)
+    baseline = client.post('/api/e2e-dashboards/prepare', json=payload)
+    assert baseline.status_code == 200, baseline.text
+    for chart in (chart for slide in baseline.json()['slides'] for chart in slide['charts']):
+        assert client.get(f"/api/e2e-dashboards/chart/{baseline.json()['token']}/{chart['index']}").status_code == 200
+    changed = {**payload, **changes}
+    prepared = client.post('/api/e2e-dashboards/prepare', json=changed)
+    assert prepared.status_code == 200, prepared.text
+    token = prepared.json()['token']
+    indexes = [chart['index'] for slide in prepared.json()['slides'] for chart in slide['charts']]
+    # Every column and filter of the changed universe is already cached: no
+    # CDR row is read from SQLite again.
+    from src.modules import dashboard_column_cache
+    original_build, original_read = dashboard_column_cache.ColumnCache._build, dashboards_module.pd.read_sql_query
+    reads = []
+    monkeypatch.setattr(dashboard_column_cache.ColumnCache, '_build', lambda *args: reads.append('build') or original_build(*args))
+    monkeypatch.setattr(dashboards_module.pd, 'read_sql_query', lambda query, *args, **kwargs: (
+        reads.append(query) if 'reporting_rows_' in query else None) or original_read(query, *args, **kwargs))
+    cached = [client.get(f'/api/e2e-dashboards/chart/{token}/{index}').json() for index in indexes]
+    assert reads == []
+    monkeypatch.setattr(dashboard_column_cache.ColumnCache, '_build', original_build)
+    monkeypatch.setattr(dashboards_module.pd, 'read_sql_query', original_read)
+    monkeypatch.setattr(dashboards_module, 'DASHBOARD_COLUMN_CACHE', False)
+    monkeypatch.setattr(dashboards_module, 'DASHBOARD_COMPACT_READS', False)
+    sqlite = [client.post(f'/api/e2e-dashboards/chart/{token}/{index}/refresh').json() for index in indexes]
+    assert cached == sqlite
+
+
+def _wait_for(condition, timeout=60.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        time.sleep(0.2)
+    return condition()
 
 
 def test_idle_chart_precompute_waits_for_quiet_periods_and_persists_models(client, monkeypatch):
@@ -3424,18 +3473,45 @@ def test_idle_chart_precompute_waits_for_quiet_periods_and_persists_models(clien
     saved = client.put('/api/e2e-dashboards/idle-precompute', json=payload)
     assert saved.status_code == 200, saved.text
     model_dir = dashboards_module.canvas_model_cache_dir(core.repository.db_path)
+    column_dir = dashboards_module.column_cache_dir(core.repository.db_path)
     shutil.rmtree(model_dir, ignore_errors=True)
+    shutil.rmtree(column_dir, ignore_errors=True)
 
-    # A user request just happened: the background work must wait.
+    # A user request just happened: the chart models must wait.
     monkeypatch.setattr(core, 'IDLE_DASHBOARD_WARMUP_SECONDS', 3600)
     core.IDLE_DASHBOARD_WARMUP_CALLBACK()
-    worker = next(thread for thread in threading.enumerate() if thread.name == 'dashboard-idle-charts')
-    time.sleep(0.5)
-    assert worker.is_alive()
+    time.sleep(1.5)
     assert not list(model_dir.glob('*.json'))
+    # One background worker handles every Dashboard.
+    assert [thread.name for thread in threading.enumerate() if thread.name.startswith('dashboard-')] == ['dashboard-cache-warmup']
 
-    # Once the application is quiet the charts are built and persisted.
+    # Once the application is quiet the charts are built and persisted, and
+    # the columns they read are cached for every CDR.
     monkeypatch.setattr(core, 'IDLE_DASHBOARD_WARMUP_SECONDS', 0)
-    worker.join(30)
-    assert not worker.is_alive()
-    assert len(list(model_dir.glob('*.json'))) >= 5
+    assert _wait_for(lambda: len(list(model_dir.glob('*.json'))) >= 5)
+    assert _wait_for(lambda: list(column_dir.rglob('*.pkl')))
+
+
+def test_background_work_builds_one_dashboard_at_a_time_in_creation_order(client, monkeypatch):
+    import src.modules.e2e_dashboards as dashboards_module
+
+    payload = _compact_read_dashboard(client)
+    monkeypatch.setattr(core, 'IDLE_DASHBOARD_WARMUP_SECONDS', 3600)
+    for name in ('first', 'second', 'third'):
+        assert client.put(f'/api/e2e-dashboards/{name}', json={**payload, 'name': name.title()}).status_code == 200
+    finished = []
+    original_add_log = dashboards_module.Repository.add_log
+
+    def tracked_log(self, user, action, *args, **kwargs):
+        if action == 'precompute_dashboard_charts':
+            finished.append((json.loads(args[0])['dashboard_id'], threading.current_thread().name))
+        return original_add_log(self, user, action, *args, **kwargs)
+
+    monkeypatch.setattr(dashboards_module.Repository, 'add_log', tracked_log)
+    # The newest Dashboard is queued again first, yet the oldest is built first.
+    assert client.put('/api/e2e-dashboards/third', json={**payload, 'name': 'Third'}).status_code == 200
+    core.IDLE_DASHBOARD_WARMUP_CALLBACK()
+    monkeypatch.setattr(core, 'IDLE_DASHBOARD_WARMUP_SECONDS', 0)
+    assert _wait_for(lambda: len(finished) == 3), finished
+    assert [dashboard_id for dashboard_id, _thread in finished] == ['first', 'second', 'third']
+    assert {thread for _dashboard_id, thread in finished} == {'dashboard-cache-warmup'}

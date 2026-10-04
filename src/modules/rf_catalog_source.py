@@ -50,6 +50,8 @@ class RFUnionSource(str):
     """
 
     branches: tuple[str, ...] = ()
+    # (kind, physical table, ((alias, physical SQL), ...)) for each branch.
+    branch_projections: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = ()
 
 
 def rf_union_source(repository, kinds: list[str]) -> tuple[str, list[str]]:
@@ -63,9 +65,11 @@ def rf_union_source(repository, kinds: list[str]) -> tuple[str, list[str]]:
     columns = list(columns_by_identity.values())
     quote = repository._quote_identifier
     queries = []
+    projections = []
     for kind, schema in schemas.items():
         lookup = {column_identity(column): column for column in schema}
         expressions = []
+        projection = []
         for target in columns:
             if target in RF_CATALOG_FIELDS:
                 candidates = [lookup[column_identity(candidate)] for candidate in RF_FIELD_ALIASES[RF_CATALOG_FIELDS[target]][kind]
@@ -78,7 +82,10 @@ def rf_union_source(repository, kinds: list[str]) -> tuple[str, list[str]]:
                 actual = lookup.get(column_identity(target))
                 expression = quote(actual) if actual else 'NULL'
             expressions.append(f'{expression} AS {quote(target)}')
+            projection.append((target, expression))
         queries.append(f'SELECT {", ".join(expressions)} FROM {quote(repository.reporting_rows_table_name(kind))}')
+        projections.append((kind, repository.reporting_rows_table_name(kind), tuple(projection)))
     source = RFUnionSource('(' + ' UNION ALL '.join(queries) + ')')
     source.branches = tuple(queries)
+    source.branch_projections = tuple(projections)
     return source, columns

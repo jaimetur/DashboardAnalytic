@@ -212,20 +212,24 @@ Open Filters, View Dashboard and PPT export remain available during background p
 
 The library can prepare up to five universes: all ready CDRs, and the newest one, two, three and four per type. These use the Dashboard's NR Mode, saved scope/filters/template and automatic dates; duplicate universes are skipped.
 
-Open Dashboards take priority over closed ones. Foreground preparation and PPT export pause this low-priority work, which resumes afterward. An incompatible universe is skipped until the workspace data changes.
+One background worker handles one Dashboard at a time, in creation order (oldest first). Foreground preparation and PPT export pause this low-priority work, which resumes afterward. An incompatible universe is skipped until the workspace data changes.
 
 > [!TIP]
 > You do not need to wait for every background universe to finish. Opening or exporting a Dashboard prepares the requested universe if it is not already reusable.
 
-When nobody has used the application for five minutes, it also builds the charts of each Dashboard's default universe (its saved universe, or the newest CDRs), open Dashboards first, and stores them as ready Canvas models. Opening that Dashboard later shows the stored charts immediately. This work stops between charts as soon as anyone uses the application and continues after the next quiet period.
+When nobody has used the application for five minutes, the same worker also builds the charts of each Dashboard's default universe (its saved universe, or the newest CDRs) as **Operator Comparison** and as **Multivendor Comparison** with both **Vendor Only** and **Operator - Vendor**, and stores them as ready Canvas models. Modes that are not available, for example without mapped Vendors, are skipped. It then caches the CDR columns these charts read for every ready CDR of the Dashboard's NR Mode, newest first.
+
+Opening a Dashboard or switching its comparison mode then shows the stored charts immediately. Changing CDRs, dates or filters recalculates the charts from the cached columns without reading the CDRs again. This work stops between charts and between CDRs as soon as anyone uses the application, and continues after the next quiet period.
 
 ### What Clear cache removes
 
 Combined CDR tables remain the source for filters and chart data. Selection records keep counts, facets and reproducible predicates; the cache does not copy CDR rows into a separate projection database.
 
-Dashboard charts read the materialized combined CDR tables; `CDR-All` pools the Data, Voice and Speech tables without rereading the original uploaded files. CDF, histogram, average, median, distribution, threshold and stacked-bar charts that only use physical fields read them grouped: identical rows are returned once with their count and expanded again before charting, so every chart receives exactly the same rows. Charts reading the same fields share that read, and charts with the same source, filters and measure share one filtering pass. Maps, scatter plots and tables that only use physical fields read just those fields, ungrouped and in the original row order. Charts using calculated fields, multivendor reports and the chart data table views read the complete rows.
+Dashboard charts read the materialized combined CDR tables through a per-CDR column cache. Each column a chart needs is read from SQLite once per CDR, together with the Dashboard filter columns (the default filters, the Dashboard's custom fields and the event date). Any combination of CDRs, dates, filters and comparison mode is then assembled in memory without querying the CDRs again. `CDR-All` pools the Data, Voice and Speech tables without rereading the original uploaded files.
 
-`.dashboard-data-cache` holds derived preview manifests, Canvas models, stored source reads and legacy image artifacts. Their keys include dataset revisions, selection, scope and renderer version, so other sessions, restarts and PPT exports reuse a read until the selected CDRs change. Older-version artifacts are removed when a workspace opens.
+The assembled rows are exactly the rows SQLite returns, with the same values and types. Maps, scatter plots, tables and chart data views also keep SQLite's row order. When SQLite would return them in an order the cache cannot reproduce, for example while filtering a single City, those charts read SQLite directly. Charts reading the same fields share one read, and charts with the same source, filters and measure share one filtering pass.
+
+`.dashboard-data-cache` holds derived preview manifests, Canvas models, the per-CDR column cache and legacy image artifacts. Their keys include dataset revisions, selection, scope and renderer version, so other sessions, restarts and PPT exports reuse them until the CDRs change. The column cache keeps up to 8 GB on disk and 1 GB in memory by default, removing the least recently used CDRs first. `DASHBOARD_ANALYTIC_COLUMN_CACHE_DISK_MB` and `DASHBOARD_ANALYTIC_COLUMN_CACHE_MEMORY_MB` change these limits. Older-version artifacts are removed when a workspace opens.
 
 > [!WARNING]
 > **Workspace Clear cache cancels active user-requested work and removes derived cache only.** It preserves Dashboard definitions, combined CDRs, templates and generated jobs. Nothing rebuilds automatically until requested again.
