@@ -13,10 +13,12 @@ import csv
 import io
 import math
 import re
+import sqlite3
 from functools import lru_cache
 from pathlib import Path
 from collections import Counter
 from typing import Any, Iterable
+from uuid import uuid4
 
 import pandas as pd
 
@@ -24,6 +26,16 @@ from src.modules.column_names import column_identity, compact_campaign_value, ve
 
 
 NETWORK_INSIGHTS_KINDS = ('data', 'voice', 'speech')
+# Bump when the normalised samples or the analysis payload change shape.
+SAMPLES_CACHE_VERSION = 1
+ANALYSIS_CACHE_VERSION = 2
+INVENTORY_CACHE_VERSION = 1
+OBSERVED_CACHE_VERSION = 5
+# Columns of the CDRs Sites/Cells Observed tables.
+OBSERVED_COLUMNS = (
+    'Operator', 'Vendor', 'Region', 'City', 'Cluster', 'Technology', 'Site_ID', 'Cell_ID', 'Band',
+    'CDR_Types', 'Campaigns', 'Samples', 'Latitude', 'Longitude', 'RSRP_Mean', 'SINR_Mean',
+)
 SPECTRUM_HOLDINGS_STATE_KEY = 'network_spectrum_holdings'
 
 # Each logical radio field lists, per CDR type, the source columns that carry
@@ -82,8 +94,12 @@ TECHNOLOGIES = {'lte': 'LTE', 'nr': 'NR', 'lte_nr': 'LTE+NR'}
 
 # Default classification bands. Thresholds are user-adjustable in the module;
 # these defaults follow common drive-test reporting practice.
+# LTE RSRP/SINR and NR SS-RSRP/SS-SINR use different reference signals, so
+# each technology has its own thresholds.
 DEFAULT_COVERAGE_THRESHOLD = -110.0
 DEFAULT_INTERFERENCE_THRESHOLD = 0.0
+DEFAULT_NR_COVERAGE_THRESHOLD = -115.0
+DEFAULT_NR_INTERFERENCE_THRESHOLD = -3.0
 RSRP_CLASSES = (
     ('Excellent', -80.0, '#2E8B57'),
     ('Good', -90.0, '#8BC34A'),
@@ -231,7 +247,8 @@ def normalise_samples(frame: pd.DataFrame, kind: str, columns: dict[str, str]) -
         source = columns.get(field)
         values = frame[source] if source in frame.columns else pd.Series('', index=frame.index)
         result[field] = values.fillna('').astype(str).str.strip()
-    result['campaign'] = result['campaign'].map(lambda value: compact_campaign_value(value) or value)
+    campaigns = {value: compact_campaign_value(value) or value for value in pd.unique(result['campaign'])}
+    result['campaign'] = result['campaign'].map(campaigns)
     for field in ('latitude', 'longitude', 'lte_rsrp', 'nr_rsrp', 'lte_sinr', 'nr_sinr', 'lte_bandwidth', 'nr_bandwidth'):
         source = columns.get(field)
         result[field] = pd.to_numeric(frame[source], errors='coerce') if source in frame.columns else math.nan
@@ -357,11 +374,13 @@ def operator_colours(operators: Iterable[str], mapping_groups: Iterable[dict[str
 def cdf_payload(
     samples: pd.DataFrame, value_column: str, group: str | None, title: str, metric_label: str,
     colours: dict[str, str], *, points: int = 120, dash_groups: dict[str, str] | None = None,
+    widths: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """Build a Canvas CDF model (one curve per Operator and group).
 
     ``dash_groups`` maps each Operator label to its secondary grouping value,
     so curves sharing an Operator colour use a different line style per value.
+    ``widths`` maps each label to its line width (newer campaigns are thicker).
     """
     dash_values = sorted(set(dash_groups.values()), key=str.casefold) if dash_groups else []
     series = []
@@ -385,8 +404,9 @@ def cdf_payload(
         else:
             dash = []
         colour = colours.get(key[0], OPERATOR_FALLBACK_COLOURS[0])
-        series.append({'name': name, 'colour': colour, 'width': 3, 'dash': dash, 'x': x, 'y': quantiles})
-        legend.append({'label': name, 'colour': colour, 'width': 3, 'dash': dash})
+        width = (widths or {}).get(key[0], 3)
+        series.append({'name': name, 'colour': colour, 'width': width, 'dash': dash, 'x': x, 'y': quantiles})
+        legend.append({'label': name, 'colour': colour, 'width': width, 'dash': dash})
     domain_x = [min(lows), max(highs)] if lows else [0, 1]
     if domain_x[0] == domain_x[1]:
         domain_x = [domain_x[0] - 1, domain_x[1] + 1]
@@ -400,6 +420,28 @@ def cdf_payload(
         'domain': {'x': domain_x, 'y': [0, 1]},
         'series': series,
     }
+
+
+def campaign_line_widths(campaigns: dict[str, str], families: dict[str, str]) -> dict[str, int]:
+    """Line width per label: the latest campaign of each Operator/Vendor is the thickest.
+
+    Like the E2E Dashboard CDFs, two campaigns use widths 1 and 4 and longer
+    histories thin out by one per older campaign.
+    """
+    from src.modules.cdr_reporting import _campaign_sort_key
+
+    by_family: dict[str, set[str]] = {}
+    for label, campaign in campaigns.items():
+        if campaign:
+            by_family.setdefault(families.get(label, ''), set()).add(campaign)
+    ranks: dict[str, dict[str, int]] = {}
+    for family, values in by_family.items():
+        ordered = sorted(values, key=_campaign_sort_key)
+        if len(ordered) == 2:
+            ranks[family] = {ordered[0]: 1, ordered[1]: 4}
+        else:
+            ranks[family] = {campaign: max(1, 4 - index) for index, campaign in enumerate(reversed(ordered))}
+    return {label: ranks.get(families.get(label, ''), {}).get(campaign, 3) for label, campaign in campaigns.items()}
 
 
 def grid_cells(
@@ -744,8 +786,34 @@ def inventory_coordinate_expressions(columns, quote) -> list[str]:
     return values
 
 
-def prepare_inventory_query(repository, connection, datasets: list[dict[str, Any]], selection: dict[str, Any]):
-    """Align complete inventories without changing stored source fields or row multiplicity."""
+def inventory_filter_normalizer(repository):
+    """Comparable form of an inventory filter value: mapped Operator and Vendor, casefolded."""
+    from src.modules.column_names import vendor_filter_value
+
+    mappings = repository.chart_mapping_settings()
+    operator_maps = {str(key).casefold(): str(value) for key, value in mappings.get('operator_mappings', {}).items()}
+    vendor_maps = {str(key).casefold(): str(value) for key, value in mappings.get('vendor_mappings', {}).items()}
+    operator_names = [*operator_maps, *operator_maps.values(), 'Vodafone', 'Vodafone UK', 'VFUK', 'VF', 'Three', '3UK', '3']
+
+    @lru_cache(maxsize=4096)
+    def filter_value(value, field):
+        text = str(value or '').strip()
+        if field == 'Operator':
+            text = operator_maps.get(text.casefold(), text)
+        elif field == 'Vendor_Only':
+            text = vendor_filter_value(text, operator_names)
+            text = vendor_maps.get(text.casefold(), text)
+        return text.casefold()
+
+    return filter_value
+
+
+def prepare_inventory_query(repository, connection, datasets: list[dict[str, Any]], selection: dict[str, Any],
+                            apply_filters: bool = True):
+    """Align complete inventories without changing stored source fields or row multiplicity.
+
+    Without ``apply_filters`` the query returns every row of every inventory.
+    """
     from functools import lru_cache
     from src.modules.column_names import vendor_filter_value
 
@@ -777,15 +845,7 @@ def prepare_inventory_query(repository, connection, datasets: list[dict[str, Any
         text = str(value or '').strip()
         return {'4g': 'LTE', 'lte': 'LTE', '5g': 'NR', 'nr': 'NR'}.get(text.casefold(), text)
 
-    @lru_cache(maxsize=1024)
-    def filter_value(value, field):
-        text = str(value or '').strip()
-        if field == 'Operator':
-            text = operator_maps.get(text.casefold(), text)
-        elif field == 'Vendor_Only':
-            text = vendor_filter_value(text, operator_names)
-            text = vendor_maps.get(text.casefold(), text)
-        return text.casefold()
+    filter_value = inventory_filter_normalizer(repository)
 
     @lru_cache(maxsize=4096)
     def cell_value(value):
@@ -861,6 +921,8 @@ def prepare_inventory_query(repository, connection, datasets: list[dict[str, Any
         selects.append(f"SELECT {', '.join(values)} FROM {quote(repository.dataset_rows_table_name(dataset['id']))}")
     if not selects:
         return '', [], columns
+    if not apply_filters:
+        return 'SELECT * FROM (' + ' UNION ALL '.join(selects) + ')', [], columns
     predicates, parameters = [], []
     for field, key in [('Operator', 'operators'), ('Vendor_Only', 'vendors'), ('Region', 'regions'), ('City', 'cities')]:
         values = list(dict.fromkeys(filter_value(value, field) for value in selection.get(key, []) if str(value).strip()))
@@ -946,7 +1008,7 @@ def install_network_insights_routes(core: Any) -> None:
     from urllib.parse import urlencode
 
     from fastapi import Depends, Form, HTTPException, Query, Request
-    from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+    from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
     from pydantic import BaseModel, Field
 
     from src.modules.cdr_reporting import _osm_map_tile_geometry
@@ -954,6 +1016,8 @@ def install_network_insights_routes(core: Any) -> None:
     app = core.app
     sample_cache: OrderedDict[str, pd.DataFrame] = OrderedDict()
     sample_cache_lock = Lock()
+    analysis_cache: OrderedDict[str, bytes] = OrderedDict()
+    analysis_cache_lock = Lock()
     inventory_cache: OrderedDict[tuple, dict[str, Any]] = OrderedDict()
     inventory_cache_lock = Lock()
 
@@ -967,8 +1031,11 @@ def install_network_insights_routes(core: Any) -> None:
         campaigns: list[str] = Field(default_factory=list)
         regions: list[str] = Field(default_factory=list)
         cities: list[str] = Field(default_factory=list)
+        # LTE thresholds; NR SS-RSRP/SS-SINR have their own.
         coverage_threshold: float = DEFAULT_COVERAGE_THRESHOLD
         interference_threshold: float = DEFAULT_INTERFERENCE_THRESHOLD
+        nr_coverage_threshold: float = DEFAULT_NR_COVERAGE_THRESHOLD
+        nr_interference_threshold: float = DEFAULT_NR_INTERFERENCE_THRESHOLD
         grid_metres: float = 250
         min_samples: int = 3
         map_operator: str = ''
@@ -1028,7 +1095,22 @@ def install_network_insights_routes(core: Any) -> None:
         if group == 'cluster' and not cluster_grouping_available(task_repository):
             raise HTTPException(400, 'Import Clusters polygons or an inventory with a Cluster field to group deployment by Cluster.')
 
-    def load_samples(task_repository, datasets: dict[str, list[int]]) -> pd.DataFrame:
+    def cache_directory(task_repository) -> Path:
+        """Workspace folder for Network Insights caches that survive restarts."""
+        folder = Path(task_repository.db_path).resolve().parent / '.network-insights-cache'
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder
+
+    def write_cache_file(folder: Path, name: str, payload: bytes, keep: int, pattern: str) -> None:
+        """Write atomically and keep only the newest files of one kind."""
+        temporary = folder / f'.{name}.{uuid4().hex}.tmp'
+        temporary.write_bytes(payload)
+        temporary.replace(folder / name)
+        for stale in sorted(folder.glob(pattern), key=lambda path: path.stat().st_mtime, reverse=True)[keep:]:
+            stale.unlink(missing_ok=True)
+
+    def samples_key(task_repository, datasets: dict[str, list[int]]) -> tuple[str, dict[str, list[int]]]:
+        """Identity of the normalised samples: CDR revisions and Operator mappings."""
         available = {row['id']: row for row in ready_cdrs(task_repository)}
         selected = {
             kind: [int(dataset_id) for dataset_id in datasets.get(kind, []) if int(dataset_id) in available and available[int(dataset_id)]['kind'] == kind]
@@ -1037,16 +1119,43 @@ def install_network_insights_routes(core: Any) -> None:
         if not any(selected.values()):
             raise HTTPException(400, 'Select at least one ready CDR.')
         fingerprint = json.dumps({
+            'version': SAMPLES_CACHE_VERSION,
             'database': str(Path(task_repository.db_path).resolve()),
             'datasets': {kind: [(dataset_id, available[dataset_id]['updated_at']) for dataset_id in ids] for kind, ids in selected.items()},
             'mappings': task_repository.chart_mapping_settings().get('operator_mappings'),
         }, sort_keys=True, default=str)
-        key = hashlib.sha256(fingerprint.encode()).hexdigest()
+        return hashlib.sha256(fingerprint.encode()).hexdigest(), selected
+
+    def load_samples(task_repository, datasets: dict[str, list[int]]) -> pd.DataFrame:
+        key, selected = samples_key(task_repository, datasets)
         with sample_cache_lock:
             cached = sample_cache.get(key)
             if cached is not None:
                 sample_cache.move_to_end(key)
                 return cached
+        # Normalised samples are kept on disk, so a restart does not read and
+        # parse the CDRs again.
+        folder = cache_directory(task_repository)
+        stored = folder / f'samples-{key}.pkl'
+        samples = None
+        if stored.is_file():
+            try:
+                samples = pd.read_pickle(stored)
+                stored.touch()
+            except Exception:
+                stored.unlink(missing_ok=True)
+        if samples is None:
+            samples = read_samples(task_repository, selected)
+            buffer = io.BytesIO()
+            samples.to_pickle(buffer, protocol=5)
+            write_cache_file(folder, stored.name, buffer.getvalue(), keep=3, pattern='samples-*.pkl')
+        with sample_cache_lock:
+            sample_cache[key] = samples
+            while len(sample_cache) > 3:
+                sample_cache.popitem(last=False)
+        return samples
+
+    def read_samples(task_repository, selected: dict[str, list[int]]) -> pd.DataFrame:
         frames = []
         mapping_settings = task_repository.chart_mapping_settings()
         for kind, ids in selected.items():
@@ -1069,12 +1178,7 @@ def install_network_insights_routes(core: Any) -> None:
             frame.attrs.update(mapping_settings)
             frame = core.normalise_operator_aliases(frame)
             frames.append(normalise_samples(frame, kind, columns))
-        samples = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-        with sample_cache_lock:
-            sample_cache[key] = samples
-            while len(sample_cache) > 3:
-                sample_cache.popitem(last=False)
-        return samples
+        return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
     @app.get('/network-insights', response_class=HTMLResponse)
     def network_insights_page(request: Request, user=Depends(insights_user)):
@@ -1093,6 +1197,8 @@ def install_network_insights_routes(core: Any) -> None:
                 'technologies': TECHNOLOGIES,
                 'coverage_threshold': DEFAULT_COVERAGE_THRESHOLD,
                 'interference_threshold': DEFAULT_INTERFERENCE_THRESHOLD,
+                'nr_coverage_threshold': DEFAULT_NR_COVERAGE_THRESHOLD,
+                'nr_interference_threshold': DEFAULT_NR_INTERFERENCE_THRESHOLD,
                 'rsrp_classes': [{'label': label, 'lower': None if math.isinf(lower) else lower, 'colour': colour} for label, lower, colour in RSRP_CLASSES],
                 'sinr_classes': [{'label': label, 'lower': None if math.isinf(lower) else lower, 'colour': colour} for label, lower, colour in SINR_CLASSES],
                 'spectrum_holdings': holdings,
@@ -1136,21 +1242,55 @@ def install_network_insights_routes(core: Any) -> None:
             (value for value in items if str(value).strip()), key=str.casefold,
         ) for field, items in values.items()}}
 
+    def analysis_key(task_repository, request: AnalysisRequest) -> str:
+        """Identity of an analysis: its request and every input it reads."""
+        samples, _selected = samples_key(task_repository, request.datasets)
+        inputs = {
+            'version': ANALYSIS_CACHE_VERSION, 'samples': samples, 'request': request.model_dump(),
+            'mapping_groups': task_repository.list_operator_mapping_groups(),
+            'holdings': load_spectrum_holdings(task_repository),
+            'inventories': [(row['id'], row['updated_at']) for row in inventory_datasets(task_repository)],
+        }
+        return hashlib.sha256(json.dumps(inputs, sort_keys=True, default=str).encode()).hexdigest()
+
     @app.post('/api/network-insights/analysis')
     def network_insights_analysis(request: AnalysisRequest, user=Depends(insights_user)):
-        return run_analysis(request)
+        # Repeating an analysis with the same CDRs and filters returns the
+        # stored result instead of recalculating it, also after a restart.
+        task_repository = bound_repository()
+        key = analysis_key(task_repository, request)
+        with analysis_cache_lock:
+            cached = analysis_cache.get(key)
+            if cached is not None:
+                analysis_cache.move_to_end(key)
+        folder = cache_directory(task_repository)
+        stored = folder / f'analysis-{key}.json'
+        if cached is None and stored.is_file():
+            cached = stored.read_bytes()
+            stored.touch()
+        if cached is None:
+            cached = json.dumps(run_analysis(request), ensure_ascii=False, allow_nan=False, separators=(',', ':')).encode('utf-8')
+            write_cache_file(folder, stored.name, cached, keep=40, pattern='analysis-*.json')
+        with analysis_cache_lock:
+            analysis_cache[key] = cached
+            while len(analysis_cache) > 12:
+                analysis_cache.popitem(last=False)
+        return Response(cached, media_type='application/json')
+
+    def technology_thresholds(request: AnalysisRequest, radio: str) -> tuple[float, float]:
+        if radio == 'nr':
+            return request.nr_coverage_threshold, request.nr_interference_threshold
+        return request.coverage_threshold, request.interference_threshold
 
     def run_analysis(request: AnalysisRequest) -> dict[str, Any]:
         technology = request.technology if request.technology in TECHNOLOGIES else 'lte'
         requested_groups = [request.group] if isinstance(request.group, str) else request.group
-        # LTE+NR always separates the technologies: LTE RSRP/SINR and NR
-        # SS-RSRP/SS-SINR use different reference signals and are never pooled.
         # Operator can only be left out when Vendor groups the samples instead.
         if 'vendor' not in requested_groups:
             requested_groups = ['operator', *requested_groups]
-        groups = [field for field in GROUPINGS
-                  if (field == 'technology' and technology == 'lte_nr')
-                  or (field != 'technology' and field in requested_groups)]
+        # LTE+NR never pools the technologies: LTE RSRP/SINR and NR SS-RSRP/SS-SINR
+        # use different reference signals, so each one gets its own section.
+        groups = [field for field in GROUPINGS if field != 'technology' and field in requested_groups]
         group_label = ' → '.join(GROUPINGS[field] for field in groups) or 'All samples'
         task_repository = bound_repository()
         samples = load_samples(task_repository, request.datasets)
@@ -1173,22 +1313,6 @@ def install_network_insights_routes(core: Any) -> None:
         if filtered.empty:
             raise HTTPException(400, 'No samples match the selected filters.')
         filtered = filtered.copy()
-        if 'technology' in groups:
-            technology_frames = []
-            for radio in ('lte', 'nr'):
-                part = filtered.loc[filtered[[f'{radio}_rsrp', f'{radio}_sinr']].notna().any(axis=1)].copy()
-                part['technology'] = TECHNOLOGIES[radio]
-                other = 'nr' if radio == 'lte' else 'lte'
-                for metric in ('rsrp', 'sinr', 'bandwidth'):
-                    part[f'{other}_{metric}'] = math.nan
-                part[f'{other}_band'] = ''
-                technology_frames.append(part)
-            filtered = pd.concat(technology_frames, ignore_index=True)
-            if filtered.empty:
-                raise HTTPException(400, 'No LTE or NR radio measurements match the selected filters.')
-            # Each row now carries one technology, so its values form one column.
-            for metric in ('rsrp', 'sinr'):
-                filtered[f'lte_nr_{metric}'] = filtered[f'lte_{metric}'].fillna(filtered[f'nr_{metric}'])
         original_operators = filtered['operator'].copy()
         operator_mappings = {str(key).casefold(): str(value)
                              for key, value in task_repository.list_operator_mappings().items()}
@@ -1211,14 +1335,22 @@ def install_network_insights_routes(core: Any) -> None:
         else:
             labels = pd.Series('All samples', index=filtered.index)
         filtered['operator'] = labels
-        group_column = None
-        # Curves sharing an Operator colour differ by line style per secondary group.
-        secondary = [field for field in groups if field != 'operator']
+        # Curves share their Operator/Vendor colour. Campaigns differ by line
+        # width (the latest is the thickest) and other groups by line style.
+        family_field = groups[0] if groups and groups[0] in {'operator', 'vendor'} else None
+        secondary = [field for field in groups if field not in {family_field, 'campaign'}]
         dash_groups = None
-        if 'operator' in groups and secondary:
-            secondary_labels = filtered[secondary].fillna('').astype(str).agg(' · '.join, axis=1)
+        if family_field and secondary:
+            secondary_values = filtered[secondary].fillna('').astype(str)
+            secondary_labels = secondary_values[secondary[0]]
+            for field in secondary[1:]:
+                secondary_labels = secondary_labels.str.cat(secondary_values[field], sep=' · ')
             dash_groups = dict(zip(labels, secondary_labels, strict=True))
-        rsrp, sinr = f'{technology}_rsrp', f'{technology}_sinr'
+        widths = None
+        if 'campaign' in groups:
+            family_values = original_operators if family_field == 'operator' else filtered[family_field] if family_field else None
+            families = dict(zip(labels, family_values.fillna('').astype(str), strict=True)) if family_values is not None else {}
+            widths = campaign_line_widths(dict(zip(labels, filtered['campaign'].fillna('').astype(str), strict=True)), families)
         mapping_groups = task_repository.list_operator_mapping_groups()
         if 'operator' in groups:
             source_colours = operator_colours(original_operators, mapping_groups)
@@ -1226,55 +1358,77 @@ def install_network_insights_routes(core: Any) -> None:
                        for label, operator in zip(labels, original_operators, strict=True)}
         else:
             colours = operator_colours(filtered['operator'], [])
-        overview = rf_summary(filtered, technology, None, request.coverage_threshold, request.interference_threshold)
-        overview.sort(key=lambda row: str(row['operator']).casefold())
         campaigns = [value for value in options['campaigns'] if value in set(filtered['campaign'])]
-        comparison = None
-        if len(campaigns) >= 2 and 'campaign' not in groups:
-            previous, latest = campaigns[-2], campaigns[-1]
-            by_campaign = {
-                (row['operator'], row['group']): row
-                for row in rf_summary(filtered.loc[filtered['campaign'].isin([previous, latest])], technology, 'campaign',
-                                      request.coverage_threshold, request.interference_threshold)
-            }
-            for row in overview:
-                before, after = by_campaign.get((row['operator'], previous)), by_campaign.get((row['operator'], latest))
-                row['deltas'] = {
-                    metric: (round(after[metric] - before[metric], 2) if before and after and after[metric] is not None and before[metric] is not None else None)
-                    for metric in ('rsrp_median', 'low_coverage_share', 'sinr_median', 'high_interference_share')
-                }
-            comparison = {'previous': previous, 'latest': latest}
-        map_operators = [row['operator'] for row in overview]
-        map_operator = request.map_operator if request.map_operator in map_operators else (map_operators[0] if map_operators else '')
-        operator_samples = filtered.loc[filtered['operator'] == map_operator]
-        coverage_cells, coverage_grid = grid_cells(operator_samples, rsrp, request.coverage_threshold, request.grid_metres, request.min_samples)
-        interference_cells, interference_grid = grid_cells(operator_samples, sinr, request.interference_threshold, request.grid_metres, request.min_samples)
-        technology_label = TECHNOLOGIES[technology]
-        holdings = load_spectrum_holdings(task_repository)
+        radios = ('lte', 'nr') if technology == 'lte_nr' else (technology,)
         warnings = []
-        rsrp_available = filtered[['lte_rsrp', 'nr_rsrp']].notna().any().any() if technology == 'lte_nr' else filtered[rsrp].notna().any()
-        if not rsrp_available:
-            warnings.append(f'The selected CDRs carry no {technology_label} RSRP samples.')
+
+        def technology_section(radio: str) -> dict[str, Any]:
+            label = TECHNOLOGIES[radio]
+            coverage_threshold, interference_threshold = technology_thresholds(request, radio)
+            rsrp, sinr = f'{radio}_rsrp', f'{radio}_sinr'
+            frame = filtered
+            if technology == 'lte_nr':
+                frame = filtered.loc[filtered[[rsrp, sinr]].notna().any(axis=1)]
+            if not frame[rsrp].notna().any():
+                warnings.append(f'The selected CDRs carry no {label} RSRP samples.')
+            overview = rf_summary(frame, radio, None, coverage_threshold, interference_threshold)
+            overview.sort(key=lambda row: str(row['operator']).casefold())
+            comparison = None
+            if len(campaigns) >= 2 and 'campaign' not in groups:
+                previous, latest = campaigns[-2], campaigns[-1]
+                by_campaign = {
+                    (row['operator'], row['group']): row
+                    for row in rf_summary(frame.loc[frame['campaign'].isin([previous, latest])], radio, 'campaign',
+                                          coverage_threshold, interference_threshold)
+                }
+                for row in overview:
+                    before, after = by_campaign.get((row['operator'], previous)), by_campaign.get((row['operator'], latest))
+                    row['deltas'] = {
+                        metric: (round(after[metric] - before[metric], 2) if before and after and after[metric] is not None and before[metric] is not None else None)
+                        for metric in ('rsrp_median', 'low_coverage_share', 'sinr_median', 'high_interference_share')
+                    }
+                comparison = {'previous': previous, 'latest': latest}
+            for row in overview:
+                row['technology'] = label
+            map_operators = [row['operator'] for row in overview]
+            map_operator = request.map_operator if request.map_operator in map_operators else (map_operators[0] if map_operators else '')
+            operator_samples = frame.loc[frame['operator'] == map_operator]
+            coverage_cells, coverage_grid = grid_cells(operator_samples, rsrp, coverage_threshold, request.grid_metres, request.min_samples)
+            interference_cells, interference_grid = grid_cells(operator_samples, sinr, interference_threshold, request.grid_metres, request.min_samples)
+            return {
+                'technology': radio, 'technology_label': label,
+                'coverage_threshold': coverage_threshold, 'interference_threshold': interference_threshold,
+                'overview': overview, 'rf_rows': overview, 'comparison': comparison,
+                'charts': {
+                    'rsrp_cdf': cdf_payload(frame, rsrp, None, f'{label} RSRP', 'RSRP (dBm)', colours, dash_groups=dash_groups, widths=widths),
+                    'sinr_cdf': cdf_payload(frame, sinr, None, f'{label} SINR', 'SINR (dB)', colours, dash_groups=dash_groups, widths=widths),
+                },
+                'maps': {
+                    'operator': map_operator, 'operators': map_operators,
+                    'coverage': map_payload(coverage_cells, RSRP_CLASSES, f'{map_operator} · Mean {label} RSRP per {coverage_grid:g} m grid', 'dBm', _osm_map_tile_geometry),
+                    'coverage_hotspots': hotspots(coverage_cells), 'coverage_grid_metres': coverage_grid,
+                    'interference': map_payload(interference_cells, SINR_CLASSES, f'{map_operator} · Mean {label} SINR per {interference_grid:g} m grid', 'dB', _osm_map_tile_geometry),
+                    'interference_hotspots': hotspots(interference_cells), 'interference_grid_metres': interference_grid,
+                },
+            }
+
+        sections = [technology_section(radio) for radio in radios]
         if filtered[['latitude', 'longitude']].dropna().empty:
             warnings.append('The selected CDRs carry no sample coordinates, so maps are unavailable.')
+        holdings = load_spectrum_holdings(task_repository)
+        rows = [row for section in sections for row in section['overview']]
+        first = sections[0]
         return {
-            'technology': technology, 'technology_label': technology_label,
+            'technology': technology, 'technology_label': TECHNOLOGIES[technology],
             'group': groups, 'group_label': group_label,
-            'options': options, 'comparison': comparison,
-            'overview': overview,
-            'rf_rows': overview,
+            'options': options, 'comparison': first['comparison'],
+            # Every technology section in order; LTE+NR has one for LTE and one for NR.
+            'sections': sections,
+            'overview': rows,
+            'rf_rows': rows,
             'missing_inventory_operators': missing_inventory_operators,
-            'charts': {
-                'rsrp_cdf': cdf_payload(filtered, rsrp, group_column, f'{technology_label} RSRP', 'RSRP (dBm)', colours, dash_groups=dash_groups),
-                'sinr_cdf': cdf_payload(filtered, sinr, group_column, f'{technology_label} SINR', 'SINR (dB)', colours, dash_groups=dash_groups),
-            },
-            'maps': {
-                'operator': map_operator, 'operators': map_operators,
-                'coverage': map_payload(coverage_cells, RSRP_CLASSES, f'{map_operator} · Mean {technology_label} RSRP per {coverage_grid:g} m grid', 'dBm', _osm_map_tile_geometry),
-                'coverage_hotspots': hotspots(coverage_cells), 'coverage_grid_metres': coverage_grid,
-                'interference': map_payload(interference_cells, SINR_CLASSES, f'{map_operator} · Mean {technology_label} SINR per {interference_grid:g} m grid', 'dB', _osm_map_tile_geometry),
-                'interference_hotspots': hotspots(interference_cells), 'interference_grid_metres': interference_grid,
-            },
+            'charts': first['charts'],
+            'maps': first['maps'],
             'spectrum': {
                 'observed': observed_spectrum(filtered),
                 'licensed': licensed_spectrum_summary(holdings),
@@ -1283,76 +1437,423 @@ def install_network_insights_routes(core: Any) -> None:
             'warnings': warnings,
         }
 
-    def combined_inventory_query(task_repository, connection, request):
-        datasets = inventory_datasets(task_repository)
-        query, parameters, columns = prepare_inventory_query(task_repository, connection, datasets, request.model_dump())
-        if query:
-            query = f'SELECT {", ".join(task_repository._quote_identifier(column) for column in columns)} FROM ({query}) AS inventory '
-            query += 'ORDER BY Source_Dataset_ID, __Inventory_Source_Row'
-        return query, parameters, columns
+    # ------------------------------------------------------------------
+    # Sites/Cells tables: complete inventories or cells observed in CDRs
+    # ------------------------------------------------------------------
+    class SitesRequest(AnalysisRequest):
+        source: str = 'inventory'
+        operator: str = ''
+        page: int = 0
+        column: str = ''
+        search: str = ''
+        # Excel-style column filters: column -> accepted values ('' is blank).
+        filters: dict[str, list[str]] = Field(default_factory=dict)
 
-    def inventory_page(connection, query, parameters, columns, page=0, operator=''):
-        if query and operator:
-            query = f'SELECT * FROM ({query}) WHERE Operator = ?'
-            parameters = [*parameters, operator]
-        total = connection.execute(f'SELECT COUNT(*) FROM ({query})', parameters).fetchone()[0] if query else 0
-        page = min(page, max(0, (total - 1) // 50))
-        rows = connection.execute(f'{query} LIMIT ? OFFSET ?', [*parameters, 50, page * 50]).fetchall() if query else []
-        return {'operator': operator, 'columns': columns, 'key_columns': list(INVENTORY_KEY_COLUMNS),
-                'rows': [list(row) for row in rows], 'total_rows': total, 'page': page, 'page_size': 50}
+    site_tables_cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
+    site_tables_lock = Lock()
 
-    @app.post('/api/network-insights/inventory/tables')
-    def network_insights_inventory_tables(request: AnalysisRequest, user=Depends(insights_user)):
-        task_repository = bound_repository()
+    def remember(key: str, build) -> dict[str, Any]:
+        with site_tables_lock:
+            cached = site_tables_cache.get(key)
+            if cached is not None:
+                site_tables_cache.move_to_end(key)
+                return cached
+        value = build()
+        with site_tables_lock:
+            site_tables_cache[key] = value
+            while len(site_tables_cache) > 8:
+                site_tables_cache.popitem(last=False)
+        return value
+
+    def operator_labels(task_repository) -> dict[str, str]:
+        """Mapped operator -> inventory label (Vodafone, Three) of the uploaded inventories."""
         mappings = {str(key).casefold(): str(value) for key, value in task_repository.list_operator_mappings().items()}
-        labels = {mappings.get(row['operator'].casefold(), row['operator']): row['operator']
-                  for row in inventory_datasets(task_repository)}
-        wanted = {mappings.get(value.casefold(), value) for value in request.operators}
+        return {mappings.get(row['operator'].casefold(), row['operator']): row['operator']
+                for row in inventory_datasets(task_repository)}
+
+    def inventory_index(task_repository) -> dict[str, Any]:
+        """Normalised key fields of every inventory row, built once per inventory revision.
+
+        Pages, filters and value lists read this index; only the visible rows
+        are read back from the stored inventories.
+        """
+        datasets = inventory_datasets(task_repository)
+        signature = json.dumps([INVENTORY_CACHE_VERSION, str(Path(task_repository.db_path).resolve()),
+                                [(row['id'], inventory_revision(task_repository, row)) for row in datasets],
+                                task_repository.chart_mapping_settings(), inventory_polygon_sources(task_repository)],
+                               sort_keys=True, default=str)
+        digest = hashlib.sha256(signature.encode()).hexdigest()
+
+        def build() -> dict[str, Any]:
+            folder = cache_directory(task_repository)
+            stored = folder / f'inventory-index-{digest}.pkl'
+            if stored.is_file():
+                try:
+                    stored.touch()
+                    return pd.read_pickle(stored)
+                except Exception:
+                    stored.unlink(missing_ok=True)
+            with task_repository.connection() as connection:
+                query, parameters, columns = prepare_inventory_query(task_repository, connection, datasets, {}, apply_filters=False)
+                quote = task_repository._quote_identifier
+                keys = [*INVENTORY_KEY_COLUMNS, 'Source_Dataset_ID', '__Inventory_Source_Row']
+                frame = pd.read_sql_query(
+                    f"SELECT {', '.join(quote(column) for column in keys)} FROM ({query})", connection, params=parameters,
+                ) if query else pd.DataFrame(columns=keys)
+            for column in INVENTORY_KEY_COLUMNS:
+                frame[column] = frame[column].fillna('').astype(str)
+            frame = frame.sort_values(['Source_Dataset_ID', '__Inventory_Source_Row'], kind='stable').reset_index(drop=True)
+            index = {'frame': frame, 'columns': columns,
+                     'names': {int(row['id']): str(row['file_name']) for row in datasets},
+                     'sources': source_column_map(task_repository, datasets)}
+            buffer = io.BytesIO()
+            pd.to_pickle(index, buffer, protocol=5)
+            write_cache_file(folder, stored.name, buffer.getvalue(), keep=3, pattern='inventory-index-*.pkl')
+            return index
+
+        return remember(f'inventory-index:{digest}', build)
+
+    def source_column_map(task_repository, datasets) -> dict[str, dict[int, str]]:
+        """Displayed column -> stored column per inventory, as in the combined query."""
+        schemas = {int(row['id']): task_repository.list_dataset_row_columns(row['id']) for row in datasets}
+        source_columns = list(dict.fromkeys(column for columns in schemas.values() for column in columns))
+        used = {column.casefold() for column in [*INVENTORY_KEY_COLUMNS, 'Source_Dataset_ID', 'Source_Dataset_Name']}
+        used |= {'__inventory_cell_id', '__inventory_source_row'}
+        mapping: dict[str, dict[int, str]] = {}
+        for source in source_columns:
+            name = f'Source_{source}' if column_identity(source) in {column_identity(key) for key in INVENTORY_KEY_COLUMNS} else source
+            while name.casefold() in used:
+                name = f'Source_{name}'
+            used.add(name.casefold())
+            mapping[name] = {dataset_id: source for dataset_id, columns in schemas.items() if source in columns}
+        return mapping
+
+    def selected_inventory(task_repository, request: SitesRequest) -> tuple[dict[str, Any], pd.DataFrame]:
+        """Inventory index rows matching the Analysis Selection (Operator, Vendor, Region, City, Technology)."""
+        index = inventory_index(task_repository)
+        frame = index['frame']
+        normalise = inventory_filter_normalizer(task_repository)
+        mask = pd.Series(True, index=frame.index)
+        for field, values in (('Operator', request.operators), ('Vendor_Only', request.vendors),
+                              ('Region', request.regions), ('City', request.cities)):
+            wanted = {normalise(value, field) for value in values if str(value).strip()}
+            if wanted:
+                keys = {value: normalise(value, field) for value in pd.unique(frame[field])}
+                mask &= frame[field].map(keys).isin(wanted)
+        technologies = ['LTE', 'NR'] if request.technology == 'lte_nr' else ['NR'] if request.technology == 'nr' else ['LTE']
+        mask &= frame['Technology'].isin(technologies)
+        return index, frame.loc[mask]
+
+    def observed_cells(task_repository, request: SitesRequest) -> dict[str, Any]:
+        """One row per LTE cell (or site without cell identity) observed in the selected CDRs."""
+        samples_identity, _selected = samples_key(task_repository, request.datasets)
+        selection = {key: value for key, value in request.model_dump().items()
+                     if key in {'operators', 'vendors', 'campaigns', 'regions', 'cities', 'technology'}}
+        digest = hashlib.sha256(json.dumps([OBSERVED_CACHE_VERSION, samples_identity, selection,
+                                            inventory_polygon_sources(task_repository)], sort_keys=True, default=str).encode()).hexdigest()
+
+        def build() -> dict[str, Any]:
+            samples = load_samples(task_repository, request.datasets)
+            filtered = samples
+            for field, values in (('operator', request.operators), ('vendor', request.vendors), ('region', request.regions),
+                                  ('city', request.cities), ('campaign', request.campaigns)):
+                if field == 'vendor':
+                    values = vendor_filter_values(values, samples['operator'].dropna().unique())
+                wanted = {str(value).casefold() for value in values if str(value).strip()}
+                if wanted:
+                    filtered = filtered.loc[filtered[field].str.casefold().isin(wanted)]
+            columns = list(OBSERVED_COLUMNS)
+            if request.technology == 'nr' or filtered.empty:
+                # Cell traces identify LTE cells only.
+                return {'frame': pd.DataFrame(columns=columns), 'columns': columns}
+            fields = ['operator', 'vendor', 'region', 'city', 'campaign', 'kind', 'lte_band', 'latitude', 'longitude', 'lte_rsrp', 'lte_sinr']
+            with_cells = filtered.loc[filtered['cells'].map(len) > 0, [*fields, 'cells']].explode('cells').rename(columns={'cells': 'cell'})
+            sites_only = filtered.loc[(filtered['cells'].map(len) == 0) & (filtered['enodebs'].map(len) > 0), [*fields, 'enodebs']]
+            sites_only = sites_only.explode('enodebs').rename(columns={'enodebs': 'site'})
+            sites_only['cell'] = ''
+            sites = {value: (str(enodeb) if (enodeb := lte_enodeb_from_eci(value)) is not None else '') for value in pd.unique(with_cells['cell'])}
+            with_cells['site'] = with_cells['cell'].map(sites)
+            rows = pd.concat([with_cells, sites_only], ignore_index=True)
+            rows = rows.loc[(rows['cell'] != '') | (rows['site'] != '')]
+            if rows.empty:
+                return {'frame': pd.DataFrame(columns=columns), 'columns': columns}
+            keys = ['operator', 'site', 'cell']
+            # Vectorised per-cell aggregation: blanks become missing so 'first'
+            # takes the first non-empty value of each cell.
+            for field in ('vendor', 'region', 'city', 'lte_band'):
+                rows[field] = rows[field].replace('', pd.NA)
+            grouped = rows.groupby(keys, sort=True, dropna=False).agg(
+                Vendor=('vendor', 'first'), Region=('region', 'first'), City=('city', 'first'), Band=('lte_band', 'first'),
+                Samples=('kind', 'size'), Latitude=('latitude', 'mean'), Longitude=('longitude', 'mean'),
+                RSRP_Mean=('lte_rsrp', 'mean'), SINR_Mean=('lte_sinr', 'mean'),
+            )
+            codes = {key: position for position, key in enumerate(grouped.index)}
+            for name, field in (('CDR_Types', 'kind'), ('Campaigns', 'campaign')):
+                # One linear pass instead of a Python call per cell.
+                distinct = rows.loc[rows[field] != '', [*keys, field]].drop_duplicates().sort_values(field)
+                values: list[list[str]] = [[] for _ in range(len(grouped))]
+                for key, value in zip(zip(*(distinct[column] for column in keys)), distinct[field]):
+                    values[codes[key]].append(str(value))
+                grouped[name] = [', '.join(items) for items in values]
+            grouped = grouped.reset_index().rename(columns={'operator': 'Operator', 'site': 'Site_ID', 'cell': 'Cell_ID'})
+            for field in ('Vendor', 'Region', 'City', 'Band'):
+                grouped[field] = grouped[field].astype(object).where(grouped[field].notna(), '')
+            grouped['Technology'] = 'LTE'
+            for column in ('Latitude', 'Longitude'):
+                grouped[column] = grouped[column].round(6)
+            for column in ('RSRP_Mean', 'SINR_Mean'):
+                grouped[column] = grouped[column].round(2)
+            grouped['Cluster'] = observed_clusters(task_repository, grouped)
+            return {'frame': grouped[columns].reset_index(drop=True), 'columns': columns}
+
+        def stored_build() -> dict[str, Any]:
+            folder = cache_directory(task_repository)
+            stored = folder / f'observed-{digest}.pkl'
+            if stored.is_file():
+                try:
+                    stored.touch()
+                    return pd.read_pickle(stored)
+                except Exception:
+                    stored.unlink(missing_ok=True)
+            result = build()
+            buffer = io.BytesIO()
+            pd.to_pickle(result, buffer, protocol=5)
+            write_cache_file(folder, stored.name, buffer.getvalue(), keep=12, pattern='observed-*.pkl')
+            return result
+
+        return remember(f'observed:{digest}', stored_build)
+
+    def observed_clusters(task_repository, frame: pd.DataFrame) -> pd.Series:
+        """Cluster of each observed cell's mean position, when Clusters polygons are imported."""
+        sources = inventory_polygon_sources(task_repository)
+        lookups = inventory_polygon_lookup(sources) if sources else {}
+        if 'Cluster' not in lookups or frame.empty:
+            return pd.Series('', index=frame.index)
+        import shapely
+
+        tree, names = lookups['Cluster']
+        located = frame['Longitude'].notna() & frame['Latitude'].notna()
+        result = pd.Series('', index=frame.index, dtype=object)
+        if not located.any():
+            return result
+        # One bulk spatial query; the first matching polygon names each cell.
+        points = shapely.points(frame.loc[located, 'Longitude'].to_numpy(), frame.loc[located, 'Latitude'].to_numpy())
+        inputs, matches = tree.query(points, predicate='intersects')
+        first: dict[int, int] = {}
+        for position, match in zip(inputs.tolist(), matches.tolist()):
+            first.setdefault(position, match)
+        positions = frame.index[located]
+        result.loc[positions] = [names[first[position]] if position in first else '' for position in range(len(positions))]
+        return result
+
+    def table_operators(task_repository, request: SitesRequest, frame: pd.DataFrame) -> dict[str, str]:
+        """Operators with a table: those of the uploaded inventories, otherwise the CDR operators."""
+        labels = operator_labels(task_repository)
+        if not labels and request.source == 'observed':
+            labels = {value: value for value in pd.unique(frame['Operator']) if str(value).strip()}
+        mappings = {str(key).casefold(): str(value) for key, value in task_repository.list_operator_mappings().items()}
+        wanted = {mappings.get(value.casefold(), value) for value in request.operators if str(value).strip()}
+        return {operator: label for operator, label in labels.items() if not wanted or operator in wanted}
+
+    def text_values(series: pd.Series) -> pd.Series:
+        """Values as filters compare them: text, with blanks as ''."""
+        values = series.astype(object).where(series.notna(), '')
+        return values.map(lambda value: '' if value is None else (str(int(value)) if isinstance(value, float) and value.is_integer() else str(value)).strip())
+
+    def source_rowids(task_repository, index, column: str, values: list[str]) -> dict[int, set[int]]:
+        """Inventory rows whose stored column holds one of the values, per inventory."""
+        quote = task_repository._quote_identifier
+        wanted = [str(value) for value in values]
+        rowids: dict[int, set[int]] = {}
         with task_repository.connection() as connection:
-            query, parameters, columns = combined_inventory_query(task_repository, connection, request)
-            tables = [{**inventory_page(connection, query, parameters, columns, operator=operator), 'operator_label': label}
-                      for operator, label in labels.items() if not wanted or operator in wanted]
-        return {'inventories': tables}
+            for dataset_id in index['names']:
+                stored = index['sources'].get(column, {}).get(dataset_id)
+                table = quote(task_repository.dataset_rows_table_name(dataset_id))
+                if stored is None:
+                    # An inventory without the column has it blank in every row.
+                    rowids[dataset_id] = ({int(row[0]) for row in connection.execute(f'SELECT rowid FROM {table}')}
+                                          if '' in wanted else set())
+                    continue
+                text = f"TRIM(COALESCE(CAST({quote(stored)} AS TEXT), ''))"
+                placeholders = ', '.join('?' for _ in wanted)
+                rows = connection.execute(f'SELECT rowid FROM {table} WHERE {text} IN ({placeholders})', wanted).fetchall()
+                rowids[dataset_id] = {int(row[0]) for row in rows}
+        return rowids
 
-    @app.post('/api/network-insights/inventory')
-    def network_insights_combined_inventory(request: AnalysisRequest, page: int = Query(0, ge=0),
-                                          operator: str = '', user=Depends(insights_user)):
-        task_repository = bound_repository()
+    def apply_column_filters(task_repository, request: SitesRequest, index, frame: pd.DataFrame, skip: str = '') -> pd.DataFrame:
+        for column, values in request.filters.items():
+            if column == skip or values is None:
+                continue
+            accepted = {str(value) for value in values}
+            if column in frame.columns and not column.startswith('__'):
+                frame = frame.loc[text_values(frame[column]).isin(accepted)]
+            elif request.source == 'inventory' and column == 'Source_Dataset_Name':
+                names = {dataset_id for dataset_id, name in index['names'].items() if name in accepted}
+                frame = frame.loc[frame['Source_Dataset_ID'].isin(names)]
+            elif request.source == 'inventory' and column in index['sources']:
+                rowids = source_rowids(task_repository, index, column, sorted(accepted))
+                keys = set((dataset_id, rowid) for dataset_id, ids in rowids.items() for rowid in ids)
+                pairs = pd.Series(list(zip(frame['Source_Dataset_ID'].astype(int), frame['__Inventory_Source_Row'].astype(int))), index=frame.index)
+                frame = frame.loc[pairs.isin(keys)]
+        return frame
+
+    def table_frame(task_repository, request: SitesRequest, skip_filter: str = '') -> tuple[dict[str, Any], pd.DataFrame, list[str]]:
+        """Rows of one Sites/Cells table after the Analysis Selection and column filters."""
+        if request.source == 'observed':
+            observed = observed_cells(task_repository, request)
+            index, frame, columns = observed, observed['frame'], observed['columns']
+        else:
+            index, frame = selected_inventory(task_repository, request)
+            columns = index['columns']
+        if request.operator:
+            frame = frame.loc[frame['Operator'] == request.operator]
+        return index, apply_column_filters(task_repository, request, index, frame, skip_filter), columns
+
+    def inventory_rows(task_repository, index, frame: pd.DataFrame, columns: list[str]) -> list[list[Any]]:
+        """Complete rows of the given index entries, in index order."""
+        quote = task_repository._quote_identifier
+        stored: dict[tuple[int, int], dict[str, Any]] = {}
         with task_repository.connection() as connection:
-            query, parameters, columns = combined_inventory_query(task_repository, connection, request)
-            return inventory_page(connection, query, parameters, columns, page, operator)
+            for dataset_id, part in frame.groupby('Source_Dataset_ID', sort=False):
+                dataset_id = int(dataset_id)
+                table = quote(task_repository.dataset_rows_table_name(dataset_id))
+                fields = {name: sources[dataset_id] for name, sources in index['sources'].items() if dataset_id in sources}
+                rowids = [int(value) for value in part['__Inventory_Source_Row']]
+                for start in range(0, len(rowids), 500):
+                    chunk = rowids[start:start + 500]
+                    select = ', '.join(['rowid', *(quote(source) for source in fields.values())])
+                    for row in connection.execute(f"SELECT {select} FROM {table} WHERE rowid IN ({', '.join('?' for _ in chunk)})", chunk):
+                        stored[(dataset_id, int(row[0]))] = dict(zip(fields, row[1:]))
+        rows = []
+        for record in frame.to_dict('records'):
+            dataset_id, rowid = int(record['Source_Dataset_ID']), int(record['__Inventory_Source_Row'])
+            values = stored.get((dataset_id, rowid), {})
+            row = []
+            for column in columns:
+                if column == 'Source_Dataset_Name':
+                    row.append(index['names'].get(dataset_id, ''))
+                elif column in record and not column.startswith('__'):
+                    row.append(record[column])
+                else:
+                    row.append(values.get(column))
+            rows.append(row)
+        return rows
 
-    @app.post('/api/network-insights/inventory/export')
-    def network_insights_combined_inventory_export(request: AnalysisRequest, operator: str = '', user=Depends(insights_user)):
+    def table_page(task_repository, request: SitesRequest, label: str = '') -> dict[str, Any]:
+        index, frame, columns = table_frame(task_repository, request)
+        total = len(frame)
+        page = min(max(request.page, 0), max(0, (total - 1) // 50))
+        visible = frame.iloc[page * 50:(page + 1) * 50]
+        if request.source == 'inventory':
+            rows = inventory_rows(task_repository, index, visible, columns)
+            key_columns = list(INVENTORY_KEY_COLUMNS)
+        else:
+            rows = visible.astype(object).where(visible.notna(), None).values.tolist()
+            key_columns = ['Operator', 'Site_ID', 'Cell_ID']
+        return {'operator': request.operator, 'operator_label': label or request.operator, 'source': request.source,
+                'columns': columns, 'key_columns': key_columns, 'rows': rows, 'total_rows': total, 'page': page,
+                'page_size': 50, 'filters': {column: values for column, values in request.filters.items() if values is not None}}
+
+    def table_suffix(labels: list[str]) -> str:
+        """CSV suffix: _VF for Vodafone, _3 for Three and _VF_3 for both."""
+        codes = []
+        for label in labels:
+            text = str(label).strip()
+            code = {'vodafone': 'VF', 'vf': 'VF', 'vf_uk': 'VF', 'three': '3', '3': '3', '3uk': '3'}.get(text.casefold())
+            codes.append(code or re.sub(r'[^A-Za-z0-9]+', '_', text).strip('_'))
+        ordered = sorted(dict.fromkeys(code for code in codes if code), key=lambda code: (code != 'VF', code != '3', code))
+        return ('_' + '_'.join(ordered)) if ordered else ''
+
+    @app.post('/api/network-insights/sites/tables')
+    def network_insights_site_tables(request: SitesRequest, user=Depends(insights_user)):
         task_repository = bound_repository()
+        _index, frame, _columns = table_frame(task_repository, SitesRequest(**{**request.model_dump(), 'operator': '', 'filters': {}}))
+        labels = table_operators(task_repository, request, frame)
+        tables = [table_page(task_repository, SitesRequest(**{**request.model_dump(), 'operator': operator, 'page': 0, 'filters': {}}), label)
+                  for operator, label in labels.items()]
+        return {'source': request.source, 'tables': tables}
 
+    @app.post('/api/network-insights/sites/page')
+    def network_insights_site_page(request: SitesRequest, user=Depends(insights_user)):
+        task_repository = bound_repository()
+        labels = operator_labels(task_repository)
+        return table_page(task_repository, request, labels.get(request.operator, request.operator))
+
+    @app.post('/api/network-insights/sites/values')
+    def network_insights_site_values(request: SitesRequest, user=Depends(insights_user)):
+        """Values of one column under every other filter, for its Excel-style filter."""
+        task_repository = bound_repository()
+        index, frame, columns = table_frame(task_repository, request, skip_filter=request.column)
+        if request.column not in columns:
+            raise HTTPException(400, 'Choose a column of the table.')
+        if request.source == 'inventory' and request.column not in frame.columns and request.column != 'Source_Dataset_Name':
+            counts = Counter()
+            quote = task_repository._quote_identifier
+            with task_repository.connection() as connection:
+                for dataset_id, part in frame.groupby('Source_Dataset_ID', sort=False):
+                    stored = index['sources'].get(request.column, {}).get(int(dataset_id))
+                    if stored is None:
+                        counts[''] += len(part)
+                        continue
+                    table = quote(task_repository.dataset_rows_table_name(int(dataset_id)))
+                    rowids = json.dumps([int(value) for value in part['__Inventory_Source_Row']])
+                    text = f"TRIM(COALESCE(CAST({quote(stored)} AS TEXT), ''))"
+                    for value, count in connection.execute(
+                        f'SELECT {text}, COUNT(*) FROM {table} WHERE rowid IN (SELECT value FROM json_each(?)) GROUP BY 1', [rowids],
+                    ):
+                        counts[str(value)] += int(count)
+        elif request.column == 'Source_Dataset_Name':
+            counts = Counter({index['names'].get(int(key), ''): int(value) for key, value in frame['Source_Dataset_ID'].value_counts().items()})
+        else:
+            counts = Counter(text_values(frame[request.column]).value_counts().to_dict())
+        search = request.search.strip().casefold()
+        values = sorted((value for value in counts if not search or search in value.casefold()), key=lambda value: (value == '', value.casefold()))
+        return {'column': request.column, 'values': [{'value': value, 'count': counts[value]} for value in values[:2000]],
+                'truncated': len(values) > 2000, 'selected': request.filters.get(request.column)}
+
+    @app.post('/api/network-insights/sites/export')
+    def network_insights_site_export(request: SitesRequest, user=Depends(insights_user)):
         from tempfile import NamedTemporaryFile
 
         from fastapi.responses import FileResponse
         from starlette.background import BackgroundTask
 
-        # SQLite connections must stay on the worker that created them. A streaming
-        # iterator may resume on another worker, leaving a partially downloaded CSV.
+        task_repository = bound_repository()
+        index, frame, columns = table_frame(task_repository, request)
+        labels = operator_labels(task_repository) or {value: value for value in pd.unique(frame['Operator'])}
+        included = [request.operator] if request.operator else list(dict.fromkeys(str(value) for value in frame['Operator']))
+        suffix = table_suffix([labels.get(operator, operator) for operator in included] or list(labels.values()))
+        name = ('cdr-observed-sites-cells' if request.source == 'observed' else 'site-cell-inventory') + f'{suffix}.csv'
         with NamedTemporaryFile(mode='w', newline='', encoding='utf-8', suffix='.csv', delete=False) as output:
             destination = Path(output.name)
             try:
-                with task_repository.connection() as connection:
-                    query, parameters, columns = combined_inventory_query(task_repository, connection, request)
-                    if query and operator:
-                        query = f'SELECT * FROM ({query}) WHERE Operator = ?'
-                        parameters = [*parameters, operator]
-                    writer = csv.writer(output)
-                    writer.writerow(columns)
-                    if query:
-                        cursor = connection.execute(query, parameters)
-                        while rows := cursor.fetchmany(1000):
-                            writer.writerows(tuple('' if value is None else value for value in row) for row in rows)
+                writer = csv.writer(output)
+                writer.writerow(columns)
+                for start in range(0, len(frame), 5000):
+                    chunk = frame.iloc[start:start + 5000]
+                    rows = (inventory_rows(task_repository, index, chunk, columns) if request.source == 'inventory'
+                            else chunk.astype(object).where(chunk.notna(), None).values.tolist())
+                    writer.writerows(['' if value is None else value for value in row] for row in rows)
             except Exception:
                 destination.unlink(missing_ok=True)
                 raise
-
-        return FileResponse(destination, media_type='text/csv', filename='site-cell-inventory.csv',
+        return FileResponse(destination, media_type='text/csv', filename=name,
                             background=BackgroundTask(destination.unlink, missing_ok=True))
+
+    # Earlier routes of the complete inventory tables answer through the same tables.
+    @app.post('/api/network-insights/inventory/tables')
+    def network_insights_inventory_tables(request: AnalysisRequest, user=Depends(insights_user)):
+        tables = network_insights_site_tables(SitesRequest(**request.model_dump(), source='inventory'), user)['tables']
+        return {'inventories': tables}
+
+    @app.post('/api/network-insights/inventory')
+    def network_insights_combined_inventory(request: AnalysisRequest, page: int = Query(0, ge=0),
+                                          operator: str = '', user=Depends(insights_user)):
+        return network_insights_site_page(SitesRequest(**request.model_dump(), source='inventory', page=page, operator=operator), user)
+
+    @app.post('/api/network-insights/inventory/export')
+    def network_insights_combined_inventory_export(request: AnalysisRequest, operator: str = '', user=Depends(insights_user)):
+        return network_insights_site_export(SitesRequest(**request.model_dump(), source='inventory', operator=operator), user)
 
     def inventory_records(task_repository, dataset: dict[str, Any], page: int = 0) -> dict[str, Any]:
         """Read a bounded page without discarding inventory columns or unmatched rows."""
@@ -1377,7 +1878,7 @@ def install_network_insights_routes(core: Any) -> None:
             return StreamingResponse(
                 task_repository.stream_dataset_preview_csv(dataset_id, columns, {}),
                 media_type='text/csv',
-                headers={'Content-Disposition': f'attachment; filename="site-inventory-{dataset_id}.csv"'},
+                headers={'Content-Disposition': f'attachment; filename="site-inventory{table_suffix([dataset["operator"]])}.csv"'},
             )
         return inventory_records(task_repository, dataset, page)
 
@@ -1398,7 +1899,7 @@ def install_network_insights_routes(core: Any) -> None:
         writer.writerows((row['group'], row['sites'], row['cells']) for row in summary['rows'])
         return StreamingResponse(
             iter([output.getvalue()]), media_type='text/csv',
-            headers={'Content-Disposition': f'attachment; filename="network-deployment-{dataset_id}-{group}.csv"'},
+            headers={'Content-Disposition': f'attachment; filename="network-deployment-{group}{table_suffix([dataset["operator"]])}.csv"'},
         )
 
     @app.get('/api/network-insights/deployment/export-all')
@@ -1412,12 +1913,55 @@ def install_network_insights_routes(core: Any) -> None:
         for inventory in deployment['inventories']:
             writer.writerows((inventory['operator'], inventory['id'], inventory['file_name'],
                               row['group'], row['sites'], row['cells']) for row in inventory['rows'])
+        suffix = table_suffix([inventory['operator'] for inventory in deployment['inventories']])
         return StreamingResponse(iter([output.getvalue()]), media_type='text/csv',
-                                 headers={'Content-Disposition': f'attachment; filename="network-deployment-all-{group}.csv"'})
+                                 headers={'Content-Disposition': f'attachment; filename="network-deployment-{group}{suffix}.csv"'})
 
     @app.get('/api/network-insights/deployment')
     def network_insights_deployment(group: str = 'scenario', user=Depends(insights_user)):
         return deployment_summary(group)
+
+    def inventory_revision(task_repository, dataset: dict[str, Any]) -> tuple:
+        """Profile revision plus row count and last row, so any row change refreshes caches."""
+        table = task_repository._quote_identifier(task_repository.dataset_rows_table_name(dataset['id']))
+        try:
+            with task_repository.connection() as connection:
+                count, last = connection.execute(f'SELECT COUNT(*), MAX(rowid) FROM {table}').fetchone()
+        except sqlite3.OperationalError:
+            count, last = 0, 0
+        columns = tuple(task_repository.list_dataset_row_columns(dataset['id']))
+        return dataset['updated_at'], int(count or 0), int(last or 0), columns
+
+    def cached_inventory_projection(task_repository, dataset: dict[str, Any]) -> dict[str, Any]:
+        """An inventory's identifiers and grouping fields, kept in memory and on disk."""
+        key = (str(Path(task_repository.db_path).resolve()), dataset['id'],
+               dataset['file_name'], inventory_revision(task_repository, dataset), inventory_polygon_sources(task_repository))
+        with inventory_cache_lock:
+            cached = inventory_cache.get(key)
+            if cached is not None:
+                inventory_cache.move_to_end(key)
+                return cached
+        folder = cache_directory(task_repository)
+        digest = hashlib.sha256(json.dumps([INVENTORY_CACHE_VERSION, *key], default=str).encode()).hexdigest()
+        stored = folder / f'inventory-{digest}.pkl'
+        frame = None
+        if stored.is_file():
+            try:
+                frame = pd.read_pickle(stored)
+                stored.touch()
+            except Exception:
+                stored.unlink(missing_ok=True)
+        if frame is None:
+            frame = inventory_projection(task_repository, dataset)
+            buffer = io.BytesIO()
+            frame.to_pickle(buffer, protocol=5)
+            write_cache_file(folder, stored.name, buffer.getvalue(), keep=8, pattern='inventory-*.pkl')
+        with inventory_cache_lock:
+            cached = inventory_cache.setdefault(key, {'frame': frame, 'summaries': {}})
+            inventory_cache.move_to_end(key)
+            while len(inventory_cache) > 6:
+                inventory_cache.popitem(last=False)
+        return cached
 
     def deployment_summary(group: str = 'scenario') -> dict[str, Any]:
         task_repository = bound_repository()
@@ -1427,17 +1971,8 @@ def install_network_insights_routes(core: Any) -> None:
             if group == 'inventory':
                 results.append(inventory_records(task_repository, dataset))
                 continue
-            # Profile revisions change after processing and supported table edits.
-            key = (str(Path(task_repository.db_path).resolve()), dataset['id'],
-                   dataset['file_name'], dataset['updated_at'], inventory_polygon_sources(task_repository))
+            cached = cached_inventory_projection(task_repository, dataset)
             with inventory_cache_lock:
-                cached = inventory_cache.get(key)
-                if cached is None:
-                    cached = {'frame': inventory_projection(task_repository, dataset), 'summaries': {}}
-                    inventory_cache[key] = cached
-                inventory_cache.move_to_end(key)
-                while len(inventory_cache) > 4:
-                    inventory_cache.popitem(last=False)
                 grouping = group if group in DEPLOYMENT_GROUPINGS else None
                 if grouping not in cached['summaries']:
                     cached['summaries'][grouping] = inventory_summary(
@@ -1451,7 +1986,7 @@ def install_network_insights_routes(core: Any) -> None:
         task_repository = bound_repository()
         frames: dict[str, list[pd.DataFrame]] = {}
         for dataset in inventory_datasets(task_repository):
-            frames.setdefault(dataset['operator'], []).append(inventory_projection(task_repository, dataset))
+            frames.setdefault(dataset['operator'], []).append(cached_inventory_projection(task_repository, dataset)['frame'])
         rows = []
         for operator, sources in sorted(frames.items()):
             frame = pd.concat(sources, ignore_index=True)

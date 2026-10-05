@@ -14,6 +14,7 @@ another workspace is active runs as soon as its workspace becomes active again.
 import calendar
 import html
 import json
+import math
 import re
 import shutil
 import sqlite3
@@ -123,6 +124,28 @@ def _formats(values: Any) -> list[str]:
     return selected or ['powerpoint']
 
 
+def _network_thresholds(selection: dict[str, Any]) -> dict[str, float]:
+    """LTE and NR thresholds of a Network Insights selection.
+
+    Jobs saved before NR had its own thresholds keep their single pair for
+    NR-only analyses.
+    """
+    def number(key: str, default: float) -> float:
+        try:
+            value = float(selection.get(key))
+        except (TypeError, ValueError):
+            return default
+        return value if math.isfinite(value) else default
+
+    legacy_nr = selection.get('technology') == 'nr' and 'nr_coverage_threshold' not in selection
+    return {
+        'coverage_threshold': number('coverage_threshold', -110.0),
+        'interference_threshold': number('interference_threshold', 0.0),
+        'nr_coverage_threshold': number('coverage_threshold' if legacy_nr else 'nr_coverage_threshold', -115.0),
+        'nr_interference_threshold': number('interference_threshold' if legacy_nr else 'nr_interference_threshold', -3.0),
+    }
+
+
 def _datasets_by_kind(value: Any) -> dict[str, list[int]]:
     if not isinstance(value, dict):
         return {}
@@ -167,8 +190,7 @@ def normalize_definition(raw: Any) -> dict[str, Any]:
                 'technology': network_selection.get('technology') if network_selection.get('technology') in {'lte', 'nr', 'lte_nr'} else 'lte',
                 'group': _strings(network_selection.get('group')) or ['operator', 'campaign'],
                 **{field: _strings(network_selection.get(field)) for field in NETWORK_FILTER_FIELDS},
-                'coverage_threshold': float(network_selection.get('coverage_threshold', -110) or -110),
-                'interference_threshold': float(network_selection.get('interference_threshold', 0) or 0),
+                **_network_thresholds(network_selection),
                 'grid_metres': float(network_selection.get('grid_metres', 250) or 250),
             },
         },

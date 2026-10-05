@@ -630,18 +630,37 @@ def test_grouped_cdf_curves_differ_by_line_style_and_lte_nr_stays_separate(clien
         'datasets': {'data': ids}, 'technology': 'lte', 'group': ['vendor'],
     }).json()
     assert pooled['group'] == ['vendor']
-    styles = {(series['colour'], str(series['dash'])) for series in grouped['charts']['rsrp_cdf']['series']}
-    assert len(styles) == len(grouped['charts']['rsrp_cdf']['series']) == 4
+    # Campaigns keep the Operator colour: the latest is the thickest line.
+    series = grouped['charts']['rsrp_cdf']['series']
+    assert len(series) == 4 and all(not item['dash'] for item in series)
+    widths = {item['name']: item['width'] for item in series}
+    assert widths == {'EE · 2026-Q1': 1, 'EE · 2026-Q2': 4, 'VF · 2026-Q1': 1, 'VF · 2026-Q2': 4}
+    assert len({item['colour'] for item in series}) == 2
+    styles = {(item['colour'], str(item['dash'])) for item in client.post('/api/network-insights/analysis', json={
+        'datasets': {'data': ids}, 'technology': 'lte', 'group': ['operator', 'city'],
+    }).json()['charts']['rsrp_cdf']['series']}
+    # Other groups (EE in Leeds, VF in York) differ by line style.
+    assert len({dash for _colour, dash in styles}) == len(styles) == 2
 
-    # LTE and NR RSRP are never pooled: LTE+NR always groups by Technology.
+    # LTE and NR are never pooled: LTE+NR returns one section per technology
+    # with its own thresholds, CDFs, overview and maps.
     combined = client.post('/api/network-insights/analysis', json={
         'datasets': {'data': ids}, 'technology': 'lte_nr', 'group': ['operator'],
+        'coverage_threshold': -100, 'nr_coverage_threshold': -90,
     }).json()
-    assert combined['group'] == ['operator', 'technology']
-    medians = {row['operator']: row['rsrp_median'] for row in combined['overview']}
-    assert medians['EE · NR'] == medians['EE · LTE'] - 8
-    names = [series['name'] for series in combined['charts']['rsrp_cdf']['series']]
-    assert sorted(names) == ['EE · LTE', 'EE · NR', 'VF · LTE', 'VF · NR']
+    assert combined['group'] == ['operator']
+    lte, nr = combined['sections']
+    assert (lte['technology'], nr['technology']) == ('lte', 'nr')
+    assert (lte['coverage_threshold'], nr['coverage_threshold']) == (-100, -90)
+    assert nr['interference_threshold'] == ni.DEFAULT_NR_INTERFERENCE_THRESHOLD
+    assert lte['charts']['rsrp_cdf']['title'] == 'LTE RSRP' and nr['charts']['rsrp_cdf']['title'] == 'NR RSRP'
+    assert lte['maps']['coverage']['type'] == nr['maps']['coverage']['type'] == 'map'
+    lte_ee = next(row for row in lte['overview'] if row['operator'] == 'EE')
+    nr_ee = next(row for row in nr['overview'] if row['operator'] == 'EE')
+    assert nr_ee['rsrp_median'] == lte_ee['rsrp_median'] - 8
+    assert lte_ee['technology'] == 'LTE' and nr_ee['technology'] == 'NR'
+    assert len(combined['overview']) == len(lte['overview']) + len(nr['overview'])
+    assert sorted(series['name'] for series in nr['charts']['rsrp_cdf']['series']) == ['EE', 'VF']
 
 
 @pytest.mark.parametrize('kind', ['mapping_vodafone', 'mapping_three'])
@@ -674,7 +693,7 @@ def test_full_inventory_pages_and_csv_preserve_all_records(client, tmp_path, kin
     assert exported[-1][0] == '' and exported[-1][1] == '102'
     assert float(exported[1][4]) == rows.iloc[0]['Coordinates']
     page = client.get('/network-insights').text
-    assert 'Full Site / Cell Inventory' in page
+    assert 'Full Sites/Cells Inventory' in page
     assert page.index('class="module-tabs-secondary"') < page.index('class="module-tabs-primary"')
 
 
@@ -877,6 +896,8 @@ const group = {
   dispatchEvent(event) { events.push(event.type); if (event.type === 'change') listeners.forEach(callback => callback()); },
 };
 const technology = {value: 'lte'};
+const thresholds = [{dataset: {niRadio: 'lte'}, hidden: false}, {dataset: {niRadio: 'nr'}, hidden: false}];
+global.document = {querySelectorAll: () => thresholds};
 const $ = id => id === 'ni-group' ? group : technology;
 '''
     assertions = r'''
@@ -894,15 +915,17 @@ group.dispatchEvent(new Event('change'));
 assert.equal(choice('operator').disabled, true);
 assert.equal(choice('operator').selected, true);
 assert.equal(events.includes('multiselect:options-updated'), false);
+group.options.push(new Choice('Technology', 'technology'));
 technology.value = 'lte_nr'; syncTechnologyGrouping();
-assert.equal(choice('technology').disabled, true);
-assert.equal(choice('technology').selected, true);
+assert.equal(choice('technology'), undefined);
+assert.deepEqual(thresholds.map(item => item.hidden), [false, false]);
 group.options.filter(option => !option.disabled).forEach(option => {option.selected = false;});
 group.dispatchEvent(new Event('change'));
 assert.equal(choice('operator').selected, true);
-assert.equal(choice('technology').selected, true);
 technology.value = 'nr'; syncTechnologyGrouping();
-assert.equal(choice('technology'), undefined);
+assert.deepEqual(thresholds.map(item => item.hidden), [true, false]);
+technology.value = 'lte'; syncTechnologyGrouping();
+assert.deepEqual(thresholds.map(item => item.hidden), [false, true]);
 '''
     subprocess.run([node, '-e', script + grouping_code + assertions], check=True, capture_output=True, text=True)
 
@@ -1088,3 +1111,74 @@ def test_pending_inventory_names_follow_actual_filtered_operators_not_group_labe
     assert response.json()['missing_inventory_operators'] == []
     response = client.post('/api/network-insights/analysis', json={**selection, 'operators': ['EE']})
     assert response.json()['missing_inventory_operators'] == ['EE']
+
+
+def test_site_tables_filter_columns_excel_style_and_export_with_operator_suffix(client, tmp_path):
+    _login(client)
+    selection = _combined_inventory_sources(tmp_path)
+    tables = client.post('/api/network-insights/sites/tables', json={**selection, 'source': 'inventory'}).json()['tables']
+    assert {table['operator']: table['total_rows'] for table in tables} == {'VF': 56, '3': 2}
+    request = {**selection, 'source': 'inventory', 'operator': 'VF', 'column': 'Site_ID'}
+    values = client.post('/api/network-insights/sites/values', json=request).json()['values']
+    assert {row['value']: row['count'] for row in values} == {'VF1': 55, 'VF5G': 1}
+    page = client.post('/api/network-insights/sites/page', json={**request, 'filters': {'Site_ID': ['VF5G']}}).json()
+    assert page['total_rows'] == 1 and page['filters'] == {'Site_ID': ['VF5G']}
+    response = client.post('/api/network-insights/sites/export', json={**request, 'filters': {'Site_ID': ['VF5G']}})
+    assert 'site-cell-inventory_VF.csv' in response.headers['content-disposition']
+    assert len(list(csv.reader(io.StringIO(response.text)))) == 2
+    response = client.post('/api/network-insights/sites/export', json={**selection, 'source': 'inventory', 'operator': '3'})
+    assert 'site-cell-inventory_3.csv' in response.headers['content-disposition']
+    response = client.post('/api/network-insights/sites/export', json={**selection, 'source': 'inventory'})
+    assert 'site-cell-inventory_VF_3.csv' in response.headers['content-disposition']
+    assert client.post('/api/network-insights/sites/values', json={**request, 'column': 'Missing'}).status_code == 400
+
+
+def test_observed_site_tables_aggregate_cdr_cells_per_operator(client, tmp_path):
+    _login(client)
+    cdr = _add_ready_dataset(tmp_path, 'analysis.xlsx', 'data', _data_rows('2026-Q1'))
+    selection = {'datasets': {'data': [cdr]}, 'technology': 'lte', 'source': 'observed'}
+    response = client.post('/api/network-insights/sites/tables', json=selection)
+    assert response.status_code == 200
+    tables = response.json()['tables']
+    assert tables and all(table['source'] == 'observed' for table in tables)
+    assert tables[0]['columns'] == list(ni.OBSERVED_COLUMNS)
+    assert sum(row[tables[0]['columns'].index('Samples')] for table in tables for row in table['rows']) > 0
+    vf = next(table for table in tables if table['operator'] == 'VF')
+    exported = client.post('/api/network-insights/sites/export', json={**selection, 'operator': 'VF'})
+    assert 'cdr-observed-sites-cells_VF.csv' in exported.headers['content-disposition']
+    assert len(list(csv.reader(io.StringIO(exported.text)))) == vf['total_rows'] + 1
+
+
+def test_repeated_analysis_reuses_cached_result_until_cdrs_change(client, tmp_path, monkeypatch):
+    _login(client)
+    cdr = _add_ready_dataset(tmp_path, 'analysis.xlsx', 'data', _data_rows('2026-Q1'))
+    selection = {'datasets': {'data': [cdr]}, 'technology': 'lte'}
+    first = client.post('/api/network-insights/analysis', json=selection)
+    assert first.status_code == 200
+    calls = []
+    original = ni.normalise_samples
+    monkeypatch.setattr(ni, 'normalise_samples', lambda *args, **kwargs: calls.append(1) or original(*args, **kwargs))
+    second = client.post('/api/network-insights/analysis', json=selection)
+    assert second.json() == first.json() and calls == []
+    app_module.repository.replace_dataset_rows(cdr, _data_rows('2026-Q1', rsrp_offset=-20))
+    app_module.repository.update_dataset_profile(cdr, processed_at=local_now_iso())
+    third = client.post('/api/network-insights/analysis', json=selection)
+    assert third.status_code == 200 and calls
+
+
+def test_lte_nr_summary_export_has_separate_technology_sections(client, tmp_path):
+    from docx import Document
+
+    _login(client)
+    rows = _data_rows('2026-Q1')
+    rows['NR_PCell_RSRP_Avg'] = rows['LTE_PCell_RSRP_Avg'] - 8
+    cdr = _add_ready_dataset(tmp_path, 'analysis.xlsx', 'data', rows)
+    response = client.post('/api/network-insights/export/word', json={
+        'datasets': {'data': [cdr]}, 'technology': 'lte_nr', 'nr_coverage_threshold': -120})
+    assert response.status_code == 200
+    document = Document(io.BytesIO(response.content))
+    headings = [paragraph.text for paragraph in document.paragraphs if paragraph.style.name.startswith('Heading')]
+    assert 'RF Quality Overview · LTE' in headings and 'RF Quality Overview · NR' in headings
+    assert 'Coverage Map · NR' in headings
+    text = '\n'.join(paragraph.text for paragraph in document.paragraphs)
+    assert 'NR thresholds: low coverage below -120.0 dBm RSRP' in text

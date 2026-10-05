@@ -44,8 +44,10 @@
           <div class="rj-grid">
             <label>NR Mode<select id="rj-ni-nr-mode"><option value="NSA">NSA</option><option value="SA">SA</option></select></label>
             <label>Technology<select id="rj-ni-technology"></select></label>
-            <label>Low coverage below (dBm)<input type="number" id="rj-ni-coverage" value="-110" step="1"></label>
-            <label>High interference below (dB)<input type="number" id="rj-ni-interference" value="0" step="1"></label>
+            <label data-rj-ni-radio="lte">LTE low coverage below (dBm)<input type="number" id="rj-ni-coverage" value="-110" step="1"></label>
+            <label data-rj-ni-radio="lte">LTE high interference below (dB)<input type="number" id="rj-ni-interference" value="0" step="0.5"></label>
+            <label data-rj-ni-radio="nr">NR low coverage below (dBm)<input type="number" id="rj-ni-nr-coverage" value="-115" step="1"></label>
+            <label data-rj-ni-radio="nr">NR high interference below (dB)<input type="number" id="rj-ni-nr-interference" value="-3" step="0.5"></label>
           </div>
           <div class="rj-inline" id="rj-ni-group"></div>
           <div id="rj-ni-filters" class="rj-filters"></div>

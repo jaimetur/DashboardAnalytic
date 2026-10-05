@@ -303,6 +303,17 @@
     }));
     $('rj-ni-coverage').value = selection.coverage_threshold ?? -110;
     $('rj-ni-interference').value = selection.interference_threshold ?? 0;
+    $('rj-ni-nr-coverage').value = selection.nr_coverage_threshold ?? -115;
+    $('rj-ni-nr-interference').value = selection.nr_interference_threshold ?? -3;
+    // Only the thresholds of the selected technologies are shown.
+    const syncRadioThresholds = () => {
+      const technology = $('rj-ni-technology').value;
+      document.querySelectorAll('[data-rj-ni-radio]').forEach((label) => {
+        label.hidden = ![label.dataset.rjNiRadio, 'lte_nr'].includes(technology);
+      });
+    };
+    $('rj-ni-technology').onchange = syncRadioThresholds;
+    syncRadioThresholds();
     const groups = selection.group || ['operator', 'campaign'];
     $('rj-ni-group').replaceChildren(node('span', 'Grouping:', 'rj-inline-label'), ...Object.entries(options.network_groupings).map(([value, label]) => {
       const row = node('label', undefined, 'rj-check');
@@ -397,6 +408,7 @@
             datasets: networkDatasets, nr_mode: $('rj-ni-nr-mode').value, technology: $('rj-ni-technology').value,
             group: [...$('rj-ni-group').querySelectorAll('input:checked')].map((box) => box.value),
             coverage_threshold: Number($('rj-ni-coverage').value), interference_threshold: Number($('rj-ni-interference').value),
+            nr_coverage_threshold: Number($('rj-ni-nr-coverage').value), nr_interference_threshold: Number($('rj-ni-nr-interference').value),
             ...Object.fromEntries(networkFilters.map(([key, picker]) => [key, picker.getValue()])),
           },
         },

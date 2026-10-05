@@ -124,3 +124,20 @@
 
 .ni-inventory .ni-inventory-key-column{background:#e3f3e8;color:#174b32}
 .ni-inventory th.ni-inventory-key-column{background:#c5e5d0;color:#103f27}
+
+/* Excel-style column filters of the Sites/Cells tables. */
+.ni-column-head { display: inline-flex; align-items: center; gap: .3rem; white-space: nowrap; }
+.ni-column-filter { padding: 0 .3rem; border: 1px solid transparent; border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: .8rem; line-height: 1.4; cursor: pointer; opacity: .65; }
+.ni-column-filter:hover { opacity: 1; border-color: currentColor; }
+.ni-column-filter.is-active { opacity: 1; background: #fde7f0; border-color: #d4537e; color: #9b1c4c; }
+.ni-filter-menu { position: fixed; z-index: 5000; display: grid; gap: .5rem; overflow: auto; padding: .7rem; border: 1px solid var(--line); border-radius: 12px; background: #fff; color: #102131; box-shadow: 0 16px 36px rgba(18, 32, 43, .22); }
+.ni-filter-values { display: grid; gap: .15rem; max-height: 16rem; overflow: auto; }
+.ni-filter-values label { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .45rem; font-weight: 500; cursor: pointer; }
+.ni-filter-values label small { color: var(--muted); }
+.ni-filter-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .4rem; }
+/* LTE+NR: LTE and NR are shown in separate sections with their own thresholds. */
+.ni-selection-grid label[hidden]{display:none}
+.ni-technology-sections{display:grid;gap:22px}
+.ni-technology-section{display:grid;gap:14px}
+.ni-technology-title{grid-column:1/-1;margin:.4rem 0 0;font-size:1.05rem;color:var(--ni-dark)}
+.ni-technology-title span{margin-left:.5rem;font-size:.82rem;font-weight:600;color:var(--muted)}

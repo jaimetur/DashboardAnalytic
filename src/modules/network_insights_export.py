@@ -43,9 +43,13 @@ def summary_selection_lines(selection: dict[str, Any]) -> list[str]:
         *([f"NR Mode: {selection['nr_mode']}"] if selection.get('nr_mode') else []),
         f"Technology: {selection.get('technology_label') or selection.get('technology') or 'LTE'}",
         f"Grouping: {selection.get('group_label') or 'Operator → Campaign'}",
-        f"Thresholds: low coverage below {selection.get('coverage_threshold')} dBm RSRP, "
-        f"high interference below {selection.get('interference_threshold')} dB SINR",
     ]
+    technology = selection.get('technology') or 'lte'
+    for radio, label, coverage, interference in (('lte', 'LTE', 'coverage_threshold', 'interference_threshold'),
+                                                  ('nr', 'NR', 'nr_coverage_threshold', 'nr_interference_threshold')):
+        if technology in {radio, 'lte_nr'} and selection.get(coverage) is not None:
+            lines.append(f"{label} thresholds: low coverage below {selection.get(coverage)} dBm RSRP, "
+                         f"high interference below {selection.get(interference)} dB SINR")
     for label, key in (('Operators', 'operators'), ('Vendors', 'vendors'), ('Campaigns', 'campaigns'),
                        ('Regions', 'regions'), ('Cities', 'cities')):
         values = selection.get(key) or []
@@ -53,6 +57,14 @@ def summary_selection_lines(selection: dict[str, Any]) -> list[str]:
     datasets = selection.get('dataset_names') or []
     lines.append(f"CDRs ({len(datasets)}): {', '.join(datasets) if datasets else 'All ready CDRs'}")
     return lines
+
+
+def technology_sections(analysis: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """(title suffix, section) per technology; LTE+NR exports LTE and NR separately."""
+    sections = analysis.get('sections') or [analysis]
+    if len(sections) == 1:
+        return [('', sections[0])]
+    return [(f" · {section.get('technology_label') or section.get('technology')}", section) for section in sections]
 
 
 def overview_table(analysis: dict[str, Any]) -> tuple[list[str], list[list[str]]]:
@@ -123,17 +135,24 @@ def cluster_sites_tables(analysis: dict[str, Any], deployment: dict[str, Any]) -
     observed = [[row.get('operator') or '', _number(row.get('observed_enodebs'), 0),
                  _number(row.get('observed_cells'), 0), _number(row.get('samples'), 0),
                  _number(row['samples'] / row['observed_enodebs']) if row.get('observed_enodebs') else '—']
-                for row in analysis.get('rf_rows') or []]
+                for _suffix, section in technology_sections(analysis) for row in _labelled_rows(analysis, section)]
     inventory = [[row['operator'], _number(row['sites'], 0), _number(row['cells'], 0)]
                  for row in (deployment.get('cluster_inventories') or {}).get('rows') or []]
     tables = []
     if observed:
-        tables.append(('Cluster Sites Density · Observed Sites / Cells',
+        tables.append(('Cluster Sites Density · Observed Sites/Cells',
                        ['Group', 'Observed eNodeBs', 'Observed cells', 'Samples', 'Samples per eNodeB'], observed))
     if inventory:
-        tables.append(('Cluster Sites Density · Inventory Sites / Cells',
+        tables.append(('Cluster Sites Density · Inventory Sites/Cells',
                        ['Operator', 'Inventory sites', 'Inventory cells'], inventory))
     return tables
+
+
+def _labelled_rows(analysis: dict[str, Any], section: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = section.get('rf_rows') or []
+    if len(analysis.get('sections') or []) < 2:
+        return rows
+    return [{**row, 'operator': f"{row.get('operator') or ''} · {section.get('technology_label') or ''}"} for row in rows]
 
 
 def _chart_images(analysis: dict[str, Any], render: ChartRenderer) -> list[tuple[str, BytesIO | None, str]]:
@@ -273,9 +292,12 @@ def export_network_insights_powerpoint(destination: Path, analysis: dict[str, An
         paragraph = shape.text_frame.paragraphs[0] if index == 0 else shape.text_frame.add_paragraph()
         paragraph.text = line
         paragraph.font.size = Pt(15)
-    columns, rows = overview_table(analysis)
-    _table_slides(presentation, 'RF Quality Overview', columns, rows, selection.get('group_label') or '')
-    for title, image, note in _chart_images(analysis, render):
+    for suffix, section in technology_sections(analysis):
+        columns, rows = overview_table(section)
+        _table_slides(presentation, f'RF Quality Overview{suffix}', columns, rows, selection.get('group_label') or '')
+    images = [(f'{title}{suffix}', image, note) for suffix, section in technology_sections(analysis)
+              for title, image, note in _chart_images(section, render)]
+    for title, image, note in images:
         slide = _slide(presentation, title)
         if image is not None:
             left, top, width, height = _content_frame(slide)
@@ -288,10 +310,11 @@ def export_network_insights_powerpoint(destination: Path, analysis: dict[str, An
                                      width=Inches(picture_width), height=Inches(picture_height))
         else:
             _add_textbox(slide, 0.55, 1.3, 12.2, 0.3, note, size=12, color=ORANGE)
-    maps = analysis.get('maps') or {}
-    for title, key, unit in (('Weakest Coverage Areas', 'coverage_hotspots', 'dBm'), ('Highest Interference Areas', 'interference_hotspots', 'dB')):
-        columns, rows = hotspot_table(maps.get(key) or [], unit)
-        _table_slides(presentation, title, columns, rows, f"Map operator: {maps.get('operator') or '—'}")
+    for suffix, section in technology_sections(analysis):
+        maps = section.get('maps') or {}
+        for title, key, unit in (('Weakest Coverage Areas', 'coverage_hotspots', 'dBm'), ('Highest Interference Areas', 'interference_hotspots', 'dB')):
+            columns, rows = hotspot_table(maps.get(key) or [], unit)
+            _table_slides(presentation, f'{title}{suffix}', columns, rows, f"Map operator: {maps.get('operator') or '—'}")
     for title, columns, rows in [*spectrum_tables(analysis), *deployment_tables(deployment), *cluster_sites_tables(analysis, deployment)]:
         _table_slides(presentation, title, columns, rows)
     warnings = analysis.get('warnings') or []
@@ -353,9 +376,9 @@ def export_network_insights_word(destination: Path, analysis: dict[str, Any], de
     section.page_width, section.page_height = DocxInches(11.69), DocxInches(8.27)
     section.left_margin = section.right_margin = DocxInches(0.6)
     section.top_margin = section.bottom_margin = DocxInches(0.6)
-    tables = [overview_table(analysis),
-              *(hotspot_table((analysis.get('maps') or {}).get(key) or [], unit) for key, unit in
-                [('coverage_hotspots', 'dBm'), ('interference_hotspots', 'dB')]),
+    tables = [*(overview_table(section) for _suffix, section in technology_sections(analysis)),
+              *(hotspot_table((section.get('maps') or {}).get(key) or [], unit) for _suffix, section in technology_sections(analysis)
+                for key, unit in [('coverage_hotspots', 'dBm'), ('interference_hotspots', 'dB')]),
               *((columns, rows) for _title, columns, rows in [*spectrum_tables(analysis), *deployment_tables(deployment), *cluster_sites_tables(analysis, deployment)])]
     needed = max((sum(length * 9 + 0.14 * 72 for length in _column_text_widths(columns, rows)) / 72
                   for columns, rows in tables), default=0)
@@ -367,23 +390,26 @@ def export_network_insights_word(destination: Path, analysis: dict[str, Any], de
         document.add_paragraph(line, style='List Bullet')
     for warning in analysis.get('warnings') or []:
         document.add_paragraph(f'Warning: {warning}')
-    document.add_heading('RF Quality Overview', level=1)
-    columns, rows = overview_table(analysis)
-    _docx_table(document, columns, rows)
-    for title, image, note in _chart_images(analysis, render):
-        document.add_heading(title, level=1)
-        if image is not None:
-            document.add_picture(image, width=DocxInches(6.3))
-        else:
-            document.add_paragraph(note)
-    maps = analysis.get('maps') or {}
-    for title, key, unit in (('Weakest Coverage Areas', 'coverage_hotspots', 'dBm'), ('Highest Interference Areas', 'interference_hotspots', 'dB')):
-        document.add_heading(title, level=1)
-        columns, rows = hotspot_table(maps.get(key) or [], unit)
-        if rows:
-            _docx_table(document, columns, rows)
-        else:
-            document.add_paragraph('No area falls below the threshold for this selection.')
+    for suffix, section in technology_sections(analysis):
+        document.add_heading(f'RF Quality Overview{suffix}', level=1)
+        columns, rows = overview_table(section)
+        _docx_table(document, columns, rows)
+    for suffix, section in technology_sections(analysis):
+        for title, image, note in _chart_images(section, render):
+            document.add_heading(f'{title}{suffix}', level=1)
+            if image is not None:
+                document.add_picture(image, width=DocxInches(6.3))
+            else:
+                document.add_paragraph(note)
+    for suffix, section in technology_sections(analysis):
+        maps = section.get('maps') or {}
+        for title, key, unit in (('Weakest Coverage Areas', 'coverage_hotspots', 'dBm'), ('Highest Interference Areas', 'interference_hotspots', 'dB')):
+            document.add_heading(f'{title}{suffix}', level=1)
+            columns, rows = hotspot_table(maps.get(key) or [], unit)
+            if rows:
+                _docx_table(document, columns, rows)
+            else:
+                document.add_paragraph('No area falls below the threshold for this selection.')
     for title, columns, rows in [*spectrum_tables(analysis), *deployment_tables(deployment), *cluster_sites_tables(analysis, deployment)]:
         document.add_heading(title, level=1)
         _docx_table(document, columns, rows)

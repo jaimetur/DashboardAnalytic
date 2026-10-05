@@ -12,7 +12,8 @@
     if (stored && typeof stored === 'object' && !Array.isArray(stored)) savedSelection = stored;
   } catch {}
   const selectionControls = ['ni-nr-mode', 'ni-technology', 'ni-group', 'ni-coverage-threshold',
-    'ni-interference-threshold', 'ni-grid', 'ni-deployment-group', 'ni-sites-source'];
+    'ni-interference-threshold', 'ni-nr-coverage-threshold', 'ni-nr-interference-threshold', 'ni-grid',
+    'ni-deployment-group', 'ni-sites-source'];
   for (const id of selectionControls) {
     const control = $(id);
     const value = savedSelection.controls?.[id];
@@ -29,16 +30,17 @@
   let restoreDatasets = true;
   const syncTechnologyGrouping = () => {
     const control = $('ni-group');
+    // LTE+NR analyses LTE and NR in separate sections, each with its own
+    // thresholds, so Technology is never a grouping and RSRP/SINR are never pooled.
     const existing = [...control.options].find(option => option.value === 'technology');
-    // LTE+NR always separates the technologies; their RSRP/SINR are never pooled.
-    if ($('ni-technology').value === 'lte_nr') {
-      const technology = existing || new Option('Technology', 'technology', true, true);
-      technology.selected = true;
-      technology.disabled = true;
-      technology.dataset.disabledReason = 'Technology is required when LTE+NR is selected.';
-      if (!existing) control.add(technology, [...control.options].find(option => option.value === 'campaign') || null);
-    } else if (existing) existing.remove();
-    control.dispatchEvent(new Event('multiselect:options-updated'));
+    if (existing) {
+      existing.remove();
+      control.dispatchEvent(new Event('multiselect:options-updated'));
+    }
+    const technology = $('ni-technology').value;
+    document.querySelectorAll('[data-ni-radio]').forEach(label => {
+      label.hidden = ![label.dataset.niRadio, 'lte_nr'].includes(technology);
+    });
   };
   syncTechnologyGrouping();
   // Operator stays checked unless Vendor is checked.
@@ -63,7 +65,10 @@
   const integer = value => (Number.isFinite(Number(value)) ? Number(value).toLocaleString('en-US') : '—');
   let analysis = null;
   let analysing = 0;
-  const mapPayloads = {coverage: null, interference: null};
+  // Map payloads by `<technology>-<coverage|interference>`.
+  const mapPayloads = {};
+  const sections = () => analysis?.sections || (analysis ? [analysis] : []);
+  const multipleSections = () => sections().length > 1;
 
   const status = (message, tone = '') => {
     const element = $('ni-status');
@@ -192,6 +197,8 @@
     cities: filterValues('ni-cities'),
     coverage_threshold: Number($('ni-coverage-threshold').value),
     interference_threshold: Number($('ni-interference-threshold').value),
+    nr_coverage_threshold: Number($('ni-nr-coverage-threshold').value),
+    nr_interference_threshold: Number($('ni-nr-interference-threshold').value),
     grid_metres: Number($('ni-grid').value),
     min_samples: 3,
     map_operator: mapOperator,
@@ -213,7 +220,9 @@
       fillFilterOptions(payload.options);
       render();
       const comparison = payload.comparison ? ` Changes compare ${payload.comparison.latest} with ${payload.comparison.previous}.` : '';
-      status(`Analysed ${integer(payload.overview.reduce((total, row) => total + row.samples, 0))} samples (${payload.technology_label}).${comparison}${payload.warnings.length ? ` ${payload.warnings.join(' ')}` : ''}`, payload.warnings.length ? 'warning' : 'done');
+      const counts = (payload.sections || [payload]).map(section =>
+        `${integer(section.overview.reduce((total, row) => total + row.samples, 0))} ${section.technology_label}`).join(' and ');
+      status(`Analysed ${counts} samples.${comparison}${payload.warnings.length ? ` ${payload.warnings.join(' ')}` : ''}`, payload.warnings.length ? 'warning' : 'done');
     } catch (error) {
       if (request === analysing) status(error.message, 'error');
     } finally {
@@ -256,10 +265,17 @@
     const sign = value > 0 ? '+' : '';
     return `<span class="ni-delta ${value === 0 ? '' : improved ? 'is-better' : 'is-worse'}">${sign}${number(value)}${unit}</span>`;
   };
+  const sectionTitle = section => `<h3 class="ni-technology-title">${escapeHtml(section.technology_label)} <span>Low coverage below ${escapeHtml(section.coverage_threshold)} dBm · high interference below ${escapeHtml(section.interference_threshold)} dB</span></h3>`;
   const renderOverview = () => {
     const host = $('ni-overview');
     host.replaceChildren();
-    for (const row of analysis.overview) {
+    for (const section of sections()) {
+      if (multipleSections()) host.insertAdjacentHTML('beforeend', sectionTitle(section));
+      renderOverviewCards(host, section);
+    }
+  };
+  const renderOverviewCards = (host, section) => {
+    for (const row of section.overview) {
       const colour = analysis.colours[row.operator] || '#6D46A8';
       const deltas = row.deltas || {};
       const card = document.createElement('article');
@@ -279,17 +295,32 @@
   };
   const classBar = classes => `<span class="ni-class-bar">${(classes || []).map(item =>
     `<span style="width:${item.share}%;background:${item.colour}" title="${escapeHtml(item.label)}: ${number(item.share)}%"></span>`).join('')}</span>`;
-  const renderRfTable = () => {
-    const table = $('ni-rf-table');
-    const grouped = Boolean(analysis.rf_rows.some(row => row.group));
-    table.querySelector('thead').innerHTML = `<tr><th>${escapeHtml(analysis.group_label || 'All samples')}</th>${grouped ? `<th>${escapeHtml(analysis.group_label)}</th>` : ''}<th>Samples</th><th>${escapeHtml(analysis.technology_label)} RSRP samples</th><th>Median RSRP</th><th>P10 RSRP</th><th>Low coverage</th><th>RSRP classes</th><th>Median SINR</th><th>P10 SINR</th><th>High interference</th><th>SINR classes</th></tr>`;
-    table.querySelector('tbody').innerHTML = analysis.rf_rows.map(row => `<tr>
+  // RF Quality: CDFs and table per technology (LTE and NR separately with LTE+NR).
+  const renderRfSections = () => {
+    const host = $('ni-rf-sections');
+    host.innerHTML = sections().map(section => `<section class="ni-technology-section">
+      ${multipleSections() ? sectionTitle(section) : ''}
+      <div class="ni-chart-grid">
+        <div class="ni-chart-card"><canvas id="ni-${section.technology}-rsrp-cdf" role="img" aria-label="${escapeHtml(section.technology_label)} RSRP cumulative distribution"></canvas></div>
+        <div class="ni-chart-card"><canvas id="ni-${section.technology}-sinr-cdf" role="img" aria-label="${escapeHtml(section.technology_label)} SINR cumulative distribution"></canvas></div>
+      </div>
+      <div class="table-wrap ni-table-wrap"><table class="ni-table">${rfTable(section)}</table></div>
+    </section>`).join('');
+    for (const section of sections()) {
+      globalThis.renderDashboardChart($(`ni-${section.technology}-rsrp-cdf`), section.charts.rsrp_cdf);
+      globalThis.renderDashboardChart($(`ni-${section.technology}-sinr-cdf`), section.charts.sinr_cdf);
+    }
+  };
+  const rfTable = section => {
+    const grouped = Boolean(section.rf_rows.some(row => row.group));
+    return `<thead><tr><th>${escapeHtml(analysis.group_label || 'All samples')}</th>${grouped ? `<th>${escapeHtml(analysis.group_label)}</th>` : ''}<th>Samples</th><th>${escapeHtml(section.technology_label)} RSRP samples</th><th>Median RSRP</th><th>P10 RSRP</th><th>Low coverage</th><th>RSRP classes</th><th>Median SINR</th><th>P10 SINR</th><th>High interference</th><th>SINR classes</th></tr></thead>
+    <tbody>${section.rf_rows.map(row => `<tr>
       <td><span class="ni-swatch" style="background:${analysis.colours[row.operator] || '#6D46A8'}"></span>${escapeHtml(row.operator)}</td>
       ${grouped ? `<td>${escapeHtml(row.group)}</td>` : ''}
       <td class="num">${integer(row.samples)}</td><td class="num">${integer(row.rsrp_samples)}</td><td class="num">${number(row.rsrp_median)}</td><td class="num">${number(row.rsrp_p10)}</td>
       <td class="num">${number(row.low_coverage_share)}%</td><td>${classBar(row.rsrp_classes)}</td>
       <td class="num">${number(row.sinr_median)}</td><td class="num">${number(row.sinr_p10)}</td>
-      <td class="num">${number(row.high_interference_share)}%</td><td>${classBar(row.sinr_classes)}</td></tr>`).join('');
+      <td class="num">${number(row.high_interference_share)}%</td><td>${classBar(row.sinr_classes)}</td></tr>`).join('')}</tbody>`;
   };
 
   // A port of the server's OpenStreetMap tile geometry, used to zoom maps.
@@ -320,32 +351,48 @@
     globalThis.renderDashboardChart($(`ni-${kind}-map`), zoomed);
     $('ni-map-note').textContent = `Zoomed to ${number(latitude, 4)}, ${number(longitude, 4)}.`;
   };
-  const renderHotspots = (kind, rows, unit) => {
-    const table = $(`ni-${kind}-hotspots`);
-    if (!rows.length) { table.innerHTML = '<tbody><tr><td class="form-note">No grid square has most samples below the threshold.</td></tr></tbody>'; return; }
-    table.innerHTML = `<thead><tr><th>Area</th><th>Region</th><th>Samples</th><th>Mean</th><th>Below</th></tr></thead><tbody>${rows.map(row => `<tr>
+  const hotspotTable = (kind, rows, unit) => {
+    if (!rows.length) return '<tbody><tr><td class="form-note">No grid square has most samples below the threshold.</td></tr></tbody>';
+    return `<thead><tr><th>Area</th><th>Region</th><th>Samples</th><th>Mean</th><th>Below</th></tr></thead><tbody>${rows.map(row => `<tr>
       <td><button type="button" class="ni-zoom" data-kind="${kind}" data-latitude="${row.latitude}" data-longitude="${row.longitude}" title="Zoom the map to ${number(row.latitude, 4)}, ${number(row.longitude, 4)}">${escapeHtml(row.city || `${number(row.latitude, 3)}, ${number(row.longitude, 3)}`)}</button></td>
       <td>${escapeHtml(row.region || '—')}</td><td class="num">${integer(row.samples)}</td>
       <td class="num">${number(row.mean)} ${unit}</td><td class="num">${number(row.bad_share)}%</td></tr>`).join('')}</tbody>`;
   };
+  // Coverage and interference maps per technology, for one shared Group.
   const renderMaps = () => {
     const maps = analysis.maps;
     const selector = $('ni-map-operator');
     // Follow the displayed table order rather than the map payload's source order.
-    const availableGroups = new Set(maps.operators);
+    const availableGroups = new Set(sections().flatMap(section => section.maps.operators));
     const orderedGroups = [...new Set(analysis.rf_rows.map(row => row.operator))]
       .filter(group => availableGroups.has(group));
     const displayedGroups = new Set(orderedGroups);
-    orderedGroups.push(...maps.operators.filter(group => !displayedGroups.has(group))
+    orderedGroups.push(...[...availableGroups].filter(group => !displayedGroups.has(group))
       .sort((left, right) => left.localeCompare(right, undefined, {sensitivity: 'base', numeric: true})));
     selector.replaceChildren(...orderedGroups.map(operator => {
       const option = document.createElement('option'); option.value = operator; option.textContent = operator; option.selected = operator === maps.operator; return option;
     }));
-    mapPayloads.coverage = maps.coverage; mapPayloads.interference = maps.interference;
-    globalThis.renderDashboardChart($('ni-coverage-map'), maps.coverage);
-    globalThis.renderDashboardChart($('ni-interference-map'), maps.interference);
-    renderHotspots('coverage', maps.coverage_hotspots, 'dBm');
-    renderHotspots('interference', maps.interference_hotspots, 'dB');
+    for (const key of Object.keys(mapPayloads)) delete mapPayloads[key];
+    $('ni-map-sections').innerHTML = sections().map(section => {
+      const radio = section.technology;
+      const label = escapeHtml(section.technology_label);
+      return `<section class="ni-technology-section">
+        ${multipleSections() ? sectionTitle(section) : ''}
+        <div class="ni-map-grid">
+          <section class="ni-map-card"><h3>${label} Coverage (mean RSRP per grid square)</h3><div class="ni-chart-card ni-map-canvas"><canvas id="ni-${radio}-coverage-map" role="img" aria-label="${label} coverage map"></canvas></div>
+            <h4>Weakest coverage areas</h4><div class="table-wrap ni-hotspot-wrap"><table class="ni-table ni-hotspots">${hotspotTable(`${radio}-coverage`, section.maps.coverage_hotspots, 'dBm')}</table></div></section>
+          <section class="ni-map-card"><h3>${label} Interference (mean SINR per grid square)</h3><div class="ni-chart-card ni-map-canvas"><canvas id="ni-${radio}-interference-map" role="img" aria-label="${label} interference map"></canvas></div>
+            <h4>Highest interference areas</h4><div class="table-wrap ni-hotspot-wrap"><table class="ni-table ni-hotspots">${hotspotTable(`${radio}-interference`, section.maps.interference_hotspots, 'dB')}</table></div></section>
+        </div>
+      </section>`;
+    }).join('');
+    for (const section of sections()) {
+      for (const kind of ['coverage', 'interference']) {
+        const key = `${section.technology}-${kind}`;
+        mapPayloads[key] = section.maps[kind];
+        globalThis.renderDashboardChart($(`ni-${key}-map`), section.maps[kind]);
+      }
+    }
     $('ni-map-note').textContent = `${maps.operator} · grid ${number(maps.coverage_grid_metres, 0)} m${maps.coverage_grid_metres !== Number($('ni-grid').value) ? ' (coarsened to keep the map readable)' : ''}.`;
   };
   let clusterInventories = null;
@@ -371,8 +418,9 @@
       return;
     }
     const grouped = Boolean(analysis.rf_rows.some(row => row.group));
-    table.innerHTML = `<thead><tr><th>${escapeHtml(analysis.group_label || 'All samples')}</th>${grouped ? `<th>${escapeHtml(analysis.group_label)}</th>` : ''}<th>Observed eNodeBs</th><th>Observed cells</th><th>Samples</th><th>Samples per eNodeB</th></tr></thead><tbody>${analysis.rf_rows.map(row => `<tr>
-      <td><span class="ni-swatch" style="background:${analysis.colours[row.operator] || '#6D46A8'}"></span>${escapeHtml(row.operator)}</td>${grouped ? `<td>${escapeHtml(row.group)}</td>` : ''}
+    const technology = multipleSections();
+    table.innerHTML = `<thead><tr><th>${escapeHtml(analysis.group_label || 'All samples')}</th>${grouped ? `<th>${escapeHtml(analysis.group_label)}</th>` : ''}${technology ? '<th>Technology</th>' : ''}<th>Observed eNodeBs</th><th>Observed cells</th><th>Samples</th><th>Samples per eNodeB</th></tr></thead><tbody>${analysis.rf_rows.map(row => `<tr>
+      <td><span class="ni-swatch" style="background:${analysis.colours[row.operator] || '#6D46A8'}"></span>${escapeHtml(row.operator)}</td>${grouped ? `<td>${escapeHtml(row.group)}</td>` : ''}${technology ? `<td>${escapeHtml(row.technology || '')}</td>` : ''}
       <td class="num">${integer(row.observed_enodebs)}</td><td class="num">${integer(row.observed_cells)}</td><td class="num">${integer(row.samples)}</td>
       <td class="num">${row.observed_enodebs ? number(row.samples / row.observed_enodebs) : '—'}</td></tr>`).join('')}</tbody>`;
   };
@@ -402,40 +450,50 @@
   const render = () => {
     if (!analysis) return;
     renderOverview();
-    globalThis.renderDashboardChart($('ni-rsrp-cdf'), analysis.charts.rsrp_cdf);
-    globalThis.renderDashboardChart($('ni-sinr-cdf'), analysis.charts.sinr_cdf);
-    renderRfTable();
+    renderRfSections();
     renderMaps();
     renderSites();
     renderSpectrum();
   };
 
+  // Sites/Cells tables: complete inventories or cells observed in the CDRs.
+  const siteTableTitle = source => source === 'observed' ? 'CDRs Sites/Cells Observed' : 'Full Sites/Cells Inventory';
   const renderInventory = inventory => {
     const lastPage = Math.max(0, Math.ceil(inventory.total_rows / inventory.page_size) - 1);
-    return `<section class="ni-inventory" data-ni-inventory="${escapeHtml(inventory.operator)}" data-ni-operator-label="${escapeHtml(inventory.operator_label || inventory.operator)}">
-      <h3>${escapeHtml(inventory.operator_label || inventory.operator)} · Site / Cell Inventory</h3>
+    const filters = inventory.filters || {};
+    const active = Object.keys(filters).length;
+    return `<section class="ni-inventory" data-ni-inventory="${escapeHtml(inventory.operator)}" data-ni-operator-label="${escapeHtml(inventory.operator_label || inventory.operator)}" data-ni-source="${escapeHtml(inventory.source || 'inventory')}" data-ni-filters="${escapeHtml(JSON.stringify(filters))}">
+      <h3>${escapeHtml(inventory.operator_label || inventory.operator)} · ${siteTableTitle(inventory.source)}</h3>
       <div class="ni-map-toolbar">
         <button type="button" class="ni-secondary-action" data-ni-inventory-export>Export CSV</button>
+        ${active ? `<button type="button" class="ni-secondary-action" data-ni-filters-clear>Clear ${integer(active)} filter${active === 1 ? '' : 's'}</button>` : ''}
         <button type="button" class="ni-secondary-action" data-ni-inventory-page="${inventory.page - 1}" ${inventory.page === 0 ? 'disabled' : ''}>Previous</button>
         <span class="form-note">Page ${integer(inventory.page + 1)} of ${integer(lastPage + 1)} · ${integer(inventory.total_rows)} rows · ${integer(inventory.columns.length)} columns</span>
         <button type="button" class="ni-secondary-action" data-ni-inventory-page="${inventory.page + 1}" ${inventory.page >= lastPage ? 'disabled' : ''}>Next</button>
       </div>
-      <div class="table-wrap ni-table-wrap"><table class="ni-table"><thead><tr>${inventory.columns.map(column => `<th${inventory.key_columns.includes(column) ? ' class="ni-inventory-key-column"' : ''}>${escapeHtml(column)}</th>`).join('')}</tr></thead>
-      <tbody>${inventory.rows.map(row => `<tr>${row.map((value, index) => `<td${inventory.key_columns.includes(inventory.columns[index]) ? ' class="ni-inventory-key-column"' : ''}>${escapeHtml(value ?? '')}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${inventory.columns.length || 1}" class="form-note">No inventory rows.</td></tr>`}</tbody></table></div>
+      <div class="table-wrap ni-table-wrap"><table class="ni-table"><thead><tr>${inventory.columns.map(column => `<th${inventory.key_columns.includes(column) ? ' class="ni-inventory-key-column"' : ''}><span class="ni-column-head">${escapeHtml(column)}<button type="button" class="ni-column-filter${filters[column] ? ' is-active' : ''}" data-ni-filter-column="${escapeHtml(column)}" title="Filter ${escapeHtml(column)}" aria-label="Filter ${escapeHtml(column)}">▾</button></span></th>`).join('')}</tr></thead>
+      <tbody>${inventory.rows.map(row => `<tr>${row.map((value, index) => `<td${inventory.key_columns.includes(inventory.columns[index]) ? ' class="ni-inventory-key-column"' : ''}>${escapeHtml(value ?? '')}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${inventory.columns.length || 1}" class="form-note">${active ? 'No rows match the column filters.' : 'No rows.'}</td></tr>`}</tbody></table></div>
     </section>`;
   };
 
   let inventorySelection = null;
   let displayedDeploymentGroup = '';
-  const downloadDeploymentCsv = async (button, operator = '') => {
+  const isSiteTable = group => group === 'inventory' || group === 'observed';
+  const cardFilters = card => { try { return JSON.parse(card.dataset.niFilters || '{}'); } catch { return {}; } };
+  const fileName = response => {
+    const disposition = response.headers.get('content-disposition') || '';
+    const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
+    return match ? decodeURIComponent(match[1]) : '';
+  };
+  const downloadDeploymentCsv = async (button, operator = '', filters = {}) => {
     if (button.disabled) return;
     const selection = inventorySelection;
     const group = displayedDeploymentGroup;
     button.disabled = true;
     try {
-      const response = group === 'inventory'
-        ? await fetch(`/api/network-insights/inventory/export${operator ? `?operator=${encodeURIComponent(operator)}` : ''}`, {
-          method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(selection),
+      const response = isSiteTable(group)
+        ? await fetch('/api/network-insights/sites/export', {
+          method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({...selection, operator, filters}),
         })
         : await fetch(`/api/network-insights/deployment/export-all?group=${encodeURIComponent(group)}`);
       if (!response.ok) {
@@ -445,7 +503,7 @@
       const url = URL.createObjectURL(await response.blob());
       const link = document.createElement('a');
       link.href = url;
-      link.download = group === 'inventory' ? `${operator || 'all'}-site-cell-inventory.csv` : `network-deployment-all-${group}.csv`;
+      link.download = fileName(response) || `network-deployment-${group}.csv`;
       document.body.append(link); link.click(); link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (error) {
@@ -454,26 +512,18 @@
       if (displayedDeploymentGroup === group && !deploymentController?.signal.aborted) button.disabled = false;
     }
   };
-  $('ni-deployment-export-all').addEventListener('click', event => { void downloadDeploymentCsv(event.currentTarget); });
-  $('ni-deployment').addEventListener('click', async event => {
-    const card = event.target.closest('[data-ni-inventory]');
-    if (!card || !inventorySelection) return;
-    const exportButton = event.target.closest('[data-ni-inventory-export]');
-    if (exportButton) {
-      void downloadDeploymentCsv(exportButton, card.dataset.niInventory);
-      return;
-    }
-    const button = event.target.closest('[data-ni-inventory-page]');
-    if (!button || button.disabled) return;
+  // Reload one table with its page and column filters.
+  const reloadSiteTable = async (card, page, filters) => {
     const controller = deploymentController;
     const controls = [...card.querySelectorAll('button')].map(control => [control, control.disabled]);
     controls.forEach(([control]) => { control.disabled = true; });
     try {
-      const response = await fetch(`/api/network-insights/inventory?operator=${encodeURIComponent(card.dataset.niInventory)}&page=${button.dataset.niInventoryPage}`, {
-        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(inventorySelection), signal: controller.signal,
+      const response = await fetch('/api/network-insights/sites/page', {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, signal: controller.signal,
+        body: JSON.stringify({...inventorySelection, operator: card.dataset.niInventory, page, filters}),
       });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.detail || 'Unable to load the inventory page.');
+      if (!response.ok) throw new Error(payload.detail || 'Unable to load the table page.');
       if (deploymentController === controller && card.isConnected) {
         card.outerHTML = renderInventory({...payload, operator_label: card.dataset.niOperatorLabel});
       }
@@ -483,6 +533,94 @@
         controls.forEach(([control, disabled]) => { control.disabled = disabled; });
       }
     }
+  };
+
+  // Excel-style column filter: the values of the column under the other filters.
+  let filterMenu = null;
+  const closeFilterMenu = () => { filterMenu?.remove(); filterMenu = null; };
+  const openFilterMenu = async (card, button) => {
+    closeFilterMenu();
+    const column = button.dataset.niFilterColumn;
+    const filters = cardFilters(card);
+    const menu = document.createElement('div');
+    menu.className = 'ni-filter-menu';
+    menu.innerHTML = `<p class="form-note">Loading values of ${escapeHtml(column)}…</p>`;
+    document.body.append(menu);
+    filterMenu = menu;
+    const bounds = button.getBoundingClientRect();
+    const place = () => {
+      const width = Math.min(320, window.innerWidth - 16);
+      menu.style.width = `${width}px`;
+      menu.style.left = `${Math.max(8, Math.min(bounds.left, window.innerWidth - width - 8))}px`;
+      const below = window.innerHeight - bounds.bottom - 12;
+      menu.style.maxHeight = `${Math.max(220, Math.min(420, below > 260 ? below : bounds.top - 12))}px`;
+      menu.style.top = below > 260 ? `${bounds.bottom + 4}px` : `${Math.max(8, bounds.top - menu.offsetHeight - 4)}px`;
+    };
+    place();
+    try {
+      const response = await fetch('/api/network-insights/sites/values', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({...inventorySelection, operator: card.dataset.niInventory, filters, column}),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || 'Unable to load the column values.');
+      if (filterMenu !== menu) return;
+      const selected = new Set(filters[column] || payload.values.map(item => item.value));
+      menu.innerHTML = `<strong>${escapeHtml(column)}</strong>
+        <input type="search" class="ni-filter-search" placeholder="Search values…" aria-label="Search values of ${escapeHtml(column)}">
+        <div class="ni-filter-actions"><button type="button" class="ni-secondary-action" data-ni-filter-all>Select All / None</button></div>
+        <div class="ni-filter-values">${payload.values.map(item => `<label><input type="checkbox" value="${escapeHtml(item.value)}" ${selected.has(item.value) ? 'checked' : ''}><span>${item.value === '' ? '(Blanks)' : escapeHtml(item.value)}</span><small>${integer(item.count)}</small></label>`).join('') || '<p class="form-note">No values.</p>'}</div>
+        ${payload.truncated ? '<p class="form-note">Showing the first 2,000 values; search to narrow them.</p>' : ''}
+        <div class="ni-filter-actions"><button type="button" class="ni-secondary-action" data-ni-filter-clear>Clear</button><button type="button" class="ni-secondary-action" data-ni-filter-cancel>Cancel</button><button type="button" data-ni-filter-apply>Apply</button></div>`;
+      place();
+      const boxes = () => [...menu.querySelectorAll('.ni-filter-values input')];
+      menu.querySelector('.ni-filter-search').addEventListener('input', event => {
+        const query = event.target.value.trim().toLocaleLowerCase();
+        boxes().forEach(box => { box.closest('label').hidden = Boolean(query) && !box.value.toLocaleLowerCase().includes(query); });
+      });
+      menu.querySelector('[data-ni-filter-all]').addEventListener('click', () => {
+        const visible = boxes().filter(box => !box.closest('label').hidden);
+        const select = visible.some(box => !box.checked);
+        visible.forEach(box => { box.checked = select; });
+      });
+      menu.querySelector('[data-ni-filter-cancel]').addEventListener('click', closeFilterMenu);
+      menu.querySelector('[data-ni-filter-clear]').addEventListener('click', () => {
+        delete filters[column];
+        closeFilterMenu();
+        void reloadSiteTable(card, 0, filters);
+      });
+      menu.querySelector('[data-ni-filter-apply]').addEventListener('click', () => {
+        const chosen = boxes().filter(box => box.checked).map(box => box.value);
+        if (chosen.length === boxes().length && !payload.truncated) delete filters[column];
+        else filters[column] = chosen;
+        closeFilterMenu();
+        void reloadSiteTable(card, 0, filters);
+      });
+    } catch (error) {
+      if (filterMenu === menu) menu.innerHTML = `<p class="form-note">${escapeHtml(error.message)}</p>`;
+    }
+  };
+  document.addEventListener('pointerdown', event => {
+    if (filterMenu && !filterMenu.contains(event.target) && !event.target.closest('[data-ni-filter-column]')) closeFilterMenu();
+  });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape') closeFilterMenu(); });
+  window.addEventListener('resize', closeFilterMenu);
+
+  $('ni-deployment-export-all').addEventListener('click', event => { void downloadDeploymentCsv(event.currentTarget); });
+  $('ni-deployment').addEventListener('click', async event => {
+    const card = event.target.closest('[data-ni-inventory]');
+    if (!card || !inventorySelection) return;
+    const filterButton = event.target.closest('[data-ni-filter-column]');
+    if (filterButton) { void openFilterMenu(card, filterButton); return; }
+    if (event.target.closest('[data-ni-filters-clear]')) { void reloadSiteTable(card, 0, {}); return; }
+    const exportButton = event.target.closest('[data-ni-inventory-export]');
+    if (exportButton) {
+      void downloadDeploymentCsv(exportButton, card.dataset.niInventory, cardFilters(card));
+      return;
+    }
+    const button = event.target.closest('[data-ni-inventory-page]');
+    if (!button || button.disabled) return;
+    void reloadSiteTable(card, Number(button.dataset.niInventoryPage), cardFilters(card));
   });
 
   let deploymentController = null;
@@ -503,9 +641,9 @@
     host.querySelectorAll('button').forEach(button => { button.disabled = true; });
     const timeout = setTimeout(() => controller.abort(), 120000);
     try {
-      const selection = group === 'inventory' ? requestBody() : null;
-      const response = group === 'inventory'
-        ? await fetch('/api/network-insights/inventory/tables', {
+      const selection = isSiteTable(group) ? {...requestBody(), source: group} : null;
+      const response = isSiteTable(group)
+        ? await fetch('/api/network-insights/sites/tables', {
           method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(selection), signal: controller.signal,
         })
         : await fetch(`/api/network-insights/deployment?group=${encodeURIComponent(group)}`, {signal: controller.signal});
@@ -513,19 +651,22 @@
       if (deploymentController !== controller) return;
       if (!response.ok) throw new Error(payload.detail || 'Unable to load the cell inventories.');
       displayedDeploymentGroup = group;
-      $('ni-deployment-export-all').disabled = !payload.inventories.length;
-      if (group === 'inventory') {
+      if (isSiteTable(group)) {
         inventorySelection = selection;
-        host.innerHTML = payload.inventories.map(renderInventory).join('') || '<p class="form-note">No uploaded inventories match the selected operators.</p>';
-        note.textContent = 'Complete uploaded inventories, filtered by Operator, Vendor, Region, City and Technology. CDR selection, NR Mode and Campaigns do not restrict inventory rows. CSV includes all matching rows and columns.';
+        $('ni-deployment-export-all').disabled = !payload.tables.length;
+        host.innerHTML = payload.tables.map(renderInventory).join('') || '<p class="form-note">No table matches the selected operators.</p>';
+        note.textContent = group === 'observed'
+          ? 'Sites and LTE cells observed in the selected CDRs, filtered by the Analysis Selection (CDRs, Operator, Vendor, Region, City and Campaign). Use ▾ on a column to filter it; CSV exports every matching row.'
+          : 'Complete uploaded inventories, filtered by Operator, Vendor, Region, City and Technology. CDR selection, NR Mode and Campaigns do not restrict inventory rows. Use ▾ on a column to filter it; CSV exports every matching row and column.';
         return;
       }
+      $('ni-deployment-export-all').disabled = !payload.inventories.length;
       inventorySelection = null;
       host.innerHTML = payload.inventories.map(inventory => {
         const maximum = inventory.rows.reduce((maximum, row) => Math.max(maximum, row.sites), 1);
         const available = inventory.available_groups.includes(group);
         return `<section class="ni-inventory"><h3>${escapeHtml(inventory.operator)} <span>${escapeHtml(inventory.file_name)}</span></h3>
-          <a class="ghost-link" href="/api/network-insights/deployment/${inventory.id}/export?group=${encodeURIComponent(group)}">Export CSV</a>
+          <a class="ghost-link" href="/api/network-insights/deployment/${inventory.id}/export?group=${encodeURIComponent(group)}" download>Export CSV</a>
           ${available ? '' : `<p class="form-note">This inventory has no ${escapeHtml(payload.group_label)} column; totals are shown instead.</p>`}
           <table class="ni-table"><thead><tr><th>${escapeHtml(available ? payload.group_label : 'Inventory')}</th><th>Sites</th><th>Cells</th><th></th></tr></thead><tbody>${inventory.rows.map(row => `<tr>
             <td>${escapeHtml(row.group)}</td><td class="num">${integer(row.sites)}</td><td class="num">${integer(row.cells)}</td>
@@ -574,7 +715,7 @@
   $('network-insights').addEventListener('change', rememberSelection);
   let inventoryRefreshTimer = null;
   const refreshInventory = () => {
-    if ($('ni-deployment-group').value !== 'inventory') return;
+    if (!isSiteTable($('ni-deployment-group').value)) return;
     clearTimeout(inventoryRefreshTimer);
     deploymentController?.abort();
     $('ni-deployment-export-all').disabled = true;
@@ -592,10 +733,10 @@
   $('ni-analyse').onclick = () => { void analyse($('ni-map-operator').value || savedSelection.map_group || ''); };
   $('ni-map-operator').onchange = () => { void analyse($('ni-map-operator').value || savedSelection.map_group || ''); };
   $('ni-map-reset').onclick = () => {
-    for (const kind of ['coverage', 'interference']) {
-      if (!mapPayloads[kind]) continue;
+    for (const [kind, payload] of Object.entries(mapPayloads)) {
+      if (!payload || !$(`ni-${kind}-map`)) continue;
       globalThis.setDashboardChartZoom?.($(`ni-${kind}-map`), 1);
-      globalThis.renderDashboardChart($(`ni-${kind}-map`), mapPayloads[kind]);
+      globalThis.renderDashboardChart($(`ni-${kind}-map`), payload);
     }
     if (analysis) $('ni-map-note').textContent = `${analysis.maps.operator} · whole area.`;
   };
