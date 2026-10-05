@@ -48,7 +48,7 @@ The **Reporting Jobs** table lists every job with its name, artifacts, next run,
 | ⏸ / ⏵ | Disables or enables the schedule |
 | × Delete | Deletes the job, its run history and artifacts |
 
-Select **New Reporting Job**, enter a name, check each type of artifact to include — CDR Analysis, Network Insights, E2E Dashboards, Scoring & GAP Analysis and Non-Qualified Calls — and configure its entries, then choose the delivery and the schedule and **Save Reporting Job**. An unchecked type keeps its configuration in the editor but is not generated. Each artifact type and each entry has **Collapse/Expand**, remembered by the browser after reloading the page, and an entry's header names its NR Mode, technology or Dashboard. The fields of each entry share one row on wide screens, and CDRs appear in one card per type (CDR Data, Voice and Speech) with **Select All/None**, as in Network Insights.
+Select **New Reporting Job**, enter a name, check each type of artifact to include — CDR Analysis, Network Insights, E2E Dashboards, Scoring & GAP Analysis and Non-Qualified Calls — and configure its entries, then choose the delivery and the schedule and **Save Reporting Job**. An unchecked type keeps its configuration in the editor but is not generated. Each type offers its output formats as chips (at least one stays selected). Each artifact type and each entry has **Collapse/Expand**, remembered by the browser after reloading the page, and an entry's header names its NR Mode, technology or Dashboard. The fields of each entry share one row on wide screens, and CDRs appear in one card per type (CDR Data, Voice and Speech) with **Select All/None**, as in Network Insights.
 
 ## Email delivery
 
