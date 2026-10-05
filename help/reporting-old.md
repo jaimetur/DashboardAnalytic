@@ -1,14 +1,14 @@
-# E2E Reporting
+# Reporting (old)
 
-Use **E2E Reporting → NetCheck CDR Reports** to create a persistent PowerPoint Report or standalone Chart Set from processed CDR-Data, CDR-Voice and CDR-Speech datasets.
+Use **Reporting (old) → NetCheck CDR Reports** to create a persistent PowerPoint Report or standalone Chart Set from processed CDR-Data, CDR-Voice and CDR-Speech datasets.
 
 > [!NOTE]
-> **Restricted classic workflow.** E2E Reporting is available to super-admin accounts and EJAITUR. E2E Dashboards is the main template-driven analysis workflow.
+> **Restricted classic workflow.** Reporting (old) is available only to the users, roles and groups it is activated for in Admin → Features Activation (by default super-admins and EJAITUR). E2E Dashboards and the scheduled [Reporting](reporting.md) jobs are the main workflows.
 
 > [!WARNING]
 > **Missing CDR types.** A non-empty CDR selection is enough to generate a job, but charts requiring an unselected source type show an unavailable placeholder.
 
-E2E Reporting is available to super-admins and the EJAITUR user when a workspace is active. The module menu and this Help chapter are hidden from other users. The canonical route is `/e2e-reporting`; `/reporting` bookmarks redirect there and the API uses `/api/e2e-reporting`.
+Reporting (old) is available to the users, roles and groups it is activated for in Admin → Features Activation (by default super-admins and EJAITUR) when a workspace is active. The module menu and this Help chapter are hidden from other users. The route is `/reporting-old` and the API uses `/api/reporting-old`; bookmarks to the former `/e2e-reporting` routes redirect there.
 
 ## In this guide
 

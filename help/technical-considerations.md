@@ -130,7 +130,7 @@ Example:
 
 Template filters are parsed as ordered, semicolon-terminated conditions joined with logical AND. Rows and Columns are ordered dimensions, so reversing their selection changes the grouping hierarchy. Legends derive their content from the chosen dimension, filter, threshold or bucket rule, and side legends reserve plot space.
 
-These contracts are shared by E2E Dashboards, E2E Reporting, Chart Builder and Template Editor so a saved definition has the same meaning in previews and generated output. The authoring syntax, operators, examples, aggregation behaviour and legend rules are centralized in [Workspace Config → Report Template reference](workspace-config.md#report-template-reference).
+These contracts are shared by E2E Dashboards, Reporting (old), Chart Builder and Template Editor so a saved definition has the same meaning in previews and generated output. The authoring syntax, operators, examples, aggregation behaviour and legend rules are centralized in [Workspace Config → Report Template reference](workspace-config.md#report-template-reference).
 
 ## Multivendor calculation and remapping
 
@@ -182,7 +182,7 @@ vendor NOT CONTAINS (Mixed, Other);
 
 ## Interactive previews and Dashboard preparation
 
-E2E Reporting, Chart Builder and Report Template Editor use the shared Interactive Preview. E2E Dashboards uses the same chart contracts in its live viewer, expanded viewer and historical Charts Panel, while preparing one synchronized dataset selection for the complete Dashboard.
+Reporting (old), Chart Builder and Report Template Editor use the shared Interactive Preview. E2E Dashboards uses the same chart contracts in its live viewer, expanded viewer and historical Charts Panel, while preparing one synchronized dataset selection for the complete Dashboard.
 
 Live charts draw their Canvas models in the user's browser. Server-side Report, Chart Set and Dashboard exports send those same models through a persistent Node/Chromium renderer, which keeps chart geometry and semantic tooltips aligned with the interactive view. Docker includes these runtime dependencies; source deployments using `dashboard-canvas` need Node.js, a supported Chromium-family browser and the WebSocket module.
 

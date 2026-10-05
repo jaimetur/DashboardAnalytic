@@ -78,4 +78,4 @@ Legend Position: Bottom
 - If no source appears, process a dataset and select its matching CDR Type.
 - If a chart is empty, inspect filtered data and verify KPI, technology and filter values.
 
-Use E2E Reporting for persistent Chart Sets and Report Template Editor for reusable definitions.
+Use Reporting (old) for persistent Chart Sets and Report Template Editor for reusable definitions.

@@ -353,6 +353,22 @@ CREATE TABLE IF NOT EXISTS transfer_offers (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_nocase
 ON users(username COLLATE NOCASE);
+
+CREATE TABLE IF NOT EXISTS user_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_groups_name_nocase
+ON user_groups(name COLLATE NOCASE);
+
+CREATE TABLE IF NOT EXISTS user_group_members (
+    group_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    PRIMARY KEY (group_id, user_id)
+);
 """
 
 
@@ -1850,9 +1866,65 @@ class Repository:
 
     def delete_user(self, user_id: int) -> None:
         with self.global_connection() as conn:
+            conn.executescript(GLOBAL_SCHEMA)
             cursor = conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
             if cursor.rowcount == 0:
                 raise ValueError("User not found")
+            conn.execute("DELETE FROM user_group_members WHERE user_id = ?", (user_id,))
+
+    def list_user_groups(self) -> list[dict[str, Any]]:
+        """Custom user groups, ordered by name, with their member user IDs."""
+        with self.global_connection() as conn:
+            conn.executescript(GLOBAL_SCHEMA)
+            groups = conn.execute(
+                "SELECT id, name, description, created_at FROM user_groups ORDER BY name COLLATE NOCASE, id",
+            ).fetchall()
+            members = conn.execute("SELECT group_id, user_id FROM user_group_members ORDER BY user_id").fetchall()
+        member_ids: dict[int, list[int]] = {}
+        for row in members:
+            member_ids.setdefault(int(row['group_id']), []).append(int(row['user_id']))
+        return [
+            {'id': int(row['id']), 'name': str(row['name']), 'description': str(row['description'] or ''),
+             'created_at': str(row['created_at'] or ''), 'member_ids': member_ids.get(int(row['id']), [])}
+            for row in groups
+        ]
+
+    def save_user_group(self, group_id: int | None, name: str, description: str, member_ids: list[int]) -> int:
+        """Create (group_id None) or update a custom user group and replace its members."""
+        normalized_name = name.strip()
+        if not normalized_name:
+            raise ValueError('Group name cannot be empty.')
+        with self.global_connection() as conn:
+            conn.executescript(GLOBAL_SCHEMA)
+            duplicate = conn.execute(
+                "SELECT id FROM user_groups WHERE name COLLATE NOCASE = ?", (normalized_name,),
+            ).fetchone()
+            if duplicate and (group_id is None or int(duplicate['id']) != int(group_id)):
+                raise ValueError('A group with that name already exists.')
+            if group_id is None:
+                group_id = int(conn.execute(
+                    "INSERT INTO user_groups (name, description, created_at) VALUES (?, ?, ?)",
+                    (normalized_name, description.strip(), local_now_iso()),
+                ).lastrowid)
+            elif conn.execute(
+                "UPDATE user_groups SET name = ?, description = ? WHERE id = ?",
+                (normalized_name, description.strip(), group_id),
+            ).rowcount == 0:
+                raise ValueError('Group not found.')
+            known = {int(row['id']) for row in conn.execute("SELECT id FROM users").fetchall()}
+            conn.execute("DELETE FROM user_group_members WHERE group_id = ?", (group_id,))
+            conn.executemany(
+                "INSERT OR IGNORE INTO user_group_members (group_id, user_id) VALUES (?, ?)",
+                [(group_id, int(user_id)) for user_id in member_ids if int(user_id) in known],
+            )
+        return int(group_id)
+
+    def delete_user_group(self, group_id: int) -> None:
+        with self.global_connection() as conn:
+            conn.executescript(GLOBAL_SCHEMA)
+            if conn.execute("DELETE FROM user_groups WHERE id = ?", (group_id,)).rowcount == 0:
+                raise ValueError('Group not found.')
+            conn.execute("DELETE FROM user_group_members WHERE group_id = ?", (group_id,))
 
     def list_users(self) -> list[sqlite3.Row]:
         with self.global_connection() as conn:

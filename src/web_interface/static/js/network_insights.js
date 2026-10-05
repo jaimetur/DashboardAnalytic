@@ -12,7 +12,7 @@
     if (stored && typeof stored === 'object' && !Array.isArray(stored)) savedSelection = stored;
   } catch {}
   const selectionControls = ['ni-nr-mode', 'ni-technology', 'ni-group', 'ni-coverage-threshold',
-    'ni-interference-threshold', 'ni-grid', 'ni-deployment-group'];
+    'ni-interference-threshold', 'ni-grid', 'ni-deployment-group', 'ni-sites-source'];
   for (const id of selectionControls) {
     const control = $(id);
     const value = savedSelection.controls?.[id];
@@ -21,7 +21,7 @@
       for (const option of control.options) option.selected = value.includes(option.value);
       control.dispatchEvent(new Event('multiselect:options-updated'));
     } else if (control.tagName === 'SELECT') {
-      if ([...control.options].some(option => option.value === String(value))) control.value = value;
+      if ([...control.options].some(option => option.value === String(value) && !option.disabled)) control.value = value;
     } else if (Number.isFinite(Number(value))) control.value = value;
   }
   const pendingFilterRestore = new Map(Object.entries(savedSelection.filters || {})
@@ -32,8 +32,11 @@
     const existing = [...control.options].find(option => option.value === 'technology');
     // LTE+NR always separates the technologies; their RSRP/SINR are never pooled.
     if ($('ni-technology').value === 'lte_nr') {
-      if (existing) existing.selected = true;
-      else control.add(new Option('Technology', 'technology', true, true), [...control.options].find(option => option.value === 'campaign') || null);
+      const technology = existing || new Option('Technology', 'technology', true, true);
+      technology.selected = true;
+      technology.disabled = true;
+      technology.dataset.disabledReason = 'Technology is required when LTE+NR is selected.';
+      if (!existing) control.add(technology, [...control.options].find(option => option.value === 'campaign') || null);
     } else if (existing) existing.remove();
     control.dispatchEvent(new Event('multiselect:options-updated'));
   };
@@ -42,10 +45,15 @@
   const enforceOperatorGrouping = () => {
     const control = $('ni-group');
     const option = value => [...control.options].find(item => item.value === value);
-    if (option('operator') && !option('operator').selected && !option('vendor')?.selected) {
-      option('operator').selected = true;
-      control.dispatchEvent(new Event('multiselect:options-updated'));
-    }
+    const operator = option('operator');
+    if (!operator) return;
+    const required = !option('vendor')?.selected;
+    const changed = operator.disabled !== required || (required && !operator.selected);
+    operator.disabled = required;
+    operator.dataset.disabledReason = 'Operator is required unless Vendor is selected.';
+    if (required) operator.selected = true;
+    // Synchronize the existing menu without rebuilding and closing it.
+    if (changed) control.dispatchEvent(new Event('change', {bubbles: true}));
   };
   enforceOperatorGrouping();
   $('ni-group').addEventListener('change', enforceOperatorGrouping);
@@ -148,6 +156,7 @@
         const merged = {...(optionsCache.get(key) || {}), ...payload.options};
         optionsCache.set(key, merged);
         fillFilterOptions(payload.options);
+        refreshInventory();
       };
       // Cached dimensions render independently of the first Vendor_Only lookup.
       const results = await Promise.allSettled([loadPart(false), loadPart(true)]);
@@ -173,6 +182,7 @@
 
   const requestBody = (mapOperator = '') => ({
     datasets: selectedDatasets(),
+    nr_mode: $('ni-nr-mode').value,
     technology: $('ni-technology').value,
     group: selectedValues('ni-group'),
     operators: filterValues('ni-operators'),
@@ -210,6 +220,35 @@
       if (request === analysing) { button.disabled = false; button.classList.remove('is-busy'); }
     }
   };
+
+  // Summary Network Insights of the current selection, as PowerPoint or Word.
+  document.querySelectorAll('[data-ni-export]').forEach((button) => button.addEventListener('click', async () => {
+    const kind = button.dataset.niExport;
+    const label = kind === 'word' ? 'Word' : 'PowerPoint';
+    button.disabled = true; button.classList.add('is-busy');
+    status(`Generating the Summary Network Insights ${label}… Charts and maps are rendered at full size.`, 'busy');
+    try {
+      const response = await fetch(`/api/network-insights/export/${kind}`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(requestBody(analysis?.maps?.operator || '')),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail || `Unable to export the ${label} summary.`);
+      }
+      const disposition = response.headers.get('content-disposition') || '';
+      const name = /filename\*?=(?:UTF-8'')?"?([^";]+)/i.exec(disposition)?.[1];
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(await response.blob());
+      link.download = name ? decodeURIComponent(name) : `Summary Network Insights.${kind === 'word' ? 'docx' : 'pptx'}`;
+      document.body.append(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+      status(`Summary Network Insights ${label} downloaded.`, 'done');
+    } catch (error) {
+      status(error.message, 'error');
+    } finally {
+      button.disabled = false; button.classList.remove('is-busy');
+    }
+  }));
 
   const delta = (value, unit, betterHigher) => {
     if (value === null || value === undefined) return '';
@@ -309,8 +348,28 @@
     renderHotspots('interference', maps.interference_hotspots, 'dB');
     $('ni-map-note').textContent = `${maps.operator} · grid ${number(maps.coverage_grid_metres, 0)} m${maps.coverage_grid_metres !== Number($('ni-grid').value) ? ' (coarsened to keep the map readable)' : ''}.`;
   };
+  let clusterInventories = null;
   const renderSites = () => {
+    const observed = $('ni-sites-source').value === 'observed';
+    const missing = analysis?.missing_inventory_operators || [];
+    $('ni-sites-pending').hidden = !observed || !missing.length;
+    $('ni-sites-pending').innerHTML = missing.length
+      ? `<strong>Pending input:</strong> site inventories for ${missing.map(escapeHtml).join(', ')}.` : '';
+    $('ni-sites-note').hidden = !observed;
+    $('ni-sites-inventory-note').hidden = observed;
+    $('ni-inventory-totals').hidden = observed;
     const table = $('ni-sites-table');
+    if (!observed) {
+      const rows = clusterInventories?.rows || [];
+      table.innerHTML = rows.length
+        ? `<thead><tr><th>Operator</th><th>Inventory sites</th><th>Inventory cells</th></tr></thead><tbody>${rows.map(row => `<tr><td>${escapeHtml(row.operator)}</td><td class="num">${integer(row.sites)}</td><td class="num">${integer(row.cells)}</td></tr>`).join('')}</tbody>`
+        : '<tbody><tr><td class="form-note">No supported site/cell inventory is available.</td></tr></tbody>';
+      return;
+    }
+    if (!analysis) {
+      table.innerHTML = '<tbody><tr><td class="form-note">No analysis yet.</td></tr></tbody>';
+      return;
+    }
     const grouped = Boolean(analysis.rf_rows.some(row => row.group));
     table.innerHTML = `<thead><tr><th>${escapeHtml(analysis.group_label || 'All samples')}</th>${grouped ? `<th>${escapeHtml(analysis.group_label)}</th>` : ''}<th>Observed eNodeBs</th><th>Observed cells</th><th>Samples</th><th>Samples per eNodeB</th></tr></thead><tbody>${analysis.rf_rows.map(row => `<tr>
       <td><span class="ni-swatch" style="background:${analysis.colours[row.operator] || '#6D46A8'}"></span>${escapeHtml(row.operator)}</td>${grouped ? `<td>${escapeHtml(row.group)}</td>` : ''}
@@ -351,6 +410,81 @@
     renderSpectrum();
   };
 
+  const renderInventory = inventory => {
+    const lastPage = Math.max(0, Math.ceil(inventory.total_rows / inventory.page_size) - 1);
+    return `<section class="ni-inventory" data-ni-inventory="${escapeHtml(inventory.operator)}" data-ni-operator-label="${escapeHtml(inventory.operator_label || inventory.operator)}">
+      <h3>${escapeHtml(inventory.operator_label || inventory.operator)} · Site / Cell Inventory</h3>
+      <div class="ni-map-toolbar">
+        <button type="button" class="ni-secondary-action" data-ni-inventory-export>Export CSV</button>
+        <button type="button" class="ni-secondary-action" data-ni-inventory-page="${inventory.page - 1}" ${inventory.page === 0 ? 'disabled' : ''}>Previous</button>
+        <span class="form-note">Page ${integer(inventory.page + 1)} of ${integer(lastPage + 1)} · ${integer(inventory.total_rows)} rows · ${integer(inventory.columns.length)} columns</span>
+        <button type="button" class="ni-secondary-action" data-ni-inventory-page="${inventory.page + 1}" ${inventory.page >= lastPage ? 'disabled' : ''}>Next</button>
+      </div>
+      <div class="table-wrap ni-table-wrap"><table class="ni-table"><thead><tr>${inventory.columns.map(column => `<th${inventory.key_columns.includes(column) ? ' class="ni-inventory-key-column"' : ''}>${escapeHtml(column)}</th>`).join('')}</tr></thead>
+      <tbody>${inventory.rows.map(row => `<tr>${row.map((value, index) => `<td${inventory.key_columns.includes(inventory.columns[index]) ? ' class="ni-inventory-key-column"' : ''}>${escapeHtml(value ?? '')}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${inventory.columns.length || 1}" class="form-note">No inventory rows.</td></tr>`}</tbody></table></div>
+    </section>`;
+  };
+
+  let inventorySelection = null;
+  let displayedDeploymentGroup = '';
+  const downloadDeploymentCsv = async (button, operator = '') => {
+    if (button.disabled) return;
+    const selection = inventorySelection;
+    const group = displayedDeploymentGroup;
+    button.disabled = true;
+    try {
+      const response = group === 'inventory'
+        ? await fetch(`/api/network-insights/inventory/export${operator ? `?operator=${encodeURIComponent(operator)}` : ''}`, {
+          method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(selection),
+        })
+        : await fetch(`/api/network-insights/deployment/export-all?group=${encodeURIComponent(group)}`);
+      if (!response.ok) {
+        const payload = await response.json();
+        throw new Error(payload.detail || 'Unable to export the deployment tables.');
+      }
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = group === 'inventory' ? `${operator || 'all'}-site-cell-inventory.csv` : `network-deployment-all-${group}.csv`;
+      document.body.append(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      $('ni-deployment-status').textContent = error.message;
+    } finally {
+      if (displayedDeploymentGroup === group && !deploymentController?.signal.aborted) button.disabled = false;
+    }
+  };
+  $('ni-deployment-export-all').addEventListener('click', event => { void downloadDeploymentCsv(event.currentTarget); });
+  $('ni-deployment').addEventListener('click', async event => {
+    const card = event.target.closest('[data-ni-inventory]');
+    if (!card || !inventorySelection) return;
+    const exportButton = event.target.closest('[data-ni-inventory-export]');
+    if (exportButton) {
+      void downloadDeploymentCsv(exportButton, card.dataset.niInventory);
+      return;
+    }
+    const button = event.target.closest('[data-ni-inventory-page]');
+    if (!button || button.disabled) return;
+    const controller = deploymentController;
+    const controls = [...card.querySelectorAll('button')].map(control => [control, control.disabled]);
+    controls.forEach(([control]) => { control.disabled = true; });
+    try {
+      const response = await fetch(`/api/network-insights/inventory?operator=${encodeURIComponent(card.dataset.niInventory)}&page=${button.dataset.niInventoryPage}`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(inventorySelection), signal: controller.signal,
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || 'Unable to load the inventory page.');
+      if (deploymentController === controller && card.isConnected) {
+        card.outerHTML = renderInventory({...payload, operator_label: card.dataset.niOperatorLabel});
+      }
+    } catch (error) {
+      if (error.name !== 'AbortError' && deploymentController === controller && card.isConnected) {
+        $('ni-deployment-status').textContent = error.message;
+        controls.forEach(([control, disabled]) => { control.disabled = disabled; });
+      }
+    }
+  });
+
   let deploymentController = null;
   const loadDeployment = async () => {
     deploymentController?.abort();
@@ -359,29 +493,44 @@
     const group = $('ni-deployment-group').value;
     const host = $('ni-deployment');
     const note = $('ni-deployment-status');
+    $('ni-deployment-export-all').disabled = true;
+    inventorySelection = null;
     if (!(config.inventories || []).length) {
       host.innerHTML = '<p class="ni-pending-box"><strong>Pending input.</strong> Upload the Vodafone or Three cell inventories as Vendor mapping datasets in Workspace to analyse NNS, eMOCN scenarios, host networks and RAN vendors.</p>';
-      $('ni-inventory-totals').replaceChildren();
       return;
     }
     note.textContent = 'Loading the cell inventories…';
+    host.querySelectorAll('button').forEach(button => { button.disabled = true; });
     const timeout = setTimeout(() => controller.abort(), 120000);
     try {
-      const response = await fetch(`/api/network-insights/deployment?group=${encodeURIComponent(group)}`, {signal: controller.signal});
+      const selection = group === 'inventory' ? requestBody() : null;
+      const response = group === 'inventory'
+        ? await fetch('/api/network-insights/inventory/tables', {
+          method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(selection), signal: controller.signal,
+        })
+        : await fetch(`/api/network-insights/deployment?group=${encodeURIComponent(group)}`, {signal: controller.signal});
       const payload = await response.json();
       if (deploymentController !== controller) return;
       if (!response.ok) throw new Error(payload.detail || 'Unable to load the cell inventories.');
+      displayedDeploymentGroup = group;
+      $('ni-deployment-export-all').disabled = !payload.inventories.length;
+      if (group === 'inventory') {
+        inventorySelection = selection;
+        host.innerHTML = payload.inventories.map(renderInventory).join('') || '<p class="form-note">No uploaded inventories match the selected operators.</p>';
+        note.textContent = 'Complete uploaded inventories, filtered by Operator, Vendor, Region, City and Technology. CDR selection, NR Mode and Campaigns do not restrict inventory rows. CSV includes all matching rows and columns.';
+        return;
+      }
+      inventorySelection = null;
       host.innerHTML = payload.inventories.map(inventory => {
         const maximum = inventory.rows.reduce((maximum, row) => Math.max(maximum, row.sites), 1);
         const available = inventory.available_groups.includes(group);
         return `<section class="ni-inventory"><h3>${escapeHtml(inventory.operator)} <span>${escapeHtml(inventory.file_name)}</span></h3>
+          <a class="ghost-link" href="/api/network-insights/deployment/${inventory.id}/export?group=${encodeURIComponent(group)}">Export CSV</a>
           ${available ? '' : `<p class="form-note">This inventory has no ${escapeHtml(payload.group_label)} column; totals are shown instead.</p>`}
           <table class="ni-table"><thead><tr><th>${escapeHtml(available ? payload.group_label : 'Inventory')}</th><th>Sites</th><th>Cells</th><th></th></tr></thead><tbody>${inventory.rows.map(row => `<tr>
             <td>${escapeHtml(row.group)}</td><td class="num">${integer(row.sites)}</td><td class="num">${integer(row.cells)}</td>
             <td><span class="ni-share"><span style="width:${row.sites / maximum * 100}%"></span></span></td></tr>`).join('')}</tbody></table></section>`;
       }).join('');
-      $('ni-inventory-totals').innerHTML = payload.inventories.filter(inventory => inventory.totals).map(inventory =>
-        `<article class="ni-inventory-total"><span>${escapeHtml(inventory.operator)} inventory</span><strong>${integer(inventory.totals.sites)}</strong><small>sites · ${integer(inventory.totals.cells)} cells</small></article>`).join('');
       note.textContent = 'Sites and cells counted from the uploaded cell inventories (distinct site and cell identifiers).';
     } catch (error) {
       if (deploymentController !== controller) return;
@@ -391,6 +540,23 @@
       clearTimeout(timeout);
     }
   };
+
+  const loadClusterInventories = async () => {
+    try {
+      const response = await fetch('/api/network-insights/cluster-inventories');
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || 'Unable to load site inventories.');
+      clusterInventories = payload;
+      $('ni-inventory-totals').innerHTML = payload.rows.map(row =>
+        `<article class="ni-inventory-total"><span>${escapeHtml(row.operator)} inventory</span><div class="ni-inventory-site-count"><strong>${integer(row.sites)}</strong><small>sites</small></div><small>${integer(row.cells)} cells</small></article>`).join('');
+      renderSites();
+    } catch (error) {
+      if ($('ni-sites-source').value === 'inventory') $('ni-sites-table').innerHTML = `<tbody><tr><td class="form-note">${escapeHtml(error.message)}</td></tr></tbody>`;
+    }
+  };
+  $('ni-sites-source').onchange = () => { renderSites(); if (!clusterInventories) void loadClusterInventories(); };
+  renderSites();
+  void loadClusterInventories();
 
   const rememberSelection = () => {
     const filters = Object.fromEntries(filterNames.map(field => {
@@ -406,6 +572,18 @@
     try { if (storageKey) localStorage.setItem(storageKey, JSON.stringify(savedSelection)); } catch {}
   };
   $('network-insights').addEventListener('change', rememberSelection);
+  let inventoryRefreshTimer = null;
+  const refreshInventory = () => {
+    if ($('ni-deployment-group').value !== 'inventory') return;
+    clearTimeout(inventoryRefreshTimer);
+    deploymentController?.abort();
+    $('ni-deployment-export-all').disabled = true;
+    $('ni-deployment').querySelectorAll('button').forEach(button => { button.disabled = true; });
+    inventoryRefreshTimer = setTimeout(() => { void loadDeployment(); }, 150);
+  };
+  $('network-insights').addEventListener('change', event => {
+    if (event.target.closest('.ni-selection-panel')) refreshInventory();
+  });
 
   $('ni-technology').onchange = syncTechnologyGrouping;
   $('ni-nr-mode').onchange = () => { renderDatasets(); scheduleFilterOptions(); };

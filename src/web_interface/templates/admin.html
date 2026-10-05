@@ -1,5 +1,19 @@
 {% extends 'base.html' %}
 {% block content %}
+{% macro principal_picker(form_id, name, sections, selected, empty_label, label) -%}
+<details class="principal-picker" data-principal-picker data-empty-label="{{ empty_label }}">
+  <summary aria-label="{{ label }}"><span data-principal-picker-summary>{{ empty_label }}</span><span class="principal-picker-chevron" aria-hidden="true"></span></summary>
+  <div class="principal-picker-menu" role="group" aria-label="{{ label }}">
+    <input class="principal-picker-search" type="search" placeholder="Filter…" aria-label="Filter {{ label }}">
+    {% for heading, items in sections %}
+    <section data-principal-picker-section="{{ heading }}">
+      <p class="principal-picker-heading">{{ heading }}</p>
+      {% for value, text in items %}<label><input type="checkbox" name="{{ name }}" value="{{ value }}" form="{{ form_id }}" {% if value in selected %}checked{% endif %}><span>{{ text }}</span></label>{% else %}<p class="table-help">None available.</p>{% endfor %}
+    </section>
+    {% endfor %}
+  </div>
+</details>
+{%- endmacro %}
 <section class="dashboard-stack spacious-stack admin-stack">
   {% if not embedded_template_editor %}
   <article class="panel dataset-summary-panel module-hero-admin admin-overview-panel" style="background: linear-gradient(135deg, #ff8070, #861919) !important; color: #ffffff;">
@@ -135,6 +149,91 @@
     </div>
   </details>
 
+
+  <details class="panel collapsible-panel" id="user-groups" open data-panel-state-key="admin:user-groups">
+    <summary class="collapsible-summary">
+      <div>
+        <p class="eyebrow">Identity</p>
+        <h2>User Groups</h2>
+      </div>
+      <span class="collapse-chip">Collapse</span>
+    </summary>
+    <p class="table-help">Custom groups of users. Features Activation can activate a feature for a whole group.</p>
+    {% set member_items = [] %}{% for row in users %}{% set _ = member_items.append((row['id'], row['username'])) %}{% endfor %}
+    <div class="table-wrap">
+      <table class="principal-table user-groups-table">
+        <thead><tr><th>Group</th><th>Description</th><th>Members</th><th>Actions</th></tr></thead>
+        <tbody>
+          {% for group in user_groups %}
+          <tr>
+            <td>
+              <form id="user-group-update-{{ group.id }}" action="/admin/user-groups/{{ group.id }}/update" method="post"></form>
+              <form id="user-group-delete-{{ group.id }}" action="/admin/user-groups/{{ group.id }}/delete" method="post" data-confirm="Delete group {{ group.name }}? Its members keep their accounts."></form>
+              <input class="table-input" type="text" name="name" value="{{ group.name }}" form="user-group-update-{{ group.id }}" required aria-label="Group name">
+            </td>
+            <td><input class="table-input" type="text" name="description" value="{{ group.description }}" form="user-group-update-{{ group.id }}" aria-label="Description of {{ group.name }}"></td>
+            <td>{{ principal_picker('user-group-update-' ~ group.id, 'member_ids', [('Users', member_items)], group.member_ids, 'No members', 'Members of ' ~ group.name) }}</td>
+            <td>
+              <div class="table-actions">
+                <button type="submit" form="user-group-update-{{ group.id }}" class="icon-action" aria-label="Save group" title="Save group">✓</button>
+                <button type="submit" form="user-group-delete-{{ group.id }}" class="danger-button icon-action" aria-label="Delete group" title="Delete group">×</button>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+          <tr class="user-groups-create-row">
+            <td>
+              <form id="user-group-create" action="/admin/user-groups" method="post"></form>
+              <input class="table-input" type="text" name="name" placeholder="New group name" form="user-group-create" required aria-label="New group name">
+            </td>
+            <td><input class="table-input" type="text" name="description" placeholder="Description" form="user-group-create" aria-label="New group description"></td>
+            <td>{{ principal_picker('user-group-create', 'member_ids', [('Users', member_items)], [], 'No members', 'Members of the new group') }}</td>
+            <td><div class="table-actions"><button type="submit" form="user-group-create">Create group</button></div></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </details>
+
+  {% if user.role == 'super-admin' %}
+  <details class="panel collapsible-panel" id="features-activation" open data-panel-state-key="admin:features-activation">
+    <summary class="collapsible-summary">
+      <div>
+        <p class="eyebrow">Modules</p>
+        <h2>Features Activation</h2>
+      </div>
+      <span class="collapse-chip">Collapse</span>
+    </summary>
+    <p class="table-help">Each main module is active for <strong>All users</strong> or <strong>Nobody</strong> by default. <strong>Allowed</strong> roles, groups and users gain it and <strong>Forbidden</strong> ones lose it; when an account matches both lists, Forbidden wins. A feature that is not active for an account disappears from its navigation and its pages and API answer 403. Non-Qualified Calls starts hidden from everyone; Reporting and Reporting (old) start allowed for super-admins, and Reporting (old) also for EJAITUR.</p>
+    <form id="features-activation-form" action="/admin/features" method="post" autocomplete="off"></form>
+    {% set principal_sections = [] %}
+    {% set role_items = [] %}{% for role in feature_roles %}{% set _ = role_items.append(('role:' ~ role, role)) %}{% endfor %}
+    {% set group_items = [] %}{% for group in user_groups %}{% set _ = group_items.append(('group:' ~ group.id, group.name)) %}{% endfor %}
+    {% set user_items = [] %}{% for row in users %}{% set _ = user_items.append(('user:' ~ row['id'], row['username'] ~ ' (' ~ row['role'] ~ ')')) %}{% endfor %}
+    {% set principal_sections = [('Roles', role_items), ('Groups', group_items), ('Users', user_items)] %}
+    <div class="table-wrap">
+      <table class="principal-table features-activation-table">
+        <thead><tr><th>Feature</th><th>By default</th><th>Allowed</th><th>Forbidden</th></tr></thead>
+        <tbody>
+          {% for feature in feature_activation %}
+          <tr>
+            <td><strong>{{ feature.label }}</strong></td>
+            <td>
+              <select class="table-select" name="default__{{ feature.key }}" form="features-activation-form" aria-label="Default access to {{ feature.label }}">
+                <option value="all" {% if feature.default == 'all' %}selected{% endif %}>All users</option>
+                <option value="none" {% if feature.default == 'none' %}selected{% endif %}>Nobody</option>
+              </select>
+            </td>
+            <td>{{ principal_picker('features-activation-form', 'allow__' ~ feature.key, principal_sections, feature.allow_values, 'Nobody else', 'Allowed for ' ~ feature.label) }}</td>
+            <td>{{ principal_picker('features-activation-form', 'deny__' ~ feature.key, principal_sections, feature.deny_values, 'Nobody', 'Forbidden for ' ~ feature.label) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="form-actions"><button type="submit" form="features-activation-form">Save Features Activation</button></div>
+  </details>
+  {% endif %}
   {% endif %}
   {% if embedded_template_editor %}
   <details class="panel collapsible-panel slides-templates-editor-panel" id="catalogue-editor" open data-panel-state-key="admin:slides-templates-editor">
@@ -374,7 +473,7 @@
       <div class="confirm-icon info-icon" aria-hidden="true">⇩</div>
       <p class="eyebrow">Full Environment export</p>
       <h3 id="full-environment-workspace-title">Select workspaces</h3>
-      <p>Application Config is always included. Each selected workspace includes its database, input files, Dashboard definitions, Report Templates, Main Cities, Operator &amp; Vendor Maps, Scoring &amp; GAP Analysis Configuration (KPI methodology profiles, aggregation hierarchy and GAP KPI priorities), Auto-calculated Fields and Query Builder Queries.</p>
+      <p>Application Config is always included. Each selected workspace includes its database, input files, Dashboard definitions, Report Templates, Main Cities, Operator &amp; Vendor Maps, Scoring &amp; GAP Analysis Configuration (KPI methodology profiles, aggregation hierarchy and GAP KPI priorities), Auto-calculated Fields, Query Builder Queries and Reporting Jobs.</p>
       <div class="full-environment-workspace-toolbar">
         <button type="button" class="ghost-link" data-full-environment-select-all>Select all</button>
         <button type="button" class="ghost-link" data-full-environment-select-none>Select none</button>
@@ -447,7 +546,7 @@
             <div class="database-backup-immediate-grid">
               <section class="database-backup-operation-panel"><h5>Backup</h5>
                 <label class="database-backup-components">Backup content
-                  <select name="components" multiple data-backup-components data-multiselect-groups="true" data-multiselect-auto-close="1000"><optgroup label="Configuration Content"><option value="app_database" {% if 'app_database' in recurring_backup.components %}selected{% endif %}>Application database</option></optgroup><optgroup label="Workspace Content">{% for value, label in [('workspace_database', 'Workspace Database'), ('dashboards', 'Dashboards (one JSON file with all Dashboard definitions)'), ('report_templates', 'Report Templates (one CSV file per Report Template)'), ('main_cities', 'Main Cities (workspace city selection)'), ('operator_mappings', 'Operator & Vendor Maps (aliases, order and theme colors)'), ('scoring_configuration', 'Scoring & GAP Analysis Configuration (KPI methodology profiles, aggregation hierarchy and GAP KPI priorities)'), ('auto_calculated_fields', 'Auto-calculated Fields (one JSON file with all definitions)'), ('query_builder_queries', 'Saved Queries (one JSON file with all saved queries)'), ('input', 'Input (includes all raw datasets files)'), ('output', 'Output (includes all generated reports, chart sets and Dashboard PPT jobs)')] %}<option value="{{ value }}" {% if value in recurring_backup.components %}selected{% endif %}>{{ label }}</option>{% endfor %}</optgroup></select>
+                  <select name="components" multiple data-backup-components data-multiselect-groups="true" data-multiselect-auto-close="1000"><optgroup label="Configuration Content"><option value="app_database" {% if 'app_database' in recurring_backup.components %}selected{% endif %}>Application database</option></optgroup><optgroup label="Workspace Content">{% for value, label in [('workspace_database', 'Workspace Database'), ('dashboards', 'Dashboards (one JSON file with all Dashboard definitions)'), ('report_templates', 'Report Templates (one CSV file per Report Template)'), ('main_cities', 'Main Cities (workspace city selection)'), ('operator_mappings', 'Operator & Vendor Maps (aliases, order and theme colors)'), ('scoring_configuration', 'Scoring & GAP Analysis Configuration (KPI methodology profiles, aggregation hierarchy and GAP KPI priorities)'), ('auto_calculated_fields', 'Auto-calculated Fields (one JSON file with all definitions)'), ('query_builder_queries', 'Saved Queries (one JSON file with all saved queries)'), ('reporting_jobs', 'Reporting Jobs (one JSON file with all Reporting Job definitions)'), ('input', 'Input (includes all raw datasets files)'), ('output', 'Output (includes all generated reports, chart sets and Dashboard PPT jobs)')] %}<option value="{{ value }}" {% if value in recurring_backup.components %}selected{% endif %}>{{ label }}</option>{% endfor %}</optgroup></select>
                 </label>
                 <label class="database-backup-workspaces" data-backup-workspaces hidden>Workspaces to include
                   <select name="workspace_ids" multiple>{% for workspace in backup_workspaces %}<option value="{{ workspace.id }}" {% if not recurring_backup.workspace_ids or workspace.id in recurring_backup.workspace_ids %}selected{% endif %}>{{ workspace.name }}</option>{% endfor %}</select>
@@ -776,7 +875,7 @@
   const refresh = () => { settings.hidden = !enabled.checked; };
   const refreshBackupWorkspaces = () => {
     if (!backupComponents || !backupWorkspaces) return;
-    const needsWorkspaces = [...backupComponents.selectedOptions].some((option) => ['workspace_database', 'dashboards', 'report_templates', 'operator_mappings', 'main_cities', 'scoring_configuration', 'auto_calculated_fields', 'query_builder_queries', 'input', 'output'].includes(option.value));
+    const needsWorkspaces = [...backupComponents.selectedOptions].some((option) => ['workspace_database', 'dashboards', 'report_templates', 'operator_mappings', 'main_cities', 'scoring_configuration', 'auto_calculated_fields', 'query_builder_queries', 'reporting_jobs', 'input', 'output'].includes(option.value));
     backupWorkspaces.hidden = !needsWorkspaces;
   };
   const refreshRecurrence = () => {
@@ -865,10 +964,10 @@
       const response = await fetch('/api/admin/backup-files/inspect', {method: 'POST', credentials: 'same-origin', body: new URLSearchParams({backup_path: restorePath.value, backup_file: restoreFile.value})});
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.detail || 'Unable to inspect the backup.');
-      const labels = {app_database: 'Application database', workspace_database: 'Workspace Database', dashboards: 'Dashboards', report_templates: 'Report Templates', main_cities: 'Main Cities', operator_mappings: 'Operator & Vendor Maps', scoring_configuration: 'Scoring & GAP Analysis Configuration', auto_calculated_fields: 'Auto-calculated Fields', query_builder_queries: 'Saved Queries', input: 'Input', output: 'Output'};
+      const labels = {app_database: 'Application database', workspace_database: 'Workspace Database', dashboards: 'Dashboards', report_templates: 'Report Templates', main_cities: 'Main Cities', operator_mappings: 'Operator & Vendor Maps', scoring_configuration: 'Scoring & GAP Analysis Configuration', auto_calculated_fields: 'Auto-calculated Fields', query_builder_queries: 'Saved Queries', reporting_jobs: 'Reporting Jobs', input: 'Input', output: 'Output'};
       const componentGroups = [
         ['Configuration Content', ['app_database']],
-        ['Workspace Content', ['workspace_database', 'dashboards', 'report_templates', 'main_cities', 'operator_mappings', 'scoring_configuration', 'auto_calculated_fields', 'query_builder_queries', 'input', 'output']],
+        ['Workspace Content', ['workspace_database', 'dashboards', 'report_templates', 'main_cities', 'operator_mappings', 'scoring_configuration', 'auto_calculated_fields', 'query_builder_queries', 'reporting_jobs', 'input', 'output']],
       ];
       restoreComponents.innerHTML = componentGroups.map(([title, values]) => {
         const available = values.filter((value) => payload.components.includes(value));
@@ -1590,4 +1689,64 @@
   document.getElementById('catalogue-editor').open = true;
 </script>
 {% endif %}
+
+<script>
+(() => {
+  // Role, group and user pickers: the menu floats over the table, the summary
+  // counts the selection live, and the search filters every section.
+  const pickers = [...document.querySelectorAll('[data-principal-picker]')];
+  const summarise = (picker) => {
+    const parts = [...picker.querySelectorAll('[data-principal-picker-section]')].map((section) => {
+      const count = section.querySelectorAll('input:checked').length;
+      if (!count) return '';
+      const heading = section.dataset.principalPickerSection.toLowerCase();
+      return `${count} ${count === 1 ? heading.replace(/s$/, '') : heading}`;
+    }).filter(Boolean);
+    picker.querySelector('[data-principal-picker-summary]').textContent = parts.join(' · ') || picker.dataset.emptyLabel;
+    picker.classList.toggle('has-selection', parts.length > 0);
+  };
+  const place = (picker) => {
+    const menu = picker.querySelector('.principal-picker-menu');
+    const bounds = picker.querySelector('summary').getBoundingClientRect();
+    const below = window.innerHeight - bounds.bottom - 12;
+    Object.assign(menu.style, {
+      left: `${Math.max(8, Math.min(bounds.left, window.innerWidth - Math.max(bounds.width, 240) - 8))}px`,
+      top: `${below > 200 ? bounds.bottom + 4 : Math.max(8, bounds.top - Math.min(320, bounds.top - 16) - 4)}px`,
+      width: `${Math.max(bounds.width, 240)}px`,
+      maxHeight: `${Math.max(180, Math.min(320, below > 200 ? below : bounds.top - 16))}px`,
+    });
+  };
+  // Browsers may restore old checkbox states from earlier visits; the
+  // markup of this response is the saved configuration.
+  const restoreSaved = () => pickers.forEach((picker) => {
+    picker.querySelectorAll('input[type="checkbox"]').forEach((box) => { box.checked = box.defaultChecked; });
+    summarise(picker);
+  });
+  window.addEventListener('pageshow', restoreSaved);
+  window.addEventListener('load', restoreSaved);
+  pickers.forEach((picker) => {
+    summarise(picker);
+    picker.addEventListener('change', () => summarise(picker));
+    picker.addEventListener('toggle', () => {
+      if (!picker.open) return;
+      pickers.forEach((other) => { if (other !== picker) other.open = false; });
+      place(picker);
+      picker.querySelector('.principal-picker-search').focus();
+    });
+    picker.querySelector('.principal-picker-search').addEventListener('input', (event) => {
+      const query = event.target.value.trim().toLocaleLowerCase();
+      picker.querySelectorAll('label').forEach((label) => { label.hidden = Boolean(query) && !label.textContent.toLocaleLowerCase().includes(query); });
+    });
+  });
+  document.addEventListener('pointerdown', (event) => {
+    pickers.forEach((picker) => { if (picker.open && !picker.contains(event.target)) picker.open = false; });
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') pickers.forEach((picker) => { picker.open = false; });
+  });
+  const reposition = () => pickers.forEach((picker) => { if (picker.open) place(picker); });
+  window.addEventListener('resize', reposition);
+  window.addEventListener('scroll', reposition, true);
+})();
+</script>
 {% endblock %}

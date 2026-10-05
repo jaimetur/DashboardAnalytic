@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 import json
 import math
 from pathlib import Path
@@ -32,6 +34,16 @@ def _add_ready_dataset(tmp_path: Path, name: str, kind: str, rows: pd.DataFrame,
         row_count=len(rows), column_count=len(rows.columns), processed_at=local_now_iso(),
     )
     return dataset_id
+
+
+def _add_ready_polygon(tmp_path, kind, name):
+    filename = f'{kind}.geojson'
+    identifier = _add_ready_dataset(tmp_path, filename, kind, pd.DataFrame({'Name': [name]}), None)
+    (tmp_path / filename).write_text(json.dumps({
+        'type': 'FeatureCollection', 'features': [{'type': 'Feature', 'properties': {'Name': name},
+            'geometry': {'type': 'Polygon', 'coordinates': [[[-2, 53], [0, 53], [0, 55], [-2, 55], [-2, 53]]]}}],
+    }), encoding='utf-8')
+    return identifier
 
 
 def _data_rows(campaign: str, rsrp_offset: float = 0.0) -> pd.DataFrame:
@@ -630,3 +642,449 @@ def test_grouped_cdf_curves_differ_by_line_style_and_lte_nr_stays_separate(clien
     assert medians['EE · NR'] == medians['EE · LTE'] - 8
     names = [series['name'] for series in combined['charts']['rsrp_cdf']['series']]
     assert sorted(names) == ['EE · LTE', 'EE · NR', 'VF · LTE', 'VF · NR']
+
+
+@pytest.mark.parametrize('kind', ['mapping_vodafone', 'mapping_three'])
+def test_full_inventory_pages_and_csv_preserve_all_records(client, tmp_path, kind) -> None:
+    _login(client)
+    rows = pd.DataFrame({
+        'Site ID': ['S1'] * 102 + [None],
+        'GCID': list(range(103)),
+        'source_sheet': ['4G'] * 50 + ['5G'] * 53,
+        'Additional attribute': ['Quoted "value", with comma\nand newline'] * 103,
+        'Coordinates': [51.1234567890123] * 103,
+    })
+    dataset_id = _add_ready_dataset(tmp_path, f'{kind}.xlsx', kind, rows, nr_mode=None)
+    payload = client.get('/api/network-insights/deployment?group=inventory').json()
+    inventory = payload['inventories'][0]
+    assert inventory['columns'] == list(rows.columns)
+    assert inventory['total_rows'] == 103
+    assert len(inventory['rows']) == 50
+    last = client.get(f'/api/network-insights/inventory/{dataset_id}?page=2').json()
+    assert last['page'] == 2 and len(last['rows']) == 3
+    assert last['rows'][-1][0] is None
+    assert client.get(f'/api/network-insights/inventory/{dataset_id}?page=99').json()['page'] == 2
+    assert client.get(f'/api/network-insights/inventory/{dataset_id}?page=-1').status_code == 422
+    response = client.get(f'/api/network-insights/inventory/{dataset_id}?download=true')
+    assert response.status_code == 200 and 'text/csv' in response.headers['content-type']
+    exported = list(csv.reader(io.StringIO(response.text)))
+    assert exported[0] == list(rows.columns)
+    assert len(exported) == 104
+    assert exported[1][3] == rows.iloc[0]['Additional attribute']
+    assert exported[-1][0] == '' and exported[-1][1] == '102'
+    assert float(exported[1][4]) == rows.iloc[0]['Coordinates']
+    page = client.get('/network-insights').text
+    assert 'Full Site / Cell Inventory' in page
+    assert page.index('class="module-tabs-secondary"') < page.index('class="module-tabs-primary"')
+
+
+@pytest.mark.parametrize('group', list(ni.DEPLOYMENT_GROUPINGS))
+def test_deployment_csv_matches_grouped_table_and_totals_fallback(client, tmp_path, group) -> None:
+    _login(client)
+    if group == 'cluster':
+        _add_ready_polygon(tmp_path, 'clusters', 'Polygon Cluster')
+    rows = pd.DataFrame({
+        'Site_ID': ['S1', 'S1', 'S2', 'S3'],
+        'CId___ECI': ['1', '2', '3', '4'],
+        'eMOCNScenario': ['NNS', 'NNS', 'S1', ''],
+        'Vendor': ['Ericsson', 'Ericsson', 'Nokia', 'Nokia'],
+        'Host Network': ['VF', 'VF', '3UK', '3UK'],
+    })
+    dataset_id = _add_ready_dataset(tmp_path, 'inventory.xlsx', 'mapping_three', rows, nr_mode=None)
+    table = client.get(f'/api/network-insights/deployment?group={group}').json()['inventories'][0]
+    response = client.get(f'/api/network-insights/deployment/{dataset_id}/export?group={group}')
+    assert response.status_code == 200
+    exported = list(csv.reader(io.StringIO(response.text)))
+    assert exported[0] == [ni.DEPLOYMENT_GROUPINGS[group] if group in table['available_groups'] else 'Inventory', 'Sites', 'Cells']
+    assert exported[1:] == [[row['group'], str(row['sites']), str(row['cells'])] for row in table['rows']]
+
+
+def test_inventory_exports_reject_non_inventory_unready_and_missing_sources(client, tmp_path) -> None:
+    _login(client)
+    rows = pd.DataFrame({'Site_ID': ['S1']})
+    cdr_id = _add_ready_dataset(tmp_path, 'cdr.xlsx', 'data', rows)
+    pending_id = _add_ready_dataset(tmp_path, 'pending.xlsx', 'mapping_three', rows, nr_mode=None)
+    app_module.repository.update_dataset_profile(pending_id, status='pending')
+    for dataset_id in [cdr_id, pending_id, 999999]:
+        assert client.get(f'/api/network-insights/inventory/{dataset_id}').status_code == 404
+        assert client.get(f'/api/network-insights/inventory/{dataset_id}?download=true').status_code == 404
+        assert client.get(f'/api/network-insights/deployment/{dataset_id}/export').status_code == 404
+    assert client.get(f'/api/network-insights/deployment/{pending_id}/export?group=invalid').status_code == 400
+    client.get('/logout')
+    assert client.get(f'/api/network-insights/inventory/{pending_id}?download=true', follow_redirects=False).status_code != 200
+    assert client.get(f'/api/network-insights/deployment/{pending_id}/export', follow_redirects=False).status_code != 200
+
+
+@pytest.mark.parametrize('path', [
+    '/api/network-insights/deployment?group=inventory',
+    '/api/network-insights/inventory/1?download=true',
+    '/api/network-insights/deployment/1/export',
+])
+def test_inventory_endpoints_require_workspace_access(client, monkeypatch, path) -> None:
+    _login(client)
+    monkeypatch.setattr(app_module.repository, 'user_has_workspace_access', lambda *_args: False)
+    assert client.get(path).status_code == 403
+    monkeypatch.setattr(app_module, 'active_workspace', None)
+    assert client.get(path).status_code == 400
+
+
+def test_module_tab_rows_remain_siblings_outside_configuration_popover(client) -> None:
+    from html.parser import HTMLParser
+
+    class NavigationParser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.stack = []
+            self.parents = {}
+
+        def handle_starttag(self, tag, attrs):
+            values = dict(attrs)
+            classes = values.get('class', '').split()
+            for row in ['module-tabs-secondary', 'module-tabs-primary']:
+                if row in classes:
+                    self.parents[row] = list(self.stack)
+            if tag not in {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'}:
+                self.stack.append((tag, values.get('id'), values.get('class')))
+
+        def handle_endtag(self, tag):
+            for index in range(len(self.stack) - 1, -1, -1):
+                if self.stack[index][0] == tag:
+                    del self.stack[index:]
+                    break
+
+    _login(client)
+    parser = NavigationParser()
+    parser.feed(client.get('/network-insights').text)
+    assert list(parser.parents) == ['module-tabs-secondary', 'module-tabs-primary']
+    assert parser.parents['module-tabs-primary'] == parser.parents['module-tabs-secondary']
+    assert parser.parents['module-tabs-primary'][-1] == ('nav', None, 'module-tabs')
+
+
+def _combined_inventory_sources(tmp_path):
+    vf = pd.DataFrame({
+        'Site_ID': ['VF1'] * 55 + ['VF5G'], 'GCID': list(range(100, 155)) + [555],
+        'OP/ Vendor': ['VF_Ericsson'] * 56, 'Region': ['North'] * 56,
+        'City': ['Leeds'] * 56, 'Cluster': ['Cluster A'] * 56,
+        'Source_Sheet': ['4G'] * 55 + ['5G'], 'Extra VF': ['keep "all",\nfields'] * 56,
+    })
+    three = pd.DataFrame({
+        'Site_ID': ['31', '32'], 'Cid__ECI': [100, 999],
+        'Vendor': ['3_Nokia', '3_Nokia'], 'Vendor_Only': ['Nokia', 'Nokia'],
+        'Region': ['South', 'South'], 'City': ['London', 'London'], 'Technology': ['4G', '4G'],
+        'Extra Three': [1, 2],
+    })
+    _add_ready_dataset(tmp_path, 'vf-full.xlsx', 'mapping_vodafone', vf, nr_mode=None)
+    _add_ready_dataset(tmp_path, 'three-full.csv', 'mapping_three', three, nr_mode=None)
+    cdr = pd.DataFrame({
+        'Operator': ['Vodafone UK'] * 55 + ['Three', 'Three', 'Vodafone UK', 'Vodafone UK'],
+        'Cell_ID': list(range(100, 155)) + [100, 999, 555, 100],
+        'Campaign': ['2026 Q1'] * 56 + ['2026 Q2', '2026 Q1', '2026 Q1'],
+        'Technology': ['LTE'] * 57 + ['NR', 'LTE'],
+    })
+    data_id = _add_ready_dataset(tmp_path, 'selected.xlsx', 'data', cdr)
+    sa_id = _add_ready_dataset(tmp_path, 'sa.xlsx', 'data', cdr.iloc[[57]], nr_mode='SA')
+    return {'datasets': {'data': [data_id, sa_id]}, 'nr_mode': 'NSA', 'technology': 'lte_nr', 'campaigns': ['2026-Q1']}
+
+
+def test_combined_inventory_preserves_sources_and_exports_filtered_pages(client, tmp_path):
+    _login(client)
+    selection = _combined_inventory_sources(tmp_path)
+    response = client.post('/api/network-insights/inventory', json=selection)
+    assert response.status_code == 200
+    first = response.json()
+    assert first['columns'][:7] == list(ni.INVENTORY_KEY_COLUMNS)
+    assert first['key_columns'] == list(ni.INVENTORY_KEY_COLUMNS)
+    assert first['total_rows'] == 58 and len(first['rows']) == 50
+    assert first['rows'][0][:7] == ['VF', 'VF_Ericsson', 'Ericsson', 'North', 'Leeds', 'LTE', 'Cluster A']
+    second = client.post('/api/network-insights/inventory?page=1', json=selection).json()
+    assert len(second['rows']) == 8
+    assert second['rows'][-1][:7] == ['3', '3_Nokia', 'Nokia', 'South', 'London', 'LTE', '']
+    response = client.post('/api/network-insights/inventory/export', json=selection)
+    exported = list(csv.reader(io.StringIO(response.text)))
+    assert exported[0] == first['columns'] and len(exported) == 59
+    assert exported[1][first['columns'].index('Extra VF')] == 'keep "all",\nfields'
+    assert exported[-1][first['columns'].index('Source_Vendor')] == '3_Nokia'
+    assert exported[-1][first['columns'].index('Source_Technology')] == '4G'
+    assert exported[-1][first['columns'].index('Extra VF')] == ''
+    assert {row[first['columns'].index('Source_Dataset_Name')] for row in exported[1:]} == {'vf-full.xlsx', 'three-full.csv'}
+    assert '__Inventory_Cell_ID' not in first['columns']
+    assert client.post('/api/network-insights/inventory?page=99', json=selection).json()['page'] == 1
+    assert client.post('/api/network-insights/inventory?page=-1', json=selection).status_code == 422
+
+
+@pytest.mark.parametrize('filters, expected', [
+    ({'operators': ['Vodafone UK']}, 56),
+    ({'operators': ['3']}, 2),
+    ({'vendors': ['Ericsson']}, 56),
+    ({'vendors': ['3_Nokia']}, 2),
+    ({'regions': ['south']}, 2),
+    ({'cities': ['London']}, 2),
+    ({'technology': 'nr'}, 1),
+    ({'technology': 'lte'}, 57),
+    ({'campaigns': ['2026-Q2']}, 58),
+    ({'nr_mode': 'SA', 'technology': 'nr'}, 1),
+    ({'operators': ['EE']}, 0),
+    ({'datasets': {}}, 58),
+])
+def test_complete_inventory_filters_mapping_attributes_independently_of_cdrs(client, tmp_path, filters, expected):
+    _login(client)
+    selection = {**_combined_inventory_sources(tmp_path), **filters}
+    response = client.post('/api/network-insights/inventory', json=selection)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['total_rows'] == expected
+    exported = list(csv.reader(io.StringIO(client.post('/api/network-insights/inventory/export', json=selection).text)))
+    assert len(exported) == expected + 1
+    if filters.get('technology') == 'nr' and payload['rows']:
+        assert all(row[5] == 'NR' for row in payload['rows'])
+
+
+def test_combined_inventory_endpoints_require_workspace_access(client, monkeypatch):
+    _login(client)
+    monkeypatch.setattr(app_module.repository, 'user_has_workspace_access', lambda *_args: False)
+    for path in ['/api/network-insights/inventory', '/api/network-insights/inventory/export']:
+        assert client.post(path, json={}).status_code == 403
+    monkeypatch.setattr(app_module, 'active_workspace', None)
+    for path in ['/api/network-insights/inventory', '/api/network-insights/inventory/export']:
+        assert client.post(path, json={}).status_code == 400
+
+
+def test_required_aggregation_choices_stay_selected_without_closing_menu():
+    import shutil
+    import subprocess
+
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node.js is unavailable.')
+    source = (Path(__file__).resolve().parents[1] / 'src/web_interface/static/js/network_insights.js').read_text()
+    grouping_code = source[source.index('  const syncTechnologyGrouping ='):source.index('  const kinds =')]
+    script = r'''
+const assert = require('node:assert/strict');
+class Choice {
+  constructor(text, value, defaultSelected = false, selected = false) {
+    this.text = text; this.value = value; this.selected = selected;
+    this.disabled = false; this.dataset = {};
+  }
+  remove() { group.options.splice(group.options.indexOf(this), 1); }
+}
+global.Option = Choice;
+const events = [];
+const listeners = [];
+const group = {
+  options: [new Choice('Operator', 'operator', true, true), new Choice('Vendor', 'vendor'), new Choice('Campaign', 'campaign', true, true)],
+  add(option, before) { this.options.splice(before ? this.options.indexOf(before) : this.options.length, 0, option); },
+  addEventListener(name, callback) { if (name === 'change') listeners.push(callback); },
+  dispatchEvent(event) { events.push(event.type); if (event.type === 'change') listeners.forEach(callback => callback()); },
+};
+const technology = {value: 'lte'};
+const $ = id => id === 'ni-group' ? group : technology;
+'''
+    assertions = r'''
+const choice = value => group.options.find(option => option.value === value);
+assert.equal(choice('operator').disabled, true);
+assert.equal(choice('operator').selected, true);
+events.length = 0;
+choice('vendor').selected = true;
+group.dispatchEvent(new Event('change'));
+assert.equal(choice('operator').disabled, false);
+assert.equal(events.includes('multiselect:options-updated'), false);
+choice('operator').selected = false;
+choice('vendor').selected = false;
+group.dispatchEvent(new Event('change'));
+assert.equal(choice('operator').disabled, true);
+assert.equal(choice('operator').selected, true);
+assert.equal(events.includes('multiselect:options-updated'), false);
+technology.value = 'lte_nr'; syncTechnologyGrouping();
+assert.equal(choice('technology').disabled, true);
+assert.equal(choice('technology').selected, true);
+group.options.filter(option => !option.disabled).forEach(option => {option.selected = false;});
+group.dispatchEvent(new Event('change'));
+assert.equal(choice('operator').selected, true);
+assert.equal(choice('technology').selected, true);
+technology.value = 'nr'; syncTechnologyGrouping();
+assert.equal(choice('technology'), undefined);
+'''
+    subprocess.run([node, '-e', script + grouping_code + assertions], check=True, capture_output=True, text=True)
+
+
+def test_full_inventory_tables_and_individual_exports_are_scoped_by_operator(client, tmp_path):
+    _login(client)
+    selection = _combined_inventory_sources(tmp_path)
+    response = client.post('/api/network-insights/inventory/tables', json=selection)
+    assert response.status_code == 200
+    tables = response.json()['inventories']
+    assert {table['operator'] for table in tables} == {'VF', '3'}
+    assert {table['operator_label'] for table in tables} == {'Vodafone', 'Three'}
+    assert {table['operator']: table['total_rows'] for table in tables} == {'VF': 56, '3': 2}
+    for table in tables:
+        assert all(row[0] == table['operator'] for row in table['rows'])
+        response = client.post(f"/api/network-insights/inventory/export?operator={table['operator']}", json=selection)
+        exported = list(csv.reader(io.StringIO(response.text)))
+        assert len(exported) == table['total_rows'] + 1
+        assert all(row[0] == table['operator'] for row in exported[1:])
+    page = client.post('/api/network-insights/inventory?operator=VF&page=1', json=selection).json()
+    assert page['total_rows'] == 56 and len(page['rows']) == 6 and page['page'] == 1
+    filtered = client.post('/api/network-insights/inventory/tables', json={**selection, 'operators': ['3']}).json()
+    assert [row['operator'] for row in filtered['inventories']] == ['3']
+    # A table-specific export cannot widen the general Operator filter.
+    response = client.post('/api/network-insights/inventory/export?operator=VF', json={**selection, 'operators': ['3']})
+    assert len(list(csv.reader(io.StringIO(response.text)))) == 1
+    page = client.get('/network-insights').text
+    assert 'Export All to CSV' in page
+
+
+@pytest.mark.parametrize('group', list(ni.DEPLOYMENT_GROUPINGS))
+def test_export_all_deployment_csv_combines_every_displayed_inventory(client, tmp_path, group):
+    _login(client)
+    if group == 'cluster':
+        _add_ready_polygon(tmp_path, 'clusters', 'Polygon Cluster')
+    rows = pd.DataFrame({'Site_ID': ['S1', 'S1', 'S2'], 'CId___ECI': ['1', '2', '3'],
+                         'eMOCNScenario': ['NNS', 'NNS', 'S1'], 'Vendor': ['Ericsson', 'Ericsson', 'Nokia']})
+    _add_ready_dataset(tmp_path, 'vf-inventory.csv', 'mapping_vodafone', rows, nr_mode=None)
+    _add_ready_dataset(tmp_path, 'three-inventory.csv', 'mapping_three', rows, nr_mode=None)
+    displayed = client.get(f'/api/network-insights/deployment?group={group}').json()['inventories']
+    response = client.get(f'/api/network-insights/deployment/export-all?group={group}')
+    assert response.status_code == 200
+    exported = list(csv.reader(io.StringIO(response.text)))
+    assert exported[0] == ['Operator', 'Source_Dataset_ID', 'Source_Dataset_Name', ni.DEPLOYMENT_GROUPINGS[group], 'Sites', 'Cells']
+    expected = [[table['operator'], str(table['id']), table['file_name'], row['group'], str(row['sites']), str(row['cells'])]
+                for table in displayed for row in table['rows']]
+    assert exported[1:] == expected
+    assert {row[0] for row in exported[1:]} == {'Vodafone', 'Three'}
+    assert client.get('/api/network-insights/deployment/export-all?group=invalid').status_code == 400
+
+
+def test_full_inventory_uses_real_mapping_geography_headers_before_filtering(client, tmp_path):
+    _login(client)
+    vf = pd.DataFrame({'Site ID': ['V1'], 'GCID': [100], 'source_sheet': ['4G'],
+                       'OP/ Vendor': ['Ericsson'], 'Region': ['North'], 'City': [''],
+                       'Beacon2Town': ['Leeds'], 'Cluster': [''], 'Engineering Polygon': ['VF Cluster']})
+    three = pd.DataFrame({'Site_ID': ['T1'], 'CId___ECI': [200], 'Vendor': ['Ericsson'],
+                          'Region': [''], 'UK "Regional"': ['North'], 'City': [''], 'Town': ['Leeds'],
+                          'Cluster': [''], 'Regional Optimisation Polygon': ['Three Cluster']})
+    _add_ready_dataset(tmp_path, 'vf-real-headers.xlsx', 'mapping_vodafone', vf, nr_mode=None)
+    _add_ready_dataset(tmp_path, 'three-real-headers.csv', 'mapping_three', three, nr_mode=None)
+    cdr_id = _add_ready_dataset(tmp_path, 'cdr.xlsx', 'data', pd.DataFrame({
+        'Operator': ['VF', '3'], 'Cell_ID': [100, 200], 'Campaign': ['2026-Q1', '2026-Q1'], 'Technology': ['LTE', 'LTE'],
+    }))
+    selection = {'datasets': {'data': [cdr_id]}, 'technology': 'lte', 'cities': ['Leeds'], 'regions': ['North']}
+    response = client.post('/api/network-insights/inventory/tables', json=selection)
+    assert response.status_code == 200
+    tables = response.json()['inventories']
+    assert {table['operator']: table['total_rows'] for table in tables} == {'VF': 1, '3': 1}
+    assert {row[6] for table in tables for row in table['rows']} == {'VF Cluster', 'Three Cluster'}
+    assert all(row[3:6] == ['North', 'Leeds', 'LTE'] for table in tables for row in table['rows'])
+    exported = list(csv.reader(io.StringIO(client.post('/api/network-insights/inventory/export', json=selection).text)))
+    assert len(exported) == 3
+    grouped = client.get('/api/network-insights/deployment?group=region').json()['inventories']
+    assert all({row['group'] for row in table['rows']} == {'North'} for table in grouped)
+
+
+def test_cluster_inventory_counts_deduplicate_uploads_and_do_not_require_cdrs(client, tmp_path):
+    _login(client)
+    for name, kind, rows in [
+        ('vf-one.xlsx', 'mapping_vodafone', {'Site_ID': ['S1', 'S1'], 'Cell ID': ['C1', 'C2']}),
+        ('vf-two.xlsx', 'mapping_vodafone', {'Site_ID': ['S1', 'S2'], 'Cell ID': ['C2', 'C3']}),
+        ('three.csv', 'mapping_three', {'MBNL_ID': ['T1'], 'Cell ID': ['T01']}),
+    ]:
+        _add_ready_dataset(tmp_path, name, kind, pd.DataFrame(rows), None)
+    response = client.get('/api/network-insights/cluster-inventories')
+    assert response.status_code == 200
+    assert response.json()['rows'] == [{'operator': 'Three', 'sites': 1, 'cells': 1},
+                                       {'operator': 'Vodafone', 'sites': 2, 'cells': 3}]
+    html = client.get('/network-insights').text
+    assert 'id="ni-sites-source"' in html
+    assert html.index('id="ni-sites-pending"') < html.index('Cluster polygons required.')
+
+
+def test_combined_inventory_export_prepares_all_rows_before_delivery(client, tmp_path):
+    _login(client)
+    selection = _combined_inventory_sources(tmp_path)
+    _add_ready_dataset(tmp_path, 'three-large.csv', 'mapping_three', pd.DataFrame({
+        'Site_ID': ['31'] * 10050, 'Cid__ECI': [100] * 10050,
+        'Technology': ['LTE'] * 10050,
+    }), nr_mode=None)
+    response = client.post('/api/network-insights/inventory/export', json=selection)
+    assert response.status_code == 200
+    assert int(response.headers['content-length']) == len(response.content)
+    rows = list(csv.DictReader(io.StringIO(response.text)))
+    assert len(rows) == 10108
+    assert sum(row['Operator'] == 'VF' for row in rows) == 56
+    assert sum(row['Operator'] == '3' for row in rows) == 10052
+    assert {row['Source_Dataset_Name'] for row in rows} == {
+        'vf-full.xlsx', 'three-full.csv', 'three-large.csv'}
+
+
+def test_cluster_and_region_prefer_polygons_and_fallback_to_inventory(client, tmp_path):
+    _login(client)
+    selection = _combined_inventory_sources(tmp_path)
+    vf = next(row for row in app_module.repository.list_datasets() if row['dataset_kind'] == 'mapping_vodafone')
+    app_module.repository.replace_dataset_rows(vf['id'], pd.DataFrame({
+        'Site_ID': ['S1', 'S1', 'S2'], 'GCID': [100, 101, 102], 'Technology': ['LTE'] * 3,
+        'Region': ['Source Region'] * 3, 'Cluster': ['Source Cluster'] * 3,
+        'Longitude': [-1, -1, 10], 'Latitude': [54, 54, 10],
+    }))
+    # Without boundary inputs, mapping labels remain available, including Cluster.
+    for group, name in [('region', 'Source Region'), ('cluster', 'Source Cluster')]:
+        response = client.get(f'/api/network-insights/deployment?group={group}')
+        table = next(row for row in response.json()['inventories'] if row['operator'] == 'Vodafone')
+        assert table['rows'] == [{'group': name, 'sites': 2, 'cells': 3}]
+    page = client.get('/network-insights').text
+    assert 'value="cluster" disabled' not in page
+    _add_ready_polygon(tmp_path, 'mapping_region', 'Polygon Region')
+    _add_ready_polygon(tmp_path, 'clusters', 'Polygon Cluster')
+    for group, name in [('region', 'Polygon Region'), ('cluster', 'Polygon Cluster')]:
+        response = client.get(f'/api/network-insights/deployment?group={group}')
+        table = next(row for row in response.json()['inventories'] if row['operator'] == 'Vodafone')
+        assert {row['group']: (row['sites'], row['cells']) for row in table['rows']} == {
+            name: (1, 2), 'Not set': (1, 1)}
+        csv_response = client.get(f"/api/network-insights/deployment/{vf['id']}/export?group={group}")
+        assert f'{name},1,2' in csv_response.text
+    inventory = client.post('/api/network-insights/inventory/tables', json={**selection, 'regions': ['Polygon Region']}).json()
+    table = next(row for row in inventory['inventories'] if row['operator'] == 'VF')
+    assert table['total_rows'] == 2
+    assert all(row[3] == 'Polygon Region' and row[6] == 'Polygon Cluster' for row in table['rows'])
+    exported = client.post('/api/network-insights/inventory/export', json={**selection, 'regions': ['Polygon Region']})
+    records = list(csv.DictReader(io.StringIO(exported.text)))
+    assert len(records) == 2
+    assert all(row['Region'] == 'Polygon Region' and row['Cluster'] == 'Polygon Cluster' for row in records)
+    assert all(row['Source_Region'] == 'Source Region' and row['Source_Cluster'] == 'Source Cluster' for row in records)
+
+
+def test_cluster_grouping_disabled_without_polygons_or_inventory_cluster_fields(client, tmp_path):
+    _login(client)
+    _add_ready_dataset(tmp_path, 'no-cluster.csv', 'mapping_three', pd.DataFrame({'Site_ID': ['S1']}), None)
+    assert 'value="cluster" disabled' in client.get('/network-insights').text
+    for path in ['/api/network-insights/deployment?group=cluster',
+                 '/api/network-insights/deployment/export-all?group=cluster']:
+        assert client.get(path).status_code == 400
+
+
+def test_full_inventory_without_cdrs_includes_unobserved_cells_and_both_operator_exports(client, tmp_path):
+    _login(client)
+    _combined_inventory_sources(tmp_path)
+    selection = {'datasets': {}, 'technology': 'lte_nr', 'campaigns': ['No matching campaign']}
+    tables = client.post('/api/network-insights/inventory/tables', json=selection).json()['inventories']
+    assert {table['operator']: table['total_rows'] for table in tables} == {'VF': 56, '3': 2}
+    exported = client.post('/api/network-insights/inventory/export', json=selection)
+    rows = list(csv.DictReader(io.StringIO(exported.text)))
+    assert len(rows) == 58
+    assert {row['Operator'] for row in rows} == {'VF', '3'}
+    assert any(row['Operator'] == '3' and row['Cid__ECI'] == '999' for row in rows)
+
+
+def test_pending_inventory_names_follow_actual_filtered_operators_not_group_labels(client, tmp_path):
+    _login(client)
+    cdr = _add_ready_dataset(tmp_path, 'analysis.xlsx', 'data', _data_rows('2026-Q1'))
+    _add_ready_dataset(tmp_path, 'vf-inventory.csv', 'mapping_vodafone', pd.DataFrame({
+        'Site_ID': ['V1'], 'CId___ECI': [30001922],
+    }), None)
+    selection = {'datasets': {'data': [cdr]}, 'technology': 'lte', 'group': ['operator', 'city', 'campaign']}
+    response = client.post('/api/network-insights/analysis', json=selection)
+    assert response.status_code == 200
+    assert response.json()['missing_inventory_operators'] == ['EE']
+    response = client.post('/api/network-insights/analysis', json={**selection, 'operators': ['VF']})
+    assert response.status_code == 200
+    assert response.json()['missing_inventory_operators'] == []
+    response = client.post('/api/network-insights/analysis', json={**selection, 'operators': ['EE']})
+    assert response.json()['missing_inventory_operators'] == ['EE']

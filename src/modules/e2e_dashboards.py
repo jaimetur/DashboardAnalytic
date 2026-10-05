@@ -1783,6 +1783,17 @@ def install_dashboard_routes(core):
         }))
         return job_id
 
+    # Scheduled Reporting jobs generate Dashboard PPTs through the PPT jobs.
+    core.dashboard_reporting = SimpleNamespace(
+        definition_model=DashboardDefinition,
+        list_dashboards=lambda task_repository: read_dashboards(task_repository),
+        queue_export=lambda dashboard_id, user, definition=None: queue_dashboard_ppt_export(
+            dashboard_id, user, export_definition=DashboardDefinition.model_validate(definition) if definition is not None else None,
+        ),
+        job=dashboard_ppt_job,
+        serialize_job=lambda row: serialize_dashboard_ppt_job(row),
+    )
+
     def prepare_and_render_dashboard_ppt_job(
         job_id, run_token, task_repository, user, dashboard_id, raw_definition,
         explicit_selections, snapshot, export_time, previous_output,

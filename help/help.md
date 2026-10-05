@@ -9,7 +9,7 @@
 
 Use this Help centre for detailed workflows, examples and technical rules. For a shorter introduction and deployment quick start, open the **Readme** tab.
 
-Help Navigation groups chapters under General, Main Modules, Administrative Modules and Reference. Chapters outside your access are omitted.
+Help Navigation groups chapters under General, Main Modules, Administrative Modules and Reference. Help is available without signing in; only the Reporting (old) chapter requires that feature.
 
 ## In this guide
 
@@ -29,7 +29,8 @@ Help Navigation groups chapters under General, Main Modules, Administrative Modu
 | Uploading data | the [Data Ingestion](workspace-management.md#data-ingestion) section in Workspace Management |
 | Analysing one dataset | [Datasets Analysis](datasets-analysis.md) |
 | Exploring a complete template as a live dashboard or generating its PowerPoint | [E2E Dashboards](e2e-dashboards.md) |
-| Generating persistent Reports or Chart Sets | [E2E Reporting](e2e-reporting.md) |
+| Scheduling reports and emailing them | [Reporting](reporting.md) |
+| Generating persistent Reports or Chart Sets | [Reporting (old)](reporting-old.md) |
 | Calculating NetCheck scores or comparing operator gaps | [Scoring & GAP Analysis](scoring-gap-analysis.md) |
 | Building ad-hoc SQL queries with guided controls | [Query Builder](query-builder.md) |
 | Authoring templates | [Workspace Config](workspace-config.md), including the [Report Template reference](workspace-config.md#report-template-reference) |
@@ -48,7 +49,8 @@ Help Navigation groups chapters under General, Main Modules, Administrative Modu
 - [Workspace Management](workspace-management.md) — workspaces, data ingestion, processing, previews and mappings.
 - [Datasets Analysis](datasets-analysis.md) — interactive single-dataset analysis and exports.
 - [E2E Dashboards](e2e-dashboards.md) — saved Dashboards, synchronized filters and slide layouts.
-- [E2E Reporting](e2e-reporting.md) — classic Reports, Chart Sets, interactive previews and jobs.
+- [Reporting](reporting.md) — scheduled Reporting Jobs that email Dataset Analysis, Network Insights, Dashboard and Scoring artifacts.
+- [Reporting (old)](reporting-old.md) — classic Reports, Chart Sets, interactive previews and jobs.
 - [Chart Builder](chart-builder.md) — temporary ad-hoc chart construction.
 - [Query Builder](query-builder.md) — guided query design, SQL editing, execution and saved queries.
 - [App Logs](app-logs.md) — workspace events and live server output.

@@ -24,4 +24,21 @@ Persisted values are stored in the application database and take precedence over
 
 Select **Save Configuration** to persist the values. Saving restarts the shared Canvas renderer so later charts use the selected renderer and browser.
 
+## Email Delivery
+
+The **Email Delivery** panel configures the SMTP server that [Reporting](reporting.md) jobs use to send their artifacts. It is available to the same roles as the rest of Application Config.
+
+| Field | Meaning |
+| --- | --- |
+| SMTP Server, Port | Mail server and port, for example `smtp.example.com` and `587` |
+| Encryption | STARTTLS (usually port 587), SSL/TLS (usually 465) or none |
+| Username, Password | Optional SMTP authentication. Leave the password empty to keep the saved one, or the `SMTP_PASSWORD` deployment value |
+| Sender Address, Sender Name | The `From` of every report email |
+| Attachment Size Limit (MB) | A run whose attachments exceed this total fails instead of being rejected by the mail server |
+
+Select **Save Email Delivery**, then **Send Test Email** to check the settings. The deployment variables `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURITY`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_FROM_NAME` and `SMTP_MAX_ATTACHMENTS_MB` provide defaults; saved values take precedence.
+
+> [!WARNING]
+> **The SMTP password is stored in the application database.** Configuration exports, transfers and backups include it. Use the `SMTP_PASSWORD` deployment variable instead if it must not leave the server.
+
 See [Deployment Configuration](configuration.md) for environment variables, storage roots, Docker settings and bootstrap accounts. See [Workspace Config](workspace-config.md) for settings and management panels owned by an active workspace.

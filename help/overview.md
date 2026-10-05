@@ -18,9 +18,10 @@ Dashboard Analytic turns processed CDR datasets into interactive KPI analysis, r
 | Background tasks and floating cards | [Open section](#background-tasks-and-floating-cards) |
 | Workspace | [Open section](#workspace) |
 | Datasets Analysis | [Open section](#datasets-analysis) |
-| E2E Dashboards | [Open section](#e2e-dashboards) |
-| E2E Reporting | [Open section](#e2e-reporting) |
 | Network Insights | [Open section](#network-insights) |
+| E2E Dashboards | [Open section](#e2e-dashboards) |
+| Reporting | [Open section](#reporting) |
+| Reporting (old) | [Open section](#reporting-old) |
 | Chart Builder | [Open section](#chart-builder) |
 | Query Builder | [Open section](#query-builder) |
 | App Logs | [Open section](#app-logs) |
@@ -33,7 +34,7 @@ Dashboard Analytic turns processed CDR datasets into interactive KPI analysis, r
 2. Upload Data, Voice or Speech CDRs from **Workspace**.
 3. Confirm the detected input type (and, for CDRs, the NR Mode) and wait for processing to finish.
 4. Optionally map Vodafone and Three vendor information.
-5. Create or open a saved **E2E Dashboard** to analyse a complete template interactively, reuse prepared selections and generate its PowerPoint. Use **Datasets Analysis**, **Chart Builder** or **Query Builder** for focused exploration, or **E2E Reporting** for the classic report and Chart Set workflow.
+5. Create or open a saved **E2E Dashboard** to analyse a complete template interactively, reuse prepared selections and generate its PowerPoint. Use **Datasets Analysis**, **Chart Builder** or **Query Builder** for focused exploration, or **Reporting (old)** for the classic report and Chart Set workflow. Use **Reporting** to schedule jobs that email Dataset Analysis, Network Insights, Dashboard and Scoring artifacts.
 6. Follow Dashboard preparation and generation in the floating task cards, **PPT Generation Jobs** and **Reports and Charts Jobs**.
 7. Use **Scoring & GAP Analysis** for saved NetCheck scores and GAP reference operator comparisons across selected CDRs and aggregation levels; CDR processing also queues default Operator scoring when compatible companion CDRs are available. See [Scoring & GAP Analysis](scoring-gap-analysis.md).
 8. Use **Network Insights** to compare RSRP and SINR, map weak-coverage and high-interference areas and review sites, spectrum and network deployment. See [Network Insights](network-insights.md).
@@ -143,6 +144,17 @@ Datasets Analysis analyses one processed CDR at a time.
 - Shows the filtered and aggregated records behind the dashboard.
 - Supports Word and PowerPoint exports of the active analysis.
 
+## Network Insights
+
+Network Insights analyses the radio fields of the selected Data, Voice and Speech CDRs of one NR Mode:
+
+- **Overview** cards per Operator with median RSRP/SINR, low-coverage and high-interference shares, observed eNodeBs and changes between the two latest campaigns.
+- **RF Quality** CDFs and quality-class tables, grouped by Campaign, Region, City or CDR type.
+- **Coverage & Interference Maps** with grid cells coloured by quality class and ranked weak areas.
+- **Sites & Density**, **Spectrum** and **Network Deployment** from observed cells, Spectrum Holdings and the uploaded Vodafone/Three cell inventories.
+
+See [Network Insights](network-insights.md).
+
 ## E2E Dashboards
 
 E2E Dashboards is the main analysis module and the complete template-driven workflow behind Dashboard Analytic. A saved Dashboard binds a name and NR Mode to a workspace Report Template, filters, hidden fields, slide comments and an optional saved Dataset Universe. Scope, selected Data/Voice/Speech CDRs and dates can be applied temporarily or saved independently from filters.
@@ -186,9 +198,15 @@ Status cards distinguish data loading, queued data, chart rendering, queued char
 
 The operational guide is [E2E Dashboards](e2e-dashboards.md). Template creation, columns, structural slides, supported chart types, filters, aggregations, legends, layouts and colours are documented once in [Workspace Config → Report Template reference](workspace-config.md#report-template-reference).
 
-## E2E Reporting
+## Reporting
 
-E2E Reporting combines processed CDRs and a Report Template from the active workspace. It is available to super-admin accounts and EJAITUR.
+Reporting schedules **Reporting Jobs** that collect a Summary Dataset Analysis, a Summary Network Insights, Dashboard PPTs and Scoring PPTs, each with its own filters, run once or on a daily, weekly or monthly schedule and email the artifacts with a description of each one. It starts available to super-admins. See [Reporting](reporting.md).
+
+Non-Qualified Calls follows Scoring & GAP Analysis in the main tabs. It is under construction and hidden from every user until it is activated in Admin → Features Activation.
+
+## Reporting (old)
+
+Reporting (old) combines processed CDRs and a Report Template from the active workspace. It is available only to the users, roles and groups it is activated for in Admin → Features Activation (by default super-admins and EJAITUR).
 
 ### Reporting module selector
 
@@ -220,17 +238,6 @@ E2E Reporting combines processed CDRs and a Report Template from the active work
 - Keeps the actions appropriate to each job: open, download, stop, retry, relaunch or delete.
 - Provides separate bulk deletion for Reports and Chart Sets.
 - Persists both job types in the workspace `generated_jobs` table.
-
-## Network Insights
-
-Network Insights analyses the radio fields of the selected Data, Voice and Speech CDRs of one NR Mode:
-
-- **Overview** cards per Operator with median RSRP/SINR, low-coverage and high-interference shares, observed eNodeBs and changes between the two latest campaigns.
-- **RF Quality** CDFs and quality-class tables, grouped by Campaign, Region, City or CDR type.
-- **Coverage & Interference Maps** with grid cells coloured by quality class and ranked weak areas.
-- **Sites & Density**, **Spectrum** and **Network Deployment** from observed cells, Spectrum Holdings and the uploaded Vodafone/Three cell inventories.
-
-See [Network Insights](network-insights.md).
 
 ## Chart Builder
 
@@ -280,6 +287,7 @@ The **Admin** tab opens Administrator Config for `admin` and `super-admin` roles
 - Create, rename, enable, disable and delete users.
 - Reset passwords.
 - Assign roles and workspace access where permitted.
+- Group users in **User Groups** and activate each main module for all users or for selected roles, groups and users in **Features Activation**.
 
 ### Workspace Config
 

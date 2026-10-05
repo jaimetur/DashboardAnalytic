@@ -3,7 +3,7 @@
 Analyse the network behind the measured performance: radio quality (RSRP and SINR), weak-coverage and high-interference areas on a map, observed and inventoried sites, licensed and observed spectrum, and network deployment (NNS, eMOCN scenarios, host networks and RAN vendors). Results are grouped by the dimensions checked in **Group by**; Operator and Campaign are checked by default.
 
 > [!NOTE]
-> **Radio views need no extra input.** RSRP, SINR, maps, observed eNodeBs and observed bands come from the processed CDRs. Site inventories and licensed spectrum are optional inputs that complete the Sites & Density, Spectrum and Network Deployment panels.
+> **Radio views need no extra input.** RSRP, SINR, maps, observed eNodeBs and observed bands come from the processed CDRs. Site inventories and licensed spectrum are optional inputs that complete the Cluster Sites Density, Spectrum and Network Deployment panels.
 
 ## Choose your task
 
@@ -12,12 +12,14 @@ Analyse the network behind the measured performance: radio quality (RSRP and SIN
 | Run an analysis | [Analysis Selection](#analysis-selection) |
 | Compare coverage and interference per Operator | [Overview and RF Quality](#overview-and-rf-quality) |
 | Locate weak-coverage or high-interference areas | [Coverage and Interference Maps](#coverage-and-interference-maps) |
-| Count sites and eNodeBs | [Sites and Density](#sites-and-density) |
+| Count sites and eNodeBs | [Cluster Sites Density](#cluster-sites-density) |
 | Compare Low, Mid and High (TDD) spectrum | [Spectrum](#spectrum) |
 | Count NNS, eMOCN or shared sites | [Network Deployment](#network-deployment) |
 | Present RSRP and SINR slides in a Dashboard | [RF Quality template and Dashboard](#rf-quality-template-and-dashboard) |
 | Check which CDR fields are used | [Data sources](#data-sources) |
 | Know which inputs are still missing | [Pending inputs](#pending-inputs) |
+| Export the analysis to PowerPoint or Word | [Export](#export) |
+| View and export complete site/cell inventories or deployment counts as CSV | [Network Deployment](#network-deployment) |
 
 ## Analysis Selection
 
@@ -32,7 +34,7 @@ Analyse the network behind the measured performance: radio quality (RSRP and SIN
 
 **Group by** accepts several dimensions; they form a hierarchy in the selector order, with Campaign last. Each Overview card, table row, CDF curve and map group is one combination, for example `EE · 2026-Q2`.
 
-- **Operator** is always checked unless **Vendor** is checked. With Vendor checked, uncheck Operator to pool the selected operators by vendor, or keep it to split each operator by vendor.
+- **Operator** is always checked and disabled unless **Vendor** is checked. With Vendor checked, Operator becomes selectable: uncheck it to pool the selected operators by vendor, or keep it to split each operator by vendor.
 - **Vendor** uses `Vendor_Only`: actual vendors, then Mixed, Other and All Vendor(s), then operators without a mapped vendor as **Operator - All**.
 - Curves of the same Operator share its colour and use a different line style for each Campaign or other secondary group.
 - The change between the two latest campaigns appears only when Campaign is not a grouping dimension.
@@ -40,7 +42,7 @@ Analyse the network behind the measured performance: radio quality (RSRP and SIN
 
 ### LTE+NR
 
-**LTE+NR** always adds **Technology** to the grouping, so LTE and NR results appear side by side and are never pooled: LTE RSRP/SINR and NR SS-RSRP/SS-SINR use different reference signals. A sample with both measurements contributes once to each technology. Select LTE or NR to analyse one technology.
+**LTE+NR** always adds **Technology** to the grouping as a checked, disabled option, so LTE and NR results appear side by side and are never pooled: LTE RSRP/SINR and NR SS-RSRP/SS-SINR use different reference signals. A sample with both measurements contributes once to each technology. Select LTE or NR to analyse one technology.
 
 > [!TIP]
 > The first analysis of a CDR copies its radio fields into the combined reporting tables and can take a minute. Later analyses of the same CDRs reuse them and the parsed samples, so changing filters, thresholds or the map Operator is fast.
@@ -66,17 +68,42 @@ The **Overview** shows one card per group with the median RSRP, the share of sam
 
 Values outside physical ranges (RSRP outside -160 to -20 dBm, SINR outside -30 to 50 dB) are treated as missing.
 
+## Export
+
+**Export PowerPoint** and **Export Word**, beside Analyse Network, create a Summary Network Insights of the current selection: the selected CDRs, technology, grouping, thresholds and filters, the RF quality overview with campaign deltas, RSRP and SINR CDFs, coverage and interference maps with their weakest areas, observed and licensed spectrum, both Cluster Sites Density data sources and network deployment. Charts and maps are rendered at full size, so the export takes longer than the on-screen analysis. PowerPoint uses the same Template_CDR_analysis.pptx master, cover and layouts as E2E Dashboards. Table widths follow their headers and values, with wider identity columns and single-line cells; very wide PowerPoint comparisons use metric parts with the Group column repeated. Word uses horizontal pages, increasing their width for wide tables, fixed column widths and repeating single-line headers.
+
+Both formats include every grouped Network Deployment view (eMOCN Scenario, Host Network, Network, RAN Vendor, Region, Subregion, Cluster when polygons or inventory fields are available, Site Type and Band), irrespective of the currently displayed dropdown option. Full Site / Cell Inventory is excluded from PowerPoint and Word; use its individual or combined CSV export. The same summary is available as a [Reporting](reporting.md) artifact.
+
 ## Coverage and Interference Maps
 
 The maps show one group at a time (selected in **Group**) over OpenStreetMap. Samples are grouped into square grid cells of the selected size, and each cell is coloured by its mean RSRP or SINR class. Cells need at least three located samples. Very dense selections use a coarser grid automatically to keep the map readable; the note above the maps shows the grid actually used.
 
 Below each map, the **Weakest coverage areas** and **Highest interference areas** tables rank the cells where at least half of the samples are below the threshold, by the number of affected samples. Select an area (its City) to zoom the map to it, and **Show Whole Area** to return. Drag a rectangle over a map to magnify it, then drag to pan.
 
-## Sites and Density
+## Network Deployment
 
-The table counts, per group, the **observed eNodeBs** (distinct LTE eNodeB identities, Cell Identity ÷ 256, that served the measuring devices) and **observed cells**, with the samples per eNodeB. Observed eNodeBs depend on the route and do not equal the deployed sites.
+This panel reads the cell inventories uploaded as **Vendor mapping** datasets (Vodafone and Three) and counts distinct sites and cells grouped by eMOCN Scenario (for example S0, S1, NNS or S2), Host Network, Network, RAN Vendor, Region, Subregion, Cluster, Site Type or Band. **Cluster** appears below Subregion and is enabled when ready **Clusters — Geospatial** polygons or an inventory Cluster field are available. **Region** and **Cluster** use the names of imported polygons containing each site. Coordinates come from inventory Longitude/Latitude (WGS84), with Easting/Northing (British National Grid) as a fallback. All ready polygon uploads participate; newest uploads take precedence where polygons overlap, and boundary points are included. With polygons present, missing coordinates or unmatched sites are **Not set**. Without polygons for that dimension, Region or Cluster uses the corresponding inventory field if present (including UK "Regional", Engineering Polygon and Regional Optimisation Polygon aliases); inventories without it show totals. Polygon revisions invalidate cached deployment counts. This assigns names and counts identifiers; density per unit area is not calculated. An inventory without the selected column shows its totals instead. Each inventory table has an **Export CSV** button that downloads all its displayed grouping rows and site/cell counts, including the totals fallback. **Export All to CSV** combines every displayed table in one CSV, with Operator, Source_Dataset_ID and Source_Dataset_Name to identify each contribution.
 
-When a Vodafone or Three cell inventory is uploaded as a Vendor mapping dataset in Workspace, the panel also shows its total number of distinct sites and cells.
+Choose **Full Site / Cell Inventory** in **View / Group by** to see separate Vodafone and Three tables side by side for the selected operators, each with its own pages of 50 rows (stacked on narrow screens). The first seven columns — **Operator**, **Vendor**, **Vendor_Only**, **Region**, **City**, **Technology** and **Cluster** — have green backgrounds. Operator uses the workspace operator identity; Vendor uses `Operator_Vendor`, and Vendor_Only retains the vendor identity from the mapping. City comes from the mapping. Region and Cluster prefer imported polygon names resolved from the inventory site coordinates, falling back to the inventory fields only when no polygons exist for that dimension; unmatched polygon locations remain empty. Their source-header aliases include Vodafone Region, Beacon2Town and Engineering Polygon, and Three UK "Regional", Town and Regional Optimisation Polygon; blank generic columns do not hide populated source attributes. Technology uses LTE/NR, resolved from Technology/RAT, Vodafone's 4G/5G source sheets or Three's LTE ECI format.
+
+The inventory tables include **all uploaded mapping rows**, whether or not their cells appear in the CDRs. **Analysis Selection** filters Operator, Vendor, Region, City and Technology directly against the mapping attributes; Region filters match imported polygon names when Region polygons are present. Selected CDRs, NR Mode and Campaigns do not restrict inventory rows because they describe measurements rather than the deployed inventory. The tables also work without a selected CDR. Operators without a matching uploaded inventory contribute no records.
+
+**Previous** and **Next** navigate the filtered table; horizontal scrolling reveals additional columns. Each table’s **Export CSV** downloads all matching rows and columns for its operator, not only the visible page. The complete CSV is prepared before the download begins to prevent partially exported inventories. **Export All to CSV** combines both operators in one file. Both exports use the selection that generated the displayed tables. Repeated inventory rows remain intact. Missing fields in another operator's inventory appear empty. Source_Dataset_ID and Source_Dataset_Name identify each mapping file, including multiple uploaded versions. All original columns are retained after the highlighted fields; source headers that collide with those fields use a `Source_` prefix so their original values remain available.
+
+Grouped deployment counts and their CSVs retain their inventory-wide scope. Existing per-dataset inventory download endpoints remain available for complete source exports. No additional persistent data is created; existing dataset export, transfer and backup/restore workflows continue to carry the mappings.
+
+
+## Cluster Sites Density
+
+Choose the **Data source** dropdown:
+
+- **Observed Sites / Cells** follows the selected CDRs and Analysis Selection filters. The table counts, per group, the **observed eNodeBs** (distinct LTE eNodeB identities, Cell Identity ÷ 256, that served the measuring devices) and **observed cells**, with the samples per eNodeB. Observed eNodeBs depend on the route and do not equal the deployed sites.
+
+- **Inventory Sites / Cells** reads every ready Vodafone and Three Vendor mapping dataset uploaded in Workspace. It shows distinct sites and cells per operator, deduplicating identifiers across overlapping uploads, plus inventory total cards. These are complete inventory counts, independent of CDR selection and filters. Other operator inventory formats are not currently supported.
+
+A warning card explains that site density per cluster requires cluster polygons imported in Workspace as **Clusters — Geospatial** (GeoJSON, JSON or zipped shapefile). These datasets validate and preserve the boundaries; density per cluster is not calculated yet. **Network Deployment** appears immediately before this panel.
+
+The explanatory note appears only in Observed Sites / Cells mode. A separate yellow **Pending input** card above the cluster-polygon warning lists only operators present in the filtered analysis without a ready inventory. It is hidden when all analysed operators have inventories, before an analysis exists, and in Inventory Sites / Cells mode. PowerPoint and Word include both data sources irrespective of the selected dropdown option; neither view calculates density without cluster polygons.
 
 ## Spectrum
 
@@ -84,9 +111,6 @@ When a Vodafone or Three cell inventory is uploaded as a Vendor mapping dataset 
 
 **Spectrum observed in the measurements** shows the share of samples served on each LTE band (from the serving EARFCN or the band of the cell trace) and NR band, with the frequency, duplex mode, class and the most frequent downlink bandwidth. Bandwidths are reported only by CDR Data. Observed bands follow the grouping: keep Operator checked to see each operator's own bands.
 
-## Network Deployment
-
-This panel reads the cell inventories uploaded as **Vendor mapping** datasets (Vodafone and Three) and counts distinct sites and cells grouped by eMOCN Scenario (for example S0, S1, NNS or S2), Host Network, Network, RAN Vendor, Region, Subregion, Site Type or Band. An inventory without the selected column shows its totals instead.
 
 ## RF Quality template and Dashboard
 
@@ -123,8 +147,8 @@ Speech falls back to the `Recording_*` fields when the `Playing_*` fields are ab
 
 | Input | Used by | How to provide it |
 | --- | --- | --- |
-| Site inventories for every Operator | Sites & Density, Network Deployment | Upload them as Vendor mapping datasets (Vodafone and Three are supported today) |
-| Surface of each Region and City | Site density per km² | Not yet configurable |
+| Site inventories for every Operator | Cluster Sites Density, Network Deployment | Upload them as Vendor mapping datasets (Vodafone and Three are supported today) |
+| Cluster polygons | Cluster Sites Density | Upload GeoJSON, JSON or a zipped shapefile as Clusters — Geospatial in Workspace; density calculation remains pending |
 | Licensed spectrum per Operator | Spectrum | [Workspace Config → Spectrum Holdings](workspace-config.md#spectrum-holdings) |
 | NNS site list, if it differs from the inventory eMOCN Scenario | Network Deployment | Include it in the uploaded inventory |
 

@@ -1403,7 +1403,7 @@ def test_config_page_persists_runtime_overrides(client, monkeypatch) -> None:
     assert 'href="/application-config"' in page.text
     assert 'data-configuration-timezone-picker' in page.text
     assert 'data-timezone="Europe/Madrid"' in page.text
-    assert page.text.count('data-configuration-card') == 4
+    assert page.text.count('data-configuration-card') == 6
     assert 'name="max_background_tasks" value="1" min="1" max="32"' in page.text
     assert '<section class="configuration-card configuration-field-wide" data-configuration-card>' not in page.text
 
@@ -2287,12 +2287,12 @@ def test_reporting_deletion_requires_admin(client) -> None:
     import src.DashboardAnalytic as app_module
 
     endpoints = [
-        '/reporting/chart-sets/delete-all',
-        '/reporting/chart-sets/missing/delete',
-        '/reporting/chart-jobs/999999/delete',
-        '/reporting/jobs/999999/charts/delete',
-        '/reporting/jobs/999999/delete',
-        '/reporting/jobs/delete-all',
+        '/reporting-old/chart-sets/delete-all',
+        '/reporting-old/chart-sets/missing/delete',
+        '/reporting-old/chart-jobs/999999/delete',
+        '/reporting-old/jobs/999999/charts/delete',
+        '/reporting-old/jobs/999999/delete',
+        '/reporting-old/jobs/delete-all',
     ]
     # E2E Reporting is limited to super-admins and the EJAITUR user; deletion
     # additionally requires an administrative role.
@@ -2303,7 +2303,7 @@ def test_reporting_deletion_requires_admin(client) -> None:
     ]:
         app_module.SESSIONS[token] = app_module.SessionUser(username=username, role=role)
         client.cookies.set(app_module.SESSION_COOKIE, token)
-        page = client.get('/reporting')
+        page = client.get('/reporting-old')
         assert page.status_code == 200
         assert ('data-report-chart-set-delete>Delete Selected' in page.text) == allowed
         assert ('class="report-jobs-bulk-actions"' in page.text) == allowed
@@ -2543,7 +2543,7 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     assert 'Operator &amp; Vendor Maps (from active workspace)</option>' in admin_response.text
     assert admin_response.text.index('Main Cities (from active workspace)</option>') < admin_response.text.index('Operator &amp; Vendor Maps (from active workspace)</option>')
     assert 'Scoring &amp; GAP Analysis Configuration (from active workspace)' in admin_response.text
-    assert 'Full Environment (Application Config + Dashboards + Report Templates + Main Cities + Operator &amp; Vendor Maps + Scoring &amp; GAP Analysis Configuration + Auto-calculated Fields + Query Builder Queries + Selected Workspaces)' in admin_response.text
+    assert 'Full Environment (Application Config + Dashboards + Report Templates + Main Cities + Operator &amp; Vendor Maps + Scoring &amp; GAP Analysis Configuration + Auto-calculated Fields + Query Builder Queries + Reporting Jobs + Selected Workspaces)' in admin_response.text
     assert admin_response.text.index('Main Cities (workspace city selection)') < admin_response.text.index('Operator &amp; Vendor Maps (aliases, order and theme colors)')
     assert 'Scoring &amp; GAP Analysis Configuration (KPI methodology profiles, aggregation hierarchy and GAP KPI priorities)' in admin_response.text
     assert "main_cities: 'Main Cities', operator_mappings: 'Operator & Vendor Maps', scoring_configuration: 'Scoring & GAP Analysis Configuration'" in admin_response.text
@@ -4583,7 +4583,7 @@ def test_interrupted_background_jobs_become_retryable_failures(client) -> None:
     report = app_module.repository.get_report_run(report_id)
     assert report['status'] == 'failed'
     assert 'application restarted' in report['last_error']
-    assert app_module.serialize_report_job(report)['retry_url'] == f'/e2e-reporting/jobs/{report_id}/retry'
+    assert app_module.serialize_report_job(report)['retry_url'] == f'/reporting-old/jobs/{report_id}/retry'
 
 
 def test_interrupted_dataset_processing_is_resumed_instead_of_failed(client) -> None:
@@ -5167,7 +5167,7 @@ def test_ready_chart_set_job_supports_relaunch_and_row_reuse(client) -> None:
 
     ready_job = app_module.repository.get_report_chart_job(job_id)
     assert ready_job is not None
-    assert app_module.serialize_report_chart_job(ready_job)['retry_url'] == f'/e2e-reporting/chart-jobs/{job_id}/retry'
+    assert app_module.serialize_report_chart_job(ready_job)['retry_url'] == f'/reporting-old/chart-jobs/{job_id}/retry'
     assert app_module.repository.retry_report_chart_job(job_id)
 
     relaunched_job = app_module.repository.get_report_chart_job(job_id)
@@ -5975,7 +5975,7 @@ def test_workspace_import_keeps_chart_sets_visible_in_reporting(client, tmp_path
     imported = app_module.import_workspace_archive(payload, {'name': 'Imported chart workspace'})
     app_module.activate_workspace(imported.id)
 
-    reporting = client.get('/reporting')
+    reporting = client.get('/reporting-old')
     assert reporting.status_code == 200
     assert 'Imported template' in reporting.text
     assert generation in reporting.text
@@ -5990,13 +5990,13 @@ def test_delete_all_reports_removes_orphaned_output_directories(client) -> None:
     orphaned.mkdir(parents=True, exist_ok=True)
     (orphaned / 'chart-1.png').write_bytes(b'old chart')
 
-    response = client.post('/reporting/jobs/delete-all')
+    response = client.post('/reporting-old/jobs/delete-all')
 
     assert response.status_code == 202
     job_id = response.json()['job_id']
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
-        status_response = client.get(f'/api/e2e-reporting/bulk-deletions/{job_id}')
+        status_response = client.get(f'/api/reporting-old/bulk-deletions/{job_id}')
         assert status_response.status_code == 200
         if status_response.json()['status'] in {'ready', 'failed'}:
             break
@@ -8064,7 +8064,7 @@ def test_reporting_preselects_two_latest_ready_cdrs_of_each_type(client) -> None
         )
         assert response.status_code == 303
 
-    reporting = client.get('/reporting')
+    reporting = client.get('/reporting-old')
     data_select = reporting.text.split('name="data_dataset_id"', 1)[1].split('</select>', 1)[0]
     voice_select = reporting.text.split('name="voice_dataset_id"', 1)[1].split('</select>', 1)[0]
     speech_select = reporting.text.split('name="speech_dataset_id"', 1)[1].split('</select>', 1)[0]
@@ -8351,7 +8351,8 @@ def test_top_navigation_shows_document_links(client) -> None:
     assert 'E2E Reporting' not in response.text
     assert '>Chart Builder</a>' in response.text
     assert '>Query Builder</a>' in response.text
-    assert 'data-module-builders-trigger>Builders' in response.text
+    assert 'data-module-builders-trigger><svg class="module-tab-icon"' in response.text
+    assert '<span>Builders</span> <span aria-hidden="true">▾</span></button>' in response.text
     assert 'popovertarget="module-builders-options"' in response.text
     assert 'data-module-builders-options' in response.text
     assert '>Admin</a>' in response.text
@@ -8384,7 +8385,7 @@ def test_top_navigation_shows_document_links(client) -> None:
     assert 'module-hero-datasets-analysis' in dashboard.text
     assert 'linear-gradient(135deg, #0c4c8c, #68b8ff)' in dashboard.text
 
-    reporting = client.get("/reporting")
+    reporting = client.get("/reporting-old")
     assert reporting.status_code == 403
 
     admin = client.get("/admin")
@@ -8608,7 +8609,7 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert app_module.repository.report_template_content('nsa', 'Baseline Q4') == first
 
     login_super(client)
-    reporting = client.get('/reporting')
+    reporting = client.get('/reporting-old')
     assert 'value="nsa:Updated Q4" data-catalogue-technology="nsa" data-catalogue-active="true" selected' in reporting.text
     assert 'data-report-charts-edit-template' in reporting.text
     assert 'data-report-chart-viewer-edit-template' in reporting.text
@@ -8728,7 +8729,7 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert protected_delete.status_code == 400
     assert 'The default template cannot be deleted.' in protected_delete.text
 
-    reporting_after_activation = client.get('/reporting')
+    reporting_after_activation = client.get('/reporting-old')
     assert 'value="nsa:Baseline Q4" data-catalogue-technology="nsa" data-catalogue-active="true" selected' in reporting_after_activation.text
 
     exported = client.get('/workspace-config/report-templates/nsa/Updated%20Q4/export')
@@ -8745,7 +8746,7 @@ def test_reporting_chart_viewer_uses_hover_canvas_dataset_and_zoom_controls(clie
     import src.DashboardAnalytic as app_module
 
     login_super(client)
-    reporting = client.get('/reporting')
+    reporting = client.get('/reporting-old')
     assert reporting.status_code == 200
     controls = reporting.text.split('data-report-chart-viewer-canvas-controls', 1)[1].split('</div>', 2)[0]
     assert controls.index('data-report-chart-viewer-data') < controls.index('data-report-chart-zoom="in"')
@@ -9008,9 +9009,11 @@ def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
         and item["label"] == "Query Builder"
         for item in help_documents
     )
-    assert [item['relative_path'] for item in help_documents[9:]] == [
-        'scoring-gap-analysis.md',
+    assert [item['relative_path'] for item in help_documents[8:]] == [
         'network-insights.md',
+        'e2e-dashboards.md',
+        'scoring-gap-analysis.md',
+        'reporting.md',
         'chart-builder.md',
         'query-builder.md',
         'app-logs.md',
@@ -9028,18 +9031,18 @@ def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
     assert '- [Chart Builder](chart-builder.md)' in help_api.json()['content']
     assert '- [Roadmap](roadmap.md)' in help_api.json()['content']
     assert client.get('/api/documents/help/12-docker-deployment.md').status_code == 404
-    assert client.get('/documents/view/help/e2e-reporting.md').status_code == 403
-    assert client.get('/api/documents/help/e2e-reporting.md').status_code == 403
-    assert 'e2e-reporting.md' not in client.get('/api/documents/readme').json()['content']
+    assert client.get('/documents/view/help/reporting-old.md').status_code == 403
+    assert client.get('/api/documents/help/reporting-old.md').status_code == 403
+    assert 'reporting-old.md' not in client.get('/api/documents/readme').json()['content']
     overview = client.get('/api/documents/help/overview.md').json()['content']
-    assert '## E2E Reporting' not in overview
+    assert '## Reporting (old)' not in overview
+    assert '## Reporting\n' in overview
     assert '## Query Builder' in overview
     assert '[Query Builder](query-builder.md)' in overview
     for document in help_documents[1:]:
         article = client.get(f"/api/documents/help/{document['relative_path']}")
         assert article.status_code == 200
-        assert 'e2e-reporting.md' not in article.json()['content']
-        assert 'E2E Reporting' not in article.json()['content']
+        assert 'reporting-old.md' not in article.json()['content']
     excluded_help_documents = {
         "arguments-description.md",
         "arguments-description-short.md",
@@ -9059,7 +9062,7 @@ def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
     assert "document.getElementById(targetId)?.scrollIntoView" in help_article.text
 
 
-def test_reporting_help_is_available_to_super_admins_and_ejaitur(client) -> None:
+def test_reporting_old_help_follows_its_feature(client) -> None:
     import src.DashboardAnalytic as app_module
 
     for username, role in [('someone', 'super-admin'), ('EJAITUR', 'user-viewer')]:
@@ -9067,18 +9070,14 @@ def test_reporting_help_is_available_to_super_admins_and_ejaitur(client) -> None
         app_module.SESSIONS[token] = app_module.SessionUser(username=username, role=role)
         client.cookies.set(app_module.SESSION_COOKIE, token)
 
-        index = client.get('/api/documents/help-index').json()['documents']
-        assert index[9]['relative_path'] == 'e2e-reporting.md'
-        assert index[10]['relative_path'] == 'scoring-gap-analysis.md'
-        assert index[11]['relative_path'] == 'network-insights.md'
-        assert index[12]['relative_path'] == 'chart-builder.md'
-        assert client.get('/documents/view/help/e2e-reporting.md').status_code == 200
-        assert client.get('/api/documents/help/e2e-reporting.md').status_code == 200
+        index = [item['relative_path'] for item in client.get('/api/documents/help-index').json()['documents']]
+        assert index[8:13] == ['network-insights.md', 'e2e-dashboards.md', 'scoring-gap-analysis.md', 'reporting.md', 'reporting-old.md']
+        assert client.get('/documents/view/help/reporting-old.md').status_code == 200
+        assert client.get('/api/documents/help/reporting-old.md').status_code == 200
         home = client.get('/api/documents/help').json()['content']
-        assert '- [E2E Reporting](e2e-reporting.md)' in home
+        assert '- [Reporting (old)](reporting-old.md)' in home
         assert '- [Chart Builder](chart-builder.md)' in home
-        assert 'e2e-reporting.md' in client.get('/api/documents/readme').json()['content']
-
+        assert 'reporting-old.md' in client.get('/api/documents/readme').json()['content']
 
 def test_help_navigation_groups_unnumbered_documents() -> None:
     node_binary = shutil.which('node')
@@ -9088,7 +9087,7 @@ def test_help_navigation_groups_unnumbered_documents() -> None:
     template = (Path(__file__).resolve().parents[1] / 'src/web_interface/templates/doc_view.html').read_text(encoding='utf-8')
     start = template.index('  function helpDocumentGroup(relativePath) {')
     end = template.index('\n  if (helpNavLists.length)', start)
-    script = template[start:end] + "\nconsole.log(JSON.stringify(['overview.md', 'configuration.md', 'docker-deployment.md', 'workspace-management.md', 'e2e-reporting.md', 'scoring-gap-analysis.md', 'network-insights.md', 'query-builder.md', 'administrator-config.md', 'app-config.md', 'workspace-config.md', 'app-logs.md', 'project-structure.md'].map(helpDocumentGroup)));"
+    script = template[start:end] + "\nconsole.log(JSON.stringify(['overview.md', 'configuration.md', 'docker-deployment.md', 'workspace-management.md', 'reporting.md', 'scoring-gap-analysis.md', 'network-insights.md', 'query-builder.md', 'administrator-config.md', 'app-config.md', 'workspace-config.md', 'app-logs.md', 'project-structure.md'].map(helpDocumentGroup)));"
     result = subprocess.run([node_binary, '-e', script], text=True, capture_output=True, check=True)
     assert json.loads(result.stdout) == [
         'General', 'General', 'General', 'Main Modules', 'Main Modules', 'Main Modules', 'Main Modules', 'Main Modules',

@@ -24,7 +24,7 @@ Workspace Management is the first operational module. It controls isolated works
 
 ## Data Ingestion
 
-Workspace accepts `CSV`, `XLS`, `XLSX` and `XLSM`. Only successfully processed datasets can be used by Dashboard, Chart Builder or Reporting.
+Workspace accepts `CSV`, `XLS`, `XLSX` and `XLSM` for tabular datasets, and `GeoJSON`, `JSON` or zipped shapefiles for Region Mapping and Clusters. Only successfully processed datasets can be used by Dashboard, Chart Builder or Reporting.
 
 ### Supported Input Types
 
@@ -33,6 +33,8 @@ Workspace accepts `CSV`, `XLS`, `XLSX` and `XLSM`. Only successfully processed d
 - CDR-Speech
 - Multivendor Mapping — VFUK
 - Multivendor Mapping — 3UK
+- Region Mapping — Geospatial
+- Clusters — Geospatial
 - Smart Orchestrator Logs — listed for forward compatibility; ingestion and analysis are not yet implemented.
 - Other
 
@@ -51,6 +53,14 @@ Classification is proposed from filenames but remains reviewable. Examples:
 - `NetCheck_CDR_Data_2026_Q2.xlsx` → CDR-Data
 - `NetCheck_CDR_Voice_2026_Q2.xlsx` → CDR-Voice
 - `VFUK_Multivendor_Mapping.xlsx` → VFUK mapping
+
+### Cluster polygons
+
+Choose **Clusters — Geospatial** for cluster boundary files. It accepts the same geospatial formats as Region Mapping: `.geojson`, `.json` or a `.zip` containing exactly one `.shp` and its required companion files (`.shx`, `.dbf`, and `.prj` to declare its coordinate reference system). The upload proposes Clusters for geospatial filenames containing `cluster`; the type remains editable before confirmation.
+
+Cluster files must contain non-empty, valid Polygon or MultiPolygon geometries with a coordinate reference system and non-blank names in `Cluster`, `Cluster_ID`, `Cluster_Name`, `ClusterName` or `Name`. Validation registers the dataset as Processed, with no CDR NR Mode or KPI analysis. Preview exposes its validation metadata; the original polygon file remains in the workspace input directory. Clusters appear in the Dataset Type filter and their metadata table is available in Database Management.
+
+Cluster polygons are the required input shown in **Network Insights → Cluster Sites Density**. Importing them does not yet calculate site density or overwrite CDR Region/Cluster values. They are preserved by workspace duplication, export/import, transfer and backup/restore when workspace data and input files are included. Database-only backups retain registration metadata but require the original input files to recover the polygons.
 
 ### NR Mode
 
@@ -155,7 +165,7 @@ The following ingestion fields are part of the current analytics model. They pro
 | `Technology_Secondary` | First available `L2_Call_Mode_B`, `RAT_B`, `Recording_Technology` or `RAT_Timeline`. |
 | `Attempt_Count` | Integer `1` per row, used to count categorical attempts when no numeric KPI exists. |
 
-Analytics uses the success/failure/call-quality flags and the normalized time, quality, throughput, latency, loss, jitter and handover metrics directly. E2E Reporting also uses these normalized metrics as fallbacks for heterogeneous CDR layouts. `Technology_Primary` drives filters and grouping, `Vendor` drives multivendor comparisons, and `Attempt_Count` supplies a stable row-count metric.
+Analytics uses the success/failure/call-quality flags and the normalized time, quality, throughput, latency, loss, jitter and handover metrics directly. Reporting (old) also uses these normalized metrics as fallbacks for heterogeneous CDR layouts. `Technology_Primary` drives filters and grouping, `Vendor` drives multivendor comparisons, and `Attempt_Count` supplies a stable row-count metric.
 
 `Technology_Secondary` and `Unsustainable_Call` have fewer built-in consumers but remain addressable by templates, filters and Auto-calculated Fields, so they must not be removed without checking workspace definitions and migrating the model.
 

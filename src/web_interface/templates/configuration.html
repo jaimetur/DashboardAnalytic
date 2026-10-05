@@ -10,6 +10,7 @@
   </article>
 
   {% if notice %}<p class="notice success-notice">{{ notice }}</p>{% endif %}
+  {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
 
   <article class="panel configuration-panel">
     <div class="section-head">
@@ -68,5 +69,63 @@
       </div>
     </form>
   </article>
+
+  <article class="panel configuration-panel" id="email-delivery">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Scheduled Reports</p>
+        <h2>Email Delivery</h2>
+      </div>
+      <span class="pill">{% if email_delivery.configured %}Configured{% else %}Not configured{% endif %}</span>
+    </div>
+    <form method="post" action="/application-config/email-delivery" class="configuration-form" autocomplete="off">
+      <section class="configuration-card" data-configuration-card>
+        <div class="configuration-card-head"><p class="eyebrow">SMTP</p><h3>Server</h3></div>
+        <label>SMTP Server
+          <input type="text" name="host" value="{{ email_delivery.host }}" placeholder="smtp.example.com" spellcheck="false">
+        </label>
+        <label>Port
+          <input type="number" name="port" value="{{ email_delivery.port }}" min="1" max="65535" step="1" required>
+        </label>
+        <label>Encryption
+          <select name="security">
+            {% for mode in email_security_modes %}<option value="{{ mode }}" {% if email_delivery.security == mode %}selected{% endif %}>{{ {'starttls': 'STARTTLS', 'ssl': 'SSL/TLS', 'none': 'None'}[mode] }}</option>{% endfor %}
+          </select>
+          <span class="table-help">STARTTLS usually uses port 587 and SSL/TLS port 465.</span>
+        </label>
+      </section>
+      <section class="configuration-card" data-configuration-card>
+        <div class="configuration-card-head"><p class="eyebrow">Authentication</p><h3>Account And Sender</h3></div>
+        <label>Username
+          <input type="text" name="username" value="{{ email_delivery.username }}" autocomplete="off" spellcheck="false">
+        </label>
+        <label>Password
+          <input type="password" name="password" value="" autocomplete="new-password" placeholder="{% if email_delivery.password_configured %}Saved · leave empty to keep it{% else %}Not set{% endif %}">
+          <span class="table-help">Stored in the application database, which configuration exports and backups include. Leave empty to keep the saved password, or the SMTP_PASSWORD deployment value.</span>
+        </label>
+        {% if email_delivery.password_configured %}<label class="configuration-toggle"><input type="checkbox" name="clear_password" value="true"><span><strong>Remove the saved password</strong></span></label>{% endif %}
+        <label>Sender Address
+          <input type="email" name="from_address" value="{{ email_delivery.from_address }}" placeholder="reports@example.com">
+        </label>
+        <label>Sender Name
+          <input type="text" name="from_name" value="{{ email_delivery.from_name }}">
+        </label>
+        <label>Attachment Size Limit (MB)
+          <input type="number" name="max_attachments_mb" value="{{ email_delivery.max_attachments_mb }}" min="1" max="500" step="1" required>
+          <span class="table-help">A scheduled report whose attachments exceed this total fails instead of being rejected by the mail server.</span>
+        </label>
+      </section>
+      <div class="form-actions configuration-field-wide">
+        <button type="submit">Save Email Delivery</button>
+      </div>
+    </form>
+    <form method="post" action="/application-config/email-delivery/test" class="configuration-email-test">
+      <label>Send a test email to
+        <input type="email" name="recipient" placeholder="name@example.com" required>
+      </label>
+      <button type="submit" {% if not email_delivery.configured %}disabled title="Save the SMTP server and sender first"{% endif %}>Send Test Email</button>
+    </form>
+  </article>
+
 </section>
 {% endblock %}

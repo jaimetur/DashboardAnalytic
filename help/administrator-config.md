@@ -12,6 +12,8 @@ Administrator Config centralises user, portability, database and dataset adminis
 | --- | --- |
 | Roles | [Open section](#roles) |
 | Create user and Users | [Open section](#create-user-and-users) |
+| User Groups | [Open section](#user-groups) |
+| Features Activation | [Open section](#features-activation) |
 | Import / Export / Transfer | [Open section](#import-export-transfer) |
 | Database Management | [Open section](#database-management) |
 | Datasets Management | [Open section](#datasets-management) |
@@ -44,6 +46,28 @@ Administrators can:
 
 Only a super-admin can change workspace access. Leave a password field empty when an edit should preserve the current password. **Reset password** restores `super123`, `admin123` or `demo123` for the three bootstrap names and uses `Ericsson123` for another account; the dialog displays the resulting password so it can be changed or communicated securely.
 
+## User Groups
+
+**User Groups** creates custom groups of users for Features Activation. Admins and super-admins create a group with a name, an optional description and its members, then edit or delete it from the same table. Deleting a group or a user keeps every other account and group unchanged. Groups and their members are stored in the application database (`User Groups` and `User Group Members` tables), so configuration exports, transfers and backups include them.
+
+## Features Activation
+
+**Features Activation**, visible to super-admins, lists the main modules in the order of the main tabs: Workspace, Datasets Analysis, Network Insights, E2E Dashboards, Scoring & GAP Analysis, Non-Qualified Calls, Reporting, Reporting (old) and Builders.
+
+Each feature has three settings:
+
+| Setting | Meaning |
+| --- | --- |
+| By default | **All users** or **Nobody** |
+| Allowed | Roles, user groups and users that gain the feature even when the default is Nobody |
+| Forbidden | Roles, user groups and users that lose the feature even when the default is All users |
+
+An account matching both lists loses the feature: Forbidden always wins. For example, set **By default: Nobody** and allow the `admin` role, or keep **All users** and forbid one user group. Each list combines Roles, Groups and Users in one selector with a filter; the selector summarises the selection, such as `1 role · 2 users`.
+
+A feature that is not active for a user disappears from the main tabs and the Modules menu, and its pages and API answer 403. Workspace switching, dataset uploads and processing remain available everywhere. By default every module is active for all users except Non-Qualified Calls (under construction, Nobody), Reporting (Nobody, allowed for super-admins) and Reporting (old) (Nobody, allowed for super-admins and EJAITUR). The settings are stored in the application database.
+
+Reporting Jobs can only include artifacts of the modules active for their author; see [Reporting](reporting.md).
+
 ## Import / Export / Transfer
 
 ### Export targets
@@ -55,10 +79,12 @@ Only a super-admin can change workspace access. Leave a password field empty whe
 - Operator & Vendor Maps from the active workspace
 - Scoring & GAP Analysis Configuration from the active workspace (all saved methodologies, default methodology, KPI definitions, aggregation hierarchy and GAP KPI priorities)
 - Auto-calculated Fields from the active workspace
+- Query Builder Queries from the active workspace
+- Reporting Jobs from the active workspace
 - An accessible workspace
 - Full Environment with selected workspaces
 
-Admins can export/transfer the active workspace's Dashboards, Report Templates, Main Cities, Operator & Vendor Maps, Scoring & GAP Analysis Configuration and Auto-calculated Fields, plus complete workspaces they can access. Super-admins can also export Application Config and a Full Environment.
+Admins can export/transfer the active workspace's Dashboards, Report Templates, Main Cities, Operator & Vendor Maps, Scoring & GAP Analysis Configuration, Auto-calculated Fields, Query Builder Queries and Reporting Jobs, plus complete workspaces they can access. Super-admins can also export Application Config and a Full Environment.
 
 Dashboard, template, mapping and field packages preselect a destination workspace with the same name as their source, where available, and allow one or more accessible destinations to be selected.
 
@@ -66,9 +92,9 @@ Importing or transferring Report Templates synchronizes the destination library 
 
 When the same package also includes Dashboards, its Report Templates replace the destination library because the Dashboard definitions are replaced too. Selective backup restore uses the same rule.
 
-A Full Environment always contains Application Config and the complete database/input content, Dashboard definitions, Report Templates, Main Cities, Operator & Vendor Maps, Scoring & GAP Analysis Configuration and Auto-calculated Fields for every selected workspace. Selecting Full Environment only chooses the package type; the workspace picker opens when **Export ZIP** or **Transfer to other server** is pressed.
+A Full Environment always contains Application Config and the complete database/input content, Dashboard definitions, Report Templates, Main Cities, Operator & Vendor Maps, Scoring & GAP Analysis Configuration, Auto-calculated Fields, Query Builder Queries and Reporting Jobs for every selected workspace. Selecting Full Environment only chooses the package type; the workspace picker opens when **Export ZIP** or **Transfer to other server** is pressed.
 
-**Include generated Reports, Chart Sets and Dashboard PPT jobs** controls whether their `output/` trees are included. At least one workspace is required.
+**Include generated Reports, Chart Sets and Dashboard PPT jobs** controls whether their `output/` trees, and the Reporting run history, are included. Reporting Job imports add new jobs and replace jobs with the same name; their dataset references are matched by file name in the destination workspace. At least one workspace is required.
 
 Exports run as disk-backed jobs and show estimated progress. The ZIP download starts when package creation finishes.
 

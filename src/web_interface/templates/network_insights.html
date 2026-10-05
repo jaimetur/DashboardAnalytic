@@ -14,7 +14,7 @@
       <div class="ni-selection-grid">
         <label>NR Mode<select id="ni-nr-mode"><option value="NSA">NSA</option><option value="SA">SA</option></select></label>
         <label>Technology<select id="ni-technology">{% for key, label in network_insights_config.technologies.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
-        <label>Group by<select id="ni-group" multiple size="1" data-multiselect-empty-label="All samples" aria-label="Group by">{% for key, label in network_insights_config.groupings.items() %}<option value="{{ key }}"{% if key in ("operator", "campaign") %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+        <label>Group by<select id="ni-group" data-multiselect-count-locked="true" multiple size="1" data-multiselect-empty-label="All samples" aria-label="Group by">{% for key, label in network_insights_config.groupings.items() %}<option value="{{ key }}"{% if key in ("operator", "campaign") %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
         <label>Low coverage below (dBm)<input type="number" id="ni-coverage-threshold" step="1" value="{{ network_insights_config.coverage_threshold|int }}"></label>
         <label>High interference below (dB)<input type="number" id="ni-interference-threshold" step="0.5" value="{{ network_insights_config.interference_threshold|int }}"></label>
         <label>Map grid (m)<select id="ni-grid"><option value="100">100 m</option><option value="250" selected>250 m</option><option value="500">500 m</option><option value="1000">1 km</option></select></label>
@@ -30,6 +30,8 @@
       <div class="ni-dataset-groups" id="ni-datasets"></div>
       <div class="ni-actions">
         <button type="button" id="ni-analyse" class="ni-analyse">Analyse Network</button>
+        <button type="button" class="ni-secondary-action" data-ni-export="powerpoint" title="Summary of the current selection in PowerPoint">Export PowerPoint</button>
+        <button type="button" class="ni-secondary-action" data-ni-export="word" title="Summary of the current selection in Word">Export Word</button>
         <p class="form-note" id="ni-status" role="status">Choose the CDRs and press Analyse Network. Filter values load automatically for the selected CDRs.</p>
       </div>
     </div>
@@ -70,12 +72,28 @@
     </div>
   </details>
 
-  <details class="panel collapsible-panel ni-panel" open data-panel-state-key="network-insights:sites">
-    <summary class="collapsible-summary"><div><p class="eyebrow">Observed and inventoried sites</p><h2>Sites &amp; Density</h2></div><span class="collapse-chip">Collapse</span></summary>
+  <details class="panel collapsible-panel ni-panel" open data-panel-state-key="network-insights:deployment">
+    <summary class="collapsible-summary"><div><p class="eyebrow">NNS, eMOCN and shared networks</p><h2>Network Deployment</h2></div><span class="collapse-chip">Collapse</span></summary>
     <div class="collapsible-panel-body">
+      <div class="ni-map-toolbar">
+        <label>View / Group by<select id="ni-deployment-group">{% for key, label in network_insights_config.deployment_groups.items() %}<option value="{{ key }}"{% if key == 'cluster' and not network_insights_config.clusters_available %} disabled title="Import Clusters polygons or an inventory with a Cluster field to enable this view."{% endif %}>{{ label }}</option>{% endfor %}<option value="inventory">Full Site / Cell Inventory</option></select></label>
+        <button type="button" id="ni-deployment-export-all" class="ni-secondary-action" disabled>Export All to CSV</button>
+        <p class="form-note" id="ni-deployment-status"></p>
+      </div>
+      <div id="ni-deployment" class="ni-deployment"></div>
+    </div>
+  </details>
+
+  <details class="panel collapsible-panel ni-panel" open data-panel-state-key="network-insights:sites">
+    <summary class="collapsible-summary"><div><p class="eyebrow">Observed and inventoried sites</p><h2>Cluster Sites Density</h2></div><span class="collapse-chip">Collapse</span></summary>
+    <div class="collapsible-panel-body">
+      <p class="ni-pending-box" id="ni-sites-pending" hidden></p>
+      <p class="ni-pending-box"><strong>Cluster polygons required.</strong> To calculate site density per cluster, import the cluster shapes/polygons in Workspace as <strong>Clusters — Geospatial</strong>: GeoJSON, JSON or a ZIP containing a shapefile. Site density per cluster is not calculated yet.</p>
+      <div class="ni-map-toolbar"><label>Data source<select id="ni-sites-source"><option value="observed">Observed Sites / Cells</option><option value="inventory">Inventory Sites / Cells</option></select></label></div>
       <div class="table-wrap ni-table-wrap"><table class="ni-table" id="ni-sites-table"><tbody><tr><td class="form-note">No analysis yet.</td></tr></tbody></table></div>
-      <div id="ni-inventory-totals" class="ni-inventory-totals"></div>
-      <p class="form-note ni-pending">Observed eNodeBs are the distinct LTE eNodeBs (Cell Identity ÷ 256) that served the measuring devices along the route, not the deployed sites. Inventoried sites come from the Vodafone and Three cell inventories uploaded as Vendor mapping datasets. <strong>Pending input:</strong> site inventories for the other Operators and the surface of each Region and City, needed for densities per km².</p>
+      <p class="form-note" id="ni-sites-inventory-note" hidden>Complete uploaded inventories, independent of CDR selection and filters. Overlapping uploads are deduplicated per operator.</p>
+      <div id="ni-inventory-totals" class="ni-inventory-totals" hidden></div>
+      <p class="form-note ni-pending" id="ni-sites-note">Observed eNodeBs are the distinct LTE eNodeBs (Cell Identity ÷ 256) that served the measuring devices along the route, not the deployed sites. Inventoried sites come from the Vodafone and Three cell inventories uploaded as Vendor mapping datasets.</p>
     </div>
   </details>
 
@@ -90,16 +108,6 @@
     </div>
   </details>
 
-  <details class="panel collapsible-panel ni-panel" open data-panel-state-key="network-insights:deployment">
-    <summary class="collapsible-summary"><div><p class="eyebrow">NNS, eMOCN and shared networks</p><h2>Network Deployment</h2></div><span class="collapse-chip">Collapse</span></summary>
-    <div class="collapsible-panel-body">
-      <div class="ni-map-toolbar">
-        <label>Group by<select id="ni-deployment-group">{% for key, label in network_insights_config.deployment_groups.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
-        <p class="form-note" id="ni-deployment-status"></p>
-      </div>
-      <div id="ni-deployment" class="ni-deployment"></div>
-    </div>
-  </details>
 </section>
 <script id="ni-config" type="application/json">{{ network_insights_config | tojson }}</script>
 <script defer src="{{ static_path('js/dashboard_charts.js') }}?v={{ asset_version('js/dashboard_charts.js') }}"></script>

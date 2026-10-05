@@ -25,15 +25,21 @@ The UI uses a shared header, module tabs, panels, dialogs and tables. Read [Prod
 
 ## Navigation
 
+Administrative tabs occupy the upper row, aligned to the left. Primary module tabs occupy the lower row, directly beside the first content panel. The same order applies on smaller screens.
+
 Primary tabs:
 
 - Workspace
 - Datasets Analysis
-- E2E Dashboards
-- E2E Reporting
-- Scoring & GAP Analysis
 - Network Insights
+- E2E Dashboards
+- Scoring & GAP Analysis
+- Non-Qualified Calls (under construction, hidden until activated)
+- Reporting
+- Reporting (old)
 - Builders (dropdown with Chart Builder and Query Builder)
+
+Each main tab is a feature. **Admin → Features Activation** makes it available to all users or to nobody by default, plus Allowed and Forbidden roles, user groups and users (Forbidden wins); a feature that is not active for an account disappears from its tabs and Modules menu, and its pages and API answer 403. When the tabs do not fit on one line they wrap onto further lines, and main module tabs never share a line with the administrative tabs.
 
 Other tabs:
 
@@ -42,7 +48,7 @@ Other tabs:
 - Config (dropdown with Application Config and Workspace Config), for `user-editor`, `admin` and `super-admin` roles
 - Admin, for `admin` and `super-admin` roles
 
-Help Home opens by default after login. Dashboard, Reporting, Network Insights, Chart Builder and Query Builder require an open workspace.
+Help Home opens by default after login. Help, the Readme and the Changelog are also available without signing in, with a **Sign in** link. Every module except Workspace requires an open workspace.
 
 Open **Builders** to choose **Chart Builder** or **Query Builder**. The Modules sidebar links to each builder directly. Within its Administrative Modules group, Application Logs is first and Administrator Config is last. The top tab for Administrator Config remains **Admin**.
 
@@ -52,9 +58,9 @@ Modules uses nearly the full viewport height when needed and scrolls if the wind
 
 Open **Config** and choose **Application Config** for application-wide runtime settings or **Workspace Config** for Report Templates Management, Operator Mappings, Vendor Mappings, Spectrum Holdings, Main Cities and the Scoring hierarchy/KPI/GAP settings in the active workspace. Workspace Config's Page Sections navigator jumps between the panels.
 
-Help Navigation lists unnumbered documents under General, Main Modules, Administrative Modules and Reference. Scoring & GAP Analysis follows E2E Reporting in Main Modules, matching the main tab order. Network Insights follows Scoring & GAP Analysis. Docker Deployment follows Deployment Configuration in General. App Logs is the first administrative document and Administrator Config is the last. Readme and Changelog open Reference before Project Structure and Roadmap.
+Help Navigation lists unnumbered documents under General, Main Modules, Administrative Modules and Reference. Main Modules follow the main tab order: Workspace Management, Datasets Analysis, Network Insights, E2E Dashboards, Scoring & GAP Analysis, Reporting, Reporting (old), Chart Builder and Query Builder. Docker Deployment follows Deployment Configuration in General. App Logs is the first administrative document and Administrator Config is the last. Readme and Changelog open Reference before Project Structure and Roadmap.
 
-The Help Home link stays above the groups. Documents outside a user's access are omitted.
+The Help Home link stays above the groups. Every chapter is available to every reader except Reporting (old), which only users with that feature see.
 
 ## Header controls
 
@@ -81,7 +87,7 @@ Single-select and multi-select controls share a compact searchable style.
 
 ## Filter Builder
 
-The shared Filter Builder is used by Chart Builder, E2E Reporting Chart Preview and Report Template Chart Preview.
+The shared Filter Builder is used by Chart Builder, Reporting (old) Chart Preview and Report Template Chart Preview.
 
 - The field selector is searchable.
 - Operators adapt to list, text and numeric conditions.
@@ -135,8 +141,8 @@ On a phone, use portrait orientation for forms and landscape orientation when in
 
 ## Dashboard navigation and overlays
 
-The analytical tabs are ordered **Datasets Analysis → E2E Dashboards → E2E Reporting → Scoring & GAP Analysis** for users with access. Datasets Analysis uses blue, E2E Dashboards uses muted violet, and Reporting uses brighter purple. Scoring offers NR Mode and CDR selection, aggregation controls, saved background jobs and tables/charts/GAP exports. Network Insights follows Scoring & GAP Analysis with a teal tab and analyses RSRP/SINR, coverage and interference maps, sites, spectrum and network deployment.
+The analytical tabs are ordered **Datasets Analysis → Network Insights → E2E Dashboards → Scoring & GAP Analysis → Non-Qualified Calls → Reporting → Reporting (old)** for users with each feature. Datasets Analysis uses blue, Network Insights teal, E2E Dashboards muted violet, Reporting green and Reporting (old) brighter purple. Scoring offers NR Mode and CDR selection, aggregation controls, saved background jobs and tables/charts/GAP exports. Network Insights analyses RSRP/SINR, coverage and interference maps, sites, spectrum and network deployment. Each main tab shows a representative icon before its name. On narrower windows the main tabs switch to their short names (Analysis, Dashboards, Reporting, Scoring, Network) and then drop their icons, so the tab rows never overlap.
 
-E2E Reporting is shown only to super-admins and the EJAITUR user when a workspace is active; other users do not see it in the top navigation or Modules menu. The dashboard viewer groups charts by Slide and opens the same Dashboard Filters controls in a floating panel. Its dataset dialog provides pagination and CSV export.
+Reporting and Reporting (old) are shown only to the users, roles and groups it is activated for in Admin → Features Activation; Reporting starts with super-admins and Reporting (old) with super-admins and EJAITUR. The dashboard viewer groups charts by Slide and opens the same Dashboard Filters controls in a floating panel. Its dataset dialog provides pagination and CSV export.
 
 App Logs is available from the utility navigation and includes App Events for the active workspace plus the live Execution Log for the running server. See [App Logs](app-logs.md).

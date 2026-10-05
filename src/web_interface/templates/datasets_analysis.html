@@ -93,7 +93,53 @@
             <button type="submit">Export PowerPoint</button>
           </form>
           {% endif %}
+          {% if summary_datasets %}
+          <button type="button" data-dataset-summary-open="powerpoint" title="Summary of the selected datasets with every KPI">Summary PowerPoint</button>
+          <button type="button" data-dataset-summary-open="word" title="Summary of the selected datasets with every KPI">Summary Word</button>
+          {% endif %}
         </div>
+        {% if summary_datasets %}
+        <dialog class="confirm-dialog dataset-summary-dialog" data-dataset-summary-dialog>
+          <form method="post" action="/datasets-analysis/summary/powerpoint" data-loading-label="Exporting Summary Dataset Analysis" data-download-form="1" data-dataset-summary-form>
+            <p class="eyebrow">Summary Dataset Analysis</p>
+            <h3 data-dataset-summary-title>Summary PowerPoint</h3>
+            <p class="form-note">Every KPI of each selected dataset, without filters. All datasets are selected by default.</p>
+            <button type="button" class="ghost-link" data-dataset-summary-toggle>Select All / None</button>
+            <div class="dataset-summary-options">
+              {% for dataset in summary_datasets %}
+              <label class="confirm-option"><input type="checkbox" name="dataset_ids" value="{{ dataset.id }}" checked><span>{{ dataset.file_name }} <small>({{ dataset.input_kind_label or dataset.dataset_kind }})</small></span></label>
+              {% endfor %}
+            </div>
+            <div class="confirm-actions">
+              <button type="button" class="ghost-link" data-dataset-summary-cancel>Cancel</button>
+              <button type="submit" data-dataset-summary-submit>Export</button>
+            </div>
+          </form>
+        </dialog>
+        <script>
+        (() => {
+          const dialog = document.querySelector('[data-dataset-summary-dialog]');
+          if (!dialog) return;
+          const form = dialog.querySelector('[data-dataset-summary-form]');
+          const boxes = () => [...form.querySelectorAll('input[name="dataset_ids"]')];
+          document.querySelectorAll('[data-dataset-summary-open]').forEach((button) => button.addEventListener('click', () => {
+            const kind = button.dataset.datasetSummaryOpen;
+            form.action = `/datasets-analysis/summary/${kind}`;
+            dialog.querySelector('[data-dataset-summary-title]').textContent = kind === 'word' ? 'Summary Word' : 'Summary PowerPoint';
+            dialog.showModal();
+          }));
+          dialog.querySelector('[data-dataset-summary-toggle]').addEventListener('click', () => {
+            const select = !boxes().every((box) => box.checked);
+            boxes().forEach((box) => { box.checked = select; });
+          });
+          dialog.querySelector('[data-dataset-summary-cancel]').addEventListener('click', () => dialog.close());
+          form.addEventListener('submit', (event) => {
+            if (!boxes().some((box) => box.checked)) { event.preventDefault(); window.alert('Select at least one dataset.'); return; }
+            dialog.close();
+          });
+        })();
+        </script>
+        {% endif %}
         {% else %}
         <p class="form-note">No processed datasets are available yet.</p>
         {% endif %}

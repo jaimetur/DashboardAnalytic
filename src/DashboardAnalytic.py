@@ -6,6 +6,7 @@ import calendar
 import io
 import os
 import errno
+import html
 import fcntl
 import gc
 import sys
@@ -60,9 +61,10 @@ from src.modules.auth import SessionUser, verify_password
 from src.modules.column_names import MAIN_CDR_FIELDS, PREVIEW_METADATA_FIELDS, VENDOR_FIELD_IDENTITIES, clean_column_name, column_identity, resolve_column_name, vendor_filter_column, vendor_filter_value, vendor_filter_values
 from src.modules.report_layouts import canonical_layout_name, selectable_layout_name
 from src.modules.cdr_reporting import entry_dynamic_fields, DYNAMIC_LAYOUTS, CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalog_chart_payload, catalog_kpi_fields, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, is_empty_catalog_chart, materialize_calculated_dimensions, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_label_format, parse_label_position, parse_legend_position, parse_template_boolean, prepare_catalog_chart_preview_frame, prepare_multivendor_catalog_entry, preview_catalog_chart_data, render_catalog_chart_preview, render_catalog_chart_preview_with_hover, render_cdr_report, render_unavailable_source_chart, report_chart_renderer_name, reset_dashboard_canvas_renderer, split_calculated_dimension_aliases
-from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
+from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_dataset_summary_powerpoint, export_dataset_summary_word, export_powerpoint_report, export_word_report
+from src.modules.email_delivery import DEFAULT_MAX_ATTACHMENTS_MB, EMAIL_SECURITY_MODES, email_delivery_settings, invalid_recipients, parse_recipients, save_email_delivery_settings, send_email
 from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column, add_vfuk_gcid_column, apply_operator_mappings, ensure_fixed_cdr_fields, get_dataset_source_columns, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
-from src.modules.geospatial import assign_regions, validate_region_mapping
+from src.modules.geospatial import assign_regions, validate_cluster_mapping, validate_region_mapping
 from src.modules.nr_mode import NR_MODES, dataset_nr_mode, infer_nr_mode, normalize_nr_mode
 from src.modules.scoring_vendors import normalize_scoring_vendor_result, scoring_vendor_name, scoring_vendor_names, scoring_vendor_operators
 from src.modules.scoring_jobs import (
@@ -294,10 +296,11 @@ INPUT_KIND_LABELS = {
     'mapping_vodafone': 'Multivendor Mapping — Vodafone UK (VFUK)',
     'mapping_three': 'Multivendor Mapping — Three UK (3UK)',
     'mapping_region': 'Region Mapping — Geospatial',
+    'clusters': 'Clusters — Geospatial',
     'smart_orchestrator_logs': 'Smart Orchestrator Logs',
     'generic': 'Other',
 }
-UPLOAD_DATASET_KINDS = frozenset({'data', 'voice', 'speech', 'mapping_vodafone', 'mapping_three', 'mapping_region', 'smart_orchestrator_logs', 'generic'})
+UPLOAD_DATASET_KINDS = frozenset({'data', 'voice', 'speech', 'mapping_vodafone', 'mapping_three', 'mapping_region', 'clusters', 'smart_orchestrator_logs', 'generic'})
 CDR_DATASET_KINDS = frozenset({'data', 'voice', 'speech'})
 CDR_PREVIEW_FILTER_DEFINITIONS = (
     ('cdr_operator', 'Operator', ('operator', 'Operator')),
@@ -346,6 +349,8 @@ def materialize_cdr_derived_columns(
         )
     return result
 HELP_HOME_DOCUMENT = 'help.md'
+# Only users with the Reporting (old) feature see this chapter.
+OLD_REPORTING_HELP_DOCUMENT = 'reporting-old.md'
 HELP_NAVIGATION_DOCUMENTS = (
     HELP_HOME_DOCUMENT,
     'overview.md',
@@ -355,10 +360,11 @@ HELP_NAVIGATION_DOCUMENTS = (
     'web-interface.md',
     'workspace-management.md',
     'datasets-analysis.md',
-    'e2e-dashboards.md',
-    'e2e-reporting.md',
-    'scoring-gap-analysis.md',
     'network-insights.md',
+    'e2e-dashboards.md',
+    'scoring-gap-analysis.md',
+    'reporting.md',
+    'reporting-old.md',
     'chart-builder.md',
     'query-builder.md',
     'app-logs.md',
@@ -373,7 +379,8 @@ HELP_DOCUMENT_LABELS = {
     'technical-considerations.md': 'Technical Considerations',
     'datasets-analysis.md': 'Datasets Analysis',
     'e2e-dashboards.md': 'E2E Dashboards',
-    'e2e-reporting.md': 'E2E Reporting',
+    'reporting.md': 'Reporting',
+    'reporting-old.md': 'Reporting (old)',
     'scoring-gap-analysis.md': 'Scoring & GAP Analysis',
     'network-insights.md': 'Network Insights',
     'chart-builder.md': 'Chart Builder',
@@ -392,129 +399,189 @@ def help_document_label(relative_path: str) -> str:
     return stem.replace('-', ' ').replace('_', ' ').title()
 
 
+# Main modules that can be activated per user, role or custom user group,
+# listed in the order of the main navigation tabs. ``pages`` match exactly and
+# ``paths`` also match their sub-paths; shared actions (workspace switching,
+# dataset uploads and processing) stay available to every module.
+FEATURES: tuple[dict[str, Any], ...] = (
+    {'key': 'workspace', 'label': 'Workspace', 'pages': ('/workspace',), 'paths': ()},
+    {'key': 'datasets-analysis', 'label': 'Datasets Analysis', 'pages': ('/datasets-analysis',), 'paths': (
+        '/datasets-analysis/analyze', '/datasets-analysis/export', '/datasets-analysis/summary',
+        '/dashboard/analyze', '/dashboard/export',
+    )},
+    {'key': 'network-insights', 'label': 'Network Insights', 'paths': ('/network-insights', '/api/network-insights')},
+    {'key': 'e2e-dashboards', 'label': 'E2E Dashboards', 'paths': ('/e2e-dashboards', '/api/e2e-dashboards')},
+    {'key': 'scoring', 'label': 'Scoring & GAP Analysis', 'paths': ('/scoring', '/api/scoring')},
+    {'key': 'non-qualified-calls', 'label': 'Non-Qualified Calls', 'paths': ('/non-qualified-calls', '/api/non-qualified-calls')},
+    {'key': 'reporting', 'label': 'Reporting', 'paths': ('/reporting', '/api/reporting')},
+    {'key': 'reporting-old', 'label': 'Reporting (old)', 'paths': ('/reporting-old', '/api/reporting-old', '/e2e-reporting')},
+    {'key': 'builders', 'label': 'Builders', 'paths': ('/chart-builder', '/query-builder', '/api/chart-builder', '/api/query-builder')},
+)
+FEATURE_KEYS = tuple(feature['key'] for feature in FEATURES)
+FEATURE_ROLES = ('user-viewer', 'user-editor', 'admin', 'super-admin')
+FEATURE_ACTIVATION_STATE_KEY = 'feature_activation_v1'
+FEATURE_ACTIVATION_CACHE_SECONDS = 5.0
+# Both Reporting modules start restricted; the old one keeps the access
+# it had before Features Activation existed (super-admins and EJAITUR).
+# A rule grants a feature to everyone ('all') or to nobody ('none') by default;
+# its Allowed roles, groups and users gain it and its Forbidden ones lose it.
+# Forbidden always wins over Allowed.
+FEATURE_DEFAULTS: dict[str, dict[str, Any]] = {
+    # Under construction: hidden from every user until it is activated.
+    'non-qualified-calls': {'default': 'none'},
+    'reporting': {'default': 'none', 'allow': {'roles': ['super-admin']}},
+    'reporting-old': {'default': 'none', 'allow': {'roles': ['super-admin']}, 'allow_usernames': ['ejaitur']},
+}
+_feature_activation_cache: tuple[float, str, dict[str, Any]] | None = None
+
+
+def feature_for_path(path: str) -> str | None:
+    """The feature that owns a page or API path, if any."""
+    for feature in FEATURES:
+        if path in feature.get('pages', ()) or any(path == prefix or path.startswith(prefix + '/') for prefix in feature['paths']):
+            return feature['key']
+    return None
+
+
+def _feature_principals(value: object) -> dict[str, list]:
+    value = value if isinstance(value, dict) else {}
+    return {
+        'roles': [role for role in dict.fromkeys(value.get('roles') or []) if role in FEATURE_ROLES],
+        'groups': list(dict.fromkeys(int(item) for item in value.get('groups') or [] if str(item).isdigit())),
+        'users': list(dict.fromkeys(int(item) for item in value.get('users') or [] if str(item).isdigit())),
+    }
+
+
+def normalized_feature_rule(value: object, default: dict[str, Any] | None = None) -> dict[str, Any]:
+    """A feature rule: default access plus Allowed and Forbidden roles, groups and users."""
+    source = value if isinstance(value, dict) else (default or {})
+    if 'mode' in source and 'default' not in source:
+        # Rules saved before Allowed/Forbidden lists: 'selected' allowed only its selection.
+        source = {'default': 'all' if source.get('mode') == 'all' else 'none',
+                  'allow': {key: source.get(key) or [] for key in ('roles', 'groups', 'users')}}
+    rule = {
+        'default': 'none' if source.get('default') == 'none' else 'all',
+        'allow': _feature_principals(source.get('allow')),
+        'deny': _feature_principals(source.get('deny')),
+    }
+    if not isinstance(value, dict) and default and default.get('allow_usernames'):
+        # Built-in defaults may name users that only exist on some installations.
+        rule['allow_usernames'] = list(default['allow_usernames'])
+    return rule
+
+
+def feature_activation_settings() -> dict[str, dict[str, Any]]:
+    """Every feature's activation rule: saved values first, then the defaults."""
+    try:
+        stored = json.loads(repository.get_application_state(FEATURE_ACTIVATION_STATE_KEY) or '{}')
+    except (json.JSONDecodeError, TypeError, sqlite3.Error):
+        stored = {}
+    stored = stored if isinstance(stored, dict) else {}
+    return {
+        key: normalized_feature_rule(stored[key], FEATURE_DEFAULTS.get(key)) if key in stored
+        else normalized_feature_rule(None, FEATURE_DEFAULTS.get(key))
+        for key in FEATURE_KEYS
+    }
+
+
+def save_feature_activation_settings(settings_by_feature: dict[str, Any]) -> None:
+    global _feature_activation_cache
+    values = {key: normalized_feature_rule(settings_by_feature.get(key)) for key in FEATURE_KEYS}
+    repository.set_application_state(FEATURE_ACTIVATION_STATE_KEY, json.dumps(values, sort_keys=True))
+    _feature_activation_cache = None
+
+
+def _feature_activation_snapshot() -> dict[str, Any]:
+    """Activation rules plus user and group lookups, cached for a few seconds."""
+    global _feature_activation_cache
+    now, database = monotonic(), str(repository.global_db_path)
+    cached = _feature_activation_cache
+    if cached is None or cached[1] != database or now - cached[0] > FEATURE_ACTIVATION_CACHE_SECONDS:
+        users = {str(row['username']).casefold(): int(row['id']) for row in repository.list_users()}
+        groups_by_user: dict[int, set[int]] = {}
+        for group in repository.list_user_groups():
+            for user_id in group['member_ids']:
+                groups_by_user.setdefault(int(user_id), set()).add(int(group['id']))
+        cached = _feature_activation_cache = (now, database, {
+            'rules': feature_activation_settings(), 'users': users, 'groups_by_user': groups_by_user,
+        })
+    return cached[2]
+
+
+def invalidate_feature_activation_cache() -> None:
+    global _feature_activation_cache
+    _feature_activation_cache = None
+
+
+def user_has_feature(user: SessionUser | None, feature: str) -> bool:
+    """Whether a feature is active for a user: Forbidden wins, then Allowed, then the default."""
+    if user is None or feature not in FEATURE_KEYS:
+        return feature not in FEATURE_KEYS
+    snapshot = _feature_activation_snapshot()
+    rule = snapshot['rules'][feature]
+    user_id = snapshot['users'].get(user.username.casefold())
+    groups = snapshot['groups_by_user'].get(user_id, set()) if user_id is not None else set()
+
+    def matches(principals: dict[str, list], usernames: tuple[str, ...] = ()) -> bool:
+        return (user.role in principals['roles'] or bool(groups & set(principals['groups']))
+                or (user_id is not None and user_id in principals['users'])
+                or user.username.casefold() in {name.casefold() for name in usernames})
+
+    if matches(rule['deny']):
+        return False
+    if matches(rule['allow'], tuple(rule.get('allow_usernames', ()))):
+        return True
+    return rule['default'] == 'all'
+
+
+def user_features(user: SessionUser | None) -> dict[str, bool]:
+    return {key: user_has_feature(user, key) for key in FEATURE_KEYS}
+
+
+def feature_activation_context() -> list[dict[str, Any]]:
+    """Features in tab order with their rules; default usernames resolve to user IDs."""
+    rules = feature_activation_settings()
+    user_ids = {str(row['username']).casefold(): int(row['id']) for row in repository.list_users()}
+    rows = []
+    for feature in FEATURES:
+        rule = rules[feature['key']]
+        allow = dict(rule['allow'])
+        allow['users'] = list(dict.fromkeys([*allow['users'], *[user_ids[name.casefold()] for name in rule.get('allow_usernames', []) if name.casefold() in user_ids]]))
+        rows.append({**feature, 'default': rule['default'], 'allow': allow, 'deny': rule['deny'],
+                     'allow_values': [f'role:{role}' for role in allow['roles']] + [f'group:{group}' for group in allow['groups']] + [f'user:{user}' for user in allow['users']],
+                     'deny_values': [f'role:{role}' for role in rule['deny']['roles']] + [f'group:{group}' for group in rule['deny']['groups']] + [f'user:{user}' for user in rule['deny']['users']]})
+    return rows
+
+
 def can_access_e2e_reporting(user: SessionUser) -> bool:
-    return user.role == 'super-admin' or user.username.casefold() == 'ejaitur'
+    """Access to the Reporting (old) module and its Help chapter."""
+    return user_has_feature(user, 'reporting-old')
 
 
 def filter_e2e_reporting_help_content(content: str, document_name: str) -> str:
-    """Hide E2E Reporting help references from users without module access."""
-    normalized_name = Path(document_name).name.casefold()
-    lines = content.splitlines()
+    """Remove the Reporting (old) chapter from Help for users without that feature.
 
-    if normalized_name == HELP_HOME_DOCUMENT:
-        return '\n'.join(
-            line for line in lines
-            if 'e2e-reporting.md' not in line.casefold() and 'e2e reporting' not in line.casefold()
-        )
-
-    if normalized_name == 'overview.md':
-        filtered = []
-        skipping_reporting_section = False
-        for line in lines:
-            if re.match(r'^## E2E Reporting\s*$', line):
-                skipping_reporting_section = True
+    Every other Help chapter stays complete for every user, signed in or not:
+    only the old module's own sections and links to its chapter are removed.
+    """
+    lines, filtered, skipping_level = content.splitlines(), [], 0
+    for line in lines:
+        heading = re.match(r'^(#{1,6})\s+(.*?)\s*$', line)
+        if skipping_level:
+            if heading and len(heading.group(1)) <= skipping_level:
+                skipping_level = 0
+            else:
                 continue
-            if skipping_reporting_section:
-                if line.startswith('## '):
-                    skipping_reporting_section = False
-                else:
-                    continue
-            if '(#e2e-reporting)' in line:
-                continue
-            line = line.replace(
-                ', or **E2E Reporting** for the classic report and Chart Set workflow',
-                '',
-            )
-            line = line.replace('**E2E Dashboards**, Reporting, Chart Builder', '**E2E Dashboards**, Chart Builder')
-            filtered.append(line)
-        lines = filtered
-    elif normalized_name == 'readme.md':
-        filtered = []
-        skipping_reporting_section = False
-        for line in lines:
-            if re.match(r'^#{2,3} E2E Reporting\s*$', line):
-                skipping_reporting_section = True
-                continue
-            if skipping_reporting_section:
-                if re.match(r'^#{1,3} ', line):
-                    skipping_reporting_section = False
-                else:
-                    continue
-            if 'e2e-reporting.md' in line.casefold():
-                continue
-            line = line.replace(' immediately after E2E Reporting in Help', ' in Help')
-            filtered.append(line)
-        lines = filtered
-
-    # Remove links to the restricted chapter and adjust nearby module lists.
-    content = '\n'.join(lines)
-    if normalized_name == 'web-interface.md':
-        content = content.replace(
-            'Scoring & GAP Analysis follows E2E Reporting in Main Modules, matching the main tab order.',
-            'Scoring & GAP Analysis follows E2E Dashboards in Main Modules, matching the main tab order.',
-        )
-        content = content.replace(
-            '**Datasets Analysis → E2E Dashboards → E2E Reporting → Scoring & GAP Analysis** for users with access.',
-            '**Datasets Analysis → E2E Dashboards → Scoring & GAP Analysis**.',
-        )
-        content = content.replace(
-            'Datasets Analysis uses blue, E2E Dashboards uses muted violet, and Reporting uses brighter purple.',
-            'Datasets Analysis uses blue and E2E Dashboards uses muted violet.',
-        )
-        content = content.replace(
-            'E2E Reporting is shown only to super-admins and the EJAITUR user when a workspace is active; '
-            'other users do not see it in the top navigation or Modules menu. ', '',
-        )
-        content = content.replace('- E2E Reporting\n', '')
-        content = content.replace(
-            'The analytical tabs are ordered **Datasets Analysis → E2E Dashboards → E2E Reporting**. '
-            'Datasets Analysis uses blue, E2E Dashboards uses muted violet, and Reporting uses brighter purple. '
-            'E2E Reporting is enabled only for super-admins and the EJAITUR user when a workspace is active; '
-            'other users see it disabled in the top navigation and Modules menu. ',
-            'The analytical tabs include Datasets Analysis and E2E Dashboards. '
-            'Datasets Analysis uses blue and E2E Dashboards uses muted violet. ',
-        )
-        content = content.replace(
-            'The analytical tabs are ordered **Datasets Analysis → E2E Dashboards → E2E Reporting** for users with access. '
-            'Datasets Analysis uses blue, E2E Dashboards uses muted violet, and Reporting uses brighter purple. '
-            'E2E Reporting is shown only to super-admins and the EJAITUR user when a workspace is active; '
-            'other users do not see it in the top navigation or Modules menu. ',
-            'The analytical tabs include Datasets Analysis and E2E Dashboards. '
-            'Datasets Analysis uses blue and E2E Dashboards uses muted violet. ',
-        )
-        content = content.replace('Chart Builder, E2E Reporting Chart Preview and', 'Chart Builder and')
-        content = content.replace('Chart Builder, E2E Reporting Chart Preview', 'Chart Builder')
-    elif normalized_name == 'workspace-management.md':
-        content = content.replace(
-            ' E2E Reporting also uses these normalized metrics as fallbacks for heterogeneous CDR layouts.',
-            '',
-        )
-    elif normalized_name == 'datasets-analysis.md':
-        content = content.replace('- Template-driven reports belong to E2E Reporting instead.\n', '')
-        content = content.replace(' or the restricted E2E Reporting workflow', '')
-    elif normalized_name == 'chart-builder.md':
-        content = content.replace(
-            'Use E2E Reporting for persistent Chart Sets and Report Template Editor for reusable definitions.',
-            'Use Report Template Editor for reusable definitions.',
-        )
-    elif normalized_name == 'workspace-config.md':
-        content = content.replace(
-            'This is the canonical authoring reference for templates used by both '
-            '[E2E Dashboards](e2e-dashboards.md) and [E2E Reporting](e2e-reporting.md).',
-            'This is the canonical authoring reference for templates used by '
-            '[E2E Dashboards](e2e-dashboards.md).',
-        )
-        content = re.sub(r'\[[^\]]*\]\([^)]*e2e-reporting\.md[^)]*\)', '', content, flags=re.IGNORECASE)
-    elif normalized_name == 'technical-considerations.md':
-        content = content.replace('E2E Dashboards, E2E Reporting, Chart Builder', 'E2E Dashboards and Chart Builder')
-        content = content.replace('E2E Reporting, Chart Builder', 'Chart Builder')
-    elif normalized_name == 'project-structure.md':
-        content = content.replace('E2E Dashboards, E2E Reporting, Chart Builder', 'E2E Dashboards, Chart Builder')
-
-    # Remove any other explicit link to the restricted chapter in help files.
-    if normalized_name.endswith('.md') and normalized_name != 'readme.md':
-        content = re.sub(r'\[[^\]]*\]\([^)]*e2e-reporting\.md[^)]*\)', '', content, flags=re.IGNORECASE)
-    return content
+        if heading and re.fullmatch(r'Reporting \(old\)', heading.group(2), re.IGNORECASE):
+            skipping_level = len(heading.group(1))
+            continue
+        # Index rows and list items that only point to the old chapter.
+        if OLD_REPORTING_HELP_DOCUMENT in line.casefold() and re.match(r'^\s*([-*|]|\d+\.)', line):
+            continue
+        filtered.append(line)
+    content = '\n'.join(filtered) + ('\n' if content.endswith('\n') else '')
+    # Keep the visible text of any remaining inline link to the old chapter.
+    return re.sub(r'\[([^\]]*)\]\([^)]*reporting-old\.md[^)]*\)', r'\1', content, flags=re.IGNORECASE)
 
 
 def default_report_slides_template_path(
@@ -2683,7 +2750,7 @@ IDLE_DASHBOARD_WARMUP_CALLBACK: Callable[[], None] | None = None
 PASSIVE_APPLICATION_REQUEST_PATHS = {
     '/api/background-tasks', '/api/workspaces/sizes',
     '/api/e2e-dashboards/statuses', '/api/e2e-dashboards/ppt-jobs',
-    '/api/e2e-reporting/jobs', '/api/e2e-reporting/chart-jobs',
+    '/api/reporting-old/jobs', '/api/reporting-old/chart-jobs',
 }
 
 
@@ -2783,6 +2850,12 @@ async def lifespan(_: FastAPI):
         name='idle-dashboard-warmup', daemon=True,
     )
     idle_dashboard_warmup_thread.start()
+    report_scheduler_stop = Event()
+    report_scheduler_thread = Thread(
+        target=report_task_scheduler_loop, args=(report_scheduler_stop,),
+        name='e2e-reporting-scheduler', daemon=True,
+    )
+    report_scheduler_thread.start()
     _recover_unimported_transfer_packages()
     _cleanup_expired_export_packages()
     if (workspace_id := workspace_registry.active_id()):
@@ -2806,6 +2879,7 @@ async def lifespan(_: FastAPI):
             cancellation.set()
     backup_scheduler_stop.set()
     idle_dashboard_warmup_stop.set()
+    report_scheduler_stop.set()
     backup_scheduler_thread.join(timeout=1)
     idle_dashboard_warmup_thread.join(timeout=1)
     BACKGROUND_TASK_SCHEDULER.shutdown(wait=False, cancel_futures=True)
@@ -2830,10 +2904,12 @@ app = FastAPI(title=__app_name__, version=__version__, lifespan=lifespan)
 @app.middleware('http')
 async def track_interactive_application_requests(request: Request, call_next):
     """Return lightweight unauthenticated responses for passive polling."""
-    if request.url.path.startswith(('/e2e-reporting', '/api/e2e-reporting')):
+    feature = feature_for_path(request.url.path)
+    if feature:
         user = session_user(request.cookies.get(SESSION_COOKIE))
-        if user and not can_access_e2e_reporting(user):
-            detail = 'E2E Reporting access required.'
+        if user and not user_has_feature(user, feature):
+            label = next(item['label'] for item in FEATURES if item['key'] == feature)
+            detail = f'The {label} feature is not activated for your account.'
             if request.url.path.startswith('/api/'):
                 return JSONResponse({'detail': detail}, status_code=status.HTTP_403_FORBIDDEN)
             return HTMLResponse(detail, status_code=status.HTTP_403_FORBIDDEN)
@@ -3960,10 +4036,11 @@ def rebuild_dataset_artifacts(
     task_repository = task_repository or repository
     workspace_dimensions = load_repository_calculated_dimensions(task_repository)
     source_columns: list[str] = []
-    if forced_dataset_kind == 'mapping_region':
-        region_field = validate_region_mapping(dataset_path)
-        df = pd.DataFrame([{'Region_Field': region_field, 'dataset_kind': 'mapping_region', 'source_file': dataset_path.name}])
-        source_columns.append(region_field)
+    if forced_dataset_kind in {'mapping_region', 'clusters'}:
+        field = validate_cluster_mapping(dataset_path) if forced_dataset_kind == 'clusters' else validate_region_mapping(dataset_path)
+        metadata_field = 'Cluster_Field' if forced_dataset_kind == 'clusters' else 'Region_Field'
+        df = pd.DataFrame([{metadata_field: field, 'dataset_kind': forced_dataset_kind, 'source_file': dataset_path.name}])
+        source_columns.append(field)
         if progress_callback:
             progress_callback(55)
     else:
@@ -4043,7 +4120,7 @@ def rebuild_dataset_artifacts(
         progress_callback(62)
     task_repository.update_dataset_profile(dataset_id, progress=62, dataset_kind=dataset_kind, processing_step='Summarizing dataset')
     summary = summarise_dataset(df)
-    if dataset_kind == 'mapping_region':
+    if dataset_kind in {'mapping_region', 'clusters'}:
         # A polygon mapping is a configuration asset, not a CDR. It has no
         # numeric KPI to analyse, so mark it ready after validation/storage.
         task_repository.update_dataset_profile(
@@ -4751,6 +4828,11 @@ def session_user(token: str | None) -> SessionUser | None:
     return SESSIONS.get(token)
 
 
+def optional_user(request: Request) -> SessionUser | None:
+    """The signed-in user, or None for public pages such as Help."""
+    return session_user(request.cookies.get(SESSION_COOKIE))
+
+
 def current_user(request: Request) -> SessionUser:
     user = session_user(request.cookies.get(SESSION_COOKIE))
     if not user:
@@ -4844,6 +4926,7 @@ def render_template(request: Request, template_name: str, context: dict[str, Any
         'header_workspace_access': header_workspace_access,
         'header_workspace_sizes': {item.id: format_workspace_size(workspace_disk_usage(item)) for item in header_workspaces},
         'ignore_event_time_filtering': ignore_event_time_filtering(),
+        'features': user_features(template_user) if isinstance(template_user, SessionUser) else {},
         'vendor_filter_identities': {
             'operators': {str(value): str(group['canonical'])
                           for group in repository.list_operator_mapping_groups()
@@ -5273,7 +5356,7 @@ ARCHIVE_COMPONENTS = frozenset({
 })
 WORKSPACE_ARCHIVE_COMPONENTS = frozenset({
     'workspace_database', 'input', 'output', 'dashboards', 'report_templates', 'operator_mappings',
-    'auto_calculated_fields', 'query_builder_queries', 'main_cities', 'scoring_configuration',
+    'auto_calculated_fields', 'query_builder_queries', 'reporting_jobs', 'main_cities', 'scoring_configuration',
 })
 ARCHIVE_KIND_COMPONENTS = {
     'config': ('app_database',),
@@ -5289,7 +5372,7 @@ ARCHIVE_KIND_COMPONENTS = {
 }
 WORKSPACE_ELEMENT_EXPORT_TARGETS = frozenset({
     'slides-templates', 'auto-calculated-fields', 'dashboards', 'operator-mappings', 'query-builder-queries',
-    'main-cities', 'scoring-configuration',
+    'reporting-jobs', 'main-cities', 'scoring-configuration',
 })
 STATIC_EXPORT_TARGETS = frozenset({'config', 'config-with-templates', 'full-environment'})
 UNCOMPRESSED_ARCHIVE_SUFFIXES = frozenset({
@@ -5343,6 +5426,7 @@ def archive_workspace_components(manifest: dict[str, Any]) -> list[str]:
         'main-cities': ('main_cities',),
         'scoring-configuration': ('scoring_configuration',),
         'query-builder-queries': ('query_builder_queries',),
+        'reporting-jobs': ('reporting_jobs',),
     }
     return list(fallback.get(str(manifest.get('kind') or ''), ()))
 
@@ -5402,7 +5486,7 @@ def full_workspace_archive_components(*, include_input_files: bool = True, inclu
         components.append('input')
     if include_generated_outputs:
         components.append('output')
-    return [*components, 'dashboards', 'report_templates', 'main_cities', 'operator_mappings', 'scoring_configuration', 'auto_calculated_fields', 'query_builder_queries']
+    return [*components, 'dashboards', 'report_templates', 'main_cities', 'operator_mappings', 'scoring_configuration', 'auto_calculated_fields', 'query_builder_queries', 'reporting_jobs']
 
 
 def archive_workspace_components_for_target(target: str, *, include_generated_outputs: bool = True) -> list[str]:
@@ -5421,6 +5505,8 @@ def archive_workspace_components_for_target(target: str, *, include_generated_ou
         return ['scoring_configuration']
     if target == 'query-builder-queries':
         return ['query_builder_queries']
+    if target == 'reporting-jobs':
+        return ['reporting_jobs']
     if target.startswith('workspace:') or target in {'workspace', 'full-environment'}:
         return full_workspace_archive_components(include_generated_outputs=include_generated_outputs)
     return []
@@ -5479,8 +5565,10 @@ def _archive_database(
                     source.backup(target)
         if exclude_tables:
             with closing(sqlite3.connect(snapshot)) as target, target:
+                existing = {row[0] for row in target.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
                 for table in exclude_tables:
-                    target.execute(f'DELETE FROM "{table.replace(chr(34), chr(34) * 2)}"')
+                    if table in existing:
+                        target.execute(f'DELETE FROM "{table.replace(chr(34), chr(34) * 2)}"')
         _archive_file(archive, snapshot, archive_name, progress_callback, cancel_callback)
 
 
@@ -5646,7 +5734,7 @@ def create_recurring_database_backup(
         component for component in (
             'workspace_database', 'dashboards', 'input', 'output', 'report_templates',
             'operator_mappings', 'main_cities', 'auto_calculated_fields', 'query_builder_queries',
-            'scoring_configuration',
+            'reporting_jobs', 'scoring_configuration',
         )
         if component in components
     ]
@@ -5685,6 +5773,8 @@ def create_recurring_database_backup(
             total_bytes += len(_scoring_configuration_archive_payload(workspace))
         if 'query_builder_queries' in components:
             total_bytes += len(json.dumps(_query_builder_queries_payload(workspace), ensure_ascii=False).encode('utf-8'))
+        if 'reporting_jobs' in components:
+            total_bytes += len(_reporting_jobs_payload(workspace))
         if 'input' in components:
             total_bytes += source_tree_size(workspace.input_dir)
         if 'output' in components:
@@ -5744,6 +5834,9 @@ def create_recurring_database_backup(
                 if 'query_builder_queries' in components:
                     report_progress(f'Exporting Saved Queries for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                     _archive_workspace_query_builder_queries(archive, workspace, archive_workspace_root, archived_bytes)
+                if 'reporting_jobs' in components:
+                    report_progress(f'Exporting Reporting Jobs for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
+                    _archive_workspace_reporting_jobs(archive, workspace, archive_workspace_root, archived_bytes)
                 if 'input' in components:
                     report_progress(f'Archiving input files for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                     _archive_tree(archive, workspace.input_dir, f'{archive_workspace_root}/input', progress_callback=archived_bytes, cancel_callback=ensure_not_cancelled)
@@ -6027,6 +6120,8 @@ def _backup_archive_components(archive_path: Path) -> list[str]:
         components.append('auto_calculated_fields')
     if any(name.startswith('workspaces/') and '/query-builder-queries/query-builder-queries.json' in name for name in names):
         components.append('query_builder_queries')
+    if any(name.startswith('workspaces/') and '/reporting-jobs/reporting-jobs.json' in name for name in names):
+        components.append('reporting_jobs')
     if any(name.startswith('workspaces/') and '/input/' in name for name in names):
         components.append('input')
     if any(name.startswith('workspaces/') and '/output/' in name for name in names):
@@ -6100,6 +6195,8 @@ def restore_database_backup(
                 )))
             if 'query_builder_queries' in selected:
                 total_steps += int(f'{prefix}query-builder-queries/query-builder-queries.json' in name_set)
+            if 'reporting_jobs' in selected:
+                total_steps += int(f'{prefix}reporting-jobs/reporting-jobs.json' in name_set)
             for component in ('input', 'output'):
                 if component in selected:
                     total_steps += sum(name.startswith(f'{prefix}{component}/') for name in names)
@@ -6206,6 +6303,13 @@ def restore_database_backup(
                         progress_callback(f'Restoring Saved Queries for {workspace_name}', completed_steps, total_steps)
                     _restore_workspace_query_builder_queries(workspace, archive.read(member))
                     advance(f'Saved Queries restored for {workspace_name}')
+            if 'reporting_jobs' in selected:
+                member = f'{prefix}reporting-jobs/reporting-jobs.json'
+                if member in names:
+                    if progress_callback:
+                        progress_callback(f'Restoring Reporting Jobs for {workspace_name}', completed_steps, total_steps)
+                    _restore_workspace_reporting_jobs(workspace, archive.read(member))
+                    advance(f'Reporting Jobs restored for {workspace_name}')
             for component, destination in (('input', workspace.input_dir), ('output', workspace.output_dir)):
                 if component not in selected:
                     continue
@@ -6649,6 +6753,36 @@ def _restore_workspace_query_builder_queries(workspace: Workspace, payload: byte
     return imported
 
 
+def _reporting_jobs_payload(workspace: Workspace) -> bytes:
+    """Portable Reporting Jobs of a workspace (definitions only; runs are generated output)."""
+    from src.modules.report_tasks import export_tasks_document
+
+    task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
+    return export_tasks_document(task_repository)
+
+
+def _archive_workspace_reporting_jobs(
+    archive: zipfile.ZipFile, workspace: Workspace, archive_prefix: str,
+    progress_callback: Callable[[int], None] | None = None,
+) -> None:
+    payload = _reporting_jobs_payload(workspace)
+    archive.writestr(f'{archive_prefix}/reporting-jobs/reporting-jobs.json', payload)
+    if progress_callback:
+        progress_callback(len(payload))
+
+
+def _restore_workspace_reporting_jobs(workspace: Workspace, payload: bytes) -> int:
+    """Add or replace (by name) the Reporting Jobs of a package in a workspace."""
+    from src.modules.report_tasks import import_tasks_document
+
+    task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
+    try:
+        return import_tasks_document(task_repository, payload, 'import',
+                                     parse_recipients=parse_recipients, invalid_recipients=invalid_recipients)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise ValueError(f'Reporting Jobs for "{workspace.name}" are invalid: {exc}') from exc
+
+
 def _archive_workspace(
     archive: zipfile.ZipFile, workspace: Workspace, archive_prefix: str, scratch_dir: Path | None = None,
     progress_callback: Callable[[int], None] | None = None, include_generated_outputs: bool = True,
@@ -6661,7 +6795,7 @@ def _archive_workspace(
     )
     _archive_database(
         archive, workspace.database_path, f'{archive_prefix}/database.sqlite', scratch_dir, progress_callback,
-        exclude_tables=() if include_generated_outputs else ('generated_jobs',),
+        exclude_tables=() if include_generated_outputs else ('generated_jobs', 'report_task_runs'),
     )
     _archive_workspace_dashboards(archive, workspace, archive_prefix, progress_callback)
     _archive_workspace_report_templates(archive, workspace, f'{archive_prefix}/report-templates', progress_callback)
@@ -6673,6 +6807,7 @@ def _archive_workspace(
         json.dumps(task_repository.list_calculated_dimensions(), ensure_ascii=False, indent=2),
     )
     _archive_workspace_query_builder_queries(archive, workspace, archive_prefix, progress_callback)
+    _archive_workspace_reporting_jobs(archive, workspace, archive_prefix, progress_callback)
     if include_input_files:
         _archive_tree(archive, workspace.input_dir, f'{archive_prefix}/input', progress_callback=progress_callback)
     if include_generated_outputs:
@@ -6710,6 +6845,9 @@ def export_archive_filename(target: str | Iterable[str]) -> str:
     if target == 'query-builder-queries':
         workspace_name = active_workspace.name if active_workspace else 'workspace'
         return f'{workspace_name}_query-builder-queries_{generated_at}.zip'
+    if target == 'reporting-jobs':
+        workspace_name = active_workspace.name if active_workspace else 'workspace'
+        return f'{workspace_name}_reporting-jobs_{generated_at}.zip'
     if target == 'config-with-templates':
         return f'dashboard-analytic-config-with-slides-templates_{generated_at}.zip'
     if target == 'full-environment':
@@ -6883,6 +7021,18 @@ def _build_single_export_archive_file(
             )
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
             _archive_workspace_query_builder_queries(archive, source_workspace, f'workspaces/{source_workspace.name}', progress_callback)
+        elif target == 'reporting-jobs':
+            source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
+            source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
+            if not source_workspace:
+                raise ValueError('Open a workspace before exporting Reporting Jobs.')
+            archive_path = f'workspaces/{source_workspace.name}/reporting-jobs/reporting-jobs.json'
+            manifest = archive_manifest(
+                'reporting-jobs', source_workspace={'id': source_workspace.id, 'name': source_workspace.name},
+                workspace_components=archive_workspace_components_for_target(target), archive_path=archive_path,
+            )
+            archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
+            _archive_workspace_reporting_jobs(archive, source_workspace, f'workspaces/{source_workspace.name}', progress_callback)
         elif target.startswith('workspace:'):
             workspace = workspace_registry.get(target.removeprefix('workspace:'))
             if not workspace:
@@ -7179,6 +7329,10 @@ def _recovered_transfer_details(manifest: dict[str, Any]) -> tuple[str, list[str
         source = manifest.get('source_workspace')
         name = str(source.get('name') or '') if isinstance(source, dict) else ''
         return ('Query Builder Queries', [name] if name else [])
+    if kind == 'reporting-jobs':
+        source = manifest.get('source_workspace')
+        name = str(source.get('name') or '') if isinstance(source, dict) else ''
+        return ('Reporting Jobs', [name] if name else [])
     if kind == 'workspace':
         workspace = manifest.get('workspace')
         name = str(workspace.get('name') or '') if isinstance(workspace, dict) else ''
@@ -7217,7 +7371,7 @@ def _recover_unimported_transfer_packages() -> None:
             if kind not in {
                 'config', 'workspace', 'full-environment', 'slides-templates',
                 'auto-calculated-fields', 'dashboards', 'operator-mappings', 'main-cities',
-                'scoring-configuration', 'query-builder-queries', 'database-backup', 'bundle',
+                'scoring-configuration', 'query-builder-queries', 'reporting-jobs', 'database-backup', 'bundle',
             }:
                 raise ValueError('Unsupported transfer package.')
         except (OSError, ValueError, zipfile.BadZipFile):
@@ -8047,6 +8201,25 @@ def _apply_import_archive(
             payload = archive.read(member)
             imported_count = sum(_restore_workspace_query_builder_queries(workspace, payload) for workspace in destinations)
             return f'Imported {imported_count} Query Builder queries into {len(destinations)} workspaces.'
+        if kind == 'reporting-jobs':
+            member = str(manifest.get('archive_path') or '')
+            if (
+                member not in archive.namelist()
+                or not re.fullmatch(r'workspaces/[^/]+/reporting-jobs/reporting-jobs\.json', member)
+            ):
+                raise ValueError('The package does not contain valid Reporting Jobs.')
+            destinations = [workspace_registry.get(workspace_id) for workspace_id in destination_workspace_ids]
+            destinations = [workspace for workspace in destinations if workspace]
+            if not destinations:
+                source = manifest.get('source_workspace')
+                if isinstance(source, dict) and source.get('id'):
+                    candidate = workspace_registry.get(str(source['id']))
+                    destinations = [candidate] if candidate else []
+            if not destinations:
+                raise ValueError('Select at least one destination workspace.')
+            payload = archive.read(member)
+            imported_count = sum(_restore_workspace_reporting_jobs(workspace, payload) for workspace in destinations)
+            return f'Imported {imported_count} Reporting Jobs into {len(destinations)} workspaces.'
         if kind == 'full-environment':
             _safe_extract_archive_prefix(archive, staging_root, 'config', extracted)
             if progress_callback:
@@ -8275,6 +8448,7 @@ def _transfer_content_label(target: str | Iterable[str]) -> str:
         'main-cities': 'Main Cities',
         'scoring-configuration': 'Scoring & GAP Analysis Configuration',
         'query-builder-queries': 'Query Builder Queries',
+        'reporting-jobs': 'Reporting Jobs',
     }
     if target.startswith('workspace:'):
         workspace = workspace_registry.get(target.removeprefix('workspace:'))
@@ -8658,7 +8832,7 @@ def require_import_export_permission(user: SessionUser, target: str) -> None:
     """Authorize imports; admins may restore templates and fields into accessible workspaces."""
     if user.role == 'super-admin' or target in {
         'slides-templates', 'auto-calculated-fields', 'dashboards', 'operator-mappings', 'main-cities',
-        'scoring-configuration', 'query-builder-queries',
+        'scoring-configuration', 'query-builder-queries', 'reporting-jobs',
     }:
         return
     raise HTTPException(
@@ -8692,7 +8866,7 @@ def require_export_permission(user: SessionUser, target: str) -> None:
     """Authorize exports and transfers without exposing other workspaces."""
     if user.role == 'super-admin':
         return
-    if target in {'auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings', 'main-cities', 'scoring-configuration', 'query-builder-queries'}:
+    if target in {'auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings', 'main-cities', 'scoring-configuration', 'query-builder-queries', 'reporting-jobs'}:
         if active_workspace and repository.user_has_workspace_access(user.username, active_workspace.id):
             return
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Open a workspace you can access first.')
@@ -8817,6 +8991,10 @@ def render_admin_template(
         'workspace_state': 'Workspace State',
         'transfer_offers': 'Server transfer offers',
         'users': 'Users',
+        'user_groups': 'User Groups',
+        'user_group_members': 'User Group Members',
+        'report_tasks': 'Report Tasks',
+        'report_task_runs': 'Report Task Runs',
     }
     global_database_tables = (set(repository.list_global_database_tables()) - {'report_templates'}) if active_workspace else set()
     for table_name in repository.list_database_tables() if active_workspace else []:
@@ -8855,7 +9033,8 @@ def render_admin_template(
         {'value': 'scoring-configuration', 'label': 'Scoring & GAP Analysis Configuration (from active workspace)', 'disabled': not active_workspace},
         {'value': 'auto-calculated-fields', 'label': 'Auto-calculated Fields (from active workspace)', 'disabled': not active_workspace},
         {'value': 'query-builder-queries', 'label': 'Query Builder Queries (from active workspace)', 'disabled': not active_workspace},
-        {'value': 'full-environment', 'label': 'Full Environment (Application Config + Dashboards + Report Templates + Main Cities + Operator & Vendor Maps + Scoring & GAP Analysis Configuration + Auto-calculated Fields + Query Builder Queries + Selected Workspaces)'},
+        {'value': 'reporting-jobs', 'label': 'Reporting Jobs (from active workspace)', 'disabled': not active_workspace},
+        {'value': 'full-environment', 'label': 'Full Environment (Application Config + Dashboards + Report Templates + Main Cities + Operator & Vendor Maps + Scoring & GAP Analysis Configuration + Auto-calculated Fields + Query Builder Queries + Reporting Jobs + Selected Workspaces)'},
         *[
             {'value': f'workspace:{workspace.id}', 'label': f'Full Workspace: {workspace.name}'}
             for workspace in accessible_workspaces(user)
@@ -8875,7 +9054,7 @@ def render_admin_template(
         ('Configuration Content', [option for option in export_options if option['value'] == 'config']),
         ('Workspace Content', [
             option for option in export_options
-            if option['value'] in {'dashboards', 'slides-templates', 'main-cities', 'operator-mappings', 'scoring-configuration', 'auto-calculated-fields', 'query-builder-queries'}
+            if option['value'] in {'dashboards', 'slides-templates', 'main-cities', 'operator-mappings', 'scoring-configuration', 'auto-calculated-fields', 'query-builder-queries', 'reporting-jobs'}
         ]),
         ('Full Workspace', [option for option in export_options if option['value'].startswith('workspace:')]),
         ('Full Environment', [option for option in export_options if option['value'] == 'full-environment']),
@@ -8898,6 +9077,9 @@ def render_admin_template(
             'workspace_config_page': workspace_config_page,
             'embedded_template_editor': embedded_template_editor,
             'users': admin_users,
+            'user_groups': repository.list_user_groups(),
+            'feature_activation': feature_activation_context() if user.role == 'super-admin' else [],
+            'feature_roles': FEATURE_ROLES,
             'workspaces': workspace_registry.list(),
             'backup_workspaces': accessible_workspaces(user),
             'datasets': admin_datasets,
@@ -9295,7 +9477,7 @@ def logout(request: Request) -> Response:
 
 
 @app.get('/documents/view/{doc_name}', response_class=HTMLResponse)
-def documents_view(request: Request, doc_name: str, user: SessionUser = Depends(current_user)) -> HTMLResponse:
+def documents_view(request: Request, doc_name: str, user: SessionUser | None = Depends(optional_user)) -> HTMLResponse:
     normalized = str(doc_name or '').strip().lower()
     if normalized not in {'readme', 'changelog', 'help'}:
         raise HTTPException(status_code=404, detail='Document not found')
@@ -9316,10 +9498,10 @@ def documents_view(request: Request, doc_name: str, user: SessionUser = Depends(
 
 
 @app.get('/documents/view/help/{doc_file:path}', response_class=HTMLResponse)
-def help_document_view(request: Request, doc_file: str, user: SessionUser = Depends(current_user)) -> HTMLResponse:
+def help_document_view(request: Request, doc_file: str, user: SessionUser | None = Depends(optional_user)) -> HTMLResponse:
     path = resolve_help_doc_path(doc_file)
-    if path.name.casefold() == 'e2e-reporting.md' and not can_access_e2e_reporting(user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='E2E Reporting access required.')
+    if path.name.casefold() == OLD_REPORTING_HELP_DOCUMENT and not (user and can_access_e2e_reporting(user)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Reporting (old) access required.')
     return render_template(
         request,
         'doc_view.html',
@@ -9337,11 +9519,11 @@ def help_document_view(request: Request, doc_file: str, user: SessionUser = Depe
 
 
 @app.get('/api/documents/help-index')
-def get_help_documents_index(user: SessionUser = Depends(current_user)) -> dict[str, Any]:
+def get_help_documents_index(user: SessionUser | None = Depends(optional_user)) -> dict[str, Any]:
     help_root = (PROJECT_ROOT / 'help').resolve()
     documents: list[dict[str, str]] = []
     for relative_path in HELP_NAVIGATION_DOCUMENTS:
-        if relative_path == 'e2e-reporting.md' and not can_access_e2e_reporting(user):
+        if relative_path == OLD_REPORTING_HELP_DOCUMENT and not (user and can_access_e2e_reporting(user)):
             continue
         file_path = (help_root / relative_path).resolve()
         if not file_path.exists() or not file_path.is_file():
@@ -9359,7 +9541,7 @@ def get_help_documents_index(user: SessionUser = Depends(current_user)) -> dict[
 
 
 @app.get('/api/documents/changelog-index')
-def get_changelog_index(user: SessionUser = Depends(current_user)) -> dict[str, Any]:
+def get_changelog_index(user: SessionUser | None = Depends(optional_user)) -> dict[str, Any]:
     changelog = resolve_doc_path('changelog').read_text(encoding='utf-8', errors='replace')
     headers = list(re.finditer(r'^##\s+Release:\s+v([^\s]+)', changelog, re.MULTILINE))
     releases = []
@@ -9375,12 +9557,12 @@ def get_changelog_index(user: SessionUser = Depends(current_user)) -> dict[str, 
 
 
 @app.get('/api/documents/help/{doc_file:path}')
-def get_help_markdown_document(doc_file: str, user: SessionUser = Depends(current_user)) -> dict[str, Any]:
+def get_help_markdown_document(doc_file: str, user: SessionUser | None = Depends(optional_user)) -> dict[str, Any]:
     path = resolve_help_doc_path(doc_file)
-    if path.name.casefold() == 'e2e-reporting.md' and not can_access_e2e_reporting(user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='E2E Reporting access required.')
+    if path.name.casefold() == OLD_REPORTING_HELP_DOCUMENT and not (user and can_access_e2e_reporting(user)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Reporting (old) access required.')
     content = path.read_text(encoding='utf-8', errors='replace')
-    if not can_access_e2e_reporting(user):
+    if not (user and can_access_e2e_reporting(user)):
         content = filter_e2e_reporting_help_content(content, path.name)
     return {
         'name': path.name,
@@ -9390,10 +9572,10 @@ def get_help_markdown_document(doc_file: str, user: SessionUser = Depends(curren
 
 
 @app.get('/api/documents/{doc_name}')
-def get_markdown_document(doc_name: str, user: SessionUser = Depends(current_user)) -> dict[str, Any]:
+def get_markdown_document(request: Request, doc_name: str, user: SessionUser | None = Depends(optional_user)) -> dict[str, Any]:
     path = resolve_doc_path(doc_name)
     content = path.read_text(encoding='utf-8', errors='replace')
-    if not can_access_e2e_reporting(user) and path.name.casefold() in {'readme.md', HELP_HOME_DOCUMENT}:
+    if not (user and can_access_e2e_reporting(user)) and path.name.casefold() in {'readme.md', HELP_HOME_DOCUMENT}:
         content = filter_e2e_reporting_help_content(content, path.name)
     return {
         'name': path.name,
@@ -10486,8 +10668,8 @@ def select_workspace(
     # never send the user to Workspace merely because the active data source
     # changed.  Restrict the destination to application modules so this form
     # cannot become an open redirect.
-    target = '/e2e-reporting' if return_to == '/reporting' else return_to
-    target = target if target in {'/workspace', '/datasets-analysis', '/e2e-dashboards', '/e2e-reporting', '/admin'} else '/workspace'
+    target = '/reporting-old' if return_to in {'/e2e-reporting', '/reporting-old'} else return_to
+    target = target if target in {'/workspace', '/datasets-analysis', '/e2e-dashboards', '/reporting-old', '/admin'} else '/workspace'
     if user.role != 'super-admin' and not repository.user_has_workspace_access(user.username, workspace_id):
         return RedirectResponse(f'{target}?workspace_error=You+do+not+have+access+to+that+workspace.', status_code=status.HTTP_303_SEE_OTHER)
     try:
@@ -11673,6 +11855,7 @@ def datasets_analysis(
         request,
         'datasets_analysis.html',
         {
+            'summary_datasets': dataset_summary_candidates() if active_workspace else [],
             'user': user,
             'datasets': datasets,
             'ready_datasets': ready_datasets,
@@ -12017,7 +12200,7 @@ def _report_job_charts_payload(row: Any) -> dict[str, Any] | None:
         charts.append({
             'slide': item.get('slide'), 'title': str(item.get('title') or ''),
             'source': str(item.get('source') or ''), 'chart_type': str(item.get('chart_type') or ''),
-            'image_url': f"/e2e-reporting/jobs/{int(row['id'])}/charts/{file_name}",
+            'image_url': f"/reporting-old/jobs/{int(row['id'])}/charts/{file_name}",
         })
     if not charts:
         return None
@@ -12169,7 +12352,7 @@ def _temporary_preview_dataset_ids(editable: dict[str, Any], selected_ids: dict[
     return requested
 
 
-@app.get('/api/e2e-reporting/chart-preview/context')
+@app.get('/api/reporting-old/chart-preview/context')
 def temporary_chart_preview_context(source: str, identifier: str, chart_index: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
     """Return an immutable chart definition for the interactive viewer sandbox."""
     entry, selected_ids, _technology, _multivendor, template_row_index, _template_entries = _temporary_chart_preview_context(source, identifier, chart_index)
@@ -12204,7 +12387,7 @@ def temporary_chart_preview_context(source: str, identifier: str, chart_index: i
     })
 
 
-@app.post('/api/e2e-reporting/chart-preview')
+@app.post('/api/reporting-old/chart-preview')
 async def temporary_chart_preview(request: Request, user: SessionUser = Depends(current_user)) -> Response:
     """Render a transient chart from viewer edits without altering stored output."""
     try:
@@ -12378,7 +12561,7 @@ def _store_report_hover_targets(report_id: str, chart_index: int, targets: list[
         return
 
 
-@app.post('/api/e2e-reporting/chart-preview/hover')
+@app.post('/api/reporting-old/chart-preview/hover')
 async def temporary_chart_preview_hover(request: Request, user: SessionUser = Depends(current_user)) -> JSONResponse:
     """Return semantic chart hit areas for the interactive PNG preview."""
     try:
@@ -12391,7 +12574,7 @@ async def temporary_chart_preview_hover(request: Request, user: SessionUser = De
     return JSONResponse({'targets': targets})
 
 
-@app.post('/api/e2e-reporting/chart-preview/data')
+@app.post('/api/reporting-old/chart-preview/data')
 async def temporary_chart_preview_data(request: Request, user: SessionUser = Depends(current_user)) -> Response:
     """Return the bounded filtered chart dataset for the viewer sandbox."""
     try:
@@ -12574,13 +12757,13 @@ def serialize_report_job(row: Any) -> dict[str, Any]:
         'duration_seconds': duration_seconds,
         'duration_label': duration_label,
         'error': str(row['last_error'] or ''),
-        'download_url': f'/e2e-reporting/jobs/{report_id}/download' if output_available else None,
-        'open_url': f'/e2e-reporting/jobs/{report_id}/open' if output_available else None,
-        'charts_url': f'/api/e2e-reporting/jobs/{report_id}/charts' if charts_payload else None,
-        'charts_download_url': f'/e2e-reporting/jobs/{report_id}/charts/download' if charts_payload else None,
-        'delete_url': f'/e2e-reporting/jobs/{report_id}/delete',
-        'stop_url': f'/e2e-reporting/jobs/{report_id}/stop' if status_value == 'processing' else None,
-        'retry_url': f'/e2e-reporting/jobs/{report_id}/retry' if status_value in {'failed', 'stopped', 'ready'} else None,
+        'download_url': f'/reporting-old/jobs/{report_id}/download' if output_available else None,
+        'open_url': f'/reporting-old/jobs/{report_id}/open' if output_available else None,
+        'charts_url': f'/api/reporting-old/jobs/{report_id}/charts' if charts_payload else None,
+        'charts_download_url': f'/reporting-old/jobs/{report_id}/charts/download' if charts_payload else None,
+        'delete_url': f'/reporting-old/jobs/{report_id}/delete',
+        'stop_url': f'/reporting-old/jobs/{report_id}/stop' if status_value == 'processing' else None,
+        'retry_url': f'/reporting-old/jobs/{report_id}/retry' if status_value in {'failed', 'stopped', 'ready'} else None,
     }
 
 
@@ -12617,11 +12800,11 @@ def serialize_report_chart_job(row: Any) -> dict[str, Any]:
         'duration_label': duration_label,
         'error': str(row['last_error'] or ''),
         'generation': generation or None,
-        'open_url': f'/api/e2e-reporting/chart-sets/{generation}' if status_value == 'ready' and generation else None,
-        'charts_download_url': f'/e2e-reporting/chart-sets/{generation}/download' if chart_set else None,
-        'delete_url': f'/e2e-reporting/chart-jobs/{job_id}/delete',
-        'stop_url': f'/e2e-reporting/chart-jobs/{job_id}/stop' if status_value == 'processing' else None,
-        'retry_url': f'/e2e-reporting/chart-jobs/{job_id}/retry' if status_value in {'failed', 'stopped', 'ready'} else None,
+        'open_url': f'/api/reporting-old/chart-sets/{generation}' if status_value == 'ready' and generation else None,
+        'charts_download_url': f'/reporting-old/chart-sets/{generation}/download' if chart_set else None,
+        'delete_url': f'/reporting-old/chart-jobs/{job_id}/delete',
+        'stop_url': f'/reporting-old/chart-jobs/{job_id}/stop' if status_value == 'processing' else None,
+        'retry_url': f'/reporting-old/chart-jobs/{job_id}/retry' if status_value in {'failed', 'stopped', 'ready'} else None,
     }
 
 
@@ -12726,7 +12909,7 @@ def _run_netcheck_report_job_locked(
         }))
 
 
-@app.get('/e2e-reporting', response_class=HTMLResponse)
+@app.get('/reporting-old', response_class=HTMLResponse)
 def reporting(request: Request, user: SessionUser = Depends(current_user)) -> HTMLResponse:
     if not active_workspace:
         return RedirectResponse('/workspace?workspace_warning=Open+a+workspace+before+using+Reporting.', status_code=status.HTTP_303_SEE_OTHER)
@@ -13215,7 +13398,7 @@ async def chart_builder_preview(request: Request, user: SessionUser = Depends(cu
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.post('/e2e-reporting/netcheck-cdr')
+@app.post('/reporting-old/netcheck-cdr')
 def generate_netcheck_cdr_report(
     data_dataset_id: list[int] = Form([]),
     voice_dataset_id: list[int] = Form([]),
@@ -13292,7 +13475,7 @@ def generate_netcheck_cdr_report(
     return JSONResponse({'job_id': report_id, 'status': 'queued'}, status_code=status.HTTP_202_ACCEPTED)
 
 
-@app.post('/e2e-reporting/netcheck-cdr/charts')
+@app.post('/reporting-old/netcheck-cdr/charts')
 def generate_netcheck_cdr_charts(
     data_dataset_id: list[int] = Form([]),
     voice_dataset_id: list[int] = Form([]),
@@ -13633,7 +13816,7 @@ def _report_chart_payload(manifest: dict[str, Any], generation: str, output_dir:
             'title': str(item.get('title') or ''),
             'source': str(item.get('source') or ''),
             'chart_type': str(item.get('chart_type') or ''),
-            'image_url': f'/e2e-reporting/charts/{generation}/{file_name}?v={manifest.get("generated_at", "")}',
+            'image_url': f'/reporting-old/charts/{generation}/{file_name}?v={manifest.get("generated_at", "")}',
         })
     if not charts:
         return None
@@ -13843,7 +14026,7 @@ def persist_report_charts(
     return payload
 
 
-@app.get('/e2e-reporting/charts/{generation}/{chart_file}')
+@app.get('/reporting-old/charts/{generation}/{chart_file}')
 def report_chart_image(generation: str, chart_file: str, user: SessionUser = Depends(current_user)) -> FileResponse:
     if not _valid_report_chart_generation(generation) or not re.fullmatch(r'chart-\d+\.png', chart_file):
         raise HTTPException(status_code=404, detail='Chart not found.')
@@ -13853,7 +14036,7 @@ def report_chart_image(generation: str, chart_file: str, user: SessionUser = Dep
     return FileResponse(chart_path, media_type='image/png')
 
 
-@app.get('/e2e-reporting/chart-sets/{generation}/download')
+@app.get('/reporting-old/chart-sets/{generation}/download')
 def download_report_chart_set(generation: str, user: SessionUser = Depends(current_user)) -> FileResponse:
     """Download every PNG belonging to one standalone Chart Set."""
     if not _valid_report_chart_generation(generation) or load_persisted_report_charts(generation) is None:
@@ -13862,7 +14045,7 @@ def download_report_chart_set(generation: str, user: SessionUser = Depends(curre
     return _chart_png_zip_response(directory, f'Chart_Set_{generation}.zip')
 
 
-@app.get('/api/e2e-reporting/chart-sets/{generation}')
+@app.get('/api/reporting-old/chart-sets/{generation}')
 def report_chart_set(generation: str, user: SessionUser = Depends(current_user)) -> JSONResponse:
     payload = load_persisted_report_charts(generation)
     if payload is None:
@@ -13949,7 +14132,7 @@ def start_bulk_report_deletion(workspace: Workspace, kind: str, username: str) -
     return job
 
 
-@app.post('/e2e-reporting/chart-sets/delete-all')
+@app.post('/reporting-old/chart-sets/delete-all')
 def delete_all_report_chart_sets(user: SessionUser = Depends(admin_user)) -> JSONResponse:
     """Remove every standalone Chart Set and every Charts Job row."""
     if not active_workspace:
@@ -13958,7 +14141,7 @@ def delete_all_report_chart_sets(user: SessionUser = Depends(admin_user)) -> JSO
     return JSONResponse({'job_id': job['id'], 'status': job['status']}, status_code=status.HTTP_202_ACCEPTED)
 
 
-@app.get('/api/e2e-reporting/bulk-deletions/{job_id}')
+@app.get('/api/reporting-old/bulk-deletions/{job_id}')
 def bulk_report_deletion_status(job_id: str, user: SessionUser = Depends(current_user)) -> JSONResponse:
     """Return the state of one bulk Reports or Chart Sets deletion job."""
     with BULK_REPORT_DELETION_JOBS_LOCK:
@@ -13972,7 +14155,7 @@ def bulk_report_deletion_status(job_id: str, user: SessionUser = Depends(current
     })
 
 
-@app.post('/e2e-reporting/chart-sets/{generation}/delete')
+@app.post('/reporting-old/chart-sets/{generation}/delete')
 def delete_report_chart_set(generation: str, user: SessionUser = Depends(admin_user)) -> JSONResponse:
     if not _valid_report_chart_generation(generation):
         raise HTTPException(status_code=404, detail='Chart set not found.')
@@ -13986,12 +14169,12 @@ def delete_report_chart_set(generation: str, user: SessionUser = Depends(admin_u
     return JSONResponse({'chart_sets': list_persisted_report_chart_sets()})
 
 
-@app.get('/api/e2e-reporting/chart-jobs')
+@app.get('/api/reporting-old/chart-jobs')
 def report_chart_jobs(user: SessionUser = Depends(current_user)) -> JSONResponse:
     return JSONResponse({'jobs': [serialize_report_chart_job(row) for row in repository.list_report_chart_jobs(limit=None)]})
 
 
-@app.post('/e2e-reporting/chart-jobs/{job_id}/delete')
+@app.post('/reporting-old/chart-jobs/{job_id}/delete')
 def delete_report_chart_job(job_id: int, user: SessionUser = Depends(admin_user)) -> JSONResponse:
     job = repository.get_report_chart_job(job_id)
     if not job:
@@ -14009,7 +14192,7 @@ def delete_report_chart_job(job_id: int, user: SessionUser = Depends(admin_user)
     return JSONResponse({'deleted': job_id, 'generation': generation or None})
 
 
-@app.post('/e2e-reporting/chart-jobs/{job_id}/stop')
+@app.post('/reporting-old/chart-jobs/{job_id}/stop')
 def stop_report_chart_job(job_id: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
     if not repository.stop_report_chart_job(job_id):
         raise HTTPException(status_code=409, detail='Only processing Chart Set jobs can be stopped.')
@@ -14017,7 +14200,7 @@ def stop_report_chart_job(job_id: int, user: SessionUser = Depends(current_user)
     return JSONResponse({'stopped': job_id})
 
 
-@app.post('/e2e-reporting/chart-jobs/{job_id}/retry')
+@app.post('/reporting-old/chart-jobs/{job_id}/retry')
 def retry_report_chart_job(job_id: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
     if not active_workspace:
         raise HTTPException(status_code=409, detail='Open a workspace before retrying Report Charts.')
@@ -14379,6 +14562,32 @@ def scoring_dataset_recalculate(dataset_id: int, user: SessionUser = Depends(cur
     return RedirectResponse(f'/scoring?job_id={job["id"]}', status_code=303)
 
 
+def build_scoring_job_powerpoint(task_repository: Repository, job_id: int) -> tuple[bytes, str, dict[str, Any]]:
+    """PowerPoint of a completed scoring job with the default export options (all environments)."""
+    from src.modules.scoring_exports import export_scoring_powerpoint, prepare_scoring_display_selections
+    from src.modules.scoring_views import normalize_result_gaps
+    from src.modules.cdr_report_filenames import build_scoring_report_filename
+
+    job = get_scoring_job(task_repository, job_id, include_result=True)
+    if not job:
+        raise ValueError(f'Scoring job {job_id} was not found.')
+    if job['status'] != 'completed':
+        raise ValueError(f'Scoring job {job_id} has not completed ({job["status"]}).')
+    operator_mapping_groups = task_repository.list_operator_mapping_groups()
+    result = normalize_scoring_vendor_result(normalize_result_gaps(job.get('result') or {}), operator_mapping_groups)
+    if not job.get('configuration') and not result.get('configuration'):
+        job['configuration'] = task_repository.get_scoring_configuration()
+    export_job = _scoring_export_job_with_catalogue_defaults(task_repository, job)
+    template = settings.ppt_templates_dir / TEMPLATE_NAMES['nsa']
+    export_job['_scoring_display_selections'] = prepare_scoring_display_selections(export_job, result, template)
+    content = export_scoring_powerpoint(export_job, result, template, operator_mapping_groups)
+    filename = build_scoring_report_filename(
+        datetime.now(), export_job.get('nr_mode') or 'NSA', export_job.get('context_filters'),
+        display_selections=export_job['_scoring_display_selections'],
+    )
+    return content, filename, export_job
+
+
 @app.get('/scoring/jobs/{job_id}/export/{export_kind}')
 def scoring_job_export(
     job_id: int,
@@ -14496,7 +14705,7 @@ def scoring_job_export(
     raise HTTPException(status_code=404, detail='Unknown scoring export format.')
 
 
-@app.get('/api/e2e-reporting/jobs')
+@app.get('/api/reporting-old/jobs')
 def reporting_jobs(user: SessionUser = Depends(current_user)) -> JSONResponse:
     return JSONResponse({'jobs': [serialize_report_job(row) for row in repository.list_report_runs(limit=None)]})
 
@@ -14514,19 +14723,19 @@ def _report_job_file(report_id: int) -> tuple[dict[str, Any], Path]:
     return payload, path
 
 
-@app.get('/e2e-reporting/jobs/{report_id}/download')
+@app.get('/reporting-old/jobs/{report_id}/download')
 def download_report_job(report_id: int, user: SessionUser = Depends(current_user)) -> FileResponse:
     payload, path = _report_job_file(report_id)
     return FileResponse(path, filename=payload['report_name'], media_type='application/vnd.openxmlformats-officedocument.presentationml.presentation')
 
 
-@app.get('/e2e-reporting/jobs/{report_id}/open')
+@app.get('/reporting-old/jobs/{report_id}/open')
 def open_report_job(report_id: int, user: SessionUser = Depends(current_user)) -> FileResponse:
     payload, path = _report_job_file(report_id)
     return FileResponse(path, filename=payload['report_name'], media_type='application/vnd.openxmlformats-officedocument.presentationml.presentation', content_disposition_type='inline')
 
 
-@app.get('/api/e2e-reporting/jobs/{report_id}/charts')
+@app.get('/api/reporting-old/jobs/{report_id}/charts')
 def report_job_charts(report_id: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
     report = repository.get_report_run(report_id)
     payload = _report_job_charts_payload(report) if report else None
@@ -14535,7 +14744,7 @@ def report_job_charts(report_id: int, user: SessionUser = Depends(current_user))
     return JSONResponse(payload)
 
 
-@app.get('/e2e-reporting/jobs/{report_id}/charts/download')
+@app.get('/reporting-old/jobs/{report_id}/charts/download')
 def download_report_job_charts(report_id: int, user: SessionUser = Depends(current_user)) -> FileResponse:
     """Download the PNG charts rendered while generating one PowerPoint report."""
     report = repository.get_report_run(report_id)
@@ -14546,7 +14755,7 @@ def download_report_job_charts(report_id: int, user: SessionUser = Depends(curre
     return _chart_png_zip_response(directory, f'{report_name}_charts.zip')
 
 
-@app.get('/e2e-reporting/jobs/{report_id}/charts/{chart_file}')
+@app.get('/reporting-old/jobs/{report_id}/charts/{chart_file}')
 def report_job_chart_image(report_id: int, chart_file: str, user: SessionUser = Depends(current_user)) -> FileResponse:
     if not re.fullmatch(r'slide-\d+-chart-\d+\.png', chart_file):
         raise HTTPException(status_code=404, detail='Chart not found.')
@@ -14560,7 +14769,7 @@ def report_job_chart_image(report_id: int, chart_file: str, user: SessionUser = 
     return FileResponse(chart_path, media_type='image/png')
 
 
-@app.post('/e2e-reporting/jobs/{report_id}/charts/delete')
+@app.post('/reporting-old/jobs/{report_id}/charts/delete')
 def delete_report_job_charts(report_id: int, user: SessionUser = Depends(admin_user)) -> JSONResponse:
     """Delete only the rendered-chart folder belonging to one report."""
     report = repository.get_report_run(report_id)
@@ -14573,7 +14782,7 @@ def delete_report_job_charts(report_id: int, user: SessionUser = Depends(admin_u
     return JSONResponse({'deleted': report_id})
 
 
-@app.post('/e2e-reporting/jobs/{report_id}/delete')
+@app.post('/reporting-old/jobs/{report_id}/delete')
 def delete_report_job(report_id: int, user: SessionUser = Depends(admin_user)) -> JSONResponse:
     report = repository.delete_report_run(report_id)
     if not report:
@@ -14583,7 +14792,7 @@ def delete_report_job(report_id: int, user: SessionUser = Depends(admin_user)) -
     return JSONResponse({'deleted': report_id})
 
 
-@app.post('/e2e-reporting/jobs/{report_id}/stop')
+@app.post('/reporting-old/jobs/{report_id}/stop')
 def stop_report_job(report_id: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
     if not repository.stop_report_job(report_id):
         raise HTTPException(status_code=409, detail='Only processing report jobs can be stopped.')
@@ -14591,7 +14800,7 @@ def stop_report_job(report_id: int, user: SessionUser = Depends(current_user)) -
     return JSONResponse({'stopped': report_id})
 
 
-@app.post('/e2e-reporting/jobs/delete-all')
+@app.post('/reporting-old/jobs/delete-all')
 def delete_all_report_jobs(user: SessionUser = Depends(admin_user)) -> JSONResponse:
     """Delete every persisted PowerPoint report job and its generated file."""
     if not active_workspace:
@@ -14600,7 +14809,7 @@ def delete_all_report_jobs(user: SessionUser = Depends(admin_user)) -> JSONRespo
     return JSONResponse({'job_id': job['id'], 'status': job['status']}, status_code=status.HTTP_202_ACCEPTED)
 
 
-@app.post('/e2e-reporting/jobs/{report_id}/retry')
+@app.post('/reporting-old/jobs/{report_id}/retry')
 def retry_report_job(report_id: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
     if not active_workspace:
         raise HTTPException(status_code=409, detail='Open a workspace before retrying a report.')
@@ -14663,11 +14872,11 @@ def retry_report_job(report_id: int, user: SessionUser = Depends(current_user)) 
     return JSONResponse({'job_id': report_id, 'status': 'queued'}, status_code=status.HTTP_202_ACCEPTED)
 
 
-@app.api_route('/reporting', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], include_in_schema=False)
-@app.api_route('/reporting/{legacy_path:path}', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], include_in_schema=False)
+@app.api_route('/e2e-reporting', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], include_in_schema=False)
+@app.api_route('/e2e-reporting/{legacy_path:path}', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], include_in_schema=False)
 def legacy_reporting_redirect(request: Request, legacy_path: str = '') -> RedirectResponse:
-    """Keep old Reporting bookmarks and generated links working during the route rename."""
-    destination = '/e2e-reporting' + (f'/{legacy_path}' if legacy_path else '')
+    """Keep E2E Reporting bookmarks from earlier versions working: that module is now Reporting (old)."""
+    destination = '/reporting-old' + (f'/{legacy_path}' if legacy_path else '')
     if request.url.query:
         destination += f'?{request.url.query}'
     return RedirectResponse(destination, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
@@ -15726,6 +15935,75 @@ def analyze_dataset(
     return RedirectResponse(f'/datasets-analysis?{query}', status_code=status.HTTP_303_SEE_OTHER)
 
 
+def dataset_summary_candidates() -> list[dict[str, Any]]:
+    """Ready CDR datasets that Datasets Analysis can summarise, newest first."""
+    return sorted(
+        [dataset for dataset in (serialize_dataset_row(row) for row in repository.list_datasets())
+         if dataset.get('is_ready') and str(dataset.get('dataset_kind') or '').casefold() in CDR_DATASET_KINDS],
+        key=lambda dataset: int(dataset['id']), reverse=True,
+    )
+
+
+def build_dataset_summary_reports(dataset_ids: list[int] | None, username: str) -> tuple[list[dict[str, Any]], list[str]]:
+    """Datasets Analysis export payloads with every KPI and no filters; empty IDs select every dataset."""
+    candidates = dataset_summary_candidates()
+    wanted = {int(value) for value in dataset_ids or []}
+    selected = [dataset for dataset in candidates if not wanted or int(dataset['id']) in wanted]
+    if not selected:
+        raise ValueError('Select at least one ready CDR dataset.')
+    reports, errors = [], []
+    for dataset in selected:
+        enriched = enrich_selected_dataset_for_analysis(dataset)
+        metrics = list(enriched.get('selectable_metrics') or enriched.get('available_metrics') or [])
+        query = QueryParams([('dataset_id', str(dataset['id'])), ('load', '1'), *[('metric', metric) for metric in metrics]])
+        request = type('SummaryRequest', (), {'query_params': query})()
+        analysis, analyses, selected_metrics, _options, error, loaded = build_datasets_analysis_payload(enriched, request, username)
+        if not loaded or not analysis or not analyses:
+            errors.append(f"{dataset['file_name']}: {error or 'the analysis is not available'}")
+            continue
+        reports.append({
+            'dataset_name': enriched['file_name'],
+            'dataset_type': enriched.get('input_kind_label') or 'Other',
+            'filters_text': _summarize_export_filters(analysis.filters),
+            'selected_metrics': selected_metrics,
+            'analyses': [{'metric': item['metric'], 'result': asdict(item['result'])} for item in analyses],
+        })
+    if not reports:
+        raise ValueError('No selected dataset could be analysed: ' + '; '.join(errors))
+    return reports, errors
+
+
+def write_dataset_summary(dataset_ids: list[int] | None, export_kind: str, destination: Path, username: str) -> tuple[Path, list[dict[str, Any]], list[str]]:
+    """Write the Summary Dataset Analysis as PowerPoint ('powerpoint') or Word ('word')."""
+    reports, errors = build_dataset_summary_reports(dataset_ids, username)
+    if export_kind == 'word':
+        export_dataset_summary_word(destination, reports)
+    else:
+        export_dataset_summary_powerpoint(destination, reports)
+    return destination, reports, errors
+
+
+@app.post('/datasets-analysis/summary/{export_kind}')
+def export_dataset_summary(
+    export_kind: str,
+    dataset_ids: list[int] = Form(default=[]),
+    user: SessionUser = Depends(current_user),
+) -> FileResponse:
+    if export_kind not in {'word', 'powerpoint'}:
+        raise HTTPException(status_code=404, detail='Unsupported export type')
+    suffix = 'docx' if export_kind == 'word' else 'pptx'
+    stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    destination = safe_join(settings.export_dir, f'{stamp}_summary_dataset_analysis.{suffix}')
+    try:
+        write_dataset_summary(dataset_ids, export_kind, destination, user.username)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    repository.add_log(user.username, f'export_dataset_summary_{export_kind}', json.dumps({'dataset_ids': dataset_ids, 'file': destination.name}))
+    media_type = ('application/vnd.openxmlformats-officedocument.wordprocessingml.document' if export_kind == 'word'
+                  else 'application/vnd.openxmlformats-officedocument.presentationml.presentation')
+    return FileResponse(destination, filename=f'{stamp} - Summary Dataset Analysis.{suffix}', media_type=media_type)
+
+
 @app.post('/dashboard/export/{export_kind}', include_in_schema=False)
 @app.post('/datasets-analysis/export/{export_kind}')
 def export_report(
@@ -15838,8 +16116,56 @@ def configuration_panel(request: Request, user: SessionUser = Depends(config_edi
         'user': user,
         'configuration': runtime_configuration(),
         'timezone_options': sorted(available_timezones()),
+        'email_delivery': email_delivery_settings(repository),
+        'email_security_modes': EMAIL_SECURITY_MODES,
         'notice': request.query_params.get('notice'),
+        'error': request.query_params.get('error'),
     })
+
+
+@app.post('/application-config/email-delivery')
+def save_email_delivery_configuration(
+    host: str = Form(''),
+    port: int = Form(587),
+    security: str = Form('starttls'),
+    username: str = Form(''),
+    password: str = Form(''),
+    clear_password: bool = Form(False),
+    from_address: str = Form(''),
+    from_name: str = Form(''),
+    max_attachments_mb: int = Form(DEFAULT_MAX_ATTACHMENTS_MB),
+    user: SessionUser = Depends(config_editor_user),
+) -> RedirectResponse:
+    try:
+        saved = save_email_delivery_settings(repository, {
+            'host': host, 'port': port, 'security': security, 'username': username, 'password': password,
+            'from_address': from_address, 'from_name': from_name, 'max_attachments_mb': max_attachments_mb,
+        }, keep_password=not password and not clear_password)
+    except ValueError as exc:
+        return RedirectResponse('/application-config?' + urlencode({'error': str(exc)}) + '#email-delivery', status_code=status.HTTP_303_SEE_OTHER)
+    repository.try_add_log(user.username, 'save_email_delivery', json.dumps({
+        key: saved[key] for key in ('host', 'port', 'security', 'username', 'from_address', 'max_attachments_mb', 'password_configured')
+    }))
+    return RedirectResponse('/application-config?notice=Email+delivery+saved.#email-delivery', status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/application-config/email-delivery/test')
+def send_email_delivery_test(recipient: str = Form(''), user: SessionUser = Depends(config_editor_user)) -> RedirectResponse:
+    recipients = parse_recipients(recipient)
+    if not recipients or invalid_recipients(recipients):
+        return RedirectResponse('/application-config?' + urlencode({'error': 'Enter a valid test recipient.'}) + '#email-delivery', status_code=status.HTTP_303_SEE_OTHER)
+    try:
+        send_email(
+            email_delivery_settings(repository, include_password=True), recipients,
+            f'{__app_name__} · Test email',
+            f'This test email confirms that {__app_name__} can deliver scheduled reports.',
+            f'<p>This test email confirms that <strong>{html.escape(__app_name__)}</strong> can deliver scheduled reports.</p>',
+        )
+    except Exception as exc:  # SMTP errors are reported to the user as they are.
+        repository.try_add_log(user.username, 'email_delivery_test_failed', json.dumps({'recipients': recipients, 'error': str(exc)}))
+        return RedirectResponse('/application-config?' + urlencode({'error': f'Test email failed: {exc}'}) + '#email-delivery', status_code=status.HTTP_303_SEE_OTHER)
+    repository.try_add_log(user.username, 'email_delivery_test_sent', json.dumps({'recipients': recipients}))
+    return RedirectResponse('/application-config?' + urlencode({'notice': f'Test email sent to {", ".join(recipients)}.'}) + '#email-delivery', status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post('/application-config')
@@ -16322,7 +16648,7 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
     if kind not in {
             'config', 'workspace', 'full-environment', 'slides-templates',
             'auto-calculated-fields', 'dashboards', 'operator-mappings', 'main-cities',
-            'scoring-configuration', 'query-builder-queries', 'database-backup', 'bundle',
+            'scoring-configuration', 'query-builder-queries', 'reporting-jobs', 'database-backup', 'bundle',
     }:
         raise HTTPException(status_code=400, detail='The offered export type is not supported.')
     if payload.get('archive_version') != ARCHIVE_VERSION:
@@ -16849,7 +17175,7 @@ def _retain_import_upload(upload_id: str, package_path: Path, user: SessionUser)
     if kind not in {
         'config', 'workspace', 'full-environment', 'slides-templates',
         'auto-calculated-fields', 'dashboards', 'operator-mappings', 'main-cities',
-        'scoring-configuration', 'query-builder-queries', 'database-backup', 'bundle',
+        'scoring-configuration', 'query-builder-queries', 'reporting-jobs', 'database-backup', 'bundle',
     }:
         raise ValueError('The export package type is not supported.')
     require_import_manifest_permission(user, manifest)
@@ -18124,6 +18450,7 @@ def update_user_account(
         )
         if user.role == 'super-admin':
             repository.set_user_workspace_access(target_user_id, workspace_ids)
+        invalidate_feature_activation_cache()
         repository.add_log(
             user.username,
             'update_user',
@@ -18178,6 +18505,7 @@ def delete_user_account(
         )
     try:
         repository.delete_user(target_user_id)
+        invalidate_feature_activation_cache()
         repository.add_log(
             user.username,
             'delete_user',
@@ -18186,6 +18514,78 @@ def delete_user_account(
         return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
     except Exception as exc:
         return render_admin_template(request, user, error=str(exc), status_code=400)
+
+
+@app.post('/admin/user-groups', response_class=HTMLResponse)
+def create_user_group(
+    request: Request,
+    name: str = Form(''),
+    description: str = Form(''),
+    member_ids: list[int] = Form(default=[]),
+    user: SessionUser = Depends(admin_user),
+) -> Response:
+    try:
+        group_id = repository.save_user_group(None, name, description, member_ids)
+    except ValueError as exc:
+        return render_admin_template(request, user, error=str(exc), status_code=400)
+    invalidate_feature_activation_cache()
+    repository.add_log(user.username, 'create_user_group', json.dumps({'group_id': group_id, 'name': name.strip(), 'member_ids': member_ids}))
+    return RedirectResponse('/admin#user-groups', status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/admin/user-groups/{group_id}/update', response_class=HTMLResponse)
+def update_user_group(
+    request: Request,
+    group_id: int,
+    name: str = Form(''),
+    description: str = Form(''),
+    member_ids: list[int] = Form(default=[]),
+    user: SessionUser = Depends(admin_user),
+) -> Response:
+    try:
+        repository.save_user_group(group_id, name, description, member_ids)
+    except ValueError as exc:
+        return render_admin_template(request, user, error=str(exc), status_code=400)
+    invalidate_feature_activation_cache()
+    repository.add_log(user.username, 'update_user_group', json.dumps({'group_id': group_id, 'name': name.strip(), 'member_ids': member_ids}))
+    return RedirectResponse('/admin#user-groups', status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/admin/user-groups/{group_id}/delete', response_class=HTMLResponse)
+def delete_user_group(request: Request, group_id: int, user: SessionUser = Depends(admin_user)) -> Response:
+    try:
+        repository.delete_user_group(group_id)
+    except ValueError as exc:
+        return render_admin_template(request, user, error=str(exc), status_code=404)
+    invalidate_feature_activation_cache()
+    repository.add_log(user.username, 'delete_user_group', json.dumps({'group_id': group_id}))
+    return RedirectResponse('/admin#user-groups', status_code=status.HTTP_303_SEE_OTHER)
+
+
+def parse_feature_principals(values: list[str]) -> dict[str, list[str]]:
+    principals: dict[str, list[str]] = {'roles': [], 'groups': [], 'users': []}
+    for value in values:
+        kind, _separator, identifier = str(value).partition(':')
+        key = {'role': 'roles', 'group': 'groups', 'user': 'users'}.get(kind)
+        if key and identifier:
+            principals[key].append(identifier)
+    return principals
+
+
+@app.post('/admin/features', response_class=HTMLResponse)
+async def save_feature_activation(request: Request, user: SessionUser = Depends(super_admin_user)) -> Response:
+    form = await request.form()
+    values = {
+        key: {
+            'default': form.get(f'default__{key}') or 'all',
+            'allow': parse_feature_principals(form.getlist(f'allow__{key}')),
+            'deny': parse_feature_principals(form.getlist(f'deny__{key}')),
+        }
+        for key in FEATURE_KEYS
+    }
+    save_feature_activation_settings(values)
+    repository.add_log(user.username, 'save_feature_activation', json.dumps(feature_activation_settings(), sort_keys=True))
+    return RedirectResponse('/admin#features-activation', status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post('/admin/users/{target_user_id}/reset-password', response_class=HTMLResponse)
@@ -18634,3 +19034,12 @@ install_dashboard_routes(sys.modules[__name__])
 # Network Insights reuses the reporting helpers and the Canvas chart models.
 from src.modules.network_insights import install_network_insights_routes
 install_network_insights_routes(sys.modules[__name__])
+
+# Non-Qualified Calls is under construction and hidden until it is activated.
+from src.modules.non_qualified_calls import install_non_qualified_calls_routes
+install_non_qualified_calls_routes(sys.modules[__name__])
+
+# Reporting schedules jobs that collect Dataset Analysis, Network Insights,
+# Dashboard and Scoring artifacts and email them.
+from src.modules.report_tasks import install_report_task_routes
+install_report_task_routes(sys.modules[__name__])

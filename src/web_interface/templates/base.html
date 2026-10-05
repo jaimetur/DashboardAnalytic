@@ -1,3 +1,14 @@
+{%- macro tab_icon(name) -%}<svg class="module-tab-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">{{ {
+  'workspace': '<path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2h7.5A2.5 2.5 0 0 1 21 9.5v7a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 16.5z"/><path d="M3 10.5h18"/>',
+  'datasets-analysis': '<ellipse cx="10" cy="5.5" rx="6" ry="2.5"/><path d="M4 5.5v9c0 1.4 2.7 2.5 6 2.5M16 5.5v4M4 10c0 1.4 2.7 2.5 6 2.5"/><circle cx="17" cy="15.5" r="3"/><path d="m19.2 17.7 2.3 2.3"/>',
+  'e2e-dashboards': '<rect x="3" y="3" width="8" height="10" rx="1.5"/><rect x="13" y="3" width="8" height="6" rx="1.5"/><rect x="13" y="11" width="8" height="10" rx="1.5"/><rect x="3" y="15" width="8" height="6" rx="1.5"/>',
+  'non-qualified-calls': '<path d="M5 4h3l2 5-2.5 1.5a11 11 0 0 0 6 6L15 14l5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/><path d="m15 3 6 6M21 3l-6 6"/>',
+  'reporting': '<rect x="2.5" y="5" width="14" height="11" rx="2"/><path d="m3 6.5 6.5 5 6.5-5"/><circle cx="17.5" cy="16.5" r="4"/><path d="M17.5 14.6v2l1.3 1"/>',
+  'reporting-old': '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 17v-3M12 17v-6M15 17v-4"/>',
+  'scoring': '<path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 6H5.5a3 3 0 0 0 3 4M16 6h2.5a3 3 0 0 1-3 4M12 13v4M8.5 21h7M10 17h4v4h-4z"/>',
+  'network-insights': '<circle cx="12" cy="9" r="1.6"/><path d="M12 10.6V21M9 21l3-9 3 9M8.6 5.6a4.8 4.8 0 0 0 0 6.8M15.4 5.6a4.8 4.8 0 0 1 0 6.8M5.8 2.8a8.8 8.8 0 0 0 0 12.4M18.2 2.8a8.8 8.8 0 0 1 0 12.4"/>',
+  'builders': '<path d="M14.7 6.3a4 4 0 0 0-5.3 5.3L3.5 17.5a2 2 0 0 0 2.9 2.9l5.9-5.9a4 4 0 0 0 5.3-5.3l-2.5 2.5-2.4-.5-.5-2.4z"/>'
+}[name]|safe }}</svg>{%- endmacro -%}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -48,32 +59,14 @@
         <button type="button" class="topnav-user-control" data-change-password-open title="Click to change your password" aria-label="Change password for {{ user.username }}"><span class="topnav-link topnav-user-badge topnav-user-badge-{{ user.role }}">User: {{ user.username }} ({{ user.role }})</span></button>
         <a class="topnav-link topnav-link-logout" href="/logout" title="Log out of Dashboard Analytic">Logout</a>
       </nav>
+      {% elif request.url.path.startswith('/documents/view/') %}
+      <nav class="topnav"><a class="topnav-link" href="/login" title="Sign in to Dashboard Analytic">Sign in</a></nav>
       {% endif %}
     </header>
     {% endif %}
     <main>
       {% if user and not embedded_preview %}
       <nav class="module-tabs" aria-label="E2E modules">
-        <div class="module-tabs-primary">
-          <a class="module-tab module-tab-workspace{% if request.url.path == '/workspace' %} active{% endif %}" href="/workspace" title="Open Workspace management">Workspace</a>
-          {% if active_workspace %}
-          <a class="module-tab module-tab-datasets-analysis{% if request.url.path == '/datasets-analysis' %} active{% endif %}" href="/datasets-analysis" title="Open Datasets Analysis"><span class="module-tab-label-desktop">Datasets Analysis</span><span class="module-tab-label-mobile">Analysis</span></a>
-          <a class="module-tab module-tab-e2e-dashboards{% if request.url.path == '/e2e-dashboards' %} active{% endif %}" href="/e2e-dashboards" title="Open E2E Dashboards"><span class="module-tab-label-desktop">E2E Dashboards</span><span class="module-tab-label-mobile">Dashboards</span></a>
-          {% if user.role == 'super-admin' or user.username|upper == 'EJAITUR' %}<a class="module-tab module-tab-reporting{% if request.url.path == '/e2e-reporting' %} active{% endif %}" href="/e2e-reporting" title="Open E2E Reporting"><span class="module-tab-label-desktop">E2E Reporting</span><span class="module-tab-label-mobile">Reporting</span></a>{% endif %}
-          <a class="module-tab module-tab-scoring{% if request.url.path == '/scoring' %} active{% endif %}" href="/scoring" title="Open Scoring &amp; GAP Analysis"><span class="module-tab-label-desktop">Scoring &amp; GAP Analysis</span><span class="module-tab-label-mobile">Scoring</span></a>
-          <a class="module-tab module-tab-network-insights{% if request.url.path == '/network-insights' %} active{% endif %}" href="/network-insights" title="Open Network Insights"><span class="module-tab-label-desktop">Network Insights</span><span class="module-tab-label-mobile">Network</span></a>
-          <button type="button" class="module-tab module-tab-chart-builder{% if request.url.path in ['/chart-builder', '/query-builder'] %} active{% endif %}" popovertarget="module-builders-options" aria-haspopup="true" aria-expanded="false" aria-label="Choose builder" data-module-builders-trigger>Builders <span aria-hidden="true">▾</span></button>
-          <nav id="module-builders-options" class="module-builders-options" aria-label="Builders" popover data-module-builders-options>
-            <a href="/chart-builder"{% if request.url.path == '/chart-builder' %} class="is-active" aria-current="page"{% endif %}>Chart Builder</a>
-            <a href="/query-builder"{% if request.url.path == '/query-builder' %} class="is-active" aria-current="page"{% endif %}>Query Builder</a>
-          </nav>
-          {% else %}
-          <span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use Datasets Analysis"><span class="module-tab-label-desktop">Datasets Analysis</span><span class="module-tab-label-mobile">Analysis</span></span>
-          <span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use E2E Dashboards"><span class="module-tab-label-desktop">E2E Dashboards</span><span class="module-tab-label-mobile">Dashboards</span></span>
-          {% if user.role == 'super-admin' or user.username|upper == 'EJAITUR' %}<span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use E2E Reporting"><span class="module-tab-label-desktop">E2E Reporting</span><span class="module-tab-label-mobile">Reporting</span></span>{% endif %}
-          <span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use Builders">Builders</span>
-          {% endif %}
-        </div>
         <div class="module-tabs-secondary" aria-label="Documentation and administration">
           <a class="module-tab module-tab-utility{% if request.url.path == '/documents/view/readme' %} active{% endif %}" href="/documents/view/readme" title="Open Readme">Readme</a>
           <a class="module-tab module-tab-utility{% if request.url.path == '/documents/view/changelog' %} active{% endif %}" href="/documents/view/changelog" title="Open Changelog">Changelog</a>
@@ -87,6 +80,32 @@
           </nav>
           {% endif %}
           {% if user.role in ['admin', 'super-admin'] %}<a class="module-tab module-tab-admin{% if request.url.path == '/admin' %} active{% endif %}" href="/admin" title="Open Admin">Admin</a>{% endif %}
+        </div>
+        <div class="module-tabs-primary">
+          {% if features['workspace'] %}<a class="module-tab module-tab-workspace{% if request.url.path == '/workspace' %} active{% endif %}" href="/workspace" title="Open Workspace management">{{ tab_icon('workspace') }}<span>Workspace</span></a>{% endif %}
+          {% if active_workspace %}
+          {% if features['datasets-analysis'] %}<a class="module-tab module-tab-datasets-analysis{% if request.url.path == '/datasets-analysis' %} active{% endif %}" href="/datasets-analysis" title="Open Datasets Analysis">{{ tab_icon('datasets-analysis') }}<span class="module-tab-label-desktop">Datasets Analysis</span><span class="module-tab-label-mobile">Analysis</span></a>{% endif %}
+          {% if features['network-insights'] %}<a class="module-tab module-tab-network-insights{% if request.url.path == '/network-insights' %} active{% endif %}" href="/network-insights" title="Open Network Insights">{{ tab_icon('network-insights') }}<span class="module-tab-label-desktop">Network Insights</span><span class="module-tab-label-mobile">Network</span></a>{% endif %}
+          {% if features['e2e-dashboards'] %}<a class="module-tab module-tab-e2e-dashboards{% if request.url.path == '/e2e-dashboards' %} active{% endif %}" href="/e2e-dashboards" title="Open E2E Dashboards">{{ tab_icon('e2e-dashboards') }}<span class="module-tab-label-desktop">E2E Dashboards</span><span class="module-tab-label-mobile">Dashboards</span></a>{% endif %}
+          {% if features['scoring'] %}<a class="module-tab module-tab-scoring{% if request.url.path == '/scoring' %} active{% endif %}" href="/scoring" title="Open Scoring &amp; GAP Analysis">{{ tab_icon('scoring') }}<span class="module-tab-label-desktop">Scoring &amp; GAP Analysis</span><span class="module-tab-label-mobile">Scoring</span></a>{% endif %}
+          {% if features['non-qualified-calls'] %}<a class="module-tab module-tab-non-qualified-calls{% if request.url.path == '/non-qualified-calls' %} active{% endif %}" href="/non-qualified-calls" title="Open Non-Qualified Calls">{{ tab_icon('non-qualified-calls') }}<span class="module-tab-label-desktop">Non-Qualified Calls</span><span class="module-tab-label-mobile">NQ Calls</span></a>{% endif %}
+          {% if features['reporting'] %}<a class="module-tab module-tab-report-jobs{% if request.url.path == '/reporting' %} active{% endif %}" href="/reporting" title="Open Reporting">{{ tab_icon('reporting') }}<span class="module-tab-label-desktop">Reporting</span><span class="module-tab-label-mobile">Reporting</span></a>{% endif %}
+          {% if features['reporting-old'] %}<a class="module-tab module-tab-reporting{% if request.url.path == '/reporting-old' %} active{% endif %}" href="/reporting-old" title="Open Reporting (old)">{{ tab_icon('reporting-old') }}<span class="module-tab-label-desktop">Reporting (old)</span><span class="module-tab-label-mobile">Reporting (old)</span></a>{% endif %}
+          {% if features['builders'] %}<button type="button" class="module-tab module-tab-chart-builder{% if request.url.path in ['/chart-builder', '/query-builder'] %} active{% endif %}" popovertarget="module-builders-options" aria-haspopup="true" aria-expanded="false" aria-label="Choose builder" data-module-builders-trigger>{{ tab_icon('builders') }}<span>Builders</span> <span aria-hidden="true">▾</span></button>
+          <nav id="module-builders-options" class="module-builders-options" aria-label="Builders" popover data-module-builders-options>
+            <a href="/chart-builder"{% if request.url.path == '/chart-builder' %} class="is-active" aria-current="page"{% endif %}>Chart Builder</a>
+            <a href="/query-builder"{% if request.url.path == '/query-builder' %} class="is-active" aria-current="page"{% endif %}>Query Builder</a>
+          </nav>{% endif %}
+          {% else %}
+          {% if features['datasets-analysis'] %}<span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use Datasets Analysis">{{ tab_icon('datasets-analysis') }}<span class="module-tab-label-desktop">Datasets Analysis</span><span class="module-tab-label-mobile">Analysis</span></span>{% endif %}
+          {% if features['network-insights'] %}<span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use Network Insights">{{ tab_icon('network-insights') }}<span class="module-tab-label-desktop">Network Insights</span><span class="module-tab-label-mobile">Network</span></span>{% endif %}
+          {% if features['e2e-dashboards'] %}<span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use E2E Dashboards">{{ tab_icon('e2e-dashboards') }}<span class="module-tab-label-desktop">E2E Dashboards</span><span class="module-tab-label-mobile">Dashboards</span></span>{% endif %}
+          {% if features['scoring'] %}<span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use Scoring &amp; GAP Analysis">{{ tab_icon('scoring') }}<span class="module-tab-label-desktop">Scoring &amp; GAP Analysis</span><span class="module-tab-label-mobile">Scoring</span></span>{% endif %}
+          {% if features['non-qualified-calls'] %}<span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use Non-Qualified Calls">{{ tab_icon('non-qualified-calls') }}<span class="module-tab-label-desktop">Non-Qualified Calls</span><span class="module-tab-label-mobile">NQ Calls</span></span>{% endif %}
+          {% if features['reporting'] %}<span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use Reporting">{{ tab_icon('reporting') }}<span class="module-tab-label-desktop">Reporting</span><span class="module-tab-label-mobile">Reporting</span></span>{% endif %}
+          {% if features['reporting-old'] %}<span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use Reporting (old)">{{ tab_icon('reporting-old') }}<span class="module-tab-label-desktop">Reporting (old)</span><span class="module-tab-label-mobile">Reporting (old)</span></span>{% endif %}
+          {% if features['builders'] %}<span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use Builders">{{ tab_icon('builders') }}<span>Builders</span></span>{% endif %}
+          {% endif %}
         </div>
       </nav>
       {% endif %}
@@ -109,22 +128,26 @@
           <section class="module-navigator-category" aria-labelledby="module-navigator-main-title">
             <h4 id="module-navigator-main-title">Main Modules</h4>
             <nav aria-label="Main modules">
-              <a href="/workspace"{% if request.url.path == '/workspace' %} class="is-active" aria-current="page"{% endif %}>Workspace Management</a>
+              {% if features['workspace'] %}<a href="/workspace"{% if request.url.path == '/workspace' %} class="is-active" aria-current="page"{% endif %}>Workspace Management</a>{% endif %}
               {% if active_workspace %}
-              <a href="/datasets-analysis"{% if request.url.path == '/datasets-analysis' %} class="is-active" aria-current="page"{% endif %}>Dataset Analysis</a>
-              <a href="/e2e-dashboards"{% if request.url.path == '/e2e-dashboards' %} class="is-active" aria-current="page"{% endif %}>E2E Dashboard</a>
-              {% if user.role == 'super-admin' or user.username|upper == 'EJAITUR' %}<a href="/e2e-reporting"{% if request.url.path == '/e2e-reporting' %} class="is-active" aria-current="page"{% endif %}>E2E Reporting</a>{% endif %}
-              <a href="/scoring"{% if request.url.path == '/scoring' %} class="is-active" aria-current="page"{% endif %}>Scoring &amp; GAP Analysis</a>
-              <a href="/network-insights"{% if request.url.path == '/network-insights' %} class="is-active" aria-current="page"{% endif %}>Network Insights</a>
-              <a href="/chart-builder"{% if request.url.path == '/chart-builder' %} class="is-active" aria-current="page"{% endif %}>Chart Builder</a>
-              <a href="/query-builder"{% if request.url.path == '/query-builder' %} class="is-active" aria-current="page"{% endif %}>Query Builder</a>
+              {% if features['datasets-analysis'] %}<a href="/datasets-analysis"{% if request.url.path == '/datasets-analysis' %} class="is-active" aria-current="page"{% endif %}>Dataset Analysis</a>{% endif %}
+              {% if features['network-insights'] %}<a href="/network-insights"{% if request.url.path == '/network-insights' %} class="is-active" aria-current="page"{% endif %}>Network Insights</a>{% endif %}
+              {% if features['e2e-dashboards'] %}<a href="/e2e-dashboards"{% if request.url.path == '/e2e-dashboards' %} class="is-active" aria-current="page"{% endif %}>E2E Dashboard</a>{% endif %}
+              {% if features['scoring'] %}<a href="/scoring"{% if request.url.path == '/scoring' %} class="is-active" aria-current="page"{% endif %}>Scoring &amp; GAP Analysis</a>{% endif %}
+              {% if features['non-qualified-calls'] %}<a href="/non-qualified-calls"{% if request.url.path == '/non-qualified-calls' %} class="is-active" aria-current="page"{% endif %}>Non-Qualified Calls</a>{% endif %}
+              {% if features['reporting'] %}<a href="/reporting"{% if request.url.path == '/reporting' %} class="is-active" aria-current="page"{% endif %}>Reporting</a>{% endif %}
+              {% if features['reporting-old'] %}<a href="/reporting-old"{% if request.url.path == '/reporting-old' %} class="is-active" aria-current="page"{% endif %}>Reporting (old)</a>{% endif %}
+              {% if features['builders'] %}<a href="/chart-builder"{% if request.url.path == '/chart-builder' %} class="is-active" aria-current="page"{% endif %}>Chart Builder</a>
+              <a href="/query-builder"{% if request.url.path == '/query-builder' %} class="is-active" aria-current="page"{% endif %}>Query Builder</a>{% endif %}
               {% else %}
-              <span class="is-disabled" aria-disabled="true">Dataset Analysis</span>
-              <span class="is-disabled" aria-disabled="true">E2E Dashboard</span>
-              {% if user.role == 'super-admin' or user.username|upper == 'EJAITUR' %}<span class="is-disabled" aria-disabled="true">E2E Reporting</span>{% endif %}
-              <span class="is-disabled" aria-disabled="true">Scoring &amp; GAP Analysis</span>
-              <span class="is-disabled" aria-disabled="true">Network Insights</span>
-              <span class="is-disabled" aria-disabled="true">Chart Builder</span>
+              {% if features['datasets-analysis'] %}<span class="is-disabled" aria-disabled="true">Dataset Analysis</span>{% endif %}
+              {% if features['network-insights'] %}<span class="is-disabled" aria-disabled="true">Network Insights</span>{% endif %}
+              {% if features['e2e-dashboards'] %}<span class="is-disabled" aria-disabled="true">E2E Dashboard</span>{% endif %}
+              {% if features['scoring'] %}<span class="is-disabled" aria-disabled="true">Scoring &amp; GAP Analysis</span>{% endif %}
+              {% if features['non-qualified-calls'] %}<span class="is-disabled" aria-disabled="true">Non-Qualified Calls</span>{% endif %}
+              {% if features['reporting'] %}<span class="is-disabled" aria-disabled="true">Reporting</span>{% endif %}
+              {% if features['reporting-old'] %}<span class="is-disabled" aria-disabled="true">Reporting (old)</span>{% endif %}
+              {% if features['builders'] %}<span class="is-disabled" aria-disabled="true">Chart Builder</span>{% endif %}
               {% endif %}
             </nav>
           </section>

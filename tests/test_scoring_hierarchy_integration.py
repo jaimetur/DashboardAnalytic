@@ -73,7 +73,7 @@ def test_hierarchy_round_trip_json_zip_and_configuration_backup(scoring_api, tmp
     assert imported.json()['profiles'][0]['configuration']['aggregation_hierarchy'] == CUSTOM_HIERARCHY
 
 
-def test_scoring_follows_reporting_in_module_and_help_navigation(scoring_api):
+def test_reporting_follows_scoring_in_module_and_help_navigation(scoring_api):
     client = scoring_api['client']
     token = 'scoring-navigation-super-admin'
     app_module.SESSIONS[token] = app_module.SessionUser(username='super', role='super-admin')
@@ -81,12 +81,13 @@ def test_scoring_follows_reporting_in_module_and_help_navigation(scoring_api):
     page = client.get('/scoring')
     assert page.status_code == 200
     main_tabs = page.text.split('class="module-tabs-primary"', 1)[1].split('class="module-tabs-secondary"', 1)[0]
-    assert main_tabs.index('href="/e2e-reporting"') < main_tabs.index('href="/scoring"')
+    assert main_tabs.index('href="/scoring"') < main_tabs.index('href="/reporting"') < main_tabs.index('href="/reporting-old"')
     modules = page.text.split('aria-label="Main modules"', 1)[1].split('</nav>', 1)[0]
-    assert modules.index('href="/e2e-reporting"') < modules.index('href="/scoring"')
+    assert modules.index('href="/scoring"') < modules.index('href="/reporting"') < modules.index('href="/reporting-old"')
     documents = client.get('/api/documents/help-index').json()['documents']
     paths = [document['relative_path'] for document in documents]
-    assert paths.index('scoring-gap-analysis.md') == paths.index('e2e-reporting.md') + 1
+    assert paths.index('reporting.md') == paths.index('scoring-gap-analysis.md') + 1
+    assert paths.index('reporting-old.md') == paths.index('reporting.md') + 1
     help_page = client.get('/documents/view/help')
     group_function = help_page.text.split('function helpDocumentGroup(relativePath) {', 1)[1].split("return 'Main Modules';", 1)[0]
     assert "'scoring-gap-analysis.md'" in group_function

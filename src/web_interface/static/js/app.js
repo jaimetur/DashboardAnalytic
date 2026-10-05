@@ -5134,7 +5134,7 @@ function setupCustomMultiSelects() {
     if (!singleChoice) menu.appendChild(actionButton);
 
     const syncTrigger = () => {
-      const enabledOptions = Array.from(select.options).filter((option) => !option.disabled);
+      const enabledOptions = Array.from(select.options).filter((option) => !option.disabled || (select.dataset.multiselectCountLocked === 'true' && option.selected));
       const selectedOptions = enabledOptions.filter((option) => option.selected).map((option) => option.textContent?.trim()).filter(Boolean);
       const totalEnabled = enabledOptions.length;
       if (totalEnabled === 0) {
@@ -5248,7 +5248,7 @@ function setupCustomMultiSelects() {
 
       if (option.disabled) {
         optionLabel.classList.add('is-disabled');
-        optionLabel.title = 'This metric is not selectable because the dataset has no numeric values for it.';
+        optionLabel.title = option.dataset.disabledReason || 'This metric is not selectable because the dataset has no numeric values for it.';
       }
 
       optionLabel.appendChild(checkbox);
@@ -5295,7 +5295,7 @@ function setupCustomMultiSelects() {
           const optionLabel = checkbox.closest('.multiselect-option');
           optionLabel?.classList.toggle('is-disabled', option.disabled);
           if (optionLabel) optionLabel.title = option.disabled
-            ? 'This option is already included by the selected package.' : '';
+            ? (option.dataset.disabledReason || 'This option is already included by the selected package.') : '';
         }
       });
       orderSelectedOptionsFirst();

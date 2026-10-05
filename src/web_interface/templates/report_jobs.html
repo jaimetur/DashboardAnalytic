@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block content %}
+<link rel="stylesheet" href="{{ static_path('css/report_jobs.css') }}?v={{ asset_version('css/report_jobs.css') }}">
+<section class="dashboard-stack spacious-stack report-jobs" id="report-jobs">
+  <article class="panel module-hero report-jobs-hero">
+    <p class="eyebrow">Reporting</p>
+    <h2>Scheduled Reporting Jobs</h2>
+    <p class="lede">Collect Summary Dataset Analysis, Summary Network Insights, Dashboard and Scoring artifacts in one Reporting Job, run it once or on a schedule, and email the artifacts with a description of each one and its filters.</p>
+  </article>
+
+  <details class="panel collapsible-panel" open data-panel-state-key="reporting:jobs">
+    <summary class="collapsible-summary"><div><p class="eyebrow">Saved jobs</p><h2>Reporting Jobs</h2></div><span class="collapse-chip">Collapse</span></summary>
+    <div class="collapsible-panel-body">
+      <div class="report-jobs-toolbar">
+        <button type="button" id="rj-new" hidden>New Reporting Job</button>
+        <p class="form-note" id="rj-status" role="status"></p>
+      </div>
+      <div class="table-wrap">
+        <table class="reporting-jobs-table" id="rj-tasks">
+          <thead><tr><th>Name</th><th>Artifacts</th><th>Next Run</th><th>Recurrence</th><th>Email</th><th>Last Run</th><th>Actions</th></tr></thead>
+          <tbody><tr><td colspan="7" class="form-note">Loading Reporting Jobs…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </details>
+
+  <details class="panel collapsible-panel report-jobs-editor" id="rj-editor" open hidden data-panel-state-key="reporting:editor">
+    <summary class="collapsible-summary"><div><p class="eyebrow">Reporting Job</p><h2 id="rj-editor-title">New Reporting Job</h2></div><span class="collapse-chip">Collapse</span></summary>
+    <form class="collapsible-panel-body report-jobs-form" id="rj-form" novalidate>
+      <label class="rj-name">Name<input type="text" id="rj-name" maxlength="160" required></label>
+
+      <h3>Artifacts</h3>
+      <section class="rj-card" data-rj-section="dataset_analysis" data-rj-module="dataset_analysis">
+        <label class="rj-card-toggle"><input type="checkbox" id="rj-da-enabled"><strong>Summary Dataset Analysis</strong><small>Every KPI of each selected dataset, without filters.</small></label>
+        <div class="rj-card-body" data-rj-body>
+          <div class="rj-formats" data-rj-formats="rj-da"></div>
+          <div class="rj-picker" id="rj-da-datasets"></div>
+        </div>
+      </section>
+      <section class="rj-card" data-rj-section="network_insights" data-rj-module="network_insights">
+        <label class="rj-card-toggle"><input type="checkbox" id="rj-ni-enabled"><strong>Summary Network Insights</strong><small>RF quality, CDFs, maps, weak areas, spectrum and deployment for the selected CDRs.</small></label>
+        <div class="rj-card-body" data-rj-body>
+          <div class="rj-formats" data-rj-formats="rj-ni"></div>
+          <div class="rj-grid">
+            <label>NR Mode<select id="rj-ni-nr-mode"><option value="NSA">NSA</option><option value="SA">SA</option></select></label>
+            <label>Technology<select id="rj-ni-technology"></select></label>
+            <label>Low coverage below (dBm)<input type="number" id="rj-ni-coverage" value="-110" step="1"></label>
+            <label>High interference below (dB)<input type="number" id="rj-ni-interference" value="0" step="1"></label>
+          </div>
+          <div class="rj-inline" id="rj-ni-group"></div>
+          <div id="rj-ni-filters" class="rj-filters"></div>
+          <div class="rj-picker" id="rj-ni-datasets"></div>
+        </div>
+      </section>
+      <section class="rj-card" data-rj-module="dashboards">
+        <div class="rj-card-head"><strong>Dashboards</strong><small>Each entry generates a new Dashboard PPT with its own Scope, CDRs, dates and Adaptative Filters, prefilled with the saved Dashboard. Add the same Dashboard several times to include several configurations.</small></div>
+        <div id="rj-dashboards" class="rj-entries"></div>
+        <button type="button" id="rj-add-dashboard" class="rj-secondary">Add Dashboard</button>
+      </section>
+      <section class="rj-card" data-rj-module="scoring">
+        <div class="rj-card-head"><strong>Scoring</strong><small>Each entry calculates (or reuses an identical) Scoring job with its own NR Mode, CDRs, filters, aggregation levels, methodology and GAP reference, and attaches its PowerPoint.</small></div>
+        <div id="rj-scoring" class="rj-entries"></div>
+        <button type="button" id="rj-add-scoring" class="rj-secondary">Add Scoring</button>
+      </section>
+      <div id="rj-providers" class="rj-entries"></div>
+      <p class="form-note" id="rj-modules-note" hidden></p>
+
+      <h3>Delivery</h3>
+      <section class="rj-card">
+        <label class="rj-card-toggle"><input type="checkbox" id="rj-send-email"><strong>Send the artifacts by email</strong><small id="rj-email-note">Without email, each run only keeps its artifacts for download.</small></label>
+        <label class="rj-card-body" data-rj-email-body>Recipients<textarea id="rj-recipients" rows="2" placeholder="name@example.com, team@example.com"></textarea></label>
+      </section>
+
+      <h3>Schedule</h3>
+      <section class="rj-card rj-grid">
+        <label>Recurrence<select id="rj-schedule-mode">
+          <option value="manual">Manual only</option><option value="once">Once</option><option value="daily">Daily</option>
+          <option value="weekly">Weekly</option><option value="monthly">Monthly</option>
+        </select></label>
+        <label data-rj-schedule="once">Date<input type="date" id="rj-schedule-date"></label>
+        <label data-rj-schedule="once daily weekly monthly">Time<input type="time" id="rj-schedule-time" value="08:00"></label>
+        <label data-rj-schedule="monthly">Day of the month<input type="number" id="rj-schedule-day" min="1" max="31" value="1"></label>
+        <div class="rj-inline" data-rj-schedule="weekly" id="rj-schedule-weekdays"></div>
+        <label class="rj-check"><input type="checkbox" id="rj-enabled" checked><span>Enabled</span></label>
+        <p class="form-note rj-wide" id="rj-timezone"></p>
+      </section>
+
+      <div class="form-actions">
+        <button type="button" class="rj-secondary" id="rj-cancel">Cancel</button>
+        <button type="submit" id="rj-save">Save Reporting Job</button>
+      </div>
+    </form>
+  </details>
+
+  <details class="panel collapsible-panel" open data-panel-state-key="reporting:runs">
+    <summary class="collapsible-summary"><div><p class="eyebrow">Executions</p><h2>Run History</h2></div><span class="collapse-chip">Collapse</span></summary>
+    <div class="collapsible-panel-body">
+      <div class="table-wrap">
+        <table class="reporting-jobs-table" id="rj-runs">
+          <thead><tr><th>Run</th><th>Reporting Job</th><th>Trigger</th><th>Started</th><th>Status</th><th>Email</th><th>Artifacts</th><th>Actions</th></tr></thead>
+          <tbody><tr><td colspan="8" class="form-note">No runs yet.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </details>
+</section>
+<script defer src="{{ static_path('js/report_jobs.js') }}?v={{ asset_version('js/report_jobs.js') }}"></script>
+{% endblock %}

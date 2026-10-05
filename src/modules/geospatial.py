@@ -40,7 +40,7 @@ def _region_field(columns: Iterable[object]) -> str:
     raise ValueError('The Region mapping must contain a Region or WP attribute column.')
 
 
-def _read_region_mapping(path: Path):
+def _read_region_mapping(path: Path, label: str = 'Region Mapping'):
     """Read GeoJSON directly or the first real shapefile stored in a ZIP."""
     gpd = _geopandas()
     if path.suffix.casefold() != '.zip':
@@ -52,11 +52,11 @@ def _read_region_mapping(path: Path):
                 if name.casefold().endswith('.shp') and not name.startswith('__MACOSX/')
             )
     except zipfile.BadZipFile as exc:
-        raise ValueError('The Region Mapping ZIP is invalid.') from exc
+        raise ValueError(f'The {label} ZIP is invalid.') from exc
     if not shapefiles:
-        raise ValueError('The Region Mapping ZIP must contain a .shp file.')
+        raise ValueError(f'The {label} ZIP must contain a .shp file.')
     if len(shapefiles) > 1:
-        raise ValueError('The Region Mapping ZIP must contain exactly one .shp file.')
+        raise ValueError(f'The {label} ZIP must contain exactly one .shp file.')
     return gpd.read_file(f'zip://{path}!{shapefiles[0]}')
 
 
@@ -72,6 +72,28 @@ def validate_region_mapping(path: Path) -> str:
     field = _region_field(regions.columns)
     if regions[field].fillna('').astype(str).str.strip().eq('').any():
         raise ValueError(f'The Region mapping attribute {field} contains blank values.')
+    return field
+
+
+def validate_cluster_mapping(path: Path) -> str:
+    """Validate cluster polygons using the same GeoJSON/zipped-shapefile reader as regions."""
+    if path.suffix.casefold() not in {'.geojson', '.json', '.zip'}:
+        raise ValueError('Clusters require GeoJSON, JSON or a ZIP containing a shapefile.')
+    clusters = _read_region_mapping(path, 'Clusters')
+    if clusters.empty:
+        raise ValueError('The Clusters dataset has no geometries.')
+    if clusters.crs is None:
+        raise ValueError('The Clusters dataset must declare a coordinate reference system.')
+    if not clusters.geometry.geom_type.isin({'Polygon', 'MultiPolygon'}).all():
+        raise ValueError('The Clusters dataset must contain only polygon geometries.')
+    if not clusters.geometry.is_valid.all() or clusters.geometry.is_empty.any():
+        raise ValueError('The Clusters dataset contains invalid or empty polygons.')
+    field = next((found for candidate in ('Cluster', 'Cluster_ID', 'Cluster_Name', 'ClusterName', 'Name')
+                  if (found := _column(clusters.columns, candidate))), None)
+    if not field:
+        raise ValueError('The Clusters dataset must contain a Cluster, Cluster_ID, Cluster_Name or Name attribute.')
+    if clusters[field].fillna('').astype(str).str.strip().eq('').any():
+        raise ValueError(f'The Clusters attribute {field} contains blank values.')
     return field
 
 

@@ -620,9 +620,14 @@ def _init_presentation() -> Presentation:
 
 
 def export_powerpoint_report(destination: Path, report: dict[str, Any]) -> Path:
-    payload = _build_powerpoint_payload(report)
     presentation = _init_presentation()
+    _append_dataset_report_slides(presentation, _build_powerpoint_payload(report))
+    presentation.save(destination)
+    return destination
 
+
+def _append_dataset_report_slides(presentation: Presentation, payload: dict[str, Any]) -> None:
+    """Cover, summary, metric cards, one visual slide per metric and the processed metrics table."""
     cover = presentation.slides.add_slide(presentation.slide_layouts[6])
     _add_full_bg(cover, DARK_BG)
     _add_textbox(cover, 0.7, 0.8, 7.8, 0.4, "Dashboard Analytic", size=28, bold=True, color="#FFFFFF")
@@ -682,5 +687,67 @@ def export_powerpoint_report(destination: Path, report: dict[str, Any]) -> Path:
     _add_multiline_textbox(table_slide, 0.55, 0.72, 12.1, 0.18, _structured_filters_summary_lines(payload["filters_text"]), size=9, color=MUTED)
     _add_data_table(table_slide, primary_result.get("table_rows") or [], left=0.55, top=1.56, width=12.2, height=5.28)
 
+
+
+
+def _dataset_summary_cover(presentation: Presentation, title: str, reports: list[dict[str, Any]]) -> None:
+    cover = presentation.slides.add_slide(presentation.slide_layouts[6])
+    _add_full_bg(cover, DARK_BG)
+    _add_textbox(cover, 0.7, 0.8, 9.5, 0.45, "Dashboard Analytic", size=28, bold=True, color="#FFFFFF")
+    _add_textbox(cover, 0.7, 1.4, 11.5, 0.4, title, size=24, bold=True, color="#D9EEF3")
+    _add_textbox(cover, 0.7, 2.05, 11.5, 0.3, f"{len(reports)} dataset(s) · all KPIs · no filters", size=13, color="#E4EEF1")
+    for index, report in enumerate(reports[:14]):
+        _add_textbox(cover, 0.9, 2.6 + index * 0.31, 11.2, 0.26,
+                     f"• {report.get('dataset_name') or 'Dataset'} ({report.get('dataset_type') or 'Other'})", size=12, color="#FFFFFF")
+    if len(reports) > 14:
+        _add_textbox(cover, 0.9, 2.6 + 14 * 0.31, 11.2, 0.26, f"… and {len(reports) - 14} more", size=12, color="#E4EEF1")
+
+
+def export_dataset_summary_powerpoint(destination: Path, reports: list[dict[str, Any]], title: str = "Summary Dataset Analysis") -> Path:
+    """One PowerPoint with the Datasets Analysis export of every selected dataset."""
+    presentation = _init_presentation()
+    _dataset_summary_cover(presentation, title, reports)
+    for report in reports:
+        _append_dataset_report_slides(presentation, _build_powerpoint_payload(report))
     presentation.save(destination)
+    return destination
+
+
+def export_dataset_summary_word(destination: Path, reports: list[dict[str, Any]], title: str = "Summary Dataset Analysis") -> Path:
+    """One Word document with each dataset's global KPIs, metric KPIs, percentiles and charts."""
+    from docx.shared import Inches as DocxInches
+
+    document = Document()
+    document.add_heading(f"Dashboard Analytic · {title}", level=0)
+    document.add_paragraph(f"{len(reports)} dataset(s), all KPIs, no filters.")
+    for report in reports:
+        payload = _build_powerpoint_payload(report)
+        document.add_page_break()
+        document.add_heading(f"{payload['dataset_name']} ({payload['dataset_type']})", level=1)
+        global_items = [(key, value) for key, value in payload["global_kpis"].items() if key not in {"date_from", "date_to"}]
+        if global_items:
+            table = document.add_table(rows=1, cols=2)
+            table.style = "Light Grid Accent 1"
+            table.rows[0].cells[0].text, table.rows[0].cells[1].text = "Global KPI", "Value"
+            for key, value in global_items:
+                cells = table.add_row().cells
+                cells[0].text, cells[1].text = _format_label(key), _format_value(value)
+        for analysis_item in payload["analyses"]:
+            result = analysis_item["result"]
+            metric_name = result.get("selected_metric") or analysis_item.get("metric") or "Metric"
+            document.add_heading(metric_name, level=2)
+            metric_kpis = result.get("metric_kpis") or {}
+            if metric_kpis:
+                document.add_paragraph(" · ".join(f"{_format_label(key)}: {_format_value(value)}" for key, value in metric_kpis.items()))
+            document.add_picture(_draw_line_chart(result.get("cdf_chart") or {}), width=DocxInches(6.3))
+            document.add_picture(_draw_bar_chart(result.get("comparison_chart") or {}), width=DocxInches(6.3))
+            scorecard = result.get("scorecard") or []
+            if scorecard:
+                table = document.add_table(rows=1, cols=2)
+                table.style = "Light Grid Accent 1"
+                table.rows[0].cells[0].text, table.rows[0].cells[1].text = "Percentile", "Value"
+                for row in scorecard:
+                    cells = table.add_row().cells
+                    cells[0].text, cells[1].text = str(row.get("label", "")), _format_value(row.get("value", ""))
+    document.save(destination)
     return destination

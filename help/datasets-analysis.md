@@ -100,7 +100,9 @@ Empty fixed, derived and Auto-calculated fields remain visible. Stronger header 
 
 ### Export the analysis
 
-Word and PowerPoint exports reflect the current analysis request. Analysis filters do not overwrite stored dataset rows. For a complete template-driven report, use E2E Dashboards or the restricted E2E Reporting workflow.
+**Summary PowerPoint** and **Summary Word** create one document with every KPI of each selected dataset, without filters: a dialog lists the ready CDR datasets, all selected by default. The same Summary Dataset Analysis is available as a [Reporting](reporting.md) artifact.
+
+Word and PowerPoint exports reflect the current analysis request. Analysis filters do not overwrite stored dataset rows. For a complete template-driven report, use E2E Dashboards or the restricted Reporting (old) workflow.
 
 ## Example investigation
 

@@ -84,9 +84,13 @@ Dashboard queries read the workspace's combined CDR tables directly; reusable se
 
 See [E2E Dashboards Help](help/e2e-dashboards.md) for the operational workflow and [Workspace Config → Report Template reference](help/workspace-config.md#report-template-reference) for template authoring, supported chart types and examples.
 
-### E2E Reporting
+### Reporting
 
-E2E Reporting combines ready CDRs with a Report Template from the active workspace. It is available to super-admin accounts and EJAITUR.
+Reporting schedules **Reporting Jobs** that collect a Summary Dataset Analysis, a Summary Network Insights, Dashboard PPTs and Scoring PPTs, each configured with the options of its own module, run them once or daily, weekly or monthly and email the artifacts with a description of each one and its filters. SMTP delivery is configured in Application Config → Email Delivery. Reporting starts available to super-admins; activate it for other roles, user groups or users in Admin → Features Activation.
+
+### Reporting (old)
+
+Reporting (old) combines ready CDRs with a Report Template from the active workspace. It is available only to the users, roles and groups it is activated for in Admin → Features Activation (by default super-admins and EJAITUR).
 
 - **Reporting module**: choose NetCheck CDR Reports or the future Smart Orchestrator Logs workflow.
 - **NetCheck CDR Reports**: select Data, Voice and Speech campaigns, NSA/SA, template and Operator/Vendor Comparison.
@@ -107,7 +111,7 @@ Export CSV tables or editable PowerPoint matrices and charts. See [Scoring & GAP
 
 ### Network Insights
 
-Analyse the network behind the measured performance from the radio fields of ready Data, Voice and Speech CDRs: RSRP and SINR distributions and quality classes per Operator, grouped by Campaign, Region, City or CDR type, with changes between the two latest campaigns. Coverage and interference maps locate grid areas below configurable thresholds. Sites & Density counts observed eNodeBs and inventoried sites, Spectrum compares licensed holdings (configured in Workspace Config) with the bands observed in the measurements, and Network Deployment counts NNS, eMOCN, host-network and RAN-vendor sites from the Vodafone and Three inventories. Workspaces with NSA Report Templates also receive an NSA RF Quality Report Template and Dashboard with RSRP/SINR CDF and bar slides. See [Network Insights Help](help/network-insights.md).
+Analyse the network behind the measured performance from the radio fields of ready Data, Voice and Speech CDRs: RSRP and SINR distributions and quality classes per Operator, grouped by Campaign, Region, City or CDR type, with changes between the two latest campaigns. Coverage and interference maps locate grid areas below configurable thresholds. Cluster Sites Density lets users select observed CDR sites/cells or complete inventory sites/cells per operator, exports both views to PPT/Word and highlights the required cluster polygons (GeoJSON/JSON or zipped shapefile uploaded as Clusters — Geospatial), Spectrum compares licensed holdings (configured in Workspace Config) with the bands observed in the measurements, and Network Deployment counts NNS, eMOCN, host-network and RAN-vendor sites from the Vodafone and Three inventories, groups Region and Cluster by imported polygon names, falling back to inventory fields when polygons are absent, exports each grouped table to CSV, and offers side-by-side Vodafone and Three Full Site / Cell Inventory tables of complete mapping rows filtered by Operator, Vendor, Region, City and Technology, with highlighted operator/vendor/location/technology/cluster fields, complete source attributes, individual CSV exports and Export All to CSV for all deployment views. Workspaces with NSA Report Templates also receive an NSA RF Quality Report Template and Dashboard with RSRP/SINR CDF and bar slides. See [Network Insights Help](help/network-insights.md).
 
 ### Chart Builder
 
@@ -378,8 +382,11 @@ DashboardAnalytic/
 - [Web Interfaces](help/web-interface.md)
 - [Workspace Management](help/workspace-management.md)
 - [Datasets Analysis](help/datasets-analysis.md)
+- [Network Insights](help/network-insights.md)
 - [E2E Dashboards](help/e2e-dashboards.md)
-- [E2E Reporting](help/e2e-reporting.md)
+- [Scoring & GAP Analysis](help/scoring-gap-analysis.md)
+- [Reporting](help/reporting.md)
+- [Reporting (old)](help/reporting-old.md)
 - [Chart Builder](help/chart-builder.md)
 - [Query Builder](help/query-builder.md)
 - [App Logs](help/app-logs.md)

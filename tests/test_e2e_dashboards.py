@@ -1261,11 +1261,12 @@ def test_dashboards_lifecycle_and_layout(client):
     assert re.search(r'data-authenticated-session="[^"]+"', page.text)
     assert 'id="page-panel-navigator"' in page.text
     assert 'data-page-panel-navigator-list' in page.text
-    assert page.text.index('>Datasets Analysis<') < page.text.index('>E2E Dashboards<') < page.text.index('>E2E Reporting<')
-    assert client.get('/e2e-reporting').status_code == 200
-    legacy_reporting = client.get('/reporting', follow_redirects=False)
+    assert page.text.index('>Datasets Analysis<') < page.text.index('>Network Insights<') < page.text.index('>E2E Dashboards<') < page.text.index('>Reporting (old)<')
+    assert client.get('/reporting-old').status_code == 200
+    # Bookmarks from earlier versions keep opening the module now called Reporting (old).
+    legacy_reporting = client.get('/e2e-reporting/jobs?x=1', follow_redirects=False)
     assert legacy_reporting.status_code == 307
-    assert legacy_reporting.headers['location'] == '/e2e-reporting'
+    assert legacy_reporting.headers['location'] == '/reporting-old/jobs?x=1'
     assert 'id="ds-nr-mode"' in page.text
     assert 'id="ds-dashboards-body"' in page.text
     assert '>PPT Generation Jobs<' in page.text
@@ -2116,30 +2117,50 @@ def test_dashboards_lifecycle_and_layout(client):
     assert client.get('/api/e2e-dashboards').json() == {}
 
 
-def test_e2e_reporting_is_restricted_to_super_admins_and_ejaitur(client):
+def test_reporting_old_defaults_to_super_admins_and_ejaitur(client):
     client.post('/login', data={'username': 'admin', 'password': 'admin123'})
     workspace_page = client.get('/workspace')
     assert workspace_page.status_code == 200
-    assert 'href="/e2e-reporting"' not in workspace_page.text
-    assert 'E2E Reporting' not in workspace_page.text
-    assert client.get('/e2e-reporting').status_code == 403
-    assert client.get('/api/e2e-reporting/jobs').status_code == 403
+    assert 'href="/reporting-old"' not in workspace_page.text
+    assert 'Reporting (old)' not in workspace_page.text
+    assert client.get('/reporting-old').status_code == 403
+    assert client.get('/api/reporting-old/jobs').status_code == 403
 
     super_admin_token = 'e2e-reporting-super-admin'
     core.SESSIONS[super_admin_token] = core.SessionUser(username='someone', role='super-admin')
     client.cookies.set(core.SESSION_COOKIE, super_admin_token)
-    super_admin_page = client.get('/e2e-reporting')
+    super_admin_page = client.get('/reporting-old')
     assert super_admin_page.status_code == 200
-    assert 'href="/e2e-reporting"' in super_admin_page.text
+    assert 'href="/reporting-old"' in super_admin_page.text
 
     token = 'e2e-reporting-allowed-user'
     core.SESSIONS[token] = core.SessionUser(username='EJAITUR', role='user')
     client.cookies.set(core.SESSION_COOKIE, token)
-    allowed_page = client.get('/e2e-reporting')
+    allowed_page = client.get('/reporting-old')
     assert allowed_page.status_code == 200
-    assert 'href="/e2e-reporting"' in allowed_page.text
-    assert client.get('/api/e2e-reporting/jobs').status_code == 200
+    assert 'href="/reporting-old"' in allowed_page.text
+    assert client.get('/api/reporting-old/jobs').status_code == 200
 
+
+
+def test_reporting_old_access_follows_features_activation(client):
+    core.repository.create_user('analyst', 'analyst123', 'user-viewer')
+    analyst_id = next(int(row['id']) for row in core.repository.list_users() if row['username'] == 'analyst')
+    core.repository.set_user_workspace_access(analyst_id, [core.active_workspace.id])
+    client.post('/login', data={'username': 'analyst', 'password': 'analyst123'})
+    assert client.get('/reporting-old').status_code == 403
+    assert 'href="/reporting-old"' not in client.get('/workspace').text
+    client.cookies.clear()
+    client.post('/login', data={'username': 'super', 'password': 'super123'})
+    form = {f'default__{key}': 'all' for key in core.FEATURE_KEYS}
+    form.update({'default__reporting-old': 'none', 'allow__reporting-old': [f'user:{analyst_id}']})
+    assert client.post('/admin/features', data=form, follow_redirects=False).status_code == 303
+    # Super-admins are only included when selected.
+    assert client.get('/reporting-old').status_code == 403
+    client.cookies.clear()
+    client.post('/login', data={'username': 'analyst', 'password': 'analyst123'})
+    assert client.get('/reporting-old').status_code == 200
+    assert 'href="/reporting-old"' in client.get('/workspace').text
 
 def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypatch):
     payload = setup_dashboard(client)

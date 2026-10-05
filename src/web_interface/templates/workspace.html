@@ -181,6 +181,7 @@
             ('mapping_three', 'Multivendor Mapping — Three UK (3UK)'),
             ('mapping_vodafone', 'Multivendor Mapping — Vodafone UK (VFUK)'),
             ('mapping_region', 'Region Mapping — Geospatial'),
+            ('clusters', 'Clusters — Geospatial'),
             ('generic', 'Other supported dataset'),
             ('smart_orchestrator_logs', 'Smart Orchestrator Logs')
           ] %}
@@ -654,6 +655,7 @@
     ['mapping_vodafone', 'Multivendor Mapping — Vodafone UK (VFUK)'],
     ['mapping_three', 'Multivendor Mapping — Three UK (3UK)'],
     ['mapping_region', 'Region Mapping — Geospatial'],
+    ['clusters', 'Clusters — Geospatial'],
     ['generic', 'Other supported dataset'],
   ];
   const cdrTypes = new Set(['data', 'voice', 'speech']);
@@ -667,6 +669,7 @@
 
   function inferType(fileName) {
     const normalized = String(fileName || '').toLowerCase().replace(/[_-]+/g, ' ');
+    if (normalized.includes('cluster') && /\.(geojson|json|zip)$/.test(normalized)) return 'clusters';
     if (normalized.includes('vfuk') || normalized.includes('vodafone uk') || normalized.includes('vodafone')) return 'mapping_vodafone';
     if (normalized.includes('3uk') || normalized.includes('three uk') || normalized.includes('three')) return 'mapping_three';
     if (normalized.includes('region') || normalized.includes('vendor split') || normalized.endsWith('.geojson') || normalized.endsWith('.json')) return 'mapping_region';

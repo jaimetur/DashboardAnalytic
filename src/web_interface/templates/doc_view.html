@@ -253,7 +253,7 @@
 
   function helpDocumentGroup(relativePath) {
     const fileName = String(relativePath || '').split('/').pop();
-    if (['workspace-management.md', 'datasets-analysis.md', 'e2e-dashboards.md', 'e2e-reporting.md', 'scoring-gap-analysis.md', 'network-insights.md', 'chart-builder.md', 'query-builder.md'].includes(fileName)) return 'Main Modules';
+    if (['workspace-management.md', 'datasets-analysis.md', 'network-insights.md', 'e2e-dashboards.md', 'scoring-gap-analysis.md', 'reporting.md', 'reporting-old.md', 'chart-builder.md', 'query-builder.md'].includes(fileName)) return 'Main Modules';
     if (['app-logs.md', 'app-config.md', 'workspace-config.md', 'administrator-config.md'].includes(fileName)) return 'Administrative Modules';
     if (['project-structure.md', 'roadmap.md'].includes(fileName)) return 'Reference';
     return 'General';

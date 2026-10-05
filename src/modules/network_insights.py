@@ -9,8 +9,12 @@ be tested directly.
 """
 # Postponed annotations are deliberately not enabled: FastAPI must resolve the
 # request models and parameters declared inside install_network_insights_routes.
+import csv
+import io
 import math
 import re
+from functools import lru_cache
+from pathlib import Path
 from collections import Counter
 from typing import Any, Iterable
 
@@ -620,14 +624,15 @@ INVENTORY_FIELDS = {
     'network': ('Network',),
     'host_network': ('Host Network',),
     'vendor': ('OP_Vendor', 'OP/ Vendor', 'Vendor'),
-    'region': ('Region',),
+    'region': ('Region', 'UK "Regional"'),
     'subregion': ('Subregion',),
+    'cluster': ('Cluster', 'Cluster Name', 'Engineering Polygon', 'Regional Optimisation Polygon'),
     'site_type': ('Site_Type', 'Site Type'),
     'band': ('Band', 'Frequency Band'),
 }
 DEPLOYMENT_GROUPINGS = {
     'scenario': 'eMOCN Scenario', 'host_network': 'Host Network', 'network': 'Network', 'vendor': 'RAN Vendor',
-    'region': 'Region', 'subregion': 'Subregion', 'site_type': 'Site Type', 'band': 'Band',
+    'region': 'Region', 'subregion': 'Subregion', 'cluster': 'Cluster', 'site_type': 'Site Type', 'band': 'Band',
 }
 
 
@@ -635,6 +640,241 @@ DEPLOYMENT_GROUPINGS = {
 # Inventory (Vendor mapping datasets)
 # ---------------------------------------------------------------------------
 INVENTORY_DATASET_KINDS = {'mapping_vodafone': 'Vodafone', 'mapping_three': 'Three'}
+
+
+INVENTORY_KEY_COLUMNS = ('Operator', 'Vendor', 'Vendor_Only', 'Region', 'City', 'Technology', 'Cluster')
+INVENTORY_DETAIL_ALIASES = {
+    'Operator': ('Operator',),
+    'Vendor': ('Vendor', 'OP_Vendor', 'OP/ Vendor'),
+    'Vendor_Only': ('Vendor_Only',),
+    'Region': ('Region', 'UK "Regional"'),
+    'City': ('City', 'Beacon2Town', 'Town', 'Major Town and Cities v3/BUA'),
+    'Technology': ('Technology', 'RAT', 'Source_Sheet'),
+    'Cluster': ('Cluster', 'Cluster Name', 'Engineering Polygon', 'Regional Optimisation Polygon'),
+}
+
+
+INVENTORY_COORDINATES = {
+    'longitude': ('Longitude', 'Long', 'Lon', 'Site Longitude', 'Site_Longitude'),
+    'latitude': ('Latitude', 'Lat', 'Site Latitude', 'Site_Latitude'),
+    'easting': ('Easting', 'Site Easting', 'Site_Easting'),
+    'northing': ('Northing', 'Site Northing', 'Site_Northing'),
+}
+
+
+def inventory_polygon_sources(repository) -> tuple:
+    """Identify ready boundary inputs and their revisions for spatial cache invalidation."""
+    sources = []
+    for row in repository.list_datasets():
+        if row['status'] == 'ready' and row['dataset_kind'] in {'mapping_region', 'clusters'}:
+            path = Path(str(row['stored_path']))
+            sources.append((row['dataset_kind'], int(row['id']), str(row['updated_at'] or ''),
+                            str(path), path.stat().st_mtime_ns))
+    return tuple(sorted(sources, key=lambda item: item[1], reverse=True))
+
+
+@lru_cache(maxsize=4)
+def inventory_polygon_lookup(sources: tuple):
+    """Index imported polygons in WGS84; newest uploads take precedence on overlaps."""
+    from src.modules.geospatial import _column, _read_region_mapping, _region_field
+    from shapely import STRtree
+
+    lookups = {}
+    for dimension, kind in [('Region', 'mapping_region'), ('Cluster', 'clusters')]:
+        geometries, names = [], []
+        for source_kind, _identifier, _revision, path, _mtime in sources:
+            if source_kind != kind:
+                continue
+            boundaries = _read_region_mapping(Path(path), dimension).to_crs('EPSG:4326')
+            field = _region_field(boundaries.columns) if dimension == 'Region' else next(
+                found for candidate in ('Cluster', 'Cluster_ID', 'Cluster_Name', 'ClusterName', 'Name')
+                if (found := _column(boundaries.columns, candidate)))
+            for geometry, name in zip(boundaries.geometry, boundaries[field]):
+                if geometry is not None and not geometry.is_empty:
+                    geometries.append(geometry)
+                    names.append(str(name).strip())
+        if geometries:
+            lookups[dimension] = (STRtree(geometries), names)
+    return lookups
+
+
+def register_inventory_polygon_mapping(repository, connection) -> None:
+    """Resolve inventory coordinates to imported boundary names without changing source rows."""
+    sources = inventory_polygon_sources(repository)
+    lookups = inventory_polygon_lookup(sources) if sources else {}
+    projected_to_wgs84 = None
+
+    @lru_cache(maxsize=65536)
+    def mapped_name(dimension, longitude, latitude, easting, northing, original):
+        nonlocal projected_to_wgs84
+        if dimension not in lookups:
+            return original
+
+        def numeric(value):
+            try:
+                result = float(str(value).strip().replace(',', '.'))
+                return result if math.isfinite(result) else None
+            except (TypeError, ValueError):
+                return None
+
+        lon, lat = numeric(longitude), numeric(latitude)
+        if lon is None or lat is None or not (-180 <= lon <= 180 and -90 <= lat <= 90):
+            east, north = numeric(easting), numeric(northing)
+            if east is None or north is None:
+                return ''
+            if projected_to_wgs84 is None:
+                from pyproj import Transformer
+                projected_to_wgs84 = Transformer.from_crs('EPSG:27700', 'EPSG:4326', always_xy=True)
+            lon, lat = projected_to_wgs84.transform(east, north)
+        from shapely.geometry import Point
+        tree, names = lookups[dimension]
+        matches = tree.query(Point(lon, lat), predicate='intersects')
+        return names[min(matches)] if len(matches) else ''
+
+    connection.create_function('inventory_polygon_name', 6, mapped_name, deterministic=True)
+
+
+def inventory_coordinate_expressions(columns, quote) -> list[str]:
+    lookup = {column_identity(column): column for column in columns}
+    values = []
+    for aliases in INVENTORY_COORDINATES.values():
+        fields = list(dict.fromkeys(lookup[column_identity(alias)] for alias in aliases if column_identity(alias) in lookup))
+        parts = [f"NULLIF(TRIM(CAST({quote(field)} AS TEXT)), '')" for field in fields]
+        values.append(f"COALESCE({', '.join(parts)}, '')" if parts else "''")
+    return values
+
+
+def prepare_inventory_query(repository, connection, datasets: list[dict[str, Any]], selection: dict[str, Any]):
+    """Align complete inventories without changing stored source fields or row multiplicity."""
+    from functools import lru_cache
+    from src.modules.column_names import vendor_filter_value
+
+    quote = repository._quote_identifier
+    mappings = repository.chart_mapping_settings()
+    operator_maps = {str(key).casefold(): str(value) for key, value in mappings.get('operator_mappings', {}).items()}
+    vendor_maps = {str(key).casefold(): str(value) for key, value in mappings.get('vendor_mappings', {}).items()}
+    operator_names = [*operator_maps, *operator_maps.values(), 'Vodafone', 'Vodafone UK', 'VFUK', 'VF', 'Three', '3UK', '3']
+
+    @lru_cache(maxsize=1024)
+    def operator_value(value, fallback):
+        text = str(value or fallback).strip()
+        return operator_maps.get(text.casefold(), text)
+
+    @lru_cache(maxsize=1024)
+    def vendor_value(raw, only, operator):
+        text = str(raw or '').strip()
+        vendor = vendor_filter_value(text, operator_names) or str(only or '').strip()
+        if not vendor:
+            return ''
+        return f'{operator}_{vendor}'
+
+    @lru_cache(maxsize=1024)
+    def vendor_only_value(raw, only):
+        return str(only or '').strip() or vendor_filter_value(raw, operator_names)
+
+    @lru_cache(maxsize=1024)
+    def technology_value(value):
+        text = str(value or '').strip()
+        return {'4g': 'LTE', 'lte': 'LTE', '5g': 'NR', 'nr': 'NR'}.get(text.casefold(), text)
+
+    @lru_cache(maxsize=1024)
+    def filter_value(value, field):
+        text = str(value or '').strip()
+        if field == 'Operator':
+            text = operator_maps.get(text.casefold(), text)
+        elif field == 'Vendor_Only':
+            text = vendor_filter_value(text, operator_names)
+            text = vendor_maps.get(text.casefold(), text)
+        return text.casefold()
+
+    @lru_cache(maxsize=4096)
+    def cell_value(value):
+        text = str(value or '').strip()
+        if re.fullmatch(r'\d+(?:\.0+)?', text):
+            return str(int(text.split('.')[0]))
+        if re.fullmatch(r'0x[0-9a-f]+', text, re.I):
+            return str(int(text, 16))
+        return text
+
+    connection.create_function('inventory_cell', 1, cell_value, deterministic=True)
+    connection.create_function('inventory_operator', 2, operator_value, deterministic=True)
+    connection.create_function('inventory_vendor', 3, vendor_value, deterministic=True)
+    connection.create_function('inventory_vendor_only', 2, vendor_only_value, deterministic=True)
+    connection.create_function('inventory_technology', 1, technology_value, deterministic=True)
+    connection.create_function('inventory_filter', 2, filter_value, deterministic=True)
+    register_inventory_polygon_mapping(repository, connection)
+    schemas = {row['id']: repository.list_dataset_row_columns(row['id']) for row in datasets}
+    source_columns = list(dict.fromkeys(column for row in datasets for column in schemas[row['id']]))
+    columns = [*INVENTORY_KEY_COLUMNS, 'Source_Dataset_ID', 'Source_Dataset_Name']
+    source_names = {}
+    used = {column.casefold() for column in columns} | {'__inventory_cell_id', '__inventory_source_row'}
+    for source in source_columns:
+        name = f'Source_{source}' if column_identity(source) in {column_identity(key) for key in INVENTORY_KEY_COLUMNS} else source
+        while name.casefold() in used:
+            name = f'Source_{name}'
+        source_names[source] = name
+        used.add(name.casefold())
+        columns.append(name)
+
+    selects = []
+    for dataset in datasets:
+        available = schemas[dataset['id']]
+        lookup = {column_identity(column): column for column in available}
+
+        def expression(aliases):
+            fields = list(dict.fromkeys(lookup[column_identity(alias)] for alias in aliases if column_identity(alias) in lookup))
+            if not fields:
+                return "''"
+            parts = [f"NULLIF(TRIM(CAST({quote(field)} AS TEXT)), '')" for field in fields]
+            return f"COALESCE({', '.join(parts)}, '')"
+
+        fallback = str(dataset['operator']).replace("'", "''")
+        operator = f"inventory_operator({expression(INVENTORY_DETAIL_ALIASES['Operator'])}, '{fallback}')"
+        raw_vendor = expression(INVENTORY_DETAIL_ALIASES['Vendor'])
+        only = expression(INVENTORY_DETAIL_ALIASES['Vendor_Only'])
+        normalized = {
+            'Operator': operator,
+            'Vendor': f'inventory_vendor({raw_vendor}, {only}, {operator})',
+            'Vendor_Only': f'inventory_vendor_only({raw_vendor}, {only})',
+            'Region': expression(INVENTORY_DETAIL_ALIASES['Region']),
+            'City': expression(INVENTORY_DETAIL_ALIASES['City']),
+            'Technology': f"COALESCE(NULLIF(inventory_technology({expression(('Technology', 'RAT'))}), ''), CASE LOWER({expression(('Source_Sheet',))}) WHEN '4g' THEN 'LTE' WHEN '5g' THEN 'NR' ELSE '' END)",
+            'Cluster': expression(INVENTORY_DETAIL_ALIASES['Cluster']),
+        }
+        coordinates = ', '.join(inventory_coordinate_expressions(available, quote))
+        for dimension in ('Region', 'Cluster'):
+            normalized[dimension] = f"inventory_polygon_name('{dimension}', {coordinates}, {normalized[dimension]})"
+        # Three's ECI mapping format identifies LTE cells even without a Technology header.
+        if dataset['kind'] == 'mapping_three' and any(column_identity(col) in {'cideci', 'eci'} for col in available):
+            normalized['Technology'] = f"COALESCE(NULLIF({normalized['Technology']}, ''), 'LTE')"
+        cell = expression(('GCID', 'CId___ECI', 'Cid__ECI', 'ECI', 'Cell_ID', 'Global CI'))
+        if cell == "''":
+            local = expression(('Local Cell ID',))
+            enodeb = expression(('eNodeB ID', 'eNBId'))
+            gnodeb = expression(('gNodeB ID',))
+            cell = f"CASE WHEN {local} = '' THEN NULL WHEN {normalized['Technology']} = 'NR' AND {gnodeb} != '' THEN CAST({gnodeb} AS INTEGER) * 4096 + CAST({local} AS INTEGER) WHEN {normalized['Technology']} = 'LTE' AND {enodeb} != '' THEN CAST({enodeb} AS INTEGER) * 256 + CAST({local} AS INTEGER) END"
+        values = [f'{value} AS {quote(field)}' for field, value in normalized.items()]
+        values.extend([f'inventory_cell({cell}) AS __Inventory_Cell_ID', 'rowid AS __Inventory_Source_Row'])
+        filename = str(dataset['file_name']).replace("'", "''")
+        values.extend([f"{int(dataset['id'])} AS Source_Dataset_ID", f"'{filename}' AS Source_Dataset_Name"])
+        values.extend(f"{quote(source) if source in available else 'NULL'} AS {quote(source_names[source])}" for source in source_columns)
+        selects.append(f"SELECT {', '.join(values)} FROM {quote(repository.dataset_rows_table_name(dataset['id']))}")
+    if not selects:
+        return '', [], columns
+    predicates, parameters = [], []
+    for field, key in [('Operator', 'operators'), ('Vendor_Only', 'vendors'), ('Region', 'regions'), ('City', 'cities')]:
+        values = list(dict.fromkeys(filter_value(value, field) for value in selection.get(key, []) if str(value).strip()))
+        if values:
+            predicates.append(f"inventory_filter({quote(field)}, '{field}') IN ({', '.join('?' for _ in values)})")
+            parameters.extend(values)
+    technology = selection.get('technology', 'lte')
+    technologies = ['LTE', 'NR'] if technology == 'lte_nr' else ['NR'] if technology == 'nr' else ['LTE']
+    predicates.append(f"Technology IN ({', '.join('?' for _ in technologies)})")
+    parameters.extend(technologies)
+    query = 'SELECT * FROM (' + ' UNION ALL '.join(selects) + ')'
+    if predicates:
+        query += ' WHERE ' + ' AND '.join(predicates)
+    return query, parameters, columns
 
 
 def inventory_expression(columns: Iterable[str], field: str, quote) -> str | None:
@@ -655,10 +895,18 @@ def inventory_projection(task_repository: Any, dataset: dict[str, Any]) -> pd.Da
     expressions = {field: inventory_expression(columns, field, quote) for field in INVENTORY_FIELDS}
     if not expressions['site']:
         return pd.DataFrame()
+    coordinates = ', '.join(inventory_coordinate_expressions(columns, quote))
+    polygon_kinds = {source[0] for source in inventory_polygon_sources(task_repository)}
+    for field, dimension in [('region', 'Region'), ('cluster', 'Cluster')]:
+        if not expressions[field] and ('mapping_region' if field == 'region' else 'clusters') not in polygon_kinds:
+            continue
+        original = expressions[field] or "''"
+        expressions[field] = f"inventory_polygon_name('{dimension}', {coordinates}, {original})"
     selected = ', '.join(f'{expression} AS {quote(field)}'
                          for field, expression in expressions.items() if expression)
     table = quote(task_repository.dataset_rows_table_name(dataset_id))
     with task_repository.connection() as connection:
+        register_inventory_polygon_mapping(task_repository, connection)
         return pd.read_sql_query(
             f"SELECT DISTINCT {selected} FROM {table} WHERE {expressions['site']} IS NOT NULL", connection)
 
@@ -671,7 +919,7 @@ def inventory_summary(task_repository: Any, dataset: dict[str, Any], group: str 
     if 'site' not in frame.columns:
         return {'available_groups': [], 'rows': [], 'totals': None}
     available_groups = [key for key in DEPLOYMENT_GROUPINGS if key in frame.columns]
-    grouped = frame.assign(_group=frame[group].fillna('Not set') if group in available_groups else 'All')
+    grouped = frame.assign(_group=frame[group].replace('', pd.NA).fillna('Not set') if group in available_groups else 'All')
     counts = grouped.groupby('_group', sort=False)['site'].nunique().rename('sites').to_frame()
     counts['cells'] = grouped.groupby('_group', sort=False)['cell'].nunique() if 'cell' in frame.columns else 0
     counts = counts.reset_index().sort_values(['sites', '_group'], ascending=[False, True])
@@ -697,8 +945,8 @@ def install_network_insights_routes(core: Any) -> None:
 
     from urllib.parse import urlencode
 
-    from fastapi import Depends, Form, HTTPException, Request
-    from fastapi.responses import HTMLResponse, RedirectResponse
+    from fastapi import Depends, Form, HTTPException, Query, Request
+    from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
     from pydantic import BaseModel, Field
 
     from src.modules.cdr_reporting import _osm_map_tile_geometry
@@ -710,6 +958,7 @@ def install_network_insights_routes(core: Any) -> None:
     inventory_cache_lock = Lock()
 
     class AnalysisRequest(BaseModel):
+        nr_mode: str = 'NSA'
         datasets: dict[str, list[int]] = Field(default_factory=dict)
         technology: str = 'lte'
         group: list[str] | str = Field(default_factory=lambda: ['operator', 'campaign'])
@@ -763,6 +1012,21 @@ def install_network_insights_routes(core: Any) -> None:
             for row in task_repository.list_datasets()
             if row['status'] == 'ready' and row['dataset_kind'] in INVENTORY_DATASET_KINDS
         ]
+
+    def cluster_datasets_ready(task_repository) -> bool:
+        return any(row['status'] == 'ready' and row['dataset_kind'] == 'clusters'
+                   for row in task_repository.list_datasets())
+
+    def cluster_grouping_available(task_repository) -> bool:
+        if cluster_datasets_ready(task_repository):
+            return True
+        return any(inventory_expression(task_repository.list_dataset_row_columns(dataset['id']), 'cluster',
+                                        task_repository._quote_identifier)
+                   for dataset in inventory_datasets(task_repository))
+
+    def require_cluster_dataset(group: str, task_repository) -> None:
+        if group == 'cluster' and not cluster_grouping_available(task_repository):
+            raise HTTPException(400, 'Import Clusters polygons or an inventory with a Cluster field to group deployment by Cluster.')
 
     def load_samples(task_repository, datasets: dict[str, list[int]]) -> pd.DataFrame:
         available = {row['id']: row for row in ready_cdrs(task_repository)}
@@ -823,6 +1087,7 @@ def install_network_insights_routes(core: Any) -> None:
                 'datasets': ready_cdrs(task_repository),
                 'inventories': inventory_datasets(task_repository),
                 'deployment_groups': DEPLOYMENT_GROUPINGS,
+                'clusters_available': cluster_grouping_available(task_repository),
                 'groupings': GROUPINGS,
                 'main_cities': task_repository.list_main_cities(),
                 'technologies': TECHNOLOGIES,
@@ -873,6 +1138,9 @@ def install_network_insights_routes(core: Any) -> None:
 
     @app.post('/api/network-insights/analysis')
     def network_insights_analysis(request: AnalysisRequest, user=Depends(insights_user)):
+        return run_analysis(request)
+
+    def run_analysis(request: AnalysisRequest) -> dict[str, Any]:
         technology = request.technology if request.technology in TECHNOLOGIES else 'lte'
         requested_groups = [request.group] if isinstance(request.group, str) else request.group
         # LTE+NR always separates the technologies: LTE RSRP/SINR and NR
@@ -922,6 +1190,14 @@ def install_network_insights_routes(core: Any) -> None:
             for metric in ('rsrp', 'sinr'):
                 filtered[f'lte_nr_{metric}'] = filtered[f'lte_{metric}'].fillna(filtered[f'nr_{metric}'])
         original_operators = filtered['operator'].copy()
+        operator_mappings = {str(key).casefold(): str(value)
+                             for key, value in task_repository.list_operator_mappings().items()}
+        inventoried_operators = {operator_mappings.get(dataset['operator'].casefold(), dataset['operator'])
+                                for dataset in inventory_datasets(task_repository)}
+        missing_inventory_operators = sorted(
+            {str(operator) for operator in original_operators if str(operator).strip()} - inventoried_operators,
+            key=str.casefold,
+        )
         # Operator is a grouping dimension only when explicitly selected.
         # Site/cell identifiers remain scoped by their source operator when pooled.
         for field in ('enodebs', 'cells'):
@@ -987,6 +1263,7 @@ def install_network_insights_routes(core: Any) -> None:
             'options': options, 'comparison': comparison,
             'overview': overview,
             'rf_rows': overview,
+            'missing_inventory_operators': missing_inventory_operators,
             'charts': {
                 'rsrp_cdf': cdf_payload(filtered, rsrp, group_column, f'{technology_label} RSRP', 'RSRP (dBm)', colours, dash_groups=dash_groups),
                 'sinr_cdf': cdf_payload(filtered, sinr, group_column, f'{technology_label} SINR', 'SINR (dB)', colours, dash_groups=dash_groups),
@@ -1006,14 +1283,153 @@ def install_network_insights_routes(core: Any) -> None:
             'warnings': warnings,
         }
 
+    def combined_inventory_query(task_repository, connection, request):
+        datasets = inventory_datasets(task_repository)
+        query, parameters, columns = prepare_inventory_query(task_repository, connection, datasets, request.model_dump())
+        if query:
+            query = f'SELECT {", ".join(task_repository._quote_identifier(column) for column in columns)} FROM ({query}) AS inventory '
+            query += 'ORDER BY Source_Dataset_ID, __Inventory_Source_Row'
+        return query, parameters, columns
+
+    def inventory_page(connection, query, parameters, columns, page=0, operator=''):
+        if query and operator:
+            query = f'SELECT * FROM ({query}) WHERE Operator = ?'
+            parameters = [*parameters, operator]
+        total = connection.execute(f'SELECT COUNT(*) FROM ({query})', parameters).fetchone()[0] if query else 0
+        page = min(page, max(0, (total - 1) // 50))
+        rows = connection.execute(f'{query} LIMIT ? OFFSET ?', [*parameters, 50, page * 50]).fetchall() if query else []
+        return {'operator': operator, 'columns': columns, 'key_columns': list(INVENTORY_KEY_COLUMNS),
+                'rows': [list(row) for row in rows], 'total_rows': total, 'page': page, 'page_size': 50}
+
+    @app.post('/api/network-insights/inventory/tables')
+    def network_insights_inventory_tables(request: AnalysisRequest, user=Depends(insights_user)):
+        task_repository = bound_repository()
+        mappings = {str(key).casefold(): str(value) for key, value in task_repository.list_operator_mappings().items()}
+        labels = {mappings.get(row['operator'].casefold(), row['operator']): row['operator']
+                  for row in inventory_datasets(task_repository)}
+        wanted = {mappings.get(value.casefold(), value) for value in request.operators}
+        with task_repository.connection() as connection:
+            query, parameters, columns = combined_inventory_query(task_repository, connection, request)
+            tables = [{**inventory_page(connection, query, parameters, columns, operator=operator), 'operator_label': label}
+                      for operator, label in labels.items() if not wanted or operator in wanted]
+        return {'inventories': tables}
+
+    @app.post('/api/network-insights/inventory')
+    def network_insights_combined_inventory(request: AnalysisRequest, page: int = Query(0, ge=0),
+                                          operator: str = '', user=Depends(insights_user)):
+        task_repository = bound_repository()
+        with task_repository.connection() as connection:
+            query, parameters, columns = combined_inventory_query(task_repository, connection, request)
+            return inventory_page(connection, query, parameters, columns, page, operator)
+
+    @app.post('/api/network-insights/inventory/export')
+    def network_insights_combined_inventory_export(request: AnalysisRequest, operator: str = '', user=Depends(insights_user)):
+        task_repository = bound_repository()
+
+        from tempfile import NamedTemporaryFile
+
+        from fastapi.responses import FileResponse
+        from starlette.background import BackgroundTask
+
+        # SQLite connections must stay on the worker that created them. A streaming
+        # iterator may resume on another worker, leaving a partially downloaded CSV.
+        with NamedTemporaryFile(mode='w', newline='', encoding='utf-8', suffix='.csv', delete=False) as output:
+            destination = Path(output.name)
+            try:
+                with task_repository.connection() as connection:
+                    query, parameters, columns = combined_inventory_query(task_repository, connection, request)
+                    if query and operator:
+                        query = f'SELECT * FROM ({query}) WHERE Operator = ?'
+                        parameters = [*parameters, operator]
+                    writer = csv.writer(output)
+                    writer.writerow(columns)
+                    if query:
+                        cursor = connection.execute(query, parameters)
+                        while rows := cursor.fetchmany(1000):
+                            writer.writerows(tuple('' if value is None else value for value in row) for row in rows)
+            except Exception:
+                destination.unlink(missing_ok=True)
+                raise
+
+        return FileResponse(destination, media_type='text/csv', filename='site-cell-inventory.csv',
+                            background=BackgroundTask(destination.unlink, missing_ok=True))
+
+    def inventory_records(task_repository, dataset: dict[str, Any], page: int = 0) -> dict[str, Any]:
+        """Read a bounded page without discarding inventory columns or unmatched rows."""
+        columns = task_repository.list_dataset_row_columns(dataset['id'])
+        total = task_repository.dataset_row_count(dataset['id'])
+        page = min(page, max(0, (total - 1) // 50))
+        frame, total, _values = task_repository.load_dataset_preview_page(
+            dataset['id'], columns, {}, page, 50,
+        )
+        return {**dataset, 'columns': columns, 'rows': json.loads(frame.to_json(orient='values', double_precision=15)),
+                'total_rows': total, 'page': page, 'page_size': 50}
+
+    @app.get('/api/network-insights/inventory/{dataset_id}')
+    def network_insights_inventory(dataset_id: int, page: int = Query(0, ge=0),
+                                   download: bool = False, user=Depends(insights_user)):
+        task_repository = bound_repository()
+        dataset = next((row for row in inventory_datasets(task_repository) if row['id'] == dataset_id), None)
+        if dataset is None:
+            raise HTTPException(404, 'Ready Vodafone or Three inventory not found in the active workspace.')
+        if download:
+            columns = task_repository.list_dataset_row_columns(dataset_id)
+            return StreamingResponse(
+                task_repository.stream_dataset_preview_csv(dataset_id, columns, {}),
+                media_type='text/csv',
+                headers={'Content-Disposition': f'attachment; filename="site-inventory-{dataset_id}.csv"'},
+            )
+        return inventory_records(task_repository, dataset, page)
+
+    @app.get('/api/network-insights/deployment/{dataset_id}/export')
+    def network_insights_deployment_export(dataset_id: int, group: str = 'scenario', user=Depends(insights_user)):
+        if group not in DEPLOYMENT_GROUPINGS:
+            raise HTTPException(400, 'Choose a supported network deployment grouping.')
+        task_repository = bound_repository()
+        require_cluster_dataset(group, task_repository)
+        dataset = next((row for row in inventory_datasets(task_repository) if row['id'] == dataset_id), None)
+        if dataset is None:
+            raise HTTPException(404, 'Ready Vodafone or Three inventory not found in the active workspace.')
+        summary = inventory_summary(task_repository, dataset, group)
+        output = io.StringIO(newline='')
+        writer = csv.writer(output)
+        writer.writerow([DEPLOYMENT_GROUPINGS[group] if group in summary['available_groups'] else 'Inventory',
+                         'Sites', 'Cells'])
+        writer.writerows((row['group'], row['sites'], row['cells']) for row in summary['rows'])
+        return StreamingResponse(
+            iter([output.getvalue()]), media_type='text/csv',
+            headers={'Content-Disposition': f'attachment; filename="network-deployment-{dataset_id}-{group}.csv"'},
+        )
+
+    @app.get('/api/network-insights/deployment/export-all')
+    def network_insights_deployment_export_all(group: str = 'scenario', user=Depends(insights_user)):
+        if group not in DEPLOYMENT_GROUPINGS:
+            raise HTTPException(400, 'Choose a supported network deployment grouping.')
+        deployment = deployment_summary(group)
+        output = io.StringIO(newline='')
+        writer = csv.writer(output)
+        writer.writerow(['Operator', 'Source_Dataset_ID', 'Source_Dataset_Name', DEPLOYMENT_GROUPINGS[group], 'Sites', 'Cells'])
+        for inventory in deployment['inventories']:
+            writer.writerows((inventory['operator'], inventory['id'], inventory['file_name'],
+                              row['group'], row['sites'], row['cells']) for row in inventory['rows'])
+        return StreamingResponse(iter([output.getvalue()]), media_type='text/csv',
+                                 headers={'Content-Disposition': f'attachment; filename="network-deployment-all-{group}.csv"'})
+
     @app.get('/api/network-insights/deployment')
     def network_insights_deployment(group: str = 'scenario', user=Depends(insights_user)):
+        return deployment_summary(group)
+
+    def deployment_summary(group: str = 'scenario') -> dict[str, Any]:
         task_repository = bound_repository()
+        require_cluster_dataset(group, task_repository)
         results = []
         for dataset in inventory_datasets(task_repository):
+            if group == 'inventory':
+                results.append(inventory_records(task_repository, dataset))
+                continue
             # Profile revisions change after processing and supported table edits.
             key = (str(Path(task_repository.db_path).resolve()), dataset['id'],
-                   dataset['file_name'], dataset['updated_at'])
+                   dataset['file_name'], dataset['updated_at'], inventory_polygon_sources(task_repository))
             with inventory_cache_lock:
                 cached = inventory_cache.get(key)
                 if cached is None:
@@ -1029,6 +1445,75 @@ def install_network_insights_routes(core: Any) -> None:
                 summary = cached['summaries'][grouping]
             results.append({**dataset, **summary})
         return {'group': group, 'group_label': DEPLOYMENT_GROUPINGS.get(group, 'All'), 'inventories': results}
+
+    def cluster_inventory_summary() -> dict[str, Any]:
+        """Count inventory identifiers per operator, deduplicating overlapping uploads."""
+        task_repository = bound_repository()
+        frames: dict[str, list[pd.DataFrame]] = {}
+        for dataset in inventory_datasets(task_repository):
+            frames.setdefault(dataset['operator'], []).append(inventory_projection(task_repository, dataset))
+        rows = []
+        for operator, sources in sorted(frames.items()):
+            frame = pd.concat(sources, ignore_index=True)
+            totals = inventory_summary(task_repository, {}, None, frame=frame)['totals']
+            if totals:
+                rows.append({'operator': operator, **totals})
+        return {'rows': rows}
+
+    @app.get('/api/network-insights/cluster-inventories')
+    def network_insights_cluster_inventories(user=Depends(insights_user)):
+        return cluster_inventory_summary()
+
+    def write_summary(selection: dict[str, Any], export_kind: str, destination: Path) -> dict[str, Any]:
+        """Write the Summary Network Insights (PowerPoint or Word) for a saved or current selection.
+
+        An empty dataset selection analyses every ready Data, Voice and Speech CDR.
+        Returns the selection description used in the document.
+        """
+        from src.modules.cdr_reporting import _render_dashboard_payload
+        from src.modules.network_insights_export import export_network_insights_powerpoint, export_network_insights_word
+
+        task_repository = bound_repository()
+        available = ready_cdrs(task_repository)
+        request = AnalysisRequest.model_validate(selection or {})
+        if not any(request.datasets.get(kind) for kind in NETWORK_INSIGHTS_KINDS):
+            # Like the page, an analysis covers the CDRs of one NR Mode.
+            nr_mode = str((selection or {}).get('nr_mode') or 'NSA').upper()
+            request.datasets = {kind: [row['id'] for row in available if row['kind'] == kind and str(row['nr_mode']).upper() == nr_mode]
+                                for kind in NETWORK_INSIGHTS_KINDS}
+        analysis = run_analysis(request)
+        names = {row['id']: row['file_name'] for row in available}
+        description = {
+            **request.model_dump(), 'technology_label': analysis['technology_label'], 'group_label': analysis['group_label'],
+            'nr_mode': str((selection or {}).get('nr_mode') or '').upper(),
+            'dataset_names': [names[dataset_id] for kind in NETWORK_INSIGHTS_KINDS for dataset_id in request.datasets.get(kind, []) if dataset_id in names],
+        }
+        deployment = {'groupings': [deployment_summary(group) for group in DEPLOYMENT_GROUPINGS
+                                    if group != 'cluster' or cluster_grouping_available(task_repository)],
+                      'cluster_inventories': cluster_inventory_summary()}
+        render = lambda payload, width, height: _render_dashboard_payload(payload, width=width, height=height)[0]
+        writer = export_network_insights_word if export_kind == 'word' else export_network_insights_powerpoint
+        writer(destination, analysis, deployment, description, render)
+        return description
+
+    core.write_network_insights_summary = write_summary
+
+    @app.post('/api/network-insights/export/{export_kind}')
+    def network_insights_export(export_kind: str, request: AnalysisRequest, user=Depends(insights_user)):
+        from datetime import datetime
+
+        from fastapi.responses import FileResponse
+
+        if export_kind not in {'word', 'powerpoint'}:
+            raise HTTPException(404, 'Unsupported export type.')
+        suffix = 'docx' if export_kind == 'word' else 'pptx'
+        stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        destination = core.safe_join(core.settings.export_dir, f'{stamp}_summary_network_insights.{suffix}')
+        write_summary(request.model_dump(), export_kind, destination)
+        core.repository.try_add_log(user.username, f'export_network_insights_{export_kind}', json.dumps({'file': destination.name}))
+        media_type = ('application/vnd.openxmlformats-officedocument.wordprocessingml.document' if export_kind == 'word'
+                      else 'application/vnd.openxmlformats-officedocument.presentationml.presentation')
+        return FileResponse(destination, filename=f'{stamp} - Summary Network Insights.{suffix}', media_type=media_type)
 
     @app.get('/api/network-insights/spectrum')
     def network_insights_spectrum(user=Depends(insights_user)):

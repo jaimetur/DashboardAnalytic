@@ -32,6 +32,10 @@ Dashboard Analytic separates application settings, storage roots and Docker depl
 | `DASHBOARD_ANALYTIC_DASHBOARD_FRAME_CACHE_SNAPSHOTS` | Number of recently used Dashboard snapshots that keep their chart data frames in memory. Lower it on servers with little RAM. | `3` |
 | `TZ` | IANA timezone used by Docker and displayed/persisted timestamps. | `Europe/Madrid` |
 | `IGNORE_EVENT_TIME_FILTERING` | When true, ignores date and template filters based on Event_Start_Time or Event_End_Time. | `false` |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURITY` | Default SMTP server, port and encryption (`starttls`, `ssl` or `none`) for Reporting emails. Application Config → Email Delivery overrides them. | Not set; `587`; `starttls` |
+| `SMTP_USERNAME`, `SMTP_PASSWORD` | Default SMTP account. The password is used whenever no password is saved in Application Config. | Not set |
+| `SMTP_FROM`, `SMTP_FROM_NAME` | Default sender address and name of Reporting emails. | Not set; `Dashboard Analytic` |
+| `SMTP_MAX_ATTACHMENTS_MB` | Default limit for the total size of a Reporting email's attachments. | `20` |
 
 ## Application Config page
 

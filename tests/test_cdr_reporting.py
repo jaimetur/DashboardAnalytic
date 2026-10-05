@@ -261,7 +261,7 @@ def with_default_calculated_dimensions(entry: CatalogEntry) -> CatalogEntry:
 def wait_for_report_job(client, job_id: int) -> dict:
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
-        response = client.get('/api/e2e-reporting/jobs')
+        response = client.get('/api/reporting-old/jobs')
         assert response.status_code == 200
         job = next(item for item in response.json()['jobs'] if item['id'] == job_id)
         if job['status'] not in {'queued', 'processing'}:
@@ -273,7 +273,7 @@ def wait_for_report_job(client, job_id: int) -> dict:
 def wait_for_report_chart_job(client, job_id: int) -> dict:
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
-        response = client.get('/api/e2e-reporting/chart-jobs')
+        response = client.get('/api/reporting-old/chart-jobs')
         assert response.status_code == 200
         job = next(item for item in response.json()['jobs'] if item['id'] == job_id)
         if job['status'] not in {'queued', 'processing'}:
@@ -3312,7 +3312,7 @@ def test_reporting_module_is_available_to_authenticated_users(client) -> None:
     response = client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     assert response.status_code == 303
 
-    page = client.get('/reporting')
+    page = client.get('/reporting-old')
 
     assert page.status_code == 200
     assert 'NetCheck CDR Reports' in page.text
@@ -3366,14 +3366,14 @@ def test_processing_report_and_chart_jobs_can_be_stopped_then_deleted(client) ->
     )
     assert app_module.repository.get_report_run(report_id)['generate_tooltips'] == 1
     app_module.repository.update_report_job(report_id, status='processing', progress=40)
-    stopped_report = client.post(f'/reporting/jobs/{report_id}/stop')
+    stopped_report = client.post(f'/reporting-old/jobs/{report_id}/stop')
     assert stopped_report.status_code == 200
-    report = next(item for item in client.get('/api/e2e-reporting/jobs').json()['jobs'] if item['id'] == report_id)
+    report = next(item for item in client.get('/api/reporting-old/jobs').json()['jobs'] if item['id'] == report_id)
     assert report['status'] == 'stopped'
     assert report['duration_seconds'] is not None
     assert report['duration_label'].endswith('s')
     assert report['stop_url'] is None
-    assert report['retry_url'] == f'/e2e-reporting/jobs/{report_id}/retry'
+    assert report['retry_url'] == f'/reporting-old/jobs/{report_id}/retry'
     assert client.post(report['delete_url']).status_code == 200
 
     chart_id = app_module.repository.create_report_chart_job(
@@ -3383,14 +3383,14 @@ def test_processing_report_and_chart_jobs_can_be_stopped_then_deleted(client) ->
     )
     assert app_module.repository.get_report_chart_job(chart_id)['generate_tooltips'] == 0
     app_module.repository.update_report_chart_job(chart_id, status='processing', progress=40)
-    stopped_chart = client.post(f'/reporting/chart-jobs/{chart_id}/stop')
+    stopped_chart = client.post(f'/reporting-old/chart-jobs/{chart_id}/stop')
     assert stopped_chart.status_code == 200
-    chart = next(item for item in client.get('/api/e2e-reporting/chart-jobs').json()['jobs'] if item['id'] == chart_id)
+    chart = next(item for item in client.get('/api/reporting-old/chart-jobs').json()['jobs'] if item['id'] == chart_id)
     assert chart['status'] == 'stopped'
     assert chart['duration_seconds'] is not None
     assert chart['duration_label'].endswith('s')
     assert chart['stop_url'] is None
-    assert chart['retry_url'] == f'/e2e-reporting/chart-jobs/{chart_id}/retry'
+    assert chart['retry_url'] == f'/reporting-old/chart-jobs/{chart_id}/retry'
     assert client.post(chart['delete_url']).status_code == 200
 
 
@@ -3414,10 +3414,10 @@ def test_chart_set_selector_excludes_published_but_processing_job(client) -> Non
     )
     app_module.repository.update_report_chart_job(job_id, status='processing', generation=chart_set['generation'])
     selector_value = f'value="standalone:{chart_set["generation"]}"'
-    assert selector_value not in client.get('/reporting').text
+    assert selector_value not in client.get('/reporting-old').text
 
     app_module.repository.update_report_chart_job(job_id, status='ready', progress=100, finished=True)
-    assert selector_value in client.get('/reporting').text
+    assert selector_value in client.get('/reporting-old').text
 
 
 def test_persisted_chart_set_keeps_template_order_when_rendered_by_cdr_source(client) -> None:
@@ -3543,7 +3543,7 @@ def test_retrying_a_failed_chart_job_reuses_its_row(client) -> None:
     app_module.repository.update_report_chart_job(job_id, status='failed', progress=100, last_error='Synthetic failure', finished=True)
     before_ids = [row['id'] for row in app_module.repository.list_report_chart_jobs(limit=None)]
 
-    response = client.post(f'/reporting/chart-jobs/{job_id}/retry')
+    response = client.post(f'/reporting-old/chart-jobs/{job_id}/retry')
 
     assert response.status_code == 400
     assert response.json()['detail'] == 'The Chart Set job does not contain any selected CDR.'
@@ -3567,7 +3567,7 @@ def test_deleting_a_ready_chart_job_removes_its_chart_set(client) -> None:
         job_id, status='ready', progress=100, generation=chart_set['generation'], finished=True,
     )
 
-    deleted = client.post(f'/reporting/chart-jobs/{job_id}/delete')
+    deleted = client.post(f'/reporting-old/chart-jobs/{job_id}/delete')
 
     assert deleted.status_code == 200
     assert deleted.json()['generation'] == chart_set['generation']
@@ -3589,10 +3589,10 @@ def test_reporting_multivendor_requires_a_previously_mapped_selected_cdr(client)
         )
         assert response.status_code == 200
 
-    page = client.get('/reporting')
+    page = client.get('/reporting-old')
     assert page.status_code == 200
     assert 'data-vendor-mapped="false"' in page.text
-    report = client.post('/reporting/netcheck-cdr', data={
+    report = client.post('/reporting-old/netcheck-cdr', data={
         'data_dataset_id': 1, 'voice_dataset_id': 2, 'speech_dataset_id': 3,
         'technology': 'nsa', 'report_scope': 'multivendor',
     })
@@ -3611,7 +3611,7 @@ def test_netcheck_reporting_generates_template_backed_pptx(client) -> None:
         response = client.post('/datasets-analysis/upload', files={'dataset_files': (filename, BytesIO(content), media_type)})
         assert response.status_code == 200
 
-    report = client.post('/reporting/netcheck-cdr', data={
+    report = client.post('/reporting-old/netcheck-cdr', data={
         'data_dataset_id': 1,
         'voice_dataset_id': 2,
         'speech_dataset_id': 3,
@@ -3643,7 +3643,7 @@ def test_netcheck_reporting_generates_template_backed_pptx(client) -> None:
     rerun = wait_for_report_job(client, job['id'])
     assert rerun['status'] == 'ready'
     assert not stale_file.exists()
-    assert [item['id'] for item in client.get('/api/e2e-reporting/jobs').json()['jobs']] == [job['id']]
+    assert [item['id'] for item in client.get('/api/reporting-old/jobs').json()['jobs']] == [job['id']]
     deleted = client.post(job['delete_url'])
     assert deleted.status_code == 200
     assert client.get(job['download_url']).status_code == 404
@@ -3712,7 +3712,7 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
 
     monkeypatch.setattr(app_module, 'render_catalog_chart_preview', render_preview)
     monkeypatch.setattr(app_module, 'report_chart_renderer_name', lambda: 'pil')
-    response = client.post('/reporting/netcheck-cdr/charts', data={
+    response = client.post('/reporting-old/netcheck-cdr/charts', data={
         'data_dataset_id': 1, 'voice_dataset_id': 2, 'speech_dataset_id': 3,
         'technology': 'nsa', 'report_scope': 'single', 'slides_templates': 'nsa:NSA Slide Template',
     })
@@ -3728,7 +3728,7 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     assert job['date'] == payload['generated_at']
     assert payload['generation'] == datetime.strptime(payload['generated_at'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d-%H%M%S')
     assert payload['charts']
-    preview_context = client.get('/api/e2e-reporting/chart-preview/context', params={
+    preview_context = client.get('/api/reporting-old/chart-preview/context', params={
         'source': 'standalone', 'identifier': payload['generation'], 'chart_index': 0,
     })
     assert preview_context.status_code == 200
@@ -3741,7 +3741,7 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     assert context_payload['dataset_ids'] == [expected_id]
     assert context_payload['datasets_by_source']['cdr-data'] == [{'value': '1', 'label': 'NetCheck_CDR_Data.csv'}]
     assert context_payload['datasets_by_source']['cdr-voice'] == [{'value': '2', 'label': 'NetCheck_CDR_Voice.csv'}]
-    dataset_preview = client.post('/api/e2e-reporting/chart-preview/data', json={
+    dataset_preview = client.post('/api/reporting-old/chart-preview/data', json={
         'source': 'standalone', 'identifier': payload['generation'], 'chart_index': 0,
         'definition': {}, 'page': 0, 'page_size': 100, 'column_filters': {},
     })
@@ -3751,14 +3751,14 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     assert dataset_payload['filter_values'] == {}
     assert set(dataset_payload['column_metadata']) == set(dataset_payload['columns'])
     assert all({'label', 'kind', 'rule', 'pinned', 'class_name'} <= set(item) for item in dataset_payload['column_metadata'].values())
-    filter_values = client.post('/api/e2e-reporting/chart-preview/data', json={
+    filter_values = client.post('/api/reporting-old/chart-preview/data', json={
         'source': 'standalone', 'identifier': payload['generation'], 'chart_index': 0,
         'definition': {}, 'page': 0, 'page_size': 100, 'column_filters': {},
         'filter_column': dataset_payload['columns'][0],
     })
     assert filter_values.status_code == 200, filter_values.text
     assert isinstance(filter_values.json()['filter_values'], list)
-    dataset_export = client.post('/api/e2e-reporting/chart-preview/data', json={
+    dataset_export = client.post('/api/reporting-old/chart-preview/data', json={
         'source': 'standalone', 'identifier': payload['generation'], 'chart_index': 0,
         'definition': {}, 'column_filters': {}, 'download': True,
     })
@@ -3767,15 +3767,15 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     assert 'attachment; filename="filtered-chart-dataset.csv"' == dataset_export.headers['content-disposition']
     assert dataset_payload['columns'][0] in dataset_export.text.splitlines()[0]
     wrong_id = next(value for value in ('1', '2', '3') if value != expected_id)
-    invalid_dataset_type = client.post('/api/e2e-reporting/chart-preview', json={
+    invalid_dataset_type = client.post('/api/reporting-old/chart-preview', json={
         'source': 'standalone', 'identifier': payload['generation'], 'chart_index': 0,
         'definition': {'cdr_source': context_payload['cdr_source'], 'dataset_ids': [wrong_id]},
     })
     assert invalid_dataset_type.status_code == 400
     image_url = payload['charts'][0]['image_url']
-    assert re.match(r'/e2e-reporting/charts/\d{8}-\d{6}/chart-\d+\.png\?v=', image_url)
+    assert re.match(r'/reporting-old/charts/\d{8}-\d{6}/chart-\d+\.png\?v=', image_url)
     assert client.get(image_url).content == b'PNG'
-    second = client.post('/reporting/netcheck-cdr/charts', data={
+    second = client.post('/reporting-old/netcheck-cdr/charts', data={
         'data_dataset_id': 1, 'voice_dataset_id': 2, 'speech_dataset_id': 3,
         'technology': 'nsa', 'report_scope': 'single', 'slides_templates': 'nsa:NSA Slide Template',
     })
@@ -3784,12 +3784,12 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     assert second_job['status'] == 'ready'
     second_payload = client.get(second_job['open_url']).json()
     assert second_payload['generation'] != payload['generation']
-    assert client.get(f"/api/e2e-reporting/chart-sets/{payload['generation']}").status_code == 200
-    deleted = client.post(f"/reporting/chart-sets/{second_payload['generation']}/delete")
+    assert client.get(f"/api/reporting-old/chart-sets/{payload['generation']}").status_code == 200
+    deleted = client.post(f"/reporting-old/chart-sets/{second_payload['generation']}/delete")
     assert deleted.status_code == 200
     assert [item['generation'] for item in deleted.json()['chart_sets']] == [payload['generation']]
     assert client.get(image_url).content == b'PNG'
-    page = client.get('/reporting')
+    page = client.get('/reporting-old')
     assert image_url in page.text
     assert 'Operator Comparison' in page.text
     assert '(Data:1 | Voice:1 | Speech:1)' in page.text
@@ -3806,12 +3806,12 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     orphaned_directory = app_module.report_charts_directory() / '.incomplete-chart-set'
     orphaned_directory.mkdir(parents=True)
     (orphaned_directory / 'partial.png').write_bytes(b'partial')
-    cleared = client.post('/reporting/chart-sets/delete-all')
+    cleared = client.post('/reporting-old/chart-sets/delete-all')
     assert cleared.status_code == 202
     deletion_id = cleared.json()['job_id']
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
-        deletion = client.get(f'/api/e2e-reporting/bulk-deletions/{deletion_id}')
+        deletion = client.get(f'/api/reporting-old/bulk-deletions/{deletion_id}')
         assert deletion.status_code == 200
         if deletion.json()['status'] in {'ready', 'failed'}:
             break
@@ -3821,7 +3821,7 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     assert app_module.repository.get_report_chart_job(orphaned_job) is None
     assert app_module.repository.list_report_chart_jobs(limit=None) == []
     assert list(app_module.report_charts_directory().iterdir()) == []
-    assert client.get(f"/api/e2e-reporting/chart-sets/{payload['generation']}").status_code == 404
+    assert client.get(f"/api/reporting-old/chart-sets/{payload['generation']}").status_code == 404
 
 
 def test_reporting_accepts_partial_cdr_sources_and_marks_missing_chart_sources(client, monkeypatch) -> None:
@@ -3841,7 +3841,7 @@ def test_reporting_accepts_partial_cdr_sources_and_marks_missing_chart_sources(c
 
     monkeypatch.setattr(app_module, 'render_catalog_chart_preview', render_preview)
     monkeypatch.setattr(app_module, 'report_chart_renderer_name', lambda: 'pil')
-    response = client.post('/reporting/netcheck-cdr/charts', data={
+    response = client.post('/reporting-old/netcheck-cdr/charts', data={
         'data_dataset_id': 1, 'technology': 'nsa', 'report_scope': 'single',
         'slides_templates': 'nsa:NSA Slide Template',
     })
@@ -3856,7 +3856,7 @@ def test_reporting_accepts_partial_cdr_sources_and_marks_missing_chart_sources(c
     unavailable_image = client.get(payload['charts'][unavailable_index]['image_url'])
     assert unavailable_image.status_code == 200
     assert unavailable_image.content.startswith(b'\x89PNG')
-    context = client.get('/api/e2e-reporting/chart-preview/context', params={
+    context = client.get('/api/reporting-old/chart-preview/context', params={
         'source': 'standalone', 'identifier': payload['generation'], 'chart_index': unavailable_index,
     })
     assert context.status_code == 200
@@ -3885,7 +3885,7 @@ def test_chart_preview_focus_row_matches_the_editors_sorted_row(client) -> None:
     )
     app_module.repository.update_report_chart_job(job_id, status='failed', generation='20260101-000000')
 
-    context = client.get('/api/e2e-reporting/chart-preview/context', params={
+    context = client.get('/api/reporting-old/chart-preview/context', params={
         'source': 'standalone', 'identifier': '20260101-000000', 'chart_index': 0,
     })
 
@@ -3961,8 +3961,8 @@ def test_template_chart_image_preview_uses_combined_reporting_rows(client, monke
 def test_reporting_requires_at_least_one_cdr_source(client) -> None:
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     form = {'technology': 'nsa', 'report_scope': 'single', 'slides_templates': 'nsa:NSA Slide Template'}
-    report = client.post('/reporting/netcheck-cdr', data=form)
-    charts = client.post('/reporting/netcheck-cdr/charts', data=form)
+    report = client.post('/reporting-old/netcheck-cdr', data=form)
+    charts = client.post('/reporting-old/netcheck-cdr/charts', data=form)
     assert report.status_code == 400
     assert charts.status_code == 400
     assert report.json()['detail'] == 'Select at least one Data, Voice or Speech CDR.'
@@ -3987,7 +3987,7 @@ def test_partial_cdr_report_worker_receives_unavailable_frames(client, monkeypat
         Path(destination).write_bytes(b'PK')
 
     monkeypatch.setattr(app_module, 'render_cdr_report', render_report)
-    response = client.post('/reporting/netcheck-cdr', data={
+    response = client.post('/reporting-old/netcheck-cdr', data={
         'data_dataset_id': 1, 'technology': 'nsa', 'report_scope': 'single',
         'slides_templates': 'nsa:NSA Slide Template',
     })
@@ -4025,7 +4025,7 @@ def test_report_chart_generation_failures_return_json_and_are_logged(client, mon
 
     monkeypatch.setattr(app_module, 'render_catalog_chart_preview', fail_render)
     monkeypatch.setattr(app_module, 'report_chart_renderer_name', lambda: 'pil')
-    response = client.post('/reporting/netcheck-cdr/charts', data={
+    response = client.post('/reporting-old/netcheck-cdr/charts', data={
         'data_dataset_id': 1, 'voice_dataset_id': 2, 'speech_dataset_id': 3,
         'technology': 'nsa', 'report_scope': 'single', 'slides_templates': 'nsa:NSA Slide Template',
     })
@@ -4044,7 +4044,7 @@ def test_report_chart_generation_failures_return_json_and_are_logged(client, mon
     assert app_log['executed_by'] == 'system'
     assert re.match(r'^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] Chart Set job 1 failed: Slide ', app_log['summary'])
     assert app_log['summary'].endswith(': Synthetic renderer failure')
-    assert 'Synthetic renderer failure' in client.get('/reporting').text
+    assert 'Synthetic renderer failure' in client.get('/reporting-old').text
     app_logs_page = client.get('/app-logs').text
     assert 'Chart Set job 1 failed: Slide ' in app_logs_page
     assert 'Synthetic renderer failure' in app_logs_page
@@ -4067,7 +4067,7 @@ def test_report_generation_failures_show_the_error_and_are_logged(client, monkey
         raise RuntimeError('Synthetic PowerPoint failure')
 
     monkeypatch.setattr(app_module, 'render_cdr_report', fail_render)
-    response = client.post('/reporting/netcheck-cdr', data={
+    response = client.post('/reporting-old/netcheck-cdr', data={
         'data_dataset_id': 1, 'voice_dataset_id': 2, 'speech_dataset_id': 3,
         'technology': 'nsa', 'report_scope': 'single', 'slides_templates': 'nsa:NSA Slide Template',
     })
@@ -4081,7 +4081,7 @@ def test_report_generation_failures_show_the_error_and_are_logged(client, monkey
         r'^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] Report job 1 failed: Synthetic PowerPoint failure$',
         app_log['summary'],
     )
-    assert 'Synthetic PowerPoint failure' in client.get('/reporting').text
+    assert 'Synthetic PowerPoint failure' in client.get('/reporting-old').text
     assert 'Report job 1 failed: Synthetic PowerPoint failure' in client.get('/app-logs').text
 
 
@@ -4118,7 +4118,7 @@ def test_reporting_concatenates_multiple_campaign_cdrs_per_source(client, monkey
             ('technology', 'nsa'), ('report_scope', 'single'), ('slides_templates', 'nsa:NSA Slide Template'),
     ])
     response = client.post(
-        '/reporting/netcheck-cdr',
+        '/reporting-old/netcheck-cdr',
         content=payload,
         headers={'content-type': 'application/x-www-form-urlencoded'},
     )

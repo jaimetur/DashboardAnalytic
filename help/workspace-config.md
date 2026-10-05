@@ -96,7 +96,7 @@ Removing the last template reference leaves the existing column available for fu
 
 ## Report Template reference
 
-This is the canonical authoring reference for templates used by both [E2E Dashboards](e2e-dashboards.md) and [E2E Reporting](e2e-reporting.md). The common `assets/ppt-templates/Template_CDR_analysis.pptx` supplies the masters, named layouts and placeholders. Each distinct `Slide` value creates one slide; chart rows sharing that value fill its chart placeholders in row order.
+This is the canonical authoring reference for templates used by both [E2E Dashboards](e2e-dashboards.md) and [Reporting (old)](reporting-old.md). The common `assets/ppt-templates/Template_CDR_analysis.pptx` supplies the masters, named layouts and placeholders. Each distinct `Slide` value creates one slide; chart rows sharing that value fill its chart placeholders in row order.
 
 ### Template columns
 
