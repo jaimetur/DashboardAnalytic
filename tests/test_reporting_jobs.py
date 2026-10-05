@@ -391,3 +391,10 @@ def test_reporting_options_list_cdr_analysis_metrics_per_cdr_type(client):
     assert set(options['cdr_metrics']) == {'data', 'voice', 'speech'}
     assert options['cdr_kinds'] == {'data': 'CDR Data', 'voice': 'CDR Voice', 'speech': 'CDR Speech'}
     assert options['cdr_aggregations']['all'] == 'Auto' and options['cdr_cdf_groupings']['all'] == 'Single CDF'
+
+
+def test_network_insights_grouping_keeps_operator_unless_vendor():
+    entries = lambda group: report_tasks.normalize_definition(
+        {'network_insights': [{'enabled': True, 'formats': ['powerpoint'], 'selection': {'group': group}}]})['network_insights']
+    assert entries(['campaign'])[0]['selection']['group'] == ['operator', 'campaign']
+    assert entries(['vendor', 'campaign'])[0]['selection']['group'] == ['vendor', 'campaign']

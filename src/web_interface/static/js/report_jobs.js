@@ -554,6 +554,18 @@
       row.append(box, node('span', text));
       return row;
     }));
+    // As in Network Insights, Operator stays checked unless Vendor groups the samples instead.
+    const groupBox = (value) => grouping.querySelector(`input[value="${value}"]`);
+    const enforceOperator = () => {
+      const operator = groupBox('operator');
+      if (!operator) return;
+      const required = !groupBox('vendor')?.checked;
+      operator.disabled = required;
+      operator.title = required ? 'Operator is required unless Vendor is selected.' : '';
+      if (required) operator.checked = true;
+    };
+    grouping.addEventListener('change', enforceOperator);
+    enforceOperator();
     const pickers = NETWORK_FILTERS.map(([key, text]) => [key, multiPicker(text, options.values[text] || [], selection[key] || [],
       key === 'cities' ? {preset: mainCitiesPreset()} : {})]);
     const filters = node('div', undefined, 'rj-filters rj-filters-one-row');

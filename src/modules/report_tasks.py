@@ -162,7 +162,7 @@ def _network_entry(entry: dict[str, Any]) -> dict[str, Any]:
             'nr_mode': 'SA' if str(selection.get('nr_mode') or '').upper() == 'SA' else 'NSA',
             'datasets': _datasets_by_kind(selection.get('datasets')),
             'technology': selection.get('technology') if selection.get('technology') in {'lte', 'nr', 'lte_nr'} else 'lte',
-            'group': _strings(selection.get('group')) or ['operator', 'campaign'],
+            'group': _network_groups(selection.get('group')),
             **{field: _strings(selection.get(field)) for field in NETWORK_FILTER_FIELDS},
             **_network_thresholds(selection),
             'grid_metres': float(selection.get('grid_metres', 250) or 250),
@@ -227,6 +227,12 @@ CDR_ANALYSIS_KINDS = {'data': 'CDR Data', 'voice': 'CDR Voice', 'speech': 'CDR S
 def _cdr_analysis_metrics(value: Any) -> dict[str, list[str]]:
     value = value if isinstance(value, dict) else {}
     return {kind: metrics for kind in CDR_ANALYSIS_KINDS if (metrics := _strings(value.get(kind)))}
+
+
+def _network_groups(value: Any) -> list[str]:
+    """Network Insights grouping: Operator is always included unless Vendor groups the samples."""
+    groups = _strings(value) or ['operator', 'campaign']
+    return groups if 'operator' in groups or 'vendor' in groups else ['operator', *groups]
 
 
 def _choice(value: Any, choices: dict[str, str], default: str) -> str:
