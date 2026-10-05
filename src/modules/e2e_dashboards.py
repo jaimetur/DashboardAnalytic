@@ -2353,7 +2353,7 @@ def install_dashboard_routes(core):
             raise HTTPException(409, f'An {target} Dashboard with this name already exists.')
 
     @app.put('/api/e2e-dashboards/{dashboard_id}')
-    def save_dashboard(dashboard_id: str, definition: DashboardDefinition, user=Depends(dashboard_user)):
+    def save_dashboard(dashboard_id: str, definition: DashboardDefinition, user=Depends(dashboard_editor_user)):
         workspace = workspace_key()
         with lock:
             task_repository = bound_repository()
@@ -2371,7 +2371,7 @@ def install_dashboard_routes(core):
         return {'id': dashboard_id, 'definition': saved_definition}
 
     @app.patch('/api/e2e-dashboards/{dashboard_id}/name')
-    def rename_dashboard(dashboard_id: str, payload: DashboardName, user=Depends(dashboard_user)):
+    def rename_dashboard(dashboard_id: str, payload: DashboardName, user=Depends(dashboard_editor_user)):
         name = payload.name.strip()
         if not name:
             raise HTTPException(400, 'Enter a Dashboard name.')
@@ -2388,7 +2388,7 @@ def install_dashboard_routes(core):
 
     @app.patch('/api/e2e-dashboards/{dashboard_id}/template')
     def change_dashboard_template(
-        dashboard_id: str, payload: DashboardTemplateSelection, user=Depends(dashboard_user),
+        dashboard_id: str, payload: DashboardTemplateSelection, user=Depends(dashboard_editor_user),
     ):
         """Change NR Mode and template while retaining the saved filters.
 
@@ -2428,7 +2428,7 @@ def install_dashboard_routes(core):
         return {'id': dashboard_id, 'definition': saved_definition, 'invalidated': True}
 
     @app.delete('/api/e2e-dashboards/{dashboard_id}')
-    def delete_dashboard(dashboard_id: str, user=Depends(dashboard_user)):
+    def delete_dashboard(dashboard_id: str, user=Depends(dashboard_editor_user)):
         with lock:
             task_repository = bound_repository()
             dashboards = read_dashboards(task_repository)
@@ -2440,7 +2440,7 @@ def install_dashboard_routes(core):
         return {'deleted': True}
 
     @app.patch('/api/e2e-dashboards/{dashboard_id}/comments')
-    def save_dashboard_comments(dashboard_id: str, payload: DashboardComments, user=Depends(dashboard_user)):
+    def save_dashboard_comments(dashboard_id: str, payload: DashboardComments, user=Depends(dashboard_editor_user)):
         with lock:
             task_repository = bound_repository()
             dashboards = read_dashboards(task_repository)
@@ -3073,12 +3073,17 @@ def install_dashboard_routes(core):
             # cache payload is ready.
             if callable(progress):
                 progress(78, 'Caching filtered row counts and filter options')
-            cursor = connection.execute(
+            # Another process (for example a Reporting worker) may have cached
+            # the same selection meanwhile; keep a single row per cache key.
+            connection.execute(
                 'INSERT INTO dashboard_filter_selections '
-                '(cache_key, options_json, row_counts_json, universe_row_counts_json) VALUES (?, ?, ?, ?)',
+                '(cache_key, options_json, row_counts_json, universe_row_counts_json) VALUES (?, ?, ?, ?) '
+                'ON CONFLICT(cache_key) DO UPDATE SET options_json = excluded.options_json, '
+                'row_counts_json = excluded.row_counts_json, universe_row_counts_json = excluded.universe_row_counts_json',
                 (cache_key, json.dumps(options), json.dumps(row_counts), json.dumps(universe_row_counts)),
             )
-            selection_id = int(cursor.lastrowid)
+            selection_id = int(connection.execute(
+                'SELECT id FROM dashboard_filter_selections WHERE cache_key = ?', (cache_key,)).fetchone()['id'])
             stale = connection.execute(
                 'SELECT id FROM dashboard_filter_selections ORDER BY last_accessed_at DESC, id DESC LIMIT -1 OFFSET ?',
                 (DASHBOARD_SELECTION_CACHE_LIMIT,),

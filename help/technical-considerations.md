@@ -155,24 +155,23 @@ VFUK mappings materialise `GCID` as:
 - 4G: `eNodeB ID × 256 + Local Cell ID`
 - 5G: `gNodeB ID × 4096 + Local Cell ID`
 
-Resolution rules:
-
-- Same first/last vendor → Vodafone plus that vendor.
-- Different vendors → Mixed Vendor.
-- Ericsson/null and other unresolved combinations follow the supplied Vodafone business rule and may resolve to Mixed Vendor or Other Vendor.
-
 ### Three mapping
 
 3UK mappings use `Cid__ECI` or `CId___ECI` as the materialised `GCID`.
 
-- Same first/last vendor → Three plus that vendor.
-- Different or conflicting vendors → Mixed Vendor.
+### Resolution rules
+
+Vodafone UK (`Vodafone_`) and 3UK (`3_`) resolve the first and last cell with the same rule:
+
+- Same first/last vendor → `<Operator>_<Vendor>`.
+- Ericsson at either end and a different or missing vendor at the other → `<Operator>_Ericsson_Mixed`.
+- Any other different or missing combination → `<Operator>_Non-Ericsson_Mixed`.
 
 O2 and EE remain operator comparison values because this workflow has no corresponding multivendor mapping source for them.
 
 ### Remapping
 
-Use **Clear Vendors** before applying a newer mapping. Mapping and clearing are background operations and can be applied to several CDRs.
+Map CDRs again to apply a newer mapping; the new result replaces the previous one without a prior Clear. Mapping and clearing are background operations and can be applied to several CDRs.
 
 For Vendor Comparison, the renderer also appends this effective filter without altering the stored template:
 

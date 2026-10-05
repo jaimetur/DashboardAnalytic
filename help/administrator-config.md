@@ -23,7 +23,7 @@ Administrator Config centralises user, portability, database and dataset adminis
 
 | Role | Available administration |
 | --- | --- |
-| `user-viewer` | use permitted workspace features and App Logs; cannot open Application Config or Workspace Config. |
+| `user-viewer` | Explore the permitted workspace features, datasets and App Logs, and generate jobs (Dashboard PPTs with any filters, Scoring calculations, Network Insights analyses and exports, queries and reports). Cannot change the workspace: no uploading, deleting, reprocessing, stopping, mapping or clearing datasets, editing NR Modes, recreating combined tables, saving, renaming or deleting Dashboards, saved queries or Scoring jobs, and no access to Application Config or Workspace Config. |
 | `user-editor` | edit Application Config and the active workspace's Workspace Config panels; cannot use user-management controls. |
 | `admin` | manage users within policy, edit Application Config and Workspace Config, manage datasets, and export/import/transfer content for accessible workspaces. |
 | `super-admin` | create or modify super-admin accounts, assign workspace access, edit Application Config and Workspace Config, export Full Environments, and approve incoming server transfers. |
@@ -52,7 +52,7 @@ Only a super-admin can change workspace access. Leave a password field empty whe
 
 ## Features Activation
 
-**Features Activation**, visible to super-admins, lists the main modules in the order of the main tabs: Workspace, Datasets Analysis, Network Insights, E2E Dashboards, Scoring & GAP Analysis, Non-Qualified Calls, Reporting, Reporting (old) and Builders.
+**Features Activation**, visible to admins and super-admins, lists the main modules in the order of the main tabs: Workspace, Datasets Analysis, Network Insights, E2E Dashboards, Scoring & GAP Analysis, Non-Qualified Calls, Reporting, Reporting (old) and Builders.
 
 Each feature has three settings:
 
@@ -67,6 +67,9 @@ An account matching both lists loses the feature: Forbidden always wins. For exa
 A feature that is not active for a user disappears from the main tabs and the Modules menu, and its pages and API answer 403. Workspace switching, dataset uploads and processing remain available everywhere. By default every module is active for all users except Non-Qualified Calls (under construction, Nobody), Reporting (Nobody, allowed for super-admins) and Reporting (old) (Nobody, allowed for super-admins and EJAITUR). The settings are stored in the application database.
 
 Reporting Jobs can only include artifacts of the modules active for their author; see [Reporting](reporting.md).
+
+> [!IMPORTANT]
+> **Lower roles never remove features from higher roles.** An admin can grant any feature to super-admins, but cannot remove one from the super-admin role or from a super-admin account — directly, through a group or by setting the default to Nobody. Such a save is rejected and names the features it would remove. The Forbidden lists of admins do not offer super-admin roles or accounts, and Forbidden entries for super-admins set by a super-admin are kept when an admin saves.
 
 ## Import / Export / Transfer
 

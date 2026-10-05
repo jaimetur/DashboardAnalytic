@@ -1,7 +1,7 @@
 """Reporting: scheduled report jobs that collect artifacts and email them.
 
-A Reporting Job (``report_tasks``) selects artifacts — Summary Dataset Analysis,
-Summary Network Insights, Dashboard PPTs and Scoring PPTs — plus optional email
+A Reporting Job (``report_tasks``) selects artifacts — Dataset Analysis,
+Network Insights, Dashboard PPTs and Scoring PPTs — plus optional email
 recipients and a schedule. Each execution (``report_task_runs``) writes its
 artifacts to its own folder and, when email is enabled, sends them as attachments
 with a body that describes every artifact and its filters.
@@ -40,7 +40,7 @@ DASHBOARD_JOB_TIMEOUT_SECONDS = 3 * 60 * 60
 SCHEDULER_INTERVAL_SECONDS = 30
 INTERRUPTED_RUN_MESSAGE = 'The run was interrupted by an application restart.'
 MODULE_LABELS = {
-    'dataset_analysis': 'Summary Dataset Analysis', 'network_insights': 'Summary Network Insights',
+    'dataset_analysis': 'Dataset Analysis', 'network_insights': 'Network Insights',
     'dashboards': 'Dashboards', 'scoring': 'Scoring',
 }
 # The feature a user needs to include each kind of artifact in a Reporting Job.
@@ -124,6 +124,37 @@ def _formats(values: Any) -> list[str]:
     return selected or ['powerpoint']
 
 
+def _network_entries(value: Any) -> list[dict[str, Any]]:
+    """Network Insights entries; jobs saved with a single selection keep it as one entry."""
+    if isinstance(value, dict):
+        return [value] if value.get('enabled') else []
+    return [entry for entry in value or [] if isinstance(entry, dict)]
+
+
+def _network_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    selection = entry.get('selection') if isinstance(entry.get('selection'), dict) else {}
+    return {
+        'label': str(entry.get('label') or '').strip()[:120],
+        'formats': _formats(entry.get('formats')),
+        'selection': {
+            'nr_mode': 'SA' if str(selection.get('nr_mode') or '').upper() == 'SA' else 'NSA',
+            'datasets': _datasets_by_kind(selection.get('datasets')),
+            'technology': selection.get('technology') if selection.get('technology') in {'lte', 'nr', 'lte_nr'} else 'lte',
+            'group': _strings(selection.get('group')) or ['operator', 'campaign'],
+            **{field: _strings(selection.get(field)) for field in NETWORK_FILTER_FIELDS},
+            **_network_thresholds(selection),
+            'grid_metres': float(selection.get('grid_metres', 250) or 250),
+        },
+    }
+
+
+def network_entry_name(entry: dict[str, Any]) -> str:
+    """Name of a Network Insights entry: its label, or NR Mode and technology."""
+    selection = entry.get('selection') or {}
+    technology = {'lte': 'LTE', 'nr': 'NR', 'lte_nr': 'LTE+NR'}.get(selection.get('technology'), 'LTE')
+    return entry.get('label') or f"{selection.get('nr_mode') or 'NSA'} {technology}"
+
+
 def _network_thresholds(selection: dict[str, Any]) -> dict[str, float]:
     """LTE and NR thresholds of a Network Insights selection.
 
@@ -172,8 +203,6 @@ def normalize_definition(raw: Any) -> dict[str, Any]:
     """Validate a Reporting Job artifact selection; raises ValueError when nothing is selected."""
     raw = raw if isinstance(raw, dict) else {}
     dataset_analysis = raw.get('dataset_analysis') if isinstance(raw.get('dataset_analysis'), dict) else {}
-    network = raw.get('network_insights') if isinstance(raw.get('network_insights'), dict) else {}
-    network_selection = network.get('selection') if isinstance(network.get('selection'), dict) else {}
     definition: dict[str, Any] = {
         'dataset_analysis': {
             'enabled': bool(dataset_analysis.get('enabled')),
@@ -181,19 +210,8 @@ def normalize_definition(raw: Any) -> dict[str, Any]:
             # An empty list selects every ready CDR dataset at run time.
             'dataset_ids': _ids(dataset_analysis.get('dataset_ids')),
         },
-        'network_insights': {
-            'enabled': bool(network.get('enabled')),
-            'formats': _formats(network.get('formats')),
-            'selection': {
-                'nr_mode': 'SA' if str(network_selection.get('nr_mode') or '').upper() == 'SA' else 'NSA',
-                'datasets': _datasets_by_kind(network_selection.get('datasets')),
-                'technology': network_selection.get('technology') if network_selection.get('technology') in {'lte', 'nr', 'lte_nr'} else 'lte',
-                'group': _strings(network_selection.get('group')) or ['operator', 'campaign'],
-                **{field: _strings(network_selection.get(field)) for field in NETWORK_FILTER_FIELDS},
-                **_network_thresholds(network_selection),
-                'grid_metres': float(network_selection.get('grid_metres', 250) or 250),
-            },
-        },
+        # One Network Insights per entry, each with its own selection.
+        'network_insights': [_network_entry(entry) for entry in _network_entries(raw.get('network_insights'))],
         'dashboards': [],
         'scoring': [],
         # Artifacts of modules registered in ARTIFACT_PROVIDERS.
@@ -215,6 +233,8 @@ def normalize_definition(raw: Any) -> dict[str, Any]:
             'scope': entry.get('scope') if entry.get('scope') in {'single', 'multivendor'} else 'single',
             'vendor_comparison': entry.get('vendor_comparison') if entry.get('vendor_comparison') in {'operator_vendor', 'vendor_only'} else 'operator_vendor',
             'datasets': _datasets_by_kind(entry.get('datasets')),
+            # Every ready Data, Voice and Speech CDR of the Dashboard's NR Mode at each run.
+            'all_datasets': bool(entry.get('all_datasets')),
             'date_from': _date_text(entry.get('date_from')), 'date_to': _date_text(entry.get('date_to')),
             'filters': {str(field): _strings(values) for field, values in (entry.get('filters') or {}).items()
                         if str(field).strip() and _strings(values)} if isinstance(entry.get('filters'), dict) else {},
@@ -236,7 +256,7 @@ def normalize_definition(raw: Any) -> dict[str, Any]:
             'scoring_profile_id': str(entry.get('scoring_profile_id') or '').strip(),
             'baseline_operator': str(entry.get('baseline_operator') or 'EE').strip() or 'EE',
         })
-    if not (definition['dataset_analysis']['enabled'] or definition['network_insights']['enabled']
+    if not (definition['dataset_analysis']['enabled'] or definition['network_insights']
             or definition['dashboards'] or definition['scoring'] or definition['modules']):
         raise ValueError('Select at least one artifact for the Reporting Job.')
     return definition
@@ -300,10 +320,9 @@ def next_run_after(schedule: dict[str, Any], after: datetime) -> datetime | None
 def used_modules(definition: dict[str, Any]) -> list[tuple[str, str, str]]:
     """(module, label, required feature) for every kind of artifact a definition includes."""
     used = []
-    for module in ('dataset_analysis', 'network_insights'):
-        if (definition.get(module) or {}).get('enabled'):
-            used.append((module, MODULE_LABELS[module], MODULE_FEATURES[module]))
-    for module in ('dashboards', 'scoring'):
+    if (definition.get('dataset_analysis') or {}).get('enabled'):
+        used.append(('dataset_analysis', MODULE_LABELS['dataset_analysis'], MODULE_FEATURES['dataset_analysis']))
+    for module in ('network_insights', 'dashboards', 'scoring'):
         if definition.get(module):
             used.append((module, MODULE_LABELS[module], MODULE_FEATURES[module]))
     for key in definition.get('modules') or {}:
@@ -328,10 +347,11 @@ def recurrence_label(schedule: dict[str, Any]) -> str:
 
 def artifact_labels(definition: dict[str, Any], dashboard_names: dict[str, str] | None = None) -> list[str]:
     labels = []
-    for key in ('dataset_analysis', 'network_insights'):
-        section = definition.get(key) or {}
-        if section.get('enabled'):
-            labels.append(f"{MODULE_LABELS[key]} ({'/'.join(FORMAT_LABELS[value] for value in section.get('formats') or [])})")
+    section = definition.get('dataset_analysis') or {}
+    if section.get('enabled'):
+        labels.append(f"{MODULE_LABELS['dataset_analysis']} ({'/'.join(FORMAT_LABELS[value] for value in section.get('formats') or [])})")
+    for entry in definition.get('network_insights') or []:
+        labels.append(f"{MODULE_LABELS['network_insights']} · {network_entry_name(entry)} ({'/'.join(FORMAT_LABELS[value] for value in entry.get('formats') or [])})")
     dashboards = definition.get('dashboards') or []
     if dashboards:
         names = ', '.join(entry.get('label') or (dashboard_names or {}).get(entry.get('dashboard_id', ''), entry.get('dashboard_id', '')) for entry in dashboards)
@@ -536,7 +556,8 @@ def fail_interrupted_runs(task_repository: Any, active_run_ids: set[int]) -> Non
 # ---------------------------------------------------------------------------
 def _definition_dataset_ids(definition: dict[str, Any]) -> set[int]:
     ids = set(definition.get('dataset_analysis', {}).get('dataset_ids') or [])
-    ids.update(value for values in (definition.get('network_insights', {}).get('selection', {}).get('datasets') or {}).values() for value in values)
+    for entry in definition.get('network_insights') or []:
+        ids.update(value for values in ((entry.get('selection') or {}).get('datasets') or {}).values() for value in values)
     for entry in definition.get('scoring') or []:
         ids.update(entry.get('dataset_ids') or [])
     return {int(value) for value in ids}
@@ -548,9 +569,11 @@ def _remap_dataset_ids(definition: dict[str, Any], mapping: dict[int, int]) -> d
     definition = json.loads(json.dumps(definition))
     if definition.get('dataset_analysis', {}).get('dataset_ids'):
         definition['dataset_analysis']['dataset_ids'] = remap(definition['dataset_analysis']['dataset_ids'])
-    selection = definition.get('network_insights', {}).get('selection') or {}
-    if selection.get('datasets'):
-        selection['datasets'] = {kind: remap(values) for kind, values in selection['datasets'].items() if remap(values)}
+    definition['network_insights'] = _network_entries(definition.get('network_insights'))
+    for entry in definition['network_insights']:
+        selection = entry.get('selection') or {}
+        if selection.get('datasets'):
+            selection['datasets'] = {kind: remap(values) for kind, values in selection['datasets'].items() if remap(values)}
     for entry in definition.get('scoring') or []:
         if entry.get('dataset_ids'):
             entry['dataset_ids'] = remap(entry['dataset_ids'])
@@ -657,7 +680,10 @@ def install_report_task_routes(core: Any) -> None:
 
     app = core.app
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='reporting-jobs')
-    active_runs: set[int] = set()
+    # Runs of workspaces other than the active one each use their own worker process.
+    worker_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix='reporting-workers')
+    # (workspace database, run ID): run IDs are only unique within a workspace.
+    active_runs: set[tuple[str, int]] = set()
     active_lock = Lock()
     recovered_databases: set[str] = set()
 
@@ -699,8 +725,8 @@ def install_report_task_routes(core: Any) -> None:
         artifacts = []
         for export_kind in section['formats']:
             suffix = 'docx' if export_kind == 'word' else 'pptx'
-            title = f"Summary Dataset Analysis ({FORMAT_LABELS[export_kind]})"
-            destination = folder / f'{stamp} - Summary Dataset Analysis.{suffix}'
+            title = f"Dataset Analysis ({FORMAT_LABELS[export_kind]})"
+            destination = folder / f'{stamp} - Dataset Analysis.{suffix}'
             try:
                 _path, reports, errors = core.write_dataset_summary(section['dataset_ids'], export_kind, destination, username)
                 details = [f"Datasets ({len(reports)}): {', '.join(report['dataset_name'] for report in reports)}",
@@ -710,14 +736,15 @@ def install_report_task_routes(core: Any) -> None:
                 artifacts.append(failed_artifact('dataset_analysis', title, exc))
         return artifacts
 
-    def generate_network_insights(section, folder, stamp) -> list[dict[str, Any]]:
+    def generate_network_insights(section, folder, stamp, index=1) -> list[dict[str, Any]]:
         from src.modules.network_insights_export import summary_selection_lines
 
         artifacts = []
+        name = network_entry_name(section)
         for export_kind in section['formats']:
             suffix = 'docx' if export_kind == 'word' else 'pptx'
-            title = f"Summary Network Insights ({FORMAT_LABELS[export_kind]})"
-            destination = folder / f'{stamp} - Summary Network Insights.{suffix}'
+            title = f"Network Insights · {name} ({FORMAT_LABELS[export_kind]})"
+            destination = folder / safe_file_name(f"{stamp} - Network Insights {index} - {name}.{suffix}")
             try:
                 description = core.write_network_insights_summary(section['selection'], export_kind, destination)
                 artifacts.append(ready_artifact('network_insights', title, destination, summary_selection_lines(description)))
@@ -750,9 +777,19 @@ def install_report_task_routes(core: Any) -> None:
         lines.extend(str(item) for item in serialized.get('filters') or [])
         return lines
 
-    def dashboard_definition(stored: dict[str, Any], entry: dict[str, Any]) -> dict[str, Any]:
+    def dashboard_definition(stored: dict[str, Any], entry: dict[str, Any], task_repository=None) -> dict[str, Any]:
         """The saved Dashboard with the artifact's Scope, CDRs, dates and filters."""
         definition = dict(stored)
+        if entry.get('all_datasets') and task_repository is not None:
+            nr_mode = 'SA' if str(stored.get('technology') or 'nsa').upper() == 'SA' else 'NSA'
+            entry = {**entry, 'datasets': {
+                kind: ids for kind in ('data', 'voice', 'speech')
+                if (ids := sorted((int(row['id']) for row in task_repository.list_datasets()
+                                   if row['status'] == 'ready' and str(row['dataset_kind']) == kind
+                                   and core.dataset_nr_mode(row['dataset_kind'], row['nr_mode'], row['file_name']) == nr_mode), reverse=True))
+            }}
+            if not entry['datasets']:
+                raise RuntimeError(f'There are no ready {nr_mode} CDRs.')
         definition.update({
             'scope': entry['scope'], 'vendor_comparison': entry['vendor_comparison'],
             'date_from': entry.get('date_from') or 'Oldest', 'date_to': entry.get('date_to') or 'Newest',
@@ -770,7 +807,7 @@ def install_report_task_routes(core: Any) -> None:
             if not isinstance(stored, dict):
                 raise RuntimeError('The Dashboard no longer exists.')
             update_run(task_repository, run_id, message=f'Generating {title}')
-            job_id = tools.queue_export(entry['dashboard_id'], user, dashboard_definition(stored, entry))
+            job_id = tools.queue_export(entry['dashboard_id'], user, dashboard_definition(stored, entry, task_repository))
             row = wait_for_dashboard_job(task_repository, job_id, run_id)
             source = Path(str(row['output_path']))
             # Dashboard PPT names already start with their own generation time.
@@ -860,13 +897,13 @@ def install_report_task_routes(core: Any) -> None:
                 if not allowed[module]:
                     steps.append((label, lambda module=module, label=label: [failed_artifact(module, label, f'{task["created_by"]} no longer has access to {label}.')]))
             definition = {**definition,
-                          **{module: ({'enabled': False} if module in {'dataset_analysis', 'network_insights'} else [])
+                          **{module: ({'enabled': False} if module == 'dataset_analysis' else [])
                              for module, permitted in allowed.items() if not permitted and module in MODULE_FEATURES},
                           'modules': {key: value for key, value in (definition.get('modules') or {}).items() if allowed.get(key)}}
             if definition.get('dataset_analysis', {}).get('enabled'):
-                steps.append(('Summary Dataset Analysis', lambda: generate_dataset_analysis(definition['dataset_analysis'], folder, stamp, user.username, names)))
-            if definition.get('network_insights', {}).get('enabled'):
-                steps.append(('Summary Network Insights', lambda: generate_network_insights(definition['network_insights'], folder, stamp)))
+                steps.append(('Dataset Analysis', lambda: generate_dataset_analysis(definition['dataset_analysis'], folder, stamp, user.username, names)))
+            for index, entry in enumerate(definition.get('network_insights') or [], start=1):
+                steps.append(('Network Insights', lambda entry=entry, index=index: generate_network_insights(entry, folder, stamp, index)))
             for entry in definition.get('dashboards') or []:
                 steps.append(('Dashboard', lambda entry=entry: [generate_dashboard(entry, task_repository, folder, stamp, user, run_id)]))
             for entry in definition.get('scoring') or []:
@@ -919,29 +956,62 @@ def install_report_task_routes(core: Any) -> None:
                        error=str(exc), finished_at=now_local().isoformat())
         finally:
             with active_lock:
-                active_runs.discard(run_id)
+                active_runs.discard((str(Path(database_path).resolve()), run_id))
 
-    def start_run(task_repository, task: dict[str, Any], trigger: str, username: str) -> int:
+    def run_in_worker(workspace_id: str, database: str, run_id: int) -> None:
+        """Run a job of a workspace that is not open in this process, without opening it for users."""
+        import os
+        import subprocess
+        import sys
+
+        try:
+            command = [sys.executable, '-m', 'src.report_worker', '--workspace-id', workspace_id, '--run-id', str(run_id),
+                       '--parent-pid', str(os.getpid()), '--global-db', str(core.repository.global_db_path),
+                       '--workspace-registry-db', str(core.workspace_registry.registry_path)]
+            exit_code = subprocess.run(command, cwd=core.PROJECT_ROOT, check=False).returncode
+            task_repository = core.Repository(Path(database), global_db_path=core.repository.global_db_path,
+                                              workspace_registry_db_path=core.workspace_registry.registry_path)
+            run = get_run(task_repository, run_id)
+            if run and run['status'] in {'queued', 'running'}:
+                update_run(task_repository, run_id, status='failed', message='The run failed', progress=100,
+                           error=f'The Reporting worker stopped unexpectedly (exit code {exit_code}).',
+                           finished_at=now_local().isoformat())
+        finally:
+            with active_lock:
+                active_runs.discard((database, run_id))
+
+    def start_run(task_repository, task: dict[str, Any], trigger: str, username: str, workspace_id: str | None = None) -> int:
         run_id = create_run(task_repository, task, trigger, username)
+        database = str(Path(task_repository.db_path).resolve())
         with active_lock:
-            active_runs.add(run_id)
-        executor.submit(execute_run, str(Path(task_repository.db_path).resolve()), run_id)
+            active_runs.add((database, run_id))
+        active = core.active_workspace
+        if workspace_id and not (active and str(Path(active.database_path).resolve()) == database):
+            worker_executor.submit(run_in_worker, workspace_id, database, run_id)
+        else:
+            executor.submit(execute_run, database, run_id)
         return run_id
 
     def run_due_tasks(now: datetime | None = None) -> list[int]:
-        """Start every due job of the active workspace; returns the new run IDs."""
-        if not core.active_workspace:
-            return []
-        task_repository = core.Repository(core.active_workspace.database_path, global_db_path=core.repository.global_db_path,
-                                          workspace_registry_db_path=core.workspace_registry.registry_path)
-        database = str(Path(task_repository.db_path).resolve())
-        if database not in recovered_databases:
-            with active_lock:
-                running = set(active_runs)
-            fail_interrupted_runs(task_repository, running)
-            recovered_databases.add(database)
-        return [start_run(task_repository, task, 'schedule', task['created_by'])
-                for task in claim_due_tasks(task_repository, now or now_local())]
+        """Start every due job of every workspace, open or not; returns the new run IDs."""
+        started = []
+        workspaces = list(core.workspace_registry.list())
+        if core.active_workspace and all(item.id != core.active_workspace.id for item in workspaces):
+            workspaces.append(core.active_workspace)
+        for workspace in workspaces:
+            if getattr(workspace, 'status', 'ready') not in {'ready', '', None} or not Path(workspace.database_path).is_file():
+                continue
+            task_repository = core.Repository(workspace.database_path, global_db_path=core.repository.global_db_path,
+                                              workspace_registry_db_path=core.workspace_registry.registry_path)
+            database = str(Path(task_repository.db_path).resolve())
+            if database not in recovered_databases:
+                with active_lock:
+                    running = {run_id for run_database, run_id in active_runs if run_database == database}
+                fail_interrupted_runs(task_repository, running)
+                recovered_databases.add(database)
+            started += [start_run(task_repository, task, 'schedule', task['created_by'], workspace.id)
+                        for task in claim_due_tasks(task_repository, now or now_local())]
+        return started
 
     def scheduler_loop(stop_event: Event) -> None:
         while not stop_event.wait(SCHEDULER_INTERVAL_SECONDS):
@@ -953,6 +1023,7 @@ def install_report_task_routes(core: Any) -> None:
     core.register_report_artifact_provider = register_report_artifact_provider
     core.report_task_scheduler_loop = scheduler_loop
     core.run_due_report_tasks = run_due_tasks
+    core.execute_report_run = execute_run
 
     # -- options ------------------------------------------------------------
     def reporting_options(task_repository, user) -> dict[str, Any]:

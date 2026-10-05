@@ -60,7 +60,7 @@ Choose **Clusters — Geospatial** for cluster boundary files. It accepts the sa
 
 Cluster files must contain non-empty, valid Polygon or MultiPolygon geometries with a coordinate reference system and non-blank names in `Cluster`, `Cluster_ID`, `Cluster_Name`, `ClusterName` or `Name`. Validation registers the dataset as Processed, with no CDR NR Mode or KPI analysis. Preview exposes its validation metadata; the original polygon file remains in the workspace input directory. Clusters appear in the Dataset Type filter and their metadata table is available in Database Management.
 
-Cluster polygons are the required input shown in **Network Insights → Cluster Sites Density**. Importing them does not yet calculate site density or overwrite CDR Region/Cluster values. They are preserved by workspace duplication, export/import, transfer and backup/restore when workspace data and input files are included. Database-only backups retain registration metadata but require the original input files to recover the polygons.
+Cluster polygons are the required input shown in **Network Insights → Cluster Sites Density**. Importing them does not yet calculate site density. Like Region Mapping, they can be applied to CDRs: the **Cluster mapping** selector beside each CDR when importing (the newest ready Clusters dataset is proposed) and the **Cluster Mapping** field of the Map dialog (shown disabled, with a note, until the workspace has a ready Clusters dataset; Region Mapping behaves the same way) fill the CDR `Cluster` column with the name of the polygon containing each sample. Existing non-empty `Cluster` values from the source CDR are kept, and samples without coordinates or outside every polygon stay empty. They are preserved by workspace duplication, export/import, transfer and backup/restore when workspace data and input files are included. Database-only backups retain registration metadata but require the original input files to recover the polygons.
 
 ### NR Mode
 
@@ -179,10 +179,13 @@ The Datasets panel also lists `CDR-Data (combined)`, `CDR-Voice (combined)` and 
 
 Recreate runs in the background and reports progress through Materialization status. It rebuilds from every ready source dataset, recovers an empty or inconsistent individual row store from its uploaded source file when available, and verifies that each dataset's contribution and final row count match.
 
+> [!NOTE]
+> **Read-only role.** `user-viewer` accounts see the workspace datasets but cannot upload, delete, reprocess, stop, map or clear them, change their NR Mode or recreate combined tables; these controls are hidden and the server rejects them.
+
 ### Vendor Mapping
 
 > [!WARNING]
-> **Vendor remapping.** Use Clear Vendors before applying a newer mapping file. Vendor Comparison requires persisted mapping on every selected CDR.
+> **Remapping.** Map a CDR again to apply a newer mapping file; it replaces the previous result without a prior Clear. Vendor Comparison requires persisted mapping on every selected CDR.
 
 Vendor mapping is required only for Vendor Comparison.
 
@@ -195,8 +198,11 @@ Vendor mapping is required only for Vendor Comparison.
 #### Assignment Rule
 
 - The CDR must provide `Operator` and a supported serving-cell field such as `Cell_ID_A`, `Cell_IDs_A`, `Cell_ID`, `Global CI`, `GCID`, `GCI`, `CGI` or `ECI`.
-- The mapper resolves the first and last cells recorded in the CDR value. When both resolve to the same non-empty vendor, `Vendor` becomes `Operator_Vendor` for Vodafone UK or 3UK.
-- For Vodafone UK, an Ericsson/non-Ericsson conflict becomes `Vodafone_Mixed Vendor`; other unresolved combinations become `Vodafone_Other Vendor`. For 3UK, different or unresolved endpoints become `3_Mixed Vendor`. Operators without a multivendor mapping use their canonical `Operator`.
+- The mapper resolves the first and last cells recorded in the CDR value. Vodafone UK (`Vodafone_` prefix) and 3UK (`3_` prefix) follow the same rule:
+  - the same non-empty Vendor at both endpoints returns `<Operator>_<Vendor>`;
+  - Ericsson at either endpoint with a different or missing Vendor at the other returns `<Operator>_Ericsson_Mixed`;
+  - every other different or missing combination returns `<Operator>_Non-Ericsson_Mixed`.
+- Operators without a multivendor mapping use their canonical `Operator`. CDRs mapped before this rule keep `Vodafone_Mixed Vendor`, `Vodafone_Other Vendor` or `3_Mixed Vendor` until they are mapped again.
 - `Vendor_Only` removes the recognised operator prefix from a mapped `Vendor`, allowing analytics to count the physical vendors independently of the operator.
 
 #### During Upload
@@ -207,12 +213,12 @@ Vendor mapping is required only for Vendor Comparison.
 
 #### After Upload
 
-1. Click **Map Vendors**.
-2. Select one or more ready CDRs.
-3. Confirm the VFUK and/or 3UK mapping.
+1. Click **Map** on a CDR (or **Map Vendor, Region & Cluster** for several).
+2. Select one or more ready CDRs, including CDRs that are already mapped. They are listed in CDR Data, Voice and Speech cards side by side, each with **Select All/None**.
+3. Confirm the VFUK and/or 3UK mapping, and optionally the Region and Cluster mappings.
 4. Wait for processing to finish.
 
-Use **Clear Vendors** before remapping with a newer file. Mapping stores the vendor name in `Vendor_Only`; operators without an assigned vendor use `Operator - All`. The mapped value is retained in individual and combined CDRs and their dataset exports. Existing processed CDRs receive the new stored identity when mapped again.
+Mapping a CDR again replaces its previous mapping; **Clear** is only needed to remove the mappings. A mapping left as "No … mapping" keeps its previous result. Re-mapping only Vendor recalculates it on the stored rows, which is much faster than rebuilding the CDR; Region and Cluster mappings rebuild the CDR from its source file. Mapping stores the vendor name in `Vendor_Only`; operators without an assigned vendor use `Operator - All`. The mapped value is retained in individual and combined CDRs and their dataset exports. Existing processed CDRs receive the new stored identity when mapped again.
 
 The detailed GCID formulas and first/last-cell resolution rules are documented in [Technical Considerations](technical-considerations.md#multivendor-calculation-and-remapping).
 

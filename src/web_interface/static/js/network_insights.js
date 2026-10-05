@@ -85,7 +85,7 @@
       const rows = (config.datasets || []).filter(row => row.kind === kind && String(row.nr_mode || '').toUpperCase() === nrMode);
       const group = document.createElement('section');
       group.className = 'ni-dataset-group';
-      group.innerHTML = `<h3>${escapeHtml(label)} <span>(${escapeHtml(nrMode)})</span></h3>`;
+      group.innerHTML = `<div class="ni-dataset-head"><h3>${escapeHtml(label)} <span>(${escapeHtml(nrMode)})</span></h3>${rows.length ? `<button type="button" class="ni-dataset-toggle" data-ni-select-kind="${kind}">Select All</button>` : ''}</div>`;
       if (!rows.length) group.insertAdjacentHTML('beforeend', '<p class="form-note">No ready CDRs.</p>');
       const restored = restoreDatasets && Array.isArray(savedSelection.datasets?.[kind]) ? new Set(savedSelection.datasets[kind].map(Number)) : null;
       rows.forEach((row, index) => {
@@ -97,7 +97,24 @@
       host.append(group);
     }
     restoreDatasets = false;
+    syncDatasetToggles();
   };
+  // Each CDR type selects all its CDRs, or clears them when all are selected.
+  const syncDatasetToggles = () => {
+    document.querySelectorAll('[data-ni-select-kind]').forEach(button => {
+      const boxes = [...document.querySelectorAll(`#ni-datasets input[data-kind="${button.dataset.niSelectKind}"]`)];
+      button.textContent = boxes.length && boxes.every(box => box.checked) ? 'Select None' : 'Select All';
+    });
+  };
+  $('ni-datasets').addEventListener('click', event => {
+    const button = event.target.closest('[data-ni-select-kind]');
+    if (!button) return;
+    const boxes = [...document.querySelectorAll(`#ni-datasets input[data-kind="${button.dataset.niSelectKind}"]`)];
+    const select = !boxes.every(box => box.checked);
+    boxes.forEach(box => { box.checked = select; });
+    boxes[0]?.dispatchEvent(new Event('change', {bubbles: true}));
+  });
+  $('ni-datasets').addEventListener('change', syncDatasetToggles);
   const selectedDatasets = () => Object.fromEntries(kinds.map(([kind]) => [kind,
     [...document.querySelectorAll(`#ni-datasets input[data-kind="${kind}"]:checked`)].map(input => Number(input.value))]));
   const selectedValues = id => [...$(id).selectedOptions].map(option => option.value);
@@ -204,11 +221,32 @@
     map_operator: mapOperator,
   });
 
+  // Modal shown while an analysis runs; Hide leaves it running in the background.
+  const progress = {timer: null, started: 0};
+  const showProgress = message => {
+    const dialog = $('ni-progress-dialog');
+    $('ni-progress-message').textContent = message;
+    progress.started = Date.now();
+    const tick = () => { $('ni-progress-elapsed').textContent = `Elapsed: ${Math.floor((Date.now() - progress.started) / 1000)} s`; };
+    tick();
+    clearInterval(progress.timer);
+    progress.timer = setInterval(tick, 1000);
+    if (!dialog.open) dialog.showModal?.();
+  };
+  const hideProgress = () => {
+    clearInterval(progress.timer);
+    const dialog = $('ni-progress-dialog');
+    if (dialog.open) dialog.close();
+  };
+  $('ni-progress-hide').onclick = hideProgress;
+  $('ni-progress-dialog').addEventListener('cancel', () => clearInterval(progress.timer));
+
   const analyse = async (mapOperator = '') => {
     const request = ++analysing;
     const button = $('ni-analyse');
     button.disabled = true; button.classList.add('is-busy');
-    status('Analysing the selected CDRs… The first analysis of a CDR copies its radio fields and can take a minute.', 'busy');
+    status('Analysing the selected CDRs… CDRs analysed for the first time are read and prepared first.', 'busy');
+    showProgress('Analysing the selected CDRs. CDRs analysed for the first time (or changed since) are read and prepared first, which can take from a few seconds to a minute or more depending on their size; after that, new filters take a few seconds and repeated analyses are immediate.');
     try {
       const response = await fetch('/api/network-insights/analysis', {
         method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(requestBody(mapOperator)),
@@ -226,7 +264,7 @@
     } catch (error) {
       if (request === analysing) status(error.message, 'error');
     } finally {
-      if (request === analysing) { button.disabled = false; button.classList.remove('is-busy'); }
+      if (request === analysing) { button.disabled = false; button.classList.remove('is-busy'); hideProgress(); }
     }
   };
 
@@ -307,8 +345,8 @@
       <div class="table-wrap ni-table-wrap"><table class="ni-table">${rfTable(section)}</table></div>
     </section>`).join('');
     for (const section of sections()) {
-      globalThis.renderDashboardChart($(`ni-${section.technology}-rsrp-cdf`), section.charts.rsrp_cdf);
-      globalThis.renderDashboardChart($(`ni-${section.technology}-sinr-cdf`), section.charts.sinr_cdf);
+      renderChart($(`ni-${section.technology}-rsrp-cdf`), section.charts.rsrp_cdf);
+      renderChart($(`ni-${section.technology}-sinr-cdf`), section.charts.sinr_cdf);
     }
   };
   const rfTable = section => {
@@ -321,6 +359,53 @@
       <td class="num">${number(row.low_coverage_share)}%</td><td>${classBar(row.rsrp_classes)}</td>
       <td class="num">${number(row.sinr_median)}</td><td class="num">${number(row.sinr_p10)}</td>
       <td class="num">${number(row.high_interference_share)}%</td><td>${classBar(row.sinr_classes)}</td></tr>`).join('')}</tbody>`;
+  };
+
+  // In-chart zoom controls, as in E2E Dashboards: zoom out/in, level, reset
+  // and pan arrows while zoomed. Dragging a rectangle also zooms.
+  const panPaths = {left: 'M15 5 8 12l7 7', right: 'm9 5 7 7-7 7', up: 'M5 15 12 8l7 7', down: 'm5 9 7 7 7-7'};
+  const renderChart = (canvas, payload) => {
+    if (!canvas) return;
+    globalThis.renderDashboardChart(canvas, payload);
+    const card = canvas.parentElement;
+    if (!card || card.querySelector(':scope > .ni-chart-zoom')) return;
+    const button = (text, title, className = '') => {
+      const element = document.createElement('button');
+      element.type = 'button'; element.className = `ni-chart-zoom-button ${className}`.trim();
+      element.title = title; element.setAttribute('aria-label', title); element.textContent = text;
+      return element;
+    };
+    const controls = document.createElement('div');
+    controls.className = 'ni-chart-zoom'; controls.setAttribute('role', 'group'); controls.setAttribute('aria-label', 'Chart zoom');
+    const zoomOut = button('−', 'Zoom out');
+    const level = document.createElement('output'); level.className = 'ni-chart-zoom-level';
+    const zoomIn = button('+', 'Zoom in');
+    const reset = button('1:1', 'Reset zoom', 'ni-chart-zoom-reset');
+    controls.append(zoomOut, level, zoomIn, reset);
+    const pans = Object.entries(panPaths).map(([direction, path]) => {
+      const pan = button('', `Move view ${direction}`, `ni-chart-pan ni-chart-pan-${direction}`);
+      pan.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${path}"/></svg>`;
+      pan.onclick = event => { event.stopPropagation(); globalThis.panDashboardChart?.(canvas, direction); sync(); };
+      return [direction, pan];
+    });
+    const sync = () => {
+      const zoom = Math.max(1, Number(globalThis.getDashboardChartZoom?.(canvas)) || 1);
+      level.textContent = `${Math.round(zoom * 100)}%`;
+      zoomOut.disabled = reset.disabled = zoom <= 1; zoomIn.disabled = zoom >= 4;
+      const state = globalThis.getDashboardChartPanState?.(canvas) || {};
+      for (const [direction, pan] of pans) {
+        pan.hidden = zoom <= 1;
+        pan.disabled = !state[`canPan${direction[0].toUpperCase()}${direction.slice(1)}`];
+      }
+    };
+    const apply = zoom => { globalThis.setDashboardChartZoom?.(canvas, Math.max(1, Math.min(4, zoom))); sync(); };
+    zoomOut.onclick = event => { event.stopPropagation(); apply((globalThis.getDashboardChartZoom?.(canvas) || 1) - .25); };
+    zoomIn.onclick = event => { event.stopPropagation(); apply((globalThis.getDashboardChartZoom?.(canvas) || 1) + .25); };
+    reset.onclick = event => { event.stopPropagation(); apply(1); };
+    canvas.addEventListener('dashboardchartzoom', sync);
+    canvas.addEventListener('dashboardchartpan', sync);
+    card.append(controls, ...pans.map(([, pan]) => pan));
+    sync();
   };
 
   // A port of the server's OpenStreetMap tile geometry, used to zoom maps.
@@ -390,7 +475,7 @@
       for (const kind of ['coverage', 'interference']) {
         const key = `${section.technology}-${kind}`;
         mapPayloads[key] = section.maps[kind];
-        globalThis.renderDashboardChart($(`ni-${key}-map`), section.maps[kind]);
+        renderChart($(`ni-${key}-map`), section.maps[kind]);
       }
     }
     $('ni-map-note').textContent = `${maps.operator} · grid ${number(maps.coverage_grid_metres, 0)} m${maps.coverage_grid_metres !== Number($('ni-grid').value) ? ' (coarsened to keep the map readable)' : ''}.`;
@@ -457,7 +542,7 @@
   };
 
   // Sites/Cells tables: complete inventories or cells observed in the CDRs.
-  const siteTableTitle = source => source === 'observed' ? 'CDRs Sites/Cells Observed' : 'Full Sites/Cells Inventory';
+  const siteTableTitle = source => source === 'observed' ? 'Observed Sites/Cells (from CDRs)' : 'Full Sites/Cells Inventory';
   const renderInventory = inventory => {
     const lastPage = Math.max(0, Math.ceil(inventory.total_rows / inventory.page_size) - 1);
     const filters = inventory.filters || {};
@@ -542,19 +627,21 @@
     closeFilterMenu();
     const column = button.dataset.niFilterColumn;
     const filters = cardFilters(card);
-    const menu = document.createElement('div');
-    menu.className = 'ni-filter-menu';
+    const menu = document.createElement('section');
+    menu.className = 'excel-column-filter-menu ni-filter-menu';
+    menu.setAttribute('role', 'dialog');
+    menu.setAttribute('aria-label', `Filter ${column}`);
     menu.innerHTML = `<p class="form-note">Loading values of ${escapeHtml(column)}…</p>`;
     document.body.append(menu);
     filterMenu = menu;
     const bounds = button.getBoundingClientRect();
     const place = () => {
-      const width = Math.min(320, window.innerWidth - 16);
+      const width = Math.min(300, window.innerWidth - 20);
       menu.style.width = `${width}px`;
-      menu.style.left = `${Math.max(8, Math.min(bounds.left, window.innerWidth - width - 8))}px`;
-      const below = window.innerHeight - bounds.bottom - 12;
-      menu.style.maxHeight = `${Math.max(220, Math.min(420, below > 260 ? below : bounds.top - 12))}px`;
-      menu.style.top = below > 260 ? `${bounds.bottom + 4}px` : `${Math.max(8, bounds.top - menu.offsetHeight - 4)}px`;
+      menu.style.left = `${Math.max(10, Math.min(bounds.left, window.innerWidth - width - 10))}px`;
+      const below = bounds.bottom + 5;
+      const height = menu.offsetHeight;
+      menu.style.top = `${below + height <= window.innerHeight - 10 ? below : Math.max(10, bounds.top - height - 5)}px`;
     };
     place();
     try {
@@ -566,25 +653,28 @@
       if (!response.ok) throw new Error(payload.detail || 'Unable to load the column values.');
       if (filterMenu !== menu) return;
       const selected = new Set(filters[column] || payload.values.map(item => item.value));
-      menu.innerHTML = `<strong>${escapeHtml(column)}</strong>
-        <input type="search" class="ni-filter-search" placeholder="Search values…" aria-label="Search values of ${escapeHtml(column)}">
-        <div class="ni-filter-actions"><button type="button" class="ni-secondary-action" data-ni-filter-all>Select All / None</button></div>
-        <div class="ni-filter-values">${payload.values.map(item => `<label><input type="checkbox" value="${escapeHtml(item.value)}" ${selected.has(item.value) ? 'checked' : ''}><span>${item.value === '' ? '(Blanks)' : escapeHtml(item.value)}</span><small>${integer(item.count)}</small></label>`).join('') || '<p class="form-note">No values.</p>'}</div>
+      menu.innerHTML = `<strong class="ni-filter-title">${escapeHtml(column)}</strong>
+        <input type="search" placeholder="Search values" autocomplete="off" aria-label="Search values of ${escapeHtml(column)}">
+        <div class="excel-column-filter-toolbar"><button type="button" data-ni-filter-all>Select all</button><button type="button" data-ni-filter-none>Clear</button></div>
+        <div class="excel-column-filter-options">${payload.values.map(item => `<label><input type="checkbox" value="${escapeHtml(item.value)}" ${selected.has(item.value) ? 'checked' : ''}><span>${item.value === '' ? '(Blanks)' : escapeHtml(item.value)}</span><small>${integer(item.count)}</small></label>`).join('') || '<p class="form-note">No values.</p>'}</div>
         ${payload.truncated ? '<p class="form-note">Showing the first 2,000 values; search to narrow them.</p>' : ''}
-        <div class="ni-filter-actions"><button type="button" class="ni-secondary-action" data-ni-filter-clear>Clear</button><button type="button" class="ni-secondary-action" data-ni-filter-cancel>Cancel</button><button type="button" data-ni-filter-apply>Apply</button></div>`;
+        <div class="excel-column-filter-footer"><button type="button" data-ni-filter-cancel>Cancel</button><button type="button" data-ni-filter-reset>Remove filter</button><button type="button" data-ni-filter-apply>Apply</button></div>`;
       place();
-      const boxes = () => [...menu.querySelectorAll('.ni-filter-values input')];
-      menu.querySelector('.ni-filter-search').addEventListener('input', event => {
-        const query = event.target.value.trim().toLocaleLowerCase();
-        boxes().forEach(box => { box.closest('label').hidden = Boolean(query) && !box.value.toLocaleLowerCase().includes(query); });
+      const boxes = () => [...menu.querySelectorAll('.excel-column-filter-options input')];
+      const visible = () => boxes().filter(box => !box.closest('label').hidden);
+      const search = menu.querySelector('input[type="search"]');
+      // Typing filters the listed values; Select all and Clear act on the listed values.
+      search.addEventListener('input', () => {
+        const query = search.value.trim().toLocaleLowerCase();
+        boxes().forEach(box => {
+          const text = box.closest('label').querySelector('span').textContent.toLocaleLowerCase();
+          box.closest('label').hidden = Boolean(query) && !text.includes(query);
+        });
       });
-      menu.querySelector('[data-ni-filter-all]').addEventListener('click', () => {
-        const visible = boxes().filter(box => !box.closest('label').hidden);
-        const select = visible.some(box => !box.checked);
-        visible.forEach(box => { box.checked = select; });
-      });
+      menu.querySelector('[data-ni-filter-all]').addEventListener('click', () => visible().forEach(box => { box.checked = true; }));
+      menu.querySelector('[data-ni-filter-none]').addEventListener('click', () => visible().forEach(box => { box.checked = false; }));
       menu.querySelector('[data-ni-filter-cancel]').addEventListener('click', closeFilterMenu);
-      menu.querySelector('[data-ni-filter-clear]').addEventListener('click', () => {
+      menu.querySelector('[data-ni-filter-reset]').addEventListener('click', () => {
         delete filters[column];
         closeFilterMenu();
         void reloadSiteTable(card, 0, filters);
@@ -596,6 +686,7 @@
         closeFilterMenu();
         void reloadSiteTable(card, 0, filters);
       });
+      requestAnimationFrame(() => search.focus());
     } catch (error) {
       if (filterMenu === menu) menu.innerHTML = `<p class="form-note">${escapeHtml(error.message)}</p>`;
     }

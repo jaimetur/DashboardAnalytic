@@ -3731,7 +3731,7 @@ def test_workspace_bulk_dataset_actions_reprocess_in_dependency_order(client, mo
     page = client.get('/workspace')
     assert page.status_code == 200
     toolbar = page.text.split('<div class="queue-bulk-actions"', 1)[1].split('</div>', 1)[0]
-    assert toolbar.index('>Map Vendor & Region<') < toolbar.index('>Clear Vendor & Region Mapping<') < toolbar.index('>Reprocess All<') < toolbar.index('>Stop All<') < toolbar.index('>Remove All<')
+    assert toolbar.index('>Map Vendor, Region & Cluster<') < toolbar.index('>Clear Vendor, Region & Cluster Mapping<') < toolbar.index('>Reprocess All<') < toolbar.index('>Stop All<') < toolbar.index('>Remove All<')
     assert 'data-dataset-reprocess-dialog' in page.text
     assert 'name="dataset_ids" value="1" data-reprocess-dataset-choice checked' in page.text
     assert 'name="dataset_ids" value="2" data-reprocess-dataset-choice checked' in page.text
@@ -3872,7 +3872,7 @@ def test_admin_dataset_rows_can_be_reordered_in_descending_order_and_all_ids_are
     reprocessing_calls = []
     def record_reprocessing(
         _tasks, dataset_id, _path, _username,
-        vodafone_mapping_dataset_id, three_mapping_dataset_id, region_mapping_dataset_id,
+        vodafone_mapping_dataset_id, three_mapping_dataset_id, region_mapping_dataset_id, cluster_mapping_dataset_id=None,
     ):
         reprocessing_calls.append({
             'dataset_id': dataset_id,
@@ -7411,7 +7411,7 @@ def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mappin
     assert 'value="2" selected' in workspace.text
     assert 'data-loading-label="Mapping Vendors to CDR samples"' not in workspace.text
     assert 'Vendor mapping rule' in workspace.text
-    assert 'the same non-empty Vendor at both endpoints returns' in workspace.text
+    assert 'The same non-empty Vendor at both endpoints returns' in workspace.text and '_Non-Ericsson_Mixed' in workspace.text
     live_status = client.get('/api/datasets/status').json()['datasets']
     assert next(dataset for dataset in live_status if dataset['id'] == 1)['can_map_vendors'] is True
 
@@ -7432,7 +7432,8 @@ def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mappin
 
     workspace_after_mapping = client.get('/workspace').text.split('<table class="queue-table" data-queue-sortable-table>', 1)[1].split('</tbody>', 1)[0]
     assert 'data-dataset-id="1"' in workspace_after_mapping
-    assert 'data-mapping-map-open' not in workspace_after_mapping
+    # A mapped CDR can be mapped again without clearing it first.
+    assert 'data-mapping-map-open' in workspace_after_mapping
     assert 'data-mapping-clear-open' in workspace_after_mapping
     assert 'action="/workspace/clear-mappings"' in workspace.text
     live_status_after_mapping = client.get('/api/datasets/status').json()['datasets']

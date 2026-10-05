@@ -75,6 +75,14 @@ def validate_region_mapping(path: Path) -> str:
     return field
 
 
+def _cluster_field(columns: Iterable[object]) -> str:
+    field = next((found for candidate in ('Cluster', 'Cluster_ID', 'Cluster_Name', 'ClusterName', 'Name')
+                  if (found := _column(columns, candidate))), None)
+    if not field:
+        raise ValueError('The Clusters dataset must contain a Cluster, Cluster_ID, Cluster_Name or Name attribute.')
+    return field
+
+
 def validate_cluster_mapping(path: Path) -> str:
     """Validate cluster polygons using the same GeoJSON/zipped-shapefile reader as regions."""
     if path.suffix.casefold() not in {'.geojson', '.json', '.zip'}:
@@ -88,10 +96,7 @@ def validate_cluster_mapping(path: Path) -> str:
         raise ValueError('The Clusters dataset must contain only polygon geometries.')
     if not clusters.geometry.is_valid.all() or clusters.geometry.is_empty.any():
         raise ValueError('The Clusters dataset contains invalid or empty polygons.')
-    field = next((found for candidate in ('Cluster', 'Cluster_ID', 'Cluster_Name', 'ClusterName', 'Name')
-                  if (found := _column(clusters.columns, candidate))), None)
-    if not field:
-        raise ValueError('The Clusters dataset must contain a Cluster, Cluster_ID, Cluster_Name or Name attribute.')
+    field = _cluster_field(clusters.columns)
     if clusters[field].fillna('').astype(str).str.strip().eq('').any():
         raise ValueError(f'The Clusters attribute {field} contains blank values.')
     return field
@@ -99,6 +104,15 @@ def validate_cluster_mapping(path: Path) -> str:
 
 def assign_regions(dataset: pd.DataFrame, dataset_kind: str, mapping_path: Path) -> pd.DataFrame:
     """Fill blank Region values with the polygon attribute containing each CDR point."""
+    return _assign_polygons(dataset, dataset_kind, mapping_path, 'Region')
+
+
+def assign_clusters(dataset: pd.DataFrame, dataset_kind: str, mapping_path: Path) -> pd.DataFrame:
+    """Fill blank Cluster values with the Clusters polygon containing each CDR point."""
+    return _assign_polygons(dataset, dataset_kind, mapping_path, 'Cluster')
+
+
+def _assign_polygons(dataset: pd.DataFrame, dataset_kind: str, mapping_path: Path, target: str) -> pd.DataFrame:
     coordinate_pairs = COORDINATE_COLUMNS.get(dataset_kind, ())
     longitude = latitude = None
     for longitude_name, latitude_name in coordinate_pairs:
@@ -107,18 +121,19 @@ def assign_regions(dataset: pd.DataFrame, dataset_kind: str, mapping_path: Path)
         if longitude and latitude:
             break
     if not longitude or not latitude:
-        raise ValueError(f'The {dataset_kind} CDR has no supported longitude/latitude columns for Region mapping.')
+        raise ValueError(f'The {dataset_kind} CDR has no supported longitude/latitude columns for {target} mapping.')
 
     gpd = _geopandas()
-    regions = _read_region_mapping(mapping_path)
-    field = _region_field(regions.columns)
-    if regions.crs is None:
-        raise ValueError('The Region mapping must declare a coordinate reference system.')
+    label = 'Region Mapping' if target == 'Region' else 'Clusters'
+    polygons = _read_region_mapping(mapping_path, label)
+    field = _region_field(polygons.columns) if target == 'Region' else _cluster_field(polygons.columns)
+    if polygons.crs is None:
+        raise ValueError(f'The {label} must declare a coordinate reference system.')
     result = dataset.copy()
-    region_column = _column(result.columns, 'Region') or 'Region'
-    if region_column not in result:
-        result[region_column] = pd.NA
-    blank = result[region_column].isna() | result[region_column].astype(str).str.strip().eq('')
+    target_column = _column(result.columns, target) or target
+    if target_column not in result:
+        result[target_column] = pd.NA
+    blank = result[target_column].isna() | result[target_column].astype(str).str.strip().eq('')
     longitude_values = pd.to_numeric(result[longitude], errors='coerce')
     latitude_values = pd.to_numeric(result[latitude], errors='coerce')
     usable = blank & longitude_values.notna() & latitude_values.notna()
@@ -128,8 +143,8 @@ def assign_regions(dataset: pd.DataFrame, dataset_kind: str, mapping_path: Path)
         result.loc[usable, []],
         geometry=gpd.points_from_xy(longitude_values[usable], latitude_values[usable]),
         crs='EPSG:4326',
-    ).to_crs(regions.crs)
-    matches = gpd.sjoin(points, regions[[field, 'geometry']], how='left', predicate='within')
+    ).to_crs(polygons.crs)
+    matches = gpd.sjoin(points, polygons[[field, 'geometry']], how='left', predicate='within')
     values = matches[field].groupby(level=0).first()
-    result.loc[values.index, region_column] = values
+    result.loc[values.index, target_column] = values
     return result

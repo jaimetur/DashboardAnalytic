@@ -67,7 +67,7 @@ def test_definitions_keep_every_module_option_and_need_an_artifact():
     })
     assert definition['dashboards'] == [{
         'dashboard_id': 'd1', 'label': '', 'scope': 'multivendor', 'vendor_comparison': 'vendor_only',
-        'datasets': {'data': [3, 4]}, 'date_from': '2026-01-01', 'date_to': '', 'filters': {'Operator': ['EE']},
+        'datasets': {'data': [3, 4]}, 'all_datasets': False, 'date_from': '2026-01-01', 'date_to': '', 'filters': {'Operator': ['EE']},
     }]
     scoring = definition['scoring'][0]
     assert (scoring['nr_mode'], scoring['aggregation_levels'], scoring['context_filters'], scoring['main_cities']) == (
@@ -114,9 +114,10 @@ def test_features_activation_controls_modules_by_role_group_and_user(client):
     session(client, 'analyst', 'user-viewer')
     assert client.get('/workspace').status_code == 403
     assert client.get('/reporting').status_code == 200
-    # Only super-admins see and change Features Activation.
+    # Admins see Features Activation; viewers and editors do not.
     session(client, 'someone', 'admin')
-    assert 'id="features-activation"' not in client.get('/admin').text
+    assert 'id="features-activation"' in client.get('/admin').text
+    session(client, 'writer', 'user-editor')
     assert client.post('/admin/features', data=form).status_code == 403
 
 
@@ -278,3 +279,41 @@ def test_feature_rules_saved_before_forbidden_lists_keep_their_meaning():
     assert core.normalized_feature_rule({'mode': 'all'})['default'] == 'all'
     defaults = core.normalized_feature_rule(None, core.FEATURE_DEFAULTS['reporting-old'])
     assert defaults['default'] == 'none' and defaults['allow_usernames'] == ['ejaitur']
+
+
+def test_network_insights_entries_keep_their_own_selection_and_read_single_selections():
+    definition = normalize_definition({'network_insights': [
+        {'label': 'NSA LTE', 'formats': ['word'], 'selection': {'nr_mode': 'NSA', 'technology': 'lte', 'operators': ['EE']}},
+        {'formats': ['powerpoint'], 'selection': {'nr_mode': 'sa', 'technology': 'nr', 'nr_coverage_threshold': -118}},
+    ]})
+    first, second = definition['network_insights']
+    assert (first['label'], first['formats'], first['selection']['operators']) == ('NSA LTE', ['word'], ['EE'])
+    assert (second['selection']['nr_mode'], second['selection']['technology'], second['selection']['nr_coverage_threshold']) == ('SA', 'nr', -118)
+    assert report_tasks.network_entry_name(second) == 'SA NR'
+    labels = report_tasks.artifact_labels(definition)
+    assert 'Network Insights · NSA LTE (Word)' in labels and 'Network Insights · SA NR (PPT)' in labels
+    # Jobs saved with one Network Insights selection keep it as one entry.
+    legacy = normalize_definition({'network_insights': {'enabled': True, 'formats': ['word'], 'selection': {
+        'technology': 'nr', 'coverage_threshold': -112, 'datasets': {'data': [5]}}}})
+    assert len(legacy['network_insights']) == 1
+    assert legacy['network_insights'][0]['selection']['nr_coverage_threshold'] == -112
+    assert report_tasks._remap_dataset_ids(legacy, {5: 9})['network_insights'][0]['selection']['datasets'] == {'data': [9]}
+    with pytest.raises(ValueError):
+        normalize_definition({'network_insights': {'enabled': False, 'selection': {}}})
+
+
+def test_dashboard_entries_can_use_every_ready_cdr_of_their_nr_mode():
+    definition = normalize_definition({'dashboards': [{'dashboard_id': 'd1', 'all_datasets': True}]})
+    assert definition['dashboards'][0]['all_datasets'] is True and definition['dashboards'][0]['datasets'] == {}
+
+
+def test_reporting_runs_appear_in_background_tasks(client):
+    login(client)
+    task = client.post('/api/reporting/tasks', json={
+        'name': 'Background check', 'definition': {'scoring': [{'nr_mode': 'NSA'}]}, 'schedule': {'mode': 'manual'},
+    }).json()['task']
+    report_tasks.create_run(core.repository, report_tasks.get_task(core.repository, task['id']), 'manual', 'super')
+    groups = client.get('/api/background-tasks').json()
+    labels = [item['label'] for group in (groups.get('workspaces') or groups.get('groups') or []) for item in group['tasks']] \
+        if isinstance(groups, dict) else []
+    assert any(label == 'Reporting Job: Background check' for label in labels) or 'Reporting Job: Background check' in json.dumps(groups)

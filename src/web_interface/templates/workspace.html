@@ -138,7 +138,8 @@
     </summary>
     <div class="upload-panel-content">
       <p class="lede">Bring the source files that feed every product workflow into one managed workspace: NetCheck CDR workbooks (Data, Voice and Speech), Smart Orchestrator Logs, and Vodafone UK (VFUK) or Three UK (3UK) Multivendor Mappings. Workspace proposes a type from each filename, lets you confirm it per file and, for CDRs, can apply an existing mapping or one uploaded in the same batch. Batch mappings are processed before their selected CDRs.</p>
-      <form class="upload-dropzone" action="/datasets-analysis/upload" method="post" enctype="multipart/form-data" data-background-upload data-workspace-id="{{ active_workspace.id }}" data-workspace-name="{{ active_workspace.name }}" data-upload-type-form data-vodafone-mapping-options='{{ vodafone_mapping_datasets | default([]) | tojson }}' data-three-mapping-options='{{ three_mapping_datasets | default([]) | tojson }}' data-region-mapping-options='{{ region_mapping_datasets | default([]) | tojson }}'>
+      {% if user.role not in ['user-editor', 'admin', 'super-admin'] %}<p class="form-note workspace-read-only-note">The user-viewer role can explore the workspace datasets and generate jobs, but cannot upload, delete, reprocess or map datasets.</p>{% endif %}
+      <form class="upload-dropzone" action="/datasets-analysis/upload" method="post" enctype="multipart/form-data" data-background-upload data-workspace-id="{{ active_workspace.id }}" data-workspace-name="{{ active_workspace.name }}" data-upload-type-form data-vodafone-mapping-options='{{ vodafone_mapping_datasets | default([]) | tojson }}' data-three-mapping-options='{{ three_mapping_datasets | default([]) | tojson }}' data-region-mapping-options='{{ region_mapping_datasets | default([]) | tojson }}' data-cluster-mapping-options='{{ cluster_mapping_datasets | default([]) | tojson }}'>
       <label class="dropzone-field" data-upload-dropzone>
         <span class="dropzone-title">Drop workbooks or browse</span>
         <span class="dropzone-copy">Accepted: CSV, XLS, XLSX, XLSM, GeoJSON, JSON, ZIP (shapefile)</span>
@@ -192,8 +193,8 @@
       </label>
       {% set stoppable_datasets = (datasets | selectattr('status', 'equalto', 'queued') | list) + (datasets | selectattr('status', 'equalto', 'processing') | list) %}
       <div class="queue-bulk-actions" role="group" aria-label="Bulk dataset actions">
-        <button type="button" class="queue-map-all" data-mapping-map-all-open title="Map Vendor & Region" aria-label="Map Vendor & Region"{% if not mappable_cdr_datasets %} disabled{% endif %}>Map Vendor & Region</button>
-        <button type="button" class="queue-clear-all" data-mapping-clear-all-open title="Clear Vendor & Region Mapping" aria-label="Clear Vendor & Region Mapping"{% if not clearable_cdr_datasets %} disabled{% endif %}>Clear Vendor & Region Mapping</button>
+        <button type="button" class="queue-map-all" data-mapping-map-all-open title="Map Vendor, Region & Cluster" aria-label="Map Vendor, Region & Cluster"{% if not mappable_cdr_datasets %} disabled{% endif %}>Map Vendor, Region & Cluster</button>
+        <button type="button" class="queue-clear-all" data-mapping-clear-all-open title="Clear Vendor, Region & Cluster Mapping" aria-label="Clear Vendor, Region & Cluster Mapping"{% if not clearable_cdr_datasets %} disabled{% endif %}>Clear Vendor, Region & Cluster Mapping</button>
         <button type="button" class="queue-reprocess-all" data-reprocess-all-open title="Reprocess all available datasets from their original source files" aria-label="Reprocess all available datasets from their original source files"{% if not datasets | selectattr('can_reprocess') | list %} disabled{% endif %}>Reprocess All</button>
         <form method="post" action="/workspace/stop-datasets" data-confirm="Stop every dataset that is currently queued or processing?" data-confirm-title="Stop all queued and processing datasets" data-confirm-label="Stop All">
           <button type="submit" class="queue-stop-all" title="Stop all queued and processing datasets" aria-label="Stop all queued and processing datasets"{% if not stoppable_datasets %} disabled{% endif %}>Stop All</button>
@@ -291,14 +292,14 @@
                   data-mapping-map-open
                   data-dataset-id="{{ dataset.id }}"
                   data-dataset-name="{{ dataset.file_name }}"
-                title="Map Vendor & Region">Map</button>
+                title="Map Vendor, Region & Cluster">Map</button>
                 {% else %}
-                <button type="button" class="ghost-link action-link-map-vendors" disabled title="Map Vendor & Region is not available for this dataset">Map</button>
+                <button type="button" class="ghost-link action-link-map-vendors" disabled title="Map Vendor, Region & Cluster is not available for this dataset">Map</button>
                 {% endif %}
                 {% if dataset.can_clear_mappings %}
-                <button type="button" class="action-link-clear-vendors" data-mapping-clear-open data-dataset-id="{{ dataset.id }}" title="Clear Vendor & Region Mapping">Clear</button>
+                <button type="button" class="action-link-clear-vendors" data-mapping-clear-open data-dataset-id="{{ dataset.id }}" title="Clear Vendor, Region & Cluster Mapping">Clear</button>
                 {% else %}
-                <button type="button" class="action-link-clear-vendors" disabled title="No Vendor & Region Mapping is available">Clear</button>
+                <button type="button" class="action-link-clear-vendors" disabled title="No Vendor, Region & Cluster Mapping is available">Clear</button>
                 {% endif %}
                 {% if dataset.status in ['queued', 'processing'] %}
                 <form method="post" action="/datasets-analysis/stop/{{ dataset.id }}" data-confirm="Stop processing for '{{ dataset.file_name }}'?" data-confirm-title="Stop processing" data-confirm-label="Stop processing">
@@ -506,24 +507,37 @@
     >
       <p class="eyebrow">NetCheck CDR</p>
       <h3 id="vendor-mapping-title">Map CDR fields</h3>
-      <p class="lede">Choose one or more processed CDRs and the Vendor and/or Region Mappings to apply in the background.</p>
-      <fieldset class="vendor-mapping-cdr-list">
+      <p class="lede">Choose one or more processed CDRs and the Vendor, Region and/or Cluster Mappings to apply in the background. Mapping a CDR again replaces its previous mapping without clearing it first; a mapping set to "No … mapping" keeps its previous result.</p>
+      <fieldset class="vendor-mapping-cdr-list vendor-mapping-cdr-groups">
         <legend>CDRs to map</legend>
-        {% for dataset in mappable_cdr_datasets %}
-        <label class="vendor-mapping-cdr-choice">
-          <input type="checkbox" name="cdr_dataset_ids" value="{{ dataset.id }}" data-vendor-mapping-cdr-choice>
-          <span>{{ dataset.file_name }} <small>· {{ dataset.input_kind_label }} · {{ dataset.row_count }} rows</small></span>
-        </label>
+        {% for kind, kind_label in [('data', 'CDR Data'), ('voice', 'CDR Voice'), ('speech', 'CDR Speech')] %}
+        {% set kind_datasets = mappable_cdr_datasets | selectattr('dataset_kind', 'equalto', kind) | list %}
+        <section class="vendor-mapping-cdr-group" data-mapping-cdr-group>
+          <div class="vendor-mapping-cdr-group-head"><strong>{{ kind_label }}</strong>{% if kind_datasets %}<button type="button" class="vendor-mapping-select-all" data-mapping-select-all>Select All</button>{% endif %}</div>
+          {% for dataset in kind_datasets %}
+          <label class="vendor-mapping-cdr-choice">
+            <input type="checkbox" name="cdr_dataset_ids" value="{{ dataset.id }}" data-vendor-mapping-cdr-choice>
+            <span>{{ dataset.file_name }} <small>· {{ dataset.nr_mode or '—' }} · {{ dataset.row_count }} rows</small></span>
+          </label>
+          {% else %}
+          <p class="form-note">No mappable CDRs.</p>
+          {% endfor %}
+        </section>
         {% endfor %}
       </fieldset>
+      <div class="vendor-mapping-rules">
       <details class="vendor-mapping-rule" open>
         <summary>Vendor mapping rule</summary>
         <ol>
           <li>For each CDR sample, split <code>Cell_ID_A</code> (or an equivalent Global Cell ID field) in chronological order and retain only the first and last Global Cell ID.</li>
           <li>Look up both endpoints in the selected VFUK mapping for Vodafone UK or the selected 3UK mapping for Three UK.</li>
         </ol>
-        <p><strong>Vodafone UK:</strong> the same non-empty Vendor at both endpoints returns <code>Vodafone_&lt;Vendor&gt;</code>. If Ericsson is present at either endpoint and the other Vendor is different or missing, the result is <code>Vodafone_Mixed Vendor</code>. Every other different or missing endpoint combination returns <code>Vodafone_Other Vendor</code>.</p>
-        <p><strong>3UK:</strong> the same non-empty Vendor at both endpoints returns <code>3_&lt;Vendor&gt;</code>. Any different or missing endpoint Vendor returns <code>3_Mixed Vendor</code>.</p>
+        <p><strong>Vodafone UK and 3UK</strong> (<code>&lt;Operator&gt;</code> is <code>Vodafone</code> or <code>3</code>):</p>
+        <ul>
+          <li>The same non-empty Vendor at both endpoints returns <code>&lt;Operator&gt;_&lt;Vendor&gt;</code>.</li>
+          <li>If Ericsson is present at either endpoint and the other Vendor is different or missing, the result is <code>&lt;Operator&gt;_Ericsson_Mixed</code>.</li>
+          <li>Every other different or missing endpoint combination returns <code>&lt;Operator&gt;_Non-Ericsson_Mixed</code>.</li>
+        </ul>
         <p><strong>O2 and EE:</strong> no Vendor is assigned; they remain Operator comparison groups only.</p>
       </details>
       <details class="vendor-mapping-rule region-mapping-rule" open>
@@ -534,6 +548,11 @@
         </ol>
         <p>Existing non-empty <code>Region</code> values are retained. Samples without valid coordinates, or outside every mapped polygon, remain unchanged.</p>
       </details>
+      <details class="vendor-mapping-rule region-mapping-rule" open>
+        <summary>Cluster mapping rule</summary>
+        <p>The selected <strong>Clusters — Geospatial</strong> polygons assign their Cluster label to the <code>Cluster</code> column of every CDR sample whose coordinates fall inside a polygon, in the same way as Regions. Existing non-empty <code>Cluster</code> values from the source CDR are retained.</p>
+      </details>
+      </div>
       <div class="vendor-mapping-fields">
         {% if vodafone_mapping_datasets %}
         <label>VFUK Multivendor Mapping
@@ -559,14 +578,20 @@
         {% else %}
         <p class="form-note">No processed 3UK Multivendor Mapping is currently available.</p>
         {% endif %}
-        {% if region_mapping_datasets %}
         <label>Region Mapping
-          <select name="region_mapping_dataset_id">
+          <select name="region_mapping_dataset_id"{% if not region_mapping_datasets %} disabled{% endif %}>
             <option value="">No Region mapping</option>
             {% for mapping in region_mapping_datasets %}<option value="{{ mapping.id }}"{% if loop.first %} selected{% endif %}>{{ mapping.file_name }}</option>{% endfor %}
           </select>
+          {% if not region_mapping_datasets %}<small class="form-note">Upload at least one Region Mapping — Geospatial shape (GeoJSON, JSON or zipped shapefile) to the workspace to map Regions.</small>{% endif %}
         </label>
-        {% endif %}
+        <label>Cluster Mapping
+          <select name="cluster_mapping_dataset_id"{% if not cluster_mapping_datasets %} disabled{% endif %}>
+            <option value="">No Cluster mapping</option>
+            {% for mapping in cluster_mapping_datasets %}<option value="{{ mapping.id }}"{% if loop.first %} selected{% endif %}>{{ mapping.file_name }}</option>{% endfor %}
+          </select>
+          {% if not cluster_mapping_datasets %}<small class="form-note">Upload at least one Clusters — Geospatial shape with the cluster polygons (GeoJSON, JSON or zipped shapefile) to the workspace to map Clusters.</small>{% endif %}
+        </label>
       </div>
       <div class="vendor-mapping-actions">
         <button type="button" class="ghost-link" data-vendor-map-cancel>Cancel</button>
@@ -579,7 +604,7 @@
     <form method="post" action="/workspace/clear-mappings">
       <p class="eyebrow">NetCheck CDR</p>
       <h3 id="vendor-clearing-title">Clear Mappings</h3>
-      <p class="lede">Choose one or more mapped CDRs. Clearing restores each selected CDR to its processed source data without tool-applied Vendor or Region values.</p>
+      <p class="lede">Choose one or more mapped CDRs. Clearing restores each selected CDR to its processed source data without tool-applied Vendor, Region or Cluster values.</p>
       <fieldset class="vendor-mapping-cdr-list">
         <legend>CDRs to clear</legend>
         {% for dataset in clearable_cdr_datasets %}
@@ -665,6 +690,7 @@
   const vodafoneMappings = parseMappingOptions('vodafoneMappingOptions');
   const threeMappings = parseMappingOptions('threeMappingOptions');
   const regionMappings = parseMappingOptions('regionMappingOptions');
+  const clusterMappings = parseMappingOptions('clusterMappingOptions');
   let uploadInProgress = false;
 
   function inferType(fileName) {
@@ -706,7 +732,7 @@
           value: `upload:${candidate.index}`,
           label: candidate.file.name,
         }));
-      const processedMappings = (kind === 'mapping_vodafone' ? vodafoneMappings : kind === 'mapping_three' ? threeMappings : regionMappings)
+      const processedMappings = ({mapping_vodafone: vodafoneMappings, mapping_three: threeMappings, mapping_region: regionMappings, clusters: clusterMappings}[kind] || [])
         .map((mapping) => ({
           value: String(mapping.id),
           label: `${mapping.file_name} · ${mapping.row_count || 0} rows`,
@@ -720,7 +746,7 @@
         for (const [kind, field, mappingSelect] of entry.mappingSelectors) {
           const previous = mappingSelect.value;
           const choices = mappingChoices(kind, entry);
-          mappingSelect.replaceChildren(new Option(kind === 'mapping_region' ? 'No Region mapping' : 'No Map Vendor Column', ''));
+          mappingSelect.replaceChildren(new Option({mapping_region: 'No Region mapping', clusters: 'No Cluster mapping'}[kind] || 'No Map Vendor Column', ''));
           choices.forEach((choice) => mappingSelect.add(new Option(choice.label, choice.value)));
           mappingSelect.value = choices.some((choice) => choice.value === previous)
             ? previous : choices[0]?.value || '';
@@ -771,6 +797,7 @@
       addMappingSelector('mapping_vodafone', 'VFUK mapping', 'vodafone_mapping_dataset_ids');
       addMappingSelector('mapping_three', '3UK mapping', 'three_mapping_dataset_ids');
       addMappingSelector('mapping_region', 'Region mapping', 'region_mapping_dataset_ids');
+      addMappingSelector('clusters', 'Cluster mapping', 'cluster_mapping_dataset_ids');
       select.addEventListener('change', refreshMappingChoices);
       item.append(name, select, nrModeField, mappings);
       items.append(item);
@@ -955,6 +982,23 @@
     cdrChoices.forEach((choice) => { choice.checked = button.hasAttribute('data-mapping-map-all-open') || choice.value === selectedId; });
     dialog.showModal();
   });
+  // Each CDR type selects all its CDRs, or clears them when all are selected.
+  const syncSelectAll = () => dialog.querySelectorAll('[data-mapping-cdr-group]').forEach((group) => {
+    const boxes = [...group.querySelectorAll('[data-vendor-mapping-cdr-choice]')];
+    const button = group.querySelector('[data-mapping-select-all]');
+    if (button) button.textContent = boxes.length && boxes.every((box) => box.checked) ? 'Select None' : 'Select All';
+  });
+  dialog.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-mapping-select-all]');
+    if (!button) return;
+    const boxes = [...button.closest('[data-mapping-cdr-group]').querySelectorAll('[data-vendor-mapping-cdr-choice]')];
+    const select = !boxes.every((box) => box.checked);
+    boxes.forEach((box) => { box.checked = select; });
+    syncSelectAll();
+  });
+  dialog.addEventListener('change', syncSelectAll);
+  dialog.addEventListener('toggle', syncSelectAll);
+  document.addEventListener('click', (event) => { if (event.target.closest?.('[data-mapping-map-open],[data-mapping-map-all-open]')) syncSelectAll(); });
   dialog.querySelector('[data-vendor-map-cancel]')?.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();

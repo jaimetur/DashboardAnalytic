@@ -1572,7 +1572,7 @@ body[data-embedded-template-editor] .slides-templates-editor-table-wrap .form-ac
 .queue-actions .ghost-link,
 .queue-actions button { min-height: 2.15rem; padding: 0.42rem 0.62rem; white-space: nowrap; font-size: 0.78rem; line-height: 1.1; }
 .vendor-mapping-dialog { width: min(560px, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); border: 1px solid var(--line); border-radius: 20px; padding: 0; color: var(--text); background: var(--panel-strong); box-shadow: 0 24px 72px rgba(7, 21, 31, 0.34); overflow: auto; }
-.vendor-mapping-dialog[data-vendor-mapping-dialog] { width: min(980px, calc(100vw - 2rem)); }
+.vendor-mapping-dialog[data-vendor-mapping-dialog] { width: min(1480px, calc(100vw - 2rem)); }
 .vendor-mapping-dialog::backdrop { background: rgba(9, 28, 40, 0.48); backdrop-filter: blur(3px); }
 .vendor-mapping-dialog form { display: grid; gap: 1rem; padding: 1.45rem; }
 .vendor-mapping-dialog h3, .vendor-mapping-dialog p { margin: 0; }
@@ -3756,3 +3756,23 @@ body:has(.release-navigator) .help-navigator{top:37%}
 .principal-table th, .principal-table td { padding: .55rem .6rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
 .principal-table th { color: #48606f; font-size: .82rem; }
 .principal-picker-menu.is-open { display: grid; }
+
+/* user-viewer explores the workspace and generates jobs, but cannot change
+   datasets, mappings, saved Dashboards, saved queries or other stored data. */
+body[data-authenticated-role="user-viewer"] :is(.upload-dropzone, .queue-bulk-actions, .action-link-map-vendors, .action-link-clear-vendors, .action-link-stop, .action-link-reprocess, .action-link-recalculate-scoring, form[action^="/datasets-analysis/delete"], .combined-dataset-recreate-button, .auto-calculated-field-rematerialize-button, [data-ds-manage-only], .scoring-job-delete, .query-builder-save-subpanel, [data-sql-edit], [data-sql-delete]) { display: none !important; }
+body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-events: none; appearance: none; background-image: none; }
+
+/* Map CDR fields: CDRs, rules and mapping selectors side by side so the dialog fits without scrolling. */
+.vendor-mapping-cdr-groups { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .7rem; align-items: start; }
+.vendor-mapping-cdr-groups legend { grid-column: 1 / -1; }
+.vendor-mapping-cdr-group { display: grid; gap: .35rem; align-content: start; min-width: 0; padding: .6rem .7rem; border: 1px solid rgba(16, 49, 74, .14); border-radius: 12px; background: #fff; }
+.vendor-mapping-cdr-group-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.vendor-mapping-cdr-group .vendor-mapping-cdr-choice span { min-width: 0; overflow-wrap: anywhere; font-size: .86rem; }
+.vendor-mapping-select-all { padding: .2rem .7rem; border: 1px solid rgba(16, 49, 74, .25); border-radius: 999px; background: #f3f7fa; color: var(--brand); font: inherit; font-size: .76rem; font-weight: 700; box-shadow: none; cursor: pointer; }
+.vendor-mapping-rules { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .7rem; align-items: start; }
+.vendor-mapping-rules .vendor-mapping-rule { font-size: .86rem; }
+.vendor-mapping-dialog[data-vendor-mapping-dialog] .vendor-mapping-fields { grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: start; }
+.vendor-mapping-dialog[data-vendor-mapping-dialog] .vendor-mapping-fields .form-note { padding: .45rem .6rem; font-size: .76rem; }
+@media (max-width: 1000px) {
+  .vendor-mapping-cdr-groups, .vendor-mapping-rules, .vendor-mapping-dialog[data-vendor-mapping-dialog] .vendor-mapping-fields { grid-template-columns: minmax(0, 1fr); }
+}

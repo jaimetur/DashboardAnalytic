@@ -161,6 +161,8 @@ CREATE TABLE IF NOT EXISTS dataset_profiles (
     vendor_values_complete INTEGER NOT NULL DEFAULT 0,
     region_mapping_applied INTEGER NOT NULL DEFAULT 0,
     region_mapping_dataset_id INTEGER,
+    cluster_mapping_applied INTEGER NOT NULL DEFAULT 0,
+    cluster_mapping_dataset_id INTEGER,
     dataset_kind TEXT,
     nr_mode TEXT,
     row_count INTEGER,
@@ -699,6 +701,8 @@ class Repository:
             'vendor': (
                 ('Ericsson', '#2E8B57', ()), ('Huawei', '#E15759', ()),
                 ('Samsung', '#7B3FB5', ()), ('NSN', '#4E79A7', ()),
+                ('Ericsson_Mixed', '#D9A514', ('Ericsson Mixed',)),
+                ('Non-Ericsson_Mixed', '#B9770E', ('Non-Ericsson Mixed', 'Non Ericsson Mixed')),
                 ('Mixed Vendor', '#D9A514', ('Mixed',)),
                 ('Other Vendor', '#D9A514', ('Other',)),
                 ('(blank)', '#7A8791', ('Blank', 'nan', 'none')),
@@ -740,6 +744,22 @@ class Repository:
             conn.execute(
                 "INSERT INTO workspace_state (key, value) VALUES ('chart_mapping_defaults_v1', '1')"
             )
+        # Workspaces seeded before the unified Vodafone/Three vendor rule also
+        # receive its Ericsson_Mixed and Non-Ericsson_Mixed groups, once.
+        if not conn.execute("SELECT 1 FROM workspace_state WHERE key = 'vendor_mixed_groups_v2'").fetchone():
+            for canonical, color, aliases in defaults['vendor'][4:6]:
+                position = int(conn.execute(
+                    "SELECT COALESCE(MAX(position), -1) + 1 FROM chart_mapping_groups WHERE mapping_type = 'vendor'"
+                ).fetchone()[0])
+                conn.execute(
+                    'INSERT OR IGNORE INTO chart_mapping_groups (mapping_type, canonical_value, position, color) VALUES (?, ?, ?, ?)',
+                    ('vendor', canonical, position, color),
+                )
+                conn.executemany(
+                    'INSERT OR IGNORE INTO vendor_mappings (source_value, canonical_value) VALUES (?, ?)',
+                    [(source, canonical) for source in (canonical, *aliases)],
+                )
+            conn.execute("INSERT INTO workspace_state (key, value) VALUES ('vendor_mixed_groups_v2', '1')")
     @staticmethod
     def _configure_database_journal(conn: sqlite3.Connection) -> None:
         """Enable concurrent readers once, outside request-time connections.
@@ -881,6 +901,10 @@ class Repository:
             conn.execute("ALTER TABLE dataset_profiles ADD COLUMN region_mapping_applied INTEGER NOT NULL DEFAULT 0")
         if 'region_mapping_dataset_id' not in existing_columns:
             conn.execute("ALTER TABLE dataset_profiles ADD COLUMN region_mapping_dataset_id INTEGER")
+        if 'cluster_mapping_applied' not in existing_columns:
+            conn.execute("ALTER TABLE dataset_profiles ADD COLUMN cluster_mapping_applied INTEGER NOT NULL DEFAULT 0")
+        if 'cluster_mapping_dataset_id' not in existing_columns:
+            conn.execute("ALTER TABLE dataset_profiles ADD COLUMN cluster_mapping_dataset_id INTEGER")
         if 'processing_started_at' not in existing_columns:
             conn.execute("ALTER TABLE dataset_profiles ADD COLUMN processing_started_at TEXT")
         if 'processing_queued_at' not in existing_columns:
@@ -3504,7 +3528,7 @@ class Repository:
             return conn.execute(
                 """
                 SELECT d.id, d.file_name, d.stored_path, d.uploaded_by, d.uploaded_at,
-                       p.status, p.progress, p.processing_step, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.region_mapping_applied, p.region_mapping_dataset_id, p.dataset_kind, p.nr_mode, p.row_count, p.column_count,
+                       p.status, p.progress, p.processing_step, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.region_mapping_applied, p.region_mapping_dataset_id, p.cluster_mapping_applied, p.cluster_mapping_dataset_id, p.dataset_kind, p.nr_mode, p.row_count, p.column_count,
                        p.default_metric, p.default_aggregation, p.available_metrics_json,
                        p.available_aggregations_json, p.filter_options_json, p.summary_json,
                        p.kpis_json, p.last_error, p.processing_started_at, p.processed_at,
@@ -3522,7 +3546,7 @@ class Repository:
                 conn.execute(
                     """
                     SELECT d.id, d.file_name, d.stored_path, d.uploaded_by, d.uploaded_at,
-                           p.status, p.progress, p.processing_step, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.region_mapping_applied, p.region_mapping_dataset_id, p.dataset_kind, p.nr_mode, p.row_count, p.column_count,
+                           p.status, p.progress, p.processing_step, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.region_mapping_applied, p.region_mapping_dataset_id, p.cluster_mapping_applied, p.cluster_mapping_dataset_id, p.dataset_kind, p.nr_mode, p.row_count, p.column_count,
                            p.default_metric, p.default_aggregation, p.available_metrics_json,
                            p.available_aggregations_json, p.filter_options_json, p.summary_json,
                            p.kpis_json, p.last_error, p.processing_started_at, p.processed_at,

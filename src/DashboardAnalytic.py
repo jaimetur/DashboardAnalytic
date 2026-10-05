@@ -64,7 +64,7 @@ from src.modules.cdr_reporting import entry_dynamic_fields, DYNAMIC_LAYOUTS, CAT
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_dataset_summary_powerpoint, export_dataset_summary_word, export_powerpoint_report, export_word_report
 from src.modules.email_delivery import DEFAULT_MAX_ATTACHMENTS_MB, EMAIL_SECURITY_MODES, email_delivery_settings, invalid_recipients, parse_recipients, save_email_delivery_settings, send_email
 from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column, add_vfuk_gcid_column, apply_operator_mappings, ensure_fixed_cdr_fields, get_dataset_source_columns, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
-from src.modules.geospatial import assign_regions, validate_cluster_mapping, validate_region_mapping
+from src.modules.geospatial import assign_clusters, assign_regions, validate_cluster_mapping, validate_region_mapping
 from src.modules.nr_mode import NR_MODES, dataset_nr_mode, infer_nr_mode, normalize_nr_mode
 from src.modules.scoring_vendors import normalize_scoring_vendor_result, scoring_vendor_name, scoring_vendor_names, scoring_vendor_operators
 from src.modules.scoring_jobs import (
@@ -513,25 +513,59 @@ def invalidate_feature_activation_cache() -> None:
     _feature_activation_cache = None
 
 
-def user_has_feature(user: SessionUser | None, feature: str) -> bool:
-    """Whether a feature is active for a user: Forbidden wins, then Allowed, then the default."""
-    if user is None or feature not in FEATURE_KEYS:
-        return feature not in FEATURE_KEYS
-    snapshot = _feature_activation_snapshot()
-    rule = snapshot['rules'][feature]
-    user_id = snapshot['users'].get(user.username.casefold())
-    groups = snapshot['groups_by_user'].get(user_id, set()) if user_id is not None else set()
-
+def feature_rule_allows(rule: dict[str, Any], role: str, user_id: int | None, groups: set[int], username: str) -> bool:
+    """Forbidden wins, then Allowed, then the default."""
     def matches(principals: dict[str, list], usernames: tuple[str, ...] = ()) -> bool:
-        return (user.role in principals['roles'] or bool(groups & set(principals['groups']))
+        return (role in principals['roles'] or bool(groups & set(principals['groups']))
                 or (user_id is not None and user_id in principals['users'])
-                or user.username.casefold() in {name.casefold() for name in usernames})
+                or username.casefold() in {name.casefold() for name in usernames})
 
     if matches(rule['deny']):
         return False
     if matches(rule['allow'], tuple(rule.get('allow_usernames', ()))):
         return True
     return rule['default'] == 'all'
+
+
+def user_has_feature(user: SessionUser | None, feature: str) -> bool:
+    """Whether a feature is active for a user: Forbidden wins, then Allowed, then the default."""
+    if user is None or feature not in FEATURE_KEYS:
+        return feature not in FEATURE_KEYS
+    snapshot = _feature_activation_snapshot()
+    user_id = snapshot['users'].get(user.username.casefold())
+    groups = snapshot['groups_by_user'].get(user_id, set()) if user_id is not None else set()
+    return feature_rule_allows(snapshot['rules'][feature], user.role, user_id, groups, user.username)
+
+
+FEATURE_ROLE_RANK = {role: index for index, role in enumerate(FEATURE_ROLES)}
+
+
+def feature_access_removed_from_higher_roles(actor: SessionUser, before: dict[str, Any], after: dict[str, Any]) -> list[str]:
+    """Features a save would remove from roles above the actor's, or from their users.
+
+    A lower role may grant a feature to a higher role but never remove it.
+    """
+    rank = FEATURE_ROLE_RANK.get(actor.role, -1)
+    higher_roles = [role for role in FEATURE_ROLES if FEATURE_ROLE_RANK[role] > rank]
+    if not higher_roles:
+        return []
+    groups_by_user: dict[int, set[int]] = {}
+    for group in repository.list_user_groups():
+        for member in group['member_ids']:
+            groups_by_user.setdefault(int(member), set()).add(int(group['id']))
+    # Every account of a higher role, plus the role itself for its future accounts.
+    principals = [(role, None, set(), '', f'the {role} role') for role in higher_roles]
+    principals += [(str(row['role']), int(row['id']), groups_by_user.get(int(row['id']), set()), str(row['username']), str(row['username']))
+                   for row in repository.list_users() if str(row['role']) in higher_roles]
+    removed = []
+    for feature in FEATURES:
+        key = feature['key']
+        lost = [label for role, user_id, groups, username, label in principals
+                if feature_rule_allows(before[key], role, user_id, groups, username)
+                and not feature_rule_allows(after[key], role, user_id, groups, username)]
+        if lost:
+            removed.append(f"{feature['label']} ({', '.join(lost)})")
+    return removed
 
 
 def user_features(user: SessionUser | None) -> dict[str, bool]:
@@ -2570,6 +2604,24 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
         return workspace
 
 
+def use_workspace_for_background_job(workspace: Workspace) -> None:
+    """Point a worker interpreter at a workspace without opening it for users.
+
+    Unlike ``activate_workspace`` this neither marks the workspace as opened
+    nor resumes its dataset processing, which belongs to the server process.
+    """
+    global active_workspace
+    for path in (workspace.database_path.parent, workspace.input_dir, workspace.output_dir, workspace.export_dir):
+        path.mkdir(parents=True, exist_ok=True)
+    object.__setattr__(settings, 'database_path', workspace.database_path)
+    object.__setattr__(settings, 'input_dir', workspace.input_dir)
+    object.__setattr__(settings, 'output_dir', workspace.output_dir)
+    object.__setattr__(settings, 'export_dir', workspace.export_dir)
+    object.__setattr__(settings, 'slides_templates_dir', workspace.slides_templates_dir)
+    repository.db_path = workspace.database_path
+    active_workspace = workspace
+
+
 def close_active_workspace() -> None:
     global active_workspace
     if active_workspace:
@@ -3172,6 +3224,7 @@ def serialize_dataset_row(row) -> dict[str, Any]:
     item['vendor_mapping_applied'] = bool(item.get('vendor_mapping_applied'))
     item['vendor_values_complete'] = bool(item.get('vendor_values_complete'))
     item['region_mapping_applied'] = bool(item.get('region_mapping_applied'))
+    item['cluster_mapping_applied'] = bool(item.get('cluster_mapping_applied'))
     item['is_ready'] = item.get('status') == 'ready'
     dataset_path = Path(item.get('stored_path') or '')
     item['source_exists'] = dataset_path.is_file()
@@ -3195,8 +3248,9 @@ def add_workspace_vendor_capabilities(datasets: list[dict[str, Any]]) -> None:
             has_vendor_mappings
             and dataset.get('is_ready')
             and dataset.get('dataset_kind') in CDR_DATASET_KINDS
-            and not vendor_mapping_applied
-            and not dataset.get('vendor_values_complete')
+            # A tool-applied mapping can be applied again and is overwritten;
+            # complete Vendor values from the source CDR are kept.
+            and (vendor_mapping_applied or not dataset.get('vendor_values_complete'))
         )
         dataset['can_clear_vendors'] = (
             dataset.get('is_ready')
@@ -3213,18 +3267,22 @@ def add_workspace_region_capabilities(datasets: list[dict[str, Any]]) -> None:
     )
     for dataset in datasets:
         mapped = bool(dataset.get('region_mapping_applied'))
-        dataset['can_map_regions'] = has_region_mappings and dataset.get('is_ready') and dataset.get('dataset_kind') in CDR_DATASET_KINDS and not mapped
+        # Mapping again overwrites the previous tool-applied Region mapping.
+        dataset['can_map_regions'] = has_region_mappings and dataset.get('is_ready') and dataset.get('dataset_kind') in CDR_DATASET_KINDS
         dataset['can_clear_regions'] = dataset.get('is_ready') and dataset.get('dataset_kind') in CDR_DATASET_KINDS and mapped
 
 
 def add_workspace_mapping_capabilities(datasets: list[dict[str, Any]]) -> None:
-    """Expose the single Workspace mapping actions for Vendor and Region."""
+    """Expose the single Workspace mapping actions for Vendor, Region and Cluster."""
     add_workspace_vendor_capabilities(datasets)
     add_workspace_region_capabilities(datasets)
+    has_cluster_mappings = any(dataset.get('is_ready') and dataset.get('dataset_kind') == 'clusters' for dataset in datasets)
     for dataset in datasets:
         is_cdr = dataset.get('is_ready') and dataset.get('dataset_kind') in CDR_DATASET_KINDS
-        dataset['can_map_mappings'] = bool(is_cdr and (dataset.get('can_map_vendors') or dataset.get('can_map_regions')))
-        dataset['can_clear_mappings'] = bool(is_cdr and (dataset.get('can_clear_vendors') or dataset.get('can_clear_regions')))
+        dataset['can_map_clusters'] = bool(is_cdr and has_cluster_mappings)
+        dataset['can_clear_clusters'] = bool(is_cdr and dataset.get('cluster_mapping_applied'))
+        dataset['can_map_mappings'] = bool(is_cdr and (dataset.get('can_map_vendors') or dataset.get('can_map_regions') or dataset['can_map_clusters']))
+        dataset['can_clear_mappings'] = bool(is_cdr and (dataset.get('can_clear_vendors') or dataset.get('can_clear_regions') or dataset['can_clear_clusters']))
 
 
 def derive_runtime_available_metrics(dataset: dict[str, Any]) -> list[str]:
@@ -3797,6 +3855,7 @@ def enqueue_dataset_processing(
     persist_queued_state: bool = True,
     dependencies: Iterable[Future[Any]] = (),
     batch_priority: bool = False,
+    cluster_mapping_dataset_id: int | None = None,
 ) -> Future[Any] | None:
     clear_stop_request(dataset_id)
     stale_keys = [key for key in ANALYSIS_CACHE if str(dataset_path.resolve()) in key]
@@ -3818,6 +3877,7 @@ def enqueue_dataset_processing(
                 processing_options_json=json.dumps({
                     **{'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id, 'three_mapping_dataset_id': three_mapping_dataset_id},
                     **({'region_mapping_dataset_id': region_mapping_dataset_id} if region_mapping_dataset_id else {}),
+                    **({'cluster_mapping_dataset_id': cluster_mapping_dataset_id} if cluster_mapping_dataset_id else {}),
                     **({'batch_priority': True} if batch_priority else {}),
                 }),
             )
@@ -3862,7 +3922,7 @@ def enqueue_dataset_processing(
             queued_kind = str((queued_dataset['dataset_kind'] if queued_dataset else '') or '')
             future = _submit_workspace_job(
                 task_repository, wait_for_dataset_worker,
-                phase=0 if queued_kind in {'mapping_vodafone', 'mapping_three', 'mapping_region'} else 1,
+                phase=0 if queued_kind in {'mapping_vodafone', 'mapping_three', 'mapping_region', 'clusters'} else 1,
                 dataset_id=dataset_id,
                 dataset_kind=queued_kind,
                 batch_priority=batch_priority,
@@ -3900,7 +3960,7 @@ def enqueue_dataset_processing(
         queued_kind = str((queued_dataset['dataset_kind'] if queued_dataset else '') or '')
         future = _submit_workspace_job(
             task_repository, process_after_dependencies,
-            phase=0 if queued_kind in {'mapping_vodafone', 'mapping_three', 'mapping_region'} else 1,
+            phase=0 if queued_kind in {'mapping_vodafone', 'mapping_three', 'mapping_region', 'clusters'} else 1,
             dataset_id=dataset_id,
             dataset_kind=queued_kind,
             batch_priority=batch_priority,
@@ -3988,7 +4048,7 @@ def resume_interrupted_dataset_processing(workspace: Workspace) -> list[int]:
             dataset_id, dataset_path, username,
             vodafone_mapping_id, three_mapping_id,
             task_repository, workspace, region_mapping_id,
-            phase=0 if str(row['dataset_kind'] or '') in {'mapping_vodafone', 'mapping_three', 'mapping_region'} else 1,
+            phase=0 if str(row['dataset_kind'] or '') in {'mapping_vodafone', 'mapping_three', 'mapping_region', 'clusters'} else 1,
             dataset_id=dataset_id, dataset_kind=str(row['dataset_kind'] or ''),
             batch_priority=batch_priority,
         )
@@ -4022,6 +4082,15 @@ def _resume_dataset_in_worker(
         _unregister_dataset_processing(dataset_id, task_repository)
 
 
+def _dataset_option(task_repository: Repository, dataset_id: int, key: str) -> Any:
+    row = task_repository.get_dataset(dataset_id)
+    try:
+        options = json.loads(str(row['processing_options_json'] or '{}')) if row else {}
+    except (TypeError, json.JSONDecodeError, IndexError, KeyError):
+        options = {}
+    return options.get(key) if isinstance(options, dict) else None
+
+
 def rebuild_dataset_artifacts(
     dataset_id: int,
     dataset_path: Path,
@@ -4032,8 +4101,13 @@ def rebuild_dataset_artifacts(
     region_mapping_dataset_id: int | None = None,
     task_repository: Repository | None = None,
     update_combined_reporting: bool = True,
+    cluster_mapping_dataset_id: int | None = None,
 ) -> dict[str, Any]:
     task_repository = task_repository or repository
+    if cluster_mapping_dataset_id is None:
+        # Cluster polygons are chosen with the CDR's other mappings and kept in
+        # its processing options, so every processing path applies them.
+        cluster_mapping_dataset_id = _dataset_option(task_repository, dataset_id, 'cluster_mapping_dataset_id')
     workspace_dimensions = load_repository_calculated_dimensions(task_repository)
     source_columns: list[str] = []
     if forced_dataset_kind in {'mapping_region', 'clusters'}:
@@ -4098,6 +4172,15 @@ def rebuild_dataset_artifacts(
             auto_region_mapping_applied = True
         except Exception as exc:
             auto_region_mapping_error = str(exc)
+    auto_cluster_mapping_applied = False
+    if dataset_kind in CDR_DATASET_KINDS and cluster_mapping_dataset_id:
+        task_repository.update_dataset_profile(dataset_id, processing_step='Applying Cluster Mapping')
+        try:
+            cluster_mapping = _reporting_dataset(cluster_mapping_dataset_id, 'clusters', task_repository)
+            df = assign_clusters(df, dataset_kind, Path(str(cluster_mapping['stored_path'])))
+            auto_cluster_mapping_applied = True
+        except Exception as exc:
+            auto_region_mapping_error = '; '.join(filter(None, (auto_region_mapping_error, f'Cluster mapping: {exc}')))
     if dataset_kind in CDR_DATASET_KINDS:
         task_repository.update_dataset_profile(dataset_id, processing_step='Calculating CDR-derived fields')
         df = materialize_cdr_derived_columns(df, dataset_kind, workspace_dimensions)
@@ -4170,6 +4253,8 @@ def rebuild_dataset_artifacts(
         vendor_mapping_applied=auto_vendor_mapping_applied,
         region_mapping_applied=auto_region_mapping_applied,
         region_mapping_dataset_id=region_mapping_dataset_id if auto_region_mapping_applied else None,
+        cluster_mapping_applied=auto_cluster_mapping_applied,
+        cluster_mapping_dataset_id=cluster_mapping_dataset_id if auto_cluster_mapping_applied else None,
         vendor_values_complete=vendor_values_complete,
         dataset_kind=dataset_kind,
         row_count=summary.rows,
@@ -4562,12 +4647,23 @@ def enqueue_vendor_mapping(
     """Queue one CDR mapping without blocking the Workspace request."""
     task_repository = Repository(Path(repository.db_path))
     clear_stop_request(dataset_id, task_repository)
+    previous = task_repository.get_dataset(dataset_id)
+    try:
+        previous_options = json.loads(str(previous['processing_options_json'] or '{}')) if previous else {}
+    except (TypeError, json.JSONDecodeError):
+        previous_options = {}
+    # Recalculating Vendor keeps the CDR's Region mapping.
+    previous_options = previous_options if isinstance(previous_options, dict) else {}
+    region_id = previous_options.get('region_mapping_dataset_id')
+    cluster_id = previous_options.get('cluster_mapping_dataset_id')
     task_repository.update_dataset_profile(
         dataset_id, status='queued', progress=0, processing_step='', last_error=None, processing_queued_at=now_iso(),
         processing_started_at=None, processed_at=None,
         processing_options_json=json.dumps({
             'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
             'three_mapping_dataset_id': three_mapping_dataset_id,
+            **({'region_mapping_dataset_id': region_id} if region_id else {}),
+            **({'cluster_mapping_dataset_id': cluster_id} if cluster_id else {}),
             **({'batch_priority': True} if batch_priority else {}),
         }),
     )
@@ -4878,6 +4974,16 @@ def change_password(
 def admin_user(user: SessionUser = Depends(current_user)) -> SessionUser:
     if user.role not in {'admin', 'super-admin'}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Admin access required')
+    return user
+
+
+WORKSPACE_EDITOR_ROLES = frozenset({'user-editor', 'admin', 'super-admin'})
+
+
+def workspace_editor_user(user: SessionUser = Depends(current_user)) -> SessionUser:
+    """Changes to workspace datasets and stored definitions; user-viewer can only read and run jobs."""
+    if user.role not in WORKSPACE_EDITOR_ROLES:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='The user-viewer role cannot change the workspace. Ask a user-editor, admin or super-admin.')
     return user
 
 
@@ -9078,7 +9184,7 @@ def render_admin_template(
             'embedded_template_editor': embedded_template_editor,
             'users': admin_users,
             'user_groups': repository.list_user_groups(),
-            'feature_activation': feature_activation_context() if user.role == 'super-admin' else [],
+            'feature_activation': feature_activation_context() if user.role in {'admin', 'super-admin'} else [],
             'feature_roles': FEATURE_ROLES,
             'workspaces': workspace_registry.list(),
             'backup_workspaces': accessible_workspaces(user),
@@ -9648,7 +9754,7 @@ def workspace(
             {
                 'user': user, 'datasets': [], 'ready_datasets': [], 'selected_dataset': None,
                 'input_kind': None, 'input_kind_options': [], 'workspace_logs': [], 'error': None,
-                'has_processing': False, 'vodafone_mapping_datasets': [], 'three_mapping_datasets': [], 'region_mapping_datasets': [],
+                'has_processing': False, 'vodafone_mapping_datasets': [], 'three_mapping_datasets': [], 'region_mapping_datasets': [], 'cluster_mapping_datasets': [],
                 'mappable_cdr_datasets': [], 'clearable_cdr_datasets': [], 'mappable_region_cdr_datasets': [], 'clearable_region_cdr_datasets': [],
                 'calculated_dimensions': [], 'combined_tables': [],
                 'workspaces': workspaces, 'workspace_access': workspace_access, 'workspace_sizes': workspace_sizes, 'workspace_cache_sizes': workspace_cache_sizes, 'workspace_statuses': workspace_statuses, 'workspace_users': workspace_users, 'workspace_notice': request.query_params.get('workspace_notice'),
@@ -9665,6 +9771,7 @@ def workspace(
     vodafone_mapping_datasets = [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'mapping_vodafone']
     three_mapping_datasets = [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'mapping_three']
     region_mapping_datasets = [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'mapping_region']
+    cluster_mapping_datasets = [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'clusters']
     add_workspace_mapping_capabilities(datasets)
     mappable_cdr_datasets = [dataset for dataset in datasets if dataset.get('can_map_mappings')]
     clearable_cdr_datasets = [dataset for dataset in datasets if dataset.get('can_clear_mappings')]
@@ -9689,6 +9796,7 @@ def workspace(
             'vodafone_mapping_datasets': vodafone_mapping_datasets,
             'three_mapping_datasets': three_mapping_datasets,
             'region_mapping_datasets': region_mapping_datasets,
+            'cluster_mapping_datasets': cluster_mapping_datasets,
             'mappable_cdr_datasets': mappable_cdr_datasets,
             'clearable_cdr_datasets': clearable_cdr_datasets,
             'mappable_region_cdr_datasets': mappable_region_cdr_datasets,
@@ -9725,7 +9833,7 @@ def workspace_sizes_status(user: SessionUser = Depends(current_user)) -> JSONRes
 
 @app.post('/workspace/combined/{kind}/recreate')
 def recreate_combined_cdr(
-    kind: str, user: SessionUser = Depends(current_user),
+    kind: str, user: SessionUser = Depends(workspace_editor_user),
 ) -> JSONResponse:
     if not active_workspace:
         raise HTTPException(status_code=400, detail='Open a workspace before recreating combined tables.')
@@ -10100,6 +10208,30 @@ def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
                             'stop_task_id': f'dataset-management:{dataset_management_job.get("id")}',
                             'stop_url': f'/api/background-tasks/{workspace.id}/stop',
                         })
+            if 'report_task_runs' in tables:
+                # Reporting Job runs, including scheduled runs of workspaces that are not open.
+                recent = (datetime.now().astimezone() - timedelta(seconds=5)).isoformat()
+                for row in connection.execute(
+                    "SELECT id, task_name, status, progress, message, created_at, started_at, finished_at FROM report_task_runs "
+                    "WHERE status IN ('queued', 'running') OR (finished_at IS NOT NULL AND finished_at >= ?) ORDER BY id",
+                    (recent,),
+                ).fetchall():
+                    finished = str(row['status']) not in {'queued', 'running'}
+                    timestamps = {}
+                    for key, column in (('queued_at', 'created_at'), ('started_at', 'started_at'), ('completed_at', 'finished_at')):
+                        try:
+                            timestamps[key] = datetime.fromisoformat(str(row[column])).timestamp() if row[column] else None
+                        except ValueError:
+                            timestamps[key] = None
+                    tasks.append({
+                        'id': f'reporting-run:{workspace.id}:{row["id"]}',
+                        'label': f'Reporting Job: {row["task_name"]}',
+                        'detail': str(row['message'] or row['status']).strip() or 'Running',
+                        'status': 'ready' if finished and str(row['status']) in {'sent', 'completed', 'partial'} else
+                                  ('failed' if finished else ('processing' if str(row['status']) == 'running' else 'queued')),
+                        'progress': max(0, min(100, int(row['progress'] or 0))),
+                        **timestamps,
+                    })
     except sqlite3.Error:
         # A worker may briefly hold the database while publishing a progress
         # update. The next browser poll will retry without disrupting the page.
@@ -10398,7 +10530,7 @@ def background_tasks_status(user: SessionUser = Depends(current_user)) -> JSONRe
 def stop_background_task(
     workspace_id: str,
     task_id: str = Form(...),
-    user: SessionUser = Depends(current_user),
+    user: SessionUser = Depends(workspace_editor_user),
 ) -> JSONResponse:
     """Request cooperative cancellation for a task in an accessible workspace."""
     workspace = workspace_registry.get(workspace_id)
@@ -13268,7 +13400,7 @@ def cancel_query_builder_run(execution_id: str, user: SessionUser = Depends(curr
 
 
 @app.post('/api/query-builder/save')
-async def save_query_builder(request: Request, user: SessionUser = Depends(current_user)) -> JSONResponse:
+async def save_query_builder(request: Request, user: SessionUser = Depends(workspace_editor_user)) -> JSONResponse:
     payload = await request.json()
     datasets, query_sql = _query_builder_payload(payload)
     name = str(payload.get('name') or '').strip()
@@ -13284,7 +13416,7 @@ async def save_query_builder(request: Request, user: SessionUser = Depends(curre
 
 
 @app.post('/api/query-builder/saved/{query_id}')
-async def update_saved_query_builder_query(query_id: int, request: Request, user: SessionUser = Depends(current_user)) -> JSONResponse:
+async def update_saved_query_builder_query(query_id: int, request: Request, user: SessionUser = Depends(workspace_editor_user)) -> JSONResponse:
     if not active_workspace:
         raise HTTPException(status_code=400, detail='Open a workspace before editing a saved query.')
     payload = await request.json()
@@ -13312,7 +13444,7 @@ async def update_saved_query_builder_query(query_id: int, request: Request, user
 
 
 @app.delete('/api/query-builder/saved/{query_id}')
-def delete_saved_query_builder_query(query_id: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
+def delete_saved_query_builder_query(query_id: int, user: SessionUser = Depends(workspace_editor_user)) -> JSONResponse:
     if not active_workspace:
         raise HTTPException(status_code=400, detail='Open a workspace before deleting a saved query.')
     if not repository.delete_query_builder_query(query_id):
@@ -14534,7 +14666,7 @@ def scoring_jobs_result(job_id: int, user: SessionUser = Depends(current_user)) 
 
 
 @app.delete('/api/scoring/jobs/{job_id}')
-def scoring_jobs_delete(job_id: int, user: SessionUser = Depends(current_user)) -> dict[str, Any]:
+def scoring_jobs_delete(job_id: int, user: SessionUser = Depends(workspace_editor_user)) -> dict[str, Any]:
     task_repository = scoring_repository(user)
     if not delete_scoring_job(task_repository, job_id):
         raise HTTPException(status_code=404, detail='Scoring job not found.')
@@ -14543,7 +14675,7 @@ def scoring_jobs_delete(job_id: int, user: SessionUser = Depends(current_user)) 
 
 
 @app.post('/scoring/datasets/{dataset_id}/recalculate')
-def scoring_dataset_recalculate(dataset_id: int, user: SessionUser = Depends(current_user)) -> RedirectResponse:
+def scoring_dataset_recalculate(dataset_id: int, user: SessionUser = Depends(workspace_editor_user)) -> RedirectResponse:
     task_repository = scoring_repository(user)
     dataset = task_repository.get_dataset(dataset_id)
     if not dataset:
@@ -14903,8 +15035,9 @@ async def upload_dataset(
     vodafone_mapping_dataset_ids: Annotated[list[str] | None, Form()] = None,
     three_mapping_dataset_ids: Annotated[list[str] | None, Form()] = None,
     region_mapping_dataset_ids: Annotated[list[str] | None, Form()] = None,
+    cluster_mapping_dataset_ids: Annotated[list[str] | None, Form()] = None,
     nr_modes: Annotated[list[str] | None, Form()] = None,
-    user: SessionUser = Depends(current_user),
+    user: SessionUser = Depends(workspace_editor_user),
 ) -> Response:
     if not dataset_files:
         datasets = [serialize_dataset_row(row) for row in repository.list_datasets()]
@@ -14980,6 +15113,11 @@ async def upload_dataset(
         latest_region = next((row for row in repository.list_datasets() if row['status'] == 'ready' and row['dataset_kind'] == 'mapping_region'), None)
         if latest_region:
             selected_region_mappings = [str(latest_region['id']) if kind in CDR_DATASET_KINDS else None for kind in selected_kinds]
+    selected_cluster_mappings = parse_mapping_selection(cluster_mapping_dataset_ids, 'Cluster mapping')
+    if cluster_mapping_dataset_ids is None and selected_kinds:
+        latest_clusters = next((row for row in repository.list_datasets() if row['status'] == 'ready' and row['dataset_kind'] == 'clusters'), None)
+        if latest_clusters:
+            selected_cluster_mappings = [str(latest_clusters['id']) if kind in CDR_DATASET_KINDS else None for kind in selected_kinds]
 
     def validate_mapping_selection(selection: str | None, expected_kind: str, label: str) -> None:
         if not selection:
@@ -15004,6 +15142,7 @@ async def upload_dataset(
             validate_mapping_selection(selected_vodafone_mappings[index], 'mapping_vodafone', 'VFUK mapping')
             validate_mapping_selection(selected_three_mappings[index], 'mapping_three', '3UK mapping')
             validate_mapping_selection(selected_region_mappings[index], 'mapping_region', 'Region mapping')
+            validate_mapping_selection(selected_cluster_mappings[index], 'clusters', 'Cluster mapping')
 
     queued_dataset_ids: list[int] = []
     uploaded_datasets: list[dict[str, Any]] = []
@@ -15031,6 +15170,7 @@ async def upload_dataset(
             'vodafone_mapping_selection': selected_vodafone_mappings[index],
             'three_mapping_selection': selected_three_mappings[index],
             'region_mapping_selection': selected_region_mappings[index],
+            'cluster_mapping_selection': selected_cluster_mappings[index],
         })
         queued_dataset_ids.append(dataset_id)
 
@@ -15062,7 +15202,7 @@ async def upload_dataset(
     for uploaded in sorted(
         uploaded_datasets,
         key=lambda item: (
-            0 if item['dataset_kind'] in {'mapping_vodafone', 'mapping_three', 'mapping_region'} else 1,
+            0 if item['dataset_kind'] in {'mapping_vodafone', 'mapping_three', 'mapping_region', 'clusters'} else 1,
             int(item['dataset_id']),
         ),
     ):
@@ -15079,6 +15219,10 @@ async def upload_dataset(
             resolve_mapping_selection(uploaded['region_mapping_selection'], 'mapping_region', 'Region mapping')
             if dataset_kind in CDR_DATASET_KINDS else None
         )
+        cluster_mapping_dataset_id = (
+            resolve_mapping_selection(uploaded['cluster_mapping_selection'], 'clusters', 'Cluster mapping')
+            if dataset_kind in CDR_DATASET_KINDS else None
+        )
         repository.add_log(user.username, 'upload_dataset' if uploaded['created'] else 'reprocess_dataset', json.dumps({
             'file': uploaded['destination'].name,
             'dataset_kind': dataset_kind or 'auto-detected',
@@ -15086,6 +15230,7 @@ async def upload_dataset(
             'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
             'three_mapping_dataset_id': three_mapping_dataset_id,
             'region_mapping_dataset_id': region_mapping_dataset_id,
+            'cluster_mapping_dataset_id': cluster_mapping_dataset_id,
         }))
         dependencies = list(batch_mapping_futures) if dataset_kind in CDR_DATASET_KINDS else []
         future = enqueue_dataset_processing(
@@ -15098,9 +15243,10 @@ async def upload_dataset(
             region_mapping_dataset_id,
             dependencies=dependencies,
             batch_priority=len(uploaded_datasets) > 1,
+            cluster_mapping_dataset_id=cluster_mapping_dataset_id,
         )
         if future is not None:
-            if dataset_kind in {'mapping_vodafone', 'mapping_three', 'mapping_region'}:
+            if dataset_kind in {'mapping_vodafone', 'mapping_three', 'mapping_region', 'clusters'}:
                 batch_mapping_futures.append(future)
 
     if not queued_dataset_ids:
@@ -15384,14 +15530,13 @@ def move_admin_dataset(
     return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post('/dashboard/retry/{dataset_id}', include_in_schema=False)
 class DatasetNrModeUpdate(BaseModel):
     nr_mode: str
 
 
 @app.post('/workspace/datasets/{dataset_id}/nr-mode')
 def update_dataset_nr_mode(
-    dataset_id: int, payload: DatasetNrModeUpdate, user: SessionUser = Depends(current_user),
+    dataset_id: int, payload: DatasetNrModeUpdate, user: SessionUser = Depends(workspace_editor_user),
 ) -> JSONResponse:
     """Correct the NR Mode of one CDR without reprocessing it."""
     if active_workspace:
@@ -15414,12 +15559,13 @@ def update_dataset_nr_mode(
     return JSONResponse({'dataset_id': dataset_id, 'nr_mode': nr_mode})
 
 
+@app.post('/dashboard/retry/{dataset_id}', include_in_schema=False)
 @app.post('/datasets-analysis/retry/{dataset_id}')
 def retry_dataset(
     dataset_id: int,
     background_tasks: BackgroundTasks,
     return_to: str = Form(''),
-    user: SessionUser = Depends(current_user),
+    user: SessionUser = Depends(workspace_editor_user),
 ) -> Response:
     dataset = repository.get_dataset(dataset_id)
     if not dataset:
@@ -15442,6 +15588,7 @@ def retry_dataset(
         background_tasks, dataset_id, dataset_path, user.username,
         vodafone_mapping_dataset_id, three_mapping_dataset_id,
         region_mapping_dataset_id,
+        cluster_mapping_dataset_id=processing_options.get('cluster_mapping_dataset_id'),
     )
     if future is None:
         raise HTTPException(status_code=409, detail='This dataset is already queued or processing.')
@@ -15464,7 +15611,7 @@ def reprocess_workspace_datasets(
     background_tasks: BackgroundTasks,
     dataset_ids: Annotated[list[int] | None, Form()] = None,
     return_to: str = Form(''),
-    user: SessionUser = Depends(current_user),
+    user: SessionUser = Depends(workspace_editor_user),
 ) -> Response:
     if not active_workspace:
         raise HTTPException(status_code=400, detail='Open a workspace before reprocessing datasets')
@@ -15496,7 +15643,7 @@ def reprocess_workspace_datasets(
     for dataset in sorted(
         selected_datasets,
         key=lambda item: (
-            0 if item.get('dataset_kind') == 'mapping_region' else 1 if item.get('dataset_kind') in {'mapping_vodafone', 'mapping_three'} else 2,
+            0 if item.get('dataset_kind') in {'mapping_region', 'clusters'} else 1 if item.get('dataset_kind') in {'mapping_vodafone', 'mapping_three'} else 2,
             -int(item['id']),
         ),
     ):
@@ -15516,13 +15663,14 @@ def reprocess_workspace_datasets(
             vodafone_mapping_dataset_id,
             three_mapping_dataset_id,
             region_mapping_dataset_id,
+            cluster_mapping_dataset_id=processing_options.get('cluster_mapping_dataset_id'),
             dependencies=dependencies,
             batch_priority=True,
         )
         if future is None:
             continue
         dataset_id = int(dataset['id'])
-        if dataset.get('dataset_kind') in {'mapping_vodafone', 'mapping_three', 'mapping_region'}:
+        if dataset.get('dataset_kind') in {'mapping_vodafone', 'mapping_three', 'mapping_region', 'clusters'}:
             mapping_futures.append(future)
         queued_ids.append(dataset_id)
         repository.add_log(user.username, 'reprocess_dataset', json.dumps({
@@ -15553,7 +15701,7 @@ def map_dataset_vendors(
     vodafone_mapping_dataset_id: int | None = Form(default=None),
     three_mapping_dataset_id: int | None = Form(default=None),
     return_to: str = Form(''),
-    user: SessionUser = Depends(current_user),
+    user: SessionUser = Depends(workspace_editor_user),
 ) -> Response:
     selected_ids = list(dict.fromkeys(cdr_dataset_ids or ([] if cdr_dataset_id is None else [cdr_dataset_id])))
     if not selected_ids:
@@ -15583,8 +15731,7 @@ def map_dataset_vendors(
         cdr_dataset = serialize_dataset_row(cdr_row)
         if not cdr_dataset['is_ready'] or cdr_dataset.get('dataset_kind') not in CDR_DATASET_KINDS:
             raise HTTPException(status_code=400, detail='Vendor mapping is only available for processed NetCheck CDR datasets.')
-        if cdr_dataset.get('vendor_mapping_applied'):
-            raise HTTPException(status_code=400, detail=f"{cdr_dataset['file_name']} already has a Vendor mapping. Clear it before mapping again.")
+        # A previous Vendor mapping is overwritten; Clear is not required first.
         selected_datasets.append(cdr_dataset)
 
     with defer_workspace_dataset_dispatch(repository):
@@ -15627,7 +15774,7 @@ def clear_vendor_datasets(
     cdr_dataset_ids: Annotated[list[int] | None, Form()] = None,
     cdr_dataset_id: int | None = Form(default=None),
     return_to: str = Form(''),
-    user: SessionUser = Depends(current_user),
+    user: SessionUser = Depends(workspace_editor_user),
 ) -> Response:
     selected_ids = list(dict.fromkeys(cdr_dataset_ids or ([] if cdr_dataset_id is None else [cdr_dataset_id])))
     if not selected_ids:
@@ -15646,7 +15793,7 @@ def map_dataset_regions(
     cdr_dataset_ids: Annotated[list[int] | None, Form()] = None,
     cdr_dataset_id: int | None = Form(default=None),
     region_mapping_dataset_id: int | None = Form(default=None),
-    user: SessionUser = Depends(current_user),
+    user: SessionUser = Depends(workspace_editor_user),
 ) -> Response:
     selected_ids = list(dict.fromkeys(cdr_dataset_ids or ([] if cdr_dataset_id is None else [cdr_dataset_id])))
     if not selected_ids or not region_mapping_dataset_id:
@@ -15655,11 +15802,20 @@ def map_dataset_regions(
     selected_datasets: list[dict[str, Any]] = []
     for dataset_id in selected_ids:
         dataset = serialize_dataset_row(repository.get_dataset(dataset_id)) if repository.get_dataset(dataset_id) else None
-        if not dataset or not dataset.get('is_ready') or dataset.get('dataset_kind') not in CDR_DATASET_KINDS or dataset.get('region_mapping_applied'):
+        if not dataset or not dataset.get('is_ready') or dataset.get('dataset_kind') not in CDR_DATASET_KINDS:
             raise HTTPException(status_code=400, detail='Region mapping is only available for eligible processed CDRs.')
         selected_datasets.append(dataset)
     with defer_workspace_dataset_dispatch(repository):
         for dataset in sorted(selected_datasets, key=lambda item: -int(item['id'])):
+            if dataset.get('region_mapping_applied'):
+                # Rebuild from the source so the new Regions replace the previous mapping.
+                vodafone_id, three_id, _region_id = _previous_mapping_ids(dataset)
+                enqueue_dataset_processing(
+                    background_tasks, int(dataset['id']), Path(str(dataset['stored_path'])), user.username,
+                    vodafone_id, three_id, region_mapping_dataset_id, batch_priority=True,
+                    cluster_mapping_dataset_id=dataset.get('cluster_mapping_dataset_id') if dataset.get('cluster_mapping_applied') else None,
+                )
+                continue
             enqueue_region_mapping(
                 background_tasks, int(dataset['id']), user.username, region_mapping_dataset_id, batch_priority=True,
             )
@@ -15674,11 +15830,14 @@ def map_dataset_mappings(
     vodafone_mapping_dataset_id: int | None = Form(default=None),
     three_mapping_dataset_id: int | None = Form(default=None),
     region_mapping_dataset_id: int | None = Form(default=None),
-    user: SessionUser = Depends(current_user),
+    cluster_mapping_dataset_id: int | None = Form(default=None),
+    user: SessionUser = Depends(workspace_editor_user),
 ) -> Response:
     selected_ids = list(dict.fromkeys(cdr_dataset_ids or []))
-    if not selected_ids or not any((vodafone_mapping_dataset_id, three_mapping_dataset_id, region_mapping_dataset_id)):
-        raise HTTPException(status_code=400, detail='Select CDRs and at least one Vendor or Region Mapping.')
+    if not selected_ids or not any((vodafone_mapping_dataset_id, three_mapping_dataset_id, region_mapping_dataset_id, cluster_mapping_dataset_id)):
+        raise HTTPException(status_code=400, detail='Select CDRs and at least one Vendor, Region or Cluster Mapping.')
+    if cluster_mapping_dataset_id:
+        _reporting_dataset(cluster_mapping_dataset_id, 'clusters')
     if vodafone_mapping_dataset_id:
         _reporting_dataset(vodafone_mapping_dataset_id, 'mapping_vodafone')
     if three_mapping_dataset_id:
@@ -15694,22 +15853,56 @@ def map_dataset_mappings(
         selected_datasets.append(dataset)
     # Keep every selected CDR pending until the complete batch is known, so
     # priority rather than browser checkbox order chooses the first worker.
+    # Mapping a CDR again overwrites its previous mapping without a Clear first;
+    # a mapping that is not selected again keeps its previous result.
+    vendor_selected = bool(vodafone_mapping_dataset_id or three_mapping_dataset_id)
     with defer_workspace_dataset_dispatch(repository):
         for dataset in sorted(selected_datasets, key=lambda item: -int(item['id'])):
+            previous_vodafone, previous_three, previous_region = _previous_mapping_ids(dataset)
+            previous_cluster = dataset.get('cluster_mapping_dataset_id') if dataset.get('cluster_mapping_applied') else None
+            current_build = int(dataset.get('normalization_version') or 1) >= DATASET_NORMALIZATION_VERSION
+            if (vendor_selected and not region_mapping_dataset_id and not cluster_mapping_dataset_id
+                    and dataset.get('vendor_mapping_applied') and current_build):
+                # Vendor only: recalculate Vendor on the stored rows, much faster
+                # than rebuilding the CDR, and keep its Region mapping.
+                enqueue_vendor_mapping(
+                    background_tasks, int(dataset['id']), user.username,
+                    vodafone_mapping_dataset_id, three_mapping_dataset_id, batch_priority=True,
+                )
+                continue
             enqueue_dataset_processing(
                 background_tasks, int(dataset['id']), Path(str(dataset['stored_path'])), user.username,
-                vodafone_mapping_dataset_id, three_mapping_dataset_id, region_mapping_dataset_id,
+                vodafone_mapping_dataset_id if vendor_selected else previous_vodafone,
+                three_mapping_dataset_id if vendor_selected else previous_three,
+                region_mapping_dataset_id or previous_region,
                 batch_priority=True,
+                cluster_mapping_dataset_id=cluster_mapping_dataset_id or previous_cluster,
             )
-    repository.add_log(user.username, 'queue_dataset_mappings', json.dumps({'dataset_ids': selected_ids, 'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id, 'three_mapping_dataset_id': three_mapping_dataset_id, 'region_mapping_dataset_id': region_mapping_dataset_id}))
+    repository.add_log(user.username, 'queue_dataset_mappings', json.dumps({'dataset_ids': selected_ids, 'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id, 'three_mapping_dataset_id': three_mapping_dataset_id, 'region_mapping_dataset_id': region_mapping_dataset_id, 'cluster_mapping_dataset_id': cluster_mapping_dataset_id}))
     return RedirectResponse(f'/workspace?dataset_id={selected_ids[0]}', status_code=status.HTTP_303_SEE_OTHER)
+
+
+def _previous_mapping_ids(dataset: dict[str, Any]) -> tuple[int | None, int | None, int | None]:
+    """VFUK, 3UK and Region mapping datasets of the CDR's current tool-applied mappings."""
+    try:
+        options = json.loads(str(dataset.get('processing_options_json') or '{}'))
+    except (TypeError, json.JSONDecodeError):
+        options = {}
+    options = options if isinstance(options, dict) else {}
+    vendor = bool(dataset.get('vendor_mapping_applied'))
+    region = bool(dataset.get('region_mapping_applied'))
+    return (
+        options.get('vodafone_mapping_dataset_id') if vendor else None,
+        options.get('three_mapping_dataset_id') if vendor else None,
+        (dataset.get('region_mapping_dataset_id') or options.get('region_mapping_dataset_id')) if region else None,
+    )
 
 
 @app.post('/workspace/clear-mappings')
 def clear_dataset_mappings(
     background_tasks: BackgroundTasks,
     cdr_dataset_ids: Annotated[list[int] | None, Form()] = None,
-    user: SessionUser = Depends(current_user),
+    user: SessionUser = Depends(workspace_editor_user),
 ) -> Response:
     selected_ids = list(dict.fromkeys(cdr_dataset_ids or []))
     if not selected_ids:
@@ -15717,7 +15910,7 @@ def clear_dataset_mappings(
     for dataset_id in selected_ids:
         row = repository.get_dataset(dataset_id)
         dataset = serialize_dataset_row(row) if row else None
-        if not dataset or not dataset.get('is_ready') or dataset.get('dataset_kind') not in CDR_DATASET_KINDS or not (dataset.get('vendor_mapping_applied') or dataset.get('region_mapping_applied')):
+        if not dataset or not dataset.get('is_ready') or dataset.get('dataset_kind') not in CDR_DATASET_KINDS or not (dataset.get('vendor_mapping_applied') or dataset.get('region_mapping_applied') or dataset.get('cluster_mapping_applied')):
             raise HTTPException(status_code=400, detail='Clearing is only available for CDRs with a tool-applied mapping.')
         enqueue_dataset_processing(background_tasks, dataset_id, Path(str(dataset['stored_path'])), user.username)
     repository.add_log(user.username, 'queue_dataset_mappings_clearing', json.dumps({'dataset_ids': selected_ids}))
@@ -15729,7 +15922,7 @@ def clear_region_datasets(
     background_tasks: BackgroundTasks,
     cdr_dataset_ids: Annotated[list[int] | None, Form()] = None,
     cdr_dataset_id: int | None = Form(default=None),
-    user: SessionUser = Depends(current_user),
+    user: SessionUser = Depends(workspace_editor_user),
 ) -> Response:
     selected_ids = list(dict.fromkeys(cdr_dataset_ids or ([] if cdr_dataset_id is None else [cdr_dataset_id])))
     if not selected_ids:
@@ -15744,13 +15937,14 @@ def clear_region_datasets(
         except (TypeError, json.JSONDecodeError):
             options = {}
         enqueue_dataset_processing(background_tasks, dataset_id, Path(str(dataset['stored_path'])), user.username,
-            options.get('vodafone_mapping_dataset_id'), options.get('three_mapping_dataset_id'), None)
+            options.get('vodafone_mapping_dataset_id'), options.get('three_mapping_dataset_id'), None,
+            cluster_mapping_dataset_id=options.get('cluster_mapping_dataset_id'))
     repository.add_log(user.username, 'queue_region_clearing', json.dumps({'dataset_ids': selected_ids}))
     return RedirectResponse(f'/workspace?dataset_id={selected_ids[0]}', status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post('/workspace/clear-vendors/{dataset_id}')
-def clear_dataset_vendors(dataset_id: int, background_tasks: BackgroundTasks, user: SessionUser = Depends(current_user)) -> Response:
+def clear_dataset_vendors(dataset_id: int, background_tasks: BackgroundTasks, user: SessionUser = Depends(workspace_editor_user)) -> Response:
     """Backward-compatible single-dataset entry point; use the queued operation."""
     _validate_clearable_vendor_datasets([dataset_id])
     enqueue_vendor_clearing(background_tasks, dataset_id, user.username)
@@ -15763,7 +15957,7 @@ def clear_dataset_vendors(dataset_id: int, background_tasks: BackgroundTasks, us
 def stop_dataset(
     dataset_id: int,
     return_to: str = Form(''),
-    user: SessionUser = Depends(current_user),
+    user: SessionUser = Depends(workspace_editor_user),
 ) -> Response:
     dataset = repository.get_dataset(dataset_id)
     if not dataset:
@@ -15786,7 +15980,7 @@ def stop_dataset(
 @app.post('/workspace/stop-datasets')
 def stop_workspace_datasets(
     return_to: str = Form(''),
-    user: SessionUser = Depends(current_user),
+    user: SessionUser = Depends(workspace_editor_user),
 ) -> Response:
     if not active_workspace:
         raise HTTPException(status_code=400, detail='Open a workspace before stopping datasets')
@@ -15829,7 +16023,7 @@ def stop_workspace_datasets(
 @app.post('/workspace/delete-datasets')
 def delete_workspace_datasets(
     return_to: str = Form(''),
-    user: SessionUser = Depends(current_user),
+    user: SessionUser = Depends(workspace_editor_user),
 ) -> Response:
     if not active_workspace:
         raise HTTPException(status_code=400, detail='Open a workspace before removing datasets')
@@ -15880,7 +16074,7 @@ def delete_workspace_datasets(
 
 @app.post('/dashboard/delete/{dataset_id}', include_in_schema=False)
 @app.post('/datasets-analysis/delete/{dataset_id}')
-def delete_dataset(dataset_id: int, return_to: str = Form(''), user: SessionUser = Depends(current_user)) -> Response:
+def delete_dataset(dataset_id: int, return_to: str = Form(''), user: SessionUser = Depends(workspace_editor_user)) -> Response:
     dataset = repository.get_dataset(dataset_id)
     if not dataset:
         raise HTTPException(status_code=404, detail='Dataset not found')
@@ -18573,7 +18767,7 @@ def parse_feature_principals(values: list[str]) -> dict[str, list[str]]:
 
 
 @app.post('/admin/features', response_class=HTMLResponse)
-async def save_feature_activation(request: Request, user: SessionUser = Depends(super_admin_user)) -> Response:
+async def save_feature_activation(request: Request, user: SessionUser = Depends(admin_user)) -> Response:
     form = await request.form()
     values = {
         key: {
@@ -18583,6 +18777,22 @@ async def save_feature_activation(request: Request, user: SessionUser = Depends(
         }
         for key in FEATURE_KEYS
     }
+    current = feature_activation_settings()
+    if user.role != 'super-admin':
+        # Forbidden entries for higher roles are not offered to lower roles; keep them.
+        higher = {role for role in FEATURE_ROLES if FEATURE_ROLE_RANK[role] > FEATURE_ROLE_RANK.get(user.role, -1)}
+        higher_users = {int(row['id']) for row in repository.list_users() if str(row['role']) in higher}
+        for key, value in values.items():
+            kept = current[key]['deny']
+            value['deny']['roles'] = list(dict.fromkeys([*value['deny']['roles'], *[role for role in kept['roles'] if role in higher]]))
+            value['deny']['users'] = list(dict.fromkeys([*value['deny']['users'], *[item for item in kept['users'] if item in higher_users]]))
+    removed = feature_access_removed_from_higher_roles(
+        user, current, {key: normalized_feature_rule(value) for key, value in values.items()})
+    if removed:
+        return render_admin_template(
+            request, user, status_code=403,
+            error=f"A {user.role} can grant features to higher roles but cannot remove them. Nothing was saved; this change would remove: {'; '.join(removed)}.",
+        )
     save_feature_activation_settings(values)
     repository.add_log(user.username, 'save_feature_activation', json.dumps(feature_activation_settings(), sort_keys=True))
     return RedirectResponse('/admin#features-activation', status_code=status.HTTP_303_SEE_OTHER)
@@ -18732,7 +18942,7 @@ async def _save_workspace_dimensions(request: Request, user: SessionUser) -> JSO
 
 @app.put('/api/workspace/calculated-dimensions')
 async def save_workspace_calculated_dimensions(
-    request: Request, user: SessionUser = Depends(current_user),
+    request: Request, user: SessionUser = Depends(workspace_editor_user),
 ) -> JSONResponse:
     return await _save_workspace_dimensions(request, user)
 
@@ -18862,7 +19072,7 @@ def latest_auto_calculated_field_materialization(
 
 @app.post('/api/workspace/auto-calculated-fields/rematerialize')
 def rematerialize_workspace_auto_calculated_fields(
-    user: SessionUser = Depends(current_user),
+    user: SessionUser = Depends(workspace_editor_user),
 ) -> JSONResponse:
     if not active_workspace:
         raise HTTPException(status_code=400, detail='Open a workspace before rematerializing auto-calculated fields.')
@@ -18907,7 +19117,7 @@ def export_workspace_calculated_dimensions(
 @app.post('/workspace/calculated-dimensions/import')
 async def import_workspace_calculated_dimensions(
     dimensions_file: UploadFile = File(...),
-    user: SessionUser = Depends(current_user),
+    user: SessionUser = Depends(workspace_editor_user),
 ) -> RedirectResponse:
     if not active_workspace:
         raise HTTPException(status_code=400, detail='Open a workspace before importing auto-calculated fields.')

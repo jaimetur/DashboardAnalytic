@@ -282,13 +282,17 @@ def wait_for_report_chart_job(client, job_id: int) -> dict:
     raise AssertionError(f'Report Charts job {job_id} did not finish in time.')
 
 
-def test_vendor_formula_keeps_vodafone_ericsson_null_exception_as_mixed() -> None:
-    lookup = {'first': 'Ericsson'}
-
-    assert vendor_from_cells('Vodafone UK', 'first -> unknown', lookup) == 'Vodafone_Mixed Vendor'
-    assert vendor_from_cells('Vodafone UK', 'first -> first', lookup) == 'Vodafone_Ericsson'
-    assert vendor_from_cells('3', 'first -> unknown', lookup) == '3_Mixed Vendor'
-    assert vendor_from_cells('O2', 'first -> unknown', lookup) == 'O2'
+def test_vendor_formula_is_shared_by_vodafone_and_three() -> None:
+    lookup = {'eri': 'Ericsson', 'nok': 'Nokia', 'hua': 'Huawei'}
+    for operator, prefix in (('Vodafone UK', 'Vodafone'), ('3', '3')):
+        assert vendor_from_cells(operator, 'eri -> eri', lookup) == f'{prefix}_Ericsson'
+        assert vendor_from_cells(operator, 'nok -> nok', lookup) == f'{prefix}_Nokia'
+        assert vendor_from_cells(operator, 'eri -> unknown', lookup) == f'{prefix}_Ericsson_Mixed'
+        assert vendor_from_cells(operator, 'nok -> eri', lookup) == f'{prefix}_Ericsson_Mixed'
+        assert vendor_from_cells(operator, 'nok -> hua', lookup) == f'{prefix}_Non-Ericsson_Mixed'
+        assert vendor_from_cells(operator, 'unknown -> nok', lookup) == f'{prefix}_Non-Ericsson_Mixed'
+        assert vendor_from_cells(operator, '', lookup) == f'{prefix}_Non-Ericsson_Mixed'
+    assert vendor_from_cells('O2', 'eri -> unknown', lookup) == 'O2'
 
 
 def test_report_operator_aliases_use_only_workspace_configuration() -> None:
@@ -551,7 +555,7 @@ def test_session_classification_and_multivendor_enrichment() -> None:
     assert len(nsa) == 1
     assert len(sa) == 1
     assert enrich_multivendor(nsa, vodafone_mapping, three_mapping)['vendor'].tolist() == ['Vodafone_Ericsson']
-    assert enrich_multivendor(sa, vodafone_mapping, three_mapping)['vendor'].tolist() == ['3_Mixed Vendor']
+    assert enrich_multivendor(sa, vodafone_mapping, three_mapping)['vendor'].tolist() == ['3_Ericsson_Mixed']
 
 
 def test_speech_session_classification_uses_call_mode_when_sample_rat_is_blank() -> None:
@@ -641,8 +645,8 @@ def test_workspace_vendor_assignment_writes_the_normalized_vendor_field() -> Non
 
     mapped = assign_cdr_vendors(cdr, vodafone_mapping, three_mapping)
 
-    assert mapped['vendor'].tolist() == ['Vodafone_Ericsson', '3_Mixed Vendor', 'O2 (UK)']
-    assert mapped['Vendor_Only'].tolist() == ['Ericsson', 'Mixed Vendor', 'O2 (UK) - All']
+    assert mapped['vendor'].tolist() == ['Vodafone_Ericsson', '3_Ericsson_Mixed', 'O2 (UK)']
+    assert mapped['Vendor_Only'].tolist() == ['Ericsson', 'Ericsson_Mixed', 'O2 (UK) - All']
     assert mapped.columns[:2].tolist() == ['vendor', 'Operator']
 
 

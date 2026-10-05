@@ -17,9 +17,12 @@ import sqlite3
 from functools import lru_cache
 from pathlib import Path
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+from itertools import chain
 from typing import Any, Iterable
 from uuid import uuid4
 
+import numpy as np
 import pandas as pd
 
 from src.modules.column_names import column_identity, compact_campaign_value, vendor_filter_values
@@ -27,11 +30,11 @@ from src.modules.column_names import column_identity, compact_campaign_value, ve
 
 NETWORK_INSIGHTS_KINDS = ('data', 'voice', 'speech')
 # Bump when the normalised samples or the analysis payload change shape.
-SAMPLES_CACHE_VERSION = 1
-ANALYSIS_CACHE_VERSION = 2
+SAMPLES_CACHE_VERSION = 2
+ANALYSIS_CACHE_VERSION = 3
 INVENTORY_CACHE_VERSION = 1
 OBSERVED_CACHE_VERSION = 5
-# Columns of the CDRs Sites/Cells Observed tables.
+# Columns of the Observed Sites/Cells (from CDRs) tables.
 OBSERVED_COLUMNS = (
     'Operator', 'Vendor', 'Region', 'City', 'Cluster', 'Technology', 'Site_ID', 'Cell_ID', 'Band',
     'CDR_Types', 'Campaigns', 'Samples', 'Latitude', 'Longitude', 'RSRP_Mean', 'SINR_Mean',
@@ -327,8 +330,8 @@ def rf_summary(
         key = key if isinstance(key, tuple) else (key,)
         rsrp_values = part[rsrp].dropna()
         sinr_values = part[sinr].dropna()
-        enodebs = {item for values in part['enodebs'] for item in values}
-        cells = {item for values in part['cells'] for item in values}
+        enodebs = set(chain.from_iterable(part['enodebs']))
+        cells = set(chain.from_iterable(part['cells']))
         rows.append({
             'operator': key[0], 'group': key[1] if group else '',
             'samples': int(len(part)),
@@ -351,11 +354,15 @@ def class_distribution(values: pd.Series, classes: tuple[tuple[str, float, str],
     """Return the share of samples in each quality class, best first."""
     if not len(values):
         return []
-    labels = Counter(classify(float(value), classes)[0] for value in values)
-    return [
-        {'label': label, 'colour': colour, 'share': round(labels.get(label, 0) / len(values) * 100, 1)}
-        for label, _lower, colour in classes
-    ]
+    numbers = values.to_numpy(dtype=float)
+    # Each value belongs to the first class whose lower bound it reaches.
+    remaining = np.ones(len(numbers), dtype=bool)
+    shares = []
+    for label, lower, colour in classes:
+        reached = remaining & (numbers >= lower) if not math.isinf(lower) else remaining
+        shares.append({'label': label, 'colour': colour, 'share': round(int(reached.sum()) / len(numbers) * 100, 1)})
+        remaining &= ~reached
+    return shares
 
 
 def operator_colours(operators: Iterable[str], mapping_groups: Iterable[dict[str, Any]]) -> dict[str, str]:
@@ -394,7 +401,7 @@ def cdf_payload(
         if values.empty:
             continue
         quantiles = [index / (points - 1) for index in range(points)]
-        x = [round(float(values.quantile(q)), 2) for q in quantiles]
+        x = [round(float(value), 2) for value in np.quantile(values.to_numpy(dtype=float), quantiles)]
         lows.append(x[0]); highs.append(x[-1])
         name = ' · '.join(str(item) for item in key if str(item))
         if group:
@@ -463,9 +470,14 @@ def grid_cells(
         )
         cells = frame.groupby(['row', 'column'], sort=False).agg(
             samples=(value_column, 'size'), mean=(value_column, 'mean'), bad_share=('bad', 'mean'),
-            city=('city', lambda values: Counter(values).most_common(1)[0][0] if len(values) else ''),
-            region=('region', lambda values: Counter(values).most_common(1)[0][0] if len(values) else ''),
         ).reset_index()
+        cells = cells.loc[cells['samples'] >= max(1, int(min_samples))]
+        # The most frequent City and Region of each grid cell.
+        for field in ('city', 'region'):
+            counts = frame.groupby(['row', 'column', field], sort=False).size().reset_index(name='count')
+            counts = counts.sort_values('count', ascending=False, kind='stable').drop_duplicates(['row', 'column'])
+            cells = cells.merge(counts[['row', 'column', field]], on=['row', 'column'], how='left')
+            cells[field] = cells[field].fillna('')
         cells = cells.loc[cells['samples'] >= max(1, int(min_samples))]
         if len(cells) <= 12_000 or effective >= 5_000:
             break
@@ -1133,10 +1145,38 @@ def install_network_insights_routes(core: Any) -> None:
             if cached is not None:
                 sample_cache.move_to_end(key)
                 return cached
-        # Normalised samples are kept on disk, so a restart does not read and
-        # parse the CDRs again.
+        # Each CDR's samples are stored on their own, so adding or removing a
+        # CDR from the selection only reads the CDRs not analysed before.
+        revisions = {row['id']: row['updated_at'] for row in ready_cdrs(task_repository)}
+        mappings = task_repository.chart_mapping_settings().get('operator_mappings')
+        pairs = [(kind, dataset_id) for kind, ids in selected.items() for dataset_id in ids]
+        # CDRs not read before are read in parallel; SQLite reads release the GIL.
+        with ThreadPoolExecutor(max_workers=max(1, min(4, len(pairs)))) as executor:
+            frames = list(executor.map(
+                lambda pair: dataset_samples(task_repository, pair[0], pair[1], revisions.get(pair[1]), mappings), pairs))
+        frames = [frame for frame in frames if not frame.empty]
+        samples = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+        with sample_cache_lock:
+            sample_cache[key] = samples
+            while len(sample_cache) > 3:
+                sample_cache.popitem(last=False)
+        return samples
+
+    dataset_sample_cache: OrderedDict[str, pd.DataFrame] = OrderedDict()
+
+    def dataset_samples(task_repository, kind: str, dataset_id: int, revision: Any, mappings: Any) -> pd.DataFrame:
+        """Normalised samples of one CDR, kept in memory and on disk until it or the Operator mappings change."""
+        key = hashlib.sha256(json.dumps({
+            'version': SAMPLES_CACHE_VERSION, 'database': str(Path(task_repository.db_path).resolve()),
+            'dataset': dataset_id, 'kind': kind, 'revision': revision, 'mappings': mappings,
+        }, sort_keys=True, default=str).encode()).hexdigest()
+        with sample_cache_lock:
+            cached = dataset_sample_cache.get(key)
+            if cached is not None:
+                dataset_sample_cache.move_to_end(key)
+                return cached
         folder = cache_directory(task_repository)
-        stored = folder / f'samples-{key}.pkl'
+        stored = folder / f'samples-cdr-{key}.pkl'
         samples = None
         if stored.is_file():
             try:
@@ -1145,14 +1185,18 @@ def install_network_insights_routes(core: Any) -> None:
             except Exception:
                 stored.unlink(missing_ok=True)
         if samples is None:
-            samples = read_samples(task_repository, selected)
+            samples = read_samples(task_repository, {kind: [dataset_id]})
             buffer = io.BytesIO()
             samples.to_pickle(buffer, protocol=5)
-            write_cache_file(folder, stored.name, buffer.getvalue(), keep=3, pattern='samples-*.pkl')
+            write_cache_file(folder, stored.name, buffer.getvalue(), keep=24, pattern='samples-cdr-*.pkl')
+            # Samples of whole selections were stored before samples per CDR.
+            for legacy in folder.glob('samples-*.pkl'):
+                if not legacy.name.startswith('samples-cdr-'):
+                    legacy.unlink(missing_ok=True)
         with sample_cache_lock:
-            sample_cache[key] = samples
-            while len(sample_cache) > 3:
-                sample_cache.popitem(last=False)
+            dataset_sample_cache[key] = samples
+            while len(dataset_sample_cache) > 12:
+                dataset_sample_cache.popitem(last=False)
         return samples
 
     def read_samples(task_repository, selected: dict[str, list[int]]) -> pd.DataFrame:
@@ -1322,11 +1366,12 @@ def install_network_insights_routes(core: Any) -> None:
             {str(operator) for operator in original_operators if str(operator).strip()} - inventoried_operators,
             key=str.casefold,
         )
-        # Operator is a grouping dimension only when explicitly selected.
-        # Site/cell identifiers remain scoped by their source operator when pooled.
-        for field in ('enodebs', 'cells'):
-            filtered[field] = [tuple(f'{operator}:{value}' for value in values)
-                               for operator, values in zip(original_operators, filtered[field], strict=True)]
+        # Site/cell identifiers remain scoped by their source operator when
+        # operators are pooled; each group already has one operator otherwise.
+        if 'operator' not in groups:
+            for field in ('enodebs', 'cells'):
+                filtered[field] = [tuple(f'{operator}:{value}' for value in values)
+                                   for operator, values in zip(original_operators, filtered[field], strict=True)]
         if groups:
             grouping_values = filtered[groups].fillna('').astype(str)
             labels = grouping_values[groups[0]].replace('', '(Empty)')

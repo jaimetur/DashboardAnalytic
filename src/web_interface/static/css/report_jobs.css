@@ -77,3 +77,20 @@
 .report-jobs #rj-runs th:nth-child(7) { width: 27%; }
 .report-jobs #rj-runs th:nth-child(8) { width: 7%; }
 .report-jobs #rj-runs small { display: block; margin-top: .2rem; }
+/* Every field of an artifact entry on one row on wide screens. */
+.report-jobs .rj-one-row { grid-auto-flow: column; grid-template-columns: none; grid-auto-columns: minmax(0, 1fr); align-items: end; }
+.report-jobs .rj-one-row > label[hidden] { display: none; }
+.report-jobs .rj-one-row > .icon-action { justify-self: end; align-self: end; margin-bottom: .35rem; }
+.report-jobs .rj-one-row > label { min-width: 0; font-size: .86rem; }
+@media (max-width: 1100px) { .report-jobs .rj-one-row { grid-auto-flow: row; grid-template-columns: repeat(auto-fill, minmax(min(100%, 13rem), 1fr)); } }
+/* CDRs in one card per type with Select All/None, as in Network Insights. */
+.report-jobs .rj-dataset-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: .8rem; margin-top: .4rem; }
+.report-jobs .rj-dataset-groups.is-disabled { opacity: .5; }
+.report-jobs .rj-dataset-group { display: grid; gap: .3rem; align-content: start; padding: .7rem .8rem; border: 1px solid rgba(31, 95, 58, .25); border-radius: 12px; background: #eef8f1; }
+.report-jobs .rj-dataset-head { display: flex; align-items: center; justify-content: space-between; gap: .6rem; margin-bottom: .2rem; }
+.report-jobs .rj-dataset-head h4 { margin: 0; color: #1f5f3a; font-size: .92rem; }
+.report-jobs .rj-dataset-head h4 span { color: #4f7c62; font-weight: 600; }
+.report-jobs .rj-dataset-toggle { flex: 0 0 auto; padding: .2rem .7rem; border: 1px solid rgba(31, 95, 58, .35); border-radius: 999px; background: #fff; color: #1f5f3a; font: inherit; font-size: .76rem; font-weight: 700; box-shadow: none; cursor: pointer; }
+.report-jobs .rj-dataset-toggle:hover:not(:disabled) { background: #e3f3e9; }
+.report-jobs .rj-dataset-toggle:disabled { opacity: .5; cursor: default; }
+.report-jobs .rj-dataset-group label.rj-check { align-items: flex-start; font-weight: 500; font-size: .86rem; }

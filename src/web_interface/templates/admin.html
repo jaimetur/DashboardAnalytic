@@ -195,7 +195,7 @@
     </div>
   </details>
 
-  {% if user.role == 'super-admin' %}
+  {% if user.role in ['admin', 'super-admin'] %}
   <details class="panel collapsible-panel" id="features-activation" open data-panel-state-key="admin:features-activation">
     <summary class="collapsible-summary">
       <div>
@@ -211,6 +211,11 @@
     {% set group_items = [] %}{% for group in user_groups %}{% set _ = group_items.append(('group:' ~ group.id, group.name)) %}{% endfor %}
     {% set user_items = [] %}{% for row in users %}{% set _ = user_items.append(('user:' ~ row['id'], row['username'] ~ ' (' ~ row['role'] ~ ')')) %}{% endfor %}
     {% set principal_sections = [('Roles', role_items), ('Groups', group_items), ('Users', user_items)] %}
+    {# A lower role may grant features to higher roles but never forbid them. #}
+    {% set deny_role_items = [] %}{% for role in feature_roles %}{% if user.role == 'super-admin' or role != 'super-admin' %}{% set _ = deny_role_items.append(('role:' ~ role, role)) %}{% endif %}{% endfor %}
+    {% set deny_user_items = [] %}{% for row in users %}{% if user.role == 'super-admin' or row['role'] != 'super-admin' %}{% set _ = deny_user_items.append(('user:' ~ row['id'], row['username'] ~ ' (' ~ row['role'] ~ ')')) %}{% endif %}{% endfor %}
+    {% set deny_sections = [('Roles', deny_role_items), ('Groups', group_items), ('Users', deny_user_items)] %}
+    {% if user.role != 'super-admin' %}<p class="table-help">As an admin you can grant any feature to super-admins, but you cannot remove a feature from the super-admin role or from super-admin accounts (directly, through a group or with "Nobody" by default).</p>{% endif %}
     <div class="table-wrap">
       <table class="principal-table features-activation-table">
         <thead><tr><th>Feature</th><th>By default</th><th>Allowed</th><th>Forbidden</th></tr></thead>
@@ -225,7 +230,7 @@
               </select>
             </td>
             <td>{{ principal_picker('features-activation-form', 'allow__' ~ feature.key, principal_sections, feature.allow_values, 'Nobody else', 'Allowed for ' ~ feature.label) }}</td>
-            <td>{{ principal_picker('features-activation-form', 'deny__' ~ feature.key, principal_sections, feature.deny_values, 'Nobody', 'Forbidden for ' ~ feature.label) }}</td>
+            <td>{{ principal_picker('features-activation-form', 'deny__' ~ feature.key, deny_sections, feature.deny_values, 'Nobody', 'Forbidden for ' ~ feature.label) }}</td>
           </tr>
           {% endfor %}
         </tbody>

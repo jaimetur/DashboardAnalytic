@@ -1358,9 +1358,10 @@
       ppt.dataset.dashboardPptId = id;
       // Same rule as the periodic status sync: pre-caching never blocks exports.
       ppt.disabled = !dashboardCanExport(id);
-      action('Duplicate Dashboard', '⧉', async () => { if (await confirmDiscard()) await duplicateDashboard(id); });
+      // user-viewer generates PPTs and explores filters but cannot change stored Dashboards.
+      if (config.can_manage) action('Duplicate Dashboard', '⧉', async () => { if (await confirmDiscard()) await duplicateDashboard(id); });
       action('Export Dashboard', '', () => exportDashboard(id, item), 'ds-dashboard-export');
-      action('Delete Dashboard', '×', async () => { await deleteDashboard(id); }, 'danger-button');
+      if (config.can_manage) action('Delete Dashboard', '×', async () => { await deleteDashboard(id); }, 'danger-button');
       const cell = node('td'); cell.dataset.label = 'Actions'; cell.append(actions); row.append(cell); body.append(row);
       if (filtersAreOpen && !compactLibraryFiltersQuery.matches) {
         filterRowCell.append($('ds-filter-home'));

@@ -33,8 +33,8 @@ function vendorOnlyFilterChoices(field, values, additionalOperators = []) {
     const key = identity(entry.value);
     const canonical = Object.entries(configured.vendors || {}).find(([alias]) => identity(alias) === key)?.[1];
     const vendorKey = identity(canonical || entry.value);
-    if (vendorKey === 'mixedvendor' || vendorKey === 'mixedvendors') return 1;
-    if (vendorKey === 'othervendor' || vendorKey === 'othervendors') return 2;
+    if (['ericssonmixed', 'mixedvendor', 'mixedvendors'].includes(vendorKey)) return 1;
+    if (['nonericssonmixed', 'othervendor', 'othervendors'].includes(vendorKey)) return 2;
     if (vendorKey === 'allvendor' || vendorKey === 'allvendors') return 3;
     return 0;
   };
@@ -8415,11 +8415,11 @@ if (queueNode) {
           ? `<form method="post" action="/scoring/datasets/${dataset.id}/recalculate" data-loading-label="Queuing scoring"><button type="submit" class="ghost-link action-link-primary action-link-recalculate-scoring" title="Recalculate operator scoring" aria-label="Recalculate scoring">Recalculate Scoring</button></form>`
           : ''}
         ${canMapMappings
-          ? `<button type="button" class="ghost-link action-link-map-vendors" data-mapping-map-open data-dataset-id="${dataset.id}" data-dataset-name="${fileName}" title="Map Vendor & Region">Map</button>`
-          : '<button type="button" class="ghost-link action-link-map-vendors" disabled title="Map Vendor & Region is not available for this dataset">Map</button>'}
+          ? `<button type="button" class="ghost-link action-link-map-vendors" data-mapping-map-open data-dataset-id="${dataset.id}" data-dataset-name="${fileName}" title="Map Vendor, Region & Cluster">Map</button>`
+          : '<button type="button" class="ghost-link action-link-map-vendors" disabled title="Map Vendor, Region & Cluster is not available for this dataset">Map</button>'}
         ${canClearMappings
-          ? `<button type="button" class="action-link-clear-vendors" data-mapping-clear-open data-dataset-id="${dataset.id}" title="Clear Vendor & Region Mapping">Clear</button>`
-          : '<button type="button" class="action-link-clear-vendors" disabled title="No Vendor & Region Mapping is available">Clear</button>'}
+          ? `<button type="button" class="action-link-clear-vendors" data-mapping-clear-open data-dataset-id="${dataset.id}" title="Clear Vendor, Region & Cluster Mapping">Clear</button>`
+          : '<button type="button" class="action-link-clear-vendors" disabled title="No Vendor, Region & Cluster Mapping is available">Clear</button>'}
         ${canStop
           ? `<form method="post" action="/datasets-analysis/stop/${dataset.id}" data-confirm="Stop processing for '${fileName}'?" data-confirm-title="Stop processing" data-confirm-label="Stop processing"><button type="submit" class="warning-button icon-action action-link-stop" aria-label="Stop processing" title="Stop processing">Stop Processing</button></form>`
           : `<form method="post" action="/datasets-analysis/retry/${dataset.id}" data-confirm="Reprocess dataset '${fileName}' from its source file?" data-confirm-title="Reprocess dataset" data-confirm-label="Reprocess dataset" data-loading-label="Reprocessing dataset"><button type="submit" class="warning-button icon-action action-link-reprocess" aria-label="Reprocess dataset" title="Reprocess dataset"${canReprocess ? '' : ' disabled'}>Reprocess Dataset</button></form>`}

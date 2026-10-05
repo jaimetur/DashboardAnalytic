@@ -104,7 +104,7 @@ The engine pools raw rows before calculating ratios, averages, medians and P90. 
 
 ### Vendor filtering
 
-The Vendor selector filters the physical `Vendor_Only` column using cached per-CDR values. Choices appear in this order: real vendors, Mixed Vendor(s), Other Vendor(s), All Vendor(s), then operators without assigned vendors labelled **Operator - All**.
+The Vendor selector filters the physical `Vendor_Only` column using cached per-CDR values. Choices appear in this order: real vendors, Ericsson_Mixed (and the former Mixed Vendor), Non-Ericsson_Mixed (and the former Other Vendor), All Vendor(s), then operators without assigned vendors labelled **Operator - All**.
 
 Selecting **Ericsson** and **Huawei** includes only those vendor identities from the selected operators. To include an operator with no assigned vendor, also select its **Operator - All** choice, or leave the Vendor filter unrestricted. Vendor mapping stores the suffix in `Vendor_Only`; legacy operator-only values without it remain supported.
 

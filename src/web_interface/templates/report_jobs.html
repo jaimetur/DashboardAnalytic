@@ -5,7 +5,7 @@
   <article class="panel module-hero report-jobs-hero">
     <p class="eyebrow">Reporting</p>
     <h2>Scheduled Reporting Jobs</h2>
-    <p class="lede">Collect Summary Dataset Analysis, Summary Network Insights, Dashboard and Scoring artifacts in one Reporting Job, run it once or on a schedule, and email the artifacts with a description of each one and its filters.</p>
+    <p class="lede">Collect Dataset Analysis, Network Insights, Dashboard and Scoring artifacts in one Reporting Job, run it once or on a schedule, and email the artifacts with a description of each one and its filters.</p>
   </article>
 
   <details class="panel collapsible-panel" open data-panel-state-key="reporting:jobs">
@@ -30,39 +30,37 @@
       <label class="rj-name">Name<input type="text" id="rj-name" maxlength="160" required></label>
 
       <h3>Artifacts</h3>
+      <p class="form-note">Check each type of artifact to include; unchecked types keep their configuration but are not generated.</p>
       <section class="rj-card" data-rj-section="dataset_analysis" data-rj-module="dataset_analysis">
-        <label class="rj-card-toggle"><input type="checkbox" id="rj-da-enabled"><strong>Summary Dataset Analysis</strong><small>Every KPI of each selected dataset, without filters.</small></label>
+        <label class="rj-card-toggle"><input type="checkbox" id="rj-da-enabled"><strong>Datasets Analysis</strong><small>Every KPI of each selected dataset, without filters, in PowerPoint and/or Word.</small></label>
         <div class="rj-card-body" data-rj-body>
           <div class="rj-formats" data-rj-formats="rj-da"></div>
           <div class="rj-picker" id="rj-da-datasets"></div>
         </div>
       </section>
       <section class="rj-card" data-rj-section="network_insights" data-rj-module="network_insights">
-        <label class="rj-card-toggle"><input type="checkbox" id="rj-ni-enabled"><strong>Summary Network Insights</strong><small>RF quality, CDFs, maps, weak areas, spectrum and deployment for the selected CDRs.</small></label>
+        <label class="rj-card-toggle"><input type="checkbox" id="rj-ni-enabled" data-rj-entries="rj-network"><strong>Network Insights</strong><small>Each entry generates a Network Insights report (RF quality, CDFs, maps, weak areas, spectrum and deployment) in PowerPoint and/or Word with its own NR Mode, technology, thresholds, grouping, filters and CDRs. Add several entries for several configurations, for example NSA and SA, LTE and NR, or different filters.</small></label>
         <div class="rj-card-body" data-rj-body>
-          <div class="rj-formats" data-rj-formats="rj-ni"></div>
-          <div class="rj-grid">
-            <label>NR Mode<select id="rj-ni-nr-mode"><option value="NSA">NSA</option><option value="SA">SA</option></select></label>
-            <label>Technology<select id="rj-ni-technology"></select></label>
-            <label data-rj-ni-radio="lte">LTE low coverage below (dBm)<input type="number" id="rj-ni-coverage" value="-110" step="1"></label>
-            <label data-rj-ni-radio="lte">LTE high interference below (dB)<input type="number" id="rj-ni-interference" value="0" step="0.5"></label>
-            <label data-rj-ni-radio="nr">NR low coverage below (dBm)<input type="number" id="rj-ni-nr-coverage" value="-115" step="1"></label>
-            <label data-rj-ni-radio="nr">NR high interference below (dB)<input type="number" id="rj-ni-nr-interference" value="-3" step="0.5"></label>
-          </div>
-          <div class="rj-inline" id="rj-ni-group"></div>
-          <div id="rj-ni-filters" class="rj-filters"></div>
-          <div class="rj-picker" id="rj-ni-datasets"></div>
+          <div id="rj-network" class="rj-entries"></div>
+          <button type="button" id="rj-add-network" class="rj-secondary">Add Network Insights</button>
         </div>
       </section>
-      <section class="rj-card" data-rj-module="dashboards">
-        <div class="rj-card-head"><strong>Dashboards</strong><small>Each entry generates a new Dashboard PPT with its own Scope, CDRs, dates and Adaptative Filters, prefilled with the saved Dashboard. Add the same Dashboard several times to include several configurations.</small></div>
-        <div id="rj-dashboards" class="rj-entries"></div>
-        <button type="button" id="rj-add-dashboard" class="rj-secondary">Add Dashboard</button>
+      <section class="rj-card" data-rj-section="dashboards" data-rj-module="dashboards">
+        <label class="rj-card-toggle"><input type="checkbox" id="rj-dashboards-enabled" data-rj-entries="rj-dashboards"><strong>E2E Dashboards</strong><small>Each entry generates a new Dashboard PPT with its own NR Mode, Scope, CDRs, dates and Adaptative Filters, prefilled with the saved Dashboard. Add the same Dashboard several times to include several configurations.</small></label>
+        <div class="rj-card-body" data-rj-body>
+          <div id="rj-dashboards" class="rj-entries"></div>
+          <button type="button" id="rj-add-dashboard" class="rj-secondary">Add Dashboard</button>
+        </div>
       </section>
-      <section class="rj-card" data-rj-module="scoring">
-        <div class="rj-card-head"><strong>Scoring</strong><small>Each entry calculates (or reuses an identical) Scoring job with its own NR Mode, CDRs, filters, aggregation levels, methodology and GAP reference, and attaches its PowerPoint.</small></div>
-        <div id="rj-scoring" class="rj-entries"></div>
-        <button type="button" id="rj-add-scoring" class="rj-secondary">Add Scoring</button>
+      <section class="rj-card" data-rj-section="scoring" data-rj-module="scoring">
+        <label class="rj-card-toggle"><input type="checkbox" id="rj-scoring-enabled" data-rj-entries="rj-scoring"><strong>Scoring &amp; GAP Analysis</strong><small>Each entry calculates (or reuses an identical) Scoring job with its own NR Mode, CDRs, filters, aggregation levels, methodology and GAP reference, and attaches its PowerPoint.</small></label>
+        <div class="rj-card-body" data-rj-body>
+          <div id="rj-scoring" class="rj-entries"></div>
+          <button type="button" id="rj-add-scoring" class="rj-secondary">Add Scoring</button>
+        </div>
+      </section>
+      <section class="rj-card" id="rj-nqc-placeholder">
+        <label class="rj-card-toggle"><input type="checkbox" disabled><strong>Non-Qualified Calls</strong><small>Non-Qualified Calls does not provide Reporting artifacts yet; they will be available here as soon as the module provides them.</small></label>
       </section>
       <div id="rj-providers" class="rj-entries"></div>
       <p class="form-note" id="rj-modules-note" hidden></p>

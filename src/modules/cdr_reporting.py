@@ -1604,6 +1604,12 @@ def normalise_operator_aliases(frame: pd.DataFrame, mappings: dict[str, str] | N
     return result
 
 
+# Vendor_Only identities of samples whose first and last cells have different
+# or missing vendors.
+VENDOR_ERICSSON_MIXED = "Ericsson_Mixed"
+VENDOR_NON_ERICSSON_MIXED = "Non-Ericsson_Mixed"
+
+
 def _map_distinct_values(series: pd.Series, function: Callable[[object], object]) -> pd.Series:
     """Apply ``function`` once per distinct non-missing value; missing values stay unchanged.
 
@@ -1635,26 +1641,26 @@ def _canonical_cell_id(value: object) -> str:
 
 
 def vendor_from_cells(operator: object, cells: object, vendor_lookup: dict[str, str]) -> str:
-    """Implement the business formula supplied for Vodafone and Three.
+    """Vendor of a Vodafone UK or Three UK sample from its first and last Global Cell IDs.
 
-    Vodafone's Ericsson/null exceptions deliberately resolve to Mixed Vendor,
-    exactly as specified by the reference formula.
+    Both operators follow the same rule: the same non-empty Vendor at both
+    endpoints returns ``<Operator>_<Vendor>``; Ericsson at either endpoint with
+    a different or missing Vendor at the other returns
+    ``<Operator>_Ericsson_Mixed``; every other different or missing combination
+    returns ``<Operator>_Non-Ericsson_Mixed``.
     """
     normalized_operator = _normalise_operator(operator)
     if normalized_operator not in {"Vodafone UK", "3"}:
         return normalized_operator
+    prefix = "Vodafone" if normalized_operator == "Vodafone UK" else "3"
     global_cells = _split_global_cells(cells)
     first = vendor_lookup.get(global_cells[0]) if global_cells else None
     last = vendor_lookup.get(global_cells[-1]) if global_cells else None
-    if normalized_operator == "Vodafone UK":
-        if first and first == last:
-            return f"Vodafone_{first}"
-        if (first == "Ericsson" and last != "Ericsson") or (last == "Ericsson" and first != "Ericsson"):
-            return "Vodafone_Mixed Vendor"
-        return "Vodafone_Other Vendor"
     if first and first == last:
-        return f"3_{first}"
-    return "3_Mixed Vendor"
+        return f"{prefix}_{first}"
+    if "Ericsson" in {first, last}:
+        return f"{prefix}_{VENDOR_ERICSSON_MIXED}"
+    return f"{prefix}_{VENDOR_NON_ERICSSON_MIXED}"
 
 
 def _first_existing(df: pd.DataFrame, candidates: Iterable[str]) -> str | None:
@@ -3568,9 +3574,9 @@ def _vendor_only_display_info(value: object, frame: pd.DataFrame | None = None) 
             aliases[identity(canonical)] = str(canonical)
         domains[role] = aliases
     vendor_key = identity(domains['vendor'].get(key, text))
-    if vendor_key in {'mixedvendor', 'mixedvendors'}:
+    if vendor_key in {'ericssonmixed', 'mixedvendor', 'mixedvendors'}:
         return 1, text
-    if vendor_key in {'othervendor', 'othervendors'}:
+    if vendor_key in {'nonericssonmixed', 'othervendor', 'othervendors'}:
         return 2, text
     if vendor_key in {'allvendor', 'allvendors'}:
         return 3, text

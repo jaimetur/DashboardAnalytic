@@ -336,7 +336,7 @@ The complete authoring specification, examples and supported chart catalogue are
 
 | Role | Typical permissions |
 | --- | --- |
-| `user-viewer` | Use permitted workspace features and App Logs; cannot open Application Config or Workspace Config. |
+| `user-viewer` | Explore the permitted workspace features, datasets and App Logs, and generate jobs (Dashboard PPTs with any filters, Scoring calculations, Network Insights analyses and exports, queries and reports). Cannot change the workspace: no uploading, deleting, reprocessing, stopping, mapping or clearing datasets, editing NR Modes, recreating combined tables, saving, renaming or deleting Dashboards, saved queries or Scoring jobs, and no access to Application Config or Workspace Config. |
 | `user-editor` | Use permitted workspace features and App Logs; edit Application Config and Workspace Config when a workspace is open. |
 | `admin` | Manage users within policy, edit Application Config and Workspace Config, and use accessible-workspace portability and database administration. |
 | `super-admin` | Full account/workspace access management, Application Config and Workspace Config, full-environment portability and incoming transfer approval. |

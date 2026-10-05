@@ -5,13 +5,18 @@
 .network-insights .ni-hero h2{margin:0}
 .network-insights .ni-hero .lede{margin:.45rem 0 0}
 .network-insights .collapsible-summary h2{color:var(--ni-dark)}
-.ni-selection-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:14px}
+/* Every visible selection control shares one row on wide screens. */
+.ni-selection-grid{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);align-items:end;gap:12px}
 .ni-filter-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:16px}
 .network-insights label{display:grid;gap:.38rem;font-size:.88rem;font-weight:800;color:#24525a}
 .network-insights label :is(select,input){box-sizing:border-box;width:100%;min-width:0}
 .ni-dataset-groups{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:18px}
 .ni-dataset-group{padding:12px 14px;border:1px solid var(--ni-border);border-radius:12px;background:var(--ni-soft)}
 .ni-dataset-group h3{margin:0 0 .5rem;font-size:.95rem;color:var(--ni-dark)}
+.ni-dataset-head{display:flex;align-items:center;justify-content:space-between;gap:.6rem;margin:0 0 .5rem}
+.ni-dataset-head h3{margin:0}
+.ni-dataset-toggle{flex:0 0 auto;padding:.2rem .7rem;border:1px solid var(--ni-border);border-radius:999px;background:#fff;color:var(--ni-dark);font:inherit;font-size:.78rem;font-weight:700;cursor:pointer}
+.ni-dataset-toggle:hover{background:var(--ni-soft);border-color:var(--ni-color)}
 .ni-dataset-group h3 span{font-weight:600;color:#4a7d85}
 .ni-dataset-group .form-note{margin:0}
 .network-insights .ni-dataset-option{display:flex;align-items:flex-start;gap:.5rem;padding:.25rem 0;font-size:.82rem;font-weight:650;color:#29474d;overflow-wrap:anywhere}
@@ -81,7 +86,7 @@
 .ni-inventory h3{margin:0 0 .5rem;font-size:1rem;color:var(--ni-dark)}
 .ni-inventory h3 span{display:block;font-size:.76rem;font-weight:600;color:#5b7479;overflow-wrap:anywhere}
 .ni-inventory .ni-table{font-size:.82rem}
-@media(max-width:1200px){.ni-selection-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:1200px){.ni-selection-grid{grid-auto-flow:row;grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:900px){.ni-chart-grid,.ni-map-grid,.ni-dataset-groups{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:760px){
   .ni-selection-grid,.ni-filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -127,17 +132,53 @@
 
 /* Excel-style column filters of the Sites/Cells tables. */
 .ni-column-head { display: inline-flex; align-items: center; gap: .3rem; white-space: nowrap; }
-.ni-column-filter { padding: 0 .3rem; border: 1px solid transparent; border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: .8rem; line-height: 1.4; cursor: pointer; opacity: .65; }
-.ni-column-filter:hover { opacity: 1; border-color: currentColor; }
-.ni-column-filter.is-active { opacity: 1; background: #fde7f0; border-color: #d4537e; color: #9b1c4c; }
-.ni-filter-menu { position: fixed; z-index: 5000; display: grid; gap: .5rem; overflow: auto; padding: .7rem; border: 1px solid var(--line); border-radius: 12px; background: #fff; color: #102131; box-shadow: 0 16px 36px rgba(18, 32, 43, .22); }
-.ni-filter-values { display: grid; gap: .15rem; max-height: 16rem; overflow: auto; }
-.ni-filter-values label { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .45rem; font-weight: 500; cursor: pointer; }
-.ni-filter-values label small { color: var(--muted); }
-.ni-filter-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .4rem; }
+.network-insights .ni-column-filter { display: inline-grid; place-items: center; width: 1.15rem; min-width: 1.15rem; height: 1.15rem; min-height: 1.15rem; padding: 0; border: 1px solid rgba(11, 79, 92, .32); border-radius: 5px; background: rgba(255, 255, 255, .8); color: #0b4f5c; font-size: .62rem; line-height: 1; box-shadow: none; cursor: pointer; }
+.network-insights .ni-column-filter:hover { border-color: #0f6f7d; background: #e8f6f8; }
+.network-insights .ni-column-filter.is-active { border-color: #0b4f5c; background: #0f6f7d; color: #fff; }
 /* LTE+NR: LTE and NR are shown in separate sections with their own thresholds. */
 .ni-selection-grid label[hidden]{display:none}
 .ni-technology-sections{display:grid;gap:22px}
 .ni-technology-section{display:grid;gap:14px}
 .ni-technology-title{grid-column:1/-1;margin:.4rem 0 0;font-size:1.05rem;color:var(--ni-dark)}
 .ni-technology-title span{margin-left:.5rem;font-size:.82rem;font-weight:600;color:var(--muted)}
+/* Analysis in progress dialog. */
+.ni-progress-dialog{box-sizing:border-box;width:min(30rem,calc(100vw - 2rem));padding:1.6rem 1.5rem 1.2rem;border:1px solid var(--ni-border);border-radius:16px;background:#f6fbfc;color:var(--ni-dark);text-align:center;box-shadow:0 .75rem 2rem rgba(20,40,50,.22)}
+.ni-progress-dialog::backdrop{background:rgba(9,17,24,.28)}
+.ni-progress-dialog h2{margin:.8rem 0 .4rem;font-size:1.15rem;color:var(--ni-dark)}
+.ni-progress-dialog p{margin:.3rem 0}
+.ni-progress-dialog .ni-secondary-action{margin-top:.8rem}
+.ni-progress-spinner{width:2.6rem;height:2.6rem;margin:0 auto;border:4px solid var(--ni-border);border-top-color:var(--ni-color);border-radius:50%;animation:ni-spin 1s linear infinite}
+@keyframes ni-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.ni-progress-spinner{animation-duration:3s}}
+/* In-chart zoom controls of CDFs and maps, shown while the chart is hovered. */
+.ni-chart-zoom{position:absolute;top:8px;right:8px;z-index:5;display:flex;align-items:center;gap:3px;padding:4px;border:1px solid var(--ni-border);border-radius:999px;background:rgba(255,255,255,.95);box-shadow:0 5px 16px rgba(11,79,92,.18);opacity:0;visibility:hidden;transition:opacity .18s ease,visibility 0s linear .18s}
+.ni-chart-card:hover .ni-chart-zoom,.ni-chart-card:focus-within .ni-chart-zoom{opacity:1;visibility:visible;transition-delay:0s}
+.network-insights .ni-chart-zoom-button{display:grid;place-items:center;width:1.65rem;min-width:1.65rem;height:1.65rem;min-height:1.65rem;padding:0;border:0;border-radius:999px;background:var(--ni-color);color:#fff;font:800 1rem/1 inherit;cursor:pointer;box-shadow:none}
+.network-insights .ni-chart-zoom-reset{font-size:.62rem}
+.network-insights .ni-chart-zoom-button:disabled{opacity:.35;cursor:default}
+.ni-chart-zoom-level{min-width:2.8rem;color:var(--ni-dark);font-size:.68rem;font-weight:800;text-align:center}
+.network-insights .ni-chart-pan{position:absolute;z-index:5;width:1.8rem;min-width:1.8rem;height:1.8rem;min-height:1.8rem;opacity:.85}
+.network-insights .ni-chart-pan[hidden]{display:none}
+.network-insights .ni-chart-pan svg{width:1rem;height:1rem;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+.ni-chart-pan-left{left:8px;top:50%;transform:translateY(-50%)}
+.ni-chart-pan-right{right:8px;top:50%;transform:translateY(-50%)}
+.ni-chart-pan-up{top:8px;left:50%;transform:translateX(-50%)}
+.ni-chart-pan-down{bottom:8px;left:50%;transform:translateX(-50%)}
+@media(hover:none),(pointer:coarse){.ni-chart-zoom{opacity:1;visibility:visible}}
+/* Excel-style column filter menu of the Sites/Cells tables (shared Excel filter layout, teal theme). */
+.excel-column-filter-menu.ni-filter-menu{z-index:5000;overflow:auto;border-color:#b9dfe5;color:#0b4f5c;box-shadow:0 18px 48px rgba(11,79,92,.28)}
+.ni-filter-menu .ni-filter-title{font-size:.9rem}
+.ni-filter-menu input[type="search"]{border-color:#b9dfe5;background:#f6fbfc;color:#0b4f5c}
+.ni-filter-menu .excel-column-filter-toolbar button{border-color:#b9dfe5;background:#e8f6f8;color:#0b4f5c;font-weight:700}
+.ni-filter-menu .excel-column-filter-toolbar button:hover{background:#d3eef2}
+.ni-filter-menu .excel-column-filter-options{border-color:#d3eef2;background:#fbfefe}
+.ni-filter-menu .excel-column-filter-options label{color:#0b4f5c}
+.ni-filter-menu .excel-column-filter-options label:hover{background:#e8f6f8}
+.ni-filter-menu .excel-column-filter-options label[hidden]{display:none}
+.ni-filter-menu .excel-column-filter-options input{accent-color:#0f6f7d}
+.ni-filter-menu .excel-column-filter-options span{flex:1}
+.ni-filter-menu .excel-column-filter-options small{color:#5f8790;font-size:.72rem;font-weight:600}
+.ni-filter-menu .excel-column-filter-footer button{border:1px solid #b9dfe5;background:#e8f6f8;color:#0b4f5c;box-shadow:none}
+.ni-filter-menu .excel-column-filter-footer button:last-child{border-color:#0b4f5c;background:linear-gradient(135deg,#0b4f5c,#0f6f7d);color:#fff}
+.ni-filter-menu .excel-column-filter-options{max-height:220px}
+.ni-filter-menu > .form-note{margin:0;font-size:.74rem}

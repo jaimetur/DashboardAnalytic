@@ -15,10 +15,10 @@
         <label>NR Mode<select id="ni-nr-mode"><option value="NSA">NSA</option><option value="SA">SA</option></select></label>
         <label>Technology<select id="ni-technology">{% for key, label in network_insights_config.technologies.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
         <label>Group by<select id="ni-group" data-multiselect-count-locked="true" multiple size="1" data-multiselect-empty-label="All samples" aria-label="Group by">{% for key, label in network_insights_config.groupings.items() %}<option value="{{ key }}"{% if key in ("operator", "campaign") %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
-        <label data-ni-radio="lte">LTE low coverage below (dBm)<input type="number" id="ni-coverage-threshold" step="1" value="{{ '%g' % network_insights_config.coverage_threshold }}"></label>
-        <label data-ni-radio="lte">LTE high interference below (dB)<input type="number" id="ni-interference-threshold" step="0.5" value="{{ '%g' % network_insights_config.interference_threshold }}"></label>
-        <label data-ni-radio="nr">NR low coverage below (dBm)<input type="number" id="ni-nr-coverage-threshold" step="1" value="{{ '%g' % network_insights_config.nr_coverage_threshold }}"></label>
-        <label data-ni-radio="nr">NR high interference below (dB)<input type="number" id="ni-nr-interference-threshold" step="0.5" value="{{ '%g' % network_insights_config.nr_interference_threshold }}"></label>
+        <label data-ni-radio="lte" title="Samples below this LTE RSRP count as low coverage">LTE coverage below (dBm)<input type="number" id="ni-coverage-threshold" step="1" value="{{ '%g' % network_insights_config.coverage_threshold }}"></label>
+        <label data-ni-radio="lte" title="Samples below this LTE SINR count as high interference">LTE interference below (dB)<input type="number" id="ni-interference-threshold" step="0.5" value="{{ '%g' % network_insights_config.interference_threshold }}"></label>
+        <label data-ni-radio="nr" title="Samples below this NR SS-RSRP count as low coverage">NR coverage below (dBm)<input type="number" id="ni-nr-coverage-threshold" step="1" value="{{ '%g' % network_insights_config.nr_coverage_threshold }}"></label>
+        <label data-ni-radio="nr" title="Samples below this NR SS-SINR count as high interference">NR interference below (dB)<input type="number" id="ni-nr-interference-threshold" step="0.5" value="{{ '%g' % network_insights_config.nr_interference_threshold }}"></label>
         <label>Map grid (m)<select id="ni-grid"><option value="100">100 m</option><option value="250" selected>250 m</option><option value="500">500 m</option><option value="1000">1 km</option></select></label>
       </div>
       <h3 class="ni-filter-title">Filters:</h3>
@@ -69,7 +69,7 @@
     <summary class="collapsible-summary"><div><p class="eyebrow">NNS, eMOCN and shared networks</p><h2>Network Deployment</h2></div><span class="collapse-chip">Collapse</span></summary>
     <div class="collapsible-panel-body">
       <div class="ni-map-toolbar">
-        <label>View / Group by<select id="ni-deployment-group">{% for key, label in network_insights_config.deployment_groups.items() %}<option value="{{ key }}"{% if key == 'cluster' and not network_insights_config.clusters_available %} disabled title="Import Clusters polygons or an inventory with a Cluster field to enable this view."{% endif %}>{{ label }}</option>{% endfor %}<option value="observed">CDRs Sites/Cells Observed</option><option value="inventory">Full Sites/Cells Inventory</option></select></label>
+        <label>View / Group by<select id="ni-deployment-group">{% for key, label in network_insights_config.deployment_groups.items() %}<option value="{{ key }}"{% if key == 'cluster' and not network_insights_config.clusters_available %} disabled title="Import Clusters polygons or an inventory with a Cluster field to enable this view."{% endif %}>{{ label }}</option>{% endfor %}<option value="observed">Observed Sites/Cells (from CDRs)</option><option value="inventory">Full Sites/Cells Inventory</option></select></label>
         <button type="button" id="ni-deployment-export-all" class="ni-secondary-action" disabled>Export All to CSV</button>
         <p class="form-note" id="ni-deployment-status"></p>
       </div>
@@ -101,6 +101,13 @@
     </div>
   </details>
 
+  <dialog class="ni-progress-dialog" id="ni-progress-dialog" aria-labelledby="ni-progress-title" aria-describedby="ni-progress-message">
+    <div class="ni-progress-spinner" aria-hidden="true"></div>
+    <h2 id="ni-progress-title">Network analysis in progress</h2>
+    <p id="ni-progress-message">Analysing the selected CDRs…</p>
+    <p class="form-note" id="ni-progress-elapsed" aria-live="off"></p>
+    <button type="button" class="ni-secondary-action" id="ni-progress-hide">Hide</button>
+  </dialog>
 </section>
 <script id="ni-config" type="application/json">{{ network_insights_config | tojson }}</script>
 <script defer src="{{ static_path('js/dashboard_charts.js') }}?v={{ asset_version('js/dashboard_charts.js') }}"></script>

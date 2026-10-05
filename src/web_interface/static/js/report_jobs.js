@@ -79,24 +79,56 @@
   }
 
   // Dataset checklist with an "every ready dataset" switch (an empty selection).
+  // CDRs grouped in one card per type, each with Select All/None, as in Network Insights.
+  const KIND_LABELS = {data: 'CDR Data', voice: 'CDR Voice', speech: 'CDR Speech'};
   function datasetPicker(container, datasets, selected, allText) {
     container.replaceChildren();
     const all = node('label', undefined, 'rj-check');
     const allBox = node('input'); allBox.type = 'checkbox'; allBox.checked = !selected.length;
     all.append(allBox, node('span', allText));
-    const list = node('div', undefined, 'rj-dataset-list');
+    const groups = node('div', undefined, 'rj-dataset-groups');
     const chosen = new Set(selected.map(Number));
-    const boxes = datasets.map((dataset) => {
-      const row = node('label', undefined, 'rj-check');
-      const box = node('input'); box.type = 'checkbox'; box.value = dataset.id; box.checked = chosen.has(dataset.id);
-      row.append(box, node('span', `${dataset.file_name} (${dataset.kind}${dataset.nr_mode ? ` · ${dataset.nr_mode}` : ''})`));
-      list.append(row);
-      return box;
-    });
-    const sync = () => { list.classList.toggle('is-disabled', allBox.checked); boxes.forEach((box) => { box.disabled = allBox.checked; }); };
+    const boxes = [];
+    const toggles = [];
+    for (const kind of [...new Set(['data', 'voice', 'speech', ...datasets.map((item) => item.kind)])]) {
+      const items = datasets.filter((item) => item.kind === kind);
+      if (!items.length) continue;
+      const modes = [...new Set(items.map((item) => item.nr_mode).filter(Boolean))];
+      const card = node('section', undefined, 'rj-dataset-group');
+      const head = node('div', undefined, 'rj-dataset-head');
+      const title = node('h4', KIND_LABELS[kind] || kind);
+      if (modes.length) title.append(' ', node('span', `(${modes.join(', ')})`));
+      const toggle = node('button', 'Select All', 'rj-dataset-toggle'); toggle.type = 'button';
+      head.append(title, toggle);
+      card.append(head);
+      const kindBoxes = items.map((dataset) => {
+        const row = node('label', undefined, 'rj-check');
+        const box = node('input'); box.type = 'checkbox'; box.value = dataset.id; box.checked = chosen.has(dataset.id);
+        row.append(box, node('span', `${dataset.file_name}${modes.length > 1 && dataset.nr_mode ? ` · ${dataset.nr_mode}` : ''}`));
+        card.append(row);
+        boxes.push(box);
+        return box;
+      });
+      const syncToggle = () => { toggle.textContent = kindBoxes.every((box) => box.checked) ? 'Select None' : 'Select All'; };
+      toggle.addEventListener('click', () => {
+        const select = !kindBoxes.every((box) => box.checked);
+        kindBoxes.forEach((box) => { box.checked = select; });
+        syncToggle();
+      });
+      card.addEventListener('change', syncToggle);
+      syncToggle();
+      toggles.push(toggle);
+      groups.append(card);
+    }
+    if (!boxes.length) groups.append(node('p', 'No ready CDRs.', 'form-note'));
+    const sync = () => {
+      groups.classList.toggle('is-disabled', allBox.checked);
+      boxes.forEach((box) => { box.disabled = allBox.checked; });
+      toggles.forEach((toggle) => { toggle.disabled = allBox.checked; });
+    };
     allBox.addEventListener('change', sync);
     sync();
-    container.append(all, list);
+    container.append(all, groups);
     container.getValue = () => (allBox.checked ? [] : boxes.filter((box) => box.checked).map((box) => Number(box.value)));
   }
 
@@ -128,27 +160,60 @@
 
   // -- artifact entries ---------------------------------------------------
   // CDR checklists grouped by type; getValue() returns {kind: [ids]}.
-  function datasetsByKind(container, datasets, selected) {
+  function datasetsByKind(container, datasets, selected, allText = '', allSelected = false) {
     container.replaceChildren();
+    const groups = node('div', undefined, 'rj-dataset-groups');
+    const allBox = node('input'); allBox.type = 'checkbox'; allBox.checked = allSelected;
+    if (allText) {
+      const all = node('label', undefined, 'rj-check');
+      all.append(allBox, node('span', allText));
+      container.append(all);
+    }
+    container.append(groups);
+    const toggles = [];
     const chosen = new Set(Object.values(selected || {}).flat().map(Number));
     const boxes = [];
     ['data', 'voice', 'speech'].forEach((kind) => {
       const items = datasets.filter((item) => item.kind === kind);
       if (!items.length) return;
-      const group = node('div', undefined, 'rj-kind-group');
-      group.append(node('strong', `CDR ${kind[0].toUpperCase()}${kind.slice(1)}`));
-      items.forEach((dataset) => {
+      const group = node('section', undefined, 'rj-dataset-group');
+      const head = node('div', undefined, 'rj-dataset-head');
+      const toggle = node('button', 'Select All', 'rj-dataset-toggle'); toggle.type = 'button';
+      head.append(node('h4', KIND_LABELS[kind]), toggle);
+      group.append(head);
+      const kindBoxes = items.map((dataset) => {
         const row = node('label', undefined, 'rj-check');
         const box = node('input'); box.type = 'checkbox'; box.value = dataset.id; box.dataset.kind = kind; box.checked = chosen.has(dataset.id);
         row.append(box, node('span', dataset.file_name));
         group.append(row); boxes.push(box);
+        return box;
       });
-      container.append(group);
+      const syncToggle = () => { toggle.textContent = kindBoxes.every((box) => box.checked) ? 'Select None' : 'Select All'; };
+      toggle.addEventListener('click', () => {
+        const select = !kindBoxes.every((box) => box.checked);
+        kindBoxes.forEach((box) => { box.checked = select; });
+        syncToggle();
+        // The Dashboard reloads its filter values for the new CDR selection.
+        container.dispatchEvent(new Event('change', {bubbles: true}));
+      });
+      group.addEventListener('change', syncToggle);
+      syncToggle();
+      toggles.push(toggle);
+      groups.append(group);
     });
-    if (!boxes.length) container.append(node('p', 'No ready CDRs for this NR Mode.', 'form-note'));
+    if (!boxes.length) groups.append(node('p', 'No ready CDRs for this NR Mode.', 'form-note'));
+    // "Every ready CDR" selects every listed CDR now and every ready one at each run.
+    const syncAll = () => {
+      groups.classList.toggle('is-disabled', allBox.checked);
+      boxes.forEach((box) => { box.disabled = allBox.checked; });
+      toggles.forEach((toggle) => { toggle.disabled = allBox.checked; });
+    };
+    allBox.addEventListener('change', () => { syncAll(); container.dispatchEvent(new Event('change', {bubbles: true})); });
+    syncAll();
+    container.allSelected = () => Boolean(allText) && allBox.checked;
     container.getValue = () => {
       const value = {};
-      boxes.filter((box) => box.checked).forEach((box) => { (value[box.dataset.kind] ||= []).push(Number(box.value)); });
+      boxes.filter((box) => allBox.checked || box.checked).forEach((box) => { (value[box.dataset.kind] ||= []).push(Number(box.value)); });
       return value;
     };
   }
@@ -157,11 +222,25 @@
   // dates and every Adaptative Filter, prefilled with its saved definition.
   function dashboardEntry(entry = null) {
     const card = node('div', undefined, 'rj-entry');
-    const dashboards = options.dashboards;
-    // A new entry starts with the first Dashboard not added yet.
-    const added = new Set([...$('rj-dashboards').children].map((card) => card.getValue?.().dashboard_id));
-    const firstFree = dashboards.find((item) => !added.has(item.id)) || dashboards[0];
-    const dashboard = select(dashboards.map((item) => [item.id, item.name]), entry?.dashboard_id || firstFree?.id);
+    // NR Mode comes first: it decides which Dashboards and CDRs are offered.
+    const modeOf = (item) => String(item?.technology || 'nsa').toUpperCase() === 'SA' ? 'SA' : 'NSA';
+    const initial = options.dashboards.find((item) => item.id === entry?.dashboard_id);
+    const nrMode = select([['NSA', 'NSA'], ['SA', 'SA']], initial ? modeOf(initial) : (options.dashboards.some((item) => modeOf(item) === 'NSA') ? 'NSA' : 'SA'));
+    const modeDashboards = () => options.dashboards.filter((item) => modeOf(item) === nrMode.value);
+    const dashboard = node('select');
+    const noDashboards = node('p', '', 'form-note');
+    // A new entry starts with the first Dashboard of the NR Mode not added yet.
+    const fillDashboards = (selectedId = '') => {
+      const added = new Set([...$('rj-dashboards').children].filter((other) => other !== card).map((other) => other.getValue?.().dashboard_id));
+      const available = modeDashboards();
+      const chosen = available.find((item) => item.id === selectedId) || available.find((item) => !added.has(item.id)) || available[0];
+      dashboard.replaceChildren(...available.map((item) => {
+        const option = node('option', item.name); option.value = item.id; option.selected = item.id === chosen?.id; return option;
+      }));
+      dashboard.disabled = !available.length;
+      noDashboards.textContent = available.length ? '' : `There are no saved ${nrMode.value} Dashboards in this workspace.`;
+    };
+    fillDashboards(entry?.dashboard_id);
     const label = node('input'); label.type = 'text'; label.placeholder = 'Optional artifact name'; label.value = entry?.label || '';
     const remove = node('button', '×', 'danger-button icon-action'); remove.type = 'button'; remove.title = 'Remove this Dashboard';
     remove.addEventListener('click', () => card.remove());
@@ -170,10 +249,10 @@
     const comparisonField = field('Vendor comparison', comparison);
     const dateFrom = node('input'); dateFrom.type = 'date';
     const dateTo = node('input'); dateTo.type = 'date';
-    const head = node('div', undefined, 'rj-grid');
-    head.append(field('Dashboard', dashboard), field('Name in the email', label), field('Scope', scope), comparisonField,
+    const head = node('div', undefined, 'rj-grid rj-one-row');
+    head.append(field('NR Mode', nrMode), field('Dashboard', dashboard), field('Name in the email', label), field('Scope', scope), comparisonField,
       field('Date from (empty: oldest)', dateFrom), field('Date to (empty: newest)', dateTo), remove);
-    const datasets = node('div', undefined, 'rj-picker rj-kinds');
+    const datasets = node('div', undefined, 'rj-picker');
     const filters = node('div', undefined, 'rj-filters');
     const filterNote = node('p', '', 'form-note');
     let pickers = [];
@@ -213,22 +292,29 @@
       comparison.value = config.vendor_comparison || saved.vendor_comparison || 'operator_vendor';
       dateFrom.value = /^\d{4}-\d{2}-\d{2}$/.test(config.date_from || '') ? config.date_from : '';
       dateTo.value = /^\d{4}-\d{2}-\d{2}$/.test(config.date_to || '') ? config.date_to : '';
-      const technology = String(saved.technology || 'nsa').toUpperCase();
-      datasetsByKind(datasets, options.datasets.filter((item) => item.nr_mode === technology), config.datasets && Object.keys(config.datasets).length ? config.datasets : saved.datasets);
+      datasetsByKind(datasets, options.datasets.filter((item) => item.nr_mode === nrMode.value), config.datasets && Object.keys(config.datasets).length ? config.datasets : saved.datasets,
+        'Every ready Data, Voice and Speech CDR of this NR Mode at each run', Boolean(config.all_datasets));
       renderFilters({}, config.filters || {});
       comparisonField.hidden = scope.value !== 'multivendor';
       scheduleLoad();
     };
-    const savedDashboard = () => dashboards.find((item) => item.id === dashboard.value) || {};
+    const savedDashboard = () => options.dashboards.find((item) => item.id === dashboard.value) || {};
     dashboard.addEventListener('change', () => { const saved = savedDashboard(); apply(saved, saved); });
+    nrMode.addEventListener('change', () => {
+      fillDashboards();
+      const saved = savedDashboard();
+      if (dashboard.value) apply(saved, saved);
+      else { current = {saved: {}, fields: []}; datasetsByKind(datasets, [], {}); filters.replaceChildren(); filterNote.textContent = ''; }
+    });
     scope.addEventListener('change', () => { comparisonField.hidden = scope.value !== 'multivendor'; scheduleLoad(); });
     comparison.addEventListener('change', scheduleLoad);
     datasets.addEventListener('change', scheduleLoad);
-    card.append(head, node('strong', 'CDRs'), datasets, node('strong', 'Adaptative Filters'), filterNote, filters);
-    apply(entry || savedDashboard(), savedDashboard());
+    card.append(head, noDashboards, node('strong', 'CDRs'), datasets, node('strong', 'Adaptative Filters'), filterNote, filters);
+    if (dashboard.value) apply(entry || savedDashboard(), savedDashboard());
+    else { current = {saved: {}, fields: []}; datasetsByKind(datasets, [], {}); }
     card.getValue = () => ({
       dashboard_id: dashboard.value, label: label.value.trim(), scope: scope.value, vendor_comparison: comparison.value,
-      datasets: datasets.getValue(), date_from: dateFrom.value, date_to: dateTo.value,
+      datasets: datasets.getValue(), all_datasets: Boolean(datasets.allSelected?.()), date_from: dateFrom.value, date_to: dateTo.value,
       filters: Object.fromEntries(pickers.map(([name, picker]) => [name, picker.getValue()]).filter(([, values]) => values.length)),
     });
     return card;
@@ -244,7 +330,7 @@
     const baseline = node('input'); baseline.type = 'text'; baseline.value = entry.baseline_operator || 'EE';
     const remove = node('button', '×', 'danger-button icon-action'); remove.type = 'button'; remove.title = 'Remove this Scoring artifact';
     remove.addEventListener('click', () => card.remove());
-    const head = node('div', undefined, 'rj-grid');
+    const head = node('div', undefined, 'rj-grid rj-one-row');
     head.append(field('NR Mode', nrMode), field('Name in the email', label), field('Methodology', methodology), field('GAP reference operator', baseline), remove);
     const levels = node('div', undefined, 'rj-inline');
     levels.append(node('span', 'Aggregation levels:', 'rj-inline-label'));
@@ -281,56 +367,87 @@
     return card;
   }
 
+  // A Network Insights artifact offers the module's options: NR Mode,
+  // technology, LTE/NR thresholds, grouping, filters and CDRs.
+  let networkFormatId = 0;
+  function networkEntry(entry = {}) {
+    const selection = entry.selection || {};
+    const card = node('div', undefined, 'rj-entry');
+    const formats = node('div', undefined, 'rj-formats');
+    formatChoices(formats, `rj-ni-${networkFormatId += 1}`, entry.formats || ['powerpoint']);
+    const label = node('input'); label.type = 'text'; label.placeholder = 'Optional artifact name'; label.value = entry.label || '';
+    const nrMode = select([['NSA', 'NSA'], ['SA', 'SA']], selection.nr_mode || 'NSA');
+    const technology = select(Object.entries(options.technologies), selection.technology || 'lte');
+    const number = (value, step) => { const input = node('input'); input.type = 'number'; input.step = step; input.value = value; return input; };
+    const thresholds = [
+      ['lte', 'LTE coverage below (dBm)', 'coverage_threshold', number(selection.coverage_threshold ?? -110, 1)],
+      ['lte', 'LTE interference below (dB)', 'interference_threshold', number(selection.interference_threshold ?? 0, 0.5)],
+      ['nr', 'NR coverage below (dBm)', 'nr_coverage_threshold', number(selection.nr_coverage_threshold ?? -115, 1)],
+      ['nr', 'NR interference below (dB)', 'nr_interference_threshold', number(selection.nr_interference_threshold ?? -3, 0.5)],
+    ].map(([radio, text, key, input]) => ({radio, key, input, wrapper: field(text, input)}));
+    // Only the thresholds of the selected technologies are shown.
+    const syncThresholds = () => thresholds.forEach((item) => { item.wrapper.hidden = ![item.radio, 'lte_nr'].includes(technology.value); });
+    technology.addEventListener('change', syncThresholds); syncThresholds();
+    const remove = node('button', '×', 'danger-button icon-action'); remove.type = 'button'; remove.title = 'Remove this Network Insights artifact';
+    remove.addEventListener('click', () => card.remove());
+    const head = node('div', undefined, 'rj-grid rj-one-row');
+    head.append(field('NR Mode', nrMode), field('Technology', technology), field('Name in the email', label),
+      ...thresholds.map((item) => item.wrapper), remove);
+    const groups = selection.group || ['operator', 'campaign'];
+    const grouping = node('div', undefined, 'rj-inline');
+    grouping.append(node('span', 'Grouping:', 'rj-inline-label'), ...Object.entries(options.network_groupings).map(([value, text]) => {
+      const row = node('label', undefined, 'rj-check');
+      const box = node('input'); box.type = 'checkbox'; box.value = value; box.checked = groups.includes(value);
+      row.append(box, node('span', text));
+      return row;
+    }));
+    const pickers = NETWORK_FILTERS.map(([key, text]) => [key, multiPicker(text, options.values[text] || [], selection[key] || [])]);
+    const filters = node('div', undefined, 'rj-filters');
+    filters.append(...pickers.map(([, picker]) => picker));
+    const datasets = node('div', undefined, 'rj-picker');
+    const renderDatasets = (selected) => datasetPicker(datasets, options.datasets.filter((item) => item.nr_mode === nrMode.value),
+      selected, 'Every ready Data, Voice and Speech CDR of this NR Mode at each run');
+    nrMode.addEventListener('change', () => renderDatasets([]));
+    renderDatasets(Object.values(selection.datasets || {}).flat());
+    card.append(formats, head, grouping, node('strong', 'Filters'), filters, node('strong', 'CDRs'), datasets);
+    card.getValue = () => {
+      const ids = new Set(datasets.getValue());
+      const byKind = {};
+      options.datasets.filter((item) => ids.has(item.id)).forEach((item) => { (byKind[item.kind] ||= []).push(item.id); });
+      return {
+        label: label.value.trim(), formats: formats.getValue(),
+        selection: {
+          datasets: byKind, nr_mode: nrMode.value, technology: technology.value,
+          group: [...grouping.querySelectorAll('input:checked')].map((box) => box.value),
+          ...Object.fromEntries(thresholds.map((item) => [item.key, Number(item.input.value)])),
+          ...Object.fromEntries(pickers.map(([key, picker]) => [key, picker.getValue()])),
+        },
+      };
+    };
+    return card;
+  }
+
   // -- editor -------------------------------------------------------------
-  let networkGroup = null;
-  let networkFilters = [];
 
   function fillEditor(task) {
     const definition = task?.definition || {};
     const dataset = definition.dataset_analysis || {};
-    const network = definition.network_insights || {};
-    const selection = network.selection || {};
+    const network = definition.network_insights || [];
     editingId = task?.id ?? null;
     $('rj-editor-title').textContent = task?.id ? `Edit ${task.name}` : 'New Reporting Job';
     $('rj-name').value = task?.name || '';
     $('rj-da-enabled').checked = Boolean(dataset.enabled);
     formatChoices(document.querySelector('[data-rj-formats="rj-da"]'), 'rj-da', dataset.formats || ['powerpoint']);
     datasetPicker($('rj-da-datasets'), options.datasets, dataset.dataset_ids || [], 'Every ready CDR dataset at each run');
-    $('rj-ni-enabled').checked = Boolean(network.enabled);
-    formatChoices(document.querySelector('[data-rj-formats="rj-ni"]'), 'rj-ni', network.formats || ['powerpoint']);
-    $('rj-ni-technology').replaceChildren(...Object.entries(options.technologies).map(([value, label]) => {
-      const option = node('option', label); option.value = value; option.selected = value === (selection.technology || 'lte'); return option;
-    }));
-    $('rj-ni-coverage').value = selection.coverage_threshold ?? -110;
-    $('rj-ni-interference').value = selection.interference_threshold ?? 0;
-    $('rj-ni-nr-coverage').value = selection.nr_coverage_threshold ?? -115;
-    $('rj-ni-nr-interference').value = selection.nr_interference_threshold ?? -3;
-    // Only the thresholds of the selected technologies are shown.
-    const syncRadioThresholds = () => {
-      const technology = $('rj-ni-technology').value;
-      document.querySelectorAll('[data-rj-ni-radio]').forEach((label) => {
-        label.hidden = ![label.dataset.rjNiRadio, 'lte_nr'].includes(technology);
-      });
-    };
-    $('rj-ni-technology').onchange = syncRadioThresholds;
-    syncRadioThresholds();
-    const groups = selection.group || ['operator', 'campaign'];
-    $('rj-ni-group').replaceChildren(node('span', 'Grouping:', 'rj-inline-label'), ...Object.entries(options.network_groupings).map(([value, label]) => {
-      const row = node('label', undefined, 'rj-check');
-      const box = node('input'); box.type = 'checkbox'; box.value = value; box.checked = groups.includes(value);
-      row.append(box, node('span', label));
-      return row;
-    }));
-    networkFilters = NETWORK_FILTERS.map(([key, text]) => [key, multiPicker(text, options.values[text] || [], selection[key] || [])]);
-    $('rj-ni-filters').replaceChildren(...networkFilters.map(([, picker]) => picker));
-    const networkDatasets = Object.values(selection.datasets || {}).flat();
-    $('rj-ni-nr-mode').value = selection.nr_mode || 'NSA';
-    const renderNetworkDatasets = (selected) => datasetPicker($('rj-ni-datasets'), options.datasets.filter((item) => item.nr_mode === $('rj-ni-nr-mode').value),
-      selected, 'Every ready Data, Voice and Speech CDR of this NR Mode at each run');
-    $('rj-ni-nr-mode').onchange = () => renderNetworkDatasets([]);
-    renderNetworkDatasets(networkDatasets);
+    // Jobs saved with a single Network Insights selection show it as one entry.
+    const networkEntries = Array.isArray(network) ? network : (network.enabled ? [network] : []);
+    $('rj-network').replaceChildren(...networkEntries.map(networkEntry));
     $('rj-dashboards').replaceChildren(...(definition.dashboards || []).map(dashboardEntry));
     $('rj-scoring').replaceChildren(...(definition.scoring || []).map(scoringEntry));
+    // Each artifact type is included independently.
+    $('rj-ni-enabled').checked = networkEntries.length > 0;
+    $('rj-dashboards-enabled').checked = (definition.dashboards || []).length > 0;
+    $('rj-scoring-enabled').checked = (definition.scoring || []).length > 0;
     // Only the modules the user can use offer artifacts.
     const labels = {dataset_analysis: 'Datasets Analysis', network_insights: 'Network Insights', dashboards: 'E2E Dashboards', scoring: 'Scoring & GAP Analysis'};
     const unavailable = Object.entries(options.allowed_modules).filter(([, allowed]) => !allowed).map(([module]) => module);
@@ -338,6 +455,7 @@
     $('rj-modules-note').hidden = !unavailable.length;
     $('rj-modules-note').textContent = `Artifacts of modules not activated for your account are not available: ${unavailable.map((module) => labels[module]).join(', ')}.`;
     const modules = definition.modules || {};
+    $('rj-nqc-placeholder').hidden = options.providers.some((provider) => /non.?qualified/i.test(`${provider.key} ${provider.label}`));
     $('rj-providers').replaceChildren(...options.providers.map((provider) => {
       const config = modules[provider.key] || {};
       const card = node('section', undefined, 'rj-card');
@@ -392,9 +510,6 @@
   }
 
   function editorPayload() {
-    const networkIds = new Set($('rj-ni-datasets').getValue());
-    const networkDatasets = {};
-    options.datasets.filter((item) => networkIds.has(item.id)).forEach((item) => { (networkDatasets[item.kind] ||= []).push(item.id); });
     return {
       name: $('rj-name').value.trim(),
       definition: {
@@ -402,18 +517,9 @@
           enabled: $('rj-da-enabled').checked && options.allowed_modules.dataset_analysis, formats: document.querySelector('[data-rj-formats="rj-da"]').getValue(),
           dataset_ids: $('rj-da-datasets').getValue(),
         },
-        network_insights: {
-          enabled: $('rj-ni-enabled').checked && options.allowed_modules.network_insights, formats: document.querySelector('[data-rj-formats="rj-ni"]').getValue(),
-          selection: {
-            datasets: networkDatasets, nr_mode: $('rj-ni-nr-mode').value, technology: $('rj-ni-technology').value,
-            group: [...$('rj-ni-group').querySelectorAll('input:checked')].map((box) => box.value),
-            coverage_threshold: Number($('rj-ni-coverage').value), interference_threshold: Number($('rj-ni-interference').value),
-            nr_coverage_threshold: Number($('rj-ni-nr-coverage').value), nr_interference_threshold: Number($('rj-ni-nr-interference').value),
-            ...Object.fromEntries(networkFilters.map(([key, picker]) => [key, picker.getValue()])),
-          },
-        },
-        dashboards: [...$('rj-dashboards').children].map((card) => card.getValue()),
-        scoring: [...$('rj-scoring').children].map((card) => card.getValue()),
+        network_insights: options.allowed_modules.network_insights && $('rj-ni-enabled').checked ? [...$('rj-network').children].map((card) => card.getValue()) : [],
+        dashboards: $('rj-dashboards-enabled').checked ? [...$('rj-dashboards').children].map((card) => card.getValue()) : [],
+        scoring: $('rj-scoring-enabled').checked ? [...$('rj-scoring').children].map((card) => card.getValue()) : [],
         modules: Object.fromEntries([...$('rj-providers').children].map((card) => card.getValue())),
       },
       send_email: $('rj-send-email').checked,
@@ -568,6 +674,15 @@
     $('rj-dashboards').append(dashboardEntry());
   });
   $('rj-add-scoring').addEventListener('click', () => $('rj-scoring').append(scoringEntry()));
+  $('rj-add-network').addEventListener('click', () => $('rj-network').append(networkEntry()));
+  // Checking an artifact type without entries starts its first entry.
+  document.querySelectorAll('[data-rj-entries]').forEach((toggle) => toggle.addEventListener('change', () => {
+    const host = $(toggle.dataset.rjEntries);
+    if (!toggle.checked || host.children.length) return;
+    if (host.id === 'rj-network') host.append(networkEntry());
+    else if (host.id === 'rj-scoring') host.append(scoringEntry());
+    else if (options.dashboards.length) host.append(dashboardEntry());
+  }));
   $('rj-cancel').addEventListener('click', () => { $('rj-editor').hidden = true; editingId = null; });
   $('rj-form').addEventListener('submit', async (event) => {
     event.preventDefault();

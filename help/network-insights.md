@@ -24,16 +24,16 @@ Analyse the network behind the measured performance: radio quality (RSRP and SIN
 ## Analysis Selection
 
 1. Open the workspace and the **Network Insights** tab, which follows **Scoring & GAP Analysis**.
-2. Choose **NR Mode**. All ready Data, Voice and Speech CDRs of that mode are selected; clear the ones you do not need.
+2. Choose **NR Mode**. All ready Data, Voice and Speech CDRs of that mode are selected; clear the ones you do not need. **Select All** in each CDR type card selects all its CDRs, and becomes **Select None** to clear them when all are selected.
 3. Restrict **Operators**, **Vendors**, **Regions**, **Cities** or **Campaigns** in **Filters:** if needed. Their values load automatically from the selected CDRs; **Main Cities** appears first in Cities when configured. Leaving every value selected applies no restriction.
 4. Choose **Technology** (LTE, NR or LTE+NR) and **Group by** (Operator, Vendor, Region, City, CDR type and Campaign).
 5. Adjust the thresholds of the selected technology and the **Map grid** size (default 250 m). LTE and NR have their own thresholds because LTE RSRP/SINR and NR SS-RSRP/SS-SINR use different reference signals; LTE+NR shows both pairs.
 
 | Threshold | LTE default | NR default |
 | --- | --- | --- |
-| Low coverage below | -110 dBm | -115 dBm |
-| High interference below | 0 dB | -3 dB |
-6. Press **Analyse Network**.
+| Coverage below (low coverage) | -110 dBm | -115 dBm |
+| Interference below (high interference) | 0 dB | -3 dB |
+6. Press **Analyse Network**. A dialog shows that the analysis is in progress, with the elapsed time, and closes when the results are ready; **Hide** closes it while the analysis continues.
 
 ### Grouping
 
@@ -77,13 +77,13 @@ Values outside physical ranges (RSRP outside -160 to -20 dBm, SINR outside -30 t
 
 **Export PowerPoint** and **Export Word**, beside Analyse Network, create a Summary Network Insights of the current selection: the selected CDRs, technology, grouping, thresholds and filters, the RF quality overview with campaign deltas, RSRP and SINR CDFs, coverage and interference maps with their weakest areas, observed and licensed spectrum, both Cluster Sites Density data sources and network deployment. Charts and maps are rendered at full size, so the export takes longer than the on-screen analysis. PowerPoint uses the same Template_CDR_analysis.pptx master, cover and layouts as E2E Dashboards. Table widths follow their headers and values, with wider identity columns and single-line cells; very wide PowerPoint comparisons use metric parts with the Group column repeated. Word uses horizontal pages, increasing their width for wide tables, fixed column widths and repeating single-line headers.
 
-Both formats include every grouped Network Deployment view (eMOCN Scenario, Host Network, Network, RAN Vendor, Region, Subregion, Cluster when polygons or inventory fields are available, Site Type and Band), irrespective of the currently displayed dropdown option. CDRs Sites/Cells Observed and Full Sites/Cells Inventory are excluded from PowerPoint and Word; use their individual or combined CSV exports. With LTE+NR, the overview, CDFs, maps and weakest areas appear once for LTE and once for NR. The same summary is available as a [Reporting](reporting.md) artifact.
+Both formats include every grouped Network Deployment view (eMOCN Scenario, Host Network, Network, RAN Vendor, Region, Subregion, Cluster when polygons or inventory fields are available, Site Type and Band), irrespective of the currently displayed dropdown option. Observed Sites/Cells (from CDRs) and Full Sites/Cells Inventory are excluded from PowerPoint and Word; use their individual or combined CSV exports. With LTE+NR, the overview, CDFs, maps and weakest areas appear once for LTE and once for NR. The same summary is available as a [Reporting](reporting.md) artifact.
 
 ## Coverage and Interference Maps
 
 The maps show one group at a time (selected in **Group**) over OpenStreetMap; with LTE+NR, the LTE and NR maps of that group appear in separate sections, each classified with its own thresholds. Samples are grouped into square grid cells of the selected size, and each cell is coloured by its mean RSRP or SINR class. Cells need at least three located samples. Very dense selections use a coarser grid automatically to keep the map readable; the note above the maps shows the grid actually used.
 
-Below each map, the **Weakest coverage areas** and **Highest interference areas** tables rank the cells where at least half of the samples are below the threshold, by the number of affected samples. Select an area (its City) to zoom the map to it, and **Show Whole Area** to return. Drag a rectangle over a map to magnify it, then drag to pan.
+Below each map, the **Weakest coverage areas** and **Highest interference areas** tables rank the cells where at least half of the samples are below the threshold, by the number of affected samples. Select an area (its City) to zoom the map to it, and **Show Whole Area** to return. Hover over a CDF or map to show its zoom controls (−, +, the zoom level and 1:1 to reset), as in E2E Dashboards; drag a rectangle to magnify an area, then drag or use the arrows to pan.
 
 ## Network Deployment
 
@@ -95,7 +95,7 @@ The inventory tables include **all uploaded mapping rows**, whether or not their
 
 **Previous** and **Next** navigate the filtered table; horizontal scrolling reveals additional columns. Each table’s **Export CSV** downloads all matching rows and columns for its operator, not only the visible page. The complete CSV is prepared before the download begins to prevent partially exported inventories. **Export All to CSV** combines both operators in one file. Both exports use the selection that generated the displayed tables. Repeated inventory rows remain intact. Missing fields in another operator's inventory appear empty. Source_Dataset_ID and Source_Dataset_Name identify each mapping file, including multiple uploaded versions. All original columns are retained after the highlighted fields; source headers that collide with those fields use a `Source_` prefix so their original values remain available.
 
-Choose **CDRs Sites/Cells Observed**, above Full Sites/Cells Inventory, to list the same per-operator tables from the CDR measurements instead: one row per observed site and LTE cell (Cell Identity; sites without a reported cell appear with an empty Cell_ID) with Operator, Vendor, Region, City, Cluster, Technology, Band, CDR types, Campaigns, Samples, mean coordinates and mean RSRP/SINR. These tables follow the full Analysis Selection, including the selected CDRs, NR Mode, Campaigns and filters. Building them for a new selection takes a few seconds; the result is stored and reused.
+Choose **Observed Sites/Cells (from CDRs)**, above Full Sites/Cells Inventory, to list the same per-operator tables from the CDR measurements instead: one row per observed site and LTE cell (Cell Identity; sites without a reported cell appear with an empty Cell_ID) with Operator, Vendor, Region, City, Cluster, Technology, Band, CDR types, Campaigns, Samples, mean coordinates and mean RSRP/SINR. These tables follow the full Analysis Selection, including the selected CDRs, NR Mode, Campaigns and filters. Building them for a new selection takes a few seconds; the result is stored and reused.
 
 Every column header of both tables has a **▾** button with an Excel-style filter: search the column values (with their row counts, under the other active filters), check the ones to keep — **(Blanks)** keeps empty cells — and **Apply**. Filtered columns are highlighted, **Clear N filters** removes them, and the table's **Export CSV** exports only the filtered rows.
 
