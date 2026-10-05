@@ -79,28 +79,48 @@
   }
 
   // Dataset checklist with an "every ready dataset" switch (an empty selection).
-  // Artifact cards and entries collapse to keep long jobs readable.
-  const collapseButton = (card, label) => {
+  // Artifact cards and entries collapse to keep long jobs readable; the state
+  // is remembered in this browser across page reloads.
+  const collapseKey = (key) => `reporting:collapsed:${key}`;
+  const readCollapsed = (key) => { try { return localStorage.getItem(collapseKey(key)) === '1'; } catch { return false; } };
+  const writeCollapsed = (key, collapsed) => {
+    try { if (collapsed) localStorage.setItem(collapseKey(key), '1'); else localStorage.removeItem(collapseKey(key)); } catch {}
+  };
+  const collapseButton = (card, label, key = null) => {
     const button = node('button', 'Collapse', 'collapse-chip rj-collapse'); button.type = 'button';
-    button.setAttribute('aria-expanded', 'true'); button.title = `Collapse ${label}`;
-    button.addEventListener('click', (event) => {
-      event.preventDefault(); event.stopPropagation();
-      const collapsed = card.classList.toggle('is-collapsed');
+    const apply = (collapsed) => {
+      card.classList.toggle('is-collapsed', collapsed);
       button.textContent = collapsed ? 'Expand' : 'Collapse';
       button.setAttribute('aria-expanded', String(!collapsed));
       button.title = `${collapsed ? 'Expand' : 'Collapse'} ${label}`;
+    };
+    // `key` may be a function: entries only know their position once added.
+    const currentKey = () => (typeof key === 'function' ? key() : key);
+    button.addEventListener('click', (event) => {
+      event.preventDefault(); event.stopPropagation();
+      const collapsed = !card.classList.contains('is-collapsed');
+      apply(collapsed);
+      if (currentKey()) writeCollapsed(currentKey(), collapsed);
     });
+    button.restore = () => { if (currentKey()) apply(readCollapsed(currentKey())); };
+    apply(false);
+    button.restore();
     return button;
   };
   const entryHead = (card, kind, describe) => {
     const head = node('div', undefined, 'rj-entry-head');
     const title = node('strong', '', 'rj-entry-title');
     const refresh = () => { title.textContent = `${kind} · ${describe() || 'New entry'}`; };
-    head.append(title, collapseButton(card, kind));
+    const entryKey = () => (card.parentElement
+      ? `${editingId ?? 'new'}:${kind}:${[...card.parentElement.children].indexOf(card)}` : null);
+    const button = collapseButton(card, kind, entryKey);
+    head.append(title, button);
+    // The entry is added to its list right after it is built.
+    setTimeout(() => button.restore(), 0);
     card.addEventListener('change', refresh);
     card.addEventListener('input', refresh);
     card.refreshTitle = refresh;
-    requestAnimationFrame(refresh);
+    setTimeout(refresh, 0);
     return head;
   };
 
@@ -703,7 +723,7 @@
   });
   $('rj-add-scoring').addEventListener('click', () => $('rj-scoring').append(scoringEntry()));
   document.querySelectorAll('#rj-form .rj-card[data-rj-section]').forEach((card) => {
-    card.append(collapseButton(card, card.querySelector('.rj-card-toggle strong')?.textContent || 'artifact'));
+    card.append(collapseButton(card, card.querySelector('.rj-card-toggle strong')?.textContent || 'artifact', `section:${card.dataset.rjSection}`));
   });
   $('rj-add-network').addEventListener('click', () => $('rj-network').append(networkEntry()));
   // Checking an artifact type without entries starts its first entry.
