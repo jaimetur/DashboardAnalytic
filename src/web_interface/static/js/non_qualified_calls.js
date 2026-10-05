@@ -14,7 +14,8 @@
   };
   const SERVICE_LABELS = {voice: 'Voice', speech: 'Speech', data: 'Data'};
   const FIELD_LABELS = {
-    service: 'Service', campaign: 'Campaign', operator: 'Operator', vendor: 'Vendor', region: 'Region', city: 'City',
+    service: 'Service', campaign: 'Campaign', operator: 'Operator', operator_vendor: 'Operator_Vendor', vendor: 'Vendor',
+    region: 'Region', cluster: 'Cluster', city: 'City', dataset_id: 'CDR',
     technology: 'Technology', test_name: 'Test Name', result: 'Result', failure_classification: 'Failure Classification',
     failure_category: 'Failure Category', status: 'Status', team: 'Team', assignee: 'Assignee', datasets: 'CDR',
   };
@@ -23,7 +24,7 @@
 
   const state = {
     options: {statuses: [], teams: []}, users: [], user: {username: '', can_edit: false, can_moderate: false},
-    unassigned: '__unassigned__', datasets: [], sort: 'start_time', direction: 'desc', page: 1, pageSize: 50,
+    unassigned: '__unassigned__', datasets: [], mainCities: [], sort: 'start_time', direction: 'desc', page: 1, pageSize: 50,
     result: null, selected: new Set(), detail: null, requestToken: 0, busy: false,
   };
 
@@ -146,6 +147,10 @@
     };
     filterSelects().forEach((select) => {
       const field = select.dataset.nqFilter;
+      if (field === 'city') {
+        const present = new Set((values.city || []).map((value) => value.toLocaleLowerCase()));
+        select.dataset.multiselectPresetValues = state.mainCities.filter((city) => present.has(city.toLocaleLowerCase())).join('|');
+      }
       fillSelect(select, entries[field] || (values[field] || []).map((value) => [value, value]));
     });
   };
@@ -162,7 +167,25 @@
     if (search) filters.search = search;
     return filters;
   };
+  // The selection is shared by every user of the workspace and restored in every session.
+  const applySavedFilters = (saved) => {
+    filterSelects().forEach((select) => {
+      const values = new Set(saved[select.dataset.nqFilter] || []);
+      [...select.options].forEach((option) => { option.selected = values.has(option.value); });
+      select.dispatchEvent(new Event('multiselect:options-updated'));
+    });
+    root.querySelectorAll('[data-nq-flag]').forEach((box) => { box.checked = saved[box.dataset.nqFlag] === true; });
+    $('nq-search').value = saved.search || '';
+    state.savedFilters = JSON.stringify(currentFilters());
+  };
+  const saveFilters = debounce((filters) => {
+    const serialized = JSON.stringify(filters);
+    if (serialized === state.savedFilters) return;
+    state.savedFilters = serialized;
+    api('/api/non-qualified-calls/filters', {method: 'PUT', body: JSON.stringify({filters})}).catch(() => { state.savedFilters = null; });
+  }, 800);
   const selectOnly = (field, value) => {
+    if (field === 'dataset_id') field = 'datasets';
     const select = root.querySelector(`[data-nq-filter="${field}"]`);
     if (!select) return;
     const target = field === 'team' || field === 'assignee' ? (value || state.unassigned) : value;
@@ -221,18 +244,20 @@
     }));
     const filters = currentFilters();
     $('nq-breakdowns').replaceChildren(...result.breakdowns.map((breakdown) => {
-      const card = node('section', undefined, 'nq-breakdown');
+      // CDR names are long: that card spans two columns and writes each name in full above its bar.
+      const card = node('section', undefined, breakdown.field === 'dataset_id' ? 'nq-breakdown nq-breakdown-wide' : 'nq-breakdown');
       card.append(node('h3', breakdown.label));
       const max = Math.max(1, ...breakdown.items.map((item) => item.count));
       if (!breakdown.items.length) card.append(node('p', 'No calls.', 'form-note'));
       breakdown.items.forEach((item) => {
         const field = breakdown.field;
         const label = field === 'service' ? (SERVICE_LABELS[item.value] || item.value)
-          : item.value || (field === 'team' ? 'Unassigned' : 'Not classified');
+          : item.label || item.value || (field === 'team' ? 'Unassigned' : 'Not classified');
         const row = node('button', undefined, 'nq-bar');
         row.type = 'button';
         const filterValue = (field === 'team' && !item.value) ? state.unassigned : item.value;
-        const active = (filters[field] || []).length === 1 && filters[field][0] === filterValue;
+        const filterKey = field === 'dataset_id' ? 'datasets' : field;
+        const active = (filters[filterKey] || []).length === 1 && filters[filterKey][0] === filterValue;
         row.classList.toggle('is-active', active);
         row.title = active ? `Remove the ${FIELD_LABELS[field]} filter` : `Show only ${label}`;
         const track = node('span', undefined, 'nq-bar-track');
@@ -243,7 +268,7 @@
         track.append(fill);
         row.append(node('span', label, 'nq-bar-label'), track, node('span', number(item.count), 'nq-bar-count'));
         row.addEventListener('click', () => {
-          if (field === 'failure_classification' && !item.value) return;
+          if (!item.value && !['team', 'assignee'].includes(field)) return;
           selectOnly(field, item.value);
         });
         card.append(row);
@@ -258,7 +283,7 @@
     select.setAttribute('aria-label', `${HISTORY_LABELS[kind]} of the call`);
     const entries = kind === 'status' ? state.options.statuses.map((item) => [item.name, item.name])
       : kind === 'team' ? [['', 'Unassigned'], ...state.options.teams.map((item) => [item.name, item.name])]
-        : [['', 'Unassigned'], ...state.users.map((name) => [name, name])];
+        : [['', 'Unassigned'], ...assignableUsers(call.team).map((name) => [name, name])];
     const current = call[kind] || '';
     if (current && !entries.some(([value]) => value === current)) entries.push([current, current]);
     select.append(...entries.map(([value, label]) => {
@@ -292,6 +317,11 @@
     });
     select.addEventListener('click', (event) => event.stopPropagation());
     return select;
+  };
+  // A team with members is assigned to its members only.
+  const assignableUsers = (team) => {
+    const members = state.options.teams.find((item) => item.name === team)?.members || [];
+    return members.length ? members : state.users;
   };
   const textCell = (value, className = '') => node('td', value || '—', className);
   const renderRows = (result) => {
@@ -455,6 +485,7 @@
   async function loadCalls({quiet = false} = {}) {
     const token = ++state.requestToken;
     const filters = currentFilters();
+    if (state.filtersRestored) saveFilters(filters);
     if (!quiet) {
       $('nq-count').textContent = 'Loading calls…';
       root.classList.add('is-loading');
@@ -474,6 +505,7 @@
       renderSortHeaders();
       renderPagination(result);
       renderBulk();
+      void loadProgress();
       const first = result.total ? (result.page - 1) * result.page_size + 1 : 0;
       const last = Math.min(result.total, result.page * result.page_size);
       $('nq-count').textContent = result.total ? `Showing ${number(first)}–${number(last)} of ${number(result.total)} calls` : 'No calls';
@@ -487,6 +519,194 @@
   }
   const scheduleLoad = debounce(() => { state.page = 1; loadCalls(); }, 300);
 
+  // -- progress view --------------------------------------------------------------
+  const PALETTE = ['#b0234f', '#0f6f7d', '#e08a1e', '#6a63c9', '#2e8b57', '#245a96', '#b85b20', '#7b8790', '#5b6b2e', '#c8365f'];
+  const GRANULARITY_LABELS = {week: 'Week', month: 'Month', quarter: 'Quarter', year: 'Year'};
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const svgNode = (tag, attributes = {}) => {
+    const element = document.createElementNS(SVG_NS, tag);
+    Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, value));
+    return element;
+  };
+  const kpiCard = (label, value, note, kind = '') => {
+    const card = node('article', undefined, `nq-kpi${kind ? ` nq-kpi-${kind}` : ''}`);
+    card.append(node('span', label, 'nq-kpi-label'), node('strong', value), node('span', note, 'nq-kpi-note'));
+    return card;
+  };
+  const days = (value) => (value === null || value === undefined ? '—' : `${Number(value).toFixed(1)} d`);
+  // A donut chart with its legend; a click on a slice filters the calls.
+  const donut = (distribution) => {
+    const card = node('section', undefined, 'nq-pie');
+    card.append(node('h3', distribution.label));
+    const items = distribution.items.slice(0, 10);
+    const total = items.reduce((sum, item) => sum + item.count, 0);
+    const colorFor = (item, index) => (distribution.field === 'status' ? optionColor('status', item.value)
+      : distribution.field === 'team' ? optionColor('team', item.value) : '') || PALETTE[index % PALETTE.length];
+    const svg = svgNode('svg', {viewBox: '0 0 120 120', class: 'nq-pie-chart', role: 'img', 'aria-label': distribution.label});
+    const radius = 46;
+    const circumference = 2 * Math.PI * radius;
+    let offset = 0;
+    svg.append(svgNode('circle', {cx: 60, cy: 60, r: radius, fill: 'none', stroke: '#f3dfe6', 'stroke-width': 18}));
+    items.forEach((item, index) => {
+      const length = total ? (item.count / total) * circumference : 0;
+      const slice = svgNode('circle', {
+        cx: 60, cy: 60, r: radius, fill: 'none', stroke: colorFor(item, index), 'stroke-width': 18,
+        'stroke-dasharray': `${length} ${circumference - length}`, 'stroke-dashoffset': -offset, transform: 'rotate(-90 60 60)',
+      });
+      const title = svgNode('title');
+      title.textContent = `${item.value}: ${number(item.count)} (${percent(item.count, total)})`;
+      slice.append(title);
+      svg.append(slice);
+      offset += length;
+    });
+    const centre = svgNode('text', {x: 60, y: 64, 'text-anchor': 'middle', class: 'nq-pie-total'});
+    centre.textContent = number(total);
+    svg.append(centre);
+    const legend = node('ul', undefined, 'nq-pie-legend');
+    items.forEach((item, index) => {
+      const row = node('li');
+      const button = node('button', undefined, 'nq-pie-item');
+      button.type = 'button';
+      const swatch = node('span', '', 'nq-swatch');
+      swatch.style.background = colorFor(item, index);
+      button.append(swatch, node('span', item.value, 'nq-pie-label'), node('strong', `${number(item.count)} · ${percent(item.count, total)}`));
+      const filterField = {status: 'status', team: 'team', assignee: 'assignee', service: 'service', result: 'result'}[distribution.field];
+      button.title = `Show only ${item.value}`;
+      button.addEventListener('click', () => {
+        const value = item.filter ?? (['Unassigned', '—'].includes(item.value) ? '' : item.value);
+        selectOnly(filterField, value);
+      });
+      row.append(button);
+      legend.append(row);
+    });
+    if (!items.length) legend.append(node('li', 'No calls.', 'nq-muted'));
+    card.append(svg, legend);
+    return card;
+  };
+  const statsTable = (table, columns, rows) => {
+    const head = node('thead');
+    const headRow = node('tr');
+    columns.forEach((column) => headRow.append(node('th', column)));
+    head.append(headRow);
+    const body = node('tbody');
+    rows.forEach((values) => {
+      const row = node('tr');
+      values.forEach((value, index) => row.append(node('td', value, index ? 'nq-number' : '')));
+      body.append(row);
+    });
+    if (!rows.length) {
+      const row = node('tr');
+      const cell = node('td', 'No data for this selection.', 'nq-empty');
+      cell.colSpan = columns.length;
+      row.append(cell);
+      body.append(row);
+    }
+    table.replaceChildren(head, body);
+  };
+  // Detected, attended and closed calls per period, with the open backlog as a line.
+  const timelineChart = (periods) => {
+    const host = $('nq-timeline-chart');
+    const shown = periods.slice(-24);
+    if (!shown.length) { host.replaceChildren(node('p', 'No dated activity for this selection.', 'nq-muted')); return; }
+    const series = [['detected', 'Detected', '#8a6b76'], ['attended', 'Attended', '#e08a1e'], ['closed', 'Closed', '#2e8b57']];
+    const width = Math.max(640, shown.length * 64);
+    const height = 240;
+    const top = 16;
+    const bottom = 40;
+    const left = 40;
+    const plot = height - top - bottom;
+    const maximum = Math.max(1, ...shown.flatMap((period) => [...series.map(([key]) => period[key]), period.open_backlog]));
+    const svg = svgNode('svg', {viewBox: `0 0 ${width + left} ${height}`, class: 'nq-timeline-svg', role: 'img', 'aria-label': 'Progress per period'});
+    [0, 0.25, 0.5, 0.75, 1].forEach((share) => {
+      const y = top + plot * (1 - share);
+      svg.append(svgNode('line', {x1: left, x2: width + left, y1: y, y2: y, class: 'nq-grid-line'}));
+      const label = svgNode('text', {x: left - 6, y: y + 4, 'text-anchor': 'end', class: 'nq-axis-label'});
+      label.textContent = number(Math.round(maximum * share));
+      svg.append(label);
+    });
+    const slot = width / shown.length;
+    const bar = Math.min(16, (slot - 12) / series.length);
+    const points = [];
+    shown.forEach((period, index) => {
+      const x = left + index * slot + (slot - bar * series.length) / 2;
+      series.forEach(([key, label, color], position) => {
+        const value = period[key];
+        const barHeight = (value / maximum) * plot;
+        const rect = svgNode('rect', {x: x + position * bar, y: top + plot - barHeight, width: bar - 2, height: barHeight, rx: 2, fill: color});
+        const title = svgNode('title');
+        title.textContent = `${period.period} · ${label}: ${number(value)}`;
+        rect.append(title);
+        svg.append(rect);
+      });
+      points.push(`${left + index * slot + slot / 2},${top + plot - (period.open_backlog / maximum) * plot}`);
+      const caption = svgNode('text', {x: left + index * slot + slot / 2, y: height - bottom + 16, 'text-anchor': 'middle', class: 'nq-axis-label'});
+      caption.textContent = period.period;
+      svg.append(caption);
+    });
+    svg.append(svgNode('polyline', {points: points.join(' '), class: 'nq-backlog-line'}));
+    const legend = node('div', undefined, 'nq-chart-legend');
+    [...series, ['open_backlog', 'Open backlog', '#b0234f']].forEach(([, label, color]) => {
+      const item = node('span');
+      const swatch = node('span', '', 'nq-swatch');
+      swatch.style.background = color;
+      item.append(swatch, label);
+      legend.append(item);
+    });
+    const scroller = node('div', undefined, 'nq-chart-scroll');
+    scroller.append(svg);
+    host.replaceChildren(legend, scroller);
+    scroller.scrollLeft = scroller.scrollWidth;
+  };
+  const renderProgress = (progress) => {
+    const summary = progress.summary;
+    $('nq-progress-kpis').replaceChildren(
+      kpiCard('Attended', number(summary.attended), `${percent(summary.attended, summary.total)} have a follow-up`, 'open'),
+      kpiCard('Not Attended', number(summary.not_attended), 'No change or comment yet', 'total'),
+      kpiCard('Closure Rate', `${summary.closure_rate.toFixed(1)}%`, `${number(summary.closed)} of ${number(summary.total)} closed`, 'closed'),
+      kpiCard('First Follow-up', days(summary.avg_days_to_first_follow_up), 'Average from the call', 'team'),
+      kpiCard('Time to Close', days(summary.avg_days_to_close), 'Average from the first follow-up', 'commented'),
+      kpiCard('Activity', number(summary.comments + summary.changes), `${number(summary.comments)} comments · ${number(summary.changes)} changes · ${number(summary.contributors)} users`),
+    );
+    $('nq-pies').replaceChildren(...progress.distributions.map(donut));
+    const label = GRANULARITY_LABELS[progress.granularity] || 'Month';
+    $('nq-timeline-title').textContent = `Progress per ${label}`;
+    timelineChart(progress.periods);
+    statsTable($('nq-timeline-table'), [label, 'Detected', 'Attended', 'Comments', ...progress.statuses.map((status) => `→ ${status}`),
+      'Closed', 'Reopened', 'Open Backlog', 'Avg Days to Close'],
+    [...progress.periods].reverse().map((period) => [period.period, number(period.detected), number(period.attended), number(period.comments),
+      ...progress.statuses.map((status) => number(period.statuses[status] || 0)), number(period.closed), number(period.reopened),
+      number(period.open_backlog), period.avg_days_to_close === null ? '—' : period.avg_days_to_close.toFixed(1)]));
+    const agingTotal = progress.aging.reduce((sum, item) => sum + item.count, 0);
+    const maxAge = Math.max(1, ...progress.aging.map((item) => item.count));
+    $('nq-aging').replaceChildren(...progress.aging.map((item) => {
+      const row = node('div', undefined, 'nq-bar nq-static-bar');
+      const track = node('span', undefined, 'nq-bar-track');
+      const fill = node('span', undefined, 'nq-bar-fill');
+      fill.style.width = `${Math.max(2, (item.count / maxAge) * 100)}%`;
+      track.append(fill);
+      row.append(node('span', item.value, 'nq-bar-label'), track, node('span', `${number(item.count)} · ${percent(item.count, agingTotal)}`, 'nq-bar-count'));
+      return row;
+    }));
+    const workload = (rows) => rows.map((row) => [row.name, number(row.open), number(row.closed), number(row.total)]);
+    statsTable($('nq-team-workload'), ['Team', 'Open', 'Closed', 'Total'], workload(progress.teams));
+    statsTable($('nq-assignee-workload'), ['Assignee', 'Open', 'Closed', 'Total'], workload(progress.assignees));
+    statsTable($('nq-activity'), ['User', 'Changes', 'Comments', 'Calls Closed'],
+      progress.activity.map((row) => [row.name, number(row.changes), number(row.comments), number(row.closed)]));
+  };
+  let progressToken = 0;
+  async function loadProgress() {
+    const token = ++progressToken;
+    try {
+      const progress = await api('/api/non-qualified-calls/progress', {
+        method: 'POST', body: JSON.stringify({filters: currentFilters(), granularity: $('nq-granularity').value}),
+      });
+      if (token === progressToken) renderProgress(progress);
+    } catch (error) {
+      if (token === progressToken) $('nq-progress-kpis').replaceChildren(node('p', error.message, 'nq-muted'));
+    }
+  }
+  $('nq-granularity').addEventListener('change', () => loadProgress());
+
   async function loadState() {
     try {
       const payload = await api('/api/non-qualified-calls/state');
@@ -495,8 +715,13 @@
       state.user = payload.user;
       state.unassigned = payload.unassigned || state.unassigned;
       state.datasets = payload.datasets || [];
+      state.mainCities = payload.main_cities || [];
       renderSync(payload.sync);
       fillFilters(payload);
+      if (!state.filtersRestored) {
+        state.filtersRestored = true;
+        applySavedFilters(payload.saved_filters || {});
+      }
       fillBulkSelects();
       await loadCalls();
     } catch (error) {

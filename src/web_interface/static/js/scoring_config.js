@@ -130,7 +130,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
   };
   const totalPacketLossFormula = '100 * SUM(totalpacketlost) / SUM(Packets_Sent)';
   const totalPacketLossExpression = 'IFNULL(Packets_Lost,0) + IFNULL(Packets_Discarded,0) + IFNULL(INT(Packets_Corrupted),0) + IFNULL(Packets_Not_Sent,0)';
-  const defaultHierarchy = ['Operator', 'Vendor', 'Region', 'City', 'Campaign'];
+  const defaultHierarchy = ['Operator', 'Vendor', 'Region', 'Cluster', 'City', 'Campaign'];
   const hierarchyDimensions = new Set(defaultHierarchy);
   let profileCollection = null;
   let configuration = null;
@@ -1202,7 +1202,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
   };
 
   const normalizeHierarchy = (value) => {
-    const items = Array.isArray(value) ? value.map((item) => String(item)) : [];
+    let items = Array.isArray(value) ? value.map((item) => String(item)) : [];
+    // Hierarchies saved before Cluster existed get it right after Region.
+    if (!items.includes('Cluster')) items = items.flatMap((item) => (item === 'Region' ? ['Region', 'Cluster'] : [item]));
     return items.length === defaultHierarchy.length
       && new Set(items).size === defaultHierarchy.length
       && items.every((item) => hierarchyDimensions.has(item))
@@ -1562,7 +1564,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       kpiDirty = false;
       priorityDirty = false;
       hierarchyDirty = false;
-      hierarchyOrder = [...configuration.aggregation_hierarchy];
+      hierarchyOrder = normalizeHierarchy(configuration.aggregation_hierarchy);
       render();
       setStatus(kpiStatus, 'Methodology saved, including all environments, KPIs, aggregation hierarchy and GAP priority.', 'success');
     } catch (error) {

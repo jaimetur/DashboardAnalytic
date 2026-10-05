@@ -575,7 +575,7 @@ def test_vendor_comparison_prompt_uses_confirm_and_secondary_choices():
     dashboard_script = (root / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
     app_script = (root / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
 
-    assert "confirmLabel: 'Vendor Only (All Operators Combined)', secondaryLabel: 'Operator - Vendor'" in dashboard_script
+    assert "confirmLabel: 'Vendor (All Operators Combined)', secondaryLabel: 'Operator_Vendor'" in dashboard_script
     assert "if (choice !== 'confirm' && choice !== 'secondary') return;" in dashboard_script
     assert "exportDefinition.vendor_comparison = choice === 'secondary' ? 'operator_vendor' : 'vendor_only';" in dashboard_script
     assert "const handleAccept = () => close(hasAlternatives ? 'confirm' : true);" in app_script
@@ -941,11 +941,9 @@ def test_dashboard_ppt_dialog_selections_override_saved_dashboard_filters(client
     assert output_file.endswith(' - Operator Comparison - South.pptx')
     # The dialog selections travel with the job and override the saved filters.
     assert submitted[0][6] == {
-        'Operator': ['B'], 'Vendor_Only': ['Vendor B'], 'Region': ['South'], 'City': ['Leeds'],
+        'Operator': ['B'], 'Vendor': ['Vendor B'], 'Region': ['South'], 'City': ['Leeds'],
     }
-    expected_saved_filters = {**payload['filters']}
-    expected_saved_filters['Vendor_Only'] = expected_saved_filters.pop('Vendor')
-    assert client.get('/api/e2e-dashboards').json()[dashboard_id]['filters'] == expected_saved_filters
+    assert client.get('/api/e2e-dashboards').json()[dashboard_id]['filters'] == payload['filters']
 
 
 def test_dashboard_ppt_all_labels_only_consider_the_selected_cdrs(client):
@@ -1261,7 +1259,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert re.search(r'data-authenticated-session="[^"]+"', page.text)
     assert 'id="page-panel-navigator"' in page.text
     assert 'data-page-panel-navigator-list' in page.text
-    assert page.text.index('>Datasets Analysis<') < page.text.index('>Network Insights<') < page.text.index('>E2E Dashboards<') < page.text.index('>Reporting (old)<')
+    assert page.text.index('>CDR Analysis<') < page.text.index('>Network Insights<') < page.text.index('>E2E Dashboards<') < page.text.index('>Reporting (old)<')
     assert client.get('/reporting-old').status_code == 200
     # Bookmarks from earlier versions keep opening the module now called Reporting (old).
     legacy_reporting = client.get('/e2e-reporting/jobs?x=1', follow_redirects=False)
@@ -1483,7 +1481,7 @@ def test_dashboards_lifecycle_and_layout(client):
     workspace_template = (Path(__file__).parents[1] / 'src/web_interface/templates/workspace.html').read_text(encoding='utf-8')
     assert '<p class="eyebrow">Workspaces Management</p>\n        <h2>Select Workspace</h2>' in workspace_template
     datasets_analysis_template = (Path(__file__).parents[1] / 'src/web_interface/templates/datasets_analysis.html').read_text(encoding='utf-8')
-    assert '<p class="eyebrow">Dataset Analysis</p>\n            <h2>{{ selected_dataset.file_name if selected_dataset else \'Select Dataset\' }}</h2>' in datasets_analysis_template
+    assert '<p class="eyebrow">CDR Analysis</p>\n            <h2>{{ selected_dataset.file_name if selected_dataset else \'Select Dataset\' }}</h2>' in datasets_analysis_template
     app_logs_template = (Path(__file__).parents[1] / 'src/web_interface/templates/app_logs.html').read_text(encoding='utf-8')
     assert '<p class="eyebrow">Application activity</p>\n        <h2>App Logs</h2>' in app_logs_template
     documentation_template = (Path(__file__).parents[1] / 'src/web_interface/templates/doc_view.html').read_text(encoding='utf-8')
@@ -1846,7 +1844,7 @@ def test_dashboards_lifecycle_and_layout(client):
     selection_key_source = dashboard_module[dashboard_module.index('def persistent_selection_key'):dashboard_module.index('def selected_date_bounds')]
     assert "'scope': definition.scope," not in selection_key_source
     assert "'schema': DASHBOARD_SELECTION_CACHE_VERSION," in selection_key_source
-    assert 'DASHBOARD_SELECTION_CACHE_VERSION = 15' in dashboard_module
+    assert 'DASHBOARD_SELECTION_CACHE_VERSION = 16' in dashboard_module
     assert "kind: sorted([" in selection_key_source
     assert "kind: sorted(set(dataset_ids))" in selection_key_source
     assert "field: sorted(set(values))" in selection_key_source
@@ -2075,7 +2073,7 @@ def test_dashboards_lifecycle_and_layout(client):
     result = client.post('/api/e2e-dashboards/prepare', json=payload)
     assert result.status_code == 200, result.text
     preview = result.json()
-    assert preview['filter_fields'] == ['Market', 'Region', 'City', 'Campaign', 'Operator', 'Vendor_Only', 'RAT', 'Session Type', 'Call Status']
+    assert preview['filter_fields'] == ['Operator', 'Operator_Vendor', 'Vendor', 'Market', 'Region', 'Cluster', 'City', 'Campaign', 'RAT', 'Session Type', 'Call Status']
     assert 'Technology' not in preview['options']
     assert preview['options']['Operator'] == ['A', 'B']
     assert preview['options']['City'] == ['Leeds', 'London']
@@ -2229,7 +2227,7 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypa
     assert job['filters'] == [
         'CDR Data: sample.csv', 'Date: Oldest to Newest',
         'Operator: All Operators', 'Vendor: All Vendors', 'City: London',
-        'Vendor comparison: Operator – Vendor',
+        'Vendor comparison: Operator_Vendor',
     ]
     assert job['duration_seconds'] is not None
     background_groups = client.get('/api/background-tasks').json()['groups']
@@ -3370,8 +3368,8 @@ def test_dynamic_vendor_only_editor_keeps_operator_rows_after_bin_edit(client):
         connection.execute('UPDATE dataset_profiles SET vendor_mapping_applied = 1 WHERE dataset_id = ?', (dataset_id,))
     core.repository.replace_cdr_catalogue(dataset_id, vendors=['A_Ericsson', 'B_Huawei'], regions=[], cities=['London'])
     core.repository.replace_reporting_rows(dataset_id, 'data', pd.DataFrame({
-        'Operator': ['A', 'A', 'B', 'B'], 'Vendor': ['A_Ericsson', 'A_Ericsson', 'B_Huawei', 'B_Huawei'],
-        'Vendor_Only': ['Ericsson', 'Ericsson', 'Huawei', 'Huawei'], 'City': ['London'] * 4,
+        'Operator': ['A', 'A', 'B', 'B'], 'Operator_Vendor': ['A_Ericsson', 'A_Ericsson', 'B_Huawei', 'B_Huawei'],
+        'Vendor': ['Ericsson', 'Ericsson', 'Huawei', 'Huawei'], 'City': ['London'] * 4,
         'Campaign': ['UK_Q1_2026', 'UK_Q2_2026', 'UK_Q1_2026', 'UK_Q2_2026'],
         'Test_Start_Time': ['2026-01-01', '2026-04-01', '2026-01-01', '2026-04-01'],
         'LTE_PCell_RSRP_Avg': [-100, -90, -105, -95], 'NR_PCell_RSRP_Avg': [-95, -85, None, None],
@@ -3407,7 +3405,7 @@ def test_dynamic_vendor_only_editor_keeps_operator_rows_after_bin_edit(client):
         context = client.get(f'/api/e2e-dashboards/chart/{token}/{index}/filter-context')
         assert context.status_code == 200, context.text
         assert context.json()['dynamic_rows_field'] == ''
-        assert context.json()['dynamic_columns_field'] == 'Vendor_Only'
+        assert context.json()['dynamic_columns_field'] == 'Vendor'
         expected_filter = 'Bin Size = 10' if index < 2 else 'Bin Size = 5'
         assert context.json()['filters'].startswith(expected_filter)
 

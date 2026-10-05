@@ -9,8 +9,14 @@ COLUMN_IDENTITY_ALIASES = {
     'suscribers': 'subscribers',
 }
 
+# Operator_Vendor is the operator-specific vendor (for example Vodafone_Ericsson)
+# and Vendor the vendor alone (Ericsson); operators without a vendor store
+# "<Operator> - All" in both.
+OPERATOR_VENDOR_FIELD = 'Operator_Vendor'
+VENDOR_FIELD = 'Vendor'
+
 MAIN_CDR_FIELDS = (
-    'Operator', 'Subscriber', 'Vendor', 'Vendor_Only',
+    'Operator', 'Subscriber', OPERATOR_VENDOR_FIELD, VENDOR_FIELD,
     'Campaign', 'Benchmark', 'Campaign_Year', 'Campaign_Quarter', 'Period', 'Market',
     'Region', 'Zone', 'City',
     'Technology', 'RAT', 'RAT_A', 'L2_Call_Mode_A', 'Playing_Technology',
@@ -20,7 +26,11 @@ MAIN_CDR_FIELDS = (
 
 PREVIEW_METADATA_FIELDS = ('Source_File', 'Source_Sheet', 'Dataset_Kind')
 
-VENDOR_FIELD_IDENTITIES = frozenset({'vendor', 'vendoronly'})
+VENDOR_FIELD_IDENTITIES = frozenset({'vendor', 'operatorvendor'})
+# Filter names that select the vendor alone; Vendor_Only and Vendor V3 are
+# former names of the same field.
+VENDOR_FILTER_IDENTITIES = frozenset({'vendor', 'vendoronly', 'vendorv3'})
+OPERATOR_VENDOR_FILTER_IDENTITIES = frozenset({'operatorvendor', 'opvendor'})
 
 
 def clean_column_name(value: object) -> str:
@@ -98,8 +108,23 @@ def resolve_column_name(columns: Iterable[object], requested: object) -> str | N
 
 
 def vendor_filter_column(column: object) -> str:
-    """Route legacy vendor filter names to the operator-independent field."""
-    return 'Vendor_Only' if column_identity(column) in {'vendor', 'vendorv3', 'operatorvendor', 'opvendor'} else str(column)
+    """Route every vendor filter name to its field: Vendor or Operator_Vendor."""
+    identity = column_identity(column)
+    if identity in VENDOR_FILTER_IDENTITIES:
+        return VENDOR_FIELD
+    if identity in OPERATOR_VENDOR_FILTER_IDENTITIES:
+        return OPERATOR_VENDOR_FIELD
+    return str(column)
+
+
+def is_vendor_filter(column: object) -> bool:
+    """Whether a filter name selects the vendor alone."""
+    return column_identity(column) in VENDOR_FILTER_IDENTITIES
+
+
+def is_operator_vendor_filter(column: object) -> bool:
+    """Whether a filter name selects the operator-specific vendor."""
+    return column_identity(column) in OPERATOR_VENDOR_FILTER_IDENTITIES
 
 
 def vendor_filter_value(value: object, operators=()) -> str:
@@ -129,6 +154,37 @@ def mapped_vendor_only_value(vendor: object, operator: object = '') -> str:
     return vendor_only_value(text, operator_text)
 
 
+def operator_vendor_value(vendor: object, operator: object = '') -> str:
+    """The operator-specific vendor: <Operator>_<Vendor>, or "<Operator> - All" without a vendor."""
+    operator_text = '' if operator is None else str(operator).strip()
+    text = '' if vendor is None or str(vendor).strip().casefold() in {'nan', '<na>', 'none'} else str(vendor).strip()
+    if re.search(r'\s+- All(?: Vendors)?$', text, flags=re.IGNORECASE):
+        return re.sub(r'\s+- All(?: Vendors)?$', ' - All', text, flags=re.IGNORECASE)
+    if not operator_text:
+        return text
+    if not text or column_identity(text) == column_identity(operator_text):
+        return f'{operator_text} - All'
+    if vendor_only_value(text, operator_text) != text:
+        return text
+    return f'{operator_text}_{text}'
+
+
+def operator_vendor_filter_values(values, operators=()) -> list[str]:
+    """Match Operator_Vendor values, including an Operator name saved before "<Operator> - All"."""
+    mappings = {str(alias).strip().casefold(): str(canonical).strip() for alias, canonical in operators.items()} if isinstance(operators, dict) else {}
+    names = {str(name).strip().casefold() for name in [*mappings.keys(), *mappings.values(), *([] if mappings else operators)] if name}
+    result = []
+    for value in values:
+        text = str(value or '').strip()
+        result.append(text)
+        if text.casefold() in names:
+            canonical = mappings.get(text.casefold(), text)
+            result.extend((f'{canonical} - All', f'{text} - All'))
+        elif re.search(r'\s+- All(?: Vendors)?$', text, flags=re.IGNORECASE):
+            result.append(re.sub(r'\s+- All(?: Vendors)?$', ' - All', text, flags=re.IGNORECASE))
+    return list(dict.fromkeys(result))
+
+
 def vendor_filter_values(values, operators=()) -> list[str]:
     """Match current and legacy operator-only values during cache transitions."""
     mappings = {str(alias).strip().casefold(): str(canonical).strip() for alias, canonical in operators.items()} if isinstance(operators, dict) else {}
@@ -142,3 +198,28 @@ def vendor_filter_values(values, operators=()) -> list[str]:
             canonical = mappings.get(text.casefold(), text)
             result.extend((canonical, f'{canonical} - All', f'{canonical} - All Vendors', f'{text} - All', f'{text} - All Vendors'))
     return list(dict.fromkeys(result))
+
+
+def vendor_match_values(field: object, values, operators=()) -> list[str]:
+    """Filter values to match on a field, accepting former Vendor and Operator_Vendor spellings."""
+    column = vendor_filter_column(field)
+    if column == VENDOR_FIELD:
+        return vendor_filter_values(values, operators)
+    if column == OPERATOR_VENDOR_FIELD:
+        return operator_vendor_filter_values(values, operators)
+    return [str(value) for value in values]
+
+
+def vendor_filter_rank(value: object) -> int:
+    """0 for vendors, 1 for mixed, other and all-vendor groups, 2 for operators without a vendor."""
+    text = str(value or '').strip()
+    if re.search(r'\s-\sAll(?: Vendors)?$', text, flags=re.IGNORECASE):
+        return 2
+    key = re.sub(r'[^a-z0-9]', '', text.casefold())
+    return 1 if any(part in key for part in ('mixed', 'othervendor', 'allvendor')) else 0
+
+
+def sort_vendor_values(values: Iterable[object]) -> list:
+    """Vendor filter values in the order used everywhere: vendors, then mixed groups, then
+    operators without a vendor, each block alphabetically."""
+    return sorted(values, key=lambda value: (vendor_filter_rank(value), str(value or '').strip().casefold()))

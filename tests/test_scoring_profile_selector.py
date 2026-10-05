@@ -9,6 +9,7 @@ import re
 import src.DashboardAnalytic as app_module
 from src.modules.repository import Repository
 from tests.scoring_fixtures import scoring_configuration
+from src.modules.scoring_config import complete_aggregation_hierarchy
 
 
 class _ScoringProfileSelectParser(HTMLParser):
@@ -78,7 +79,7 @@ def test_scoring_calculation_selector_lists_profiles_and_defaults_to_active(clie
     alternate_page_profile = next(
         profile for profile in page_config['scoring_profiles'] if profile['id'] == 'netcheck-alt'
     )
-    assert alternate_page_profile['aggregation_hierarchy'] == alternate['configuration']['aggregation_hierarchy']
+    assert alternate_page_profile['aggregation_hierarchy'] == complete_aggregation_hierarchy(alternate['configuration']['aggregation_hierarchy'])
     assert page_config['active_profile_id'] == active_id
 
     script = (Path(__file__).parents[1] / 'src/web_interface/static/js/scoring.js').read_text(encoding='utf-8')

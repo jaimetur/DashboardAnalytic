@@ -87,7 +87,7 @@
     </summary>
     <div class="table-wrap">
       <table class="users-table">
-        <thead><tr><th>ID</th><th>Username</th><th>Password</th><th>Role</th><th>Active</th><th>Workspaces</th><th>Created</th><th>Actions</th></tr></thead>
+        <thead><tr><th>ID</th><th>Username</th><th>Password</th><th>Role</th><th>Active</th><th>Groups</th><th>Workspaces</th><th>Created</th><th>Actions</th></tr></thead>
         <tbody>
           {% for row in users %}
           <tr data-user-row>
@@ -126,12 +126,28 @@
               </label>
             </td>
             <td>
+              {% set groups_locked = user.role != 'super-admin' and row['role'] == 'super-admin' %}
+              <input type="hidden" name="groups_submitted" value="1" form="user-update-{{ row['id'] }}">
+              <details class="workspace-user-picker" data-workspace-user-picker>
+                <summary><span>{% if row['group_ids'] %}{{ row['group_ids'] | length }} group{{ '' if row['group_ids'] | length == 1 else 's' }}{% else %}No groups{% endif %}</span><span class="workspace-user-picker-chevron" aria-hidden="true"></span></summary>
+                <div class="workspace-user-picker-menu">
+                  <input class="workspace-user-picker-search" type="search" placeholder="Filter groups…" aria-label="Filter groups for {{ row['username'] }}">
+                  {% for group in user_groups %}<label><input type="checkbox" name="group_ids" value="{{ group.id }}" form="user-update-{{ row['id'] }}" {% if group.id in row['group_ids'] %}checked{% endif %} {% if groups_locked %}disabled{% endif %}><span>{{ group.name }}</span></label>{% else %}<p class="table-help">No user groups yet.</p>{% endfor %}
+                </div>
+              </details>
+            </td>
+            <td>
               <details class="workspace-user-picker" data-workspace-user-picker>
                 <summary><span>Workspace access</span><span class="workspace-user-picker-chevron" aria-hidden="true"></span></summary>
                 <div class="workspace-user-picker-menu">
                   <input class="workspace-user-picker-search" type="search" placeholder="Filter workspaces…" aria-label="Filter workspaces for {{ row['username'] }}">
+                  <p class="workspace-user-picker-heading">User</p>
                   {% if user.role == 'super-admin' %}<button class="workspace-user-picker-toggle" type="button">Select All / None</button>{% endif %}
                   {% for workspace in workspaces %}<label><input type="checkbox" {% if user.role == 'super-admin' %}name="workspace_ids" value="{{ workspace.id }}" form="user-update-{{ row['id'] }}"{% else %}disabled{% endif %} {% if workspace.id in row['workspace_ids'] %}checked{% endif %}><span>{{ workspace.name }}</span></label>{% endfor %}
+                  {% if row['group_workspaces'] %}<p class="workspace-user-picker-heading">Groups</p>
+                  {% for item in row['group_workspaces'] %}<label class="workspace-inherited-access"><input type="checkbox" checked disabled><span>{{ item.workspace }} <small>· {{ item.groups | join(', ') }}</small></span></label>{% endfor %}{% endif %}
+                  {% if row['role_workspaces'] %}<p class="workspace-user-picker-heading">Role</p>
+                  {% for name in row['role_workspaces'] %}<label class="workspace-inherited-access"><input type="checkbox" checked disabled><span>{{ name }} <small>· {{ row['role'] }}</small></span></label>{% endfor %}{% endif %}
                 </div>
               </details>
             </td>
@@ -204,7 +220,7 @@
       </div>
       <span class="collapse-chip">Collapse</span>
     </summary>
-    <p class="table-help">Each main module is active for <strong>All users</strong> or <strong>Nobody</strong> by default. <strong>Allowed</strong> roles, groups and users gain it and <strong>Forbidden</strong> ones lose it; when an account matches both lists, Forbidden wins. A feature that is not active for an account disappears from its navigation and its pages and API answer 403. Non-Qualified Calls starts hidden from everyone; Reporting and Reporting (old) start allowed for super-admins, and Reporting (old) also for EJAITUR.</p>
+    <p class="table-help">Each main module is active for <strong>All users</strong> or <strong>Nobody</strong> by default. <strong>Allowed</strong> roles, groups and users gain it and <strong>Forbidden</strong> ones lose it; when an account matches both lists, Forbidden wins. A feature that is not active for an account disappears from its navigation and its pages and API answer 403. Non-Qualified Calls starts hidden from everyone; Reporting (old) starts allowed for super-admins and EJAITUR.</p>
     <form id="features-activation-form" action="/admin/features" method="post" autocomplete="off"></form>
     {% set principal_sections = [] %}
     {% set role_items = [] %}{% for role in feature_roles %}{% set _ = role_items.append(('role:' ~ role, role)) %}{% endfor %}
@@ -237,6 +253,34 @@
       </table>
     </div>
     <div class="form-actions"><button type="submit" form="features-activation-form">Save Features Activation</button></div>
+  </details>
+
+  <details id="workspace-access" class="panel collapsible-panel workspace-access-panel" open data-panel-state-key="admin:workspace-access">
+    <summary class="collapsible-summary">
+      <div>
+        <p class="eyebrow">Workspaces</p>
+        <h2>Workspace Access</h2>
+      </div>
+      <span class="collapse-chip">Collapse</span>
+    </summary>
+    <p class="table-help">A workspace opens for the <strong>roles</strong>, <strong>user groups</strong> and <strong>users</strong> it is granted to; super-admins open every workspace. Users granted here are the same ones listed in <strong>Workspace → Access</strong> and in each user's workspaces.</p>
+    <form id="workspace-access-form" action="/admin/workspace-access" method="post" autocomplete="off"></form>
+    <div class="table-wrap">
+      <table class="principal-table workspace-access-table">
+        <thead><tr><th>Workspace</th><th>Access</th></tr></thead>
+        <tbody>
+          {% for workspace in workspace_access_rows %}
+          <tr>
+            <td><strong>{{ workspace.name }}</strong></td>
+            <td>{{ principal_picker('workspace-access-form', 'access__' ~ workspace.id, principal_sections, workspace['values'], 'Super-admins only', 'Access to ' ~ workspace.name) }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="2" class="table-help">No workspaces.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="form-actions"><button type="submit" form="workspace-access-form">Save Workspace Access</button></div>
   </details>
   {% endif %}
   {% endif %}
@@ -1502,7 +1546,7 @@
         Array.from(role.options).forEach((option) => { option.selected = option.defaultSelected; });
       }
       if (active instanceof HTMLInputElement) active.checked = active.defaultChecked;
-      document.querySelectorAll(`[form="${form.id}"][name="workspace_ids"]`).forEach((box) => {
+      document.querySelectorAll(`[form="${form.id}"]:is([name="workspace_ids"], [name="group_ids"])`).forEach((box) => {
         if (box instanceof HTMLInputElement) box.checked = box.defaultChecked;
       });
     });
@@ -1555,6 +1599,9 @@
     if (password instanceof HTMLInputElement) password.value = '';
     document.querySelectorAll(`[form="${form.id}"][name="workspace_ids"]`).forEach((box) => {
       if (box instanceof HTMLInputElement) box.checked = (user.workspace_ids || []).includes(box.value);
+    });
+    document.querySelectorAll(`[form="${form.id}"][name="group_ids"]`).forEach((box) => {
+      if (box instanceof HTMLInputElement) box.checked = (user.group_ids || []).map(String).includes(box.value);
     });
   };
 

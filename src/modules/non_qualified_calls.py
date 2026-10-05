@@ -11,8 +11,8 @@ Follow-up is keyed by a stable ``call_key`` derived from the call itself (its
 service, Operator, Campaign and test/session identifier), so statuses and
 comments survive reprocessing or uploading the same CDR again.
 
-When the module produces reports, it registers a Reporting artifact provider with
-``core.register_report_artifact_provider`` so Reporting Jobs can include them.
+Its Executive Summary and Progress Status report is a Reporting artifact
+(PowerPoint, Word or Excel) registered with ``register_report_artifact_provider``.
 """
 
 import hashlib
@@ -25,7 +25,7 @@ from io import BytesIO
 from threading import Lock
 from typing import Any
 
-from src.modules.column_names import column_identity
+from src.modules.column_names import column_identity, sort_vendor_values
 
 NQ_CALLS_TABLE = 'nq_calls'
 NQ_CALL_SOURCES_TABLE = 'nq_call_sources'
@@ -33,6 +33,7 @@ NQ_CALL_TRACKING_TABLE = 'nq_call_tracking'
 NQ_CALL_COMMENTS_TABLE = 'nq_call_comments'
 NQ_CALL_HISTORY_TABLE = 'nq_call_history'
 NQ_CALL_OPTIONS_TABLE = 'nq_call_options'
+NQ_TEAM_MEMBERS_TABLE = 'nq_team_members'
 # Database Management titles of the module tables.
 NQ_TABLE_TITLES = {
     NQ_CALLS_TABLE: 'NQ Calls',
@@ -41,12 +42,13 @@ NQ_TABLE_TITLES = {
     NQ_CALL_COMMENTS_TABLE: 'NQ Call Comments',
     NQ_CALL_HISTORY_TABLE: 'NQ Call History',
     NQ_CALL_OPTIONS_TABLE: 'NQ Call Options',
+    NQ_TEAM_MEMBERS_TABLE: 'NQ Team Members',
 }
 SERVICES = ('voice', 'speech', 'data')
 SERVICE_LABELS = {'voice': 'Voice', 'speech': 'Speech', 'data': 'Data'}
 QUALIFIED_RESULT = 'completed'
 # Bump when the indexed fields or the call key change so every CDR is indexed again.
-INDEX_VERSION = 1
+INDEX_VERSION = 2
 TRACKING_FORMAT = 'nq-call-tracking'
 TRACKING_FORMAT_VERSION = 1
 UNASSIGNED = '__unassigned__'
@@ -73,8 +75,10 @@ DEFAULT_TEAMS = (
 FIELD_SOURCES: dict[str, tuple[str, ...]] = {
     'campaign': ('Campaign',),
     'operator': ('Operator', 'Operator_A', 'Home_Operator_A', 'Home_Operator'),
+    'operator_vendor': ('Operator_Vendor',),
     'vendor': ('Vendor',),
     'region': ('region', 'Region'),
+    'cluster': ('Cluster',),
     'city': ('city', 'City'),
     'technology': ('Technology', 'technology_primary', 'RAT_A', 'RAT'),
     'test_name': ('Test_Name', 'Type_Of_Test', 'Session_Type', 'Test_Type'),
@@ -98,22 +102,23 @@ IDENTIFIER_SOURCES = ('Test_ID', 'Session_ID_A', 'Session_id', 'JOIN_ID')
 SUBSCRIBER_SOURCES = ('Subscriber',)
 # Filters on indexed fields; the tracking filters are handled separately.
 FIELD_FILTERS = (
-    'service', 'campaign', 'operator', 'vendor', 'region', 'city', 'technology', 'test_name', 'result',
-    'failure_classification', 'failure_category',
+    'service', 'campaign', 'operator', 'operator_vendor', 'vendor', 'region', 'cluster', 'city', 'technology',
+    'test_name', 'result', 'failure_classification', 'failure_category',
 )
 TRACKING_FILTERS = ('status', 'team', 'assignee')
 SORT_COLUMNS = {
-    'service': 'service', 'start_time': 'start_time', 'operator': 'operator', 'vendor': 'vendor',
+    'service': 'service', 'start_time': 'start_time', 'operator': 'operator', 'operator_vendor': 'operator_vendor', 'vendor': 'vendor',
     'campaign': 'campaign', 'city': 'city', 'technology': 'technology', 'test_name': 'test_name',
     'result': 'result', 'failure': 'failure_classification', 'status': 'status', 'team': 'team',
     'assignee': 'assignee', 'comments': 'comment_count', 'updated_at': 'updated_at',
 }
 BREAKDOWNS = (
     ('service', 'By Service'), ('result', 'By Result'), ('status', 'By Status'), ('team', 'By Team'),
-    ('failure_classification', 'By Failure Classification'), ('operator', 'By Operator'),
+    ('failure_classification', 'By Failure Classification'), ('operator', 'By Operator'), ('vendor', 'By Vendor'),
+    ('region', 'By Region'), ('cluster', 'By Cluster'), ('city', 'By City'), ('dataset_id', 'By CDR'),
 )
 SEARCH_FIELDS = (
-    'operator', 'vendor', 'campaign', 'region', 'city', 'technology', 'test_name', 'result',
+    'operator', 'operator_vendor', 'vendor', 'campaign', 'region', 'cluster', 'city', 'technology', 'test_name', 'result',
     'failure_classification', 'failure_category', 'failure_subcategory', 'failure_comment', 'cell_id',
 )
 
@@ -175,6 +180,11 @@ CREATE TABLE IF NOT EXISTS {NQ_CALL_OPTIONS_TABLE} (
     is_closed INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (kind, name)
 );
+CREATE TABLE IF NOT EXISTS {NQ_TEAM_MEMBERS_TABLE} (
+    team TEXT NOT NULL COLLATE NOCASE,
+    username TEXT NOT NULL COLLATE NOCASE,
+    PRIMARY KEY (team, username)
+);
 """
 
 _sync_locks: dict[str, Lock] = {}
@@ -215,6 +225,11 @@ def ensure_nq_tables(task_repository: Any) -> None:
         existed = connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (NQ_CALL_OPTIONS_TABLE,),
         ).fetchone()
+        indexed = {str(row[1]) for row in connection.execute(f'PRAGMA table_info({NQ_CALLS_TABLE})').fetchall()}
+        if indexed and not set(CALL_FIELDS) <= indexed:
+            # The index is rebuilt from the CDRs whenever its fields change.
+            connection.execute(f'DROP TABLE {NQ_CALLS_TABLE}')
+            connection.execute(f'DROP TABLE IF EXISTS {NQ_CALL_SOURCES_TABLE}')
         connection.executescript(SCHEMA)
         if not existed:
             connection.executemany(
@@ -349,18 +364,28 @@ def sync_nq_calls(task_repository: Any) -> dict[str, Any]:
 # Options: statuses and teams
 # ---------------------------------------------------------------------------
 def list_options(task_repository: Any) -> dict[str, list[dict[str, Any]]]:
+    """The statuses and the teams, each team with its members."""
     with task_repository.connection() as connection:
         rows = connection.execute(
             f'SELECT kind, name, color, is_closed FROM {NQ_CALL_OPTIONS_TABLE} ORDER BY kind, position, name COLLATE NOCASE'
         ).fetchall()
+        members: dict[str, list[str]] = {}
+        for row in connection.execute(f'SELECT team, username FROM {NQ_TEAM_MEMBERS_TABLE} ORDER BY username COLLATE NOCASE'):
+            members.setdefault(str(row['team']).casefold(), []).append(str(row['username']))
     options: dict[str, list[dict[str, Any]]] = {'statuses': [], 'teams': []}
     for row in rows:
         item = {'name': str(row['name']), 'color': str(row['color'])}
         if row['kind'] == 'status':
             options['statuses'].append({**item, 'closed': bool(row['is_closed'])})
         else:
-            options['teams'].append(item)
+            options['teams'].append({**item, 'members': members.get(item['name'].casefold(), [])})
     return options
+
+
+def team_members(options: dict[str, list[dict[str, Any]]]) -> dict[str, set[str]]:
+    """Casefolded members of every team that has members."""
+    return {team['name'].casefold(): {member.casefold() for member in team.get('members') or []}
+            for team in options['teams'] if team.get('members')}
 
 
 def default_status(options: dict[str, list[dict[str, Any]]]) -> str:
@@ -383,21 +408,44 @@ def _normalize_option_list(items: Any, kind: str) -> list[dict[str, Any]]:
             raise ValueError(f'The {kind} "{name}" is repeated.')
         seen.add(name.casefold())
         color = str(item.get('color') or '').strip()
-        normalized.append({
+        option = {
             'name': name,
             'previous': re.sub(r'\s+', ' ', str(item.get('previous') or '')).strip(),
             'color': color if COLOR_PATTERN.fullmatch(color) else '#7b8790',
             'closed': bool(item.get('closed')) if kind == 'status' else False,
-        })
+        }
+        # Teams edited without their members keep the members they have.
+        if kind == 'team' and isinstance(item.get('members'), list):
+            option['members'] = list(dict.fromkeys(
+                str(member).strip() for member in item['members'] if str(member).strip()
+            ))
+        normalized.append(option)
     return normalized
 
 
-def save_options(task_repository: Any, statuses: Any, teams: Any, username: str) -> dict[str, list[dict[str, Any]]]:
-    """Replace the statuses and teams; renamed values follow on every call, removed ones must be unused."""
+def save_options(
+    task_repository: Any, statuses: Any, teams: Any, username: str, users: set[str] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Replace the statuses and teams; renamed values follow on every call, removed ones must be unused.
+
+    ``statuses`` None keeps the statuses (the Workspace Config Teams panel).
+    Team members must be users of the workspace when ``users`` is given.
+    """
+    current = list_options(task_repository)
+    if statuses is None:
+        statuses = [{**item, 'previous': item['name']} for item in current['statuses']]
     lists = {'status': _normalize_option_list(statuses, 'status'), 'team': _normalize_option_list(teams, 'team')}
+    if users is not None:
+        known = {name.casefold(): name for name in users}
+        for team in lists['team']:
+            if 'members' not in team:
+                continue
+            unknown = [member for member in team['members'] if member.casefold() not in known]
+            if unknown:
+                raise ValueError(f'{", ".join(unknown)} cannot join "{team["name"]}": choose users with access to this workspace.')
+            team['members'] = [known[member.casefold()] for member in team['members']]
     if not lists['status']:
         raise ValueError('Keep at least one status.')
-    current = list_options(task_repository)
     with task_repository.connection() as connection:
         for kind, column in (('status', 'status'), ('team', 'team')):
             existing = {item['name'].casefold(): item['name'] for item in current['statuses' if kind == 'status' else 'teams']}
@@ -424,6 +472,17 @@ def save_options(task_repository: Any, statuses: Any, teams: Any, username: str)
                 f'INSERT INTO {NQ_CALL_OPTIONS_TABLE} (kind, name, color, position, is_closed) VALUES (?, ?, ?, ?, ?)',
                 [(kind, item['name'], item['color'], index, int(item['closed'])) for index, item in enumerate(lists[kind])],
             )
+            if kind == 'team':
+                previous_members = {item['name'].casefold(): item.get('members') or [] for item in current['teams']}
+                connection.execute(f'DELETE FROM {NQ_TEAM_MEMBERS_TABLE}')
+                rows = []
+                for item in lists['team']:
+                    members = item['members'] if 'members' in item else previous_members.get(
+                        (item['previous'] or item['name']).casefold(), previous_members.get(item['name'].casefold(), []))
+                    rows.extend((item['name'], member) for member in members)
+                connection.executemany(
+                    f'INSERT OR IGNORE INTO {NQ_TEAM_MEMBERS_TABLE} (team, username) VALUES (?, ?)', rows,
+                )
     if hasattr(task_repository, 'try_add_log'):
         task_repository.try_add_log(username, 'nq_call_options', 'Non-Qualified Calls statuses and teams updated.')
     return list_options(task_repository)
@@ -456,6 +515,39 @@ def _strings(values: Any) -> list[str]:
     if not isinstance(values, list):
         return []
     return list(dict.fromkeys(str(value) for value in values if value is not None))
+
+
+# The Filters panel is shared: every user of the workspace finds the last selection, in any session.
+SAVED_FILTERS_STATE_KEY = 'nq_calls_filters'
+FLAG_FILTERS = ('open_only', 'mine', 'without_comments')
+
+
+def normalize_saved_filters(filters: Any) -> dict[str, Any]:
+    """The known filters of a selection: value lists, flags and the search text."""
+    filters = filters if isinstance(filters, dict) else {}
+    saved: dict[str, Any] = {}
+    for field in (*FIELD_FILTERS, *TRACKING_FILTERS, 'datasets'):
+        values = _strings(filters.get(field))[:5000]
+        if values:
+            saved[field] = values
+    saved.update({flag: True for flag in FLAG_FILTERS if filters.get(flag) is True})
+    search = str(filters.get('search') or '').strip()[:200]
+    if search:
+        saved['search'] = search
+    return saved
+
+
+def saved_filters(repository: Any) -> dict[str, Any]:
+    try:
+        return normalize_saved_filters(json.loads(repository.get_workspace_state(SAVED_FILTERS_STATE_KEY) or '{}'))
+    except (TypeError, ValueError):
+        return {}
+
+
+def save_filters(repository: Any, filters: Any) -> dict[str, Any]:
+    saved = normalize_saved_filters(filters)
+    repository.set_workspace_state(SAVED_FILTERS_STATE_KEY, json.dumps(saved, ensure_ascii=False, sort_keys=True))
+    return saved
 
 
 def _filter_sql(filters: dict[str, Any], username: str, closed_statuses: list[str]) -> tuple[str, list[Any]]:
@@ -544,6 +636,11 @@ def query_calls(task_repository: Any, request: dict[str, Any], username: str) ->
             breakdowns.append({'field': field, 'label': label, 'items': [
                 {'value': str(row['value'] or ''), 'count': int(row['count'])} for row in values
             ]})
+        names = {str(row['id']): str(row['file_name']) for row in connection.execute('SELECT id, file_name FROM datasets')}
+        for breakdown in breakdowns:
+            if breakdown['field'] == 'dataset_id':
+                for item in breakdown['items']:
+                    item['label'] = names.get(item['value'], f"CDR {item['value']}")
         closed_marks = ', '.join('?' for _ in closed) or "''"
         summary = connection.execute(
             f"SELECT COUNT(*) AS total, "
@@ -572,11 +669,209 @@ def filter_options(task_repository: Any) -> dict[str, list[str]]:
                 f"SELECT DISTINCT {field} AS value FROM {NQ_CALLS_TABLE} WHERE {field} <> '' ORDER BY value COLLATE NOCASE"
             ).fetchall()
             values[field] = [str(row['value']) for row in rows]
+            if field in {'operator_vendor', 'vendor'}:
+                values[field] = sort_vendor_values(values[field])
         assignees = connection.execute(
             f"SELECT DISTINCT assignee FROM {NQ_CALL_TRACKING_TABLE} WHERE assignee <> '' ORDER BY assignee COLLATE NOCASE"
         ).fetchall()
     values['assignee'] = [str(row['assignee']) for row in assignees]
     return values
+
+
+PROGRESS_GRANULARITIES = ('week', 'month', 'quarter', 'year')
+AGE_BUCKETS = ((7, 'Under 7 days'), (30, '7–30 days'), (90, '30–90 days'), (None, 'Over 90 days'))
+
+
+def _parse_time(value: Any) -> datetime | None:
+    text = _text(value).replace('T', ' ')
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        try:
+            parsed = datetime.strptime(text[:19], '%Y-%m-%d %H:%M:%S')
+        except ValueError:
+            return None
+    return parsed.replace(tzinfo=None) if parsed.tzinfo is None else parsed.astimezone().replace(tzinfo=None)
+
+
+def period_label(moment: datetime, granularity: str) -> str:
+    """The week (ISO), month, quarter or year a moment belongs to."""
+    if granularity == 'week':
+        year, week, _day = moment.isocalendar()
+        return f'{year}-W{week:02d}'
+    if granularity == 'quarter':
+        return f'{moment.year}-Q{(moment.month - 1) // 3 + 1}'
+    if granularity == 'year':
+        return str(moment.year)
+    return f'{moment.year}-{moment.month:02d}'
+
+
+def progress_stats(task_repository: Any, filters: dict[str, Any], username: str, granularity: str = 'month') -> dict[str, Any]:
+    """Follow-up progress of the calls matching the filters.
+
+    Distributions by status, team, assignee, service and result; how many calls
+    were detected, attended (first change or comment), commented, moved to each
+    status, closed and reopened per week, month, quarter or year; the open
+    backlog, the age of open calls, the workload of teams and assignees and the
+    activity of every user.
+    """
+    granularity = granularity if granularity in PROGRESS_GRANULARITIES else 'month'
+    options = list_options(task_repository)
+    closed_names = {item['name'].casefold() for item in options['statuses'] if item['closed']}
+    base, base_params = _base_sql(default_status(options))
+    where, params = _filter_sql(filters, username, [item['name'] for item in options['statuses'] if item['closed']])
+    with task_repository.connection() as connection:
+        calls = connection.execute(
+            f'WITH calls AS ({base}) SELECT call_key, start_time, status, team, assignee, service, result FROM calls{where}',
+            [*base_params, *params],
+        ).fetchall()
+        keys = [str(row['call_key']) for row in calls]
+        history: list[Any] = []
+        comments: list[Any] = []
+        for start in range(0, len(keys), 500):
+            chunk = keys[start:start + 500]
+            marks = ', '.join('?' for _ in chunk)
+            history.extend(connection.execute(
+                f'SELECT call_key, field, old_value, new_value, changed_by, changed_at FROM {NQ_CALL_HISTORY_TABLE} '
+                f'WHERE call_key IN ({marks}) ORDER BY changed_at, id', chunk).fetchall())
+            comments.extend(connection.execute(
+                f'SELECT call_key, created_by, created_at, deleted_at FROM {NQ_CALL_COMMENTS_TABLE} '
+                f'WHERE call_key IN ({marks}) ORDER BY created_at, id', chunk).fetchall())
+
+    def distribution(field: str, empty: str, order: list[str] | None = None) -> list[dict[str, Any]]:
+        counts: dict[str, int] = {}
+        for row in calls:
+            value = str(row[field] or '') or empty
+            counts[value] = counts.get(value, 0) + 1
+        ordered = [name for name in (order or []) if name in counts]
+        ordered += sorted((name for name in counts if name not in ordered), key=lambda name: (-counts[name], name.casefold()))
+        return [{'value': name, 'count': counts[name]} for name in ordered]
+
+    first_followup: dict[str, datetime] = {}
+    closed_at: dict[str, datetime] = {}
+    timeline: dict[str, dict[str, Any]] = {}
+
+    def bucket(moment: datetime | None) -> dict[str, Any] | None:
+        if moment is None:
+            return None
+        label = period_label(moment, granularity)
+        return timeline.setdefault(label, {
+            'period': label, 'detected': 0, 'attended': 0, 'comments': 0, 'changes': 0,
+            'closed': 0, 'reopened': 0, 'statuses': {}, 'close_days': [],
+        })
+
+    def follow_up(key: str, moment: datetime | None) -> None:
+        if moment is not None and (key not in first_followup or moment < first_followup[key]):
+            first_followup[key] = moment
+
+    activity: dict[str, dict[str, int]] = {}
+    for row in history:
+        moment = _parse_time(row['changed_at'])
+        key = str(row['call_key'])
+        follow_up(key, moment)
+        user = activity.setdefault(str(row['changed_by'] or '—'), {'changes': 0, 'comments': 0, 'closed': 0})
+        user['changes'] += 1
+        target = bucket(moment)
+        if target is not None:
+            target['changes'] += 1
+        if row['field'] != 'status' or target is None:
+            continue
+        new_value, old_value = str(row['new_value']), str(row['old_value'])
+        target['statuses'][new_value] = target['statuses'].get(new_value, 0) + 1
+        if new_value.casefold() in closed_names and old_value.casefold() not in closed_names:
+            target['closed'] += 1
+            user['closed'] += 1
+            closed_at[key] = moment
+        elif old_value.casefold() in closed_names and new_value.casefold() not in closed_names:
+            target['reopened'] += 1
+            closed_at.pop(key, None)
+    for row in comments:
+        moment = _parse_time(row['created_at'])
+        follow_up(str(row['call_key']), moment)
+        activity.setdefault(str(row['created_by'] or '—'), {'changes': 0, 'comments': 0, 'closed': 0})['comments'] += 1
+        target = bucket(moment)
+        if target is not None:
+            target['comments'] += 1
+    for row in calls:
+        target = bucket(_parse_time(row['start_time']))
+        if target is not None:
+            target['detected'] += 1
+    for key, moment in first_followup.items():
+        bucket(moment)['attended'] += 1
+    for key, moment in closed_at.items():
+        if key in first_followup:
+            bucket(moment)['close_days'].append((moment - first_followup[key]).total_seconds() / 86400)
+
+    periods = []
+    backlog = 0
+    for label in sorted(timeline):
+        item = timeline[label]
+        backlog += item['detected'] - item['closed'] + item['reopened']
+        days = item.pop('close_days')
+        periods.append({**item, 'open_backlog': max(backlog, 0),
+                        'avg_days_to_close': round(sum(days) / len(days), 1) if days else None})
+
+    open_calls = [row for row in calls if str(row['status']).casefold() not in closed_names]
+    now = datetime.now()
+    ages: dict[str, int] = {label: 0 for _limit, label in AGE_BUCKETS}
+    ages['Unknown date'] = 0
+    for row in open_calls:
+        moment = _parse_time(row['start_time'])
+        if moment is None:
+            ages['Unknown date'] += 1
+            continue
+        days = (now - moment).total_seconds() / 86400
+        ages[next(label for limit, label in AGE_BUCKETS if limit is None or days < limit)] += 1
+
+    def workload(field: str) -> list[dict[str, Any]]:
+        rows: dict[str, dict[str, Any]] = {}
+        for row in calls:
+            name = str(row[field] or '') or 'Unassigned'
+            entry = rows.setdefault(name, {'name': name, 'open': 0, 'closed': 0, 'total': 0})
+            entry['total'] += 1
+            entry['closed' if str(row['status']).casefold() in closed_names else 'open'] += 1
+        return sorted(rows.values(), key=lambda entry: (-entry['open'], -entry['total'], entry['name'].casefold()))
+
+    attended = [key for key in keys if key in first_followup]
+    response_days = []
+    starts = {str(row['call_key']): _parse_time(row['start_time']) for row in calls}
+    for key in attended:
+        if starts.get(key) is not None and first_followup[key] >= starts[key]:
+            response_days.append((first_followup[key] - starts[key]).total_seconds() / 86400)
+    close_days = [(closed_at[key] - first_followup[key]).total_seconds() / 86400
+                  for key in closed_at if key in first_followup]
+    total = len(calls)
+    closed_total = total - len(open_calls)
+    return {
+        'granularity': granularity,
+        'summary': {
+            'total': total, 'attended': len(attended), 'not_attended': total - len(attended),
+            'open': len(open_calls), 'closed': closed_total,
+            'closure_rate': round(closed_total * 100 / total, 1) if total else 0.0,
+            'comments': sum(1 for row in comments if not row['deleted_at']),
+            'changes': len(history), 'contributors': len(activity),
+            'avg_days_to_first_follow_up': round(sum(response_days) / len(response_days), 1) if response_days else None,
+            'avg_days_to_close': round(sum(close_days) / len(close_days), 1) if close_days else None,
+        },
+        'distributions': [
+            {'field': 'status', 'label': 'By Status', 'items': distribution('status', '—', [item['name'] for item in options['statuses']])},
+            {'field': 'team', 'label': 'By Team', 'items': distribution('team', 'Unassigned', [item['name'] for item in options['teams']])},
+            {'field': 'assignee', 'label': 'By Assignee', 'items': distribution('assignee', 'Unassigned')},
+            {'field': 'service', 'label': 'By Service', 'items': [
+                {**item, 'value': SERVICE_LABELS.get(item['value'], item['value']), 'filter': item['value']}
+                for item in distribution('service', '—')]},
+            {'field': 'result', 'label': 'By Result', 'items': distribution('result', '—')},
+        ],
+        'aging': [{'value': label, 'count': count} for label, count in ages.items() if count or label != 'Unknown date'],
+        'periods': periods,
+        'statuses': [item['name'] for item in options['statuses']],
+        'teams': workload('team'),
+        'assignees': workload('assignee')[:20],
+        'activity': sorted(({'name': name, **values} for name, values in activity.items()),
+                           key=lambda entry: (-(entry['changes'] + entry['comments']), entry['name'].casefold()))[:20],
+    }
 
 
 def indexed_datasets(task_repository: Any) -> list[dict[str, Any]]:
@@ -678,9 +973,15 @@ def update_tracking(
     task_repository: Any, call_keys: list[str], changes: dict[str, Any], username: str, users: set[str],
     expected_version: int | None = None,
 ) -> list[str]:
-    """Apply status, team or assignee changes; returns the calls that changed."""
+    """Apply status, team or assignee changes; returns the calls that changed.
+
+    A team with members only accepts them as assignees: assigning anybody else
+    is refused, and moving a call to such a team clears an assignee who is not
+    a member.
+    """
     options = list_options(task_repository)
     validated = _validate_changes(changes, options, users)
+    members = team_members(options)
     default = default_status(options)
     when = now_iso()
     changed: list[str] = []
@@ -693,11 +994,16 @@ def update_tracking(
                 raise TrackingConflict(
                     f"{row['updated_by'] or 'Another user'} changed this call at {row['updated_at']}. Review it and try again."
                 )
-            differences = {field: value for field, value in validated.items() if str(row[field]) != value}
+            current = {field: str(row[field]) for field in ('status', 'team', 'assignee')}
+            current.update(validated)
+            allowed = members.get(current['team'].casefold())
+            if allowed and current['assignee'] and current['assignee'].casefold() not in allowed:
+                if 'assignee' in validated:
+                    raise ValueError(f'{current["assignee"]} is not a member of the {current["team"]} team.')
+                current['assignee'] = ''
+            differences = {field: value for field, value in current.items() if str(row[field]) != value}
             if not differences:
                 continue
-            current = {field: str(row[field]) for field in ('status', 'team', 'assignee')}
-            current.update(differences)
             connection.execute(
                 f'INSERT INTO {NQ_CALL_TRACKING_TABLE} (call_key, status, team, assignee, version, updated_by, updated_at) '
                 'VALUES (?, ?, ?, ?, 1, ?, ?) ON CONFLICT(call_key) DO UPDATE SET status = excluded.status, '
@@ -938,6 +1244,10 @@ def import_tracking_document(task_repository: Any, payload: bytes | str) -> int:
                     f'INSERT OR IGNORE INTO {NQ_CALL_OPTIONS_TABLE} (kind, name, color, position, is_closed) VALUES (?, ?, ?, ?, ?)',
                     (kind, item['name'], item['color'], position, int(item['closed'])),
                 )
+                connection.executemany(
+                    f'INSERT OR IGNORE INTO {NQ_TEAM_MEMBERS_TABLE} (team, username) VALUES (?, ?)',
+                    [(item['name'], member) for member in item.get('members') or []],
+                )
         for item in tracking:
             call_key = _text(item.get('call_key'))
             if not call_key:
@@ -1018,6 +1328,13 @@ def install_non_qualified_calls_routes(core: Any) -> None:
         statuses: list[dict[str, Any]] = Field(default_factory=list)
         teams: list[dict[str, Any]] = Field(default_factory=list)
 
+    class TeamsPayload(BaseModel):
+        teams: list[dict[str, Any]] = Field(default_factory=list)
+
+    class ProgressPayload(BaseModel):
+        filters: dict[str, Any] = Field(default_factory=dict)
+        granularity: str = 'month'
+
     class ExportPayload(BaseModel):
         filters: dict[str, Any] = Field(default_factory=dict)
 
@@ -1064,6 +1381,73 @@ def install_non_qualified_calls_routes(core: Any) -> None:
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
+    # -- Reporting Jobs artifact ---------------------------------------------
+    report_filters = (
+        ('datasets', 'CDRs'), ('service', 'Service'), ('campaign', 'Campaign'), ('operator', 'Operator'),
+        ('operator_vendor', 'Operator_Vendor'), ('vendor', 'Vendor'), ('region', 'Region'), ('cluster', 'Cluster'),
+        ('city', 'City'), ('result', 'Result'), ('failure_classification', 'Failure Classification'),
+        ('status', 'Status'), ('team', 'Team'), ('assignee', 'Assignee'),
+    )
+    report_settings = (
+        {'key': 'granularity', 'label': 'Progress periods', 'default': 'month',
+         'choices': [['week', 'Week'], ['month', 'Month'], ['quarter', 'Quarter'], ['year', 'Year']]},
+        {'key': 'open_only', 'label': 'Calls', 'default': '',
+         'choices': [['', 'Every call'], ['1', 'Open calls only']]},
+    )
+
+    def report_values(user) -> dict[str, list[Any]]:
+        repository = workspace_repository(user)
+        values = filter_options(repository)
+        options = list_options(repository)
+        values['datasets'] = [[str(item['id']), item['name']] for item in indexed_datasets(repository)]
+        values['status'] = [item['name'] for item in options['statuses']]
+        values['team'] = [[UNASSIGNED, 'Unassigned'], *[item['name'] for item in options['teams']]]
+        values['assignee'] = [[UNASSIGNED, 'Unassigned'], *workspace_users()]
+        return values
+
+    def generate_report(config, folder, stamp, user) -> list[dict[str, Any]]:
+        from src.modules.non_qualified_calls_export import export_powerpoint, export_word, selection_lines
+        from src.modules.report_tasks import artifact_path
+
+        repository = workspace_repository(user)
+        sync_nq_calls(repository)
+        settings = config.get('options') if isinstance(config.get('options'), dict) else {}
+        filters = {key: [str(value) for value in values] for key, values in (settings.get('filters') or {}).items()
+                   if isinstance(values, list) and values}
+        if str(settings.get('open_only') or '') == '1':
+            filters['open_only'] = True
+        granularity = str(settings.get('granularity') or 'month')
+        executive = query_calls(repository, {'filters': filters, 'page_size': 25}, user.username)
+        progress = progress_stats(repository, filters, user.username, granularity)
+        options = list_options(repository)
+        names = {str(item['id']): item['name'] for item in indexed_datasets(repository)}
+        lines = selection_lines(filters, names, granularity)
+        summary = executive['summary']
+        details = [*lines[:-1], f"{summary['total']:,} Non-Qualified Calls · {summary['open']:,} open · {summary['closed']:,} closed · "
+                   f"{progress['summary']['attended']:,} attended"]
+        artifacts = []
+        for export_format in config.get('formats') or ['powerpoint']:
+            suffix = {'powerpoint': '.pptx', 'word': '.docx', 'excel': '.xlsx'}[export_format]
+            label = {'powerpoint': 'PPT', 'word': 'Word', 'excel': 'Excel'}[export_format]
+            destination = artifact_path(folder, stamp, 'Non-Qualified Calls', 'Executive Summary and Progress Status', suffix)
+            if export_format == 'powerpoint':
+                export_powerpoint(destination, lines, summary, executive['breakdowns'], progress, options)
+            elif export_format == 'word':
+                export_word(destination, lines, summary, executive['breakdowns'], progress)
+            else:
+                destination.write_bytes(export_workbook(repository, filters, user.username))
+            artifacts.append({'module': 'non_qualified_calls', 'title': f'Non-Qualified Calls ({label})',
+                              'file_name': destination.name, 'size': destination.stat().st_size,
+                              'status': 'ready', 'details': details})
+        return artifacts
+
+    from src.modules.report_tasks import register_report_artifact_provider
+
+    register_report_artifact_provider(
+        'non_qualified_calls', 'Non-Qualified Calls', 'non-qualified-calls', generate_report,
+        formats=('powerpoint', 'word', 'excel'), filters=report_filters, settings=report_settings, values=report_values,
+    )
+
     @core.app.get('/non-qualified-calls', response_class=HTMLResponse)
     def non_qualified_calls_page(request: Request, user=Depends(core.current_user)):
         return core.render_template(request, 'non_qualified_calls.html', {
@@ -1079,7 +1463,13 @@ def install_non_qualified_calls_routes(core: Any) -> None:
             'datasets': indexed_datasets(repository), 'users': workspace_users(),
             'user': {'username': user.username, 'can_edit': can_edit(user), 'can_moderate': can_moderate(user)},
             'unassigned': UNASSIGNED, 'page_sizes': list(PAGE_SIZES),
+            'main_cities': list(repository.list_main_cities()),
+            'saved_filters': saved_filters(repository),
         })
+
+    @core.app.put('/api/non-qualified-calls/filters')
+    def nq_save_filters(payload: QueryPayload, user=Depends(core.current_user)) -> JSONResponse:
+        return JSONResponse({'filters': save_filters(workspace_repository(user), payload.filters)})
 
     @core.app.post('/api/non-qualified-calls/calls')
     def nq_calls(payload: QueryPayload, user=Depends(core.current_user)) -> JSONResponse:
@@ -1134,8 +1524,26 @@ def install_non_qualified_calls_routes(core: Any) -> None:
     @core.app.put('/api/non-qualified-calls/options')
     def nq_save_options(payload: OptionsPayload, user=Depends(editor_user)) -> JSONResponse:
         repository = workspace_repository(user)
-        options = translate(lambda: save_options(repository, payload.statuses, payload.teams, user.username))
+        options = translate(lambda: save_options(repository, payload.statuses, payload.teams, user.username, set(workspace_users())))
         return JSONResponse({'options': options})
+
+    @core.app.get('/api/non-qualified-calls/teams')
+    def nq_teams(user=Depends(core.current_user)) -> JSONResponse:
+        """Teams and their members for Workspace Config."""
+        repository = workspace_repository(user)
+        return JSONResponse({'teams': list_options(repository)['teams'], 'users': workspace_users(), 'can_edit': can_edit(user)})
+
+    @core.app.put('/api/non-qualified-calls/teams')
+    def nq_save_teams(payload: TeamsPayload, user=Depends(editor_user)) -> JSONResponse:
+        repository = workspace_repository(user)
+        options = translate(lambda: save_options(repository, None, payload.teams, user.username, set(workspace_users())))
+        return JSONResponse({'teams': options['teams']})
+
+    @core.app.post('/api/non-qualified-calls/progress')
+    def nq_progress(payload: ProgressPayload, user=Depends(core.current_user)) -> JSONResponse:
+        repository = workspace_repository(user)
+        sync_nq_calls(repository)
+        return JSONResponse(progress_stats(repository, payload.filters, user.username, payload.granularity))
 
     @core.app.post('/api/non-qualified-calls/export')
     def nq_export(payload: ExportPayload, user=Depends(core.current_user)) -> Response:

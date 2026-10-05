@@ -6,7 +6,7 @@ Dashboard Analytic turns processed CDR datasets into interactive KPI analysis, r
 > **Workspace ownership.** Open the intended workspace before selecting datasets, methodologies or templates. Application Config and user accounts have a separate global scope.
 
 > [!TIP]
-> **Choose an analysis workflow.** Use Datasets Analysis for one CDR, Builders for ad-hoc exploration, E2E Dashboards for a complete template, Scoring & GAP Analysis for scoring comparisons and Network Insights for radio quality, sites and spectrum.
+> **Choose an analysis workflow.** Use CDR Analysis for one CDR, Builders for ad-hoc exploration, E2E Dashboards for a complete template, Scoring & GAP Analysis for scoring comparisons and Network Insights for radio quality, sites and spectrum.
 
 ## In this guide
 
@@ -17,7 +17,7 @@ Dashboard Analytic turns processed CDR datasets into interactive KPI analysis, r
 | Application and workspace configuration | [Open section](#application-and-workspace-configuration) |
 | Background tasks and floating cards | [Open section](#background-tasks-and-floating-cards) |
 | Workspace | [Open section](#workspace) |
-| Datasets Analysis | [Open section](#datasets-analysis) |
+| CDR Analysis | [Open section](#datasets-analysis) |
 | Network Insights | [Open section](#network-insights) |
 | E2E Dashboards | [Open section](#e2e-dashboards) |
 | Non-Qualified Calls | [Open section](#non-qualified-calls) |
@@ -35,7 +35,7 @@ Dashboard Analytic turns processed CDR datasets into interactive KPI analysis, r
 2. Upload Data, Voice or Speech CDRs from **Workspace**.
 3. Confirm the detected input type (and, for CDRs, the NR Mode) and wait for processing to finish.
 4. Optionally map Vodafone and Three vendor information.
-5. Create or open a saved **E2E Dashboard** to analyse a complete template interactively, reuse prepared selections and generate its PowerPoint. Use **Datasets Analysis**, **Chart Builder** or **Query Builder** for focused exploration, or **Reporting (old)** for the classic report and Chart Set workflow. Use **Reporting** to schedule jobs that email Dataset Analysis, Network Insights, Dashboard and Scoring artifacts.
+5. Create or open a saved **E2E Dashboard** to analyse a complete template interactively, reuse prepared selections and generate its PowerPoint. Use **CDR Analysis**, **Chart Builder** or **Query Builder** for focused exploration, or **Reporting (old)** for the classic report and Chart Set workflow. Use **Reporting** to schedule jobs that email CDR Analysis, Network Insights, Dashboard and Scoring artifacts.
 6. Follow Dashboard preparation and generation in the floating task cards, **PPT Generation Jobs** and **Reports and Charts Jobs**.
 7. Use **Scoring & GAP Analysis** for saved NetCheck scores and GAP reference operator comparisons across selected CDRs and aggregation levels; CDR processing also queues default Operator scoring when compatible companion CDRs are available. See [Scoring & GAP Analysis](scoring-gap-analysis.md).
 8. Use **Network Insights** to compare RSRP and SINR, map weak-coverage and high-interference areas and review sites, spectrum and network deployment. See [Network Insights](network-insights.md).
@@ -101,7 +101,7 @@ Workspace is the entry point for data and storage management.
 - Follow processing progress.
 - Filter the queue by dataset type.
 - Preview processed rows with searchable, Excel-style column filters.
-- Open eligible datasets in Datasets Analysis.
+- Open eligible datasets in CDR Analysis.
 - Stop, retry or delete work.
 - Apply, clear and reapply vendor mappings.
 
@@ -115,9 +115,9 @@ Workspace is the entry point for data and storage management.
 
 Example: upload `NetCheck_CDR_Data_2026_Q2.xlsx`, confirm **CDR-Data**, wait for **Processed**, then use **Show Analysis** or select it from Reporting.
 
-## Datasets Analysis
+## CDR Analysis
 
-Datasets Analysis analyses one processed CDR at a time.
+CDR Analysis analyses one processed CDR at a time.
 
 ### Analysis Controls
 
@@ -205,7 +205,7 @@ Non-Qualified Calls follows Scoring & GAP Analysis in the main tabs. It lists ev
 
 ## Reporting
 
-Reporting schedules **Reporting Jobs** that collect a Summary Dataset Analysis, a Summary Network Insights, Dashboard PPTs and Scoring PPTs, each with its own filters, run once or on a daily, weekly or monthly schedule and email the artifacts with a description of each one. It starts available to super-admins. See [Reporting](reporting.md).
+Reporting schedules **Reporting Jobs** that collect a Summary CDR Analysis, a Summary Network Insights, Dashboard PPTs and Scoring PPTs, each with its own filters, run once or on a daily, weekly or monthly schedule and email the artifacts with a description of each one. It is available to every user unless Admin → Features Activation restricts it, and it can also include the Non-Qualified Calls Executive Summary and Progress Status. See [Reporting](reporting.md).
 
 ## Reporting (old)
 

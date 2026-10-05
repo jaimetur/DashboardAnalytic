@@ -37,14 +37,24 @@
             <label>New workspace
               <input class="workspace-create-name" name="name" required maxlength="100" placeholder="e.g. 2026 Q3 benchmark">
             </label>
-            {% if user.role == 'super-admin' %}<details class="workspace-user-picker" data-workspace-user-picker>
-              <summary><span>Users with access</span><span class="workspace-user-picker-chevron" aria-hidden="true"></span></summary>
+            <label>CDR type
+              <select name="cdr_type" class="workspace-create-cdr-type" aria-label="CDR files handled by the new workspace">
+                {% for option in cdr_type_options %}<option value="{{ option.value }}"{% if not option.supported %} disabled{% endif %}{% if option.value == 'netcheck' %} selected{% endif %}>{{ option.label }}{% if not option.supported %} (coming soon){% endif %}</option>{% endfor %}
+              </select>
+            </label>
+            {% if user.role == 'super-admin' %}<div class="workspace-create-access"><span>Access</span><details class="workspace-user-picker" data-workspace-user-picker>
+              <summary><span>Roles, groups and users</span><span class="workspace-user-picker-chevron" aria-hidden="true"></span></summary>
               <div class="workspace-user-picker-menu">
-                <input class="workspace-user-picker-search" type="search" placeholder="Filter users…" aria-label="Filter available users">
+                <input class="workspace-user-picker-search" type="search" placeholder="Filter…" aria-label="Filter roles, groups and users">
+                <p class="workspace-user-picker-heading">Roles</p>
+                {% for role in access_roles | default([], true) %}<label><input type="checkbox" name="access_roles" value="{{ role }}"><span>{{ role }}</span></label>{% endfor %}
+                <p class="workspace-user-picker-heading">Groups</p>
+                {% for group in access_groups | default([], true) %}<label><input type="checkbox" name="access_groups" value="{{ group.id }}"><span>{{ group.name }}</span></label>{% else %}<p class="table-help">No user groups.</p>{% endfor %}
+                <p class="workspace-user-picker-heading">Users</p>
                 <button class="workspace-user-picker-toggle" type="button">Select All / None</button>
                 {% for account in workspace_users %}<label><input type="checkbox" name="usernames" value="{{ account.username }}"><span>{{ account.username }}</span></label>{% endfor %}
               </div>
-            </details>{% endif %}
+            </details></div>{% endif %}
             <button type="submit">Create and open</button>
           </form>
         </div>
@@ -53,7 +63,8 @@
             <thead>
               <tr>
                 <th class="workspace-name-column">Workspace</th>
-                {% if user.role == 'super-admin' %}<th class="workspace-access-column">Users with access</th>{% endif %}
+                {% if user.role == 'super-admin' %}<th class="workspace-access-column">Access</th>{% endif %}
+                <th class="workspace-cdr-type-column">CDR Type</th>
                 <th>Size</th>
                 <th>Cache Size</th>
                 <th>Status</th>
@@ -70,18 +81,29 @@
                   </form>
                   <input form="workspace-save-{{ item.id }}" aria-label="Workspace name: {{ item.name }}" name="name" required maxlength="100" value="{{ item.name }}" data-workspace-name-input {% if not workspace_access.get(item.id, false) %}disabled{% endif %}>
                 </td>
-                {% if user.role == 'super-admin' %}<td class="workspace-access-column" data-label="Users with access">
+                {% if user.role == 'super-admin' %}{% set access_rule = (workspace_access_rules | default({}, true)).get(item.id, {}) %}<td class="workspace-access-column" data-label="Access">
                   <div class="workspace-access-editor">
                     <details class="workspace-user-picker" data-workspace-user-picker>
-                      <summary><span>Users with access</span><span class="workspace-user-picker-chevron" aria-hidden="true"></span></summary>
+                      <summary><span>Roles, groups and users</span><span class="workspace-user-picker-chevron" aria-hidden="true"></span></summary>
                       <div class="workspace-user-picker-menu">
-                        <input class="workspace-user-picker-search" type="search" placeholder="Filter users…" aria-label="Filter available users">
+                        <input class="workspace-user-picker-search" type="search" placeholder="Filter…" aria-label="Filter roles, groups and users">
+                        <p class="workspace-user-picker-heading">Roles</p>
+                        {% for role in access_roles | default([], true) %}<label><input form="workspace-save-{{ item.id }}" type="checkbox" name="access_roles" value="{{ role }}" {% if role in access_rule.get('roles', []) %}checked{% endif %}><span>{{ role }}</span></label>{% endfor %}
+                        <p class="workspace-user-picker-heading">Groups</p>
+                        {% for group in access_groups | default([], true) %}<label><input form="workspace-save-{{ item.id }}" type="checkbox" name="access_groups" value="{{ group.id }}" {% if group.id in access_rule.get('groups', []) %}checked{% endif %}><span>{{ group.name }}</span></label>{% else %}<p class="table-help">No user groups.</p>{% endfor %}
+                        <p class="workspace-user-picker-heading">Users</p>
                         <button class="workspace-user-picker-toggle" type="button">Select All / None</button>
                         {% for account in workspace_users %}<label><input form="workspace-save-{{ item.id }}" type="checkbox" name="usernames" value="{{ account.username }}" {% if item.id in account.workspace_ids %}checked{% endif %}><span>{{ account.username }}</span></label>{% endfor %}
                       </div>
                     </details>
                   </div>
                 </td>{% endif %}
+                <td class="workspace-cdr-type-column" data-label="CDR Type">
+                  {% set item_cdr_type = (workspace_cdr_types | default({}, true)).get(item.id, 'netcheck') %}
+                  <select form="workspace-save-{{ item.id }}" name="cdr_type" aria-label="CDR type of {{ item.name }}" {% if not workspace_access.get(item.id, false) %}disabled{% endif %}>
+                    {% for option in cdr_type_options %}<option value="{{ option.value }}"{% if not option.supported %} disabled{% endif %}{% if option.value == item_cdr_type %} selected{% endif %}>{{ option.label }}{% if not option.supported %} (coming soon){% endif %}</option>{% endfor %}
+                  </select>
+                </td>
                 <td data-label="Size"><span class="workspace-size" data-workspace-size data-workspace-id="{{ item.id }}">{{ workspace_sizes.get(item.id, '0 MB') }}</span></td>
                 <td data-label="Cache Size"><span class="workspace-size" data-workspace-cache-size data-workspace-id="{{ item.id }}">{{ workspace_cache_sizes.get(item.id, '0 B') }}</span></td>
                 <td data-label="Status"><span class="workspace-status-pill workspace-status-{{ workspace_status.status }}" data-workspace-status data-workspace-id="{{ item.id }}">{{ workspace_status.status_label }}</span></td>
@@ -157,7 +179,7 @@
       <button type="submit">Upload and process</button>
       </form>
       {% if selected_dataset and selected_dataset.is_ready %}
-      <p class="form-note">Workspace opened from cache. Open the processed dataset in <strong>Datasets Analysis</strong> to work with filters, KPIs and charts.</p>
+      <p class="form-note">Workspace opened from cache. Open the processed dataset in <strong>CDR Analysis</strong> to work with filters, KPIs and charts.</p>
       {% endif %}
       {% if error %}<div class="alert upload-alert">{{ error }}</div>{% endif %}
     </div>
@@ -483,14 +505,24 @@
           <input type="checkbox" data-reprocess-all-toggle checked{% if not datasets | selectattr('can_reprocess') | list %} disabled{% endif %}>
           <span>Select all available datasets</span>
         </label>
-        {% for dataset in datasets %}
-        <label class="vendor-mapping-cdr-choice{% if not dataset.can_reprocess %} is-disabled{% endif %}">
-          <input type="checkbox" name="dataset_ids" value="{{ dataset.id }}" data-reprocess-dataset-choice{% if dataset.can_reprocess %} checked{% else %} disabled{% endif %}>
-          <span>{{ dataset.file_name }} <small>· {{ dataset.input_kind_label }} · {{ dataset.status_label }}{% if not dataset.source_exists %} · source file missing{% endif %}</small></span>
-        </label>
-        {% else %}
-        <p class="form-note">No datasets are available in this workspace.</p>
+        <div class="vendor-mapping-cdr-groups dataset-dialog-groups">
+        {% for kind, kind_label in [('data', 'CDR Data'), ('voice', 'CDR Voice'), ('speech', 'CDR Speech'), ('other', 'Other Datasets')] %}
+        {% set kind_datasets = datasets | selectattr('dataset_kind', 'equalto', kind) | list if kind != 'other' else datasets | rejectattr('dataset_kind', 'in', ['data', 'voice', 'speech']) | list %}
+        {% if kind != 'other' or kind_datasets %}
+        <section class="vendor-mapping-cdr-group" data-cdr-group>
+          <div class="vendor-mapping-cdr-group-head"><strong>{{ kind_label }}</strong>{% if kind_datasets | selectattr('can_reprocess') | list %}<button type="button" class="vendor-mapping-select-all" data-cdr-group-select-all>Select None</button>{% endif %}</div>
+          {% for dataset in kind_datasets %}
+          <label class="vendor-mapping-cdr-choice{% if not dataset.can_reprocess %} is-disabled{% endif %}">
+            <input type="checkbox" name="dataset_ids" value="{{ dataset.id }}" data-reprocess-dataset-choice{% if dataset.can_reprocess %} checked{% else %} disabled{% endif %}>
+            <span>{{ dataset.file_name }} <small>· {{ dataset.status_label }}{% if kind == 'other' %} · {{ dataset.input_kind_label }}{% endif %}{% if not dataset.source_exists %} · source file missing{% endif %}</small></span>
+          </label>
+          {% else %}
+          <p class="form-note">No datasets.</p>
+          {% endfor %}
+        </section>
+        {% endif %}
         {% endfor %}
+        </div>
       </fieldset>
       <p class="form-note" data-reprocess-selection-status></p>
       <div class="vendor-mapping-actions">
@@ -605,13 +637,21 @@
       <p class="eyebrow">NetCheck CDR</p>
       <h3 id="vendor-clearing-title">Clear Mappings</h3>
       <p class="lede">Choose one or more mapped CDRs. Clearing restores each selected CDR to its processed source data without tool-applied Vendor, Region or Cluster values.</p>
-      <fieldset class="vendor-mapping-cdr-list">
+      <fieldset class="vendor-mapping-cdr-list vendor-mapping-cdr-groups">
         <legend>CDRs to clear</legend>
-        {% for dataset in clearable_cdr_datasets %}
-        <label class="vendor-mapping-cdr-choice">
-          <input type="checkbox" name="cdr_dataset_ids" value="{{ dataset.id }}" data-vendor-clearing-cdr-choice>
-          <span>{{ dataset.file_name }} <small>· {{ dataset.input_kind_label }} · {{ dataset.row_count }} rows</small></span>
-        </label>
+        {% for kind, kind_label in [('data', 'CDR Data'), ('voice', 'CDR Voice'), ('speech', 'CDR Speech')] %}
+        {% set kind_datasets = clearable_cdr_datasets | selectattr('dataset_kind', 'equalto', kind) | list %}
+        <section class="vendor-mapping-cdr-group" data-cdr-group>
+          <div class="vendor-mapping-cdr-group-head"><strong>{{ kind_label }}</strong>{% if kind_datasets %}<button type="button" class="vendor-mapping-select-all" data-cdr-group-select-all>Select All</button>{% endif %}</div>
+          {% for dataset in kind_datasets %}
+          <label class="vendor-mapping-cdr-choice">
+            <input type="checkbox" name="cdr_dataset_ids" value="{{ dataset.id }}" data-vendor-clearing-cdr-choice>
+            <span>{{ dataset.file_name }} <small>· {{ dataset.nr_mode or '—' }} · {{ dataset.row_count }} rows</small></span>
+          </label>
+          {% else %}
+          <p class="form-note">No mapped CDRs.</p>
+          {% endfor %}
+        </section>
         {% endfor %}
       </fieldset>
       <div class="vendor-mapping-actions">
@@ -626,6 +666,29 @@
 </section>
 {% endblock %}
 {% block extra_scripts %}
+<script>
+(() => {
+  // Reprocess and Clear Mappings: each panel selects all its enabled datasets, or clears them when all are selected.
+  const groupBoxes = (group) => [...group.querySelectorAll('input[type="checkbox"]:not(:disabled)')];
+  const syncGroups = (root) => root.querySelectorAll('[data-cdr-group]').forEach((group) => {
+    const button = group.querySelector('[data-cdr-group-select-all]');
+    const boxes = groupBoxes(group);
+    if (button) button.textContent = boxes.length && boxes.every((box) => box.checked) ? 'Select None' : 'Select All';
+  });
+  document.querySelectorAll('[data-dataset-reprocess-dialog], [data-vendor-clearing-dialog]').forEach((dialog) => {
+    dialog.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-cdr-group-select-all]');
+      if (!button) return;
+      const boxes = groupBoxes(button.closest('[data-cdr-group]'));
+      const select = !boxes.every((box) => box.checked);
+      boxes.forEach((box) => { box.checked = select; });
+      boxes[0]?.dispatchEvent(new Event('change', {bubbles: true}));
+    });
+    dialog.addEventListener('change', () => syncGroups(dialog));
+    new MutationObserver(() => { if (dialog.open) syncGroups(dialog); }).observe(dialog, {attributes: true, attributeFilter: ['open']});
+  });
+})();
+</script>
 <script>
 (() => {
   const result = document.querySelector('[data-workspace-result]');

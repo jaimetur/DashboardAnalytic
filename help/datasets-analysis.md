@@ -1,6 +1,6 @@
-# Datasets Analysis
+# CDR Analysis
 
-Datasets Analysis provides on-demand KPI analysis for one processed CDR in the active workspace.
+CDR Analysis provides on-demand KPI analysis for one processed CDR in the active workspace.
 
 > [!NOTE]
 > **One dataset at a time.** Use this module for a focused investigation of one processed Data, Voice or Speech CDR. Use E2E Dashboards for a complete template across multiple datasets.
@@ -28,12 +28,12 @@ Datasets Analysis provides on-demand KPI analysis for one processed CDR in the a
 - CDR-Voice
 - CDR-Speech
 
-Mappings, logs and generic datasets are excluded from the Datasets Analysis selector.
+Mappings, logs and generic datasets are excluded from the CDR Analysis selector.
 
 ## Analysis workflow
 
 1. Select a processed dataset.
-2. Choose one or more KPI-like numeric fields.
+2. Choose one or more metrics; every available metric is selected by default.
 3. Apply the available categorical/date filters.
 4. Choose an aggregation where offered.
 5. Click **Update Analysis**.
@@ -45,7 +45,9 @@ Mappings, logs and generic datasets are excluded from the Datasets Analysis sele
 
 Controls adapt to the selected dataset.
 
-- Geographic and operator dimensions appear only when present.
+- **Metrics** lists only measurements: the service KPIs first (POLQA LQ, LQ, Mean Data Rate, call setup time, delays, RTT, throughput, jitter and packet loss), then the radio and service measurements of the CDR (RSRP, RSRQ, SINR, CQI, MCS, BLER, transmit power and throughput averages). Identifiers, phone numbers, IMEI/IMSI/MSISDN, software versions, timestamps, durations, transferred bytes, bands, PCI/ARFCN, quarters, speeds and minimum or maximum columns are not offered. Every available metric is selected by default.
+- Filters follow the order Source Sheet, Operator, **Operator_Vendor** (`<Operator>_<Vendor>`), **Vendor** (the vendor alone), Market, Region, **Cluster**, City, Test Name and the remaining dimensions; dimensions without values in the CDR are disabled. Every filter lists the values found in the rows of the open CDR.
+- **Open Dataset** shows the analysis at once. The last metrics and filters applied with **Update Analysis** to each CDR are shared by every user of the workspace and restored in every session; **Reset** clears them and shows the default analysis.
 - Date ranges appear only when a usable date field exists.
 - Technical identifiers and coordinates are not offered as KPIs.
 - Filter choices are retained for the requested analysis, not written back to source data.
@@ -60,8 +62,10 @@ Controls adapt to the selected dataset.
 
 ## Charts and Scorecards
 
-- **CDF Curve** shows the empirical KPI distribution.
-- **Group Benchmark** compares the selected aggregation.
+- **CDF Curve** shows the empirical KPI distribution. **Global CDF Comparison** and **Compare CDF by** draw one curve per value of the chosen dimension (Operator by default, listed first), up to eight curves.
+- **Group Benchmark** compares the selected aggregation. Bar labels that do not fit are rotated.
+- Every chart has zoom controls (−, level, + and reset) as in E2E Dashboards and scrolls horizontally when zoomed; hovering a bar shows its value, and hovering a CDF shows the probability of every curve at that value.
+- **Grouped Percentiles** and **Processed Metrics** show decimal values with two digits; Processed Metrics lists Cluster after Region.
 - Metric cards provide compact numerical summaries.
 
 ## Processed Metrics
@@ -85,7 +89,7 @@ The table shows the calculated records for the active request. Use it to verify 
 | --- | --- |
 | Source_File, Source_Sheet, Dataset_Kind | Yellow origin fields, shown first. |
 | Main CDR fields | Blue, labelled CDR-Main. |
-| Derived fields, including Vendor and Vendor_Only | Light green. |
+| Derived fields, including Operator_Vendor and Vendor | Light green. |
 | Auto-calculated Fields | Purple. |
 
 Empty fixed, derived and Auto-calculated fields remain visible. Stronger header colours distinguish labels from values. After origin fields, Preview groups the identity/fixed fields, Auto-calculated Fields, other derived fields and remaining source fields.
@@ -100,7 +104,7 @@ Empty fixed, derived and Auto-calculated fields remain visible. Stronger header 
 
 ### Export the analysis
 
-**Summary PowerPoint** and **Summary Word** create one document with every KPI of each selected dataset, without filters: a dialog lists the ready CDR datasets, all selected by default. The same Summary Dataset Analysis is available as a [Reporting](reporting.md) artifact.
+**Summary PowerPoint** and **Summary Word** create one document with every KPI of each selected dataset, without filters: a dialog lists the ready CDR datasets, all selected by default. The same Summary CDR Analysis is available as a [Reporting](reporting.md) artifact.
 
 Word and PowerPoint exports reflect the current analysis request. Analysis filters do not overwrite stored dataset rows. For a complete template-driven report, use E2E Dashboards or the restricted Reporting (old) workflow.
 

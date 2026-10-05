@@ -1,6 +1,6 @@
 """Reporting: scheduled report jobs that collect artifacts and email them.
 
-A Reporting Job (``report_tasks``) selects artifacts — Dataset Analysis,
+A Reporting Job (``report_tasks``) selects artifacts — CDR Analysis,
 Network Insights, Dashboard PPTs and Scoring PPTs — plus optional email
 recipients and a schedule. Each execution (``report_task_runs``) writes its
 artifacts to its own folder and, when email is enabled, sends them as attachments
@@ -27,20 +27,33 @@ from pathlib import Path
 from threading import Event, Lock
 from typing import Any
 
+from src.modules.column_names import sort_vendor_values
+
 REPORT_TASKS_TABLE = 'report_tasks'
 REPORT_TASK_RUNS_TABLE = 'report_task_runs'
 REPORT_FORMATS = ('powerpoint', 'word')
 SCHEDULE_MODES = ('manual', 'once', 'daily', 'weekly', 'monthly')
 WEEKDAY_NAMES = ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday')
-SCORING_LEVELS = ('Operator', 'Vendor', 'Region', 'City', 'Campaign')
-SCORING_FILTER_FIELDS = ('Operator', 'Vendor', 'Region', 'City', 'Campaign')
-NETWORK_FILTER_FIELDS = ('operators', 'vendors', 'campaigns', 'regions', 'cities')
+SCORING_LEVELS = ('Operator', 'Vendor', 'Region', 'Cluster', 'City', 'Campaign')
+SCORING_FILTER_FIELDS = ('Operator', 'Operator_Vendor', 'Vendor', 'Region', 'Cluster', 'City', 'Campaign')
+NETWORK_FILTER_FIELDS = ('operators', 'operator_vendors', 'vendors', 'campaigns', 'regions', 'clusters', 'cities')
+# CDR Analysis artifacts: the global aggregation of the charts and the CDF comparison, one choice each.
+CDR_ANALYSIS_AGGREGATIONS = {
+    'all': 'Auto', 'operator': 'Operator', 'operator_vendor': 'Operator_Vendor', 'vendor': 'Vendor',
+    'market': 'Market', 'region': 'Region', 'cluster': 'Cluster', 'city': 'City',
+}
+CDR_ANALYSIS_CDF_GROUPINGS = {'all': 'Single CDF', **{key: label for key, label in CDR_ANALYSIS_AGGREGATIONS.items() if key != 'all'}}
+# Network Insights filter names and the CDR Analysis dimension each one filters.
+CDR_ANALYSIS_FILTER_DIMENSIONS = {
+    'operators': 'operator', 'operator_vendors': 'operator_vendor', 'vendors': 'vendor', 'regions': 'region',
+    'clusters': 'cluster', 'cities': 'city', 'campaigns': 'campaign',
+}
 RUN_FINAL_STATUSES = ('sent', 'completed', 'partial', 'failed')
 DASHBOARD_JOB_TIMEOUT_SECONDS = 3 * 60 * 60
 SCHEDULER_INTERVAL_SECONDS = 30
 INTERRUPTED_RUN_MESSAGE = 'The run was interrupted by an application restart.'
 MODULE_LABELS = {
-    'dataset_analysis': 'Dataset Analysis', 'network_insights': 'Network Insights',
+    'dataset_analysis': 'CDR Analysis', 'network_insights': 'Network Insights',
     'dashboards': 'Dashboards', 'scoring': 'Scoring',
 }
 # The feature a user needs to include each kind of artifact in a Reporting Job.
@@ -48,16 +61,25 @@ MODULE_FEATURES = {
     'dataset_analysis': 'datasets-analysis', 'network_insights': 'network-insights',
     'dashboards': 'e2e-dashboards', 'scoring': 'scoring',
 }
-# Artifacts of other modules (for example Non-Qualified Calls once it produces
-# reports) register here: key -> {'label', 'feature', 'formats', 'generate'}.
-# ``generate(config, folder, stamp, user)`` returns artifact dictionaries.
+# Artifacts of other modules (for example Non-Qualified Calls) register here:
+# key -> {'label', 'feature', 'formats', 'generate', 'filters', 'settings', 'values'}.
+# ``generate(config, folder, stamp, user)`` returns artifact dictionaries; the
+# config's ``options`` holds the chosen ``filters`` and ``settings``.
 ARTIFACT_PROVIDERS: dict[str, dict[str, Any]] = {}
 
 
-def register_report_artifact_provider(key: str, label: str, feature: str, generate, formats: tuple[str, ...] = ('powerpoint',)) -> None:
-    """Let a module add its own reports to Reporting Jobs."""
-    ARTIFACT_PROVIDERS[key] = {'label': label, 'feature': feature, 'formats': tuple(formats), 'generate': generate}
-FORMAT_LABELS = {'powerpoint': 'PPT', 'word': 'Word'}
+def register_report_artifact_provider(
+    key: str, label: str, feature: str, generate, formats: tuple[str, ...] = ('powerpoint',), *,
+    filters: tuple[tuple[str, str], ...] = (), settings: tuple[dict[str, Any], ...] = (), values=None,
+) -> None:
+    """Let a module add its own reports to Reporting Jobs.
+
+    ``filters`` are (key, label) multi-value filters whose choices ``values(user)``
+    returns; ``settings`` are single choices: {'key', 'label', 'choices', 'default'}.
+    """
+    ARTIFACT_PROVIDERS[key] = {'label': label, 'feature': feature, 'formats': tuple(formats), 'generate': generate,
+                               'filters': tuple(filters), 'settings': tuple(settings), 'values': values}
+FORMAT_LABELS = {'powerpoint': 'PPT', 'word': 'Word', 'excel': 'Excel'}
 
 SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS {REPORT_TASKS_TABLE} (
@@ -199,6 +221,19 @@ def _date_text(value: Any) -> str:
         raise ValueError(f'Invalid date: {text}.') from exc
 
 
+CDR_ANALYSIS_KINDS = {'data': 'CDR Data', 'voice': 'CDR Voice', 'speech': 'CDR Speech'}
+
+
+def _cdr_analysis_metrics(value: Any) -> dict[str, list[str]]:
+    value = value if isinstance(value, dict) else {}
+    return {kind: metrics for kind in CDR_ANALYSIS_KINDS if (metrics := _strings(value.get(kind)))}
+
+
+def _choice(value: Any, choices: dict[str, str], default: str) -> str:
+    text = str(value or '').strip()
+    return text if text in choices else default
+
+
 def normalize_definition(raw: Any) -> dict[str, Any]:
     """Validate a Reporting Job artifact selection; raises ValueError when nothing is selected."""
     raw = raw if isinstance(raw, dict) else {}
@@ -209,6 +244,13 @@ def normalize_definition(raw: Any) -> dict[str, Any]:
             'formats': _formats(dataset_analysis.get('formats')),
             # An empty list selects every ready CDR dataset at run time.
             'dataset_ids': _ids(dataset_analysis.get('dataset_ids')),
+            # The same filters as Network Insights; empty filters include every value.
+            'filters': {field: values for field in NETWORK_FILTER_FIELDS
+                        if (values := _strings((dataset_analysis.get('filters') or {}).get(field)))},
+            # The metrics of each CDR type; an empty or missing list includes every metric.
+            'metrics': _cdr_analysis_metrics(dataset_analysis.get('metrics')),
+            'aggregation': _choice(dataset_analysis.get('aggregation'), CDR_ANALYSIS_AGGREGATIONS, 'all'),
+            'cdf_grouping': _choice(dataset_analysis.get('cdf_grouping'), CDR_ANALYSIS_CDF_GROUPINGS, 'operator'),
         },
         # One Network Insights per entry, each with its own selection.
         'network_insights': [_network_entry(entry) for entry in _network_entries(raw.get('network_insights'))],
@@ -658,6 +700,39 @@ def safe_file_name(value: str) -> str:
     return (stem[:150 - len(suffix)].rstrip(' .-') or 'artifact') + suffix
 
 
+_LEADING_STAMP = re.compile(r'^\s*\d{8}_\d{6}\s*-\s*')
+
+
+def artifact_path(folder: Path, stamp: str, module: str, name: str, suffix: str) -> Path:
+    """``<yyyymmdd_hhmmss> - <Module> - <Report name><suffix>``, unique in ``folder``.
+
+    The report name drops its own leading timestamps and module name, so a
+    Dashboard or Scoring PPT does not repeat them.
+    """
+    report = str(name or '').strip()
+    while _LEADING_STAMP.match(report):
+        report = _LEADING_STAMP.sub('', report, count=1)
+    report = re.sub(rf'^\s*{re.escape(module)}\s*(?:-\s*|$)', '', report, flags=re.IGNORECASE).strip(' -')
+    base = f'{stamp} - {module}' + (f' - {report}' if report else '')
+    candidate, copy = folder / safe_file_name(f'{base}{suffix}'), 2
+    while candidate.exists():
+        candidate, copy = folder / safe_file_name(f'{base} ({copy}){suffix}'), copy + 1
+    return candidate
+
+
+def run_stamp(run: dict[str, Any]) -> str:
+    """The yyyymmdd_hhmmss timestamp of a run, as in its artifact names."""
+    match = re.match(r'(\d{8}_\d{6})', Path(str(run.get('output_dir') or '')).name)
+    if match:
+        return match.group(1)
+    for key in ('started_at', 'created_at'):
+        try:
+            return datetime.fromisoformat(str(run.get(key))).strftime('%Y%m%d_%H%M%S')
+        except (TypeError, ValueError):
+            continue
+    return now_local().strftime('%Y%m%d_%H%M%S')
+
+
 def zip_artifacts(run: dict[str, Any]) -> BytesIO:
     buffer = BytesIO()
     folder = Path(run['output_dir'])
@@ -725,12 +800,25 @@ def install_report_task_routes(core: Any) -> None:
         artifacts = []
         for export_kind in section['formats']:
             suffix = 'docx' if export_kind == 'word' else 'pptx'
-            title = f"Dataset Analysis ({FORMAT_LABELS[export_kind]})"
-            destination = folder / f'{stamp} - Dataset Analysis.{suffix}'
+            title = f"CDR Analysis ({FORMAT_LABELS[export_kind]})"
+            destination = artifact_path(folder, stamp, 'CDR Analysis', '', f'.{suffix}')
             try:
-                _path, reports, errors = core.write_dataset_summary(section['dataset_ids'], export_kind, destination, username)
+                filters = {CDR_ANALYSIS_FILTER_DIMENSIONS[field]: values for field, values in (section.get('filters') or {}).items()
+                           if field in CDR_ANALYSIS_FILTER_DIMENSIONS}
+                _path, reports, errors = core.write_dataset_summary(
+                    section['dataset_ids'], export_kind, destination, username, filters=filters,
+                    metrics=section.get('metrics') or None, aggregation=section.get('aggregation') or 'all',
+                    cdf_grouping=section.get('cdf_grouping') or 'operator',
+                )
+                filter_text = '; '.join(f"{CDR_ANALYSIS_AGGREGATIONS.get(dimension, dimension.title())}: {', '.join(values)}"
+                                        for dimension, values in filters.items()) or 'none'
                 details = [f"Datasets ({len(reports)}): {', '.join(report['dataset_name'] for report in reports)}",
-                           'Every KPI of each dataset, without filters.', *[f'Skipped: {error}' for error in errors]]
+                           *[f"Metrics ({label}): {', '.join(section['metrics'][kind]) if (section.get('metrics') or {}).get(kind) else 'every metric'}"
+                             for kind, label in CDR_ANALYSIS_KINDS.items()],
+                           f"Filters: {filter_text}",
+                           f"Aggregation: {CDR_ANALYSIS_AGGREGATIONS[section.get('aggregation') or 'all']} · "
+                           f"CDF comparison: {CDR_ANALYSIS_CDF_GROUPINGS[section.get('cdf_grouping') or 'operator']}",
+                           *[f'Skipped: {error}' for error in errors]]
                 artifacts.append(ready_artifact('dataset_analysis', title, destination, details))
             except Exception as exc:
                 artifacts.append(failed_artifact('dataset_analysis', title, exc))
@@ -744,7 +832,7 @@ def install_report_task_routes(core: Any) -> None:
         for export_kind in section['formats']:
             suffix = 'docx' if export_kind == 'word' else 'pptx'
             title = f"Network Insights · {name} ({FORMAT_LABELS[export_kind]})"
-            destination = folder / safe_file_name(f"{stamp} - Network Insights {index} - {name}.{suffix}")
+            destination = artifact_path(folder, stamp, 'Network Insights', name, f'.{suffix}')
             try:
                 description = core.write_network_insights_summary(section['selection'], export_kind, destination)
                 artifacts.append(ready_artifact('network_insights', title, destination, summary_selection_lines(description)))
@@ -810,8 +898,8 @@ def install_report_task_routes(core: Any) -> None:
             job_id = tools.queue_export(entry['dashboard_id'], user, dashboard_definition(stored, entry, task_repository))
             row = wait_for_dashboard_job(task_repository, job_id, run_id)
             source = Path(str(row['output_path']))
-            # Dashboard PPT names already start with their own generation time.
-            destination = folder / safe_file_name(f"{stamp} - {entry['label']}{source.suffix}" if entry.get('label') else source.name)
+            # Dashboard PPT names start with their own generation time, which is dropped.
+            destination = artifact_path(folder, stamp, 'E2E Dashboards', entry.get('label') or source.stem, source.suffix)
             shutil.copy2(source, destination)
             return ready_artifact('dashboards', title, destination, dashboard_details(tools.serialize_job(row)))
         except Exception as exc:
@@ -853,7 +941,7 @@ def install_report_task_routes(core: Any) -> None:
             if not cached:
                 core.run_scoring_job(task_repository, int(job['id']))
             content, filename, export_job = core.build_scoring_job_powerpoint(task_repository, int(job['id']))
-            destination = folder / safe_file_name(f"{stamp} - {entry.get('label') or Path(filename).stem}.pptx")
+            destination = artifact_path(folder, stamp, 'Scoring & GAP Analysis', entry.get('label') or Path(filename).stem, '.pptx')
             destination.write_bytes(content)
             return ready_artifact('scoring', title, destination, scoring_details(export_job, entry, names))
         except Exception as exc:
@@ -901,7 +989,7 @@ def install_report_task_routes(core: Any) -> None:
                              for module, permitted in allowed.items() if not permitted and module in MODULE_FEATURES},
                           'modules': {key: value for key, value in (definition.get('modules') or {}).items() if allowed.get(key)}}
             if definition.get('dataset_analysis', {}).get('enabled'):
-                steps.append(('Dataset Analysis', lambda: generate_dataset_analysis(definition['dataset_analysis'], folder, stamp, user.username, names)))
+                steps.append(('CDR Analysis', lambda: generate_dataset_analysis(definition['dataset_analysis'], folder, stamp, user.username, names)))
             for index, entry in enumerate(definition.get('network_insights') or [], start=1):
                 steps.append(('Network Insights', lambda entry=entry, index=index: generate_network_insights(entry, folder, stamp, index)))
             for entry in definition.get('dashboards') or []:
@@ -1060,21 +1148,41 @@ def install_report_task_routes(core: Any) -> None:
         catalogue = task_repository.cdr_catalogue_values()
         return {
             'allowed_modules': {module: core.user_has_feature(user, feature) for module, feature in MODULE_FEATURES.items()},
-            'providers': [{'key': key, 'label': provider['label'], 'formats': list(provider['formats'])}
+            'providers': [provider_options(key, provider, user)
                           for key, provider in ARTIFACT_PROVIDERS.items() if core.user_has_feature(user, provider['feature'])],
             'datasets': datasets, 'dashboards': dashboards,
             'dashboard_filter_fields': list(ADAPTATIVE_FILTER_FIELDS),
             'main_cities': list(task_repository.list_main_cities()),
             'methodologies': methodologies, 'active_methodology': active_methodology,
-            'values': {'Operator': catalogue.get('operators', []), 'Vendor': catalogue.get('vendors', []),
-                       'Region': catalogue.get('regions', []), 'City': catalogue.get('cities', []), 'Campaign': catalogue.get('campaigns', [])},
+            'values': {'Operator': catalogue.get('operators', []), 'Operator_Vendor': sort_vendor_values(catalogue.get('vendors', [])),
+                       'Vendor': sort_vendor_values(catalogue.get('vendors_only', [])), 'Region': catalogue.get('regions', []),
+                       'Cluster': catalogue.get('clusters', []), 'City': catalogue.get('cities', []),
+                       'Campaign': catalogue.get('campaigns', [])},
             'scoring_levels': list(SCORING_LEVELS), 'formats': list(REPORT_FORMATS),
-            'network_groupings': {'operator': 'Operator', 'vendor': 'Vendor', 'region': 'Region', 'city': 'City',
+            # CDR Analysis: the metrics of the ready CDRs, and its aggregation and CDF comparison choices.
+            'cdr_metrics': {kind: list(dict.fromkeys(
+                metric for dataset in datasets if dataset['kind'] == kind
+                for metric in core.analysis_metric_columns(task_repository.list_dataset_row_columns(dataset['id']), kind)
+            )) for kind in CDR_ANALYSIS_KINDS},
+            'cdr_kinds': CDR_ANALYSIS_KINDS,
+            'cdr_aggregations': CDR_ANALYSIS_AGGREGATIONS, 'cdr_cdf_groupings': CDR_ANALYSIS_CDF_GROUPINGS,
+            'network_groupings': {'operator': 'Operator', 'vendor': 'Vendor', 'region': 'Region', 'cluster': 'Cluster', 'city': 'City',
                                   'kind': 'CDR type', 'campaign': 'Campaign'},
             'technologies': {'lte': 'LTE', 'nr': 'NR', 'lte_nr': 'LTE+NR'},
             'email_configured': bool(core.email_delivery_settings(core.repository).get('configured')),
             'timezone': now_local().strftime('%Z (UTC%z)'),
         }
+
+    def provider_options(key, provider, user) -> dict[str, Any]:
+        values = {}
+        if callable(provider.get('values')):
+            try:
+                values = provider['values'](user) or {}
+            except Exception:  # noqa: BLE001 - a provider without values still offers its formats.
+                values = {}
+        return {'key': key, 'label': provider['label'], 'formats': list(provider['formats']),
+                'filters': [{'key': name, 'label': text} for name, text in provider.get('filters') or ()],
+                'settings': list(provider.get('settings') or ()), 'values': values}
 
     def serialize_task(task, runs_by_id, dashboard_names) -> dict[str, Any]:
         last = runs_by_id.get(task['last_run_id']) if task['last_run_id'] else None
@@ -1196,7 +1304,7 @@ def install_report_task_routes(core: Any) -> None:
         ready = [item for item in run['artifacts'] if item.get('status') == 'ready' and (Path(run['output_dir']) / item['file_name']).is_file()]
         if not ready:
             raise HTTPException(404, 'This run has no artifacts to download.')
-        name = safe_file_name(f"{run['task_name']} - run {run_id}")
+        name = safe_file_name(f"{run_stamp(run)} - Reporting - {run['task_name']}")
         return StreamingResponse(zip_artifacts(run), media_type='application/zip',
                                  headers={'Content-Disposition': f'attachment; filename="{name}.zip"'})
 

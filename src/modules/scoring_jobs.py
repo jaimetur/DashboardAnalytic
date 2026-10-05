@@ -19,6 +19,7 @@ from src.modules.nr_mode import NR_MODES, normalize_nr_mode
 from src.modules.repository import Repository, local_now_iso
 from src.modules.scoring_config import (
     DEFAULT_AGGREGATION_HIERARCHY,
+    complete_aggregation_hierarchy,
     configuration_hash,
     _is_legacy_two_environment_configuration,
     validate_scoring_configuration,
@@ -30,14 +31,18 @@ DEFAULT_BASELINE_OPERATOR = 'EE'
 DEFAULT_LEVELS = ('Operator',)
 INTERRUPTED_JOB_MESSAGE = 'Interrupted because the application restarted. Retry the job to run it again.'
 AGGREGATION_CONTRACT_VERSION = 2
-SCORING_CONTEXT_FILTER_FIELDS = ('Region', 'City', 'Operator', 'Vendor', 'Campaign')
+SCORING_CONTEXT_FILTER_FIELDS = ('Region', 'Cluster', 'City', 'Operator', 'Operator_Vendor', 'Vendor', 'Campaign')
 SCORING_CONTEXT_FILTER_COLUMNS = {
     'Region': ('Region', 'g_level_2'),
+    'Cluster': ('Cluster',),
     'City': ('City', 'g_level_4'),
     'Operator': ('Operator',),
-    'Vendor': ('Vendor_Only',),
+    'Operator_Vendor': ('Operator_Vendor',),
+    'Vendor': ('Vendor',),
     'Campaign': ('Campaign',),
 }
+# Filters added after cached jobs existed only take part in a job's identity when used.
+SCORING_OPTIONAL_CONTEXT_FILTERS = frozenset({'Cluster', 'Operator_Vendor'})
 
 
 def _scoring_engine():
@@ -93,7 +98,7 @@ def _decode_json(value: Any, default: Any) -> Any:
 
 
 def _empty_context_filters() -> dict[str, list[str]]:
-    return {field: [] for field in SCORING_CONTEXT_FILTER_FIELDS}
+    return {field: [] for field in SCORING_CONTEXT_FILTER_FIELDS if field not in SCORING_OPTIONAL_CONTEXT_FILTERS}
 
 
 def _normalize_context_filters(context_filters: dict[str, list[str]] | None) -> dict[str, list[str]]:
@@ -102,7 +107,7 @@ def _normalize_context_filters(context_filters: dict[str, list[str]] | None) -> 
     if context_filters is None:
         return normalized
     if not isinstance(context_filters, dict):
-        raise ValueError('Scoring context filters must be an object keyed by Region, City, Operator, Vendor or Campaign.')
+        raise ValueError('Scoring context filters must be an object keyed by Region, Cluster, City, Operator, Operator_Vendor, Vendor or Campaign.')
 
     fields_by_identity = {column_identity(field): field for field in SCORING_CONTEXT_FILTER_FIELDS}
     values_by_field: dict[str, dict[str, str]] = {field: {} for field in SCORING_CONTEXT_FILTER_FIELDS}
@@ -126,7 +131,8 @@ def _normalize_context_filters(context_filters: dict[str, list[str]] | None) -> 
                 values_by_field[field].setdefault(value.casefold(), value)
 
     for field, values in values_by_field.items():
-        normalized[field] = sorted(values.values(), key=lambda value: (value.casefold(), value))
+        if values or field not in SCORING_OPTIONAL_CONTEXT_FILTERS:
+            normalized[field] = sorted(values.values(), key=lambda value: (value.casefold(), value))
     return normalized
 
 
@@ -156,10 +162,11 @@ def _expand_operator_context_filter(
 
 def _context_filter_cache_values(context_filters: dict[str, list[str]]) -> dict[str, list[str]]:
     """Return the case-insensitive SQL semantics used to identify filter scopes."""
-    return {
+    values = {
         field: sorted({str(value).strip().casefold() for value in context_filters.get(field, []) if str(value).strip()})
         for field in SCORING_CONTEXT_FILTER_FIELDS
     }
+    return {field: items for field, items in values.items() if items or field not in SCORING_OPTIONAL_CONTEXT_FILTERS}
 
 
 def _serialize_result_value(value: Any) -> Any:
@@ -435,6 +442,8 @@ def _normalize_levels(
             canonical = 'Region' if requested_identity == 'region' else 'City'
             aliases = ('Region', 'g_level_2') if canonical == 'Region' else ('City', 'g_level_4')
             resolved = canonical if any(resolve_column_name(available_columns, alias) for alias in aliases) else None
+        elif requested_identity == 'cluster':
+            resolved = 'Cluster' if resolve_column_name(available_columns, 'Cluster') else None
         elif requested_identity == 'campaign':
             resolved = resolve_column_name(available_columns, 'Campaign')
         else:
@@ -447,7 +456,7 @@ def _normalize_levels(
             seen.add(resolved_identity)
     hierarchy_order = {
         column_identity(field): index
-        for index, field in enumerate(aggregation_hierarchy)
+        for index, field in enumerate(complete_aggregation_hierarchy(list(aggregation_hierarchy)))
     }
     resolved_levels.sort(key=lambda value: (
         hierarchy_order.get(column_identity(value), len(hierarchy_order)), value.casefold(),
@@ -923,7 +932,7 @@ def _load_source_frames(
     for index, source in enumerate(sources, start=1):
         dataset_id = int(source['metadata']['dataset_id'])
         if active_filters.get('Vendor'):
-            repository.ensure_vendor_only_column(dataset_id)
+            repository.ensure_vendor_column(dataset_id)
         columns = repository.list_dataset_row_columns(dataset_id)
         requested = required_columns(str(source['metadata']['kind']), source['levels'])
         if any(column_identity(level) == 'datasettype' for level in source['levels']):

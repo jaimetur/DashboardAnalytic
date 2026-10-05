@@ -253,6 +253,7 @@ _HIERARCHY_LEVELS = {
     'vendor': 'Vendor',
     'ranvendor': 'Vendor',
     'region': 'Region',
+    'cluster': 'Cluster',
     'city': 'City',
     'campaign': 'Campaign',
     'datasettype': 'Dataset Type',
@@ -260,6 +261,7 @@ _HIERARCHY_LEVELS = {
 _HIERARCHY_CONTEXT_FIELDS = {
     'Vendor': 'vendor',
     'Region': 'region',
+    'Cluster': 'cluster',
     'City': 'city',
     'Campaign': 'campaign',
     'Dataset Type': 'dataset_type',

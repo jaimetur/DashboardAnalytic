@@ -60,8 +60,8 @@ def add_dataset(repository: Repository, name: str = 'UK_Q2_2026_NSA_Data.csv', *
         'Operator': ['EE', 'O2'],
         'Region': ['North', 'South'],
         'City': ['Leeds', 'London'],
+        'Operator_Vendor': ['Nokia', 'Ericsson'],
         'Vendor': ['Nokia', 'Ericsson'],
-        'Vendor_Only': ['Nokia', 'Ericsson'],
         'Dataset_Kind': [kind, kind],
         'score': [3.0, 4.0],
         'unused_payload': ['large', 'field'],
@@ -87,8 +87,8 @@ def add_complete_scoring_sources(repository: Repository, prefix: str = 'Scoped')
             'Operator': ['VF_UK', 'VF_UK', 'O2', 'VF_UK', 'VF_UK'],
             'Region': ['North'] * 5,
             'City': ['Leeds', 'Manchester', 'Leeds', 'Leeds', 'Leeds'],
+            'Operator_Vendor': ['Nokia', 'Nokia', 'Nokia', 'Ericsson', 'Nokia'],
             'Vendor': ['Nokia', 'Nokia', 'Nokia', 'Ericsson', 'Nokia'],
-            'Vendor_Only': ['Nokia', 'Nokia', 'Nokia', 'Ericsson', 'Nokia'],
             'Campaign': ['2026-Q2', '2026-Q2', '2026-Q2', '2026-Q2', '2026-Q1'],
             'Dataset_Kind': [kind] * 5,
             'score': [3.0, 4.0, 5.0, 6.0, 7.0],
@@ -108,16 +108,16 @@ def test_legacy_operator_alias_filter_matches_current_all_suffix(repository):
     ])
     repository.replace_dataset_rows(dataset_id, pd.DataFrame({
         'Operator': ['Vodafone UK', 'Vodafone UK'],
-        'Vendor': ['Vodafone UK', 'Vodafone UK_Ericsson'],
-        'Vendor_Only': ['Vodafone UK - All', 'Ericsson'],
+        'Operator_Vendor': ['Vodafone UK', 'Vodafone UK_Ericsson'],
+        'Vendor': ['Vodafone UK - All', 'Ericsson'],
     }))
 
     matched = repository.load_dataset_rows(
-        dataset_id, ['Operator', 'Vendor_Only'], {'Vendor_Only': ['VF_UK - All Vendors']},
+        dataset_id, ['Operator', 'Vendor'], {'Vendor_Only': ['VF_UK - All Vendors']},
     )
 
     assert matched['Operator'].tolist() == ['Vodafone UK']
-    assert matched['Vendor_Only'].tolist() == ['Vodafone UK - All']
+    assert matched['Vendor'].tolist() == ['Vodafone UK - All']
 
 
 def test_scoring_jobs_persist_results_and_reuse_completed_cache(repository, scoring_engine):
@@ -591,7 +591,7 @@ def test_scoring_context_filters_are_pushed_down_and_persisted(repository, scori
         assert dataset_filters['Region'] == ['North']
         assert dataset_filters['City'] == ['Leeds']
         assert dataset_filters['Operator'] == ['VF_UK', 'Vodafone UK']
-        assert dataset_filters['Vendor_Only'] == ['Nokia']
+        assert dataset_filters['Vendor'] == ['Nokia']
         assert dataset_filters['Campaign'] == ['2026-Q2']
 
 
@@ -627,13 +627,13 @@ def test_scoring_context_filters_skip_empty_sources_and_fail_when_a_type_has_no_
     data_empty_id = add_dataset(repository, 'Rows_Empty_NSA_Data.csv', kind='data')
     frame = pd.DataFrame({
         'Operator': ['O2'], 'Region': ['South'], 'City': ['London'],
-        'Vendor': ['Ericsson'], 'Campaign': ['2026-Q2'], 'score': [5.0],
+        'Operator_Vendor': ['Ericsson'], 'Campaign': ['2026-Q2'], 'score': [5.0],
     })
     repository.replace_dataset_rows(data_empty_id, frame)
     repository.update_dataset_profile(data_empty_id, row_count=1, column_count=len(frame.columns))
     voice_missing_region_id = add_dataset(repository, 'Rows_No_Region_NSA_Voice.csv', kind='voice')
     missing_region_frame = pd.DataFrame({
-        'Operator': ['EE'], 'City': ['Leeds'], 'Vendor': ['Nokia'],
+        'Operator': ['EE'], 'City': ['Leeds'], 'Operator_Vendor': ['Nokia'],
         'Campaign': ['2026-Q2'], 'score': [8.0],
     })
     repository.replace_dataset_rows(voice_missing_region_id, missing_region_frame)

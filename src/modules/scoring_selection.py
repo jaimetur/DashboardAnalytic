@@ -9,13 +9,15 @@ from src.modules.column_names import column_identity
 from src.modules.nr_mode import normalize_nr_mode
 from src.modules.repository import Repository
 from src.modules.scoring_vendors import scoring_vendor_name, scoring_vendor_operators
-from src.modules.scoring_config import DEFAULT_AGGREGATION_HIERARCHY
+from src.modules.scoring_config import complete_aggregation_hierarchy
 
 
 SCORING_SELECTION_STATE_KEY = 'scoring_calculation_selection_v1'
 SCORING_SELECTION_FORMAT = 'dashboard-analytic-scoring-selection'
 SCORING_SELECTION_VERSION = 1
-SCORING_CONTEXT_FILTER_FIELDS = ('Region', 'City', 'Operator', 'Vendor', 'Campaign')
+SCORING_CONTEXT_FILTER_FIELDS = ('Region', 'Cluster', 'City', 'Operator', 'Operator_Vendor', 'Vendor', 'Campaign')
+# Filters that are not aggregation levels: saved selections only list them when used.
+SCORING_OPTIONAL_CONTEXT_FILTERS = frozenset({'Cluster', 'Operator_Vendor'})
 MAX_TRACKED_CLIENTS = 64
 
 
@@ -109,7 +111,7 @@ def _fallback_selection(
         'nr_mode': selected_mode,
         'baseline_operator': baseline,
         'scoring_profile_id': active_profile_id if profiles else '',
-        'context_filters': {field: [] for field in SCORING_CONTEXT_FILTER_FIELDS},
+        'context_filters': {field: [] for field in SCORING_CONTEXT_FILTER_FIELDS if field not in SCORING_OPTIONAL_CONTEXT_FILTERS},
     }
 
 
@@ -117,9 +119,7 @@ def _profile_hierarchy(profiles: dict[str, dict[str, Any]], profile_id: str) -> 
     profile = profiles.get(profile_id)
     configuration = profile.get('configuration') if isinstance(profile, dict) else None
     hierarchy = configuration.get('aggregation_hierarchy') if isinstance(configuration, dict) else None
-    if isinstance(hierarchy, list) and hierarchy:
-        return [str(value).strip() for value in hierarchy if str(value).strip()]
-    return list(DEFAULT_AGGREGATION_HIERARCHY)
+    return complete_aggregation_hierarchy(hierarchy)
 
 
 def _normalize_context_filters(
@@ -127,14 +127,15 @@ def _normalize_context_filters(
     hierarchy: list[str],
     warnings: list[str],
 ) -> dict[str, list[str]]:
-    normalized = {field: [] for field in SCORING_CONTEXT_FILTER_FIELDS}
+    normalized = {field: [] for field in SCORING_CONTEXT_FILTER_FIELDS if field not in SCORING_OPTIONAL_CONTEXT_FILTERS}
     if raw_filters is None:
         return normalized
     if not isinstance(raw_filters, dict):
         warnings.append('Saved context filters were invalid and have been cleared.')
         return normalized
     supported = {column_identity(field): field for field in SCORING_CONTEXT_FILTER_FIELDS}
-    allowed_fields = {column_identity(field) for field in hierarchy}
+    # Cluster and Operator_Vendor filter the samples without being aggregation levels.
+    allowed_fields = {column_identity(field) for field in hierarchy} | {'cluster', 'operatorvendor'}
     values_by_field: dict[str, dict[str, str]] = {field: {} for field in SCORING_CONTEXT_FILTER_FIELDS}
     stale_fields = False
     for raw_field, raw_values in raw_filters.items():
@@ -153,7 +154,8 @@ def _normalize_context_filters(
             if value:
                 values_by_field[canonical].setdefault(value.casefold(), value)
     for field, values in values_by_field.items():
-        normalized[field] = sorted(values.values(), key=lambda value: (value.casefold(), value))
+        if values or field not in SCORING_OPTIONAL_CONTEXT_FILTERS:
+            normalized[field] = sorted(values.values(), key=lambda value: (value.casefold(), value))
     if stale_fields:
         warnings.append('Context filters from the previous selection were no longer supported and have been cleared.')
     return normalized

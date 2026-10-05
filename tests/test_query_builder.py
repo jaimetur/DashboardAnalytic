@@ -188,26 +188,29 @@ def test_query_builder_filter_values_ignores_own_filter_and_supports_search(clie
     assert empty_filter.json() == {'values': [], 'truncated': False}
 
 
-def test_vendor_result_filters_use_vendor_only_and_preserve_exported_columns(tmp_path: Path) -> None:
+def test_vendor_result_filters_filter_their_own_column_and_preserve_exported_columns(tmp_path: Path) -> None:
     from src.modules.query_builder import execute_query, iter_query_csv, query_column_values
 
     database_path = tmp_path / 'query-builder-vendors.sqlite'
     with sqlite3.connect(database_path) as connection:
-        connection.execute('CREATE TABLE dataset_rows_1 (Vendor TEXT, Vendor_Only TEXT)')
+        connection.execute('CREATE TABLE dataset_rows_1 (Operator_Vendor TEXT, Vendor TEXT)')
         connection.executemany('INSERT INTO dataset_rows_1 VALUES (?, ?)', [
-            ('EE_Ericsson', 'Ericsson'), ('Vodafone_Huawei', 'Huawei'), ('O2', 'O2 - All'),
+            ('EE_Ericsson', 'Ericsson'), ('Vodafone_Huawei', 'Huawei'), ('O2 - All', 'O2 - All'),
         ])
     datasets = [{'id': 1, 'name': 'data.csv', 'kind': 'data'}]
-    query = 'SELECT Vendor, Vendor_Only FROM selected_data ORDER BY source_row_id'
-    values, truncated = query_column_values(database_path, datasets, query, 0)
+    query = 'SELECT Operator_Vendor, Vendor FROM selected_data ORDER BY source_row_id'
+    values, truncated = query_column_values(database_path, datasets, query, 1)
     assert values == ['Ericsson', 'Huawei', 'O2 - All']
     assert truncated is False
-    filters = [{'index': 0, 'values': ['Ericsson']}]
+    filters = [{'index': 1, 'values': ['Ericsson']}]
     columns, rows, *_ = execute_query(database_path, datasets, query, column_filters=filters)
-    assert columns == ['Vendor', 'Vendor_Only']
+    assert columns == ['Operator_Vendor', 'Vendor']
     assert rows == [('EE_Ericsson', 'Ericsson')]
     assert ''.join(iter_query_csv(database_path, datasets, query, column_filters=filters)) == (
-        'Vendor,Vendor_Only\r\nEE_Ericsson,Ericsson\r\n'
+        'Operator_Vendor,Vendor\r\nEE_Ericsson,Ericsson\r\n'
     )
-    with pytest.raises(ValueError, match='Include Vendor_Only'):
-        query_column_values(database_path, datasets, 'SELECT Vendor FROM selected_data', 0)
+    composite = [{'index': 0, 'values': ['Vodafone_Huawei']}]
+    assert execute_query(database_path, datasets, query, column_filters=composite)[1] == [('Vodafone_Huawei', 'Huawei')]
+    # A former Vendor_Only column name filters the result's Vendor column.
+    legacy = 'SELECT Vendor AS Vendor_Only, Vendor FROM selected_data ORDER BY source_row_id'
+    assert execute_query(database_path, datasets, legacy, column_filters=[{'index': 0, 'values': ['Huawei']}])[1] == [('Huawei', 'Huawei')]

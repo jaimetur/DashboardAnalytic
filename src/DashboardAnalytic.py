@@ -17,6 +17,7 @@ except ImportError:  # pragma: no cover - Windows does not expose resource.
 import re
 import secrets
 import hashlib
+import math
 import ipaddress
 import shutil
 import sqlite3
@@ -58,7 +59,10 @@ from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
 from src.modules.background_scheduler import BackgroundTaskScheduler
 from src.modules.auth import SessionUser, verify_password
-from src.modules.column_names import MAIN_CDR_FIELDS, PREVIEW_METADATA_FIELDS, VENDOR_FIELD_IDENTITIES, clean_column_name, column_identity, resolve_column_name, vendor_filter_column, vendor_filter_value, vendor_filter_values
+from src.modules.cdr_types import (
+    CDR_TYPES, DEFAULT_CDR_TYPE, cdr_type_options, normalize_cdr_type, set_workspace_cdr_type, workspace_cdr_type,
+)
+from src.modules.column_names import MAIN_CDR_FIELDS, PREVIEW_METADATA_FIELDS, VENDOR_FIELD_IDENTITIES, clean_column_name, column_identity, resolve_column_name, sort_vendor_values, vendor_filter_column, vendor_filter_value, vendor_filter_values, vendor_match_values
 from src.modules.report_layouts import canonical_layout_name, selectable_layout_name
 from src.modules.cdr_reporting import entry_dynamic_fields, DYNAMIC_LAYOUTS, CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalog_chart_payload, catalog_kpi_fields, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, is_empty_catalog_chart, materialize_calculated_dimensions, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_label_format, parse_label_position, parse_legend_position, parse_template_boolean, prepare_catalog_chart_preview_frame, prepare_multivendor_catalog_entry, preview_catalog_chart_data, render_catalog_chart_preview, render_catalog_chart_preview_with_hover, render_cdr_report, render_unavailable_source_chart, report_chart_renderer_name, reset_dashboard_canvas_renderer, split_calculated_dimension_aliases
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_dataset_summary_powerpoint, export_dataset_summary_word, export_powerpoint_report, export_word_report
@@ -261,18 +265,18 @@ _workspace_size_cache_lock = Lock()
 # repeatedly walking every large Workspace merely to refresh header labels.
 _WORKSPACE_SIZE_CACHE_SECONDS = 300.0
 FILTER_DIMENSIONS = [
-    'market', 'period', 'operator', 'vendor', 'vendor_only', 'test_name', 'region', 'city',
+    'market', 'period', 'operator', 'operator_vendor', 'vendor', 'test_name', 'region', 'cluster', 'city', 'campaign',
     'session_type', 'direction', 'technology_primary', 'RAT', 'RAT_A',
     'Sample_RAT_A', 'source_sheet',
 ]
 FILTER_DIMENSIONS_BY_KIND = {
-    'voice': ['market', 'operator', 'vendor', 'vendor_only', 'region', 'city', 'session_type', 'technology_primary', 'source_sheet'],
-    'speech': ['market', 'operator', 'vendor', 'vendor_only', 'region', 'city', 'session_type', 'technology_primary', 'source_sheet'],
-    'data': ['market', 'operator', 'vendor', 'vendor_only', 'test_name', 'region', 'city', 'direction', 'technology_primary', 'source_sheet'],
-    'generic': ['market', 'operator', 'vendor', 'vendor_only', 'region', 'city', 'source_sheet'],
+    'voice': ['source_sheet', 'operator', 'operator_vendor', 'vendor', 'market', 'region', 'cluster', 'city', 'session_type', 'technology_primary'],
+    'speech': ['source_sheet', 'operator', 'operator_vendor', 'vendor', 'market', 'region', 'cluster', 'city', 'session_type', 'technology_primary'],
+    'data': ['source_sheet', 'operator', 'operator_vendor', 'vendor', 'market', 'region', 'cluster', 'city', 'test_name', 'direction', 'technology_primary'],
+    'generic': ['source_sheet', 'operator', 'operator_vendor', 'vendor', 'market', 'region', 'cluster', 'city'],
 }
 COMMON_ANALYSIS_COLUMNS = [
-    'dataset_kind', 'source_file', 'market', 'period', 'operator', 'vendor', 'vendor_only', 'test_name', 'region', 'city',
+    'dataset_kind', 'source_file', 'market', 'period', 'operator', 'operator_vendor', 'vendor', 'test_name', 'region', 'cluster', 'city',
     'session_type', 'direction', 'technology_primary', 'source_sheet', 'event_start_time', 'status',
     'success', 'failure', 'dropped',
 ]
@@ -304,7 +308,8 @@ UPLOAD_DATASET_KINDS = frozenset({'data', 'voice', 'speech', 'mapping_vodafone',
 CDR_DATASET_KINDS = frozenset({'data', 'voice', 'speech'})
 CDR_PREVIEW_FILTER_DEFINITIONS = (
     ('cdr_operator', 'Operator', ('operator', 'Operator')),
-    ('cdr_vendor', 'Vendor', ('vendor', 'Vendor')),
+    ('cdr_operator_vendor', 'Operator_Vendor', ('Operator_Vendor',)),
+    ('cdr_vendor', 'Vendor', ('Vendor',)),
     ('cdr_rat', 'RAT', ('RAT_A', 'RAT', 'Sample_RAT_A')),
     ('cdr_session_type', 'Session Type', ('Session_Type', 'session_type', 'Type_of_Test')),
     ('cdr_call_status', 'Call Status', ('Call_Status', 'call_status', 'status')),
@@ -378,7 +383,7 @@ HELP_NAVIGATION_DOCUMENTS = (
 HELP_DOCUMENT_LABELS = {
     'overview.md': 'Product Overview',
     'technical-considerations.md': 'Technical Considerations',
-    'datasets-analysis.md': 'Datasets Analysis',
+    'datasets-analysis.md': 'CDR Analysis',
     'e2e-dashboards.md': 'E2E Dashboards',
     'reporting.md': 'Reporting',
     'reporting-old.md': 'Reporting (old)',
@@ -407,7 +412,7 @@ def help_document_label(relative_path: str) -> str:
 # dataset uploads and processing) stay available to every module.
 FEATURES: tuple[dict[str, Any], ...] = (
     {'key': 'workspace', 'label': 'Workspace', 'pages': ('/workspace',), 'paths': ()},
-    {'key': 'datasets-analysis', 'label': 'Datasets Analysis', 'pages': ('/datasets-analysis',), 'paths': (
+    {'key': 'datasets-analysis', 'label': 'CDR Analysis', 'pages': ('/datasets-analysis',), 'paths': (
         '/datasets-analysis/analyze', '/datasets-analysis/export', '/datasets-analysis/summary',
         '/dashboard/analyze', '/dashboard/export',
     )},
@@ -422,6 +427,8 @@ FEATURES: tuple[dict[str, Any], ...] = (
 FEATURE_KEYS = tuple(feature['key'] for feature in FEATURES)
 FEATURE_ROLES = ('user-viewer', 'user-editor', 'admin', 'super-admin')
 FEATURE_ACTIVATION_STATE_KEY = 'feature_activation_v1'
+REPORTING_FOR_ALL_USERS_STATE_KEY = 'feature_reporting_all_users_v1'
+LEGACY_REPORTING_RULE = {'default': 'none', 'allow': {'roles': ['super-admin']}}
 FEATURE_ACTIVATION_CACHE_SECONDS = 5.0
 # Both Reporting modules start restricted; the old one keeps the access
 # it had before Features Activation existed (super-admins and EJAITUR).
@@ -431,7 +438,7 @@ FEATURE_ACTIVATION_CACHE_SECONDS = 5.0
 FEATURE_DEFAULTS: dict[str, dict[str, Any]] = {
     # Under construction: hidden from every user until it is activated.
     'non-qualified-calls': {'default': 'none'},
-    'reporting': {'default': 'none', 'allow': {'roles': ['super-admin']}},
+    'reporting': {'default': 'all'},
     'reporting-old': {'default': 'none', 'allow': {'roles': ['super-admin']}, 'allow_usernames': ['ejaitur']},
 }
 _feature_activation_cache: tuple[float, str, dict[str, Any]] | None = None
@@ -479,6 +486,12 @@ def feature_activation_settings() -> dict[str, dict[str, Any]]:
     except (json.JSONDecodeError, TypeError, sqlite3.Error):
         stored = {}
     stored = stored if isinstance(stored, dict) else {}
+    if 'reporting' in stored and repository.get_application_state(REPORTING_FOR_ALL_USERS_STATE_KEY) != '1':
+        # Reporting left development: rules saved with its former default open it to every user, once.
+        if normalized_feature_rule(stored['reporting']) == normalized_feature_rule(LEGACY_REPORTING_RULE):
+            del stored['reporting']
+            repository.set_application_state(FEATURE_ACTIVATION_STATE_KEY, json.dumps(stored, sort_keys=True))
+        repository.set_application_state(REPORTING_FOR_ALL_USERS_STATE_KEY, '1')
     return {
         key: normalized_feature_rule(stored[key], FEATURE_DEFAULTS.get(key)) if key in stored
         else normalized_feature_rule(None, FEATURE_DEFAULTS.get(key))
@@ -1433,7 +1446,7 @@ def combined_reporting_required_columns(
         # E2E Dashboard Default Filters are a fixed part of every combined
         # source. Keep every physical fallback alias so opening a Dashboard
         # never has to repair selected CDR rows just to populate its facets.
-        'market', 'operator', 'vendor',
+        'market', 'operator', 'Operator_Vendor', 'Vendor',
         'Region', 'G_Level_2', 'G Level 2',
         'City', 'G_Level_4', 'G Level 4',
         'Campaign', 'campaign',
@@ -2368,7 +2381,7 @@ def reporting_catalog_entries(technology: str):
 
 def catalogue_editor_columns(datasets: Iterable[Any] | None = None, calculated_dimensions: Iterable[Any] = ()) -> dict[str, list[str]]:
     """Offer the processed CDR fields that can be used in the template editor."""
-    common = {'Operator', 'Campaign', 'source_sheet', 'vendor', 'RAT_A', 'RAT'}
+    common = {'Operator', 'Campaign', 'source_sheet', 'Operator_Vendor', 'Vendor', 'RAT_A', 'RAT'}
     columns: dict[str, set[str]] = {
         'cdr-data': set(common) | {
             'Test_Result', 'Test_Name', 'Type_of_Test', 'Direction', 'G Level 4',
@@ -2848,6 +2861,39 @@ def idle_dashboard_warmup_loop(stop_event: Event) -> None:
             continue
 
 
+STARTUP_READY = Event()
+STARTUP_GRACE_SECONDS = 3.0
+STARTUP_STATUS: dict[str, str] = {'message': 'Starting Dashboard Analytic…', 'error': ''}
+
+
+def _prepare_active_workspace() -> None:
+    """Open the active workspace, upgrading its database if needed, and recover interrupted jobs."""
+    try:
+        if (workspace_id := workspace_registry.active_id()):
+            workspace = workspace_registry.get(workspace_id)
+            name = workspace.name if workspace else workspace_id
+            STARTUP_STATUS['message'] = f'Opening workspace "{name}"…'
+            activate_workspace(workspace_id)
+            interrupted_datasets, interrupted_reports = repository.fail_interrupted_background_jobs(fail_datasets=False)
+            interrupted_chart_jobs = repository.fail_interrupted_report_chart_jobs()
+            if interrupted_datasets or interrupted_reports or interrupted_chart_jobs:
+                repository.add_log(
+                    'system',
+                    'recover_interrupted_background_jobs',
+                    json.dumps({
+                        'datasets': interrupted_datasets,
+                        'reports': interrupted_reports,
+                        'chart_jobs': interrupted_chart_jobs,
+                    }),
+                )
+    except Exception as exc:  # The application still opens; the workspace can be opened again from Workspace.
+        STARTUP_STATUS['error'] = f'The active workspace could not be opened: {exc}'
+        print(f'Unable to open the active workspace at startup: {exc}', file=sys.stderr, flush=True)
+    finally:
+        STARTUP_STATUS['message'] = 'Ready.'
+        STARTUP_READY.set()
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     APP_SHUTTING_DOWN.clear()
@@ -2912,20 +2958,13 @@ async def lifespan(_: FastAPI):
     report_scheduler_thread.start()
     _recover_unimported_transfer_packages()
     _cleanup_expired_export_packages()
-    if (workspace_id := workspace_registry.active_id()):
-        activate_workspace(workspace_id)
-        interrupted_datasets, interrupted_reports = repository.fail_interrupted_background_jobs(fail_datasets=False)
-        interrupted_chart_jobs = repository.fail_interrupted_report_chart_jobs()
-        if interrupted_datasets or interrupted_reports or interrupted_chart_jobs:
-            repository.add_log(
-                'system',
-                'recover_interrupted_background_jobs',
-                json.dumps({
-                    'datasets': interrupted_datasets,
-                    'reports': interrupted_reports,
-                    'chart_jobs': interrupted_chart_jobs,
-                }),
-            )
+    # Opening the active workspace can run one-time database upgrades that take minutes.
+    # The server starts answering after a short grace period and shows a preparing page
+    # until the workspace is ready, instead of leaving the browser on a blank screen.
+    STARTUP_READY.clear()
+    preparation_thread = Thread(target=_prepare_active_workspace, name='workspace-startup', daemon=True)
+    preparation_thread.start()
+    preparation_thread.join(timeout=STARTUP_GRACE_SECONDS)
     yield
     APP_SHUTTING_DOWN.set()
     with QUERY_BUILDER_EXECUTIONS_LOCK:
@@ -2982,6 +3021,60 @@ async def track_interactive_application_requests(request: Request, call_next):
             global LAST_INTERACTIVE_APPLICATION_ACTIVITY
             LAST_INTERACTIVE_APPLICATION_ACTIVITY = monotonic()
     return await call_next(request)
+
+
+STARTUP_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard Analytic</title>
+<style>
+  :root { color-scheme: light dark; --bg: #f4f7f8; --card: #fff; --text: #10314a; --muted: #5b6b78; --accent: #08736d; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #0f1a22; --card: #17252f; --text: #e6f0f4; --muted: #9db0bc; --accent: #3cc2b6; } }
+  body { display: grid; place-items: center; min-height: 100vh; margin: 0; padding: 16px; box-sizing: border-box; background: var(--bg); color: var(--text); font: 16px/1.5 "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 34rem; padding: 2rem 2.2rem; border-radius: 18px; background: var(--card); box-shadow: 0 18px 48px rgba(0, 0, 0, .14); text-align: center; }
+  .spinner { width: 2.6rem; height: 2.6rem; margin: 0 auto 1.2rem; border: 4px solid rgba(8, 115, 109, .2); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  h1 { margin: 0 0 .4rem; font-size: 1.3rem; } p { margin: .4rem 0; color: var(--muted); } strong { color: var(--text); }
+</style></head>
+<body><main role="status" aria-live="polite">
+  <div class="spinner" aria-hidden="true"></div>
+  <h1>Dashboard Analytic is starting</h1>
+  <p><strong id="startup-message">__MESSAGE__</strong></p>
+  <p>The first start after an update can take a few minutes while the workspace database is upgraded. This page opens the application as soon as it is ready.</p>
+</main>
+<script>
+  const poll = async () => {
+    try {
+      const response = await fetch('/api/startup-status', {cache: 'no-store'});
+      const status = await response.json();
+      if (status.ready) { window.location.reload(); return; }
+      document.getElementById('startup-message').textContent = status.message;
+    } catch (error) { /* The server is restarting: try again. */ }
+    window.setTimeout(poll, 1500);
+  };
+  window.setTimeout(poll, 1500);
+</script></body></html>"""
+
+
+@app.middleware('http')
+async def wait_for_startup(request: Request, call_next):
+    """While the active workspace is opened at startup, answer with a preparing page instead of blocking."""
+    path = request.url.path
+    if STARTUP_READY.is_set() or path.startswith('/static/') or path == '/favicon.ico':
+        return await call_next(request)
+    if path == '/api/startup-status':
+        return JSONResponse({'ready': False, 'message': STARTUP_STATUS['message']}, headers={'Cache-Control': 'no-store'})
+    headers = {'Retry-After': '5', 'Cache-Control': 'no-store'}
+    if path.startswith('/api/') or request.method != 'GET':
+        detail = f"Dashboard Analytic is starting: {STARTUP_STATUS['message']} Try again in a moment."
+        return JSONResponse({'detail': detail}, status_code=status.HTTP_503_SERVICE_UNAVAILABLE, headers=headers)
+    page = STARTUP_PAGE.replace('__MESSAGE__', html.escape(STARTUP_STATUS['message']))
+    return HTMLResponse(page, status_code=status.HTTP_503_SERVICE_UNAVAILABLE, headers=headers)
+
+
+@app.get('/api/startup-status')
+def startup_status() -> JSONResponse:
+    return JSONResponse({'ready': True, 'message': STARTUP_STATUS['message'], 'error': STARTUP_STATUS['error']},
+                        headers={'Cache-Control': 'no-store'})
 
 
 app.mount('/static', StaticFiles(directory=settings.static_dir), name='static')
@@ -3062,6 +3155,8 @@ def format_aggregation_label(value: str | None) -> str:
         return 'Auto / raw view'
     if normalized.lower() == 'technology_primary':
         return 'Technology'
+    if normalized.lower() == 'operator_vendor':
+        return 'Operator_Vendor'
     return normalized.replace('_', ' ').title()
 
 
@@ -3127,7 +3222,7 @@ def is_metric_candidate(column: str) -> bool:
         'campaign_year', 'campaign_quarter', 'hour_bucket', 'day_bucket',
         'dataset_id', 'user_id', 'row_id', 'record_id', 'session_id', 'call_id', 'test_id', 'campaign_id',
         'campaign', 'benchmark', 'period', 'market', 'region', 'zone', 'city',
-        'operator', 'subscriber', 'suscriber', 'vendor', 'vendor_only',
+        'operator', 'subscriber', 'suscriber', 'operator_vendor', 'vendor', 'vendor_only',
         'technology', 'rat', 'rat_a', 'l2_call_mode_a', 'playing_technology',
         'session_type', 'type_of_test', 'test_name',
         'call_status', 'status', 'result', 'test_result',
@@ -3150,26 +3245,54 @@ def is_metric_candidate(column: str) -> bool:
     return not normalized.startswith('_')
 
 
-def derive_available_metrics(df) -> list[str]:
-    preferred = [
-        'POLQA_LQ_Avg', 'LQ', 'Mean_Data_Rate', 'quality_score', 'throughput_mbps', 'setup_time_seconds', 'duration_seconds',
-        'jitter_ms', 'packet_loss_pct', 'latency_ms', 'Call_Setup_Time', 'Call_Duration', 'Receive_Delay', 'TCP_RTT_Service_Access_Delay',
+# CDR Analysis offers measurements only: the service KPIs first, then the radio
+# and service measurements of the CDR (averages; minimum and maximum columns are left out).
+ANALYSIS_KPI_METRICS = (
+    'POLQA_LQ_Avg', 'LQ', 'Mean_Data_Rate', 'quality_score', 'throughput_mbps', 'jitter_ms', 'packet_loss_pct',
+    'latency_ms', 'Call_Setup_Time', 'Receive_Delay', 'TCP_RTT_Service_Access_Delay', 'TCP_Throughput',
+)
+ANALYSIS_MEASUREMENT_PATTERN = re.compile(
+    r'rsrp|rsrq|sinr|cqi|mcs|bler|txpower|throughput|data_rate|bitrate|frame_?rate|delay|latency|jitter|rtt'
+    r'|packet_?loss|polqa|(^|_)lq(_|$)|(^|_)mos(_|$)|jerkiness',
+    re.IGNORECASE,
+)
+ANALYSIS_NON_MEASUREMENT_PATTERN = re.compile(
+    r'dialed|imei|imsi|msisdn|system_software|speed|quarter|timestamp|1st|last_received|duration|transferred_bytes'
+    r'|earfcn|arfcn|pci|band|distance|call_mode|index|numerology|ratio|variance|standard_deviation'
+    r'|category|_(min|max)(_[ab])?$|_p\d+$|_start$|_end$',
+    re.IGNORECASE,
+)
+MAX_ANALYSIS_METRICS = 60
+
+
+def analysis_metric_columns(columns: Iterable[object], dataset_kind: str | None = None) -> list[str]:
+    """The measurement columns CDR Analysis offers, service KPIs first.
+
+    CDRs with recognised radio and service measurements offer only those; other
+    datasets offer every candidate column that is not an identifier, a time or a count.
+    """
+    names = list(dict.fromkeys(str(column) for column in columns))
+    by_lower = {name.lower(): name for name in names}
+    ordered = [by_lower[metric.lower()] for metric in ANALYSIS_KPI_METRICS if metric.lower() in by_lower]
+    candidates = [
+        name for name in names
+        if name not in ordered and is_metric_candidate(name) and not ANALYSIS_NON_MEASUREMENT_PATTERN.search(name)
     ]
-    numeric_columns = [
+    measurements = [name for name in candidates if ANALYSIS_MEASUREMENT_PATTERN.search(name)]
+    ordered.extend(measurements if dataset_kind in {'data', 'voice', 'speech'} and measurements else candidates)
+    return ordered[:MAX_ANALYSIS_METRICS]
+
+
+def derive_available_metrics(df, dataset_kind: str | None = None) -> list[str]:
+    numeric_columns = {
         column for column in df.columns
-        if not pd.api.types.is_bool_dtype(df[column])
-        and pd.to_numeric(df[column], errors='coerce').notna().any()
+        if not pd.api.types.is_bool_dtype(df[column]) and pd.to_numeric(df[column], errors='coerce').notna().any()
+    }
+    # Known KPI columns stay listed even when empty: runtime availability disables them instead.
+    return [
+        column for column in analysis_metric_columns(df.columns, dataset_kind)
+        if column in numeric_columns or column in ANALYSIS_KPI_METRICS
     ]
-    # Keep known metric columns visible even when the current dataset contains
-    # only empty values. Runtime availability will mark them disabled instead
-    # of hiding them from the selector altogether.
-    numeric_columns.extend(
-        column for column in preferred
-        if column in df.columns and column not in numeric_columns and is_metric_candidate(column)
-    )
-    ordered = [column for column in preferred if column in numeric_columns and is_metric_candidate(column)]
-    ordered.extend(column for column in numeric_columns if column not in ordered and is_metric_candidate(column))
-    return ordered[:20]
 
 
 def derive_available_aggregations(filter_options: dict[str, list[str]]) -> list[str]:
@@ -4131,11 +4254,17 @@ def rebuild_dataset_artifacts(
         df = add_three_gcid_column(df)
     if forced_dataset_kind in {'mapping_vodafone', 'mapping_three'}:
         from src.modules.column_names import vendor_filter_value
-        vendor_column = resolve_column_name(df.columns, 'Vendor') or resolve_column_name(df.columns, 'OP_Vendor') or resolve_column_name(df.columns, 'OP/ Vendor')
-        if vendor_column and not resolve_column_name(df.columns, 'Vendor_Only'):
+        # An inventory's vendor comes from OP/ Vendor, OP_Vendor or Vendor; Vendor keeps the vendor alone.
+        vendor_columns = [column for column in (
+            resolve_column_name(df.columns, name) for name in ('OP/ Vendor', 'OP_Vendor', 'Operator_Vendor', 'Vendor')
+        ) if column]
+        if vendor_columns:
+            raw_vendor = df[vendor_columns[0]].where(df[vendor_columns[0]].notna() & df[vendor_columns[0]].astype(str).str.strip().ne(''))
+            for column in vendor_columns[1:]:
+                raw_vendor = raw_vendor.fillna(df[column].where(df[column].notna() & df[column].astype(str).str.strip().ne('')))
             operators = [value for group in task_repository.list_operator_mapping_groups() for value in [group.get('canonical'), *(group.get('aliases') or [])] if value]
-            labels = {value: vendor_filter_value(value, operators) for value in df[vendor_column].dropna().unique()}
-            df['Vendor_Only'] = df[vendor_column].map(labels).fillna('')
+            labels = {value: vendor_filter_value(value, operators) for value in raw_vendor.dropna().unique()}
+            df['Vendor'] = raw_vendor.map(labels).fillna('')
     dataset_kind = df['dataset_kind'].iloc[0] if 'dataset_kind' in df.columns and not df.empty else (forced_dataset_kind or infer_dataset_kind(df, dataset_path.name))
     auto_vendor_mapping_applied = False
     auto_vendor_mapping_error: str | None = None
@@ -4162,7 +4291,7 @@ def rebuild_dataset_artifacts(
             auto_vendor_mapping_applied = True
         except Exception as exc:
             # Mapping is optional during import. A mapping issue must not make
-            # an otherwise valid CDR unusable in Workspace or Datasets Analysis.
+            # an otherwise valid CDR unusable in Workspace or CDR Analysis.
             auto_vendor_mapping_error = str(exc)
     if dataset_kind in CDR_DATASET_KINDS and region_mapping_dataset_id:
         task_repository.update_dataset_profile(dataset_id, processing_step='Applying Region Mapping')
@@ -4227,7 +4356,7 @@ def rebuild_dataset_artifacts(
     if progress_callback:
         progress_callback(72)
     task_repository.update_dataset_profile(dataset_id, progress=72, processing_step='Calculating metrics')
-    available_metrics = derive_available_metrics(df)
+    available_metrics = derive_available_metrics(df, dataset_kind)
     analysis = build_analysis(df, {'aggregation': 'all', 'extra_filters': {}}, '')
     if progress_callback:
         progress_callback(84)
@@ -4241,11 +4370,8 @@ def rebuild_dataset_artifacts(
     if progress_callback:
         progress_callback(94)
     task_repository.update_dataset_profile(dataset_id, processing_step='Finalizing dataset profile')
-    vendor_values_complete = bool(
-        'vendor' in df.columns
-        and not df.empty
-        and df['vendor'].fillna('').astype(str).str.strip().ne('').all()
-    )
+    # Mapped Vendors are always complete; otherwise whether the source CDR has a Vendor on every row.
+    vendor_values_complete = bool(auto_vendor_mapping_applied or df.attrs.get('vendor_values_complete'))
     task_repository.update_dataset_profile(
         dataset_id,
         status='ready',
@@ -4317,8 +4443,9 @@ def cache_cdr_catalogue(dataset_id: int, frame: pd.DataFrame, task_repository: R
 
     task_repository.replace_cdr_catalogue(
         dataset_id,
-        vendors=values('vendor'),
-        vendors_only=values('Vendor_Only'),
+        vendors=values('Operator_Vendor'),
+        vendors_only=values('Vendor'),
+        clusters=values('Cluster'),
         regions=values('region', 'g_level_2', 'g level 2'),
         cities=values('city', 'g_level_4', 'g level 4'),
         campaigns=values('campaign'),
@@ -4367,9 +4494,15 @@ def backfill_cdr_catalogues(dataset_ids: Iterable[int], task_repository: Reposit
     dataset_ids = list(dataset_ids)
     missing_catalogues = task_repository.missing_cdr_catalogue_ids(dataset_ids)
     for dataset_id in task_repository.missing_cdr_vendor_only_ids(dataset_ids):
-        task_repository.ensure_vendor_only_column(dataset_id)
-        column = task_repository.resolve_dataset_row_column_name(dataset_id, "Vendor_Only")
+        task_repository.ensure_vendor_column(dataset_id)
+        column = task_repository.resolve_dataset_row_column_name(dataset_id, "Vendor")
         task_repository.set_cdr_catalogue_vendor_only(dataset_id, task_repository.list_distinct_dataset_row_values(dataset_id, column, limit=None) if column else [])
+    for dataset_id in set(task_repository.missing_cdr_cluster_ids(dataset_ids)) - set(missing_catalogues):
+        if task_repository.dataset_rows_table_exists(dataset_id):
+            columns = set(task_repository.list_dataset_row_columns(dataset_id))
+            task_repository.set_cdr_catalogue_clusters(
+                dataset_id, _distinct_cdr_row_values(task_repository, dataset_id, columns, 'Cluster'),
+            )
     for dataset_id in missing_catalogues:
         if not task_repository.dataset_rows_table_exists(dataset_id):
             continue
@@ -4380,8 +4513,9 @@ def backfill_cdr_catalogues(dataset_ids: Iterable[int], task_repository: Reposit
 
         task_repository.replace_cdr_catalogue(
             dataset_id,
-            vendors=distinct_values('vendor'),
-            vendors_only=distinct_values('Vendor_Only'),
+            vendors=distinct_values('Operator_Vendor'),
+            vendors_only=distinct_values('Vendor'),
+            clusters=distinct_values('Cluster'),
             regions=distinct_values('region', 'g_level_2', 'g level 2'),
             cities=distinct_values('city', 'g_level_4', 'g level 4'),
             campaigns=distinct_values('campaign'),
@@ -4426,7 +4560,7 @@ def persist_mapped_cdr_frame(
     if dataset_kind in CDR_DATASET_KINDS:
         cache_cdr_catalogue(dataset_id, frame, task_repository)
     summary = summarise_dataset(frame)
-    available_metrics = derive_available_metrics(frame)
+    available_metrics = derive_available_metrics(frame, dataset_kind)
     analysis = build_analysis(frame, {'aggregation': 'all', 'extra_filters': {}}, '')
     profile_df = restrict_frame_to_metric(frame, analysis.selected_metric)
     filter_options = derive_filter_options(profile_df)
@@ -4437,11 +4571,7 @@ def persist_mapped_cdr_frame(
     task_repository.update_dataset_profile(
         dataset_id,
         vendor_mapping_applied=True,
-        vendor_values_complete=bool(
-            'vendor' in frame.columns
-            and not frame.empty
-            and frame['vendor'].fillna('').astype(str).str.strip().ne('').all()
-        ),
+        vendor_values_complete=True,
         row_count=summary.rows,
         column_count=len(summary.columns),
         default_metric=analysis.selected_metric,
@@ -4870,18 +5000,14 @@ def refresh_selected_dataset_if_stale(
                 blank = frame[canonical].isna() | frame[canonical].astype(str).str.strip().eq('')
                 frame.loc[blank, canonical] = alias_values.loc[blank]
             frame = frame.drop(columns=[alias])
-        legacy_vendor_only = next((column for column in frame.columns if str(column).casefold() == 'vendor_2'), None)
-        current_vendor_only = next((column for column in frame.columns if str(column).casefold() == 'vendor_only'), None)
-        if legacy_vendor_only and not current_vendor_only:
-            frame = frame.rename(columns={legacy_vendor_only: 'Vendor_Only'})
         legacy_report_vendor = resolve_column_name(frame.columns, 'report_vendor')
-        vendor_column = resolve_column_name(frame.columns, 'Vendor')
+        vendor_column = resolve_column_name(frame.columns, 'Operator_Vendor') or resolve_column_name(frame.columns, 'Vendor')
         if legacy_report_vendor:
             if vendor_column:
                 blank_vendor = frame[vendor_column].isna() | frame[vendor_column].astype(str).str.strip().eq('')
                 frame.loc[blank_vendor, vendor_column] = frame.loc[blank_vendor, legacy_report_vendor]
             else:
-                frame['Vendor'] = frame[legacy_report_vendor]
+                frame['Operator_Vendor'] = frame[legacy_report_vendor]
             frame = frame.drop(columns=[legacy_report_vendor])
         frame = ensure_fixed_cdr_fields(frame)
         frame = ensure_vendor_group(frame)
@@ -5035,6 +5161,7 @@ def render_template(request: Request, template_name: str, context: dict[str, Any
         'header_workspace_sizes': {item.id: format_workspace_size(workspace_disk_usage(item)) for item in header_workspaces},
         'ignore_event_time_filtering': ignore_event_time_filtering(),
         'features': user_features(template_user) if isinstance(template_user, SessionUser) else {},
+        'cdr_type_options': cdr_type_options(),
         'vendor_filter_identities': {
             'operators': {str(value): str(group['canonical'])
                           for group in repository.list_operator_mapping_groups()
@@ -5106,6 +5233,10 @@ def choose_selected_dataset(
 def enrich_selected_dataset_for_analysis(selected_dataset: dict[str, Any] | None) -> dict[str, Any] | None:
     if not selected_dataset or not selected_dataset['is_ready']:
         return selected_dataset
+    if repository.dataset_rows_table_exists(int(selected_dataset['id'])):
+        # Offer the measurements of the stored rows, also for datasets processed before the current metric rules.
+        selected_dataset['available_metrics'] = analysis_metric_columns(
+            repository.list_dataset_row_columns(int(selected_dataset['id'])), selected_dataset.get('dataset_kind'))
     selected_dataset['metric_availability'] = derive_runtime_metric_availability(selected_dataset)
     selected_dataset['available_metrics'] = list(selected_dataset['metric_availability'].keys())
     selected_dataset['selectable_metrics'] = [
@@ -5114,8 +5245,11 @@ def enrich_selected_dataset_for_analysis(selected_dataset: dict[str, Any] | None
     if selected_dataset.get('default_metric') not in selected_dataset['selectable_metrics']:
         selected_dataset['default_metric'] = selected_dataset['selectable_metrics'][0] if selected_dataset['selectable_metrics'] else None
     filter_options = selected_dataset.get('filter_options') or {}
+    for key in ('operator_vendor', 'vendor'):
+        if filter_options.get(key):
+            filter_options[key] = sort_vendor_values(filter_options[key])
     selected_dataset['available_cdf_groupings'] = [
-        item for item in ['vendor', 'market', 'operator', 'region', 'city']
+        item for item in ['operator', 'operator_vendor', 'vendor', 'market', 'region', 'cluster', 'city']
         if len(filter_options.get(item, []) or []) > 1
     ]
     return selected_dataset
@@ -5149,11 +5283,15 @@ def build_datasets_analysis_table_rows(df: pd.DataFrame, selected_metrics: list[
         return sorted(grouped_rows, key=lambda item: -int(item.get('samples') or 0))[:50]
 
     preferred_columns: list[str] = []
-    for column in ['market', 'operator', 'vendor', 'region', 'city', 'session_type', 'test_name', 'direction', 'technology_primary', 'source_sheet', 'event_start_time', 'status']:
+    for column in ['market', 'operator', 'operator_vendor', 'vendor', 'region', 'cluster', 'city', 'session_type', 'test_name', 'direction', 'technology_primary', 'source_sheet', 'event_start_time', 'status']:
         if column in df.columns and column not in preferred_columns:
             preferred_columns.append(column)
     preferred_columns.extend(metric for metric in usable_metrics if metric not in preferred_columns)
     rows = df.copy()
+    if 'region' in preferred_columns and 'cluster' not in preferred_columns:
+        # Cluster follows Region also when the CDR has no Cluster mapping yet.
+        rows['cluster'] = ''
+        preferred_columns.insert(preferred_columns.index('region') + 1, 'cluster')
     if 'event_start_time' in rows.columns:
         rows = rows.sort_values('event_start_time', ascending=False)
     elif usable_metrics:
@@ -9176,7 +9314,7 @@ def render_admin_template(
         'audit_logs': 'Audit log',
         'dashboard_filter_selections': 'Dashboard filter selections',
         'dashboard_ppt_jobs': 'Dashboard PPT jobs',
-        'cdr_catalogues': 'CDR Operator, Vendor, Vendor Only, Region, City, Campaign And Source Level Catalogues',
+        'cdr_catalogues': 'CDR Operator, Operator Vendor, Vendor, Region, Cluster, City, Campaign And Source Level Catalogues',
         'dataset_profiles': 'Dataset profiles',
         'dataset_source_columns': 'Dataset source columns',
         'datasets': 'Datasets',
@@ -9261,10 +9399,7 @@ def render_admin_template(
         ('Full Environment', [option for option in export_options if option['value'] == 'full-environment']),
     ]
     export_option_groups = [group for group in export_option_groups if group[1]]
-    admin_users = [
-        {**dict(row), 'created_at': format_local_timestamp(row['created_at']), 'workspace_ids': repository.list_user_workspace_ids(int(row['id']))}
-        for row in repository.list_users()
-    ]
+    admin_users = admin_user_rows()
     database_notice = request.query_params.get('database_notice') or None
     backup_notice = request.query_params.get('backup_notice') or None
     if database_notice in {'Recurring backup settings saved.', 'Manual backup started.'}:
@@ -9281,6 +9416,7 @@ def render_admin_template(
             'user_groups': repository.list_user_groups(),
             'feature_activation': feature_activation_context() if user.role in {'admin', 'super-admin'} else [],
             'feature_roles': FEATURE_ROLES,
+            'workspace_access_rows': workspace_access_rows(user, admin_users) if user.role in {'admin', 'super-admin'} else [],
             'workspaces': workspace_registry.list(),
             'backup_workspaces': accessible_workspaces(user),
             'datasets': admin_datasets,
@@ -9292,6 +9428,9 @@ def render_admin_template(
             'database_table_groups': database_table_groups,
             'operator_mapping_groups': repository.list_operator_mapping_groups() if active_workspace else [],
             'operator_mapping_notice': request.query_params.get('operator_mapping_notice') or None,
+            'cdr_type_options': cdr_type_options(),
+            'workspace_cdr_type': workspace_cdr_type(repository) if active_workspace else DEFAULT_CDR_TYPE,
+            'cdr_type_notice': request.query_params.get('cdr_type_notice') or None,
             'operator_mapping_error': request.query_params.get('operator_mapping_error') or None,
             'all_main_cities': all_main_cities,
             'selected_main_cities': selected_main_cities,
@@ -9438,6 +9577,25 @@ def build_app_logs() -> list[dict[str, Any]]:
     return logs
 
 
+DATASETS_ANALYSIS_SELECTION_KEY = 'datasets_analysis_selection_v1'
+
+
+def datasets_analysis_saved_selection() -> dict[str, Any]:
+    """The last analysed dataset and the last Adaptive Filters applied to each dataset of the workspace."""
+    try:
+        saved = json.loads(repository.get_workspace_state(DATASETS_ANALYSIS_SELECTION_KEY) or '{}')
+    except (TypeError, ValueError):
+        saved = {}
+    saved = saved if isinstance(saved, dict) else {}
+    queries = saved.get('queries') if isinstance(saved.get('queries'), dict) else {}
+    return {'dataset_id': saved.get('dataset_id'), 'queries': {str(key): str(value) for key, value in queries.items()}}
+
+
+def default_cdf_grouping(dataset: dict[str, Any] | None) -> str:
+    """CDFs compare operators by default when the dataset has several."""
+    return 'operator' if 'operator' in ((dataset or {}).get('available_cdf_groupings') or []) else 'all'
+
+
 def build_datasets_analysis_payload(selected_dataset: dict[str, Any] | None, request: Request, username: str | None = None) -> tuple[dict[str, Any] | None, list[dict[str, Any]], list[str], dict[str, Any], str | None, bool]:
     if not selected_dataset:
         return None, [], [], {}, None, False
@@ -9452,19 +9610,18 @@ def build_datasets_analysis_payload(selected_dataset: dict[str, Any] | None, req
     dataset_path = Path(selected_dataset['stored_path'])
     aggregation = request.query_params.get('aggregation') or selected_dataset.get('default_aggregation') or 'all'
     requested_metrics = [value for value in request.query_params.getlist('metric') if value]
-    if not requested_metrics:
-        fallback_metric = request.query_params.get('metric') or selected_dataset.get('default_metric') or ''
-        if fallback_metric:
-            requested_metrics = [fallback_metric]
     available_metrics = selected_dataset.get('available_metrics') or []
     selectable_metrics = selected_dataset.get('selectable_metrics') or available_metrics
+    if not requested_metrics:
+        # Every available metric is selected by default.
+        requested_metrics = list(selectable_metrics)
     selected_metrics = [metric for metric in requested_metrics if metric in selectable_metrics]
     if not selected_metrics:
         default_metric = selected_dataset.get('default_metric') or (selectable_metrics[0] if selectable_metrics else '')
         selected_metrics = [default_metric] if default_metric else []
     aggregation_overrides = parse_aggregation_overrides(request.query_params.get('aggregation_overrides') or '')
     cdf_overrides = parse_cdf_overrides(request.query_params.get('cdf_overrides') or '')
-    cdf_grouping = request.query_params.get('cdf_grouping') or 'all'
+    cdf_grouping = request.query_params.get('cdf_grouping') or default_cdf_grouping(selected_dataset)
     filters = {
         'market': choose_filter_values(request.query_params.getlist('market'), filter_options, 'market'),
         'period': choose_filter_values(request.query_params.getlist('period'), filter_options, 'period'),
@@ -9498,7 +9655,7 @@ def build_datasets_analysis_payload(selected_dataset: dict[str, Any] | None, req
         df = load_cached_dataset(dataset_path)
         repository.replace_dataset_rows(selected_dataset['id'], df)
     if str(selected_dataset.get('dataset_kind') or '').casefold() in CDR_DATASET_KINDS:
-        # General Dataset Analysis filters use source-faithful table values.
+        # General CDR Analysis filters use source-faithful table values.
         # Canonical Operator/Vendor labels and theme metadata belong only to
         # the in-memory analysis/chart frame.
         mapping_settings = repository.chart_mapping_settings()
@@ -9506,6 +9663,7 @@ def build_datasets_analysis_payload(selected_dataset: dict[str, Any] | None, req
         df.attrs.update(mapping_settings)
         df = normalise_operator_aliases(df)
     analyses: list[dict[str, Any]] = []
+    shared_analysis: dict[str, Any] = {}
     for metric in selected_metrics:
         try:
             metric_filters = {
@@ -9518,7 +9676,7 @@ def build_datasets_analysis_payload(selected_dataset: dict[str, Any] | None, req
             if analysis is None:
                 with warnings.catch_warnings(record=True) as captured_warnings:
                     warnings.simplefilter('always')
-                    analysis = store_cached_analysis(dataset_path, metric_filters, metric, build_analysis(df, metric_filters, metric, prefiltered=True))
+                    analysis = store_cached_analysis(dataset_path, metric_filters, metric, build_analysis(df, metric_filters, metric, prefiltered=True, shared=shared_analysis))
                 if username:
                     for captured in captured_warnings:
                         add_analysis_audit_log(
@@ -9852,7 +10010,7 @@ def workspace(
                 'has_processing': False, 'vodafone_mapping_datasets': [], 'three_mapping_datasets': [], 'region_mapping_datasets': [], 'cluster_mapping_datasets': [],
                 'mappable_cdr_datasets': [], 'clearable_cdr_datasets': [], 'mappable_region_cdr_datasets': [], 'clearable_region_cdr_datasets': [],
                 'calculated_dimensions': [], 'combined_tables': [],
-                'workspaces': workspaces, 'workspace_access': workspace_access, 'workspace_sizes': workspace_sizes, 'workspace_cache_sizes': workspace_cache_sizes, 'workspace_statuses': workspace_statuses, 'workspace_users': workspace_users, 'workspace_notice': request.query_params.get('workspace_notice'),
+                'workspaces': workspaces, 'workspace_access': workspace_access, 'workspace_sizes': workspace_sizes, 'workspace_cache_sizes': workspace_cache_sizes, 'workspace_statuses': workspace_statuses, 'workspace_users': workspace_users, 'workspace_cdr_types': workspace_cdr_types(workspaces), 'workspace_access_rules': repository.workspace_access_rules(), 'access_roles': FEATURE_ROLES, 'access_groups': repository.list_user_groups(), 'workspace_notice': request.query_params.get('workspace_notice'),
                 'workspace_warning': request.query_params.get('workspace_warning'),
                 'workspace_error': request.query_params.get('workspace_error'),
             },
@@ -9904,6 +10062,9 @@ def workspace(
             'workspace_cache_sizes': workspace_cache_sizes,
             'workspace_statuses': workspace_statuses,
             'workspace_users': workspace_users,
+            'workspace_cdr_types': workspace_cdr_types(workspace_registry.list()),
+            'workspace_access_rules': repository.workspace_access_rules(), 'access_roles': FEATURE_ROLES,
+            'access_groups': repository.list_user_groups(),
             'active_workspace': active_workspace,
             'workspace_notice': request.query_params.get('workspace_notice'),
             'workspace_warning': request.query_params.get('workspace_warning'),
@@ -10864,6 +11025,84 @@ def workspace_access_map(user: SessionUser, workspaces: list[Workspace]) -> dict
     return {workspace.id: repository.user_has_workspace_access(user.username, workspace.id) for workspace in workspaces}
 
 
+def admin_user_rows() -> list[dict[str, Any]]:
+    """Accounts with their direct workspaces, user groups and the workspaces their role or groups open."""
+    groups = repository.list_user_groups()
+    rules = repository.workspace_access_rules()
+    names = {workspace.id: workspace.name for workspace in workspace_registry.list()}
+    rows = []
+    for row in repository.list_users():
+        user_id = int(row['id'])
+        group_ids = [group['id'] for group in groups if user_id in group['member_ids']]
+        group_names = {group['id']: group['name'] for group in groups}
+        by_group = [
+            {'workspace': names[workspace_id], 'groups': [group_names[group_id] for group_id in rule['groups'] if group_id in group_ids]}
+            for workspace_id, rule in rules.items() if workspace_id in names and set(rule['groups']) & set(group_ids)
+        ]
+        by_role = [names[workspace_id] for workspace_id, rule in rules.items() if workspace_id in names and row['role'] in rule['roles']]
+        rows.append({
+            **dict(row), 'created_at': format_local_timestamp(row['created_at']),
+            'workspace_ids': repository.list_user_workspace_ids(user_id), 'group_ids': group_ids,
+            'group_workspaces': sorted(by_group, key=lambda item: item['workspace'].casefold()),
+            'role_workspaces': sorted(by_role, key=str.casefold),
+        })
+    return rows
+
+
+def workspace_cdr_types(workspaces: list[Workspace]) -> dict[str, str]:
+    """The CDR type of each workspace, read without opening (or migrating) its database."""
+    from src.modules.cdr_types import CDR_TYPE_STATE_KEY
+
+    types = {}
+    for workspace in workspaces:
+        value = ''
+        try:
+            with closing(sqlite3.connect(f'file:{workspace.database_path}?mode=ro', uri=True, timeout=2)) as connection:
+                row = connection.execute('SELECT value FROM workspace_state WHERE key = ?', (CDR_TYPE_STATE_KEY,)).fetchone()
+                value = str(row[0]) if row else ''
+        except sqlite3.Error:
+            pass
+        types[workspace.id] = value if value in CDR_TYPES else DEFAULT_CDR_TYPE
+    return types
+
+
+def workspace_access_rows(user: SessionUser, accounts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The workspaces an administrator manages, with the roles, groups and users that open each one."""
+    rules = repository.workspace_access_rules()
+    rows = []
+    for workspace in accessible_workspaces(user):
+        rule = rules.get(workspace.id, {})
+        rows.append({
+            'id': workspace.id, 'name': workspace.name,
+            'values': [*(f'role:{role}' for role in rule.get('roles', [])), *(f'group:{group}' for group in rule.get('groups', [])),
+                       *(f"user:{account['id']}" for account in accounts if workspace.id in (account.get('workspace_ids') or []))],
+        })
+    return rows
+
+
+@app.post('/admin/workspace-access')
+async def save_workspace_access(request: Request, user: SessionUser = Depends(admin_user)) -> Response:
+    """Grant each managed workspace to roles, user groups and users."""
+    form = await request.form()
+    accounts = {int(row['id']): row for row in repository.list_users()}
+    groups = {int(group['id']) for group in repository.list_user_groups()}
+    changes = {}
+    for workspace in accessible_workspaces(user):
+        values = [str(value) for value in form.getlist(f'access__{workspace.id}')]
+        roles = [value[5:] for value in values if value.startswith('role:') and value[5:] in FEATURE_ROLES]
+        group_ids = [int(value[6:]) for value in values if value.startswith('group:') and value[6:].isdigit() and int(value[6:]) in groups]
+        user_ids = {int(value[5:]) for value in values if value.startswith('user:') and value[5:].isdigit()}
+        if user.role != 'super-admin':
+            # An administrator keeps the access to the workspaces they manage.
+            user_ids |= {account_id for account_id, row in accounts.items() if str(row['username']).casefold() == user.username.casefold()}
+        repository.set_workspace_access_rule(workspace.id, roles, group_ids)
+        repository.set_workspace_user_access(
+            workspace.id, [str(accounts[user_id]['username']) for user_id in user_ids if user_id in accounts])
+        changes[workspace.name] = {'roles': roles, 'groups': group_ids, 'users': len(user_ids)}
+    repository.add_log(user.username, 'update_workspace_access', json.dumps(changes))
+    return RedirectResponse('/admin#workspace-access', status_code=status.HTTP_303_SEE_OTHER)
+
+
 def require_workspace_access(user: SessionUser, workspace_id: str) -> None:
     if user.role != 'super-admin' and not repository.user_has_workspace_access(user.username, workspace_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='You do not have access to that workspace.')
@@ -10924,9 +11163,14 @@ def close_workspace(workspace_id: str = Form(...), user: SessionUser = Depends(c
 
 
 @app.post('/workspace/create')
-def create_workspace(name: str = Form(...), usernames: list[str] = Form(default=[]), user: SessionUser = Depends(current_user)) -> Response:
+def create_workspace(
+    name: str = Form(...), usernames: list[str] = Form(default=[]), cdr_type: str = Form(DEFAULT_CDR_TYPE),
+    access_roles: list[str] = Form(default=[]), access_groups: list[int] = Form(default=[]),
+    user: SessionUser = Depends(current_user),
+) -> Response:
     require_workspace_admin(user)
     try:
+        cdr_type = normalize_cdr_type(cdr_type)
         workspace = workspace_registry.create(name)
         selected_usernames = {item.strip().casefold() for item in usernames if item.strip()}
         for account in repository.list_users():
@@ -10937,11 +11181,15 @@ def create_workspace(name: str = Form(...), usernames: list[str] = Form(default=
                     int(account['id']),
                     [*repository.list_user_workspace_ids(int(account['id'])), workspace.id],
                 )
+        if user.role == 'super-admin':
+            repository.set_workspace_access_rule(
+                workspace.id, [role for role in access_roles if role in FEATURE_ROLES], access_groups)
         activate_workspace(workspace.id)
+        set_workspace_cdr_type(repository, cdr_type)
     except ValueError as exc:
         return RedirectResponse(f'/workspace?{urlencode({"workspace_error": str(exc)})}', status_code=status.HTTP_303_SEE_OTHER)
     repository.try_add_log(user.username, 'create_workspace', json.dumps({
-        'workspace': workspace.id, 'name': workspace.name,
+        'workspace': workspace.id, 'name': workspace.name, 'cdr_type': CDR_TYPES[cdr_type]['label'],
     }))
     return RedirectResponse(f'/workspace?{urlencode({"workspace_notice": f"Created and opened {workspace.name}."})}', status_code=status.HTTP_303_SEE_OTHER)
 
@@ -10968,6 +11216,9 @@ def save_workspace(
     workspace_id: str = Form(...),
     name: str = Form(...),
     usernames: list[str] = Form(default=[]),
+    access_roles: list[str] = Form(default=[]),
+    access_groups: list[int] = Form(default=[]),
+    cdr_type: str = Form(''),
     user: SessionUser = Depends(current_user),
 ) -> Response:
     require_workspace_admin(user)
@@ -10981,6 +11232,13 @@ def save_workspace(
         workspace = current_workspace if name == current_workspace.name else workspace_registry.rename(workspace_id, name)
         if user.role == 'super-admin':
             repository.set_workspace_user_access(workspace.id, usernames)
+            repository.set_workspace_access_rule(
+                workspace.id, [role for role in access_roles if role in FEATURE_ROLES], access_groups)
+        if cdr_type and cdr_type != workspace_cdr_types([workspace])[workspace.id]:
+            set_workspace_cdr_type(Repository(
+                workspace.database_path, global_db_path=repository.global_db_path,
+                workspace_registry_db_path=workspace_registry.registry_path,
+            ), cdr_type)
         if active_workspace and active_workspace.id == workspace.id:
             activate_workspace(workspace.id)
     except ValueError as exc:
@@ -11352,7 +11610,7 @@ def _preview_column_categories(
         if column_identity(column) not in source_identities
     } if source_columns_complete else set()
     derived_columns.update(
-        column for column in available_columns if column_identity(column) == 'vendoronly'
+        column for column in available_columns if column_identity(column) in VENDOR_FIELD_IDENTITIES
     )
     try:
         auto_definitions = catalog_repository.list_calculated_dimensions()
@@ -11391,8 +11649,8 @@ DERIVED_PREVIEW_RULES = {
     'zone': 'Uses Zone from the source, otherwise G_Level_3, otherwise remains empty.',
     'city': 'Uses City from the source, otherwise G_Level_4, otherwise remains empty.',
     'subscriber': 'Uses Subscriber or legacy Suscriber; when both are absent, it copies Operator.',
-    'vendor': 'Stores Operator_Vendor for operators resolved through a multivendor cell mapping and the canonical Operator for every other operator.',
-    'vendoronly': 'Copies Vendor after removing its Operator_ prefix.',
+    'operatorvendor': 'Stores <Operator>_<Vendor> from the source Vendor or the Vendor Mapping applied to this CDR; operators without a vendor store "<Operator> - All".',
+    'vendor': 'Copies Operator_Vendor after removing its Operator_ prefix; operators without a vendor store "<Operator> - All".',
     'technology': 'Keeps its source values; when the complete column is absent or empty, copies the first populated field from Technology, RAT, RAT_A, L2_Call_Mode_A and Playing_Technology, in that order.',
     'rat': 'Keeps its source values; when the complete column is absent or empty, copies the first populated field from Technology, RAT, RAT_A, L2_Call_Mode_A and Playing_Technology, in that order.',
     'rata': 'Keeps its source values; when the complete column is absent or empty, copies the first populated field from Technology, RAT, RAT_A, L2_Call_Mode_A and Playing_Technology, in that order.',
@@ -11481,7 +11739,7 @@ def _preview_column_metadata(
             kinds[column] = 'Auto-calculated'
             definition = definitions.get(identity, {})
             rules[column] = json.dumps(definition, ensure_ascii=False, indent=2) if definition else 'Workspace auto-calculated field.'
-        elif identity == 'vendor' and vendor_mapping_applied:
+        elif identity in VENDOR_FIELD_IDENTITIES and vendor_mapping_applied:
             kinds[column] = 'Vendor-Map'
             rules[column] = 'Populated from the Vendor Mapping applied to this CDR.'
         elif column in derived:
@@ -11617,10 +11875,10 @@ def _apply_preview_column_filters(
         column = resolve_column_name(result.columns, vendor_filter_column(requested))
         if column is None:
             continue
-        if column_identity(column) == 'vendoronly':
+        if column_identity(column) in VENDOR_FIELD_IDENTITIES:
             operator_column = resolve_column_name(result.columns, 'Operator')
             operators = result[operator_column].dropna().unique() if operator_column else []
-            values = vendor_filter_values(values, operators)
+            values = vendor_match_values(requested, values, operators)
         accepted = {str(value).strip().casefold() for value in values}
         if not accepted:
             return result.iloc[0:0]
@@ -11693,10 +11951,11 @@ def preview_dataset(
         field for field in (*PREVIEW_METADATA_FIELDS, *MAIN_CDR_FIELDS) if column_identity(field) not in available_identities
     )
     if dataset['dataset_kind'] in {'mapping_vodafone', 'mapping_three'}:
-        repository.ensure_vendor_only_column(dataset_id)
+        repository.ensure_vendor_column(dataset_id)
         available_columns = list(dict.fromkeys([*available_columns, *repository.list_dataset_row_columns(dataset_id)]))
+    # Inventories processed before the Vendor rename keep their vendor alone in Vendor_Only.
     vendor_preview_column = next(
-        (column for column in ('Vendor_Only',) if column in available_columns),
+        (column for column in ('Vendor_Only', 'Vendor') if column in available_columns),
         None,
     ) if dataset['dataset_kind'] in {'mapping_vodafone', 'mapping_three'} else None
     vendor_preview_columns = {vendor_preview_column} if vendor_preview_column else set()
@@ -12073,10 +12332,29 @@ def datasets_analysis(
 ) -> HTMLResponse:
     if not active_workspace:
         return RedirectResponse('/workspace?workspace_warning=Open+a+workspace+before+using+Datasets+Analysis.', status_code=status.HTTP_303_SEE_OTHER)
+    # The Adaptive Filters are shared by every user of the workspace and restored in every session.
+    saved_selection = datasets_analysis_saved_selection()
+    opened = {key: value for key, value in (('dataset_id', dataset_id), ('input_kind', input_kind)) if value not in (None, '')}
+    if request.query_params.get('reset') == '1':
+        saved_selection['queries'].pop(str(dataset_id), None)
+        repository.set_workspace_state(DATASETS_ANALYSIS_SELECTION_KEY, json.dumps(saved_selection))
+        # Reset opens the dataset with its default analysis.
+        return RedirectResponse(f'/datasets-analysis?{urlencode({**opened, "load": "1"})}', status_code=status.HTTP_303_SEE_OTHER)
+    if not should_load_analysis(request) and not (set(request.query_params) - {'dataset_id', 'input_kind'}):
+        restored = saved_selection['queries'].get(str(dataset_id or saved_selection.get('dataset_id') or ''))
+        if restored:
+            return RedirectResponse(f'/datasets-analysis?{restored}', status_code=status.HTTP_303_SEE_OTHER)
+        if dataset_id is not None:
+            # Open Dataset shows the analysis at once, without Update Analysis.
+            return RedirectResponse(f'/datasets-analysis?{urlencode({**opened, "load": "1"})}', status_code=status.HTTP_303_SEE_OTHER)
     datasets, ready_datasets, input_kind_options, selected_dataset = build_dataset_view_state(dataset_id, input_kind, CDR_DATASET_KINDS)
     selected_dataset = refresh_selected_dataset_if_stale(selected_dataset)
     selected_dataset = enrich_selected_dataset_for_analysis(selected_dataset)
     analysis, analyses, selected_metrics, filter_options, analysis_error, analysis_loaded = build_datasets_analysis_payload(selected_dataset, request, user.username)
+    if analysis_loaded and selected_dataset and not analysis_error:
+        saved_selection['dataset_id'] = int(selected_dataset['id'])
+        saved_selection['queries'][str(selected_dataset['id'])] = request.url.query
+        repository.set_workspace_state(DATASETS_ANALYSIS_SELECTION_KEY, json.dumps(saved_selection))
 
     return render_template(
         request,
@@ -12095,7 +12373,7 @@ def datasets_analysis(
             'selected_date_to': '' if ignore_event_time_filtering() else request.query_params.get('date_to') or '',
             'selected_aggregation': request.query_params.get('aggregation') or (selected_dataset.get('default_aggregation') if selected_dataset else 'all') or 'all',
             'aggregation_overrides': parse_aggregation_overrides(request.query_params.get('aggregation_overrides') or ''),
-            'selected_cdf_grouping': request.query_params.get('cdf_grouping') or 'all',
+            'selected_cdf_grouping': request.query_params.get('cdf_grouping') or default_cdf_grouping(selected_dataset),
             'cdf_overrides': parse_cdf_overrides(request.query_params.get('cdf_overrides') or ''),
             'filter_options': filter_options,
             'input_kind': input_kind,
@@ -12160,7 +12438,7 @@ def reporting_query_columns(dataset_kind: str, catalog_entries: list[Any], multi
     longer transfers every historical source field just to render its charts.
     """
     requested = {
-        'source_sheet', *MAIN_CDR_FIELDS, 'vendor',
+        'source_sheet', *MAIN_CDR_FIELDS,
         'RAT', 'RAT_A', 'Sample_RAT_A', 'technology_primary',
         'L1_Call_Mode_A', 'L2_Call_Mode_A', 'Session_Type', 'session_type',
         'Type_of_Test', 'Test_Name', 'test_name', 'Test_Type', 'test_type',
@@ -12197,7 +12475,7 @@ def reporting_query_columns(dataset_kind: str, catalog_entries: list[Any], multi
     # their physical dependencies in the compact reporting table so job output
     # matches Interactive Preview and direct rendering.
     derived_dependencies = {
-        'vendorv3': {'vendor'},
+        'vendorv3': {'Operator_Vendor', 'Vendor'},
         'firstltepccarfcn': {'LTE_PCC_EARFCN'},
         'tputabove': {'Mean_Data_Rate', 'Test_Name'},
         'tputbelow': {'Mean_Data_Rate', 'Test_Name'},
@@ -13643,7 +13921,7 @@ def generate_netcheck_cdr_report(
     if report_scope not in {'single', 'multivendor'}:
         raise HTTPException(status_code=400, detail='Choose a valid report scope.')
     if vendor_comparison not in {'operator_vendor', 'vendor_only'}:
-        raise HTTPException(status_code=400, detail='Choose Operator – Vendor or Vendor only.')
+        raise HTTPException(status_code=400, detail='Choose Operator_Vendor or Vendor.')
     multivendor = report_scope == 'multivendor'
     selected = {
         'data': _optional_reporting_datasets(data_dataset_id, 'data'),
@@ -13721,7 +13999,7 @@ def generate_netcheck_cdr_charts(
     if report_scope not in {'single', 'multivendor'}:
         raise HTTPException(status_code=400, detail='Choose a valid report scope.')
     if vendor_comparison not in {'operator_vendor', 'vendor_only'}:
-        raise HTTPException(status_code=400, detail='Choose Operator – Vendor or Vendor only.')
+        raise HTTPException(status_code=400, detail='Choose Operator_Vendor or Vendor.')
     multivendor = report_scope == 'multivendor'
     selected = {
         'data': _optional_reporting_datasets(data_dataset_id, 'data'),
@@ -14593,9 +14871,9 @@ def _scoring_export_job_with_catalogue_defaults(
 @app.get('/scoring', response_class=HTMLResponse)
 def scoring_page(request: Request, user: SessionUser = Depends(current_user)) -> HTMLResponse:
     task_repository = scoring_repository(user)
-    from src.modules.scoring_config import DEFAULT_AGGREGATION_HIERARCHY
+    from src.modules.scoring_config import complete_aggregation_hierarchy
     configuration_error = ''
-    aggregation_hierarchy = list(DEFAULT_AGGREGATION_HIERARCHY)
+    aggregation_hierarchy = complete_aggregation_hierarchy()
     active_profile_id = ''
     active_profile_name = ''
     scoring_profiles: list[dict[str, Any]] = []
@@ -14604,9 +14882,7 @@ def scoring_page(request: Request, user: SessionUser = Depends(current_user)) ->
         scoring_profiles = [{
             'id': profile['id'],
             'name': profile['name'],
-            'aggregation_hierarchy': list(
-                profile['configuration'].get('aggregation_hierarchy') or DEFAULT_AGGREGATION_HIERARCHY,
-            ),
+            'aggregation_hierarchy': complete_aggregation_hierarchy(profile['configuration'].get('aggregation_hierarchy')),
         } for profile in profile_collection['profiles']]
         active_profile_id = profile_collection['active_profile_id']
         active_profile = next(
@@ -14615,7 +14891,7 @@ def scoring_page(request: Request, user: SessionUser = Depends(current_user)) ->
         )
         configuration = active_profile['configuration']
         active_profile_name = active_profile['name']
-        aggregation_hierarchy = list(configuration.get('aggregation_hierarchy') or DEFAULT_AGGREGATION_HIERARCHY)
+        aggregation_hierarchy = complete_aggregation_hierarchy(configuration.get('aggregation_hierarchy'))
     except ValueError as exc:
         configuration_error = str(exc)
     ready_cdrs = [row for row in task_repository.list_datasets()
@@ -14634,6 +14910,8 @@ def scoring_page(request: Request, user: SessionUser = Depends(current_user)) ->
         item = dict(row)
         item['original_name'] = item['file_name']
         item['catalogue'] = dict(catalogues[item['id']])
+        # Scoring filters: Vendor is the vendor alone and Operator_Vendor the operator-specific vendor.
+        item['catalogue']['operator_vendors'] = list(item['catalogue'].get('vendors') or [])
         item['catalogue']['vendors'] = list(item['catalogue'].get('vendors_only') or [])
         item['campaign'] = ', '.join(item['catalogue']['campaigns'])
         item['nr_mode'] = dataset_nr_mode(item['dataset_kind'], item['nr_mode'], item['file_name'])
@@ -16225,7 +16503,7 @@ def analyze_dataset(
 
 
 def dataset_summary_candidates() -> list[dict[str, Any]]:
-    """Ready CDR datasets that Datasets Analysis can summarise, newest first."""
+    """Ready CDR datasets that CDR Analysis can summarise, newest first."""
     return sorted(
         [dataset for dataset in (serialize_dataset_row(row) for row in repository.list_datasets())
          if dataset.get('is_ready') and str(dataset.get('dataset_kind') or '').casefold() in CDR_DATASET_KINDS],
@@ -16233,8 +16511,16 @@ def dataset_summary_candidates() -> list[dict[str, Any]]:
     )
 
 
-def build_dataset_summary_reports(dataset_ids: list[int] | None, username: str) -> tuple[list[dict[str, Any]], list[str]]:
-    """Datasets Analysis export payloads with every KPI and no filters; empty IDs select every dataset."""
+def build_dataset_summary_reports(
+    dataset_ids: list[int] | None, username: str, *, filters: dict[str, list[str]] | None = None,
+    metrics: dict[str, list[str]] | None = None, aggregation: str = 'all', cdf_grouping: str | None = None,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """CDR Analysis export payloads; empty IDs select every dataset.
+
+    ``metrics`` lists the metrics of each CDR type (data, voice, speech); a missing type includes every metric.
+
+    ``filters`` maps analysis dimensions (operator, vendor, city, campaign…) to the values to keep.
+    """
     candidates = dataset_summary_candidates()
     wanted = {int(value) for value in dataset_ids or []}
     selected = [dataset for dataset in candidates if not wanted or int(dataset['id']) in wanted]
@@ -16243,8 +16529,17 @@ def build_dataset_summary_reports(dataset_ids: list[int] | None, username: str) 
     reports, errors = [], []
     for dataset in selected:
         enriched = enrich_selected_dataset_for_analysis(dataset)
-        metrics = list(enriched.get('selectable_metrics') or enriched.get('available_metrics') or [])
-        query = QueryParams([('dataset_id', str(dataset['id'])), ('load', '1'), *[('metric', metric) for metric in metrics]])
+        available = list(enriched.get('selectable_metrics') or enriched.get('available_metrics') or [])
+        wanted_metrics = (metrics or {}).get(str(dataset.get('dataset_kind') or ''))
+        chosen = [metric for metric in available if not wanted_metrics or metric in wanted_metrics]
+        if not chosen:
+            errors.append(f"{dataset['file_name']}: none of the selected metrics is available")
+            continue
+        query = QueryParams([
+            ('dataset_id', str(dataset['id'])), ('load', '1'), ('aggregation', aggregation or 'all'),
+            ('cdf_grouping', cdf_grouping or default_cdf_grouping(enriched)), *[('metric', metric) for metric in chosen],
+            *[(dimension, value) for dimension, values in (filters or {}).items() for value in values],
+        ])
         request = type('SummaryRequest', (), {'query_params': query})()
         analysis, analyses, selected_metrics, _options, error, loaded = build_datasets_analysis_payload(enriched, request, username)
         if not loaded or not analysis or not analyses:
@@ -16262,9 +16557,11 @@ def build_dataset_summary_reports(dataset_ids: list[int] | None, username: str) 
     return reports, errors
 
 
-def write_dataset_summary(dataset_ids: list[int] | None, export_kind: str, destination: Path, username: str) -> tuple[Path, list[dict[str, Any]], list[str]]:
-    """Write the Summary Dataset Analysis as PowerPoint ('powerpoint') or Word ('word')."""
-    reports, errors = build_dataset_summary_reports(dataset_ids, username)
+def write_dataset_summary(
+    dataset_ids: list[int] | None, export_kind: str, destination: Path, username: str, **options: Any,
+) -> tuple[Path, list[dict[str, Any]], list[str]]:
+    """Write the Summary CDR Analysis as PowerPoint ('powerpoint') or Word ('word')."""
+    reports, errors = build_dataset_summary_reports(dataset_ids, username, **options)
     if export_kind == 'word':
         export_dataset_summary_word(destination, reports)
     else:
@@ -16290,7 +16587,7 @@ def export_dataset_summary(
     repository.add_log(user.username, f'export_dataset_summary_{export_kind}', json.dumps({'dataset_ids': dataset_ids, 'file': destination.name}))
     media_type = ('application/vnd.openxmlformats-officedocument.wordprocessingml.document' if export_kind == 'word'
                   else 'application/vnd.openxmlformats-officedocument.presentationml.presentation')
-    return FileResponse(destination, filename=f'{stamp} - Summary Dataset Analysis.{suffix}', media_type=media_type)
+    return FileResponse(destination, filename=f'{stamp} - Summary CDR Analysis.{suffix}', media_type=media_type)
 
 
 @app.post('/dashboard/export/{export_kind}', include_in_schema=False)
@@ -16321,7 +16618,7 @@ def export_report(
     if not selected_dataset or not selected_dataset['is_ready']:
         raise HTTPException(status_code=400, detail='Dataset is not ready for export')
     if selected_dataset.get('dataset_kind') not in CDR_DATASET_KINDS:
-        raise HTTPException(status_code=400, detail='Only NetCheck CDR Data, Voice and Speech datasets can be exported from Datasets Analysis.')
+        raise HTTPException(status_code=400, detail='Only NetCheck CDR Data, Voice and Speech datasets can be exported from CDR Analysis.')
 
     query_items: list[tuple[str, str]] = [
         ('dataset_id', str(dataset_id)),
@@ -16513,6 +16810,21 @@ def workspace_configuration_panel(
     request: Request, user: SessionUser = Depends(config_editor_user),
 ) -> HTMLResponse:
     return render_admin_template(request, user, workspace_config_page=True)
+
+
+@app.post('/workspace-config/cdr-type')
+def save_workspace_cdr_type(
+    request: Request, cdr_type: str = Form(...), user: SessionUser = Depends(config_editor_user),
+) -> Response:
+    if not active_workspace:
+        return render_workspace_config_template(request, user, error='Open a workspace before choosing its CDR type.', status_code=400)
+    try:
+        saved = set_workspace_cdr_type(repository, cdr_type)
+    except ValueError as exc:
+        return render_workspace_config_template(request, user, error=str(exc), status_code=400)
+    repository.add_log(user.username, 'set_workspace_cdr_type', json.dumps({'cdr_type': CDR_TYPES[saved]['label']}))
+    notice = f"This workspace handles {CDR_TYPES[saved]['label']} files."
+    return RedirectResponse(f'/workspace-config?{urlencode({"cdr_type_notice": notice})}', status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post('/workspace-config/main-cities/save')
@@ -18683,6 +18995,8 @@ def update_user_account(
     role: str = Form(...),
     active: str | None = Form(default=None),
     workspace_ids: list[str] = Form(default=[]),
+    group_ids: list[int] = Form(default=[]),
+    groups_submitted: str = Form(default=''),
     edited_field: str = Form(default=''),
     user: SessionUser = Depends(admin_user),
 ) -> Response:
@@ -18698,6 +19012,7 @@ def update_user_account(
             'role': row['role'],
             'active': bool(row['active']),
             'workspace_ids': repository.list_user_workspace_ids(int(row['id'])),
+            'group_ids': [group['id'] for group in repository.list_user_groups() if int(row['id']) in group['member_ids']],
         }
 
     def failure(message: str, status_code: int, row=None) -> Response:
@@ -18739,6 +19054,8 @@ def update_user_account(
         )
         if user.role == 'super-admin':
             repository.set_user_workspace_access(target_user_id, workspace_ids)
+        if groups_submitted == '1':
+            repository.set_user_groups(target_user_id, group_ids)
         invalidate_feature_activation_cache()
         repository.add_log(
             user.username,
@@ -19326,6 +19643,16 @@ templates.env.globals['format_aggregation_overrides'] = format_aggregation_overr
 templates.env.globals['format_cdf_overrides'] = format_cdf_overrides
 templates.env.globals['format_aggregation_label'] = format_aggregation_label
 
+
+def format_two_decimals(value: Any) -> Any:
+    """Measurements in CDR Analysis tables: decimals rounded to two digits, other values unchanged."""
+    if isinstance(value, float) and math.isfinite(value) and not value.is_integer():
+        return f'{value:.2f}'
+    return value
+
+
+templates.env.filters['two_decimals'] = format_two_decimals
+
 # Register the template-driven dashboard workspace after the shared reporting helpers.
 from src.modules.e2e_dashboards import (
     DASHBOARD_CHART_MODEL_CACHE_VERSION,
@@ -19340,11 +19667,12 @@ install_dashboard_routes(sys.modules[__name__])
 from src.modules.network_insights import install_network_insights_routes
 install_network_insights_routes(sys.modules[__name__])
 
-# Non-Qualified Calls is under construction and hidden until it is activated.
+# Non-Qualified Calls is in development and hidden until it is activated; it adds
+# its report to Reporting Jobs.
 from src.modules.non_qualified_calls import install_non_qualified_calls_routes
 install_non_qualified_calls_routes(sys.modules[__name__])
 
-# Reporting schedules jobs that collect Dataset Analysis, Network Insights,
+# Reporting schedules jobs that collect CDR Analysis, Network Insights,
 # Dashboard and Scoring artifacts and email them.
 from src.modules.report_tasks import install_report_task_routes
 install_report_task_routes(sys.modules[__name__])

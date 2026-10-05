@@ -22,12 +22,14 @@
     <div class="collapsible-panel-body">
       <div class="nq-filter-grid" id="nq-filter-grid">
         <label>CDRs<select data-nq-filter="datasets" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="CDRs"></select></label>
-        <label>Service<select data-nq-filter="service" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Service"></select></label>
         <label>Campaign<select data-nq-filter="campaign" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Campaign"></select></label>
         <label>Operator<select data-nq-filter="operator" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Operator"></select></label>
+        <label>Operator_Vendor<select data-nq-filter="operator_vendor" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Operator_Vendor"></select></label>
         <label>Vendor<select data-nq-filter="vendor" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Vendor"></select></label>
         <label>Region<select data-nq-filter="region" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Region"></select></label>
-        <label>City<select data-nq-filter="city" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="City"></select></label>
+        <label>Cluster<select data-nq-filter="cluster" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Cluster"></select></label>
+        <label>City<select data-nq-filter="city" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" data-multiselect-preset-label="Main Cities" aria-label="City"></select></label>
+        <label>Service<select data-nq-filter="service" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Service"></select></label>
         <label>Technology<select data-nq-filter="technology" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Technology"></select></label>
         <label>Test Name<select data-nq-filter="test_name" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Test Name"></select></label>
         <label>Result<select data-nq-filter="result" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Result"></select></label>
@@ -53,6 +55,29 @@
       <div class="nq-kpis" id="nq-kpis"></div>
       <p class="nq-hint">Click any bar to drill down into its calls; click it again to remove that filter.</p>
       <div class="nq-breakdowns" id="nq-breakdowns"></div>
+    </div>
+  </details>
+
+  <details class="panel collapsible-panel nq-progress-panel" open data-panel-state-key="non-qualified-calls:progress">
+    <summary class="collapsible-summary"><div><p class="eyebrow">Follow-up</p><h2>Progress View</h2></div><span class="collapse-chip">Collapse</span></summary>
+    <div class="collapsible-panel-body">
+      <div class="nq-progress-head">
+        <p class="nq-hint">How the filtered calls are being followed up: their distribution, how many were attended, moved between statuses, closed and reopened in each period, the age of open calls and the workload of teams, assignees and users.</p>
+        <label class="nq-page-size">Periods<select id="nq-granularity"><option value="week">Week</option><option value="month" selected>Month</option><option value="quarter">Quarter</option><option value="year">Year</option></select></label>
+      </div>
+      <div class="nq-kpis" id="nq-progress-kpis"></div>
+      <div class="nq-pies" id="nq-pies"></div>
+      <section class="nq-progress-section">
+        <h3 id="nq-timeline-title">Progress per Month</h3>
+        <div class="nq-timeline-chart" id="nq-timeline-chart"></div>
+        <div class="nq-table-wrap"><table class="nq-table nq-stats-table" id="nq-timeline-table"></table></div>
+      </section>
+      <div class="nq-progress-grid">
+        <section class="nq-progress-section"><h3>Age of Open Calls</h3><div id="nq-aging"></div></section>
+        <section class="nq-progress-section"><h3>Team Workload</h3><div class="nq-table-wrap"><table class="nq-table nq-stats-table" id="nq-team-workload"></table></div></section>
+        <section class="nq-progress-section"><h3>Assignee Workload</h3><div class="nq-table-wrap"><table class="nq-table nq-stats-table" id="nq-assignee-workload"></table></div></section>
+        <section class="nq-progress-section"><h3>User Activity</h3><div class="nq-table-wrap"><table class="nq-table nq-stats-table" id="nq-activity"></table></div></section>
+      </div>
     </div>
   </details>
 

@@ -17,8 +17,8 @@ Workspace Management is the first operational module. It controls isolated works
 
 ## Workspace Lifecycle
 
-- Create, open, close, rename, duplicate and delete workspaces.
-- Review workspace size and access.
+- Create, open, close, rename, duplicate and delete workspaces. **Create and open** asks for the name, the **CDR type** (NetCheck CDR by default; Umlaut CDR is coming soon) and, for super-admins, the **Access**, all in one row.
+- Review workspace size, CDR type and access. The workspaces table changes the **CDR Type** of a workspace, and super-admins grant each workspace in its **Access** selector to roles, user groups and users; **✓** saves the row. Admins also grant workspaces in [Admin → Workspace Access](administrator-config.md#workspace-access).
 - Keep databases, uploaded files and generated output isolated.
 - Open a workspace before using Dashboard, Reporting or Chart Builder.
 
@@ -110,10 +110,11 @@ The processor materialises every fixed field even when all its values are empty.
 
 | Field | Stored value / fallback rule |
 | --- | --- |
-| `Operator` | Imports and preserves the source `Operator`, `Operator_A`, `Home_Operator_A` or `Home_Operator` value. Workspace Operator Mappings affect chart presentation and chart-template filters only; Dataset Preview, Dataset Analysis selectors and combined CDR tables remain source-faithful. |
+| `Operator` | Imports and preserves the source `Operator`, `Operator_A`, `Home_Operator_A` or `Home_Operator` value. Workspace Operator Mappings affect chart presentation and chart-template filters only; Dataset Preview, CDR Analysis selectors and combined CDR tables remain source-faithful. |
 | `Subscriber` | Keeps the source `Subscriber` or legacy `Suscriber` value. If the complete field is absent or empty, it copies `Operator`. |
 | `Vendor` | Stores `Operator_Vendor` for operators resolved through a multivendor cell mapping and the canonical `Operator` for all other operators. This is the single official comparison field used by filters, legends and reports. |
-| `Vendor_Only` | Derives from `Vendor` by removing a recognised operator prefix, including configured Vodafone/VF, Three/3/H3G, O2 and EE aliases. |
+| `Operator_Vendor` | The `<Operator>_<Vendor>` identity from the source CDR or the vendor mapping (`<Operator> - All` for operators without a vendor). |
+| `Vendor` | The vendor alone: `Operator_Vendor` without a recognised operator prefix, including configured Vodafone/VF, Three/3/H3G, O2 and EE aliases (`<Operator> - All` for operators without a vendor). |
 | `Campaign` | Keeps the exact source value. Comparisons and chart labels recognise reordered country, year, quarter and SA/NSA tokens and can present `YYYY-Qn`, `YYYY-Qn_SA` or `YYYY-Qn_NSA`. A mode-free equality filter does not merge SA and NSA records. |
 | `Benchmark` | Keeps the source value. If the complete source column is absent or empty, it copies `Campaign`. |
 | `Campaign_Year` | Extracts the first four-digit year from `Campaign`, using `Benchmark` as the per-row fallback. |
@@ -203,7 +204,7 @@ Vendor mapping is required only for Vendor Comparison.
   - Ericsson at either endpoint with a different or missing Vendor at the other returns `<Operator>_Ericsson_Mixed`;
   - every other different or missing combination returns `<Operator>_Non-Ericsson_Mixed`.
 - Operators without a multivendor mapping use their canonical `Operator`. CDRs mapped before this rule keep `Vodafone_Mixed Vendor`, `Vodafone_Other Vendor` or `3_Mixed Vendor` until they are mapped again.
-- `Vendor_Only` removes the recognised operator prefix from a mapped `Vendor`, allowing analytics to count the physical vendors independently of the operator.
+- `Vendor` removes the recognised operator prefix from the mapped `Operator_Vendor`, allowing analytics to count the physical vendors independently of the operator. CDRs processed before these names are migrated once when the workspace opens: the former `Vendor` becomes `Operator_Vendor` and the former `Vendor_Only` becomes `Vendor`.
 
 #### During Upload
 
@@ -218,7 +219,7 @@ Vendor mapping is required only for Vendor Comparison.
 3. Confirm the VFUK and/or 3UK mapping, and optionally the Region and Cluster mappings.
 4. Wait for processing to finish.
 
-Mapping a CDR again replaces its previous mapping; **Clear** is only needed to remove the mappings. A mapping left as "No … mapping" keeps its previous result. Re-mapping only Vendor recalculates it on the stored rows, which is much faster than rebuilding the CDR; Region and Cluster mappings rebuild the CDR from its source file. Mapping stores the vendor name in `Vendor_Only`; operators without an assigned vendor use `Operator - All`. The mapped value is retained in individual and combined CDRs and their dataset exports. Existing processed CDRs receive the new stored identity when mapped again.
+Mapping a CDR again replaces its previous mapping; **Clear** is only needed to remove the mappings. **Clear Mappings** and **Reprocess Datasets** use the same wide dialog, with the CDRs in CDR Data, Voice and Speech panels (and Other Datasets for Reprocess) and **Select All/None** in each panel. A mapping left as "No … mapping" keeps its previous result. Re-mapping only Vendor recalculates it on the stored rows, which is much faster than rebuilding the CDR; Region and Cluster mappings rebuild the CDR from its source file. Mapping stores the `<Operator>_<Vendor>` identity in `Operator_Vendor` and the vendor name in `Vendor`; operators without an assigned vendor use `Operator - All`. The mapped value is retained in individual and combined CDRs and their dataset exports. Existing processed CDRs receive the new stored identity when mapped again.
 
 The detailed GCID formulas and first/last-cell resolution rules are documented in [Technical Considerations](technical-considerations.md#multivendor-calculation-and-remapping).
 
@@ -236,7 +237,7 @@ Preview opens persisted rows in a separate view.
 - `PINNED` marks origin, Main, Derived and Auto-calculated fields that remain available across dataset views. `UN_PINNED` marks source-only fields that are present only when supplied by the selected dataset.
 - Hover over a `Derived`, `Auto-calculated` or `Analysis-derived` badge to see a formatted tooltip with the field's calculation rule. Select the badge to open the complete rule in a floating details panel.
 - Use **Filter Labels** to select one or more labels and show only their columns. **All Labels** restores every column category; this column display filter does not change the dataset rows.
-- Mapping previews highlight `GCID` and vendor fields. Their vendor selector uses `Vendor_Only`; legacy inventories materialize this derived column from mapped Vendor values and workspace operator aliases. Preview column filters also use `Vendor_Only`. Vendor choices list real vendors first, then Mixed, Other and All groups, then operator-only identities labelled **Operator - All**. The derived column is included with dataset rows in applicable workspace transfers and backups.
+- Mapping previews highlight `GCID` and vendor fields. Their vendor selector uses the vendor alone; inventories keep their source columns and derive it from mapped Vendor values and workspace operator aliases. Preview column filters offer **Operator_Vendor** and **Vendor**. Vendor choices list real vendors first, then Mixed, Other and All groups, then operator-only identities labelled **Operator - All**. The derived column is included with dataset rows in applicable workspace transfers and backups.
 
 ### Smart Orchestrator Logs
 

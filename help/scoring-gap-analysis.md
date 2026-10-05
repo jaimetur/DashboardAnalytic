@@ -48,7 +48,7 @@ On first use, the module selects the latest ready CDR of each type for the chose
 ### 3. Set filters, aggregation and reference
 
 1. Restrict **Operators**, **Vendors**, **Regions**, **Cities** or **Campaigns** if needed.
-2. Choose the aggregation levels. **Operator** is always included; additional levels split the results into separate combinations.
+2. Choose the aggregation levels (Operator, Vendor, Region, **Cluster**, City and Campaign, in the order of the methodology). **Operator** is always included; additional levels split the results into separate combinations. Cluster needs CDRs with a `Cluster` column, filled by the source CDR or by a Cluster mapping.
 3. In **GAP reference operator**, select the operator to compare against. The initial reference is **EE**.
 4. Choose the saved **Scoring Methodology** beside Calculate and Recalculate.
 
@@ -73,7 +73,7 @@ Recalculation keeps the job identifier, replaces its results and updates the dis
 
 Select a job in the **Scoring Results** dropdown or the **Scoring Jobs** history. The module loads its saved results and restores its calculation inputs so you can relaunch it.
 
-Job cards show filters, ordered aggregation levels, **GAP Reference** and **Scoring Methodology**. A complete vendor selection appears as **All Vendors**. Hover or click the **CDRs** button to inspect the source files.
+Job cards show filters, ordered aggregation levels, **GAP Reference** and **Scoring Methodology**. The job name lists the date, NR Mode, Regions, **Clusters** (in their own colour), Cities, Operators, Vendors and Campaigns, and the generated PowerPoint is named `yyyymmdd_hhmmss - Scoring & GAP Analysis - <NR Mode> - <Regions> - <Clusters> - <Cities> - <Operators> - <Vendors> - <Campaigns>.pptx`. A complete vendor selection appears as **All Vendors**. Hover or click the **CDRs** button to inspect the source files.
 
 Deleting a job removes its saved results after confirmation; it does not delete its source CDRs. Running work stops at a processing checkpoint or discards its pending result.
 
@@ -104,9 +104,9 @@ The engine pools raw rows before calculating ratios, averages, medians and P90. 
 
 ### Vendor filtering
 
-The Vendor selector filters the physical `Vendor_Only` column using cached per-CDR values. Choices appear in this order: real vendors, Ericsson_Mixed (and the former Mixed Vendor), Non-Ericsson_Mixed (and the former Other Vendor), All Vendor(s), then operators without assigned vendors labelled **Operator - All**.
+The **Operator_Vendor** selector filters the `<Operator>_<Vendor>` identity and the **Vendor** selector the vendor alone, using cached per-CDR values; **Cluster** follows Region and **City** offers **Main Cities** first. Choices appear in this order: real vendors, Ericsson_Mixed (and the former Mixed Vendor), Non-Ericsson_Mixed (and the former Other Vendor), All Vendor(s), then operators without assigned vendors labelled **Operator - All**.
 
-Selecting **Ericsson** and **Huawei** includes only those vendor identities from the selected operators. To include an operator with no assigned vendor, also select its **Operator - All** choice, or leave the Vendor filter unrestricted. Vendor mapping stores the suffix in `Vendor_Only`; legacy operator-only values without it remain supported.
+Selecting **Ericsson** and **Huawei** includes only those vendor identities from the selected operators. To include an operator with no assigned vendor, also select its **Operator - All** choice, or leave the Vendor filter unrestricted. Vendor mapping stores the suffix in `Operator_Vendor` and `Vendor`; legacy operator-only values without it remain supported.
 
 Legacy saved operator-prefixed selections are normalized to vendor names. The **Operator** filter remains independent. When Vendor is an aggregation level, operators without a vendor still display **All** in that level; web and PowerPoint retain the existing comparison and reference behavior.
 

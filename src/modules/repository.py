@@ -20,9 +20,12 @@ from typing import Any, Iterable, Iterator, Literal
 import pandas as pd
 
 from src.modules.auth import hash_password
-from src.modules.column_names import MAIN_CDR_FIELDS, clean_column_name, column_identity, vendor_filter_column, vendor_filter_value, vendor_filter_values, mapped_vendor_only_value
+from src.modules.column_names import (
+    MAIN_CDR_FIELDS, OPERATOR_VENDOR_FIELD, VENDOR_FIELD, clean_column_name, column_identity, mapped_vendor_only_value,
+    operator_vendor_value, vendor_filter_column, vendor_filter_value, vendor_filter_values, vendor_match_values,
+)
 from src.modules.nr_mode import NR_MODE_DATASET_KINDS, infer_nr_mode, normalize_nr_mode
-from src.modules.report_layouts import normalize_catalog_layouts
+from src.modules.report_layouts import normalize_catalog_layouts, rename_template_vendor_fields
 from src.modules.runtime_config import ignore_event_time_filtering
 
 
@@ -630,6 +633,8 @@ class Repository:
             self._migrate_generated_jobs(conn)
             self._cleanup_duplicate_datasets(conn)
             self._migrate_legacy_vendor_mapping_profiles(conn)
+            self._migrate_vendor_field_names(conn)
+            self._refresh_vendor_filter_options(conn)
             conn.execute(
                 """
                 INSERT OR IGNORE INTO dataset_profiles (dataset_id, status, progress, updated_at)
@@ -823,15 +828,54 @@ class Repository:
             row = conn.execute('SELECT workspace_ids_json FROM users WHERE id = ?', (user_id,)).fetchone()
             return self._workspace_ids_from_json(row['workspace_ids_json']) if row else []
 
+    WORKSPACE_ACCESS_RULES_KEY = 'workspace_access_rules_v1'
+
+    def workspace_access_rules(self) -> dict[str, dict[str, list]]:
+        """The roles and user groups that open each workspace, besides the users granted one by one."""
+        try:
+            stored = json.loads(self.get_application_state(self.WORKSPACE_ACCESS_RULES_KEY) or '{}')
+        except (TypeError, ValueError):
+            stored = {}
+        rules: dict[str, dict[str, list]] = {}
+        for workspace_id, rule in (stored.items() if isinstance(stored, dict) else []):
+            rule = rule if isinstance(rule, dict) else {}
+            roles = [str(role) for role in rule.get('roles') or [] if str(role).strip()]
+            groups = [int(group) for group in rule.get('groups') or [] if str(group).isdigit()]
+            if roles or groups:
+                rules[str(workspace_id)] = {'roles': list(dict.fromkeys(roles)), 'groups': list(dict.fromkeys(groups))}
+        return rules
+
+    def set_workspace_access_rule(self, workspace_id: str, roles: Iterable[str], groups: Iterable[int]) -> None:
+        rules = self.workspace_access_rules()
+        rule = {'roles': list(dict.fromkeys(str(role) for role in roles if str(role).strip())),
+                'groups': list(dict.fromkeys(int(group) for group in groups))}
+        if rule['roles'] or rule['groups']:
+            rules[str(workspace_id)] = rule
+        else:
+            rules.pop(str(workspace_id), None)
+        self.set_application_state(self.WORKSPACE_ACCESS_RULES_KEY, json.dumps(rules, sort_keys=True))
+
     def user_has_workspace_access(self, username: str, workspace_id: str) -> bool:
+        """A user opens a workspace granted to them, to their role or to one of their user groups."""
+        rule = self.workspace_access_rules().get(str(workspace_id))
         with self.global_connection() as conn:
             conn.executescript(GLOBAL_SCHEMA)
             self._ensure_user_workspace_columns(conn)
             row = conn.execute(
-                'SELECT workspace_ids_json FROM users WHERE username COLLATE NOCASE = ?',
+                'SELECT id, role, workspace_ids_json FROM users WHERE username COLLATE NOCASE = ?',
                 (username.strip(),),
             ).fetchone()
-        return bool(row) and str(workspace_id) in self._workspace_ids_from_json(row['workspace_ids_json'])
+            if not row:
+                return False
+            if str(workspace_id) in self._workspace_ids_from_json(row['workspace_ids_json']):
+                return True
+            if not rule:
+                return False
+            if str(row['role']) in rule['roles']:
+                return True
+            groups = {int(item['group_id']) for item in conn.execute(
+                'SELECT group_id FROM user_group_members WHERE user_id = ?', (int(row['id']),))}
+        return bool(groups & set(rule['groups']))
 
     def set_user_workspace_access(self, user_id: int, workspace_ids: list[str]) -> None:
         unique_ids = sorted({str(item).strip() for item in workspace_ids if str(item).strip()})
@@ -885,7 +929,7 @@ class Repository:
             conn.execute("ALTER TABLE cdr_catalogues ADD COLUMN campaigns_json TEXT")
         if existing_columns and 'operators_json' not in existing_columns:
             conn.execute("ALTER TABLE cdr_catalogues ADD COLUMN operators_json TEXT")
-        for column in ('vendors_only_json', 'g_level_1_json', 'g_level_2_json'):
+        for column in ('vendors_only_json', 'g_level_1_json', 'g_level_2_json', 'clusters_json'):
             if existing_columns and column not in existing_columns:
                 conn.execute(f"ALTER TABLE cdr_catalogues ADD COLUMN {column} TEXT")
 
@@ -954,6 +998,7 @@ class Repository:
         campaigns: Iterable[str] | None = None, operators: Iterable[str] | None = None,
         vendors_only: Iterable[str] | None = None,
         g_level_1: Iterable[str] | None = None, g_level_2: Iterable[str] | None = None,
+        clusters: Iterable[str] | None = None,
     ) -> None:
         """Persist the lightweight universe catalogues derived from one CDR.
 
@@ -965,11 +1010,12 @@ class Repository:
         operators_json = None if operators is None else normalized(operators)
         g_level_1_json = None if g_level_1 is None else normalized(g_level_1)
         g_level_2_json = None if g_level_2 is None else normalized(g_level_2)
+        clusters_json = None if clusters is None else normalized(clusters)
         with self.connection() as conn:
             conn.execute(
                 """
-                INSERT INTO cdr_catalogues (dataset_id, vendors_json, vendors_only_json, regions_json, cities_json, campaigns_json, operators_json, g_level_1_json, g_level_2_json, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO cdr_catalogues (dataset_id, vendors_json, vendors_only_json, regions_json, cities_json, campaigns_json, operators_json, g_level_1_json, g_level_2_json, clusters_json, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(dataset_id) DO UPDATE SET
                     vendors_json = excluded.vendors_json,
                     vendors_only_json = COALESCE(excluded.vendors_only_json, cdr_catalogues.vendors_only_json),
@@ -979,9 +1025,10 @@ class Repository:
                     operators_json = COALESCE(excluded.operators_json, cdr_catalogues.operators_json),
                     g_level_1_json = COALESCE(excluded.g_level_1_json, cdr_catalogues.g_level_1_json),
                     g_level_2_json = COALESCE(excluded.g_level_2_json, cdr_catalogues.g_level_2_json),
+                    clusters_json = COALESCE(excluded.clusters_json, cdr_catalogues.clusters_json),
                     updated_at = excluded.updated_at
                 """,
-                (dataset_id, normalized(vendors), vendors_only_json, normalized(regions), normalized(cities), campaigns_json, operators_json, g_level_1_json, g_level_2_json, local_now_iso()),
+                (dataset_id, normalized(vendors), vendors_only_json, normalized(regions), normalized(cities), campaigns_json, operators_json, g_level_1_json, g_level_2_json, clusters_json, local_now_iso()),
             )
 
     def missing_cdr_source_level_ids(self, dataset_ids: Iterable[int]) -> list[int]:
@@ -1049,7 +1096,7 @@ class Repository:
         ids = list(dict.fromkeys(int(value) for value in dataset_ids))
         if not ids:
             return {}
-        fields = ('vendors', 'vendors_only', 'regions', 'cities', 'campaigns', 'operators')
+        fields = ('vendors', 'vendors_only', 'regions', 'clusters', 'cities', 'campaigns', 'operators')
         with self.connection() as conn:
             rows = conn.execute(
                 f"SELECT * FROM cdr_catalogues WHERE dataset_id IN ({','.join('?' for _ in ids)})", ids,
@@ -1074,7 +1121,7 @@ class Repository:
                 dataset_ids = [int(row[0]) for row in conn.execute('SELECT dataset_id FROM cdr_catalogues')]
         catalogues = self.cdr_catalogues_by_dataset(dataset_ids)
         return {field: sorted({value for catalogue in catalogues.values() for value in catalogue[field]}, key=str.casefold)
-                for field in ('vendors', 'regions', 'cities', 'campaigns', 'operators')}
+                for field in ('vendors', 'vendors_only', 'regions', 'clusters', 'cities', 'campaigns', 'operators')}
 
     def missing_cdr_vendor_only_ids(self, dataset_ids: Iterable[int]) -> list[int]:
         """Identify CDRs whose Vendor_Only cache has not been populated."""
@@ -1086,6 +1133,26 @@ class Repository:
                 f"SELECT dataset_id FROM cdr_catalogues WHERE vendors_only_json IS NOT NULL AND dataset_id IN ({','.join('?' for _ in ids)})", ids,
             )}
         return [dataset_id for dataset_id in ids if dataset_id not in cached]
+
+    def missing_cdr_cluster_ids(self, dataset_ids: Iterable[int]) -> list[int]:
+        """Identify CDRs whose Cluster catalogue has not been read yet."""
+        ids = list(dict.fromkeys(int(value) for value in dataset_ids))
+        if not ids:
+            return []
+        with self.connection() as conn:
+            cached = {int(row[0]) for row in conn.execute(
+                f"SELECT dataset_id FROM cdr_catalogues WHERE clusters_json IS NOT NULL AND dataset_id IN ({','.join('?' for _ in ids)})", ids,
+            )}
+        return [dataset_id for dataset_id in ids if dataset_id not in cached]
+
+    def set_cdr_catalogue_clusters(self, dataset_id: int, clusters: Iterable[str]) -> None:
+        """Cache the Clusters of one CDR, including an intentionally empty universe."""
+        with self.connection() as conn:
+            conn.execute(
+                'INSERT INTO cdr_catalogues (dataset_id, clusters_json, updated_at) VALUES (?, ?, ?) '
+                'ON CONFLICT(dataset_id) DO UPDATE SET clusters_json = excluded.clusters_json, updated_at = excluded.updated_at',
+                (dataset_id, self._catalogue_json(clusters), local_now_iso()),
+            )
 
     def set_cdr_catalogue_vendor_only(self, dataset_id: int, vendors: Iterable[str]) -> None:
         """Cache Vendor_Only independently, including an intentionally empty universe."""
@@ -1164,6 +1231,115 @@ class Repository:
                     "UPDATE dataset_profiles SET vendor_mapping_applied = 1 WHERE dataset_id = ?",
                     (dataset_id,),
                 )
+
+    VENDOR_FIELDS_MIGRATION_KEY = 'cdr_vendor_fields_operator_vendor_v1'
+
+    def _migrate_vendor_field_names(self, conn: sqlite3.Connection) -> None:
+        """Rename the CDR Vendor to Operator_Vendor and Vendor_Only to Vendor, once per workspace.
+
+        Operators without a vendor, stored as their Operator name, become
+        "<Operator> - All" in Operator_Vendor as in Vendor. Vendor inventories
+        keep their source columns.
+        """
+        if conn.execute('SELECT 1 FROM workspace_state WHERE key = ?', (self.VENDOR_FIELDS_MIGRATION_KEY,)).fetchone():
+            return
+        dataset_ids = [int(row['dataset_id']) for row in conn.execute(
+            "SELECT dataset_id FROM dataset_profiles WHERE dataset_kind IN ('data', 'voice', 'speech')"
+        ).fetchall()]
+        tables = [self.dataset_rows_table_name(dataset_id) for dataset_id in dataset_ids]
+        tables += [self.reporting_rows_table_name(kind) for kind in ('data', 'voice', 'speech')]
+        for table in tables:
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)).fetchone():
+                self._rename_vendor_fields(conn, table)
+        if dataset_ids:
+            marks = ', '.join('?' for _ in dataset_ids)
+            # Catalogues, cached selections and analyses are rebuilt from the renamed fields.
+            conn.execute(f'DELETE FROM cdr_catalogues WHERE dataset_id IN ({marks})', dataset_ids)
+            conn.execute(f'UPDATE dataset_profiles SET updated_at = ? WHERE dataset_id IN ({marks})', [local_now_iso(), *dataset_ids])
+            conn.execute('DELETE FROM dashboard_filter_selections')
+        conn.execute('INSERT OR REPLACE INTO workspace_state (key, value) VALUES (?, ?)', (self.VENDOR_FIELDS_MIGRATION_KEY, '1'))
+
+    VENDOR_FILTER_OPTIONS_MIGRATION_KEY = 'dataset_filter_options_vendor_fields_v1'
+
+    def _refresh_vendor_filter_options(self, conn: sqlite3.Connection) -> None:
+        """Rebuild the stored Operator_Vendor, Vendor and Cluster filter values of processed CDRs, once per workspace.
+
+        Profiles keep the filter values found while processing, so the values
+        stored before the vendor fields were renamed still list the composite
+        under Vendor and have neither Operator_Vendor nor Cluster.
+        """
+        if conn.execute('SELECT 1 FROM workspace_state WHERE key = ?', (self.VENDOR_FILTER_OPTIONS_MIGRATION_KEY,)).fetchone():
+            return
+        profiles = conn.execute(
+            "SELECT dataset_id, filter_options_json FROM dataset_profiles WHERE dataset_kind IN ('data', 'voice', 'speech')"
+        ).fetchall()
+        for profile in profiles:
+            table = self.dataset_rows_table_name(int(profile['dataset_id']))
+            if not conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)).fetchone():
+                continue
+            try:
+                stored = json.loads(profile['filter_options_json'] or '{}')
+            except (TypeError, json.JSONDecodeError):
+                stored = {}
+            if not isinstance(stored, dict) or not stored:
+                continue
+            quoted_table = self._quote_identifier(table)
+            columns = {str(row['name']).lower(): str(row['name']) for row in conn.execute(f'PRAGMA table_info({quoted_table})')}
+            fresh = {}
+            for dimension in ('operator_vendor', 'vendor', 'cluster'):
+                column = columns.get(dimension)
+                if not column:
+                    continue
+                value = f'TRIM(CAST({self._quote_identifier(column)} AS TEXT))'
+                fresh[dimension] = [str(row[0]) for row in conn.execute(
+                    f"SELECT DISTINCT {value} FROM {quoted_table} WHERE {value} <> '' ORDER BY LOWER({value})"
+                )]
+            # Operator_Vendor goes before Vendor and Cluster after Region, as in the filter panels.
+            order: list[str] = []
+            for key in stored:
+                if key == 'vendor':
+                    order += ['operator_vendor', 'vendor']
+                elif key not in fresh and key not in {'operator_vendor', 'cluster', 'vendor_only'}:
+                    order.append(key)
+                    if key == 'region':
+                        order.append('cluster')
+            order += [key for key in fresh if key not in order]
+            options = {key: values for key in order if (values := fresh[key] if key in fresh else stored.get(key))}
+            conn.execute(
+                'UPDATE dataset_profiles SET filter_options_json = ?, available_aggregations_json = ? WHERE dataset_id = ?',
+                (json.dumps(options), json.dumps([key for key, values in options.items() if len(values) > 1]), profile['dataset_id']),
+            )
+        conn.execute('INSERT OR REPLACE INTO workspace_state (key, value) VALUES (?, ?)', (self.VENDOR_FILTER_OPTIONS_MIGRATION_KEY, '1'))
+
+    def _rename_vendor_fields(self, conn: sqlite3.Connection, table: str) -> None:
+        quoted_table = self._quote_identifier(table)
+        lookup = {column_identity(row['name']): str(row['name'])
+                  for row in conn.execute(f'PRAGMA table_info({quoted_table})').fetchall()}
+        if 'operatorvendor' in lookup:
+            return
+        vendor, vendor_only, operator = lookup.get('vendor'), lookup.get('vendoronly'), lookup.get('operator')
+        if not vendor:
+            return
+        quote = self._quote_identifier
+        stale_index = self._index_name(table, 'vendor', 'norm')
+        conn.execute(f'DROP INDEX IF EXISTS {quote(stale_index)}')
+        conn.execute(f'ALTER TABLE {quoted_table} RENAME COLUMN {quote(vendor)} TO {quote(OPERATOR_VENDOR_FIELD)}')
+        if vendor_only:
+            conn.execute(f'ALTER TABLE {quoted_table} RENAME COLUMN {quote(vendor_only)} TO {quote(VENDOR_FIELD)}')
+        else:
+            conn.create_function('migrated_vendor', 2, lambda value, op: mapped_vendor_only_value(
+                operator_vendor_value(value, op), op), deterministic=True)
+            conn.execute(f'ALTER TABLE {quoted_table} ADD COLUMN {quote(VENDOR_FIELD)} TEXT')
+            operator_expression = quote(operator) if operator else "''"
+            conn.execute(f'UPDATE {quoted_table} SET {quote(VENDOR_FIELD)} = migrated_vendor({quote(OPERATOR_VENDOR_FIELD)}, {operator_expression})')
+        if operator:
+            composite, op = quote(OPERATOR_VENDOR_FIELD), quote(operator)
+            conn.execute(
+                f"UPDATE {quoted_table} SET {composite} = TRIM(CAST({op} AS TEXT)) || ' - All' "
+                f"WHERE TRIM(COALESCE(CAST({op} AS TEXT), '')) <> '' AND ("
+                f"TRIM(COALESCE(CAST({composite} AS TEXT), '')) = '' "
+                f"OR LOWER(TRIM(CAST({composite} AS TEXT))) = LOWER(TRIM(CAST({op} AS TEXT))))"
+            )
 
     def _migrate_generated_jobs(self, conn: sqlite3.Connection) -> None:
         """Merge the two legacy job tables into the single generated-jobs table."""
@@ -1370,12 +1546,21 @@ class Repository:
             conn.execute("ALTER TABLE report_templates ADD COLUMN updated_at TEXT")
         if 'updated_by' not in columns:
             conn.execute("ALTER TABLE report_templates ADD COLUMN updated_by TEXT NOT NULL DEFAULT ''")
+        # Templates written before Operator_Vendor are converted once per workspace.
+        conn.execute('CREATE TABLE IF NOT EXISTS workspace_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+        rename_vendor_fields = not conn.execute(
+            "SELECT 1 FROM workspace_state WHERE key = 'report_template_vendor_fields_v1'"
+        ).fetchone()
         for row in conn.execute("SELECT technology, name, content FROM report_templates").fetchall():
             content = bytes(row['content'] or b'')
             normalized = normalize_catalog_layouts(content)
+            if rename_vendor_fields:
+                normalized = rename_template_vendor_fields(normalized)
             if normalized != content:
                 conn.execute("UPDATE report_templates SET content = ? WHERE technology = ? AND name = ?",
                              (sqlite3.Binary(normalized), row['technology'], row['name']))
+        if rename_vendor_fields:
+            conn.execute("INSERT OR REPLACE INTO workspace_state (key, value) VALUES ('report_template_vendor_fields_v1', '1')")
         now = local_now_iso()
         if conn.execute("SELECT 1 FROM report_templates WHERE created_at IS NULL LIMIT 1").fetchone():
             conn.execute("UPDATE report_templates SET created_at = ? WHERE created_at IS NULL", (now,))
@@ -1790,8 +1975,9 @@ class Repository:
         selected_indices: list[int] = []
         selected_names: list[str] = []
         for normalized, indices in positions.items():
+            # Vendor and a lower-case vendor helper share one SQLite column; Vendor wins.
             selected_index = (
-                next((index for index in reversed(indices) if original_names[index] == 'vendor'), indices[0])
+                next((index for index in indices if original_names[index] == VENDOR_FIELD), indices[0])
                 if normalized == 'vendor' else indices[0]
             )
             selected_indices.append(selected_index)
@@ -1942,6 +2128,17 @@ class Repository:
                 [(group_id, int(user_id)) for user_id in member_ids if int(user_id) in known],
             )
         return int(group_id)
+
+    def set_user_groups(self, user_id: int, group_ids: Iterable[int]) -> None:
+        """Replace the user groups a user belongs to."""
+        with self.global_connection() as conn:
+            conn.executescript(GLOBAL_SCHEMA)
+            known = {int(row['id']) for row in conn.execute("SELECT id FROM user_groups").fetchall()}
+            conn.execute("DELETE FROM user_group_members WHERE user_id = ?", (int(user_id),))
+            conn.executemany(
+                "INSERT OR IGNORE INTO user_group_members (group_id, user_id) VALUES (?, ?)",
+                [(int(group_id), int(user_id)) for group_id in dict.fromkeys(group_ids) if int(group_id) in known],
+            )
 
     def delete_user_group(self, group_id: int) -> None:
         with self.global_connection() as conn:
@@ -2630,7 +2827,7 @@ class Repository:
         return column_identity(column)
 
     REPORTING_CORE_COLUMNS = (
-        'source_sheet', *MAIN_CDR_FIELDS, 'vendor', 'Sample_RAT_A',
+        'source_sheet', *MAIN_CDR_FIELDS, 'Sample_RAT_A',
         'technology_primary', 'L1_Call_Mode_A', 'L2_Call_Mode_A', 'Session_Type',
         'session_type', 'Type_of_Test', 'Test_Name', 'test_name', 'Test_Type', 'test_type',
     )
@@ -2767,13 +2964,13 @@ class Repository:
             ).fetchone()
             return self._table_columns(conn, table_name) if exists else []
 
-    def ensure_vendor_only_column(self, dataset_id: int) -> None:
-        """Materialize missing Vendor_Only for legacy CDRs and vendor inventories."""
+    def ensure_vendor_column(self, dataset_id: int) -> None:
+        """Materialize a missing Vendor (the vendor alone) for CDRs and vendor inventories."""
         columns = self.list_dataset_row_columns(dataset_id)
         lookup = {column_identity(column): column for column in columns}
-        if 'vendoronly' in lookup:
+        if 'vendor' in lookup:
             return
-        source = next((lookup[key] for key in ('vendor', 'vendorv3', 'operatorvendor', 'opvendor') if key in lookup), None)
+        source = next((lookup[key] for key in ('operatorvendor', 'vendorv3', 'opvendor', 'vendoronly') if key in lookup), None)
         if not source:
             return
         operators = [value for group in self.list_operator_mapping_groups()
@@ -2784,12 +2981,12 @@ class Repository:
         with self.connection() as connection:
             connection.execute('BEGIN IMMEDIATE')
             current_columns = connection.execute(f'PRAGMA table_info({table})').fetchall()
-            if any(column_identity(row['name']) == 'vendoronly' for row in current_columns):
+            if any(column_identity(row['name']) == 'vendor' for row in current_columns):
                 return
             connection.create_function('vendor_filter_identity', 2,
                 lambda value, operator: mapped_vendor_only_value(vendor_filter_value(value, [*operators, operator]), operator or (str(value).strip() if str(value).strip().casefold() in {str(name).casefold() for name in operators} else '')))
-            connection.execute(f'ALTER TABLE {table} ADD COLUMN "Vendor_Only" TEXT')
-            connection.execute(f'UPDATE {table} SET "Vendor_Only" = vendor_filter_identity({self._quote_identifier(source)}, {operator_expression})')
+            connection.execute(f'ALTER TABLE {table} ADD COLUMN "{VENDOR_FIELD}" TEXT')
+            connection.execute(f'UPDATE {table} SET "{VENDOR_FIELD}" = vendor_filter_identity({self._quote_identifier(source)}, {operator_expression})')
             connection.execute('UPDATE dataset_profiles SET column_count = ?, updated_at = ? WHERE dataset_id = ?',
                                (len(columns) + 1, local_now_iso(), int(dataset_id)))
 
@@ -2878,7 +3075,7 @@ class Repository:
         if not selected_columns:
             return pd.DataFrame(), 0, [] if filter_column else None
 
-        mappings = self.list_operator_mappings() if any(vendor_filter_column(key) == 'Vendor_Only' for key in filters) else {}
+        mappings = self.list_operator_mappings() if any(vendor_filter_column(key) in {VENDOR_FIELD, OPERATOR_VENDOR_FIELD} for key in filters) else {}
         operators = mappings
         where_clauses: list[str] = []
         params: list[Any] = []
@@ -2886,7 +3083,7 @@ class Repository:
             resolved = self._resolve_dataset_row_column_name(existing_columns, vendor_filter_column(key))
             if not resolved:
                 continue
-            values = [str(value).strip().lower() for value in (vendor_filter_values(raw_values, operators) if vendor_filter_column(key) == 'Vendor_Only' else raw_values)]
+            values = [str(value).strip().lower() for value in vendor_match_values(key, raw_values, operators)]
             if not values:
                 where_clauses.append('0 = 1')
                 continue
@@ -2926,7 +3123,7 @@ class Repository:
                     resolved = self._resolve_dataset_row_column_name(existing_columns, vendor_filter_column(key))
                     if not resolved or resolved == resolved_filter_column:
                         continue
-                    values = [str(value).strip().lower() for value in (vendor_filter_values(raw_values, operators) if vendor_filter_column(key) == 'Vendor_Only' else raw_values)]
+                    values = [str(value).strip().lower() for value in vendor_match_values(key, raw_values, operators)]
                     if not values:
                         facet_clauses.append('0 = 1')
                         continue
@@ -2951,8 +3148,8 @@ class Repository:
         self, dataset_id: int, columns: list[str], filters: dict[str, list[str]],
         page: int, page_size: int, filter_column: str | None = None,
     ) -> tuple[pd.DataFrame, int, list[str] | None]:
-        if any(vendor_filter_column(field) == 'Vendor_Only' for field in [*filters, filter_column or '']):
-            self.ensure_vendor_only_column(dataset_id)
+        if any(vendor_filter_column(field) == VENDOR_FIELD for field in [*filters, filter_column or '']):
+            self.ensure_vendor_column(dataset_id)
         return self._load_table_preview_page(
             self.dataset_rows_table_name(dataset_id), set(self.list_dataset_row_columns(dataset_id)),
             columns, filters, page, page_size, filter_column,
@@ -3217,7 +3414,7 @@ class Repository:
 
     def _create_dataset_row_indexes(self, conn: sqlite3.Connection, table_name: str, columns: list[str]) -> None:
         indexed_dimensions = [
-            'market', 'period', 'operator', 'vendor', 'test_name', 'region', 'city',
+            'market', 'period', 'operator', 'operator_vendor', 'vendor', 'test_name', 'region', 'city',
             'g_level_2', 'g_level_4', 'campaign', 'rat', 'rat_a', 'sample_rat_a',
             'session_type', 'direction', 'technology_primary', 'source_sheet',
             'call_status', 'status',
@@ -3386,13 +3583,12 @@ class Repository:
         where_clauses: list[str] = []
         params: list[Any] = []
         for key, value in filters.items():
-            resolved_key = self._resolve_dataset_row_column_name(existing_columns, key)
+            resolved_key = self._resolve_dataset_row_column_name(existing_columns, vendor_filter_column(key))
             if key in {'aggregation', 'extra_filters', 'date_from', 'date_to'} or value in (None, '') or not resolved_key:
                 continue
             values = value if isinstance(value, (list, tuple, set)) else [value]
-            if column_identity(resolved_key) == 'vendoronly':
-                mappings = self.list_operator_mappings()
-                values = vendor_filter_values(values, mappings)
+            if vendor_filter_column(key) in {VENDOR_FIELD, OPERATOR_VENDOR_FIELD}:
+                values = vendor_match_values(key, values, self.list_operator_mappings())
             if str(key).casefold() == 'gcid':
                 integer_values: list[int] = []
                 for item in values:

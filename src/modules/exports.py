@@ -703,8 +703,8 @@ def _dataset_summary_cover(presentation: Presentation, title: str, reports: list
         _add_textbox(cover, 0.9, 2.6 + 14 * 0.31, 11.2, 0.26, f"… and {len(reports) - 14} more", size=12, color="#E4EEF1")
 
 
-def export_dataset_summary_powerpoint(destination: Path, reports: list[dict[str, Any]], title: str = "Summary Dataset Analysis") -> Path:
-    """One PowerPoint with the Datasets Analysis export of every selected dataset."""
+def export_dataset_summary_powerpoint(destination: Path, reports: list[dict[str, Any]], title: str = "Summary CDR Analysis") -> Path:
+    """One PowerPoint with the CDR Analysis export of every selected dataset."""
     presentation = _init_presentation()
     _dataset_summary_cover(presentation, title, reports)
     for report in reports:
@@ -713,7 +713,7 @@ def export_dataset_summary_powerpoint(destination: Path, reports: list[dict[str,
     return destination
 
 
-def export_dataset_summary_word(destination: Path, reports: list[dict[str, Any]], title: str = "Summary Dataset Analysis") -> Path:
+def export_dataset_summary_word(destination: Path, reports: list[dict[str, Any]], title: str = "Summary CDR Analysis") -> Path:
     """One Word document with each dataset's global KPIs, metric KPIs, percentiles and charts."""
     from docx.shared import Inches as DocxInches
 

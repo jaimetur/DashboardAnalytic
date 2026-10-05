@@ -14,6 +14,7 @@ Administrator Config centralises user, portability, database and dataset adminis
 | Create user and Users | [Open section](#create-user-and-users) |
 | User Groups | [Open section](#user-groups) |
 | Features Activation | [Open section](#features-activation) |
+| Workspace Access | [Open section](#workspace-access) |
 | Import / Export / Transfer | [Open section](#import-export-transfer) |
 | Database Management | [Open section](#database-management) |
 | Datasets Management | [Open section](#datasets-management) |
@@ -44,15 +45,15 @@ Administrators can:
 - manage workspace access where authorised;
 - delete eligible accounts.
 
-Only a super-admin can change workspace access. Leave a password field empty when an edit should preserve the current password. **Reset password** restores `super123`, `admin123` or `demo123` for the three bootstrap names and uses `Ericsson123` for another account; the dialog displays the resulting password so it can be changed or communicated securely.
+The **Groups** column chooses the user groups each account belongs to (the same membership edited in [User Groups](#user-groups)). The **Workspaces** column lists the workspaces granted to the account under **User**, followed, read-only, by the workspaces it opens through its user groups (**Groups**, with the group names) and through its role (**Role**). Only a super-admin can change the workspaces of an account here; admins grant the workspaces they manage in [Workspace Access](#workspace-access). Leave a password field empty when an edit should preserve the current password. **Reset password** restores `super123`, `admin123` or `demo123` for the three bootstrap names and uses `Ericsson123` for another account; the dialog displays the resulting password so it can be changed or communicated securely.
 
 ## User Groups
 
-**User Groups** creates custom groups of users for Features Activation. Admins and super-admins create a group with a name, an optional description and its members, then edit or delete it from the same table. Deleting a group or a user keeps every other account and group unchanged. Groups and their members are stored in the application database (`User Groups` and `User Group Members` tables), so configuration exports, transfers and backups include them.
+**User Groups** creates custom groups of users for Features Activation and Workspace Access. Admins and super-admins create a group with a name, an optional description and its members, then edit or delete it from the same table. Deleting a group or a user keeps every other account and group unchanged. Groups and their members are stored in the application database (`User Groups` and `User Group Members` tables), so configuration exports, transfers and backups include them.
 
 ## Features Activation
 
-**Features Activation**, visible to admins and super-admins, lists the main modules in the order of the main tabs: Workspace, Datasets Analysis, Network Insights, E2E Dashboards, Scoring & GAP Analysis, Non-Qualified Calls, Reporting, Reporting (old) and Builders.
+**Features Activation**, visible to admins and super-admins, lists the main modules in the order of the main tabs: Workspace, CDR Analysis, Network Insights, E2E Dashboards, Scoring & GAP Analysis, Non-Qualified Calls, Reporting, Reporting (old) and Builders.
 
 Each feature has three settings:
 
@@ -64,12 +65,16 @@ Each feature has three settings:
 
 An account matching both lists loses the feature: Forbidden always wins. For example, set **By default: Nobody** and allow the `admin` role, or keep **All users** and forbid one user group. Each list combines Roles, Groups and Users in one selector with a filter; the selector summarises the selection, such as `1 role · 2 users`.
 
-A feature that is not active for a user disappears from the main tabs and the Modules menu, and its pages and API answer 403. Workspace switching, dataset uploads and processing remain available everywhere. By default every module is active for all users except Non-Qualified Calls (in development, Nobody), Reporting (Nobody, allowed for super-admins) and Reporting (old) (Nobody, allowed for super-admins and EJAITUR). The settings are stored in the application database.
+A feature that is not active for a user disappears from the main tabs and the Modules menu, and its pages and API answer 403. Workspace switching, dataset uploads and processing remain available everywhere. By default every module is active for all users except Non-Qualified Calls (in development, Nobody) and Reporting (old) (Nobody, allowed for super-admins and EJAITUR). Reporting is active for all users; settings saved while it was restricted to super-admins by default are opened to everyone once. The settings are stored in the application database.
 
 Reporting Jobs can only include artifacts of the modules active for their author; see [Reporting](reporting.md).
 
 > [!IMPORTANT]
 > **Lower roles never remove features from higher roles.** An admin can grant any feature to super-admins, but cannot remove one from the super-admin role or from a super-admin account — directly, through a group or by setting the default to Nobody. Such a save is rejected and names the features it would remove. The Forbidden lists of admins do not offer super-admin roles or accounts, and Forbidden entries for super-admins set by a super-admin are kept when an admin saves.
+
+## Workspace Access
+
+**Workspace Access**, visible to admins and super-admins, lists the workspaces the current account manages with one **Access** selector each that combines **Roles**, **Groups** and **Users**. An account opens a workspace granted to it, to its role or to one of its user groups; super-admins open every workspace. Users granted here are the same direct grants shown in each account's workspaces and in **Workspace → Access**, where super-admins also choose roles, groups and users when creating or saving a workspace. Saving never removes an admin's own access to the workspaces they manage. Role and group grants are stored in the application database (`application_state`), so configuration exports, transfers and backups include them.
 
 ## Import / Export / Transfer
 
@@ -221,7 +226,7 @@ Saving or deleting a row clears analysis caches so later Dashboard and Reporting
 - Review dataset ID, editable name, stored path, uploader, upload time and last update.
 - Rename a dataset inline; queued and processing rows remain locked until their current work finishes.
 - Preview any Ready dataset in a separate tab.
-- Open Ready Data, Voice or Speech CDRs in Datasets Analysis.
+- Open Ready Data, Voice or Speech CDRs in CDR Analysis.
 - Apply available VFUK/3UK mappings to an eligible CDR or clear its persisted Vendor mapping.
 - Delete a dataset after confirmation whenever it is not processing; stop active processing from Workspace first.
 

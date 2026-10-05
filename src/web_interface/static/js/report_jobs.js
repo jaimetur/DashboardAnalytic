@@ -9,10 +9,12 @@
     if (className) element.className = className;
     return element;
   };
-  const FORMAT_LABELS = {powerpoint: 'PowerPoint', word: 'Word'};
+  const FORMAT_LABELS = {powerpoint: 'PowerPoint', word: 'Word', excel: 'Excel'};
   const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-    const SCORING_FILTERS = [['Operator', 'Operator'], ['Vendor', 'Vendor'], ['Region', 'Region'], ['City', 'City'], ['Campaign', 'Campaign']];
-  const NETWORK_FILTERS = [['operators', 'Operator'], ['vendors', 'Vendor'], ['campaigns', 'Campaign'], ['regions', 'Region'], ['cities', 'City']];
+  const SCORING_FILTERS = [['Operator', 'Operator'], ['Operator_Vendor', 'Operator_Vendor'], ['Vendor', 'Vendor'],
+    ['Region', 'Region'], ['Cluster', 'Cluster'], ['City', 'City'], ['Campaign', 'Campaign']];
+  const NETWORK_FILTERS = [['operators', 'Operator'], ['operator_vendors', 'Operator_Vendor'], ['vendors', 'Vendor'],
+    ['regions', 'Region'], ['clusters', 'Cluster'], ['cities', 'City'], ['campaigns', 'Campaign']];
   const STATUS_LABELS = {queued: 'Queued', running: 'Running', sent: 'Sent', completed: 'Completed', partial: 'Partial', failed: 'Failed'};
 
   let state = {tasks: [], runs: [], can_edit: false};
@@ -45,18 +47,29 @@
 
   // -- reusable pickers ---------------------------------------------------
   // A filterable multi-select dropdown; getValue() returns the checked values.
-  function multiPicker(label, values, selected = [], {allLabel = ''} = {}) {
+  // Only one dropdown is open at a time; a click outside or Escape closes it.
+  // ``preset`` adds a first "Main Cities" choice: with ``dynamic`` it is a
+  // flag read at run time (getPreset()), otherwise it checks those values.
+  function multiPicker(label, values, selected = [], {allLabel = '', preset = null} = {}) {
     const wrapper = node('details', undefined, 'workspace-user-picker rj-multi');
     const summary = node('summary');
-    const caption = node('span');
+    const caption = node('span', '', 'rj-multi-caption');
     summary.append(caption, node('span', '', 'workspace-user-picker-chevron'));
-    const menu = node('div', undefined, 'workspace-user-picker-menu');
+    const menu = node('div', undefined, 'workspace-user-picker-menu rj-multi-menu');
     const search = node('input', undefined, 'workspace-user-picker-search');
     search.type = 'search'; search.placeholder = 'Filter…'; search.setAttribute('aria-label', `Filter ${label}`);
     menu.append(search);
+    let presetBox = null;
+    if (preset) {
+      const row = node('label', undefined, 'rj-multi-option rj-multi-preset');
+      presetBox = node('input'); presetBox.type = 'checkbox'; presetBox.checked = Boolean(preset.checked);
+      row.append(presetBox, node('span', preset.label));
+      row.title = preset.values.length ? preset.values.join(', ') : 'No Main Cities are set in Workspace Config.';
+      menu.append(row);
+    }
     const chosen = new Set(selected.map(String));
     const boxes = values.map((value) => {
-      const row = node('label');
+      const row = node('label', undefined, 'rj-multi-option');
       const box = node('input'); box.type = 'checkbox'; box.value = String(value); box.checked = chosen.has(String(value));
       row.append(box, node('span', String(value)));
       menu.append(row);
@@ -64,19 +77,63 @@
     });
     if (!values.length) menu.append(node('p', 'No values available.', 'table-help'));
     const refresh = () => {
-      const count = boxes.filter((box) => box.checked).length;
-      caption.textContent = `${label}: ${count ? `${count} selected` : (allLabel || 'All')}`;
+      if (presetBox && preset.dynamic) boxes.forEach((box) => { box.disabled = presetBox.checked; });
+      const count = boxes.filter((box) => box.checked && !box.disabled).length;
+      caption.textContent = `${label}: ${presetBox?.checked && preset.dynamic ? preset.label : count ? `${count} selected` : (allLabel || 'All')}`;
+      summary.title = caption.textContent;
     };
+    presetBox?.addEventListener('change', () => {
+      if (!preset.dynamic) {
+        const wanted = new Set(preset.values.map((value) => String(value).toLocaleLowerCase()));
+        boxes.forEach((box) => { box.checked = presetBox.checked && wanted.has(box.value.toLocaleLowerCase()); });
+      }
+      refresh();
+    });
     menu.addEventListener('change', refresh);
     search.addEventListener('input', () => {
       const query = search.value.trim().toLocaleLowerCase();
       boxes.forEach((box) => { box.parentElement.hidden = Boolean(query) && !box.value.toLocaleLowerCase().includes(query); });
     });
+    wrapper.addEventListener('toggle', () => {
+      if (!wrapper.open) return;
+      document.querySelectorAll('details.rj-multi[open]').forEach((other) => { if (other !== wrapper) other.open = false; });
+      search.focus();
+    });
     wrapper.append(summary, menu);
     refresh();
-    wrapper.getValue = () => boxes.filter((box) => box.checked).map((box) => box.value);
+    wrapper.getValue = () => boxes.filter((box) => box.checked && !box.disabled).map((box) => box.value);
+    wrapper.getPreset = () => Boolean(presetBox?.checked);
     return wrapper;
   }
+  document.addEventListener('click', (event) => {
+    document.querySelectorAll('details.rj-multi[open]').forEach((picker) => { if (!picker.contains(event.target)) picker.open = false; });
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') document.querySelectorAll('details.rj-multi[open]').forEach((picker) => { picker.open = false; });
+  });
+  // A row of checkboxes where only one can be checked, such as the CDR Analysis aggregation.
+  function singleChoiceRow(label, choices, value) {
+    const row = node('div', undefined, 'rj-inline rj-single-choice');
+    row.append(node('span', `${label}:`, 'rj-inline-label'));
+    const boxes = Object.entries(choices).map(([key, text]) => {
+      const option = node('label', undefined, 'rj-check');
+      const box = node('input'); box.type = 'checkbox'; box.value = key; box.checked = key === value;
+      box.addEventListener('change', () => {
+        if (!box.checked) { box.checked = true; return; }
+        boxes.forEach((other) => { if (other !== box) other.checked = false; });
+      });
+      option.append(box, node('span', text));
+      row.append(option);
+      return box;
+    });
+    if (!boxes.some((box) => box.checked) && boxes.length) boxes[0].checked = true;
+    row.getValue = () => boxes.find((box) => box.checked)?.value || '';
+    return row;
+  }
+
+  const mainCitiesPreset = (checked = false, dynamic = false) => ({
+    label: dynamic ? 'Main Cities (workspace list at each run)' : 'Main Cities', values: options.main_cities || [], checked, dynamic,
+  });
 
   // Dataset checklist with an "every ready dataset" switch (an empty selection).
   // Artifact cards and entries collapse to keep long jobs readable; the state
@@ -177,16 +234,21 @@
     container.getValue = () => (allBox.checked ? [] : boxes.filter((box) => box.checked).map((box) => Number(box.value)));
   }
 
-  function formatChoices(container, prefix, selected) {
-    container.replaceChildren();
-    options.formats.forEach((format) => {
-      const row = node('label', undefined, 'rj-check');
+  // Output formats as compact chips under the artifact's own checkbox; at least one stays checked.
+  function formatChoices(container, prefix, selected, formats = options.formats) {
+    container.replaceChildren(node('span', 'Format:', 'rj-inline-label'));
+    container.classList.add('rj-formats');
+    const boxes = formats.map((format) => {
+      const row = node('label', undefined, 'rj-check rj-format-chip');
       const box = node('input'); box.type = 'checkbox'; box.value = format; box.checked = selected.includes(format);
       box.dataset.format = prefix;
+      box.addEventListener('change', () => { if (!boxes.some((item) => item.checked)) box.checked = true; });
       row.append(box, node('span', FORMAT_LABELS[format] || format));
       container.append(row);
+      return box;
     });
-    container.getValue = () => [...container.querySelectorAll('input:checked')].map((box) => box.value);
+    if (boxes.length && !boxes.some((box) => box.checked)) boxes[0].checked = true;
+    container.getValue = () => boxes.filter((box) => box.checked).map((box) => box.value);
   }
 
   const select = (choices, value) => {
@@ -311,7 +373,8 @@
       date_from: dateFrom.value || 'Oldest', date_to: dateTo.value || 'Newest',
     });
     const renderFilters = (values, selected) => {
-      pickers = current.fields.map((name) => [name, multiPicker(name === 'Vendor_Only' ? 'Vendor' : name, values[name] || [], selected[name] || [])]);
+      pickers = current.fields.map((name) => [name, multiPicker(name, values[name] || [], selected[name] || [],
+        name === 'City' ? {preset: mainCitiesPreset()} : {})]);
       filters.replaceChildren(...pickers.map(([, picker]) => picker));
     };
     // Filter values are the ones the selected CDRs offer, as in the Dashboard.
@@ -388,15 +451,12 @@
       levels.append(row);
       return box;
     });
-    const mainCities = node('label', undefined, 'rj-check');
-    const mainBox = node('input'); mainBox.type = 'checkbox'; mainBox.checked = Boolean(entry.main_cities);
-    mainCities.append(mainBox, node('span', `Main Cities only (${options.main_cities.length ? options.main_cities.join(', ') : 'none set'})`));
-    const pickers = SCORING_FILTERS.map(([key, text]) => [key, multiPicker(text, options.values[text] || [], entry.context_filters?.[key] || [])]);
+    // Main Cities is the City filter's first choice: the workspace list at each run.
+    const pickers = SCORING_FILTERS.map(([key, text]) => [key, multiPicker(text, options.values[text] || [], entry.context_filters?.[key] || [],
+      key === 'City' ? {preset: mainCitiesPreset(Boolean(entry.main_cities), true)} : {})]);
     const cityPicker = pickers.find(([key]) => key === 'City')[1];
-    const syncCities = () => { cityPicker.hidden = mainBox.checked; };
-    mainBox.addEventListener('change', syncCities); syncCities();
     const filters = node('div', undefined, 'rj-filters');
-    filters.append(...pickers.map(([, picker]) => picker), mainCities);
+    filters.append(...pickers.map(([, picker]) => picker));
     const datasets = node('div', undefined, 'rj-picker');
     const renderDatasets = () => datasetPicker(datasets, options.datasets.filter((item) => item.nr_mode === nrMode.value),
       entry.dataset_ids || [], 'Newest complete set of Data, Voice and Speech CDRs at each run');
@@ -407,10 +467,56 @@
       label: label.value.trim(), nr_mode: nrMode.value, dataset_ids: datasets.getValue(),
       scoring_profile_id: methodology.value, baseline_operator: baseline.value.trim() || 'EE',
       aggregation_levels: levelBoxes.filter((box) => box.checked).map((box) => box.value),
-      main_cities: mainBox.checked,
+      main_cities: cityPicker.getPreset(),
       context_filters: Object.fromEntries(pickers.map(([key, picker]) => [key, picker.getValue()])
-        .filter(([key, values]) => values.length && !(key === 'City' && mainBox.checked))),
+        .filter(([, values]) => values.length)),
     });
+    return card;
+  }
+
+  // A module artifact (for example Non-Qualified Calls): formats, its single
+  // choices (settings) and its multi-value filters.
+  function providerCard(provider, config) {
+    const card = node('section', undefined, 'rj-card');
+    const toggle = node('label', undefined, 'rj-card-toggle');
+    const box = node('input'); box.type = 'checkbox'; box.checked = Boolean(config.enabled);
+    toggle.append(box, node('strong', provider.label));
+    const body = node('div', undefined, 'rj-card-body rj-provider-body');
+    const formats = node('div', undefined, 'rj-formats');
+    formatChoices(formats, `rj-provider-${provider.key}`, config.formats || [provider.formats[0]], provider.formats);
+    const saved = config.options || {};
+    const settings = (provider.settings || []).map((setting) => {
+      const control = select(setting.choices, String(saved[setting.key] ?? setting.default ?? ''));
+      return [setting.key, control, field(setting.label, control)];
+    });
+    const settingsRow = node('div', undefined, 'rj-grid rj-one-row');
+    settingsRow.append(...settings.map(([, , wrapper]) => wrapper));
+    // Values are [value, label] pairs or plain values.
+    const pickers = (provider.filters || []).map(({key, label}) => {
+      const values = (provider.values?.[key] || []).map((item) => (Array.isArray(item) ? item : [item, item]));
+      const picker = multiPicker(label, values.map(([value]) => value), saved.filters?.[key] || [],
+        key === 'city' ? {preset: mainCitiesPreset()} : {});
+      // Show the labels (for example CDR names) while keeping their values.
+      const labels = new Map(values.map(([value, text]) => [String(value), String(text)]));
+      picker.querySelectorAll('.rj-multi-option:not(.rj-multi-preset) span').forEach((span) => {
+        span.textContent = labels.get(span.textContent) ?? span.textContent;
+      });
+      return [key, picker];
+    });
+    const filters = node('div', undefined, 'rj-filters');
+    filters.append(...pickers.map(([, picker]) => picker));
+    body.append(formats, ...(settings.length ? [settingsRow] : []),
+      ...(pickers.length ? [node('strong', 'Filters'), node('p', 'Empty filters include every value.', 'form-note'), filters] : []));
+    const syncBody = () => { body.hidden = !box.checked; };
+    box.addEventListener('change', syncBody); syncBody();
+    card.append(toggle, body);
+    card.getValue = () => [provider.key, {
+      enabled: box.checked, formats: formats.getValue(),
+      options: {
+        ...Object.fromEntries(settings.map(([key, control]) => [key, control.value])),
+        filters: Object.fromEntries(pickers.map(([key, picker]) => [key, picker.getValue()]).filter(([, values]) => values.length)),
+      },
+    }];
     return card;
   }
 
@@ -448,8 +554,9 @@
       row.append(box, node('span', text));
       return row;
     }));
-    const pickers = NETWORK_FILTERS.map(([key, text]) => [key, multiPicker(text, options.values[text] || [], selection[key] || [])]);
-    const filters = node('div', undefined, 'rj-filters');
+    const pickers = NETWORK_FILTERS.map(([key, text]) => [key, multiPicker(text, options.values[text] || [], selection[key] || [],
+      key === 'cities' ? {preset: mainCitiesPreset()} : {})]);
+    const filters = node('div', undefined, 'rj-filters rj-filters-one-row');
     filters.append(...pickers.map(([, picker]) => picker));
     const datasets = node('div', undefined, 'rj-picker');
     const renderDatasets = (selected) => datasetPicker(datasets, options.datasets.filter((item) => item.nr_mode === nrMode.value),
@@ -487,6 +594,23 @@
     $('rj-da-enabled').checked = Boolean(dataset.enabled);
     formatChoices(document.querySelector('[data-rj-formats="rj-da"]'), 'rj-da', dataset.formats || ['powerpoint']);
     datasetPicker($('rj-da-datasets'), options.datasets, dataset.dataset_ids || [], 'Every ready CDR dataset at each run');
+    $('rj-da-aggregation').replaceWith(Object.assign(singleChoiceRow('Aggregation', options.cdr_aggregations || {}, dataset.aggregation || 'all'), {id: 'rj-da-aggregation'}));
+    $('rj-da-cdf').replaceWith(Object.assign(singleChoiceRow('CDF Comparison', options.cdr_cdf_groupings || {}, dataset.cdf_grouping || 'operator'), {id: 'rj-da-cdf'}));
+    // One metric selector per CDR type; every metric is selected by default and selecting all keeps future metrics too.
+    const savedMetrics = dataset.metrics && !Array.isArray(dataset.metrics) ? dataset.metrics : {};
+    $('rj-da-metrics').replaceChildren(...Object.entries(options.cdr_kinds || {}).map(([kind, label]) => {
+      const metrics = (options.cdr_metrics || {})[kind] || [];
+      const picker = multiPicker(`${label} Metrics`, metrics, (savedMetrics[kind] || []).length ? savedMetrics[kind] : metrics);
+      picker.dataset.rjMetrics = kind;
+      return picker;
+    }));
+    const filters = dataset.filters || {};
+    const filterPickers = NETWORK_FILTERS.map(([key, text]) => {
+      const picker = multiPicker(text, options.values[text] || [], filters[key] || [], key === 'cities' ? {preset: mainCitiesPreset()} : {});
+      picker.dataset.rjFilter = key;
+      return picker;
+    });
+    $('rj-da-filters').replaceChildren(...filterPickers);
     // Jobs saved with a single Network Insights selection show it as one entry.
     const networkEntries = Array.isArray(network) ? network : (network.enabled ? [network] : []);
     $('rj-network').replaceChildren(...networkEntries.map(networkEntry));
@@ -497,30 +621,13 @@
     $('rj-dashboards-enabled').checked = (definition.dashboards || []).length > 0;
     $('rj-scoring-enabled').checked = (definition.scoring || []).length > 0;
     // Only the modules the user can use offer artifacts.
-    const labels = {dataset_analysis: 'Datasets Analysis', network_insights: 'Network Insights', dashboards: 'E2E Dashboards', scoring: 'Scoring & GAP Analysis'};
+    const labels = {dataset_analysis: 'CDR Analysis', network_insights: 'Network Insights', dashboards: 'E2E Dashboards', scoring: 'Scoring & GAP Analysis'};
     const unavailable = Object.entries(options.allowed_modules).filter(([, allowed]) => !allowed).map(([module]) => module);
     document.querySelectorAll('[data-rj-module]').forEach((section) => { section.hidden = unavailable.includes(section.dataset.rjModule); });
     $('rj-modules-note').hidden = !unavailable.length;
     $('rj-modules-note').textContent = `Artifacts of modules not activated for your account are not available: ${unavailable.map((module) => labels[module]).join(', ')}.`;
     const modules = definition.modules || {};
-    $('rj-nqc-placeholder').hidden = options.providers.some((provider) => /non.?qualified/i.test(`${provider.key} ${provider.label}`));
-    $('rj-providers').replaceChildren(...options.providers.map((provider) => {
-      const config = modules[provider.key] || {};
-      const card = node('section', undefined, 'rj-card');
-      const toggle = node('label', undefined, 'rj-card-toggle');
-      const box = node('input'); box.type = 'checkbox'; box.checked = Boolean(config.enabled);
-      toggle.append(box, node('strong', provider.label));
-      const formats = node('div', undefined, 'rj-formats');
-      provider.formats.forEach((format) => {
-        const row = node('label', undefined, 'rj-check');
-        const choice = node('input'); choice.type = 'checkbox'; choice.value = format; choice.checked = (config.formats || [provider.formats[0]]).includes(format);
-        row.append(choice, node('span', FORMAT_LABELS[format] || format));
-        formats.append(row);
-      });
-      card.append(toggle, formats);
-      card.getValue = () => [provider.key, {enabled: box.checked, formats: [...formats.querySelectorAll('input:checked')].map((item) => item.value)}];
-      return card;
-    }));
+    $('rj-providers').replaceChildren(...options.providers.map((provider) => providerCard(provider, modules[provider.key] || {})));
     $('rj-send-email').checked = Boolean(task?.send_email);
     $('rj-recipients').value = (task?.recipients || []).join(', ');
     const schedule = task?.schedule || {mode: 'manual', time: '08:00'};
@@ -564,6 +671,15 @@
         dataset_analysis: {
           enabled: $('rj-da-enabled').checked && options.allowed_modules.dataset_analysis, formats: document.querySelector('[data-rj-formats="rj-da"]').getValue(),
           dataset_ids: $('rj-da-datasets').getValue(),
+          metrics: Object.fromEntries([...$('rj-da-metrics').querySelectorAll('[data-rj-metrics]')].map((picker) => {
+            const kind = picker.dataset.rjMetrics;
+            const chosen = picker.getValue();
+            return [kind, chosen.length === ((options.cdr_metrics || {})[kind] || []).length ? [] : chosen];
+          }).filter(([, chosen]) => chosen.length)),
+          filters: Object.fromEntries([...$('rj-da-filters').querySelectorAll('[data-rj-filter]')]
+            .map((picker) => [picker.dataset.rjFilter, picker.getValue()]).filter(([, values]) => values.length)),
+          aggregation: $('rj-da-aggregation').getValue?.() || 'all',
+          cdf_grouping: $('rj-da-cdf').getValue?.() || 'operator',
         },
         network_insights: options.allowed_modules.network_insights && $('rj-ni-enabled').checked ? [...$('rj-network').children].map((card) => card.getValue()) : [],
         dashboards: $('rj-dashboards-enabled').checked ? [...$('rj-dashboards').children].map((card) => card.getValue()) : [],
@@ -613,7 +729,7 @@
   function renderTasks() {
     const body = $('rj-tasks').tBodies[0];
     if (!state.tasks.length) {
-      emptyRow(body, 'No Reporting Jobs yet.', 7);
+      emptyRow(body, 'No Reporting Jobs yet.', 8);
       return;
     }
     body.replaceChildren(...state.tasks.map((task) => {
@@ -622,10 +738,10 @@
       const artifacts = node('ul', undefined, 'rj-artifacts');
       task.artifacts.forEach((text) => artifacts.append(node('li', text)));
       const last = task.last_run;
-      const lastCell = node('td');
-      lastCell.append(statusBadge(last));
-      if (last) lastCell.append(node('small', ` ${localTime(last.started_at || last.created_at)}`));
-      const actions = node('div', undefined, 'table-actions');
+      const lastCell = node('td', last ? localTime(last.started_at || last.created_at) : '—');
+      const statusCell = node('td');
+      statusCell.append(statusBadge(last));
+      const actions = node('div', undefined, 'table-actions rj-task-actions');
       if (state.can_edit) {
         actions.append(actionButton('▶', 'Run now', async () => {
           await api(`/api/reporting/tasks/${task.id}/run`, {method: 'POST'});
@@ -655,7 +771,7 @@
         node('td', task.name), cellWith(artifacts),
         node('td', task.enabled ? localTime(task.next_run_at) : 'Disabled'), node('td', task.recurrence),
         node('td', task.send_email ? `Yes · ${task.recipients.length} recipient${task.recipients.length === 1 ? '' : 's'}` : 'No'),
-        lastCell, cellWith(actions),
+        lastCell, statusCell, cellWith(actions),
       );
       row.cells[4].title = task.recipients.join(', ');
       return row;

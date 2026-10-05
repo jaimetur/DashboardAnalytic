@@ -37,7 +37,7 @@ After login, the application opens **Help Home** by default.
 - Classify CDR-Data, CDR-Voice, CDR-Speech, Smart Orchestrator Logs and VFUK/3UK mapping files.
 - Combine operator workbook sheets and materialise normalised reporting fields.
 - Preview complete datasets with pagination and Excel-style column filters.
-- Analyse one processed CDR in Datasets Analysis.
+- Analyse one processed CDR in CDR Analysis.
 - Calculate and revisit NetCheck scoring and operator GAP comparisons in Scoring & GAP Analysis, with CSV and PowerPoint exports.
 - Compare RSRP/SINR, map weak-coverage and high-interference areas, and review observed sites, spectrum and network deployment in Network Insights.
 - Explore template-driven Dashboards with synchronized adaptive filters in E2E Dashboards.
@@ -59,13 +59,13 @@ Workspace owns data ingestion and workspace-local storage.
 
 - **Workspaces Management**: create, open, close, rename, duplicate or remove workspaces; review disk usage and access.
 - **Data Ingestion**: upload one or more source files and confirm each detected type.
-- **Queue and Status**: monitor processing, preview data, open Datasets Analysis, map/clear vendors, stop, retry or delete datasets.
+- **Queue and Status**: monitor processing, preview data, open CDR Analysis, map/clear vendors, stop, retry or delete datasets.
 - **Auto-calculated Fields**: create, duplicate, import, export and rematerialize fields for applicable CDR types; follow background progress from Workspace.
 - **Combined CDR tables**: inspect CDR-Data, CDR-Voice and CDR-Speech combined rows, preview them and recreate a table in the background when required.
 
-### Datasets Analysis
+### CDR Analysis
 
-Datasets Analysis analyses one ready Data, Voice or Speech CDR.
+CDR Analysis analyses one ready Data, Voice or Speech CDR.
 
 - **Analysis Controls**: dataset, KPI, adaptive filters and aggregations.
 - **Dataset Summary**: context, sample counts, KPI cards and percentiles.
@@ -86,7 +86,7 @@ See [E2E Dashboards Help](help/e2e-dashboards.md) for the operational workflow a
 
 ### Reporting
 
-Reporting schedules **Reporting Jobs** that collect a Summary Dataset Analysis, a Summary Network Insights, Dashboard PPTs and Scoring PPTs, each configured with the options of its own module, run them once or daily, weekly or monthly and email the artifacts with a description of each one and its filters. SMTP delivery is configured in Application Config → Email Delivery. Reporting starts available to super-admins; activate it for other roles, user groups or users in Admin → Features Activation.
+Reporting schedules **Reporting Jobs** that collect a Summary CDR Analysis, a Summary Network Insights, Dashboard PPTs and Scoring PPTs, each configured with the options of its own module, run them once or daily, weekly or monthly and email the artifacts with a description of each one and its filters. SMTP delivery is configured in Application Config → Email Delivery. Reporting is available to every user; restrict it for roles, user groups or users in Admin → Features Activation.
 
 ### Reporting (old)
 
@@ -164,7 +164,7 @@ See [Product overview](help/overview.md) for a detailed tour of every module and
 2. Upload the required source files in Workspace.
 3. Confirm their types and wait for **Processed**.
 4. Optionally map VFUK/3UK vendor data.
-5. Use Datasets Analysis, E2E Dashboards, Chart Builder or Reporting.
+5. Use CDR Analysis, E2E Dashboards, Chart Builder or Reporting.
 6. Review long-running work in the floating task cards and **Reports and Charts Jobs**.
 7. Check App Logs if an operation fails.
 
@@ -382,7 +382,7 @@ DashboardAnalytic/
 - [Docker deployment](help/docker-deployment.md)
 - [Web Interfaces](help/web-interface.md)
 - [Workspace Management](help/workspace-management.md)
-- [Datasets Analysis](help/datasets-analysis.md)
+- [CDR Analysis](help/datasets-analysis.md)
 - [Network Insights](help/network-insights.md)
 - [Non-Qualified Calls](help/non-qualified-calls.md)
 - [E2E Dashboards](help/e2e-dashboards.md)

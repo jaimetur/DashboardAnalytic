@@ -18,6 +18,7 @@ import src.DashboardAnalytic as app_module
 from src.modules import scoring_jobs
 from src.modules.repository import Repository, local_now_iso
 from tests.scoring_fixtures import scoring_configuration
+from src.modules.scoring_config import complete_aggregation_hierarchy
 
 
 def _login(client) -> None:
@@ -165,7 +166,7 @@ def test_scoring_page_exposes_profile_choices_and_active_profile(scoring_api, mo
     assert profiles == [{
         'id': 'netcheck-2026',
         'name': 'NetCheck 2026',
-        'aggregation_hierarchy': scoring_api['repository'].get_scoring_configuration()['aggregation_hierarchy'],
+        'aggregation_hierarchy': complete_aggregation_hierarchy(scoring_api['repository'].get_scoring_configuration()['aggregation_hierarchy']),
     }]
     assert captured['scoring_active_profile_id'] == 'netcheck-2026'
     assert captured['aggregation_levels'] == profiles[0]['aggregation_hierarchy']

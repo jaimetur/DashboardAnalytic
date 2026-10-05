@@ -61,7 +61,7 @@ The importer preserves source fields and adds normalised fields used across modu
 
 - `Campaign`, preserving source text; filters and chart labels can present recognised values as `YYYY-Qn`, `YYYY-Qn_SA` or `YYYY-Qn_NSA`.
 - `Operator`, preserving source values; configured aliases supply canonical labels for charts and comparisons.
-- `Vendor`, populated by explicit vendor mapping or the operator fallback, and `Vendor_Only`, which removes a recognised operator prefix for real vendors and stores `Operator - All` for operators without an assigned vendor.
+- `Operator_Vendor`, the `<Operator>_<Vendor>` identity populated by explicit vendor mapping, and `Vendor`, which removes a recognised operator prefix for real vendors. Both store `Operator - All` for operators without an assigned vendor. Workspaces created before these names are migrated once at startup (`Vendor` → `Operator_Vendor`, `Vendor_Only` → `Vendor`), together with their stored filter values and Report Templates.
 - `Call Family`, derived from call/session mode.
 - `Test Family`, derived from the available test type/name fields.
 - `Rate Bucket`, calculated for distribution charts from configured bucket limits.
@@ -225,6 +225,10 @@ Charts in the same Reporting Chart Set and CDR type share one cached source fram
 - Vertical and horizontal scrolling affect only the table viewport.
 - Column-filter value lists are calculated from all chart-filtered rows.
 - Counters distinguish total dataset rows, chart-filtered rows, rows after column filters and rows shown on the current page.
+
+## Startup and workspace upgrades
+
+At startup the server opens the active workspace in a background thread. A normal start finishes within a few seconds, as before; when the workspace database needs one-time upgrades after an update (for example the vendor column migration), the server starts answering after three seconds with a page that shows what is being prepared and opens the application as soon as it is ready. Until then every page answers `503` with that page and every API answers `503` with a JSON message; `/api/startup-status` reports the progress.
 
 ## Background jobs and output
 

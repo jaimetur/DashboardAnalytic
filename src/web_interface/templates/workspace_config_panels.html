@@ -116,6 +116,32 @@
     </div>
   </details>
 
+  {% if features['non-qualified-calls'] %}
+  <link rel="stylesheet" href="{{ static_path('css/non_qualified_calls.css') }}?v={{ asset_version('css/non_qualified_calls.css') }}">
+  <details id="nq-teams" class="panel collapsible-panel nq-teams-panel" open data-panel-state-key="workspace-config:nq-teams">
+    <summary class="collapsible-summary">
+      <div><p class="eyebrow">Follow-Up</p><h2>Non-Qualified Calls Teams</h2></div>
+      <span class="collapse-chip">Collapse</span>
+    </summary>
+    <div class="collapsible-panel-body">
+      {% if active_workspace %}
+      <p class="lede">Teams that follow up the Non-Qualified Calls of <strong>"{{ active_workspace.name }}"</strong> and their members. A user can belong to several teams. A call assigned to a team with members can only be assigned to one of them; a team without members accepts every user of the workspace.</p>
+      <div class="nq-teams-editor" data-nq-teams>
+        <p class="form-note">Loading teams…</p>
+      </div>
+      <p class="form-note" data-nq-teams-status role="status" aria-live="polite"></p>
+      <div class="form-actions nq-teams-actions" data-nq-teams-actions hidden>
+        <button type="button" class="nq-secondary-action" data-nq-teams-add>Add Team</button>
+        <button type="button" class="nq-primary-action" data-nq-teams-save>Save Teams</button>
+      </div>
+      {% else %}
+      <p class="form-note">Open a workspace before configuring Non-Qualified Calls Teams.</p>
+      {% endif %}
+    </div>
+  </details>
+  <script defer src="{{ static_path('js/nq_teams.js') }}?v={{ asset_version('js/nq_teams.js') }}"></script>
+  {% endif %}
+
   <details id="operator-vendor-maps" class="panel collapsible-panel operator-vendor-maps-panel" open data-panel-state-key="workspace-config:operator-vendor-maps">
     <summary class="collapsible-summary">
       <div><p class="eyebrow">Workspace normalization</p><h2>Operator &amp; Vendor Maps</h2></div>

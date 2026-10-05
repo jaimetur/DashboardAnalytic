@@ -175,22 +175,22 @@ def test_vendor_filter_selects_all_matching_operator_prefixes_and_outputs_legacy
     ])
     expected_operators = {'3', 'EE', 'VF_UK'}
     source_rows = [
-        {'Operator': '3', 'Vendor': '3_Ericsson', 'Region': 'North', 'City': 'Leeds',
+        {'Operator': '3', 'Operator_Vendor': '3_Ericsson', 'Region': 'North', 'City': 'Leeds',
          'Campaign': '2026-Q2', 'score': 1},
-        {'Operator': 'EE', 'Vendor': 'EE_Ericsson', 'Region': 'North', 'City': 'Leeds',
+        {'Operator': 'EE', 'Operator_Vendor': 'EE_Ericsson', 'Region': 'North', 'City': 'Leeds',
          'Campaign': '2026-Q2', 'score': 1},
-        {'Operator': 'VF_UK', 'Vendor': 'VF_UK_Huawei', 'Region': 'North', 'City': 'Leeds',
+        {'Operator': 'VF_UK', 'Operator_Vendor': 'VF_UK_Huawei', 'Region': 'North', 'City': 'Leeds',
          'Campaign': '2026-Q2', 'score': 1},
-        {'Operator': 'VF_UK', 'Vendor': 'VF_UK', 'Region': 'North', 'City': 'Leeds',
+        {'Operator': 'VF_UK', 'Operator_Vendor': 'VF_UK', 'Region': 'North', 'City': 'Leeds',
          'Campaign': '2026-Q2', 'score': 1},
-        {'Operator': 'O2', 'Vendor': 'O2', 'Region': 'North', 'City': 'Leeds',
+        {'Operator': 'O2', 'Operator_Vendor': 'O2', 'Region': 'North', 'City': 'Leeds',
          'Campaign': '2026-Q2', 'score': 1},
-        {'Operator': 'Nokia Test', 'Vendor': 'Nokia', 'Region': 'North', 'City': 'Leeds',
+        {'Operator': 'Nokia Test', 'Operator_Vendor': 'Nokia', 'Region': 'North', 'City': 'Leeds',
          'Campaign': '2026-Q2', 'score': 1},
     ]
     for dataset_id in scoring_api['complete_dataset_ids']:
         frame = pd.DataFrame(source_rows)
-        frame['Vendor_Only'] = [
+        frame['Vendor'] = [
             'Ericsson', 'Ericsson', 'Huawei', 'Vodafone UK - All', 'O2 - All', 'Nokia',
         ]
         repository.replace_dataset_rows(dataset_id, frame)

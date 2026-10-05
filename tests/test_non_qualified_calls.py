@@ -86,13 +86,14 @@ def test_module_is_hidden_until_activated_and_marks_tabs_in_development(client):
     assert client.get('/api/non-qualified-calls/state').status_code == 403
     page = client.get('/workspace').text
     assert 'href="/non-qualified-calls"' not in page
-    # Modules still in development show a bold asterisk after their tab name.
-    assert '<span class="module-tab-label-mobile">Network</span><strong class="module-tab-dev-mark" title="In development"> *</strong>' in page
+    # Modules still in development show a red NEW label after their tab name, released new modules a green one.
+    assert '<span class="module-tab-label-mobile">Network</span><svg class="module-tab-new module-tab-new-red"' in page
+    assert '<span class="module-tab-label-mobile">Scoring</span><svg class="module-tab-new module-tab-new-blue"' in page
     enable_module()
     page = client.get('/non-qualified-calls')
     assert page.status_code == 200
     assert 'module-tab-non-qualified-calls active' in page.text
-    assert '<span class="module-tab-label-mobile">NQ Calls</span><strong class="module-tab-dev-mark"' in page.text
+    assert '<span class="module-tab-label-mobile">NQ Calls</span><svg class="module-tab-new module-tab-new-red"' in page.text
     assert 'id="nq-table"' in page.text and 'non_qualified_calls.js' in page.text
 
 
@@ -275,3 +276,75 @@ def test_nq_tables_appear_in_database_management(client, tmp_path):
     page = client.get('/admin').text
     for title in ('NQ Calls', 'NQ Call Tracking', 'NQ Call Comments', 'NQ Call History', 'NQ Call Options', 'NQ Call Sources'):
         assert f'>{title}<' in page or f'"{title}"' in page, title
+
+
+def test_teams_members_progress_shared_filters_and_reporting_artifact(client, tmp_path):
+    enable_module()
+    workspace_user('editor', 'user-editor')
+    workspace_user('viewer', 'user-viewer')
+    voice_id = add_cdr(tmp_path, 'NetCheck_UK_CDR_Voice_2026_Q1.xlsx', 'voice', voice_rows())
+    add_cdr(tmp_path, 'NetCheck_UK_CDR_Data_2026_Q1.xlsx', 'data', data_rows())
+    login(client)
+
+    # Teams are edited from Workspace Config with their members; a user can be in several teams.
+    teams = client.get('/api/non-qualified-calls/teams').json()
+    assert teams['can_edit'] and {'editor', 'viewer'} <= set(teams['users'])
+    payload = [{**team, 'previous': team['name'], 'members': ['editor'] if team['name'] == 'Core Network' else []}
+               for team in teams['teams']]
+    payload.append({'name': 'Field Ops', 'color': '#336699', 'previous': '', 'members': ['editor', 'viewer']})
+    saved = client.put('/api/non-qualified-calls/teams', json={'teams': payload})
+    assert saved.status_code == 200, saved.text
+    members = {team['name']: team['members'] for team in saved.json()['teams']}
+    assert members['Core Network'] == ['editor'] and members['Field Ops'] == ['editor', 'viewer']
+    assert client.put('/api/non-qualified-calls/teams', json={'teams': [{'name': 'Ghosts', 'members': ['nobody']}]}).status_code == 400
+    assert 'Non-Qualified Calls Teams' in client.get('/workspace-config').text
+
+    # A call of a team with members only accepts its members as assignee.
+    call = next(item for item in query(client)['calls'] if item['result'] == 'Dropped')
+    url = f"/api/non-qualified-calls/calls/{call['call_key']}"
+    assert client.patch(url, json={'changes': {'team': 'Core Network', 'assignee': 'viewer'}}).status_code == 400
+    assigned = client.patch(url, json={'changes': {'team': 'Field Ops', 'assignee': 'viewer'}}).json()['call']
+    assert assigned['assignee'] == 'viewer'
+    # Moving it to a team the assignee does not belong to clears the assignee.
+    moved = client.patch(url, json={'changes': {'team': 'Core Network'}}).json()['call']
+    assert moved['team'] == 'Core Network' and moved['assignee'] == ''
+    assert client.post(f'{url}/comments', json={'body': 'Checked the drive test.'}).status_code == 200
+
+    # Summary breakdowns include the CDR names.
+    result = query(client)
+    by_cdr = next(item for item in result['breakdowns'] if item['field'] == 'dataset_id')
+    assert by_cdr['label'] == 'By CDR' and {item['label'] for item in by_cdr['items']} == {
+        'NetCheck_UK_CDR_Voice_2026_Q1.xlsx', 'NetCheck_UK_CDR_Data_2026_Q1.xlsx'}
+    assert [item['field'] for item in result['breakdowns']][-5:] == ['vendor', 'region', 'cluster', 'city', 'dataset_id']
+
+    # Progress View: distributions, attended calls and periods.
+    progress = client.post('/api/non-qualified-calls/progress', json={'filters': {}, 'granularity': 'week'})
+    assert progress.status_code == 200, progress.text
+    progress = progress.json()
+    assert progress['summary']['total'] == 4 and progress['summary']['attended'] == 1
+    assert {item['field'] for item in progress['distributions']} >= {'status', 'team', 'assignee'}
+    assert progress['periods'] and sum(period['detected'] for period in progress['periods']) == 4
+
+    # The Filters panel is shared by every user and session of the workspace.
+    filters = {'service': ['voice'], 'city': ['Leeds'], 'open_only': True, 'search': 'drop', 'unknown': ['x']}
+    assert client.put('/api/non-qualified-calls/filters', json={'filters': filters}).status_code == 200
+    login(client, 'viewer', 'viewer123')
+    assert client.get('/api/non-qualified-calls/state').json()['saved_filters'] == {
+        'city': ['Leeds'], 'open_only': True, 'search': 'drop', 'service': ['voice']}
+
+    # Reporting Jobs: the Executive Summary and Progress Status artifact with its filters.
+    from src.modules.report_tasks import ARTIFACT_PROVIDERS
+
+    login(client)
+    provider = ARTIFACT_PROVIDERS['non_qualified_calls']
+    user = core.SessionUser(username='super', role='super-admin')
+    artifacts = provider['generate'](
+        {'formats': ['powerpoint', 'word', 'excel'], 'options': {'filters': {'datasets': [str(voice_id)]}, 'granularity': 'month'}},
+        tmp_path, '20261006_120000', user)
+    assert [item['file_name'] for item in artifacts] == [
+        '20261006_120000 - Non-Qualified Calls - Executive Summary and Progress Status.pptx',
+        '20261006_120000 - Non-Qualified Calls - Executive Summary and Progress Status.docx',
+        '20261006_120000 - Non-Qualified Calls - Executive Summary and Progress Status.xlsx',
+    ]
+    assert all((tmp_path / item['file_name']).stat().st_size > 0 for item in artifacts)
+    assert '2 Non-Qualified Calls' in artifacts[0]['details'][-1]

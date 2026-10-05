@@ -3685,7 +3685,7 @@ def test_chart_builder_uses_dashboard_canvas_model(client) -> None:
             'chart_type': 'Average Vertical Bars',
             'cdr_source': 'CDR-Data',
             'kpi': 'score',
-            'grouping_rows': 'Vendor',
+            'grouping_rows': 'Operator_Vendor',
             'grouping_columns': '',
             'legend': '',
             'legend_position': 'Top',
@@ -4475,7 +4475,7 @@ def test_workspace_management_reports_every_supported_row_status(client, tmp_pat
 
     page = client.get('/workspace')
     header = page.text.split('<table class="workspace-library-table">', 1)[1].split('</thead>', 1)[0]
-    assert header.index('>Workspace</th>') < header.index('Users with access') < header.index('<th>Size</th>')
+    assert header.index('>Workspace</th>') < header.index('>Access</th>') < header.index('>CDR Type</th>') < header.index('<th>Size</th>')
     assert header.index('<th>Cache Size</th>') < header.index('<th>Status</th>') < header.index('<th>Actions</th>')
     assert 'workspace-status-active' in page.text
     first_row = page.text.split('<tr class="workspace-library-row', 1)[1].split('</tr>', 1)[0]
@@ -6169,7 +6169,7 @@ def test_canonical_mapping_renames_update_all_templates_and_dashboards_exactly(c
     assert renamed_entry.chart_title == 'VF_UK and VF_SA by Ericsson'
     assert renamed_entry.filters == (
         'Operator IN (VF_UK, VF_SA); '
-        'Vendor_Only IN (VF_UK_Ericsson, VF_SA_Ericsson, Ericsson)'
+        'Vendor IN (VF_UK_Ericsson, VF_SA_Ericsson, Ericsson)'
     )
     dashboard = json.loads(app_module.repository.get_workspace_state('e2e_dashboards_v2'))['mapping-dashboard']
     assert dashboard['name'] == 'VF_UK vs VF_SA'
@@ -6192,7 +6192,7 @@ def test_canonical_mapping_renames_update_all_templates_and_dashboards_exactly(c
     assert renamed_entry.chart_title == 'VF_UK and VF_SA by ERI'
     assert renamed_entry.filters == (
         'Operator IN (VF_UK, VF_SA); '
-        'Vendor_Only IN (VF_UK_ERI, VF_SA_ERI, ERI)'
+        'Vendor IN (VF_UK_ERI, VF_SA_ERI, ERI)'
     )
     dashboard = json.loads(app_module.repository.get_workspace_state('e2e_dashboards_v2'))['mapping-dashboard']
     assert dashboard['filters']['Vendor'] == ['VF_UK_ERI', 'VF_SA_ERI', 'ERI']
@@ -6817,8 +6817,8 @@ def test_operator_mapping_is_applied_to_charts_but_not_materialized_tables(clien
     assert app_module.combined_cdr_integrity('data')['has_missing_rows'] is False
 
     dataset = app_module.serialize_dataset_row(app_module.repository.get_dataset(1))
-    materialized = app_module.repository.load_dataset_rows(1, ['Operator', 'Subscriber', 'Vendor'], {})
-    combined = app_module.repository.load_reporting_rows('data', [1], ['Operator', 'Subscriber', 'Vendor'])
+    materialized = app_module.repository.load_dataset_rows(1, ['Operator', 'Subscriber', 'Operator_Vendor', 'Vendor'], {})
+    combined = app_module.repository.load_reporting_rows('data', [1], ['Operator', 'Subscriber', 'Operator_Vendor', 'Vendor'])
     chart_frame = app_module._combined_reporting_frame([dataset], 'nsa', [], False)
 
     assert materialized['Operator'].tolist() == ['Vodafone UK', 'O2']
@@ -6827,9 +6827,11 @@ def test_operator_mapping_is_applied_to_charts_but_not_materialized_tables(clien
     assert materialized['Subscriber'].tolist() == ['Vodafone UK', 'O2']
     assert combined['Subscriber'].tolist() == ['Vodafone UK', 'O2']
     assert chart_frame['Subscriber'].tolist() == ['VF', 'O2']
-    assert materialized['Vendor'].tolist() == ['Vodafone UK_Ericsson', 'O2_Huawei']
-    assert combined['Vendor'].tolist() == ['Vodafone UK_Ericsson', 'O2_Huawei']
-    assert chart_frame['Vendor'].tolist() == ['VF_Ericsson', 'O2_Huawei']
+    # The source Vendor is the operator-specific vendor; Vendor keeps the vendor alone.
+    assert materialized['Operator_Vendor'].tolist() == ['Vodafone UK_Ericsson', 'O2_Huawei']
+    assert combined['Operator_Vendor'].tolist() == ['Vodafone UK_Ericsson', 'O2_Huawei']
+    assert chart_frame['Operator_Vendor'].tolist() == ['VF_Ericsson', 'O2_Huawei']
+    assert materialized['Vendor'].tolist() == ['Ericsson', 'Huawei']
     operator_options = next(
         values for field, values in dataset['filter_options'].items()
         if app_module.column_identity(field) == 'operator'
@@ -7143,21 +7145,21 @@ def test_cdr_preview_groups_every_non_source_field_after_source_sheet(tmp_path: 
     assert derived == {'source_sheet', 'market', 'vendor'}
 
 
-def test_cdr_preview_uses_clean_duplicate_names_and_orders_vendor_only_after_vendor(tmp_path: Path) -> None:
+def test_cdr_preview_uses_clean_duplicate_names_and_orders_vendor_after_operator_vendor(tmp_path: Path) -> None:
     import src.DashboardAnalytic as app_module
     from src.modules.column_names import clean_column_name
 
     source = tmp_path / 'source.csv'
     source.write_text('Campaign,Vendor,Cell_Duplicate_2\nUK_Q3_2026,Ericsson,A\n', encoding='utf-8')
     ordered, derived, main, _auto = app_module._preview_column_categories(
-        ['source_sheet', 'Campaign', 'Vendor', 'Vendor_Only', 'Cell_Duplicate_2'], [source],
+        ['source_sheet', 'Campaign', 'Vendor', 'Operator_Vendor', 'Cell_Duplicate_2'], [source],
     )
 
     assert clean_column_name('campaign__2') == 'campaign_Duplicate_2'
     assert 'Cell_Duplicate_2' in ordered
-    assert ordered.index('Vendor_Only') == ordered.index('Vendor') + 1
-    assert 'Vendor_Only' in derived
-    assert {'Campaign', 'Vendor', 'Vendor_Only'} <= main
+    assert ordered.index('Vendor') == ordered.index('Operator_Vendor') + 1
+    assert {'Operator_Vendor', 'Vendor'} <= derived
+    assert {'Campaign', 'Operator_Vendor', 'Vendor'} <= main
 
 
 def test_cdr_preview_badges_follow_physical_source_columns(tmp_path: Path, monkeypatch) -> None:
@@ -7172,8 +7174,7 @@ def test_cdr_preview_badges_follow_physical_source_columns(tmp_path: Path, monke
         encoding='utf-8',
     )
     columns = [
-        'Operator', 'Vendor', 'Campaign', 'Source_File', 'Source_Sheet',
-        'Vendor_Only', 'Campaign_Year',
+        'Operator', 'Operator_Vendor', 'Vendor', 'Campaign', 'Source_File', 'Source_Sheet', 'Campaign_Year',
     ]
 
     _ordered, derived, main, auto = app_module._preview_column_categories(columns, [source])
@@ -7182,11 +7183,12 @@ def test_cdr_preview_badges_follow_physical_source_columns(tmp_path: Path, monke
     )
 
     assert kinds['Operator'] == 'CDR-Main'
-    assert kinds['Vendor'] == 'CDR-Main'
+    # Operator_Vendor and Vendor are both calculated from the source Vendor.
+    assert kinds['Operator_Vendor'] == 'Derived'
+    assert kinds['Vendor'] == 'Derived'
     assert kinds['Campaign'] == 'CDR-Main'
     assert kinds['Source_File'] == 'CDR-Data'
     assert kinds['Source_Sheet'] == 'Derived'
-    assert kinds['Vendor_Only'] == 'Derived'
     assert kinds['Campaign_Year'] == 'Derived'
 
     source_identities = {
@@ -7198,7 +7200,7 @@ def test_cdr_preview_badges_follow_physical_source_columns(tmp_path: Path, monke
     assert all(app_module.column_identity(column) in source_identities for column in cdr_main_columns)
     assert all(
         app_module.column_identity(column) not in source_identities
-        or app_module.column_identity(column) == 'vendoronly'
+        or app_module.column_identity(column) in {'vendor', 'vendoronly'}
         for column in derived_columns
     )
 
@@ -7210,7 +7212,7 @@ def test_cdr_preview_badges_follow_physical_source_columns(tmp_path: Path, monke
         columns, [missing_source], unknown_derived, unknown_main, unknown_auto, 'data',
     )
     assert 'CDR-Main' not in unknown_kinds.values()
-    assert {column for column, kind in unknown_kinds.items() if kind == 'Derived'} == {'Vendor_Only'}
+    assert {column for column, kind in unknown_kinds.items() if kind == 'Derived'} == {'Operator_Vendor', 'Vendor'}
 
 
 def test_cdr_preview_paginates_and_filters_every_column(client, monkeypatch) -> None:
@@ -7291,10 +7293,10 @@ def test_cdr_preview_paginates_and_filters_every_column(client, monkeypatch) -> 
     assert '>PINNED</button>' in default_preview.text
     assert '>UN_PINNED</button>' in default_preview.text
     assert '>CDR-Main</button>' in default_preview.text
+    operator_vendor_badge = default_preview.text.split('data-column-label="Operator_Vendor"', 1)[1][:100]
     vendor_badge = default_preview.text.split('data-column-label="Vendor"', 1)[1][:100]
-    vendor_only_badge = default_preview.text.split('data-column-label="Vendor_Only"', 1)[1][:100]
-    assert 'data-column-kind="CDR-Main"' in vendor_badge
-    assert 'data-column-kind="Derived"' in vendor_only_badge
+    assert 'data-column-kind="Derived"' in operator_vendor_badge
+    assert 'data-column-kind="Derived"' in vendor_badge
     preview_css = app_module.PROJECT_ROOT.joinpath(
         'src/web_interface/static/css/app.css',
     ).read_text(encoding='utf-8')
@@ -7349,7 +7351,7 @@ def test_cdr_preview_paginates_and_filters_every_column(client, monkeypatch) -> 
     assert filtered_response.json()['rows'][0]['operator'] == '3'
     vendor_key = next(key for key in filtered_response.json()['rows'][0] if key.casefold() == 'vendor')
     assert filtered_response.json()['rows'][0][vendor_key] == 'Nokia'
-    assert filtered_response.json()['rows'][0]['Vendor_Only'] == 'Nokia'
+    assert filtered_response.json()['rows'][0]['Operator_Vendor'] == '3_Nokia'
     assert filtered_response.json()['rows'][0]['Suscriber'] == 'Target User'
     assert filtered_response.json()['rows'][0]['Campaign'] == 'UK_Q4_2026'
 
@@ -7358,7 +7360,7 @@ def test_cdr_preview_paginates_and_filters_every_column(client, monkeypatch) -> 
     })
     assert filtered_export.headers['content-type'].startswith('text/csv')
     assert 'attachment; filename="dataset-1-preview.csv"' == filtered_export.headers['content-disposition']
-    assert ',3,Target User,Nokia,Nokia,' in filtered_export.text
+    assert ',3,Target User,3_Nokia,Nokia,' in filtered_export.text
     assert 'Vodafone UK' not in filtered_export.text
 
     empty_selection = client.post('/api/workspace/preview/1/data', json={
@@ -7564,10 +7566,10 @@ def test_workspace_upload_can_map_selected_cdr_vendor_during_processing(client) 
     preview = client.get('/workspace/preview/2')
     assert preview.status_code == 200
     assert '>3_Nokia<' in preview.text
+    operator_vendor_badge = preview.text.split('data-column-label="Operator_Vendor"', 1)[1][:100]
     vendor_badge = preview.text.split('data-column-label="Vendor"', 1)[1][:100]
-    vendor_only_badge = preview.text.split('data-column-label="Vendor_Only"', 1)[1][:100]
+    assert 'data-column-kind="Vendor-Map"' in operator_vendor_badge
     assert 'data-column-kind="Vendor-Map"' in vendor_badge
-    assert 'data-column-kind="Derived"' in vendor_only_badge
 
     import src.DashboardAnalytic as app_module
     dataset = app_module.serialize_dataset_row(app_module.repository.get_dataset(2))
@@ -8104,7 +8106,7 @@ def test_dashboard_explicit_dataset_id_overrides_mismatched_input_kind_filter(cl
     assert 'option value="2" data-dataset-kind="data" selected' in response.text
 
 
-def test_dashboard_data_filters_show_test_name_between_vendor_and_region(client) -> None:
+def test_dashboard_data_filters_follow_source_operator_vendor_location_then_test_name(client) -> None:
     login(client)
 
     client.post(
@@ -8115,10 +8117,9 @@ def test_dashboard_data_filters_show_test_name_between_vendor_and_region(client)
 
     response = client.get("/datasets-analysis?dataset_id=1")
     assert response.status_code == 200
-    vendor_pos = response.text.index("Vendor")
-    test_name_pos = response.text.index("Test Name")
-    region_pos = response.text.index("Region")
-    assert vendor_pos < test_name_pos < region_pos
+    controls = response.text[response.text.index('name="metric"'):]
+    order = [controls.index(f'<select name="{name}"') for name in ('source_sheet', 'operator', 'operator_vendor', 'vendor', 'market', 'region', 'cluster', 'city', 'test_name', 'direction')]
+    assert order == sorted(order)
 
 
 def test_admin_can_update_user_identity_fields(client) -> None:
@@ -8143,7 +8144,7 @@ def test_admin_can_update_user_identity_fields(client) -> None:
     )
     assert update_response.status_code == 200
     assert update_response.json()['user'] == {
-        'id': analyst['id'], 'username': 'analyst-updated', 'role': 'admin', 'active': False, 'workspace_ids': [],
+        'id': analyst['id'], 'username': 'analyst-updated', 'role': 'admin', 'active': False, 'workspace_ids': [], 'group_ids': [],
     }
 
     updated = app_module.repository.get_user("analyst-updated")
@@ -8347,20 +8348,20 @@ def test_top_navigation_shows_document_links(client) -> None:
     assert '>Administrative Modules</h4>' in response.text
     assert '>Documentation</h4>' in response.text
     assert '>Workspace Management</a>' in response.text
-    assert '>Dataset Analysis</a>' in response.text
+    assert '>CDR Analysis</a>' in response.text
     assert '>E2E Dashboard</a>' in response.text
     assert 'E2E Reporting' not in response.text
     assert '>Chart Builder</a>' in response.text
     assert '>Query Builder</a>' in response.text
     assert 'data-module-builders-trigger><svg class="module-tab-icon"' in response.text
-    assert '<span>Builders</span> <span aria-hidden="true">▾</span></button>' in response.text
+    assert '<span>Builders</span> <span aria-hidden="true">▾</span><svg class="module-tab-new module-tab-new-blue"' in response.text
     assert 'popovertarget="module-builders-options"' in response.text
     assert 'data-module-builders-options' in response.text
-    assert '>Admin</a>' in response.text
+    assert '<span>Admin</span></a>' in response.text
     assert '>Administrator Config</a>' in response.text
     assert '>Application Config</a>' in response.text
     assert '>Workspace Config</a>' in response.text
-    assert 'data-module-config-trigger>Config' in response.text
+    assert 'data-module-config-trigger><svg class="module-tab-icon"' in response.text
     assert '>Application Logs</a>' in response.text
     administrative_modules = response.text.split('<nav aria-label="Administrative modules">', 1)[1].split('</nav>', 1)[0]
     assert administrative_modules.index('>Application Logs</a>') < administrative_modules.index('>Application Config</a>')
@@ -8996,7 +8997,7 @@ def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
     assert any(item["relative_path"] == "web-interface.md" for item in help_documents)
     assert any(
         item["relative_path"] == "datasets-analysis.md"
-        and item["label"] == "Datasets Analysis"
+        and item["label"] == "CDR Analysis"
         for item in help_documents
     )
     assert not any(item["relative_path"] == "e2e-reporting.md" for item in help_documents)
@@ -9267,9 +9268,9 @@ def test_dashboard_adaptive_filters_include_city_and_multi_select_fields(client)
     assert response.status_code == 200
     assert 'select name="city" multiple' in response.text
     assert 'select name="region" multiple' in response.text
+    assert 'select name="operator_vendor" multiple' in response.text
     assert 'select name="vendor" multiple' in response.text
-    assert 'select name="vendor_only" multiple' in response.text
-    assert response.text.index('select name="vendor" multiple') < response.text.index('select name="vendor_only" multiple')
+    assert response.text.index('select name="operator_vendor" multiple') < response.text.index('select name="vendor" multiple')
     assert ">Madrid<" in response.text
     assert ">Barcelona<" in response.text
     assert ">Ericsson<" in response.text
@@ -9957,3 +9958,69 @@ def test_dashboard_filter_multiselect_action_toggles_select_all_and_none() -> No
     assert "dynamicAll ? 'All values' : 'Select All / None'" not in script
     assert 'const shouldSelectAll = options.some((option) => !option.selected);' in script
     assert "if (dynamicAll && shouldSelectAll) select.dataset.multiselectDynamicAllSelected = 'true';" in script
+
+
+def test_startup_page_answers_while_the_active_workspace_is_opened(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    assert app_module.STARTUP_READY.is_set()
+    app_module.STARTUP_READY.clear()
+    try:
+        page = client.get('/login')
+        assert page.status_code == 503 and 'Dashboard Analytic is starting' in page.text
+        assert client.get('/api/startup-status').json()['ready'] is False
+        assert client.get('/api/background-tasks').status_code == 503
+    finally:
+        app_module.STARTUP_READY.set()
+    assert client.get('/api/startup-status').json()['ready'] is True
+    assert client.get('/login').status_code == 200
+
+
+def test_workspaces_record_the_cdr_type_they_handle(client) -> None:
+    import src.DashboardAnalytic as app_module
+    from src.modules.cdr_types import workspace_cdr_type
+
+    login(client)
+    page = client.get('/workspace').text
+    assert '<option value="netcheck" selected>NetCheck CDR</option>' in page
+    assert '<option value="umlaut" disabled>Umlaut CDR (coming soon)</option>' in page
+    assert client.post('/workspace/create', data={'name': 'Umlaut trial', 'cdr_type': 'umlaut'}, follow_redirects=False).headers['location'].startswith('/workspace?workspace_error=')
+    assert client.post('/workspace/create', data={'name': 'NetCheck trial'}, follow_redirects=False).status_code == 303
+    assert workspace_cdr_type(app_module.repository) == 'netcheck'
+    config = client.get('/workspace-config').text
+    assert 'action="/workspace-config/cdr-type"' in config and '<option value="netcheck" selected>NetCheck CDR</option>' in config
+    assert client.post('/workspace-config/cdr-type', data={'cdr_type': 'netcheck'}, follow_redirects=False).status_code == 303
+    assert client.post('/workspace-config/cdr-type', data={'cdr_type': 'umlaut'}).status_code == 400
+
+
+def test_workspace_table_changes_the_cdr_type(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    workspace = app_module.active_workspace
+    page = client.get('/workspace').text
+    assert '<th class="workspace-cdr-type-column">CDR Type</th>' in page
+    assert f'name="cdr_type" aria-label="CDR type of {workspace.name}"' in page
+    assert app_module.workspace_cdr_types([workspace]) == {workspace.id: 'netcheck'}
+    response = client.post('/workspace/save', data={'workspace_id': workspace.id, 'name': workspace.name, 'cdr_type': 'umlaut'},
+                           follow_redirects=False)
+    assert 'workspace_error' in response.headers['location']
+
+
+def test_datasets_analysis_filters_are_shared_and_cdf_compares_operators(client) -> None:
+    login(client)
+    csv_content = b"market,period,operator,score\nES,2026-Q1,EE,91\nES,2026-Q1,O2,87\nES,2026-Q1,EE,85\n"
+    client.post("/datasets-analysis/upload", data={"dataset_kinds": "data"},
+                files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")}, follow_redirects=False)
+    page = client.get("/datasets-analysis?dataset_id=1&metric=score&operator=EE&load=1").text
+    assert '<option value="operator" selected' in page
+    assert page.index('<option value="operator"') < page.index('<option value="operator_vendor"')
+    # Another session opens the same selection.
+    restored = client.get("/datasets-analysis", follow_redirects=False)
+    assert restored.status_code == 303 and 'operator=EE' in restored.headers['location']
+    assert client.get("/datasets-analysis?dataset_id=1", follow_redirects=False).status_code == 303
+    # Reset clears it and opens the default analysis; Open Dataset always shows the analysis.
+    reset = client.get("/datasets-analysis?dataset_id=1&reset=1", follow_redirects=False)
+    assert reset.status_code == 303 and reset.headers['location'] == '/datasets-analysis?dataset_id=1&load=1'
+    opened = client.get("/datasets-analysis?dataset_id=1", follow_redirects=False)
+    assert opened.headers['location'] == '/datasets-analysis?dataset_id=1&load=1'

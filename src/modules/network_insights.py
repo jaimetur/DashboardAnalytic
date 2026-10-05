@@ -25,15 +25,15 @@ from uuid import uuid4
 import numpy as np
 import pandas as pd
 
-from src.modules.column_names import column_identity, compact_campaign_value, vendor_filter_values
+from src.modules.column_names import column_identity, compact_campaign_value, operator_vendor_filter_values, sort_vendor_values, vendor_filter_values
 
 
 NETWORK_INSIGHTS_KINDS = ('data', 'voice', 'speech')
 # Bump when the normalised samples or the analysis payload change shape.
-SAMPLES_CACHE_VERSION = 2
-ANALYSIS_CACHE_VERSION = 3
-INVENTORY_CACHE_VERSION = 1
-OBSERVED_CACHE_VERSION = 5
+SAMPLES_CACHE_VERSION = 3
+ANALYSIS_CACHE_VERSION = 4
+INVENTORY_CACHE_VERSION = 3
+OBSERVED_CACHE_VERSION = 6
 # Columns of the Observed Sites/Cells (from CDRs) tables.
 OBSERVED_COLUMNS = (
     'Operator', 'Vendor', 'Region', 'City', 'Cluster', 'Technology', 'Site_ID', 'Cell_ID', 'Band',
@@ -86,13 +86,15 @@ RF_FIELD_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
 }
 DIMENSION_ALIASES = {
     'operator': ('Operator',),
-    'vendor': ('Vendor_Only',),
+    'operator_vendor': ('Operator_Vendor',),
+    'vendor': ('Vendor',),
     'campaign': ('Campaign', 'Period'),
     'region': ('Region', 'G_Level_2'),
+    'cluster': ('Cluster',),
     'city': ('City', 'G_Level_4'),
     'source_sheet': ('source_sheet',),
 }
-GROUPINGS = {'operator': 'Operator', 'vendor': 'Vendor', 'region': 'Region', 'city': 'City', 'kind': 'CDR type', 'technology': 'Technology', 'campaign': 'Campaign'}
+GROUPINGS = {'operator': 'Operator', 'vendor': 'Vendor', 'region': 'Region', 'cluster': 'Cluster', 'city': 'City', 'kind': 'CDR type', 'technology': 'Technology', 'campaign': 'Campaign'}
 TECHNOLOGIES = {'lte': 'LTE', 'nr': 'NR', 'lte_nr': 'LTE+NR'}
 
 # Default classification bands. Thresholds are user-adjustable in the module;
@@ -246,7 +248,7 @@ def normalise_samples(frame: pd.DataFrame, kind: str, columns: dict[str, str]) -
     """Return one tidy row per CDR sample with the logical radio fields."""
     result = pd.DataFrame(index=frame.index)
     result['kind'] = kind.title()
-    for field in ('operator', 'vendor', 'campaign', 'region', 'city'):
+    for field in ('operator', 'operator_vendor', 'vendor', 'campaign', 'region', 'cluster', 'city'):
         source = columns.get(field)
         values = frame[source] if source in frame.columns else pd.Series('', index=frame.index)
         result[field] = values.fillna('').astype(str).str.strip()
@@ -696,10 +698,11 @@ DEPLOYMENT_GROUPINGS = {
 INVENTORY_DATASET_KINDS = {'mapping_vodafone': 'Vodafone', 'mapping_three': 'Three'}
 
 
-INVENTORY_KEY_COLUMNS = ('Operator', 'Vendor', 'Vendor_Only', 'Region', 'City', 'Technology', 'Cluster')
+INVENTORY_KEY_COLUMNS = ('Operator', 'Operator_Vendor', 'Vendor', 'Region', 'Cluster', 'City', 'Technology')
+# Source vendor of an inventory, and the vendor alone stored by earlier versions.
 INVENTORY_DETAIL_ALIASES = {
     'Operator': ('Operator',),
-    'Vendor': ('Vendor', 'OP_Vendor', 'OP/ Vendor'),
+    'Source_Vendor': ('Vendor', 'OP_Vendor', 'OP/ Vendor'),
     'Vendor_Only': ('Vendor_Only',),
     'Region': ('Region', 'UK "Regional"'),
     'City': ('City', 'Beacon2Town', 'Town', 'Major Town and Cities v3/BUA'),
@@ -798,6 +801,40 @@ def inventory_coordinate_expressions(columns, quote) -> list[str]:
     return values
 
 
+OPERATOR_FAMILIES = (
+    {'vf', 'vodafone', 'vodafoneuk'}, {'3', 'three', 'threeuk', 'h3g', 'h3guk'},
+    {'o2', 'o2uk', 'telefonica'}, {'ee', 'everythingeverywhere'},
+)
+
+
+def operator_family(name: object) -> str:
+    """One identity for every spelling of the same operator (Vodafone, VF, Vodafone UK...)."""
+    identity = re.sub(r'[^a-z0-9]+', '', str(name or '').casefold())
+    return next((f'family{index}' for index, family in enumerate(OPERATOR_FAMILIES) if identity in family), identity)
+
+
+SAMPLE_FILTERS = (
+    ('operator', 'operators'), ('operator_vendor', 'operator_vendors'), ('vendor', 'vendors'), ('region', 'regions'),
+    ('cluster', 'clusters'), ('city', 'cities'), ('campaign', 'campaigns'),
+)
+
+
+def filter_samples(samples: pd.DataFrame, request: Any) -> pd.DataFrame:
+    """Samples matching the Common Selection filters."""
+    filtered = samples
+    operators = samples['operator'].dropna().unique() if 'operator' in samples else []
+    for field, key in SAMPLE_FILTERS:
+        values = list(getattr(request, key, None) or [])
+        if field == 'vendor':
+            values = vendor_filter_values(values, operators)
+        elif field == 'operator_vendor':
+            values = operator_vendor_filter_values(values, operators)
+        wanted = {str(value).casefold() for value in values if str(value).strip()}
+        if wanted and field in filtered:
+            filtered = filtered.loc[filtered[field].str.casefold().isin(wanted)]
+    return filtered
+
+
 def inventory_filter_normalizer(repository):
     """Comparable form of an inventory filter value: mapped Operator and Vendor, casefolded."""
     from src.modules.column_names import vendor_filter_value
@@ -812,9 +849,17 @@ def inventory_filter_normalizer(repository):
         text = str(value or '').strip()
         if field == 'Operator':
             text = operator_maps.get(text.casefold(), text)
-        elif field == 'Vendor_Only':
+        elif field == 'Vendor':
             text = vendor_filter_value(text, operator_names)
             text = vendor_maps.get(text.casefold(), text)
+        elif field == 'Operator_Vendor':
+            # CDRs write Vodafone_Ericsson and inventories Vodafone UK_Ericsson:
+            # compare the operator family and the mapped vendor.
+            all_vendors = re.search(r'\s+- All(?: Vendors)?$', text, flags=re.IGNORECASE)
+            base = re.sub(r'\s+- All(?: Vendors)?$', '', text, flags=re.IGNORECASE)
+            prefix, _separator, vendor = base.partition('_')
+            vendor = '' if all_vendors else vendor_maps.get(vendor.strip().casefold(), vendor.strip())
+            return f"{operator_family(operator_maps.get(prefix.strip().casefold(), prefix))}|{vendor.casefold()}"
         return text.casefold()
 
     return filter_value
@@ -902,12 +947,12 @@ def prepare_inventory_query(repository, connection, datasets: list[dict[str, Any
 
         fallback = str(dataset['operator']).replace("'", "''")
         operator = f"inventory_operator({expression(INVENTORY_DETAIL_ALIASES['Operator'])}, '{fallback}')"
-        raw_vendor = expression(INVENTORY_DETAIL_ALIASES['Vendor'])
+        raw_vendor = expression(INVENTORY_DETAIL_ALIASES['Source_Vendor'])
         only = expression(INVENTORY_DETAIL_ALIASES['Vendor_Only'])
         normalized = {
             'Operator': operator,
-            'Vendor': f'inventory_vendor({raw_vendor}, {only}, {operator})',
-            'Vendor_Only': f'inventory_vendor_only({raw_vendor}, {only})',
+            'Operator_Vendor': f'inventory_vendor({raw_vendor}, {only}, {operator})',
+            'Vendor': f'inventory_vendor_only({raw_vendor}, {only})',
             'Region': expression(INVENTORY_DETAIL_ALIASES['Region']),
             'City': expression(INVENTORY_DETAIL_ALIASES['City']),
             'Technology': f"COALESCE(NULLIF(inventory_technology({expression(('Technology', 'RAT'))}), ''), CASE LOWER({expression(('Source_Sheet',))}) WHEN '4g' THEN 'LTE' WHEN '5g' THEN 'NR' ELSE '' END)",
@@ -936,7 +981,8 @@ def prepare_inventory_query(repository, connection, datasets: list[dict[str, Any
     if not apply_filters:
         return 'SELECT * FROM (' + ' UNION ALL '.join(selects) + ')', [], columns
     predicates, parameters = [], []
-    for field, key in [('Operator', 'operators'), ('Vendor_Only', 'vendors'), ('Region', 'regions'), ('City', 'cities')]:
+    for field, key in [('Operator', 'operators'), ('Operator_Vendor', 'operator_vendors'), ('Vendor', 'vendors'),
+                       ('Region', 'regions'), ('Cluster', 'clusters'), ('City', 'cities')]:
         values = list(dict.fromkeys(filter_value(value, field) for value in selection.get(key, []) if str(value).strip()))
         if values:
             predicates.append(f"inventory_filter({quote(field)}, '{field}') IN ({', '.join('?' for _ in values)})")
@@ -1039,9 +1085,11 @@ def install_network_insights_routes(core: Any) -> None:
         technology: str = 'lte'
         group: list[str] | str = Field(default_factory=lambda: ['operator', 'campaign'])
         operators: list[str] = Field(default_factory=list)
+        operator_vendors: list[str] = Field(default_factory=list)
         vendors: list[str] = Field(default_factory=list)
         campaigns: list[str] = Field(default_factory=list)
         regions: list[str] = Field(default_factory=list)
+        clusters: list[str] = Field(default_factory=list)
         cities: list[str] = Field(default_factory=list)
         # LTE thresholds; NR SS-RSRP/SS-SINR have their own.
         coverage_threshold: float = DEFAULT_COVERAGE_THRESHOLD
@@ -1254,9 +1302,10 @@ def install_network_insights_routes(core: Any) -> None:
 
     @app.post('/api/network-insights/filter-options')
     def network_insights_filter_options(request: AnalysisRequest, vendor_only: bool = False, user=Depends(insights_user)):
+        """Filter values of the selected CDRs from their catalogues; vendor_only returns the vendor fields."""
         task_repository = bound_repository()
         available = {row['id']: row for row in ready_cdrs(task_repository)}
-        fields = ('vendor',) if vendor_only else ('operator', 'region', 'city', 'campaign')
+        fields = ('operator_vendor', 'vendor') if vendor_only else ('operator', 'region', 'cluster', 'city', 'campaign')
         values = {field: set() for field in fields}
         mappings = task_repository.chart_mapping_settings()
         selected = {dataset_id: kind for kind in NETWORK_INSIGHTS_KINDS
@@ -1269,11 +1318,17 @@ def install_network_insights_routes(core: Any) -> None:
                 column = columns.get('vendor')
                 vendor_values = task_repository.list_distinct_dataset_row_values(dataset_id, column, limit=None) if column else []
                 task_repository.set_cdr_catalogue_vendor_only(dataset_id, vendor_values)
+        else:
+            for dataset_id in task_repository.missing_cdr_cluster_ids(selected):
+                columns = resolve_source_columns(task_repository.list_dataset_row_columns(dataset_id), selected[dataset_id])
+                column = columns.get('cluster')
+                cluster_values = task_repository.list_distinct_dataset_row_values(dataset_id, column, limit=None) if column else []
+                task_repository.set_cdr_catalogue_clusters(dataset_id, cluster_values)
+        catalogue_keys = {'operator_vendor': 'vendors', 'vendor': 'vendors_only', 'city': 'cities'}
         catalogues = task_repository.cdr_catalogues_by_dataset(selected)
         for catalogue in catalogues.values():
             for field in values:
-                catalogue_key = 'vendors_only' if field == 'vendor' else 'cities' if field == 'city' else field + 's'
-                values[field].update(catalogue.get(catalogue_key, []))
+                values[field].update(catalogue.get(catalogue_keys.get(field, field + 's'), []))
         if values.get('operator'):
             frame = pd.DataFrame({'Operator': sorted(values['operator'])})
             frame = core.apply_operator_mappings(frame, mappings.get('operator_mappings') or {})
@@ -1282,9 +1337,9 @@ def install_network_insights_routes(core: Any) -> None:
             values['operator'] = set(frame['Operator'].dropna().astype(str))
         if 'campaign' in values:
             values['campaign'] = {compact_campaign_value(value) or value for value in values['campaign']}
-        return {'options': {field + 's' if field != 'city' else 'cities': sorted(
-            (value for value in items if str(value).strip()), key=str.casefold,
-        ) for field, items in values.items()}}
+        return {'options': {field + 's' if field != 'city' else 'cities': (
+            sort_vendor_values if field in {'operator_vendor', 'vendor'} else lambda items: sorted(items, key=str.casefold)
+        )([value for value in items if str(value).strip()]) for field, items in values.items()}}
 
     def analysis_key(task_repository, request: AnalysisRequest) -> str:
         """Identity of an analysis: its request and every input it reads."""
@@ -1342,18 +1397,14 @@ def install_network_insights_routes(core: Any) -> None:
             raise HTTPException(400, 'The selected CDRs have no samples.')
         options = {
             'operators': [value for value in dict.fromkeys(samples['operator']) if value],
+            'operator_vendors': sorted({value for value in samples['operator_vendor'] if value}, key=str.casefold),
             'vendors': sorted({value for value in samples['vendor'] if value}, key=str.casefold),
             'regions': sorted({value for value in samples['region'] if value}, key=str.casefold),
+            'clusters': sorted({value for value in samples['cluster'] if value}, key=str.casefold),
             'cities': sorted({value for value in samples['city'] if value}, key=str.casefold),
             'campaigns': sorted({value for value in samples['campaign'] if value}, key=str.casefold),
         }
-        filtered = samples
-        for field, values in (('operator', request.operators), ('vendor', request.vendors), ('region', request.regions), ('city', request.cities), ('campaign', request.campaigns)):
-            if field == 'vendor':
-                values = vendor_filter_values(values, samples['operator'].dropna().unique())
-            wanted = {str(value).casefold() for value in values if str(value).strip()}
-            if wanted:
-                filtered = filtered.loc[filtered[field].str.casefold().isin(wanted)]
+        filtered = filter_samples(samples, request)
         if filtered.empty:
             raise HTTPException(400, 'No samples match the selected filters.')
         filtered = filtered.copy()
@@ -1579,8 +1630,9 @@ def install_network_insights_routes(core: Any) -> None:
         frame = index['frame']
         normalise = inventory_filter_normalizer(task_repository)
         mask = pd.Series(True, index=frame.index)
-        for field, values in (('Operator', request.operators), ('Vendor_Only', request.vendors),
-                              ('Region', request.regions), ('City', request.cities)):
+        for field, values in (('Operator', request.operators), ('Operator_Vendor', request.operator_vendors),
+                              ('Vendor', request.vendors), ('Region', request.regions),
+                              ('Cluster', request.clusters), ('City', request.cities)):
             wanted = {normalise(value, field) for value in values if str(value).strip()}
             if wanted:
                 keys = {value: normalise(value, field) for value in pd.unique(frame[field])}
@@ -1593,20 +1645,13 @@ def install_network_insights_routes(core: Any) -> None:
         """One row per LTE cell (or site without cell identity) observed in the selected CDRs."""
         samples_identity, _selected = samples_key(task_repository, request.datasets)
         selection = {key: value for key, value in request.model_dump().items()
-                     if key in {'operators', 'vendors', 'campaigns', 'regions', 'cities', 'technology'}}
+                     if key in {'operators', 'operator_vendors', 'vendors', 'campaigns', 'regions', 'clusters', 'cities', 'technology'}}
         digest = hashlib.sha256(json.dumps([OBSERVED_CACHE_VERSION, samples_identity, selection,
                                             inventory_polygon_sources(task_repository)], sort_keys=True, default=str).encode()).hexdigest()
 
         def build() -> dict[str, Any]:
             samples = load_samples(task_repository, request.datasets)
-            filtered = samples
-            for field, values in (('operator', request.operators), ('vendor', request.vendors), ('region', request.regions),
-                                  ('city', request.cities), ('campaign', request.campaigns)):
-                if field == 'vendor':
-                    values = vendor_filter_values(values, samples['operator'].dropna().unique())
-                wanted = {str(value).casefold() for value in values if str(value).strip()}
-                if wanted:
-                    filtered = filtered.loc[filtered[field].str.casefold().isin(wanted)]
+            filtered = filter_samples(samples, request)
             columns = list(OBSERVED_COLUMNS)
             if request.technology == 'nr' or filtered.empty:
                 # Cell traces identify LTE cells only.

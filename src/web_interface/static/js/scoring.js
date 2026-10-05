@@ -160,16 +160,19 @@
   } catch {
     scoringConfig = {};
   }
-  const defaultHierarchy = ['Operator', 'Vendor', 'Region', 'City', 'Campaign'];
+  const defaultHierarchy = ['Operator', 'Vendor', 'Region', 'Cluster', 'City', 'Campaign'];
   const catalogueKeyByLevel = new Map([
-    ['Operator', 'operators'], ['Vendor', 'vendors'], ['Region', 'regions'],
+    ['Operator', 'operators'], ['Vendor', 'vendors'], ['Region', 'regions'], ['Cluster', 'clusters'],
     ['City', 'cities'], ['Campaign', 'campaigns'],
   ]);
-  const validHierarchy = hierarchy => Array.isArray(hierarchy)
-    && hierarchy.length === defaultHierarchy.length
-    && new Set(hierarchy).size === defaultHierarchy.length
-    && hierarchy.every(level => catalogueKeyByLevel.has(level))
-    ? hierarchy.map(String) : null;
+  // Hierarchies saved before Cluster existed get it right after Region.
+  const completeHierarchy = hierarchy => (hierarchy.includes('Cluster') ? hierarchy
+    : hierarchy.flatMap(level => (level === 'Region' ? ['Region', 'Cluster'] : [level])));
+  const validHierarchy = hierarchy => {
+    const levels = Array.isArray(hierarchy) ? completeHierarchy(hierarchy.map(String)) : [];
+    return levels.length === defaultHierarchy.length && new Set(levels).size === defaultHierarchy.length
+      && levels.every(level => catalogueKeyByLevel.has(level)) ? levels : null;
+  };
   const scoringProfiles = (Array.isArray(scoringConfig.scoring_profiles) ? scoringConfig.scoring_profiles : [])
     .filter(profile => profile && typeof profile.id === 'string' && typeof profile.name === 'string')
     .map(profile => ({...profile, aggregation_hierarchy: validHierarchy(profile.aggregation_hierarchy)}))
@@ -181,8 +184,11 @@
   const configuredHierarchy = validHierarchy(initialProfile?.aggregation_hierarchy)
     || validHierarchy(scoringConfig.aggregation_hierarchy) || defaultHierarchy;
   let currentHierarchy = [...configuredHierarchy];
-  let contextFilterDefinitions = currentHierarchy
-    .map(key => ({key, catalogueKey: catalogueKeyByLevel.get(key)}));
+  // Operator_Vendor precedes Vendor; it filters but is not an aggregation level.
+  const filterCatalogueKeys = new Map([...catalogueKeyByLevel, ['Operator_Vendor', 'operator_vendors']]);
+  const contextFilterKeys = hierarchy => hierarchy.flatMap(key => (key === 'Vendor' ? ['Operator_Vendor', 'Vendor'] : [key]));
+  let contextFilterDefinitions = contextFilterKeys(currentHierarchy)
+    .map(key => ({key, catalogueKey: filterCatalogueKeys.get(key)}));
   const contextFilterSelects = new Map(contextFilterDefinitions.map(({key}) => [
     key, root.querySelector(`[data-scoring-context-filter="${key}"]`),
   ]));
@@ -325,8 +331,8 @@
   }
 
   function contextFilterOptions(key, catalogueValues) {
-    if (key === 'Vendor') {
-      return (window.vendorOnlyFilterChoices?.('Vendor_Only', catalogueValues) || catalogueValues.map(value => ({value, label: value})))
+    if (key === 'Vendor' || key === 'Operator_Vendor') {
+      return (window.vendorOnlyFilterChoices?.(key, catalogueValues) || catalogueValues.map(value => ({value, label: value})))
         .map(choice => ({...choice, color: ''}));
     }
     if (key !== 'Operator') {
@@ -417,11 +423,12 @@
     if (!ordered) return false;
     const selected = new Set(aggregationInputs.filter(input => input.checked).map(input => input.value));
     currentHierarchy = ordered;
-    contextFilterDefinitions = ordered.map(key => ({key, catalogueKey: catalogueKeyByLevel.get(key)}));
-    for (const level of ordered) {
-      const filter = contextFilterSelects.get(level);
-      const filterLabel = filter?.closest('label');
+    contextFilterDefinitions = contextFilterKeys(ordered).map(key => ({key, catalogueKey: filterCatalogueKeys.get(key)}));
+    for (const {key} of contextFilterDefinitions) {
+      const filterLabel = contextFilterSelects.get(key)?.closest('label');
       if (filterLabel && contextFilterGrid) contextFilterGrid.append(filterLabel);
+    }
+    for (const level of ordered) {
       const input = aggregationInputByLevel.get(level);
       const levelLabel = input?.closest('label');
       if (levelLabel && aggregationLevelsContainer) aggregationLevelsContainer.append(levelLabel);
@@ -881,6 +888,7 @@
       {dimension: 'neutral', value: formatDate(valueOf(job, ['created_at', 'submitted_at', 'started_at'], ''))},
       {dimension: 'nr-mode', value: valueOf(job, ['nr_mode'], 'All NR Modes')},
       {dimension: 'region', value: filterValue('Region', 'All Regions')},
+      {dimension: 'cluster', value: filterValue('Cluster', 'All Clusters')},
       {dimension: 'city', value: filterValue('City', 'All Cities')},
       {dimension: 'operator', value: filterValue('Operator', 'All Operators')},
       {dimension: 'vendor', value: filterValue('Vendor', 'All Vendors')},

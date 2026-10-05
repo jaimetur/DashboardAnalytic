@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -35,12 +36,12 @@ DEFAULT_METRICS: dict[str, list[str]] = {
     'generic': ['quality_score', 'attempt_count'],
 }
 AGGREGATION_CANDIDATES: dict[str, list[str]] = {
-    'voice': ['operator', 'session_type', 'region', 'city', 'vendor', 'technology_primary', 'source_sheet', 'market', 'period'],
-    'speech': ['operator', 'session_type', 'region', 'city', 'vendor', 'Playing_Technology', 'source_sheet', 'market', 'period'],
-    'data': ['operator', 'test_name', 'direction', 'region', 'city', 'vendor', 'Type_of_Test', 'source_sheet', 'market', 'period'],
+    'voice': ['operator', 'session_type', 'region', 'city', 'operator_vendor', 'vendor', 'technology_primary', 'source_sheet', 'market', 'period'],
+    'speech': ['operator', 'session_type', 'region', 'city', 'operator_vendor', 'vendor', 'Playing_Technology', 'source_sheet', 'market', 'period'],
+    'data': ['operator', 'test_name', 'direction', 'region', 'city', 'operator_vendor', 'vendor', 'Type_of_Test', 'source_sheet', 'market', 'period'],
     'generic': ['operator', 'region', 'city', 'market', 'period', 'source_sheet'],
 }
-CDF_COMPARISON_CANDIDATES = ['vendor', 'market', 'operator', 'region', 'city']
+CDF_COMPARISON_CANDIDATES = ['operator_vendor', 'vendor', 'market', 'operator', 'region', 'cluster', 'city']
 MAX_CDF_POINTS = 1024
 MAX_TOTAL_CDF_POINTS_PER_CHART = 1536
 MIN_CDF_POINTS_PER_SERIES = 192
@@ -184,10 +185,9 @@ def compute_grouped_scorecards(df: pd.DataFrame, metric: str, aggregation: str |
     if table_rows:
         group_order = [str(row.get(aggregation, '')).strip() for row in table_rows if str(row.get(aggregation, '')).strip()]
     else:
-        group_order = [
-            str(value).strip() for value in df[resolved_aggregation].dropna().tolist()
-            if str(value).strip()
-        ]
+        # Distinct values in order of appearance, without walking every row in Python.
+        distinct = pd.unique(df[resolved_aggregation].dropna().astype(str).str.strip())
+        group_order = [value for value in distinct if value]
 
     seen: set[str] = set()
     ordered_groups: list[str] = []
@@ -199,8 +199,10 @@ def compute_grouped_scorecards(df: pd.DataFrame, metric: str, aggregation: str |
         ordered_groups.append(group_name)
 
     grouped_scorecards: list[dict[str, Any]] = []
+    # Normalise the group column once instead of once per group.
+    group_keys = df[resolved_aggregation].astype(str).str.strip().str.lower()
     for group_name in ordered_groups[:8]:
-        group_df = df[df[resolved_aggregation].astype(str).str.strip().str.lower() == group_name.lower()]
+        group_df = df[group_keys == group_name.lower()]
         items = compute_scorecard(group_df, metric)
         if not items:
             continue
@@ -392,12 +394,12 @@ def _chart_category_color(df: pd.DataFrame, dimension: str, value: object) -> st
 
 def _build_global_kpis(df: pd.DataFrame, dataset_kind: str, filters: dict[str, Any] | None = None) -> dict[str, Any]:
     filters = filters or {}
-    vendor_only_column = 'vendor_only' if 'vendor_only' in df.columns else 'vendor' if 'vendor' in df.columns else None
+    vendor_column = 'vendor' if 'vendor' in df.columns else None
     kpis: dict[str, Any] = {
         'dataset_kind': dataset_kind,
         'rows': int(len(df.index)),
         'operators': _selected_count(filters, 'operator') if _selected_count(filters, 'operator') is not None else (int(df['operator'].dropna().nunique()) if 'operator' in df.columns else 0),
-        'vendors': _selected_count(filters, 'vendor_only') if _selected_count(filters, 'vendor_only') is not None else (_distinct_nonblank_count(df[vendor_only_column]) if vendor_only_column else 0),
+        'vendors': _selected_count(filters, 'vendor') if _selected_count(filters, 'vendor') is not None else (_distinct_nonblank_count(df[vendor_column]) if vendor_column else 0),
         'regions': _selected_count(filters, 'region') if _selected_count(filters, 'region') is not None else (int(df['region'].dropna().nunique()) if 'region' in df.columns else 0),
         'cities': _selected_count(filters, 'city') if _selected_count(filters, 'city') is not None else (int(df['city'].dropna().nunique()) if 'city' in df.columns else 0),
     }
@@ -530,7 +532,9 @@ def _build_cdf_chart(df: pd.DataFrame, metric: str, filters: dict[str, Any], cdf
                 continue
             seen_selected.add(normalized)
             preferred_keys.append(normalized)
-        ordered_keys = preferred_keys
+        # The rows are already filtered, so every group they contain was selected; the
+        # selection only orders the curves (mapped names such as VF_UK do not match it).
+        ordered_keys = [*preferred_keys, *(key for key in grouped_values if key not in seen_selected)]
     else:
         ordered_keys = list(grouped_values.keys())
         if grouping_column in {'operator', 'subscriber', 'vendor', 'vendor_only', 'operator_vendor'}:
@@ -607,7 +611,7 @@ def _top_records(df: pd.DataFrame, metric: str) -> list[dict[str, Any]]:
     preferred_columns: list[str] = []
     seen: set[str] = set()
     for column in [
-        'operator', 'session_type', 'test_name', 'direction', 'status', 'market', 'period', 'region', 'vendor', metric,
+        'operator', 'session_type', 'test_name', 'direction', 'status', 'market', 'period', 'region', 'operator_vendor', 'vendor', metric,
         'city',
         'setup_time_seconds', 'duration_seconds', 'throughput_mbps', 'quality_score', 'technology_primary', 'source_sheet',
     ]:
@@ -641,7 +645,11 @@ def _build_comparison_chart(
     }
 
 
-def build_analysis(df: pd.DataFrame, filters: dict[str, Any], metric: str, *, prefiltered: bool = False) -> AnalysisResult:
+def build_analysis(
+    df: pd.DataFrame, filters: dict[str, Any], metric: str, *, prefiltered: bool = False,
+    shared: dict[str, Any] | None = None,
+) -> AnalysisResult:
+    """Analyse one metric. ``shared`` lets the metrics of one request reuse what does not depend on the metric."""
     filtered = df if prefiltered else apply_filters(df, filters)
     if filtered.empty:
         raise ValueError('No rows match the selected filters')
@@ -658,7 +666,8 @@ def build_analysis(df: pd.DataFrame, filters: dict[str, Any], metric: str, *, pr
             str(filtered.get('source_file', pd.Series(dtype='object')).iloc[0]) if 'source_file' in filtered.columns else '',
         )
     selected_metric = _infer_metric(filtered, metric, dataset_kind)
-    analysis_frame = filtered[pd.to_numeric(filtered[selected_metric], errors='coerce').notna()].copy()
+    # Boolean indexing already returns a new frame; the analysis never modifies it.
+    analysis_frame = filtered[pd.to_numeric(filtered[selected_metric], errors='coerce').notna()]
     summary = DatasetSummary(
         rows=len(analysis_frame.index),
         columns=analysis_frame.columns.tolist(),
@@ -671,7 +680,15 @@ def build_analysis(df: pd.DataFrame, filters: dict[str, Any], metric: str, *, pr
 
     requested_aggregation = str(filters.get('aggregation') or '').strip().lower()
     requested_cdf_grouping = str(filters.get('cdf_grouping') or '').strip().lower()
-    aggregation = _infer_aggregation(analysis_frame, requested_aggregation, dataset_kind)
+    if shared is None or (requested_aggregation and requested_aggregation != 'all'):
+        aggregation = _infer_aggregation(analysis_frame, requested_aggregation, dataset_kind)
+    else:
+        # The automatic aggregation depends on the dimensions, not on the metric.
+        aggregation_key = (id(filtered), dataset_kind)
+        if shared.get('aggregation_key') != aggregation_key:
+            shared['aggregation_key'] = aggregation_key
+            shared['aggregation'] = _infer_aggregation(filtered, requested_aggregation, dataset_kind)
+        aggregation = shared['aggregation']
     cdf_grouping = _infer_cdf_grouping(analysis_frame, requested_cdf_grouping)
     normalized_filters = {
         **filters,
@@ -680,7 +697,14 @@ def build_analysis(df: pd.DataFrame, filters: dict[str, Any], metric: str, *, pr
     }
     table_rows = _aggregate_table(analysis_frame, aggregation, selected_metric, dataset_kind) if aggregation else _top_records(analysis_frame, selected_metric)
 
-    global_kpis = _build_global_kpis(filtered, dataset_kind, normalized_filters)
+    if shared is None:
+        global_kpis = _build_global_kpis(filtered, dataset_kind, normalized_filters)
+    else:
+        kpi_key = (id(filtered), dataset_kind, json.dumps(normalized_filters, sort_keys=True, default=str))
+        if shared.get('global_kpis_key') != kpi_key:
+            shared['global_kpis_key'] = kpi_key
+            shared['global_kpis'] = _build_global_kpis(filtered, dataset_kind, normalized_filters)
+        global_kpis = shared['global_kpis']
 
     return AnalysisResult(
         summary=summary,

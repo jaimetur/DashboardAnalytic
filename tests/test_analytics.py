@@ -16,14 +16,14 @@ def test_compute_cdf_orders_and_normalizes_values() -> None:
     assert result == [(1.0, 1 / 3), (3.0, 2 / 3), (5.0, 1.0)]
 
 
-def test_filter_options_include_capitalized_vendor_only_field() -> None:
+def test_filter_options_include_operator_vendor_and_vendor_fields() -> None:
     options = derive_filter_options(pd.DataFrame({
-        "Vendor": ["Vodafone UK_Ericsson", "3_Ericsson"],
-        "Vendor_Only": ["Ericsson", "Ericsson"],
+        "Operator_Vendor": ["Vodafone UK_Ericsson", "3_Ericsson"],
+        "Vendor": ["Ericsson", "Ericsson"],
     }))
 
-    assert options["vendor"] == ["3_Ericsson", "Vodafone UK_Ericsson"]
-    assert options["vendor_only"] == ["Ericsson"]
+    assert options["operator_vendor"] == ["3_Ericsson", "Vodafone UK_Ericsson"]
+    assert options["vendor"] == ["Ericsson"]
 
 
 def test_compute_cdf_caps_large_series_to_fixed_resolution() -> None:
@@ -250,7 +250,8 @@ def test_normalised_operator_without_vendor_uses_operator_all_identity() -> None
         Path('data.csv'),
     )
 
-    assert normalized['Vendor_Only'].tolist() == ['O2 - All', 'Ericsson']
+    assert normalized['Operator_Vendor'].tolist() == ['O2 - All', 'Vodafone UK_Ericsson']
+    assert normalized['Vendor'].tolist() == ['O2 - All', 'Ericsson']
 
 
 def test_build_analysis_returns_voice_specific_kpis_and_aggregation() -> None:
@@ -523,14 +524,14 @@ def test_global_kpis_reflect_selected_dimension_counts_when_filters_are_active()
         "operator": ["Vodafone", "Vodafone", "o2"],
         "region": ["North", "North", "South"],
         "city": ["Madrid", "Barcelona", "Sevilla"],
-        "vendor": ["Huawei", "Huawei", "Ericsson"],
-        "vendor_only": ["Ericsson", "Ericsson", "Ericsson"],
+        "operator_vendor": ["Vodafone_Huawei", "Vodafone_Huawei", "o2_Ericsson"],
+        "vendor": ["Ericsson", "Ericsson", "Ericsson"],
         "score": [10, 20, 30],
     })
 
     analysis = build_analysis(
         df,
-        {"aggregation": "all", "extra_filters": {"operator": ["Vodafone", "o2"], "region": ["North", "South"], "city": ["Madrid", "Sevilla"], "vendor": ["Huawei", "Ericsson"]}},
+        {"aggregation": "all", "extra_filters": {"operator": ["Vodafone", "o2"], "region": ["North", "South"], "city": ["Madrid", "Sevilla"], "operator_vendor": ["Vodafone_Huawei", "o2_Ericsson"]}},
         "score",
     )
 

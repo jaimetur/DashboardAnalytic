@@ -50,8 +50,8 @@ def summary_selection_lines(selection: dict[str, Any]) -> list[str]:
         if technology in {radio, 'lte_nr'} and selection.get(coverage) is not None:
             lines.append(f"{label} thresholds: low coverage below {selection.get(coverage)} dBm RSRP, "
                          f"high interference below {selection.get(interference)} dB SINR")
-    for label, key in (('Operators', 'operators'), ('Vendors', 'vendors'), ('Campaigns', 'campaigns'),
-                       ('Regions', 'regions'), ('Cities', 'cities')):
+    for label, key in (('Operators', 'operators'), ('Operator_Vendor', 'operator_vendors'), ('Vendors', 'vendors'),
+                       ('Campaigns', 'campaigns'), ('Regions', 'regions'), ('Clusters', 'clusters'), ('Cities', 'cities')):
         values = selection.get(key) or []
         lines.append(f"{label}: {', '.join(values) if values else 'All'}")
     datasets = selection.get('dataset_names') or []

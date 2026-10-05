@@ -106,4 +106,4 @@ Reports, Chart Sets, Dashboard exports and interactive previews share the Dashbo
 - Failed or interrupted job: inspect App Logs, then retry the existing job.
 
 > [!NOTE]
-> **Vendor comparison:** Multivendor exports ask whether to compare **Operator – Vendor** identities or pool selected operators by **Vendor_Only**. The selection is retained in the generated job for retries.
+> **Vendor comparison:** Multivendor exports ask whether to compare **Operator – Vendor** identities or pool selected operators by **Vendor** (All Operators Combined). The selection is retained in the generated job for retries.

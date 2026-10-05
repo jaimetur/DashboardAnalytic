@@ -140,7 +140,7 @@
     control.dispatchEvent(new Event('multiselect:options-updated'));
   };
 
-  const filterNames = ['operators', 'vendors', 'regions', 'cities', 'campaigns'];
+  const filterNames = ['operators', 'operator_vendors', 'vendors', 'regions', 'clusters', 'cities', 'campaigns'];
   const fillFilterOptions = options => {
     if (options.operators) $('ni-vendors').dataset.multiselectOperatorValues = JSON.stringify(options.operators);
     for (const field of filterNames) {
@@ -180,7 +180,7 @@
         fillFilterOptions(payload.options);
         refreshInventory();
       };
-      // Cached dimensions render independently of the first Vendor_Only lookup.
+      // Cached dimensions render independently of the first Vendor lookup.
       const results = await Promise.allSettled([loadPart(false), loadPart(true)]);
       const failure = results.find(result => result.status === 'rejected');
       if (failure) throw failure.reason;
@@ -208,9 +208,11 @@
     technology: $('ni-technology').value,
     group: selectedValues('ni-group'),
     operators: filterValues('ni-operators'),
+    operator_vendors: filterValues('ni-operator_vendors'),
     vendors: filterValues('ni-vendors'),
     campaigns: filterValues('ni-campaigns'),
     regions: filterValues('ni-regions'),
+    clusters: filterValues('ni-clusters'),
     cities: filterValues('ni-cities'),
     coverage_threshold: Number($('ni-coverage-threshold').value),
     interference_threshold: Number($('ni-interference-threshold').value),
@@ -622,7 +624,8 @@
 
   // Excel-style column filter: the values of the column under the other filters.
   let filterMenu = null;
-  const closeFilterMenu = () => { filterMenu?.remove(); filterMenu = null; };
+  let placeFilterMenu = null;
+  const closeFilterMenu = () => { filterMenu?.remove(); filterMenu = null; placeFilterMenu = null; };
   const openFilterMenu = async (card, button) => {
     closeFilterMenu();
     const column = button.dataset.niFilterColumn;
@@ -634,8 +637,10 @@
     menu.innerHTML = `<p class="form-note">Loading values of ${escapeHtml(column)}…</p>`;
     document.body.append(menu);
     filterMenu = menu;
-    const bounds = button.getBoundingClientRect();
+    // The menu is fixed to the viewport: place it under its column button again on every scroll.
     const place = () => {
+      const bounds = button.getBoundingClientRect();
+      if (!button.isConnected || bounds.bottom < 0 || bounds.top > window.innerHeight) { closeFilterMenu(); return; }
       const width = Math.min(300, window.innerWidth - 20);
       menu.style.width = `${width}px`;
       menu.style.left = `${Math.max(10, Math.min(bounds.left, window.innerWidth - width - 10))}px`;
@@ -643,6 +648,7 @@
       const height = menu.offsetHeight;
       menu.style.top = `${below + height <= window.innerHeight - 10 ? below : Math.max(10, bounds.top - height - 5)}px`;
     };
+    placeFilterMenu = place;
     place();
     try {
       const response = await fetch('/api/network-insights/sites/values', {
@@ -696,6 +702,9 @@
   });
   document.addEventListener('keydown', event => { if (event.key === 'Escape') closeFilterMenu(); });
   window.addEventListener('resize', closeFilterMenu);
+  document.addEventListener('scroll', event => {
+    if (placeFilterMenu && !filterMenu?.contains(event.target)) placeFilterMenu();
+  }, {capture: true, passive: true});
 
   $('ni-deployment-export-all').addEventListener('click', event => { void downloadDeploymentCsv(event.currentTarget); });
   $('ni-deployment').addEventListener('click', async event => {
@@ -747,8 +756,8 @@
         $('ni-deployment-export-all').disabled = !payload.tables.length;
         host.innerHTML = payload.tables.map(renderInventory).join('') || '<p class="form-note">No table matches the selected operators.</p>';
         note.textContent = group === 'observed'
-          ? 'Sites and LTE cells observed in the selected CDRs, filtered by the Analysis Selection (CDRs, Operator, Vendor, Region, City and Campaign). Use ▾ on a column to filter it; CSV exports every matching row.'
-          : 'Complete uploaded inventories, filtered by Operator, Vendor, Region, City and Technology. CDR selection, NR Mode and Campaigns do not restrict inventory rows. Use ▾ on a column to filter it; CSV exports every matching row and column.';
+          ? 'Sites and LTE cells observed in the selected CDRs, filtered by the Analysis Selection (CDRs, Operator, Operator_Vendor, Vendor, Region, Cluster, City and Campaign). Use ▾ on a column to filter it; CSV exports every matching row.'
+          : 'Complete uploaded inventories, filtered by Operator, Operator_Vendor, Vendor, Region, Cluster, City and Technology. CDR selection, NR Mode and Campaigns do not restrict inventory rows. Use ▾ on a column to filter it; CSV exports every matching row and column.';
         return;
       }
       $('ni-deployment-export-all').disabled = !payload.inventories.length;

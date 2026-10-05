@@ -56,7 +56,7 @@ Runtime `config/` and `data/` directories use project-local defaults but are exc
 - `src/modules/workspaces.py`: workspace registry, lifecycle, path migration, duplication and deletion.
 - `src/modules/ingestion.py`: workbook/CSV ingestion, CDR classification helpers and derived input fields.
 - `src/modules/analytics.py`: single-dataset analytical calculations.
-- `src/modules/exports.py`: Datasets Analysis Word and PowerPoint output, including the multi-dataset Summary Dataset Analysis.
+- `src/modules/exports.py`: CDR Analysis Word and PowerPoint output, including the multi-dataset Summary CDR Analysis.
 - `src/modules/network_insights_export.py`: Summary Network Insights PowerPoint and Word output.
 - `src/modules/report_tasks.py`: Reporting Jobs (`report_tasks`, `report_task_runs`), schedules, artifact generation, email bodies, the scheduler and the artifact provider registry for other modules.
 - `src/modules/email_delivery.py`: SMTP settings (Application Config → Email Delivery) and sending.
@@ -69,7 +69,7 @@ Runtime `config/` and `data/` directories use project-local defaults but are exc
 
 ## Browser layer
 
-- `src/web_interface/templates/`: Jinja pages for Workspace, Datasets Analysis, E2E Dashboards, Reporting (old), Chart Builder, Admin, App Logs and document viewing.
+- `src/web_interface/templates/`: Jinja pages for Workspace, CDR Analysis, E2E Dashboards, Reporting (old), Chart Builder, Admin, App Logs and document viewing.
 - `src/web_interface/static/js/`: shared UI behaviour, common chart drawing and the E2E Dashboard client.
 - `src/web_interface/static/css/`: application and module-specific styles.
 - `src/web_interface/static/markdown_renderer.js`: in-app README, Changelog and Help rendering, including cross-document heading anchors.

@@ -156,7 +156,9 @@
     selectedKinds().forEach(kind => columnsForKind(kind).forEach(column => columns.add(column)));
     return [...columns];
   };
-  const vendorFilterField = field => ['vendor', 'vendorv3', 'operatorvendor', 'opvendor'].includes(String(field).toLowerCase().replace(/[^a-z0-9]/g, '')) ? 'Vendor_Only' : field;
+  const vendorIdentity = field => String(field).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const vendorFilterField = field => (['vendor', 'vendorv3', 'vendoronly'].includes(vendorIdentity(field)) ? 'Vendor'
+    : ['operatorvendor', 'opvendor'].includes(vendorIdentity(field)) ? 'Operator_Vendor' : field);
   const availableFilterColumns = () => [...new Set(availableColumns().map(vendorFilterField))];
   const refreshFields = () => {
     const columns = availableColumns();

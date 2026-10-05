@@ -108,7 +108,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .module-tab { flex: 0 0 auto; padding: 0.75rem 1.15rem; border: 1px solid var(--line); border-bottom: 0; border-radius: 15px 15px 0 0; background: rgba(255,255,255,0.56); color: #48606f; font-weight: 700; box-shadow: 0 8px 18px rgba(18, 32, 43, 0.05); }
 .module-tab-disabled { opacity: 0.48; cursor: not-allowed; }
 .module-tab-label-mobile { display: none; }
-.module-tabs-primary .module-tab { display: inline-flex; align-items: center; gap: .45rem; }
+.module-tabs-primary .module-tab, .module-tabs-secondary .module-tab { display: inline-flex; align-items: center; gap: .45rem; }
 .module-tab-icon { flex: 0 0 auto; width: 1.15em; height: 1.15em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 /* Tab rows never overlap: they keep their content width, switch the main
    tabs to their short names and then drop the icons as the window narrows. */
@@ -143,12 +143,18 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .module-tab-workspace.active { background: linear-gradient(145deg, #10314a, #08736d); border-color: rgba(7, 93, 89, 0.72); color: #fff; box-shadow: 0 10px 24px rgba(11, 122, 117, 0.34); }
 .module-tab-datasets-analysis.active { background: linear-gradient(135deg, #0c4c8c, #68b8ff); border-color: rgba(12, 76, 140, 0.68); color: #fff; box-shadow: 0 10px 24px rgba(40, 120, 189, 0.34); }
 .module-tab-non-qualified-calls.active { background: linear-gradient(135deg, #7d1238, #e0507a); border-color: rgba(125, 18, 56, 0.7); color: #fff; box-shadow: 0 10px 24px rgba(176, 35, 79, 0.32); }
-/* Modules still in development show a bold asterisk after their tab name. */
-.module-tab-dev-mark { font-weight: 900; white-space: pre; }
-/* The tab already separates its parts with a gap; keep a single space before the mark. */
-.module-tabs-primary .module-tab .module-tab-dev-mark { margin-left: -.45rem; }
+/* New modules show a small NEW label on their tab: red while in development, blue while being validated and green once consolidated. */
+/* A corner sticker: it overlaps the tab's top edge and takes no space from the label. */
+.module-tabs-primary .module-tab { position: relative; }
+.module-tab-new { position: absolute; z-index: 2; top: -.42rem; right: .45rem; width: 1.75rem; height: .82rem; pointer-events: none; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .25)); }
+.module-tab-new rect { stroke: #fff; stroke-width: 1.2; }
+.module-tab-new text { fill: #fff; font: 800 8.4px "Segoe UI", system-ui, sans-serif; letter-spacing: .04em; }
+.module-tab-new-red rect { fill: #d7263d; }
+.module-tab-new-green rect { fill: #1f8a4c; }
+.module-tab-new-blue rect { fill: #2563eb; }
 .module-tab-report-jobs.active { background: linear-gradient(135deg, #1f5f3a, #4fb37a); border-color: rgba(31, 95, 58, 0.7); color: #fff; box-shadow: 0 10px 24px rgba(46, 140, 88, 0.32); }
-.module-tab-network-insights.active { background: linear-gradient(135deg, #0b4f5c, #22a7b8); border-color: rgba(9, 79, 92, 0.7); color: #fff; box-shadow: 0 10px 24px rgba(20, 128, 145, 0.32); }
+.module-tab-network-insights.active { background: linear-gradient(135deg, #1e1b4b, #4f46e5); border-color: rgba(49, 46, 129, 0.7); color: #fff; box-shadow: 0 10px 24px rgba(79, 70, 229, 0.32); }
+.module-tab-scoring.active { background: linear-gradient(128deg, #143653 0%, #176e77 58%, #40a88a 100%); border-color: rgba(20, 54, 83, 0.72); color: #fff; box-shadow: 0 10px 24px rgba(23, 110, 119, 0.32); }
 .module-tab-chart-builder.active { background: linear-gradient(135deg, #b85b20, #e99b45); border-color: rgba(159, 76, 23, 0.64); color: #fff; box-shadow: 0 10px 24px rgba(183, 91, 31, 0.28); }
 .chart-builder-layout .report-chart-viewer-sandbox { grid-column: 2; grid-row: 1; }
 .chart-builder-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 390px); gap: 1rem; min-height: min(74vh, 920px); }
@@ -1576,7 +1582,7 @@ body[data-embedded-template-editor] .slides-templates-editor-table-wrap .form-ac
 .queue-actions .ghost-link,
 .queue-actions button { min-height: 2.15rem; padding: 0.42rem 0.62rem; white-space: nowrap; font-size: 0.78rem; line-height: 1.1; }
 .vendor-mapping-dialog { width: min(560px, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); border: 1px solid var(--line); border-radius: 20px; padding: 0; color: var(--text); background: var(--panel-strong); box-shadow: 0 24px 72px rgba(7, 21, 31, 0.34); overflow: auto; }
-.vendor-mapping-dialog[data-vendor-mapping-dialog] { width: min(1480px, calc(100vw - 2rem)); }
+.vendor-mapping-dialog:is([data-vendor-mapping-dialog], [data-vendor-clearing-dialog], [data-dataset-reprocess-dialog]) { width: min(1480px, calc(100vw - 2rem)); }
 .vendor-mapping-dialog::backdrop { background: rgba(9, 28, 40, 0.48); backdrop-filter: blur(3px); }
 .vendor-mapping-dialog form { display: grid; gap: 1rem; padding: 1.45rem; }
 .vendor-mapping-dialog h3, .vendor-mapping-dialog p { margin: 0; }
@@ -1912,7 +1918,10 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .workspace-management[open] { flex: 1 1 100%; border: 1px solid rgba(255,255,255,0.28); border-radius: 14px; padding: 0.7rem 0.85rem; background: rgba(0,0,0,0.12); }
 .workspace-management-forms { margin-top: 0.8rem; }
 .workspace-management-forms form { padding-right: 0.7rem; border-right: 1px solid rgba(255,255,255,0.22); }
-.workspace-management-forms > form:first-child { display: grid; grid-template-columns: minmax(16rem, 42rem) max-content max-content; width: 100%; justify-content: start; }
+.workspace-management-forms > form:first-child { display: grid; grid-template-columns: minmax(16rem, 42rem) repeat(3, max-content); align-items: end; width: 100%; justify-content: start; }
+/* Name, CDR type, Access and Create and open share one row. */
+.workspace-management-forms > form:first-child > button { align-self: end; }
+.workspace-create-access { display: grid; gap: 0.35rem; color: rgba(255,255,255,0.84); font-size: 0.85rem; font-weight: 700; }
 .workspace-management-forms > form:first-child .workspace-user-picker { grid-column: auto; width: auto; min-width: 0; }
 .workspace-management-forms input { min-width: 210px; }
 .workspace-management-forms form:first-child > label:first-child { width: auto; }
@@ -2300,6 +2309,9 @@ body[data-embedded-dataset-preview] > .shell > main { width: 100%; max-width: no
 .doc-markdown .admonition.important .admonition-title::before, .doc-markdown .admonition.warning .admonition-title::before, .doc-markdown .admonition.caution .admonition-title::before { content: '!'; }
 .doc-markdown .admonition p { margin: .5rem 0 0; }
 .doc-markdown table { min-width: 0; }
+/* Table cells break long words only when they must, so short first columns are never split letter by letter. */
+.doc-markdown :is(th, td) { overflow-wrap: break-word; word-break: normal; hyphens: manual; }
+.doc-markdown :is(th, td):first-child { min-width: 8.5rem; }
 .doc-markdown img { display: block; width: auto; max-width: 100% !important; max-inline-size: 100% !important; height: auto !important; margin-inline: auto; border-radius: 12px; }
 .doc-layout { display: grid; grid-template-columns: 17rem minmax(0, 1fr); gap: 1rem; align-items: start; }
 .doc-sidebar { position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow: auto; padding: 1rem; border: 1px solid var(--line); border-radius: 18px; background: rgba(255,255,255,0.72); }
@@ -3769,6 +3781,9 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
 /* Map CDR fields: CDRs, rules and mapping selectors side by side so the dialog fits without scrolling. */
 .vendor-mapping-cdr-groups { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .7rem; align-items: start; }
 .vendor-mapping-cdr-groups legend { grid-column: 1 / -1; }
+/* Reprocess Datasets: the CDR panels plus Other Datasets when the workspace has mappings or inventories. */
+.dataset-dialog-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); }
+.dataset-reprocess-list { display: grid; gap: .6rem; }
 .vendor-mapping-cdr-group { display: grid; gap: .35rem; align-content: start; min-width: 0; padding: .6rem .7rem; border: 1px solid rgba(16, 49, 74, .14); border-radius: 12px; background: #fff; }
 .vendor-mapping-cdr-group-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
 .vendor-mapping-cdr-group .vendor-mapping-cdr-choice span { min-width: 0; overflow-wrap: anywhere; font-size: .86rem; }
@@ -3780,3 +3795,33 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
 @media (max-width: 1000px) {
   .vendor-mapping-cdr-groups, .vendor-mapping-rules, .vendor-mapping-dialog[data-vendor-mapping-dialog] .vendor-mapping-fields { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* The main module tabs cover the lower part of the administrative tabs, so both rows show the same tab height. */
+.module-tabs-secondary { position: relative; z-index: 0; margin-bottom: -.75rem; }
+.module-tabs-primary { position: relative; z-index: 1; }
+/* Workspace Config: CDR type of the workspace. */
+.workspace-cdr-type-form { display: flex; flex-wrap: wrap; align-items: end; gap: .6rem 1rem; margin-top: .9rem; }
+.workspace-cdr-type-form label { display: grid; gap: .3rem; min-width: 14rem; }
+.workspace-cdr-type-form .form-note { flex-basis: 100%; margin: 0; }
+.workspace-user-picker-heading { margin: .45rem .3rem .1rem; color: #4d6a7c; font-size: .7rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
+.workspace-config-overview-panel .workspace-cdr-type-form label { color: #e6f1f7; font-weight: 700; }
+.workspace-config-overview-panel .workspace-cdr-type-form .form-note,
+.workspace-config-overview-panel > .form-note { color: #cfe0ea; }
+.workspace-library-table .workspace-cdr-type-column select { min-width: 10rem; }
+.workspace-inherited-access { opacity: .82; cursor: default !important; }
+.workspace-inherited-access small { color: #4d6a7c; font-weight: 600; }
+/* CDR Analysis metric cards: long metric names wrap and the samples pill keeps one line. */
+.executive-subpanel-head > div { min-width: 0; }
+.executive-subpanel-head h3 { overflow-wrap: anywhere; }
+.executive-subpanel-head > .pill { flex: 0 0 auto; white-space: nowrap; }
+/* CDR Analysis header: the Input Type and Dataset labels stay readable on the blue background. */
+.dataset-selector-grid label { color: #eaf4ff; font-weight: 700; }
+/* CDR Analysis charts: zoom controls, horizontal scrolling when zoomed and hover tooltips. */
+.chart-zoom { display: flex; justify-content: flex-end; align-items: center; gap: .3rem; margin: 0 0 .3rem; }
+.chart-zoom button { display: inline-grid; place-items: center; width: 1.8rem; height: 1.8rem; min-height: 0; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: #245a96; font-weight: 800; box-shadow: none; cursor: pointer; }
+.chart-zoom button:disabled { opacity: .45; cursor: default; }
+.chart-zoom-level { min-width: 3rem; color: #526371; font-size: .78rem; font-weight: 700; text-align: center; }
+.chart-zoom-viewport { overflow-x: auto; overflow-y: hidden; }
+.chart-tooltip { position: fixed; z-index: 6000; display: grid; gap: .2rem; max-width: 22rem; padding: .45rem .6rem; border: 1px solid rgba(16, 49, 74, .2); border-radius: 9px; background: rgba(255, 255, 255, .97); color: #10314a; font-size: .78rem; box-shadow: 0 10px 26px rgba(16, 49, 74, .22); pointer-events: none; }
+.chart-tooltip span { display: flex; align-items: center; gap: .35rem; }
+.chart-tooltip i { display: inline-block; width: .6rem; height: .6rem; border-radius: 50%; }

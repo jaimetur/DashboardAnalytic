@@ -117,3 +117,52 @@ def normalize_catalog_layouts(content: bytes) -> bytes:
         return output.getvalue().encode('utf-8')
     except (UnicodeDecodeError, csv.Error):
         return content
+
+
+# Template fields that name aggregation dimensions, and the filter field.
+VENDOR_AGGREGATION_FIELDS = (
+    'Rows Aggregation', 'Column Aggregation', 'Legend', 'Dynamic Rows Field', 'Dynamic Columns Field', 'Dynamic Field',
+    'Grouping', 'Grouping_Rows', 'Grouping_Columns',
+)
+_VENDOR_ONLY_NAME = re.compile(r'(?<![\w])vendor[ _]*only(?![\w])', re.IGNORECASE)
+_VENDOR_NAME = re.compile(r'(?<![\w])vendor(?![\w])', re.IGNORECASE)
+
+
+def rename_template_vendor_fields(content: bytes) -> bytes:
+    """Convert a template written before the Operator_Vendor field to the current names.
+
+    Aggregations, legends and dynamic fields named Vendor grouped by the
+    operator-specific vendor, now Operator_Vendor; Vendor_Only is now Vendor.
+    Vendor filters already selected the vendor alone and keep the name Vendor.
+    """
+    try:
+        text = content.decode('utf-8-sig')
+        reader = csv.DictReader(io.StringIO(text))
+        headers = reader.fieldnames or []
+        rows = list(reader)
+        if any(None in row for row in rows):
+            return content
+        changed = False
+        for row in rows:
+            for header in headers:
+                value = row.get(header) or ''
+                if header in VENDOR_AGGREGATION_FIELDS:
+                    renamed = _VENDOR_ONLY_NAME.sub('\x00', value)
+                    renamed = _VENDOR_NAME.sub('Operator_Vendor', renamed).replace('\x00', 'Vendor')
+                elif header == 'Filters':
+                    renamed = re.sub(r'(^|[;\r\n]\s*)vendor[ _]*only(?=\s*(?:NOT\s+CONTAINS|NOT\s+IN|CONTAINS|IN|[<>=!]))',
+                                     r'\1Vendor', value, flags=re.IGNORECASE)
+                else:
+                    continue
+                if renamed != value:
+                    row[header] = renamed
+                    changed = True
+        if not changed:
+            return content
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=headers, lineterminator='\n')
+        writer.writeheader()
+        writer.writerows(rows)
+        return output.getvalue().encode('utf-8')
+    except (UnicodeDecodeError, csv.Error):
+        return content

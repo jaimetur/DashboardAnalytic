@@ -78,17 +78,20 @@ def test_definitions_keep_every_module_option_and_need_an_artifact():
 def test_features_activation_controls_modules_by_role_group_and_user(client):
     analyst_id = workspace_user('analyst', 'user-viewer')
     login(client)
-    # Defaults: Reporting for super-admins, Non-Qualified Calls hidden, the rest for everyone.
+    # Defaults: Non-Qualified Calls hidden, Reporting (old) for its listed users, the rest for everyone.
     page = client.get('/workspace').text
     assert 'href="/reporting"' in page and 'href="/reporting-old"' in page
     assert 'href="/non-qualified-calls"' not in page
     order = [page.index(f'href="{path}"') for path in ('/datasets-analysis', '/network-insights', '/e2e-dashboards', '/scoring', '/reporting', '/reporting-old')]
     assert order == sorted(order)
     session(client, 'analyst', 'user-viewer')
-    assert 'href="/reporting"' not in client.get('/workspace').text
-    assert client.get('/reporting').status_code == 403
-    assert client.get('/api/reporting/state').status_code == 403
+    assert 'href="/reporting"' in client.get('/workspace').text
+    assert client.get('/reporting').status_code == 200
     assert client.get('/scoring').status_code == 200
+    # Rules saved with the former Reporting default (super-admins only) open Reporting to everyone once.
+    core.repository.set_application_state(core.FEATURE_ACTIVATION_STATE_KEY, json.dumps({'reporting': core.LEGACY_REPORTING_RULE}))
+    core._feature_activation_cache = None
+    assert core.feature_activation_settings()['reporting']['default'] == 'all'
     # A user group activates Reporting for its members.
     login(client)
     assert client.post('/admin/user-groups', data={'name': 'Analysts', 'description': 'Team', 'member_ids': [analyst_id]},
@@ -317,3 +320,74 @@ def test_reporting_runs_appear_in_background_tasks(client):
     labels = [item['label'] for group in (groups.get('workspaces') or groups.get('groups') or []) for item in group['tasks']] \
         if isinstance(groups, dict) else []
     assert any(label == 'Reporting Job: Background check' for label in labels) or 'Reporting Job: Background check' in json.dumps(groups)
+
+
+def test_workspace_access_by_role_group_and_user(client):
+    login(client)
+    workspace_id = core.active_workspace.id
+    core.repository.create_user('field', 'field123', 'user-viewer')
+    field_id = next(int(row['id']) for row in core.repository.list_users() if row['username'] == 'field')
+    assert not core.repository.user_has_workspace_access('field', workspace_id)
+    # A role opens the workspace to every account with that role.
+    assert client.post('/admin/workspace-access', data={f'access__{workspace_id}': ['role:user-viewer']},
+                       follow_redirects=False).status_code == 303
+    assert core.repository.user_has_workspace_access('field', workspace_id)
+    assert 'id="workspace-access"' in client.get('/admin').text
+    # A user group opens it to its members only.
+    assert client.post('/admin/user-groups', data={'name': 'Field', 'description': '', 'member_ids': [field_id]},
+                       follow_redirects=False).status_code == 303
+    group_id = core.repository.list_user_groups()[0]['id']
+    client.post('/admin/workspace-access', data={f'access__{workspace_id}': [f'group:{group_id}']}, follow_redirects=False)
+    assert core.repository.workspace_access_rules()[workspace_id] == {'roles': [], 'groups': [group_id]}
+    assert core.repository.user_has_workspace_access('field', workspace_id)
+    # Users are the same direct grants as the Workspace Access picker of Workspace Management.
+    client.post('/admin/workspace-access', data={f'access__{workspace_id}': [f'user:{field_id}']}, follow_redirects=False)
+    assert workspace_id not in core.repository.workspace_access_rules()
+    assert workspace_id in core.repository.list_user_workspace_ids(field_id)
+    client.post('/admin/workspace-access', data={}, follow_redirects=False)
+    assert not core.repository.user_has_workspace_access('field', workspace_id)
+    # Workspace Management saves roles and groups with the workspace.
+    name = core.active_workspace.name
+    assert client.post('/workspace/save', data={'workspace_id': workspace_id, 'name': name, 'access_roles': ['user-viewer'],
+                                                'access_groups': [group_id]}, follow_redirects=False).status_code == 303
+    assert core.repository.workspace_access_rules()[workspace_id] == {'roles': ['user-viewer'], 'groups': [group_id]}
+
+
+def test_users_table_assigns_groups_and_lists_workspaces_granted_by_groups(client):
+    login(client)
+    workspace = core.active_workspace
+    core.repository.create_user('analyst', 'analyst123', 'user-viewer')
+    analyst_id = next(int(row['id']) for row in core.repository.list_users() if row['username'] == 'analyst')
+    group_id = core.repository.save_user_group(None, 'Analysts', '', [])
+    core.repository.set_workspace_access_rule(workspace.id, [], [group_id])
+    response = client.post(f'/admin/users/{analyst_id}/update', data={
+        'username': 'analyst', 'role': 'user-viewer', 'active': '1', 'group_ids': [group_id], 'groups_submitted': '1',
+    }, headers={'X-Requested-With': 'XMLHttpRequest'})
+    assert response.status_code == 200, response.text
+    assert response.json()['user']['group_ids'] == [group_id]
+    assert core.repository.user_has_workspace_access('analyst', workspace.id)
+    page = client.get('/admin').text
+    assert '<th>Groups</th><th>Workspaces</th>' in page
+    assert f'<span>{workspace.name} <small>· Analysts</small></span>' in page
+    # A form without the group selector keeps the memberships.
+    client.post(f'/admin/users/{analyst_id}/update', data={'username': 'analyst', 'role': 'user-viewer', 'active': '1'},
+                headers={'X-Requested-With': 'XMLHttpRequest'})
+    assert core.repository.list_user_groups()[0]['member_ids'] == [analyst_id]
+
+
+def test_cdr_analysis_artifact_keeps_metrics_filters_and_single_choices():
+    definition = report_tasks.normalize_definition({'dataset_analysis': {
+        'enabled': True, 'formats': ['powerpoint'], 'metrics': {'data': ['Mean_Data_Rate'], 'voice': [], 'other': ['x']},
+        'filters': {'operators': ['EE'], 'clusters': [], 'unknown': ['x']},
+        'aggregation': 'vendor', 'cdf_grouping': 'nonsense',
+    }})['dataset_analysis']
+    assert definition['metrics'] == {'data': ['Mean_Data_Rate']} and definition['filters'] == {'operators': ['EE']}
+    assert definition['aggregation'] == 'vendor' and definition['cdf_grouping'] == 'operator'
+
+
+def test_reporting_options_list_cdr_analysis_metrics_per_cdr_type(client):
+    login(client)
+    options = client.get('/api/reporting/options').json()
+    assert set(options['cdr_metrics']) == {'data', 'voice', 'speech'}
+    assert options['cdr_kinds'] == {'data': 'CDR Data', 'voice': 'CDR Voice', 'speech': 'CDR Speech'}
+    assert options['cdr_aggregations']['all'] == 'Auto' and options['cdr_cdf_groupings']['all'] == 'Single CDF'

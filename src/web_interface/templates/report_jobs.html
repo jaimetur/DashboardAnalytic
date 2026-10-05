@@ -5,7 +5,7 @@
   <article class="panel module-hero report-jobs-hero">
     <p class="eyebrow">Reporting</p>
     <h2>Scheduled Reporting Jobs</h2>
-    <p class="lede">Collect Dataset Analysis, Network Insights, Dashboard and Scoring artifacts in one Reporting Job, run it once or on a schedule, and email the artifacts with a description of each one and its filters.</p>
+    <p class="lede">Collect CDR Analysis, Network Insights, Dashboard and Scoring artifacts in one Reporting Job, run it once or on a schedule, and email the artifacts with a description of each one and its filters.</p>
   </article>
 
   <details class="panel collapsible-panel" open data-panel-state-key="reporting:jobs">
@@ -17,8 +17,8 @@
       </div>
       <div class="table-wrap">
         <table class="reporting-jobs-table" id="rj-tasks">
-          <thead><tr><th>Name</th><th>Artifacts</th><th>Next Run</th><th>Recurrence</th><th>Email</th><th>Last Run</th><th>Actions</th></tr></thead>
-          <tbody><tr><td colspan="7" class="form-note">Loading Reporting Jobs…</td></tr></tbody>
+          <thead><tr><th>Name</th><th>Artifacts</th><th>Next Run</th><th>Recurrence</th><th>Email</th><th>Last Run</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody><tr><td colspan="8" class="form-note">Loading Reporting Jobs…</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -32,9 +32,15 @@
       <h3>Artifacts</h3>
       <p class="form-note">Check each type of artifact to include; unchecked types keep their configuration but are not generated.</p>
       <section class="rj-card" data-rj-section="dataset_analysis" data-rj-module="dataset_analysis">
-        <label class="rj-card-toggle"><input type="checkbox" id="rj-da-enabled"><strong>Datasets Analysis</strong><small>Every KPI of each selected dataset, without filters, in PowerPoint and/or Word.</small></label>
+        <label class="rj-card-toggle"><input type="checkbox" id="rj-da-enabled"><strong>CDR Analysis</strong><small>The selected metrics of each selected dataset with their filters, chart aggregation and CDF comparison, in PowerPoint and/or Word.</small></label>
         <div class="rj-card-body" data-rj-body>
           <div class="rj-formats" data-rj-formats="rj-da"></div>
+          <div class="rj-inline" id="rj-da-aggregation"></div>
+          <div class="rj-inline" id="rj-da-cdf"></div>
+          <strong>Metrics</strong>
+          <div class="rj-filters" id="rj-da-metrics"></div>
+          <strong>Filters</strong>
+          <div class="rj-filters rj-filters-one-row" id="rj-da-filters"></div>
           <div class="rj-picker" id="rj-da-datasets"></div>
         </div>
       </section>
@@ -58,9 +64,6 @@
           <div id="rj-scoring" class="rj-entries"></div>
           <button type="button" id="rj-add-scoring" class="rj-secondary">Add Scoring</button>
         </div>
-      </section>
-      <section class="rj-card" id="rj-nqc-placeholder">
-        <label class="rj-card-toggle"><input type="checkbox" disabled><strong>Non-Qualified Calls</strong><small>Non-Qualified Calls does not provide Reporting artifacts yet; they will be available here as soon as the module provides them.</small></label>
       </section>
       <div id="rj-providers" class="rj-entries"></div>
       <p class="form-note" id="rj-modules-note" hidden></p>

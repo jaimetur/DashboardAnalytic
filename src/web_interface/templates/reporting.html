@@ -307,8 +307,8 @@
     const chooseVendorComparison = async () => {
       if (scope.value !== 'multivendor') return true;
       const choice = await showConfirmDialog(
-        'Keep operators separate within each vendor, or pool all selected operators by Vendor_Only?',
-        {title: 'Choose vendor comparison', confirmLabel: 'Operator – Vendor', secondaryLabel: 'Vendor only', cancelLabel: 'Cancel', wideActions: true},
+        'Keep operators separate within each vendor (Operator_Vendor), or pool all selected operators by Vendor?',
+        {title: 'Choose vendor comparison', confirmLabel: 'Operator_Vendor', secondaryLabel: 'Vendor', cancelLabel: 'Cancel', wideActions: true},
       );
       if (choice !== 'confirm' && choice !== 'secondary') return false;
       reportForm.elements.vendor_comparison.value = choice === 'secondary' ? 'vendor_only' : 'operator_vendor';

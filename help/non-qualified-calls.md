@@ -2,7 +2,7 @@
 
 Non-Qualified Calls brings the CDR Drive Test follow-up into Dashboard Analytic: an executive summary of every call and test that did not complete, a drill-down table of those calls, and a shared follow-up of each one with a status, a responsible team, an assignee and a comment thread that every user of the workspace sees.
 
-The module is in development, so its main tab shows **NQ Calls \*** (or **Non-Qualified Calls \***). It is hidden from every user until an admin or super-admin activates it in [Admin → Features Activation](administrator-config.md).
+The module is in development, so its main tab shows a red **NEW** label. It is hidden from every user until an admin or super-admin activates it in [Admin → Features Activation](administrator-config.md).
 
 ## Which calls are Non-Qualified
 
@@ -16,18 +16,29 @@ Each call keeps a stable identity built from its service, Operator, Campaign and
 
 The **Filters** panel restricts the summary, the table and the Excel export together:
 
-- **CDRs**, **Service**, **Campaign**, **Operator**, **Vendor**, **Region**, **City**, **Technology**, **Test Name**, **Result**, **Failure Classification** and **Failure Category**, from the indexed calls.
+- **CDRs**, **Campaign**, **Operator**, **Operator_Vendor**, **Vendor**, **Region**, **Cluster**, **City**, **Service**, **Technology**, **Test Name**, **Result**, **Failure Classification** and **Failure Category**, from the indexed calls. **Operator_Vendor** is the `<Operator>_<Vendor>` identity and **Vendor** the vendor alone; **City** offers the workspace **Main Cities** first.
 - **Status**, **Team** and **Assignee**, from the follow-up. **Unassigned** selects calls without a team or assignee.
 - **Search** finds text in the call fields (Operator, Vendor, Campaign, Region, City, Technology, test, result, failure fields and cell) and in the comments.
 - **Open calls only**, **Assigned to me** and **Without comments**.
 
 Selecting every value of a filter, or none, applies no restriction. Active filters appear as chips above the table; click a chip to remove it. **Reset Filters** clears them all.
 
+The selection is shared: it is saved in the workspace, so every user finds the last filters applied, in any session and on any device. **Assigned to me** always refers to the user viewing the page.
+
 ## Summary
 
-The **Summary** panel is the executive view of the filtered calls: the number of Non-Qualified Calls, how many are open and closed, and how many have a responsible team or comments. Breakdowns by Service, Result, Status, Team, Failure Classification and Operator show where the calls concentrate.
+The **Summary** panel is the executive view of the filtered calls: the number of Non-Qualified Calls, how many are open and closed, and how many have a responsible team or comments. Breakdowns by Service, Result, Status, Team, Failure Classification, Operator, Vendor, Region, Cluster, City and, last, by CDR show where the calls concentrate; the By CDR card is wider and shows each CDR name in full.
 
 Click any bar to drill down: the table shows only that value. Click the same bar again to remove that filter.
+
+## Progress View
+
+The **Progress View** below the Summary shows how the follow-up advances for the filtered calls:
+
+- Indicators: calls, open and closed calls, calls attended (with a follow-up change or a comment), commented, with a team and assigned, and the average days to close.
+- Donut charts **By Status**, **By Team**, **By Assignee**, **By Service** and **By Result**; each legend shows the full name with its count and share, and a click filters the calls by that value.
+- A timeline per **week**, **month**, **quarter** or **year** of the calls detected, attended, commented, closed and reopened, with a table that adds the status changes, the open backlog at the end of each period and the average days to close.
+- The age of the open calls, the workload of each team and assignee (open, closed and total calls) and the recent activity.
 
 ## Calls
 
@@ -57,6 +68,12 @@ When another user changes a call after you loaded it, your change is refused and
 
 The defaults are the statuses Open, Under Investigation, Pending Information, Resolved (closed) and Not Applicable (closed), and the teams RAN Optimisation, Core Network, IMS / VoLTE, Transport and Device & Test Setup. Renaming a status or team updates every call that uses it. A status or team that is still used by a call cannot be removed; move its calls first.
 
+**Workspace Config → Non-Qualified Calls Teams** edits the teams with their colours and **members**: choose the workspace users that belong to each team; a user can belong to several teams. When a call has a team with members, its **Assignee** list offers only them, and moving the call to a team its assignee does not belong to clears the assignee. A team without members accepts every user of the workspace.
+
+## Reporting Jobs
+
+Reporting Jobs include a **Non-Qualified Calls** artifact with the Executive Summary and the Progress Status of the calls in PowerPoint, Word and/or Excel. Each job chooses its own filters (the same as the Filters panel), the period of the progress timeline and whether to include only open calls. See [Reporting](reporting.md).
+
 ## Storage and portability
 
 The module stores its data in the workspace database, visible in [Admin → Database Management](administrator-config.md):
@@ -69,5 +86,6 @@ The module stores its data in the workspace database, visible in [Admin → Data
 | NQ Call Comments | Every comment with its author, time, edits and deletion. |
 | NQ Call History | Every change of status, team or assignee and every comment edit or deletion. |
 | NQ Call Options | The configured statuses and teams. |
+| NQ Team Members | The users that belong to each team. |
 
-The follow-up — statuses, teams, tracking, comments and history — travels as **NQ Call Tracking** with Admin → Import / Export / Transfer, Full Workspace and Full Environment packages, workspace transfers, and backups and restores. Imports merge it into the destination workspace: missing statuses and teams are added, a call's newer follow-up replaces an older one, and comments and history entries are added once, so importing the same package again changes nothing. The follow-up applies to the destination calls with the same identity, so import the same CDRs there to see it.
+The follow-up — statuses, teams with their members, tracking, comments and history — travels as **NQ Call Tracking** with Admin → Import / Export / Transfer, Full Workspace and Full Environment packages, workspace transfers, and backups and restores. Imports merge it into the destination workspace: missing statuses and teams are added, a call's newer follow-up replaces an older one, and comments and history entries are added once, so importing the same package again changes nothing. The follow-up applies to the destination calls with the same identity, so import the same CDRs there to see it.

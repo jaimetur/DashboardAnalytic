@@ -1,6 +1,7 @@
-.network-insights{--ni-color:#0f6f7d;--ni-dark:#0b4f5c;--ni-soft:#e8f6f8;--ni-border:#b9dfe5}
-.network-insights .ni-hero{min-height:0;background:linear-gradient(125deg,#0b4f5c,#22a7b8)!important;color:#fff}
-.network-insights .ni-hero :is(.eyebrow,.lede){color:#e6fbff}
+/* Network Insights: electric indigo palette shared by the tab, header and controls. */
+.network-insights{--ni-color:#4338ca;--ni-dark:#312e81;--ni-soft:#eef0ff;--ni-border:#c7cbf7}
+.network-insights .ni-hero{min-height:0;background:linear-gradient(125deg,#1e1b4b,#4f46e5)!important;color:#fff}
+.network-insights .ni-hero :is(.eyebrow,.lede){color:#e8e9ff}
 .network-insights .ni-hero .eyebrow{margin:0 0 .25rem}
 .network-insights .ni-hero h2{margin:0}
 .network-insights .ni-hero .lede{margin:.45rem 0 0}
@@ -8,7 +9,7 @@
 /* Every visible selection control shares one row on wide screens. */
 .ni-selection-grid{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);align-items:end;gap:12px}
 .ni-filter-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:16px}
-.network-insights label{display:grid;gap:.38rem;font-size:.88rem;font-weight:800;color:#24525a}
+.network-insights label{display:grid;gap:.38rem;font-size:.88rem;font-weight:800;color:#2e2a6b}
 .network-insights label :is(select,input){box-sizing:border-box;width:100%;min-width:0}
 .ni-dataset-groups{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:18px}
 .ni-dataset-group{padding:12px 14px;border:1px solid var(--ni-border);border-radius:12px;background:var(--ni-soft)}
@@ -17,7 +18,7 @@
 .ni-dataset-head h3{margin:0}
 .ni-dataset-toggle{flex:0 0 auto;padding:.2rem .7rem;border:1px solid var(--ni-border);border-radius:999px;background:#fff;color:var(--ni-dark);font:inherit;font-size:.78rem;font-weight:700;cursor:pointer}
 .ni-dataset-toggle:hover{background:var(--ni-soft);border-color:var(--ni-color)}
-.ni-dataset-group h3 span{font-weight:600;color:#4a7d85}
+.ni-dataset-group h3 span{font-weight:600;color:#5a5a9e}
 .ni-dataset-group .form-note{margin:0}
 .network-insights .ni-dataset-option{display:flex;align-items:flex-start;gap:.5rem;padding:.25rem 0;font-size:.82rem;font-weight:650;color:#29474d;overflow-wrap:anywhere}
 .network-insights .ni-dataset-option input{width:auto;margin-top:.15rem;accent-color:var(--ni-color)}
@@ -27,17 +28,17 @@
 .ni-actions .form-note[data-tone="done"]{background:#e3f5ec;color:#1f6043;font-weight:700}
 .ni-actions .form-note[data-tone="warning"]{background:#fff0dc;color:#80470d;font-weight:700}
 .ni-actions .form-note[data-tone="error"]{background:#fbe3e6;color:#8c2731;font-weight:700}
-.network-insights .ni-analyse{display:inline-flex;align-items:center;gap:.55rem;padding:.7rem 1.25rem;border:1px solid var(--ni-dark);border-radius:999px;background:linear-gradient(135deg,#0b4f5c,#1b97a8);color:#fff;font-weight:800;box-shadow:0 8px 18px rgba(16,111,125,.28)}
+.network-insights .ni-analyse{display:inline-flex;align-items:center;gap:.55rem;padding:.7rem 1.25rem;border:1px solid var(--ni-dark);border-radius:999px;background:linear-gradient(135deg,#312e81,#1b97a8);color:#fff;font-weight:800;box-shadow:0 8px 18px rgba(67,56,202,.28)}
 .network-insights .ni-analyse::before{content:'';width:1.1rem;height:1.1rem;background:center/contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 20v-8'/%3E%3Cpath d='M8.5 8.5a5 5 0 0 1 7 0M5.6 5.6a9 9 0 0 1 12.8 0'/%3E%3Ccircle cx='12' cy='12' r='1.4' fill='white'/%3E%3C/svg%3E")}
 .network-insights .ni-analyse:hover:not(:disabled){background:linear-gradient(135deg,#083e48,#13798a)}
 .network-insights .ni-analyse:disabled{opacity:.6;cursor:progress}
-.network-insights .ni-secondary-action{padding:.5rem 1rem;border:1px solid #6b8f95;border-radius:999px;background:#fff;color:#24525a;font-weight:750}
+.network-insights .ni-secondary-action{padding:.5rem 1rem;border:1px solid #6b8f95;border-radius:999px;background:#fff;color:#2e2a6b;font-weight:750}
 .network-insights .ni-secondary-action:hover{background:var(--ni-soft)}
 .ni-overview{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
-.ni-operator-card{padding:14px 16px;border:1px solid var(--ni-border);border-top:5px solid var(--ni-operator,#0f6f7d);border-radius:12px;background:#fff;box-shadow:0 6px 16px rgba(11,79,92,.08)}
-.ni-operator-card h3{margin:0 0 .6rem;color:var(--ni-operator,#0f6f7d);font-size:1.12rem}
+.ni-operator-card{padding:14px 16px;border:1px solid var(--ni-border);border-top:5px solid var(--ni-operator,#4338ca);border-radius:12px;background:#fff;box-shadow:0 6px 16px rgba(49,46,129,.08)}
+.ni-operator-card h3{margin:0 0 .6rem;color:var(--ni-operator,#4338ca);font-size:1.12rem}
 .ni-operator-card dl{display:grid;grid-template-columns:1fr 1fr;gap:.55rem .8rem;margin:0}
-.ni-operator-card dt{font-size:.72rem;font-weight:700;color:#5b7479;text-transform:uppercase;letter-spacing:.02em}
+.ni-operator-card dt{font-size:.72rem;font-weight:700;color:#5f6280;text-transform:uppercase;letter-spacing:.02em}
 .ni-operator-card dd{margin:.12rem 0 0;font-size:1.02rem;font-weight:850;color:#1e3a3f}
 .ni-delta{display:inline-block;margin-left:.2rem;padding:.08rem .35rem;border-radius:999px;background:#eef1f2;color:#55666b;font-size:.7rem;font-weight:800;vertical-align:middle}
 .ni-delta.is-better{background:#dff4e8;color:#17633d}
@@ -49,7 +50,7 @@
 .ni-table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid var(--ni-border);border-radius:12px;overflow:hidden;font-size:.84rem}
 .ni-table th{background:#d9eef1;color:#16505a;text-align:left;white-space:nowrap}
 .ni-table th,.ni-table td{padding:8px 10px;vertical-align:middle}
-.ni-table tbody tr:nth-child(odd){background:#f6fbfc}
+.ni-table tbody tr:nth-child(odd){background:#f7f7ff}
 .ni-table td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .ni-swatch{display:inline-block;width:.75rem;height:.75rem;margin-right:.45rem;border-radius:3px;vertical-align:-1px}
 .ni-class-bar{display:flex;min-width:140px;height:.8rem;border-radius:999px;overflow:hidden;background:#e7eef0}
@@ -57,34 +58,34 @@
 .ni-spectrum-bar{min-width:0}
 .ni-spectrum-bar-cell{width:35%}
 .ni-share{display:inline-block;width:70px;height:.55rem;border-radius:999px;background:#e2eef0;overflow:hidden;vertical-align:middle}
-.ni-share>span{display:block;height:100%;background:linear-gradient(90deg,#0f6f7d,#22a7b8)}
+.ni-share>span{display:block;height:100%;background:linear-gradient(90deg,#4338ca,#4f46e5)}
 .ni-map-toolbar{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;margin-bottom:14px}
 .ni-map-toolbar label{min-width:200px}
 .ni-map-toolbar .form-note{margin:0 0 .45rem}
 .ni-map-card h3{margin:0 0 .6rem;font-size:1rem;color:var(--ni-dark)}
-.ni-map-card h4{margin:1rem 0 .4rem;font-size:.9rem;color:#24525a}
+.ni-map-card h4{margin:1rem 0 .4rem;font-size:.9rem;color:#2e2a6b}
 .ni-hotspot-wrap{max-height:320px}
 .ni-hotspots{min-width:0;font-size:.8rem}
 .ni-inventory .ni-table,.ni-licensed .ni-table{min-width:0}
 .ni-hotspots :is(th,td){padding:6px 8px}
-.network-insights .ni-zoom{display:inline-flex;align-items:center;gap:.3rem;padding:.22rem .55rem;border:1px solid #7fb6be;border-radius:999px;background:var(--ni-soft);color:#0b4f5c;font-size:.76rem;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+.network-insights .ni-zoom{display:inline-flex;align-items:center;gap:.3rem;padding:.22rem .55rem;border:1px solid #7fb6be;border-radius:999px;background:var(--ni-soft);color:#312e81;font-size:.76rem;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
 .network-insights .ni-zoom::before{content:'';width:.8rem;height:.8rem;background:center/contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230b4f5c' stroke-width='2.4' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-4-4M11 8v6M8 11h6'/%3E%3C/svg%3E")}
 .network-insights .ni-zoom:hover{background:#cdebef}
 .ni-subtitle{margin:.4rem 0 .6rem;font-size:1rem;color:var(--ni-dark)}
 .ni-subtitle~.ni-subtitle{margin-top:1.4rem}
 .ni-pending-box{margin:0;padding:.8rem 1rem;border:1px solid #e1bd4f;border-radius:12px;background:#fff6d5;color:#634a07}
-.ni-pending-box a{color:#0b4f5c;font-weight:800}
+.ni-pending-box a{color:#312e81;font-weight:800}
 .ni-pending strong{color:#80470d}
 .ni-inventory-totals[hidden]{display:none}
 .ni-inventory-totals{display:flex;gap:14px;flex-wrap:wrap;margin-top:14px}
 .ni-inventory-total{display:grid;min-width:180px;padding:12px 16px;border:1px solid var(--ni-border);border-radius:12px;background:var(--ni-soft)}
-.ni-inventory-total span{font-size:.75rem;font-weight:800;color:#4a7d85;text-transform:uppercase}
+.ni-inventory-total span{font-size:.75rem;font-weight:800;color:#5a5a9e;text-transform:uppercase}
 .ni-inventory-total strong{font-size:1.5rem;color:var(--ni-dark)}
 .ni-inventory-total small{color:#4a6a70;font-weight:650}
 .ni-inventory-site-count{display:flex;align-items:baseline;gap:.35rem;white-space:nowrap}
 .ni-deployment{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}
 .ni-inventory h3{margin:0 0 .5rem;font-size:1rem;color:var(--ni-dark)}
-.ni-inventory h3 span{display:block;font-size:.76rem;font-weight:600;color:#5b7479;overflow-wrap:anywhere}
+.ni-inventory h3 span{display:block;font-size:.76rem;font-weight:600;color:#5f6280;overflow-wrap:anywhere}
 .ni-inventory .ni-table{font-size:.82rem}
 @media(max-width:1200px){.ni-selection-grid{grid-auto-flow:row;grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:900px){.ni-chart-grid,.ni-map-grid,.ni-dataset-groups{grid-template-columns:minmax(0,1fr)}}
@@ -99,20 +100,21 @@
 .ni-chart-card canvas.ds-chart-selection-blocked{cursor:default}
 .ni-chart-card canvas.ds-chart-zoomed{cursor:grab}
 .ni-chart-card canvas.is-panning{cursor:grabbing}
-.network-insights .ds-live-chart-tooltip{position:absolute;z-index:4;display:grid;gap:2px;max-width:min(260px,80%);padding:9px 11px;border:1px solid #9fcfd6;border-radius:9px;background:rgba(255,255,255,.97);box-shadow:0 8px 24px rgba(11,79,92,.22);color:#24525a;font-size:.75rem;line-height:1.25;pointer-events:none}
+.network-insights .ds-live-chart-tooltip{position:absolute;z-index:4;display:grid;gap:2px;max-width:min(260px,80%);padding:9px 11px;border:1px solid #9fcfd6;border-radius:9px;background:rgba(255,255,255,.97);box-shadow:0 8px 24px rgba(49,46,129,.22);color:#2e2a6b;font-size:.75rem;line-height:1.25;pointer-events:none}
 .network-insights .ds-live-chart-tooltip[hidden]{display:none}
-.network-insights .ds-live-chart-tooltip strong{color:#0b4f5c;font-size:.79rem}
+.network-insights .ds-live-chart-tooltip strong{color:#312e81;font-size:.79rem}
 .network-insights .ds-live-chart-tooltip span{display:block}
-.network-insights .ds-chart-zoom-selection{position:absolute;z-index:4;box-sizing:border-box;border:2px solid #0f6f7d;background:rgba(15,111,125,.16);box-shadow:0 0 0 1px rgba(255,255,255,.8) inset;pointer-events:none}
+.network-insights .ds-chart-zoom-selection{position:absolute;z-index:4;box-sizing:border-box;border:2px solid #4338ca;background:rgba(67,56,202,.16);box-shadow:0 0 0 1px rgba(255,255,255,.8) inset;pointer-events:none}
 .network-insights .ds-chart-zoom-selection[hidden]{display:none!important}
 
 .network-insights .ni-selection-panel:has(.multiselect-menu:not([hidden])){position:relative;z-index:50;overflow:visible}
 .network-insights .ni-selection-panel:has(.multiselect-menu:not([hidden]))>.collapsible-panel-body{overflow:visible}
 
 .ni-filter-title{margin:1.2rem 0 .65rem;color:var(--ni-dark);font-size:1.3rem;font-weight:850}
-.ni-filter-grid{grid-template-columns:repeat(5,minmax(0,1fr));margin-top:0}
+.ni-filter-grid{grid-template-columns:repeat(7,minmax(0,1fr));margin-top:0}
+@media(max-width:1500px){.ni-filter-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
 .network-insights .ni-filter-grid .multiselect-trigger{padding:.65rem .85rem;border-color:var(--ni-border);border-radius:12px;box-shadow:none;background:#fff;color:var(--ni-dark)}
-.network-insights .ni-filter-grid .multiselect-menu{border-color:var(--ni-border);border-radius:12px;background:#fff;backdrop-filter:none;box-shadow:0 12px 28px #0b4f5c26;padding:.55rem}
+.network-insights .ni-filter-grid .multiselect-menu{border-color:var(--ni-border);border-radius:12px;background:#fff;backdrop-filter:none;box-shadow:0 12px 28px #312e8126;padding:.55rem}
 .network-insights :is(.ni-filter-grid,.ni-selection-grid) .multiselect-option{display:flex;align-items:center;justify-content:flex-start;gap:.6rem;min-height:2rem;padding:.4rem .5rem;border-radius:6px;font-size:.85rem;font-weight:600;line-height:1.3}
 .network-insights :is(.ni-filter-grid,.ni-selection-grid) .multiselect-option input{flex:0 0 1rem;width:1rem;height:1rem;min-width:1rem;margin:0;accent-color:var(--ni-color)}
 .network-insights .ni-filter-grid .multiselect-action{background:var(--ni-soft);color:var(--ni-dark);border-radius:7px}
@@ -121,7 +123,7 @@
 
 .network-insights :is(.ni-filter-grid,.ni-selection-grid) .multiselect-option span{min-width:0;color:var(--ni-dark);overflow-wrap:anywhere}
 .network-insights .ni-filter-grid .multiselect-search{padding:.5rem .65rem;border:1px solid var(--ni-border);border-radius:8px;font-size:.82rem}
-.network-insights .ni-filter-grid .multiselect-search:focus{outline:2px solid #0f6f7d55;outline-offset:1px;border-color:var(--ni-color)}
+.network-insights .ni-filter-grid .multiselect-search:focus{outline:2px solid #4338ca55;outline-offset:1px;border-color:var(--ni-color)}
 .network-insights .ni-filter-grid .multiselect-action{padding:.5rem .65rem;font-size:.82rem}
 
 .ni-inventory[data-ni-inventory]{min-width:0}
@@ -132,9 +134,9 @@
 
 /* Excel-style column filters of the Sites/Cells tables. */
 .ni-column-head { display: inline-flex; align-items: center; gap: .3rem; white-space: nowrap; }
-.network-insights .ni-column-filter { display: inline-grid; place-items: center; width: 1.15rem; min-width: 1.15rem; height: 1.15rem; min-height: 1.15rem; padding: 0; border: 1px solid rgba(11, 79, 92, .32); border-radius: 5px; background: rgba(255, 255, 255, .8); color: #0b4f5c; font-size: .62rem; line-height: 1; box-shadow: none; cursor: pointer; }
-.network-insights .ni-column-filter:hover { border-color: #0f6f7d; background: #e8f6f8; }
-.network-insights .ni-column-filter.is-active { border-color: #0b4f5c; background: #0f6f7d; color: #fff; }
+.network-insights .ni-column-filter { display: inline-grid; place-items: center; width: 1.15rem; min-width: 1.15rem; height: 1.15rem; min-height: 1.15rem; padding: 0; border: 1px solid rgba(49,46,129, .32); border-radius: 5px; background: rgba(255, 255, 255, .8); color: #312e81; font-size: .62rem; line-height: 1; box-shadow: none; cursor: pointer; }
+.network-insights .ni-column-filter:hover { border-color: #4338ca; background: #eef0ff; }
+.network-insights .ni-column-filter.is-active { border-color: #312e81; background: #4338ca; color: #fff; }
 /* LTE+NR: LTE and NR are shown in separate sections with their own thresholds. */
 .ni-selection-grid label[hidden]{display:none}
 .ni-technology-sections{display:grid;gap:22px}
@@ -142,7 +144,7 @@
 .ni-technology-title{grid-column:1/-1;margin:.4rem 0 0;font-size:1.05rem;color:var(--ni-dark)}
 .ni-technology-title span{margin-left:.5rem;font-size:.82rem;font-weight:600;color:var(--muted)}
 /* Analysis in progress dialog. */
-.ni-progress-dialog{box-sizing:border-box;width:min(30rem,calc(100vw - 2rem));padding:1.6rem 1.5rem 1.2rem;border:1px solid var(--ni-border);border-radius:16px;background:#f6fbfc;color:var(--ni-dark);text-align:center;box-shadow:0 .75rem 2rem rgba(20,40,50,.22)}
+.ni-progress-dialog{box-sizing:border-box;width:min(30rem,calc(100vw - 2rem));padding:1.6rem 1.5rem 1.2rem;border:1px solid var(--ni-border);border-radius:16px;background:#f7f7ff;color:var(--ni-dark);text-align:center;box-shadow:0 .75rem 2rem rgba(20,40,50,.22)}
 .ni-progress-dialog::backdrop{background:rgba(9,17,24,.28)}
 .ni-progress-dialog h2{margin:.8rem 0 .4rem;font-size:1.15rem;color:var(--ni-dark)}
 .ni-progress-dialog p{margin:.3rem 0}
@@ -151,7 +153,7 @@
 @keyframes ni-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.ni-progress-spinner{animation-duration:3s}}
 /* In-chart zoom controls of CDFs and maps, shown while the chart is hovered. */
-.ni-chart-zoom{position:absolute;top:8px;right:8px;z-index:5;display:flex;align-items:center;gap:3px;padding:4px;border:1px solid var(--ni-border);border-radius:999px;background:rgba(255,255,255,.95);box-shadow:0 5px 16px rgba(11,79,92,.18);opacity:0;visibility:hidden;transition:opacity .18s ease,visibility 0s linear .18s}
+.ni-chart-zoom{position:absolute;top:8px;right:8px;z-index:5;display:flex;align-items:center;gap:3px;padding:4px;border:1px solid var(--ni-border);border-radius:999px;background:rgba(255,255,255,.95);box-shadow:0 5px 16px rgba(49,46,129,.18);opacity:0;visibility:hidden;transition:opacity .18s ease,visibility 0s linear .18s}
 .ni-chart-card:hover .ni-chart-zoom,.ni-chart-card:focus-within .ni-chart-zoom{opacity:1;visibility:visible;transition-delay:0s}
 .network-insights .ni-chart-zoom-button{display:grid;place-items:center;width:1.65rem;min-width:1.65rem;height:1.65rem;min-height:1.65rem;padding:0;border:0;border-radius:999px;background:var(--ni-color);color:#fff;font:800 1rem/1 inherit;cursor:pointer;box-shadow:none}
 .network-insights .ni-chart-zoom-reset{font-size:.62rem}
@@ -166,19 +168,19 @@
 .ni-chart-pan-down{bottom:8px;left:50%;transform:translateX(-50%)}
 @media(hover:none),(pointer:coarse){.ni-chart-zoom{opacity:1;visibility:visible}}
 /* Excel-style column filter menu of the Sites/Cells tables (shared Excel filter layout, teal theme). */
-.excel-column-filter-menu.ni-filter-menu{z-index:5000;overflow:auto;border-color:#b9dfe5;color:#0b4f5c;box-shadow:0 18px 48px rgba(11,79,92,.28)}
+.excel-column-filter-menu.ni-filter-menu{z-index:5000;overflow:auto;border-color:#c7cbf7;color:#312e81;box-shadow:0 18px 48px rgba(49,46,129,.28)}
 .ni-filter-menu .ni-filter-title{font-size:.9rem}
-.ni-filter-menu input[type="search"]{border-color:#b9dfe5;background:#f6fbfc;color:#0b4f5c}
-.ni-filter-menu .excel-column-filter-toolbar button{border-color:#b9dfe5;background:#e8f6f8;color:#0b4f5c;font-weight:700}
-.ni-filter-menu .excel-column-filter-toolbar button:hover{background:#d3eef2}
-.ni-filter-menu .excel-column-filter-options{border-color:#d3eef2;background:#fbfefe}
-.ni-filter-menu .excel-column-filter-options label{color:#0b4f5c}
-.ni-filter-menu .excel-column-filter-options label:hover{background:#e8f6f8}
+.ni-filter-menu input[type="search"]{border-color:#c7cbf7;background:#f7f7ff;color:#312e81}
+.ni-filter-menu .excel-column-filter-toolbar button{border-color:#c7cbf7;background:#eef0ff;color:#312e81;font-weight:700}
+.ni-filter-menu .excel-column-filter-toolbar button:hover{background:#dfe1fb}
+.ni-filter-menu .excel-column-filter-options{border-color:#dfe1fb;background:#fcfcff}
+.ni-filter-menu .excel-column-filter-options label{color:#312e81}
+.ni-filter-menu .excel-column-filter-options label:hover{background:#eef0ff}
 .ni-filter-menu .excel-column-filter-options label[hidden]{display:none}
-.ni-filter-menu .excel-column-filter-options input{accent-color:#0f6f7d}
+.ni-filter-menu .excel-column-filter-options input{accent-color:#4338ca}
 .ni-filter-menu .excel-column-filter-options span{flex:1}
 .ni-filter-menu .excel-column-filter-options small{color:#5f8790;font-size:.72rem;font-weight:600}
-.ni-filter-menu .excel-column-filter-footer button{border:1px solid #b9dfe5;background:#e8f6f8;color:#0b4f5c;box-shadow:none}
-.ni-filter-menu .excel-column-filter-footer button:last-child{border-color:#0b4f5c;background:linear-gradient(135deg,#0b4f5c,#0f6f7d);color:#fff}
+.ni-filter-menu .excel-column-filter-footer button{border:1px solid #c7cbf7;background:#eef0ff;color:#312e81;box-shadow:none}
+.ni-filter-menu .excel-column-filter-footer button:last-child{border-color:#312e81;background:linear-gradient(135deg,#312e81,#4338ca);color:#fff}
 .ni-filter-menu .excel-column-filter-options{max-height:220px}
 .ni-filter-menu > .form-note{margin:0;font-size:.74rem}

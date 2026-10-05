@@ -162,16 +162,21 @@
     definitionValue.datasets ||= {};
     for (const kind of ['data', 'voice', 'speech']) definitionValue.datasets[kind] ||= [];
     definitionValue.filters ||= {};
+    // Vendor, Vendor V3 and the former Vendor_Only select the vendor alone;
+    // Operator_Vendor and OP_Vendor select the operator-specific vendor.
+    const vendorField = field => (['vendor', 'vendoronly', 'vendorv3'].includes(identity(field)) ? 'Vendor'
+      : ['operatorvendor', 'opvendor'].includes(identity(field)) ? 'Operator_Vendor' : field);
     for (const field of Object.keys(definitionValue.filters)) {
-      if (!['vendor', 'vendoronly', 'vendorv3', 'operatorvendor', 'opvendor'].includes(identity(field))) continue;
+      const target = vendorField(field);
+      if (target === field) continue;
       const values = definitionValue.filters[field];
       delete definitionValue.filters[field];
-      definitionValue.filters.Vendor_Only = [...new Set((values || []).map(value => window.normalizeVendorFilterValue?.(value) ?? value))];
+      definitionValue.filters[target] = [...new Set((values || []).map(value => (target === 'Vendor' ? window.normalizeVendorFilterValue?.(value) ?? value : value)))];
     }
     definitionValue.custom_fields ||= [];
-    definitionValue.custom_fields = [...new Set(definitionValue.custom_fields.map(field => ['vendor', 'vendorv3', 'operatorvendor', 'opvendor'].includes(identity(field)) ? 'Vendor_Only' : field))];
+    definitionValue.custom_fields = [...new Set(definitionValue.custom_fields.map(vendorField))];
     definitionValue.hidden_filters ||= [];
-    definitionValue.hidden_filters = definitionValue.hidden_filters.map(field => ['vendor', 'vendorv3', 'operatorvendor', 'opvendor'].includes(identity(field)) ? 'Vendor_Only' : field);
+    definitionValue.hidden_filters = definitionValue.hidden_filters.map(vendorField);
     definitionValue.slide_comments ||= {};
     if (!definitionValue.date_from) definitionValue.date_from = 'Oldest';
     if (!definitionValue.date_to) definitionValue.date_to = 'Newest';
@@ -697,7 +702,7 @@
     };
     // Dashboard Filters start from the values saved in the Dashboard; a field
     // it does not filter starts with every value of the selected CDRs.
-    const selectionFields = {operators: 'Operator', vendors: 'Vendor_Only', regions: 'Region', cities: 'City'};
+    const selectionFields = {operators: 'Operator', vendors: 'Vendor', regions: 'Region', cities: 'City'};
     // Save Universe and Save Filters update this saved definition.
     let savedDashboard = dashboard;
     const savedDashboardSelection = field => {
@@ -952,19 +957,19 @@
         if (request !== geographyRequest) return;
         for (const [field, key, rawValues] of [
           ['Operator', 'operators', geography.operators || []],
-          ['Vendor_Only', 'vendors', geography.vendors || []],
+          ['Vendor', 'vendors', geography.vendors || []],
           ['Region', 'regions', geography.regions || []], ['City', 'cities', geography.cities || []],
         ]) {
           const values = rawValues.map(String).map(value => value.trim()).filter(Boolean);
           const isOperator = field === 'Operator';
-          const isVendor = field === 'Vendor_Only';
+          const isVendor = field === 'Vendor';
           const isRegion = field === 'Region';
           const section = isOperator ? operatorSection : isVendor ? vendorSection : isRegion ? regionSection : citySection;
           const control = isOperator ? operatorControl : isVendor ? vendorControl : isRegion ? regionControl : cityControl;
           const copy = isOperator ? operatorCopy : isVendor ? vendorCopy : isRegion ? regionCopy : cityCopy;
           const previous = selectionState[key];
           if (values.length <= 1) {
-            const label = field === 'Operator' ? 'Operator' : field === 'Vendor_Only' ? 'Vendor' : field === 'Region' ? 'Region' : 'City';
+            const label = field;
             section.hidden = false;
             control.disabled = true;
             control.replaceChildren();
@@ -988,7 +993,7 @@
           }));
           control.dispatchEvent(new Event('multiselect:options-updated'));
           selectionState[key] = {values: [...selected], all: selected.size === values.length};
-          copy.textContent = `Select one or more ${field === 'Operator' ? 'Operators' : field === 'Vendor_Only' ? 'Vendors' : field === 'Region' ? 'Regions' : 'Cities'} to include in this PowerPoint export.`;
+          copy.textContent = `Select one or more ${field === 'Operator' ? 'Operators' : field === 'Vendor' ? 'Vendors' : field === 'Region' ? 'Regions' : 'Cities'} to include in this PowerPoint export.`;
         }
         rememberDialog();
         if (extraFilters.size) void loadExtraFilterOptions();
@@ -1153,8 +1158,8 @@
     }
     if (!chooseScope && exportDefinition.scope === 'multivendor') {
       const choice = await window.showConfirmDialog(
-        'Keep operators separate within each vendor, or pool all selected operators by Vendor_Only?',
-        {title: 'Choose vendor comparison', confirmLabel: 'Vendor Only (All Operators Combined)', secondaryLabel: 'Operator - Vendor', cancelLabel: 'Cancel', wideActions: true},
+        'Keep operators separate within each vendor (Operator_Vendor), or pool all selected operators by Vendor?',
+        {title: 'Choose vendor comparison', confirmLabel: 'Vendor (All Operators Combined)', secondaryLabel: 'Operator_Vendor', cancelLabel: 'Cancel', wideActions: true},
       );
       if (choice !== 'confirm' && choice !== 'secondary') return;
       exportDefinition = structuredClone(exportDefinition);
@@ -2064,7 +2069,7 @@
       const selected = Array.isArray(definition.filters[field])
         ? definition.filters[field].map(value => String(value)) : [];
       const custom = definition.custom_fields.includes(field);
-      const label = ['vendor', 'vendoronly'].includes(identity(field)) ? 'Vendor' : custom ? field : field === 'technology_primary' ? 'Technology' : field.replaceAll('_',' ').replace(/\b\w/g, letter => letter.toUpperCase());
+      const label = ['vendor', 'vendoronly'].includes(identity(field)) ? 'Vendor' : identity(field) === 'operatorvendor' ? 'Operator_Vendor' : custom ? field : field === 'technology_primary' ? 'Technology' : field.replaceAll('_',' ').replace(/\b\w/g, letter => letter.toUpperCase());
       const aliases = Object.entries(filterAliases).find(([name]) => identity(name) === identity(field))?.[1] || [];
       if (aliases.length > 1) {
         const aliasTooltip = `Supported columns by priority:\n${aliases.map((alias, index) => `${index + 1}. ${alias}`).join('\n')}`;
@@ -2092,6 +2097,7 @@
       }
       if (!custom && identity(field) === identity('City')) {
         values.dataset.multiselectPresetLabel = 'Main Cities';
+        values.dataset.multiselectPresetFirst = 'true';
         values.dataset.multiselectPresetValues = mainCities.join('|');
       }
       const available = [...new Set([...(facetOptions[field] || []), ...selected].map(value => String(value)))];

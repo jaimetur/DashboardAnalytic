@@ -103,3 +103,43 @@
 .report-jobs .rj-entry-title { color: #1f5f3a; font-size: .92rem; }
 .report-jobs .rj-entry.is-collapsed > :not(.rj-entry-head) { display: none !important; }
 .report-jobs .rj-collapse { flex: 0 0 auto; cursor: pointer; font: inherit; font-size: .78rem; font-weight: 700; }
+/* Filter dropdowns: one per column, left-aligned options and a single open menu. */
+.report-jobs .rj-filters { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 13.5rem), 1fr)); gap: .55rem; align-items: start; }
+.report-jobs .rj-multi { min-width: 0; }
+.report-jobs .rj-multi > summary { align-items: center; min-height: 2.6rem; box-sizing: border-box; border-color: rgba(31, 95, 58, .3); color: #1d3b2b; }
+.report-jobs .rj-multi[open] > summary { border-color: #2f6e4b; box-shadow: 0 0 0 3px rgba(79, 179, 122, .18); }
+.report-jobs .rj-multi-caption { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.report-jobs .rj-multi .workspace-user-picker-menu { top: calc(100% + .3rem); left: 0; z-index: 60; display: grid; gap: .1rem; width: max-content; min-width: 100%; max-width: min(24rem, 90vw); max-height: 18rem; box-sizing: border-box; }
+.report-jobs .rj-multi .workspace-user-picker-search { box-sizing: border-box; width: 100%; margin-bottom: .3rem; padding: .45rem .6rem; border: 1px solid rgba(31, 95, 58, .3); border-radius: 8px; font-size: .84rem; }
+.report-jobs .rj-multi .workspace-user-picker-menu label.rj-multi-option { display: flex; flex-direction: row; justify-content: flex-start; align-items: center; gap: .55rem; padding: .35rem .45rem; border-radius: 7px; font-size: .86rem; font-weight: 600; text-align: left; cursor: pointer; }
+.report-jobs .rj-multi .workspace-user-picker-menu label.rj-multi-option:hover { background: #e9f6ee; }
+.report-jobs .rj-multi .workspace-user-picker-menu label.rj-multi-option input { flex: 0 0 1rem; width: 1rem; min-width: 1rem; height: 1rem; margin: 0; accent-color: #2f6e4b; }
+.report-jobs .rj-multi .workspace-user-picker-menu label.rj-multi-option span { min-width: 0; overflow-wrap: anywhere; }
+.report-jobs .rj-multi .workspace-user-picker-menu label.rj-multi-preset { margin-bottom: .2rem; border: 1px solid rgba(31, 95, 58, .25); background: #f1f9f4; color: #1f5f3a; }
+.report-jobs .rj-multi .workspace-user-picker-menu label.rj-multi-option:has(input:disabled) { opacity: .45; cursor: default; }
+
+/* Saved jobs: every action on one row. */
+.reporting-jobs-table .table-actions.rj-task-actions { flex-wrap: nowrap; gap: .4rem; white-space: nowrap; }
+/* Network Insights: its seven filters share one row on wide screens. */
+.report-jobs .rj-filters.rj-filters-one-row { grid-template-columns: repeat(auto-fit, minmax(min(100%, 8.5rem), 1fr)); }
+/* Saved jobs: narrow Name and Email columns so Last Run and Status keep one line. */
+#rj-tasks th:nth-child(1), #rj-tasks td:nth-child(1) { width: 9rem; overflow-wrap: anywhere; }
+#rj-tasks th:nth-child(5), #rj-tasks td:nth-child(5) { width: 5.5rem; }
+#rj-tasks th:nth-child(6), #rj-tasks td:nth-child(6) { white-space: nowrap; }
+#rj-tasks th:nth-child(7), #rj-tasks td:nth-child(7) { width: 1%; white-space: nowrap; }
+#rj-tasks .rj-status { white-space: nowrap; }
+/* Reporting palette in the artifact panels: green checkboxes, highlighted row titles and more room between rows. */
+.report-jobs input[type="checkbox"], .report-jobs input[type="radio"] { accent-color: #2f8a57; }
+.report-jobs .rj-card-body, .report-jobs .rj-entry { gap: 1.1rem; }
+.report-jobs .rj-card-body > strong, .report-jobs .rj-entry > strong, .report-jobs .rj-inline-label {
+  color: #1f6b43; font-weight: 800; letter-spacing: .01em;
+}
+.report-jobs .rj-card-body > strong, .report-jobs .rj-entry > strong { margin-bottom: -.55rem; }
+.report-jobs .rj-inline { row-gap: .55rem; }
+/* The artifact checkbox reads as the title of its panel; its output formats are compact chips below it. */
+.report-jobs .rj-card > .rj-card-toggle > strong { color: #174d31; font-size: 1.12rem; font-weight: 850; }
+.report-jobs .rj-card > .rj-card-toggle > input { width: 1.35rem; height: 1.35rem; }
+.report-jobs .rj-formats { display: flex; flex-wrap: wrap; align-items: center; gap: .45rem; }
+.report-jobs label.rj-format-chip { gap: .35rem; padding: .22rem .7rem .22rem .5rem; border: 1px solid rgba(47, 138, 87, .35); border-radius: 999px; background: #fff; font-size: .86rem; font-weight: 650; }
+.report-jobs label.rj-format-chip:has(input:checked) { border-color: #2f8a57; background: #e8f5ed; color: #174d31; }
+.report-jobs label.rj-format-chip input { width: .9rem; height: .9rem; }

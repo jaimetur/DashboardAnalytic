@@ -3,7 +3,7 @@
 Use **Reporting** to collect artifacts from several modules in one **Reporting Job**, run it on demand or on a schedule, and email the artifacts with a clear description of each one and its filters.
 
 > [!NOTE]
-> **Feature activation.** Reporting starts available to super-admins only. Super-admins allow or forbid it for other roles, user groups or users in **Admin → Features Activation**. Creating, editing and running jobs requires `user-editor`, `admin` or `super-admin`.
+> **Feature activation.** Reporting is available to every user by default. Admins and super-admins allow or forbid it for roles, user groups or users in **Admin → Features Activation**. Creating, editing and running jobs requires `user-editor`, `admin` or `super-admin`.
 
 ## In this guide
 
@@ -22,18 +22,22 @@ A job includes any combination of these artifacts. A user can only include artif
 
 | Artifact | Content | Options |
 | --- | --- | --- |
-| **Dataset Analysis** | The Datasets Analysis export of every selected dataset, with every KPI and no filters: global KPIs, metric cards, CDF and comparison charts, grouped percentiles and the processed metrics table | PowerPoint and/or Word; every ready CDR (also future ones) or a fixed selection |
-| **Network Insights** | RF quality overview with campaign deltas, RSRP and SINR CDFs, coverage and interference maps with their weakest areas (LTE and NR separately for LTE+NR), observed and licensed spectrum and network deployment | One report per entry, in PowerPoint and/or Word: NR Mode, technology, LTE/NR thresholds, grouping, Operator/Vendor/Campaign/Region/City filters and CDRs |
-| **Dashboard** | One new Dashboard PowerPoint per entry, generated at each run | NR Mode first, which lists its Dashboards and CDRs (or **Every ready Data, Voice and Speech CDR of this NR Mode at each run**), then the Dashboard's own options, prefilled with its saved definition: Scope and Vendor comparison, CDR Data/Voice/Speech, date range and every Adaptative Filter (Market, Region, City, Campaign, Operator, Vendor, RAT, Session Type, Call Status and the Dashboard's Auto-calculated Fields). Filter values are the ones the selected CDRs offer; empty filters include every value |
-| **Scoring** | One Scoring & GAP Analysis PowerPoint per entry | The Scoring calculation options: NR Mode, CDRs (or the newest complete set at each run), Operator/Vendor/Region/City/Campaign filters or Main Cities, aggregation levels, methodology and GAP reference. An identical completed calculation is reused |
+| **CDR Analysis** | The CDR Analysis export of every selected dataset: global KPIs, metric cards, CDF and comparison charts, grouped percentiles and the processed metrics table | PowerPoint and/or Word; every ready CDR (also future ones) or a fixed selection; in a **Metrics** row, the metrics of each CDR type (CDR Data, Voice and Speech; all by default); in a **Filters** row, the Operator, Operator_Vendor, Vendor, Region, Cluster, City (with Main Cities) and Campaign filters of Network Insights; and two single-choice rows, **Aggregation** for the charts' global aggregation and **CDF Comparison** for the CDF curves (Operator by default) |
+| **Network Insights** | RF quality overview with campaign deltas, RSRP and SINR CDFs, coverage and interference maps with their weakest areas (LTE and NR separately for LTE+NR), observed and licensed spectrum and network deployment | One report per entry, in PowerPoint and/or Word: NR Mode, technology, LTE/NR thresholds, grouping (Operator, Vendor, Region, Cluster, City, CDR type, Campaign), Operator/Operator_Vendor/Vendor/Region/Cluster/City/Campaign filters in one row and CDRs |
+| **Dashboard** | One new Dashboard PowerPoint per entry, generated at each run | NR Mode first, which lists its Dashboards and CDRs (or **Every ready Data, Voice and Speech CDR of this NR Mode at each run**), then the Dashboard's own options, prefilled with its saved definition: Scope and Vendor comparison, CDR Data/Voice/Speech, date range and every Adaptative Filter (Operator, Operator_Vendor, Vendor, Market, Region, Cluster, City, Campaign, RAT, Session Type, Call Status and the Dashboard's Auto-calculated Fields). Filter values are the ones the selected CDRs offer; empty filters include every value |
+| **Scoring** | One Scoring & GAP Analysis PowerPoint per entry | The Scoring calculation options: NR Mode, CDRs (or the newest complete set at each run), Operator/Operator_Vendor/Vendor/Region/Cluster/City/Campaign filters (City offers Main Cities first), aggregation levels including Cluster, methodology and GAP reference. An identical completed calculation is reused |
 
-Add Network Insights, the same Dashboard or Scoring several times to include several configurations, for example a Network Insights report for NSA and another for SA, one for LTE and one for NR, or three Dashboards with two filter configurations each. Jobs saved with a single Network Insights selection show it as one entry. Modules that provide their own reports, such as Non-Qualified Calls when it is ready, appear as additional artifacts.
+Add Network Insights, the same Dashboard or Scoring several times to include several configurations, for example a Network Insights report for NSA and another for SA, one for LTE and one for NR, or three Dashboards with two filter configurations each. Jobs saved with a single Network Insights selection show it as one entry. Modules that provide their own reports appear as additional artifacts: **Non-Qualified Calls** adds its Executive Summary and Progress Status in PowerPoint, Word and/or Excel, with the filters of its Filters panel, the period of the progress timeline and an open-calls-only option.
 
-The same summaries are available directly: **Summary PowerPoint** and **Summary Word** in [Datasets Analysis](datasets-analysis.md) ask which datasets to include, and **Export PowerPoint** and **Export Word** in [Network Insights](network-insights.md) export the current selection.
+Filter dropdowns open one at a time and close when clicking elsewhere; every City selector offers **Main Cities** first.
+
+Every artifact file is named `yyyymmdd_hhmmss - <Module> - <report name>` with the run timestamp, for example `20261006_093000 - Network Insights - NSA LTE.pptx`; artifacts with the same name get ` (2)`, ` (3)`… The ZIP of a run is named `yyyymmdd_hhmmss - Reporting - <job name>.zip`.
+
+The same summaries are available directly: **Summary PowerPoint** and **Summary Word** in [CDR Analysis](datasets-analysis.md) ask which datasets to include, and **Export PowerPoint** and **Export Word** in [Network Insights](network-insights.md) export the current selection.
 
 ## Reporting Jobs
 
-The **Reporting Jobs** table lists every job with its name, artifacts, next run, recurrence, whether it sends email and its last run.
+The **Reporting Jobs** table lists every job with its name, artifacts, next run, recurrence, whether it sends email, the time of its last run and its status, followed by its actions in one row.
 
 | Action | Result |
 | --- | --- |
@@ -44,7 +48,7 @@ The **Reporting Jobs** table lists every job with its name, artifacts, next run,
 | ⏸ / ⏵ | Disables or enables the schedule |
 | × Delete | Deletes the job, its run history and artifacts |
 
-Select **New Reporting Job**, enter a name, check each type of artifact to include — Datasets Analysis, Network Insights, E2E Dashboards, Scoring & GAP Analysis and, when it provides artifacts, Non-Qualified Calls — and configure its entries, then choose the delivery and the schedule and **Save Reporting Job**. An unchecked type keeps its configuration in the editor but is not generated. Each artifact type and each entry has **Collapse/Expand**, remembered by the browser after reloading the page, and an entry's header names its NR Mode, technology or Dashboard. The fields of each entry share one row on wide screens, and CDRs appear in one card per type (CDR Data, Voice and Speech) with **Select All/None**, as in Network Insights.
+Select **New Reporting Job**, enter a name, check each type of artifact to include — CDR Analysis, Network Insights, E2E Dashboards, Scoring & GAP Analysis and Non-Qualified Calls — and configure its entries, then choose the delivery and the schedule and **Save Reporting Job**. An unchecked type keeps its configuration in the editor but is not generated. Each artifact type and each entry has **Collapse/Expand**, remembered by the browser after reloading the page, and an entry's header names its NR Mode, technology or Dashboard. The fields of each entry share one row on wide screens, and CDRs appear in one card per type (CDR Data, Voice and Speech) with **Select All/None**, as in Network Insights.
 
 ## Email delivery
 

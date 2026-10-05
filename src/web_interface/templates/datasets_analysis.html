@@ -4,7 +4,7 @@
   <article class="panel dataset-summary-panel select-dataset-card module-hero-datasets-analysis" style="background: linear-gradient(135deg, #0c4c8c, #68b8ff) !important; color: #ffffff;">
         <div class="section-head tight-head">
           <div>
-            <p class="eyebrow">Dataset Analysis</p>
+            <p class="eyebrow">CDR Analysis</p>
             <h2>{{ selected_dataset.file_name if selected_dataset else 'Select Dataset' }}</h2>
           </div>
           {% if selected_dataset %}<span class="pill status-pill status-{{ selected_dataset.status }}">{{ selected_dataset.status_label }}</span>{% endif %}
@@ -100,8 +100,8 @@
         </div>
         {% if summary_datasets %}
         <dialog class="confirm-dialog dataset-summary-dialog" data-dataset-summary-dialog>
-          <form method="post" action="/datasets-analysis/summary/powerpoint" data-loading-label="Exporting Summary Dataset Analysis" data-download-form="1" data-dataset-summary-form>
-            <p class="eyebrow">Summary Dataset Analysis</p>
+          <form method="post" action="/datasets-analysis/summary/powerpoint" data-loading-label="Exporting Summary CDR Analysis" data-download-form="1" data-dataset-summary-form>
+            <p class="eyebrow">Summary CDR Analysis</p>
             <h3 data-dataset-summary-title>Summary PowerPoint</h3>
             <p class="form-note">Every KPI of each selected dataset, without filters. All datasets are selected by default.</p>
             <button type="button" class="ghost-link" data-dataset-summary-toggle>Select All / None</button>
@@ -244,7 +244,7 @@
               <span>Global CDF Comparison</span>
               <select name="cdf_grouping" form="datasets-analysis-filters-form" data-global-cdf-grouping-select>
                 <option value="all" {% if (selected_cdf_grouping or 'all')|lower == 'all' %}selected{% endif %}>Single CDF</option>
-                {% for item in ['vendor', 'market', 'operator', 'region', 'city'] %}
+                {% for item in ['operator', 'operator_vendor', 'vendor', 'market', 'region', 'cluster', 'city'] %}
                 <option value="{{ item }}" {% if item == ((selected_cdf_grouping or 'all')|lower) %}selected{% endif %} {% if item not in selected_dataset.available_cdf_groupings %}disabled{% endif %}>{{ format_aggregation_label(item) }}</option>
                 {% endfor %}
               </select>
@@ -253,7 +253,7 @@
               <span>Global Aggregation</span>
               <select name="aggregation" form="datasets-analysis-filters-form" data-global-aggregation-select>
                 <option value="all" {% if selected_aggregation == 'all' %}selected{% endif %}>Auto / raw view</option>
-                {% for item in ['operator', 'vendor', 'region', 'city', 'market', 'period', 'session_type', 'test_name', 'direction', 'technology_primary', 'source_sheet'] %}
+                {% for item in ['operator', 'operator_vendor', 'vendor', 'region', 'cluster', 'city', 'market', 'period', 'session_type', 'test_name', 'direction', 'technology_primary', 'source_sheet'] %}
                 <option value="{{ item }}" {% if item == selected_aggregation %}selected{% endif %} {% if item not in selected_dataset.available_aggregations %}disabled{% endif %}>{{ format_aggregation_label(item) }}</option>
                 {% endfor %}
               </select>
@@ -288,7 +288,7 @@
                       data-global-cdf-grouping="{{ selected_cdf_grouping or 'all' }}"
                     >
                       <option value="all" {% if (current_analysis.filters.cdf_grouping or 'all')|lower == 'all' %}selected{% endif %}>Single CDF</option>
-                      {% for item in ['vendor', 'market', 'operator', 'region', 'city'] %}
+                      {% for item in ['operator', 'operator_vendor', 'vendor', 'market', 'region', 'cluster', 'city'] %}
                       <option value="{{ item }}" {% if item == ((current_analysis.filters.cdf_grouping or 'all')|lower) %}selected{% endif %} {% if item not in selected_dataset.available_cdf_groupings %}disabled{% endif %}>{{ format_aggregation_label(item) }}</option>
                       {% endfor %}
                     </select>
@@ -320,7 +320,7 @@
                       data-global-aggregation="{{ selected_aggregation or 'all' }}"
                     >
                       <option value="all" {% if (current_analysis.filters.aggregation or 'all')|lower == 'all' %}selected{% endif %}>Auto / raw view</option>
-                      {% for item in ['operator', 'vendor', 'region', 'city', 'market', 'period', 'session_type', 'test_name', 'direction', 'technology_primary', 'source_sheet'] %}
+                      {% for item in ['operator', 'operator_vendor', 'vendor', 'region', 'cluster', 'city', 'market', 'period', 'session_type', 'test_name', 'direction', 'technology_primary', 'source_sheet'] %}
                       <option value="{{ item }}" {% if item == ((current_analysis.filters.aggregation or 'all')|lower) %}selected{% endif %} {% if item not in selected_dataset.available_aggregations %}disabled{% endif %}>{{ format_aggregation_label(item) }}</option>
                       {% endfor %}
                     </select>
@@ -362,7 +362,7 @@
                       {% set ns.value = item.value %}
                       {% endif %}
                       {% endfor %}
-                      <td>{{ ns.value }}</td>
+                      <td>{{ ns.value | two_decimals }}</td>
                       {% endfor %}
                     </tr>
                     {% endfor %}
@@ -400,7 +400,7 @@
               {% for row in analysis.table_rows %}
               <tr>
                 {% for value in row.values() %}
-                <td>{{ value }}</td>
+                <td>{{ value | two_decimals }}</td>
                 {% endfor %}
               </tr>
               {% endfor %}
@@ -416,7 +416,7 @@
       <section class="panel empty-state-panel">
         <p class="eyebrow">Waiting</p>
         <h2>Dataset still processing</h2>
-        <p class="lede">This dataset is not ready for dataset analysis yet. Open the Workspace view to monitor processing progress.</p>
+        <p class="lede">This dataset is not ready for CDR analysis yet. Open the Workspace view to monitor processing progress.</p>
       </section>
       {% else %}
       <section class="panel empty-state-panel">
@@ -446,7 +446,7 @@
           <label class="sidebar-field-full">Metrics
             <select name="metric" multiple size="{{ [selected_dataset.available_metrics|length, 8]|min }}">
               {% for item in selected_dataset.available_metrics %}
-              <option value="{{ item }}" {% if not metric_availability.get(item, True) %}disabled{% endif %} {% if ((item in selected_metrics) or (not selected_metrics and item == selected_dataset.default_metric)) and metric_availability.get(item, True) %}selected{% endif %}>{{ item }}</option>
+              <option value="{{ item }}" {% if not metric_availability.get(item, True) %}disabled{% endif %} {% if ((item in selected_metrics) or not selected_metrics) and metric_availability.get(item, True) %}selected{% endif %}>{{ item }}</option>
               {% endfor %}
             </select>
             <span class="table-help">Use the dropdown to select one, several, or all KPIs.</span>
@@ -475,7 +475,7 @@
           {% endif %}
           <div class="sidebar-actions">
             <button type="submit">Update Analysis</button>
-            {% if selected_dataset %}<a class="ghost-link reset-link" href="/datasets-analysis?dataset_id={{ selected_dataset.id }}{% if input_kind %}&input_kind={{ input_kind }}{% endif %}">Reset</a>{% endif %}
+            {% if selected_dataset %}<a class="ghost-link reset-link" href="/datasets-analysis?dataset_id={{ selected_dataset.id }}{% if input_kind %}&input_kind={{ input_kind }}{% endif %}&reset=1">Reset</a>{% endif %}
           </div>
         </form>
       </article>

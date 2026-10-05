@@ -17,7 +17,7 @@
 - CDR ingestion, profiling, preview
 - Vendor mapping datasets support.
 - Region mapping polygon shapes support.
-- Datasets Analysis analysis and exports.
+- CDR Analysis analysis and exports.
 - Ad-hoc Chart Builder.
 - Ad-hoc Query Builder.
 - Template-driven NSA/SA Dashboards and PPT Reports.

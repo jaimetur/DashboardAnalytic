@@ -24,6 +24,7 @@ _SHARED = ['Operator', 'Campaign', 'G_Level_1', 'G_Level_2']
 _LEVEL_SOURCE_ALIASES = {
     'Region': ('Region', 'G_Level_2'),
     'City': ('City', 'G_Level_4'),
+    'Cluster': ('Cluster',),
 }
 _FIELDS = {
     'data': ['Test_Name', 'Test_Result', 'Mean_Data_Rate', 'Transfer_Duration', 'Type_of_Test',
@@ -260,7 +261,7 @@ def calculate_scoring(
     dimensions = []
     for level in levels:
         identity = column_identity(level)
-        canonical = {'operator': 'Operator', 'region': 'Region', 'city': 'City', 'vendor': 'Vendor',
+        canonical = {'operator': 'Operator', 'region': 'Region', 'cluster': 'Cluster', 'city': 'City', 'vendor': 'Vendor',
                      'ranvendor': 'Vendor', 'campaign': 'Campaign',
                      'datasettype': 'Dataset Type', 'datasetkind': 'Dataset Type'}.get(identity)
         if canonical is None:

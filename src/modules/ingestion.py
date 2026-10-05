@@ -14,7 +14,10 @@ try:
 except ImportError:  # pragma: no cover - packaged installations include it.
     pycountry = None
 
-from src.modules.column_names import campaign_parts, clean_column_name, column_identity, resolve_column_name, mapped_vendor_only_value
+from src.modules.column_names import (
+    OPERATOR_VENDOR_FIELD, VENDOR_FIELD, campaign_parts, clean_column_name, column_identity, mapped_vendor_only_value,
+    operator_vendor_value, resolve_column_name,
+)
 
 
 CDR_IGNORED_SHEETS = {
@@ -209,6 +212,39 @@ def _ensure_dataset_field(dataset: pd.DataFrame, target: str, candidates: Iterab
     return actual
 
 
+def ensure_vendor_fields(dataset: pd.DataFrame, operator_column: str) -> pd.DataFrame:
+    """Store Operator_Vendor (<Operator>_<Vendor>) and Vendor (the vendor alone).
+
+    The source CDR's Vendor, or Operator_Vendor when the CDR already has it, is
+    the operator-specific vendor. Files with the former Vendor_Only field keep
+    their Vendor as Operator_Vendor. Operators without a vendor store
+    "<Operator> - All" in both fields.
+    """
+    columns = list(dataset.columns)
+    composite = resolve_column_name(columns, OPERATOR_VENDOR_FIELD)
+    vendor_columns = [column for column in columns if column_identity(column) in {'vendor', 'vendoronly', 'vendor2'}]
+    source = composite or next(
+        (column for column in vendor_columns if column_identity(column) == 'vendor'), None,
+    )
+    position = min((columns.index(column) for column in [*vendor_columns, *([composite] if composite else [])]), default=len(columns))
+    operators = dataset[operator_column].fillna('').astype(str).str.strip()
+    raw_values = dataset[source] if source else pd.Series([''] * len(dataset), index=dataset.index)
+    raw = raw_values.fillna('').astype(str).str.strip()
+    # Each distinct (vendor, operator) pair is resolved once.
+    resolved = {}
+    for pair in set(zip(raw, operators, strict=False)):
+        operator_vendor = operator_vendor_value(*pair)
+        resolved[pair] = (operator_vendor, mapped_vendor_only_value(operator_vendor, pair[1]))
+    rows = [resolved[pair] for pair in zip(raw, operators, strict=False)]
+    composite_values = [row[0] for row in rows]
+    vendor_values = [row[1] for row in rows]
+    dataset = dataset.drop(columns=[*vendor_columns, *([composite] if composite else [])])
+    position = min(position, len(dataset.columns))
+    dataset.insert(position, OPERATOR_VENDOR_FIELD, composite_values)
+    dataset.insert(position + 1, VENDOR_FIELD, vendor_values)
+    return dataset
+
+
 def ensure_fixed_cdr_fields(dataset: pd.DataFrame) -> pd.DataFrame:
     legacy_report_columns = [column for column in dataset.columns if column_identity(column) == 'reportvendor']
     if legacy_report_columns:
@@ -249,14 +285,7 @@ def ensure_fixed_cdr_fields(dataset: pd.DataFrame) -> pd.DataFrame:
     _ensure_dataset_field(dataset, 'City', ('City', 'G_Level_4'))
     operator = _ensure_dataset_field(dataset, 'Operator', ('Operator', 'Operator_A', 'Home_Operator_A', 'Home_Operator'))
     _ensure_dataset_field(dataset, 'Subscriber', ('Subscriber', 'Suscriber', operator))
-    vendor = _ensure_dataset_field(dataset, 'Vendor', ('Vendor', 'vendor'))
-    vendor_only = _ensure_dataset_field(dataset, 'Vendor_Only', ('Vendor_Only',))
-    operators = dataset[operator].fillna('').astype(str).str.strip()
-    vendors = dataset[vendor].fillna('').astype(str).str.strip()
-    vendor_only_values = {
-        pair: mapped_vendor_only_value(*pair) for pair in set(zip(vendors, operators, strict=False))
-    }
-    dataset[vendor_only] = [vendor_only_values[pair] for pair in zip(vendors, operators, strict=False)]
+    dataset = ensure_vendor_fields(dataset, operator)
     technology_fields = ('Technology', 'RAT', 'RAT_A', 'L2_Call_Mode_A', 'Playing_Technology')
     for field in technology_fields:
         _ensure_dataset_field(dataset, field, technology_fields)
@@ -522,13 +551,12 @@ def infer_dataset_kind(df: pd.DataFrame, file_name: str = '') -> str:
 def _normalise_dataset(df: pd.DataFrame, file_path: Path) -> pd.DataFrame:
     dataset = df.copy()
     dataset.columns = [clean_column_name(column) for column in dataset.columns]
-    legacy_vendor_only = next((column for column in dataset.columns if str(column).casefold() == 'vendor_2'), None)
-    current_vendor_only = next((column for column in dataset.columns if str(column).casefold() == 'vendor_only'), None)
-    if legacy_vendor_only:
-        if current_vendor_only:
-            dataset = dataset.drop(columns=[legacy_vendor_only])
-        else:
-            dataset = dataset.rename(columns={legacy_vendor_only: 'Vendor_Only'})
+    source_vendor = resolve_column_name(dataset.columns, OPERATOR_VENDOR_FIELD) or resolve_column_name(dataset.columns, VENDOR_FIELD)
+    # Whether the source CDR brings a Vendor for every row; mapped Vendors replace it.
+    vendor_values_complete = bool(
+        source_vendor and not dataset.empty
+        and dataset[source_vendor].fillna('').astype(str).str.strip().ne('').all()
+    )
     dataset_kind = infer_dataset_kind(dataset, file_path.name)
     dataset['dataset_kind'] = dataset_kind
     dataset['source_file'] = file_path.name
@@ -549,7 +577,6 @@ def _normalise_dataset(df: pd.DataFrame, file_path: Path) -> pd.DataFrame:
     dataset['direction'] = _first_available_series(dataset, ['direction', 'Direction_A', 'Direction', 'Call_Direction', 'call_direction'])
     dataset['region'] = _first_available_series(dataset, ['region', 'Region'])
     dataset['city'] = _first_available_series(dataset, ['city', 'City'])
-    dataset['vendor'] = _first_available_series(dataset, ['vendor', 'Vendor'])
     dataset['status'] = _first_available_series(dataset, ['status', 'Call_Status_A', 'Call_Status', 'Test_Result', 'Test_Status'])
 
     dataset['disturbed'] = _first_available_series(dataset, ['Disturbed_Call']).astype(str).str.lower().eq('yes')
@@ -622,6 +649,7 @@ def _normalise_dataset(df: pd.DataFrame, file_path: Path) -> pd.DataFrame:
     )
 
     dataset = ensure_fixed_cdr_fields(dataset)
+    dataset.attrs['vendor_values_complete'] = vendor_values_complete
     start_column = resolve_column_name(dataset.columns, 'Event_Start_Time') or 'event_start_time'
     end_column = resolve_column_name(dataset.columns, 'Event_End_Time') or 'event_end_time'
     start_times = pd.to_datetime(dataset[start_column], errors='coerce', format='mixed')

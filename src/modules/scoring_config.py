@@ -20,6 +20,19 @@ SUPPORTED_MAPPING_METHODS = frozenset({'piecewise_linear', 'piecewise_quadratic'
 _PROFILE_ID = re.compile(r'[a-z0-9][a-z0-9_-]{0,63}\Z')
 DEFAULT_AGGREGATION_HIERARCHY = ['Operator', 'Vendor', 'Region', 'City', 'Campaign']
 _AGGREGATION_FIELDS = frozenset(DEFAULT_AGGREGATION_HIERARCHY)
+# Levels added after configurations were saved; a saved hierarchy without them keeps
+# its identity (and its calculated jobs) and gets them in their default position.
+OPTIONAL_AGGREGATION_LEVELS = {'Cluster': 'Region'}
+
+
+def complete_aggregation_hierarchy(hierarchy: object = None) -> list[str]:
+    """The aggregation hierarchy with every level: Cluster follows Region unless it was placed."""
+    levels = [str(value).strip() for value in hierarchy if str(value).strip()] if isinstance(hierarchy, list) else []
+    levels = levels or list(DEFAULT_AGGREGATION_HIERARCHY)
+    for level, after in OPTIONAL_AGGREGATION_LEVELS.items():
+        if level not in levels:
+            levels.insert(levels.index(after) + 1 if after in levels else len(levels), level)
+    return levels
 _SCORE_ANCHORS = ('low_score', 'medium_score', 'high_score', 'ultra_score')
 _SCOPE_ENVIRONMENTS = {
     'DriveCity': {'sheet': 'DriveCity', 'g_level_1': 'Drive', 'g_level_2': 'City'},
@@ -542,11 +555,11 @@ def validate_scoring_configuration(payload: object) -> dict[str, Any]:
     aggregation_hierarchy = configuration.get('aggregation_hierarchy', DEFAULT_AGGREGATION_HIERARCHY)
     if (not isinstance(aggregation_hierarchy, list)
             or any(not isinstance(field, str) for field in aggregation_hierarchy)
-            or len(aggregation_hierarchy) != len(DEFAULT_AGGREGATION_HIERARCHY)
-            or len(set(aggregation_hierarchy)) != len(DEFAULT_AGGREGATION_HIERARCHY)
-            or set(aggregation_hierarchy) != _AGGREGATION_FIELDS):
+            or len(set(aggregation_hierarchy)) != len(aggregation_hierarchy)
+            or not _AGGREGATION_FIELDS <= set(aggregation_hierarchy) <= _AGGREGATION_FIELDS | set(OPTIONAL_AGGREGATION_LEVELS)):
         raise ValueError(
-            'Scoring configuration aggregation_hierarchy must list Operator, Vendor, Region, City and Campaign exactly once.'
+            'Scoring configuration aggregation_hierarchy must list Operator, Vendor, Region, City and Campaign '
+            'exactly once, optionally with Cluster.'
         )
     _validate_scope(configuration.get('scope'))
     interpolation = _validate_interpolation(configuration.get('interpolation', {

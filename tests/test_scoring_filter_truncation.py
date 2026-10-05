@@ -20,12 +20,12 @@ def test_complete_unicode_values_and_filename_budget():
                if field in filters)
     assert all(plan['omitted'][field] for field in filters)
     parts = filename.removesuffix('.pptx').split(' - ')[3:]
-    for field, part in zip(('region', 'city', 'operator', 'vendor'), parts):
+    for field, part in zip(('region', 'cluster', 'city', 'operator', 'vendor'), parts):
         retained = part.split(' + ') if part else []
         assert retained == plan['values'][field][:len(retained)]
         assert len(', '.join(plan['values'][field])) <= 110
     assert any(len(part.split(' + ')) < len(plan['values'][field])
-               for field, part in zip(('region', 'city', 'operator', 'vendor'), parts))
+               for field, part in zip(('region', 'cluster', 'city', 'operator', 'vendor'), parts))
     assert filters['city'] == values
 
 

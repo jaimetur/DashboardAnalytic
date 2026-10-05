@@ -27,7 +27,7 @@ Help Navigation groups chapters under General, Main Modules, Administrative Modu
 | Comparing results with another tool | [Technical Considerations](technical-considerations.md) |
 | Installing the service | [Deployment Configuration](configuration.md) and [Docker Deployment](docker-deployment.md) |
 | Uploading data | the [Data Ingestion](workspace-management.md#data-ingestion) section in Workspace Management |
-| Analysing one dataset | [Datasets Analysis](datasets-analysis.md) |
+| Analysing one dataset | [CDR Analysis](datasets-analysis.md) |
 | Exploring a complete template as a live dashboard or generating its PowerPoint | [E2E Dashboards](e2e-dashboards.md) |
 | Scheduling reports and emailing them | [Reporting](reporting.md) |
 | Generating persistent Reports or Chart Sets | [Reporting (old)](reporting-old.md) |
@@ -47,10 +47,10 @@ Help Navigation groups chapters under General, Main Modules, Administrative Modu
 - [Docker Deployment](docker-deployment.md) — production, development, persistence and upgrades.
 - [Web Interfaces](web-interface.md) — shared navigation, dialogs, tables and responsive behaviour.
 - [Workspace Management](workspace-management.md) — workspaces, data ingestion, processing, previews and mappings.
-- [Datasets Analysis](datasets-analysis.md) — interactive single-dataset analysis and exports.
+- [CDR Analysis](datasets-analysis.md) — interactive single-dataset analysis and exports.
 - [E2E Dashboards](e2e-dashboards.md) — saved Dashboards, synchronized filters and slide layouts.
 - [Non-Qualified Calls](non-qualified-calls.md) — summary, drill-down and shared follow-up (status, team, assignee and comments) of every call and test that did not complete.
-- [Reporting](reporting.md) — scheduled Reporting Jobs that email Dataset Analysis, Network Insights, Dashboard and Scoring artifacts.
+- [Reporting](reporting.md) — scheduled Reporting Jobs that email CDR Analysis, Network Insights, Dashboard and Scoring artifacts.
 - [Reporting (old)](reporting-old.md) — classic Reports, Chart Sets, interactive previews and jobs.
 - [Chart Builder](chart-builder.md) — temporary ad-hoc chart construction.
 - [Query Builder](query-builder.md) — guided query design, SQL editing, execution and saved queries.

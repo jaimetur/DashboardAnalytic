@@ -105,12 +105,12 @@ def validate_query(database_path: Path, datasets: list[dict[str, Any]], query: s
 
 
 def _vendor_filter_index(columns: list[str], index: int) -> int:
-    if vendor_filter_column(columns[index]) != 'Vendor_Only':
+    """Former vendor names (Vendor V3, Vendor_Only, OP_Vendor) filter the result's Vendor or Operator_Vendor column."""
+    target = column_identity(vendor_filter_column(columns[index]))
+    if target == column_identity(columns[index]):
         return index
-    resolved = next((i for i, column in enumerate(columns) if column_identity(column) == 'vendoronly'), None)
-    if resolved is None:
-        raise ValueError('Include Vendor_Only in the query results to filter vendors.')
-    return resolved
+    resolved = next((i for i, column in enumerate(columns) if column_identity(column) == target), None)
+    return index if resolved is None else resolved
 
 
 def _normalize_column_filters(

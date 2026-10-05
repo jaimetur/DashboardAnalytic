@@ -45,7 +45,7 @@ def build_cdr_report_filename(
 SCORING_LIST_MAX_CHARACTERS = 110
 
 _SCORING_FIELDS = {
-    'region': 'All Regions', 'city': 'All Cities', 'operator': 'All Operators',
+    'region': 'All Regions', 'cluster': 'All Clusters', 'city': 'All Cities', 'operator': 'All Operators',
     'vendor': 'All Vendors', 'campaign': 'All Campaigns',
 }
 

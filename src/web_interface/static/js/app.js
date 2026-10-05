@@ -28,18 +28,16 @@ function vendorOnlyFilterChoices(field, values, additionalOperators = []) {
     entry.operator = Boolean(entry.label) && !vendorAliases.has(key) && operators.has(operatorKey);
     if (entry.operator) entry.label += ' - All';
   }
+  // Everywhere: vendors, then mixed, other and all-vendor groups, then operators without a vendor, each alphabetically.
   const rank = entry => {
-    if (entry.operator) return 4;
+    if (entry.operator || /\s-\sAll(?: Vendors)?$/i.test(String(entry.value ?? ''))) return 2;
     const key = identity(entry.value);
     const canonical = Object.entries(configured.vendors || {}).find(([alias]) => identity(alias) === key)?.[1];
     const vendorKey = identity(canonical || entry.value);
-    if (['ericssonmixed', 'mixedvendor', 'mixedvendors'].includes(vendorKey)) return 1;
-    if (['nonericssonmixed', 'othervendor', 'othervendors'].includes(vendorKey)) return 2;
-    if (vendorKey === 'allvendor' || vendorKey === 'allvendors') return 3;
-    return 0;
+    return ['mixed', 'othervendor', 'allvendor'].some(part => vendorKey.includes(part)) ? 1 : 0;
   };
   return entries.sort((left, right) => rank(left) - rank(right)
-    || String(left.value ?? '').localeCompare(String(right.value ?? ''), undefined, {sensitivity: 'base'}));
+    || String(left.label ?? '').localeCompare(String(right.label ?? ''), undefined, {sensitivity: 'base'}));
 }
 window.vendorOnlyFilterChoices = vendorOnlyFilterChoices;
 
@@ -1049,9 +1047,15 @@ function drawLineChart(svg, labels, series, width, height, padding, axisLabels =
         `;
       }).join('')
     : `<text x="${padding}" y="18" fill="#526371">CDF</text>`;
+  // Geometry for the hover tooltip: the x value under the pointer and each curve's probability there.
+  svg.chartGeometry = {
+    left: leftPadding, top: innerTop, width: innerWidth, height: innerHeight, minX: domainMinX, maxX: domainMaxX,
+    series: seriesCollection.map((item, index) => ({name: item.name, color: item.color || palette[index % palette.length], labels: item.labels || [], series: item.series || []})),
+  };
   svg.innerHTML = `
     <line x1="${leftPadding}" y1="${height - bottomPadding}" x2="${width - rightPadding}" y2="${height - bottomPadding}" stroke="#9ab0bc" />
     <line x1="${leftPadding}" y1="${innerTop}" x2="${leftPadding}" y2="${height - bottomPadding}" stroke="#9ab0bc" />
+    <line class="chart-hover-guide" x1="0" y1="${innerTop}" x2="0" y2="${height - bottomPadding}" stroke="#526371" stroke-dasharray="4 4" visibility="hidden" />
     ${xTickLabels}
     ${yTickLabels}
     ${legend}
@@ -1066,11 +1070,16 @@ function drawBarChart(svg, labels, series, width, height, padding, axisLabels = 
   const maxValue = numericSeries.length > 0 ? Math.max(...numericSeries) : 1;
   const yAxisLabel = String(axisLabels.y || 'Mean metric');
   const leftPadding = padding + 26;
-  const bottomPadding = padding + 18;
   const topPadding = padding;
   const innerWidth = width - leftPadding - padding;
-  const innerHeight = height - topPadding - bottomPadding;
   const barWidth = innerWidth / labels.length;
+  // Labels that do not fit under their bar are rotated, and shortened only when even that is not enough.
+  const longestLabel = Math.max(...labels.map((label) => String(label).length), 1);
+  const rotateLabels = longestLabel * 6.4 > barWidth - 4;
+  const labelChars = rotateLabels ? 22 : Math.max(4, Math.floor((barWidth - 4) / 6.4));
+  const shortLabel = (label) => (String(label).length > labelChars ? `${String(label).slice(0, labelChars - 1)}…` : String(label));
+  const bottomPadding = padding + 18 + (rotateLabels ? Math.min(longestLabel, labelChars) * 4.2 : 0);
+  const innerHeight = height - topPadding - bottomPadding;
   const bars = labels.map((label, index) => {
     const value = series[index];
     const scaledHeight = ((Number(value) || 0) / (maxValue || 1)) * innerHeight;
@@ -1080,10 +1089,14 @@ function drawBarChart(svg, labels, series, width, height, padding, axisLabels = 
     const valueLabel = Number.isFinite(Number(value)) ? Number(value).toFixed(Math.abs(Number(value)) >= 100 ? 0 : 2).replace(/\.00$/, '') : String(value);
     const valueY = scaledHeight > 28 ? y + 18 : Math.max(y - 8, topPadding + 12);
     const valueFill = scaledHeight > 28 ? 'rgba(255,255,255,0.96)' : '#334550';
+    const labelY = height - bottomPadding + 16;
+    const tip = escapeChartText(`${label}: ${Number.isFinite(Number(value)) ? Number(value).toFixed(2) : value}`);
     return `
-      <rect x="${x}" y="${y}" width="${Math.max(barWidth - 16, 24)}" height="${scaledHeight}" rx="10" fill="${colors[index] || '#dd653e'}"></rect>
-      <text x="${textX}" y="${valueY}" text-anchor="middle" fill="${valueFill}" font-size="11" font-weight="700">${valueLabel}</text>
-      <text x="${textX}" y="${height - 10}" text-anchor="middle" fill="#526371" font-size="11">${String(label).slice(0, 12)}</text>
+      <rect x="${x}" y="${y}" width="${Math.max(barWidth - 16, 24)}" height="${scaledHeight}" rx="10" fill="${colors[index] || '#dd653e'}" data-chart-tip="${tip}"></rect>
+      <text x="${textX}" y="${valueY}" text-anchor="middle" fill="${valueFill}" font-size="11" font-weight="700" pointer-events="none">${valueLabel}</text>
+      ${rotateLabels
+        ? `<text x="${textX}" y="${labelY}" text-anchor="end" fill="#526371" font-size="11" transform="rotate(-35 ${textX} ${labelY})" data-chart-tip="${tip}">${escapeChartText(shortLabel(label))}</text>`
+        : `<text x="${textX}" y="${labelY}" text-anchor="middle" fill="#526371" font-size="11" data-chart-tip="${tip}">${escapeChartText(shortLabel(label))}</text>`}
     `;
   }).join('');
   svg.innerHTML = `
@@ -1092,6 +1105,86 @@ function drawBarChart(svg, labels, series, width, height, padding, axisLabels = 
     ${bars}
     <text x="16" y="${topPadding + innerHeight / 2}" text-anchor="middle" fill="#526371" font-size="12" font-weight="600" transform="rotate(-90 16 ${topPadding + innerHeight / 2})">${yAxisLabel}</text>
   `;
+}
+
+function escapeChartText(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (character) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[character]));
+}
+
+// One tooltip for every CDR Analysis chart: bar values, and the CDF probability of each curve at the pointer.
+const chartTooltip = (() => {
+  let node = null;
+  const element = () => {
+    if (!node) { node = document.createElement('div'); node.className = 'chart-tooltip'; node.hidden = true; document.body.append(node); }
+    return node;
+  };
+  return {
+    show(event, html) {
+      const tip = element();
+      tip.innerHTML = html; tip.hidden = false;
+      const x = Math.min(event.clientX + 14, window.innerWidth - tip.offsetWidth - 8);
+      const y = Math.max(8, event.clientY - tip.offsetHeight - 12);
+      tip.style.left = `${x}px`; tip.style.top = `${y}px`;
+    },
+    hide() { if (node) node.hidden = true; },
+  };
+})();
+
+function cdfProbabilityAt(labels, series, x) {
+  let low = 0; let high = labels.length - 1; let found = -1;
+  while (low <= high) {
+    const middle = (low + high) >> 1;
+    if (Number(labels[middle]) <= x) { found = middle; low = middle + 1; } else { high = middle - 1; }
+  }
+  return found < 0 ? 0 : Number(series[found]);
+}
+
+function setupChartInteractions(container) {
+  const svg = container.querySelector('.chart-svg');
+  if (!svg || svg.dataset.chartInteractive === '1') return;
+  svg.dataset.chartInteractive = '1';
+  svg.addEventListener('mousemove', (event) => {
+    const target = event.target.closest?.('[data-chart-tip]');
+    if (target) { chartTooltip.show(event, target.dataset.chartTip); return; }
+    const geometry = svg.chartGeometry;
+    const guide = svg.querySelector('.chart-hover-guide');
+    if (!geometry || container.dataset.chartKind !== 'cdf') { chartTooltip.hide(); return; }
+    const box = svg.getBoundingClientRect();
+    const viewBoxWidth = svg.viewBox.baseVal.width || box.width;
+    const viewBoxHeight = svg.viewBox.baseVal.height || box.height;
+    const px = (event.clientX - box.left) * (viewBoxWidth / box.width);
+    const py = (event.clientY - box.top) * (viewBoxHeight / box.height);
+    if (px < geometry.left || px > geometry.left + geometry.width || py < geometry.top || py > geometry.top + geometry.height) {
+      chartTooltip.hide(); guide?.setAttribute('visibility', 'hidden'); return;
+    }
+    const x = geometry.minX + ((px - geometry.left) / (geometry.width || 1)) * (geometry.maxX - geometry.minX);
+    guide?.setAttribute('x1', px); guide?.setAttribute('x2', px); guide?.setAttribute('visibility', 'visible');
+    const rows = geometry.series.map((item) => `<span><i style="background:${item.color}"></i>${escapeChartText(item.name)}: <strong>${(cdfProbabilityAt(item.labels, item.series, x) * 100).toFixed(1)}%</strong></span>`);
+    chartTooltip.show(event, `<strong>${escapeChartText(formatAxisValue(x))}</strong>${rows.join('')}`);
+  });
+  svg.addEventListener('mouseleave', () => { chartTooltip.hide(); svg.querySelector('.chart-hover-guide')?.setAttribute('visibility', 'hidden'); });
+  // Zoom controls as in E2E Dashboards: −, level, + and reset; the chart scrolls horizontally when zoomed.
+  const viewport = document.createElement('div');
+  viewport.className = 'chart-zoom-viewport';
+  svg.before(viewport); viewport.append(svg);
+  const controls = document.createElement('div');
+  controls.className = 'chart-zoom'; controls.setAttribute('role', 'group'); controls.setAttribute('aria-label', 'Chart zoom');
+  const button = (text, title) => { const item = document.createElement('button'); item.type = 'button'; item.textContent = text; item.title = title; item.setAttribute('aria-label', title); return item; };
+  const zoomOut = button('−', 'Zoom out'); const zoomIn = button('+', 'Zoom in'); const reset = button('↺', 'Reset zoom');
+  const level = document.createElement('output'); level.className = 'chart-zoom-level';
+  const apply = (value) => {
+    const zoom = Math.max(1, Math.min(4, value));
+    container.dataset.chartZoom = String(zoom);
+    level.textContent = `${Math.round(zoom * 100)}%`;
+    zoomOut.disabled = zoom <= 1; reset.disabled = zoom <= 1; zoomIn.disabled = zoom >= 4;
+    drawChart(container);
+  };
+  zoomOut.addEventListener('click', () => apply((Number(container.dataset.chartZoom) || 1) - 0.5));
+  zoomIn.addEventListener('click', () => apply((Number(container.dataset.chartZoom) || 1) + 0.5));
+  reset.addEventListener('click', () => apply(1));
+  controls.append(zoomOut, level, zoomIn, reset);
+  viewport.before(controls);
+  apply(Number(container.dataset.chartZoom) || 1);
 }
 
 function drawChart(container) {
@@ -1107,7 +1200,10 @@ function drawChart(container) {
     }
     return;
   }
-  const width = 600;
+  // Zoom widens the drawing inside a scrollable viewport, keeping text at its size.
+  const zoom = Math.max(1, Number(container.dataset.chartZoom) || 1);
+  const width = 600 * zoom;
+  svg.style.width = zoom > 1 ? `${zoom * 100}%` : '';
   const isCdfChart = container.dataset.chartKind === 'cdf';
   const height = isCdfChart ? 280 : Math.max(Math.round(svg.getBoundingClientRect().height || 280), 280);
   svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
@@ -1168,7 +1264,7 @@ function setupCdfRangeControls() {
   });
 }
 
-document.querySelectorAll('[data-chart]').forEach(drawChart);
+document.querySelectorAll('[data-chart]').forEach((container) => { drawChart(container); setupChartInteractions(container); });
 setupCdfRangeControls();
 
 document.querySelectorAll('[data-horizontal-wheel-scroll]').forEach((container) => {
@@ -2641,7 +2737,9 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     field.dataset.searchableSelect = '';
     field.setAttribute('aria-label', 'Filter field');
     field.append(new Option('Choose field', ''));
-    const vendorField = value => ['vendor', 'vendorv3', 'operatorvendor', 'opvendor'].includes(String(value).toLowerCase().replace(/[^a-z0-9]/g, '')) ? 'Vendor_Only' : value;
+    const vendorIdentity = value => String(value).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const vendorField = value => (['vendor', 'vendorv3', 'vendoronly'].includes(vendorIdentity(value)) ? 'Vendor'
+      : ['operatorvendor', 'opvendor'].includes(vendorIdentity(value)) ? 'Operator_Vendor' : value);
     [...new Set(fields.map(vendorField))].forEach(value => field.add(new Option(value, value)));
     const normalizedOption = (select, requested) => {
       const normalize = (value) => String(value || '').toLocaleLowerCase().replace(/[^a-z0-9]+/g, '');
@@ -4254,7 +4352,7 @@ document.addEventListener('click', (event) => {
   navigateToPersistedDatasetAnalysis(
     datasetId,
     openLink.dataset.inputKind,
-    openLink.dataset.loadingLabel || 'Opening datasets analysis',
+    openLink.dataset.loadingLabel || 'Opening CDR analysis',
   );
 });
 
@@ -4537,7 +4635,7 @@ function buildDatasetAnalysisUrl(params) {
   return query ? `/datasets-analysis?${query}` : '/datasets-analysis';
 }
 
-function navigateToPersistedDatasetAnalysis(datasetId, inputKind, loadingLabel = 'Opening datasets analysis') {
+function navigateToPersistedDatasetAnalysis(datasetId, inputKind, loadingLabel = 'Opening CDR analysis') {
   const params = new URLSearchParams();
   const normalizedDatasetId = String(datasetId || '').trim();
   const normalizedInputKind = String(inputKind || '').trim();
@@ -4781,7 +4879,7 @@ function setupSearchableSingleSelects() {
     if (select.dataset.multiselectVendorOnly === 'true') {
       const current = select.value;
       const options = new Map([...select.options].map(option => [option.value, option]));
-      select.replaceChildren(...vendorOnlyFilterChoices('Vendor_Only', [...options.keys()]).map(({value, label}) => {
+      select.replaceChildren(...vendorOnlyFilterChoices('Vendor', [...options.keys()]).map(({value, label}) => {
         const option = options.get(value); option.textContent = value ? label : 'All vendors'; return option;
       }));
       select.value = current;
@@ -4983,8 +5081,10 @@ function setupWorkspaceUserPickers() {
     search?.addEventListener('keyup', filter);
     search?.addEventListener('search', filter);
     toggle?.addEventListener('click', () => {
-      const shouldSelectAll = checkboxes.some((checkbox) => !checkbox.checked);
-      checkboxes.forEach((checkbox) => { checkbox.checked = shouldSelectAll; });
+      // Select All / None acts on the users; roles and groups are chosen one by one.
+      const users = checkboxes.filter((checkbox) => checkbox.name === 'usernames');
+      const shouldSelectAll = users.some((checkbox) => !checkbox.checked);
+      users.forEach((checkbox) => { checkbox.checked = shouldSelectAll; });
       filter();
     });
     picker.addEventListener('toggle', () => {
@@ -5058,12 +5158,12 @@ function setupCustomMultiSelects() {
     select.dataset.multiselectReady = '1';
     select.classList.add('multiselect-native');
     normalizeExportTargetSelection(select);
-    const filterField = select.dataset.multiselectVendorOnly === 'true' ? 'Vendor_Only'
+    const filterField = select.dataset.multiselectVendorOnly === 'true' ? 'Vendor'
       : select.dataset.filterFieldName || select.getAttribute('aria-label')?.replace(/ filter$/, '') || '';
     let operatorValues = [];
     try { operatorValues = JSON.parse(select.dataset.multiselectOperatorValues || '[]'); } catch {}
     const filterChoices = vendorOnlyFilterChoices(filterField, Array.from(select.options).map(option => option.value), operatorValues);
-    if (String(filterField).toLowerCase().replace(/[^a-z0-9]/g, '') === 'vendoronly') {
+    if (select.dataset.multiselectVendorOnly === 'true') {
       const byValue = new Map(Array.from(select.options).map(option => [option.value, option]));
       select.append(...filterChoices.map(choice => {
         const option = byValue.get(choice.value);
@@ -5202,8 +5302,8 @@ function setupCustomMultiSelects() {
         });
         dispatchNativeChange();
       });
-      if (select.dataset.multiselectPresetFirst === 'true') menu.insertBefore(presetButton, actionButton);
-      else menu.appendChild(presetButton);
+      // Presets such as Main Cities are always the first option of their selector.
+      menu.insertBefore(presetButton, actionButton);
     }
 
     const groupedOptions = select.dataset.multiselectGroups === 'true';
@@ -9241,11 +9341,15 @@ window.enableExcelColumnFilters = (table, {onChange, excludeLastColumn = true} =
       const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel';
       const confirm = document.createElement('button'); confirm.type = 'button'; confirm.textContent = 'Apply'; footer.append(cancel, confirm);
       menu.append(search, toolbar, options, footer); document.body.append(menu);
-      const bounds = trigger.getBoundingClientRect(), width = Math.min(300, window.innerWidth - 20);
-      menu.style.width = `${width}px`; menu.style.left = `${Math.max(10, Math.min(bounds.left, window.innerWidth - width - 10))}px`;
-      const below = bounds.bottom + 5, height = menu.offsetHeight;
-      menu.style.top = `${below + height <= window.innerHeight - 10 ? below : Math.max(10, bounds.top - height - 5)}px`;
-      openMenu = {menu, trigger}; trigger.setAttribute('aria-expanded', 'true');
+      // The menu is fixed to the viewport: place it under its column again on every scroll.
+      const place = () => {
+        const bounds = trigger.getBoundingClientRect(), width = Math.min(300, window.innerWidth - 20);
+        if (!trigger.isConnected || bounds.bottom < 0 || bounds.top > window.innerHeight) { closeMenu(); return; }
+        menu.style.width = `${width}px`; menu.style.left = `${Math.max(10, Math.min(bounds.left, window.innerWidth - width - 10))}px`;
+        const below = bounds.bottom + 5, height = menu.offsetHeight;
+        menu.style.top = `${below + height <= window.innerHeight - 10 ? below : Math.max(10, bounds.top - height - 5)}px`;
+      };
+      openMenu = {menu, trigger, place}; place(); trigger.setAttribute('aria-expanded', 'true');
       search.addEventListener('input', () => { const term = search.value.trim().toLocaleLowerCase(); options.querySelectorAll('label').forEach((option) => { option.hidden = Boolean(term) && !option.textContent.toLocaleLowerCase().includes(term); }); });
       selectAll.addEventListener('click', () => options.querySelectorAll('input').forEach((input) => { input.checked = true; }));
       clear.addEventListener('click', () => options.querySelectorAll('input').forEach((input) => { input.checked = false; }));
@@ -9260,6 +9364,7 @@ window.enableExcelColumnFilters = (table, {onChange, excludeLastColumn = true} =
   });
   document.addEventListener('click', closeMenu);
   document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeMenu(); });
+  document.addEventListener('scroll', (event) => { if (openMenu && !openMenu.menu.contains(event.target)) openMenu.place?.(); }, {capture: true, passive: true});
   return controller;
 };
 

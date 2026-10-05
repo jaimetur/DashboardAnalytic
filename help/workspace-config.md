@@ -20,7 +20,9 @@ Open **Config → Workspace Config** from the main navigation at `/workspace-con
 | Report Template reference | [Open section](#report-template-reference) |
 | Operator & Vendor Maps | [Open section](#operator-vendor-maps) |
 | Spectrum Holdings | [Open section](#spectrum-holdings) |
+| CDR type | [Open section](#cdr-type) |
 | Main Cities | [Open section](#main-cities) |
+| Non-Qualified Calls Teams | [Open section](#non-qualified-calls-teams) |
 | Portable operations | [Open section](#portable-operations) |
 | Scoring & GAP Analysis Setup | [Open section](#scoring-gap-analysis-setup) |
 
@@ -350,17 +352,17 @@ Legend Position: Top
 Conditions are joined with logical AND and separated by `;`. Column matching is case-insensitive.
 
 ```text
-Call Family IN (VoLTE, MultiRAB); Direction = DL; Vendor_Only NOT CONTAINS (Mixed, Other)
+Call Family IN (VoLTE, MultiRAB); Direction = DL; Vendor NOT CONTAINS (Mixed, Other)
 ```
 
 | Operator | Example |
 | --- | --- |
 | Equals / not equal | `Call_Status = Completed`, `Operator != EE` |
 | List inclusion / exclusion | `Operator IN (VF, O2, 3, EE)`, `Campaign NOT IN (2025-Q4)` |
-| Contains / not contains | `Test_Name CONTAINS FDFS`, `Vendor_Only NOT CONTAINS (Mixed, Other)` |
+| Contains / not contains | `Test_Name CONTAINS FDFS`, `Vendor NOT CONTAINS (Mixed, Other)` |
 | Numeric comparison | `LQ < 1.6`, `Mean_Data_Rate >= 20` |
 
-Vendor filters target `Vendor_Only`. Import accepts legacy `Vendor`, `Vendor V3`, `Operator_Vendor` and `OP_Vendor` filter field names; CSV export writes `Vendor_Only`. Operator-prefixed filter values are resolved using workspace operator aliases when the report runs. This alias handling applies to filter fields, while aggregation fields keep their selected comparison semantics.
+`Vendor` filters the vendor alone and `Operator_Vendor` the `<Operator>_<Vendor>` identity. Import accepts the former `Vendor_Only` and `Vendor V3` (as `Vendor`) and `OP_Vendor` (as `Operator_Vendor`) filter names, and templates written for earlier versions are converted once: their `Vendor` groupings and legends become `Operator_Vendor` and their `Vendor_Only` filters become `Vendor`, so their charts stay identical. Operator-prefixed filter values are resolved using workspace operator aliases when the report runs. This alias handling applies to filter fields, while aggregation fields keep their selected comparison semantics.
 
 `IN`, `NOT IN`, `CONTAINS` and `NOT CONTAINS` accept comma-separated values. Parentheses are optional in Filter Builder input. A comma separates values within one condition; use `;` between independent conditions. `Threshold = 1.6` configures threshold charts and `Buckets = 1,5,20,100` configures distribution ranges.
 
@@ -437,11 +439,19 @@ Vodafone,n78,TDD,High (TDD),90,
 
 Comma, semicolon and tab separators are accepted, so rows can be pasted from a spreadsheet. **Save Spectrum Holdings** validates every row and replaces all holdings of the workspace; an empty text area removes them. The table above the editor shows the MHz per Operator and band class.
 
+## CDR type
+
+The **Workspace Configuration** panel at the top chooses the **CDR type** of the workspace: the CDR files it processes. **NetCheck CDR** is the default and the only type supported today; **Umlaut CDR** files are similar but rename some columns, and appear as *coming soon* until they are supported. The type is also chosen when a workspace is created and can be changed from the workspaces table of [Workspace Management](workspace-management.md). It is stored in the workspace database, so it travels with the workspace in transfers, Full Workspace packages and backups.
+
 ## Main Cities
 
 The Main Cities panel appears before Operator & Vendor Maps and lists cities found in ready CDR datasets for the active workspace. Use the center buttons to move selected or all cities between the available list and the selected list, then choose **Save Main Cities**. The setting belongs to this workspace.
 
-Dashboard's Default Filters City multiselect and the PowerPoint export City selector provide a **Main Cities** preset. Applying it selects the configured cities that are available in the current Dashboard or export dataset selection.
+Every City selector — Dashboard filters, the PowerPoint export, Scoring, Network Insights, Non-Qualified Calls and Reporting Jobs — offers **Main Cities** as its first option. Applying it selects the configured cities that are available in the current selection.
+
+## Non-Qualified Calls Teams
+
+When Non-Qualified Calls is active for the account, **Non-Qualified Calls Teams** lists the teams that follow up the Non-Qualified Calls of the workspace with their colour and **members**. Add, rename, reorder or remove teams and choose the workspace users of each one in its filterable selector; a user can belong to several teams. A call assigned to a team with members can only be assigned to one of them, and a team without members accepts every user. `user-viewer` accounts see the teams read-only. Teams in use by a call cannot be removed. See [Non-Qualified Calls](non-qualified-calls.md).
 
 ## Portable operations
 
@@ -499,7 +509,7 @@ Max Points displays two decimal places while retaining full precision for calcul
 
 ### Methodology Aggregation Hierarchy
 
-Reorder Operator, Vendor, Region, City and Campaign. Operator is mandatory for calculations. The hierarchy controls the selection panels and hierarchical result tables, charts and PowerPoint output.
+Reorder Operator, Vendor, Region, Cluster, City and Campaign. Operator is mandatory for calculations. Methodologies saved before Cluster existed keep their calculated jobs and place Cluster right after Region. The hierarchy controls the selection panels and hierarchical result tables, charts and PowerPoint output.
 
 ### Methodology KPIs Priorities for GAP analysis
 
@@ -545,12 +555,12 @@ Distinct values come from the selected, filtered CDR universe; empty values are 
 For RF histograms, select **Operator**: the first definition is LTE and the second NR, so each Operator occupies one column. Campaigns remain grouped inside each chart. Changing filters changes the number of columns; LTE and NR keep their corresponding positions even when one technology has no valid samples.
 
 > [!NOTE]
-> **Vendor comparison:** When **Report type** is **Multivendor Comparison**, the **Vendor comparison** selector appears to its right. **Vendor Only (All Operators Combined)** is the first and default option when opening the export dialog; it pools selected operators using the same `Vendor_Only` value. Choose **Operator - Vendor** to keep each operator separate. Campaigns remain separate. The job retains this choice for retries. Dynamic vendor grids use up to six columns per slide and keep operators of the same vendor together where possible.
+> **Vendor comparison:** When **Report type** is **Multivendor Comparison**, the **Vendor comparison** selector appears to its right. **Vendor Only (All Operators Combined)** is the first and default option when opening the export dialog; it pools selected operators using the same `Vendor` value. Choose **Operator - Vendor** to keep each operator separate. Campaigns remain separate. The job retains this choice for retries. Dynamic vendor grids use up to six columns per slide and keep operators of the same vendor together where possible.
 
 ### Vendor-only filter labels
 
-Across the application, filters on `Vendor_Only` list actual vendors first, followed by Ericsson_Mixed (and the former Mixed Vendor), Non-Ericsson_Mixed (and the former Other Vendor), then All Vendor(s). Operator-only identities follow with the display suffix ** - All**, based on canonical Operator identities, their configured aliases and cached CDR operators. Configured vendor identities take precedence, so actual vendors remain in the first group. Vendor mapping stores `Operator - All` in `Vendor_Only` for operator-only identities. Dataset exports, combined CDRs, transfers and backups preserve that value; legacy operator-only values without the suffix remain supported. This applies to Dashboard filters, Network Insights, data-preview column filters, Query Builder column filters and Report Template filter assistance.
+Across the application, `Vendor` and `Operator_Vendor` filters list their values in the same order: pure vendors first (Ericsson, Huawei, Nokia, Samsung…), then the mixed, other and all-vendor groups, then the operators without a vendor, each block alphabetically. Operator-only identities follow with the display suffix ** - All**, based on canonical Operator identities, their configured aliases and cached CDR operators. Configured vendor identities take precedence, so actual vendors remain in the first group. Vendor mapping stores `Operator - All` in `Operator_Vendor` and `Vendor` for operator-only identities. Dataset exports, combined CDRs, transfers and backups preserve that value; legacy operator-only values without the suffix remain supported. This applies to Dashboard filters, Network Insights, data-preview column filters, Query Builder column filters and Report Template filter assistance.
 
-CDR catalogue caches retain both `Vendor` and `Vendor_Only` universes. CDR processing refreshes both from their source columns. The caches remain part of workspace database backups and restores; legacy catalogues preserve their existing Vendor values while Vendor_Only is backfilled once.
+CDR catalogue caches retain the `Operator_Vendor`, `Vendor`, `Region`, `Cluster`, `City`, `Campaign` and `Operator` universes. CDR processing refreshes them from their source columns, and catalogues of CDRs processed before Cluster existed are backfilled once. The caches remain part of workspace database backups and restores.
 
-Operator mapping colours also apply to operators without a vendor in multivendor charts, including Vendor_Only labels displayed as **Operator - All**. Vendor mapping colours apply to actual vendors.
+Operator mapping colours also apply to operators without a vendor in multivendor charts, including Vendor labels displayed as **Operator - All**. Vendor mapping colours apply to actual vendors.

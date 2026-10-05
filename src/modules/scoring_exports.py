@@ -41,7 +41,7 @@ _GAP_SUMMARY_CATEGORY = '#E6F0F7'
 _SCORING_EXPANDED_CATEGORY = '#DCE5E9'
 _KPI_TYPE_COLORS = {'Reliable': '#D8EFCA', 'Diff': '#FFF2CC'}
 _LEGACY_CAMPAIGN_WARNING = 'Campaigns are scored separately; the supplied Tableau Prep flow pools campaigns.'
-_SCOPE_FILTER_FIELDS = ('Operator', 'Vendor', 'Region', 'City', 'Campaign')
+_SCOPE_FILTER_FIELDS = ('Operator', 'Vendor', 'Region', 'Cluster', 'City', 'Campaign')
 
 
 def _table_for_mode(matrix: dict, table_mode: str) -> dict:

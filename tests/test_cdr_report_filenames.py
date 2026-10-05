@@ -38,13 +38,13 @@ def test_build_scoring_report_filename_uses_saved_filter_dimensions_and_order():
     filename = build_scoring_report_filename(
         datetime(2026, 9, 30, 12, 34, 56), 'NSA',
         {
-            'Region': ['North', 'South'], 'City': ['Bristol'],
+            'Region': ['North', 'South'], 'Cluster': ['North_1'], 'City': ['Bristol'],
             'Operator': ['EE', 'O2'], 'Vendor': [], 'Campaign': ['UK_Q2_2026'],
         },
     )
 
     assert filename == (
-        '20260930_123456 - Scoring & GAP Analysis - NSA - North + South - Bristol '
+        '20260930_123456 - Scoring & GAP Analysis - NSA - North + South - North_1 - Bristol '
         '- EE + O2 - All Vendors - UK_Q2_2026.pptx'
     )
 
@@ -56,7 +56,7 @@ def test_build_scoring_report_filename_labels_unrestricted_dimensions_and_saniti
     )
 
     assert filename == (
-        '20260930_123456 - Scoring & GAP Analysis - SA - All Regions '
+        '20260930_123456 - Scoring & GAP Analysis - SA - All Regions - All Clusters '
         '- All Cities - All Operators - All Vendors - All Campaigns.pptx'
     )
     long_filename = build_scoring_report_filename(

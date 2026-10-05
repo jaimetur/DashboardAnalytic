@@ -11,7 +11,8 @@
   .scoring-controls { display: grid; gap: 1rem; }
   .scoring-filter-grid { display: grid; grid-template-columns: minmax(12rem,15rem) minmax(0,1fr); gap: 1rem; align-items: start; }
   .scoring-gap-reference-grid { align-items: center; }
-  .scoring-context-filter-grid { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: .65rem; }
+  .scoring-context-filter-grid { display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); gap: .65rem; }
+  @media(max-width:1500px) { .scoring-context-filter-grid { grid-template-columns: repeat(4,minmax(0,1fr)); } }
   .scoring-context-filter-grid > label { display: grid; min-width: 0; gap: .3rem; color: var(--muted); font-size: .76rem; font-weight: 750; }
   .scoring-context-filter-grid select[multiple] { width: 100%; min-height: 2.35rem; }
   .scoring-context-filter-note { margin: .45rem .1rem 0; color: var(--muted); font-size: .7rem; }
@@ -93,6 +94,7 @@
   .scoring-job-title-operator { color: #2458a6; }
   .scoring-job-title-vendor { color: #6941a5; }
   .scoring-job-title-region { color: #087e75; }
+  .scoring-job-title-cluster { color: #4d7c0f; }
   .scoring-job-title-city { color: #966300; }
   .scoring-job-title-campaign { color: #b4234d; }
   .scoring-job-item-top .scoring-status { flex: 0 0 auto; }
@@ -375,13 +377,13 @@
     <div class="scoring-picker" aria-labelledby="scoring-context-filters-title">
       <div class="scoring-picker-head"><strong id="scoring-context-filters-title">Context filters</strong><span>From selected CDRs</span></div>
       <div class="scoring-context-filter-grid" data-scoring-context-filters>
-        {% for level in aggregation_levels %}
-        <label>{{ level }}
-          <select multiple size="1" data-scoring-context-filter="{{ level }}" data-multiselect-auto-close="1000" data-multiselect-empty-label="All values" aria-label="Filter by {{ level }}">
+        {% for level in aggregation_levels %}{% for field in (['Operator_Vendor', 'Vendor'] if level == 'Vendor' else [level]) %}
+        <label>{{ field }}
+          <select multiple size="1" data-scoring-context-filter="{{ field }}" data-multiselect-auto-close="1000" data-multiselect-empty-label="All values" aria-label="Filter by {{ field }}">
             <option value="" disabled>No values</option>
           </select>
         </label>
-        {% endfor %}
+        {% endfor %}{% endfor %}
       </div>
       <p class="scoring-context-filter-note">Values come from the selected CDR catalogues. Leaving a filter empty includes all values. Main Cities uses the workspace city list.</p>
     </div>
@@ -507,7 +509,7 @@
       <div class="scoring-chart-expanded-content" data-scoring-expanded-chart></div>
     </section>
   </div>
-  <script type="application/json" data-scoring-config>{{ {'main_cities': scoring_main_cities | default([], true), 'operator_groups': scoring_operator_groups | default([], true), 'aggregation_hierarchy': aggregation_levels | default(['Operator', 'Vendor', 'Region', 'City', 'Campaign'], true), 'scoring_profiles': scoring_profiles | default([], true), 'active_profile_id': scoring_active_profile_id | default('', true)} | tojson }}</script>
+  <script type="application/json" data-scoring-config>{{ {'main_cities': scoring_main_cities | default([], true), 'operator_groups': scoring_operator_groups | default([], true), 'aggregation_hierarchy': aggregation_levels | default(['Operator', 'Vendor', 'Region', 'Cluster', 'City', 'Campaign'], true), 'scoring_profiles': scoring_profiles | default([], true), 'active_profile_id': scoring_active_profile_id | default('', true)} | tojson }}</script>
 </section>
 {% endblock %}
 {% block extra_scripts %}

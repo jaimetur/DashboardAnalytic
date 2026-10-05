@@ -48,7 +48,7 @@ The result panel reports the current page's row count and columns, plus the tota
 
 With **All rows**, the generated SQL has no row limit and the pages cover all matching rows. Use the filter button in a result column's header to search its distinct values, select the values to keep, and apply or clear the filter. The menu shows up to 200 values at a time; search to find additional values.
 
-Vendor filters use `Vendor_Only`, with real vendors before Mixed, Other and All groups, followed by operator-only identities labelled **Operator - All**. The SQL assistant offers `Vendor_Only` as the vendor filter field. A result-column filter on legacy `Vendor` targets `Vendor_Only`; include `Vendor_Only` in the query result to use it. Manually written SQL is preserved as authored.
+CDR rows have **`Operator_Vendor`** (`<Operator>_<Vendor>`) and **`Vendor`** (the vendor alone); vendor choices list real vendors before Mixed, Other and All groups, followed by operator-only identities labelled **Operator - All**. A result-column filter on the former `Vendor_Only` name targets `Vendor`, and one on `OP_Vendor` targets `Operator_Vendor`; include that column in the query result to use it. Saved SQL that names `Vendor_Only` must be updated to `Vendor`. Manually written SQL is preserved as authored.
 
 Filters in different columns combine and apply to the full query result, including later pages. They reset when you run a new query. **Copy** copies the column headers and rows on the visible filtered page as tab-separated text. **Export CSV** downloads all rows and columns in the filtered result, without a row cap.
 

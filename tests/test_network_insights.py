@@ -486,28 +486,28 @@ def test_two_axis_dynamic_expansion_filters_vendor_only_and_paginates_grid_frame
         layout='Title + dynamic rows + dynamic columns + comments down',
         chart_title='Signal', cdr_source='CDR-Data', kpi='LTE_RSRP',
         chart_type='Histogram Bars', legend='', filters='',
-        grouping_rows='Vendor', grouping_columns='Campaign',
-        dynamic_rows_field='Vendor', dynamic_columns_field='Campaign',
+        grouping_rows='Operator_Vendor', grouping_columns='Campaign',
+        dynamic_rows_field='Operator_Vendor', dynamic_columns_field='Campaign',
     )
     source = pd.DataFrame({
-        'Vendor_Only': ['Ericsson', 'Ericsson', 'Huawei', 'Huawei'],
+        'Vendor': ['Ericsson', 'Ericsson', 'Huawei', 'Huawei'],
         'Campaign': ['Q1', 'Q2', 'Q1', 'Q2'],
         'LTE_RSRP': [-100, -95, -90, -85],
     })
     pair = expand_dynamic_layouts([definition], {
-        'Vendor_Only': ['Ericsson', 'Huawei'], 'Campaign': ['Q1', 'Q2'],
+        'Vendor': ['Ericsson', 'Huawei'], 'Campaign': ['Q1', 'Q2'],
     }, multivendor=True, vendor_comparison='vendor_only')
     selected = _select_dynamic_chart_frame(
         source, next(entry for entry in pair if entry.dynamic_row_value == 'Ericsson' and entry.dynamic_column_value == 'Q2'),
     )
-    assert selected[['Vendor_Only', 'Campaign', 'LTE_RSRP']].to_dict('records') == [
-        {'Vendor_Only': 'Ericsson', 'Campaign': 'Q2', 'LTE_RSRP': -95},
+    assert selected[['Vendor', 'Campaign', 'LTE_RSRP']].to_dict('records') == [
+        {'Vendor': 'Ericsson', 'Campaign': 'Q2', 'LTE_RSRP': -95},
     ]
 
     vendors = [f'Vendor {index}' for index in range(7)]
     campaigns = [f'Q{index}' for index in range(7)]
     paged = expand_dynamic_layouts([definition], {
-        'Vendor_Only': vendors, 'Campaign': campaigns,
+        'Vendor': vendors, 'Campaign': campaigns,
     }, multivendor=True, vendor_comparison='vendor_only')
     assert len(paged) == 49
     pages = {}
@@ -584,10 +584,10 @@ def test_multivendor_dynamic_histograms_page_by_vendor_and_keep_template_indexes
     ]
 
     expanded = expand_dynamic_layouts(
-        base, {'Vendor': values}, multivendor=True, vendor_comparison='operator_vendor',
+        base, {'Operator_Vendor': values}, multivendor=True, vendor_comparison='operator_vendor',
     )
 
-    assert {entry.dynamic_field for entry in expanded} == {'Vendor'}
+    assert {entry.dynamic_field for entry in expanded} == {'Operator_Vendor'}
     assert {entry.template_index for entry in expanded} == template_indexes
     pages = {}
     for entry in expanded:
@@ -604,10 +604,10 @@ def test_multivendor_dynamic_histograms_page_by_vendor_and_keep_template_indexes
             assert sum(entry.template_index == index for entry in rows) == len({entry.dynamic_value for entry in rows})
 
     pooled = expand_dynamic_layouts(
-        base, {'Vendor_Only': ['Ericsson', 'Huawei']},
+        base, {'Vendor': ['Ericsson', 'Huawei']},
         multivendor=True, vendor_comparison='vendor_only',
     )
-    assert {entry.dynamic_field for entry in pooled} == {'Vendor_Only'}
+    assert {entry.dynamic_field for entry in pooled} == {'Vendor'}
     assert {entry.dynamic_value for entry in pooled} == {'Ericsson', 'Huawei'}
 
 
@@ -814,10 +814,10 @@ def test_combined_inventory_preserves_sources_and_exports_filtered_pages(client,
     assert first['columns'][:7] == list(ni.INVENTORY_KEY_COLUMNS)
     assert first['key_columns'] == list(ni.INVENTORY_KEY_COLUMNS)
     assert first['total_rows'] == 58 and len(first['rows']) == 50
-    assert first['rows'][0][:7] == ['VF', 'VF_Ericsson', 'Ericsson', 'North', 'Leeds', 'LTE', 'Cluster A']
+    assert first['rows'][0][:7] == ['VF', 'VF_Ericsson', 'Ericsson', 'North', 'Cluster A', 'Leeds', 'LTE']
     second = client.post('/api/network-insights/inventory?page=1', json=selection).json()
     assert len(second['rows']) == 8
-    assert second['rows'][-1][:7] == ['3', '3_Nokia', 'Nokia', 'South', 'London', 'LTE', '']
+    assert second['rows'][-1][:7] == ['3', '3_Nokia', 'Nokia', 'South', '', 'London', 'LTE']
     response = client.post('/api/network-insights/inventory/export', json=selection)
     exported = list(csv.reader(io.StringIO(response.text)))
     assert exported[0] == first['columns'] and len(exported) == 59
@@ -855,7 +855,7 @@ def test_complete_inventory_filters_mapping_attributes_independently_of_cdrs(cli
     exported = list(csv.reader(io.StringIO(client.post('/api/network-insights/inventory/export', json=selection).text)))
     assert len(exported) == expected + 1
     if filters.get('technology') == 'nr' and payload['rows']:
-        assert all(row[5] == 'NR' for row in payload['rows'])
+        assert all(row[6] == 'NR' for row in payload['rows'])
 
 
 def test_combined_inventory_endpoints_require_workspace_access(client, monkeypatch):
@@ -995,8 +995,8 @@ def test_full_inventory_uses_real_mapping_geography_headers_before_filtering(cli
     assert response.status_code == 200
     tables = response.json()['inventories']
     assert {table['operator']: table['total_rows'] for table in tables} == {'VF': 1, '3': 1}
-    assert {row[6] for table in tables for row in table['rows']} == {'VF Cluster', 'Three Cluster'}
-    assert all(row[3:6] == ['North', 'Leeds', 'LTE'] for table in tables for row in table['rows'])
+    assert {row[4] for table in tables for row in table['rows']} == {'VF Cluster', 'Three Cluster'}
+    assert all(row[3] == 'North' and row[5:7] == ['Leeds', 'LTE'] for table in tables for row in table['rows'])
     exported = list(csv.reader(io.StringIO(client.post('/api/network-insights/inventory/export', json=selection).text)))
     assert len(exported) == 3
     grouped = client.get('/api/network-insights/deployment?group=region').json()['inventories']
@@ -1066,7 +1066,7 @@ def test_cluster_and_region_prefer_polygons_and_fallback_to_inventory(client, tm
     inventory = client.post('/api/network-insights/inventory/tables', json={**selection, 'regions': ['Polygon Region']}).json()
     table = next(row for row in inventory['inventories'] if row['operator'] == 'VF')
     assert table['total_rows'] == 2
-    assert all(row[3] == 'Polygon Region' and row[6] == 'Polygon Cluster' for row in table['rows'])
+    assert all(row[3] == 'Polygon Region' and row[4] == 'Polygon Cluster' for row in table['rows'])
     exported = client.post('/api/network-insights/inventory/export', json={**selection, 'regions': ['Polygon Region']})
     records = list(csv.DictReader(io.StringIO(exported.text)))
     assert len(records) == 2
