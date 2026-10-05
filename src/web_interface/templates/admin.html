@@ -1692,11 +1692,14 @@
 
 <script>
 (() => {
-  // Role, group and user pickers: the menu floats over the table, the summary
-  // counts the selection live, and the search filters every section.
+  // Role, group and user pickers: while open, the menu moves to <body> so no
+  // transformed or clipped panel offsets or cuts it; its checkboxes stay
+  // bound to their form through the form attribute.
   const pickers = [...document.querySelectorAll('[data-principal-picker]')];
+  const menuOf = new Map(pickers.map((picker) => [picker, picker.querySelector('.principal-picker-menu')]));
   const summarise = (picker) => {
-    const parts = [...picker.querySelectorAll('[data-principal-picker-section]')].map((section) => {
+    const menu = menuOf.get(picker);
+    const parts = [...menu.querySelectorAll('[data-principal-picker-section]')].map((section) => {
       const count = section.querySelectorAll('input:checked').length;
       if (!count) return '';
       const heading = section.dataset.principalPickerSection.toLowerCase();
@@ -1706,40 +1709,56 @@
     picker.classList.toggle('has-selection', parts.length > 0);
   };
   const place = (picker) => {
-    const menu = picker.querySelector('.principal-picker-menu');
+    const menu = menuOf.get(picker);
     const bounds = picker.querySelector('summary').getBoundingClientRect();
+    const width = Math.max(bounds.width, 240);
     const below = window.innerHeight - bounds.bottom - 12;
+    const above = bounds.top - 12;
+    const openBelow = below >= 200 || below >= above;
+    const height = Math.max(160, Math.min(340, openBelow ? below : above));
     Object.assign(menu.style, {
-      left: `${Math.max(8, Math.min(bounds.left, window.innerWidth - Math.max(bounds.width, 240) - 8))}px`,
-      top: `${below > 200 ? bounds.bottom + 4 : Math.max(8, bounds.top - Math.min(320, bounds.top - 16) - 4)}px`,
-      width: `${Math.max(bounds.width, 240)}px`,
-      maxHeight: `${Math.max(180, Math.min(320, below > 200 ? below : bounds.top - 16))}px`,
+      left: `${Math.max(8, Math.min(bounds.left, window.innerWidth - width - 8))}px`,
+      width: `${width}px`,
+      maxHeight: `${height}px`,
+      top: openBelow ? `${bounds.bottom + 4}px` : `${Math.max(8, bounds.top - 4 - Math.min(menu.scrollHeight, height))}px`,
     });
+  };
+  const open = (picker) => {
+    pickers.forEach((other) => { if (other !== picker && other.open) other.open = false; });
+    const menu = menuOf.get(picker);
+    document.body.append(menu);
+    menu.classList.add('is-open');
+    place(picker);
+    menu.querySelector('.principal-picker-search').focus();
+  };
+  const close = (picker) => {
+    const menu = menuOf.get(picker);
+    menu.classList.remove('is-open');
+    menu.removeAttribute('style');
+    picker.append(menu);
   };
   // Browsers may restore old checkbox states from earlier visits; the
   // markup of this response is the saved configuration.
   const restoreSaved = () => pickers.forEach((picker) => {
-    picker.querySelectorAll('input[type="checkbox"]').forEach((box) => { box.checked = box.defaultChecked; });
+    menuOf.get(picker).querySelectorAll('input[type="checkbox"]').forEach((box) => { box.checked = box.defaultChecked; });
     summarise(picker);
   });
   window.addEventListener('pageshow', restoreSaved);
   window.addEventListener('load', restoreSaved);
   pickers.forEach((picker) => {
+    const menu = menuOf.get(picker);
     summarise(picker);
-    picker.addEventListener('change', () => summarise(picker));
-    picker.addEventListener('toggle', () => {
-      if (!picker.open) return;
-      pickers.forEach((other) => { if (other !== picker) other.open = false; });
-      place(picker);
-      picker.querySelector('.principal-picker-search').focus();
-    });
-    picker.querySelector('.principal-picker-search').addEventListener('input', (event) => {
+    menu.addEventListener('change', () => summarise(picker));
+    picker.addEventListener('toggle', () => { if (picker.open) open(picker); else close(picker); });
+    menu.querySelector('.principal-picker-search').addEventListener('input', (event) => {
       const query = event.target.value.trim().toLocaleLowerCase();
-      picker.querySelectorAll('label').forEach((label) => { label.hidden = Boolean(query) && !label.textContent.toLocaleLowerCase().includes(query); });
+      menu.querySelectorAll('label').forEach((label) => { label.hidden = Boolean(query) && !label.textContent.toLocaleLowerCase().includes(query); });
     });
   });
   document.addEventListener('pointerdown', (event) => {
-    pickers.forEach((picker) => { if (picker.open && !picker.contains(event.target)) picker.open = false; });
+    pickers.forEach((picker) => {
+      if (picker.open && !picker.contains(event.target) && !menuOf.get(picker).contains(event.target)) picker.open = false;
+    });
   });
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') pickers.forEach((picker) => { picker.open = false; });
