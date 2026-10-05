@@ -20,6 +20,7 @@ Dashboard Analytic turns processed CDR datasets into interactive KPI analysis, r
 | Datasets Analysis | [Open section](#datasets-analysis) |
 | Network Insights | [Open section](#network-insights) |
 | E2E Dashboards | [Open section](#e2e-dashboards) |
+| Non-Qualified Calls | [Open section](#non-qualified-calls) |
 | Reporting | [Open section](#reporting) |
 | Reporting (old) | [Open section](#reporting-old) |
 | Chart Builder | [Open section](#chart-builder) |
@@ -198,11 +199,13 @@ Status cards distinguish data loading, queued data, chart rendering, queued char
 
 The operational guide is [E2E Dashboards](e2e-dashboards.md). Template creation, columns, structural slides, supported chart types, filters, aggregations, legends, layouts and colours are documented once in [Workspace Config → Report Template reference](workspace-config.md#report-template-reference).
 
+## Non-Qualified Calls
+
+Non-Qualified Calls follows Scoring & GAP Analysis in the main tabs. It lists every Voice and Speech call and every Data test whose result is not Completed (Failed, Dropped, Cutoff…) in the ready CDRs of the workspace, summarises them by service, result, status, team, failure classification and Operator with drill-down into the calls, and lets the teams follow each call up with a status, a responsible team, an assignee and a shared, traceable comment thread. The follow-up exports to Excel and travels with workspace packages, transfers and backups. The module is in development and hidden from every user until it is activated in Admin → Features Activation. See [Non-Qualified Calls](non-qualified-calls.md).
+
 ## Reporting
 
 Reporting schedules **Reporting Jobs** that collect a Summary Dataset Analysis, a Summary Network Insights, Dashboard PPTs and Scoring PPTs, each with its own filters, run once or on a daily, weekly or monthly schedule and email the artifacts with a description of each one. It starts available to super-admins. See [Reporting](reporting.md).
-
-Non-Qualified Calls follows Scoring & GAP Analysis in the main tabs. It is under construction and hidden from every user until it is activated in Admin → Features Activation.
 
 ## Reporting (old)
 

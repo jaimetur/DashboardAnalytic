@@ -2543,7 +2543,7 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     assert 'Operator &amp; Vendor Maps (from active workspace)</option>' in admin_response.text
     assert admin_response.text.index('Main Cities (from active workspace)</option>') < admin_response.text.index('Operator &amp; Vendor Maps (from active workspace)</option>')
     assert 'Scoring &amp; GAP Analysis Configuration (from active workspace)' in admin_response.text
-    assert 'Full Environment (Application Config + Dashboards + Report Templates + Main Cities + Operator &amp; Vendor Maps + Scoring &amp; GAP Analysis Configuration + Auto-calculated Fields + Query Builder Queries + Reporting Jobs + Selected Workspaces)' in admin_response.text
+    assert 'Full Environment (Application Config + Dashboards + Report Templates + Main Cities + Operator &amp; Vendor Maps + Scoring &amp; GAP Analysis Configuration + Auto-calculated Fields + Query Builder Queries + Reporting Jobs + NQ Call Tracking + Selected Workspaces)' in admin_response.text
     assert admin_response.text.index('Main Cities (workspace city selection)') < admin_response.text.index('Operator &amp; Vendor Maps (aliases, order and theme colors)')
     assert 'Scoring &amp; GAP Analysis Configuration (KPI methodology profiles, aggregation hierarchy and GAP KPI priorities)' in admin_response.text
     assert "main_cities: 'Main Cities', operator_mappings: 'Operator & Vendor Maps', scoring_configuration: 'Scoring & GAP Analysis Configuration'" in admin_response.text
@@ -9014,6 +9014,7 @@ def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
         'network-insights.md',
         'e2e-dashboards.md',
         'scoring-gap-analysis.md',
+        'non-qualified-calls.md',
         'reporting.md',
         'chart-builder.md',
         'query-builder.md',
@@ -9072,7 +9073,7 @@ def test_reporting_old_help_follows_its_feature(client) -> None:
         client.cookies.set(app_module.SESSION_COOKIE, token)
 
         index = [item['relative_path'] for item in client.get('/api/documents/help-index').json()['documents']]
-        assert index[8:13] == ['network-insights.md', 'e2e-dashboards.md', 'scoring-gap-analysis.md', 'reporting.md', 'reporting-old.md']
+        assert index[8:14] == ['network-insights.md', 'e2e-dashboards.md', 'scoring-gap-analysis.md', 'non-qualified-calls.md', 'reporting.md', 'reporting-old.md']
         assert client.get('/documents/view/help/reporting-old.md').status_code == 200
         assert client.get('/api/documents/help/reporting-old.md').status_code == 200
         home = client.get('/api/documents/help').json()['content']

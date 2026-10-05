@@ -8,12 +8,15 @@
 #### ⚠️ Breaking Changes:
 
 #### 🌟 New Features:
+- **Non-Qualified Calls** (in development, still hidden until activated in Admin → Features Activation) lists every Voice and Speech call and every Data test whose result is not Completed in the ready CDRs of the workspace, indexed automatically when CDRs are added, reprocessed or deleted. An executive summary (totals, open, closed, with team, commented, and breakdowns by Service, Result, Status, Team, Failure Classification and Operator) drills down into a filterable, sortable and paginated table where editors set each call's status, responsible team and assignee in place or in bulk. A side panel shows every CDR field of the call and an activity timeline of shared comments and changes with their author and time; comments can be edited or deleted by their author or an admin while the history keeps every previous value, and concurrent changes are detected instead of overwritten. Statuses and teams are configurable with colours, the follow-up stays with each call when its CDR is reprocessed or uploaded again, Export Excel downloads the filtered calls with their comments and history, and the follow-up travels as **NQ Call Tracking** with Import/Export, transfers, Full Workspace/Environment packages and backups.
 
 #### 🚀 Enhancements:
+- **Main tabs:** Non-Qualified Calls uses a raspberry palette for its selected tab and the whole module, and modules still in development (Network Insights, Non-Qualified Calls and Reporting) show a bold asterisk after their tab name.
 
 #### 🐛 Bug fixes:
 
 #### 📚 Documentation:
+- Added the [Non-Qualified Calls](help/non-qualified-calls.md) guide and updated the overview, web interface, administrator, project structure and roadmap documents.
 
 ---
 

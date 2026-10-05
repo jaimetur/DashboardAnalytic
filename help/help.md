@@ -49,6 +49,7 @@ Help Navigation groups chapters under General, Main Modules, Administrative Modu
 - [Workspace Management](workspace-management.md) — workspaces, data ingestion, processing, previews and mappings.
 - [Datasets Analysis](datasets-analysis.md) — interactive single-dataset analysis and exports.
 - [E2E Dashboards](e2e-dashboards.md) — saved Dashboards, synchronized filters and slide layouts.
+- [Non-Qualified Calls](non-qualified-calls.md) — summary, drill-down and shared follow-up (status, team, assignee and comments) of every call and test that did not complete.
 - [Reporting](reporting.md) — scheduled Reporting Jobs that email Dataset Analysis, Network Insights, Dashboard and Scoring artifacts.
 - [Reporting (old)](reporting-old.md) — classic Reports, Chart Sets, interactive previews and jobs.
 - [Chart Builder](chart-builder.md) — temporary ad-hoc chart construction.

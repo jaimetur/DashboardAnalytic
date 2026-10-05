@@ -34,7 +34,7 @@ Primary tabs:
 - Network Insights
 - E2E Dashboards
 - Scoring & GAP Analysis
-- Non-Qualified Calls (under construction, hidden until activated)
+- Non-Qualified Calls (in development, hidden until activated)
 - Reporting
 - Reporting (old)
 - Builders (dropdown with Chart Builder and Query Builder)
@@ -58,7 +58,7 @@ Modules uses nearly the full viewport height when needed and scrolls if the wind
 
 Open **Config** and choose **Application Config** for application-wide runtime settings or **Workspace Config** for Report Templates Management, Operator Mappings, Vendor Mappings, Spectrum Holdings, Main Cities and the Scoring hierarchy/KPI/GAP settings in the active workspace. Workspace Config's Page Sections navigator jumps between the panels.
 
-Help Navigation lists unnumbered documents under General, Main Modules, Administrative Modules and Reference. Main Modules follow the main tab order: Workspace Management, Datasets Analysis, Network Insights, E2E Dashboards, Scoring & GAP Analysis, Reporting, Reporting (old), Chart Builder and Query Builder. Docker Deployment follows Deployment Configuration in General. App Logs is the first administrative document and Administrator Config is the last. Readme and Changelog open Reference before Project Structure and Roadmap.
+Help Navigation lists unnumbered documents under General, Main Modules, Administrative Modules and Reference. Main Modules follow the main tab order: Workspace Management, Datasets Analysis, Network Insights, E2E Dashboards, Scoring & GAP Analysis, Non-Qualified Calls, Reporting, Reporting (old), Chart Builder and Query Builder. Docker Deployment follows Deployment Configuration in General. App Logs is the first administrative document and Administrator Config is the last. Readme and Changelog open Reference before Project Structure and Roadmap.
 
 The Help Home link stays above the groups. Every chapter is available to every reader except Reporting (old), which only users with that feature see.
 
@@ -141,7 +141,7 @@ On a phone, use portrait orientation for forms and landscape orientation when in
 
 ## Dashboard navigation and overlays
 
-The analytical tabs are ordered **Datasets Analysis → Network Insights → E2E Dashboards → Scoring & GAP Analysis → Non-Qualified Calls → Reporting → Reporting (old)** for users with each feature. Datasets Analysis uses blue, Network Insights teal, E2E Dashboards muted violet, Reporting green and Reporting (old) brighter purple. Scoring offers NR Mode and CDR selection, aggregation controls, saved background jobs and tables/charts/GAP exports. Network Insights analyses RSRP/SINR, coverage and interference maps, sites, spectrum and network deployment. Each main tab shows a representative icon before its name. On narrower windows the main tabs switch to their short names (Analysis, Dashboards, Reporting, Scoring, Network) and then drop their icons, so the tab rows never overlap.
+The analytical tabs are ordered **Datasets Analysis → Network Insights → E2E Dashboards → Scoring & GAP Analysis → Non-Qualified Calls → Reporting → Reporting (old)** for users with each feature. Datasets Analysis uses blue, Network Insights teal, E2E Dashboards muted violet, Non-Qualified Calls raspberry, Reporting green and Reporting (old) brighter purple; Non-Qualified Calls also uses raspberry for its header, buttons, tables and dialogs. Modules still in development (Network Insights, Non-Qualified Calls and Reporting) show a bold asterisk after their tab name, for example **NQ Calls \***. Scoring offers NR Mode and CDR selection, aggregation controls, saved background jobs and tables/charts/GAP exports. Network Insights analyses RSRP/SINR, coverage and interference maps, sites, spectrum and network deployment. Each main tab shows a representative icon before its name. On narrower windows the main tabs switch to their short names (Analysis, Dashboards, Reporting, Scoring, Network) and then drop their icons, so the tab rows never overlap.
 
 Reporting and Reporting (old) are shown only to the users, roles and groups it is activated for in Admin → Features Activation; Reporting starts with super-admins and Reporting (old) with super-admins and EJAITUR. The dashboard viewer groups charts by Slide and opens the same Dashboard Filters controls in a floating panel. Its dataset dialog provides pagination and CSV export.
 

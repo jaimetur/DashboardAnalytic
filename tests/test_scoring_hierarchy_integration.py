@@ -86,7 +86,9 @@ def test_reporting_follows_scoring_in_module_and_help_navigation(scoring_api):
     assert modules.index('href="/scoring"') < modules.index('href="/reporting"') < modules.index('href="/reporting-old"')
     documents = client.get('/api/documents/help-index').json()['documents']
     paths = [document['relative_path'] for document in documents]
-    assert paths.index('reporting.md') == paths.index('scoring-gap-analysis.md') + 1
+    # Non-Qualified Calls sits between Scoring and Reporting, as in the main tabs.
+    assert paths.index('non-qualified-calls.md') == paths.index('scoring-gap-analysis.md') + 1
+    assert paths.index('reporting.md') == paths.index('non-qualified-calls.md') + 1
     assert paths.index('reporting-old.md') == paths.index('reporting.md') + 1
     help_page = client.get('/documents/view/help')
     group_function = help_page.text.split('function helpDocumentGroup(relativePath) {', 1)[1].split("return 'Main Modules';", 1)[0]

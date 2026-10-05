@@ -64,7 +64,7 @@ Each feature has three settings:
 
 An account matching both lists loses the feature: Forbidden always wins. For example, set **By default: Nobody** and allow the `admin` role, or keep **All users** and forbid one user group. Each list combines Roles, Groups and Users in one selector with a filter; the selector summarises the selection, such as `1 role · 2 users`.
 
-A feature that is not active for a user disappears from the main tabs and the Modules menu, and its pages and API answer 403. Workspace switching, dataset uploads and processing remain available everywhere. By default every module is active for all users except Non-Qualified Calls (under construction, Nobody), Reporting (Nobody, allowed for super-admins) and Reporting (old) (Nobody, allowed for super-admins and EJAITUR). The settings are stored in the application database.
+A feature that is not active for a user disappears from the main tabs and the Modules menu, and its pages and API answer 403. Workspace switching, dataset uploads and processing remain available everywhere. By default every module is active for all users except Non-Qualified Calls (in development, Nobody), Reporting (Nobody, allowed for super-admins) and Reporting (old) (Nobody, allowed for super-admins and EJAITUR). The settings are stored in the application database.
 
 Reporting Jobs can only include artifacts of the modules active for their author; see [Reporting](reporting.md).
 
@@ -84,10 +84,11 @@ Reporting Jobs can only include artifacts of the modules active for their author
 - Auto-calculated Fields from the active workspace
 - Query Builder Queries from the active workspace
 - Reporting Jobs from the active workspace
+- NQ Call Tracking from the active workspace (Non-Qualified Calls statuses, teams, follow-up, comments and history)
 - An accessible workspace
 - Full Environment with selected workspaces
 
-Admins can export/transfer the active workspace's Dashboards, Report Templates, Main Cities, Operator & Vendor Maps, Scoring & GAP Analysis Configuration, Auto-calculated Fields, Query Builder Queries and Reporting Jobs, plus complete workspaces they can access. Super-admins can also export Application Config and a Full Environment.
+Admins can export/transfer the active workspace's Dashboards, Report Templates, Main Cities, Operator & Vendor Maps, Scoring & GAP Analysis Configuration, Auto-calculated Fields, Query Builder Queries, Reporting Jobs and NQ Call Tracking, plus complete workspaces they can access. Super-admins can also export Application Config and a Full Environment.
 
 Dashboard, template, mapping and field packages preselect a destination workspace with the same name as their source, where available, and allow one or more accessible destinations to be selected.
 
@@ -95,7 +96,7 @@ Importing or transferring Report Templates synchronizes the destination library 
 
 When the same package also includes Dashboards, its Report Templates replace the destination library because the Dashboard definitions are replaced too. Selective backup restore uses the same rule.
 
-A Full Environment always contains Application Config and the complete database/input content, Dashboard definitions, Report Templates, Main Cities, Operator & Vendor Maps, Scoring & GAP Analysis Configuration, Auto-calculated Fields, Query Builder Queries and Reporting Jobs for every selected workspace. Selecting Full Environment only chooses the package type; the workspace picker opens when **Export ZIP** or **Transfer to other server** is pressed.
+A Full Environment always contains Application Config and the complete database/input content, Dashboard definitions, Report Templates, Main Cities, Operator & Vendor Maps, Scoring & GAP Analysis Configuration, Auto-calculated Fields, Query Builder Queries, Reporting Jobs and NQ Call Tracking for every selected workspace. Selecting Full Environment only chooses the package type; the workspace picker opens when **Export ZIP** or **Transfer to other server** is pressed.
 
 **Include generated Reports, Chart Sets and Dashboard PPT jobs** controls whether their `output/` trees, and the Reporting run history, are included. Reporting Job imports add new jobs and replace jobs with the same name; their dataset references are matched by file name in the destination workspace. At least one workspace is required.
 
@@ -150,6 +151,7 @@ In **Backup**, select one or more content types:
 - **Workspace Content: Operator & Vendor Maps** stores one JSON file containing every canonical Operator and Vendor, alias, row position and thematic colour.
 - **Workspace Content: Scoring & GAP Analysis Configuration** stores all saved methodologies, their default selection, KPI definitions, aggregation hierarchy and GAP KPI priorities; import and restore recover all three Scoring Setup subpanels together.
 - **Workspace Content: Auto-calculated Fields** stores one JSON file containing every selected workspace definition.
+- **Workspace Content: NQ Call Tracking** stores one JSON file with the Non-Qualified Calls statuses, teams, follow-up, comments and history; restore merges it into the workspace without duplicating comments or history.
 - **Workspace Content: Input** stores raw dataset files when explicitly selected.
 - **Workspace Content: Output** stores generated Reports, Chart Sets and Dashboard PowerPoint jobs when explicitly selected.
 

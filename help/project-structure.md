@@ -60,7 +60,7 @@ Runtime `config/` and `data/` directories use project-local defaults but are exc
 - `src/modules/network_insights_export.py`: Summary Network Insights PowerPoint and Word output.
 - `src/modules/report_tasks.py`: Reporting Jobs (`report_tasks`, `report_task_runs`), schedules, artifact generation, email bodies, the scheduler and the artifact provider registry for other modules.
 - `src/modules/email_delivery.py`: SMTP settings (Application Config → Email Delivery) and sending.
-- `src/modules/non_qualified_calls.py`: Non-Qualified Calls module placeholder.
+- `src/modules/non_qualified_calls.py`: Non-Qualified Calls: indexing of the NQ calls of every CDR (`nq_calls`, `nq_call_sources`), their follow-up (`nq_call_tracking`, `nq_call_comments`, `nq_call_history`, `nq_call_options`), the summary and drill-down queries, the Excel export, the NQ Call Tracking portability document and its routes.
 - `src/modules/cdr_reporting.py`: Report Template parsing, filters, aggregations, chart contracts, map tiles and classic report rendering.
 - `src/modules/e2e_dashboards.py`: Dashboard definitions, direct combined-CDR SQL selections, preview/model caches, live previews, filtered chart data and Dashboard PPT jobs.
 - `src/modules/dashboard_canvas_renderer.mjs`: Node/Chromium-compatible Canvas rendering used for consistent interactive and exported charts.

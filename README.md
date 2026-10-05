@@ -384,6 +384,7 @@ DashboardAnalytic/
 - [Workspace Management](help/workspace-management.md)
 - [Datasets Analysis](help/datasets-analysis.md)
 - [Network Insights](help/network-insights.md)
+- [Non-Qualified Calls](help/non-qualified-calls.md)
 - [E2E Dashboards](help/e2e-dashboards.md)
 - [Scoring & GAP Analysis](help/scoring-gap-analysis.md)
 - [Reporting](help/reporting.md)

@@ -1,10 +1,151 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="dashboard-stack spacious-stack non-qualified-calls" id="non-qualified-calls">
-  <article class="panel module-hero">
-    <p class="eyebrow">Non-Qualified Calls</p>
-    <h2>Non-Qualified Calls</h2>
-    <p class="lede">This module is under construction. Its analyses and reports will appear here, and Reporting Jobs will be able to include its reports.</p>
+<link rel="stylesheet" href="{{ static_path('css/non_qualified_calls.css') }}?v={{ asset_version('css/non_qualified_calls.css') }}">
+<section class="dashboard-stack spacious-stack non-qualified-calls" id="non-qualified-calls" data-nq-can-edit="{{ 'true' if nq_can_edit else 'false' }}">
+  <article class="panel module-hero nq-hero">
+    <div class="nq-hero-copy">
+      <p class="eyebrow">Non-Qualified Calls</p>
+      <h2>Follow up every call and test that did not complete</h2>
+      <p class="lede">Every Voice and Speech call and every Data test whose result is not Completed (Failed, Dropped, Cutoff…) in the ready CDRs of this workspace. Review the overall health, drill down from the summary into the calls, and track each one with a status, a responsible team, an assignee and a shared comment thread.</p>
+    </div>
+    <div class="nq-hero-side">
+      <p class="nq-sync" id="nq-sync" role="status">Indexing Non-Qualified Calls…</p>
+      <button type="button" class="nq-hero-action" id="nq-refresh" title="Reload the calls, their follow-up and any new or changed CDRs">Refresh</button>
+    </div>
   </article>
+
+  {% if not active_workspace %}
+  <article class="panel"><p class="form-note">Open a workspace to review its Non-Qualified Calls.</p></article>
+  {% else %}
+  <details class="panel collapsible-panel nq-filters-panel" open data-panel-state-key="non-qualified-calls:filters">
+    <summary class="collapsible-summary"><div><p class="eyebrow">Selection</p><h2>Filters</h2></div><span class="collapse-chip">Collapse</span></summary>
+    <div class="collapsible-panel-body">
+      <div class="nq-filter-grid" id="nq-filter-grid">
+        <label>CDRs<select data-nq-filter="datasets" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="CDRs"></select></label>
+        <label>Service<select data-nq-filter="service" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Service"></select></label>
+        <label>Campaign<select data-nq-filter="campaign" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Campaign"></select></label>
+        <label>Operator<select data-nq-filter="operator" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Operator"></select></label>
+        <label>Vendor<select data-nq-filter="vendor" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Vendor"></select></label>
+        <label>Region<select data-nq-filter="region" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Region"></select></label>
+        <label>City<select data-nq-filter="city" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="City"></select></label>
+        <label>Technology<select data-nq-filter="technology" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Technology"></select></label>
+        <label>Test Name<select data-nq-filter="test_name" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Test Name"></select></label>
+        <label>Result<select data-nq-filter="result" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Result"></select></label>
+        <label>Failure Classification<select data-nq-filter="failure_classification" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Failure Classification"></select></label>
+        <label>Failure Category<select data-nq-filter="failure_category" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Failure Category"></select></label>
+        <label>Status<select data-nq-filter="status" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Status"></select></label>
+        <label>Team<select data-nq-filter="team" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Team"></select></label>
+        <label>Assignee<select data-nq-filter="assignee" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Assignee"></select></label>
+      </div>
+      <div class="nq-filter-row">
+        <label class="nq-search">Search<input type="search" id="nq-search" placeholder="Operator, city, cell, failure or comment text…" autocomplete="off"></label>
+        <label class="nq-toggle"><input type="checkbox" data-nq-flag="open_only"> Open calls only</label>
+        <label class="nq-toggle"><input type="checkbox" data-nq-flag="mine"> Assigned to me</label>
+        <label class="nq-toggle"><input type="checkbox" data-nq-flag="without_comments"> Without comments</label>
+        <button type="button" class="nq-secondary-action" id="nq-reset">Reset Filters</button>
+      </div>
+    </div>
+  </details>
+
+  <details class="panel collapsible-panel nq-summary-panel" open data-panel-state-key="non-qualified-calls:summary">
+    <summary class="collapsible-summary"><div><p class="eyebrow">Executive view</p><h2>Summary</h2></div><span class="collapse-chip">Collapse</span></summary>
+    <div class="collapsible-panel-body">
+      <div class="nq-kpis" id="nq-kpis"></div>
+      <p class="nq-hint">Click any bar to drill down into its calls; click it again to remove that filter.</p>
+      <div class="nq-breakdowns" id="nq-breakdowns"></div>
+    </div>
+  </details>
+
+  <details class="panel collapsible-panel nq-calls-panel" open data-panel-state-key="non-qualified-calls:calls">
+    <summary class="collapsible-summary"><div><p class="eyebrow">Drill-down</p><h2>Calls</h2></div><span class="collapse-chip">Collapse</span></summary>
+    <div class="collapsible-panel-body">
+      <div class="nq-active-filters" id="nq-active-filters" hidden></div>
+      <div class="nq-toolbar">
+        <p class="nq-count" id="nq-count" role="status">Loading calls…</p>
+        <div class="nq-bulk" id="nq-bulk" hidden>
+          <strong id="nq-bulk-count"></strong>
+          <select id="nq-bulk-status" aria-label="Set the status of the selected calls"><option value="">Set status…</option></select>
+          <select id="nq-bulk-team" aria-label="Set the team of the selected calls"><option value="">Set team…</option></select>
+          <select id="nq-bulk-assignee" aria-label="Assign the selected calls"><option value="">Assign to…</option></select>
+          <button type="button" class="nq-link-action" id="nq-bulk-clear">Clear selection</button>
+        </div>
+        <div class="nq-toolbar-actions">
+          <label class="nq-page-size">Rows<select id="nq-page-size">{% for size in nq_page_sizes %}<option value="{{ size }}"{% if size == 50 %} selected{% endif %}>{{ size }}</option>{% endfor %}</select></label>
+          {% if nq_can_edit %}<button type="button" class="nq-secondary-action" id="nq-options-open" title="Configure the statuses and teams">Statuses &amp; Teams</button>{% endif %}
+          <button type="button" class="nq-primary-action" id="nq-export" title="Every call that matches the filters, with its comments and history">Export Excel</button>
+        </div>
+      </div>
+      <div class="nq-table-wrap">
+        <table class="nq-table" id="nq-table">
+          <thead>
+            <tr>
+              {% if nq_can_edit %}<th class="nq-select-cell"><input type="checkbox" id="nq-select-page" aria-label="Select every call on this page"></th>{% endif %}
+              <th data-sort="service">Service</th>
+              <th data-sort="start_time">Start Time</th>
+              <th data-sort="operator">Operator / Vendor</th>
+              <th data-sort="city">City / Campaign</th>
+              <th data-sort="test_name">Test / Technology</th>
+              <th data-sort="result">Result</th>
+              <th data-sort="failure">Failure</th>
+              <th data-sort="status">Status</th>
+              <th data-sort="team">Team</th>
+              <th data-sort="assignee">Assignee</th>
+              <th data-sort="comments">Comments</th>
+              <th class="nq-open-cell"><span class="sr-only">Open</span></th>
+            </tr>
+          </thead>
+          <tbody id="nq-rows"></tbody>
+        </table>
+      </div>
+      <nav class="nq-pagination" id="nq-pagination" aria-label="Pages of calls"></nav>
+    </div>
+  </details>
+  {% endif %}
 </section>
+
+<div class="nq-drawer-backdrop" id="nq-drawer-backdrop" hidden></div>
+<aside class="nq-drawer" id="nq-drawer" aria-labelledby="nq-drawer-title" aria-hidden="true">
+  <header class="nq-drawer-head">
+    <div>
+      <p class="eyebrow" id="nq-drawer-eyebrow">Call</p>
+      <h2 id="nq-drawer-title">Call details</h2>
+      <p class="nq-drawer-meta" id="nq-drawer-meta"></p>
+    </div>
+    <button type="button" class="nq-drawer-close" id="nq-drawer-close" aria-label="Close the call details">&times;</button>
+  </header>
+  <div class="nq-drawer-tracking" id="nq-drawer-tracking"></div>
+  <div class="nq-drawer-tabs" role="tablist">
+    <button type="button" role="tab" class="is-active" data-nq-tab="activity" aria-selected="true">Activity</button>
+    <button type="button" role="tab" data-nq-tab="details" aria-selected="false">Call Details</button>
+  </div>
+  <div class="nq-drawer-body">
+    <section data-nq-panel="activity">
+      <ol class="nq-timeline" id="nq-timeline"></ol>
+      <form class="nq-composer" id="nq-composer"{% if not nq_can_edit %} hidden{% endif %}>
+        <textarea id="nq-comment-body" rows="3" maxlength="5000" placeholder="Add a comment for every user of this workspace… (Ctrl+Enter to post)"></textarea>
+        <div class="nq-composer-actions"><span class="nq-composer-note" id="nq-composer-note"></span><button type="submit" class="nq-primary-action">Add Comment</button></div>
+      </form>
+    </section>
+    <section data-nq-panel="details" hidden>
+      <dl class="nq-detail-grid" id="nq-detail-grid"></dl>
+      <label class="nq-search nq-field-search">All CDR fields<input type="search" id="nq-field-search" placeholder="Filter fields…" autocomplete="off"></label>
+      <table class="nq-fields-table"><tbody id="nq-fields"></tbody></table>
+    </section>
+  </div>
+</aside>
+
+{% if nq_can_edit %}
+<dialog class="nq-options-dialog" id="nq-options-dialog" aria-labelledby="nq-options-title">
+  <form method="dialog" class="nq-options-form" id="nq-options-form">
+    <header><h2 id="nq-options-title">Statuses &amp; Teams</h2><p class="form-note">Shared by every user of this workspace. The first status is shown for calls nobody has followed up yet; statuses marked Closed count as closed in the summary. Renaming a value updates every call; a value in use cannot be removed.</p></header>
+    <div class="nq-options-columns">
+      <section><h3>Statuses</h3><ul class="nq-option-list" data-nq-options="statuses"></ul><button type="button" class="nq-secondary-action" data-nq-option-add="statuses">Add Status</button></section>
+      <section><h3>Teams</h3><ul class="nq-option-list" data-nq-options="teams"></ul><button type="button" class="nq-secondary-action" data-nq-option-add="teams">Add Team</button></section>
+    </div>
+    <p class="nq-options-error" id="nq-options-error" role="alert"></p>
+    <footer><button type="button" class="nq-secondary-action" id="nq-options-cancel">Cancel</button><button type="submit" class="nq-primary-action" id="nq-options-save">Save</button></footer>
+  </form>
+</dialog>
+{% endif %}
+<script defer src="{{ static_path('js/non_qualified_calls.js') }}?v={{ asset_version('js/non_qualified_calls.js') }}"></script>
 {% endblock %}

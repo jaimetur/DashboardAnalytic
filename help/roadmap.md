@@ -31,7 +31,7 @@
 
 ## Planned product work
 
-- Non-qualified calls Analysis module.
+- Non-Qualified Calls: confirm the NQ definition (currently every result other than Completed) and add its reports to Reporting Jobs.
 - Configuration datasets ingestion to enrich CDR dataset and combine them to extract combined info using SQL Queries or Report Templates.
 - Additional validated KPI/chart contracts.
 - Smart Orchestrator Logs Reports.

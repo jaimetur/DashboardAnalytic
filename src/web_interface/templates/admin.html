@@ -478,7 +478,7 @@
       <div class="confirm-icon info-icon" aria-hidden="true">⇩</div>
       <p class="eyebrow">Full Environment export</p>
       <h3 id="full-environment-workspace-title">Select workspaces</h3>
-      <p>Application Config is always included. Each selected workspace includes its database, input files, Dashboard definitions, Report Templates, Main Cities, Operator &amp; Vendor Maps, Scoring &amp; GAP Analysis Configuration (KPI methodology profiles, aggregation hierarchy and GAP KPI priorities), Auto-calculated Fields, Query Builder Queries and Reporting Jobs.</p>
+      <p>Application Config is always included. Each selected workspace includes its database, input files, Dashboard definitions, Report Templates, Main Cities, Operator &amp; Vendor Maps, Scoring &amp; GAP Analysis Configuration (KPI methodology profiles, aggregation hierarchy and GAP KPI priorities), Auto-calculated Fields, Query Builder Queries, Reporting Jobs and NQ Call Tracking.</p>
       <div class="full-environment-workspace-toolbar">
         <button type="button" class="ghost-link" data-full-environment-select-all>Select all</button>
         <button type="button" class="ghost-link" data-full-environment-select-none>Select none</button>
@@ -551,7 +551,7 @@
             <div class="database-backup-immediate-grid">
               <section class="database-backup-operation-panel"><h5>Backup</h5>
                 <label class="database-backup-components">Backup content
-                  <select name="components" multiple data-backup-components data-multiselect-groups="true" data-multiselect-auto-close="1000"><optgroup label="Configuration Content"><option value="app_database" {% if 'app_database' in recurring_backup.components %}selected{% endif %}>Application database</option></optgroup><optgroup label="Workspace Content">{% for value, label in [('workspace_database', 'Workspace Database'), ('dashboards', 'Dashboards (one JSON file with all Dashboard definitions)'), ('report_templates', 'Report Templates (one CSV file per Report Template)'), ('main_cities', 'Main Cities (workspace city selection)'), ('operator_mappings', 'Operator & Vendor Maps (aliases, order and theme colors)'), ('scoring_configuration', 'Scoring & GAP Analysis Configuration (KPI methodology profiles, aggregation hierarchy and GAP KPI priorities)'), ('auto_calculated_fields', 'Auto-calculated Fields (one JSON file with all definitions)'), ('query_builder_queries', 'Saved Queries (one JSON file with all saved queries)'), ('reporting_jobs', 'Reporting Jobs (one JSON file with all Reporting Job definitions)'), ('input', 'Input (includes all raw datasets files)'), ('output', 'Output (includes all generated reports, chart sets and Dashboard PPT jobs)')] %}<option value="{{ value }}" {% if value in recurring_backup.components %}selected{% endif %}>{{ label }}</option>{% endfor %}</optgroup></select>
+                  <select name="components" multiple data-backup-components data-multiselect-groups="true" data-multiselect-auto-close="1000"><optgroup label="Configuration Content"><option value="app_database" {% if 'app_database' in recurring_backup.components %}selected{% endif %}>Application database</option></optgroup><optgroup label="Workspace Content">{% for value, label in [('workspace_database', 'Workspace Database'), ('dashboards', 'Dashboards (one JSON file with all Dashboard definitions)'), ('report_templates', 'Report Templates (one CSV file per Report Template)'), ('main_cities', 'Main Cities (workspace city selection)'), ('operator_mappings', 'Operator & Vendor Maps (aliases, order and theme colors)'), ('scoring_configuration', 'Scoring & GAP Analysis Configuration (KPI methodology profiles, aggregation hierarchy and GAP KPI priorities)'), ('auto_calculated_fields', 'Auto-calculated Fields (one JSON file with all definitions)'), ('query_builder_queries', 'Saved Queries (one JSON file with all saved queries)'), ('reporting_jobs', 'Reporting Jobs (one JSON file with all Reporting Job definitions)'), ('nq_call_tracking', 'NQ Call Tracking (one JSON file with the Non-Qualified Calls statuses, teams, follow-up, comments and history)'), ('input', 'Input (includes all raw datasets files)'), ('output', 'Output (includes all generated reports, chart sets and Dashboard PPT jobs)')] %}<option value="{{ value }}" {% if value in recurring_backup.components %}selected{% endif %}>{{ label }}</option>{% endfor %}</optgroup></select>
                 </label>
                 <label class="database-backup-workspaces" data-backup-workspaces hidden>Workspaces to include
                   <select name="workspace_ids" multiple>{% for workspace in backup_workspaces %}<option value="{{ workspace.id }}" {% if not recurring_backup.workspace_ids or workspace.id in recurring_backup.workspace_ids %}selected{% endif %}>{{ workspace.name }}</option>{% endfor %}</select>
@@ -880,7 +880,7 @@
   const refresh = () => { settings.hidden = !enabled.checked; };
   const refreshBackupWorkspaces = () => {
     if (!backupComponents || !backupWorkspaces) return;
-    const needsWorkspaces = [...backupComponents.selectedOptions].some((option) => ['workspace_database', 'dashboards', 'report_templates', 'operator_mappings', 'main_cities', 'scoring_configuration', 'auto_calculated_fields', 'query_builder_queries', 'reporting_jobs', 'input', 'output'].includes(option.value));
+    const needsWorkspaces = [...backupComponents.selectedOptions].some((option) => ['workspace_database', 'dashboards', 'report_templates', 'operator_mappings', 'main_cities', 'scoring_configuration', 'auto_calculated_fields', 'query_builder_queries', 'reporting_jobs', 'nq_call_tracking', 'input', 'output'].includes(option.value));
     backupWorkspaces.hidden = !needsWorkspaces;
   };
   const refreshRecurrence = () => {
@@ -969,10 +969,10 @@
       const response = await fetch('/api/admin/backup-files/inspect', {method: 'POST', credentials: 'same-origin', body: new URLSearchParams({backup_path: restorePath.value, backup_file: restoreFile.value})});
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.detail || 'Unable to inspect the backup.');
-      const labels = {app_database: 'Application database', workspace_database: 'Workspace Database', dashboards: 'Dashboards', report_templates: 'Report Templates', main_cities: 'Main Cities', operator_mappings: 'Operator & Vendor Maps', scoring_configuration: 'Scoring & GAP Analysis Configuration', auto_calculated_fields: 'Auto-calculated Fields', query_builder_queries: 'Saved Queries', reporting_jobs: 'Reporting Jobs', input: 'Input', output: 'Output'};
+      const labels = {app_database: 'Application database', workspace_database: 'Workspace Database', dashboards: 'Dashboards', report_templates: 'Report Templates', main_cities: 'Main Cities', operator_mappings: 'Operator & Vendor Maps', scoring_configuration: 'Scoring & GAP Analysis Configuration', auto_calculated_fields: 'Auto-calculated Fields', query_builder_queries: 'Saved Queries', reporting_jobs: 'Reporting Jobs', nq_call_tracking: 'NQ Call Tracking', input: 'Input', output: 'Output'};
       const componentGroups = [
         ['Configuration Content', ['app_database']],
-        ['Workspace Content', ['workspace_database', 'dashboards', 'report_templates', 'main_cities', 'operator_mappings', 'scoring_configuration', 'auto_calculated_fields', 'query_builder_queries', 'reporting_jobs', 'input', 'output']],
+        ['Workspace Content', ['workspace_database', 'dashboards', 'report_templates', 'main_cities', 'operator_mappings', 'scoring_configuration', 'auto_calculated_fields', 'query_builder_queries', 'reporting_jobs', 'nq_call_tracking', 'input', 'output']],
       ];
       restoreComponents.innerHTML = componentGroups.map(([title, values]) => {
         const available = values.filter((value) => payload.components.includes(value));
