@@ -76,6 +76,19 @@
       return box;
     });
     if (!values.length) menu.append(node('p', 'No values available.', 'table-help'));
+    // Select All / None acts on the listed (filtered) values, like the other filters of the application.
+    if (values.length) {
+      const toggleAll = node('button', 'Select All / None', 'workspace-user-picker-toggle rj-multi-toggle');
+      toggleAll.type = 'button';
+      toggleAll.addEventListener('click', () => {
+        const listed = boxes.filter((box) => !box.disabled && !box.parentElement.hidden);
+        const select = listed.some((box) => !box.checked);
+        listed.forEach((box) => { box.checked = select; });
+        if (presetBox && !preset.dynamic) presetBox.checked = false;
+        refresh();
+      });
+      search.after(toggleAll);
+    }
     const refresh = () => {
       if (presetBox && preset.dynamic) boxes.forEach((box) => { box.disabled = presetBox.checked; });
       const count = boxes.filter((box) => box.checked && !box.disabled).length;

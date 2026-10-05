@@ -146,3 +146,5 @@
 .report-jobs label.rj-format-chip:has(input:disabled), .report-jobs .rj-inline label.rj-check:has(input:disabled) { opacity: .7; cursor: default; }
 .report-jobs label.rj-format-chip input, .report-jobs .rj-inline label.rj-check input { width: .9rem; height: .9rem; }
 .report-jobs label.rj-format-chip, .report-jobs .rj-inline label.rj-check { width: fit-content; justify-self: start; align-self: center; }
+.report-jobs .rj-multi .rj-multi-toggle { width: 100%; margin: .1rem 0 .25rem; padding: .42rem .55rem; border: 0; border-radius: 7px; background: #e3f3e9; color: #1f6b43; font-size: .76rem; font-weight: 750; text-align: left; box-shadow: none; cursor: pointer; }
+.report-jobs .rj-multi .rj-multi-toggle:hover { background: #d0ebdb; color: #174d31; }
