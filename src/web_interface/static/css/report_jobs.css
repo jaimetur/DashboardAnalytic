@@ -140,6 +140,9 @@
 .report-jobs .rj-card > .rj-card-toggle > strong { color: #174d31; font-size: 1.12rem; font-weight: 850; }
 .report-jobs .rj-card > .rj-card-toggle > input { width: 1.35rem; height: 1.35rem; }
 .report-jobs .rj-formats { display: flex; flex-wrap: wrap; align-items: center; gap: .45rem; }
-.report-jobs label.rj-format-chip { gap: .35rem; padding: .22rem .7rem .22rem .5rem; border: 1px solid rgba(47, 138, 87, .35); border-radius: 999px; background: #fff; font-size: .86rem; font-weight: 650; }
-.report-jobs label.rj-format-chip:has(input:checked) { border-color: #2f8a57; background: #e8f5ed; color: #174d31; }
-.report-jobs label.rj-format-chip input { width: .9rem; height: .9rem; }
+/* Every row of choices (formats, aggregation, CDF comparison, grouping, levels…) uses the same chips. */
+.report-jobs label.rj-format-chip, .report-jobs .rj-inline label.rj-check { gap: .35rem; padding: .22rem .7rem .22rem .5rem; border: 1px solid rgba(47, 138, 87, .35); border-radius: 999px; background: #fff; font-size: .86rem; font-weight: 650; cursor: pointer; }
+.report-jobs label.rj-format-chip:has(input:checked), .report-jobs .rj-inline label.rj-check:has(input:checked) { border-color: #2f8a57; background: #e8f5ed; color: #174d31; }
+.report-jobs label.rj-format-chip:has(input:disabled), .report-jobs .rj-inline label.rj-check:has(input:disabled) { opacity: .7; cursor: default; }
+.report-jobs label.rj-format-chip input, .report-jobs .rj-inline label.rj-check input { width: .9rem; height: .9rem; }
+.report-jobs label.rj-format-chip, .report-jobs .rj-inline label.rj-check { width: fit-content; justify-self: start; align-self: center; }

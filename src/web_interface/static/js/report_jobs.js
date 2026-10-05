@@ -185,7 +185,7 @@
   const KIND_LABELS = {data: 'CDR Data', voice: 'CDR Voice', speech: 'CDR Speech'};
   function datasetPicker(container, datasets, selected, allText) {
     container.replaceChildren();
-    const all = node('label', undefined, 'rj-check');
+    const all = node('label', undefined, 'rj-check rj-format-chip');
     const allBox = node('input'); allBox.type = 'checkbox'; allBox.checked = !selected.length;
     all.append(allBox, node('span', allText));
     const groups = node('div', undefined, 'rj-dataset-groups');
@@ -272,7 +272,7 @@
     const groups = node('div', undefined, 'rj-dataset-groups');
     const allBox = node('input'); allBox.type = 'checkbox'; allBox.checked = allSelected;
     if (allText) {
-      const all = node('label', undefined, 'rj-check');
+      const all = node('label', undefined, 'rj-check rj-format-chip');
       all.append(allBox, node('span', allText));
       container.append(all);
     }
