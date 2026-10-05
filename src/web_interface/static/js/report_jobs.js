@@ -79,6 +79,31 @@
   }
 
   // Dataset checklist with an "every ready dataset" switch (an empty selection).
+  // Artifact cards and entries collapse to keep long jobs readable.
+  const collapseButton = (card, label) => {
+    const button = node('button', 'Collapse', 'collapse-chip rj-collapse'); button.type = 'button';
+    button.setAttribute('aria-expanded', 'true'); button.title = `Collapse ${label}`;
+    button.addEventListener('click', (event) => {
+      event.preventDefault(); event.stopPropagation();
+      const collapsed = card.classList.toggle('is-collapsed');
+      button.textContent = collapsed ? 'Expand' : 'Collapse';
+      button.setAttribute('aria-expanded', String(!collapsed));
+      button.title = `${collapsed ? 'Expand' : 'Collapse'} ${label}`;
+    });
+    return button;
+  };
+  const entryHead = (card, kind, describe) => {
+    const head = node('div', undefined, 'rj-entry-head');
+    const title = node('strong', '', 'rj-entry-title');
+    const refresh = () => { title.textContent = `${kind} · ${describe() || 'New entry'}`; };
+    head.append(title, collapseButton(card, kind));
+    card.addEventListener('change', refresh);
+    card.addEventListener('input', refresh);
+    card.refreshTitle = refresh;
+    requestAnimationFrame(refresh);
+    return head;
+  };
+
   // CDRs grouped in one card per type, each with Select All/None, as in Network Insights.
   const KIND_LABELS = {data: 'CDR Data', voice: 'CDR Voice', speech: 'CDR Speech'};
   function datasetPicker(container, datasets, selected, allText) {
@@ -309,7 +334,8 @@
     scope.addEventListener('change', () => { comparisonField.hidden = scope.value !== 'multivendor'; scheduleLoad(); });
     comparison.addEventListener('change', scheduleLoad);
     datasets.addEventListener('change', scheduleLoad);
-    card.append(head, noDashboards, node('strong', 'CDRs'), datasets, node('strong', 'Adaptative Filters'), filterNote, filters);
+    card.append(entryHead(card, 'Dashboard', () => [nrMode.value, dashboard.selectedOptions[0]?.textContent, label.value.trim()].filter(Boolean).join(' · ')),
+      head, noDashboards, node('strong', 'CDRs'), datasets, node('strong', 'Adaptative Filters'), filterNote, filters);
     if (dashboard.value) apply(entry || savedDashboard(), savedDashboard());
     else { current = {saved: {}, fields: []}; datasetsByKind(datasets, [], {}); }
     card.getValue = () => ({
@@ -355,7 +381,8 @@
     const renderDatasets = () => datasetPicker(datasets, options.datasets.filter((item) => item.nr_mode === nrMode.value),
       entry.dataset_ids || [], 'Newest complete set of Data, Voice and Speech CDRs at each run');
     nrMode.addEventListener('change', renderDatasets); renderDatasets();
-    card.append(head, levels, node('strong', 'Filters'), filters, node('strong', 'CDRs'), datasets);
+    card.append(entryHead(card, 'Scoring', () => [nrMode.value, label.value.trim()].filter(Boolean).join(' · ')),
+      head, levels, node('strong', 'Filters'), filters, node('strong', 'CDRs'), datasets);
     card.getValue = () => ({
       label: label.value.trim(), nr_mode: nrMode.value, dataset_ids: datasets.getValue(),
       scoring_profile_id: methodology.value, baseline_operator: baseline.value.trim() || 'EE',
@@ -409,7 +436,8 @@
       selected, 'Every ready Data, Voice and Speech CDR of this NR Mode at each run');
     nrMode.addEventListener('change', () => renderDatasets([]));
     renderDatasets(Object.values(selection.datasets || {}).flat());
-    card.append(formats, head, grouping, node('strong', 'Filters'), filters, node('strong', 'CDRs'), datasets);
+    card.append(entryHead(card, 'Network Insights', () => [nrMode.value, technology.selectedOptions[0]?.textContent, label.value.trim()].filter(Boolean).join(' · ')),
+      formats, head, grouping, node('strong', 'Filters'), filters, node('strong', 'CDRs'), datasets);
     card.getValue = () => {
       const ids = new Set(datasets.getValue());
       const byKind = {};
@@ -674,6 +702,9 @@
     $('rj-dashboards').append(dashboardEntry());
   });
   $('rj-add-scoring').addEventListener('click', () => $('rj-scoring').append(scoringEntry()));
+  document.querySelectorAll('#rj-form .rj-card[data-rj-section]').forEach((card) => {
+    card.append(collapseButton(card, card.querySelector('.rj-card-toggle strong')?.textContent || 'artifact'));
+  });
   $('rj-add-network').addEventListener('click', () => $('rj-network').append(networkEntry()));
   // Checking an artifact type without entries starts its first entry.
   document.querySelectorAll('[data-rj-entries]').forEach((toggle) => toggle.addEventListener('change', () => {

@@ -94,3 +94,12 @@
 .report-jobs .rj-dataset-toggle:hover:not(:disabled) { background: #e3f3e9; }
 .report-jobs .rj-dataset-toggle:disabled { opacity: .5; cursor: default; }
 .report-jobs .rj-dataset-group label.rj-check { align-items: flex-start; font-weight: 500; font-size: .86rem; }
+/* Collapsible artifact cards and entries. */
+.report-jobs .rj-card[data-rj-section] { position: relative; }
+.report-jobs .rj-card[data-rj-section] > .rj-collapse { position: absolute; top: .8rem; right: .9rem; }
+.report-jobs .rj-card[data-rj-section] > .rj-card-toggle { padding-right: 7rem; }
+.report-jobs .rj-card.is-collapsed > :not(.rj-card-toggle):not(.rj-collapse) { display: none !important; }
+.report-jobs .rj-entry-head { display: flex; align-items: center; justify-content: space-between; gap: .8rem; }
+.report-jobs .rj-entry-title { color: #1f5f3a; font-size: .92rem; }
+.report-jobs .rj-entry.is-collapsed > :not(.rj-entry-head) { display: none !important; }
+.report-jobs .rj-collapse { flex: 0 0 auto; cursor: pointer; font: inherit; font-size: .78rem; font-weight: 700; }
