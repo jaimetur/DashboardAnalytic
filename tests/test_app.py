@@ -3617,7 +3617,7 @@ def test_datasets_analysis_excludes_timestamp_columns_from_metrics(client) -> No
     assert 'value="operator"  disabled' in response.text
     assert 'value="score"' in response.text
     assert "data-table-wrap" in response.text
-    assert "Global Aggregation" in response.text
+    assert "Global Comparison" in response.text
 
 
 def test_admin_can_retry_stuck_dataset(client) -> None:
