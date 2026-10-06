@@ -1164,6 +1164,14 @@ def install_report_task_routes(core: Any) -> None:
                        'Vendor': sort_vendor_values(catalogue.get('vendors_only', [])), 'Region': catalogue.get('regions', []),
                        'Cluster': catalogue.get('clusters', []), 'City': catalogue.get('cities', []),
                        'Campaign': catalogue.get('campaigns', [])},
+            # The filter values of each CDR, so every entry lists only the values of the CDRs it uses.
+            'values_by_dataset': {
+                dataset_id: {'Operator': catalogue_values['operators'], 'Operator_Vendor': catalogue_values['vendors'],
+                             'Vendor': catalogue_values['vendors_only'], 'Region': catalogue_values['regions'],
+                             'Cluster': catalogue_values['clusters'], 'City': catalogue_values['cities'],
+                             'Campaign': catalogue_values['campaigns']}
+                for dataset_id, catalogue_values in task_repository.cdr_catalogues_by_dataset([item['id'] for item in datasets]).items()
+            },
             'scoring_levels': list(SCORING_LEVELS), 'formats': list(REPORT_FORMATS),
             # CDR Analysis: the metrics of the ready CDRs, and its aggregation and CDF comparison choices.
             'cdr_metrics': {kind: list(dict.fromkeys(

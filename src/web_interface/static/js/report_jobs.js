@@ -155,6 +155,43 @@
     return row;
   }
 
+  // Filter values of a set of CDRs: the union of their catalogues, vendors in the order of the Vendor filters.
+  const vendorRank = (value) => {
+    const text = String(value ?? '');
+    if (/\s-\sAll(?: Vendors)?$/i.test(text)) return 2;
+    const key = text.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return ['mixed', 'othervendor', 'allvendor'].some((part) => key.includes(part)) ? 1 : 0;
+  };
+  const valuesForDatasets = (ids) => {
+    const union = {};
+    ids.forEach((id) => Object.entries((options.values_by_dataset || {})[id] || {}).forEach(([field, values]) => {
+      values.forEach((value) => (union[field] ||= new Set()).add(value));
+    }));
+    return Object.fromEntries(Object.entries(union).map(([field, values]) => [field, [...values].sort((left, right) => (
+      (['Vendor', 'Operator_Vendor'].includes(field) ? vendorRank(left) - vendorRank(right) : 0)
+      || String(left).localeCompare(String(right), undefined, {sensitivity: 'base'})))]));
+  };
+  // A row of filter pickers whose values follow the CDRs of the entry; refresh() keeps what is already chosen.
+  function scopedFilters(definitions, saved = {}, presetFor = () => null, className = 'rj-filters') {
+    const container = node('div', undefined, className);
+    let pickers = [];
+    container.refresh = (datasetIds) => {
+      const current = pickers.length ? Object.fromEntries(pickers.map(([key, picker]) => [key, picker.getValue()])) : saved;
+      const presets = Object.fromEntries(pickers.map(([key, picker]) => [key, picker.getPreset()]));
+      const values = valuesForDatasets(datasetIds);
+      pickers = definitions.map(([key, text]) => {
+        const preset = presetFor(key, pickers.length ? presets[key] : undefined);
+        const picker = multiPicker(text, values[text] || [], current[key] || [], preset ? {preset} : {});
+        picker.dataset.rjFilter = key;
+        return [key, picker];
+      });
+      container.replaceChildren(...pickers.map(([, picker]) => picker));
+    };
+    container.values = () => Object.fromEntries(pickers.map(([key, picker]) => [key, picker.getValue()]));
+    container.picker = (key) => pickers.find(([name]) => name === key)?.[1];
+    return container;
+  }
+
   const mainCitiesPreset = (checked = false, dynamic = false) => ({
     label: dynamic ? 'Main Cities (workspace list at each run)' : 'Main Cities', values: options.main_cities || [], checked, dynamic,
   });
@@ -240,6 +277,7 @@
         const select = !kindBoxes.every((box) => box.checked);
         kindBoxes.forEach((box) => { box.checked = select; });
         syncToggle();
+        card.dispatchEvent(new Event('change', {bubbles: true}));
       });
       card.addEventListener('change', syncToggle);
       syncToggle();
@@ -476,24 +514,28 @@
       return box;
     });
     // Main Cities is the City filter's first choice: the workspace list at each run.
-    const pickers = SCORING_FILTERS.map(([key, text]) => [key, multiPicker(text, options.values[text] || [], entry.context_filters?.[key] || [],
-      key === 'City' ? {preset: mainCitiesPreset(Boolean(entry.main_cities), true)} : {})]);
-    const cityPicker = pickers.find(([key]) => key === 'City')[1];
-    const filters = node('div', undefined, 'rj-filters');
-    filters.append(...pickers.map(([, picker]) => picker));
+    const filters = scopedFilters(SCORING_FILTERS, entry.context_filters || {},
+      (key, checked) => (key === 'City' ? mainCitiesPreset(checked ?? Boolean(entry.main_cities), true) : null));
     const datasets = node('div', undefined, 'rj-picker');
-    const renderDatasets = () => datasetPicker(datasets, options.datasets.filter((item) => item.nr_mode === nrMode.value),
-      entry.dataset_ids || [], 'Newest complete set of Data, Voice and Speech CDRs at each run');
-    nrMode.addEventListener('change', renderDatasets); renderDatasets();
+    // The filters list the values of the selected CDRs, or of every CDR of the NR Mode.
+    const cdrsInUse = () => datasets.getValue().length ? datasets.getValue()
+      : options.datasets.filter((item) => item.nr_mode === nrMode.value).map((item) => item.id);
+    const renderDatasets = (selected) => {
+      datasetPicker(datasets, options.datasets.filter((item) => item.nr_mode === nrMode.value),
+        selected, 'Newest complete set of Data, Voice and Speech CDRs at each run');
+      filters.refresh(cdrsInUse());
+    };
+    nrMode.addEventListener('change', () => renderDatasets([]));
+    datasets.addEventListener('change', () => filters.refresh(cdrsInUse()));
+    renderDatasets(entry.dataset_ids || []);
     card.append(entryHead(card, 'Scoring', () => [nrMode.value, label.value.trim()].filter(Boolean).join(' · ')),
       head, levels, node('strong', 'Filters'), filters, node('strong', 'CDRs'), datasets);
     card.getValue = () => ({
       label: label.value.trim(), nr_mode: nrMode.value, dataset_ids: datasets.getValue(),
       scoring_profile_id: methodology.value, baseline_operator: baseline.value.trim() || 'EE',
       aggregation_levels: levelBoxes.filter((box) => box.checked).map((box) => box.value),
-      main_cities: cityPicker.getPreset(),
-      context_filters: Object.fromEntries(pickers.map(([key, picker]) => [key, picker.getValue()])
-        .filter(([, values]) => values.length)),
+      main_cities: Boolean(filters.picker('City')?.getPreset()),
+      context_filters: Object.fromEntries(Object.entries(filters.values()).filter(([, values]) => values.length)),
     });
     return card;
   }
@@ -590,14 +632,19 @@
     };
     grouping.addEventListener('change', enforceOperator);
     enforceOperator();
-    const pickers = NETWORK_FILTERS.map(([key, text]) => [key, multiPicker(text, options.values[text] || [], selection[key] || [],
-      key === 'cities' ? {preset: mainCitiesPreset()} : {})]);
-    const filters = node('div', undefined, 'rj-filters rj-filters-one-row');
-    filters.append(...pickers.map(([, picker]) => picker));
+    const filters = scopedFilters(NETWORK_FILTERS, selection, (key) => (key === 'cities' ? mainCitiesPreset() : null),
+      'rj-filters rj-filters-one-row');
     const datasets = node('div', undefined, 'rj-picker');
-    const renderDatasets = (selected) => datasetPicker(datasets, options.datasets.filter((item) => item.nr_mode === nrMode.value),
-      selected, 'Every ready Data, Voice and Speech CDR of this NR Mode at each run');
+    // The filters list the values of the selected CDRs, or of every CDR of the NR Mode.
+    const cdrsInUse = () => datasets.getValue().length ? datasets.getValue()
+      : options.datasets.filter((item) => item.nr_mode === nrMode.value).map((item) => item.id);
+    const renderDatasets = (selected) => {
+      datasetPicker(datasets, options.datasets.filter((item) => item.nr_mode === nrMode.value),
+        selected, 'Every ready Data, Voice and Speech CDR of this NR Mode at each run');
+      filters.refresh(cdrsInUse());
+    };
     nrMode.addEventListener('change', () => renderDatasets([]));
+    datasets.addEventListener('change', () => filters.refresh(cdrsInUse()));
     renderDatasets(Object.values(selection.datasets || {}).flat());
     card.append(entryHead(card, 'Network Insights', () => [nrMode.value, technology.selectedOptions[0]?.textContent, label.value.trim()].filter(Boolean).join(' · ')),
       formats, head, grouping, node('strong', 'Filters'), filters, node('strong', 'CDRs'), datasets);
@@ -611,7 +658,7 @@
           datasets: byKind, nr_mode: nrMode.value, technology: technology.value,
           group: [...grouping.querySelectorAll('input:checked')].map((box) => box.value),
           ...Object.fromEntries(thresholds.map((item) => [item.key, Number(item.input.value)])),
-          ...Object.fromEntries(pickers.map(([key, picker]) => [key, picker.getValue()])),
+          ...filters.values(),
         },
       };
     };
@@ -640,13 +687,18 @@
       picker.dataset.rjMetrics = kind;
       return picker;
     }));
-    const filters = dataset.filters || {};
-    const filterPickers = NETWORK_FILTERS.map(([key, text]) => {
-      const picker = multiPicker(text, options.values[text] || [], filters[key] || [], key === 'cities' ? {preset: mainCitiesPreset()} : {});
-      picker.dataset.rjFilter = key;
-      return picker;
-    });
-    $('rj-da-filters').replaceChildren(...filterPickers);
+    const daFilters = scopedFilters(NETWORK_FILTERS, dataset.filters || {}, (key) => (key === 'cities' ? mainCitiesPreset() : null),
+      'rj-filters rj-filters-one-row');
+    daFilters.id = 'rj-da-filters';
+    $('rj-da-filters').replaceWith(daFilters);
+    // The filters list the values of the selected CDRs, or of every ready CDR.
+    const daCdrsInUse = () => $('rj-da-datasets').getValue().length ? $('rj-da-datasets').getValue() : options.datasets.map((item) => item.id);
+    daFilters.refresh(daCdrsInUse());
+    if (!$('rj-da-datasets').dataset.rjScoped) {
+      $('rj-da-datasets').dataset.rjScoped = '1';
+      $('rj-da-datasets').addEventListener('change', () => $('rj-da-filters').refresh(
+        $('rj-da-datasets').getValue().length ? $('rj-da-datasets').getValue() : options.datasets.map((item) => item.id)));
+    }
     // Jobs saved with a single Network Insights selection show it as one entry.
     const networkEntries = Array.isArray(network) ? network : (network.enabled ? [network] : []);
     $('rj-network').replaceChildren(...networkEntries.map(networkEntry));

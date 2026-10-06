@@ -398,3 +398,11 @@ def test_network_insights_grouping_keeps_operator_unless_vendor():
         {'network_insights': [{'enabled': True, 'formats': ['powerpoint'], 'selection': {'group': group}}]})['network_insights']
     assert entries(['campaign'])[0]['selection']['group'] == ['operator', 'campaign']
     assert entries(['vendor', 'campaign'])[0]['selection']['group'] == ['vendor', 'campaign']
+
+
+def test_reporting_options_list_filter_values_per_cdr(client):
+    login(client)
+    options = client.get('/api/reporting/options').json()
+    assert isinstance(options['values_by_dataset'], dict)
+    for values in options['values_by_dataset'].values():
+        assert set(values) == {'Operator', 'Operator_Vendor', 'Vendor', 'Region', 'Cluster', 'City', 'Campaign'}
