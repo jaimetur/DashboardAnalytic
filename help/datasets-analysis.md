@@ -105,9 +105,9 @@ Empty fixed, derived and Auto-calculated fields remain visible. Stronger header 
 
 ### Export the analysis
 
-**Summary PowerPoint** and **Summary Word** create one document with every KPI of each selected dataset, without filters: a dialog lists the ready CDR datasets, all selected by default. The same Summary CDR Analysis is available as a [Reporting](reporting.md) artifact.
+**Export PowerPoint** and **Export Word** open one dialog. With **Use the current filters, metrics and chart settings** (checked when an analysis is open) the document is the open CDR exactly as on screen: its metrics and filters, each chart's **Compare by** and **Compare CDF by**, and each CDF's **Visible X Range**. Unchecking it exports the CDRs selected in the dialog (the open CDR by default) with every KPI and no filters, the same summary available as a [Reporting](reporting.md) artifact.
 
-Word and PowerPoint exports reflect the current analysis request. Analysis filters do not overwrite stored dataset rows. For a complete template-driven report, use E2E Dashboards or the restricted Reporting (old) workflow.
+Analysis filters do not overwrite stored dataset rows. Analysis filters do not overwrite stored dataset rows. For a complete template-driven report, use E2E Dashboards or the restricted Reporting (old) workflow.
 
 ## Example investigation
 

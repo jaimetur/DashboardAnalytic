@@ -336,13 +336,14 @@ def _draw_line_chart(chart: dict[str, Any]) -> BytesIO:
             if not item.get("labels") or not item.get("series"):
                 continue
             x_limit = chart.get("x_view_max_default")
+            x_start = chart.get("x_view_min_default")
             raw_labels = [float(value) for value in item.get("labels", [])]
             raw_series = [float(value) for value in item.get("series", [])]
-            if x_limit is not None:
+            if x_limit is not None or x_start is not None:
                 filtered_pairs = [
                     (label, value)
                     for label, value in zip(raw_labels, raw_series, strict=False)
-                    if label <= float(x_limit)
+                    if (x_limit is None or label <= float(x_limit)) and (x_start is None or label >= float(x_start))
                 ]
                 if filtered_pairs:
                     raw_labels = [pair[0] for pair in filtered_pairs]
@@ -358,13 +359,14 @@ def _draw_line_chart(chart: dict[str, Any]) -> BytesIO:
             })
     else:
         x_limit = chart.get("x_view_max_default")
+        x_start = chart.get("x_view_min_default")
         raw_labels = [float(value) for value in chart.get("labels", [])]
         raw_series = [float(value) for value in chart.get("series", [])]
-        if x_limit is not None:
+        if x_limit is not None or x_start is not None:
             filtered_pairs = [
                 (label, value)
                 for label, value in zip(raw_labels, raw_series, strict=False)
-                if label <= float(x_limit)
+                if (x_limit is None or label <= float(x_limit)) and (x_start is None or label >= float(x_start))
             ]
             if filtered_pairs:
                 raw_labels = [pair[0] for pair in filtered_pairs]

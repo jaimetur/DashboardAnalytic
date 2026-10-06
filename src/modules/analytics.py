@@ -46,6 +46,9 @@ MAX_CDF_POINTS = 1024
 MAX_TOTAL_CDF_POINTS_PER_CHART = 1536
 MIN_CDF_POINTS_PER_SERIES = 192
 CDF_DEFAULT_Y_THRESHOLD = 0.95
+# The visible CDF range starts where the first curve reaches this share of its samples,
+# leaving out long, nearly empty lower tails.
+CDF_DEFAULT_Y_LOWER_THRESHOLD = 0.01
 METRIC_AXIS_TITLES = {
     'polqa_lq_avg': 'POLQA LQ Avg',
     'lq': 'LQ',
@@ -284,6 +287,11 @@ def _resolve_cdf_threshold_cutoff(value_arrays: list[np.ndarray], threshold: flo
     return threshold_crossings[-1]
 
 
+def _lower_cutoff(sorted_values: np.ndarray) -> float:
+    index = max(0, int(np.ceil(sorted_values.size * CDF_DEFAULT_Y_LOWER_THRESHOLD)) - 1)
+    return float(sorted_values[index])
+
+
 def _build_cdf_view_window(single_series_pairs: list[tuple[float, float]] | None = None, series_collection: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     if series_collection:
         maxima = sorted(
@@ -301,16 +309,25 @@ def _build_cdf_view_window(single_series_pairs: list[tuple[float, float]] | None
             raw_arrays = [item.get('_raw_values') for item in series_collection if isinstance(item.get('_raw_values'), np.ndarray)]
             threshold_max = _resolve_cdf_threshold_cutoff(raw_arrays)
         default_max = min(shared_max, threshold_max) if threshold_max is not None else shared_max
+        lower_values = [
+            _lower_cutoff(item['_raw_values']) for item in series_collection
+            if isinstance(item.get('_raw_values'), np.ndarray) and item['_raw_values'].size
+        ]
+        default_min = max(overall_min, min(lower_values)) if lower_values else overall_min
         return {
             'x_min': round(overall_min, 4),
             'x_max': round(overall_max, 4),
+            'x_view_min_default': round(min(default_min, default_max), 4),
             'x_view_max_default': round(default_max, 4),
             'x_view_max_recommended': round(default_max, 4) if len(maxima) >= 2 else None,
         }
     if single_series_pairs:
+        lower = next((float(x) for x, probability in single_series_pairs if float(probability) >= CDF_DEFAULT_Y_LOWER_THRESHOLD),
+                     float(single_series_pairs[0][0]))
         return {
             'x_min': round(float(single_series_pairs[0][0]), 4),
             'x_max': round(float(single_series_pairs[-1][0]), 4),
+            'x_view_min_default': round(lower, 4),
             'x_view_max_default': round(float(single_series_pairs[-1][0]), 4),
             'x_view_max_recommended': None,
         }
@@ -607,6 +624,10 @@ def _aggregate_table(df: pd.DataFrame, aggregation: str, metric: str, dataset_ki
                 row[label] = _series_mean(group, extra_column)
         rows.append(row)
 
+    if column_identity(aggregation) in {'vendor', 'operatorvendor', 'vendoronly'}:
+        # Vendor rows follow the order of the Vendor filters: vendors, mixed groups, operators without a vendor.
+        order = {value: index for index, value in enumerate(sort_vendor_values([row[aggregation] for row in rows]))}
+        return sorted(rows, key=lambda item: order[item[aggregation]])[:25]
     return sorted(rows, key=lambda item: (-item['samples'], -item['mean_metric']))[:25]
 
 
@@ -633,7 +654,11 @@ def _build_comparison_chart(
     if not aggregation:
         return {'labels': [], 'series': [], 'type': 'bar'}
     compact_rows = table_rows
-    if aggregation in {'operator', 'subscriber', 'vendor', 'vendor_only', 'operator_vendor'}:
+    if aggregation in {'vendor', 'vendor_only', 'operator_vendor'}:
+        # Bars by vendor follow the order of the Vendor filters, as the tables do.
+        order = {value: index for index, value in enumerate(sort_vendor_values([row.get(aggregation, '') for row in compact_rows]))}
+        compact_rows = sorted(compact_rows, key=lambda row: order.get(row.get(aggregation, ''), len(order)))
+    elif aggregation in {'operator', 'subscriber'}:
         compact_rows = sorted(
             compact_rows,
             key=lambda row: _chart_category_key(frame, aggregation, row.get(aggregation, '')),

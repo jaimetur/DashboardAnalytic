@@ -33,7 +33,7 @@ Filter and metric dropdowns open one at a time and close when clicking elsewhere
 
 Every artifact file is named `yyyymmdd_hhmmss - <Module> - <report name>` with the run timestamp, for example `20261006_093000 - Network Insights - NSA LTE.pptx`; artifacts with the same name get ` (2)`, ` (3)`… The ZIP of a run is named `yyyymmdd_hhmmss - Reporting - <job name>.zip`.
 
-The same summaries are available directly: **Summary PowerPoint** and **Summary Word** in [CDR Analysis](datasets-analysis.md) ask which datasets to include, and **Export PowerPoint** and **Export Word** in [Network Insights](network-insights.md) export the current selection.
+The same summaries are available directly: **Export PowerPoint** and **Export Word** in [CDR Analysis](datasets-analysis.md) ask which datasets to include (or export the open CDR as on screen), and **Export PowerPoint** and **Export Word** in [Network Insights](network-insights.md) export the current selection.
 
 ## Reporting Jobs
 

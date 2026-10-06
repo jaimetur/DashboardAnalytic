@@ -46,7 +46,8 @@
         <div class="dataset-export-actions inline-actions">
           <a class="ghost-link action-link-preview" href="/workspace/preview/{{ selected_dataset.id }}" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview">Preview Dataset</a>
           {% if analysis_loaded and analysis %}
-          <form method="post" action="/datasets-analysis/export/word" data-loading-label="Exporting Word report" data-download-form="1">
+          {# The analysis on screen: filters, metrics, per-metric comparisons and, added on submit, each CDF visible range. #}
+          <form method="post" action="/datasets-analysis/export/powerpoint" data-loading-label="Exporting PowerPoint report" data-download-form="1" data-current-export-form hidden>
             <input type="hidden" name="dataset_id" value="{{ selected_dataset.id }}">
             {% for metric_name in selected_metrics %}
             <input type="hidden" name="metric" value="{{ metric_name }}">
@@ -64,50 +65,30 @@
             <input type="hidden" name="extra_filters" value="{{ format_extra_filters(analysis.filters.extra_filters) }}">
             <input type="hidden" name="aggregation_overrides" value="{{ format_aggregation_overrides(aggregation_overrides) }}">
             <input type="hidden" name="cdf_overrides" value="{{ format_cdf_overrides(cdf_overrides) }}">
+            <input type="hidden" name="cdf_ranges" value="" data-current-export-ranges>
             {% for empty_filter in (analysis.filters.explicit_empty_filters or []) %}
             <input type="hidden" name="__empty_filter" value="{{ empty_filter }}">
             {% endfor %}
-            <button type="submit">Export Word</button>
-          </form>
-          <form method="post" action="/datasets-analysis/export/powerpoint" data-loading-label="Exporting PowerPoint report" data-download-form="1">
-            <input type="hidden" name="dataset_id" value="{{ selected_dataset.id }}">
-            {% for metric_name in selected_metrics %}
-            <input type="hidden" name="metric" value="{{ metric_name }}">
-            {% endfor %}
-            {% for value in (analysis.filters.market or []) %}
-            <input type="hidden" name="market" value="{{ value }}">
-            {% endfor %}
-            {% for value in (analysis.filters.period or []) %}
-            <input type="hidden" name="period" value="{{ value }}">
-            {% endfor %}
-            <input type="hidden" name="date_from" value="{{ analysis.filters.date_from or '' }}">
-            <input type="hidden" name="date_to" value="{{ analysis.filters.date_to or '' }}">
-            <input type="hidden" name="aggregation" value="{{ analysis.filters.aggregation or 'all' }}">
-            <input type="hidden" name="cdf_grouping" value="{{ selected_cdf_grouping or 'all' }}">
-            <input type="hidden" name="extra_filters" value="{{ format_extra_filters(analysis.filters.extra_filters) }}">
-            <input type="hidden" name="aggregation_overrides" value="{{ format_aggregation_overrides(aggregation_overrides) }}">
-            <input type="hidden" name="cdf_overrides" value="{{ format_cdf_overrides(cdf_overrides) }}">
-            {% for empty_filter in (analysis.filters.explicit_empty_filters or []) %}
-            <input type="hidden" name="__empty_filter" value="{{ empty_filter }}">
-            {% endfor %}
-            <button type="submit">Export PowerPoint</button>
           </form>
           {% endif %}
           {% if summary_datasets %}
-          <button type="button" data-dataset-summary-open="powerpoint" title="Summary of the selected datasets with every KPI">Summary PowerPoint</button>
-          <button type="button" data-dataset-summary-open="word" title="Summary of the selected datasets with every KPI">Summary Word</button>
+          <button type="button" data-dataset-summary-open="powerpoint" title="Export the open CDR as on screen, or several CDRs with every KPI">Export PowerPoint</button>
+          <button type="button" data-dataset-summary-open="word" title="Export the open CDR as on screen, or several CDRs with every KPI">Export Word</button>
           {% endif %}
         </div>
         {% if summary_datasets %}
         <dialog class="confirm-dialog dataset-summary-dialog" data-dataset-summary-dialog>
-          <form method="post" action="/datasets-analysis/summary/powerpoint" data-loading-label="Exporting Summary CDR Analysis" data-download-form="1" data-dataset-summary-form>
-            <p class="eyebrow">Summary CDR Analysis</p>
-            <h3 data-dataset-summary-title>Summary PowerPoint</h3>
-            <p class="form-note">Every KPI of each selected dataset, without filters. All datasets are selected by default.</p>
+          <form method="post" action="/datasets-analysis/summary/powerpoint" data-loading-label="Exporting CDR Analysis" data-download-form="1" data-dataset-summary-form>
+            <p class="eyebrow">CDR Analysis</p>
+            <h3 data-dataset-summary-title>Export PowerPoint</h3>
+            {% if analysis_loaded and analysis %}
+            <label class="confirm-option dataset-export-current"><input type="checkbox" data-export-current checked><span><strong>Use the current filters, metrics and chart settings</strong> <small>(the open CDR as on screen, with each chart's Compare by, Compare CDF by and Visible X Range)</small></span></label>
+            {% endif %}
+            <p class="form-note" data-export-summary-note>Every KPI of each selected CDR, without filters.</p>
             <button type="button" class="ghost-link" data-dataset-summary-toggle>Select All / None</button>
             <div class="dataset-summary-options">
               {% for dataset in summary_datasets %}
-              <label class="confirm-option"><input type="checkbox" name="dataset_ids" value="{{ dataset.id }}" checked><span>{{ dataset.file_name }} <small>({{ dataset.input_kind_label or dataset.dataset_kind }})</small></span></label>
+              <label class="confirm-option"><input type="checkbox" name="dataset_ids" value="{{ dataset.id }}" {% if selected_dataset and dataset.id == selected_dataset.id %}checked{% endif %}><span>{{ dataset.file_name }} <small>({{ dataset.input_kind_label or dataset.dataset_kind }})</small></span></label>
               {% endfor %}
             </div>
             <div class="confirm-actions">
@@ -122,12 +103,42 @@
           if (!dialog) return;
           const form = dialog.querySelector('[data-dataset-summary-form]');
           const boxes = () => [...form.querySelectorAll('input[name="dataset_ids"]')];
+          // One export: the open CDR as on screen, or the selected CDRs with every KPI and no filters.
+          const current = dialog.querySelector('[data-export-current]');
+          const currentForm = document.querySelector('[data-current-export-form]');
+          const note = dialog.querySelector('[data-export-summary-note]');
+          const toggle = dialog.querySelector('[data-dataset-summary-toggle]');
+          let exportKind = 'powerpoint';
+          const syncMode = () => {
+            const useCurrent = Boolean(current?.checked);
+            boxes().forEach((box) => { box.disabled = useCurrent; });
+            toggle.disabled = useCurrent;
+            note.hidden = useCurrent;
+          };
+          current?.addEventListener('change', syncMode);
           document.querySelectorAll('[data-dataset-summary-open]').forEach((button) => button.addEventListener('click', () => {
-            const kind = button.dataset.datasetSummaryOpen;
-            form.action = `/datasets-analysis/summary/${kind}`;
-            dialog.querySelector('[data-dataset-summary-title]').textContent = kind === 'word' ? 'Summary Word' : 'Summary PowerPoint';
+            exportKind = button.dataset.datasetSummaryOpen;
+            form.action = `/datasets-analysis/summary/${exportKind}`;
+            dialog.querySelector('[data-dataset-summary-title]').textContent = exportKind === 'word' ? 'Export Word' : 'Export PowerPoint';
+            syncMode();
             dialog.showModal();
           }));
+          form.addEventListener('submit', (event) => {
+            if (!current?.checked || !currentForm) return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            // Each CDF chart's visible range, as adjusted in the page.
+            const ranges = {};
+            document.querySelectorAll('.chart-card[data-chart-kind="cdf"][data-metric]').forEach((card) => {
+              const low = Number(card.dataset.cdfXMin); const high = Number(card.dataset.cdfXMax);
+              if (Number.isFinite(low) && Number.isFinite(high) && card.dataset.cdfXMax) ranges[card.dataset.metric] = [low, high];
+            });
+            currentForm.querySelector('[data-current-export-ranges]').value = JSON.stringify(ranges);
+            currentForm.action = `/datasets-analysis/export/${exportKind}`;
+            currentForm.dataset.loadingLabel = exportKind === 'word' ? 'Exporting Word report' : 'Exporting PowerPoint report';
+            dialog.close();
+            currentForm.requestSubmit();
+          }, true);
           dialog.querySelector('[data-dataset-summary-toggle]').addEventListener('click', () => {
             const select = !boxes().every((box) => box.checked);
             boxes().forEach((box) => { box.checked = select; });
@@ -294,7 +305,7 @@
                     </select>
                   </label>
                 </div>
-                <div class="chart-card chart-card-cdf" data-chart='{{ current_analysis.cdf_chart | tojson }}' data-chart-kind="cdf">
+                <div class="chart-card chart-card-cdf" data-chart='{{ current_analysis.cdf_chart | tojson }}' data-chart-kind="cdf" data-metric="{{ current_analysis.selected_metric }}">
                   <svg class="chart-svg" viewBox="0 0 600 280" preserveAspectRatio="none"></svg>
                   <div class="cdf-range-control" data-cdf-range-control hidden>
                     <div class="cdf-range-head">

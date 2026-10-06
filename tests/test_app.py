@@ -10024,3 +10024,21 @@ def test_datasets_analysis_filters_are_shared_and_cdf_compares_operators(client)
     assert reset.status_code == 303 and reset.headers['location'] == '/datasets-analysis?dataset_id=1&load=1'
     opened = client.get("/datasets-analysis?dataset_id=1", follow_redirects=False)
     assert opened.headers['location'] == '/datasets-analysis?dataset_id=1&load=1'
+
+
+def test_cdr_analysis_export_keeps_each_cdf_visible_range(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    assert app_module.parse_cdf_ranges('{"LQ": [1.5, 4.2], "bad": [3, 1], "x": "y"}') == {'LQ': (1.5, 4.2)}
+    result = app_module.with_cdf_range({'cdf_chart': {'x_view_max_default': 5}}, (1.5, 4.2))
+    assert result['cdf_chart'] == {'x_view_max_default': 4.2, 'x_view_min_default': 1.5}
+    login(client)
+    csv_content = b"market,period,operator,score\nES,2026-Q1,EE,91\nES,2026-Q1,O2,87\nES,2026-Q1,EE,85\n"
+    client.post("/datasets-analysis/upload", data={"dataset_kinds": "data"},
+                files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")}, follow_redirects=False)
+    page = client.get("/datasets-analysis?dataset_id=1&metric=score&load=1").text
+    assert page.count('data-dataset-summary-open=') == 2 and 'Summary PowerPoint' not in page
+    assert 'data-current-export-form' in page and 'name="cdf_ranges"' in page and 'data-metric="score"' in page
+    response = client.post("/datasets-analysis/export/powerpoint", data={
+        "dataset_id": "1", "metric": "score", "cdf_ranges": '{"score": [85, 90]}'})
+    assert response.status_code == 200

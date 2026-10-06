@@ -1196,7 +1196,7 @@ function setupChartInteractions(container) {
     ['cdfXMin', 'cdfXMax', 'cdfYMin', 'cdfYMax'].forEach((key) => { delete container.dataset[key]; });
     if (container.syncCdfRange) {
       const payload = JSON.parse(container.dataset.chart || '{}');
-      container.syncCdfRange(Number(payload.x_min), Number(payload.x_view_max_default ?? payload.x_max));
+      container.syncCdfRange(Number(payload.x_view_min_default ?? payload.x_min), Number(payload.x_view_max_default ?? payload.x_max));
     }
     apply(1);
   });
@@ -1324,7 +1324,8 @@ function setupCdfRangeControls() {
       input.min = String(xMin); input.max = String(xMax); input.step = String(step);
     });
     slider.value = String(Number.isFinite(defaultXMax) ? defaultXMax : xMax);
-    if (minSlider) minSlider.value = String(xMin);
+    const defaultXMin = Number(payload.x_view_min_default);
+    if (minSlider) minSlider.value = String(Number.isFinite(defaultXMin) ? defaultXMin : xMin);
 
     const updateRangeUi = (event) => {
       let low = minSlider ? Number(minSlider.value) : xMin;

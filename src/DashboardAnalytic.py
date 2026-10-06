@@ -9591,6 +9591,30 @@ def datasets_analysis_saved_selection() -> dict[str, Any]:
     return {'dataset_id': saved.get('dataset_id'), 'queries': {str(key): str(value) for key, value in queries.items()}}
 
 
+def parse_cdf_ranges(raw: str) -> dict[str, tuple[float, float]]:
+    """The Visible X Range of each metric's CDF chart, as shown when the export was requested."""
+    try:
+        payload = json.loads(raw or '{}')
+    except (TypeError, ValueError):
+        return {}
+    ranges = {}
+    for metric, bounds in (payload.items() if isinstance(payload, dict) else []):
+        try:
+            low, high = float(bounds[0]), float(bounds[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if math.isfinite(low) and math.isfinite(high) and low < high:
+            ranges[str(metric)] = (low, high)
+    return ranges
+
+
+def with_cdf_range(result: dict[str, Any], bounds: tuple[float, float] | None) -> dict[str, Any]:
+    """An exported analysis whose CDF keeps the visible range chosen in the page."""
+    if bounds and isinstance(result.get('cdf_chart'), dict):
+        result['cdf_chart'] = {**result['cdf_chart'], 'x_view_min_default': bounds[0], 'x_view_max_default': bounds[1]}
+    return result
+
+
 def default_cdf_grouping(dataset: dict[str, Any] | None) -> str:
     """CDFs compare operators by default when the dataset has several."""
     return 'operator' if 'operator' in ((dataset or {}).get('available_cdf_groupings') or []) else 'all'
@@ -16605,6 +16629,7 @@ def export_report(
     extra_filters: str = Form(''),
     aggregation_overrides: str = Form(''),
     cdf_overrides: str = Form(''),
+    cdf_ranges: str = Form(''),
     empty_filters: list[str] | None = Form(default=None, alias='__empty_filter'),
     user: SessionUser = Depends(current_user),
 ) -> FileResponse:
@@ -16661,17 +16686,19 @@ def export_report(
 
     file_stem = Path(selected_dataset['stored_path']).stem
     filters_text = _summarize_export_filters(analysis.filters)
+    visible_ranges = parse_cdf_ranges(cdf_ranges)
     report_payload = {
         'dataset_name': selected_dataset['file_name'],
         'dataset_type': selected_dataset.get('input_kind_label') or 'Other',
         'filters_text': filters_text,
         'selected_metrics': selected_metrics,
-        'analyses': [{'metric': item['metric'], 'result': asdict(item['result'])} for item in analyses],
+        'analyses': [{'metric': item['metric'], 'result': with_cdf_range(asdict(item['result']), visible_ranges.get(item['metric']))}
+                     for item in analyses],
     }
 
     if export_kind == 'word':
         destination = safe_join(settings.export_dir, f'{file_stem}_report.docx')
-        export_word_report(destination, asdict(analysis))
+        export_word_report(destination, with_cdf_range(asdict(analysis), visible_ranges.get(analysis.selected_metric)))
         media_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     else:
         report_hash = hashlib.sha1(
