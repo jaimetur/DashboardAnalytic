@@ -283,6 +283,23 @@
     </div>
     <div class="form-actions"><button type="submit" form="features-activation-form">Save Features Activation</button></div>
   </details>
+
+  {% if user.role == 'super-admin' %}
+  <details id="interface-settings" class="panel collapsible-panel" open data-panel-state-key="admin:interface-settings">
+    <summary class="collapsible-summary">
+      <div>
+        <p class="eyebrow">Interface</p>
+        <h2>Interface Settings</h2>
+        <p class="summary-description">Application-wide display options for every user. Only super-admins can change them.</p>
+      </div>
+      <span class="collapse-chip">Collapse</span>
+    </summary>
+    <form class="interface-settings-form" action="/admin/interface-settings" method="post" autocomplete="off">
+      <label class="confirm-option"><input type="checkbox" name="show_module_stage_labels" value="true" {% if show_module_stage_labels %}checked{% endif %}><span>Show the stage label of each module on its tab (<strong>ALPHA</strong>, <strong>BETA</strong>, <strong>NEW</strong> or <strong>STABLE</strong>)</span></label>
+      <div class="form-actions"><button type="submit">Save Interface Settings</button></div>
+    </form>
+  </details>
+  {% endif %}
   {% endif %}
   {% endif %}
   {% if embedded_template_editor %}

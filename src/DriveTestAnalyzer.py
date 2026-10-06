@@ -182,6 +182,8 @@ DEFAULT_SLIDES_TEMPLATES_DIR = settings.slides_templates_dir
 application_config_dir = settings.database_path.parent
 application_data_dir = settings.data_dir
 RUNTIME_CONFIGURATION_STATE_KEY = 'runtime_configuration_v1'
+# Whether module tabs show their ALPHA, BETA, NEW or STABLE label; only super-admins change it.
+MODULE_STAGE_LABELS_STATE_KEY = 'module_stage_labels_visible_v1'
 DATASET_MANAGEMENT_JOB_STATE_KEY = 'admin_dataset_management_job_v1'
 DATASET_MANAGEMENT_STOP_STATE_KEY = 'admin_dataset_management_stop_v1'
 
@@ -5196,6 +5198,7 @@ def render_template(request: Request, template_name: str, context: dict[str, Any
         'header_workspace_sizes': {item.id: format_workspace_size(workspace_disk_usage(item)) for item in header_workspaces},
         'ignore_event_time_filtering': ignore_event_time_filtering(),
         'features': user_features(template_user) if isinstance(template_user, SessionUser) else {},
+        'show_module_stage_labels': module_stage_labels_visible(),
         'cdr_type_options': cdr_type_options(),
         'vendor_filter_identities': {
             'operators': {str(value): str(group['canonical'])
@@ -19545,6 +19548,26 @@ def parse_feature_principals(values: list[str]) -> dict[str, list[str]]:
         if key and identifier:
             principals[key].append(identifier)
     return principals
+
+
+def module_stage_labels_visible() -> bool:
+    """Module tabs show their stage label unless a super-admin turned the labels off."""
+    try:
+        return repository.get_application_state(MODULE_STAGE_LABELS_STATE_KEY) != '0'
+    except sqlite3.Error:
+        return True
+
+
+@app.post('/admin/interface-settings')
+def save_interface_settings(
+    show_module_stage_labels: bool = Form(False),
+    user: SessionUser = Depends(super_admin_user),
+) -> Response:
+    repository.set_application_state(MODULE_STAGE_LABELS_STATE_KEY, '1' if show_module_stage_labels else '0')
+    repository.try_add_log(user.username, 'save_interface_settings', json.dumps({
+        'show_module_stage_labels': show_module_stage_labels,
+    }))
+    return RedirectResponse('/admin#interface-settings', status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post('/admin/features', response_class=HTMLResponse)

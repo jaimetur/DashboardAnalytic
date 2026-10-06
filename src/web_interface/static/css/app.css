@@ -151,12 +151,25 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 /* New modules show a small NEW label on their tab: red while in development, blue while being validated and green once consolidated. */
 /* A corner sticker: it overlaps the tab's top edge and takes no space from the label. */
 .module-tabs-primary .module-tab { position: relative; }
-.module-tab-new { position: absolute; z-index: 2; top: -.42rem; right: .45rem; width: 1.75rem; height: .82rem; pointer-events: none; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .25)); }
+.module-tab-new { position: absolute; z-index: 2; top: -.56rem; right: .45rem; width: 2.27rem; height: 1.06rem; pointer-events: none; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .25)); }
 .module-tab-new rect { stroke: #fff; stroke-width: 1.2; }
 .module-tab-new text { fill: #fff; font: 800 8.4px "Segoe UI", system-ui, sans-serif; letter-spacing: .04em; }
-.module-tab-new-red rect { fill: #d7263d; }
-.module-tab-new-green rect { fill: #1f8a4c; }
-.module-tab-new-blue rect { fill: #2563eb; }
+/* Module stages: ALPHA in development, BETA being validated, NEW consolidated, STABLE established. */
+.module-tab-new-alpha rect { fill: #d7263d; }
+.module-tab-new-beta rect { fill: #ffd60a; stroke: #fff; }
+.module-tab-new-beta text { fill: #3d2a00; }
+.module-tab-new-new rect { fill: #2563eb; }
+.module-tab-new-stable rect { fill: #1f8a4c; }
+/* Wider labels keep the badge height. */
+.module-tab-new-alpha { width: 3.18rem; }
+.module-tab-new-beta { width: 2.73rem; }
+.module-tab-new-stable { width: 3.48rem; }
+/* NEW leads with a star that marks a new feature. */
+.module-tab-new-new { width: 3.03rem; }
+.module-tab-new .module-tab-new-star { fill: #ffd60a; stroke: none; }
+/* Interface Settings: room between the option and its save button. */
+.interface-settings-form { display: grid; gap: 1rem; }
+.interface-settings-form .form-actions { margin: 0; }
 .module-tab-report-jobs.active { background: linear-gradient(135deg, #1f5f3a, #4fb37a); border-color: rgba(31, 95, 58, 0.7); color: #fff; box-shadow: 0 10px 24px rgba(46, 140, 88, 0.32); }
 .module-tab-network-insights.active { background: linear-gradient(135deg, #1e1b4b, #4f46e5); border-color: rgba(49, 46, 129, 0.7); color: #fff; box-shadow: 0 10px 24px rgba(79, 70, 229, 0.32); }
 .module-tab-scoring.active { background: linear-gradient(128deg, #143653 0%, #176e77 58%, #40a88a 100%); border-color: rgba(20, 54, 83, 0.72); color: #fff; box-shadow: 0 10px 24px rgba(23, 110, 119, 0.32); }
@@ -3944,3 +3957,31 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
 /* Icon-only Preview buttons keep their hidden label out of the layout so the icon stays centred. */
 .queue-actions .action-link-preview, .admin-dataset-actions .action-link-preview { gap: 0; }
 .button-icon { width: 1.05rem; height: 1.05rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: 0 0 auto; }
+
+/* Module tabs: unselected tabs are light and neutral, with their module colour
+   on the icon and a thin top line; hovering tints them with that colour. The
+   selected tab keeps its module gradient. */
+.module-tab-workspace { --tab-accent: #08736d; }
+.module-tab-datasets-analysis { --tab-accent: #1f6fbf; }
+.module-tab-network-insights { --tab-accent: #4f46e5; }
+.module-tab-e2e-dashboards { --tab-accent: #7751b9; }
+.module-tab-scoring { --tab-accent: #176e77; }
+.module-tab-non-qualified-calls { --tab-accent: #b0234f; }
+.module-tab-report-jobs { --tab-accent: #2e8c58; }
+.module-tab-reporting { --tab-accent: #7650b5; }
+.module-tab-chart-builder { --tab-accent: #b85b20; }
+.module-tabs-primary .module-tab:not(.active) {
+  background: linear-gradient(180deg, #ffffff, #f2f5f8);
+  border-color: #d8e0e7;
+  color: #334552;
+  box-shadow: inset 0 3px 0 var(--tab-accent, #8a99a6), 0 6px 14px rgba(18, 32, 43, 0.06);
+  transition: background-color .15s ease, color .15s ease, transform .15s ease, box-shadow .15s ease;
+}
+.module-tabs-primary .module-tab:not(.active) .module-tab-icon { stroke: var(--tab-accent, currentColor); }
+.module-tabs-primary .module-tab:not(.active):not(.module-tab-disabled):hover {
+  background: color-mix(in srgb, var(--tab-accent, #8a99a6) 10%, #ffffff);
+  border-color: color-mix(in srgb, var(--tab-accent, #8a99a6) 38%, #d8e0e7);
+  color: var(--tab-accent, #334552);
+  transform: translateY(-1px);
+  box-shadow: inset 0 3px 0 var(--tab-accent, #8a99a6), 0 10px 20px color-mix(in srgb, var(--tab-accent, #8a99a6) 18%, transparent);
+}

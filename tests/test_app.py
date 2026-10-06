@@ -8549,7 +8549,7 @@ def test_top_navigation_shows_document_links(client) -> None:
     assert '>Chart Builder</a>' in response.text
     assert '>Query Builder</a>' in response.text
     assert 'data-module-builders-trigger><svg class="module-tab-icon"' in response.text
-    assert '<span>Builders</span> <span aria-hidden="true">▾</span><svg class="module-tab-new module-tab-new-blue"' in response.text
+    assert '<span>Builders</span> <span aria-hidden="true">▾</span><svg class="module-tab-new module-tab-new-beta"' in response.text
     assert 'popovertarget="module-builders-options"' in response.text
     assert 'data-module-builders-options' in response.text
     assert '<span>Admin</span></a>' in response.text
@@ -10239,3 +10239,23 @@ def test_cdr_analysis_export_keeps_each_cdf_visible_range(client) -> None:
     assert response.status_code == 200
     stored = list((app_module.settings.output_dir / 'reports' / 'cdr-analysis').glob('*_report_*.pptx'))
     assert len(stored) == 1 and not list(app_module.settings.export_dir.glob('*_report_*.pptx'))
+
+
+def test_module_stage_labels_can_be_hidden_only_by_super_admins(client) -> None:
+    login(client)
+    admin_page = client.get('/admin').text
+    assert 'id="interface-settings"' not in admin_page
+    assert client.post('/admin/interface-settings', data={}, follow_redirects=False).status_code == 403
+    assert 'class="module-tab-new module-tab-new-stable"' in client.get('/workspace').text
+
+    client.post('/logout', follow_redirects=False)
+    login_super(client)
+    assert 'name="show_module_stage_labels" value="true" checked' in client.get('/admin').text
+    hidden = client.post('/admin/interface-settings', data={}, follow_redirects=False)
+    assert hidden.status_code == 303
+    page = client.get('/workspace').text
+    assert 'module-tab-new' not in page
+    assert 'name="show_module_stage_labels" value="true" >' in client.get('/admin').text
+
+    client.post('/admin/interface-settings', data={'show_module_stage_labels': 'true'}, follow_redirects=False)
+    assert 'class="module-tab-new module-tab-new-stable"' in client.get('/workspace').text
