@@ -7798,9 +7798,53 @@ document.querySelectorAll('form[data-confirm]').forEach(bindConfirmForm);
 
 function isChartMappingForm(form) {
   try {
-    return /^\/admin\/(?:operator|vendor)-mappings\/(?:save|delete|move)$/.test(new URL(form.action, window.location.href).pathname);
+    return /^\/(?:admin|workspace-config)\/(?:operator|vendor)-mappings\/(?:save|delete|move)$/.test(new URL(form.action, window.location.href).pathname);
   } catch (_error) {
     return false;
+  }
+}
+
+// Unsaved edits of the other rows (and of the new-group form) survive the refresh
+// of a mapping table after one row is saved, moved or deleted.
+function unsavedChartMappingEdits(body, submittedForm = null) {
+  const edits = {rows: {}, create: null};
+  body.querySelectorAll('input[name="original_canonical"]').forEach((original) => {
+    const row = original.closest('tr');
+    const formId = original.getAttribute('form');
+    if (!row || (submittedForm?.id && formId === submittedForm.id)) return;
+    const fields = {};
+    row.querySelectorAll(`[form="${CSS.escape(formId || '')}"]:is([name="color"], [name="canonical_value"], [name="aliases"])`).forEach((field) => {
+      if (field.value !== field.defaultValue) fields[field.name] = field.value;
+    });
+    if (Object.keys(fields).length) edits.rows[original.value] = fields;
+  });
+  const createForm = body.querySelector('form[class$="-mapping-create"]');
+  if (createForm && createForm !== submittedForm) {
+    const fields = {};
+    createForm.querySelectorAll('[name="color"], [name="canonical_value"], [name="aliases"]').forEach((field) => {
+      if (field.value !== field.defaultValue) fields[field.name] = field.value;
+    });
+    if (Object.keys(fields).length) edits.create = fields;
+  }
+  return edits;
+}
+
+function restoreChartMappingEdits(body, edits) {
+  body.querySelectorAll('input[name="original_canonical"]').forEach((original) => {
+    const fields = edits.rows[original.value];
+    const formId = original.getAttribute('form');
+    if (!fields || !formId) return;
+    Object.entries(fields).forEach(([name, value]) => {
+      const field = body.querySelector(`[form="${CSS.escape(formId)}"][name="${name}"]`);
+      if (field) field.value = value;
+    });
+  });
+  const createForm = body.querySelector('form[class$="-mapping-create"]');
+  if (createForm && edits.create) {
+    Object.entries(edits.create).forEach(([name, value]) => {
+      const field = createForm.querySelector(`[name="${name}"]`);
+      if (field) field.value = value;
+    });
   }
 }
 
@@ -7827,7 +7871,11 @@ async function submitChartMappingForm(form) {
     if (!(currentBody instanceof HTMLElement) || !(freshBody instanceof HTMLElement)) {
       throw new Error('The updated mapping table could not be loaded.');
     }
+    // A rejected save keeps what was typed in its own row as well.
+    const rejected = Boolean(freshBody.querySelector('.alert-error'));
+    const unsavedEdits = unsavedChartMappingEdits(currentBody, rejected ? null : form);
     currentBody.replaceWith(freshBody);
+    restoreChartMappingEdits(freshBody, unsavedEdits);
     bindChartMappingForms(freshBody);
     freshBody.querySelectorAll('form[data-confirm]').forEach(bindConfirmForm);
     window.requestAnimationFrame(() => window.scrollTo({

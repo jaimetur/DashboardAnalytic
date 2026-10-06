@@ -6297,6 +6297,13 @@ def test_admin_vendor_mappings_support_aliases_colours_and_reordering(client) ->
     assert 'async function submitChartMappingForm(form)' in script
     assert 'currentBody.replaceWith(freshBody);' in script
     assert 'top: scrollTop, left: scrollLeft, behavior: \'auto\'' in script
+    # The in-place submit must recognise the routes the mapping forms actually post to,
+    # or every save reloads the page and drops the unsaved edits of the other rows.
+    route_pattern = re.search(r'function isChartMappingForm\(form\) \{.*?return /(.+?)/\.test', script, re.S).group(1)
+    form_actions = set(re.findall(r'action="(/workspace-config/(?:operator|vendor)-mappings/[a-z]+)"', page.text))
+    assert {action.rsplit('/', 1)[1] for action in form_actions} == {'save', 'move', 'delete'}
+    assert all(re.fullmatch(route_pattern.replace('\\/', '/'), action) for action in form_actions)
+    assert 'restoreChartMappingEdits(freshBody, unsavedEdits);' in script
 
 
 def test_canonical_mapping_renames_update_all_templates_and_dashboards_exactly(client) -> None:
