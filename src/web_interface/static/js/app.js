@@ -1138,6 +1138,10 @@ const chartTooltip = (() => {
     hide() { if (node) node.hidden = true; },
   };
 })();
+// The tooltip never outlives the pointer over its chart: leaving the chart, scrolling or switching window hides it.
+document.addEventListener('pointermove', (event) => { if (!event.target.closest?.('.chart-svg')) chartTooltip.hide(); }, {passive: true});
+window.addEventListener('scroll', () => chartTooltip.hide(), {passive: true, capture: true});
+window.addEventListener('blur', () => chartTooltip.hide());
 
 function cdfProbabilityAt(labels, series, x) {
   let low = 0; let high = labels.length - 1; let found = -1;
@@ -1172,7 +1176,10 @@ function setupChartInteractions(container) {
     const rows = geometry.series.map((item) => `<span><i style="background:${item.color}"></i>${escapeChartText(item.name)}: <strong>${(cdfProbabilityAt(item.labels, item.series, x) * 100).toFixed(1)}%</strong></span>`);
     chartTooltip.show(event, `<strong>${escapeChartText(formatAxisValue(x))}</strong>${rows.join('')}`);
   });
-  svg.addEventListener('mouseleave', () => { chartTooltip.hide(); svg.querySelector('.chart-hover-guide')?.setAttribute('visibility', 'hidden'); });
+  const hideHover = () => { chartTooltip.hide(); svg.querySelector('.chart-hover-guide')?.setAttribute('visibility', 'hidden'); };
+  svg.addEventListener('mouseleave', hideHover);
+  svg.addEventListener('pointerleave', hideHover);
+  container.addEventListener('pointerleave', hideHover);
   // Zoom controls as in E2E Dashboards: −, level, + and reset; the chart scrolls horizontally when zoomed.
   const viewport = document.createElement('div');
   viewport.className = 'chart-zoom-viewport';

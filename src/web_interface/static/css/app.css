@@ -3840,3 +3840,4 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
 .chart-tooltip i { display: inline-block; width: .6rem; height: .6rem; border-radius: 50%; }
 .chart-svg .chart-zoom-box { fill: rgba(36, 90, 150, .12); stroke: #245a96; stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
 .chart-zoom-viewport .chart-svg { cursor: crosshair; }
+.chart-card .chart-zoom-viewport, .chart-card .cdf-range-control { -webkit-user-select: none; user-select: none; }
