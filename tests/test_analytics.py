@@ -286,10 +286,11 @@ def test_build_analysis_returns_voice_specific_kpis_and_aggregation() -> None:
     assert analysis.metric_kpis["p10_metric"] == 3.28
     assert analysis.metric_kpis["p90_metric"] == 4.4
     assert analysis.filters["aggregation"] == "operator"
-    assert analysis.table_rows[0]["operator"] == "Vodafone"
+    # Without operator maps, operators are listed alphabetically in tables, percentiles and bars alike.
+    assert [row["operator"] for row in analysis.table_rows] == ["o2 - de", "Vodafone"]
     assert analysis.comparison_chart["y_axis_label"] == "Mean metric"
     assert len(analysis.scorecard_groups) == 2
-    assert analysis.scorecard_groups[0]["group"] == "Vodafone"
+    assert analysis.scorecard_groups[1]["group"] == "Vodafone"
     assert [item["label"] for item in analysis.scorecard_groups[0]["items"]] == ["P10", "P25", "P50", "P75", "P90"]
 
 

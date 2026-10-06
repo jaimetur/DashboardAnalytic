@@ -3837,6 +3837,8 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
 .chart-zoom-viewport { overflow-x: auto; overflow-y: hidden; }
 .chart-tooltip { position: fixed; z-index: 6000; display: grid; gap: .2rem; max-width: 22rem; padding: .45rem .6rem; border: 1px solid rgba(16, 49, 74, .2); border-radius: 9px; background: rgba(255, 255, 255, .97); color: #10314a; font-size: .78rem; box-shadow: 0 10px 26px rgba(16, 49, 74, .22); pointer-events: none; }
 .chart-tooltip span { display: flex; align-items: center; gap: .35rem; }
+/* display: grid above would otherwise override the hidden attribute and keep the tooltip on screen. */
+.chart-tooltip[hidden] { display: none !important; }
 .chart-tooltip i { display: inline-block; width: .6rem; height: .6rem; border-radius: 50%; }
 .chart-svg .chart-zoom-box { fill: rgba(36, 90, 150, .12); stroke: #245a96; stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
 .chart-zoom-viewport .chart-svg { cursor: crosshair; }

@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.modules.column_names import column_identity, resolve_column_name, sort_vendor_values
+from src.modules.column_names import column_identity, resolve_column_name, vendor_filter_rank
 from src.modules.runtime_config import ignore_event_time_filtering
 
 from src.modules.ingestion import DatasetSummary, infer_dataset_kind
@@ -200,9 +200,9 @@ def compute_grouped_scorecards(df: pd.DataFrame, metric: str, aggregation: str |
             continue
         seen.add(normalized)
         ordered_groups.append(group_name)
-    if column_identity(aggregation) in {'vendor', 'operatorvendor', 'vendoronly'}:
-        # Vendor groups follow the order of the Vendor filters: vendors, mixed groups, operators without a vendor.
-        ordered_groups = sort_vendor_values(ordered_groups)
+    if aggregation in ORDERED_DIMENSIONS:
+        # Operators and vendors follow the order of their Workspace Config maps, as the charts and tables do.
+        ordered_groups.sort(key=lambda value: _category_order_key(df, aggregation, value))
 
     grouped_scorecards: list[dict[str, Any]] = []
     # Normalise the group column once instead of once per group.
@@ -407,6 +407,31 @@ def _chart_category_key(df: pd.DataFrame, dimension: str, value: object) -> tupl
     return (int(group.get('position', 0)) if group else len(configured), str(value).casefold())
 
 
+ORDERED_DIMENSIONS = {'operator', 'subscriber', 'vendor', 'vendor_only', 'operator_vendor'}
+
+
+def _category_order_key(df: pd.DataFrame, dimension: str, value: object) -> tuple:
+    """Operators and vendors in the order of the Operator Maps and Vendor Maps tables of Workspace Config;
+    unmapped values follow, vendors before mixed groups and operators without a vendor, alphabetically."""
+    def single(role: str, text: object) -> tuple:
+        group = _chart_mapping_group(df, role, text)
+        if group:
+            return 0, int(group.get('position', 0)), 0, str(text).casefold()
+        return 1, 0, vendor_filter_rank(text) if role == 'vendor' else 0, str(text).casefold()
+
+    normalized = column_identity(dimension)
+    if normalized in {'operator', 'subscriber'}:
+        return single('operator', value)
+    if normalized == 'operatorvendor':
+        # <Operator>_<Vendor>: operators in their map order, then vendors in theirs.
+        text = str(value or '').strip()
+        if vendor_filter_rank(text) == 2:
+            return (*single('operator', text.rsplit(' - ', 1)[0]), 2)
+        operator_text = text.rsplit('_', 1)[0] if '_' in text else text
+        return (*single('operator', operator_text), *single('vendor', text))
+    return single('vendor', value)
+
+
 def _chart_category_color(df: pd.DataFrame, dimension: str, value: object) -> str | None:
     group = _chart_mapping_group(df, dimension, value)
     return str(group.get('color')) if group and group.get('color') else None
@@ -558,7 +583,7 @@ def _build_cdf_chart(df: pd.DataFrame, metric: str, filters: dict[str, Any], cdf
     else:
         ordered_keys = list(grouped_values.keys())
         if grouping_column in {'operator', 'subscriber', 'vendor', 'vendor_only', 'operator_vendor'}:
-            ordered_keys.sort(key=lambda key: _chart_category_key(df, grouping_column, grouped_values[key]['name']))
+            ordered_keys.sort(key=lambda key: _category_order_key(df, grouping_column, grouped_values[key]['name']))
 
     point_budget = _resolve_cdf_point_budget(len(ordered_keys[:8]))
     series_collection: list[dict[str, Any]] = []
@@ -624,10 +649,9 @@ def _aggregate_table(df: pd.DataFrame, aggregation: str, metric: str, dataset_ki
                 row[label] = _series_mean(group, extra_column)
         rows.append(row)
 
-    if column_identity(aggregation) in {'vendor', 'operatorvendor', 'vendoronly'}:
-        # Vendor rows follow the order of the Vendor filters: vendors, mixed groups, operators without a vendor.
-        order = {value: index for index, value in enumerate(sort_vendor_values([row[aggregation] for row in rows]))}
-        return sorted(rows, key=lambda item: order[item[aggregation]])[:25]
+    if aggregation in ORDERED_DIMENSIONS:
+        # Operators and vendors follow the order of their Workspace Config maps, as the charts do.
+        return sorted(rows, key=lambda item: _category_order_key(df, aggregation, item[aggregation]))[:25]
     return sorted(rows, key=lambda item: (-item['samples'], -item['mean_metric']))[:25]
 
 
@@ -654,15 +678,8 @@ def _build_comparison_chart(
     if not aggregation:
         return {'labels': [], 'series': [], 'type': 'bar'}
     compact_rows = table_rows
-    if aggregation in {'vendor', 'vendor_only', 'operator_vendor'}:
-        # Bars by vendor follow the order of the Vendor filters, as the tables do.
-        order = {value: index for index, value in enumerate(sort_vendor_values([row.get(aggregation, '') for row in compact_rows]))}
-        compact_rows = sorted(compact_rows, key=lambda row: order.get(row.get(aggregation, ''), len(order)))
-    elif aggregation in {'operator', 'subscriber'}:
-        compact_rows = sorted(
-            compact_rows,
-            key=lambda row: _chart_category_key(frame, aggregation, row.get(aggregation, '')),
-        )
+    if aggregation in ORDERED_DIMENSIONS:
+        compact_rows = sorted(compact_rows, key=lambda row: _category_order_key(frame, aggregation, row.get(aggregation, '')))
     compact_rows = compact_rows[:8]
     return {
         'labels': [str(row.get(aggregation, 'n/a')) for row in compact_rows],

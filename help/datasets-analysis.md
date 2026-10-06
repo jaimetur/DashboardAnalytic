@@ -66,7 +66,7 @@ Controls adapt to the selected dataset.
 - **Group Benchmark** compares the selected aggregation. Bar labels that do not fit are rotated.
 - Every chart has floating zoom controls in its top-right corner (−, level, + and reset) and, as in E2E Dashboards, zooms into a rectangle dragged over it: a CDF narrows its X and Y range, and a bar chart widens to fit the selected bars and scrolls to them. Hovering a bar shows its value, and hovering a CDF shows the probability of every curve at that value.
 - **Visible X Range** has two handles to adjust the start and the end of the CDF axis. By default it starts where the first curve reaches 5% of its samples and ends where every curve reaches 95%, leaving out nearly empty tails; a rectangle zoom moves both handles and reset returns to these defaults.
-- **Grouped Percentiles** and **Processed Metrics** show decimal values with two digits; Processed Metrics lists Cluster after Region, and percentiles by Vendor or Operator_Vendor follow the order of the Vendor filters.
+- **Grouped Percentiles** and **Processed Metrics** show decimal values with two digits; Processed Metrics lists Cluster after Region. Grouped by Operator, Vendor or Operator_Vendor, the tables, the percentiles, the bars and the CDF curves follow the order of the Operator Maps and Vendor Maps tables of Workspace Config; values that are not in the maps follow alphabetically (mixed groups before operators without a vendor).
 - Metric cards provide compact numerical summaries.
 
 ## Processed Metrics
