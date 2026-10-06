@@ -4046,3 +4046,9 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
 .module-tabs-primary.is-compact-1 .module-tab { padding: .72rem .85rem; font-size: .94em; gap: .35rem; }
 .module-tabs-primary.is-compact-2 { column-gap: .28rem; }
 .module-tabs-primary.is-compact-2 .module-tab { padding: .7rem .62rem; font-size: .88em; gap: .28rem; }
+
+/* E2E Dashboards: a PowerPoint job selected in the table is the one shown in the Charts Panel. */
+.ds-ppt-jobs-table tr.ds-ppt-job-selectable { cursor: pointer; }
+.ds-ppt-jobs-table tr.ds-ppt-job-selectable:hover td { background: rgba(119, 81, 185, .06); }
+.ds-ppt-jobs-table tr.is-selected td { background: rgba(119, 81, 185, .12); }
+.ds-ppt-charts-view-dashboard { align-self: end; padding: .5rem .9rem; border-radius: 999px; background: linear-gradient(135deg, #1f8a4c, #2fae66); color: #fff; font-weight: 700; border: 0; }

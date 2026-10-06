@@ -254,14 +254,22 @@
   let environmentDefaultJobId = null;
   let currentResults = null;
   let currentResultsJobId = null;
-  let activeResultTab = restoredScoringViewState.resultTab
-    || root.querySelector('[data-result-tab][aria-selected="true"]')?.dataset.resultTab || 'charts';
-  for (const tab of root.querySelectorAll('[data-result-tab]')) {
-    const selected = tab.dataset.resultTab === activeResultTab;
-    tab.setAttribute('aria-selected', String(selected));
-    tab.tabIndex = selected ? 0 : -1;
-  }
-  for (const pane of resultPanes) pane.hidden = pane.dataset.resultPane !== activeResultTab;
+  // Reloading the page keeps the selected results tab; opening the page again
+  // from another page always starts on Scoring Charts.
+  const pageReloaded = (() => {
+    try { return performance.getEntriesByType('navigation')[0]?.type === 'reload'; } catch { return false; }
+  })();
+  let activeResultTab = (pageReloaded && restoredScoringViewState.resultTab) || 'charts';
+  const showResultTab = name => {
+    activeResultTab = name;
+    for (const tab of root.querySelectorAll('[data-result-tab]')) {
+      const selected = tab.dataset.resultTab === name;
+      tab.setAttribute('aria-selected', String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+    }
+    for (const pane of root.querySelectorAll('[data-result-pane]')) pane.hidden = pane.dataset.resultPane !== name;
+  };
+  showResultTab(activeResultTab);
   let chartFocusReturn = null;
   let previousBodyOverflow = '';
   let userSelectedJob = Boolean(selectedJobId);
@@ -4076,18 +4084,36 @@
     const palette = ['#176E77', '#E6A81D', '#C55A11', '#5B9BD5', '#A64D79'];
     const allocations = [...environments.values()].map((item, index) => ({...item, color: palette[index % palette.length]}))
       .filter(item => combined || item.name.toLowerCase() === requested.toLowerCase());
-    return allocations.length ? allocations : [{name: requested, ...bestNetworkTotals(tableData).allocation, color: palette[0]}];
+    if (!allocations.length) return [{name: requested, ...bestNetworkTotals(tableData).allocation, color: palette[0]}];
+    // Environments without results in any series give their points to the others,
+    // in proportion, as the Combined scores do; the configured points stay visible.
+    const results = typeof currentResults === 'undefined' ? null : currentResults;
+    const scaled = new Set(combined ? results?.environment_scaling?.scaled_environments || [] : []);
+    const total = allocations.reduce((sum, item) => sum + item.Voice + item.Data, 0);
+    const kept = allocations.filter(item => !scaled.has(item.name)).reduce((sum, item) => sum + item.Voice + item.Data, 0);
+    if (!scaled.size || !(kept > 0)) return allocations;
+    return allocations.map(item => {
+      const factor = scaled.has(item.name) ? 0 : total / kept;
+      return {...item, factor, original: {Voice: item.Voice, Data: item.Data}, Voice: item.Voice * factor, Data: item.Data * factor};
+    });
   }
 
   function maximumAllocationCategories(tableData, environments, configuration = {}) {
     const totals = new Map();
+    const originals = new Map();
     for (const metric of configuration.metrics || []) {
       const category = String(metric.category || 'Other');
+      let original = 0;
       const points = environments.reduce((sum, environment) => {
         const value = Number(metric?.contexts?.[environment.name]?.max_points);
-        return sum + (Number.isFinite(value) && value > 0 ? value : 0);
+        const configured = Number.isFinite(value) && value > 0 ? value : 0;
+        original += configured;
+        return sum + configured * (environment.factor ?? 1);
       }, 0);
-      if (points > 0) totals.set(category, (totals.get(category) || 0) + points);
+      if (original > 0) {
+        totals.set(category, (totals.get(category) || 0) + points);
+        originals.set(category, (originals.get(category) || 0) + original);
+      }
     }
     if (!totals.size) {
       for (const row of tableData?.rows || []) {
@@ -4098,7 +4124,7 @@
       }
     }
     const palette = ['#4472C4', '#7030A0', '#C55A11', '#5B9BD5', '#A64D79', '#548235', '#D65F8D', '#8064A2'];
-    return [...totals].map(([label, value], index) => ({label, value, color: palette[index % palette.length]}));
+    return [...totals].map(([label, value], index) => ({label, value, original: originals.get(label), color: palette[index % palette.length]}));
   }
 
   function allocationIconPath(kind) {
@@ -4156,21 +4182,25 @@
     const voiceTotal = environments.reduce((sum, item) => sum + item.Voice, 0);
     const dataTotal = environments.reduce((sum, item) => sum + item.Data, 0);
     const legendItems = [];
-    const addLegend = (label, color, value, iconKind, global = false) => {
+    const addLegend = (label, color, value, iconKind, global = false, original = value) => {
       const percentage = total > 0 ? value / total * 100 : 0;
       const amount = `${formattedChartPoints(value)} pts (${percentage.toFixed(1)}%)`;
-      const text = `${label}: ${amount}`;
-      legendItems.push({color, iconKind, global, label, amount, lines: [text],
+      // Points moved by scaling show the configured points struck through before them.
+      const struck = Number.isFinite(original) && Math.abs(original - value) > .005 ? `${formattedChartPoints(original)} pts` : '';
+      const text = `${label}: ${struck ? `${struck} ` : ''}${amount}`;
+      legendItems.push({color, iconKind, global, label, amount, struck, lines: [text],
         fontSize: Math.min(14, 304 / Math.max(1, text.length * .55))});
     };
+    const originalOf = (item, key) => (item.original ? item.original[key] : item[key]);
     if (combined) addLegend('Total Points', '#465565', total, 'Global', true);
     legendItems.push({heading: 'Points per Environment:'});
-    environments.forEach(item => addLegend(allocationEnvironmentLabel(item.name), item.color, item.Voice + item.Data, item.name));
+    environments.forEach(item => addLegend(allocationEnvironmentLabel(item.name), item.color, item.Voice + item.Data, item.name,
+      false, originalOf(item, 'Voice') + originalOf(item, 'Data')));
     legendItems.push({heading: categories ? 'Points per KPI Category:' : 'Points per Service:'});
-    if (categories) categories.forEach(item => addLegend(allocationCategoryLabel(item.label), item.color, item.value, item.label));
+    if (categories) categories.forEach(item => addLegend(allocationCategoryLabel(item.label), item.color, item.value, item.label, false, item.original ?? item.value));
     else {
-      addLegend('Voice', voiceColor, voiceTotal, 'Voice');
-      addLegend('Data', dataColor, dataTotal, 'Data');
+      addLegend('Voice', voiceColor, voiceTotal, 'Voice', false, environments.reduce((sum, item) => sum + originalOf(item, 'Voice'), 0));
+      addLegend('Data', dataColor, dataTotal, 'Data', false, environments.reduce((sum, item) => sum + originalOf(item, 'Data'), 0));
     }
     const height = 480 + legendItems.reduce((sum, item) => sum + (item.heading ? 30 : item.lines.length * 22 + 8), 0) + 18;
     svg.setAttribute('viewBox', `0 0 460 ${height}`);
@@ -4289,7 +4319,13 @@
       label.textContent = `${item.label}: `;
       const amount = svgElement(svg, 'tspan', {dx: 3, fill: '#8A3D0A', style: 'fill:#8A3D0A'});
       amount.textContent = item.amount;
-      text.append(label, amount);
+      text.append(label);
+      if (item.struck) {
+        const struck = svgElement(svg, 'tspan', {dx: 3, fill: '#7A8691', 'text-decoration': 'line-through', style: 'fill:#7A8691;text-decoration:line-through'});
+        struck.textContent = item.struck;
+        text.append(struck);
+      }
+      text.append(amount);
       setChartTooltip(text, item.lines.join(' '));
       svg.append(icon, swatch, text);
       legendY += item.lines.length * 22 + 8;
@@ -4368,6 +4404,16 @@
     document.body.style.overflow = previousBodyOverflow;
     if (chartFocusReturn?.isConnected) chartFocusReturn.focus();
     chartFocusReturn = null;
+  }
+
+  // Information about the calculation, such as environments scaled to the maximum scoring.
+  function renderNotices(notices) {
+    const box = root.querySelector('[data-notice-box]');
+    const list = root.querySelector('[data-notice-list]');
+    if (!box || !list) return;
+    const items = (Array.isArray(notices) ? notices : []).map(String).filter(Boolean);
+    list.replaceChildren(...items.map(text => Object.assign(document.createElement('li'), {textContent: text})));
+    box.hidden = !items.length;
   }
 
   function renderWarnings(warnings) {
@@ -4656,6 +4702,8 @@
     }
     const warnings = payload.warnings ?? job?.warnings ?? [];
     renderWarnings(scoringCoverageWarnings({...payload, warnings}, job, effectiveEnvironment));
+    // Scaling concerns the Combined scores, not the score of a single environment.
+    renderNotices(!effectiveEnvironment || ['all', 'Combined'].includes(effectiveEnvironment) ? payload.notices ?? job?.notices ?? [] : []);
     setExportLinks(jobIdOf(job || payload.job || {}), true);
   }
 
@@ -4671,6 +4719,7 @@
       pane.append(empty);
     }
     root.querySelector('[data-warning-box]').hidden = true;
+    renderNotices([]);
     setExportLinks('', false);
   }
 
@@ -4832,6 +4881,10 @@
       return;
     }
     const payload = {...calculationPayload(), force};
+    // A new scoring always opens on Scoring Charts.
+    showResultTab('charts');
+    syncResultTableControls();
+    persistScoringViewState();
     submittingCalculation = true;
     ++calculationMatchRevision;
     window.clearTimeout(calculationMatchTimer);

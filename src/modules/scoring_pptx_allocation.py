@@ -161,6 +161,29 @@ def maximum_allocations_from_configuration(
     return allocations
 
 
+def scaled_environment_allocations(
+    allocations: dict[str, dict[str, float]], scaling: dict[str, Any] | None,
+) -> dict[str, dict[str, float]]:
+    """Allocations of the Combined scores when environments without results were scaled out.
+
+    Those environments get no points and the others share theirs in proportion;
+    each keeps its configured maximum as ``original_max``.
+    """
+    scaled = set((scaling or {}).get('scaled_environments') or [])
+    if not scaled:
+        return allocations
+    total = sum(values.get('max', 0.0) for values in allocations.values())
+    kept = sum(values.get('max', 0.0) for name, values in allocations.items() if name not in scaled)
+    if kept <= 0:
+        return allocations
+    result = {}
+    for name, values in allocations.items():
+        factor = 0.0 if name in scaled else total / kept
+        result[name] = {'voice': values.get('voice', 0.0) * factor, 'data': values.get('data', 0.0) * factor,
+                        'max': values.get('max', 0.0) * factor, 'original_max': values.get('max', 0.0)}
+    return result
+
+
 def category_maximum_allocations(matrix: dict[str, Any]) -> dict[str, float]:
     """Return configured maximum points once per KPI category in a score matrix."""
     allocations: dict[str, float] = {}
@@ -436,7 +459,7 @@ def _environment_segment_icons(slide, allocations, environment_allocations,
     return marker_bottom
 
 
-def _legend_row(slide, x, y, width, height, icon, color, label, detail, bold=False, wrap=False):
+def _legend_row(slide, x, y, width, height, icon, color, label, detail, bold=False, wrap=False, struck=''):
     _legend_icon(slide, icon, x, y + max(0, (height - .18) / 2), .18, color)
     swatch = slide.shapes.add_shape(
         MSO_SHAPE.RECTANGLE, Inches(x + .20), Inches(y + (height - .09) / 2), Inches(.09), Inches(.09),
@@ -458,7 +481,7 @@ def _legend_row(slide, x, y, width, height, icon, color, label, detail, bold=Fal
     textbox.text_frame.margin_left = textbox.text_frame.margin_right = 0
     textbox.text_frame.margin_top = textbox.text_frame.margin_bottom = 0
     font_size = min(8.5, max(6.5, (width - .32) * 72 /
-                            (max(1, len(label) + len(detail) + 2) * .52)))
+                            (max(1, len(label) + len(detail) + len(struck) + 3) * .52)))
     paragraph.font.size = Pt(font_size)
     name_run = paragraph.add_run()
     name_run.text = f'{label}: '
@@ -466,6 +489,13 @@ def _legend_row(slide, x, y, width, height, icon, color, label, detail, bold=Fal
     name_run.font.size = Pt(font_size)
     name_run.font.bold = bold
     name_run.font.color.rgb = RGBColor.from_string('465565')
+    if struck:
+        struck_run = paragraph.add_run()
+        struck_run.text = f'{struck} '
+        struck_run.font.name = 'Arial'
+        struck_run.font.size = Pt(font_size)
+        struck_run.font.color.rgb = RGBColor.from_string('7A8691')
+        struck_run._r.get_or_add_rPr().set('strike', 'sngStrike')
     detail_run = paragraph.add_run()
     detail_run.text = detail
     detail_run.font.name = 'Arial'
@@ -543,9 +573,12 @@ def add_maximum_allocation_donut(
     for environment, voice, data_points in allocations:
         value = voice + data_points
         percent = value * 100 / center_total if center_total else 0
+        # Points moved by environment scaling show the configured points struck through.
+        configured = environment_allocations.get(environment, {}).get('original_max')
+        struck = f'{_legend_points(configured)} pts' if configured is not None and abs(configured - value) > .005 else ''
         legend_items.append((_environment_kind(environment), _global_color(environment, environment_allocations),
                              matrix.get('environment_labels', {}).get(environment, _environment_display_label(environment)),
-                             f'{_legend_points(value)} pts ({percent:.1f}%)'))
+                             f'{_legend_points(value)} pts ({percent:.1f}%)', struck))
     legend_items.append(('heading', 'Points per KPI Category:' if category_mode else 'Points per Service:'))
     if category_mode:
         for index, category in enumerate(inner_labels):
@@ -629,10 +662,10 @@ def add_maximum_allocation_donut(
         if item[0] == 'heading':
             _allocation_legend_heading(slide, x + .12, y, label_width - .12, label_height, item[1])
         else:
-            kind, color, label, detail = item
+            kind, color, label, detail, *rest = item
             global_row = label == 'Total Points'
             indent = .12 if global_row else .26
             _legend_row(slide, x + indent, y, label_width - indent, label_height,
-                        kind, color, label, detail, bold=global_row, wrap=False)
+                        kind, color, label, detail, bold=global_row, wrap=False, struck=rest[0] if rest else '')
         label_y += label_height
     return chart

@@ -419,15 +419,13 @@ def calculate_scoring(
         )
         row['weighted_points'] = row['score'] * row['max_points']
     totals = _totals(rows, keys, config)
+    # Scaling is information, not a coverage problem: it is shown apart from the warnings.
+    notices = scaling_warnings(totals)
     if any(not row['complete_coverage'] for row in totals):
         warnings.append('Incomplete KPI or environment coverage: partial points are shown without renormalizing weights; a complete benchmark score is unavailable.')
+
     def reference_for(row, records, identity):
-        candidates = [other for other in records
-                      if _is_baseline(str(other['operator']), baseline_operator, baseline_aliases)
-                      and other[identity] == row[identity]
-                      and all(other.get(key) == row.get(key) for key in keys if key not in {'operator', 'vendor'})]
-        exact = next((other for other in candidates if other.get('vendor') == row.get('vendor')), None)
-        return exact if exact is not None else next((other for other in candidates if other.get('vendor') == 'All'), None)
+        return _reference_for(row, records, identity, keys, baseline_operator, baseline_aliases)
 
     gap = []
     for row in rows:
@@ -442,11 +440,34 @@ def calculate_scoring(
                         'baseline_operator': baseline_operator,
                         'baseline_actual_operator': baseline['operator'], 'baseline_points': baseline['weighted_points'], 'operator_points': row['weighted_points'],
                         'gap_points': row['weighted_points'] - baseline['weighted_points']})
+    gap_totals = _gap_totals(totals, keys, baseline_operator, baseline_aliases)
+    return {'scoring': rows, 'global_kpis': global_kpis,
+            'totals': totals, 'charts': [dict(row) for row in totals], 'gap': gap,
+            'gap_totals': gap_totals, 'warnings': list(dict.fromkeys(warnings)), 'notices': notices,
+            'environment_scaling': environment_scaling(totals),
+            'aggregation_levels': dimensions,
+            'aggregation_contract_version': AGGREGATION_CONTRACT_VERSION,
+            'campaigns': sorted(campaign_values.values(), key=lambda value: (value.casefold(), value)),
+            'method_version': method_version, 'configuration': config,
+            'configuration_hash': configuration_hash(config), 'gap_direction': 'operator_minus_reference',
+            'baseline_aliases': baseline_aliases}
+
+
+def _reference_for(row, records, identity, keys, baseline_operator, baseline_aliases):
+    candidates = [other for other in records
+                  if _is_baseline(str(other['operator']), baseline_operator, baseline_aliases)
+                  and other[identity] == row[identity]
+                  and all(other.get(key) == row.get(key) for key in keys if key not in {'operator', 'vendor'})]
+    exact = next((other for other in candidates if other.get('vendor') == row.get('vendor')), None)
+    return exact if exact is not None else next((other for other in candidates if other.get('vendor') == 'All'), None)
+
+
+def _gap_totals(totals: list[dict], keys: list[str], baseline_operator: str, baseline_aliases: list[str]) -> list[dict]:
     gap_totals = []
     for row in totals:
         if _is_baseline(str(row['operator']), baseline_operator, baseline_aliases):
             continue
-        baseline = reference_for(row, totals, 'category')
+        baseline = _reference_for(row, totals, 'category', keys, baseline_operator, baseline_aliases)
         if baseline is not None:
             complete = baseline['complete_coverage'] and row['complete_coverage']
             gap_totals.append({**{key: row.get(key) for key in keys}, 'category': row['category'],
@@ -454,15 +475,50 @@ def calculate_scoring(
                                'baseline_points': baseline['weighted_points'], 'operator_points': row['weighted_points'],
                                'gap_points': row['weighted_points'] - baseline['weighted_points'] if complete else None,
                                'complete_coverage': complete})
-    return {'scoring': rows, 'global_kpis': global_kpis,
-            'totals': totals, 'charts': [dict(row) for row in totals], 'gap': gap,
-            'gap_totals': gap_totals, 'warnings': list(dict.fromkeys(warnings)),
-            'aggregation_levels': dimensions,
-            'aggregation_contract_version': AGGREGATION_CONTRACT_VERSION,
-            'campaigns': sorted(campaign_values.values(), key=lambda value: (value.casefold(), value)),
-            'method_version': method_version, 'configuration': config,
-            'configuration_hash': configuration_hash(config), 'gap_direction': 'operator_minus_reference',
-            'baseline_aliases': baseline_aliases}
+    return gap_totals
+
+
+def environment_scaling(totals: list[dict]) -> dict | None:
+    """The environments scaled out of the Combined scores, if any, and the factor applied."""
+    row = next((row for row in totals if row.get('environment') == 'Combined' and row.get('category') == 'Overall'
+                and row.get('scaled_environments')), None)
+    if row is None:
+        return None
+    return {'scaled_environments': row['scaled_environments'], 'environments_with_results': row['environments_with_results'],
+            'scale_factor': row.get('scale_factor')}
+
+
+def apply_environment_scaling(result: dict, baseline_operator: str = 'EE') -> dict:
+    """Scale the Combined scores of a result saved before scaling existed.
+
+    The totals are rebuilt from the saved KPI scores, so opening an earlier job
+    shows environments without results scaled, without calculating it again.
+    """
+    if not isinstance(result, dict) or 'environment_scaling' in result:
+        return result
+    rows = result.get('scoring')
+    configuration = result.get('configuration')
+    if not isinstance(rows, list) or not rows or not isinstance(configuration, dict):
+        return result
+    try:
+        config = _required_configuration(configuration)
+        dimensions = list(result.get('aggregation_levels') or ['Operator'])
+        if 'Operator' not in dimensions:
+            dimensions.append('Operator')
+        keys = [_key_name(field) for field in dict.fromkeys(['Campaign', *dimensions, 'environment'])]
+        totals = _totals(rows, keys, config)
+    except (KeyError, TypeError, ValueError):
+        return result
+    scaling = environment_scaling(totals)
+    result['environment_scaling'] = scaling
+    if scaling is None:
+        return result
+    aliases = list(result.get('baseline_aliases') or [baseline_operator])
+    result['totals'] = totals
+    result['charts'] = [dict(row) for row in totals]
+    result['gap_totals'] = _gap_totals(totals, keys, baseline_operator, aliases)
+    result['notices'] = scaling_warnings(totals)
+    return result
 
 
 def _totals(rows: list[dict], keys: list[str], configuration: dict) -> list[dict]:
@@ -501,21 +557,66 @@ def _totals(rows: list[dict], keys: list[str], configuration: dict) -> list[dict
         name for name in environments
         if environments[name].get('total_points', 0) > 0
     ]
+    # Filters can leave an environment without results in every series of the
+    # calculation (one City is only Drive - City, for example). The Combined
+    # scores then scale the environments with results to the full maximum, the
+    # same way for every series. An environment measured in any series is never
+    # scaled: series without it keep their partial score and its notes.
+    measured = {row.get('environment') for row in rows if row.get('value') is not None}
+    with_results = [name for name in active_environments if name in measured]
+    scaled_out = [name for name in active_environments if name not in measured] if with_results else []
+    included = with_results if scaled_out else active_environments
     for group, members in combined.items():
         metadata = dict(zip(base_keys, group))
-        active_members = [row for row in members if row.get('environment') in active_environments]
         expected = [m for m in metrics
                     if ('dataset_type' not in keys or m['source_kind'].title() == metadata['dataset_type'])
                     and (metadata['category'] == 'Overall' or m['category'] == metadata['category'])
                     and sum(m['contexts'][name]['max_points'] for name in active_environments
                             if name in m['contexts']) > 0]
-        maximum = sum(sum(m['contexts'][name]['max_points'] for name in active_environments
-                          if name in m['contexts'])
-                      for m in expected)
-        totals.append(_summary({**metadata, 'environment': 'Combined'}, active_members, maximum,
-                               len(active_members) == len(active_environments)
-                               and all(row['complete_coverage'] for row in active_members), summary=True))
+
+        def maximum_of(names: list[str]) -> float:
+            return sum(sum(m['contexts'][name]['max_points'] for name in names if name in m['contexts']) for m in expected)
+
+        maximum = maximum_of(active_environments)
+        active_members = [row for row in members if row.get('environment') in included]
+        reached = maximum_of(included)
+        complete = (len(active_members) == len(included) and reached > 0
+                    and all(row['complete_coverage'] for row in active_members))
+        summary = _summary({**metadata, 'environment': 'Combined'}, active_members, maximum, complete, summary=True)
+        if scaled_out and reached > 0:
+            factor = maximum / reached
+            summary.update({
+                'unscaled_points': summary['weighted_points'], 'unscaled_max_points': reached,
+                'scale_factor': factor, 'scaled_environments': scaled_out, 'environments_with_results': with_results,
+            })
+            for key in ('weighted_points', 'total_points', 'available_points'):
+                summary[key] *= factor
+            summary['score'] = summary['weighted_points'] / maximum if complete and maximum > 0 else None
+        elif scaled_out:
+            summary.update({'scaled_environments': scaled_out, 'environments_with_results': with_results})
+        totals.append(summary)
     return totals
+
+
+def _number_text(value: float) -> str:
+    return f'{value:.2f}'.rstrip('0').rstrip('.')
+
+
+def scaling_warnings(totals: list[dict]) -> list[str]:
+    """Explain the Combined scores scaled because environments have no results in any series."""
+    row = next((row for row in totals if row.get('environment') == 'Combined' and row.get('category') == 'Overall'
+                and row.get('scaled_environments')), None)
+    if row is None:
+        return []
+    missing = ', '.join(row['scaled_environments'])
+    verb = 'has' if len(row['scaled_environments']) == 1 else 'have'
+    if not row.get('scale_factor'):
+        return [f'{missing} {verb} no results in any series with the selected filters, and the environments with results '
+                f'have no points, so the Combined scores cannot be scaled.']
+    return [f"Scaled to the maximum scoring: {missing} {verb} no results in any series with the selected filters, so the "
+            f"Combined scores use {', '.join(row['environments_with_results'])} "
+            f"({_number_text(row['unscaled_max_points'])} points) scaled ×{row['scale_factor']:.3f} "
+            f"to the full {_number_text(row['max_points'])} points."]
 
 
 def _summary(metadata: dict, members: list[dict], maximum: float, complete: bool, summary: bool = False) -> dict:

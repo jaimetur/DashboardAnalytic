@@ -860,6 +860,9 @@ def get_scoring_job(
     )
     if include_result and not include_internal_snapshot:
         _apply_current_environment_labels(repository, job)
+        # Results saved before environment scaling existed are scaled when they are opened.
+        from src.modules.scoring import apply_environment_scaling
+        apply_environment_scaling(job.get('result'), str(job.get('baseline_operator') or 'EE'))
     return job
 
 

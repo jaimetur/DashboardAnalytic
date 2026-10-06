@@ -1922,7 +1922,8 @@ def install_dashboard_routes(core):
         ensure_dashboard_ppt_jobs(task_repository)
         with task_repository.connection() as connection:
             rows = connection.execute(
-                f'SELECT * FROM {DASHBOARD_PPT_JOBS_TABLE} ORDER BY id DESC LIMIT 100'
+                # Newest first: a relaunched job takes the date of its relaunch and moves to the top.
+                f'SELECT * FROM {DASHBOARD_PPT_JOBS_TABLE} ORDER BY created_at DESC, id DESC LIMIT 100'
             ).fetchall()
         return {'jobs': [serialize_dashboard_ppt_job(row) for row in rows]}
 

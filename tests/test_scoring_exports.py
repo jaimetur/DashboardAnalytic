@@ -1546,3 +1546,22 @@ def test_saved_environment_display_name_replaces_historical_name_in_ppt():
     for slide in content:
         assert slide.shapes.title.text_frame.paragraphs[1].text == 'Drive - City QA'
     assert any('Drive - City QA' in _slide_text(slide) for slide in slides)
+
+
+def test_powerpoint_shows_environment_scaling_in_orange_and_in_the_allocation_donut():
+    from src.modules.scoring import apply_environment_scaling
+
+    result = _result()
+    result.setdefault('configuration', scoring_configuration())
+    result.setdefault('aggregation_levels', ['Operator'])
+    result.pop('environment_scaling', None)
+    apply_environment_scaling(result, 'EE')
+    assert result['environment_scaling']['scaled_environments'] == ['DriveConnectionroad']
+    presentation = _export(result, environment='Combined')
+    notices = [shape for slide in presentation.slides for shape in slide.shapes if shape.name == 'Scoring Scaling Notice']
+    assert notices and 'DriveConnectionroad has no results in any series' in notices[0].text_frame.text
+    assert str(notices[0].text_frame.paragraphs[0].font.color.rgb) == 'FF8C1A'
+    struck = [run for slide in presentation.slides for shape in slide.shapes if shape.has_text_frame
+              for paragraph in shape.text_frame.paragraphs for run in paragraph.runs
+              if run._r.rPr is not None and run._r.rPr.get('strike') == 'sngStrike']
+    assert {run.text.strip() for run in struck} >= {'650 pts', '350 pts'}

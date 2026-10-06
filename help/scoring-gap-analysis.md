@@ -204,6 +204,8 @@ The pale yellow **Calculation notes** card lists affected combinations, missing 
 > [!WARNING]
 > **Missing points are not redistributed.** An incomplete result keeps the original weights and configured benchmark maximum. Available contributions are not scaled up to a complete score.
 
+**Environments without results in any series are scaled.** When the filters leave an environment without results for every operator and series of the calculation (for example, City = London only covers Drive - City), the Combined scores use the environments with results and scale them to the full maximum scoring: an environment without results gets 0 points and the others share its points in proportion, the same for every operator, so GAPs stay comparable. An orange **Scaled results** card explains which environments were scaled and the factor applied; scaled values are not marked as incomplete. The *Maximum score per environment* donuts show the configured points of every environment struck through beside the points finally allocated, and the PowerPoint and Word exports show the same notice in orange on their first page. When an environment has results in any series it is never scaled, and the series without it keep their partial score and their notes. Saved jobs are scaled when they are opened, without calculating them again.
+
 Example: **VF_UK / Samsung / Q1: maximum 583.2645 of 650 points**, with the unavailable KPI names listed below. Another campaign can have a different achievable maximum because different KPIs are missing.
 
 - Incomplete numeric values appear **in bold red with `*`**.

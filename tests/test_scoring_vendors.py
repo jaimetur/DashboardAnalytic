@@ -371,11 +371,23 @@ def test_coverage_notes_name_excluded_kpis_for_each_vendor_campaign_context():
     combined_notes = notes['Combined']
     q1_note = next(note for note in combined_notes if '/ 2026-Q1:' in note)
     q2_note = next(note for note in combined_notes if '/ 2026-Q2:' in note)
-    assert 'VF_UK / Samsung / North / Leeds / 2026-Q1: maximum achievable scoring' in q1_note
-    assert 'maximum achievable scoring 933.2645 of 1000 points.' in q1_note
-    assert 'Classic Calls: Call Setup Time > 10 s [%] (DriveCity)' in q1_note
-    assert 'Classic Calls: Call Setup Time (DriveCity)' in q1_note
+    assert q1_note.startswith('VF_UK / Samsung / North / Leeds / 2026-Q1: maximum achievable scoring 933.2645 of 1000 points.')
+    # Short notes: the first missing KPIs by environment, then how many more.
+    assert 'KPIs without valid measurements: Call Setup Time > 10 s [%], Call Setup Time,' in q1_note
+    assert '(DriveCity)' in q1_note and 'more.' in q1_note
     assert 'maximum achievable scoring 990.9 of 1000 points.' in q2_note
-    assert 'Classic Calls: Call Setup Success Ratio (DriveCity)' in q2_note
+    assert 'Call Setup Success Ratio' in q2_note
     assert 'K7' not in q1_note and 'K10' not in q1_note and 'K11' not in q2_note
     assert len(combined_notes) == 2
+
+
+def test_coverage_notes_group_series_with_the_same_missing_contributions():
+    configuration = scoring_configuration()
+    totals = [
+        {'environment': 'Combined', 'operator': operator, 'vendor': 'All', 'campaign': '2026-Q1', 'region': None,
+         'city': city, 'category': 'Overall', 'complete_coverage': False, 'available_points': 650.0, 'max_points': 1000.0}
+        for operator in ('EE', 'VF_UK', 'O2') for city in ('Leeds', 'York')
+    ]
+    notes = scoring_coverage_notes({'configuration': configuration, 'totals': totals, 'scoring': []})['Combined']
+    assert len(notes) == 1
+    assert notes[0].startswith('EE / All / Leeds / 2026-Q1, EE / All / York / 2026-Q1, VF_UK / All / Leeds / 2026-Q1 and 3 more series:')

@@ -1465,10 +1465,18 @@
     }
     const filtersBadge = $('ds-ppt-charts-filters');
     filtersBadge.hidden = !job;
+    const viewDashboard = $('ds-ppt-charts-view-dashboard');
+    viewDashboard.hidden = !job?.charts_api_url;
+    viewDashboard.dataset.jobId = job?.id || '';
     filtersBadge.dataset.jobId = job?.id || '';
     filtersBadge.setAttribute('aria-label', job ? `View filters used for ${job.dashboard_name}` : 'View filters');
   };
   const selectedDashboardPptChartJob = () => dashboardPptJobs.find(job => String(job.id) === $('ds-ppt-charts-filters').dataset.jobId);
+  // View as Dashboard opens the Dashboard of the job shown in the Charts Panel.
+  $('ds-ppt-charts-view-dashboard').addEventListener('click', safe(() => {
+    const job = dashboardPptJobs.find(item => String(item.id) === $('ds-ppt-charts-view-dashboard').dataset.jobId);
+    if (job) return openDashboardPptViewer(job);
+  }));
   $('ds-ppt-charts-filters').addEventListener('pointerenter', () => {
     const job = selectedDashboardPptChartJob();
     if (job) showDashboardPptJobFilterTooltip($('ds-ppt-charts-filters'), job);
@@ -1556,6 +1564,7 @@
     const request = ++dashboardPptChartsRequest;
     dashboardPptChartsJobId = String(job.id);
     $('ds-ppt-chart-job').value = String(job.id);
+    $('ds-ppt-jobs-body').querySelectorAll('tr[data-job-id]').forEach(row => row.classList.toggle('is-selected', row.dataset.jobId === String(job.id)));
     renderDashboardPptJobPickerLabel($('ds-ppt-chart-job-picker-label'), job);
     $('ds-ppt-charts-copy').textContent = `Loading cached charts for Dashboard "${job.dashboard_name}"…`;
     $('ds-ppt-charts-empty').hidden = true;
@@ -1736,6 +1745,18 @@
     $('ds-ppt-jobs-empty').hidden = jobs.length > 0;
     for (const job of jobs) {
       const row = node('tr');
+      // Selecting a job in the table shows its charts in the Charts Panel below.
+      if (job.charts_api_url) {
+        row.classList.add('ds-ppt-job-selectable');
+        row.dataset.jobId = String(job.id);
+        row.classList.toggle('is-selected', String(job.id) === dashboardPptChartsJobId);
+        row.addEventListener('click', event => {
+          if (event.target.closest('button, a, input, select, label, .ds-ppt-job-filters')) return;
+          body.querySelectorAll('tr.is-selected').forEach(item => item.classList.remove('is-selected'));
+          row.classList.add('is-selected');
+          void loadDashboardPptCharts(job.id);
+        });
+      }
       for (const value of [job.id, job.generated_by, job.date]) row.append(node('td', String(value)));
       // NR Mode uses the same colour code as the Datasets and Dashboards selectors.
       const nrMode = String(job.nr_mode || job.technology || job.type || '-');

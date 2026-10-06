@@ -29,10 +29,11 @@ from src.modules.scoring_views import (
 )
 from src.modules.scoring_pptx_allocation import (
     _environment_display_label, add_maximum_allocation_donut, category_maximum_allocations,
-    maximum_allocations_from_configuration,
+    maximum_allocations_from_configuration, scaled_environment_allocations,
 )
 
 _FONT = 'Ericsson Hilda'
+_SCALING_NOTICE_COLOR = '#FF8C1A'
 _WHITE = '#FFFFFF'
 _NEUTRAL = '#ECEFF1'
 _GAP_SUMMARY_HEADER = '#455B65'
@@ -730,6 +731,15 @@ def _add_scoring_intro_slides(
         _style_scoring_intro_field(paragraph, campaign_text, bold_label=True)
         for run in paragraph.runs:
             run.font.name = 'Aptos'
+    # Combined scores scaled because environments have no results are announced in orange.
+    notices = [str(notice) for notice in result.get('notices') or []]
+    if notices and (environment is None or str(environment).casefold() in {'combined', 'all', 'all environments'}):
+        notice_shape = _text(slide, ' '.join(notices), campaign_top + .45, left=.52, width=10.68, height=.6,
+                             size=12, color=_SCALING_NOTICE_COLOR)
+        notice_shape.name = 'Scoring Scaling Notice'
+        for paragraph in notice_shape.text_frame.paragraphs:
+            paragraph.font.bold = True
+            paragraph.font.name = 'Aptos'
 
 
 def _header_foreground(color: str) -> str:
@@ -2201,10 +2211,12 @@ def export_scoring_powerpoint(job: dict[str, Any], result: dict[str, Any], templ
                 matrix['context']['environment'], configuration,
             )
     environment_allocations = maximum_allocations_from_configuration(configuration)
+    combined_allocations = scaled_environment_allocations(environment_allocations, result.get('environment_scaling'))
     for matrix_key in ('score_tables', 'hierarchy_score_tables'):
         for matrix in views.get(matrix_key, []):
             matrix['_split_charts'] = split_charts
-            matrix['environment_allocations'] = environment_allocations
+            combined = str(matrix['context'].get('environment') or '').casefold() in {'combined', 'all', 'all environments'}
+            matrix['environment_allocations'] = combined_allocations if combined else environment_allocations
             matrix['environment_labels'] = {
                 name: str(scope.get('display_name') or _environment_display_label(name))
                 for name, scope in configuration.get('scope', {}).get('environments', {}).items()
@@ -2282,8 +2294,9 @@ def export_scoring_powerpoint(job: dict[str, Any], result: dict[str, Any], templ
     coverage_notes = scoring_coverage_notes(result)
     coverage_details = [f"{'All Environments' if environment == 'Combined' else environment} — {note}"
                         for environment, notes in coverage_notes.items() for note in notes]
-    slide_warnings = [str(warning) for warning in result.get('warnings', [])
-                      if str(warning) != _LEGACY_CAMPAIGN_WARNING]
+    slide_warnings = [str(notice) for notice in result.get('notices', [])]
+    slide_warnings.extend(str(warning) for warning in result.get('warnings', [])
+                          if str(warning) != _LEGACY_CAMPAIGN_WARNING)
     slide_warnings.extend(coverage_details)
     for slide in presentation.slides:
         slide.notes_slide.notes_text_frame.text = '\n'.join(slide_warnings)

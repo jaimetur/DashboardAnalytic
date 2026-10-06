@@ -246,7 +246,7 @@ def test_campaign_is_optional_and_defaults_to_pooled_raw_rows():
     assert pooled_rows[0]['campaign'] is None
     assert pooled_rows[0]['value'] == 50
     assert pooled['aggregation_levels'] == ['Operator']
-    assert pooled['aggregation_contract_version'] == 2
+    assert pooled["aggregation_contract_version"] == 2
     assert pooled['campaigns'] == ['2026Q2', '2026Q3']
     assert {row['campaign']: row['value'] for row in separated_rows} == {'2026Q2': 100, '2026Q3': 0}
     assert separated['aggregation_levels'] == ['Operator', 'Campaign']
@@ -437,3 +437,60 @@ def test_complete_city_road_coverage_combines_fixed_weights():
     assert overall['DriveConnectionroad']['max_points'] == pytest.approx(350)
     assert overall['Combined']['weighted_points'] == pytest.approx(overall['DriveCity']['weighted_points'] + overall['DriveConnectionroad']['weighted_points'])
     assert overall['Combined']['score'] == pytest.approx(overall['Combined']['weighted_points'] / 1000)
+
+
+def _combined_overall(result, operator):
+    return next(row for row in result['totals']
+                if row['environment'] == 'Combined' and row['category'] == 'Overall' and row['operator'] == operator)
+
+
+def test_environment_without_results_in_any_series_is_scaled_to_the_maximum_scoring():
+    # One City only covers Drive - City: no series has Drive - Connecting Roads results.
+    source = pd.concat([
+        frame([{'Session_Type': 'CALL', 'Call_Status': 'Completed'}], operator='EE'),
+        frame([{'Session_Type': 'CALL', 'Call_Status': 'Failed'}], operator='VF'),
+    ], ignore_index=True)
+    result = calculate_scoring({'voice': source}, ['Operator'])
+    ee = _combined_overall(result, 'EE')
+    city_maximum = next(row for row in result['totals'] if row['environment'] == 'DriveCity'
+                        and row['category'] == 'Overall' and row['operator'] == 'EE')['max_points']
+    assert ee['scaled_environments'] == ['DriveConnectionroad']
+    assert ee['max_points'] == pytest.approx(1000)
+    assert ee['scale_factor'] == pytest.approx(1000 / city_maximum)
+    assert ee['weighted_points'] == pytest.approx(ee['unscaled_points'] * ee['scale_factor'])
+    # Every series and the reference use the same factor, so GAPs stay comparable.
+    assert _combined_overall(result, 'VF')['scale_factor'] == pytest.approx(ee['scale_factor'])
+    assert result['notices'] and 'DriveConnectionroad has no results in any series' in result['notices'][0]
+    assert not any('Scaled' in warning for warning in result['warnings'])
+
+
+def test_environment_with_results_in_some_series_is_not_scaled():
+    source = pd.concat([
+        frame([{'Session_Type': 'CALL', 'Call_Status': 'Completed'}], operator='EE'),
+        frame([{'Session_Type': 'CALL', 'Call_Status': 'Completed'}], operator='EE', environment='Connectionroad'),
+        frame([{'Session_Type': 'CALL', 'Call_Status': 'Failed'}], operator='VF'),
+    ], ignore_index=True)
+    result = calculate_scoring({'voice': source}, ['Operator'])
+    vf = _combined_overall(result, 'VF')
+    assert 'scaled_environments' not in vf and 'scale_factor' not in vf
+    assert vf['complete_coverage'] is False
+    assert result['notices'] == []
+
+
+def test_results_saved_before_scaling_are_scaled_when_opened():
+    from src.modules.scoring import apply_environment_scaling
+
+    source = pd.concat([
+        frame([{'Session_Type': 'CALL', 'Call_Status': 'Completed'}], operator='EE'),
+        frame([{'Session_Type': 'CALL', 'Call_Status': 'Failed'}], operator='VF'),
+    ], ignore_index=True)
+    expected = calculate_scoring({'voice': source}, ['Operator'])
+    saved = deepcopy(expected)
+    for key in ('environment_scaling', 'notices'):
+        saved.pop(key)
+    # A result saved earlier kept the Combined scores unscaled.
+    saved['totals'] = [{**row, 'weighted_points': row.get('unscaled_points', row['weighted_points'])} for row in saved['totals']]
+    apply_environment_scaling(saved, 'EE')
+    assert saved['environment_scaling']['scaled_environments'] == ['DriveConnectionroad']
+    assert saved['notices'] == expected['notices']
+    assert _combined_overall(saved, 'EE')['weighted_points'] == pytest.approx(_combined_overall(expected, 'EE')['weighted_points'])

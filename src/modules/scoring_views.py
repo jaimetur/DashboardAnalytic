@@ -64,8 +64,16 @@ def normalize_result_gaps(result: dict[str, Any] | None) -> dict[str, Any]:
     return normalized
 
 
+def _points_text(value: float | None) -> str:
+    return f'{value:.4f}'.rstrip('0').rstrip('.') if value is not None else ''
+
+
 def scoring_coverage_notes(result: dict[str, Any]) -> dict[str, list[str]]:
-    """Explain each scoring ceiling and missing KPI contribution by its actual context."""
+    """Summarise, per environment, the series without a complete score and what they miss.
+
+    Series missing the same environments and KPIs share one short note that names
+    a few of them, their scoring ceiling and the missing contributions.
+    """
     totals = _records(result.get('totals'))
     records = _records(result.get('scoring', result.get('score_rows', [])))
     configuration = result.get('configuration') or {}
@@ -73,73 +81,68 @@ def scoring_coverage_notes(result: dict[str, Any]) -> dict[str, list[str]]:
     weighted_environments = [name for name, value in environment_configuration.items()
                              if (_number(value.get('total_points')) or 0) > 0]
     environments = list(dict.fromkeys(str(row.get('environment')) for row in totals))
-    notes = {environment: [] for environment in environments}
+    context_fields = ('operator', 'vendor', 'region', 'city', 'campaign', 'dataset_type')
+    grouped: dict[str, dict[tuple, dict[str, Any]]] = {environment: {} for environment in environments}
     for total in totals:
         if total.get('category') != 'Overall' or total.get('complete_coverage') is not False:
             continue
         environment = str(total.get('environment'))
-        selected_environments = weighted_environments if environment == 'Combined' else [environment]
-        context_fields = ('operator', 'vendor', 'region', 'city', 'campaign', 'dataset_type')
+        # Environments scaled out of a Combined score have no results to explain.
+        selected_environments = ([name for name in weighted_environments if name not in (total.get('scaled_environments') or [])]
+                                 if environment == 'Combined' else [environment])
         matches = [row for row in records
                    if row.get('environment') in selected_environments
                    and all(row.get(key) == total.get(key) for key in context_fields
                            if key != 'dataset_type' or total.get(key) is not None)]
-        excluded = []
-        for row in matches:
-            if (_number(row.get('max_points')) or 0) > 0 and _number(row.get('weighted_points')) is None:
-                label = f"{row.get('category', '')}: {row.get('kpi', '')}"
-                if environment == 'Combined':
-                    label += f" ({row.get('environment', '')})"
-                if label not in excluded:
-                    excluded.append(label)
         expected_metrics = _metrics_for_context(total, total.get('dataset_type') is not None,
                                                configuration.get('metrics', []))
+        without_data = []
+        missing: list[tuple[str, str]] = []
         for name in selected_environments:
+            measured = [row for row in matches if row.get('environment') == name]
+            if not measured and environment == 'Combined':
+                without_data.append(name)
+                continue
+            for row in measured:
+                if (_number(row.get('max_points')) or 0) > 0 and _number(row.get('weighted_points')) is None:
+                    missing.append((name, str(row.get('kpi', ''))))
             for metric in expected_metrics:
                 if (_number(metric.get('contexts', {}).get(name, {}).get('max_points')) or 0) <= 0:
                     continue
-                if not any(row.get('environment') == name and row.get('kpi_code') == metric.get('code') for row in matches):
-                    label = f"{metric.get('category', '')}: {metric.get('kpi', '')}"
-                    label += f' ({name}; no matching rows)' if environment == 'Combined' else ' (no matching rows)'
-                    excluded.append(label)
-            if not expected_metrics and not any(row.get('environment') == name for row in matches):
-                excluded.append(f'All configured KPIs in {name} (no matching rows)')
-        context_labels = []
-        for key in context_fields:
-            value = total.get(key)
-            if value is not None and str(value).strip():
-                display = _hierarchy_display_value({'level': key.title(), 'value': value})
-                context_labels.append(display)
-        available = _number(total.get('available_points'))
-        maximum = _number(total.get('max_points'))
-        available_label = f'{available:.4f}'.rstrip('0').rstrip('.') if available is not None else ''
-        maximum_label = f'{maximum:.4f}'.rstrip('0').rstrip('.') if maximum is not None else ''
-        ceiling = (f'{available_label} of {maximum_label} points'
-                   if available is not None and maximum is not None else 'unavailable')
-        affected = []
-        if environment == 'Combined':
-            for name in selected_environments:
-                contribution = next((row for row in totals if row.get('environment') == name
-                                     and row.get('category') == 'Overall'
-                                     and all(row.get(key) == total.get(key) for key in context_fields)), None)
-                if contribution is not None and contribution.get('complete_coverage') is not False:
-                    continue
-                environment_available = _number(contribution.get('available_points')) if contribution else 0.0
-                environment_maximum = _number(contribution.get('max_points')) if contribution else sum(
-                    _number(metric.get('contexts', {}).get(name, {}).get('max_points')) or 0 for metric in expected_metrics
-                )
-                if environment_available is not None and environment_maximum is not None:
-                    available_text = f'{environment_available:.4f}'.rstrip('0').rstrip('.')
-                    maximum_text = f'{environment_maximum:.4f}'.rstrip('0').rstrip('.')
-                    affected.append(f'{name}: {available_text} of {maximum_text} points')
-        affected_text = f"Affected environments and scoring ceilings: {'; '.join(affected)}. " if affected else ''
-        excluded_text = '; '.join(excluded) or 'Required KPI contributions have no valid measurements'
-        notes[environment].append(
-            f"{' / '.join(context_labels)}: maximum achievable scoring {ceiling}. "
-            f'{affected_text}'
-            f'Excluded KPIs (no valid measurements): {excluded_text}. '
-            'Their weights are not redistributed.'
-        )
+                if not any(row.get('kpi_code') == metric.get('code') for row in measured):
+                    missing.append((name, str(metric.get('kpi', ''))))
+        missing = list(dict.fromkeys(missing))
+        context = ' / '.join(_hierarchy_display_value({'level': key.title(), 'value': total.get(key)})
+                             for key in context_fields if total.get(key) is not None and str(total.get(key)).strip())
+        group = grouped[environment].setdefault((tuple(without_data), tuple(missing)), {'contexts': [], 'ceilings': []})
+        group['contexts'].append(context)
+        group['ceilings'].append((_number(total.get('available_points')), _number(total.get('max_points'))))
+    notes = {environment: [] for environment in environments}
+    for environment, groups in grouped.items():
+        for (without_data, missing), group in groups.items():
+            contexts = group['contexts']
+            shown = ', '.join(contexts[:3]) + (f' and {len(contexts) - 3} more series' if len(contexts) > 3 else '')
+            ceilings = [(available, maximum) for available, maximum in group['ceilings'] if available is not None and maximum is not None]
+            ceiling = ''
+            if ceilings:
+                low = min(available for available, _maximum in ceilings)
+                high = max(available for available, _maximum in ceilings)
+                maximum = max(maximum for _available, maximum in ceilings)
+                reached = _points_text(low) if low == high else f'{_points_text(low)}–{_points_text(high)}'
+                ceiling = f': maximum achievable scoring {reached} of {_points_text(maximum)} points'
+            parts = []
+            if without_data:
+                parts.append(f"No data in {', '.join(without_data)}")
+            if missing:
+                by_environment: dict[str, list[str]] = {}
+                for name, kpi in missing[:5]:
+                    by_environment.setdefault(name, []).append(kpi)
+                listed = '; '.join(f"{', '.join(kpis)} ({name})" if environment == 'Combined' else ', '.join(kpis)
+                                   for name, kpis in by_environment.items())
+                more = f' and {len(missing) - 5} more' if len(missing) > 5 else ''
+                parts.append(f'KPIs without valid measurements: {listed}{more}')
+            details = '. '.join(parts) or 'Required KPI contributions have no valid measurements'
+            notes[environment].append(f'{shown}{ceiling}. {details}. Their weights are neither redistributed nor scaled.')
     return notes
 
 
@@ -167,6 +170,11 @@ def build_scoring_views(job: dict[str, Any] | None, result: dict[str, Any] | Non
     metrics = configuration['metrics']
     configured_environments = list(configuration.get('scope', {}).get('environments', {}))
     combined_environments = _positive_scoring_environments(configuration)
+    # Environments without results in any series are scaled out of the Combined scores.
+    scaled_environments = {
+        _canonical_environment(name, configured_environments)
+        for name in ((result.get('environment_scaling') or {}).get('scaled_environments') or [])
+    }
     gap_priority = list(configuration.get('gap_priority') or [metric['code'] for metric in metrics])
     gap_priority_rank = {code: index for index, code in enumerate(gap_priority)}
     levels = job.get('levels', job.get('aggregation_levels', [])) or []
@@ -220,6 +228,7 @@ def build_scoring_views(job: dict[str, Any] | None, result: dict[str, Any] | Non
                 environment_records, combined_environments, include_dataset_type,
                 actual_environments, metrics, configuration, baseline_aliases,
                 gap_priority_rank, global_kpis_by_scope.get(scope, []),
+                scaled_environments=scaled_environments,
             )
             table['operator_styles'] = styles
             score_tables.append(table)
@@ -277,7 +286,8 @@ def _hierarchy_levels(job: dict[str, Any], result: dict[str, Any]) -> list[str]:
         contract_version = int(job.get('aggregation_contract_version') or result.get('aggregation_contract_version') or 0)
     except (TypeError, ValueError):
         contract_version = 0
-    if contract_version != 2:
+    # Version 2 introduced the hierarchy levels; later versions keep them.
+    if contract_version < 2:
         return []
     levels = job.get('aggregation_levels') or job.get('levels') or result.get('aggregation_levels') or []
     if isinstance(levels, str):
@@ -647,8 +657,12 @@ def _build_score_table(
     metrics: list[dict[str, Any]], configuration: dict[str, Any],
     baseline_aliases: list[str], gap_priority_rank: dict[str, int],
     global_kpi_records: list[dict[str, Any]] | None = None,
+    scaled_environments: set[str] | None = None,
 ) -> dict[str, Any]:
     environment = context['environment']
+    kept_environments = [name for name in combined_environments if name not in (scaled_environments or set())]
+    if not kept_environments:
+        kept_environments = list(combined_environments)
     metric_records = {name: {(_record_view_code(record), _operator_name(record)): record
                              for record in records}
                       for name, records in environment_records.items()}
@@ -669,8 +683,10 @@ def _build_score_table(
         for operator in operators:
             if environment == 'Combined':
                 value = _combined_metric_value(
-                    code, operator, environment_records, combined_environments, metric, metric_records,
+                    code, operator, environment_records, kept_environments, metric, metric_records,
                 )
+                if len(kept_environments) < len(combined_environments):
+                    _scale_combined_value(value, metric, combined_environments, kept_environments)
                 global_record = _find_global_kpi_record(
                     code, operator, global_kpi_records or [],
                 )
@@ -772,9 +788,9 @@ def _build_score_table(
         'gap_scale_max': gap_scale_max,
         'gap_scale_colors': {'zero': _GAP_NEUTRAL, 'positive': _GAP_POSITIVE_MAX, 'negative': _GAP_NEGATIVE_MAX},
         'coverage_note': _coverage_note(
-            rows, operators, environment, actual_environments, combined_environments,
+            rows, operators, environment, actual_environments, kept_environments,
         ),
-        'combined_required_environments': list(combined_environments),
+        'combined_required_environments': list(kept_environments),
         'gap_priority': [code for code in gap_priority_rank],
         'gap_direction': 'operator_minus_reference',
     }
@@ -1243,6 +1259,28 @@ def _combined_metric_value(
         'color': THRESHOLD_COLORS[threshold_band],
         'environment_values': environment_values,
     }
+
+
+def _scale_combined_value(
+    value: dict[str, Any], metric: dict[str, Any], combined_environments: list[str], kept_environments: list[str],
+) -> None:
+    """Scale a Combined KPI measured without some environments up to its full configured maximum."""
+    full = _metric_max_points(metric, 'Combined', combined_environments)
+    kept = _metric_max_points(metric, 'Combined', kept_environments)
+    if not full or not kept:
+        return
+    factor = full / kept
+    if value.get('points') is not None:
+        value['points'] = _clean_number(value['points'] * factor)
+    for contribution in (value.get('environment_values') or {}).values():
+        if contribution.get('points') is not None:
+            contribution['points'] = contribution['points'] * factor
+        if contribution.get('max_points') is not None:
+            contribution['max_points'] = contribution['max_points'] * factor
+    value['score'] = value['points'] / full if value.get('points') is not None else None
+    value['threshold_band'] = _threshold_band(value['score'], metric, 'Combined', value['complete'], combined_environments)
+    value['color'] = THRESHOLD_COLORS[value['threshold_band']]
+    value['scaled'] = True
 
 
 def _signed_gap(

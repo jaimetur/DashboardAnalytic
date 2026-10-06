@@ -303,11 +303,15 @@
   .scoring-chart-tooltip[hidden] { display: none !important; }
   .scoring-warnings { display: grid; gap: .3rem; margin: .7rem 0 0; padding-left: 1.1rem; color: #795b20; font-size: .78rem; }
   .scoring-warning-icon { width: 1.2rem; height: 1.2rem; margin-right: .4rem; vertical-align: middle; color: #a8640b; }
-  .scoring-warning-box { grid-column: 1 / -1; grid-row: 3; min-width: 0; overflow-wrap: anywhere; line-height: 1.45; margin-top: .7rem; padding: .7rem .8rem; border: 1px solid rgba(213,143,31,.3); border-radius: 11px; background: #fff9e9; }
+  .scoring-notes-stack { grid-column: 1 / -1; grid-row: 3; display: grid; min-width: 0; }
+  .scoring-notice-box { min-width: 0; overflow-wrap: anywhere; line-height: 1.45; margin-top: .7rem; padding: .7rem .8rem; border: 2px solid #ffb26b; border-radius: 11px; background: #ffe0c2; color: #c43e00; font-weight: 700; }
+  .scoring-notices { display: grid; gap: .3rem; margin: .5rem 0 0; padding-left: 1.1rem; font-size: .78rem; }
+  .scoring-notice-icon { width: 1.2rem; height: 1.2rem; margin-right: .4rem; vertical-align: middle; color: #c43e00; }
+  .scoring-warning-box { min-width: 0; overflow-wrap: anywhere; line-height: 1.45; margin-top: .7rem; padding: .7rem .8rem; border: 1px solid rgba(213,143,31,.3); border-radius: 11px; background: #fff9e9; }
   @media(max-width:1050px) { .scoring-dataset-groups { grid-template-columns: 1fr; } .scoring-dataset-group .scoring-dataset-list { max-height: 12rem; } .scoring-best-network-layout { grid-template-columns: 1fr; } }
   @media(max-width:1050px) { .scoring-context-filter-grid { grid-template-columns: repeat(3,minmax(0,1fr)); } }
   .scoring-warning-maximum { font-size: 1.15em; font-weight: 800; }
-  @media(max-width:1300px) { .scoring-warning-box { grid-row: 5; } .scoring-results-head { grid-template-columns: minmax(0,1fr); } .scoring-results-controls { grid-column: 1; } .scoring-job-selector { grid-column: 1; grid-row: 4; } .scoring-results-tools { grid-column: 1; grid-row: 3; justify-content: flex-start; width: 100%; overflow-x: auto; padding: .2rem 0; } .scoring-results-config-shortcuts, .scoring-results-tools > .scoring-export-actions { justify-content: flex-end; } }
+  @media(max-width:1300px) { .scoring-notes-stack { grid-row: 5; } .scoring-results-head { grid-template-columns: minmax(0,1fr); } .scoring-results-controls { grid-column: 1; } .scoring-job-selector { grid-column: 1; grid-row: 4; } .scoring-results-tools { grid-column: 1; grid-row: 3; justify-content: flex-start; width: 100%; overflow-x: auto; padding: .2rem 0; } .scoring-results-config-shortcuts, .scoring-results-tools > .scoring-export-actions { justify-content: flex-end; } }
   @media(max-width:900px) { .scoring-filter-grid,.scoring-jobs-layout { grid-template-columns: 1fr; } .scoring-job-list { max-height: 22rem; } }
   @media(max-width:600px) { .scoring-context-filter-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .scoring-dataset-list { grid-template-columns: 1fr; } .scoring-controls-foot { align-items: stretch; } .scoring-actions { width: 100%; } .scoring-actions button { flex: 1 1 100%; } .scoring-chart-expanded-dialog { width: calc(100vw - .5rem); height: calc(100dvh - .5rem); padding: .65rem; gap: .5rem; border-radius: 14px; } .scoring-chart-expanded-header h3 { font-size: 1rem; } .scoring-chart-expanded-header p:not(.eyebrow) { display: none; } }
   .scoring-calculation-actions { display: flex; align-items: stretch; justify-content: space-between; flex-wrap: wrap; gap: 1rem; }
@@ -491,7 +495,10 @@
             <div class="scoring-job-list" data-job-list aria-label="Saved scoring jobs" aria-live="polite"><div class="scoring-empty">Loading saved jobs…</div></div>
           </div>
         </details>
+      <div class="scoring-notes-stack">
+      <div class="scoring-notice-box" data-notice-box role="status" aria-live="polite" hidden><svg class="scoring-notice-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8h.01"/></svg><strong>Scaled results</strong><ul class="scoring-notices" data-notice-list></ul></div>
       <div class="scoring-warning-box" data-warning-box role="status" aria-live="polite" hidden><svg class="scoring-warning-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M10.3 4.5a2 2 0 0 1 3.4 0l8 13.5a2 2 0 0 1-1.7 3H4a2 2 0 0 1-1.7-3z"/><path d="M12 9v4m0 4h.01"/></svg><strong>Calculation notes</strong><ul class="scoring-warnings" data-warning-list></ul></div>
+      </div>
       </div>
       <div class="scoring-result-tabs" role="tablist" aria-label="Scoring outputs">
         <button type="button" class="scoring-result-tab" role="tab" aria-selected="true" aria-controls="scoring-chart-pane" data-result-tab="charts">Scoring Charts</button>

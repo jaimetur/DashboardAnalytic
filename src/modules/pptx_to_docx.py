@@ -238,7 +238,14 @@ def pptx_to_docx(content: bytes, title: str = '') -> bytes:
                 for paragraph in shape.text_frame.paragraphs:
                     text = ''.join(run.text for run in paragraph.runs).strip()
                     if text:
-                        document.add_paragraph(text)
+                        # Keep the colour of coloured notes, such as the orange scaling notice.
+                        run = document.add_paragraph().add_run(text)
+                        font = paragraph.runs[0].font if paragraph.runs else paragraph.font
+                        colour = font.color.rgb if font.color and font.color.type is not None else (
+                            paragraph.font.color.rgb if paragraph.font.color and paragraph.font.color.type is not None else None)
+                        if colour is not None and str(colour).upper() not in {'FFFFFF'}:
+                            run.font.color.rgb = RGBColor.from_string(str(colour))
+                        run.font.bold = bool(paragraph.font.bold or (paragraph.runs and paragraph.runs[0].font.bold))
     output = BytesIO()
     document.save(output)
     return output.getvalue()

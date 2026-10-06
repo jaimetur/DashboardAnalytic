@@ -1860,3 +1860,5 @@
 .ds-legend-menu-open>.ds-legend-menu-parent{background:#efe9fb;color:#55358d}
 .ds-hidden-slide-notice{grid-column:1/-1;align-self:center;justify-self:center;display:flex;flex-direction:column;align-items:center;gap:.8rem;max-width:36rem;margin:auto;padding:1.4rem 1.6rem;border:1px dashed #cfc4e2;border-radius:.8rem;background:#faf8fe;color:#4a3d63;text-align:center}
 .ds-hidden-slide-notice p{margin:0;font-weight:700}
+/* View as Dashboard sits beside View Filters with the same height and shape. */
+.e2e-dashboards .ds-ppt-charts-view-dashboard { display: inline-flex; align-items: center; justify-content: center; align-self: end; width: auto; height: 2.55rem; min-height: 2.55rem; padding: .3rem 1rem; border-radius: 999px; font-size: .96rem; line-height: 1; }
