@@ -89,8 +89,8 @@
       // All: every value selected, or none (no restriction either way).
       allBox.checked = enabled > 0 && (count === 0 || count === enabled);
       const state = allBox.checked ? 'All' : `${count} of ${enabled}`;
-      caption.textContent = `${label}: ${presetBox?.checked && preset.dynamic ? preset.label : state}`;
-      summary.title = caption.textContent;
+      caption.textContent = presetBox?.checked && preset.dynamic ? preset.label : state;
+      summary.title = `${label}: ${caption.textContent}`;
     };
     // Checking All selects every value; unchecking it clears them to pick only some.
     allBox.addEventListener('change', () => {
@@ -118,13 +118,16 @@
     });
     wrapper.append(summary, menu);
     refresh();
+    // The filter name sits above its selector, which shows only the selection.
+    const field = node('div', undefined, 'rj-multi-field');
+    field.append(node('span', label, 'rj-multi-label'), wrapper);
     // All (or nothing selected) is saved as no restriction, so future values are included too.
-    wrapper.getValue = () => {
+    field.getValue = () => {
       const checked = boxes.filter((box) => box.checked && !box.disabled).map((box) => box.value);
       return allBox.checked || !checked.length ? [] : checked;
     };
-    wrapper.getPreset = () => Boolean(presetBox?.checked);
-    return wrapper;
+    field.getPreset = () => Boolean(presetBox?.checked);
+    return field;
   }
   document.addEventListener('click', (event) => {
     document.querySelectorAll('details.rj-multi[open]').forEach((picker) => { if (!picker.contains(event.target)) picker.open = false; });
@@ -633,7 +636,7 @@
     const savedMetrics = dataset.metrics && !Array.isArray(dataset.metrics) ? dataset.metrics : {};
     $('rj-da-metrics').replaceChildren(...Object.entries(options.cdr_kinds || {}).map(([kind, label]) => {
       const metrics = (options.cdr_metrics || {})[kind] || [];
-      const picker = multiPicker(`${label} Metrics`, metrics, savedMetrics[kind] || []);
+      const picker = multiPicker(label, metrics, savedMetrics[kind] || []);
       picker.dataset.rjMetrics = kind;
       return picker;
     }));

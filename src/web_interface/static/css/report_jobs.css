@@ -149,3 +149,5 @@
 .report-jobs .rj-multi .rj-multi-toggle { width: 100%; margin: .1rem 0 .25rem; padding: .42rem .55rem; border: 0; border-radius: 7px; background: #e3f3e9; color: #1f6b43; font-size: .76rem; font-weight: 750; text-align: left; box-shadow: none; cursor: pointer; }
 .report-jobs .rj-multi .rj-multi-toggle:hover { background: #d0ebdb; color: #174d31; }
 .report-jobs .rj-multi label.rj-multi-all { margin-bottom: .2rem; padding-bottom: .4rem; border-bottom: 1px solid rgba(47, 138, 87, .2); font-weight: 800; color: #1f6b43; }
+.report-jobs .rj-multi-field { display: grid; gap: .3rem; min-width: 0; }
+.report-jobs .rj-multi-label { color: #1f6b43; font-size: .82rem; font-weight: 800; }
