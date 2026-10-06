@@ -1183,7 +1183,7 @@ function setupChartInteractions(container) {
   zoomIn.addEventListener('click', () => apply((Number(container.dataset.chartZoom) || 1) + 0.5));
   reset.addEventListener('click', () => apply(1));
   controls.append(zoomOut, level, zoomIn, reset);
-  viewport.before(controls);
+  container.append(controls);
   apply(Number(container.dataset.chartZoom) || 1);
 }
 

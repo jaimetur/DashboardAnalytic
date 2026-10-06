@@ -3817,10 +3817,14 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
 /* CDR Analysis header: the Input Type and Dataset labels stay readable on the blue background. */
 .dataset-selector-grid label { color: #eaf4ff; font-weight: 700; }
 /* CDR Analysis charts: zoom controls, horizontal scrolling when zoomed and hover tooltips. */
-.chart-zoom { display: flex; justify-content: flex-end; align-items: center; gap: .3rem; margin: 0 0 .3rem; }
-.chart-zoom button { display: inline-grid; place-items: center; width: 1.8rem; height: 1.8rem; min-height: 0; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: #245a96; font-weight: 800; box-shadow: none; cursor: pointer; }
-.chart-zoom button:disabled { opacity: .45; cursor: default; }
-.chart-zoom-level { min-width: 3rem; color: #526371; font-size: .78rem; font-weight: 700; text-align: center; }
+/* Floating in the chart's top-right corner, outside the layout, so the chart keeps all its space. */
+.chart-card:has(> .chart-zoom) { position: relative; }
+.chart-zoom { position: absolute; z-index: 3; top: .5rem; right: .5rem; display: flex; align-items: center; gap: .15rem; padding: .15rem; border: 1px solid rgba(16, 49, 74, .12); border-radius: 9px; background: rgba(255, 255, 255, .82); box-shadow: 0 4px 12px rgba(16, 49, 74, .12); backdrop-filter: blur(4px); opacity: .7; transition: opacity .15s ease; }
+.chart-card:hover > .chart-zoom, .chart-zoom:focus-within { opacity: 1; }
+.chart-zoom button { display: inline-grid; place-items: center; width: 1.45rem; height: 1.45rem; min-height: 0; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #245a96; font-size: .85rem; font-weight: 800; line-height: 1; box-shadow: none; cursor: pointer; }
+.chart-zoom button:hover:not(:disabled) { background: #e8f1fb; }
+.chart-zoom button:disabled { opacity: .4; cursor: default; }
+.chart-zoom-level { min-width: 2.4rem; color: #526371; font-size: .7rem; font-weight: 700; text-align: center; }
 .chart-zoom-viewport { overflow-x: auto; overflow-y: hidden; }
 .chart-tooltip { position: fixed; z-index: 6000; display: grid; gap: .2rem; max-width: 22rem; padding: .45rem .6rem; border: 1px solid rgba(16, 49, 74, .2); border-radius: 9px; background: rgba(255, 255, 255, .97); color: #10314a; font-size: .78rem; box-shadow: 0 10px 26px rgba(16, 49, 74, .22); pointer-events: none; }
 .chart-tooltip span { display: flex; align-items: center; gap: .35rem; }
