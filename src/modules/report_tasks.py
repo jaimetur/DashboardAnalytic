@@ -24,7 +24,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
-from threading import Event, Lock
+from threading import Event, Lock, Thread
 from typing import Any
 
 from src.modules.column_names import sort_vendor_values
@@ -1120,6 +1120,32 @@ def install_report_task_routes(core: Any) -> None:
     core.execute_report_run = execute_run
 
     # -- options ------------------------------------------------------------
+    catalogue_backfills: set[str] = set()
+    catalogue_backfills_lock = Lock()
+
+    def complete_catalogues_in_background(task_repository, dataset_ids: list[int]) -> bool:
+        """Start (once per workspace) rebuilding incomplete CDR catalogues; True while some are pending."""
+        missing = task_repository.missing_cdr_catalogue_ids(dataset_ids)
+        if not missing:
+            return False
+        key = str(task_repository.db_path)
+        with catalogue_backfills_lock:
+            if key in catalogue_backfills:
+                return True
+            catalogue_backfills.add(key)
+
+        def run() -> None:
+            try:
+                core.backfill_cdr_catalogues(missing, task_repository)
+            except Exception as exc:  # The next editor opening tries again.
+                print(f'Unable to complete the CDR catalogues: {exc}', flush=True)
+            finally:
+                with catalogue_backfills_lock:
+                    catalogue_backfills.discard(key)
+
+        Thread(target=run, name='reporting-catalogue-backfill', daemon=True).start()
+        return True
+
     def reporting_options(task_repository, user) -> dict[str, Any]:
         from src.modules.e2e_dashboards import ADAPTATIVE_FILTER_FIELDS
 
@@ -1151,6 +1177,9 @@ def install_report_task_routes(core: Any) -> None:
             active_methodology = profiles['active_profile_id']
         except ValueError:
             methodologies, active_methodology = [], ''
+        # Filter values come from the cached catalogues; incomplete ones are rebuilt in the background
+        # (it can take minutes for large CDRs) and the editor says so instead of waiting.
+        catalogues_pending = complete_catalogues_in_background(task_repository, [item['id'] for item in datasets])
         catalogue = task_repository.cdr_catalogue_values()
         return {
             'allowed_modules': {module: core.user_has_feature(user, feature) for module, feature in MODULE_FEATURES.items()},
@@ -1172,6 +1201,7 @@ def install_report_task_routes(core: Any) -> None:
                              'Campaign': catalogue_values['campaigns']}
                 for dataset_id, catalogue_values in task_repository.cdr_catalogues_by_dataset([item['id'] for item in datasets]).items()
             },
+            'catalogues_pending': catalogues_pending,
             'scoring_levels': list(SCORING_LEVELS), 'formats': list(REPORT_FORMATS),
             # CDR Analysis: the metrics of the ready CDRs, and its aggregation and CDF comparison choices.
             'cdr_metrics': {kind: list(dict.fromkeys(

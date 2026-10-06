@@ -1180,13 +1180,18 @@ class Repository:
                          (self._catalogue_json(operators), local_now_iso(), int(dataset_id)))
 
     def missing_cdr_catalogue_ids(self, dataset_ids: Iterable[int]) -> list[int]:
-        """Identify CDRs created before catalogue persistence was introduced."""
+        """CDRs without a complete catalogue: none at all, or a partial row.
+
+        Single-universe backfills (Vendor, Cluster, Campaign…) can create a row
+        before the full catalogue exists; only a full catalogue stores Operators.
+        """
         ids = [int(dataset_id) for dataset_id in dataset_ids]
         if not ids:
             return []
         with self.connection() as conn:
             rows = conn.execute(
-                f"SELECT dataset_id FROM cdr_catalogues WHERE dataset_id IN ({','.join('?' for _ in ids)})",
+                f"SELECT dataset_id FROM cdr_catalogues WHERE operators_json IS NOT NULL "
+                f"AND dataset_id IN ({','.join('?' for _ in ids)})",
                 ids,
             ).fetchall()
         known = {int(row['dataset_id']) for row in rows}

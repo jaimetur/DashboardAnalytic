@@ -515,7 +515,8 @@
     });
     // Main Cities is the City filter's first choice: the workspace list at each run.
     const filters = scopedFilters(SCORING_FILTERS, entry.context_filters || {},
-      (key, checked) => (key === 'City' ? mainCitiesPreset(checked ?? Boolean(entry.main_cities), true) : null));
+      (key, checked) => (key === 'City' ? mainCitiesPreset(checked ?? Boolean(entry.main_cities), true) : null),
+      'rj-filters rj-filters-one-row');
     const datasets = node('div', undefined, 'rj-picker');
     // The filters list the values of the selected CDRs, or of every CDR of the NR Mode.
     const cdrsInUse = () => datasets.getValue().length ? datasets.getValue()
@@ -784,6 +785,9 @@
 
   async function ensureOptions() {
     options = await api('/api/reporting/options');
+    if (options.catalogues_pending) {
+      status('The filter values of some CDRs are being prepared in the background; reopen the editor in a few minutes to see all of them.', 'info');
+    }
     return options;
   }
 

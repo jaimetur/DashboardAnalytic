@@ -30,6 +30,7 @@
 - Column filter menus of Network Insights inventories and other Excel-style tables stay attached to their column while the page or the table scrolls.
 - Non-Qualified Calls filter dropdowns are no longer clipped, and the By CDR card and the Progress View legends show complete names.
 - Tables in the Help show their first column without splitting words.
+- Partial CDR catalogues (rows holding only some filter universes after the vendor migration) are detected and rebuilt from the CDR rows; Reporting Jobs rebuild them in the background and opens its editor at once.
 - CDR Analysis CDF comparisons draw one curve for every value of the chosen dimension when its filter lists every value, instead of only the values whose mapped name equals the source name.
 
 #### 📚 Documentation:
