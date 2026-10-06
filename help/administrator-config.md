@@ -144,7 +144,7 @@ For super-admins, complete unimported packages appear in **Recovered transfer pa
 - **Icon**, shown before the title, and **Colour**, the accent of the tab: its top line and icon when not selected and its gradient when selected. The default colour keeps the palette of the module.
 - The **Label** in the corner of the tab (for example ALPHA, BETA, NEW or STABLE, or empty for none), its colour, and an optional icon with its own colour.
 
-The Preview column draws each tab as it looks when it is not selected. Colours show their hexadecimal value below them to copy or paste it. **Show a label on the tab of each main module** hides every label at once, and **Reset tabs and labels to defaults** restores the default order, titles, icons, colours and labels.
+The Preview column draws each tab as it looks when it is not selected. Colours show their hexadecimal value below them to copy or paste it. **Show a label on the tab of each main module** hides every label at once, and **Reset tabs and labels to defaults** restores the default order, titles, icons, colours and labels. Interface Settings belong to the application configuration, so they travel with **App Config** in Import / Export, transfers to another server, Full Environment packages and backups.
 
 ## Database Management
 

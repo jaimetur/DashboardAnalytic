@@ -2930,6 +2930,33 @@ def test_full_environment_import_remaps_permissions_to_replaced_workspace_id(cli
     assert not app_module.repository.user_has_workspace_access('admin', source_workspace.id)
 
 
+def test_config_export_carries_the_interface_settings(client) -> None:
+    import src.DriveTestAnalyzer as app_module
+
+    login_super(client)
+    saved = {'show_module_stage_labels': 'true', 'title__reporting': 'Scheduled Reporting', 'tab_color__reporting': '#123456',
+             'label__reporting': 'GA', 'position__reporting': '1', 'position__datasets-analysis': '2'}
+    assert client.post('/admin/interface-settings', data=saved, follow_redirects=False).status_code == 303
+    exported = client.get('/admin/import-export/export?export_target=config')
+    assert exported.status_code == 200
+
+    client.post('/admin/interface-settings', data={'reset_module_labels': '1'}, follow_redirects=False)
+    assert app_module.load_module_labels(app_module.repository)['reporting']['title'] == 'Reporting'
+    assert not app_module.module_stage_labels_visible()
+
+    imported = client.post(
+        '/admin/import-export/import',
+        data={'confirmed_import': 'true'},
+        files={'package': ('configuration.zip', BytesIO(exported.content), 'application/zip')},
+        follow_redirects=False,
+    )
+    assert imported.status_code == 303
+    settings = app_module.load_module_labels(app_module.repository)
+    assert settings['reporting']['title'] == 'Scheduled Reporting' and settings['reporting']['tab_color'] == '#123456'
+    assert settings['reporting']['text'] == 'GA' and list(settings).index('reporting') == 1
+    assert app_module.module_stage_labels_visible()
+
+
 def test_config_import_replaces_global_users_and_preserves_user_ids(client) -> None:
     import src.DriveTestAnalyzer as app_module
 
