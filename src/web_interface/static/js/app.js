@@ -1142,13 +1142,31 @@ const chartTooltip = (() => {
       const x = Math.min(event.clientX + 14, window.innerWidth - tip.offsetWidth - 8);
       const y = Math.max(8, event.clientY - tip.offsetHeight - 12);
       tip.style.left = `${x}px`; tip.style.top = `${y}px`;
-      // A fast exit can skip the leave events: while visible, check that the pointer is still over the chart.
+      // A fast exit can skip the leave events: while visible, check that the last pointer position is still on the chart.
       owner = event.currentTarget instanceof Element ? event.currentTarget : event.target.closest?.('.chart-svg');
-      if (!watchdog) watchdog = window.setInterval(() => { if (!owner || !owner.matches(':hover')) hide(); }, 150);
+      if (!watchdog) {
+        watchdog = window.setInterval(() => {
+          const box = owner?.getBoundingClientRect();
+          const inside = box && pointer.x >= box.left && pointer.x <= box.right && pointer.y >= box.top && pointer.y <= box.bottom;
+          // Either signal is enough: browsers keep one of them up to date when the pointer leaves fast.
+          if (!owner || !owner.isConnected || !pointer.inWindow || !inside || !owner.matches(':hover')) hide();
+        }, 120);
+      }
     },
     hide,
   };
 })();
+// Where the pointer is anywhere in the page, and whether it is still in the window.
+const pointer = {x: -1, y: -1, inWindow: true};
+const trackPointer = (event) => { pointer.x = event.clientX; pointer.y = event.clientY; pointer.inWindow = true; };
+document.addEventListener('pointermove', trackPointer, {passive: true, capture: true});
+document.addEventListener('mousemove', trackPointer, {passive: true, capture: true});
+document.addEventListener('mouseout', (event) => {
+  if (!event.relatedTarget) { pointer.inWindow = false; chartTooltip.hide(); }
+}, {passive: true});
+document.documentElement.addEventListener('mouseleave', () => { pointer.inWindow = false; chartTooltip.hide(); });
+document.addEventListener('visibilitychange', () => chartTooltip.hide());
+document.addEventListener('pointerup', (event) => { if (!event.target.closest?.('.chart-svg')) chartTooltip.hide(); }, {passive: true});
 // The tooltip never outlives the pointer over its chart: leaving the chart, scrolling or switching window hides it.
 document.addEventListener('pointermove', (event) => { if (!event.target.closest?.('.chart-svg')) chartTooltip.hide(); }, {passive: true});
 window.addEventListener('scroll', () => chartTooltip.hide(), {passive: true, capture: true});
