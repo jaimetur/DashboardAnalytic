@@ -1,15 +1,19 @@
 {% extends 'base.html' %}
 {% block content %}
 <section class="dashboard-stack spacious-stack datasets-analysis-stack">
-  <article class="panel dataset-summary-panel select-dataset-card module-hero-datasets-analysis" style="background: linear-gradient(135deg, #0c4c8c, #68b8ff) !important; color: #ffffff;">
+  <article class="panel module-hero-datasets-analysis" style="background: linear-gradient(135deg, #0c4c8c, #68b8ff) !important; color: #ffffff;">
+    <p class="eyebrow">CDR Analysis</p>
+    <h2>KPI Analysis of a Single CDR</h2>
+    <p class="lede">Explore one processed Data, Voice or Speech CDR with adaptive filters, KPI summaries, percentile scorecards, CDF curves and group benchmarks, then export exactly what you see to PowerPoint or Word.</p>
+  </article>
+  <article class="panel dataset-summary-panel select-dataset-card cdr-dataset-panel" data-page-panel-label="Dataset" style="background: linear-gradient(135deg, #0c4c8c, #68b8ff) !important; color: #ffffff;">
         <div class="section-head tight-head">
           <div>
-            <p class="eyebrow">CDR Analysis</p>
-            <h2>{{ selected_dataset.file_name if selected_dataset else 'Select Dataset' }}</h2>
+            <p class="eyebrow">Dataset</p>
+            <h2>Select CDR to Analyze</h2>
           </div>
           {% if selected_dataset %}<span class="pill status-pill status-{{ selected_dataset.status }}">{{ selected_dataset.status_label }}</span>{% endif %}
         </div>
-        <p class="lede">Explore a processed source with adaptive filters, KPI summaries, percentile scorecards and comparison charts. The selected dataset and active scope are also used by the Word and PowerPoint analysis exports.</p>
         <form id="datasets-analysis-dataset-form" class="dataset-selector-grid" action="/datasets-analysis" method="get" data-loading-label="Opening datasets analysis">
           <label>Input Type
             <select name="input_kind" data-input-kind-select>

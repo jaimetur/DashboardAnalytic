@@ -8102,7 +8102,7 @@ def test_dashboard_explicit_dataset_id_overrides_mismatched_input_kind_filter(cl
 
     response = client.get("/datasets-analysis?dataset_id=2&input_kind=voice")
     assert response.status_code == 200
-    assert "<h2>data.csv</h2>" in response.text
+    assert "<h2>Select CDR to Analyze</h2>" in response.text
     assert 'option value="2" data-dataset-kind="data" selected' in response.text
 
 

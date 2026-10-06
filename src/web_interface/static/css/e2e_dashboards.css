@@ -1,9 +1,9 @@
 .e2e-dashboards{--ds-color:#7751b9;--ds-soft:#f3effa;--ds-border:#d6c8ea}
 .module-hero-e2e-dashboards .lede,.module-hero-e2e-dashboards .eyebrow{color:#f5efff}
 .module-hero-e2e-dashboards{min-height:0;background:linear-gradient(125deg,#403078,#9678c7)!important;color:white}
-.module-hero-e2e-dashboards .eyebrow{margin:0 0 .25rem}
-.module-hero-e2e-dashboards h2{margin:0}
-.module-hero-e2e-dashboards .lede{margin:.45rem 0 0}
+.module-hero-e2e-dashboards .eyebrow{margin:0 0 .35rem}
+.module-hero-e2e-dashboards h2{margin:1.25rem 0}
+.module-hero-e2e-dashboards .lede{margin:1rem 0}
 .e2e-dashboards button,.e2e-dashboards .button{background:var(--ds-color);color:white;border-color:var(--ds-color)}
 .e2e-dashboards button:disabled{opacity:.45;cursor:not-allowed}
 .e2e-dashboards .danger-button{background:#a33850;border-color:#a33850}

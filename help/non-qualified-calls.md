@@ -8,7 +8,7 @@ The module is in development, so its main tab shows a red **NEW** label. It is h
 
 A Non-Qualified (NQ) call is any Voice or Speech call, or any Data test, whose result is not **Completed**: for example **Failed** and **Dropped** Voice calls and **Failed** and **Cutoff** Data tests. The result is read from the processed `status` field of the CDR, or from `Call_Status`, `Test_Result` or `Test_Status` when it is missing. Rows without a result are not included.
 
-Every ready Voice, Speech and Data CDR of the active workspace is indexed automatically the first time the page opens and again whenever a CDR is added, reprocessed or deleted, so the list always matches the workspace datasets. The header shows how many NQ calls and CDRs are indexed and when they were last indexed; **Refresh** reloads them.
+Every ready Voice, Speech and Data CDR of the active workspace is indexed automatically the first time the page opens and again whenever a CDR is added, reprocessed or deleted, so the list always matches the workspace datasets. The top of the **Filters** panel shows how many NQ calls and CDRs are indexed and when they were last indexed; **Refresh** reloads them.
 
 Each call keeps a stable identity built from its service, Operator, Campaign and test or session identifier (`Test_ID`, `Session_ID_A`, `Session_id` or `JOIN_ID`; without one, its subscriber, test name and start and end times). Its status, team, assignee and comments therefore stay with it when its CDR is reprocessed or uploaded again. When the same call appears in two CDRs, it is listed once.
 

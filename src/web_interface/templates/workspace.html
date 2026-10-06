@@ -1,7 +1,16 @@
 {% extends 'base.html' %}
 {% block content %}
 <section class="dashboard-stack spacious-stack">
-  <article class="panel hero-panel workspace-switcher-panel">
+  <article class="panel hero-panel workspace-hero">
+    <div class="section-head tight-head">
+      <div>
+        <p class="eyebrow">Workspace</p>
+        <h2>Isolated Workspaces for your Data</h2>
+      </div>
+    </div>
+    <p class="lede">Each workspace keeps its own datasets apart (CDRs, Smart Orchestrator logs, Vendor mappings, Region and Cluster polygons and the rest of its sources) together with their processing history, configuration, dashboards and reports, with access granted by role, group or user. Open the workspace to work in, or create and manage workspaces below.</p>
+  </article>
+  <article class="panel workspace-switcher-panel" data-page-panel-label="Workspaces Management">
     <div class="section-head tight-head">
       <div>
         <p class="eyebrow">Workspaces Management</p>
@@ -12,7 +21,6 @@
         <span class="pill live-pill">Active workspace: {{ active_workspace.name if active_workspace else 'None' }}</span>
       </div>
     </div>
-    <p class="lede">Datasets, processing history and reporting data are isolated in the selected workspace.</p>
     {% if workspace_notice %}<span data-workspace-result data-workspace-result-tone="info" hidden>{{ workspace_notice }}</span>{% endif %}
     {% if workspace_warning %}<span data-workspace-result data-workspace-result-tone="warning" hidden>{{ workspace_warning }}</span>{% endif %}
     {% if workspace_error %}<span data-workspace-result data-workspace-result-tone="error" hidden>{{ workspace_error }}</span>{% endif %}

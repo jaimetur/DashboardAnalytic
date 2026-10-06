@@ -5,12 +5,13 @@
 }
 .non-qualified-calls .nq-hero { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; min-height: 0; background: linear-gradient(125deg, #7d1238, #e0507a) !important; border-color: rgba(125, 18, 56, .55); color: #fff; }
 .non-qualified-calls .nq-hero :is(.eyebrow, .lede) { color: #ffe6ee; }
-.non-qualified-calls .nq-hero .eyebrow { margin: 0 0 .25rem; }
-.non-qualified-calls .nq-hero h2 { margin: 0; color: #fff; }
-.non-qualified-calls .nq-hero .lede { max-width: 72rem; margin: .45rem 0 0; }
-.nq-hero-side { display: grid; justify-items: end; gap: .6rem; flex: 0 0 auto; }
-.nq-sync { margin: 0; padding: .45rem .8rem; border: 1px solid rgba(255, 255, 255, .35); border-radius: 999px; background: rgba(255, 255, 255, .14); color: #fff; font-size: .84rem; font-weight: 700; white-space: nowrap; }
-.nq-hero-action { padding: .55rem 1.1rem; border: 1px solid rgba(255, 255, 255, .6); border-radius: 999px; background: #fff; color: var(--nq-dark); font-weight: 800; box-shadow: 0 8px 18px rgba(80, 8, 34, .25); }
+.non-qualified-calls .nq-hero .eyebrow { margin: 0 0 .35rem; }
+.non-qualified-calls .nq-hero h2 { margin: 1.25rem 0; color: #fff; }
+.non-qualified-calls .nq-hero .lede { max-width: 72rem; margin: 1rem 0; }
+/* The indexing status and Refresh open the Filters panel. */
+.nq-sync-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .65rem; margin-bottom: 1rem; }
+.nq-sync { margin: 0; padding: .5rem 1rem; border: 0; border-radius: 999px; background: linear-gradient(125deg, #7d1238, #e0507a); color: #fff; font-size: .84rem; font-weight: 800; white-space: nowrap; box-shadow: 0 6px 14px rgba(125, 18, 56, .25); }
+.nq-hero-action { padding: .55rem 1.1rem; border: 1px solid rgba(125, 18, 56, .35); border-radius: 999px; background: #fff; color: var(--nq-dark); font-weight: 800; box-shadow: 0 6px 14px rgba(80, 8, 34, .14); }
 .nq-hero-action:hover:not(:disabled) { background: var(--nq-soft); }
 .non-qualified-calls .collapsible-summary h2, .non-qualified-calls .collapsible-summary .eyebrow { color: var(--nq-dark); }
 .non-qualified-calls .collapse-chip { border-color: var(--nq-border); color: var(--nq-dark); }
@@ -219,7 +220,6 @@
 
 @media (max-width: 900px) {
   .non-qualified-calls .nq-hero { flex-direction: column; align-items: flex-start; }
-  .nq-hero-side { justify-items: start; }
   .nq-sync { white-space: normal; }
   .nq-drawer-tracking, .nq-options-columns { grid-template-columns: minmax(0, 1fr); }
 }

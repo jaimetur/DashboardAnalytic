@@ -8,10 +8,6 @@
       <h2>Follow up every call and test that did not complete</h2>
       <p class="lede">Every Voice and Speech call and every Data test whose result is not Completed (Failed, Dropped, Cutoff…) in the ready CDRs of this workspace. Review the overall health, drill down from the summary into the calls, and track each one with a status, a responsible team, an assignee and a shared comment thread.</p>
     </div>
-    <div class="nq-hero-side">
-      <p class="nq-sync" id="nq-sync" role="status">Indexing Non-Qualified Calls…</p>
-      <button type="button" class="nq-hero-action" id="nq-refresh" title="Reload the calls, their follow-up and any new or changed CDRs">Refresh</button>
-    </div>
   </article>
 
   {% if not active_workspace %}
@@ -20,6 +16,10 @@
   <details class="panel collapsible-panel nq-filters-panel" open data-panel-state-key="non-qualified-calls:filters">
     <summary class="collapsible-summary"><div><p class="eyebrow">Selection</p><h2>Filters</h2></div><span class="collapse-chip">Collapse</span></summary>
     <div class="collapsible-panel-body">
+      <div class="nq-sync-bar">
+        <p class="nq-sync" id="nq-sync" role="status">Indexing Non-Qualified Calls…</p>
+        <button type="button" class="nq-hero-action" id="nq-refresh" title="Reload the calls, their follow-up and any new or changed CDRs">Refresh</button>
+      </div>
       <div class="nq-filter-grid" id="nq-filter-grid">
         <label>CDRs<select data-nq-filter="datasets" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="CDRs"></select></label>
         <label>Campaign<select data-nq-filter="campaign" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Campaign"></select></label>

@@ -2,9 +2,9 @@
 .network-insights{--ni-color:#4338ca;--ni-dark:#312e81;--ni-soft:#eef0ff;--ni-border:#c7cbf7}
 .network-insights .ni-hero{min-height:0;background:linear-gradient(125deg,#1e1b4b,#4f46e5)!important;color:#fff}
 .network-insights .ni-hero :is(.eyebrow,.lede){color:#e8e9ff}
-.network-insights .ni-hero .eyebrow{margin:0 0 .25rem}
-.network-insights .ni-hero h2{margin:0}
-.network-insights .ni-hero .lede{margin:.45rem 0 0}
+.network-insights .ni-hero .eyebrow{margin:0 0 .35rem}
+.network-insights .ni-hero h2{margin:1.25rem 0}
+.network-insights .ni-hero .lede{margin:1rem 0}
 .network-insights .collapsible-summary h2{color:var(--ni-dark)}
 /* Every visible selection control shares one row on wide screens. */
 .ni-selection-grid{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);align-items:end;gap:12px}

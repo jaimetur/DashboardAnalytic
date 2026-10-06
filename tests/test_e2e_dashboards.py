@@ -1474,14 +1474,15 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "dashboardFiltersOpen = false;" in dashboard_script
     assert "$('ds-filter-panel').hidden = true;" in dashboard_script
     chart_builder_template = (Path(__file__).parents[1] / 'src/web_interface/templates/chart_builder.html').read_text(encoding='utf-8')
-    assert '<p class="eyebrow">Chart Builder</p><h2>Ad-Hoc Analysis</h2>' in chart_builder_template
+    assert '<p class="eyebrow">Chart Builder</p><h2>Ad-Hoc Charts from your CDRs</h2>' in chart_builder_template
     assert 'data-page-panel-label="Interactive Preview"' in chart_builder_template
     assert '<p class="eyebrow">Chart Builder</p>\n        <h2>Interactive Preview</h2>' in chart_builder_template
     assert '<p class="eyebrow">Chart Definition</p>' in chart_builder_template
     workspace_template = (Path(__file__).parents[1] / 'src/web_interface/templates/workspace.html').read_text(encoding='utf-8')
     assert '<p class="eyebrow">Workspaces Management</p>\n        <h2>Select Workspace</h2>' in workspace_template
     datasets_analysis_template = (Path(__file__).parents[1] / 'src/web_interface/templates/datasets_analysis.html').read_text(encoding='utf-8')
-    assert '<p class="eyebrow">CDR Analysis</p>\n            <h2>{{ selected_dataset.file_name if selected_dataset else \'Select Dataset\' }}</h2>' in datasets_analysis_template
+    assert '<p class="eyebrow">CDR Analysis</p>\n    <h2>KPI Analysis of a Single CDR</h2>' in datasets_analysis_template
+    assert '<p class="eyebrow">Dataset</p>\n            <h2>Select CDR to Analyze</h2>' in datasets_analysis_template
     app_logs_template = (Path(__file__).parents[1] / 'src/web_interface/templates/app_logs.html').read_text(encoding='utf-8')
     assert '<p class="eyebrow">Application activity</p>\n        <h2>App Logs</h2>' in app_logs_template
     documentation_template = (Path(__file__).parents[1] / 'src/web_interface/templates/doc_view.html').read_text(encoding='utf-8')
