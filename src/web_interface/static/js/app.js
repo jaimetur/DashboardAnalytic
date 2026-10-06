@@ -1,3 +1,26 @@
+// Errors answered by a proxy in front of the server, or by a server failure, are
+// not JSON. They are given a JSON detail naming the cause, so every page that shows
+// the detail of a failed request explains it instead of a generic message.
+(() => {
+  const nativeFetch = window.fetch?.bind(window);
+  if (!nativeFetch) return;
+  const describe = (status) => {
+    if (status === 502 || status === 503) return `The server did not answer (HTTP ${status}). It may be restarting or busy, for example materializing Auto-calculated Fields; try again in a few minutes.`;
+    if (status === 504) return 'The server did not answer in time (HTTP 504). It may be busy, for example materializing Auto-calculated Fields; try again in a few minutes.';
+    if (status === 413) return 'The request is too large for the server (HTTP 413).';
+    if (status >= 500) return `The server failed while processing the request (HTTP ${status}). App Logs shows the error.`;
+    return '';
+  };
+  window.fetch = async (...args) => {
+    const response = await nativeFetch(...args);
+    if (response.ok || (response.status < 500 && response.status !== 413)) return response;
+    if ((response.headers.get('content-type') || '').includes('application/json')) return response;
+    const detail = describe(response.status);
+    return detail ? new Response(JSON.stringify({detail}), {
+      status: response.status, statusText: response.statusText, headers: {'Content-Type': 'application/json'},
+    }) : response;
+  };
+})();
 // Browser state saved before the rename to DriveTest Analyzer used the "dashboard-analytic:" prefix.
 // Move it once to the current prefix so remembered filters, panels and drafts survive the update.
 (() => {

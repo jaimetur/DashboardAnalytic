@@ -2982,6 +2982,10 @@ async def lifespan(_: FastAPI):
         name='e2e-reporting-scheduler', daemon=True,
     )
     report_scheduler_thread.start()
+    try:
+        _interrupt_stale_transfer_offers()
+    except sqlite3.Error:
+        pass
     _recover_unimported_transfer_packages()
     _cleanup_expired_export_packages()
     # Opening the active workspace can run one-time database upgrades that take minutes.
@@ -5208,6 +5212,9 @@ def render_template(request: Request, template_name: str, context: dict[str, Any
         'show_module_stage_labels': module_stage_labels_visible(),
         'module_tab_badges': module_label_badges(module_settings) if module_stage_labels_visible() else {},
         'module_tabs': module_tabs(module_settings),
+        # Analyses of the active workspace are slower while its Auto-calculated Fields are materialized.
+        'workspace_materializing': bool(active_workspace) and isinstance(template_user, SessionUser) and not embedded_template_editor
+        and repository.get_workspace_state('calculated_dimensions_need_materialization') == 'processing',
         'administrative_icons': ADMINISTRATIVE_ICONS,
         'module_label_settings': {
             'modules': [(module, dict(MAIN_MODULES)[module]) for module in module_settings],
@@ -6680,8 +6687,11 @@ def restore_database_backup(
                     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
                         raise ValueError(f'Backup fields for "{workspace_name}" are invalid.') from exc
                     task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
-                    task_repository.replace_calculated_dimensions(calculated_dimensions_json(parsed))
-                    task_repository.set_workspace_state('calculated_dimensions_need_materialization', '1')
+                    current = parse_calculated_dimensions(task_repository.list_calculated_dimensions())
+                    # Identical fields need no materialization of the whole workspace.
+                    if calculated_dimensions_json(current) != calculated_dimensions_json(parsed):
+                        task_repository.replace_calculated_dimensions(calculated_dimensions_json(parsed))
+                        task_repository.set_workspace_state('calculated_dimensions_need_materialization', '1')
                     advance(f'Auto-calculated Fields restored for {workspace_name}')
             if 'query_builder_queries' in selected:
                 member = f'{prefix}query-builder-queries/query-builder-queries.json'
@@ -8472,6 +8482,9 @@ def import_auto_calculated_fields(
         )
         previous = parse_calculated_dimensions(task_repository.list_calculated_dimensions())
         saved = parse_calculated_dimensions(calculated_dimensions_json(imported))
+        if calculated_dimensions_json(previous) == calculated_dimensions_json(saved):
+            # Identical fields need no materialization of the whole workspace.
+            continue
         affected_sources = affected_calculated_dimension_sources(previous, saved)
         task_repository.replace_calculated_dimensions(calculated_dimensions_json(saved))
         if affected_sources:
@@ -9043,7 +9056,44 @@ def _start_received_transfer(offer_id: str) -> None:
     ).start()
 
 
+# Incoming transfers this server process is importing right now.
+ACTIVE_TRANSFER_IMPORTS: set[str] = set()
+INTERRUPTED_TRANSFER_ERROR = 'Interrupted: the server stopped before this transfer finished, and nothing more is imported. Send it again if needed.'
+
+
+def _interrupt_stale_transfer_offers(
+    offer_ids: Iterable[str] | None = None, statuses: frozenset[str] = frozenset({'receiving', 'received', 'importing'}),
+) -> list[str]:
+    """Mark incoming transfers that no running import will finish as interrupted.
+
+    A server restart stops every receive and import, and they never resume on their
+    own, so they are not left shown as running. ``offer_ids`` and ``statuses`` limit
+    it to those offers and states.
+    """
+    interrupted = []
+    wanted = set(offer_ids) if offer_ids is not None else None
+    with TRANSFER_LOCK:
+        _refresh_persisted_transfer_offers()
+        for offer_id, offer in TRANSFER_OFFERS.items():
+            if wanted is not None and offer_id not in wanted:
+                continue
+            if offer.get('status') in statuses and offer_id not in ACTIVE_TRANSFER_IMPORTS:
+                offer.update({'status': 'failed', 'phase': 'interrupted', 'error': INTERRUPTED_TRANSFER_ERROR,
+                              'finished_at': datetime.now(timezone.utc).timestamp()})
+                _save_transfer_offer(offer)
+                interrupted.append(offer_id)
+    return interrupted
+
+
 def _run_received_transfer(offer_id: str) -> None:
+    ACTIVE_TRANSFER_IMPORTS.add(offer_id)
+    try:
+        _import_received_transfer(offer_id)
+    finally:
+        ACTIVE_TRANSFER_IMPORTS.discard(offer_id)
+
+
+def _import_received_transfer(offer_id: str) -> None:
     with TRANSFER_LOCK:
         offer = TRANSFER_OFFERS.get(offer_id)
         if not offer:
@@ -10828,6 +10878,9 @@ def _global_background_tasks(user: SessionUser, accessible_ids: set[str]) -> lis
             prefix == 'import' and job.get('status') == 'queued'
         ) or (
             prefix == 'incoming-transfer' and job.get('status') in {'receiving', 'received'}
+        ) or (
+            # An import no running process will finish can be closed.
+            prefix == 'incoming-transfer' and job.get('status') == 'importing' and str(job.get('id')) not in ACTIVE_TRANSFER_IMPORTS
         )
         if can_stop:
             task['stop_task_id'] = f'{prefix}:{job.get("id")}'
@@ -11292,6 +11345,9 @@ def stop_server_background_task(task_id: str = Form(...), user: SessionUser = De
     if prefix == 'incoming-transfer':
         if user.role != 'super-admin':
             raise HTTPException(status_code=403, detail='Only super-admins can stop incoming transfers.')
+        # An import that no running process will finish (left by a restart) is simply closed.
+        if _interrupt_stale_transfer_offers([job_id], frozenset({'importing'})):
+            return JSONResponse({'stopping': task_id})
         with TRANSFER_LOCK:
             _refresh_persisted_transfer_offers()
             offer = TRANSFER_OFFERS.get(job_id)
@@ -12647,11 +12703,20 @@ def datasets_analysis(
         repository.set_workspace_state(DATASETS_ANALYSIS_SELECTION_KEY, json.dumps(saved_selection))
         # Reset opens the dataset with its default analysis.
         return RedirectResponse(f'/datasets-analysis?{urlencode({**opened, "load": "1"})}', status_code=status.HTTP_303_SEE_OTHER)
+    restored_address = ''
     if not should_load_analysis(request) and not (set(request.query_params) - {'dataset_id', 'input_kind'}):
         restored = saved_selection['queries'].get(str(dataset_id or saved_selection.get('dataset_id') or ''))
         if restored:
-            return RedirectResponse(f'/datasets-analysis?{restored}', status_code=status.HTTP_303_SEE_OTHER)
-        if dataset_id is not None:
+            # The saved selection is shown here rather than through a redirect: a long
+            # selection does not fit in the Location header behind some reverse
+            # proxies (Synology answers 502 above about 4 KB). The browser then shows
+            # its address, which the page scripts read.
+            request = Request({**request.scope, 'query_string': restored.encode('latin-1', errors='ignore')})
+            restored_dataset = request.query_params.get('dataset_id') or ''
+            dataset_id = int(restored_dataset) if restored_dataset.isdigit() else dataset_id
+            input_kind = request.query_params.get('input_kind') or input_kind
+            restored_address = f'/datasets-analysis?{restored}'
+        elif dataset_id is not None:
             # Open Dataset shows the analysis at once, without Update Analysis.
             return RedirectResponse(f'/datasets-analysis?{urlencode({**opened, "load": "1"})}', status_code=status.HTTP_303_SEE_OTHER)
     datasets, ready_datasets, input_kind_options, selected_dataset = build_dataset_view_state(dataset_id, input_kind, CDR_DATASET_KINDS)
@@ -12685,6 +12750,7 @@ def datasets_analysis(
             'input_kind': input_kind,
             'input_kind_options': input_kind_options,
             'error': analysis_error,
+            'restored_address': restored_address,
         },
     )
 

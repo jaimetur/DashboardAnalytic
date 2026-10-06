@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% block content %}
 {% import 'datasets_analysis_metric_parts.html' as metric_parts with context %}
+{% if restored_address %}<script>history.replaceState(history.state, '', {{ restored_address | tojson }});</script>{% endif %}
 <section class="dashboard-stack spacious-stack datasets-analysis-stack">
   <article class="panel module-hero-datasets-analysis" style="background: linear-gradient(135deg, #0c4c8c, #68b8ff) !important; color: #ffffff;">
     <p class="eyebrow">CDR Analysis</p>

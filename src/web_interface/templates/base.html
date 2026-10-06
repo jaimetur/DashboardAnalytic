@@ -87,6 +87,7 @@
         </div>
       </nav>
       {% endif %}
+      {% if workspace_materializing %}<div class="alert alert-warning workspace-materializing-notice" role="status"><strong>Updating the Auto-calculated Fields of {{ active_workspace.name }}.</strong> Analyses and exports may be slower or fail until it finishes; try again in a few minutes.</div>{% endif %}
       {% block content %}{% endblock %}
     </main>
     {% if user and not embedded_template_editor and not embedded_preview %}

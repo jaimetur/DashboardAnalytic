@@ -382,6 +382,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .form-note { color: var(--muted); font-size: 0.92rem; }
 .alert { background: rgba(225, 95, 58, 0.13); color: #9d3417; padding: 0.9rem 1rem; border-radius: 14px; margin-top: 1rem; }
 .alert-warning { background: rgba(213, 143, 31, 0.16); color: #80520a; border: 1px solid rgba(181, 114, 14, 0.28); }
+.workspace-materializing-notice { margin: 0 0 1rem; }
 .user-password-editor { display: grid; width: 100%; }
 .user-password-editor > input { grid-area: 1 / 1; min-width: 0; width: 100%; padding-right: 3rem; }
 .password-masked { -webkit-text-security: disc; }

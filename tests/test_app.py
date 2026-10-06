@@ -5772,6 +5772,41 @@ def test_orphaned_auto_field_materialization_can_be_stopped_from_background_pane
     )
 
 
+def test_importing_identical_auto_calculated_fields_does_not_materialize_the_workspace(client) -> None:
+    import src.DriveTestAnalyzer as app_module
+
+    login_super(client)
+    workspace = app_module.active_workspace
+    current = app_module.repository.list_calculated_dimensions()
+    app_module.repository.set_workspace_state('calculated_dimensions_need_materialization', '0')
+    app_module.import_auto_calculated_fields(current, [workspace.id])
+    assert app_module.repository.get_workspace_state('calculated_dimensions_need_materialization') == '0'
+
+
+def test_incoming_transfer_left_importing_by_a_restart_is_closed(client) -> None:
+    import src.DriveTestAnalyzer as app_module
+
+    login_super(client)
+    offer_id = 'stale-import'
+    app_module.repository.save_transfer_offer({
+        'id': offer_id, 'status': 'importing', 'phase': 'validating', 'progress': 0, 'content': 'Config',
+        'created_at': 1, 'updated_at': 1,
+    })
+    with app_module.TRANSFER_LOCK:
+        app_module._refresh_persisted_transfer_offers()
+    # No running import will finish it, so its card can be stopped, which closes it.
+    groups = client.get('/api/background-tasks').json()['groups']
+    task = next(task for group in groups for task in group['tasks'] if task['id'] == f'incoming-transfer:{offer_id}')
+    assert task['stop_url'] == '/api/server-background-tasks/stop'
+    assert client.post('/api/server-background-tasks/stop', data={'task_id': f'incoming-transfer:{offer_id}'}).status_code == 200
+    stored = {str(offer['id']): offer for offer in app_module.repository.list_transfer_offers()}[offer_id]
+    assert stored['status'] == 'failed' and stored['phase'] == 'interrupted'
+
+    # Startup closes every transfer a stopped server left receiving or importing.
+    app_module.repository.save_transfer_offer({'id': 'stale-receive', 'status': 'received', 'created_at': 1, 'updated_at': 1})
+    assert app_module._interrupt_stale_transfer_offers() == ['stale-receive']
+
+
 def test_incoming_transfer_cannot_stop_after_import_begins(client, monkeypatch) -> None:
     import src.DriveTestAnalyzer as app_module
 
@@ -5794,6 +5829,7 @@ def test_incoming_transfer_cannot_stop_after_import_begins(client, monkeypatch) 
             'parent_task_id': f'incoming-transfer:{offer_id}', 'created_at': 2,
         },
     })
+    monkeypatch.setattr(app_module, 'ACTIVE_TRANSFER_IMPORTS', {offer_id})
 
     groups = client.get('/api/background-tasks').json()['groups']
     task = next(
@@ -10237,10 +10273,12 @@ def test_datasets_analysis_filters_are_shared_and_cdf_compares_operators(client)
     page = client.get("/datasets-analysis?dataset_id=1&metric=score&operator=EE&load=1").text
     assert '<option value="operator" selected' in page
     assert page.index('<option value="operator"') < page.index('<option value="operator_vendor"')
-    # Another session opens the same selection.
+    # Another session opens the same selection, shown at once without a redirect
+    # (a long selection would not fit in a Location header behind some proxies).
     restored = client.get("/datasets-analysis", follow_redirects=False)
-    assert restored.status_code == 303 and 'operator=EE' in restored.headers['location']
-    assert client.get("/datasets-analysis?dataset_id=1", follow_redirects=False).status_code == 303
+    assert restored.status_code == 200 and '<option value="operator" selected' in restored.text
+    assert 'history.replaceState(history.state, \'\', "/datasets-analysis?' in restored.text and 'operator=EE' in restored.text
+    assert client.get("/datasets-analysis?dataset_id=1", follow_redirects=False).status_code == 200
     # Reset clears it and opens the default analysis; Open Dataset always shows the analysis.
     reset = client.get("/datasets-analysis?dataset_id=1&reset=1", follow_redirects=False)
     assert reset.status_code == 303 and reset.headers['location'] == '/datasets-analysis?dataset_id=1&load=1'
