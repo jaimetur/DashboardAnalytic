@@ -59,10 +59,10 @@
     const search = node('input', undefined, 'workspace-user-picker-search');
     search.type = 'search'; search.placeholder = 'Filter…'; search.setAttribute('aria-label', `Filter ${label}`);
     menu.append(search);
-    // All Values: no restriction. It is checked while nothing (or everything) is selected.
+    // All: no restriction. It is checked while nothing (or everything) is selected.
     const allRow = node('label', undefined, 'rj-multi-option rj-multi-all');
     const allBox = node('input'); allBox.type = 'checkbox';
-    allRow.append(allBox, node('span', 'All Values'));
+    allRow.append(allBox, node('span', 'All'));
     if (values.length) menu.append(allRow);
     let presetBox = null;
     if (preset) {
@@ -86,13 +86,13 @@
       if (presetBox && preset.dynamic) boxes.forEach((box) => { box.disabled = presetBox.checked; });
       const count = boxes.filter((box) => box.checked && !box.disabled).length;
       const enabled = boxes.filter((box) => !box.disabled).length;
-      // All Values: every value selected, or none (no restriction either way).
+      // All: every value selected, or none (no restriction either way).
       allBox.checked = enabled > 0 && (count === 0 || count === enabled);
-      const state = allBox.checked ? 'All Values' : `${count} of ${enabled}`;
+      const state = allBox.checked ? 'All' : `${count} of ${enabled}`;
       caption.textContent = `${label}: ${presetBox?.checked && preset.dynamic ? preset.label : state}`;
       summary.title = caption.textContent;
     };
-    // Checking All Values selects every value; unchecking it clears them to pick only some.
+    // Checking All selects every value; unchecking it clears them to pick only some.
     allBox.addEventListener('change', () => {
       boxes.forEach((box) => { if (!box.disabled) box.checked = allBox.checked; });
       if (presetBox && !preset.dynamic) presetBox.checked = false;
@@ -118,7 +118,7 @@
     });
     wrapper.append(summary, menu);
     refresh();
-    // All Values (or nothing selected) is saved as no restriction, so future values are included too.
+    // All (or nothing selected) is saved as no restriction, so future values are included too.
     wrapper.getValue = () => {
       const checked = boxes.filter((box) => box.checked && !box.disabled).map((box) => box.value);
       return allBox.checked || !checked.length ? [] : checked;
@@ -629,7 +629,7 @@
     datasetPicker($('rj-da-datasets'), options.datasets, dataset.dataset_ids || [], 'Every ready CDR dataset at each run');
     $('rj-da-aggregation').replaceWith(Object.assign(singleChoiceRow('Aggregation', options.cdr_aggregations || {}, dataset.aggregation || 'all'), {id: 'rj-da-aggregation'}));
     $('rj-da-cdf').replaceWith(Object.assign(singleChoiceRow('CDF Comparison', options.cdr_cdf_groupings || {}, dataset.cdf_grouping || 'operator'), {id: 'rj-da-cdf'}));
-    // One metric selector per CDR type; All Values (the default) includes every metric, also future ones.
+    // One metric selector per CDR type; All (the default) includes every metric, also future ones.
     const savedMetrics = dataset.metrics && !Array.isArray(dataset.metrics) ? dataset.metrics : {};
     $('rj-da-metrics').replaceChildren(...Object.entries(options.cdr_kinds || {}).map(([kind, label]) => {
       const metrics = (options.cdr_metrics || {})[kind] || [];
