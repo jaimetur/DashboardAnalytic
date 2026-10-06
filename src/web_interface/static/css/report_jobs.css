@@ -188,3 +188,8 @@
 .reporting-jobs-table tr.rj-editor-row > td.rj-editor-cell { padding: .3rem 0 1rem; border: 0; background: transparent; white-space: normal; font-weight: 400; vertical-align: top; }
 .reporting-jobs-table tr.rj-editor-row:hover > td { background: transparent; }
 .reporting-jobs-table tr.rj-editor-row .rj-editor-subpanel { margin-top: 0; }
+/* Job Editor actions: Cancel (red) and Save share the same height. */
+.report-jobs #rj-form .form-actions { display: flex; align-items: stretch; justify-content: flex-end; gap: .7rem; }
+.report-jobs #rj-form .form-actions > button { display: inline-flex; align-items: center; justify-content: center; min-height: 3rem; padding: .7rem 1.6rem; box-sizing: border-box; font-size: 1rem; font-weight: 800; line-height: 1.2; }
+.report-jobs #rj-form #rj-cancel { border: 1px solid #b83232; background: #d64545; color: #fff; box-shadow: 0 6px 14px rgba(214, 69, 69, .25); }
+.report-jobs #rj-form #rj-cancel:hover { background: #b83232; }
