@@ -377,7 +377,7 @@ The PPT preserves template slides, layouts, chart proportions, titles, legends a
 
 Title covers match the viewer: Campaigns appear in orange above the divider; Scope, Regions and Cities appear beneath in green, cyan and pink. Chart subtitles use normal letter spacing.
 
-Generated PPTs, chart PNGs, tooltips and Canvas assets are stored under **output/dashboards**.
+Generated PPTs, chart PNGs, tooltips and Canvas assets are stored under **output/reports/dashboards**.
 
 | Filename part | Contents |
 | --- | --- |

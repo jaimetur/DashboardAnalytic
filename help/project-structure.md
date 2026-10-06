@@ -139,9 +139,14 @@ Report Templates become CSV files only inside portable export, transfer and back
 
 ### Generated output
 
-- `output/reports/`: classic Report PPTX files and report chart assets.
-- `output/charts/`: standalone Chart Sets.
-- `output/dashboards/`: Dashboard PPTX files plus persistent PNG, tooltip and Canvas-model assets used by PPT Generation Jobs and Charts Panel.
+- `output/reports/dashboards/`: Dashboard PowerPoint jobs and their persistent PNG, tooltip and Canvas-model assets.
+- `output/reports/cdr-analysis/`: CDR Analysis PowerPoint and Word exports.
+- `output/reports/network-insights/`: Summary Network Insights PowerPoint and Word exports.
+- `output/reports/reports-old/`: Reporting (old) PowerPoint reports and their PNG charts.
+- `output/reports/reports-charts-old/`: Reporting (old) Chart Sets.
+- `output/reports/reporting-jobs/`: Reporting Job runs, one folder per run with its artifacts.
+
+Workspaces, backups and transfer packages created with the former layout (module folders directly below `output/` and loose documents in `output/reports/`) are moved to these folders the first time the workspace is opened, and the job paths stored in the workspace database follow them.
 
 `transfer-packages/` holds temporary or recoverable portable packages. `scheduled-backups/` is the default Admin backup destination. `.map-tiles-cache/openstreetmap/` is a shared regenerable tile cache outside individual workspaces.
 

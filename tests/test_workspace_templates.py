@@ -264,10 +264,10 @@ def test_workspace_duplicate_optionally_copies_generated_reports_and_chart_sets(
     assert source is not None
     source_repository = Repository(source.database_path, tmp_path / 'application.db')
     source_repository.initialize()
-    report = source.export_dir / 'generated.pptx'
+    report = source.export_dir / 'reports-old' / 'generated.pptx'
     report.parent.mkdir(parents=True, exist_ok=True)
     report.write_bytes(b'report')
-    chart = source.output_dir / 'charts' / '20260910-120000' / 'chart-1.png'
+    chart = source.output_dir / 'reports' / 'reports-charts-old' / '20260910-120000' / 'chart-1.png'
     chart.parent.mkdir(parents=True, exist_ok=True)
     chart.write_bytes(b'chart')
     with sqlite3.connect(source.database_path) as connection:
@@ -278,15 +278,15 @@ def test_workspace_duplicate_optionally_copies_generated_reports_and_chart_sets(
         )
 
     copied = registry.duplicate(source.id, include_generated_outputs=True)
-    assert (copied.export_dir / 'generated.pptx').read_bytes() == b'report'
-    assert (copied.output_dir / 'charts' / '20260910-120000' / 'chart-1.png').read_bytes() == b'chart'
+    assert (copied.export_dir / 'reports-old' / 'generated.pptx').read_bytes() == b'report'
+    assert (copied.output_dir / 'reports' / 'reports-charts-old' / '20260910-120000' / 'chart-1.png').read_bytes() == b'chart'
     with sqlite3.connect(copied.database_path) as connection:
         copied_path = connection.execute('SELECT output_path FROM generated_jobs').fetchone()[0]
-    assert copied_path == str(copied.export_dir / 'generated.pptx')
+    assert copied_path == str(copied.export_dir / 'reports-old' / 'generated.pptx')
 
     without_outputs = registry.duplicate(source.id)
-    assert not (without_outputs.export_dir / 'generated.pptx').exists()
-    assert not (without_outputs.output_dir / 'charts').exists()
+    assert not (without_outputs.export_dir / 'reports-old' / 'generated.pptx').exists()
+    assert not (without_outputs.output_dir / 'reports' / 'reports-charts-old').exists()
     with sqlite3.connect(without_outputs.database_path) as connection:
         assert connection.execute('SELECT COUNT(*) FROM generated_jobs').fetchone()[0] == 0
 

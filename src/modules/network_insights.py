@@ -26,6 +26,7 @@ import numpy as np
 import pandas as pd
 
 from src.modules.column_names import column_identity, compact_campaign_value, operator_vendor_filter_values, sort_vendor_values, vendor_filter_values
+from src.modules.output_layout import NETWORK_INSIGHTS_FOLDER, module_output_dir
 
 
 NETWORK_INSIGHTS_KINDS = ('data', 'voice', 'speech')
@@ -2144,7 +2145,8 @@ def install_network_insights_routes(core: Any) -> None:
             raise HTTPException(404, 'Unsupported export type.')
         suffix = 'docx' if export_kind == 'word' else 'pptx'
         stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        destination = core.safe_join(core.settings.export_dir, f'{stamp}_summary_network_insights.{suffix}')
+        destination = core.safe_join(module_output_dir(core.settings.output_dir, NETWORK_INSIGHTS_FOLDER, create=True),
+                                     f'{stamp}_summary_network_insights.{suffix}')
         try:
             write_summary(request.model_dump(), export_kind, destination)
         except HTTPException:

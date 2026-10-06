@@ -27,6 +27,7 @@ from uuid import uuid4
 import pandas as pd
 from src.modules.column_names import column_identity, compact_campaign_value, sort_vendor_values, vendor_filter_column, vendor_filter_value, vendor_filter_values, vendor_match_values
 from src.modules.nr_mode import DEFAULT_NR_MODE, dataset_nr_mode, normalize_nr_mode
+from src.modules.output_layout import DASHBOARDS_FOLDER, module_output_dir
 from fastapi import BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
@@ -1647,7 +1648,7 @@ def install_dashboard_routes(core):
         )
 
     def dashboard_ppt_output_dir(task_repository) -> Path:
-        return Path(task_repository.db_path).parent / 'output' / 'dashboards'
+        return module_output_dir(Path(task_repository.db_path).parent / 'output', DASHBOARDS_FOLDER)
 
     def remove_dashboard_ppt_job_folder(task_repository, output_path) -> None:
         """Delete one job folder, never anything outside the Dashboard output root."""

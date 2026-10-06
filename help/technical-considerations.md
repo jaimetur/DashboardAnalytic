@@ -45,11 +45,16 @@ Stored below `APP_DATA_DIR/workspaces/<workspace>/`:
 
 - `<workspace>.db`: datasets, profiles, audit events, Dashboard definitions and selections, generated jobs, Auto-calculated Fields, complete Report Templates in `report_templates`, and materialised reporting rows.
 - `input/`: uploaded source files.
-- `output/reports/`: generated PowerPoint reports and their PNG charts.
-- `output/charts/`: standalone Chart Sets.
-- `output/dashboards/`: Dashboard PowerPoint jobs and their persistent PNG, tooltip and Canvas-model assets.
+- `output/reports/dashboards/`: Dashboard PowerPoint jobs and their persistent PNG, tooltip and Canvas-model assets.
+- `output/reports/cdr-analysis/`: CDR Analysis PowerPoint and Word exports.
+- `output/reports/network-insights/`: Summary Network Insights PowerPoint and Word exports.
+- `output/reports/reports-old/`: Reporting (old) PowerPoint reports and their PNG charts.
+- `output/reports/reports-charts-old/`: Reporting (old) Chart Sets.
+- `output/reports/reporting-jobs/`: Reporting Job runs, one folder per run with its artifacts.
 - `.dashboard-data-cache/`: regenerable E2E Dashboard preview manifests and live Canvas/legacy PIL chart artifacts. Dashboard SQL reads the combined CDR tables in the workspace database directly; this directory is not a user dataset or source of record.
 - `.dashboard-cache-version.json`: signature used to invalidate caches written by older application or cache-format versions.
+
+Workspaces, backups and transfer packages created with the former layout (module folders directly below `output/` and loose documents in `output/reports/`) are moved to these folders the first time the workspace is opened, and the job paths stored in the workspace database follow them.
 
 Application-level derived data lives below `APP_DATA_DIR`: `transfer-packages/` holds temporary/recoverable portability archives, `scheduled-backups/` is the default Admin backup destination and `.map-tiles-cache/openstreetmap/` stores regenerable map tiles.
 
@@ -240,17 +245,17 @@ Classic Reports and standalone Chart Sets share the `generated_jobs` table and a
 Output locations:
 
 ```text
-output/reports/<report-name>/
+output/reports/reports-old/<report-name>/
   <report-name>.pptx
   report-charts/
 
-output/charts/<generation>/
+output/reports/reports-charts-old/<generation>/
 ```
 
 Dashboard PowerPoint generations use the separate `dashboard_ppt_jobs` table because they preserve a saved Dashboard identity and its exact applied definition. Each job records its CDR selection, dates, NR Mode, scope, adaptive filters, preview fingerprint and progress. Its output contains the PPTX plus persistent PNG, tooltip and Canvas-model assets:
 
 ```text
-output/dashboards/<timestamp - dashboard-name>/
+output/reports/dashboards/<timestamp - dashboard-name>/
 ```
 
 The Dashboard jobs UI supports stop, retry, relaunch and deletion. A completed job can be reopened through Charts Panel without rerendering its charts, and its Filtered Chart Dataset replays the saved selection directly against the combined CDR table used at generation time.

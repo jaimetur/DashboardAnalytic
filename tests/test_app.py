@@ -2310,7 +2310,7 @@ def test_reporting_deletion_requires_admin(client) -> None:
         # Live job renderers must not recreate delete buttons for normal users.
         assert ('remove.dataset.reportJobDelete = job.delete_url' in page.text) == allowed
         assert ('remove.dataset.reportChartJobDelete = job.delete_url' in page.text) == allowed
-        marker = app_module.settings.output_dir / 'reports' / 'permission-check.txt'
+        marker = app_module.settings.output_dir / 'reports' / 'reports-old' / 'permission-check.txt'
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text('Preserve for normal users', encoding='utf-8')
         for endpoint in endpoints:
@@ -3019,13 +3019,13 @@ def test_workspace_export_can_exclude_generated_dashboards_reports_and_chart_set
     import src.DriveTestAnalyzer as app_module
 
     login_super(client)
-    report = app_module.settings.output_dir / 'reports' / 'generated.pptx'
+    report = app_module.settings.output_dir / 'reports' / 'reports-old' / 'generated.pptx'
     report.parent.mkdir(parents=True, exist_ok=True)
     report.write_bytes(b'report')
-    chart = app_module.settings.output_dir / 'charts' / '20260907-120000' / 'chart-1.png'
+    chart = app_module.settings.output_dir / 'reports' / 'reports-charts-old' / '20260907-120000' / 'chart-1.png'
     chart.parent.mkdir(parents=True, exist_ok=True)
     chart.write_bytes(b'chart')
-    dashboard = app_module.settings.output_dir / 'dashboards' / '20260907_120000 - Dashboard' / 'dashboard.pptx'
+    dashboard = app_module.settings.output_dir / 'reports' / 'dashboards' / '20260907_120000 - Dashboard' / 'dashboard.pptx'
     dashboard.parent.mkdir(parents=True, exist_ok=True)
     dashboard.write_bytes(b'dashboard')
 
@@ -3033,9 +3033,9 @@ def test_workspace_export_can_exclude_generated_dashboards_reports_and_chart_set
     app_module.build_export_archive_file('workspace:default', included_archive, include_generated_outputs=True)
     with zipfile.ZipFile(included_archive) as archive:
         assert json.loads(archive.read('manifest.json'))['includes_generated_outputs'] is True
-        assert 'workspaces/Default/output/reports/generated.pptx' in archive.namelist()
-        assert 'workspaces/Default/output/charts/20260907-120000/chart-1.png' in archive.namelist()
-        assert 'workspaces/Default/output/dashboards/20260907_120000 - Dashboard/dashboard.pptx' in archive.namelist()
+        assert 'workspaces/Default/output/reports/reports-old/generated.pptx' in archive.namelist()
+        assert 'workspaces/Default/output/reports/reports-charts-old/20260907-120000/chart-1.png' in archive.namelist()
+        assert 'workspaces/Default/output/reports/dashboards/20260907_120000 - Dashboard/dashboard.pptx' in archive.namelist()
 
     excluded_archive = tmp_path / 'excluded.zip'
     app_module.build_export_archive_file('workspace:default', excluded_archive, include_generated_outputs=False)
@@ -4260,7 +4260,7 @@ def test_workspace_management_isolates_dataset_databases_and_remembers_last_open
     assert app_module.repository.db_path == default_db
     assert len(app_module.repository.list_datasets()) == 1
 
-    dashboard_output = app_module.settings.output_dir / 'dashboards' / '20260915_120000 - Default Dashboard' / 'dashboard.pptx'
+    dashboard_output = app_module.settings.output_dir / 'reports' / 'dashboards' / '20260915_120000 - Default Dashboard' / 'dashboard.pptx'
     dashboard_output.parent.mkdir(parents=True, exist_ok=True)
     dashboard_output.write_bytes(b'dashboard')
     with app_module.repository.connection() as conn:
@@ -4285,7 +4285,7 @@ def test_workspace_management_isolates_dataset_databases_and_remembers_last_open
     assert app_module.repository.user_has_workspace_access('admin', copied_workspace.id)
     with app_module.repository.connection() as conn:
         assert conn.execute('SELECT COUNT(*) FROM datasets').fetchone()[0] == 1
-    copied_dashboard_output = copied_workspace.output_dir / 'dashboards' / '20260915_120000 - Default Dashboard' / 'dashboard.pptx'
+    copied_dashboard_output = copied_workspace.output_dir / 'reports' / 'dashboards' / '20260915_120000 - Default Dashboard' / 'dashboard.pptx'
     assert copied_dashboard_output.read_bytes() == b'dashboard'
     with sqlite3.connect(copied_workspace.database_path) as conn:
         assert conn.execute('SELECT output_path FROM dashboard_ppt_jobs').fetchone()[0] == str(copied_dashboard_output)
@@ -5942,7 +5942,8 @@ def test_workspace_import_replaces_an_open_workspace_and_removes_old_files(clien
         stored_path = connection.execute('SELECT stored_path FROM datasets').fetchone()[0]
         report_path = connection.execute('SELECT output_path FROM generated_jobs').fetchone()[0]
     assert stored_path == str(imported.input_dir / 'new-data.csv')
-    assert report_path == str(imported.export_dir / 'imported.pptx')
+    assert report_path == str(imported.output_dir / 'reports' / 'reports-old' / 'imported.pptx')
+    assert (imported.output_dir / 'reports' / 'reports-old' / 'imported.pptx').is_file()
     assert app_module.repository.user_has_workspace_access('admin', imported.id)
     assert all(' - Importing ' not in workspace.name for workspace in app_module.workspace_registry.list())
     assert not imported.slides_templates_dir.exists()
@@ -5985,7 +5986,10 @@ def test_delete_all_reports_removes_orphaned_output_directories(client) -> None:
     import src.DriveTestAnalyzer as app_module
 
     login_super(client)
-    reports_root = Path(app_module.settings.output_dir) / 'reports'
+    reports_root = Path(app_module.settings.output_dir) / 'reports' / 'reports-old'
+    dashboard_output = Path(app_module.settings.output_dir) / 'reports' / 'dashboards' / 'kept.pptx'
+    dashboard_output.parent.mkdir(parents=True, exist_ok=True)
+    dashboard_output.write_bytes(b'dashboard')
     orphaned = reports_root / 'report-without-job' / 'report-charts'
     orphaned.mkdir(parents=True, exist_ok=True)
     (orphaned / 'chart-1.png').write_bytes(b'old chart')
@@ -6004,6 +6008,7 @@ def test_delete_all_reports_removes_orphaned_output_directories(client) -> None:
     assert status_response.json()['status'] == 'ready'
     assert reports_root.is_dir()
     assert list(reports_root.iterdir()) == []
+    assert dashboard_output.read_bytes() == b'dashboard'
 
 
 def test_admin_panel_is_available_for_admin(client) -> None:
@@ -10042,3 +10047,5 @@ def test_cdr_analysis_export_keeps_each_cdf_visible_range(client) -> None:
     response = client.post("/datasets-analysis/export/powerpoint", data={
         "dataset_id": "1", "metric": "score", "cdf_ranges": '{"score": [85, 90]}'})
     assert response.status_code == 200
+    stored = list((app_module.settings.output_dir / 'reports' / 'cdr-analysis').glob('*_report_*.pptx'))
+    assert len(stored) == 1 and not list(app_module.settings.export_dir.glob('*_report_*.pptx'))

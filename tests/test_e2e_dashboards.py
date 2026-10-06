@@ -2251,7 +2251,7 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypa
         output_path.name,
     )
     assert output_path.parent.name == output_path.stem
-    assert output_path.parent.parent == Path(core.repository.db_path).parent / 'output' / 'dashboards'
+    assert output_path.parent.parent == Path(core.repository.db_path).parent / 'output' / 'reports' / 'dashboards'
     assert len(list(charts_dir.glob('*.png'))) == 3
     assert len(list(charts_dir.glob('*.hover.json'))) == 3
     assert len(list(charts_dir.glob('*.model.json'))) == 3

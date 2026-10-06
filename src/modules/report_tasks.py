@@ -29,6 +29,7 @@ from typing import Any
 
 from src.branding import canonical_format
 from src.modules.column_names import sort_vendor_values
+from src.modules.output_layout import REPORTING_JOBS_FOLDER, module_output_dir
 
 REPORT_TASKS_TABLE = 'report_tasks'
 REPORT_TASK_RUNS_TABLE = 'report_task_runs'
@@ -833,7 +834,7 @@ def install_report_task_routes(core: Any) -> None:
         return core.SessionUser(username=username, role=record.role if record else 'user-editor')
 
     def output_root() -> Path:
-        return Path(core.settings.output_dir) / 'reporting'
+        return module_output_dir(core.settings.output_dir, REPORTING_JOBS_FOLDER)
 
     # -- artifact generators ------------------------------------------------
     def dataset_names(task_repository) -> dict[int, str]:

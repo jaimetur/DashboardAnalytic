@@ -3495,8 +3495,8 @@ def test_chart_set_writes_sidecars_directly_to_its_final_generation(tmp_path: Pa
 
     def rendered_charts():
         generation = published[0]
-        assert (tmp_path / 'charts' / generation).is_dir()
-        assert not list((tmp_path / 'charts').glob('.report-charts-*'))
+        assert (tmp_path / 'reports' / 'reports-charts-old' / generation).is_dir()
+        assert not list((tmp_path / 'reports' / 'reports-charts-old').glob('.report-charts-*'))
         yield ({
             'slide': 1, 'title': 'Chart', 'source': 'data', 'chart_type': 'Bar',
             'hover_targets': [{'kind': 'bar', 'x': 1}],
@@ -3508,7 +3508,7 @@ def test_chart_set_writes_sidecars_directly_to_its_final_generation(tmp_path: Pa
         before_publish=published.append,
     )
 
-    generation_dir = tmp_path / 'charts' / chart_set['generation']
+    generation_dir = tmp_path / 'reports' / 'reports-charts-old' / chart_set['generation']
     assert (generation_dir / 'chart-001.png').read_bytes() == b'PNG'
     assert json.loads((generation_dir / 'chart-001.hover.json').read_text(encoding='utf-8')) == [{'kind': 'bar', 'x': 1}]
 

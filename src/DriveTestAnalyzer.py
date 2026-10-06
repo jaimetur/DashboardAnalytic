@@ -94,6 +94,9 @@ from src.modules.query_builder import MAX_PREVIEW_ROWS, execute_query, iter_quer
 from src.runtime_logs import execution_log_entries
 from src.modules.workspaces import Workspace, WorkspaceRegistry
 from src.branding import BACKUP_FILE_PATTERNS, canonical_format
+from src.modules.output_layout import (
+    CDR_ANALYSIS_FOLDER, REPORTS_CHARTS_OLD_FOLDER, REPORTS_OLD_FOLDER, migrate_output_layout, module_output_dir,
+)
 from src.version import __app_name__, __release_date__, __version__
 from src.utils.filesystem import ensure_directories, safe_join
 
@@ -2598,6 +2601,7 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
             first_initialization = database_key not in INITIALIZED_WORKSPACE_DATABASES
             if first_initialization:
                 repository.initialize()
+                migrate_output_layout(workspace.output_dir, workspace.database_path)
                 recovered_scoring_ids = recover_interrupted_scoring_jobs(repository)
                 if recovered_scoring_ids:
                     repository.try_add_log('system', 'recover_interrupted_scoring_jobs', json.dumps({
@@ -8045,6 +8049,14 @@ def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | Non
                     'UPDATE dashboard_ppt_jobs SET output_path = REPLACE(output_path, ?, ?)',
                     (str(source_output_dir), str(workspace.output_dir)),
                 )
+            has_report_task_runs = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'report_task_runs'"
+            ).fetchone()
+            if source_output_dir and has_report_task_runs:
+                connection.execute(
+                    'UPDATE report_task_runs SET output_dir = REPLACE(output_dir, ?, ?)',
+                    (str(source_output_dir), str(workspace.output_dir)),
+                )
             if has_generated_jobs:
                 # Older archives did not always retain source output metadata.
                 # Resolve copied report files inside the destination workspace
@@ -8060,6 +8072,7 @@ def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | Non
                             'UPDATE generated_jobs SET output_path = ? WHERE id = ?',
                             (str(target), report_id),
                         )
+        migrate_output_layout(workspace.output_dir, workspace.database_path)
         shutil.rmtree(workspace.database_path.parent / 'slides-templates', ignore_errors=True)
     except Exception:
         workspace_registry.remove(workspace.id)
@@ -12828,9 +12841,12 @@ def _report_job_output_path(row: Any) -> Path | None:
         candidates.append(Path(stored))
     file_name = Path(str(row['output_file'] or '')).name
     if file_name:
-        # New reports live under the active workspace's output tree.  Keep the
-        # former exports location as a compatibility fallback for old jobs.
+        # New reports live in output/reports/reports-old.  Keep the former
+        # locations as a compatibility fallback for old jobs.
+        reports_old = module_output_dir(settings.output_dir, REPORTS_OLD_FOLDER)
         candidates.extend((
+            reports_old / Path(file_name).stem / file_name,
+            reports_old / file_name,
             Path(settings.output_dir) / 'reports' / file_name,
             Path(settings.export_dir) / file_name,
             Path(settings.output_dir) / file_name,
@@ -12843,7 +12859,7 @@ def _report_job_output_path(row: Any) -> Path | None:
 
 def _report_job_directory(file_name: str, output_dir: Path | None = None) -> Path:
     """Return the dedicated directory for one generated PowerPoint report."""
-    reports_dir = Path(output_dir or settings.output_dir) / 'reports'
+    reports_dir = module_output_dir(output_dir or settings.output_dir, REPORTS_OLD_FOLDER)
     stem = Path(file_name).stem
     return safe_join(reports_dir, stem)
 
@@ -14460,11 +14476,11 @@ def _run_report_chart_job(
 
 def report_charts_directory(output_dir: Path | None = None) -> Path:
     """Return the active workspace directory containing timestamped chart sets."""
-    return Path(output_dir or settings.output_dir) / 'charts'
+    return module_output_dir(output_dir or settings.output_dir, REPORTS_CHARTS_OLD_FOLDER)
 
 
 def _migrate_report_charts_root(output_dir: Path | None = None) -> None:
-    """Move pre-v0.2.1 Chart Sets from output/report-charts to output/charts."""
+    """Move pre-v0.2.1 Chart Sets from output/report-charts to the current Chart Sets folder."""
     root = Path(output_dir or settings.output_dir)
     legacy = root / 'report-charts'
     destination = report_charts_directory(output_dir)
@@ -14786,7 +14802,7 @@ def start_bulk_report_deletion(workspace: Workspace, kind: str, username: str) -
                         _delete_report_job_artifacts(deleted, workspace.output_dir)
                     with BULK_REPORT_DELETION_JOBS_LOCK:
                         job.update(completed=index)
-                reports_root = workspace.output_dir / 'reports'
+                reports_root = module_output_dir(workspace.output_dir, REPORTS_OLD_FOLDER)
                 if reports_root.is_dir():
                     shutil.rmtree(reports_root)
                 reports_root.mkdir(parents=True, exist_ok=True)
@@ -16772,6 +16788,11 @@ def write_dataset_summary(
     return destination, reports, errors
 
 
+def cdr_analysis_export_dir() -> Path:
+    """Folder of the active workspace that keeps CDR Analysis PowerPoint and Word exports."""
+    return module_output_dir(settings.output_dir, CDR_ANALYSIS_FOLDER, create=True)
+
+
 @app.post('/datasets-analysis/summary/{export_kind}')
 def export_dataset_summary(
     export_kind: str,
@@ -16782,7 +16803,7 @@ def export_dataset_summary(
         raise HTTPException(status_code=404, detail='Unsupported export type')
     suffix = 'docx' if export_kind == 'word' else 'pptx'
     stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    destination = safe_join(settings.export_dir, f'{stamp}_summary_dataset_analysis.{suffix}')
+    destination = safe_join(cdr_analysis_export_dir(), f'{stamp}_summary_dataset_analysis.{suffix}')
     try:
         write_dataset_summary(dataset_ids, export_kind, destination, user.username)
     except ValueError as exc:
@@ -16886,7 +16907,7 @@ def export_report(
             default=str,
         ).encode('utf-8')
     ).hexdigest()[:10]
-    presentation = safe_join(settings.export_dir, f'{file_stem}_report_{report_hash}.pptx')
+    presentation = safe_join(cdr_analysis_export_dir(), f'{file_stem}_report_{report_hash}.pptx')
     try:
         if not presentation.exists():
             export_powerpoint_report(presentation, report_payload)

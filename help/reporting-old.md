@@ -54,7 +54,7 @@ For the complete schema, supported chart types, examples, Filter Builder languag
 Enter the report name, choose datasets, NR Mode, scope and template, then queue generation. The job creates:
 
 ```text
-output/reports/<report-name>/
+output/reports/reports-old/<report-name>/
   <report-name>.pptx
   report-charts/
 ```
@@ -66,7 +66,7 @@ The PPTX uses `Template_CDR_analysis.pptx` masters/layouts and the selected Repo
 This queues a standalone Chart Set under:
 
 ```text
-output/charts/<generation>/
+output/reports/reports-charts-old/<generation>/
 ```
 
 Chart Sets use the same datasets, NR Mode, scope, template and renderer as Reports without building the final PowerPoint.

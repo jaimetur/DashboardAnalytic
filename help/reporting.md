@@ -85,7 +85,7 @@ Times use the application timezone set in Application Config. The scheduler chec
 | Partial | Some artifacts failed; the others were emailed |
 | Failed | No artifact was generated, or the email could not be sent |
 
-Runs interrupted by an application restart are marked as failed. Artifacts are stored under the application output folder in `reporting/`.
+Runs interrupted by an application restart are marked as failed. Artifacts are stored in `output/reports/reporting-jobs/` of the workspace, one folder per run.
 
 ## Portability
 
