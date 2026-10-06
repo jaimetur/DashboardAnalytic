@@ -3852,3 +3852,8 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
 .dataset-summary-groups .vendor-mapping-cdr-choice input { flex: 0 0 auto; width: 1rem; height: 1rem; margin: .15rem 0 0; }
 .dataset-export-current { align-items: flex-start; }
 @media (max-width: 900px) { .dataset-summary-groups { grid-template-columns: minmax(0, 1fr); } }
+/* Confirmation copy written as HTML (paragraphs and lists) keeps its own spacing. */
+.confirm-panel #confirm-copy:has(> p, > ul) { white-space: normal; }
+.confirm-panel #confirm-copy > p { margin: 0 0 .6rem; }
+.confirm-panel #confirm-copy > ul { margin: 0 0 .7rem; padding-left: 1.2rem; }
+.confirm-panel #confirm-copy > ul li { margin: .2rem 0; }
