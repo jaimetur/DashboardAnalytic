@@ -789,13 +789,38 @@
   };
   document.getElementById('rj-enabled')?.addEventListener('change', syncEnabledLabel);
 
-  // The editor is a sub-panel of the saved jobs: it unfolds to edit and folds away on Cancel or Save.
+  // The editor unfolds inside the jobs table, right below the job being edited (above the others),
+  // or at the top for a new job, and folds away on Cancel, Save or ×.
+  const editorHome = document.createComment('rj-editor');
+  // Kept by reference: refreshing the table detaches the editor row until placeEditor() puts it back.
+  const editorElement = document.getElementById('rj-editor');
+  let editorOpen = false;
+  function placeEditor() {
+    const editor = editorElement;
+    const body = $('rj-tasks').tBodies[0];
+    let row = document.getElementById('rj-editor-row');
+    if (!editorOpen) {
+      if (row) { editorHome.after(editor); row.remove(); }
+      return;
+    }
+    if (!row) {
+      row = node('tr'); row.id = 'rj-editor-row'; row.className = 'rj-editor-row';
+      const cell = node('td', undefined, 'rj-editor-cell'); cell.colSpan = 8;
+      row.append(cell);
+    }
+    row.cells[0].append(editor);
+    const edited = editingId !== null ? body.querySelector(`tr[data-task-id="${editingId}"]`) : null;
+    if (edited) edited.after(row); else body.prepend(row);
+  }
   function openEditor(taskId) {
-    const editor = $('rj-editor');
-    const panel = editor.closest('details');
+    const editor = editorElement;
+    if (!editorHome.isConnected) editor.before(editorHome);
+    const panel = editor.closest('details') || $('rj-tasks').closest('details');
     if (panel) panel.open = true;
     document.querySelectorAll('#rj-tasks tr.rj-editing').forEach((row) => row.classList.remove('rj-editing'));
     if (taskId !== null) document.querySelector(`#rj-tasks tr[data-task-id="${taskId}"]`)?.classList.add('rj-editing');
+    editorOpen = true;
+    placeEditor();
     editor.hidden = false;
     editor.classList.remove('is-closing');
     editor.classList.add('is-opening');
@@ -803,12 +828,16 @@
     editor.scrollIntoView({behavior: 'smooth', block: 'start'});
   }
   function closeEditor() {
-    const editor = $('rj-editor');
+    const editor = editorElement;
     editingId = null;
     document.querySelectorAll('#rj-tasks tr.rj-editing').forEach((row) => row.classList.remove('rj-editing'));
     if (editor.hidden) return;
     editor.classList.add('is-closing');
-    editor.addEventListener('animationend', () => { editor.hidden = true; editor.classList.remove('is-closing'); }, {once: true});
+    editor.addEventListener('animationend', () => {
+      editor.hidden = true; editor.classList.remove('is-closing');
+      editorOpen = false;
+      placeEditor();
+    }, {once: true});
   }
 
   async function ensureOptions() {
@@ -853,6 +882,7 @@
     const body = $('rj-tasks').tBodies[0];
     if (!state.tasks.length) {
       emptyRow(body, 'No Reporting Jobs yet.', 8);
+      placeEditor();
       return;
     }
     body.replaceChildren(...state.tasks.map((task) => {
@@ -910,6 +940,7 @@
       row.cells[4].title = task.recipients.join(', ');
       return row;
     }));
+    placeEditor();
   }
 
   function renderRuns() {

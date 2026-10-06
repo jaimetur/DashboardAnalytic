@@ -184,3 +184,7 @@
 .report-jobs .rj-editor-close { position: absolute; top: .8rem; right: .8rem; display: grid; place-items: center; width: 2rem; height: 2rem; min-height: 0; padding: 0; border: 0; border-radius: 50%; background: #d64545; color: #fff; font-size: 1.3rem; font-weight: 800; line-height: 1; box-shadow: 0 4px 10px rgba(214, 69, 69, .3); cursor: pointer; }
 .report-jobs .rj-editor-close:hover { background: #b83232; }
 .report-jobs .rj-editor-close:focus-visible { outline: 3px solid rgba(214, 69, 69, .35); outline-offset: 2px; }
+/* The editor row of the jobs table: no table styling around the sub-panel. */
+.reporting-jobs-table tr.rj-editor-row > td.rj-editor-cell { padding: .3rem 0 1rem; border: 0; background: transparent; white-space: normal; font-weight: 400; vertical-align: top; }
+.reporting-jobs-table tr.rj-editor-row:hover > td { background: transparent; }
+.reporting-jobs-table tr.rj-editor-row .rj-editor-subpanel { margin-top: 0; }
