@@ -28,6 +28,7 @@
 - Whenever implementing or modifying a feature, review all documentation related to that feature.
 - Update any documentation that is no longer accurate after the change.
 - Documentation must describe the final supported behavior, not intermediate implementation attempts or temporary states.
+- Main modules can be renamed in Admin → Interface Settings, and the Help shows their new title. Write module titles of several words (for example `Network Insights`) as they are; in section headings they keep their name. Write the one-word modules (`Workspace`, `Reporting`, `Builders`) as a link to their chapter (`[Reporting](reporting.md)`, `[Workspace Management](workspace-management.md)`) or in bold (`**Reporting**`) when they name the module, and plainly when the word means something else (for example Reporting Jobs or Reporting (old)).
 
 ## Import, Export, Transfers, Backup and Restore
 

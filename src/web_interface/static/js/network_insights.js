@@ -244,20 +244,36 @@
   $('ni-progress-hide').onclick = hideProgress;
   $('ni-progress-dialog').addEventListener('cancel', () => clearInterval(progress.timer));
 
-  const analyse = async (mapOperator = '') => {
+  // The last analysed request, to show its stored result again when the page
+  // opens with the same selection.
+  const lastAnalysisKey = storageKey ? `${storageKey}:last-analysis` : '';
+  const readLastAnalysis = () => {
+    try { return JSON.parse(localStorage.getItem(lastAnalysisKey) || 'null'); } catch { return null; }
+  };
+  const analyse = async (mapOperator = '', {cachedOnly = false} = {}) => {
     const request = ++analysing;
     const button = $('ni-analyse');
+    const body = requestBody(mapOperator);
     button.disabled = true; button.classList.add('is-busy');
-    status('Analysing the selected CDRs… CDRs analysed for the first time are read and prepared first.', 'busy');
-    showProgress('Analysing the selected CDRs. CDRs analysed for the first time (or changed since) are read and prepared first, which can take from a few seconds to a minute or more depending on their size; after that, new filters take a few seconds and repeated analyses are immediate.');
+    if (cachedOnly) {
+      status('Showing the last analysis of this selection…', 'busy');
+    } else {
+      status('Analysing the selected CDRs… CDRs analysed for the first time are read and prepared first.', 'busy');
+      showProgress('Analysing the selected CDRs. CDRs analysed for the first time (or changed since) are read and prepared first, which can take from a few seconds to a minute or more depending on their size; after that, new filters take a few seconds and repeated analyses are immediate.');
+    }
     try {
-      const response = await fetch('/api/network-insights/analysis', {
-        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(requestBody(mapOperator)),
+      const response = await fetch(`/api/network-insights/analysis${cachedOnly ? '?cached_only=true' : ''}`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
       });
+      if (cachedOnly && response.status === 204) {
+        if (request === analysing) status('');
+        return;
+      }
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.detail || 'Unable to analyse the selected CDRs.');
       if (request !== analysing) return;
       analysis = payload;
+      try { if (lastAnalysisKey) localStorage.setItem(lastAnalysisKey, JSON.stringify(body)); } catch {}
       fillFilterOptions(payload.options);
       render();
       const comparison = payload.comparison ? ` Changes compare ${payload.comparison.latest} with ${payload.comparison.previous}.` : '';
@@ -265,10 +281,18 @@
         `${integer(section.overview.reduce((total, row) => total + row.samples, 0))} ${section.technology_label}`).join(' and ');
       status(`Analysed ${counts} samples.${comparison}${payload.warnings.length ? ` ${payload.warnings.join(' ')}` : ''}`, payload.warnings.length ? 'warning' : 'done');
     } catch (error) {
-      if (request === analysing) status(error.message, 'error');
+      if (request === analysing) status(cachedOnly ? '' : error.message, cachedOnly ? '' : 'error');
     } finally {
       if (request === analysing) { button.disabled = false; button.classList.remove('is-busy'); hideProgress(); }
     }
+  };
+  // Opening or reloading the page with the selection of the last analysis shows
+  // its stored result; a changed selection waits for Analyse Network.
+  const showLastAnalysis = () => {
+    const last = readLastAnalysis();
+    if (!last || analysis || analysing) return;
+    const comparable = body => JSON.stringify({...body, map_operator: ''});
+    if (comparable(requestBody()) === comparable(last)) void analyse(last.map_operator || '', {cachedOnly: true});
   };
 
   // Summary Network Insights of the current selection, as PowerPoint or Word.
@@ -852,6 +876,6 @@
   });
   $('ni-deployment-group').onchange = () => { void loadDeployment(); };
   renderDatasets();
-  void loadFilterOptions();
+  void loadFilterOptions().then(showLastAnalysis);
   void loadDeployment();
 })();

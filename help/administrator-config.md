@@ -16,6 +16,7 @@ Administrator Config centralises user, portability, database and dataset adminis
 | Features Activation | [Open section](#features-activation) |
 | Workspace Access | [Open section](#workspace-access) |
 | Import / Export / Transfer | [Open section](#import-export-transfer) |
+| Interface Settings | [Open section](#interface-settings) |
 | Database Management | [Open section](#database-management) |
 | Datasets Management | [Open section](#datasets-management) |
 | Operational checklist | [Open section](#operational-checklist) |
@@ -53,7 +54,7 @@ The **Groups** column chooses the user groups each account belongs to (the same 
 
 ## Features Activation
 
-**Features Activation**, visible to admins and super-admins, lists the main modules in the order of the main tabs: Workspace, CDR Analysis, Network Insights, E2E Dashboards, Scoring & GAP Analysis, Non-Qualified Calls, Reporting, Reporting (old) and Builders.
+**Features Activation**, visible to admins and super-admins, lists the main modules in the order of the main tabs (by default **Workspace**, CDR Analysis, E2E Dashboards, Reporting (old), Scoring & GAP Analysis, Network Insights, Non-Qualified Calls, **Reporting** and **Builders**).
 
 Each feature has three settings:
 
@@ -65,7 +66,7 @@ Each feature has three settings:
 
 An account matching both lists loses the feature: Forbidden always wins. For example, set **By default: Nobody** and allow the `admin` role, or keep **All users** and forbid one user group. Each list combines Roles, Groups and Users in one selector with a filter; the selector summarises the selection, such as `1 role · 2 users`.
 
-A feature that is not active for a user disappears from the main tabs and the Modules menu, and its pages and API answer 403. Workspace switching, dataset uploads and processing remain available everywhere. By default every module is active for all users except Non-Qualified Calls (in development, Nobody) and Reporting (old) (Nobody, allowed for super-admins and EJAITUR). Reporting is active for all users; settings saved while it was restricted to super-admins by default are opened to everyone once. The settings are stored in the application database.
+A feature that is not active for a user disappears from the main tabs and the Modules menu, and its pages and API answer 403. Workspace switching, dataset uploads and processing remain available everywhere. By default every module is active for all users except Non-Qualified Calls (in development, Nobody) and Reporting (old) (Nobody, allowed for super-admins and EJAITUR). [Reporting](reporting.md) is active for all users; settings saved while it was restricted to super-admins by default are opened to everyone once. The settings are stored in the application database.
 
 Reporting Jobs can only include artifacts of the modules active for their author; see [Reporting](reporting.md).
 
@@ -103,7 +104,7 @@ When the same package also includes Dashboards, its Report Templates replace the
 
 A Full Environment always contains Application Config and the complete database/input content, Dashboard definitions, Report Templates, Main Cities, Operator & Vendor Maps, Scoring & GAP Analysis Configuration, Auto-calculated Fields, Query Builder Queries, Reporting Jobs and NQ Call Tracking for every selected workspace. Selecting Full Environment only chooses the package type; the workspace picker opens when **Export ZIP** or **Transfer to other server** is pressed.
 
-**Include generated Reports, Chart Sets and Dashboard PPT jobs** controls whether their `output/` trees, and the Reporting run history, are included. Reporting Job imports add new jobs and replace jobs with the same name; their dataset references are matched by file name in the destination workspace. At least one workspace is required.
+**Include generated Reports, Chart Sets and Dashboard PPT jobs** controls whether their `output/` trees, and the [Reporting](reporting.md) run history, are included. Reporting Job imports add new jobs and replace jobs with the same name; their dataset references are matched by file name in the destination workspace. At least one workspace is required.
 
 Exports run as disk-backed jobs and show estimated progress. The ZIP download starts when package creation finishes.
 
@@ -134,6 +135,16 @@ The dialog remembers the last destination. Active state is restored after page r
 Literal private IP destinations such as `192.168.1.17` are contacted directly, bypassing proxy variables inherited by Docker. The receiving application must listen on `0.0.0.0` rather than only `127.0.0.1`, and its host firewall must allow inbound TCP traffic on the selected port. When the destination is the Docker host itself, use `host.docker.internal`; a different computer on the LAN should use that computer's LAN IP.
 
 For super-admins, complete unimported packages appear in **Recovered transfer packages** with content, workspaces, creation time, size, Import and Delete actions. Incomplete remnants are removed automatically.
+
+## Interface Settings
+
+**Interface Settings**, visible only to super-admins after Import / Export / Transfer, applies to every user. Its table has one row per main module, in the order of the main tabs; drag a row by its handle (⠿) or use the arrows to move it. The Modules menu, the Help navigation and Features Activation follow the same order. For each tab choose:
+
+- **Module Title** and **Short title**, the name shown on the tab and the one used on narrow windows (empty uses the title). The Modules menu and the Help use the Module Title too: the chapter of a renamed module takes its new title in the Help navigation and as its heading, and the Help text names the module with it (section headings keep their name so their links keep working; Workspace, Reporting and Builders, also ordinary words of the Help, change where the Help names the module as a link to its chapter or in bold).
+- **Icon**, shown before the title, and **Colour**, the accent of the tab: its top line and icon when not selected and its gradient when selected. The default colour keeps the palette of the module.
+- The **Label** in the corner of the tab (for example ALPHA, BETA, NEW or STABLE, or empty for none), its colour, and an optional icon with its own colour.
+
+The Preview column draws each tab as it looks when it is not selected. Colours show their hexadecimal value below them to copy or paste it. **Show a label on the tab of each main module** hides every label at once, and **Reset tabs and labels to defaults** restores the default order, titles, icons, colours and labels.
 
 ## Database Management
 

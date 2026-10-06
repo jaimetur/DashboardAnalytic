@@ -94,6 +94,11 @@ from src.modules.query_builder import MAX_PREVIEW_ROWS, execute_query, iter_quer
 from src.runtime_logs import execution_log_entries
 from src.modules.workspaces import Workspace, WorkspaceRegistry
 from src.branding import BACKUP_FILE_PATTERNS, BACKUP_SCRATCH_PATTERNS, canonical_format
+from src.modules.module_labels import (
+    ICONS as MODULE_LABEL_ICONS, MAIN_MODULES, MAX_LABEL_LENGTH as MAX_MODULE_LABEL_LENGTH, MAX_SHORT_TITLE_LENGTH,
+    MAX_TITLE_LENGTH, MODULE_LABELS_STATE_KEY, MODULE_TABS, TAB_ICONS, load_module_labels, module_label_badges, module_tabs,
+    ADMINISTRATIVE_ICONS, help_chapter_icons, normalize_module_labels, ordered_help_documents, rename_modules_in_help, renamed_help_chapters,
+)
 from src.modules.output_layout import (
     CDR_ANALYSIS_FOLDER, REPORTS_CHARTS_OLD_FOLDER, REPORTS_OLD_FOLDER, migrate_output_layout, module_output_dir,
 )
@@ -380,12 +385,12 @@ HELP_NAVIGATION_DOCUMENTS = (
     'web-interface.md',
     'workspace-management.md',
     'datasets-analysis.md',
-    'network-insights.md',
     'e2e-dashboards.md',
+    'reporting-old.md',
     'scoring-gap-analysis.md',
+    'network-insights.md',
     'non-qualified-calls.md',
     'reporting.md',
-    'reporting-old.md',
     'chart-builder.md',
     'query-builder.md',
     'app-logs.md',
@@ -431,12 +436,12 @@ FEATURES: tuple[dict[str, Any], ...] = (
         '/datasets-analysis/analyze', '/datasets-analysis/export', '/datasets-analysis/summary', '/datasets-analysis/metrics',
         '/dashboard/analyze', '/dashboard/export',
     )},
-    {'key': 'network-insights', 'label': 'Network Insights', 'paths': ('/network-insights', '/api/network-insights')},
     {'key': 'e2e-dashboards', 'label': 'E2E Dashboards', 'paths': ('/e2e-dashboards', '/api/e2e-dashboards')},
+    {'key': 'reporting-old', 'label': 'Reporting (old)', 'paths': ('/reporting-old', '/api/reporting-old', '/e2e-reporting')},
     {'key': 'scoring', 'label': 'Scoring & GAP Analysis', 'paths': ('/scoring', '/api/scoring')},
+    {'key': 'network-insights', 'label': 'Network Insights', 'paths': ('/network-insights', '/api/network-insights')},
     {'key': 'non-qualified-calls', 'label': 'Non-Qualified Calls', 'paths': ('/non-qualified-calls', '/api/non-qualified-calls')},
     {'key': 'reporting', 'label': 'Reporting', 'paths': ('/reporting', '/api/reporting')},
-    {'key': 'reporting-old', 'label': 'Reporting (old)', 'paths': ('/reporting-old', '/api/reporting-old', '/e2e-reporting')},
     {'key': 'builders', 'label': 'Builders', 'paths': ('/chart-builder', '/query-builder', '/api/chart-builder', '/api/query-builder')},
 )
 FEATURE_KEYS = tuple(feature['key'] for feature in FEATURES)
@@ -606,8 +611,9 @@ def feature_activation_context() -> list[dict[str, Any]]:
     """Features in tab order with their rules; default usernames resolve to user IDs."""
     rules = feature_activation_settings()
     user_ids = {str(row['username']).casefold(): int(row['id']) for row in repository.list_users()}
+    order = {module: position for position, module in enumerate(load_module_labels(repository))}
     rows = []
-    for feature in FEATURES:
+    for feature in sorted(FEATURES, key=lambda item: order.get(item['key'], len(order))):
         rule = rules[feature['key']]
         allow = dict(rule['allow'])
         allow['users'] = list(dict.fromkeys([*allow['users'], *[user_ids[name.casefold()] for name in rule.get('allow_usernames', []) if name.casefold() in user_ids]]))
@@ -5183,6 +5189,7 @@ def render_template(request: Request, template_name: str, context: dict[str, Any
     embedded_template_editor = bool(context.get('embedded_template_editor'))
     header_workspaces = workspace_registry.list() if isinstance(template_user, SessionUser) and not embedded_template_editor else []
     header_workspace_access = workspace_access_map(template_user, header_workspaces) if isinstance(template_user, SessionUser) else {}
+    module_settings = load_module_labels(repository)
     payload = {
         'request': request,
         'app_name': __app_name__,
@@ -5199,6 +5206,17 @@ def render_template(request: Request, template_name: str, context: dict[str, Any
         'ignore_event_time_filtering': ignore_event_time_filtering(),
         'features': user_features(template_user) if isinstance(template_user, SessionUser) else {},
         'show_module_stage_labels': module_stage_labels_visible(),
+        'module_tab_badges': module_label_badges(module_settings) if module_stage_labels_visible() else {},
+        'module_tabs': module_tabs(module_settings),
+        'administrative_icons': ADMINISTRATIVE_ICONS,
+        'module_label_settings': {
+            'modules': [(module, dict(MAIN_MODULES)[module]) for module in module_settings],
+            'labels': module_settings, 'icons': MODULE_LABEL_ICONS, 'tab_icons': TAB_ICONS,
+            'defaults': {module: {'title': tab['title'], 'short_title': tab['short_title'], 'tab_color': tab['tab_color']}
+                         for module, tab in MODULE_TABS.items()},
+            'max_length': MAX_MODULE_LABEL_LENGTH, 'max_title_length': MAX_TITLE_LENGTH,
+            'max_short_title_length': MAX_SHORT_TITLE_LENGTH,
+        } if isinstance(template_user, SessionUser) and template_user.role == 'super-admin' else None,
         'cdr_type_options': cdr_type_options(),
         'vendor_filter_identities': {
             'operators': {str(value): str(group['canonical'])
@@ -10145,7 +10163,7 @@ def help_document_view(request: Request, doc_file: str, user: SessionUser | None
         'doc_view.html',
         {
             'user': user,
-            'doc_name': HELP_DOCUMENT_LABELS.get(
+            'doc_name': renamed_help_chapters(load_module_labels(repository)).get(doc_file) or HELP_DOCUMENT_LABELS.get(
                 doc_file,
                 help_document_label(doc_file),
             ),
@@ -10160,7 +10178,11 @@ def help_document_view(request: Request, doc_file: str, user: SessionUser | None
 def get_help_documents_index(user: SessionUser | None = Depends(optional_user)) -> dict[str, Any]:
     help_root = (PROJECT_ROOT / 'help').resolve()
     documents: list[dict[str, str]] = []
-    for relative_path in HELP_NAVIGATION_DOCUMENTS:
+    # Chapters of the main modules follow the order of the main tabs and their titles.
+    module_settings = load_module_labels(repository)
+    renamed = renamed_help_chapters(module_settings)
+    icons = help_chapter_icons(module_settings)
+    for relative_path in ordered_help_documents(HELP_NAVIGATION_DOCUMENTS, module_settings):
         if relative_path == OLD_REPORTING_HELP_DOCUMENT and not (user and can_access_e2e_reporting(user)):
             continue
         file_path = (help_root / relative_path).resolve()
@@ -10169,13 +10191,15 @@ def get_help_documents_index(user: SessionUser | None = Depends(optional_user)) 
         documents.append({
             'name': file_path.name,
             'relative_path': relative_path,
-            'label': HELP_DOCUMENT_LABELS.get(
+            'label': renamed.get(relative_path) or HELP_DOCUMENT_LABELS.get(
                 relative_path,
                 help_document_label(relative_path),
             ),
             'url': '/documents/view/help' if relative_path == HELP_HOME_DOCUMENT else f'/documents/view/help/{relative_path}',
+            **icons.get(relative_path, {}),
         })
-    return {'root': str(help_root), 'documents': documents}
+    return {'root': str(help_root), 'documents': documents,
+            'icons': {key: ADMINISTRATIVE_ICONS[key] for key in ('readme', 'changelog')}}
 
 
 @app.get('/api/documents/changelog-index')
@@ -10202,6 +10226,7 @@ def get_help_markdown_document(doc_file: str, user: SessionUser | None = Depends
     content = path.read_text(encoding='utf-8', errors='replace')
     if not (user and can_access_e2e_reporting(user)):
         content = filter_e2e_reporting_help_content(content, path.name)
+    content = rename_modules_in_help(content, path.name, load_module_labels(repository))
     return {
         'name': path.name,
         'path': str(path),
@@ -10215,6 +10240,8 @@ def get_markdown_document(request: Request, doc_name: str, user: SessionUser | N
     content = path.read_text(encoding='utf-8', errors='replace')
     if not (user and can_access_e2e_reporting(user)) and path.name.casefold() in {'readme.md', HELP_HOME_DOCUMENT}:
         content = filter_e2e_reporting_help_content(content, path.name)
+    if path.name.casefold() == HELP_HOME_DOCUMENT:
+        content = rename_modules_in_help(content, path.name, load_module_labels(repository))
     return {
         'name': path.name,
         'path': str(path),
@@ -19559,13 +19586,25 @@ def module_stage_labels_visible() -> bool:
 
 
 @app.post('/admin/interface-settings')
-def save_interface_settings(
-    show_module_stage_labels: bool = Form(False),
-    user: SessionUser = Depends(super_admin_user),
-) -> Response:
-    repository.set_application_state(MODULE_STAGE_LABELS_STATE_KEY, '1' if show_module_stage_labels else '0')
+async def save_interface_settings(request: Request, user: SessionUser = Depends(super_admin_user)) -> Response:
+    form = await request.form()
+    show_labels = str(form.get('show_module_stage_labels') or '').casefold() in {'true', '1', 'on'}
+    repository.set_application_state(MODULE_STAGE_LABELS_STATE_KEY, '1' if show_labels else '0')
+    if form.get('reset_module_labels'):
+        labels = normalize_module_labels({})
+    else:
+        # Every setting missing from the form keeps its current value.
+        current = load_module_labels(repository)
+        fields = {'label': 'text', 'color': 'color', 'icon': 'icon', 'icon_color': 'icon_color', 'title': 'title',
+                  'short_title': 'short_title', 'tab_icon': 'tab_icon', 'tab_color': 'tab_color', 'position': 'position'}
+        labels = normalize_module_labels({
+            module: {**current[module], **{setting: form.get(f'{name}__{module}')
+                                           for name, setting in fields.items() if f'{name}__{module}' in form}}
+            for module, _name in MAIN_MODULES
+        })
+    repository.set_application_state(MODULE_LABELS_STATE_KEY, json.dumps(labels, sort_keys=True))
     repository.try_add_log(user.username, 'save_interface_settings', json.dumps({
-        'show_module_stage_labels': show_module_stage_labels,
+        'show_module_stage_labels': show_labels, 'module_labels': labels,
     }))
     return RedirectResponse('/admin#interface-settings', status_code=status.HTTP_303_SEE_OTHER)
 

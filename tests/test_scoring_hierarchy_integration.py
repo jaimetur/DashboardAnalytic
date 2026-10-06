@@ -81,15 +81,18 @@ def test_reporting_follows_scoring_in_module_and_help_navigation(scoring_api):
     page = client.get('/scoring')
     assert page.status_code == 200
     main_tabs = page.text.split('class="module-tabs-primary"', 1)[1].split('class="module-tabs-secondary"', 1)[0]
-    assert main_tabs.index('href="/scoring"') < main_tabs.index('href="/reporting"') < main_tabs.index('href="/reporting-old"')
+    assert main_tabs.index('href="/e2e-dashboards"') < main_tabs.index('href="/reporting-old"') < main_tabs.index('href="/scoring"') < main_tabs.index('href="/reporting"')
     modules = page.text.split('aria-label="Main modules"', 1)[1].split('</nav>', 1)[0]
-    assert modules.index('href="/scoring"') < modules.index('href="/reporting"') < modules.index('href="/reporting-old"')
+    assert modules.index('href="/e2e-dashboards"') < modules.index('href="/reporting-old"') < modules.index('href="/scoring"') < modules.index('href="/reporting"')
     documents = client.get('/api/documents/help-index').json()['documents']
     paths = [document['relative_path'] for document in documents]
-    # Non-Qualified Calls sits between Scoring and Reporting, as in the main tabs.
-    assert paths.index('non-qualified-calls.md') == paths.index('scoring-gap-analysis.md') + 1
+    # Network Insights follows Scoring, then Non-Qualified Calls and Reporting, as in the main tabs.
+    assert paths.index('network-insights.md') == paths.index('scoring-gap-analysis.md') + 1
+    assert paths.index('non-qualified-calls.md') == paths.index('network-insights.md') + 1
     assert paths.index('reporting.md') == paths.index('non-qualified-calls.md') + 1
-    assert paths.index('reporting-old.md') == paths.index('reporting.md') + 1
+    # Reporting (old) follows E2E Dashboards, as in the main tabs.
+    assert paths.index('reporting-old.md') == paths.index('e2e-dashboards.md') + 1
+    assert paths.index('scoring-gap-analysis.md') == paths.index('reporting-old.md') + 1
     help_page = client.get('/documents/view/help')
     group_function = help_page.text.split('function helpDocumentGroup(relativePath) {', 1)[1].split("return 'Main Modules';", 1)[0]
     assert "'scoring-gap-analysis.md'" in group_function

@@ -154,22 +154,62 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .module-tab-new { position: absolute; z-index: 2; top: -.56rem; right: .45rem; width: 2.27rem; height: 1.06rem; pointer-events: none; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .25)); }
 .module-tab-new rect { stroke: #fff; stroke-width: 1.2; }
 .module-tab-new text { fill: #fff; font: 800 8.4px "Segoe UI", system-ui, sans-serif; letter-spacing: .04em; }
-/* Module stages: ALPHA in development, BETA being validated, NEW consolidated, STABLE established. */
-.module-tab-new-alpha rect { fill: #d7263d; }
-.module-tab-new-beta rect { fill: #ffd60a; stroke: #fff; }
-.module-tab-new-beta text { fill: #3d2a00; }
-.module-tab-new-new rect { fill: #2563eb; }
-.module-tab-new-stable rect { fill: #1f8a4c; }
-/* Wider labels keep the badge height. */
-.module-tab-new-alpha { width: 3.18rem; }
-.module-tab-new-beta { width: 2.73rem; }
-.module-tab-new-stable { width: 3.48rem; }
-/* NEW leads with a star that marks a new feature. */
-.module-tab-new-new { width: 3.03rem; }
-.module-tab-new .module-tab-new-star { fill: #ffd60a; stroke: none; }
+/* Module tab labels take their text, colours and icon from Admin → Interface Settings. */
+.module-tab-new-icon { stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+/* A tab colour other than its module palette replaces the accent and the selected gradient. */
+.module-tabs-primary .module-tab.module-tab-custom-colour.active {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--tab-accent) 62%, #000), color-mix(in srgb, var(--tab-accent) 70%, #fff));
+  border-color: color-mix(in srgb, var(--tab-accent) 75%, #000);
+  color: #fff;
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--tab-accent) 32%, transparent);
+}
+.module-labels-table td { vertical-align: middle; }
+/* Smaller text keeps every column of the table visible with room to spare. */
+.module-labels-table { font-size: .85rem; }
+.module-labels-table th { font-size: .8rem; }
+.module-labels-table .table-input, .module-labels-table select.table-select { font-size: .82rem; padding: .38rem .6rem; min-height: 0; }
+.module-labels-table .color-hex-input { font-size: .74rem; padding: .22rem .35rem; }
+.module-labels-table th.module-labels-group { text-align: center; text-transform: uppercase; letter-spacing: .06em; font-size: .8rem; }
+/* Tab and Label columns are told apart by the colour of the line above them. */
+.module-labels-table th.module-labels-group-tab { color: #08736d; border-bottom: 3px solid #08736d; }
+.module-labels-table th.module-labels-group-label { color: #b45309; border-bottom: 3px solid #e9a23b; }
+.module-labels-table th.module-labels-tab { box-shadow: inset 0 3px 0 rgba(8, 115, 109, .18); }
+.module-labels-table th.module-labels-label { box-shadow: inset 0 3px 0 rgba(233, 162, 59, .25); }
+.module-labels-table .module-labels-title { width: 11rem; min-width: 0; font-weight: 700; }
+.module-labels-table .module-labels-short { width: 8rem; min-width: 0; }
+.module-labels-table .module-labels-text { width: 7.5rem; min-width: 0; }
+.module-labels-table th.module-labels-centered { text-align: center; }
+.module-labels-table td:has(> .color-hex-field) { text-align: center; }
+.module-labels-table select.module-labels-tab-icon { min-width: 11.5rem; }
+.module-labels-table select.module-labels-label-icon { width: 8rem; min-width: 0; }
+/* The hexadecimal value sits below its colour, keeping the whole table visible. */
+.module-labels-table .color-hex-field { flex-direction: column; align-items: center; gap: .25rem; }
+.module-labels-table .color-hex-input { width: 5.6rem; text-align: center; }
+.module-labels-order { white-space: nowrap; padding-left: .3rem; padding-right: .3rem; }
+.module-labels-handle { display: inline-block; padding: 0 .35rem; color: var(--muted); font-size: 1.1rem; cursor: grab; user-select: none; touch-action: none; }
+.module-labels-table tr.is-dragging .module-labels-handle { cursor: grabbing; }
+.module-labels-table .module-labels-move { min-width: 0; padding: .15rem .45rem; margin-left: .2rem; border: 1px solid #d8e0e7; border-radius: 8px; background: #fff; color: #44515d; box-shadow: none; font-size: .85rem; font-weight: 700; line-height: 1.2; }
+.module-labels-table .module-labels-move:not(:disabled):hover { background: #eef2f6; color: #1f2d38; }
+.module-labels-move:disabled { opacity: .35; cursor: default; }
+.module-labels-table tr.is-dragging { opacity: .6; background: #eef4f8; }
+.module-label-preview { min-width: 10rem; color: var(--muted); font-size: .85rem; }
+.module-label-preview-tab {
+  position: relative; display: inline-flex; align-items: center; gap: .35rem; margin-top: .55rem; padding: .45rem .6rem;
+  border: 1px solid #d8e0e7; border-radius: 12px 12px 0 0; white-space: nowrap;
+  background: linear-gradient(180deg, #ffffff, #f2f5f8);
+  box-shadow: inset 0 3px 0 var(--tab-accent), 0 6px 14px rgba(18, 32, 43, 0.06);
+  color: #334552; font-weight: 700; font-size: .78rem;
+}
+/* The preview draws the tab as unselected: module colour on its top line and icon. */
+.module-label-preview-tab .module-tab-icon { display: inline; stroke: var(--tab-accent); }
+.module-label-preview-tab .module-label-preview-badge { top: -.56rem; right: .45rem; height: 1.06rem; }
 /* Interface Settings: room between the option and its save button. */
 .interface-settings-form { display: grid; gap: 1rem; }
-.interface-settings-form .form-actions { margin: 0; }
+.interface-settings-form .form-actions { margin: 0; display: flex; flex-wrap: wrap; gap: 0.8rem; }
+/* Every colour picker shows its value in hexadecimal beside it, easy to copy or paste. */
+.color-hex-field { display: inline-flex; align-items: center; gap: 0.4rem; }
+.color-hex-input { width: 6.2rem; padding: 0.3rem 0.45rem; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: #2f3e4a; font: 600 0.85rem ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; }
+.color-hex-input:invalid, .color-hex-input.is-invalid { border-color: #d7263d; }
 .module-tab-report-jobs.active { background: linear-gradient(135deg, #1f5f3a, #4fb37a); border-color: rgba(31, 95, 58, 0.7); color: #fff; box-shadow: 0 10px 24px rgba(46, 140, 88, 0.32); }
 .module-tab-network-insights.active { background: linear-gradient(135deg, #1e1b4b, #4f46e5); border-color: rgba(49, 46, 129, 0.7); color: #fff; box-shadow: 0 10px 24px rgba(79, 70, 229, 0.32); }
 .module-tab-scoring.active { background: linear-gradient(128deg, #143653 0%, #176e77 58%, #40a88a 100%); border-color: rgba(20, 54, 83, 0.72); color: #fff; box-shadow: 0 10px 24px rgba(23, 110, 119, 0.32); }
@@ -458,14 +498,16 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
   border-color: rgba(139, 29, 36, 0.22);
   background: linear-gradient(135deg, rgba(255, 247, 246, 0.94), rgba(255, 255, 255, 0.96));
 }
-.admin-stack .module-hero-admin { order: -2; }
-.admin-stack .import-export-panel { order: -1; }
+/* Administration: header, Import / Export / Transfer, Interface Settings, then the other panels. */
+.admin-stack .module-hero-admin { order: -3; }
+.admin-stack .import-export-panel { order: -2; }
+.admin-stack #interface-settings { order: -1; }
 .admin-stack .database-management-panel { order: 1; }
 .admin-stack [data-panel-state-key="admin:datasets"] { order: 2; }
 .admin-stack [data-panel-state-key="admin:audit"] { order: 3; }
 .operator-mappings-panel .collapsible-panel-body { display: grid; gap: 1rem; }
 .operator-mappings-panel .lede, .operator-mappings-panel .form-note { margin: 0; }
-.operator-mappings-table { min-width: 820px; table-layout: fixed; }
+.operator-mappings-table { min-width: 920px; table-layout: fixed; }
 /* Groups with unsaved changes, and the bar that saves them together. */
 .operator-mappings-table tr.mapping-row-unsaved > td { background: #fff7e6; }
 .operator-mappings-table tr.mapping-row-unsaved > td:first-child { box-shadow: inset 4px 0 0 #b7791f; }
@@ -474,7 +516,9 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .mapping-unsaved-count { color: var(--muted); font-size: 0.9rem; }
 .mapping-save-all-bar.has-unsaved .mapping-unsaved-count { color: #8a5a10; font-weight: 700; }
 .operator-mappings-table .mapping-order-column { width: 6rem; }
-.operator-mappings-table .mapping-colour-column { width: 4.5rem; }
+.operator-mappings-table .mapping-colour-column { width: 11rem; }
+/* The colour picker and its hexadecimal value share the Colour column. */
+.operator-mappings-table .color-hex-field { flex-wrap: nowrap; white-space: nowrap; }
 .operator-mappings-table .mapping-canonical-column { width: 25%; }
 .operator-mappings-table .mapping-aliases-column { width: 50%; }
 .operator-mappings-table .mapping-actions-column { width: 6rem; }
@@ -2387,6 +2431,11 @@ body:has(.release-navigator) .help-navigator{top:37%}
 .help-nav-list a.active { color: #075d59; background: rgba(11, 122, 117, 0.12); border-color: rgba(11, 122, 117, 0.25); font-weight: 700; }
 .help-nav-list .help-nav-help-start { margin-top: .55rem; padding-top: .7rem; border-top: 1px solid var(--line); }
 .help-nav-list .help-nav-group { margin-top: .65rem; padding-top: .75rem; border-top: 1px solid var(--line); }
+/* Main modules show the icon of their tab before their name. */
+.help-nav-list a.has-icon { display: flex; align-items: center; gap: .5rem; }
+.help-nav-icon, .module-navigator-icon { flex: 0 0 auto; width: 1.05em; height: 1.05em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.module-navigator-category nav a:has(.module-navigator-icon), .module-navigator-category nav span:has(.module-navigator-icon) { display: flex; align-items: center; gap: .5rem; }
+.module-navigator-category nav a.is-active .module-navigator-icon { stroke: currentColor !important; }
 .help-nav-group h4 { margin: 0 0 .35rem; color: var(--muted); font-size: .75rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .help-nav-sublist { display: grid; gap: .2rem; margin: 0; padding: 0 0 0 .45rem; list-style: none; }
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
@@ -3789,6 +3838,8 @@ body:has(.release-navigator) .help-navigator{top:37%}
 .help-nav-list .release-nav-date { color: #5d6b76; font-weight: 400; }
 
 .features-activation-table td:first-child { white-space: nowrap; }
+/* A module active for Nobody by default stands out from those active for All users. */
+.features-activation-table select.table-select:has(option[value="none"]:checked) { background: #eef1f4; border-color: #aab4bf; color: #3f4a55; font-weight: 700; }
 /* The fields of these tables submit through form="…"; their empty form elements take no room between the description and the table. */
 #features-activation-form:empty, #workspace-access-form:empty { display: none; }
 .dataset-summary-dialog form { display: grid; gap: .7rem; min-width: min(34rem, 86vw); }
@@ -3800,6 +3851,8 @@ body:has(.release-navigator) .help-navigator{top:37%}
    wrap onto further rows. Main module tabs and administrative tabs are two
    separate groups, so a wrapped row never mixes both kinds of tab. */
 .module-tabs { flex-direction: column; align-items: stretch; flex-wrap: wrap; row-gap: .35rem; overflow: visible; }
+/* The stage labels stand above the module tabs, so wrapped rows of module tabs leave room for them too. */
+.module-tabs-primary { row-gap: .75rem; }
 .module-tabs-primary, .module-tabs-secondary { box-sizing: border-box; width: 100%; margin-left: 0; margin-right: 0; padding-left: .65rem; padding-right: .65rem; flex-wrap: wrap; flex-shrink: 1; min-width: 0; max-width: 100%; row-gap: .3rem; overflow: visible; }
 .module-tabs-secondary { justify-content: flex-start; }
 .module-tabs-primary .module-tab, .module-tabs-secondary .module-tab { flex: 0 1 auto; min-width: auto; overflow: visible; text-overflow: clip; }
@@ -3849,8 +3902,8 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
   .vendor-mapping-cdr-groups, .vendor-mapping-rules, .vendor-mapping-dialog[data-vendor-mapping-dialog] .vendor-mapping-fields { grid-template-columns: minmax(0, 1fr); }
 }
 
-/* The main module tabs cover the lower part of the administrative tabs, so both rows show the same tab height. */
-.module-tabs-secondary { position: relative; z-index: 0; margin-bottom: -.75rem; }
+/* The administrative tabs sit just above the main module tabs, leaving room for the module stage labels. */
+.module-tabs-secondary { position: relative; z-index: 0; margin-bottom: 0; }
 .module-tabs-primary { position: relative; z-index: 1; }
 /* Workspace Config: CDR type of the workspace. */
 .workspace-cdr-type-form { display: flex; flex-wrap: wrap; align-items: end; gap: .6rem 1rem; margin-top: .9rem; }
@@ -3985,3 +4038,10 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
   transform: translateY(-1px);
   box-shadow: inset 0 3px 0 var(--tab-accent, #8a99a6), 0 10px 20px color-mix(in srgb, var(--tab-accent, #8a99a6) 18%, transparent);
 }
+
+/* When the main module tabs almost fit on one row, they are compacted before
+   wrapping onto a second row (see fitModuleTabs in app.js). */
+.module-tabs-primary.is-compact-1 { column-gap: .35rem; }
+.module-tabs-primary.is-compact-1 .module-tab { padding: .72rem .85rem; font-size: .94em; gap: .35rem; }
+.module-tabs-primary.is-compact-2 { column-gap: .28rem; }
+.module-tabs-primary.is-compact-2 .module-tab { padding: .7rem .62rem; font-size: .88em; gap: .28rem; }

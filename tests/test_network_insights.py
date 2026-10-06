@@ -265,6 +265,11 @@ def test_network_insights_page_and_analysis(client, tmp_path) -> None:
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload['comparison'] is None
+    # Reopening the page asks for the stored result only and never calculates a new one.
+    assert client.post('/api/network-insights/analysis?cached_only=true',
+                       json={'datasets': {'data': ids}, 'technology': 'lte', 'group': 'campaign'}).json() == payload
+    assert client.post('/api/network-insights/analysis?cached_only=true',
+                       json={'datasets': {'data': ids}, 'technology': 'lte', 'group': 'region'}).status_code == 204
 
     operator_comparison = client.post('/api/network-insights/analysis', json={
         'datasets': {'data': ids}, 'technology': 'lte', 'group': 'operator',

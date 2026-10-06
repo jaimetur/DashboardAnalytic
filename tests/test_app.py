@@ -8549,7 +8549,7 @@ def test_top_navigation_shows_document_links(client) -> None:
     assert '>Chart Builder</a>' in response.text
     assert '>Query Builder</a>' in response.text
     assert 'data-module-builders-trigger><svg class="module-tab-icon"' in response.text
-    assert '<span>Builders</span> <span aria-hidden="true">▾</span><svg class="module-tab-new module-tab-new-beta"' in response.text
+    assert '<span>Builders</span> <span aria-hidden="true">▾</span><svg class="module-tab-new module-tab-new-builders"' in response.text
     assert 'popovertarget="module-builders-options"' in response.text
     assert 'data-module-builders-options' in response.text
     assert '<span>Admin</span></a>' in response.text
@@ -9207,9 +9207,9 @@ def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
         for item in help_documents
     )
     assert [item['relative_path'] for item in help_documents[8:]] == [
-        'network-insights.md',
         'e2e-dashboards.md',
         'scoring-gap-analysis.md',
+        'network-insights.md',
         'non-qualified-calls.md',
         'reporting.md',
         'chart-builder.md',
@@ -9269,7 +9269,7 @@ def test_reporting_old_help_follows_its_feature(client) -> None:
         client.cookies.set(app_module.SESSION_COOKIE, token)
 
         index = [item['relative_path'] for item in client.get('/api/documents/help-index').json()['documents']]
-        assert index[8:14] == ['network-insights.md', 'e2e-dashboards.md', 'scoring-gap-analysis.md', 'non-qualified-calls.md', 'reporting.md', 'reporting-old.md']
+        assert index[8:14] == ['e2e-dashboards.md', 'reporting-old.md', 'scoring-gap-analysis.md', 'network-insights.md', 'non-qualified-calls.md', 'reporting.md']
         assert client.get('/documents/view/help/reporting-old.md').status_code == 200
         assert client.get('/api/documents/help/reporting-old.md').status_code == 200
         home = client.get('/api/documents/help').json()['content']
@@ -10246,16 +10246,99 @@ def test_module_stage_labels_can_be_hidden_only_by_super_admins(client) -> None:
     admin_page = client.get('/admin').text
     assert 'id="interface-settings"' not in admin_page
     assert client.post('/admin/interface-settings', data={}, follow_redirects=False).status_code == 403
-    assert 'class="module-tab-new module-tab-new-stable"' in client.get('/workspace').text
+    assert 'class="module-tab-new module-tab-new-workspace"' in client.get('/workspace').text
 
     client.post('/logout', follow_redirects=False)
     login_super(client)
-    assert 'name="show_module_stage_labels" value="true" checked' in client.get('/admin').text
+    assert 'name="show_module_stage_labels" value="true" data-no-persist checked' in client.get('/admin').text
     hidden = client.post('/admin/interface-settings', data={}, follow_redirects=False)
     assert hidden.status_code == 303
     page = client.get('/workspace').text
     assert 'module-tab-new' not in page
-    assert 'name="show_module_stage_labels" value="true" >' in client.get('/admin').text
+    assert 'name="show_module_stage_labels" value="true" data-no-persist >' in client.get('/admin').text
 
     client.post('/admin/interface-settings', data={'show_module_stage_labels': 'true'}, follow_redirects=False)
-    assert 'class="module-tab-new module-tab-new-stable"' in client.get('/workspace').text
+    assert 'class="module-tab-new module-tab-new-workspace"' in client.get('/workspace').text
+
+
+
+def test_module_labels_are_configured_per_module_by_super_admins(client) -> None:
+    import src.DriveTestAnalyzer as app_module
+
+    login_super(client)
+    admin_page = client.get('/admin').text
+    assert 'name="label__scoring" value="NEW"' in admin_page and 'data-module-label-icons' in admin_page
+    form = {'show_module_stage_labels': 'true'}
+    for module, _name in app_module.MAIN_MODULES:
+        label = app_module.load_module_labels(app_module.repository)[module]
+        form.update({f'label__{module}': label['text'], f'color__{module}': label['color'],
+                     f'icon__{module}': label['icon'], f'icon_color__{module}': label['icon_color']})
+    form.update({'label__workspace': 'CORE', 'color__workspace': '#123456', 'icon__workspace': 'bolt',
+                 'icon_color__workspace': '#ffd60a', 'label__network-insights': '', 'icon__scoring': 'not-an-icon'})
+    assert client.post('/admin/interface-settings', data=form, follow_redirects=False).status_code == 303
+
+    page = client.get('/workspace').text
+    assert '<svg class="module-tab-new module-tab-new-workspace"' in page and '>CORE</text>' in page
+    assert 'style="fill: #123456"' in page and 'class="module-tab-new-icon"' in page
+    assert 'module-tab-new-network-insights' not in page
+    assert app_module.load_module_labels(app_module.repository)['scoring']['icon'] == ''
+
+    client.post('/admin/interface-settings', data={'show_module_stage_labels': 'true', 'reset_module_labels': '1'}, follow_redirects=False)
+    assert app_module.load_module_labels(app_module.repository)['workspace']['text'] == 'STABLE'
+
+
+def test_module_tabs_take_order_title_icon_and_colour_from_interface_settings(client) -> None:
+    import src.DriveTestAnalyzer as app_module
+
+    login_super(client)
+    admin_page = client.get('/admin').text
+    assert 'name="title__scoring" value="Scoring &amp; GAP Analysis"' in admin_page and 'data-module-tab-icons' in admin_page
+    order = ['workspace', 'network-insights', 'datasets-analysis', 'e2e-dashboards', 'reporting-old', 'scoring',
+             'non-qualified-calls', 'reporting', 'builders']
+    form = {'show_module_stage_labels': 'true', **{f'position__{module}': str(index) for index, module in enumerate(order)}}
+    form.update({'title__network-insights': 'Radio Insights', 'short_title__network-insights': 'Radio',
+                 'tab_icon__network-insights': 'signal', 'tab_color__network-insights': '#aa3300',
+                 'title__workspace': 'Workspace', 'short_title__workspace': '', 'tab_icon__workspace': 'globe',
+                 'tab_color__workspace': '#aa3300'})
+    assert client.post('/admin/interface-settings', data=form, follow_redirects=False).status_code == 303
+    settings = app_module.load_module_labels(app_module.repository)
+    assert list(settings) == order
+    # Modules without tab fields in the form keep their title, icon and colour.
+    assert settings['scoring']['title'] == 'Scoring & GAP Analysis' and settings['scoring']['tab_icon'] == 'scoring'
+
+    page = client.get('/workspace').text
+    tabs = page.split('class="module-tabs-primary"', 1)[1].split('</nav>', 1)[0]
+    assert tabs.index('Radio Insights') < tabs.index('CDR Analysis')
+    assert '<span class="module-tab-label-desktop">Radio Insights</span><span class="module-tab-label-mobile">Radio</span>' in tabs
+    assert 'module-tab-workspace module-tab-custom-colour' in tabs and 'style="--tab-accent: #AA3300"' in tabs
+    assert '<path d="M5 20v-3M10 20v-7M15 20V9M20 20V4"/>' in tabs
+    modules = page.split('aria-label="Main modules"', 1)[1].split('</nav>', 1)[0]
+    assert modules.index('Radio Insights') < modules.index('CDR Analysis')
+    documents = [item['relative_path'] for item in client.get('/api/documents/help-index').json()['documents']]
+    assert documents.index('workspace-management.md') + 1 == documents.index('network-insights.md')
+    assert documents.index('network-insights.md') + 1 == documents.index('datasets-analysis.md')
+    # The Help names a renamed module with its new title, keeping section headings and links.
+    labels = {item['relative_path']: item['label'] for item in client.get('/api/documents/help-index').json()['documents']}
+    assert labels['network-insights.md'] == 'Radio Insights'
+    chapter = client.get('/api/documents/help/network-insights.md').json()['content']
+    assert chapter.startswith('# Radio Insights') and 'Network Insights' not in chapter
+    overview = client.get('/api/documents/help/overview.md').json()['content']
+    assert '[Radio Insights](network-insights.md)' in overview and '## Network Insights' in overview
+    assert 'Radio Insights' in client.get('/documents/view/help/network-insights.md').text
+    # One-word titles change where the Help names the module as a link or in bold.
+    form = {'title__reporting': 'Scheduled Reporting', 'short_title__reporting': ''}
+    assert client.post('/admin/interface-settings', data={'show_module_stage_labels': 'true', **form}, follow_redirects=False).status_code == 303
+    home = client.get('/api/documents/help').json()['content']
+    assert '[Scheduled Reporting](reporting.md)' in home and 'Reporting Jobs' in home
+    reporting = client.get('/api/documents/help/reporting.md').json()['content']
+    assert reporting.startswith('# Scheduled Reporting') and 'Use **Scheduled Reporting**' in reporting
+    index = client.get('/api/documents/help-index').json()
+    assert {'readme', 'changelog'} <= set(index['icons'])
+    assert all(item.get('icon') for item in index['documents'] if item['relative_path'] in {'reporting.md', 'app-logs.md', 'chart-builder.md'})
+    features = [row['key'] for row in app_module.feature_activation_context()]
+    assert features == order
+
+    client.post('/admin/interface-settings', data={'show_module_stage_labels': 'true', 'reset_module_labels': '1'}, follow_redirects=False)
+    settings = app_module.load_module_labels(app_module.repository)
+    assert list(settings) == [module for module, _name in app_module.MAIN_MODULES]
+    assert settings['network-insights']['title'] == 'Network Insights' and settings['network-insights']['tab_color'] == '#4F46E5'

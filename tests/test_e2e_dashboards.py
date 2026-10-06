@@ -1259,7 +1259,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert re.search(r'data-authenticated-session="[^"]+"', page.text)
     assert 'id="page-panel-navigator"' in page.text
     assert 'data-page-panel-navigator-list' in page.text
-    assert page.text.index('>CDR Analysis<') < page.text.index('>Network Insights<') < page.text.index('>E2E Dashboards<') < page.text.index('>Reporting (old)<')
+    assert page.text.index('>CDR Analysis<') < page.text.index('>E2E Dashboards<') < page.text.index('>Reporting (old)<') < page.text.index('>Network Insights<')
     assert client.get('/reporting-old').status_code == 200
     # Bookmarks from earlier versions keep opening the module now called Reporting (old).
     legacy_reporting = client.get('/e2e-reporting/jobs?x=1', follow_redirects=False)

@@ -167,7 +167,7 @@ Speech falls back to the `Recording_*` fields when the `Playing_*` fields are ab
 
 Analyses are calculated on demand. Spectrum Holdings belong to the workspace and travel with the **Operator & Vendor Maps** export, transfers and backups. Workspace templates and Dashboards travel with Report Templates and Dashboards.
 
-Network Insights remembers the selected CDRs, NR Mode, Technology, grouping, filters, thresholds, map grid and deployment grouping in this browser, separately for each workspace and user. Unavailable CDRs or values are omitted when restored. These browser preferences are not included in workspace exports or backups.
+Network Insights remembers the selected CDRs, NR Mode, Technology, grouping, filters, thresholds, map grid and deployment grouping in this browser, separately for each workspace and user. Unavailable CDRs or values are omitted when restored. Opening or reloading Network Insights with the same selection as the last analysis shows that analysis again at once, from the results the workspace keeps; once the selection changes, press **Analyse Network** to calculate it. These browser preferences are not included in workspace exports or backups.
 
 ## Troubleshooting
 

@@ -32,10 +32,10 @@ DriveTest Analyzer separates application settings, storage roots and Docker depl
 | `DRIVETEST_ANALYZER_DASHBOARD_FRAME_CACHE_SNAPSHOTS` | Number of recently used Dashboard snapshots that keep their chart data frames in memory. Lower it on servers with little RAM. | `3` |
 | `TZ` | IANA timezone used by Docker and displayed/persisted timestamps. | `Europe/Madrid` |
 | `IGNORE_EVENT_TIME_FILTERING` | When true, ignores date and template filters based on Event_Start_Time or Event_End_Time. | `false` |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURITY` | Default SMTP server, port and encryption (`starttls`, `ssl` or `none`) for Reporting emails. Application Config → Email Delivery overrides them. | Not set; `587`; `starttls` |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURITY` | Default SMTP server, port and encryption (`starttls`, `ssl` or `none`) for [Reporting](reporting.md) emails. Application Config → Email Delivery overrides them. | Not set; `587`; `starttls` |
 | `SMTP_USERNAME`, `SMTP_PASSWORD` | Default SMTP account. The password is used whenever no password is saved in Application Config. | Not set |
-| `SMTP_FROM`, `SMTP_FROM_NAME` | Default sender address and name of Reporting emails. | Not set; `DriveTest Analyzer` |
-| `SMTP_MAX_ATTACHMENTS_MB` | Default limit for the total size of a Reporting email's attachments. | `20` |
+| `SMTP_FROM`, `SMTP_FROM_NAME` | Default sender address and name of [Reporting](reporting.md) emails. | Not set; `DriveTest Analyzer` |
+| `SMTP_MAX_ATTACHMENTS_MB` | Default limit for the total size of a [Reporting](reporting.md) email's attachments. | `20` |
 
 Before version 0.6.0 the application was named Dashboard Analytic. Variables with the former `DASHBOARD_ANALYTIC_` prefix are still read when the matching `DRIVETEST_ANALYZER_` variable is not set, and export packages, JSON exports and backups created with the former name (format identifiers and backup files starting with `dashboard-analytic-`) are still imported and restored.
 

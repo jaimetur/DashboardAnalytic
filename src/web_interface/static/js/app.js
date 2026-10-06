@@ -4900,9 +4900,15 @@ function formatAggregationOverrides(overrides) {
     .join(';');
 }
 
+// Panels that show saved settings or records (users, user groups, workspace
+// access, features activation) always show what the server saved: a value kept
+// in the browser would hide it and be saved back over it.
+const SAVED_SETTINGS_SCOPES = '.users-table, .principal-table, .principal-picker, .interface-settings-form';
+
 function canPersistControl(control) {
   if (!control || !persistencePathnames.has(window.location.pathname)) return false;
   if (control.hasAttribute('data-no-persist')) return false;
+  if (control.closest?.(SAVED_SETTINGS_SCOPES)) return false;
   if (!control.name || control.disabled) return false;
   const tagName = String(control.tagName || '').toLowerCase();
   const type = String(control.type || '').toLowerCase();
@@ -7883,6 +7889,7 @@ async function submitChartMappingForm(form) {
     const unsavedEdits = unsavedChartMappingEdits(currentBody, rejected ? null : form);
     currentBody.replaceWith(freshBody);
     restoreChartMappingEdits(freshBody, unsavedEdits);
+    addColourHexFields(freshBody);
     refreshChartMappingUnsavedState(panel);
     bindChartMappingForms(freshBody);
     freshBody.querySelectorAll('form[data-confirm]').forEach(bindConfirmForm);
@@ -7911,6 +7918,80 @@ function bindChartMappingForms(root = document) {
 }
 
 bindChartMappingForms();
+
+// Every colour picker shows its value in hexadecimal beside it: copy it from there,
+// or paste or type a #RRGGBB value to change the colour.
+function addColourHexFields(root = document) {
+  root.querySelectorAll('input[type="color"]:not([data-hex-field-ready])').forEach((picker) => {
+    picker.dataset.hexFieldReady = '1';
+    const wrapper = document.createElement('span');
+    wrapper.className = 'color-hex-field';
+    picker.replaceWith(wrapper);
+    const hex = document.createElement('input');
+    hex.type = 'text';
+    hex.className = 'color-hex-input';
+    hex.maxLength = 7;
+    hex.spellcheck = false;
+    hex.autocomplete = 'off';
+    hex.pattern = '#?[0-9A-Fa-f]{6}';
+    hex.setAttribute('aria-label', `${picker.getAttribute('aria-label') || 'Colour'} (hexadecimal)`);
+    // The initial value also survives a form reset, which restores every field to it.
+    hex.defaultValue = picker.value.toUpperCase();
+    hex.value = hex.defaultValue;
+    wrapper.append(picker, hex);
+    picker.form?.addEventListener('reset', () => window.setTimeout(() => { hex.value = picker.value.toUpperCase(); }));
+    picker.addEventListener('input', () => { hex.value = picker.value.toUpperCase(); hex.classList.remove('is-invalid'); });
+    hex.addEventListener('input', () => {
+      const text = hex.value.trim();
+      const value = text.startsWith('#') ? text : `#${text}`;
+      const valid = /^#[0-9A-Fa-f]{6}$/.test(value);
+      hex.classList.toggle('is-invalid', !valid);
+      if (!valid) return;
+      picker.value = value.toLowerCase();
+      picker.dispatchEvent(new Event('input', {bubbles: true}));
+      picker.dispatchEvent(new Event('change', {bubbles: true}));
+    });
+    hex.addEventListener('blur', () => { hex.value = picker.value.toUpperCase(); hex.classList.remove('is-invalid'); });
+  });
+}
+addColourHexFields();
+
+// Main module tabs: when they almost fit on one row, a slightly smaller title
+// keeps them on it; when even the most compact size wraps, they return to the
+// default size and wrap onto a second row.
+const MODULE_TAB_COMPACT_LEVELS = ['is-compact-1', 'is-compact-2'];
+function fitModuleTabs() {
+  const row = document.querySelector('.module-tabs-primary');
+  if (!row) return;
+  const onOneRow = () => {
+    const tabs = Array.from(row.children).filter((item) => item.matches('.module-tab') && item.offsetParent);
+    return !tabs.length || tabs.every((tab) => Math.abs(tab.offsetTop - tabs[0].offsetTop) < 4);
+  };
+  row.classList.remove(...MODULE_TAB_COMPACT_LEVELS);
+  if (onOneRow()) return;
+  for (const level of MODULE_TAB_COMPACT_LEVELS) {
+    row.classList.remove(...MODULE_TAB_COMPACT_LEVELS);
+    row.classList.add(level);
+    if (onOneRow()) return;
+  }
+  row.classList.remove(...MODULE_TAB_COMPACT_LEVELS);
+}
+(() => {
+  const container = document.querySelector('.module-tabs');
+  if (!container) return;
+  let lastWidth = -1;
+  const refit = () => {
+    const width = container.clientWidth;
+    if (width === lastWidth) return;
+    lastWidth = width;
+    fitModuleTabs();
+  };
+  refit();
+  window.addEventListener('load', () => { lastWidth = -1; refit(); });
+  document.fonts?.ready?.then(() => { lastWidth = -1; refit(); });
+  if ('ResizeObserver' in window) new ResizeObserver(() => window.requestAnimationFrame(refit)).observe(container);
+  else window.addEventListener('resize', refit);
+})();
 
 // Rows whose colour, label or source labels differ from the saved values are
 // marked, counted, and can be saved together with Save all changes.
@@ -7977,6 +8058,7 @@ async function saveAllChartMappings(panel) {
     body.replaceWith(freshBody);
     // Groups that could not be saved keep what was typed in them.
     restoreChartMappingEdits(freshBody, edits);
+    addColourHexFields(freshBody);
     const saved = pending.length - failures.length;
     freshBody.querySelectorAll('.alert').forEach((alert) => alert.remove());
     if (saved) {

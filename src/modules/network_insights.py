@@ -1360,9 +1360,10 @@ def install_network_insights_routes(core: Any) -> None:
         return hashlib.sha256(json.dumps(inputs, sort_keys=True, default=str).encode()).hexdigest()
 
     @app.post('/api/network-insights/analysis')
-    def network_insights_analysis(request: AnalysisRequest, user=Depends(insights_user)):
+    def network_insights_analysis(request: AnalysisRequest, cached_only: bool = Query(False), user=Depends(insights_user)):
         # Repeating an analysis with the same CDRs and filters returns the
         # stored result instead of recalculating it, also after a restart.
+        # ``cached_only`` answers 204 instead of calculating a missing result.
         task_repository = bound_repository()
         key = analysis_key(task_repository, request)
         with analysis_cache_lock:
@@ -1374,6 +1375,8 @@ def install_network_insights_routes(core: Any) -> None:
         if cached is None and stored.is_file():
             cached = stored.read_bytes()
             stored.touch()
+        if cached is None and cached_only:
+            return Response(status_code=204)
         if cached is None:
             cached = json.dumps(run_analysis(request), ensure_ascii=False, allow_nan=False, separators=(',', ':')).encode('utf-8')
             write_cache_file(folder, stored.name, cached, keep=40, pattern='analysis-*.json')

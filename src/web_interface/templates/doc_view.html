@@ -265,9 +265,21 @@
       .then(({response, data}) => {
         if (!response.ok || !Array.isArray(data.documents)) throw new Error('Unable to load help navigation.');
         const relatedDocuments = [
-          {label: 'Readme', url: '/documents/view/readme'},
-          {label: 'Changelog', url: '/documents/view/changelog'},
+          {label: 'Readme', url: '/documents/view/readme', icon: data.icons?.readme},
+          {label: 'Changelog', url: '/documents/view/changelog', icon: data.icons?.changelog},
         ];
+        // Modules and documents show the icon of their tab, in its colour.
+        const addIcon = (link, icon, colour) => {
+          if (!icon) return;
+          const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+          svg.setAttribute('class', 'help-nav-icon');
+          svg.setAttribute('viewBox', '0 0 24 24');
+          svg.setAttribute('aria-hidden', 'true');
+          svg.innerHTML = icon;
+          if (colour) svg.style.stroke = colour;
+          link.prepend(svg);
+          link.classList.add('has-icon');
+        };
         helpNavLists.forEach((navList) => {
           let currentGroup = '';
           let groupList = navList;
@@ -290,6 +302,7 @@
                   const relatedLink = document.createElement('a');
                   relatedLink.href = documentLink.url;
                   relatedLink.textContent = documentLink.label;
+                  addIcon(relatedLink, documentLink.icon?.d, documentLink.icon?.color);
                   if (relatedLink.pathname === window.location.pathname) relatedLink.classList.add('active');
                   relatedItem.appendChild(relatedLink);
                   groupList.appendChild(relatedItem);
@@ -302,6 +315,7 @@
             link.href = helpDocument.url;
             const label = position === 0 ? 'Help Home' : (helpDocument.label || formatHelpLabel(helpDocument.relative_path));
             link.textContent = position === 0 ? `${label} 🏠` : label;
+            addIcon(link, helpDocument.icon, helpDocument.icon_color);
             if (link.pathname === window.location.pathname) link.classList.add('active');
             item.appendChild(link);
             groupList.appendChild(item);

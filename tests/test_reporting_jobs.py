@@ -82,7 +82,7 @@ def test_features_activation_controls_modules_by_role_group_and_user(client):
     page = client.get('/workspace').text
     assert 'href="/reporting"' in page and 'href="/reporting-old"' in page
     assert 'href="/non-qualified-calls"' not in page
-    order = [page.index(f'href="{path}"') for path in ('/datasets-analysis', '/network-insights', '/e2e-dashboards', '/scoring', '/reporting', '/reporting-old')]
+    order = [page.index(f'href="{path}"') for path in ('/datasets-analysis', '/e2e-dashboards', '/reporting-old', '/scoring', '/network-insights', '/reporting')]
     assert order == sorted(order)
     session(client, 'analyst', 'user-viewer')
     assert 'href="/reporting"' in client.get('/workspace').text
@@ -136,7 +136,7 @@ def test_help_readme_and_changelog_are_public_except_reporting_old(client):
     assert 'Email Delivery' in client.get('/api/documents/help/app-config.md').json()['content']
     login(client)
     index = [item['relative_path'] for item in client.get('/api/documents/help-index').json()['documents']]
-    assert index.index('scoring-gap-analysis.md') < index.index('reporting.md') < index.index('reporting-old.md')
+    assert index.index('e2e-dashboards.md') < index.index('reporting-old.md') < index.index('scoring-gap-analysis.md') < index.index('reporting.md')
     assert client.get('/api/documents/help/reporting-old.md').status_code == 200
 
 

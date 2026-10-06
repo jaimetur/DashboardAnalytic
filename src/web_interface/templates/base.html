@@ -1,21 +1,7 @@
-{%- macro tab_icon(name) -%}<svg class="module-tab-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">{{ {
-  'workspace': '<path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2h7.5A2.5 2.5 0 0 1 21 9.5v7a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 16.5z"/><path d="M3 10.5h18"/>',
-  'datasets-analysis': '<ellipse cx="10" cy="5.5" rx="6" ry="2.5"/><path d="M4 5.5v9c0 1.4 2.7 2.5 6 2.5M16 5.5v4M4 10c0 1.4 2.7 2.5 6 2.5"/><circle cx="17" cy="15.5" r="3"/><path d="m19.2 17.7 2.3 2.3"/>',
-  'e2e-dashboards': '<rect x="3" y="3" width="8" height="10" rx="1.5"/><rect x="13" y="3" width="8" height="6" rx="1.5"/><rect x="13" y="11" width="8" height="10" rx="1.5"/><rect x="3" y="15" width="8" height="6" rx="1.5"/>',
-  'non-qualified-calls': '<path d="M5 4h3l2 5-2.5 1.5a11 11 0 0 0 6 6L15 14l5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/><path d="m15 3 6 6M21 3l-6 6"/>',
-  'reporting': '<rect x="2.5" y="5" width="14" height="11" rx="2"/><path d="m3 6.5 6.5 5 6.5-5"/><circle cx="17.5" cy="16.5" r="4"/><path d="M17.5 14.6v2l1.3 1"/>',
-  'reporting-old': '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 17v-3M12 17v-6M15 17v-4"/>',
-  'scoring': '<path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 6H5.5a3 3 0 0 0 3 4M16 6h2.5a3 3 0 0 1-3 4M12 13v4M8.5 21h7M10 17h4v4h-4z"/>',
-  'network-insights': '<circle cx="12" cy="9" r="1.6"/><path d="M12 10.6V21M9 21l3-9 3 9M8.6 5.6a4.8 4.8 0 0 0 0 6.8M15.4 5.6a4.8 4.8 0 0 1 0 6.8M5.8 2.8a8.8 8.8 0 0 0 0 12.4M18.2 2.8a8.8 8.8 0 0 1 0 12.4"/>',
-  'readme': '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5M8 8h8M8 12h6"/>',
-  'changelog': '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
-  'help': '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.6 2.6 0 0 1 5 .9c0 1.7-2.5 2.2-2.5 3.9M12 17.2h.01"/>',
-  'app-logs': '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>',
-  'config': '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
-  'admin': '<path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6z"/><path d="m9 12 2 2 4-4"/>',
-  'builders': '<path d="M14.7 6.3a4 4 0 0 0-5.3 5.3L3.5 17.5a2 2 0 0 0 2.9 2.9l5.9-5.9a4 4 0 0 0 5.3-5.3l-2.5 2.5-2.4-.5-.5-2.4z"/>'
-}[name]|safe }}</svg>{%- endmacro -%}
-{%- macro new_badge(stage) -%}{%- if show_module_stage_labels | default(true) -%}{%- set badge = {'alpha': ('ALPHA', 'Alpha, in development', 42), 'beta': ('BETA', 'Beta, being validated', 36), 'new': ('NEW', 'New, consolidated', 40), 'stable': ('STABLE', 'Stable', 46)}[stage] -%}<svg class="module-tab-new module-tab-new-{{ stage }}" viewBox="0 0 {{ badge[2] }} 14" role="img" aria-label="{{ badge[1] }}"><title>{{ badge[1] }}</title><rect width="{{ badge[2] }}" height="14" rx="4"/>{%- if stage == 'new' -%}<path class="module-tab-new-star" d="M8.00 2.60 L9.12 5.66 L12.37 5.78 L9.81 7.79 L10.70 10.92 L8.00 9.10 L5.30 10.92 L6.19 7.79 L3.63 5.78 L6.88 5.66Z"/>{%- endif -%}<text x="{{ (badge[2] + 10) / 2 if stage == 'new' else badge[2] / 2 }}" y="10.2" text-anchor="middle">{{ badge[0] }}</text></svg>{%- endif -%}{%- endmacro -%}
+{%- macro tab_icon(name, class_name='module-tab-icon', colour='') -%}<svg class="{{ class_name }}" viewBox="0 0 24 24" aria-hidden="true" focusable="false"{% if colour %} style="stroke: {{ colour }}"{% endif %}>{{ administrative_icons[name].d | safe }}</svg>{%- endmacro -%}
+{%- macro module_nav_icon(tab) -%}{% if tab.icon_path %}<svg class="module-navigator-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" style="stroke: {{ tab.tab_color }}">{{ tab.icon_path | safe }}</svg>{% endif %}{%- endmacro -%}
+{%- macro module_tab_content(tab) -%}{% if tab.icon_path %}<svg class="module-tab-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">{{ tab.icon_path | safe }}</svg>{% endif %}{% if tab.short_title == tab.title %}<span>{{ tab.title }}</span>{% else %}<span class="module-tab-label-desktop">{{ tab.title }}</span><span class="module-tab-label-mobile">{{ tab.short_title }}</span>{% endif %}{%- endmacro -%}
+{%- macro new_badge(module) -%}{%- set badge = (module_tab_badges | default({})).get(module) -%}{%- if badge -%}<svg class="module-tab-new module-tab-new-{{ module }}" viewBox="0 0 {{ badge.width }} 14" style="width: {{ '%.2f' | format(badge.width * 1.06 / 14) }}rem" role="img" aria-label="{{ badge.text }}"><title>{{ badge.text }}</title><rect width="{{ badge.width }}" height="14" rx="4" style="fill: {{ badge.color }}"/>{%- if badge.icon_path -%}<path class="module-tab-new-icon" d="{{ badge.icon_path }}" style="{{ 'fill: ' ~ badge.icon_color ~ '; stroke: none' if badge.icon_mode == 'fill' else 'fill: none; stroke: ' ~ badge.icon_color }}"/>{%- endif -%}<text x="{{ badge.text_x }}" y="10.2" text-anchor="middle" style="fill: {{ badge.ink }}">{{ badge.text }}</text></svg>{%- endif -%}{%- endmacro -%}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -89,30 +75,15 @@
           {% if user.role in ['admin', 'super-admin'] %}<a class="module-tab module-tab-admin{% if request.url.path == '/admin' %} active{% endif %}" href="/admin" title="Open Admin">{{ tab_icon('admin') }}<span>Admin</span></a>{% endif %}
         </div>
         <div class="module-tabs-primary">
-          {% if features['workspace'] %}<a class="module-tab module-tab-workspace{% if request.url.path == '/workspace' %} active{% endif %}" href="/workspace" title="Open Workspace management">{{ tab_icon('workspace') }}<span>Workspace</span>{{ new_badge('stable') }}</a>{% endif %}
-          {% if active_workspace %}
-          {% if features['datasets-analysis'] %}<a class="module-tab module-tab-datasets-analysis{% if request.url.path == '/datasets-analysis' %} active{% endif %}" href="/datasets-analysis" title="Open CDR Analysis">{{ tab_icon('datasets-analysis') }}<span class="module-tab-label-desktop">CDR Analysis</span><span class="module-tab-label-mobile">Analysis</span>{{ new_badge('stable') }}</a>{% endif %}
-          {% if features['network-insights'] %}<a class="module-tab module-tab-network-insights{% if request.url.path == '/network-insights' %} active{% endif %}" href="/network-insights" title="Open Network Insights">{{ tab_icon('network-insights') }}<span class="module-tab-label-desktop">Network Insights</span><span class="module-tab-label-mobile">Network</span>{{ new_badge('alpha') }}</a>{% endif %}
-          {% if features['e2e-dashboards'] %}<a class="module-tab module-tab-e2e-dashboards{% if request.url.path == '/e2e-dashboards' %} active{% endif %}" href="/e2e-dashboards" title="Open E2E Dashboards">{{ tab_icon('e2e-dashboards') }}<span class="module-tab-label-desktop">E2E Dashboards</span><span class="module-tab-label-mobile">Dashboards</span>{{ new_badge('new') }}</a>{% endif %}
-          {% if features['scoring'] %}<a class="module-tab module-tab-scoring{% if request.url.path == '/scoring' %} active{% endif %}" href="/scoring" title="Open Scoring &amp; GAP Analysis">{{ tab_icon('scoring') }}<span class="module-tab-label-desktop">Scoring &amp; GAP Analysis</span><span class="module-tab-label-mobile">Scoring</span>{{ new_badge('beta') }}</a>{% endif %}
-          {% if features['non-qualified-calls'] %}<a class="module-tab module-tab-non-qualified-calls{% if request.url.path == '/non-qualified-calls' %} active{% endif %}" href="/non-qualified-calls" title="Open Non-Qualified Calls">{{ tab_icon('non-qualified-calls') }}<span class="module-tab-label-desktop">Non-Qualified Calls</span><span class="module-tab-label-mobile">NQ Calls</span>{{ new_badge('alpha') }}</a>{% endif %}
-          {% if features['reporting'] %}<a class="module-tab module-tab-report-jobs{% if request.url.path == '/reporting' %} active{% endif %}" href="/reporting" title="Open Reporting">{{ tab_icon('reporting') }}<span class="module-tab-label-desktop">Reporting</span><span class="module-tab-label-mobile">Reporting</span>{{ new_badge('beta') }}</a>{% endif %}
-          {% if features['reporting-old'] %}<a class="module-tab module-tab-reporting{% if request.url.path == '/reporting-old' %} active{% endif %}" href="/reporting-old" title="Open Reporting (old)">{{ tab_icon('reporting-old') }}<span class="module-tab-label-desktop">Reporting (old)</span><span class="module-tab-label-mobile">Reporting (old)</span></a>{% endif %}
-          {% if features['builders'] %}<button type="button" class="module-tab module-tab-chart-builder{% if request.url.path in ['/chart-builder', '/query-builder'] %} active{% endif %}" popovertarget="module-builders-options" aria-haspopup="true" aria-expanded="false" aria-label="Choose builder" data-module-builders-trigger>{{ tab_icon('builders') }}<span>Builders</span> <span aria-hidden="true">▾</span>{{ new_badge('beta') }}</button>
+          {% for tab in module_tabs %}{% if features[tab.key] %}
+          {% if tab.key == 'builders' %}{% if active_workspace %}<button type="button" class="module-tab {{ tab.css }}{% if tab.colour_style %} module-tab-custom-colour{% endif %}{% if request.url.path in ['/chart-builder', '/query-builder'] %} active{% endif %}"{% if tab.colour_style %} style="{{ tab.colour_style }}"{% endif %} popovertarget="module-builders-options" aria-haspopup="true" aria-expanded="false" aria-label="Choose builder" data-module-builders-trigger>{{ module_tab_content(tab) }} <span aria-hidden="true">▾</span>{{ new_badge(tab.key) }}</button>
           <nav id="module-builders-options" class="module-builders-options" aria-label="Builders" popover data-module-builders-options>
             <a href="/chart-builder"{% if request.url.path == '/chart-builder' %} class="is-active" aria-current="page"{% endif %}>Chart Builder</a>
             <a href="/query-builder"{% if request.url.path == '/query-builder' %} class="is-active" aria-current="page"{% endif %}>Query Builder</a>
-          </nav>{% endif %}
-          {% else %}
-          {% if features['datasets-analysis'] %}<span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use CDR Analysis">{{ tab_icon('datasets-analysis') }}<span class="module-tab-label-desktop">CDR Analysis</span><span class="module-tab-label-mobile">Analysis</span>{{ new_badge('stable') }}</span>{% endif %}
-          {% if features['network-insights'] %}<span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use Network Insights">{{ tab_icon('network-insights') }}<span class="module-tab-label-desktop">Network Insights</span><span class="module-tab-label-mobile">Network</span>{{ new_badge('alpha') }}</span>{% endif %}
-          {% if features['e2e-dashboards'] %}<span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use E2E Dashboards">{{ tab_icon('e2e-dashboards') }}<span class="module-tab-label-desktop">E2E Dashboards</span><span class="module-tab-label-mobile">Dashboards</span>{{ new_badge('new') }}</span>{% endif %}
-          {% if features['scoring'] %}<span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use Scoring &amp; GAP Analysis">{{ tab_icon('scoring') }}<span class="module-tab-label-desktop">Scoring &amp; GAP Analysis</span><span class="module-tab-label-mobile">Scoring</span>{{ new_badge('beta') }}</span>{% endif %}
-          {% if features['non-qualified-calls'] %}<span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use Non-Qualified Calls">{{ tab_icon('non-qualified-calls') }}<span class="module-tab-label-desktop">Non-Qualified Calls</span><span class="module-tab-label-mobile">NQ Calls</span>{{ new_badge('alpha') }}</span>{% endif %}
-          {% if features['reporting'] %}<span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use Reporting">{{ tab_icon('reporting') }}<span class="module-tab-label-desktop">Reporting</span><span class="module-tab-label-mobile">Reporting</span>{{ new_badge('beta') }}</span>{% endif %}
-          {% if features['reporting-old'] %}<span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use Reporting (old)">{{ tab_icon('reporting-old') }}<span class="module-tab-label-desktop">Reporting (old)</span><span class="module-tab-label-mobile">Reporting (old)</span></span>{% endif %}
-          {% if features['builders'] %}<span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use Builders">{{ tab_icon('builders') }}<span>Builders</span></span>{% endif %}
-          {% endif %}
+          </nav>{% else %}<span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use {{ tab.title }}">{{ module_tab_content(tab) }}{{ new_badge(tab.key) }}</span>{% endif %}
+          {% elif tab.key == 'workspace' or active_workspace %}<a class="module-tab {{ tab.css }}{% if tab.colour_style %} module-tab-custom-colour{% endif %}{% if request.url.path == tab.href %} active{% endif %}"{% if tab.colour_style %} style="{{ tab.colour_style }}"{% endif %} href="{{ tab.href }}" title="Open {{ tab.nav_title }}">{{ module_tab_content(tab) }}{{ new_badge(tab.key) }}</a>
+          {% else %}<span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use {{ tab.title }}">{{ module_tab_content(tab) }}{{ new_badge(tab.key) }}</span>
+          {% endif %}{% endif %}{% endfor %}
         </div>
       </nav>
       {% endif %}
@@ -135,46 +106,30 @@
           <section class="module-navigator-category" aria-labelledby="module-navigator-main-title">
             <h4 id="module-navigator-main-title">Main Modules</h4>
             <nav aria-label="Main modules">
-              {% if features['workspace'] %}<a href="/workspace"{% if request.url.path == '/workspace' %} class="is-active" aria-current="page"{% endif %}>Workspace Management</a>{% endif %}
-              {% if active_workspace %}
-              {% if features['datasets-analysis'] %}<a href="/datasets-analysis"{% if request.url.path == '/datasets-analysis' %} class="is-active" aria-current="page"{% endif %}>CDR Analysis</a>{% endif %}
-              {% if features['network-insights'] %}<a href="/network-insights"{% if request.url.path == '/network-insights' %} class="is-active" aria-current="page"{% endif %}>Network Insights</a>{% endif %}
-              {% if features['e2e-dashboards'] %}<a href="/e2e-dashboards"{% if request.url.path == '/e2e-dashboards' %} class="is-active" aria-current="page"{% endif %}>E2E Dashboard</a>{% endif %}
-              {% if features['scoring'] %}<a href="/scoring"{% if request.url.path == '/scoring' %} class="is-active" aria-current="page"{% endif %}>Scoring &amp; GAP Analysis</a>{% endif %}
-              {% if features['non-qualified-calls'] %}<a href="/non-qualified-calls"{% if request.url.path == '/non-qualified-calls' %} class="is-active" aria-current="page"{% endif %}>Non-Qualified Calls</a>{% endif %}
-              {% if features['reporting'] %}<a href="/reporting"{% if request.url.path == '/reporting' %} class="is-active" aria-current="page"{% endif %}>Reporting</a>{% endif %}
-              {% if features['reporting-old'] %}<a href="/reporting-old"{% if request.url.path == '/reporting-old' %} class="is-active" aria-current="page"{% endif %}>Reporting (old)</a>{% endif %}
-              {% if features['builders'] %}<a href="/chart-builder"{% if request.url.path == '/chart-builder' %} class="is-active" aria-current="page"{% endif %}>Chart Builder</a>
-              <a href="/query-builder"{% if request.url.path == '/query-builder' %} class="is-active" aria-current="page"{% endif %}>Query Builder</a>{% endif %}
-              {% else %}
-              {% if features['datasets-analysis'] %}<span class="is-disabled" aria-disabled="true">CDR Analysis</span>{% endif %}
-              {% if features['network-insights'] %}<span class="is-disabled" aria-disabled="true">Network Insights</span>{% endif %}
-              {% if features['e2e-dashboards'] %}<span class="is-disabled" aria-disabled="true">E2E Dashboard</span>{% endif %}
-              {% if features['scoring'] %}<span class="is-disabled" aria-disabled="true">Scoring &amp; GAP Analysis</span>{% endif %}
-              {% if features['non-qualified-calls'] %}<span class="is-disabled" aria-disabled="true">Non-Qualified Calls</span>{% endif %}
-              {% if features['reporting'] %}<span class="is-disabled" aria-disabled="true">Reporting</span>{% endif %}
-              {% if features['reporting-old'] %}<span class="is-disabled" aria-disabled="true">Reporting (old)</span>{% endif %}
-              {% if features['builders'] %}<span class="is-disabled" aria-disabled="true">Chart Builder</span>{% endif %}
-              {% endif %}
+              {% for tab in module_tabs %}{% if features[tab.key] %}
+              {% if tab.key == 'workspace' or active_workspace %}{% if tab.key == 'builders' %}<a href="/chart-builder"{% if request.url.path == '/chart-builder' %} class="is-active" aria-current="page"{% endif %}>{{ module_nav_icon(tab) }}Chart Builder</a>
+              <a href="/query-builder"{% if request.url.path == '/query-builder' %} class="is-active" aria-current="page"{% endif %}>{{ module_nav_icon(tab) }}Query Builder</a>{% else %}<a href="{{ tab.href }}"{% if request.url.path == tab.href %} class="is-active" aria-current="page"{% endif %}>{{ module_nav_icon(tab) }}{{ tab.nav_title }}</a>{% endif %}
+              {% else %}<span class="is-disabled" aria-disabled="true">{{ module_nav_icon(tab) }}{{ 'Chart Builder' if tab.key == 'builders' else tab.nav_title }}</span>
+              {% endif %}{% endif %}{% endfor %}
             </nav>
           </section>
           <section class="module-navigator-category" aria-labelledby="module-navigator-administration-title">
             <h4 id="module-navigator-administration-title">Administrative Modules</h4>
             <nav aria-label="Administrative modules">
-              <a href="/app-logs"{% if request.url.path == '/app-logs' %} class="is-active" aria-current="page"{% endif %}>Application Logs</a>
+              <a href="/app-logs"{% if request.url.path == '/app-logs' %} class="is-active" aria-current="page"{% endif %}>{{ tab_icon('app-logs', 'module-navigator-icon', administrative_icons['app-logs'].color) }}Application Logs</a>
               {% if user.role in ['user-editor', 'admin', 'super-admin'] %}
-              <a href="/application-config"{% if request.url.path == '/application-config' %} class="is-active" aria-current="page"{% endif %}>Application Config</a>
-              <a href="/workspace-config"{% if request.url.path == '/workspace-config' %} class="is-active" aria-current="page"{% endif %}>Workspace Config</a>
+              <a href="/application-config"{% if request.url.path == '/application-config' %} class="is-active" aria-current="page"{% endif %}>{{ tab_icon('config', 'module-navigator-icon', administrative_icons['config'].color) }}Application Config</a>
+              <a href="/workspace-config"{% if request.url.path == '/workspace-config' %} class="is-active" aria-current="page"{% endif %}>{{ tab_icon('config', 'module-navigator-icon', administrative_icons['config'].color) }}Workspace Config</a>
               {% endif %}
-              {% if user.role in ['admin', 'super-admin'] %}<a href="/admin"{% if request.url.path == '/admin' %} class="is-active" aria-current="page"{% endif %}>Administrator Config</a>{% endif %}
+              {% if user.role in ['admin', 'super-admin'] %}<a href="/admin"{% if request.url.path == '/admin' %} class="is-active" aria-current="page"{% endif %}>{{ tab_icon('admin', 'module-navigator-icon', administrative_icons['admin'].color) }}Administrator Config</a>{% endif %}
             </nav>
           </section>
           <section class="module-navigator-category" aria-labelledby="module-navigator-documentation-title">
             <h4 id="module-navigator-documentation-title">Documentation</h4>
             <nav aria-label="Documentation modules">
-              <a href="/documents/view/help"{% if request.url.path.startswith('/documents/view/help') %} class="is-active" aria-current="page"{% endif %}>Help</a>
-              <a href="/documents/view/readme"{% if request.url.path == '/documents/view/readme' %} class="is-active" aria-current="page"{% endif %}>Readme</a>
-              <a href="/documents/view/changelog"{% if request.url.path == '/documents/view/changelog' %} class="is-active" aria-current="page"{% endif %}>Changelog</a>
+              <a href="/documents/view/help"{% if request.url.path.startswith('/documents/view/help') %} class="is-active" aria-current="page"{% endif %}>{{ tab_icon('help', 'module-navigator-icon', administrative_icons['help'].color) }}Help</a>
+              <a href="/documents/view/readme"{% if request.url.path == '/documents/view/readme' %} class="is-active" aria-current="page"{% endif %}>{{ tab_icon('readme', 'module-navigator-icon', administrative_icons['readme'].color) }}Readme</a>
+              <a href="/documents/view/changelog"{% if request.url.path == '/documents/view/changelog' %} class="is-active" aria-current="page"{% endif %}>{{ tab_icon('changelog', 'module-navigator-icon', administrative_icons['changelog'].color) }}Changelog</a>
             </nav>
           </section>
         </div>

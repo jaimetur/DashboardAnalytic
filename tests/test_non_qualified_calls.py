@@ -87,16 +87,16 @@ def test_module_is_hidden_until_activated_and_marks_tabs_in_development(client):
     page = client.get('/workspace').text
     assert 'href="/non-qualified-calls"' not in page
     # Each module tab shows its stage: ALPHA, BETA, NEW or STABLE.
-    assert '<span class="module-tab-label-mobile">Network</span><svg class="module-tab-new module-tab-new-alpha"' in page
-    assert '<span class="module-tab-label-mobile">Scoring</span><svg class="module-tab-new module-tab-new-beta"' in page
-    assert '<span>Workspace</span><svg class="module-tab-new module-tab-new-stable"' in page
-    assert '<span class="module-tab-label-mobile">Analysis</span><svg class="module-tab-new module-tab-new-stable"' in page
+    assert '<span class="module-tab-label-mobile">Network</span><svg class="module-tab-new module-tab-new-network-insights"' in page
+    assert '<span class="module-tab-label-mobile">Scoring</span><svg class="module-tab-new module-tab-new-scoring"' in page
+    assert '<span>Workspace</span><svg class="module-tab-new module-tab-new-workspace"' in page
+    assert '<span class="module-tab-label-mobile">Analysis</span><svg class="module-tab-new module-tab-new-datasets-analysis"' in page
     assert '>STABLE</text>' in page and '>ALPHA</text>' in page and '>BETA</text>' in page and '>NEW</text>' in page
     enable_module()
     page = client.get('/non-qualified-calls')
     assert page.status_code == 200
     assert 'module-tab-non-qualified-calls active' in page.text
-    assert '<span class="module-tab-label-mobile">NQ Calls</span><svg class="module-tab-new module-tab-new-alpha"' in page.text
+    assert '<span class="module-tab-label-mobile">NQ Calls</span><svg class="module-tab-new module-tab-new-non-qualified-calls"' in page.text
     assert 'id="nq-table"' in page.text and 'non_qualified_calls.js' in page.text
 
 

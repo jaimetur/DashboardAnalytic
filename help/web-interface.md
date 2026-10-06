@@ -27,17 +27,17 @@ The UI uses a shared header, module tabs, panels, dialogs and tables. Read [Prod
 
 Administrative tabs occupy the upper row, aligned to the left. Primary module tabs occupy the lower row, directly beside the first content panel. The same order applies on smaller screens.
 
-Primary tabs:
+Primary tabs, in their default order (super-admins change their order, titles, icons and colours in **Admin → Interface Settings**):
 
-- Workspace
+- **Workspace**
 - CDR Analysis
-- Network Insights
 - E2E Dashboards
-- Scoring & GAP Analysis
-- Non-Qualified Calls (in development, hidden until activated)
-- Reporting
 - Reporting (old)
-- Builders (dropdown with Chart Builder and Query Builder)
+- Scoring & GAP Analysis
+- Network Insights
+- Non-Qualified Calls (in development, hidden until activated)
+- **Reporting**
+- **Builders** (dropdown with Chart Builder and Query Builder)
 
 Each main tab is a feature. **Admin → Features Activation** makes it available to all users or to nobody by default, plus Allowed and Forbidden roles, user groups and users (Forbidden wins); a feature that is not active for an account disappears from its tabs and Modules menu, and its pages and API answer 403. When the tabs do not fit on one line they wrap onto further lines, and main module tabs never share a line with the administrative tabs.
 
@@ -58,7 +58,7 @@ Modules uses nearly the full viewport height when needed and scrolls if the wind
 
 Open **Config** and choose **Application Config** for application-wide runtime settings or **Workspace Config** for Report Templates Management, Operator Mappings, Vendor Mappings, Spectrum Holdings, Main Cities and the Scoring hierarchy/KPI/GAP settings in the active workspace. Workspace Config's Page Sections navigator jumps between the panels.
 
-Help Navigation lists unnumbered documents under General, Main Modules, Administrative Modules and Reference. Main Modules follow the main tab order: Workspace Management, CDR Analysis, Network Insights, E2E Dashboards, Scoring & GAP Analysis, Non-Qualified Calls, Reporting, Reporting (old), Chart Builder and Query Builder. Docker Deployment follows Deployment Configuration in General. App Logs is the first administrative document and Administrator Config is the last. Readme and Changelog open Reference before Project Structure and Roadmap.
+Help Navigation lists unnumbered documents under General, Main Modules, Administrative Modules and Reference. Main Modules follow the order of the main tabs, by default: [Workspace Management](workspace-management.md), CDR Analysis, E2E Dashboards, Reporting (old), Scoring & GAP Analysis, Network Insights, Non-Qualified Calls, [Reporting](reporting.md), Chart Builder and Query Builder. Docker Deployment follows Deployment Configuration in General. App Logs is the first administrative document and Administrator Config is the last. Readme and Changelog open Reference before Project Structure and Roadmap.
 
 The Help Home link stays above the groups. Every chapter is available to every reader except Reporting (old), which only users with that feature see.
 
@@ -141,8 +141,8 @@ On a phone, use portrait orientation for forms and landscape orientation when in
 
 ## Dashboard navigation and overlays
 
-The analytical tabs are ordered **CDR Analysis → Network Insights → E2E Dashboards → Scoring & GAP Analysis → Non-Qualified Calls → Reporting → Reporting (old)** for users with each feature. CDR Analysis uses blue, Network Insights electric indigo, E2E Dashboards muted violet, Scoring & GAP Analysis the navy-to-green gradient of its header, Non-Qualified Calls raspberry, Reporting green and Reporting (old) brighter purple; Network Insights and Non-Qualified Calls also use their colour for their header, buttons, tables and dialogs. Module tabs show their stage in a small label in the top-right corner, without taking space from their name: a red **ALPHA** while in development (Network Insights and Non-Qualified Calls), a yellow **BETA** while being validated (Scoring & GAP Analysis, Reporting and Builders), a blue **NEW** once consolidated (E2E Dashboards) and a green **STABLE** for established modules (Workspace and CDR Analysis). Super-admins can hide these labels for everyone in **Admin → Interface Settings**. Each module header shows a subtle decoration that represents the module (for example CDF curves in CDR Analysis or an antenna with radio waves in Network Insights) and is only as tall as its content; the controls of the module, such as the workspace or dataset selectors, follow in their own panel. The administrative tabs (Help, App Logs, Config and Admin) show an icon too, and the main tabs cover their lower part so both rows show the same tab height. Scoring offers NR Mode and CDR selection, aggregation controls, saved background jobs and tables/charts/GAP exports. Network Insights analyses RSRP/SINR, coverage and interference maps, sites, spectrum and network deployment. Each main tab shows a representative icon before its name. On narrower windows the main tabs switch to their short names (Analysis, Dashboards, Reporting, Scoring, Network) and then drop their icons, so the tab rows never overlap.
+By default the analytical tabs are ordered **CDR Analysis** → **E2E Dashboards** → **Reporting (old)** → **Scoring & GAP Analysis** → **Network Insights** → **Non-Qualified Calls** → **Reporting** for users with each feature. CDR Analysis uses blue, Network Insights electric indigo, E2E Dashboards muted violet, Scoring & GAP Analysis the navy-to-green gradient of its header, Non-Qualified Calls raspberry, **Reporting** green and Reporting (old) brighter purple; Network Insights and Non-Qualified Calls also use their colour for their header, buttons, tables and dialogs. Module tabs show their stage in a small label in the top-right corner, without taking space from their name: a red **ALPHA** while in development (Network Insights and Non-Qualified Calls), a yellow **BETA** while being validated (**Reporting** and **Builders**), a blue **NEW** with a star once consolidated (Scoring & GAP Analysis) and a green **STABLE** for established modules (Workspace, CDR Analysis and E2E Dashboards). Super-admins choose in **Admin → Interface Settings** the order of the main tabs, the title of each one and its short title for narrow windows, its icon and its colour, and the label of each module with its colour and optional icon, or hide every label. Each module header shows a subtle decoration that represents the module (for example CDF curves in CDR Analysis or an antenna with radio waves in Network Insights) and is only as tall as its content; the controls of the module, such as the workspace or dataset selectors, follow in their own panel. The administrative tabs (Help, App Logs, Config and Admin) show an icon too, and the main tabs cover their lower part so both rows show the same tab height. Scoring offers NR Mode and CDR selection, aggregation controls, saved background jobs and tables/charts/GAP exports. Network Insights analyses RSRP/SINR, coverage and interference maps, sites, spectrum and network deployment. Each main tab shows a representative icon before its name. On narrower windows the main tabs switch to their short names (Analysis, Dashboards, Reporting, Scoring, Network) and then drop their icons, so the tab rows never overlap.
 
-Reporting and Reporting (old) are shown only to the users, roles and groups it is activated for in Admin → Features Activation; Reporting starts with super-admins and Reporting (old) with super-admins and EJAITUR. The dashboard viewer groups charts by Slide and opens the same Dashboard Filters controls in a floating panel. Its dataset dialog provides pagination and CSV export.
+**Reporting** and Reporting (old) are shown only to the users, roles and groups it is activated for in Admin → Features Activation; **Reporting** starts with super-admins and Reporting (old) with super-admins and EJAITUR. The dashboard viewer groups charts by Slide and opens the same Dashboard Filters controls in a floating panel. Its dataset dialog provides pagination and CSV export.
 
 App Logs is available from the utility navigation and includes App Events for the active workspace plus the live Execution Log for the running server. See [App Logs](app-logs.md).

@@ -295,8 +295,154 @@
       <span class="collapse-chip">Collapse</span>
     </summary>
     <form class="interface-settings-form" action="/admin/interface-settings" method="post" autocomplete="off">
-      <label class="confirm-option"><input type="checkbox" name="show_module_stage_labels" value="true" {% if show_module_stage_labels %}checked{% endif %}><span>Show the stage label of each module on its tab (<strong>ALPHA</strong>, <strong>BETA</strong>, <strong>NEW</strong> or <strong>STABLE</strong>)</span></label>
-      <div class="form-actions"><button type="submit">Save Interface Settings</button></div>
+      <label class="confirm-option"><input type="checkbox" name="show_module_stage_labels" value="true" data-no-persist {% if show_module_stage_labels %}checked{% endif %}><span>Show a label on the tab of each main module (for example <strong>ALPHA</strong>, <strong>BETA</strong>, <strong>NEW</strong> or <strong>STABLE</strong>)</span></label>
+      {% if module_label_settings %}
+      <p class="table-help">Each row is a main tab, in the order of the main tabs; the Modules menu, the Help navigation and Features Activation follow the same order. Drag a row by its handle or use the arrows to move it. Choose the title of the tab, its short title for narrow windows, its icon and its colour (the accent of the module palette), and the label shown in its corner with its colour and an optional icon. Leave the label empty to show none; the label text turns white or dark to stay readable on its colour.</p>
+      <div class="table-wrap">
+        <table class="module-labels-table" data-module-labels>
+          <thead>
+            <tr><th></th><th colspan="4" class="module-labels-group module-labels-group-tab">Tab</th><th colspan="4" class="module-labels-group module-labels-group-label">Label</th><th></th></tr>
+            <tr><th>Order</th><th class="module-labels-tab">Module Title</th><th class="module-labels-tab">Short title</th><th class="module-labels-tab">Icon</th><th class="module-labels-tab module-labels-centered">Colour</th><th class="module-labels-label">Text</th><th class="module-labels-label module-labels-centered">Colour</th><th class="module-labels-label">Icon</th><th class="module-labels-label module-labels-centered">Icon colour</th><th>Preview</th></tr>
+          </thead>
+          <tbody>
+            {% for module, name in module_label_settings.modules %}{% set label = module_label_settings.labels[module] %}{% set defaults = module_label_settings.defaults[module] %}
+            <tr data-module-label-row>
+              <td class="module-labels-order"><input type="hidden" name="position__{{ module }}" value="{{ loop.index0 }}" data-no-persist data-module-label-position><span class="module-labels-handle" title="Drag to move {{ name }}" aria-hidden="true" data-module-label-handle>⠿</span><button type="button" class="module-labels-move" data-module-label-move="-1" aria-label="Move {{ name }} up" title="Move up">↑</button><button type="button" class="module-labels-move" data-module-label-move="1" aria-label="Move {{ name }} down" title="Move down">↓</button></td>
+              <td><input class="table-input module-labels-title" type="text" name="title__{{ module }}" value="{{ label.title }}" maxlength="{{ module_label_settings.max_title_length }}" placeholder="{{ defaults.title }}" title="{{ name }}" aria-label="Tab title of {{ name }}" data-no-persist data-module-tab-title></td>
+              <td><input class="table-input module-labels-short" type="text" name="short_title__{{ module }}" value="{{ label.short_title }}" maxlength="{{ module_label_settings.max_short_title_length }}" placeholder="Same as the title" aria-label="Short tab title of {{ name }}" data-no-persist data-module-tab-short-title></td>
+              <td><select class="table-select module-labels-tab-icon" name="tab_icon__{{ module }}" aria-label="Tab icon of {{ name }}" data-no-persist data-module-tab-icon><option value="">No icon</option>{% for key, icon in module_label_settings.tab_icons.items() %}<option value="{{ key }}" {% if label.tab_icon == key %}selected{% endif %}>{{ icon.label }}</option>{% endfor %}</select></td>
+              <td><input class="mapping-color" type="color" name="tab_color__{{ module }}" value="{{ label.tab_color | lower }}" aria-label="Tab colour of {{ name }}" data-no-persist data-module-tab-color></td>
+              <td><input class="table-input module-labels-text" type="text" name="label__{{ module }}" value="{{ label.text }}" maxlength="{{ module_label_settings.max_length }}" placeholder="No label" aria-label="Label of {{ name }}" data-no-persist data-module-label-text></td>
+              <td><input class="mapping-color" type="color" name="color__{{ module }}" value="{{ label.color | lower }}" aria-label="Label colour of {{ name }}" data-no-persist data-module-label-color></td>
+              <td><select class="table-select module-labels-label-icon" name="icon__{{ module }}" aria-label="Icon of {{ name }}" data-no-persist data-module-label-icon><option value="">No icon</option>{% for key, icon in module_label_settings.icons.items() %}<option value="{{ key }}" {% if label.icon == key %}selected{% endif %}>{{ icon.label }}</option>{% endfor %}</select></td>
+              <td><input class="mapping-color" type="color" name="icon_color__{{ module }}" value="{{ label.icon_color | lower }}" aria-label="Icon colour of {{ name }}" data-no-persist data-module-label-icon-color></td>
+              <td class="module-label-preview" data-module-label-preview></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <script type="application/json" data-module-tab-icons>{{ module_label_settings.tab_icons | tojson }}</script>
+      <script type="application/json" data-module-label-icons>{{ module_label_settings.icons | tojson }}</script>
+      <script>
+  // Interface Settings: live preview of every module label, drawn like on the tabs.
+  (() => {
+    const table = document.querySelector('[data-module-labels]');
+    if (!table) return;
+    let icons = {};
+    try { icons = JSON.parse(document.querySelector('[data-module-label-icons]')?.textContent || '{}'); } catch (_) { icons = {}; }
+    const ink = (colour) => {
+      const [red, green, blue] = [1, 3, 5].map((index) => parseInt(colour.slice(index, index + 2), 16) / 255)
+        .map((value) => (value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4));
+      const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+      return 1.05 / (luminance + 0.05) >= 3 ? '#FFFFFF' : '#2B2100';
+    };
+    const svgNode = (name, attributes) => {
+      const node = document.createElementNS('http://www.w3.org/2000/svg', name);
+      Object.entries(attributes).forEach(([key, value]) => node.setAttribute(key, value));
+      return node;
+    };
+    let tabIcons = {};
+    try { tabIcons = JSON.parse(document.querySelector('[data-module-tab-icons]')?.textContent || '{}'); } catch (_) { tabIcons = {}; }
+    // The tab as the main tabs draw it when selected, with its label in the corner.
+    const render = (row) => {
+      const cell = row.querySelector('[data-module-label-preview]');
+      const titleInput = row.querySelector('[data-module-tab-title]');
+      const tab = document.createElement('span');
+      tab.className = 'module-label-preview-tab';
+      tab.style.setProperty('--tab-accent', row.querySelector('[data-module-tab-color]').value);
+      const tabIcon = tabIcons[row.querySelector('[data-module-tab-icon]').value];
+      if (tabIcon) {
+        const svg = svgNode('svg', {class: 'module-tab-icon', viewBox: '0 0 24 24', 'aria-hidden': 'true'});
+        svg.innerHTML = tabIcon.d;
+        tab.append(svg);
+      }
+      const title = document.createElement('span');
+      title.textContent = titleInput.value.trim() || titleInput.placeholder;
+      tab.append(title);
+      cell.replaceChildren(tab);
+      // Labels hidden for every module are left out of the preview too.
+      const badge = showLabels?.checked === false ? null : renderBadge(row);
+      if (badge) tab.append(badge);
+    };
+    const renderBadge = (row) => {
+      const text = row.querySelector('[data-module-label-text]').value.trim();
+      const colour = row.querySelector('[data-module-label-color]').value;
+      const icon = icons[row.querySelector('[data-module-label-icon]').value];
+      const iconColour = row.querySelector('[data-module-label-icon-color]').value;
+      if (!text) return null;
+      const start = icon ? 16 : 4;
+      const width = start + Math.round(6.2 * text.length) + 4;
+      const svg = svgNode('svg', {class: 'module-tab-new module-label-preview-badge', viewBox: `0 0 ${width} 14`, role: 'img', 'aria-label': text});
+      svg.style.width = `${(width * 1.06 / 14).toFixed(2)}rem`;
+      svg.append(svgNode('rect', {width, height: 14, rx: 4, style: `fill: ${colour}`}));
+      if (icon) {
+        svg.append(svgNode('path', {class: 'module-tab-new-icon', d: icon.d, style: icon.mode === 'fill' ? `fill: ${iconColour}; stroke: none` : `fill: none; stroke: ${iconColour}`}));
+      }
+      const label = svgNode('text', {x: (start + width - 4) / 2, y: 10.2, 'text-anchor': 'middle', style: `fill: ${ink(colour)}`});
+      label.textContent = text;
+      svg.append(label);
+      return svg;
+    };
+    const body = table.tBodies[0];
+    // Rows keep their order in hidden positions, saved with the form.
+    const renumber = () => {
+      [...body.rows].forEach((row, index) => {
+        row.querySelector('[data-module-label-position]').value = String(index);
+        row.querySelector('[data-module-label-move="-1"]').disabled = index === 0;
+        row.querySelector('[data-module-label-move="1"]').disabled = index === body.rows.length - 1;
+      });
+    };
+    body.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-module-label-move]');
+      if (!button) return;
+      const row = button.closest('tr');
+      const target = Number(button.dataset.moduleLabelMove) < 0 ? row.previousElementSibling : row.nextElementSibling?.nextElementSibling;
+      if (Number(button.dataset.moduleLabelMove) < 0 && !target) return;
+      body.insertBefore(row, target || null);
+      renumber();
+      button.focus();
+    });
+    // Rows are dragged by their handle with the pointer (mouse, pen or touch),
+    // which also works on table rows where native drag and drop does not.
+    let dragged = null;
+    body.addEventListener('pointerdown', (event) => {
+      const handle = event.target.closest('[data-module-label-handle]');
+      if (!handle || event.button !== 0) return;
+      event.preventDefault();
+      dragged = handle.closest('[data-module-label-row]');
+      dragged.classList.add('is-dragging');
+      handle.setPointerCapture?.(event.pointerId);
+    });
+    body.addEventListener('pointermove', (event) => {
+      if (!dragged) return;
+      const next = [...body.rows].filter((row) => row !== dragged).find((row) => {
+        const box = row.getBoundingClientRect();
+        return event.clientY < box.top + box.height / 2;
+      });
+      if (next !== dragged.nextElementSibling) body.insertBefore(dragged, next || null);
+    });
+    const drop = () => {
+      if (!dragged) return;
+      dragged.classList.remove('is-dragging');
+      dragged = null;
+      renumber();
+    };
+    body.addEventListener('pointerup', drop);
+    body.addEventListener('pointercancel', drop);
+    const showLabels = table.closest('form')?.querySelector('[name="show_module_stage_labels"]');
+    showLabels?.addEventListener('change', () => body.querySelectorAll('[data-module-label-row]').forEach(render));
+    table.closest('form')?.addEventListener('reset', () => setTimeout(() => body.querySelectorAll('[data-module-label-row]').forEach(render)));
+    renumber();
+    table.querySelectorAll('[data-module-label-row]').forEach((row) => {
+      render(row);
+      row.addEventListener('input', () => render(row));
+      row.addEventListener('change', () => render(row));
+    });
+  })();
+      </script>
+      {% endif %}
+      <div class="form-actions"><button type="submit">Save Interface Settings</button>{% if module_label_settings %}<button type="submit" class="ghost-link" name="reset_module_labels" value="1">Reset tabs and labels to defaults</button>{% endif %}</div>
     </form>
   </details>
   {% endif %}
