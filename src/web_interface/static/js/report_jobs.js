@@ -72,7 +72,8 @@
       row.title = preset.values.length ? preset.values.join(', ') : 'No Main Cities are set in Workspace Config.';
       menu.append(row);
     }
-    const chosen = new Set(selected.map(String));
+    // An empty saved selection means every value: they all start checked.
+    const chosen = new Set((selected.length ? selected : values).map(String));
     const boxes = values.map((value) => {
       const row = node('label', undefined, 'rj-multi-option');
       const box = node('input'); box.type = 'checkbox'; box.value = String(value); box.checked = chosen.has(String(value));
@@ -81,36 +82,23 @@
       return box;
     });
     if (!values.length) menu.append(node('p', 'No values available.', 'table-help'));
-    // Select All / None acts on the listed (filtered) values, like the other filters of the application.
-    if (values.length) {
-      const toggleAll = node('button', 'Select All / None', 'workspace-user-picker-toggle rj-multi-toggle');
-      toggleAll.type = 'button';
-      toggleAll.addEventListener('click', () => {
-        const listed = boxes.filter((box) => !box.disabled && !box.parentElement.hidden);
-        const select = listed.some((box) => !box.checked);
-        listed.forEach((box) => { box.checked = select; });
-        if (presetBox && !preset.dynamic) presetBox.checked = false;
-        refresh();
-      });
-      search.after(toggleAll);
-    }
     const refresh = () => {
       if (presetBox && preset.dynamic) boxes.forEach((box) => { box.disabled = presetBox.checked; });
       const count = boxes.filter((box) => box.checked && !box.disabled).length;
       const enabled = boxes.filter((box) => !box.disabled).length;
-      const everything = count === 0 || count === enabled;
-      allBox.checked = everything && !(presetBox?.checked && preset.dynamic);
-      const state = everything ? 'All' : `${count} of ${enabled}`;
+      // All Values: every value selected, or none (no restriction either way).
+      allBox.checked = enabled > 0 && (count === 0 || count === enabled);
+      const state = allBox.checked ? 'All Values' : `${count} of ${enabled}`;
       caption.textContent = `${label}: ${presetBox?.checked && preset.dynamic ? preset.label : state}`;
       summary.title = caption.textContent;
     };
+    // Checking All Values selects every value; unchecking it clears them to pick only some.
     allBox.addEventListener('change', () => {
-      if (allBox.checked) {
-        boxes.forEach((box) => { box.checked = false; });
-        if (presetBox) presetBox.checked = false;
-      }
+      boxes.forEach((box) => { if (!box.disabled) box.checked = allBox.checked; });
+      if (presetBox && !preset.dynamic) presetBox.checked = false;
       refresh();
     });
+
     presetBox?.addEventListener('change', () => {
       if (!preset.dynamic) {
         const wanted = new Set(preset.values.map((value) => String(value).toLocaleLowerCase()));
@@ -130,8 +118,11 @@
     });
     wrapper.append(summary, menu);
     refresh();
-    // Every value selected is the same as All Values: no restriction, so future values are included too.
-    wrapper.getValue = () => (allBox.checked ? [] : boxes.filter((box) => box.checked && !box.disabled).map((box) => box.value));
+    // All Values (or nothing selected) is saved as no restriction, so future values are included too.
+    wrapper.getValue = () => {
+      const checked = boxes.filter((box) => box.checked && !box.disabled).map((box) => box.value);
+      return allBox.checked || !checked.length ? [] : checked;
+    };
     wrapper.getPreset = () => Boolean(presetBox?.checked);
     return wrapper;
   }
