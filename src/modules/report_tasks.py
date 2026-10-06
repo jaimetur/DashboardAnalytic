@@ -1253,6 +1253,7 @@ def install_report_task_routes(core: Any) -> None:
         return {
             'tasks': [serialize_task(task, runs_by_id, dashboard_names) for task in list_tasks(task_repository)],
             'runs': runs, 'can_edit': user.role in {'user-editor', 'admin', 'super-admin'},
+            'workspace_id': core.active_workspace.id if core.active_workspace else '',
         }
 
     @app.get('/api/reporting/options')

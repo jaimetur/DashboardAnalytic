@@ -740,6 +740,35 @@
     openEditor(task?.id ?? null);
     // What the job looks like when the editor opens, to detect unsaved changes.
     editorSnapshot = JSON.stringify(editorPayload());
+    saveDraft();
+  }
+
+  // The open Job Editor is kept as a draft in this browser, so reloading the page reopens it as it was.
+  const DRAFT_KEY = 'dashboard-analytic:reporting-job-draft';
+  const readDraft = () => { try { return JSON.parse(window.localStorage.getItem(DRAFT_KEY) || 'null'); } catch { return null; } };
+  const clearDraft = () => { try { window.localStorage.removeItem(DRAFT_KEY); } catch { /* Storage unavailable. */ } };
+  let draftTimer = 0;
+  const saveDraft = () => {
+    window.clearTimeout(draftTimer);
+    draftTimer = window.setTimeout(() => {
+      if (!editorOpen || !options) return;
+      try {
+        window.localStorage.setItem(DRAFT_KEY, JSON.stringify({
+          workspace: state.workspace_id, editingId, snapshot: editorSnapshot, payload: editorPayload(),
+        }));
+      } catch { /* Storage unavailable: the editor simply does not survive a reload. */ }
+    }, 300);
+  };
+  async function restoreDraft() {
+    const draft = readDraft();
+    if (!draft || !state.can_edit || draft.workspace !== state.workspace_id || !draft.payload) return;
+    const task = draft.editingId !== null ? state.tasks.find((item) => item.id === draft.editingId) : null;
+    if (draft.editingId !== null && !task) { clearDraft(); return; }
+    await ensureOptions();
+    const recipients = String(draft.payload.recipients || '').split(/[,;\n]/).map((item) => item.trim()).filter(Boolean);
+    fillEditor({...(task || {}), ...draft.payload, recipients, id: task ? task.id : undefined, name: draft.payload.name || task?.name || ''});
+    if (draft.snapshot) editorSnapshot = draft.snapshot;
+    if (editorDirty()) status('The Job Editor was reopened with its unsaved changes.', 'info');
   }
 
   // Leaving the editor with unsaved changes asks first.
@@ -844,6 +873,8 @@
     const editor = editorElement;
     editingId = null;
     editorSnapshot = null;
+    window.clearTimeout(draftTimer);
+    clearDraft();
     document.querySelectorAll('#rj-tasks tr.rj-editing').forEach((row) => row.classList.remove('rj-editing'));
     if (editor.hidden) return;
     editor.classList.add('is-closing');
@@ -1010,6 +1041,10 @@
   }
 
   // -- events -------------------------------------------------------------
+  // Every edit refreshes the draft kept for a reload.
+  ['input', 'change', 'click'].forEach((type) => document.addEventListener(type, (event) => {
+    if (event.target.closest?.('#rj-form')) saveDraft();
+  }));
   document.addEventListener('change', (event) => {
     if (event.target.closest('#rj-form')) syncEditor();
   });
@@ -1056,5 +1091,5 @@
     }
   });
 
-  void refresh().catch((error) => status(error.message, 'error'));
+  void refresh().then(restoreDraft).catch((error) => status(error.message, 'error'));
 })();

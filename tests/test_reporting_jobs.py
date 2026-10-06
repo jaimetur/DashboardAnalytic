@@ -406,3 +406,8 @@ def test_reporting_options_list_filter_values_per_cdr(client):
     assert isinstance(options['values_by_dataset'], dict)
     for values in options['values_by_dataset'].values():
         assert set(values) == {'Operator', 'Operator_Vendor', 'Vendor', 'Region', 'Cluster', 'City', 'Campaign'}
+
+
+def test_reporting_state_names_its_workspace_for_editor_drafts(client):
+    login(client)
+    assert client.get('/api/reporting/state').json()['workspace_id'] == core.active_workspace.id
