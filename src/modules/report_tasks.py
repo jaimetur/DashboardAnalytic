@@ -822,8 +822,8 @@ def install_report_task_routes(core: Any) -> None:
                            *[f"Metrics ({label}): {', '.join(section['metrics'][kind]) if (section.get('metrics') or {}).get(kind) else 'every metric'}"
                              for kind, label in CDR_ANALYSIS_KINDS.items()],
                            f"Filters: {filter_text}",
-                           f"Aggregation: {CDR_ANALYSIS_AGGREGATIONS[section.get('aggregation') or 'all']} · "
-                           f"CDF comparison: {CDR_ANALYSIS_CDF_GROUPINGS[section.get('cdf_grouping') or 'operator']}",
+                           f"Global comparison: {CDR_ANALYSIS_AGGREGATIONS[section.get('aggregation') or 'all']} · "
+                           f"Global CDF comparison: {CDR_ANALYSIS_CDF_GROUPINGS[section.get('cdf_grouping') or 'operator']}",
                            *[f'Skipped: {error}' for error in errors]]
                 artifacts.append(ready_artifact('dataset_analysis', title, destination, details))
             except Exception as exc:

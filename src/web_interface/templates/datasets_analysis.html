@@ -283,7 +283,7 @@
               </select>
             </label>
             <label class="chart-aggregation-control panel-aggregation-control" data-summary-control>
-              <span>Global Aggregation</span>
+              <span>Global Comparison</span>
               <select name="aggregation" form="datasets-analysis-filters-form" data-global-aggregation-select>
                 <option value="all" {% if selected_aggregation == 'all' %}selected{% endif %}>Auto / raw view</option>
                 {% for item in ['operator', 'operator_vendor', 'vendor', 'region', 'cluster', 'city', 'market', 'period', 'session_type', 'test_name', 'direction', 'technology_primary', 'source_sheet'] %}
