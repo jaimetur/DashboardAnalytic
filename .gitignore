@@ -15,3 +15,6 @@ htmlcov/
 /.idea/
 # Local methodology reference; import explicitly into a workspace.
 /assets/scoring/netcheck_2026.json
+
+# Local preview configuration of the Claude desktop app (not part of the project)
+.claude/launch.json
