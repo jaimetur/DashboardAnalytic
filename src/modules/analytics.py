@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.modules.column_names import resolve_column_name
+from src.modules.column_names import column_identity, resolve_column_name, sort_vendor_values
 from src.modules.runtime_config import ignore_event_time_filtering
 
 from src.modules.ingestion import DatasetSummary, infer_dataset_kind
@@ -197,6 +197,9 @@ def compute_grouped_scorecards(df: pd.DataFrame, metric: str, aggregation: str |
             continue
         seen.add(normalized)
         ordered_groups.append(group_name)
+    if column_identity(aggregation) in {'vendor', 'operatorvendor', 'vendoronly'}:
+        # Vendor groups follow the order of the Vendor filters: vendors, mixed groups, operators without a vendor.
+        ordered_groups = sort_vendor_values(ordered_groups)
 
     grouped_scorecards: list[dict[str, Any]] = []
     # Normalise the group column once instead of once per group.

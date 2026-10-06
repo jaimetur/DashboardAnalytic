@@ -991,7 +991,7 @@ function limitSeriesCollectionByX(seriesCollection, xMaxOverride) {
   refreshAll();
 })();
 
-function drawLineChart(svg, labels, series, width, height, padding, axisLabels = {}, xMaxOverride = null, xMinOverride = null) {
+function drawLineChart(svg, labels, series, width, height, padding, axisLabels = {}, xMaxOverride = null, xMinOverride = null, yRange = null) {
   const palette = ['#0b7a75', '#dd653e', '#245a96', '#b84d3a', '#6d46a8', '#228a5d', '#c78b1d', '#4d6a88'];
   const rawSeriesCollection = Array.isArray(series) && series.length > 0 && typeof series[0] === 'object' && Array.isArray(series[0].series)
     ? series
@@ -1008,7 +1008,10 @@ function drawLineChart(svg, labels, series, width, height, padding, axisLabels =
   const minX = Number.isFinite(Number(xMinOverride)) ? Number(xMinOverride) : dataMinX;
   const maxX = Number.isFinite(Number(xMaxOverride)) ? Number(xMaxOverride) : dataMaxX;
   const maxY = Math.max(...flatSeries, 1);
-  const legendHeight = seriesCollection.length > 1 ? 28 : 0;
+  // The legend leaves the top-right corner to the floating zoom controls and grows by rows.
+  const legendColumns = Math.max(1, Math.floor((width - padding - 170) / 150));
+  const legendRows = Math.ceil(seriesCollection.length / legendColumns);
+  const legendHeight = seriesCollection.length > 1 ? legendRows * 18 + 12 : 0;
   const xAxisLabel = String(axisLabels.x || 'Metric value');
   const yAxisLabel = String(axisLabels.y || 'Cumulative probability');
   const leftPadding = padding + 26;
@@ -1020,9 +1023,13 @@ function drawLineChart(svg, labels, series, width, height, padding, axisLabels =
   const domainMinX = Math.min(minX, maxX);
   const domainMaxX = Math.max(minX, maxX);
   const scaleX = (value) => leftPadding + ((value - domainMinX) / ((domainMaxX - domainMinX) || 1)) * innerWidth;
-  const scaleY = (value) => height - bottomPadding - (value / maxY) * innerHeight;
+  // A box zoom narrows the probability range too; curves are clipped to the plot area.
+  const minY = Number.isFinite(Number(yRange?.min)) ? Number(yRange.min) : 0;
+  const topY = Number.isFinite(Number(yRange?.max)) ? Number(yRange.max) : maxY;
+  const scaleY = (value) => height - bottomPadding - ((value - minY) / ((topY - minY) || 1)) * innerHeight;
   const xTicks = [domainMinX, (domainMinX + domainMaxX) / 2, domainMaxX];
-  const yTicks = [0, 0.5, 1.0];
+  const yTicks = yRange ? [minY, (minY + topY) / 2, topY] : [0, 0.5, 1.0];
+  const clipId = `cdf-clip-${Math.random().toString(36).slice(2, 9)}`;
   const xTickLabels = xTicks.map((value) => `
     <line x1="${scaleX(value)}" y1="${height - bottomPadding}" x2="${scaleX(value)}" y2="${height - bottomPadding + 6}" stroke="#9ab0bc" />
     <text x="${scaleX(value)}" y="${height - bottomPadding + 18}" text-anchor="middle" fill="#526371" font-size="11">${formatAxisValue(value)}</text>
@@ -1039,8 +1046,8 @@ function drawLineChart(svg, labels, series, width, height, padding, axisLabels =
   const legend = seriesCollection.length > 1
     ? seriesCollection.map((item, index) => {
         const color = item.color || palette[index % palette.length];
-        const x = padding + (index % 3) * 170;
-        const y = 18 + Math.floor(index / 3) * 18;
+        const x = padding + (index % legendColumns) * 150;
+        const y = 18 + Math.floor(index / legendColumns) * 18;
         return `
           <circle cx="${x}" cy="${y}" r="5" fill="${color}"></circle>
           <text x="${x + 10}" y="${y + 4}" fill="#526371" font-size="11">${String(item.name).slice(0, 20)}</text>
@@ -1049,7 +1056,7 @@ function drawLineChart(svg, labels, series, width, height, padding, axisLabels =
     : `<text x="${padding}" y="18" fill="#526371">CDF</text>`;
   // Geometry for the hover tooltip: the x value under the pointer and each curve's probability there.
   svg.chartGeometry = {
-    left: leftPadding, top: innerTop, width: innerWidth, height: innerHeight, minX: domainMinX, maxX: domainMaxX,
+    kind: 'line', left: leftPadding, top: innerTop, width: innerWidth, height: innerHeight, minX: domainMinX, maxX: domainMaxX, minY, maxY: topY,
     series: seriesCollection.map((item, index) => ({name: item.name, color: item.color || palette[index % palette.length], labels: item.labels || [], series: item.series || []})),
   };
   svg.innerHTML = `
@@ -1059,7 +1066,8 @@ function drawLineChart(svg, labels, series, width, height, padding, axisLabels =
     ${xTickLabels}
     ${yTickLabels}
     ${legend}
-    ${lines}
+    <clipPath id="${clipId}"><rect x="${leftPadding}" y="${innerTop}" width="${innerWidth}" height="${innerHeight}"></rect></clipPath>
+    <g clip-path="url(#${clipId})">${lines}</g>
     <text x="${leftPadding + innerWidth / 2}" y="${height - 4}" text-anchor="middle" fill="#526371" font-size="12" font-weight="600">${xAxisLabel}</text>
     <text x="16" y="${innerTop + innerHeight / 2}" text-anchor="middle" fill="#526371" font-size="12" font-weight="600" transform="rotate(-90 16 ${innerTop + innerHeight / 2})">${yAxisLabel}</text>
   `;
@@ -1099,6 +1107,7 @@ function drawBarChart(svg, labels, series, width, height, padding, axisLabels = 
         : `<text x="${textX}" y="${labelY}" text-anchor="middle" fill="#526371" font-size="11" data-chart-tip="${tip}">${escapeChartText(shortLabel(label))}</text>`}
     `;
   }).join('');
+  svg.chartGeometry = {kind: 'bar', left: leftPadding, top: topPadding, width: innerWidth, height: innerHeight};
   svg.innerHTML = `
     <line x1="${leftPadding}" y1="${height - bottomPadding}" x2="${width - padding}" y2="${height - bottomPadding}" stroke="#9ab0bc" />
     <line x1="${leftPadding}" y1="${topPadding}" x2="${leftPadding}" y2="${height - bottomPadding}" stroke="#9ab0bc" />
@@ -1143,12 +1152,13 @@ function setupChartInteractions(container) {
   const svg = container.querySelector('.chart-svg');
   if (!svg || svg.dataset.chartInteractive === '1') return;
   svg.dataset.chartInteractive = '1';
+  let dragging = false;
   svg.addEventListener('mousemove', (event) => {
     const target = event.target.closest?.('[data-chart-tip]');
     if (target) { chartTooltip.show(event, target.dataset.chartTip); return; }
     const geometry = svg.chartGeometry;
     const guide = svg.querySelector('.chart-hover-guide');
-    if (!geometry || container.dataset.chartKind !== 'cdf') { chartTooltip.hide(); return; }
+    if (!geometry || geometry.kind !== 'line' || dragging) { chartTooltip.hide(); return; }
     const box = svg.getBoundingClientRect();
     const viewBoxWidth = svg.viewBox.baseVal.width || box.width;
     const viewBoxHeight = svg.viewBox.baseVal.height || box.height;
@@ -1176,12 +1186,76 @@ function setupChartInteractions(container) {
     const zoom = Math.max(1, Math.min(4, value));
     container.dataset.chartZoom = String(zoom);
     level.textContent = `${Math.round(zoom * 100)}%`;
-    zoomOut.disabled = zoom <= 1; reset.disabled = zoom <= 1; zoomIn.disabled = zoom >= 4;
+    zoomOut.disabled = zoom <= 1; reset.disabled = zoom <= 1 && !container.dataset.cdfYMax; zoomIn.disabled = zoom >= 4;
     drawChart(container);
   };
   zoomOut.addEventListener('click', () => apply((Number(container.dataset.chartZoom) || 1) - 0.5));
   zoomIn.addEventListener('click', () => apply((Number(container.dataset.chartZoom) || 1) + 0.5));
-  reset.addEventListener('click', () => apply(1));
+  reset.addEventListener('click', () => {
+    // Back to the whole chart: no box zoom and the X range of the slider.
+    ['cdfXMin', 'cdfXMax', 'cdfYMin', 'cdfYMax'].forEach((key) => { delete container.dataset[key]; });
+    if (container.syncCdfRange) {
+      const payload = JSON.parse(container.dataset.chart || '{}');
+      container.syncCdfRange(Number(payload.x_min), Number(payload.x_view_max_default ?? payload.x_max));
+    }
+    apply(1);
+  });
+  // Box zoom as in E2E Dashboards: drag a rectangle over the chart to zoom into it.
+  const toViewBox = (event) => {
+    const box = svg.getBoundingClientRect();
+    return {
+      x: (event.clientX - box.left) * ((svg.viewBox.baseVal.width || box.width) / box.width),
+      y: (event.clientY - box.top) * ((svg.viewBox.baseVal.height || box.height) / box.height),
+    };
+  };
+  svg.addEventListener('pointerdown', (event) => {
+    const geometry = svg.chartGeometry;
+    if (event.button !== 0 || !geometry) return;
+    const start = toViewBox(event);
+    if (start.x < geometry.left || start.x > geometry.left + geometry.width || start.y < geometry.top || start.y > geometry.top + geometry.height) return;
+    event.preventDefault();
+    dragging = true; chartTooltip.hide();
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('class', 'chart-zoom-box');
+    svg.append(rect);
+    const clamp = (point) => ({
+      x: Math.max(geometry.left, Math.min(geometry.left + geometry.width, point.x)),
+      y: Math.max(geometry.top, Math.min(geometry.top + geometry.height, point.y)),
+    });
+    let end = start;
+    const move = (moveEvent) => {
+      end = clamp(toViewBox(moveEvent));
+      const top = geometry.kind === 'bar' ? geometry.top : Math.min(start.y, end.y);
+      const bottom = geometry.kind === 'bar' ? geometry.top + geometry.height : Math.max(start.y, end.y);
+      rect.setAttribute('x', Math.min(start.x, end.x)); rect.setAttribute('width', Math.abs(end.x - start.x));
+      rect.setAttribute('y', top); rect.setAttribute('height', bottom - top);
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up);
+      rect.remove(); dragging = false;
+      const x0 = Math.min(start.x, end.x); const x1 = Math.max(start.x, end.x);
+      if (x1 - x0 < 6) return;
+      if (geometry.kind === 'line') {
+        const valueAt = (x) => geometry.minX + ((x - geometry.left) / (geometry.width || 1)) * (geometry.maxX - geometry.minX);
+        const probabilityAt = (y) => geometry.minY + ((geometry.top + geometry.height - y) / (geometry.height || 1)) * (geometry.maxY - geometry.minY);
+        const y0 = Math.min(start.y, end.y); const y1 = Math.max(start.y, end.y);
+        if (y1 - y0 >= 6) { container.dataset.cdfYMin = String(probabilityAt(y1)); container.dataset.cdfYMax = String(probabilityAt(y0)); }
+        else { container.dataset.cdfYMin = String(geometry.minY); container.dataset.cdfYMax = String(geometry.maxY); }
+        // The X range also moves the two handles of the visible range.
+        if (container.syncCdfRange) container.syncCdfRange(valueAt(x0), valueAt(x1));
+        else { container.dataset.cdfXMin = String(valueAt(x0)); container.dataset.cdfXMax = String(valueAt(x1)); }
+        apply(Number(container.dataset.chartZoom) || 1);
+        return;
+      }
+      // Bars: widen the chart so the selected bars fill the view, then scroll to them.
+      const startFraction = x0 / (svg.viewBox.baseVal.width || 1);
+      const span = (x1 - x0) / (svg.viewBox.baseVal.width || 1);
+      const current = Number(container.dataset.chartZoom) || 1;
+      apply(Math.min(current / Math.max(span, 0.0625), 4));
+      requestAnimationFrame(() => { viewport.scrollLeft = startFraction * viewport.scrollWidth; });
+    };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
+  });
   controls.append(zoomOut, level, zoomIn, reset);
   container.append(controls);
   apply(Number(container.dataset.chartZoom) || 1);
@@ -1222,44 +1296,64 @@ function drawChart(container) {
     padding,
     {x: payload.x_axis_label, y: payload.y_axis_label},
     activeXMax,
-    0,
+    Number.isFinite(Number(container.dataset.cdfXMin)) && container.dataset.cdfXMin !== '' ? Number(container.dataset.cdfXMin) : 0,
+    container.dataset.cdfYMax ? {min: Number(container.dataset.cdfYMin), max: Number(container.dataset.cdfYMax)} : null,
   );
 }
 
 function setupCdfRangeControls() {
+  // Visible X range with two handles: the start and the end of the CDF axis.
   document.querySelectorAll('.chart-card[data-chart-kind="cdf"]').forEach((container) => {
     const payload = JSON.parse(container.dataset.chart || '{"labels":[],"series":[],"type":"line"}');
     const control = container.querySelector('[data-cdf-range-control]');
     const slider = container.querySelector('[data-cdf-range-slider]');
+    const minSlider = container.querySelector('[data-cdf-range-min-slider]');
+    const dual = container.querySelector('[data-cdf-range-dual]');
     const valueNode = container.querySelector('[data-cdf-range-value]');
     const xMin = Number(payload.x_min);
     const xMax = Number(payload.x_max);
     const defaultXMax = Number(payload.x_view_max_default);
-    const recommendedXMax = Number(payload.x_view_max_recommended);
 
     if (!control || !slider || !Number.isFinite(xMin) || !Number.isFinite(xMax) || xMax <= xMin) {
       if (control) control.hidden = true;
       return;
     }
-
-    slider.min = String(xMin);
-    slider.max = String(xMax);
-    slider.step = String(Math.max((xMax - xMin) / 400, 0.0001));
+    const step = Math.max((xMax - xMin) / 400, 0.0001);
+    [minSlider, slider].forEach((input) => {
+      if (!input) return;
+      input.min = String(xMin); input.max = String(xMax); input.step = String(step);
+    });
     slider.value = String(Number.isFinite(defaultXMax) ? defaultXMax : xMax);
-    container.dataset.cdfXMax = slider.value;
+    if (minSlider) minSlider.value = String(xMin);
 
-    const updateRangeUi = () => {
-      const currentValue = Number(slider.value);
-      container.dataset.cdfXMax = String(currentValue);
-      if (valueNode) {
-        valueNode.textContent = `${formatAxisValue(xMin)} -> ${formatAxisValue(currentValue)}`;
+    const updateRangeUi = (event) => {
+      let low = minSlider ? Number(minSlider.value) : xMin;
+      let high = Number(slider.value);
+      // The handles never cross: the one being moved stops next to the other.
+      if (high - low < step) {
+        if (event?.target === minSlider) { low = high - step; minSlider.value = String(low); }
+        else { high = low + step; slider.value = String(high); }
       }
+      container.dataset.cdfXMin = String(low);
+      container.dataset.cdfXMax = String(high);
+      if (dual) {
+        dual.style.setProperty('--from', `${((low - xMin) / (xMax - xMin)) * 100}%`);
+        dual.style.setProperty('--to', `${((high - xMin) / (xMax - xMin)) * 100}%`);
+      }
+      if (valueNode) valueNode.textContent = `${formatAxisValue(low)} -> ${formatAxisValue(high)}`;
       drawChart(container);
+    };
+    container.syncCdfRange = (low, high) => {
+      if (minSlider) minSlider.value = String(low);
+      slider.value = String(high);
+      updateRangeUi();
     };
 
     control.hidden = false;
-    slider.addEventListener('input', updateRangeUi);
-    slider.addEventListener('change', updateRangeUi);
+    [minSlider, slider].forEach((input) => {
+      input?.addEventListener('input', updateRangeUi);
+      input?.addEventListener('change', updateRangeUi);
+    });
     updateRangeUi();
   });
 }
