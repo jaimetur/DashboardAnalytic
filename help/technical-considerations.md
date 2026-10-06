@@ -268,6 +268,7 @@ Portable ZIPs can contain Application Config, Dashboard definitions, Report Temp
 
 - Large packages are built and processed on disk rather than fully in browser memory.
 - Workspace database snapshots use SQLite-safe copy/backup behaviour.
+- Backups write each database snapshot to a temporary `drivetest-analyzer-export-*` folder inside the backup folder and delete it when the snapshot is archived. Every finished backup also deletes snapshot folders left by backups that were killed mid-copy, once they have been unchanged for six hours.
 - Workspace replacement closes the target automatically when required.
 - Old workspace files are removed only after the replacement succeeds.
 - Full Environment import preserves imported workspace permissions, including the workspace that was active on the source.

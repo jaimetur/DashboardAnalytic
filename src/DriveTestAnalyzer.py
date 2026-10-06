@@ -93,7 +93,7 @@ from src.modules.runtime_config import IGNORE_EVENT_TIME_FILTERING_ENV, env_flag
 from src.modules.query_builder import MAX_PREVIEW_ROWS, execute_query, iter_query_csv, query_column_values, validate_query
 from src.runtime_logs import execution_log_entries
 from src.modules.workspaces import Workspace, WorkspaceRegistry
-from src.branding import BACKUP_FILE_PATTERNS, canonical_format
+from src.branding import BACKUP_FILE_PATTERNS, BACKUP_SCRATCH_PATTERNS, canonical_format
 from src.modules.output_layout import (
     CDR_ANALYSIS_FOLDER, REPORTS_CHARTS_OLD_FOLDER, REPORTS_OLD_FOLDER, migrate_output_layout, module_output_dir,
 )
@@ -167,6 +167,8 @@ BULK_REPORT_DELETION_JOBS_LOCK = Lock()
 RECURRING_BACKUP_STATE_KEY = 'recurring_database_backup'
 RECURRING_BACKUP_LOCK = Lock()
 RECURRING_BACKUP_RUNNING = False
+# The largest backups take under half an hour, so an older snapshot folder is no longer in use.
+STALE_BACKUP_SCRATCH_SECONDS = 6 * 60 * 60
 MANUAL_BACKUP_JOBS: dict[str, dict[str, Any]] = {}
 MANUAL_BACKUP_JOBS_LOCK = Lock()
 SCHEDULED_BACKUP_JOBS: dict[str, dict[str, Any]] = {}
@@ -6155,7 +6157,27 @@ def create_recurring_database_backup(
     backups = sorted((item for pattern in BACKUP_FILE_PATTERNS for item in backup_root.glob(pattern)), key=lambda item: item.stat().st_mtime, reverse=True)
     for stale in backups[max(1, int(config['max_backups'])):]:
         stale.unlink(missing_ok=True)
+    remove_stale_backup_scratch(backup_root)
     return destination
+
+
+def remove_stale_backup_scratch(backup_root: Path) -> None:
+    """Delete snapshot folders left behind when a backup process was killed mid-copy.
+
+    A finished, failed or cancelled backup removes its own snapshot folder, so a
+    folder survives only when the process died. Folders changed within
+    ``STALE_BACKUP_SCRATCH_SECONDS`` are kept because another backup may still own them.
+    """
+    cutoff = time_module.time() - STALE_BACKUP_SCRATCH_SECONDS
+    for folder in (item for pattern in BACKUP_SCRATCH_PATTERNS for item in backup_root.glob(pattern)):
+        try:
+            if not folder.is_dir():
+                continue
+            last_change = max([folder.stat().st_mtime, *(item.stat().st_mtime for item in folder.iterdir())])
+        except OSError:
+            continue
+        if last_change < cutoff:
+            shutil.rmtree(folder, ignore_errors=True)
 
 
 def _recurring_backup_period(config: dict[str, Any], now: datetime) -> str | None:

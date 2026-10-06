@@ -15,6 +15,8 @@ LEGACY_APP_SLUG = 'dashboard-analytic'
 ENVIRONMENT_PREFIX = 'DRIVETEST_ANALYZER_'
 LEGACY_ENVIRONMENT_PREFIX = 'DASHBOARD_ANALYTIC_'
 BACKUP_FILE_PATTERNS = (f'{APP_SLUG}-backup-*.zip', f'{LEGACY_APP_SLUG}-backup-*.zip')
+# Database snapshot folders written next to a backup ZIP while it is being built.
+BACKUP_SCRATCH_PATTERNS = (f'{APP_SLUG}-export-*', f'{LEGACY_APP_SLUG}-export-*')
 
 
 def canonical_format(value: Any) -> Any:

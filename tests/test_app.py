@@ -4929,6 +4929,37 @@ def test_cancelled_backup_removes_its_partial_archive(client, tmp_path: Path) ->
     assert list(tmp_path.glob('drivetest-analyzer-export-*')) == []
 
 
+def test_backup_removes_snapshot_folders_left_by_killed_backups(client, tmp_path: Path) -> None:
+    import os
+    import time
+
+    import src.DriveTestAnalyzer as app_module
+
+    login(client)
+    old = time.time() - app_module.STALE_BACKUP_SCRATCH_SECONDS - 60
+    orphans = [tmp_path / 'dashboard-analytic-export-old1', tmp_path / 'drivetest-analyzer-export-old2']
+    for folder in orphans:
+        folder.mkdir()
+        (folder / 'snapshot.db').write_bytes(b'partial')
+        os.utime(folder / 'snapshot.db', (old, old))
+        os.utime(folder, (old, old))
+    in_use = tmp_path / 'drivetest-analyzer-export-busy'
+    in_use.mkdir()
+    (in_use / 'snapshot.db').write_bytes(b'being written')
+    os.utime(in_use, (old, old))
+    config = app_module.recurring_backup_settings() | {
+        'components': ['app_database'],
+        'workspace_ids': [],
+        'backup_path': str(tmp_path),
+    }
+
+    destination = app_module.create_recurring_database_backup(config)
+
+    assert destination.is_file()
+    assert not any(folder.exists() for folder in orphans)
+    assert (in_use / 'snapshot.db').is_file()
+
+
 def test_dashboard_library_open_close_and_view_actions_include_labels() -> None:
     root = Path(__file__).parents[1] / 'src' / 'web_interface' / 'static'
     script = (root / 'js' / 'e2e_dashboards.js').read_text(encoding='utf-8')
