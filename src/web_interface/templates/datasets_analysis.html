@@ -85,10 +85,17 @@
             <label class="confirm-option dataset-export-current"><input type="checkbox" data-export-current checked><span><strong>Use the current filters, metrics and chart settings</strong> <small>(the open CDR as on screen, with each chart's Compare by, Compare CDF by and Visible X Range)</small></span></label>
             {% endif %}
             <p class="form-note" data-export-summary-note>Every KPI of each selected CDR, without filters.</p>
-            <button type="button" class="ghost-link" data-dataset-summary-toggle>Select All / None</button>
-            <div class="dataset-summary-options">
-              {% for dataset in summary_datasets %}
-              <label class="confirm-option"><input type="checkbox" name="dataset_ids" value="{{ dataset.id }}" {% if selected_dataset and dataset.id == selected_dataset.id %}checked{% endif %}><span>{{ dataset.file_name }} <small>({{ dataset.input_kind_label or dataset.dataset_kind }})</small></span></label>
+            <div class="vendor-mapping-cdr-groups dataset-summary-groups" data-dataset-summary-groups>
+              {% for kind, kind_label in [('data', 'CDR Data'), ('voice', 'CDR Voice'), ('speech', 'CDR Speech')] %}
+              {% set kind_datasets = summary_datasets | selectattr('dataset_kind', 'equalto', kind) | list %}
+              <section class="vendor-mapping-cdr-group" data-summary-group>
+                <div class="vendor-mapping-cdr-group-head"><strong>{{ kind_label }}</strong>{% if kind_datasets %}<button type="button" class="vendor-mapping-select-all" data-summary-group-toggle>Select All</button>{% endif %}</div>
+                {% for dataset in kind_datasets %}
+                <label class="vendor-mapping-cdr-choice"><input type="checkbox" name="dataset_ids" value="{{ dataset.id }}" {% if selected_dataset and dataset.id == selected_dataset.id %}checked{% endif %}><span>{{ dataset.file_name }} <small>· {{ dataset.nr_mode or '—' }}</small></span></label>
+                {% else %}
+                <p class="form-note">No ready CDRs.</p>
+                {% endfor %}
+              </section>
               {% endfor %}
             </div>
             <div class="confirm-actions">
@@ -107,14 +114,33 @@
           const current = dialog.querySelector('[data-export-current]');
           const currentForm = document.querySelector('[data-current-export-form]');
           const note = dialog.querySelector('[data-export-summary-note]');
-          const toggle = dialog.querySelector('[data-dataset-summary-toggle]');
+          const groups = dialog.querySelector('[data-dataset-summary-groups]');
           let exportKind = 'powerpoint';
+          // Each CDR type selects all its CDRs, or clears them when all are selected.
+          const syncToggles = () => dialog.querySelectorAll('[data-summary-group]').forEach((group) => {
+            const button = group.querySelector('[data-summary-group-toggle]');
+            const groupBoxes = [...group.querySelectorAll('input[name="dataset_ids"]')];
+            if (button) {
+              button.textContent = groupBoxes.length && groupBoxes.every((box) => box.checked) ? 'Select None' : 'Select All';
+              button.disabled = groupBoxes.some((box) => box.disabled);
+            }
+          });
           const syncMode = () => {
             const useCurrent = Boolean(current?.checked);
             boxes().forEach((box) => { box.disabled = useCurrent; });
-            toggle.disabled = useCurrent;
+            groups.classList.toggle('is-disabled', useCurrent);
             note.hidden = useCurrent;
+            syncToggles();
           };
+          dialog.addEventListener('click', (event) => {
+            const button = event.target.closest('[data-summary-group-toggle]');
+            if (!button) return;
+            const groupBoxes = [...button.closest('[data-summary-group]').querySelectorAll('input[name="dataset_ids"]')];
+            const select = !groupBoxes.every((box) => box.checked);
+            groupBoxes.forEach((box) => { box.checked = select; });
+            syncToggles();
+          });
+          dialog.addEventListener('change', syncToggles);
           current?.addEventListener('change', syncMode);
           document.querySelectorAll('[data-dataset-summary-open]').forEach((button) => button.addEventListener('click', () => {
             exportKind = button.dataset.datasetSummaryOpen;
@@ -139,13 +165,9 @@
             dialog.close();
             currentForm.requestSubmit();
           }, true);
-          dialog.querySelector('[data-dataset-summary-toggle]').addEventListener('click', () => {
-            const select = !boxes().every((box) => box.checked);
-            boxes().forEach((box) => { box.checked = select; });
-          });
           dialog.querySelector('[data-dataset-summary-cancel]').addEventListener('click', () => dialog.close());
           form.addEventListener('submit', (event) => {
-            if (!boxes().some((box) => box.checked)) { event.preventDefault(); window.alert('Select at least one dataset.'); return; }
+            if (!boxes().some((box) => box.checked)) { event.preventDefault(); window.alert('Select at least one CDR.'); return; }
             dialog.close();
           });
         })();

@@ -1123,9 +1123,17 @@ function escapeChartText(value) {
 // One tooltip for every CDR Analysis chart: bar values, and the CDF probability of each curve at the pointer.
 const chartTooltip = (() => {
   let node = null;
+  let owner = null;
+  let watchdog = 0;
   const element = () => {
     if (!node) { node = document.createElement('div'); node.className = 'chart-tooltip'; node.hidden = true; document.body.append(node); }
     return node;
+  };
+  const hide = () => {
+    if (node) node.hidden = true;
+    owner?.querySelector('.chart-hover-guide')?.setAttribute('visibility', 'hidden');
+    owner = null;
+    window.clearInterval(watchdog); watchdog = 0;
   };
   return {
     show(event, html) {
@@ -1134,13 +1142,18 @@ const chartTooltip = (() => {
       const x = Math.min(event.clientX + 14, window.innerWidth - tip.offsetWidth - 8);
       const y = Math.max(8, event.clientY - tip.offsetHeight - 12);
       tip.style.left = `${x}px`; tip.style.top = `${y}px`;
+      // A fast exit can skip the leave events: while visible, check that the pointer is still over the chart.
+      owner = event.currentTarget instanceof Element ? event.currentTarget : event.target.closest?.('.chart-svg');
+      if (!watchdog) watchdog = window.setInterval(() => { if (!owner || !owner.matches(':hover')) hide(); }, 150);
     },
-    hide() { if (node) node.hidden = true; },
+    hide,
   };
 })();
 // The tooltip never outlives the pointer over its chart: leaving the chart, scrolling or switching window hides it.
 document.addEventListener('pointermove', (event) => { if (!event.target.closest?.('.chart-svg')) chartTooltip.hide(); }, {passive: true});
 window.addEventListener('scroll', () => chartTooltip.hide(), {passive: true, capture: true});
+window.addEventListener('wheel', () => chartTooltip.hide(), {passive: true, capture: true});
+window.addEventListener('touchmove', () => chartTooltip.hide(), {passive: true, capture: true});
 window.addEventListener('blur', () => chartTooltip.hide());
 
 function cdfProbabilityAt(labels, series, x) {

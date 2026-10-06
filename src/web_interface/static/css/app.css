@@ -3841,3 +3841,12 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
 .chart-svg .chart-zoom-box { fill: rgba(36, 90, 150, .12); stroke: #245a96; stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
 .chart-zoom-viewport .chart-svg { cursor: crosshair; }
 .chart-card .chart-zoom-viewport, .chart-card .cdf-range-control { -webkit-user-select: none; user-select: none; }
+/* CDR Analysis Export dialog: CDRs in Data, Voice and Speech panels as in the other dialogs. */
+.dataset-summary-dialog { width: min(1180px, calc(100vw - 2rem)); }
+.dataset-summary-dialog form { min-width: 0; }
+.dataset-summary-groups { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .7rem; align-items: start; }
+.dataset-summary-groups.is-disabled { opacity: .55; }
+.dataset-summary-groups .vendor-mapping-cdr-choice { display: flex; align-items: flex-start; gap: .45rem; padding: .2rem .1rem; color: #102131; font-weight: 600; }
+.dataset-summary-groups .vendor-mapping-cdr-choice input { flex: 0 0 auto; width: 1rem; height: 1rem; margin: .15rem 0 0; }
+.dataset-export-current { align-items: flex-start; }
+@media (max-width: 900px) { .dataset-summary-groups { grid-template-columns: minmax(0, 1fr); } }

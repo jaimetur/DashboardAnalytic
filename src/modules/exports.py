@@ -454,14 +454,12 @@ def _draw_line_chart(chart: dict[str, Any]) -> BytesIO:
     return buffer
 
 
-def _add_metric_cards(slide, analyses: list[dict[str, Any]]) -> None:
+def _add_metric_cards(slide, analyses: list[dict[str, Any]], *, start_y: float = 1.64, card_h: float = 2.45) -> None:
     cols = 3
     gap_x = 0.2
     gap_y = 0.18
     card_w = 4.0
-    card_h = 2.45
     start_x = 0.55
-    start_y = 1.64
     for index, analysis_item in enumerate(analyses[:6]):
         result = analysis_item["result"]
         metric_name = result.get("selected_metric") or analysis_item.get("metric") or "Metric"
@@ -614,82 +612,147 @@ def _build_powerpoint_payload(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+CDR_ANALYSIS_TEMPLATE = "Template_CDR_analysis.pptx"
+# Content slides of the template keep their title area: content starts this much lower.
+TEMPLATE_CONTENT_SHIFT = 0.6
+
+
+def _cdr_analysis_template() -> Path | None:
+    from src.config import settings
+
+    path = settings.ppt_templates_dir / CDR_ANALYSIS_TEMPLATE
+    return path if path.is_file() else None
+
+
+def _named_layout(presentation: Presentation, name: str):
+    return next((layout for layout in presentation.slide_layouts if layout.name == name), None)
+
+
 def _init_presentation() -> Presentation:
+    """CDR Analysis exports use the PowerPoint template in assets; without it, a plain 16:9 deck."""
+    template = _cdr_analysis_template()
+    if template is not None:
+        presentation = Presentation(str(template))
+        slide_ids = presentation.slides._sldIdLst
+        for slide_id in list(slide_ids):
+            presentation.part.drop_rel(slide_id.rId)
+            slide_ids.remove(slide_id)
+        if _named_layout(presentation, "Title Page") is not None and _named_layout(presentation, "Title Only") is not None:
+            presentation.cdr_template = True
+            return presentation
     presentation = Presentation()
     presentation.slide_width = Inches(PPT_WIDTH_IN)
     presentation.slide_height = Inches(PPT_HEIGHT_IN)
+    presentation.cdr_template = False
     return presentation
+
+
+def _content_slide(presentation: Presentation, title: str) -> tuple[Any, float]:
+    """A content slide with its title; returns the slide and how much lower its content starts."""
+    if getattr(presentation, "cdr_template", False):
+        slide = presentation.slides.add_slide(_named_layout(presentation, "Title Only"))
+        slide.shapes.title.text = title
+        return slide, TEMPLATE_CONTENT_SHIFT
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    _add_full_bg(slide, BG)
+    _add_textbox(slide, 0.55, 0.35, 8.0, 0.28, title, size=22, bold=True)
+    return slide, 0.0
+
+
+def _title_slide(presentation: Presentation, title: str, lines: list[str]) -> None:
+    """The template's title page: the report title and, below it, what the filters include."""
+    slide = presentation.slides.add_slide(_named_layout(presentation, "Title Page"))
+    slide.shapes.title.text = title
+    subtitle = next((shape for shape in slide.placeholders if shape.placeholder_format.idx == 1), None)
+    if subtitle is None:
+        return
+    frame = subtitle.text_frame
+    frame.word_wrap = True
+    size = 16 if len(lines) <= 3 else 13 if len(lines) <= 6 else 10
+    for index, line in enumerate(lines):
+        paragraph = frame.paragraphs[0] if index == 0 else frame.add_paragraph()
+        paragraph.text = line
+        paragraph.font.size = Pt(size)
+
+
+def _closing_slide(presentation: Presentation) -> None:
+    layout = _named_layout(presentation, "Black logo end slide") if getattr(presentation, "cdr_template", False) else None
+    if layout is not None:
+        slide = presentation.slides.add_slide(layout)
+        for placeholder in list(slide.placeholders):
+            placeholder.element.getparent().remove(placeholder.element)
 
 
 def export_powerpoint_report(destination: Path, report: dict[str, Any]) -> Path:
     presentation = _init_presentation()
     _append_dataset_report_slides(presentation, _build_powerpoint_payload(report))
+    _closing_slide(presentation)
     presentation.save(destination)
     return destination
 
 
 def _append_dataset_report_slides(presentation: Presentation, payload: dict[str, Any]) -> None:
     """Cover, summary, metric cards, one visual slide per metric and the processed metrics table."""
-    cover = presentation.slides.add_slide(presentation.slide_layouts[6])
-    _add_full_bg(cover, DARK_BG)
-    _add_textbox(cover, 0.7, 0.8, 7.8, 0.4, "Dashboard Analytic", size=28, bold=True, color="#FFFFFF")
-    _add_textbox(cover, 0.7, 1.35, 8.5, 0.35, payload["dataset_name"], size=22, bold=True, color="#D9EEF3")
-    _add_badge(cover, 0.7, 2.05, 1.4, payload["dataset_type"], fill=TEAL)
-    for line_index, filter_line in enumerate(_filters_lines(payload["filters_text"])[:8]):
-        _add_textbox(cover, 0.7, 2.55 + line_index * 0.28, 7.6, 0.22, filter_line, size=12, color="#E4EEF1")
-    _add_panel(cover, 8.75, 0.75, 3.85, 5.95, fill="#1C4665", line="#2D607B")
-    _add_textbox(cover, 9.0, 1.05, 3.2, 0.28, "Export Contents", size=14, bold=True, color="#FFFFFF")
-    contents = [
-        "Dataset Summary",
-        "Global Metrics",
-        "Metric KPI cards",
-        "Visual Analytics per metric",
-        "Processed Metrics table",
-    ]
-    for index, label in enumerate(contents):
-        _add_badge(cover, 9.0, 1.55 + index * 0.72, 3.0, label, fill=BLUE)
+    filter_lines = _filters_lines(payload["filters_text"])
+    if getattr(presentation, "cdr_template", False):
+        metrics = payload["selected_metrics"]
+        metric_line = f"Metrics ({len(metrics)}): {', '.join(metrics[:8])}{', …' if len(metrics) > 8 else ''}"
+        _title_slide(presentation, f"CDR Analysis · {payload['dataset_name']}", [payload["dataset_type"], metric_line, *filter_lines])
+    else:
+        cover = presentation.slides.add_slide(presentation.slide_layouts[6])
+        _add_full_bg(cover, DARK_BG)
+        _add_textbox(cover, 0.7, 0.8, 7.8, 0.4, "Dashboard Analytic", size=28, bold=True, color="#FFFFFF")
+        _add_textbox(cover, 0.7, 1.35, 8.5, 0.35, payload["dataset_name"], size=22, bold=True, color="#D9EEF3")
+        _add_badge(cover, 0.7, 2.05, 1.4, payload["dataset_type"], fill=TEAL)
+        for line_index, filter_line in enumerate(filter_lines[:8]):
+            _add_textbox(cover, 0.7, 2.55 + line_index * 0.28, 7.6, 0.22, filter_line, size=12, color="#E4EEF1")
+        _add_panel(cover, 8.75, 0.75, 3.85, 5.95, fill="#1C4665", line="#2D607B")
+        _add_textbox(cover, 9.0, 1.05, 3.2, 0.28, "Export Contents", size=14, bold=True, color="#FFFFFF")
+        contents = [
+            "Dataset Summary",
+            "Global Metrics",
+            "Metric KPI cards",
+            "Visual Analytics per metric",
+            "Processed Metrics table",
+        ]
+        for index, label in enumerate(contents):
+            _add_badge(cover, 9.0, 1.55 + index * 0.72, 3.0, label, fill=BLUE)
+    summary_lines = _structured_filters_summary_lines(payload["filters_text"])
 
-    global_slide = presentation.slides.add_slide(presentation.slide_layouts[6])
-    _add_full_bg(global_slide, BG)
-    _add_textbox(global_slide, 0.55, 0.35, 5.5, 0.28, "Dataset Summary", size=22, bold=True)
-    _add_badge(global_slide, 9.95, 0.34, 2.75, payload["dataset_name"][:28], fill=TEAL)
-    _add_multiline_textbox(global_slide, 0.55, 0.72, 12.1, 0.18, _structured_filters_summary_lines(payload["filters_text"]), size=9, color=MUTED)
+    global_slide, shift = _content_slide(presentation, "Dataset Summary")
+    _add_badge(global_slide, 9.95, 0.34 + shift, 2.75, payload["dataset_name"][:28], fill=TEAL)
+    _add_multiline_textbox(global_slide, 0.55, 0.72 + shift, 12.1, 0.18, summary_lines, size=9, color=MUTED)
     global_items = [(key, value) for key, value in payload["global_kpis"].items() if key not in {"date_from", "date_to"}]
-    _add_kpi_grid(global_slide, global_items[:16], left=0.55, top=1.58, width=12.2, columns=4, card_height=1.0)
+    _add_kpi_grid(global_slide, global_items[:16], left=0.55, top=1.58 + shift, width=12.2, columns=4,
+                  card_height=1.0 if not shift else 0.9)
 
     metric_card_pages = [payload["analyses"][index:index + 6] for index in range(0, len(payload["analyses"]), 6)] or [[]]
     for page_index, metric_page in enumerate(metric_card_pages, start=1):
-        metric_slide = presentation.slides.add_slide(presentation.slide_layouts[6])
-        _add_full_bg(metric_slide, BG)
-        _add_textbox(metric_slide, 0.55, 0.35, 5.5, 0.28, "Dataset Summary", size=22, bold=True)
+        metric_slide, shift = _content_slide(presentation, "Dataset Summary")
         title = "Selected Metric Cards" if len(metric_card_pages) == 1 else f"Selected Metric Cards · Page {page_index}"
-        _add_textbox(metric_slide, 0.55, 0.72, 6.0, 0.24, title, size=12, bold=True, color=ORANGE)
-        _add_multiline_textbox(metric_slide, 0.55, 0.96, 12.1, 0.18, _structured_filters_summary_lines(payload["filters_text"]), size=9, color=MUTED)
-        _add_metric_cards(metric_slide, metric_page)
+        _add_textbox(metric_slide, 0.55, 0.72 + shift, 6.0, 0.24, title, size=12, bold=True, color=ORANGE)
+        _add_multiline_textbox(metric_slide, 0.55, 0.96 + shift, 12.1, 0.18, summary_lines, size=9, color=MUTED)
+        _add_metric_cards(metric_slide, metric_page, start_y=1.64 + shift, card_h=2.45 if not shift else 2.1)
 
     for analysis_item in payload["analyses"]:
         result = analysis_item["result"]
         metric_name = result.get("selected_metric") or analysis_item.get("metric") or "Metric"
-        visual = presentation.slides.add_slide(presentation.slide_layouts[6])
-        _add_full_bg(visual, BG)
-        _add_textbox(visual, 0.55, 0.35, 6.0, 0.28, f"Visual Analytics · {metric_name}", size=22, bold=True)
-        _add_multiline_textbox(visual, 0.55, 0.72, 12.1, 0.18, _structured_filters_summary_lines(payload["filters_text"]), size=9, color=MUTED)
+        visual, shift = _content_slide(presentation, f"Visual Analytics · {metric_name}")
+        _add_multiline_textbox(visual, 0.55, 0.72 + shift, 12.1, 0.18, summary_lines, size=9, color=MUTED)
         cdf_image = _draw_line_chart(result.get("cdf_chart") or {})
         comparison_image = _draw_bar_chart(result.get("comparison_chart") or {})
-        visual.shapes.add_picture(cdf_image, Inches(0.55), Inches(1.48), width=Inches(6.0), height=Inches(2.8))
-        visual.shapes.add_picture(comparison_image, Inches(6.78), Inches(1.48), width=Inches(6.0), height=Inches(2.8))
-        _add_metric_kpi_strip(visual, result.get("metric_kpis") or {}, left=0.55, top=4.38, width=12.2)
-        _add_textbox(visual, 0.55, 4.82, 3.4, 0.18, f"Grouped Percentiles · { _format_label(result.get('filters', {}).get('aggregation') or 'all') }", size=9, bold=True, color=BLUE)
-        _add_grouped_scorecard_table(visual, (result.get("scorecard_groups") or [])[:8], left=0.55, top=5.04, width=12.2, height=0.84)
+        chart_height = 2.8 if not shift else 2.6
+        visual.shapes.add_picture(cdf_image, Inches(0.55), Inches(1.48 + shift), width=Inches(6.0), height=Inches(chart_height))
+        visual.shapes.add_picture(comparison_image, Inches(6.78), Inches(1.48 + shift), width=Inches(6.0), height=Inches(chart_height))
+        below = 1.48 + shift + chart_height
+        _add_metric_kpi_strip(visual, result.get("metric_kpis") or {}, left=0.55, top=below + 0.1, width=12.2)
+        _add_textbox(visual, 0.55, below + 0.54, 3.4, 0.18, f"Grouped Percentiles · { _format_label(result.get('filters', {}).get('aggregation') or 'all') }", size=9, bold=True, color=BLUE)
+        _add_grouped_scorecard_table(visual, (result.get("scorecard_groups") or [])[:8], left=0.55, top=below + 0.76, width=12.2, height=0.84)
 
     primary_result = payload["analyses"][0]["result"] if payload["analyses"] else {}
-    table_slide = presentation.slides.add_slide(presentation.slide_layouts[6])
-    _add_full_bg(table_slide, BG)
-    _add_textbox(table_slide, 0.55, 0.35, 5.5, 0.28, "Processed Metrics", size=22, bold=True)
-    _add_multiline_textbox(table_slide, 0.55, 0.72, 12.1, 0.18, _structured_filters_summary_lines(payload["filters_text"]), size=9, color=MUTED)
-    _add_data_table(table_slide, primary_result.get("table_rows") or [], left=0.55, top=1.56, width=12.2, height=5.28)
-
-
+    table_slide, shift = _content_slide(presentation, "Processed Metrics")
+    _add_multiline_textbox(table_slide, 0.55, 0.72 + shift, 12.1, 0.18, summary_lines, size=9, color=MUTED)
+    _add_data_table(table_slide, primary_result.get("table_rows") or [], left=0.55, top=1.56 + shift, width=12.2, height=5.28 - shift)
 
 
 def _dataset_summary_cover(presentation: Presentation, title: str, reports: list[dict[str, Any]]) -> None:
@@ -708,9 +771,15 @@ def _dataset_summary_cover(presentation: Presentation, title: str, reports: list
 def export_dataset_summary_powerpoint(destination: Path, reports: list[dict[str, Any]], title: str = "Summary CDR Analysis") -> Path:
     """One PowerPoint with the CDR Analysis export of every selected dataset."""
     presentation = _init_presentation()
-    _dataset_summary_cover(presentation, title, reports)
+    if getattr(presentation, "cdr_template", False):
+        names = [f"{report.get('dataset_name') or 'Dataset'} ({report.get('dataset_type') or 'Other'})" for report in reports]
+        _title_slide(presentation, title, [f"{len(reports)} dataset(s) · all KPIs · no filters", *names[:10],
+                                           *([f"… and {len(names) - 10} more"] if len(names) > 10 else [])])
+    else:
+        _dataset_summary_cover(presentation, title, reports)
     for report in reports:
         _append_dataset_report_slides(presentation, _build_powerpoint_payload(report))
+    _closing_slide(presentation)
     presentation.save(destination)
     return destination
 
