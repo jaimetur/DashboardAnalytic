@@ -560,6 +560,8 @@
       const row = node('label', undefined, 'rj-check');
       const box = node('input'); box.type = 'checkbox'; box.value = level;
       box.checked = level === 'Operator' || (entry.aggregation_levels || []).includes(level); box.disabled = level === 'Operator';
+      // As in Scoring & GAP Analysis, Operator is always part of the aggregation.
+      if (level === 'Operator') row.title = 'Operator is required';
       row.append(box, node('span', level));
       levels.append(row);
       return box;
