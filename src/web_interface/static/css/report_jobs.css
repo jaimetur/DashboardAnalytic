@@ -179,3 +179,8 @@
 @media (prefers-reduced-motion: reduce) { .report-jobs .rj-editor-subpanel.is-opening, .report-jobs .rj-editor-subpanel.is-closing { animation-duration: .01s; } }
 .reporting-jobs-table tr.rj-editing td { background: #e3f3e9; }
 .reporting-jobs-table tr.rj-editing td:first-child { box-shadow: inset 4px 0 0 #2f8a57; font-weight: 700; }
+/* Close button in the editor's top-right corner, like Cancel. */
+.report-jobs .rj-editor-subpanel { position: relative; }
+.report-jobs .rj-editor-close { position: absolute; top: .8rem; right: .8rem; display: grid; place-items: center; width: 2rem; height: 2rem; min-height: 0; padding: 0; border: 0; border-radius: 50%; background: #d64545; color: #fff; font-size: 1.3rem; font-weight: 800; line-height: 1; box-shadow: 0 4px 10px rgba(214, 69, 69, .3); cursor: pointer; }
+.report-jobs .rj-editor-close:hover { background: #b83232; }
+.report-jobs .rj-editor-close:focus-visible { outline: 3px solid rgba(214, 69, 69, .35); outline-offset: 2px; }

@@ -989,6 +989,7 @@
     else if (options.dashboards.length) host.append(dashboardEntry());
   }));
   $('rj-cancel').addEventListener('click', closeEditor);
+  $('rj-editor-close').addEventListener('click', closeEditor);
   $('rj-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const button = $('rj-save');
