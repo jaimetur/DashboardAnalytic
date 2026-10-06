@@ -193,3 +193,59 @@
 .report-jobs #rj-form .form-actions > button { display: inline-flex; align-items: center; justify-content: center; min-height: 3rem; padding: .7rem 1.6rem; box-sizing: border-box; font-size: 1rem; font-weight: 800; line-height: 1.2; }
 .report-jobs #rj-form #rj-cancel { border: 1px solid #b83232; background: #d64545; color: #fff; box-shadow: 0 6px 14px rgba(214, 69, 69, .25); }
 .report-jobs #rj-form #rj-cancel:hover { background: #b83232; }
+
+/* Job Editor artifacts: each artifact is a white card in the colour of its module (as its tab), with a tinted
+   header band, so it is clear where one artifact ends and the next begins. */
+.report-jobs .rj-card[data-rj-module] { --rj-accent: #1f5f3a; --rj-tint: rgba(31, 95, 58, .07); }
+.report-jobs .rj-card[data-rj-module="dataset_analysis"] { --rj-accent: #0c4c8c; --rj-tint: rgba(12, 76, 140, .07); }
+.report-jobs .rj-card[data-rj-module="network_insights"] { --rj-accent: #4338ca; --rj-tint: rgba(67, 56, 202, .07); }
+.report-jobs .rj-card[data-rj-module="dashboards"] { --rj-accent: #5b3f99; --rj-tint: rgba(91, 63, 153, .07); }
+.report-jobs .rj-card[data-rj-module="scoring"] { --rj-accent: #176e77; --rj-tint: rgba(23, 110, 119, .08); }
+.report-jobs .rj-card[data-rj-module="non_qualified_calls"] { --rj-accent: #a3204c; --rj-tint: rgba(163, 32, 76, .07); }
+.report-jobs .rj-card[data-rj-module] {
+  margin-top: .4rem; padding: 0; overflow: visible; gap: 0;
+  border: 1px solid color-mix(in srgb, var(--rj-accent) 28%, transparent); border-left: 6px solid var(--rj-accent);
+  border-radius: 14px; background: #fff; box-shadow: 0 8px 22px rgba(18, 31, 43, .07);
+}
+.report-jobs .rj-card[data-rj-module] > .rj-card-toggle {
+  padding: .85rem 7rem .85rem 1rem; border-radius: 8px 13px 0 0; background: var(--rj-tint);
+  border-bottom: 1px solid color-mix(in srgb, var(--rj-accent) 18%, transparent);
+}
+.report-jobs .rj-card[data-rj-module].is-collapsed > .rj-card-toggle { border-bottom: 0; border-radius: 8px 13px 13px 8px; }
+.report-jobs .rj-card[data-rj-module] > .rj-card-toggle > strong { color: var(--rj-accent); }
+.report-jobs .rj-card[data-rj-module] > .rj-card-toggle input { accent-color: var(--rj-accent); }
+.report-jobs .rj-card[data-rj-module] > .rj-card-body { padding: 1rem; }
+.report-jobs .rj-card[data-rj-module] .rj-entry {
+  border: 1px solid color-mix(in srgb, var(--rj-accent) 25%, transparent); border-left: 4px solid color-mix(in srgb, var(--rj-accent) 70%, white);
+  border-radius: 10px; background: #fcfdfe;
+}
+.report-jobs .rj-card[data-rj-module] .rj-entry-title { color: var(--rj-accent); }
+.report-jobs .rj-card[data-rj-module] .rj-card-body > strong, .report-jobs .rj-card[data-rj-module] .rj-entry > strong { color: var(--rj-accent); }
+.report-jobs .rj-card[data-rj-module] .rj-secondary { border-color: color-mix(in srgb, var(--rj-accent) 45%, transparent); color: var(--rj-accent); }
+.report-jobs .rj-card[data-rj-module] .rj-secondary:hover { background: var(--rj-tint); }
+.report-jobs .rj-card[data-rj-module] input[type="checkbox"] { accent-color: var(--rj-accent); }
+.report-jobs .rj-card[data-rj-module] .rj-inline-label, .report-jobs .rj-card[data-rj-module] .rj-formats > strong { color: var(--rj-accent); }
+.report-jobs .rj-card[data-rj-module] label.rj-format-chip:has(input:checked),
+.report-jobs .rj-card[data-rj-module] .rj-inline label.rj-check:has(input:checked) {
+  border-color: color-mix(in srgb, var(--rj-accent) 60%, white); background: var(--rj-tint); color: var(--rj-accent);
+}
+/* Artifact tabs: one tab per artifact type in its module colour; only the selected artifact is shown. */
+.report-jobs .rj-artifact-tabs { display: flex; flex-wrap: wrap; gap: .5rem; margin: .3rem 0 -.2rem; }
+.report-jobs .rj-artifact-tab {
+  --rj-accent: #1f5f3a; display: inline-flex; align-items: center; gap: .45rem; padding: .55rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--rj-accent) 35%, transparent); border-radius: 999px; background: #fff;
+  color: var(--rj-accent); font: inherit; font-weight: 800; cursor: pointer;
+}
+.report-jobs .rj-artifact-tab[aria-selected="true"] { background: var(--rj-accent); color: #fff; box-shadow: 0 6px 14px color-mix(in srgb, var(--rj-accent) 30%, transparent); }
+.report-jobs .rj-artifact-tab .rj-tab-state { display: inline-grid; place-items: center; width: 1.1rem; height: 1.1rem; border-radius: 50%; border: 2px solid currentColor; font-size: .7rem; line-height: 1; opacity: .55; }
+.report-jobs .rj-artifact-tab.is-included .rj-tab-state { opacity: 1; background: currentColor; }
+.report-jobs .rj-artifact-tab.is-included .rj-tab-state::after { content: '✓'; color: #fff; }
+.report-jobs .rj-artifact-tab.is-included[aria-selected="true"] .rj-tab-state::after { color: var(--rj-accent); }
+.report-jobs .rj-artifact-tab[data-module="dataset_analysis"] { --rj-accent: #0c4c8c; }
+.report-jobs .rj-artifact-tab[data-module="network_insights"] { --rj-accent: #4338ca; }
+.report-jobs .rj-artifact-tab[data-module="dashboards"] { --rj-accent: #5b3f99; }
+.report-jobs .rj-artifact-tab[data-module="scoring"] { --rj-accent: #176e77; }
+.report-jobs .rj-artifact-tab[data-module="non_qualified_calls"] { --rj-accent: #a3204c; }
+.report-jobs .rj-card[data-rj-module].is-tab-hidden { display: none !important; }
+.report-jobs .rj-card[data-rj-module] .rj-filters label { color: color-mix(in srgb, var(--rj-accent) 80%, #17232d); }
+.report-jobs .rj-artifact-tab .rj-tab-icon { display: inline-block; width: 1.05rem; height: 1.05rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: 0 0 auto; }

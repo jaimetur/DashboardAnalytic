@@ -4957,6 +4957,25 @@
       });
       return;
     }
+    const documentButton = event.target.closest('[data-scoring-document-export]');
+    if (documentButton) {
+      // Both buttons export the selected job, like the PowerPoint link of its results.
+      const pptLink = root.querySelector('[data-export-ppt]');
+      if (!pptLink || pptLink.getAttribute('aria-disabled') === 'true') {
+        const message = 'Select a completed scoring job to export it.';
+        if (typeof showAlertDialog === 'function') showAlertDialog(message, {title: 'No scoring job selected'});
+        else window.alert(message);
+        return;
+      }
+      if (documentButton.dataset.scoringDocumentExport === 'word') {
+        const url = new URL(pptLink.href, window.location.href);
+        url.pathname = url.pathname.replace(/\/export\/ppt$/, '/export/word');
+        window.location.assign(url.href);
+      } else {
+        void generateScoringPpt(pptLink);
+      }
+      return;
+    }
     const exportLink = event.target.closest('.scoring-export-actions a');
     if (exportLink?.getAttribute('aria-disabled') === 'true') {
       event.preventDefault();

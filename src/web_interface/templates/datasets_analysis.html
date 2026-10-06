@@ -32,7 +32,7 @@
             </select>
           </label>
           <div class="dataset-selector-actions">
-            <button type="submit" {% if not ready_datasets %}disabled{% endif %}>Open Dataset</button>
+            <button type="submit" class="icon-button" {% if not ready_datasets %}disabled{% endif %}><svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1H7.5a2 2 0 0 0-1.9 1.4L3 19z"/><path d="M3 19l2.6-7.6A2 2 0 0 1 7.5 10H22l-2.6 7.6a2 2 0 0 1-1.9 1.4H3"/></svg>Open Dataset</button>
           </div>
         </form>
         {% if selected_dataset %}
@@ -49,7 +49,7 @@
         </div>
         <p class="form-note">Uploaded by {{ selected_dataset.uploaded_by }} on {{ selected_dataset.uploaded_at_local or selected_dataset.uploaded_at }}</p>
         <div class="dataset-export-actions inline-actions">
-          <a class="ghost-link action-link-preview" href="/workspace/preview/{{ selected_dataset.id }}" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview">Preview Dataset</a>
+          <a class="ghost-link action-link-preview" href="/workspace/preview/{{ selected_dataset.id }}" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview"><svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>Preview Dataset</a>
           {% if analysis_loaded and analysis %}
           {# The analysis on screen: filters, metrics, per-metric comparisons and, added on submit, each CDF visible range. #}
           <form method="post" action="/datasets-analysis/export/powerpoint" data-loading-label="Exporting PowerPoint report" data-download-form="1" data-current-export-form hidden>
@@ -77,8 +77,8 @@
           </form>
           {% endif %}
           {% if summary_datasets %}
-          <button type="button" data-dataset-summary-open="powerpoint" title="Export the open CDR as on screen, or several CDRs with every KPI">Export PowerPoint</button>
-          <button type="button" data-dataset-summary-open="word" title="Export the open CDR as on screen, or several CDRs with every KPI">Export Word</button>
+          <button type="button" class="document-export-action document-export-powerpoint" data-dataset-summary-open="powerpoint" title="Export the open CDR as on screen, or several CDRs with every KPI"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4M7 13l3-3 2 2 4-4"/></svg>Export PowerPoint</button>
+          <button type="button" class="document-export-action document-export-word" data-dataset-summary-open="word" title="Export the open CDR as on screen, or several CDRs with every KPI"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M8.5 12l1.2 5 1.8-4 1.8 4 1.2-5"/></svg>Export Word</button>
           {% endif %}
         </div>
         {% if summary_datasets %}

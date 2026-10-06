@@ -8,7 +8,7 @@ The module is in development, so its main tab shows a red **NEW** label. It is h
 
 A Non-Qualified (NQ) call is any Voice or Speech call, or any Data test, whose result is not **Completed**: for example **Failed** and **Dropped** Voice calls and **Failed** and **Cutoff** Data tests. The result is read from the processed `status` field of the CDR, or from `Call_Status`, `Test_Result` or `Test_Status` when it is missing. Rows without a result are not included.
 
-Every ready Voice, Speech and Data CDR of the active workspace is indexed automatically the first time the page opens and again whenever a CDR is added, reprocessed or deleted, so the list always matches the workspace datasets. The top of the **Filters** panel shows how many NQ calls and CDRs are indexed and when they were last indexed; **Refresh** reloads them.
+Every ready Voice, Speech and Data CDR of the active workspace is indexed automatically the first time the page opens and again whenever a CDR is added, reprocessed or deleted, so the list always matches the workspace datasets. The top of the **Filters** panel shows how many NQ calls and CDRs are indexed and when they were last indexed; **Refresh** reloads them. **Export PowerPoint** and **Export Word**, on the right of the indexing badge and Refresh, download the Executive Summary and the Progress Status of the filtered calls with the look of the page (indicator cards, breakdowns, donuts, timeline, age and workload, and the detail tables), the report selection on the cover (with the period chosen in the Progress View), the same document as the Reporting artifact; a progress dialog stays open while it is prepared.
 
 Each call keeps a stable identity built from its service, Operator, Campaign and test or session identifier (`Test_ID`, `Session_ID_A`, `Session_id` or `JOIN_ID`; without one, its subscriber, test name and start and end times). Its status, team, assignee and comments therefore stay with it when its CDR is reprocessed or uploaded again. When the same call appears in two CDRs, it is listed once.
 
@@ -36,8 +36,8 @@ Click any bar to drill down: the table shows only that value. Click the same bar
 The **Progress View** below the Summary shows how the follow-up advances for the filtered calls:
 
 - Indicators: calls, open and closed calls, calls attended (with a follow-up change or a comment), commented, with a team and assigned, and the average days to close.
-- Donut charts **By Status**, **By Team**, **By Assignee**, **By Service** and **By Result**; each legend shows the full name with its count and share, and a click filters the calls by that value.
-- A timeline per **week**, **month**, **quarter** or **year** of the calls detected, attended, commented, closed and reopened, with a table that adds the status changes, the open backlog at the end of each period and the average days to close.
+- Donut charts **By Status**, **By Team**, **By Assignee**, **By Service** and **By Result**; each legend shows the full name with its count and share; hovering a slice shows its value, count and share, and a click on a slice or a legend entry filters the calls by that value.
+- A timeline per **week**, **month**, **quarter** or **year** of the calls detected, attended, commented, closed and reopened (hover a period to read all its values), with a table that adds the status changes, the open backlog at the end of each period and the average days to close.
 - The age of the open calls, the workload of each team and assignee (open, closed and total calls) and the recent activity.
 
 ## Calls

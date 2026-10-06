@@ -534,6 +534,36 @@
     return card;
   };
   const days = (value) => (value === null || value === undefined ? '—' : `${Number(value).toFixed(1)} d`);
+  // One floating tooltip for the Progress View charts; it follows the pointer and hides when it leaves the chart.
+  const chartTooltip = (() => {
+    const tip = node('div', undefined, 'nq-chart-tooltip');
+    tip.hidden = true;
+    tip.setAttribute('role', 'tooltip');
+    document.body.append(tip);
+    const show = (event, title, rows) => {
+      const heading = node('strong', title);
+      const list = node('div', undefined, 'nq-chart-tooltip-rows');
+      rows.forEach(([label, value, color]) => {
+        const line = node('div');
+        const swatch = node('span', '', 'nq-swatch');
+        swatch.style.background = color || 'transparent';
+        line.append(swatch, node('span', label), node('b', value));
+        list.append(line);
+      });
+      tip.replaceChildren(heading, list);
+      tip.hidden = false;
+      const gap = 14;
+      const box = tip.getBoundingClientRect();
+      const x = event.clientX + gap + box.width > window.innerWidth ? event.clientX - gap - box.width : event.clientX + gap;
+      const y = Math.min(window.innerHeight - box.height - 8, Math.max(8, event.clientY - box.height / 2));
+      tip.style.left = `${x}px`;
+      tip.style.top = `${y}px`;
+    };
+    const hide = () => { tip.hidden = true; };
+    window.addEventListener('scroll', hide, true);
+    window.addEventListener('blur', hide);
+    return {show, hide};
+  })();
   // A donut chart with its legend; a click on a slice filters the calls.
   const donut = (distribution) => {
     const card = node('section', undefined, 'nq-pie');
@@ -553,9 +583,15 @@
         cx: 60, cy: 60, r: radius, fill: 'none', stroke: colorFor(item, index), 'stroke-width': 18,
         'stroke-dasharray': `${length} ${circumference - length}`, 'stroke-dashoffset': -offset, transform: 'rotate(-90 60 60)',
       });
-      const title = svgNode('title');
-      title.textContent = `${item.value}: ${number(item.count)} (${percent(item.count, total)})`;
-      slice.append(title);
+      slice.classList.add('nq-pie-slice');
+      slice.addEventListener('pointermove', (event) => chartTooltip.show(event, distribution.label,
+        [[item.value, `${number(item.count)} · ${percent(item.count, total)}`, colorFor(item, index)]]));
+      slice.addEventListener('pointerleave', chartTooltip.hide);
+      slice.addEventListener('click', () => {
+        chartTooltip.hide();
+        const field = {status: 'status', team: 'team', assignee: 'assignee', service: 'service', result: 'result'}[distribution.field];
+        if (field) selectOnly(field, item.filter ?? (['Unassigned', '—'].includes(item.value) ? '' : item.value));
+      });
       svg.append(slice);
       offset += length;
     });
@@ -627,23 +663,32 @@
     const slot = width / shown.length;
     const bar = Math.min(16, (slot - 12) / series.length);
     const points = [];
+    const zones = [];
     shown.forEach((period, index) => {
       const x = left + index * slot + (slot - bar * series.length) / 2;
       series.forEach(([key, label, color], position) => {
         const value = period[key];
         const barHeight = (value / maximum) * plot;
-        const rect = svgNode('rect', {x: x + position * bar, y: top + plot - barHeight, width: bar - 2, height: barHeight, rx: 2, fill: color});
-        const title = svgNode('title');
-        title.textContent = `${period.period} · ${label}: ${number(value)}`;
-        rect.append(title);
-        svg.append(rect);
+        svg.append(svgNode('rect', {x: x + position * bar, y: top + plot - barHeight, width: bar - 2, height: barHeight, rx: 2, fill: color}));
       });
+      // The whole period column answers the pointer with every value of the period.
+      const zone = svgNode('rect', {x: left + index * slot, y: top, width: slot, height: plot, class: 'nq-timeline-zone'});
+      const rows = [...series.map(([key, label, color]) => [label, number(period[key]), color]), ['Open backlog', number(period.open_backlog), '#b0234f']];
+      zone.addEventListener('pointermove', (event) => chartTooltip.show(event, period.period, rows));
+      zone.addEventListener('pointerleave', chartTooltip.hide);
+      zones.push(zone);
       points.push(`${left + index * slot + slot / 2},${top + plot - (period.open_backlog / maximum) * plot}`);
       const caption = svgNode('text', {x: left + index * slot + slot / 2, y: height - bottom + 16, 'text-anchor': 'middle', class: 'nq-axis-label'});
       caption.textContent = period.period;
       svg.append(caption);
     });
     svg.append(svgNode('polyline', {points: points.join(' '), class: 'nq-backlog-line'}));
+    points.forEach((point) => {
+      const [cx, cy] = point.split(',');
+      svg.append(svgNode('circle', {cx, cy, r: 3.5, class: 'nq-backlog-point'}));
+    });
+    svg.append(...zones);
+    svg.addEventListener('pointerleave', chartTooltip.hide);
     const legend = node('div', undefined, 'nq-chart-legend');
     [...series, ['open_backlog', 'Open backlog', '#b0234f']].forEach(([, label, color]) => {
       const item = node('span');
@@ -1052,6 +1097,39 @@
       }
     });
   });
+  // Executive Summary and Progress Status of the filtered calls, as on the page, in PowerPoint or Word.
+  document.querySelectorAll('[data-nq-document-export]').forEach((button) => button.addEventListener('click', async () => {
+    const kind = button.dataset.nqDocumentExport;
+    const label = kind === 'word' ? 'Word' : 'PowerPoint';
+    button.disabled = true;
+    globalThis.showLoadingOverlay?.(`Preparing the ${label} document`,
+      `Preparing the Non-Qualified Calls ${label} with the Executive Summary and the Progress Status of the filtered calls. The document downloads when it is ready.`);
+    try {
+      const response = await fetch(`/api/non-qualified-calls/export/${kind}`, {
+        method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({filters: currentFilters(), granularity: $('nq-granularity').value}),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(typeof payload.detail === 'string' ? payload.detail : `The ${label} export failed.`);
+      }
+      const disposition = response.headers.get('Content-Disposition') || '';
+      const name = /filename="([^"]+)"/.exec(disposition)?.[1] || `Non-Qualified Calls.${kind === 'word' ? 'docx' : 'pptx'}`;
+      const url = URL.createObjectURL(await response.blob());
+      const link = node('a');
+      link.href = url;
+      link.download = name;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      toast(error.message, 'error');
+    } finally {
+      globalThis.hideLoadingOverlay?.();
+      button.disabled = false;
+    }
+  }));
   $('nq-export').addEventListener('click', async (event) => {
     const button = event.currentTarget;
     button.disabled = true;

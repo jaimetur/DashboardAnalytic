@@ -269,6 +269,9 @@ def normalize_definition(raw: Any) -> dict[str, Any]:
         provider = ARTIFACT_PROVIDERS.get(key)
         if provider and isinstance(config, dict) and config.get('enabled'):
             formats = [value for value in _strings(config.get('formats')) if value in provider['formats']] or [provider['formats'][0]]
+            if not any(value in {'powerpoint', 'word'} for value in formats) and any(value in {'powerpoint', 'word'} for value in provider['formats']):
+                # Excel holds the details; a document (PowerPoint or Word) is always generated with it.
+                formats.insert(0, next(value for value in provider['formats'] if value in {'powerpoint', 'word'}))
             definition['modules'][key] = {'enabled': True, 'formats': formats,
                                           'options': config.get('options') if isinstance(config.get('options'), dict) else {}}
     # Dashboards and Scoring entries carry every option of their own module;
@@ -303,6 +306,8 @@ def normalize_definition(raw: Any) -> dict[str, Any]:
             'main_cities': bool(entry.get('main_cities')),
             'scoring_profile_id': str(entry.get('scoring_profile_id') or '').strip(),
             'baseline_operator': str(entry.get('baseline_operator') or 'EE').strip() or 'EE',
+            # PowerPoint and/or Word; jobs saved before Word was offered keep PowerPoint.
+            'formats': [value for value in _formats(entry.get('formats')) if value in {'powerpoint', 'word'}] or ['powerpoint'],
         })
     if not (definition['dataset_analysis']['enabled'] or definition['network_insights']
             or definition['dashboards'] or definition['scoring'] or definition['modules']):
@@ -406,8 +411,10 @@ def artifact_labels(definition: dict[str, Any], dashboard_names: dict[str, str] 
         labels.append(f'Dashboards: {len(dashboards)} PPT ({names})')
     scoring = definition.get('scoring') or []
     if scoring:
-        names = ', '.join(entry.get('label') or f"{entry.get('nr_mode', 'NSA')} {' → '.join(entry.get('aggregation_levels') or ['Operator'])}" for entry in scoring)
-        labels.append(f'Scoring: {len(scoring)} PPT ({names})')
+        for entry in scoring:
+            name = entry.get('label') or f"{entry.get('nr_mode', 'NSA')} {' → '.join(entry.get('aggregation_levels') or ['Operator'])}"
+            formats = '/'.join(FORMAT_LABELS[value] for value in entry.get('formats') or ['powerpoint'])
+            labels.append(f"{MODULE_LABELS['scoring']} · {name} ({formats})")
     for key, config in (definition.get('modules') or {}).items():
         provider = ARTIFACT_PROVIDERS.get(key)
         labels.append(f"{provider['label'] if provider else key} ({'/'.join(FORMAT_LABELS.get(value, value) for value in config.get('formats') or [])})")
@@ -947,11 +954,21 @@ def install_report_task_routes(core: Any) -> None:
             if not cached:
                 core.run_scoring_job(task_repository, int(job['id']))
             content, filename, export_job = core.build_scoring_job_powerpoint(task_repository, int(job['id']))
-            destination = artifact_path(folder, stamp, 'Scoring & GAP Analysis', entry.get('label') or Path(filename).stem, '.pptx')
-            destination.write_bytes(content)
-            return ready_artifact('scoring', title, destination, scoring_details(export_job, entry, names))
+            artifacts = []
+            for export_format in entry.get('formats') or ['powerpoint']:
+                suffix = '.docx' if export_format == 'word' else '.pptx'
+                destination = artifact_path(folder, stamp, 'Scoring & GAP Analysis', entry.get('label') or Path(filename).stem, suffix)
+                if export_format == 'word':
+                    # The Word document carries the same slides: one landscape page per slide.
+                    from src.modules.pptx_to_docx import pptx_to_docx
+                    destination.write_bytes(pptx_to_docx(content, 'Scoring & GAP Analysis'))
+                else:
+                    destination.write_bytes(content)
+                artifacts.append(ready_artifact('scoring', f"{title} ({FORMAT_LABELS[export_format]})", destination,
+                                                scoring_details(export_job, entry, names)))
+            return artifacts
         except Exception as exc:
-            return failed_artifact('scoring', title, exc)
+            return [failed_artifact('scoring', title, exc)]
 
     def generate_provider(key, provider, config, folder, stamp, user) -> list[dict[str, Any]]:
         try:
@@ -1001,7 +1018,7 @@ def install_report_task_routes(core: Any) -> None:
             for entry in definition.get('dashboards') or []:
                 steps.append(('Dashboard', lambda entry=entry: [generate_dashboard(entry, task_repository, folder, stamp, user, run_id)]))
             for entry in definition.get('scoring') or []:
-                steps.append(('Scoring', lambda entry=entry: [generate_scoring(entry, task_repository, folder, stamp, user.username, names, run_id)]))
+                steps.append(('Scoring', lambda entry=entry: generate_scoring(entry, task_repository, folder, stamp, user.username, names, run_id)))
             for key, config in (definition.get('modules') or {}).items():
                 provider = ARTIFACT_PROVIDERS.get(key)
                 if provider is None:

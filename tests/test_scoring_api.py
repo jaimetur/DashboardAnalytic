@@ -483,6 +483,12 @@ def test_scoring_exports_accept_expanded_and_summary_table_modes(scoring_api):
     invalid_environment = client.get(f"/scoring/jobs/{job['id']}/export/ppt?environment=Unknown")
     invalid_mode = client.get(f"/scoring/jobs/{job['id']}/export/gap?table_mode=compact")
     invalid_gap_layout = client.get(f"/scoring/jobs/{job['id']}/export/ppt?gap_layout=side")
+    summary_word = client.get(f"/scoring/jobs/{job['id']}/export/word?table_mode=summary")
+    assert summary_word.status_code == 200
+    assert summary_word.headers['content-disposition'].endswith('.docx')
+    from docx import Document as WordDocument
+    word_document = WordDocument(BytesIO(summary_word.content))
+    assert word_document.tables and any(paragraph.style.name == 'Heading 1' for paragraph in word_document.paragraphs)
 
     assert legacy_csv.status_code == 200
     assert city_raw_csv.status_code == 200

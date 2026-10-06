@@ -23,6 +23,9 @@
   .scoring-dataset-actions button:hover:not(:disabled) { background: #245d47; color: #fff; }
   .scoring-dataset-actions button svg { flex: 0 0 auto; width: 1.1rem; height: 1.1rem; }
   .scoring-dataset-filter-grid > label { width: 100%; max-width: 15rem; }
+  .scoring-nr-row { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 1rem; }
+  .scoring-nr-row > label { display: grid; gap: .35rem; width: 100%; max-width: 15rem; }
+  .scoring-document-exports { display: flex; flex-wrap: wrap; gap: .6rem; }
   .scoring-dataset-filter-grid select[data-nr-filter] { min-height: 2.45rem; }
   .scoring-picker { min-width: 0; padding: .85rem; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.64); }
   .scoring-controls .scoring-picker { border-color: #b4d6c5; background: #e5f3eb; }
@@ -331,13 +334,19 @@
       <div class="scoring-controls-meta"><span class="scoring-hero-badge"><span aria-hidden="true">◉</span> CDR benchmark workspace</span><span class="pill" data-selected-count>0 CDRs selected</span></div>
     </div>
     <div class="scoring-filter-grid scoring-dataset-filter-grid">
-      <label>NR Mode
-        <select data-nr-filter>
-          {% for mode in scoring_datasets | map(attribute='nr_mode') | reject('equalto', none) | reject('equalto', '') | unique | sort %}
-          <option value="{{ mode }}" {% if mode == 'NSA' %}selected{% endif %}>{{ mode }}</option>
-          {% endfor %}
-        </select>
-      </label>
+      <div class="scoring-nr-row">
+        <label>NR Mode
+          <select data-nr-filter>
+            {% for mode in scoring_datasets | map(attribute='nr_mode') | reject('equalto', none) | reject('equalto', '') | unique | sort %}
+            <option value="{{ mode }}" {% if mode == 'NSA' %}selected{% endif %}>{{ mode }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <div class="scoring-document-exports" aria-label="Export the selected scoring job">
+          <button type="button" class="document-export-action document-export-powerpoint" data-scoring-document-export="ppt" title="The selected scoring job in PowerPoint"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4M7 13l3-3 2 2 4-4"/></svg>Export PowerPoint</button>
+          <button type="button" class="document-export-action document-export-word" data-scoring-document-export="word" title="The selected scoring job in Word"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M8.5 12l1.2 5 1.8-4 1.8 4 1.2-5"/></svg>Export Word</button>
+        </div>
+      </div>
       <div class="scoring-picker">
         <div class="scoring-picker-head"><strong>CDR datasets</strong><span data-visible-count>{{ scoring_datasets | length }} available</span></div>
         <div class="scoring-dataset-actions" aria-label="CDR selection shortcuts">

@@ -54,7 +54,8 @@
 
 
       <h3>Artifacts</h3>
-      <p class="form-note">Check each type of artifact to include; unchecked types keep their configuration but are not generated.</p>
+      <p class="form-note">Choose an artifact in its tab and check it to include it; unchecked artifacts keep their configuration but are not generated.</p>
+      <div class="rj-artifact-tabs" id="rj-artifact-tabs" role="tablist" aria-label="Artifacts"></div>
       <section class="rj-card" data-rj-section="dataset_analysis" data-rj-module="dataset_analysis">
         <label class="rj-card-toggle"><input type="checkbox" id="rj-da-enabled"><strong>CDR Analysis</strong><small>The selected metrics of each selected dataset with their filters, global comparison and global CDF comparison, in PowerPoint and/or Word.</small></label>
         <div class="rj-card-body" data-rj-body>
@@ -83,7 +84,7 @@
         </div>
       </section>
       <section class="rj-card" data-rj-section="scoring" data-rj-module="scoring">
-        <label class="rj-card-toggle"><input type="checkbox" id="rj-scoring-enabled" data-rj-entries="rj-scoring"><strong>Scoring &amp; GAP Analysis</strong><small>Each entry calculates (or reuses an identical) Scoring job with its own NR Mode, CDRs, filters, aggregation levels, methodology and GAP reference, and attaches its PowerPoint.</small></label>
+        <label class="rj-card-toggle"><input type="checkbox" id="rj-scoring-enabled" data-rj-entries="rj-scoring"><strong>Scoring &amp; GAP Analysis</strong><small>Each entry calculates (or reuses an identical) Scoring job with its own NR Mode, CDRs, filters, aggregation levels, methodology and GAP reference, and attaches it in PowerPoint and/or Word.</small></label>
         <div class="rj-card-body" data-rj-body>
           <div id="rj-scoring" class="rj-entries"></div>
           <button type="button" id="rj-add-scoring" class="rj-secondary">Add Scoring</button>

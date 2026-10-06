@@ -15347,7 +15347,7 @@ def scoring_job_export(
         return Response(content.encode('utf-8-sig'), media_type='text/csv', headers={
             'Content-Disposition': f'attachment; filename="scoring-job-{job_id}-{export_kind}.csv"',
         })
-    if export_kind == 'ppt':
+    if export_kind in {'ppt', 'word'}:
         from src.modules.scoring_exports import export_scoring_powerpoint, prepare_scoring_display_selections
         from src.modules.cdr_report_filenames import build_scoring_report_filename
         try:
@@ -15370,8 +15370,15 @@ def scoring_job_export(
             datetime.now(), export_job.get('nr_mode') or 'NSA', export_job.get('context_filters'),
             display_selections=export_job['_scoring_display_selections'],
         )
+        media_type = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+        if export_kind == 'word':
+            # The Word document carries the same slides: one landscape page per slide.
+            from src.modules.pptx_to_docx import pptx_to_docx
+            content = pptx_to_docx(content, 'Scoring & GAP Analysis')
+            filename = str(Path(filename).with_suffix('.docx'))
+            media_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
         disposition = f"attachment; filename*=UTF-8''{quote(filename)}"
-        return Response(content, media_type='application/vnd.openxmlformats-officedocument.presentationml.presentation', headers={
+        return Response(content, media_type=media_type, headers={
             'Content-Disposition': disposition,
         })
     raise HTTPException(status_code=404, detail='Unknown scoring export format.')

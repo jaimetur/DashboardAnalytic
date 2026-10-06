@@ -411,3 +411,17 @@ def test_reporting_options_list_filter_values_per_cdr(client):
 def test_reporting_state_names_its_workspace_for_editor_drafts(client):
     login(client)
     assert client.get('/api/reporting/state').json()['workspace_id'] == core.active_workspace.id
+
+
+def test_module_artifacts_always_include_a_document_with_their_excel():
+    from src.modules import report_tasks
+
+    register_report_artifact_provider('document_and_excel_test', 'Document Test', 'reporting', lambda *_args: [],
+                                      formats=('powerpoint', 'word', 'excel'))
+    try:
+        only_excel = normalize_definition({'modules': {'document_and_excel_test': {'enabled': True, 'formats': ['excel']}}})
+        assert only_excel['modules']['document_and_excel_test']['formats'] == ['powerpoint', 'excel']
+        word_and_excel = normalize_definition({'modules': {'document_and_excel_test': {'enabled': True, 'formats': ['word', 'excel']}}})
+        assert word_and_excel['modules']['document_and_excel_test']['formats'] == ['word', 'excel']
+    finally:
+        report_tasks.ARTIFACT_PROVIDERS.pop('document_and_excel_test', None)

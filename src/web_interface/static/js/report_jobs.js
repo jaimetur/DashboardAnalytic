@@ -304,12 +304,17 @@
       const row = node('label', undefined, 'rj-check rj-format-chip');
       const box = node('input'); box.type = 'checkbox'; box.value = format; box.checked = selected.includes(format);
       box.dataset.format = prefix;
-      box.addEventListener('change', () => { if (!boxes.some((item) => item.checked)) box.checked = true; });
+      // A document (PowerPoint or Word) stays checked; Excel, when offered, is an optional extra.
+      box.addEventListener('change', () => { if (!documents().some((item) => item.checked)) box.checked = true; });
       row.append(box, node('span', FORMAT_LABELS[format] || format));
       container.append(row);
       return box;
     });
-    if (boxes.length && !boxes.some((box) => box.checked)) boxes[0].checked = true;
+    const documents = () => {
+      const documentBoxes = boxes.filter((box) => box.value !== 'excel');
+      return documentBoxes.length ? documentBoxes : boxes;
+    };
+    if (documents().length && !documents().some((box) => box.checked)) documents()[0].checked = true;
     container.getValue = () => boxes.filter((box) => box.checked).map((box) => box.value);
   }
 
@@ -493,6 +498,7 @@
 
   // A Scoring artifact offers the Scoring calculation options: NR Mode, CDRs,
   // filters, Main Cities, aggregation levels, methodology and GAP reference.
+  let scoringFormatId = 0;
   function scoringEntry(entry = {}) {
     const card = node('div', undefined, 'rj-entry');
     const label = node('input'); label.type = 'text'; label.placeholder = 'Optional artifact name'; label.value = entry.label || '';
@@ -529,10 +535,12 @@
     nrMode.addEventListener('change', () => renderDatasets([]));
     datasets.addEventListener('change', () => filters.refresh(cdrsInUse()));
     renderDatasets(entry.dataset_ids || []);
+    const formats = node('div', undefined, 'rj-formats');
+    formatChoices(formats, `rj-scoring-${scoringFormatId += 1}`, entry.formats || ['powerpoint'], ['powerpoint', 'word']);
     card.append(entryHead(card, 'Scoring', () => [nrMode.value, label.value.trim()].filter(Boolean).join(' · ')),
-      head, levels, node('strong', 'Filters'), filters, node('strong', 'CDRs'), datasets);
+      formats, head, levels, node('strong', 'Filters'), filters, node('strong', 'CDRs'), datasets);
     card.getValue = () => ({
-      label: label.value.trim(), nr_mode: nrMode.value, dataset_ids: datasets.getValue(),
+      label: label.value.trim(), nr_mode: nrMode.value, dataset_ids: datasets.getValue(), formats: formats.getValue(),
       scoring_profile_id: methodology.value, baseline_operator: baseline.value.trim() || 'EE',
       aggregation_levels: levelBoxes.filter((box) => box.checked).map((box) => box.value),
       main_cities: Boolean(filters.picker('City')?.getPreset()),
@@ -545,12 +553,18 @@
   // choices (settings) and its multi-value filters.
   function providerCard(provider, config) {
     const card = node('section', undefined, 'rj-card');
+    card.dataset.rjModule = provider.key;
     const toggle = node('label', undefined, 'rj-card-toggle');
     const box = node('input'); box.type = 'checkbox'; box.checked = Boolean(config.enabled);
     toggle.append(box, node('strong', provider.label));
     const body = node('div', undefined, 'rj-card-body rj-provider-body');
     const formats = node('div', undefined, 'rj-formats');
     formatChoices(formats, `rj-provider-${provider.key}`, config.formats || [provider.formats[0]], provider.formats);
+    const excelChip = formats.querySelector('input[value="excel"]')?.closest('label');
+    if (excelChip) {
+      excelChip.title = `Excel exports only the ${provider.label} detail: every call with its follow-up, comments and history. `
+        + 'The Executive Summary and Progress Status are in the PowerPoint or Word document, which is always generated.';
+    }
     const saved = config.options || {};
     const settings = (provider.settings || []).map((setting) => {
       const control = select(setting.choices, String(saved[setting.key] ?? setting.default ?? ''));
@@ -668,6 +682,48 @@
 
   // -- editor -------------------------------------------------------------
 
+  // Artifacts are organised in tabs: one per artifact type, in its module colour, with a check when it is
+  // included in the job. Every artifact stays in the form, so saving reads all of them.
+  // The selected artifact tab is remembered by the browser, so reloading the page keeps it.
+  const ARTIFACT_TAB_KEY = 'dashboard-analytic:reporting-artifact-tab';
+  let activeArtifact = (() => { try { return localStorage.getItem(ARTIFACT_TAB_KEY) || ''; } catch { return ''; } })();
+  const ARTIFACT_TAB_ICONS = {
+    dataset_analysis: '.module-tab-datasets-analysis', network_insights: '.module-tab-network-insights',
+    dashboards: '.module-tab-e2e-dashboards', scoring: '.module-tab-scoring', non_qualified_calls: '.module-tab-non-qualified-calls',
+  };
+  function syncArtifactTabs() {
+    const host = $('rj-artifact-tabs');
+    if (!host) return;
+    const cards = [...document.querySelectorAll('.rj-card[data-rj-module]')].filter((card) => !card.hidden);
+    if (!cards.some((card) => card.dataset.rjModule === activeArtifact)) activeArtifact = cards[0]?.dataset.rjModule || '';
+    host.replaceChildren(...cards.map((card) => {
+      const toggle = card.querySelector(':scope > .rj-card-toggle input[type="checkbox"]');
+      const tab = node('button', undefined, 'rj-artifact-tab');
+      tab.type = 'button';
+      tab.setAttribute('role', 'tab');
+      tab.dataset.module = card.dataset.rjModule;
+      tab.classList.toggle('is-included', Boolean(toggle?.checked));
+      tab.setAttribute('aria-selected', String(card.dataset.rjModule === activeArtifact));
+      tab.title = toggle?.checked ? 'Included in the job' : 'Not included in the job';
+      // The icon of the module's main tab follows the inclusion check.
+      const icon = document.querySelector(`.module-tabs ${ARTIFACT_TAB_ICONS[card.dataset.rjModule] || '.none'} .module-tab-icon`)?.cloneNode(true);
+      // Its own class: the navigation hides its tab icons on narrow windows.
+      icon?.setAttribute('class', 'rj-tab-icon');
+      tab.append(node('span', '', 'rj-tab-state'), ...(icon ? [icon] : []),
+        node('span', card.querySelector(':scope > .rj-card-toggle strong')?.textContent || card.dataset.rjModule));
+      tab.addEventListener('click', () => {
+        activeArtifact = card.dataset.rjModule;
+        try { localStorage.setItem(ARTIFACT_TAB_KEY, activeArtifact); } catch { /* Storage unavailable: the tab is still selected. */ }
+        syncArtifactTabs();
+      });
+      return tab;
+    }));
+    cards.forEach((card) => card.classList.toggle('is-tab-hidden', card.dataset.rjModule !== activeArtifact));
+  }
+  document.addEventListener('change', (event) => {
+    if (event.target.closest?.('.rj-card[data-rj-module] > .rj-card-toggle')) syncArtifactTabs();
+  });
+
   function fillEditor(task) {
     const definition = task?.definition || {};
     const dataset = definition.dataset_analysis || {};
@@ -717,6 +773,7 @@
     $('rj-modules-note').textContent = `Artifacts of modules not activated for your account are not available: ${unavailable.map((module) => labels[module]).join(', ')}.`;
     const modules = definition.modules || {};
     $('rj-providers').replaceChildren(...options.providers.map((provider) => providerCard(provider, modules[provider.key] || {})));
+    syncArtifactTabs();
     $('rj-send-email').checked = Boolean(task?.send_email);
     $('rj-recipients').value = (task?.recipients || []).join(', ');
     const schedule = task?.schedule || {mode: 'manual', time: '08:00'};

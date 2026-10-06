@@ -348,3 +348,22 @@ def test_teams_members_progress_shared_filters_and_reporting_artifact(client, tm
     ]
     assert all((tmp_path / item['file_name']).stat().st_size > 0 for item in artifacts)
     assert '2 Non-Qualified Calls' in artifacts[0]['details'][-1]
+
+
+def test_page_exports_the_executive_summary_to_powerpoint_and_word(client, tmp_path):
+    from docx import Document
+    from pptx import Presentation
+
+    enable_module()
+    add_cdr(tmp_path, 'NetCheck_UK_CDR_Data_2026_Q1.xlsx', 'data', data_rows())
+    login(client)
+    page = client.get('/non-qualified-calls').text
+    assert 'data-nq-document-export="powerpoint"' in page and 'data-nq-document-export="word"' in page
+    body = {'filters': {'result': ['Cutoff']}, 'granularity': 'month'}
+    deck = client.post('/api/non-qualified-calls/export/powerpoint', json=body)
+    assert deck.status_code == 200 and deck.headers['content-disposition'].endswith('.pptx"')
+    assert len(Presentation(io.BytesIO(deck.content)).slides) > 1
+    document = client.post('/api/non-qualified-calls/export/word', json=body)
+    assert document.status_code == 200 and document.headers['content-disposition'].endswith('.docx"')
+    assert Document(io.BytesIO(document.content)).paragraphs
+    assert client.post('/api/non-qualified-calls/export/pdf', json=body).status_code == 404

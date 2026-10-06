@@ -70,26 +70,6 @@ def technology_sections(analysis: dict[str, Any]) -> list[tuple[str, dict[str, A
     return [(f" · {section.get('technology_label') or section.get('technology')}", section) for section in sections]
 
 
-def overview_table(analysis: dict[str, Any]) -> tuple[list[str], list[list[str]]]:
-    comparison = analysis.get('comparison')
-    columns = ['Group', 'Samples', 'RSRP mean', 'RSRP median', 'RSRP P10', 'Low cov. %',
-               'SINR mean', 'SINR median', 'SINR P10', 'High interf. %', 'eNodeBs', 'Cells']
-    if comparison:
-        columns += [f'Δ RSRP med. ({comparison["latest"]} vs {comparison["previous"]})', 'Δ Low cov.', 'Δ SINR med.', 'Δ High interf.']
-    rows = []
-    for row in analysis.get('rf_rows') or analysis.get('overview') or []:
-        values = [str(row.get('operator') or ''), _number(row.get('samples'), 0), _number(row.get('rsrp_mean')), _number(row.get('rsrp_median')),
-                  _number(row.get('rsrp_p10')), _number(row.get('low_coverage_share'), suffix='%'), _number(row.get('sinr_mean')),
-                  _number(row.get('sinr_median')), _number(row.get('sinr_p10')), _number(row.get('high_interference_share'), suffix='%'),
-                  _number(row.get('observed_enodebs'), 0), _number(row.get('observed_cells'), 0)]
-        if comparison:
-            deltas = row.get('deltas') or {}
-            values += [_signed(deltas.get('rsrp_median')), _signed(deltas.get('low_coverage_share'), ' pp'),
-                       _signed(deltas.get('sinr_median')), _signed(deltas.get('high_interference_share'), ' pp')]
-        rows.append(values)
-    return columns, rows
-
-
 def hotspot_table(rows: list[dict[str, Any]], unit: str, limit: int = 10) -> tuple[list[str], list[list[str]]]:
     columns = ['City', 'Region', 'Samples', f'Mean ({unit})', 'Share below threshold', 'Latitude', 'Longitude']
     return columns, [
@@ -162,7 +142,11 @@ def _render_image(render: ChartRenderer, payload: Any, width: int = 1600, height
     if not isinstance(payload, dict):
         return None, 'No chart for this selection.'
     try:
-        return BytesIO(render(payload, width, height)), ''
+        image = BytesIO(render(payload, width, height))
+        with Image.open(image) as raster:
+            raster.verify()
+        image.seek(0)
+        return image, ''
     except Exception as exc:  # A chart that cannot be drawn must not drop the whole summary.
         return None, f'The chart could not be rendered: {exc}'
 
@@ -251,7 +235,7 @@ def area_table(rows: list[dict[str, Any]], unit: str, limit: int = 8) -> tuple[l
     ]
 
 
-CLASS_BAR_BLOCKS = 16
+CLASS_BAR_BLOCKS = 12
 CLASS_BAR_BLOCK = '\u2588'
 
 
@@ -536,8 +520,6 @@ def export_network_insights_powerpoint(destination: Path, analysis: dict[str, An
     # Sections follow the order of the page: Overview, RF Quality, maps, Network Deployment, Cluster Sites Density, Spectrum.
     for suffix, section in sections:
         _overview_slides(presentation, f'Overview{suffix}', overview_cards(analysis, section))
-        columns, rows = overview_table(section)
-        _table_slides(presentation, f'RF Quality Overview{suffix}', columns, rows, selection.get('group_label') or '')
     for suffix, section, cdfs, _groups in visuals:
         if cdfs:
             _visual_slides(presentation, f'RF Quality{suffix}', cdfs, rf_quality_table(section))
@@ -690,7 +672,7 @@ def export_network_insights_word(destination: Path, analysis: dict[str, Any], de
     section.page_width, section.page_height = DocxInches(11.69), DocxInches(8.27)
     section.left_margin = section.right_margin = DocxInches(0.6)
     section.top_margin = section.bottom_margin = DocxInches(0.6)
-    tables = [*(overview_table(section) for _suffix, section in technology_sections(analysis)),
+    tables = [*(rf_quality_table(section)[:2] for _suffix, section in technology_sections(analysis)),
               *(hotspot_table((section.get('maps') or {}).get(key) or [], unit) for _suffix, section in technology_sections(analysis)
                 for key, unit in [('coverage_hotspots', 'dBm'), ('interference_hotspots', 'dB')]),
               *((columns, rows) for _title, columns, rows in [*spectrum_tables(analysis), *deployment_tables(deployment), *cluster_sites_tables(analysis, deployment)])]
@@ -726,9 +708,6 @@ def export_network_insights_word(destination: Path, analysis: dict[str, Any], de
     for suffix, section in sections:
         _docx_section_heading(document, f'Overview{suffix}')
         _docx_overview_cards(document, overview_cards(analysis, section))
-        _docx_section_heading(document, f'RF Quality Overview{suffix}')
-        columns, rows = overview_table(section)
-        _docx_table(document, columns, rows)
     for suffix, section, cdfs, _groups in visuals:
         if cdfs:
             _docx_side_by_side(document, f'RF Quality{suffix}', [(caption, (image, note, None)) for caption, image, note, _table in cdfs], add_image, new_page=True)

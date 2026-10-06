@@ -3900,3 +3900,14 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
 @keyframes metric-pending-shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
 .metric-failed .metric-pending-spinner, .metric-failed .metric-pending-body { display: none; }
 .metric-failed .metric-pending-note, .metric-failed .metric-pending-pill { color: #9b2c2c; }
+/* PowerPoint and Word export buttons: their own colours and icons in every module. */
+.document-export-action.document-export-action { border: 0; }
+.document-export-action { display: inline-flex; align-items: center; justify-content: center; gap: .45rem; width: auto; padding: .55rem 1.1rem; border: 0; border-radius: 999px; color: #fff; font-weight: 800; box-shadow: 0 6px 14px rgba(0, 0, 0, .16); }
+.document-export-action svg { width: 1.05rem; height: 1.05rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.document-export-action.document-export-powerpoint { background: linear-gradient(125deg, #b7472a, #e0693f); }
+.document-export-action.document-export-powerpoint:hover:not(:disabled) { background: linear-gradient(125deg, #9c3b22, #c95a33); color: #fff; }
+.document-export-action.document-export-word { background: linear-gradient(125deg, #1f4e96, #3b7bd4); }
+.document-export-action.document-export-word:hover:not(:disabled) { background: linear-gradient(125deg, #1a427f, #2f68b8); color: #fff; }
+.document-export-action:disabled { opacity: .6; cursor: progress; }
+.icon-button, .action-link-preview { display: inline-flex; align-items: center; gap: .45rem; }
+.button-icon { width: 1.05rem; height: 1.05rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: 0 0 auto; }

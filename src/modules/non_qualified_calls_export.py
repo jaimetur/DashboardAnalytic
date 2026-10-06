@@ -203,8 +203,45 @@ def with_colors(distributions: list[dict[str, Any]], options: dict[str, Any]) ->
                                        for item in distribution['items']]} for distribution in distributions]
 
 
+def _cover_selection(cover, lines: list[str]) -> None:
+    """The report selection (filters, progress periods and generation time) under the cover subtitle."""
+    subtitle = next((shape for shape in cover.placeholders if shape.placeholder_format.idx == 1), None)
+    if subtitle is None or not lines:
+        return
+    frame = subtitle.text_frame
+    frame.word_wrap = True
+    # The template shrinks the subtitle to fit; the selection keeps a readable size instead.
+    frame.auto_size = MSO_AUTO_SIZE.NONE
+    size = 14 if len(lines) <= 4 else 12 if len(lines) <= 7 else 10
+    for line in lines:
+        paragraph = frame.add_paragraph()
+        paragraph.text = line
+        paragraph.font.size = Pt(size)
+
+
+def report_panels(summary: dict[str, Any], breakdowns: list[dict[str, Any]], progress: dict[str, Any],
+                  options: dict[str, Any]) -> list[tuple[str, Any]]:
+    """The Executive Summary and Progress View drawn like the page, as (title, PNG) panels."""
+    from src.modules.non_qualified_calls_visuals import executive_summary_panels, progress_view_panels
+
+    from src.modules.non_qualified_calls_visuals import table_panels
+
+    label = GRANULARITY_LABELS.get(progress['granularity'], 'Month')
+    tables = [panel for title, columns, rows in detail_tables(progress) for panel in table_panels(title, columns, rows)]
+    return [*executive_summary_panels(summary, breakdowns, options), *progress_view_panels(progress, options, label), *tables]
+
+
+def detail_tables(progress: dict[str, Any]) -> list[tuple[str, list[str], list[list[str]]]]:
+    """The figures the panels summarise: every period of the timeline and the activity of each user."""
+    label = GRANULARITY_LABELS.get(progress['granularity'], 'Month')
+    return [(f'Progress View · Progress per {label} · Details', *timeline_table(progress)),
+            ('Progress View · User Activity', *activity_table(progress['activity']))]
+
+
 def export_powerpoint(destination: Path, lines: list[str], summary: dict[str, Any], breakdowns: list[dict[str, Any]],
                       progress: dict[str, Any], options: dict[str, Any], template: Path | None = None) -> Path:
+    from PIL import Image
+
     from src.config import settings
     from src.modules.cdr_reporting import _named_slide_layout, _remove_all_slides, _set_structural_slide_text
 
@@ -212,22 +249,16 @@ def export_powerpoint(destination: Path, lines: list[str], summary: dict[str, An
     _remove_all_slides(presentation)
     cover = presentation.slides.add_slide(_named_slide_layout(presentation, 'Title Page'))
     _set_structural_slide_text(cover, 'Non-Qualified Calls', 'Executive Summary and Progress Status')
-    _text_slide(presentation, 'Report Selection', lines)
-    tables = report_tables(summary, breakdowns, progress)
-    title, columns, rows = tables[0]
-    _table_slides(presentation, title, columns, rows)
-    breakdown_charts = with_colors([breakdown for breakdown in breakdowns if breakdown['field'] in {'service', 'result', 'status'}], options)
-    _pie_slide(presentation, 'Executive Summary · Distribution', breakdown_charts)
-    for title, columns, rows in tables[1:len(breakdowns) + 1]:
-        _table_slides(presentation, f'Executive Summary · {title}', columns, rows)
-    progress_tables = tables[len(breakdowns) + 1:]
-    title, columns, rows = progress_tables[0]
-    _table_slides(presentation, title, columns, rows)
-    distributions = with_colors(progress['distributions'], options)
-    _pie_slide(presentation, 'Progress Status · Status, Team and Assignee', distributions[:3])
-    _timeline_chart_slide(presentation, progress)
-    for title, columns, rows in progress_tables[1:]:
-        _table_slides(presentation, f'Progress Status · {title}', columns, rows)
+    _cover_selection(cover, lines)
+    for title, image in report_panels(summary, breakdowns, progress, options):
+        slide = _slide(presentation, title)
+        left, top, width, height = _content_frame(slide)
+        with Image.open(image) as raster:
+            ratio = raster.width / raster.height
+        image.seek(0)
+        picture_width = min(width, height * ratio)
+        slide.shapes.add_picture(image, Inches(left + (width - picture_width) / 2), Inches(top),
+                                 width=Inches(picture_width), height=Inches(picture_width / ratio))
     closing = _named_slide_layout(presentation, 'Black logo end slide')
     if closing is not None:
         _set_structural_slide_text(presentation.slides.add_slide(closing), '', '')
@@ -236,7 +267,7 @@ def export_powerpoint(destination: Path, lines: list[str], summary: dict[str, An
 
 
 def export_word(destination: Path, lines: list[str], summary: dict[str, Any], breakdowns: list[dict[str, Any]],
-                progress: dict[str, Any]) -> Path:
+                progress: dict[str, Any], options: dict[str, Any] | None = None) -> Path:
     document = Document()
     section = document.sections[0]
     section.orientation = WD_ORIENT.LANDSCAPE
@@ -244,18 +275,14 @@ def export_word(destination: Path, lines: list[str], summary: dict[str, Any], br
     section.left_margin = section.right_margin = DocxInches(0.6)
     section.top_margin = section.bottom_margin = DocxInches(0.6)
     document.add_heading('Dashboard Analytic · Non-Qualified Calls', level=0)
+    document.add_paragraph('Executive Summary and Progress Status')
     for line in lines:
         document.add_paragraph(line, style='List Bullet')
-    tables = report_tables(summary, breakdowns, progress)
-    for index, (title, columns, rows) in enumerate(tables):
-        if index == 0:
-            document.add_heading('Executive Summary', level=1)
-        elif index == len(breakdowns) + 1:
-            document.add_heading('Progress Status', level=1)
-        document.add_heading(title, level=2)
-        if rows:
-            _docx_table(document, columns, rows)
-        else:
-            document.add_paragraph('No data for this selection.')
+    usable = (section.page_width - section.left_margin - section.right_margin) / 914400
+    for title, image in report_panels(summary, breakdowns, progress, options or {'statuses': [], 'teams': []}):
+        heading = document.add_heading(title, level=1)
+        # Every section starts on its own page, as each one has its own slide in PowerPoint.
+        heading.paragraph_format.page_break_before = True
+        document.add_picture(image, width=DocxInches(usable))
     document.save(destination)
     return destination

@@ -9,7 +9,14 @@
 .non-qualified-calls .nq-hero h2 { margin: 1.25rem 0; color: #fff; }
 .non-qualified-calls .nq-hero .lede { max-width: 72rem; margin: 1rem 0; }
 /* The indexing status and Refresh open the Filters panel. */
-.nq-sync-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .65rem; margin-bottom: 1rem; }
+.nq-sync-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .65rem; margin-bottom: 1rem; }
+.nq-sync-exports, .nq-sync-status { display: flex; flex-wrap: wrap; align-items: center; gap: .65rem; }
+/* The badge is as tall as the Refresh and export buttons of its row. */
+.nq-sync-status { align-items: stretch; }
+.nq-sync-status .nq-sync { display: inline-flex; align-items: center; }
+.nq-sync-exports { margin-left: auto; }
+.nq-sync-bar .nq-hero-action { display: inline-flex; align-items: center; gap: .45rem; }
+.nq-sync-bar .nq-hero-action svg { width: 1.05rem; height: 1.05rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .nq-sync { margin: 0; padding: .5rem 1rem; border: 0; border-radius: 999px; background: linear-gradient(125deg, #7d1238, #e0507a); color: #fff; font-size: .84rem; font-weight: 800; white-space: nowrap; box-shadow: 0 6px 14px rgba(125, 18, 56, .25); }
 .nq-hero-action { padding: .55rem 1.1rem; border: 1px solid rgba(125, 18, 56, .35); border-radius: 999px; background: #fff; color: var(--nq-dark); font-weight: 800; box-shadow: 0 6px 14px rgba(80, 8, 34, .14); }
 .nq-hero-action:hover:not(:disabled) { background: var(--nq-soft); }
@@ -293,3 +300,15 @@
 [data-nq-teams-status][data-tone="error"] { color: #b3261e; font-weight: 700; }
 [data-nq-teams-status][data-tone="done"] { color: #1f7a44; font-weight: 700; }
 @media (max-width: 900px) { .nq-team-row { grid-template-columns: 2.6rem 1fr repeat(3, auto); } .nq-team-row .nq-members { grid-column: 1 / -1; grid-row: 2; } }
+/* Progress View chart tooltips. */
+.nq-chart-tooltip { position: fixed; z-index: 1000; display: grid; gap: .35rem; min-width: 10rem; max-width: 18rem; padding: .55rem .7rem; border: 1px solid rgba(125, 18, 56, .2); border-radius: 10px; background: #fff; color: #2d1520; font-size: .8rem; box-shadow: 0 10px 24px rgba(60, 4, 24, .18); pointer-events: none; }
+.nq-chart-tooltip[hidden] { display: none !important; }
+.nq-chart-tooltip strong { color: #7d1238; }
+.nq-chart-tooltip-rows { display: grid; gap: .2rem; }
+.nq-chart-tooltip-rows > div { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .45rem; }
+.nq-chart-tooltip-rows b { font-variant-numeric: tabular-nums; }
+.nq-timeline-zone { fill: transparent; cursor: crosshair; }
+.nq-timeline-zone:hover { fill: rgba(125, 18, 56, .06); }
+.nq-backlog-point { fill: #b0234f; stroke: #fff; stroke-width: 1.5; pointer-events: none; }
+.nq-pie-slice { cursor: pointer; transition: stroke-width .12s ease; }
+.nq-pie-slice:hover { stroke-width: 22; }

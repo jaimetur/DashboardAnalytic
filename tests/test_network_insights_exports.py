@@ -5,9 +5,19 @@ from docx import Document
 from docx.oxml.ns import qn
 from pptx import Presentation
 
-from src.modules.network_insights_export import export_network_insights_powerpoint, export_network_insights_word, overview_table
+import io
+
+from PIL import Image
+
+from src.modules.network_insights_export import export_network_insights_powerpoint, export_network_insights_word, rf_quality_table
 
 TEMPLATE = Path(__file__).resolve().parents[1] / 'assets/ppt-templates/Template_CDR_analysis.pptx'
+
+
+def _png(*_args) -> bytes:
+    output = io.BytesIO()
+    Image.new('RGB', (160, 90), (230, 236, 245)).save(output, 'PNG')
+    return output.getvalue()
 
 
 def _analysis(comparison=False):
@@ -18,7 +28,7 @@ def _analysis(comparison=False):
         'sinr_p10': -0.8, 'high_interference_share': 13.8, 'observed_enodebs': 140, 'observed_cells': 512,
         'deltas': {'rsrp_median': 1.2, 'low_coverage_share': -0.3, 'sinr_median': 0.2, 'high_interference_share': -1.1},
     } for index in range(25)]
-    analysis = {'rf_rows': rows, 'maps': {}, 'spectrum': {}}
+    analysis = {'rf_rows': rows, 'maps': {}, 'spectrum': {}, 'charts': {'rsrp_cdf': {'type': 'cdf'}, 'sinr_cdf': {'type': 'cdf'}}}
     if comparison:
         analysis['comparison'] = {'latest': '2026-Q2', 'previous': '2026-Q1'}
     return analysis
@@ -27,15 +37,16 @@ def _analysis(comparison=False):
 def test_network_ppt_preserves_dashboard_template_and_fits_group_cells(tmp_path):
     output = tmp_path / 'network.pptx'
     source = _analysis()
-    export_network_insights_powerpoint(output, source, {}, {'group_label': 'Operator → City → Technology → Campaign'}, lambda *_args: b'', template=TEMPLATE)
+    export_network_insights_powerpoint(output, source, {}, {'group_label': 'Operator → City → Technology → Campaign'}, _png, template=TEMPLATE)
     deck, reference = Presentation(output), Presentation(TEMPLATE)
     assert (deck.slide_width, deck.slide_height) == (reference.slide_width, reference.slide_height)
     assert deck.slides[0].slide_layout.name == 'Title Page'
     assert deck.slides[-1].slide_layout.name == 'Black logo end slide'
     assert len(deck.slide_layouts) == len(reference.slide_layouts)
-    tables = [shape.table for slide in deck.slides for shape in slide.shapes if shape.has_table and shape.table.cell(0, 1).text == "Samples"]
-    assert len(tables) == 3
-    columns, values = overview_table(source)
+    columns, values, _bars = rf_quality_table(source)
+    # The RF Quality table sits under the CDFs and continues on further slides; no separate overview table is exported.
+    tables = [shape.table for slide in deck.slides for shape in slide.shapes if shape.has_table and shape.table.cell(0, 1).text == 'Samples']
+    assert len(tables) > 1
     actual = []
     for table in tables:
         assert [cell.text for cell in table.rows[0].cells] == columns
@@ -43,6 +54,7 @@ def test_network_ppt_preserves_dashboard_template_and_fits_group_cells(tmp_path)
         for row in table.rows:
             assert all(cell.text_frame.word_wrap is False for cell in row.cells)
             assert all(len(cell.text_frame.paragraphs) == 1 for cell in row.cells)
+            assert all(run.font.size.pt >= 8 for cell in row.cells for run in cell.text_frame.paragraphs[0].runs)
         actual.extend([[cell.text for cell in row.cells] for row in list(table.rows)[1:]])
     assert actual == values
     with zipfile.ZipFile(output) as generated, zipfile.ZipFile(TEMPLATE) as original:
@@ -50,42 +62,28 @@ def test_network_ppt_preserves_dashboard_template_and_fits_group_cells(tmp_path)
         assert generated.read('ppt/slideMasters/slideMaster1.xml') == original.read('ppt/slideMasters/slideMaster1.xml')
 
 
-def test_wide_network_ppt_repeats_group_without_losing_comparison_metrics(tmp_path):
-    output = tmp_path / 'wide-network.pptx'
-    source = _analysis(comparison=True)
-    export_network_insights_powerpoint(output, source, {}, {}, lambda *_args: b'', template=TEMPLATE)
-    tables = [shape.table for slide in Presentation(output).slides for shape in slide.shapes if shape.has_table and shape.table.cell(0, 1).text != "Observed eNodeBs"]
-    columns, _rows = overview_table(source)
-    assert {cell.text for table in tables for cell in table.rows[0].cells} == set(columns)
-    assert all(table.cell(0, 0).text == 'Group' for table in tables)
-    assert all(run.font.size.pt >= 8 for table in tables for row in table.rows for cell in row.cells for paragraph in cell.text_frame.paragraphs for run in paragraph.runs)
-    for column in columns[1:]:
-        assert sum(sum(cell.text == column for cell in table.rows[0].cells) for table in tables) == 3
-
-
 def test_network_word_uses_landscape_fixed_single_line_tables(tmp_path):
-    for comparison in [False, True]:
-        output = tmp_path / f'network-{comparison}.docx'
-        source = _analysis(comparison)
-        export_network_insights_word(output, source, {}, {}, lambda *_args: b'')
-        document = Document(output)
-        section = document.sections[0]
-        assert section.page_width > section.page_height
-        columns, values = overview_table(source)
-        # The Overview cards come first; the RF Quality Overview table follows them.
-        table = next(table for table in document.tables if [cell.text for cell in table.rows[0].cells] == columns)
-        assert table.autofit is False
-        assert table.columns[0].width > table.columns[1].width
-        assert sum(column.width for column in table.columns) <= section.page_width - section.left_margin - section.right_margin + 9144
-        assert [cell.text for cell in table.rows[0].cells] == columns
-        assert [[cell.text for cell in row.cells] for row in list(table.rows)[1:]] == values
-        assert table.rows[0]._tr.trPr.find(qn('w:tblHeader')) is not None
-        for row in table.rows:
-            assert row._tr.trPr.find(qn('w:cantSplit')) is not None
-            for cell in row.cells:
-                assert cell._tc.tcPr.find(qn('w:noWrap')) is not None
-                assert len(cell.paragraphs) == 1 and '\n' not in cell.text
-                assert all(run.font.size.pt >= 8 for run in cell.paragraphs[0].runs)
+    output = tmp_path / 'network.docx'
+    source = _analysis()
+    export_network_insights_word(output, source, {}, {}, _png)
+    document = Document(output)
+    section = document.sections[0]
+    assert section.page_width > section.page_height
+    columns, values, _bars = rf_quality_table(source)
+    tables = [table for table in document.tables if [cell.text for cell in table.rows[0].cells] == columns]
+    assert len(tables) == 1
+    table = tables[0]
+    assert table.autofit is False
+    assert table.columns[0].width > table.columns[1].width
+    assert sum(column.width for column in table.columns) <= section.page_width - section.left_margin - section.right_margin + 9144
+    assert [[cell.text for cell in row.cells] for row in list(table.rows)[1:]] == values
+    assert table.rows[0]._tr.trPr.find(qn('w:tblHeader')) is not None
+    for row in table.rows:
+        assert row._tr.trPr.find(qn('w:cantSplit')) is not None
+        for cell in row.cells:
+            assert cell._tc.tcPr.find(qn('w:noWrap')) is not None
+            assert len(cell.paragraphs) == 1 and '\n' not in cell.text
+            assert all(run.font.size.pt >= 8 for run in cell.paragraphs[0].runs)
 
 
 def test_network_summaries_include_all_grouped_deployment_views_and_exclude_full_inventory(client, tmp_path, monkeypatch):

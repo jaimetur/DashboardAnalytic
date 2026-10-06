@@ -19,8 +19,10 @@ import hashlib
 import json
 import math
 import re
+import tempfile
 import uuid
 from datetime import datetime
+from pathlib import Path
 from io import BytesIO
 from threading import Lock
 from typing import Any
@@ -1405,8 +1407,25 @@ def install_non_qualified_calls_routes(core: Any) -> None:
         values['assignee'] = [[UNASSIGNED, 'Unassigned'], *workspace_users()]
         return values
 
+    def summary_parts(repository, filters: dict[str, Any], username: str, granularity: str):
+        """The executive summary, progress status, options and selection lines of one NQ selection."""
+        from src.modules.non_qualified_calls_export import selection_lines
+
+        executive = query_calls(repository, {'filters': filters, 'page_size': 25}, username)
+        progress = progress_stats(repository, filters, username, granularity)
+        options = list_options(repository)
+        names = {str(item['id']): item['name'] for item in indexed_datasets(repository)}
+        return executive, progress, options, selection_lines(filters, names, granularity)
+
+    def write_summary_document(export_format: str, destination: Path, executive, progress, options, lines) -> None:
+        from src.modules.non_qualified_calls_export import export_powerpoint, export_word
+
+        if export_format == 'powerpoint':
+            export_powerpoint(destination, lines, executive['summary'], executive['breakdowns'], progress, options)
+        else:
+            export_word(destination, lines, executive['summary'], executive['breakdowns'], progress, options)
+
     def generate_report(config, folder, stamp, user) -> list[dict[str, Any]]:
-        from src.modules.non_qualified_calls_export import export_powerpoint, export_word, selection_lines
         from src.modules.report_tasks import artifact_path
 
         repository = workspace_repository(user)
@@ -1417,11 +1436,7 @@ def install_non_qualified_calls_routes(core: Any) -> None:
         if str(settings.get('open_only') or '') == '1':
             filters['open_only'] = True
         granularity = str(settings.get('granularity') or 'month')
-        executive = query_calls(repository, {'filters': filters, 'page_size': 25}, user.username)
-        progress = progress_stats(repository, filters, user.username, granularity)
-        options = list_options(repository)
-        names = {str(item['id']): item['name'] for item in indexed_datasets(repository)}
-        lines = selection_lines(filters, names, granularity)
+        executive, progress, options, lines = summary_parts(repository, filters, user.username, granularity)
         summary = executive['summary']
         details = [*lines[:-1], f"{summary['total']:,} Non-Qualified Calls · {summary['open']:,} open · {summary['closed']:,} closed · "
                    f"{progress['summary']['attended']:,} attended"]
@@ -1430,10 +1445,8 @@ def install_non_qualified_calls_routes(core: Any) -> None:
             suffix = {'powerpoint': '.pptx', 'word': '.docx', 'excel': '.xlsx'}[export_format]
             label = {'powerpoint': 'PPT', 'word': 'Word', 'excel': 'Excel'}[export_format]
             destination = artifact_path(folder, stamp, 'Non-Qualified Calls', 'Executive Summary and Progress Status', suffix)
-            if export_format == 'powerpoint':
-                export_powerpoint(destination, lines, summary, executive['breakdowns'], progress, options)
-            elif export_format == 'word':
-                export_word(destination, lines, summary, executive['breakdowns'], progress)
+            if export_format in {'powerpoint', 'word'}:
+                write_summary_document(export_format, destination, executive, progress, options, lines)
             else:
                 destination.write_bytes(export_workbook(repository, filters, user.username))
             artifacts.append({'module': 'non_qualified_calls', 'title': f'Non-Qualified Calls ({label})',
@@ -1544,6 +1557,25 @@ def install_non_qualified_calls_routes(core: Any) -> None:
         repository = workspace_repository(user)
         sync_nq_calls(repository)
         return JSONResponse(progress_stats(repository, payload.filters, user.username, payload.granularity))
+
+    @core.app.post('/api/non-qualified-calls/export/{export_format}')
+    def nq_export_document(export_format: str, payload: ProgressPayload, user=Depends(core.current_user)) -> Response:
+        """The Executive Summary and Progress Status of the filtered calls, as on the page, in PowerPoint or Word."""
+        if export_format not in {'powerpoint', 'word'}:
+            raise HTTPException(404, 'Unsupported export type.')
+        repository = workspace_repository(user)
+        sync_nq_calls(repository)
+        executive, progress, options, lines = summary_parts(repository, payload.filters, user.username, payload.granularity)
+        suffix = '.pptx' if export_format == 'powerpoint' else '.docx'
+        stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        name = re.sub(r'[^A-Za-z0-9._ -]+', '_', f'{stamp} - Non-Qualified Calls - {core.active_workspace.name}{suffix}')
+        with tempfile.TemporaryDirectory() as folder:
+            destination = Path(folder) / f'summary{suffix}'
+            write_summary_document(export_format, destination, executive, progress, options, lines)
+            content = destination.read_bytes()
+        media_type = ('application/vnd.openxmlformats-officedocument.presentationml.presentation' if export_format == 'powerpoint'
+                      else 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+        return Response(content, media_type=media_type, headers={'Content-Disposition': f'attachment; filename="{name}"'})
 
     @core.app.post('/api/non-qualified-calls/export')
     def nq_export(payload: ExportPayload, user=Depends(core.current_user)) -> Response:
