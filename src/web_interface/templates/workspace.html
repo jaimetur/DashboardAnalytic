@@ -309,9 +309,6 @@
                   aria-label="Show analysis"
                   {% if dataset.dataset_kind %}data-input-kind="{{ dataset.dataset_kind }}"{% endif %}
                 >Show Analysis</a>
-                <form method="post" action="/scoring/datasets/{{ dataset.id }}/recalculate" data-loading-label="Queuing scoring">
-                  <button type="submit" class="ghost-link action-link-primary action-link-recalculate-scoring" title="Recalculate operator scoring" aria-label="Recalculate scoring">Recalculate Scoring</button>
-                </form>
                 {% else %}
                 <button type="button" class="ghost-link action-link-primary" disabled title="Analysis is only available for ready CDR datasets" aria-label="Analysis unavailable">Show Analysis</button>
                 {% endif %}

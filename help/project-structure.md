@@ -23,7 +23,10 @@ DriveTestAnalyzer/
 │   ├── DriveTestAnalyzer.py
 │   ├── main.py
 │   ├── config.py
+│   ├── branding.py
 │   ├── version.py
+│   ├── dataset_worker.py
+│   ├── report_worker.py
 │   ├── modules/
 │   ├── utils/
 │   └── web_interface/
@@ -34,6 +37,8 @@ DriveTestAnalyzer/
 │   └── ppt-templates/
 ├── docker/
 ├── help/
+├── macos-launcher/
+├── macos-installer/
 ├── tests/
 ├── tools/
 ├── .github/workflows/
@@ -51,9 +56,13 @@ Runtime `config/` and `data/` directories use project-local defaults but are exc
 - `src/main.py`: shared source, PyCharm and Docker launcher using `APP_HOST`, `APP_PORT` and the timestamped Uvicorn logging configuration.
 - `src/DriveTestAnalyzer.py`: FastAPI application, page/API routes, workspace activation, shared background-task orchestration, Admin portability and classic Reporting jobs.
 - `src/config.py`: environment and `storage-paths.conf` resolution.
+- `src/branding.py`: product identifiers of exports, backups and environment variables, and compatibility with those written under the former Dashboard Analytic name.
+- `src/dataset_worker.py`: isolated worker process that parses large CDR source files outside the server process.
+- `src/report_worker.py`: worker process that runs a Reporting Job of a workspace that is not open in the server.
 - `src/version.py`: application version and release date shown by the UI.
 - `src/modules/repository.py`: global/workspace SQLite schemas, migrations and persistence methods.
 - `src/modules/workspaces.py`: workspace registry, lifecycle, path migration, duplication and deletion.
+- `src/modules/output_layout.py`: module folders below `output/reports/` and the one-time move of documents written with the former layout.
 - `src/modules/ingestion.py`: workbook/CSV ingestion, CDR classification helpers and derived input fields.
 - `src/modules/analytics.py`: single-dataset analytical calculations.
 - `src/modules/exports.py`: CDR Analysis Word and PowerPoint output, including the multi-dataset Summary CDR Analysis.
@@ -92,12 +101,18 @@ APP_DATA_DIR/
 │       ├── .dashboard-data-cache/
 │       │   ├── dashboard-previews/
 │       │   ├── charts-canvas/
-│       │   └── charts-pil/
+│       │   ├── charts-pil/
+│       │   └── columns/
+│       ├── .network-insights-cache/
 │       ├── input/
 │       └── output/
-│           ├── reports/
-│           ├── charts/
-│           └── dashboards/
+│           └── reports/
+│               ├── dashboards/
+│               ├── cdr-analysis/
+│               ├── network-insights/
+│               ├── reporting-jobs/
+│               ├── reports-old/
+│               └── reports-charts-old/
 ├── transfer-packages/
 ├── scheduled-backups/
 └── .map-tiles-cache/

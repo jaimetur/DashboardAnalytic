@@ -789,19 +789,7 @@ def test_scoring_ppt_export_normalizes_legacy_gap_without_mutating_saved_result(
     assert 'gap_direction' not in stored
 
 
-def test_scoring_dataset_recalculate_and_automatic_queue_hook(scoring_api):
-    client = scoring_api['client']
-    dataset_id = scoring_api['dataset_id']
-
-    response = client.post(f'/scoring/datasets/{dataset_id}/recalculate', follow_redirects=False)
-    assert response.status_code == 303
-    job_id = response.headers['location'].split('job_id=', 1)[1]
-    job = scoring_jobs.get_scoring_job(scoring_api['repository'], int(job_id))
-    assert job['status'] == 'queued'
-    assert job['aggregation_levels'] == ['Operator']
-    assert len(scoring_api['submitted']) == 1
-
-    scoring_api['submitted'].clear()
+def test_scoring_automatic_queue_hook(scoring_api):
     second_dataset_id = _add_ready_cdr(
         scoring_api['repository'], scoring_api['tmp_path'], name='UK_Q2_2026_NSA_Voice.csv', kind='voice',
     )

@@ -568,7 +568,7 @@ Keep all bars for one slide, or split for more readable charts. Splitting preser
 
 Configuration-only packages do not carry scoring jobs or workspace-local CDR selections. Workspace duplication, database exports, transfers and ZIP database backups preserve jobs with the workspace database.
 
-After a restart, interrupted jobs are retained as failed and can be recalculated. After CDR processing, compatible Data/Voice/Speech companions can trigger a default Operator calculation. **Recalculate Scoring** in Workspace opens the module with compatible selected inputs.
+After a restart, interrupted jobs are retained as failed and can be recalculated. After CDR processing, compatible Data/Voice/Speech companions can trigger a default Operator calculation.
 
 ## Troubleshooting
 

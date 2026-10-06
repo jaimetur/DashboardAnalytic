@@ -41,3 +41,8 @@
 ## Database Management
 
 - When any new table is created, it has to be visible in the Database Management selector and the tittle should have the same format than the others (Uppercase the First Letter of each Word).
+
+## Tests and Pending Requests
+
+- Do not run tests while there are pending requests from me; finish processing every queued request first and run the tests only when nothing else is left to do.
+- If tests are running and I send a new request, stop the tests immediately and work on the new request; run the tests again once there are no pending requests.

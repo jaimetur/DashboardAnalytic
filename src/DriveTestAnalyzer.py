@@ -15248,26 +15248,6 @@ def scoring_jobs_delete(job_id: int, user: SessionUser = Depends(workspace_edito
     return {'deleted': job_id}
 
 
-@app.post('/scoring/datasets/{dataset_id}/recalculate')
-def scoring_dataset_recalculate(dataset_id: int, user: SessionUser = Depends(workspace_editor_user)) -> RedirectResponse:
-    task_repository = scoring_repository(user)
-    dataset = task_repository.get_dataset(dataset_id)
-    if not dataset:
-        raise HTTPException(status_code=404, detail='CDR dataset not found.')
-    try:
-        selected_ids = select_latest_companion_cdrs(task_repository, dataset_id)
-        job, cached = create_scoring_job(
-            task_repository, selected_ids, ['Operator'],
-            dataset_nr_mode(dataset['dataset_kind'], dataset['nr_mode'], dataset['file_name']),
-            force=True, username=user.username,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if not cached:
-        _submit_workspace_job(task_repository, run_scoring_job, task_repository, job['id'], phase=4)
-    return RedirectResponse(f'/scoring?job_id={job["id"]}', status_code=303)
-
-
 def build_scoring_job_powerpoint(task_repository: Repository, job_id: int) -> tuple[bytes, str, dict[str, Any]]:
     """PowerPoint of a completed scoring job with the default export options (all environments)."""
     from src.modules.scoring_exports import export_scoring_powerpoint, prepare_scoring_display_selections

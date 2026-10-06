@@ -2185,8 +2185,8 @@
         const entry = firstColumn ? hierarchyPathEntry(firstColumn, depth, levels) : {level: levels[depth], value: ''};
         const value = entry.value || 'Not specified';
         const groupWidth = x2 - x1;
-        const maxCharacters = Math.max(5, Math.min(34, Math.floor(groupWidth / 8)));
-        const lines = wrappedSvgLabelLines(value, maxCharacters, 2);
+        const maxCharacters = Math.max(3, Math.min(34, Math.floor((groupWidth - 8) / 8.5)));
+        const lines = fittedSvgLabelLines(value, maxCharacters, 2);
         const label = svgElement(svg, 'text', {
           x: x1 + groupWidth / 2,
           y: y + rowHeight / 2 + (lines.length > 1 ? -4 : 5),
@@ -2974,6 +2974,29 @@
     return lines;
   }
 
+  function fittedSvgLabelLines(value, maxLength, maxLines = 2) {
+    // Identifiers such as UK_Q2_SA_2026 have no spaces: also break after "_", "-" and "/", and shorten what
+    // still does not fit so a label never runs into the neighbouring cells.
+    const tokens = String(value).match(/\s+|[^\s_\-/]+[_\-/]*|[_\-/]+/g) || [];
+    const lines = [];
+    let current = '';
+    for (const token of tokens) {
+      if (/^\s+$/.test(token)) {
+        if (current) current += ' ';
+        continue;
+      }
+      if (current && `${current}${token}`.trimEnd().length > maxLength) {
+        lines.push(current);
+        current = '';
+      }
+      current += token;
+    }
+    if (current.trim()) lines.push(current);
+    if (lines.length > maxLines) lines.splice(maxLines - 1, lines.length, lines.slice(maxLines - 1).join(''));
+    return lines.map(line => line.trimEnd()).map(line => (
+      line.length > maxLength ? `${line.slice(0, Math.max(1, maxLength - 1)).trimEnd()}…` : line));
+  }
+
   function setChartTooltip(element, message, focusable = false) {
     const text = String(message || '').trim();
     if (!text) return element;
@@ -3145,7 +3168,13 @@
       ? options.hierarchyColumns
       : Object.values(options.hierarchyColumns || {});
     const hierarchyColumnsById = new Map(hierarchyColumns.map(column => [String(column?.id ?? ''), column]));
-    const hierarchyLevels = Array.isArray(options.hierarchyLevels) ? options.hierarchyLevels.map(String) : [];
+    const requestedHierarchyLevels = Array.isArray(options.hierarchyLevels) ? options.hierarchyLevels.map(String) : [];
+    // A level with the same value under every bar (a single campaign, for example) adds nothing to the axis;
+    // the bar tooltips keep the complete hierarchy path.
+    const varyingHierarchyLevels = requestedHierarchyLevels.filter((level, depth) => new Set(
+      hierarchyColumns.map(column => hierarchyPathEntry(column, depth, requestedHierarchyLevels).rawValue),
+    ).size > 1);
+    const hierarchyLevels = varyingHierarchyLevels.length ? varyingHierarchyLevels : requestedHierarchyLevels.slice(0, 1);
     const hasHierarchyAxis = hierarchyLevels.length > 0 && hierarchyColumnsById.size > 0;
     const groupKeys = categories.map(category => String(options.groupKeyForCategory?.(category) || ''));
     const groupTransitions = stacked && hasHierarchyAxis

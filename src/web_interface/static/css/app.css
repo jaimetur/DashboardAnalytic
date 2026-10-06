@@ -1440,7 +1440,7 @@ body[data-embedded-template-editor] .slides-templates-editor-table-wrap .form-ac
 .login-hero-copy .eyebrow, .login-hero-copy .lede { margin: 0; }
 .login-brand-lockup { display: flex; align-items: center; justify-content: space-between; gap: 1.4rem; margin: 0 0 0.35rem; width: 100%; }
 .login-brand-mark { width: clamp(200px, 22vw, 240px); height: clamp(200px, 22vw, 240px); object-fit: contain; flex: 0 0 auto; margin-left: auto; filter: drop-shadow(0 18px 40px rgba(7, 16, 25, 0.28)); }
-.login-hero-copy h2 { margin: 0; font-size: clamp(2.2rem, 4vw, 4rem); line-height: 0.98; max-width: 9ch; }
+.login-hero-copy h2 { margin: 0; font-size: clamp(2.2rem, 4vw, 4rem); line-height: 0.98; white-space: nowrap; }
 .login-feature-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; align-self: start; margin-top: 1.2rem; }
 .login-feature-card { padding: 1.15rem; border-radius: 20px; background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.16); }
 .login-feature-card strong { display: block; margin: 0.35rem 0 0.55rem; font-family: "Space Grotesk", "Segoe UI", sans-serif; font-size: 1.08rem; }
@@ -2086,9 +2086,8 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .queue-status-stopped { background: linear-gradient(135deg, #8f6d35, #c09549); }
 .icon-action { width: 2rem; height: 2rem; min-width: 2rem; min-height: 2rem; display: inline-flex; align-items: center; justify-content: center; padding: 0.15rem !important; border-radius: 999px !important; font-size: 1rem !important; line-height: 1; font-weight: 800; }
 .mobile-card-pagination { display: none; }
-.queue-actions .icon-action, .queue-actions .action-link-preview, .queue-actions .action-link-primary, .queue-actions .action-link-recalculate-scoring, .queue-actions .action-link-map-vendors, .queue-actions .action-link-clear-vendors { width: 2rem; min-width: 2rem; height: 2rem; min-height: 2rem; padding: 0.15rem !important; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; font-size: 0 !important; }
+.queue-actions .icon-action, .queue-actions .action-link-preview, .queue-actions .action-link-primary, .queue-actions .action-link-map-vendors, .queue-actions .action-link-clear-vendors { width: 2rem; min-width: 2rem; height: 2rem; min-height: 2rem; padding: 0.15rem !important; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; font-size: 0 !important; }
 .queue-actions .action-link-primary::before { content: ''; width: 1.15rem; height: 1.15rem; background: center / contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cellipse cx='10' cy='5.5' rx='6' ry='2.5'/%3E%3Cpath d='M4 5.5v9c0 1.4 2.7 2.5 6 2.5M16 5.5v4M4 10c0 1.4 2.7 2.5 6 2.5'/%3E%3Ccircle cx='17' cy='15.5' r='3'/%3E%3Cpath d='m19.2 17.7 2.3 2.3'/%3E%3C/svg%3E"); }
-.queue-actions .action-link-recalculate-scoring::before { content: ''; width: 1.15rem; height: 1.15rem; background: center / contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 7v5h-5'/%3E%3Cpath d='M19 12a7 7 0 1 0-2.05 4.95'/%3E%3C/svg%3E"); }
 .queue-actions .action-link-map-vendors::before { content: '↗'; font-size: 1rem; }
 .queue-actions .action-link-clear-vendors::before { content: '↺'; font-size: 1rem; }
 .queue-actions .danger-button::before, .admin-dataset-actions .danger-button::before { content: ''; width: 1.05rem; height: 1.05rem; background: center / contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M6 6l12 12M18 6 6 18'/%3E%3C/svg%3E"); }
@@ -3783,7 +3782,7 @@ body:has(.release-navigator) .help-navigator{top:37%}
 
 /* user-viewer explores the workspace and generates jobs, but cannot change
    datasets, mappings, saved Dashboards, saved queries or other stored data. */
-body[data-authenticated-role="user-viewer"] :is(.upload-dropzone, .queue-bulk-actions, .action-link-map-vendors, .action-link-clear-vendors, .action-link-stop, .action-link-reprocess, .action-link-recalculate-scoring, form[action^="/datasets-analysis/delete"], .combined-dataset-recreate-button, .auto-calculated-field-rematerialize-button, [data-ds-manage-only], .scoring-job-delete, .query-builder-save-subpanel, [data-sql-edit], [data-sql-delete]) { display: none !important; }
+body[data-authenticated-role="user-viewer"] :is(.upload-dropzone, .queue-bulk-actions, .action-link-map-vendors, .action-link-clear-vendors, .action-link-stop, .action-link-reprocess, form[action^="/datasets-analysis/delete"], .combined-dataset-recreate-button, .auto-calculated-field-rematerialize-button, [data-ds-manage-only], .scoring-job-delete, .query-builder-save-subpanel, [data-sql-edit], [data-sql-delete]) { display: none !important; }
 body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-events: none; appearance: none; background-image: none; }
 
 /* Map CDR fields: CDRs, rules and mapping selectors side by side so the dialog fits without scrolling. */

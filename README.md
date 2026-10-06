@@ -293,8 +293,8 @@ APP_DATA_DIR=/app/data
 APP_ASSETS_DIR=/app/assets
 TZ=Europe/Madrid
 
-HOST_CONFIG_DIR=/volume1/docker/stacks/drivetestanalyzer/config
-HOST_DATA_DIR=/volume1/docker/stacks/drivetestanalyzer/data
+HOST_CONFIG_DIR=/volume1/docker/data/drivetest-analyzer/config
+HOST_DATA_DIR=/volume1/docker/data/drivetest-analyzer/data
 
 IMAGE_REPOSITORY=jaimetur/drivetest-analyzer
 IMAGE_TAG=latest
@@ -308,6 +308,7 @@ CONTAINER_NAME=drivetest-analyzer
 ├── config/
 │   └── application.db
 └── data/
+    ├── scheduled-backups/
     ├── transfer-packages/
     └── workspaces/
         ├── workspace-registry.db
@@ -315,10 +316,16 @@ CONTAINER_NAME=drivetest-analyzer
             ├── <workspace>.db
             ├── input/
             └── output/
-                ├── reports/
-                ├── charts/
-                └── dashboards/
+                └── reports/
+                    ├── dashboards/          # E2E Dashboards PowerPoint jobs
+                    ├── cdr-analysis/        # CDR Analysis exports
+                    ├── network-insights/    # Network Insights exports
+                    ├── reporting-jobs/      # Reporting Job runs and their artifacts
+                    ├── reports-old/         # Reporting (old) reports
+                    └── reports-charts-old/  # Reporting (old) Chart Sets
 ```
+
+In this example `<deployment-root>` is `/volume1/docker/data/drivetest-analyzer`; the Compose files and `.env` live in a separate stack folder such as `/volume1/docker/stacks/drivetest-analyzer`.
 
 Back up both persistent roots. Backing up only the container does not preserve application state.
 
@@ -356,14 +363,18 @@ docker buildx imagetools inspect ${DOCKERHUB_USERNAME}/drivetest-analyzer:latest
 
 ```text
 DriveTestAnalyzer/
-├── src/                    # FastAPI application, modules and browser UI
-├── tests/                  # Unit and integration tests
-├── docker/                 # Dockerfiles, Compose and environment settings
-├── assets/ppt-templates/   # PowerPoint master/layout file
-├── assets/report-templates/ # Bundled Report Templates added to workspaces
-├── config/                 # Global application database
-├── data/workspaces/        # Workspace registry and isolated workspace data
-├── help/                   # Detailed in-app documentation
+├── src/                                       # FastAPI application, modules and browser UI
+├── tests/                                     # Unit and integration tests
+├── tools/                                     # Release helper (CreateUpdateRelease.py)
+├── docker/                                    # Dockerfile, Compose files and environment settings
+├── assets/ppt-templates/                      # PowerPoint master/layout file
+├── assets/default-calculated-dimensions.json  # Auto-calculated Fields added to new workspaces
+├── macos-launcher/                            # DriveTest Analyzer.app native launcher
+├── macos-installer/                           # Installer build script and .pkg
+├── help/                                      # Detailed in-app documentation
+├── storage-paths.conf                         # Optional local config/, data/ and assets/ roots
+├── config/                                    # Default global application database (when storage-paths.conf does not override it)
+├── data/workspaces/                           # Default workspace registry and isolated workspace data
 ├── README.md
 └── CHANGELOG.md
 ```

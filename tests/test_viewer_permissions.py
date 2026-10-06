@@ -41,7 +41,6 @@ def _ready_cdr(tmp_path):
     ('post', '/workspace/clear-vendors', {'data': {'cdr_dataset_ids': '{id}'}}),
     ('post', '/workspace/datasets/{id}/nr-mode', {'json': {'nr_mode': 'SA'}}),
     ('post', '/workspace/combined/data/recreate', {}),
-    ('post', '/scoring/datasets/{id}/recalculate', {}),
     ('post', '/api/workspace/auto-calculated-fields/rematerialize', {}),
     ('put', '/api/workspace/calculated-dimensions', {'json': {'dimensions': []}}),
     ('post', '/api/query-builder/save', {'json': {'name': 'q', 'query': 'SELECT 1'}}),

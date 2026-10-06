@@ -64,8 +64,8 @@ APP_DATA_DIR=/app/data
 APP_ASSETS_DIR=/app/assets
 TZ=Europe/Madrid
 
-HOST_CONFIG_DIR=/volume1/docker/stacks/drivetestanalyzer/config
-HOST_DATA_DIR=/volume1/docker/stacks/drivetestanalyzer/data
+HOST_CONFIG_DIR=/volume1/docker/data/drivetest-analyzer/config
+HOST_DATA_DIR=/volume1/docker/data/drivetest-analyzer/data
 
 IMAGE_REPOSITORY=jaimetur/drivetest-analyzer
 IMAGE_TAG=latest

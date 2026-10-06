@@ -8715,7 +8715,6 @@ if (queueNode) {
         const currentActionsMatch =
           Boolean(actions.querySelector('a.action-link-preview')) === isReady
           && Boolean(actions.querySelector('a.action-link-primary')) === (isReady && isCdr)
-          && Boolean(actions.querySelector('.action-link-recalculate-scoring')) === (isReady && isCdr)
           && Boolean(actions.querySelector('[data-mapping-map-open]')) === canMapMappings
           && Boolean(actions.querySelector('[data-mapping-clear-open]')) === canClearMappings
           && Boolean(actions.querySelector('.action-link-stop')) === canStop
@@ -8733,9 +8732,6 @@ if (queueNode) {
         ${isReady && isCdr
           ? `<a class="ghost-link action-link-primary" href="${openHref}" data-datasets-analysis-open-link data-dataset-id="${dataset.id}" title="Show analysis" aria-label="Show analysis"${datasetKind ? ` data-input-kind="${String(datasetKind)}"` : ''}>Show Analysis</a>`
           : '<button type="button" class="ghost-link action-link-primary" disabled title="Analysis is only available for ready CDR datasets" aria-label="Analysis unavailable">Show Analysis</button>'}
-        ${isReady && isCdr
-          ? `<form method="post" action="/scoring/datasets/${dataset.id}/recalculate" data-loading-label="Queuing scoring"><button type="submit" class="ghost-link action-link-primary action-link-recalculate-scoring" title="Recalculate operator scoring" aria-label="Recalculate scoring">Recalculate Scoring</button></form>`
-          : ''}
         ${canMapMappings
           ? `<button type="button" class="ghost-link action-link-map-vendors" data-mapping-map-open data-dataset-id="${dataset.id}" data-dataset-name="${fileName}" title="Map Vendor, Region & Cluster">Map</button>`
           : '<button type="button" class="ghost-link action-link-map-vendors" disabled title="Map Vendor, Region & Cluster is not available for this dataset">Map</button>'}
