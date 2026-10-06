@@ -29,7 +29,7 @@ A job includes any combination of these artifacts. A user can only include artif
 
 Add Network Insights, the same Dashboard or Scoring several times to include several configurations, for example a Network Insights report for NSA and another for SA, one for LTE and one for NR, or three Dashboards with two filter configurations each. Jobs saved with a single Network Insights selection show it as one entry. Modules that provide their own reports appear as additional artifacts: **Non-Qualified Calls** adds its Executive Summary and Progress Status in PowerPoint, Word and/or Excel, with the filters of its Filters panel, the period of the progress timeline and an open-calls-only option.
 
-Filter and metric dropdowns open one at a time, close when clicking elsewhere and offer **Select All / None** for the listed values; every City selector offers **Main Cities** first.
+Filter and metric dropdowns open one at a time and close when clicking elsewhere. Each one starts with **All Values** (no restriction, the default; selecting every value is the same) and offers **Select All / None** for the listed values; its caption reads **All** or **N of M**; every City selector offers **Main Cities** first.
 
 Every artifact file is named `yyyymmdd_hhmmss - <Module> - <report name>` with the run timestamp, for example `20261006_093000 - Network Insights - NSA LTE.pptx`; artifacts with the same name get ` (2)`, ` (3)`… The ZIP of a run is named `yyyymmdd_hhmmss - Reporting - <job name>.zip`.
 

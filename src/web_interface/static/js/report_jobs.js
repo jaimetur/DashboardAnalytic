@@ -50,7 +50,7 @@
   // Only one dropdown is open at a time; a click outside or Escape closes it.
   // ``preset`` adds a first "Main Cities" choice: with ``dynamic`` it is a
   // flag read at run time (getPreset()), otherwise it checks those values.
-  function multiPicker(label, values, selected = [], {emptyLabel = 'All', preset = null} = {}) {
+  function multiPicker(label, values, selected = [], {preset = null} = {}) {
     const wrapper = node('details', undefined, 'workspace-user-picker rj-multi');
     const summary = node('summary');
     const caption = node('span', '', 'rj-multi-caption');
@@ -59,6 +59,11 @@
     const search = node('input', undefined, 'workspace-user-picker-search');
     search.type = 'search'; search.placeholder = 'Filter…'; search.setAttribute('aria-label', `Filter ${label}`);
     menu.append(search);
+    // All Values: no restriction. It is checked while nothing (or everything) is selected.
+    const allRow = node('label', undefined, 'rj-multi-option rj-multi-all');
+    const allBox = node('input'); allBox.type = 'checkbox';
+    allRow.append(allBox, node('span', 'All Values'));
+    if (values.length) menu.append(allRow);
     let presetBox = null;
     if (preset) {
       const row = node('label', undefined, 'rj-multi-option rj-multi-preset');
@@ -93,11 +98,19 @@
       if (presetBox && preset.dynamic) boxes.forEach((box) => { box.disabled = presetBox.checked; });
       const count = boxes.filter((box) => box.checked && !box.disabled).length;
       const enabled = boxes.filter((box) => !box.disabled).length;
-      // Everything selected reads All; an empty selection restricts nothing (filters read All, metrics say so).
-      const state = count === 0 ? emptyLabel : count === enabled ? 'All' : `${count} of ${enabled}`;
+      const everything = count === 0 || count === enabled;
+      allBox.checked = everything && !(presetBox?.checked && preset.dynamic);
+      const state = everything ? 'All' : `${count} of ${enabled}`;
       caption.textContent = `${label}: ${presetBox?.checked && preset.dynamic ? preset.label : state}`;
       summary.title = caption.textContent;
     };
+    allBox.addEventListener('change', () => {
+      if (allBox.checked) {
+        boxes.forEach((box) => { box.checked = false; });
+        if (presetBox) presetBox.checked = false;
+      }
+      refresh();
+    });
     presetBox?.addEventListener('change', () => {
       if (!preset.dynamic) {
         const wanted = new Set(preset.values.map((value) => String(value).toLocaleLowerCase()));
@@ -117,7 +130,8 @@
     });
     wrapper.append(summary, menu);
     refresh();
-    wrapper.getValue = () => boxes.filter((box) => box.checked && !box.disabled).map((box) => box.value);
+    // Every value selected is the same as All Values: no restriction, so future values are included too.
+    wrapper.getValue = () => (allBox.checked ? [] : boxes.filter((box) => box.checked && !box.disabled).map((box) => box.value));
     wrapper.getPreset = () => Boolean(presetBox?.checked);
     return wrapper;
   }
@@ -624,12 +638,11 @@
     datasetPicker($('rj-da-datasets'), options.datasets, dataset.dataset_ids || [], 'Every ready CDR dataset at each run');
     $('rj-da-aggregation').replaceWith(Object.assign(singleChoiceRow('Aggregation', options.cdr_aggregations || {}, dataset.aggregation || 'all'), {id: 'rj-da-aggregation'}));
     $('rj-da-cdf').replaceWith(Object.assign(singleChoiceRow('CDF Comparison', options.cdr_cdf_groupings || {}, dataset.cdf_grouping || 'operator'), {id: 'rj-da-cdf'}));
-    // One metric selector per CDR type; every metric is selected by default and selecting all keeps future metrics too.
+    // One metric selector per CDR type; All Values (the default) includes every metric, also future ones.
     const savedMetrics = dataset.metrics && !Array.isArray(dataset.metrics) ? dataset.metrics : {};
     $('rj-da-metrics').replaceChildren(...Object.entries(options.cdr_kinds || {}).map(([kind, label]) => {
       const metrics = (options.cdr_metrics || {})[kind] || [];
-      const picker = multiPicker(`${label} Metrics`, metrics, (savedMetrics[kind] || []).length ? savedMetrics[kind] : metrics,
-        {emptyLabel: 'None (all included)'});
+      const picker = multiPicker(`${label} Metrics`, metrics, savedMetrics[kind] || []);
       picker.dataset.rjMetrics = kind;
       return picker;
     }));
@@ -700,11 +713,8 @@
         dataset_analysis: {
           enabled: $('rj-da-enabled').checked && options.allowed_modules.dataset_analysis, formats: document.querySelector('[data-rj-formats="rj-da"]').getValue(),
           dataset_ids: $('rj-da-datasets').getValue(),
-          metrics: Object.fromEntries([...$('rj-da-metrics').querySelectorAll('[data-rj-metrics]')].map((picker) => {
-            const kind = picker.dataset.rjMetrics;
-            const chosen = picker.getValue();
-            return [kind, chosen.length === ((options.cdr_metrics || {})[kind] || []).length ? [] : chosen];
-          }).filter(([, chosen]) => chosen.length)),
+          metrics: Object.fromEntries([...$('rj-da-metrics').querySelectorAll('[data-rj-metrics]')]
+            .map((picker) => [picker.dataset.rjMetrics, picker.getValue()]).filter(([, chosen]) => chosen.length)),
           filters: Object.fromEntries([...$('rj-da-filters').querySelectorAll('[data-rj-filter]')]
             .map((picker) => [picker.dataset.rjFilter, picker.getValue()]).filter(([, values]) => values.length)),
           aggregation: $('rj-da-aggregation').getValue?.() || 'all',
