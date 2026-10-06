@@ -169,6 +169,7 @@ RECURRING_BACKUP_LOCK = Lock()
 RECURRING_BACKUP_RUNNING = False
 # The largest backups take under half an hour, so an older snapshot folder is no longer in use.
 STALE_BACKUP_SCRATCH_SECONDS = 6 * 60 * 60
+BACKUP_PARTIAL_SUFFIX = '.partial'
 MANUAL_BACKUP_JOBS: dict[str, dict[str, Any]] = {}
 MANUAL_BACKUP_JOBS_LOCK = Lock()
 SCHEDULED_BACKUP_JOBS: dict[str, dict[str, Any]] = {}
@@ -5737,8 +5738,13 @@ def archive_restore_components(manifest: dict[str, Any]) -> list[str]:
     return [*selected, *archive_workspace_components(manifest)]
 
 
-def normalize_export_targets(targets: str | Iterable[str]) -> list[str]:
-    """Apply the export selector's containment rules on the server as well as in the browser."""
+def normalize_export_targets(targets: str | Iterable[str], *, active_workspace_id: str | None = None) -> list[str]:
+    """Apply the export selector's containment rules on the server as well as in the browser.
+
+    Workspace content is exported from the active workspace, so it is left out only
+    when the Full Workspace of that workspace is selected too. ``active_workspace_id``
+    defaults to the active workspace of this server; pass ``''`` to keep every target.
+    """
     raw_targets = [targets] if isinstance(targets, str) else list(targets)
     selected = list(dict.fromkeys(str(target).strip() for target in raw_targets if str(target).strip()))
     if not selected:
@@ -5753,7 +5759,9 @@ def normalize_export_targets(targets: str | Iterable[str]) -> list[str]:
         raise ValueError('Select a valid export option.')
     if 'full-environment' in selected:
         return ['full-environment']
-    if any(target.startswith('workspace:') for target in selected):
+    if active_workspace_id is None:
+        active_workspace_id = active_workspace.id if active_workspace else ''
+    if active_workspace_id and f'workspace:{active_workspace_id}' in selected:
         selected = [target for target in selected if target not in WORKSPACE_ELEMENT_EXPORT_TARGETS]
     return selected
 
@@ -5786,7 +5794,9 @@ def full_workspace_archive_components(*, include_input_files: bool = True, inclu
     return [*components, 'dashboards', 'report_templates', 'main_cities', 'operator_mappings', 'scoring_configuration', 'auto_calculated_fields', 'query_builder_queries', 'reporting_jobs', 'nq_call_tracking']
 
 
-def archive_workspace_components_for_target(target: str, *, include_generated_outputs: bool = True) -> list[str]:
+def archive_workspace_components_for_target(
+    target: str, *, include_generated_outputs: bool = True, include_input_files: bool = True,
+) -> list[str]:
     """Describe workspace-level content for an Export or Transfer target."""
     if target == 'slides-templates':
         return ['report_templates']
@@ -5807,7 +5817,10 @@ def archive_workspace_components_for_target(target: str, *, include_generated_ou
     if target == 'nq-call-tracking':
         return ['nq_call_tracking']
     if target.startswith('workspace:') or target in {'workspace', 'full-environment'}:
-        return full_workspace_archive_components(include_generated_outputs=include_generated_outputs)
+        return full_workspace_archive_components(
+            include_input_files=include_input_files or target == 'full-environment',
+            include_generated_outputs=include_generated_outputs,
+        )
     return []
 
 
@@ -5889,6 +5902,21 @@ def _archive_tree(
         _archive_file(archive, path, f'{archive_prefix}/{relative_path.as_posix()}', progress_callback, cancel_callback)
 
 
+def backup_components(components: Iterable[str]) -> list[str]:
+    """The known backup parts of a selection, without the Input and Output folders when their workspace database is not included."""
+    selected = list(dict.fromkeys(str(item) for item in components if item in {'app_database', *WORKSPACE_ARCHIVE_COMPONENTS}))
+    if 'workspace_database' not in selected:
+        selected = [item for item in selected if item not in {'input', 'output'}]
+    return selected
+
+
+def backup_workspace_ids(components: Iterable[str], workspace_ids: Iterable[str] = ()) -> list[str]:
+    """Workspaces of a backup selection: its ``workspace:<id>`` entries, plus any sent separately."""
+    selected = [str(item) for item in workspace_ids]
+    selected += [str(item)[len('workspace:'):] for item in components if str(item).startswith('workspace:')]
+    return list(dict.fromkeys(item for item in selected if item))
+
+
 def recurring_backup_settings() -> dict[str, Any]:
     """Load the persistent recurring-backup configuration with safe defaults."""
     defaults = {
@@ -5932,9 +5960,7 @@ def recurring_backup_settings() -> dict[str, Any]:
         migrated_components.extend(
             item for item in saved.get('full_workspace_components', []) if item in {'input', 'output'}
         )
-    config['components'] = list(dict.fromkeys(
-        item for item in migrated_components if item in {'app_database', *WORKSPACE_ARCHIVE_COMPONENTS}
-    ))
+    config['components'] = backup_components(migrated_components)
     try:
         config['backup_path'] = str(ensure_backup_path_is_within_config(recurring_backup_path(config)))
     except ValueError:
@@ -6010,6 +6036,10 @@ def create_recurring_database_backup(
     backup_root = recurring_backup_path(config)
     backup_root.mkdir(parents=True, exist_ok=True)
     destination = backup_root / f'drivetest-analyzer-backup-{timestamp}.zip'
+    # The ZIP is written under a hidden temporary name and gets its backup name
+    # only once complete, so a backup killed mid-write is never listed, restored
+    # or counted as one.
+    partial = backup_root / f'.{destination.name}{BACKUP_PARTIAL_SUFFIX}'
     def ensure_not_cancelled() -> None:
         if cancel_callback:
             cancel_callback()
@@ -6089,12 +6119,12 @@ def create_recurring_database_backup(
     if workspace_manifest_components:
         manifest_components.append('workspace_components')
     try:
-        with zipfile.ZipFile(destination, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+        with zipfile.ZipFile(partial, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
             manifest = archive_manifest(
                 'database-backup', components=manifest_components,
                 workspace_components=workspace_manifest_components,
                 created_at=datetime.now().astimezone().isoformat(timespec='seconds'),
-                workspaces=[],
+                workspaces=[], source_workspaces=source_workspaces_manifest(),
             )
             if 'app_database' in components:
                 report_progress('Creating application database snapshot', 5.0)
@@ -6133,7 +6163,7 @@ def create_recurring_database_backup(
                         json.dumps(task_repository.list_calculated_dimensions(), ensure_ascii=False, indent=2),
                     )
                 if 'query_builder_queries' in components:
-                    report_progress(f'Exporting Saved Queries for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
+                    report_progress(f'Exporting Query Builder Queries for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                     _archive_workspace_query_builder_queries(archive, workspace, archive_workspace_root, archived_bytes)
                 if 'reporting_jobs' in components:
                     report_progress(f'Exporting Reporting Jobs for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
@@ -6150,8 +6180,9 @@ def create_recurring_database_backup(
                 if workspace_manifest_components:
                     manifest['workspaces'].append(item)
             archive.writestr('manifest.json', json.dumps(manifest, ensure_ascii=False, indent=2))
+        partial.replace(destination)
     except BaseException:
-        destination.unlink(missing_ok=True)
+        partial.unlink(missing_ok=True)
         raise
     report_progress('Finalising backup ZIP', 98.0)
     backups = sorted((item for pattern in BACKUP_FILE_PATTERNS for item in backup_root.glob(pattern)), key=lambda item: item.stat().st_mtime, reverse=True)
@@ -6162,7 +6193,7 @@ def create_recurring_database_backup(
 
 
 def remove_stale_backup_scratch(backup_root: Path) -> None:
-    """Delete snapshot folders left behind when a backup process was killed mid-copy.
+    """Delete snapshot folders and partial ZIPs left behind when a backup process was killed mid-write.
 
     A finished, failed or cancelled backup removes its own snapshot folder, so a
     folder survives only when the process died. Folders changed within
@@ -6178,6 +6209,12 @@ def remove_stale_backup_scratch(backup_root: Path) -> None:
             continue
         if last_change < cutoff:
             shutil.rmtree(folder, ignore_errors=True)
+    for partial in backup_root.glob(f'.*{BACKUP_PARTIAL_SUFFIX}'):
+        try:
+            if partial.is_file() and partial.stat().st_mtime < cutoff:
+                partial.unlink()
+        except OSError:
+            continue
 
 
 def _recurring_backup_period(config: dict[str, Any], now: datetime) -> str | None:
@@ -6543,7 +6580,7 @@ def restore_database_backup(
             payload = staging / 'application.db'
             with archive.open('application/application.db') as source, payload.open('wb') as target:
                 shutil.copyfileobj(source, target)
-            repository.replace_global_database_snapshot(payload)
+            replace_application_database_from_server(payload, manifest.get('source_workspaces'))
             repository.initialize()
             advance('Application database restored')
         for workspace_name, workspace in workspaces_by_name.items():
@@ -6629,9 +6666,9 @@ def restore_database_backup(
                 member = f'{prefix}query-builder-queries/query-builder-queries.json'
                 if member in names:
                     if progress_callback:
-                        progress_callback(f'Restoring Saved Queries for {workspace_name}', completed_steps, total_steps)
+                        progress_callback(f'Restoring Query Builder Queries for {workspace_name}', completed_steps, total_steps)
                     _restore_workspace_query_builder_queries(workspace, archive.read(member))
-                    advance(f'Saved Queries restored for {workspace_name}')
+                    advance(f'Query Builder Queries restored for {workspace_name}')
             if 'reporting_jobs' in selected:
                 member = f'{prefix}reporting-jobs/reporting-jobs.json'
                 if member in names:
@@ -7246,6 +7283,7 @@ def _selected_export_workspaces(workspace_ids: Iterable[str] | None) -> list[Wor
 def _build_single_export_archive_file(
     target: str, destination: Path, workspace_ids: Iterable[str] | None = None,
     progress_callback: Callable[[int], None] | None = None, include_generated_outputs: bool = True,
+    include_input_files: bool = True,
 ) -> str:
     """Create a portable archive on disk, keeping large exports out of RAM."""
     filename = export_archive_filename(target)
@@ -7287,7 +7325,9 @@ def _build_single_export_archive_file(
     with zipfile.ZipFile(destination, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=1, allowZip64=True) as archive:
         if target in {'config', 'config-with-templates'}:
             include_templates = target == 'config-with-templates'
-            manifest = archive_manifest('config', includes_slides_templates=include_templates)
+            manifest = archive_manifest(
+                'config', includes_slides_templates=include_templates, source_workspaces=source_workspaces_manifest(),
+            )
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
             archive_configuration(archive, include_templates=include_templates)
         elif target == 'slides-templates':
@@ -7424,14 +7464,15 @@ def _build_single_export_archive_file(
             manifest = archive_manifest(
                 'workspace', workspace=_workspace_archive_metadata(workspace), archive_path=archive_path,
                 workspace_components=archive_workspace_components_for_target(
-                    target, include_generated_outputs=include_generated_outputs,
+                    target, include_generated_outputs=include_generated_outputs, include_input_files=include_input_files,
                 ),
                 includes_generated_outputs=include_generated_outputs,
+                includes_input_files=include_input_files,
             )
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
             _archive_workspace(
                 archive, workspace, archive_path, destination.parent, progress_callback,
-                include_generated_outputs=include_generated_outputs,
+                include_generated_outputs=include_generated_outputs, include_input_files=include_input_files,
             )
         elif target == 'full-environment':
             workspaces = _selected_export_workspaces(workspace_ids)
@@ -7461,13 +7502,14 @@ def _build_single_export_archive_file(
 def build_export_archive_file(
     target: str | Iterable[str], destination: Path, workspace_ids: Iterable[str] | None = None,
     progress_callback: Callable[[int], None] | None = None, include_generated_outputs: bool = True,
+    include_input_files: bool = True,
 ) -> str:
     """Create one export archive, wrapping multiple selections in an importable bundle."""
     targets = normalize_export_targets(target)
     if len(targets) == 1:
         return _build_single_export_archive_file(
             targets[0], destination, workspace_ids, progress_callback,
-            include_generated_outputs=include_generated_outputs,
+            include_generated_outputs=include_generated_outputs, include_input_files=include_input_files,
         )
 
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -7485,7 +7527,7 @@ def build_export_archive_file(
                 package_workspace_ids = [active_workspace.id]
             nested_filename = _build_single_export_archive_file(
                 selected_target, package_path, package_workspace_ids, progress_callback,
-                include_generated_outputs=include_generated_outputs,
+                include_generated_outputs=include_generated_outputs, include_input_files=include_input_files,
             )
             nested_manifest = read_import_manifest(package_path)
             archive_path = f'packages/{index:03d}-{Path(nested_filename).name}'
@@ -7548,12 +7590,13 @@ def _tree_size(source: Path, *, exclude_slides_templates: bool = False) -> int:
 
 def estimate_export_bytes(
     target: str | Iterable[str], workspace_ids: Iterable[str] | None = None, include_generated_outputs: bool = True,
+    include_input_files: bool = True,
 ) -> int:
     """Estimate input bytes so the UI can show meaningful export progress."""
     targets = normalize_export_targets(target)
     if len(targets) > 1:
         return sum(
-            estimate_export_bytes(selected_target, workspace_ids, include_generated_outputs)
+            estimate_export_bytes(selected_target, workspace_ids, include_generated_outputs, include_input_files)
             for selected_target in targets
         )
     target = targets[0]
@@ -7603,7 +7646,9 @@ def estimate_export_bytes(
     elif target.startswith('workspace:'):
         workspace = workspace_registry.get(target.removeprefix('workspace:'))
         if workspace:
-            total = _file_size(workspace.database_path) + _tree_size(workspace.input_dir) + _tree_size(workspace.slides_templates_dir)
+            total = _file_size(workspace.database_path) + _tree_size(workspace.slides_templates_dir)
+            if include_input_files:
+                total += _tree_size(workspace.input_dir)
             if include_generated_outputs:
                 total += _tree_size(workspace.output_dir)
     if target == 'full-environment':
@@ -7804,7 +7849,10 @@ def recovered_transfer_packages() -> list[dict[str, Any]]:
         ], key=lambda offer: offer['created_at'] or '', reverse=True)
 
 
-def _run_export_job(job_id: str, targets: list[str], workspace_ids: list[str] | None, include_generated_outputs: bool) -> None:
+def _run_export_job(
+    job_id: str, targets: list[str], workspace_ids: list[str] | None, include_generated_outputs: bool,
+    include_input_files: bool = True,
+) -> None:
     with EXPORT_JOBS_LOCK:
         job = EXPORT_JOBS.get(job_id)
         if not job or job.get('status') != 'queued':
@@ -7812,7 +7860,7 @@ def _run_export_job(job_id: str, targets: list[str], workspace_ids: list[str] | 
         job.update(status='processing', started_at=datetime.now(timezone.utc).timestamp())
     destination = Path(str(job['path']))
     partial_path = destination.with_suffix('.part')
-    bytes_total = estimate_export_bytes(targets, workspace_ids, include_generated_outputs)
+    bytes_total = estimate_export_bytes(targets, workspace_ids, include_generated_outputs, include_input_files)
     bytes_done = 0
 
     def stop_if_cancelled() -> None:
@@ -7834,7 +7882,7 @@ def _run_export_job(job_id: str, targets: list[str], workspace_ids: list[str] | 
         stop_if_cancelled()
         filename = build_export_archive_file(
             targets, partial_path, workspace_ids, progress_callback,
-            include_generated_outputs=include_generated_outputs,
+            include_generated_outputs=include_generated_outputs, include_input_files=include_input_files,
         )
         stop_if_cancelled()
         partial_path.replace(destination)
@@ -7854,6 +7902,7 @@ def _run_export_job(job_id: str, targets: list[str], workspace_ids: list[str] | 
 
 def start_export_job(
     target: str | Iterable[str], workspace_ids: Iterable[str] | None = None, include_generated_outputs: bool = True,
+    include_input_files: bool = True,
     owner: str = '',
 ) -> dict[str, Any]:
     """Start a disk-backed ZIP build that continues independently of the page."""
@@ -7887,10 +7936,13 @@ def start_export_job(
         'created_at': datetime.now(timezone.utc).timestamp(),
         'workspace_ids': selected_workspace_ids,
         'include_generated_outputs': include_generated_outputs,
+        'include_input_files': include_input_files,
     }
     with EXPORT_JOBS_LOCK:
         EXPORT_JOBS[job_id] = job
-    EXPORT_TASK_SCHEDULER.submit(_run_export_job, job_id, targets, selected_workspace_ids, include_generated_outputs)
+    EXPORT_TASK_SCHEDULER.submit(
+        _run_export_job, job_id, targets, selected_workspace_ids, include_generated_outputs, include_input_files,
+    )
     return job
 
 
@@ -8267,7 +8319,52 @@ def import_slides_templates_archive(
     return len(destinations)
 
 
-def import_config_archive(staging_root: Path, manifest: dict[str, Any]) -> None:
+# Settings that describe this server (its backup schedule and folder, its worker
+# limits) rather than the shared configuration, so another server's App Config
+# never replaces them.
+SERVER_APPLICATION_STATE_KEYS = (RECURRING_BACKUP_STATE_KEY, RUNTIME_CONFIGURATION_STATE_KEY)
+
+
+def source_workspaces_manifest() -> list[dict[str, str]]:
+    """The id and name of every workspace, so another server can translate the ids of an application database."""
+    return [{'id': workspace.id, 'name': workspace.name} for workspace in workspace_registry.list()]
+
+
+def replace_application_database_from_server(snapshot: Path, source_workspaces: object) -> None:
+    """Replace application.db with one written by this or another server.
+
+    Workspace ids differ between servers, so grants and access rules are translated
+    by workspace name when the package lists its workspaces, those of workspaces
+    unknown here are dropped, and those of workspaces only this server has are kept.
+    The backup and runtime settings of this server are kept as well.
+    """
+    local_names = {workspace.id: workspace.name.casefold() for workspace in workspace_registry.list()}
+    source_names = {
+        str(entry['id']).strip(): str(entry['name']).strip().casefold()
+        for entry in (source_workspaces if isinstance(source_workspaces, list) else [])
+        if isinstance(entry, dict) and str(entry.get('id') or '').strip() and str(entry.get('name') or '').strip()
+    }
+    server_state = {key: repository.get_application_state(key) for key in SERVER_APPLICATION_STATE_KEYS}
+    local_only_ids = [workspace_id for workspace_id, name in local_names.items() if name not in set(source_names.values())]
+    local_only_access = repository.workspace_access_snapshot(local_only_ids) if source_names else {}
+
+    repository.replace_global_database_snapshot(snapshot)
+
+    for key, value in server_state.items():
+        if value is None:
+            repository.delete_application_state(key)
+        else:
+            repository.set_application_state(key, value)
+    if source_names:
+        local_ids_by_name = {name: workspace_id for workspace_id, name in local_names.items()}
+        repository.remap_workspace_access(
+            {source_id: local_ids_by_name[name] for source_id, name in source_names.items() if name in local_ids_by_name},
+            drop=[source_id for source_id, name in source_names.items() if name not in local_ids_by_name],
+        )
+        repository.restore_workspace_access(local_only_access)
+
+
+def import_config_archive(staging_root: Path, manifest: dict[str, Any], *, keep_server_settings: bool = False) -> None:
     config_payload = staging_root / 'config'
     if not config_payload.exists():
         raise ValueError('The configuration archive does not contain configuration files.')
@@ -8281,7 +8378,10 @@ def import_config_archive(staging_root: Path, manifest: dict[str, Any]) -> None:
     # leave the destination users in place while only ancillary files import.
     application_database = application_config_dir / 'application.db'
     repository.set_global_database(application_database)
-    repository.replace_global_database_snapshot(application_database_payload)
+    if keep_server_settings:
+        replace_application_database_from_server(application_database_payload, manifest.get('source_workspaces'))
+    else:
+        repository.replace_global_database_snapshot(application_database_payload)
 
     # Apply only the other files included in the package. This preserves
     # unrelated local configuration and makes a config import recoverable
@@ -8468,7 +8568,7 @@ def _apply_import_archive(
             _safe_extract_archive_prefix(archive, staging_root, 'config', extracted)
             if progress_callback:
                 progress_callback('importing configuration', 90.0)
-            import_config_archive(staging_root, manifest)
+            import_config_archive(staging_root, manifest, keep_server_settings=True)
             if progress_callback:
                 progress_callback('finalising', 100.0)
             return 'Configuration imported successfully. Local workspaces were preserved.'
@@ -8979,6 +9079,7 @@ def _run_transfer_job(job_id: str) -> None:
         targets = [str(target) for target in job.get('targets') or [job['target']]]
         workspace_ids = job.get('workspace_ids')
         include_generated_outputs = bool(job.get('include_generated_outputs', True))
+        include_input_files = bool(job.get('include_input_files', True))
         package_path = Path(str(job['path']))
     offer_secret = secrets.token_urlsafe(32)
     offer_id = ''
@@ -9007,6 +9108,7 @@ def _run_transfer_job(job_id: str) -> None:
                     selected_kind,
                     workspace_components=archive_workspace_components_for_target(
                         selected_target, include_generated_outputs=include_generated_outputs,
+                        include_input_files=include_input_files,
                     ),
                 )
                 offered_components.extend(archive_manifest_components(selected_manifest))
@@ -9085,7 +9187,7 @@ def _run_transfer_job(job_id: str) -> None:
             with TRANSFER_LOCK:
                 job.update({
                     'status': 'exporting',
-                    'export_total': estimate_export_bytes(targets, workspace_ids, include_generated_outputs),
+                    'export_total': estimate_export_bytes(targets, workspace_ids, include_generated_outputs, include_input_files),
                     'exported_bytes': 0,
                     'progress': 0.0,
                 })
@@ -9100,7 +9202,7 @@ def _run_transfer_job(job_id: str) -> None:
 
             filename = build_export_archive_file(
                 targets, package_path, workspace_ids, update_export_progress,
-                include_generated_outputs=include_generated_outputs,
+                include_generated_outputs=include_generated_outputs, include_input_files=include_input_files,
             )
             package_size = package_path.stat().st_size
             with TRANSFER_LOCK:
@@ -9188,7 +9290,7 @@ def _run_transfer_job(job_id: str) -> None:
 
 def start_transfer_job(
     destination_url: str, destination_port: int | None, target: str | Iterable[str], workspace_ids: Iterable[str] | None,
-    user: SessionUser, include_generated_outputs: bool = True,
+    user: SessionUser, include_generated_outputs: bool = True, include_input_files: bool = True,
 ) -> dict[str, Any]:
     targets = require_export_targets_permission(user, target)
     destination = normalize_transfer_destination(destination_url, destination_port)
@@ -9218,6 +9320,7 @@ def start_transfer_job(
         'targets': targets,
         'workspace_ids': selected_workspace_ids,
         'include_generated_outputs': include_generated_outputs,
+        'include_input_files': include_input_files,
         'path': str(package_dir / f'transfer-{job_id}.zip'),
         'status': 'queued',
         'created_at': datetime.now(timezone.utc).timestamp(),
@@ -9409,7 +9512,7 @@ def render_admin_template(
         'operator_mappings': 'Operator Mappings',
         'vendor_mappings': 'Vendor Mappings',
         'report_templates': 'Report Templates',
-        'saved_query_builder_queries': 'Saved Queries',
+        'saved_query_builder_queries': 'Query Builder Queries',
         'workspace_state': 'Workspace State',
         'transfer_offers': 'Server transfer offers',
         'users': 'Users',
@@ -9476,7 +9579,7 @@ def render_admin_template(
         ]
     export_option_groups = [
         ('Configuration Content', [option for option in export_options if option['value'] == 'config']),
-        ('Workspace Content', [
+        ('Current Workspace Content', [
             option for option in export_options
             if option['value'] in {'dashboards', 'slides-templates', 'main-cities', 'operator-mappings', 'scoring-configuration', 'auto-calculated-fields', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking'}
         ]),
@@ -17253,9 +17356,9 @@ def save_recurring_backup_settings(
         raise HTTPException(status_code=400, detail='Choose a valid backup recurrence.')
     if not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', execution_time):
         raise HTTPException(status_code=400, detail='Choose a valid backup execution time.')
-    selected_components = [item for item in components if item in {'app_database', *WORKSPACE_ARCHIVE_COMPONENTS}]
+    selected_components = backup_components(components)
     allowed_workspace_ids = {workspace.id for workspace in accessible_workspaces(user)}
-    selected_workspace_ids = list(dict.fromkeys(item for item in workspace_ids if item in allowed_workspace_ids))
+    selected_workspace_ids = list(dict.fromkeys(item for item in backup_workspace_ids(components, workspace_ids) if item in allowed_workspace_ids))
     if any(item in selected_components for item in WORKSPACE_ARCHIVE_COMPONENTS) and not selected_workspace_ids:
         raise HTTPException(status_code=400, detail='Select at least one accessible workspace for the selected backup content.')
     if enabled and not selected_components:
@@ -17298,9 +17401,9 @@ def save_recurring_backup_selection(
     user: SessionUser = Depends(admin_user),
 ) -> JSONResponse:
     """Persist immediate Backup panel choices without modifying scheduler timing."""
-    selected_components = [item for item in components if item in {'app_database', *WORKSPACE_ARCHIVE_COMPONENTS}]
+    selected_components = backup_components(components)
     allowed_workspace_ids = {workspace.id for workspace in accessible_workspaces(user)}
-    selected_workspace_ids = list(dict.fromkeys(item for item in workspace_ids if item in allowed_workspace_ids))
+    selected_workspace_ids = list(dict.fromkeys(item for item in backup_workspace_ids(components, workspace_ids) if item in allowed_workspace_ids))
     if any(item in selected_components for item in WORKSPACE_ARCHIVE_COMPONENTS) and not selected_workspace_ids:
         raise HTTPException(status_code=400, detail='Select at least one accessible workspace for the selected backup content.')
     if enabled and not selected_components:
@@ -17331,9 +17434,9 @@ def run_manual_database_backup(
     user: SessionUser = Depends(admin_user),
 ) -> Response:
     """Queue an immediate backup using the current form selection and path."""
-    selected_components = [item for item in components if item in {'app_database', *WORKSPACE_ARCHIVE_COMPONENTS}]
+    selected_components = backup_components(components)
     allowed_workspace_ids = {workspace.id for workspace in accessible_workspaces(user)}
-    selected_workspace_ids = list(dict.fromkeys(item for item in workspace_ids if item in allowed_workspace_ids))
+    selected_workspace_ids = list(dict.fromkeys(item for item in backup_workspace_ids(components, workspace_ids) if item in allowed_workspace_ids))
     if any(item in selected_components for item in WORKSPACE_ARCHIVE_COMPONENTS) and not selected_workspace_ids:
         raise HTTPException(status_code=400, detail='Select at least one accessible workspace for the selected backup content.')
     if not selected_components:
@@ -17373,8 +17476,10 @@ def backup_files(backup_path: str = Query(default=''), user: SessionUser = Depen
     if root.is_dir():
         for item in sorted(root.glob('*.zip'), key=lambda value: value.stat().st_mtime, reverse=True):
             try:
+                # A ZIP without its central directory was cut short (for example by
+                # a backup interrupted before this version) and cannot be restored.
                 files.append({'name': item.name, 'size': format_workspace_size(item.stat().st_size),
-                              'modified': backup_started_at_label(item)})
+                              'modified': backup_started_at_label(item), 'incomplete': not zipfile.is_zipfile(item)})
             except OSError:
                 continue
     return JSONResponse({'files': files})
@@ -17502,7 +17607,8 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
     components = archive_manifest_components(payload)
     workspace_components = archive_workspace_components(payload)
     try:
-        targets = normalize_export_targets(payload.get('targets') or [kind]) if kind == 'bundle' else [kind]
+        # The source server already resolved its selection against its own active workspace.
+        targets = normalize_export_targets(payload.get('targets') or [kind], active_workspace_id='') if kind == 'bundle' else [kind]
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if kind == 'bundle' and len(targets) < 2:
@@ -17853,6 +17959,7 @@ def create_admin_transfer_job(
     export_target: list[str] = Form(...),
     workspace_ids: list[str] | None = Form(None),
     include_generated_outputs: bool = Form(True),
+    include_input_files: bool = Form(True),
     user: SessionUser = Depends(admin_user),
 ) -> JSONResponse:
     targets = require_export_targets_permission(user, export_target)
@@ -17863,7 +17970,7 @@ def create_admin_transfer_job(
             targets,
             workspace_ids if targets == ['full-environment'] else None,
             user,
-            include_generated_outputs=include_generated_outputs,
+            include_generated_outputs=include_generated_outputs, include_input_files=include_input_files,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -17924,13 +18031,14 @@ def create_admin_export_job(
     export_target: list[str] = Form(...),
     workspace_ids: list[str] | None = Form(None),
     include_generated_outputs: bool = Form(True),
+    include_input_files: bool = Form(True),
     user: SessionUser = Depends(admin_user),
 ) -> JSONResponse:
     targets = require_export_targets_permission(user, export_target)
     try:
         job = start_export_job(
             targets, workspace_ids if targets == ['full-environment'] else None,
-            include_generated_outputs=include_generated_outputs,
+            include_generated_outputs=include_generated_outputs, include_input_files=include_input_files,
             owner=user.username,
         )
     except ValueError as exc:

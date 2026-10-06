@@ -5271,11 +5271,31 @@ function setupWorkspaceUserPickers() {
   });
 }
 
+// Workspace content exported from the active workspace; its Full Workspace package already contains all of it.
 const workspaceElementExportTargets = new Set([
-  'slides-templates', 'auto-calculated-fields', 'dashboards', 'operator-mappings', 'vendor-mappings',
+  'dashboards', 'slides-templates', 'main-cities', 'operator-mappings', 'vendor-mappings', 'scoring-configuration',
+  'auto-calculated-fields', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking',
 ]);
 
+// The Input and Output folders of a backup only make sense with the workspace database they belong to.
+const BACKUP_FOLDER_COMPONENTS = new Set(['input', 'output']);
+
+function normalizeBackupComponentSelection(select) {
+  const workspaceDatabase = Array.from(select.options).find((option) => option.value === 'workspace_database');
+  const enabled = Boolean(workspaceDatabase?.selected);
+  Array.from(select.options).forEach((option) => {
+    if (!BACKUP_FOLDER_COMPONENTS.has(option.value)) return;
+    option.disabled = !enabled;
+    if (!enabled) option.selected = false;
+    option.dataset.disabledReason = 'Select Workspace Database to include the Input and Output folders.';
+  });
+}
+
 function normalizeExportTargetSelection(select) {
+  if (select.matches('[data-backup-components]')) {
+    normalizeBackupComponentSelection(select);
+    return;
+  }
   if (!select.matches('[data-export-target-select]')) return;
   const options = Array.from(select.options);
   options.forEach((option) => {
@@ -5295,7 +5315,10 @@ function normalizeExportTargetSelection(select) {
     });
     return;
   }
-  const hasFullWorkspace = selected.some((option) => option.value.startsWith('workspace:'));
+  // Only the Full Workspace of the active workspace contains the content listed "from active workspace".
+  const activeWorkspaceId = select.dataset.activeWorkspaceId || '';
+  const hasFullWorkspace = selected.some((option) => (activeWorkspaceId
+    ? option.value === `workspace:${activeWorkspaceId}` : option.value.startsWith('workspace:')));
   options.forEach((option) => {
     if (hasFullWorkspace && workspaceElementExportTargets.has(option.value)) {
       option.selected = false;
@@ -5385,7 +5408,21 @@ function setupCustomMultiSelects() {
     actionButton.textContent = 'Select All / None';
     if (!singleChoice) menu.appendChild(actionButton);
 
+    const groupedOptions = select.dataset.multiselectGroups === 'true';
+    const optionGroup = (option) => (groupedOptions && option.parentElement instanceof HTMLOptGroupElement
+      ? String(option.parentElement.label || '').trim() : '');
+    const enabledGroupOptions = (group) => Array.from(select.options).filter((option) => !option.disabled && optionGroup(option) === group);
+    // Each group with several options has its own Select All, which turns into Select None once all are selected.
+    const syncGroupActions = () => {
+      menu.querySelectorAll('.multiselect-group-action').forEach((button) => {
+        const options = enabledGroupOptions(button.dataset.multiselectGroup || '');
+        button.disabled = !options.length;
+        button.textContent = options.length && options.every((option) => option.selected) ? 'Select None' : 'Select All';
+      });
+    };
+
     const syncTrigger = () => {
+      syncGroupActions();
       const enabledOptions = Array.from(select.options).filter((option) => !option.disabled || (select.dataset.multiselectCountLocked === 'true' && option.selected));
       const selectedOptions = enabledOptions.filter((option) => option.selected).map((option) => option.textContent?.trim()).filter(Boolean);
       const totalEnabled = enabledOptions.length;
@@ -5421,6 +5458,11 @@ function setupCustomMultiSelects() {
       options.forEach((option) => {
         option.selected = shouldSelectAll;
       });
+      if (select.matches('[data-backup-components]')) {
+        // Selecting the workspace database enables its Input and Output folders, which are selected as well.
+        normalizeExportTargetSelection(select);
+        Array.from(select.options).filter((option) => !option.disabled).forEach((option) => { option.selected = shouldSelectAll; });
+      }
       // Selecting all in a dynamic list keeps an open selection that also
       // includes values that appear later; selecting none clears it.
       if (dynamicAll && shouldSelectAll) select.dataset.multiselectDynamicAllSelected = 'true';
@@ -5458,16 +5500,50 @@ function setupCustomMultiSelects() {
       menu.insertBefore(presetButton, actionButton);
     }
 
-    const groupedOptions = select.dataset.multiselectGroups === 'true';
     let previousGroup = '';
+    const groupSizes = new Map();
     Array.from(select.options).forEach((option) => {
-      const group = groupedOptions && option.parentElement instanceof HTMLOptGroupElement
-        ? String(option.parentElement.label || '').trim() : '';
+      const group = optionGroup(option);
+      if (group) groupSizes.set(group, (groupSizes.get(group) || 0) + 1);
+    });
+    Array.from(select.options).forEach((option) => {
+      const group = optionGroup(option);
       if (group && group !== previousGroup) {
         const heading = document.createElement('div');
         heading.className = 'multiselect-group-label';
         heading.dataset.multiselectGroup = group;
-        heading.textContent = group;
+        const headingText = document.createElement('span');
+        headingText.textContent = group;
+        const groupNote = option.parentElement instanceof HTMLOptGroupElement ? option.parentElement.dataset.groupNote || '' : '';
+        if (groupNote) {
+          const note = document.createElement('span');
+          note.className = 'multiselect-group-note';
+          note.textContent = groupNote;
+          headingText.append(' ', note);
+        }
+        heading.appendChild(headingText);
+        if (!singleChoice && (groupSizes.get(group) || 0) > 1) {
+          const groupButton = document.createElement('button');
+          groupButton.type = 'button';
+          groupButton.className = 'multiselect-group-action';
+          groupButton.dataset.multiselectGroup = group;
+          groupButton.textContent = 'Select All';
+          groupButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            cancelAutoClose();
+            const shouldSelectAll = enabledGroupOptions(group).some((item) => !item.selected);
+            // Twice, so options a selection enables (such as backup Input and Output) are selected too.
+            for (let pass = 0; pass < 2; pass += 1) {
+              enabledGroupOptions(group).forEach((item) => { item.selected = shouldSelectAll; });
+              normalizeExportTargetSelection(select);
+            }
+            delete select.dataset.multiselectDynamicAllSelected;
+            syncCheckboxes();
+            dispatchNativeChange();
+          });
+          heading.appendChild(groupButton);
+        }
         menu.appendChild(heading);
         previousGroup = group;
       }
@@ -6587,6 +6663,8 @@ function importPackageContents(payload) {
     'operator-mappings': 'Operator & Vendor Maps', 'main-cities': 'Main Cities',
     'scoring-configuration': 'Scoring & GAP Analysis Configuration',
     'auto-calculated-fields': 'Auto-calculated Fields',
+    'query-builder-queries': 'Query Builder Queries', 'reporting-jobs': 'Reporting Jobs',
+    'nq-call-tracking': 'NQ Call Tracking',
   };
   const targets = Array.isArray(payload.targets) && payload.targets.length ? payload.targets : [payload.kind];
   const workspaceTargets = new Set([
@@ -6917,19 +6995,24 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
     if (targets.includes('full-environment')) return true;
     if (!targets.some((target) => target.startsWith('workspace:'))) {
       formData.set('include_generated_outputs', 'true');
+      formData.set('include_input_files', 'true');
       return true;
     }
-    const result = await showConfirmDialog(
-      `Include generated dashboards, reports and chart sets in this Workspace ${operation}?`,
+    // The workspace database is always included; its Output and Input folders are optional.
+    const accepted = await showConfirmDialog(
+      `Choose the folders to include in this Workspace ${operation}.`,
       {
         title: `${operation} Workspace`,
         confirmLabel: operation,
-        optionLabel: 'Include generated dashboards, reports and chart sets',
-        optionChecked: true,
+        copyHtml: `<p>The workspace database and its definitions are always included. Choose the folders to include in this Workspace ${operation}:</p>`
+          + '<label class="confirm-option"><input type="checkbox" checked data-export-include-outputs><span>Output folder: generated dashboards, reports and chart sets</span></label>'
+          + '<label class="confirm-option"><input type="checkbox" checked data-export-include-input><span>Input folder: original CDR files, needed to reprocess datasets</span></label>',
       },
     );
-    if (!result.accepted) return false;
-    formData.set('include_generated_outputs', String(result.optionChecked));
+    if (!accepted) return false;
+    const included = (selector) => !(confirmCopy?.querySelector(selector) instanceof HTMLInputElement) || confirmCopy.querySelector(selector).checked;
+    formData.set('include_generated_outputs', String(included('[data-export-include-outputs]')));
+    formData.set('include_input_files', String(included('[data-export-include-input]')));
     return true;
   };
   transferButton?.addEventListener('click', async () => {
@@ -7195,29 +7278,23 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
         operator_mappings: 'Operator & Vendor Maps',
         scoring_configuration: 'Scoring & GAP Analysis Configuration',
         auto_calculated_fields: 'Auto-calculated Fields',
+        'query-builder-queries': 'Query Builder Queries',
+        query_builder_queries: 'Query Builder Queries',
+        'reporting-jobs': 'Reporting Jobs',
+        reporting_jobs: 'Reporting Jobs',
+        'nq-call-tracking': 'NQ Call Tracking',
+        nq_call_tracking: 'NQ Call Tracking',
       };
-      const describeTransferItem = (item) => transferContentLabels[String(item)] || String(item).replaceAll('-', ' ');
-      const targetItems = Array.isArray(offer.targets) && offer.targets.length ? offer.targets : [offer.kind];
-      const workspaceItems = Array.isArray(offer.workspace_components) ? offer.workspace_components : [];
-      const workspaceContentTargets = new Set([
-        'dashboards', 'slides-templates', 'main-cities', 'operator-mappings',
-        'scoring-configuration', 'auto-calculated-fields',
-      ]);
-      const isWorkspaceContentsSelection = targetItems.length > 0
-        && targetItems.every((item) => workspaceContentTargets.has(String(item)));
-      const packageContents = [
-        isWorkspaceContentsSelection ? 'Workspace contents:' : 'Package includes:',
-        ...targetItems.map((item) => `• ${describeTransferItem(item)}`),
-        ...(!isWorkspaceContentsSelection && workspaceItems.length
-          ? [`Workspace contents: ${workspaceItems.map(describeTransferItem).join(', ')}`]
-          : []),
-      ].join('\n');
-      const transferLabel = isWorkspaceContentsSelection ? 'Workspace contents' : offer.content;
-      const workspaceCopy = Array.isArray(offer.workspaces) && offer.workspaces.length
-        ? `\nWorkspaces: ${offer.workspaces.join(', ')}`
-        : '';
+      const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (character) => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[character]));
+      const describeTransferItem = (item) => transferContentLabels[String(item)] || String(item).replaceAll('-', ' ').replaceAll('_', ' ');
+      const targetLabels = [...new Set((Array.isArray(offer.targets) && offer.targets.length ? offer.targets : [offer.kind]).map(describeTransferItem))];
+      // Workspace parts already listed as their own target are not repeated.
+      const componentLabels = [...new Set((Array.isArray(offer.workspace_components) ? offer.workspace_components : []).map(describeTransferItem))]
+        .filter((label) => !targetLabels.includes(label));
+      const listHtml = (labels) => `<ul class="incoming-transfer-contents">${labels.map((label) => `<li>${escapeHtml(label)}</li>`).join('')}</ul>`;
+      const workspaceNames = Array.isArray(offer.workspaces) ? offer.workspaces : [];
       const sourceAddress = offer.source_address ? ` (${offer.source_address})` : '';
-      confirmOverlay?.classList.add('incoming-transfer-confirm');
+      confirmOverlay?.classList.add('incoming-transfer-confirm', 'incoming-transfer-offer');
       let accepted = false;
       try {
         const importEffect = offer.kind === 'auto-calculated-fields'
@@ -7229,12 +7306,19 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
             : offer.kind === 'operator-mappings'
               ? 'Next, choose the destination workspaces. Their complete Operator/Vendor aliases, order and theme colors will be replaced without modifying stored CDR values.'
           : 'After the complete package is received, it will be imported automatically and may overwrite matching configuration or workspaces.';
+        const copyHtml = [
+          `<p><strong>${escapeHtml(offer.source)}</strong>${escapeHtml(sourceAddress)} wants to transfer to this server:</p>`,
+          workspaceNames.length ? `<p>Workspaces: <strong>${workspaceNames.map(escapeHtml).join(', ')}</strong></p>` : '',
+          listHtml(targetLabels),
+          componentLabels.length ? `<p>Including from each workspace:</p>${listHtml(componentLabels)}` : '',
+          `<p class="incoming-transfer-effect">${escapeHtml(importEffect)}</p>`,
+        ].join('');
         accepted = await showConfirmDialog(
-          `${offer.source}${sourceAddress} wants to transfer “${transferLabel}” to this server.${workspaceCopy}\n\n${packageContents}\n\n${importEffect}`,
-          {title: 'Incoming server transfer', confirmLabel: 'Accept transfer', cancelLabel: 'Reject'},
+          `${offer.source}${sourceAddress} wants to transfer ${targetLabels.join(', ')} to this server.`,
+          {title: 'Incoming server transfer', confirmLabel: 'Accept transfer', cancelLabel: 'Reject', copyHtml},
         );
       } finally {
-        confirmOverlay?.classList.remove('incoming-transfer-confirm');
+        confirmOverlay?.classList.remove('incoming-transfer-confirm', 'incoming-transfer-offer');
       }
       let destinationWorkspaceIds = [];
       if (accepted && (offer.requires_destination_workspaces || ['auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings'].includes(offer.kind))) {

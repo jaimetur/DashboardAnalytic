@@ -2491,9 +2491,10 @@ def test_direct_dashboard_preparation_separates_queue_and_execution_timestamps(c
     original = core.Repository.list_dataset_row_columns
 
     def delayed(repository, *args, **kwargs):
-        # Only the preparation under test waits; background pre-caching left
-        # by earlier tests must not stand in for it.
-        if threading.current_thread().name == 'dashboard-cache-warmup':
+        # Only the preparations requested here wait. TestClient runs them in
+        # AnyIO worker threads; background pre-caching and warm-up threads
+        # started by the setup (whatever their name) must not stand in for them.
+        if not threading.current_thread().name.startswith('AnyIO'):
             return original(repository, *args, **kwargs)
         entered.set()
         assert release.wait(5)
@@ -2554,6 +2555,13 @@ def test_applying_filters_prepares_only_data_and_renders_charts_on_demand(client
     uncached = client.get('/api/e2e-dashboards/statuses')
     assert uncached.status_code == 200
     assert uncached.json()['filtered-dashboard']['state'] in {'loading-data', 'charts-queued', 'ready'}
+    # That status request queues the background pre-caching of the Dashboard.
+    # Let it finish, so it cannot replace the prepared universe while the
+    # charts below are rendered and counted.
+    deadline = time.monotonic() + 30
+    while client.get('/api/e2e-dashboards/statuses').json()['filtered-dashboard']['state'] == 'loading-data':
+        assert time.monotonic() < deadline, 'The Dashboard pre-caching did not finish.'
+        time.sleep(0.05)
 
     calls = []
     original = dashboards_module.catalog_chart_payload

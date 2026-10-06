@@ -32,6 +32,7 @@
       <div>
         <p class="eyebrow">Identity</p>
         <h2>Create user</h2>
+        <p class="summary-description">Add an account with its username, password, role and the workspaces it can open. Groups and feature access are set in the panels below.</p>
       </div>
       <span class="collapse-chip">Collapse</span>
     </summary>
@@ -81,6 +82,7 @@
       <div>
         <p class="eyebrow">Identity</p>
         <h2>Users</h2>
+        <p class="summary-description">Every account with its role, active status, groups and workspaces. Change any of them in place, including the password.</p>
       </div>
       <span class="collapse-chip">Collapse</span>
     </summary>
@@ -170,10 +172,10 @@
       <div>
         <p class="eyebrow">Identity</p>
         <h2>User Groups</h2>
+        <p class="summary-description">Custom groups of users. Features Activation can activate a feature for a whole group.</p>
       </div>
       <span class="collapse-chip">Collapse</span>
     </summary>
-    <p class="table-help">Custom groups of users. Features Activation can activate a feature for a whole group.</p>
     {% set member_items = [] %}{% for row in users %}{% set _ = member_items.append((row['id'], row['username'])) %}{% endfor %}
     <div class="table-wrap">
       <table class="principal-table user-groups-table">
@@ -211,16 +213,6 @@
   </details>
 
   {% if user.role in ['admin', 'super-admin'] %}
-  <details class="panel collapsible-panel" id="features-activation" open data-panel-state-key="admin:features-activation">
-    <summary class="collapsible-summary">
-      <div>
-        <p class="eyebrow">Modules</p>
-        <h2>Features Activation</h2>
-      </div>
-      <span class="collapse-chip">Collapse</span>
-    </summary>
-    <p class="table-help">Each main module is active for <strong>All users</strong> or <strong>Nobody</strong> by default. <strong>Allowed</strong> roles, groups and users gain it and <strong>Forbidden</strong> ones lose it; when an account matches both lists, Forbidden wins. A feature that is not active for an account disappears from its navigation and its pages and API answer 403. Non-Qualified Calls starts hidden from everyone; Reporting (old) starts allowed for super-admins and EJAITUR.</p>
-    <form id="features-activation-form" action="/admin/features" method="post" autocomplete="off"></form>
     {% set principal_sections = [] %}
     {% set role_items = [] %}{% for role in feature_roles %}{% set _ = role_items.append(('role:' ~ role, role)) %}{% endfor %}
     {% set group_items = [] %}{% for group in user_groups %}{% set _ = group_items.append(('group:' ~ group.id, group.name)) %}{% endfor %}
@@ -230,6 +222,44 @@
     {% set deny_role_items = [] %}{% for role in feature_roles %}{% if user.role == 'super-admin' or role != 'super-admin' %}{% set _ = deny_role_items.append(('role:' ~ role, role)) %}{% endif %}{% endfor %}
     {% set deny_user_items = [] %}{% for row in users %}{% if user.role == 'super-admin' or row['role'] != 'super-admin' %}{% set _ = deny_user_items.append(('user:' ~ row['id'], row['username'] ~ ' (' ~ row['role'] ~ ')')) %}{% endif %}{% endfor %}
     {% set deny_sections = [('Roles', deny_role_items), ('Groups', group_items), ('Users', deny_user_items)] %}
+  <details id="workspace-access" class="panel collapsible-panel workspace-access-panel" open data-panel-state-key="admin:workspace-access">
+    <summary class="collapsible-summary">
+      <div>
+        <p class="eyebrow">Workspaces</p>
+        <h2>Workspace Access</h2>
+        <p class="summary-description">A workspace opens for the <strong>roles</strong>, <strong>user groups</strong> and <strong>users</strong> it is granted to; super-admins open every workspace. Users granted here are the same ones listed in <strong>Workspace → Access</strong> and in each user's workspaces.</p>
+      </div>
+      <span class="collapse-chip">Collapse</span>
+    </summary>
+    <form id="workspace-access-form" action="/admin/workspace-access" method="post" autocomplete="off"></form>
+    <div class="table-wrap">
+      <table class="principal-table workspace-access-table">
+        <thead><tr><th>Workspace</th><th>Access</th></tr></thead>
+        <tbody>
+          {% for workspace in workspace_access_rows %}
+          <tr>
+            <td><strong>{{ workspace.name }}</strong></td>
+            <td>{{ principal_picker('workspace-access-form', 'access__' ~ workspace.id, principal_sections, workspace['values'], 'Super-admins only', 'Access to ' ~ workspace.name) }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="2" class="table-help">No workspaces.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="form-actions"><button type="submit" form="workspace-access-form">Save Workspace Access</button></div>
+  </details>
+
+  <details class="panel collapsible-panel" id="features-activation" open data-panel-state-key="admin:features-activation">
+    <summary class="collapsible-summary">
+      <div>
+        <p class="eyebrow">Modules</p>
+        <h2>Features Activation</h2>
+        <p class="summary-description">Each main module is active for <strong>All users</strong> or <strong>Nobody</strong> by default. <strong>Allowed</strong> roles, groups and users gain it and <strong>Forbidden</strong> ones lose it; when an account matches both lists, Forbidden wins. A feature that is not active for an account disappears from its navigation and its pages and API answer 403. Non-Qualified Calls starts hidden from everyone; Reporting (old) starts allowed for super-admins and EJAITUR.</p>
+      </div>
+      <span class="collapse-chip">Collapse</span>
+    </summary>
+    <form id="features-activation-form" action="/admin/features" method="post" autocomplete="off"></form>
     {% if user.role != 'super-admin' %}<p class="table-help">As an admin you can grant any feature to super-admins, but you cannot remove a feature from the super-admin role or from super-admin accounts (directly, through a group or with "Nobody" by default).</p>{% endif %}
     <div class="table-wrap">
       <table class="principal-table features-activation-table">
@@ -253,34 +283,6 @@
     </div>
     <div class="form-actions"><button type="submit" form="features-activation-form">Save Features Activation</button></div>
   </details>
-
-  <details id="workspace-access" class="panel collapsible-panel workspace-access-panel" open data-panel-state-key="admin:workspace-access">
-    <summary class="collapsible-summary">
-      <div>
-        <p class="eyebrow">Workspaces</p>
-        <h2>Workspace Access</h2>
-      </div>
-      <span class="collapse-chip">Collapse</span>
-    </summary>
-    <p class="table-help">A workspace opens for the <strong>roles</strong>, <strong>user groups</strong> and <strong>users</strong> it is granted to; super-admins open every workspace. Users granted here are the same ones listed in <strong>Workspace → Access</strong> and in each user's workspaces.</p>
-    <form id="workspace-access-form" action="/admin/workspace-access" method="post" autocomplete="off"></form>
-    <div class="table-wrap">
-      <table class="principal-table workspace-access-table">
-        <thead><tr><th>Workspace</th><th>Access</th></tr></thead>
-        <tbody>
-          {% for workspace in workspace_access_rows %}
-          <tr>
-            <td><strong>{{ workspace.name }}</strong></td>
-            <td>{{ principal_picker('workspace-access-form', 'access__' ~ workspace.id, principal_sections, workspace['values'], 'Super-admins only', 'Access to ' ~ workspace.name) }}</td>
-          </tr>
-          {% else %}
-          <tr><td colspan="2" class="table-help">No workspaces.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    <div class="form-actions"><button type="submit" form="workspace-access-form">Save Workspace Access</button></div>
-  </details>
   {% endif %}
   {% endif %}
   {% if embedded_template_editor %}
@@ -289,6 +291,7 @@
       <div>
         <p class="eyebrow">PowerPoint reporting</p>
         <h2>Report Templates Editor</h2>
+        <p class="summary-description">Edit the slides, charts, KPIs and filters of the PowerPoint Report Templates of a workspace.</p>
       </div>
       <div class="summary-inline-actions">{% if catalogue_editor %}<span class="pill">{{ catalogue_editor.technology | upper }} · {{ catalogue_editor.catalogue.name }}</span>{% endif %}<span class="collapse-chip">Collapse</span></div>
     </summary>
@@ -454,6 +457,7 @@
       <div>
         <p class="eyebrow">Portability and backup</p>
         <h2>Import / Export / Transfer</h2>
+        <p class="summary-description">Move configuration, workspace content or whole workspaces between servers: import a package, download one as a ZIP or send it directly to another DriveTest Analyzer server.</p>
       </div>
       <span class="collapse-chip">Collapse</span>
     </summary>
@@ -473,8 +477,8 @@
       <form class="form-stack" action="/admin/import-export/export/jobs" method="post" data-export-package-form data-loading-label="Preparing export package" data-loading-copy="Please wait while DriveTest Analyzer creates the selected export package. You can keep this page open while it runs.">
         <h3>Export / Transfer</h3>
         <label class="admin-export-components">Content to export/transfer
-          <select name="export_target" multiple size="1" data-export-target-select data-multiselect-groups="true" data-multiselect-auto-close="1000" aria-label="Content to export or transfer">
-            {% set export_selection = namespace(selected=false) %}{% for group_label, options in export_option_groups %}<optgroup label="{{ group_label }}">{% for option in options %}<option value="{{ option.value }}" {% if option.disabled | default(false) %}disabled{% elif not export_selection.selected %}selected{% set export_selection.selected = true %}{% endif %}>{{ option.label }}</option>{% endfor %}</optgroup>{% endfor %}
+          <select name="export_target" multiple size="1" data-export-target-select data-multiselect-groups="true" data-active-workspace-id="{{ active_workspace.id if active_workspace else '' }}" data-multiselect-auto-close="1000" aria-label="Content to export or transfer">
+            {% set export_selection = namespace(selected=false) %}{% for group_label, options in export_option_groups %}<optgroup label="{{ group_label }}"{% if group_label == 'Full Workspace' %} data-group-note="Includes the Input and Output folders, optional on export"{% endif %}>{% for option in options %}<option value="{{ option.value }}" {% if option.disabled | default(false) %}disabled{% elif not export_selection.selected %}selected{% set export_selection.selected = true %}{% endif %}>{{ option.label }}</option>{% endfor %}</optgroup>{% endfor %}
           </select>
         </label>
         <p class="form-note">{% if user.role == 'super-admin' %}Choose one or more items. Full Workspace includes its workspace elements; Full Environment includes every workspace, Config and Query Builder Queries.{% else %}Choose one or more workspace elements or accessible Full Workspaces. Full Workspace includes its workspace elements.{% endif %}</p>
@@ -574,6 +578,7 @@
       <div>
         <p class="eyebrow">Database Management</p>
         <h2>Database Management</h2>
+        <p class="summary-description">Back up and restore the application and workspace databases, schedule recurring backups, and browse or edit individual records.</p>
       </div>
       <div class="summary-inline-actions">
         {% if active_workspace %}<span class="pill database-workspace-pill">Workspace: {{ active_workspace.name }}</span>{% endif %}
@@ -594,13 +599,12 @@
             <div class="database-backup-immediate-grid">
               <section class="database-backup-operation-panel"><h5>Backup</h5>
                 <label class="database-backup-components">Backup content
-                  <select name="components" multiple data-backup-components data-multiselect-groups="true" data-multiselect-auto-close="1000"><optgroup label="Configuration Content"><option value="app_database" {% if 'app_database' in recurring_backup.components %}selected{% endif %}>Application database</option></optgroup><optgroup label="Workspace Content">{% for value, label in [('workspace_database', 'Workspace Database'), ('dashboards', 'Dashboards (one JSON file with all Dashboard definitions)'), ('report_templates', 'Report Templates (one CSV file per Report Template)'), ('main_cities', 'Main Cities (workspace city selection)'), ('operator_mappings', 'Operator & Vendor Maps (aliases, order and theme colors)'), ('scoring_configuration', 'Scoring & GAP Analysis Configuration (KPI methodology profiles, aggregation hierarchy and GAP KPI priorities)'), ('auto_calculated_fields', 'Auto-calculated Fields (one JSON file with all definitions)'), ('query_builder_queries', 'Saved Queries (one JSON file with all saved queries)'), ('reporting_jobs', 'Reporting Jobs (one JSON file with all Reporting Job definitions)'), ('nq_call_tracking', 'NQ Call Tracking (one JSON file with the Non-Qualified Calls statuses, teams, follow-up, comments and history)'), ('input', 'Input (includes all raw datasets files)'), ('output', 'Output (includes all generated reports, chart sets and Dashboard PPT jobs)')] %}<option value="{{ value }}" {% if value in recurring_backup.components %}selected{% endif %}>{{ label }}</option>{% endfor %}</optgroup></select>
-                </label>
-                <label class="database-backup-workspaces" data-backup-workspaces hidden>Workspaces to include
-                  <select name="workspace_ids" multiple>{% for workspace in backup_workspaces %}<option value="{{ workspace.id }}" {% if not recurring_backup.workspace_ids or workspace.id in recurring_backup.workspace_ids %}selected{% endif %}>{{ workspace.name }}</option>{% endfor %}</select>
+                  <select name="components" multiple data-backup-components data-multiselect-groups="true" data-multiselect-auto-close="1000"><optgroup label="Configuration Content"><option value="app_database" {% if 'app_database' in recurring_backup.components %}selected{% endif %}>Application database</option></optgroup>{% if backup_workspaces %}<optgroup label="Workspaces">{% for workspace in backup_workspaces %}<option value="workspace:{{ workspace.id }}" {% if not recurring_backup.workspace_ids or workspace.id in recurring_backup.workspace_ids %}selected{% endif %}>{{ workspace.name }}</option>{% endfor %}</optgroup>{% endif %}<optgroup label="Workspace Content" data-group-note="of the selected workspaces">{% for value, label in [('workspace_database', 'Workspace Database'), ('dashboards', 'Dashboards (one JSON file with all Dashboard definitions)'), ('report_templates', 'Report Templates (one CSV file per Report Template)'), ('main_cities', 'Main Cities (workspace city selection)'), ('operator_mappings', 'Operator & Vendor Maps (aliases, order and theme colors)'), ('scoring_configuration', 'Scoring & GAP Analysis Configuration (KPI methodology profiles, aggregation hierarchy and GAP KPI priorities)'), ('auto_calculated_fields', 'Auto-calculated Fields (one JSON file with all definitions)'), ('query_builder_queries', 'Query Builder Queries (one JSON file with all saved queries)'), ('reporting_jobs', 'Reporting Jobs (one JSON file with all Reporting Job definitions)'), ('nq_call_tracking', 'NQ Call Tracking (one JSON file with the Non-Qualified Calls statuses, teams, follow-up, comments and history)'), ('output', 'Output (includes all generated reports, chart sets and Dashboard PPT jobs)'), ('input', 'Input (includes all raw datasets files)')] %}<option value="{{ value }}" {% if value in recurring_backup.components %}selected{% endif %}>{{ label }}</option>{% endfor %}</optgroup></select>
                 </label>
                 <label class="database-backup-path">Backup folder<div class="database-backup-path-picker"><input type="text" name="backup_path" value="{{ recurring_backup.backup_path }}" readonly required data-backup-path-input><button type="button" data-backup-path-browse>Browse</button></div></label>
                 <button type="submit" class="database-backup-now" formaction="/admin/database/backups/run">Backup Now</button>
+                <p class="backup-selection-summary" data-backup-selection-summary role="status"></p>
+                <p class="backup-selection-warning" data-backup-selection-warning role="status"></p>
               </section>
               <section class="database-backup-operation-panel" data-backup-restore-panel><h5>Restore</h5>
                 <label class="database-backup-path">Backup folder<div class="database-backup-path-picker"><input type="text" readonly value="{{ recurring_backup.backup_path }}" required data-backup-restore-path><button type="button" data-backup-restore-browse>Browse</button></div></label>
@@ -689,6 +693,7 @@
       <div>
         <p class="eyebrow">Datasets</p>
         <h2>Datasets Management</h2>
+        <p class="summary-description">The CDR datasets of the active workspace with their processing status, Vendor Mapping and reprocessing, plus bulk actions for all of them.</p>
       </div>
       <span class="collapse-chip">Collapse</span>
     </summary>
@@ -698,25 +703,25 @@
     {% set reprocessable_admin_datasets = datasets | selectattr('can_reprocess') | list %}
     {% set dataset_reordering_blocked = (datasets | selectattr('status', 'equalto', 'queued') | list) or (datasets | selectattr('status', 'equalto', 'processing') | list) %}
     {% set stoppable_admin_datasets = (datasets | selectattr('status', 'equalto', 'queued') | list) + (datasets | selectattr('status', 'equalto', 'processing') | list) %}
-    <div class="queue-bulk-actions admin-dataset-bulk-actions" role="group" aria-label="Bulk dataset actions">
-      <button type="button" class="queue-map-all" data-admin-vendor-map-all-open title="Assign Vendor Mapping to all eligible CDR datasets" aria-label="Assign Vendor Mapping to all eligible CDR datasets"{% if not mappable_admin_datasets %} disabled{% endif %}>Map All</button>
-      <button type="button" class="queue-clear-all" data-admin-vendor-clear-all-open title="Clear Vendor Mapping from all mapped CDR datasets" aria-label="Clear Vendor Mapping from all mapped CDR datasets"{% if not clearable_admin_datasets %} disabled{% endif %}>Clear All</button>
-      <button type="button" class="queue-reprocess-all" data-admin-reprocess-all-open title="Reprocess all available datasets from their original source files" aria-label="Reprocess all available datasets from their original source files"{% if not reprocessable_admin_datasets %} disabled{% endif %}>Reprocess All</button>
-      <form method="post" action="/workspace/stop-datasets" data-confirm="Stop every dataset that is currently queued or processing?" data-confirm-title="Stop all queued and processing datasets" data-confirm-label="Stop All">
-        <input type="hidden" name="return_to" value="admin">
-        <button type="submit" class="queue-stop-all" title="Stop all queued and processing datasets" aria-label="Stop all queued and processing datasets"{% if not stoppable_admin_datasets %} disabled{% endif %}>Stop All</button>
-      </form>
-      <form method="post" action="/workspace/delete-datasets" data-confirm="Permanently delete every dataset and its original source file from this workspace? This cannot be undone." data-confirm-title="Remove all datasets" data-confirm-label="Remove All">
-        <input type="hidden" name="return_to" value="admin">
-        <button type="submit" class="queue-remove-all" title="Remove all datasets" aria-label="Remove all datasets"{% if not datasets or datasets | selectattr('status', 'equalto', 'processing') | list %} disabled{% endif %}>Remove All</button>
-      </form>
-    </div>
     <div class="admin-dataset-draft-toolbar" data-admin-dataset-draft-toolbar>
       <div class="admin-dataset-draft-summary">
         <strong>Dataset changes</strong>
         <span data-admin-dataset-draft-status>No changes pending</span>
       </div>
       <button type="button" class="admin-dataset-apply-changes" data-admin-dataset-apply-changes title="Apply staged dataset names and order in the background" aria-label="Apply staged dataset names and order" disabled>Apply Changes</button>
+      <div class="queue-bulk-actions admin-dataset-bulk-actions" role="group" aria-label="Bulk dataset actions">
+        <button type="button" class="queue-map-all" data-admin-vendor-map-all-open title="Assign Vendor Mapping to all eligible CDR datasets" aria-label="Assign Vendor Mapping to all eligible CDR datasets"{% if not mappable_admin_datasets %} disabled{% endif %}>Map All</button>
+        <button type="button" class="queue-clear-all" data-admin-vendor-clear-all-open title="Clear Vendor Mapping from all mapped CDR datasets" aria-label="Clear Vendor Mapping from all mapped CDR datasets"{% if not clearable_admin_datasets %} disabled{% endif %}>Clear All</button>
+        <button type="button" class="queue-reprocess-all" data-admin-reprocess-all-open title="Reprocess all available datasets from their original source files" aria-label="Reprocess all available datasets from their original source files"{% if not reprocessable_admin_datasets %} disabled{% endif %}>Reprocess All</button>
+        <form method="post" action="/workspace/stop-datasets" data-confirm="Stop every dataset that is currently queued or processing?" data-confirm-title="Stop all queued and processing datasets" data-confirm-label="Stop All">
+          <input type="hidden" name="return_to" value="admin">
+          <button type="submit" class="queue-stop-all" title="Stop all queued and processing datasets" aria-label="Stop all queued and processing datasets"{% if not stoppable_admin_datasets %} disabled{% endif %}>Stop All</button>
+        </form>
+        <form method="post" action="/workspace/delete-datasets" data-confirm="Permanently delete every dataset and its original source file from this workspace? This cannot be undone." data-confirm-title="Remove all datasets" data-confirm-label="Remove All">
+          <input type="hidden" name="return_to" value="admin">
+          <button type="submit" class="queue-remove-all" title="Remove all datasets" aria-label="Remove all datasets"{% if not datasets or datasets | selectattr('status', 'equalto', 'processing') | list %} disabled{% endif %}>Remove All</button>
+        </form>
+      </div>
     </div>
     <div class="table-wrap">
       <table class="admin-datasets-table" data-admin-dataset-reordering-blocked="{{ '1' if dataset_reordering_blocked else '0' }}">
@@ -914,17 +919,34 @@
   const restoreComponents = document.querySelector('[data-backup-restore-components]');
   const restoreWorkspaces = document.querySelector('[data-backup-restore-workspaces]');
   const backupComponents = document.querySelector('[data-backup-components]');
-  const backupWorkspaces = document.querySelector('[data-backup-workspaces]');
   const statusCount = document.querySelector('[data-backup-status-count]');
   const statusSize = document.querySelector('[data-backup-status-size]');
   const statusLast = document.querySelector('[data-backup-status-last]');
   const statusNext = document.querySelector('[data-backup-status-next]');
   if (!form || !enabled || !settings) return;
   const refresh = () => { settings.hidden = !enabled.checked; };
-  const refreshBackupWorkspaces = () => {
-    if (!backupComponents || !backupWorkspaces) return;
-    const needsWorkspaces = [...backupComponents.selectedOptions].some((option) => ['workspace_database', 'dashboards', 'report_templates', 'operator_mappings', 'main_cities', 'scoring_configuration', 'auto_calculated_fields', 'query_builder_queries', 'reporting_jobs', 'nq_call_tracking', 'input', 'output'].includes(option.value));
-    backupWorkspaces.hidden = !needsWorkspaces;
+  // One line per selected workspace with what the backup keeps of it.
+  const backupSummary = document.querySelector('[data-backup-selection-summary]');
+  const backupWarning = document.querySelector('[data-backup-selection-warning]');
+  const WORKSPACE_PARTS = ['workspace_database', 'dashboards', 'report_templates', 'main_cities', 'operator_mappings', 'scoring_configuration', 'auto_calculated_fields', 'query_builder_queries', 'reporting_jobs', 'nq_call_tracking', 'output', 'input'];
+  const refreshBackupSummary = () => {
+    if (!backupComponents || !backupSummary) return;
+    const selected = new Set([...backupComponents.selectedOptions].map((option) => option.value));
+    const parts = WORKSPACE_PARTS.filter((value) => selected.has(value));
+    const workspaces = [...backupComponents.selectedOptions].filter((option) => option.value.startsWith('workspace:')).map((option) => option.textContent.trim());
+    const content = parts.length === WORKSPACE_PARTS.length ? 'full workspace'
+      : parts.length === WORKSPACE_PARTS.length - 1 && !selected.has('input') ? 'full workspace without Input'
+        : `${parts.length} of ${WORKSPACE_PARTS.length} parts`;
+    const kept = [];
+    if (selected.has('app_database')) kept.push('Application database');
+    if (parts.length) workspaces.forEach((name) => kept.push(`${name}: ${content}`));
+    backupSummary.textContent = kept.length ? `This backup keeps: ${kept.join(' · ')}` : '';
+    // Selections that would leave something out are explained apart from what is kept.
+    if (backupWarning) {
+      backupWarning.textContent = !kept.length && !parts.length ? 'Nothing is selected: choose what to back up.'
+        : parts.length && !workspaces.length ? 'No workspace is selected, so the Workspace Content options are left out of the backup.'
+          : '';
+    }
   };
   const refreshRecurrence = () => {
     if (!recurrence) return;
@@ -960,7 +982,7 @@
     const response = await fetch(`/api/admin/backup-files?backup_path=${encodeURIComponent(restorePath.value)}`, {credentials: 'same-origin'});
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.detail || 'Unable to list backup files.');
-    restoreFile.innerHTML = '<option value="">Select a backup file</option>' + (payload.files || []).map((file) => `<option value="${file.name}">${file.name} · ${file.modified} · ${file.size}</option>`).join('');
+    restoreFile.innerHTML = '<option value="">Select a backup file</option>' + (payload.files || []).map((file) => `<option value="${file.name}"${file.incomplete ? ' disabled' : ''}>${file.name} · ${file.modified} · ${file.size}${file.incomplete ? ' · incomplete, cannot be restored' : ''}</option>`).join('');
   };
   const loadDirectories = async (path = '') => {
     const response = await fetch(`/api/admin/backup-directories${path ? `?path=${encodeURIComponent(path)}` : ''}`, {credentials: 'same-origin'});
@@ -1012,15 +1034,16 @@
       const response = await fetch('/api/admin/backup-files/inspect', {method: 'POST', credentials: 'same-origin', body: new URLSearchParams({backup_path: restorePath.value, backup_file: restoreFile.value})});
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.detail || 'Unable to inspect the backup.');
-      const labels = {app_database: 'Application database', workspace_database: 'Workspace Database', dashboards: 'Dashboards', report_templates: 'Report Templates', main_cities: 'Main Cities', operator_mappings: 'Operator & Vendor Maps', scoring_configuration: 'Scoring & GAP Analysis Configuration', auto_calculated_fields: 'Auto-calculated Fields', query_builder_queries: 'Saved Queries', reporting_jobs: 'Reporting Jobs', nq_call_tracking: 'NQ Call Tracking', input: 'Input', output: 'Output'};
+      const labels = {app_database: 'Application database', workspace_database: 'Workspace Database', dashboards: 'Dashboards', report_templates: 'Report Templates', main_cities: 'Main Cities', operator_mappings: 'Operator & Vendor Maps', scoring_configuration: 'Scoring & GAP Analysis Configuration', auto_calculated_fields: 'Auto-calculated Fields', query_builder_queries: 'Query Builder Queries', reporting_jobs: 'Reporting Jobs', nq_call_tracking: 'NQ Call Tracking', input: 'Input', output: 'Output'};
       const componentGroups = [
         ['Configuration Content', ['app_database']],
-        ['Workspace Content', ['workspace_database', 'dashboards', 'report_templates', 'main_cities', 'operator_mappings', 'scoring_configuration', 'auto_calculated_fields', 'query_builder_queries', 'reporting_jobs', 'nq_call_tracking', 'input', 'output']],
+        ['Workspace Content', ['workspace_database', 'dashboards', 'report_templates', 'main_cities', 'operator_mappings', 'scoring_configuration', 'auto_calculated_fields', 'query_builder_queries', 'reporting_jobs', 'nq_call_tracking', 'output', 'input']],
       ];
       restoreComponents.innerHTML = componentGroups.map(([title, values]) => {
         const available = values.filter((value) => payload.components.includes(value));
         if (!available.length) return '';
-        return `<section class="restore-component-group"><h4>${title}</h4>${available.map((value) => `<label class="confirm-option"><input type="checkbox" value="${value}" checked><span>${labels[value]}</span></label>`).join('')}</section>`;
+        const groupAction = available.length > 1 ? '<button type="button" class="multiselect-group-action" data-restore-group-action>Select None</button>' : '';
+        return `<section class="restore-component-group"><h4><span>${title}</span>${groupAction}</h4>${available.map((value) => `<label class="confirm-option"><input type="checkbox" value="${value}" checked><span>${labels[value]}</span></label>`).join('')}</section>`;
       }).join('');
       restoreWorkspaces.innerHTML = (payload.workspaces || []).length
         ? payload.workspaces.map((workspace) => `<span class="pill database-workspace-pill">${workspace}</span>`).join('')
@@ -1028,6 +1051,20 @@
       restoreDialog.showModal();
     } catch (error) { showInfoDialog(error.message || 'Unable to inspect the backup.', {title: 'Restore', tone: 'error'}); }
   });
+  // Select All / Select None of one section of the restore selection.
+  const syncRestoreGroupActions = () => restoreComponents?.querySelectorAll('[data-restore-group-action]').forEach((button) => {
+    const boxes = [...button.closest('.restore-component-group').querySelectorAll('input[type="checkbox"]')];
+    button.textContent = boxes.every((box) => box.checked) ? 'Select None' : 'Select All';
+  });
+  restoreComponents?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-restore-group-action]');
+    if (!button) return;
+    const boxes = [...button.closest('.restore-component-group').querySelectorAll('input[type="checkbox"]')];
+    const selectAll = boxes.some((box) => !box.checked);
+    boxes.forEach((box) => { box.checked = selectAll; });
+    syncRestoreGroupActions();
+  });
+  restoreComponents?.addEventListener('change', syncRestoreGroupActions);
   restoreDialog?.querySelector('[data-backup-restore-cancel]')?.addEventListener('click', () => restoreDialog.close());
   restoreDialog?.querySelector('[data-backup-restore-confirm]')?.addEventListener('click', async () => {
     const components = [...restoreComponents.querySelectorAll('input:checked')].map((input) => input.value);
@@ -1072,11 +1109,10 @@
   });
   enabled.addEventListener('change', () => { refresh(); persistBackupSelection(); });
   recurrence?.addEventListener('change', refreshRecurrence);
-  backupComponents?.addEventListener('change', () => { refreshBackupWorkspaces(); persistBackupSelection(); });
-  backupWorkspaces?.addEventListener('change', persistBackupSelection);
+  backupComponents?.addEventListener('change', () => { refreshBackupSummary(); persistBackupSelection(); });
   refresh();
   refreshRecurrence();
-  refreshBackupWorkspaces();
+  refreshBackupSummary();
 })();
 </script>
 <script>

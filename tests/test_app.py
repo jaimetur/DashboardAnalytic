@@ -2534,10 +2534,11 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     assert 'Transfer to other server' in admin_response.text
     assert 'name="export_target" multiple size="1" data-export-target-select data-multiselect-groups="true"' in admin_response.text
     assert '<optgroup label="Configuration Content">' in admin_response.text
-    assert '<optgroup label="Workspace Content">' in admin_response.text
-    assert '<optgroup label="Full Workspace">' in admin_response.text
+    assert '<optgroup label="Current Workspace Content">' in admin_response.text
+    assert '<optgroup label="Workspace Content"' in admin_response.text
+    assert '<optgroup label="Full Workspace" data-group-note="Includes the Input and Output folders, optional on export">' in admin_response.text
     assert '<optgroup label="Full Environment">' in admin_response.text
-    assert admin_response.text.index('<optgroup label="Full Workspace">') < admin_response.text.index('<optgroup label="Full Environment">')
+    assert admin_response.text.index('<optgroup label="Full Workspace"') < admin_response.text.index('<optgroup label="Full Environment">')
     assert 'Config</option>' in admin_response.text
     assert 'Main Cities (from active workspace)</option>' in admin_response.text
     assert 'Operator &amp; Vendor Maps (from active workspace)</option>' in admin_response.text
@@ -2571,6 +2572,9 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
         'format': 'drivetest-analyzer-export',
         'includes_slides_templates': False,
         'kind': 'config',
+        'source_workspaces': [
+            {'id': workspace.id, 'name': workspace.name} for workspace in app_module.workspace_registry.list()
+        ],
         'version': 1,
     }
 
@@ -2670,13 +2674,47 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     assert len(app_module.workspace_registry.list()) == 1
 
 
+def test_full_workspace_export_can_leave_out_the_input_folder(client, tmp_path) -> None:
+    import src.DriveTestAnalyzer as app_module
+
+    login_super(client)
+    workspace = app_module.active_workspace
+    (workspace.input_dir / 'raw-cdr.csv').write_text('Operator\nA\n', encoding='utf-8')
+    (workspace.output_dir / 'generated.txt').write_text('report', encoding='utf-8')
+
+    for include_input_files in (True, False):
+        package_path = tmp_path / f'workspace-{include_input_files}.zip'
+        app_module.build_export_archive_file([f'workspace:{workspace.id}'], package_path, include_input_files=include_input_files)
+        with zipfile.ZipFile(package_path) as archive:
+            names = archive.namelist()
+            manifest = json.loads(archive.read('manifest.json'))
+        assert any(name.endswith('/input/raw-cdr.csv') for name in names) is include_input_files
+        assert any(name.endswith('/output/generated.txt') for name in names)
+        assert ('input' in manifest['workspace_components']) is include_input_files
+        assert manifest['includes_input_files'] is include_input_files
+    assert app_module.estimate_export_bytes([f'workspace:{workspace.id}'], include_input_files=False) < app_module.estimate_export_bytes(
+        [f'workspace:{workspace.id}'],
+    )
+
+
 def test_multi_selection_export_applies_containment_rules_and_builds_importable_bundle(client, tmp_path) -> None:
     import src.DriveTestAnalyzer as app_module
 
     login_super(client)
+    assert app_module.active_workspace.id == 'default'
     assert app_module.normalize_export_targets([
         'config', 'dashboards', 'workspace:default', 'auto-calculated-fields',
     ]) == ['config', 'workspace:default']
+    # Every kind of workspace content is inside the Full Workspace of the active workspace.
+    assert app_module.normalize_export_targets([
+        'main-cities', 'scoring-configuration', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking',
+        'workspace:default',
+    ]) == ['workspace:default']
+    # Content of the active workspace is kept beside the Full Workspace of another one.
+    assert app_module.normalize_export_targets(['dashboards', 'workspace:other']) == ['dashboards', 'workspace:other']
+    assert app_module.normalize_export_targets(['dashboards', 'workspace:default'], active_workspace_id='') == [
+        'dashboards', 'workspace:default',
+    ]
     assert app_module.normalize_export_targets([
         'config', 'workspace:default', 'full-environment',
     ]) == ['full-environment']
@@ -2950,6 +2988,75 @@ def test_config_import_replaces_global_users_and_preserves_user_ids(client) -> N
         (int(row['id']), row['username'], row['role'], bool(row['active']))
         for row in app_module.repository.list_users()
     ] == expected_users
+
+
+def test_config_import_from_another_server_translates_workspace_ids_and_keeps_server_settings(client, tmp_path: Path) -> None:
+    import src.DriveTestAnalyzer as app_module
+
+    repository = app_module.repository
+    login_super(client)
+    shared = app_module.active_workspace
+    local_only = app_module.workspace_registry.create('Only on this server')
+    assert client.post(
+        '/admin/users', data={'username': 'analyst', 'password': 'analyst123', 'role': 'user'}, follow_redirects=False,
+    ).status_code == 303
+
+    exported = client.get('/admin/import-export/export?export_target=config')
+    assert exported.status_code == 200
+    with zipfile.ZipFile(BytesIO(exported.content)) as archive:
+        files = {name: archive.read(name) for name in archive.namelist()}
+    manifest = json.loads(files['manifest.json'])
+    assert {'id': shared.id, 'name': shared.name} in manifest['source_workspaces']
+
+    # Rewrite the package as if another server wrote it: the shared workspace has
+    # another id there, one workspace exists only there, and its backups differ.
+    database = tmp_path / 'application.db'
+    database.write_bytes(files['config/application.db'])
+    with sqlite3.connect(database) as conn:
+        conn.execute("UPDATE users SET workspace_ids_json = ? WHERE username = 'analyst'",
+                     (json.dumps(['workspace-remote', 'workspace-gone']),))
+        for key, value in (
+            ('workspace_access_rules_v1', {'workspace-remote': {'roles': ['user-viewer'], 'groups': []},
+                                           'workspace-gone': {'roles': ['admin'], 'groups': []}}),
+            (app_module.RECURRING_BACKUP_STATE_KEY, {'max_backups': 3, 'workspace_ids': ['workspace-remote']}),
+            (app_module.RUNTIME_CONFIGURATION_STATE_KEY, {'max_background_tasks': 4}),
+        ):
+            conn.execute('INSERT OR REPLACE INTO application_state (key, value) VALUES (?, ?)', (key, json.dumps(value)))
+    conn.close()
+    manifest['source_workspaces'] = [
+        {'id': 'workspace-remote', 'name': shared.name}, {'id': 'workspace-gone', 'name': 'Only on the source'},
+    ]
+    files['manifest.json'] = json.dumps(manifest).encode()
+    files['config/application.db'] = database.read_bytes()
+    package = BytesIO()
+    with zipfile.ZipFile(package, 'w') as archive:
+        for name, content in files.items():
+            archive.writestr(name, content)
+
+    local_backup = json.dumps({'max_backups': 15, 'workspace_ids': [shared.id, local_only.id]})
+    local_runtime = json.dumps({'max_background_tasks': 1})
+    repository.set_application_state(app_module.RECURRING_BACKUP_STATE_KEY, local_backup)
+    repository.set_application_state(app_module.RUNTIME_CONFIGURATION_STATE_KEY, local_runtime)
+    repository.set_workspace_access_rule(local_only.id, ['user-editor'], [])
+    repository.set_workspace_user_access(local_only.id, ['analyst'])
+
+    imported = client.post(
+        '/admin/import-export/import',
+        data={'confirmed_import': 'true'},
+        files={'package': ('configuration.zip', package.getvalue(), 'application/zip')},
+        follow_redirects=False,
+    )
+
+    assert imported.status_code == 303
+    assert repository.get_application_state(app_module.RECURRING_BACKUP_STATE_KEY) == local_backup
+    assert repository.get_application_state(app_module.RUNTIME_CONFIGURATION_STATE_KEY) == local_runtime
+    assert repository.workspace_access_rules() == {
+        shared.id: {'roles': ['user-viewer'], 'groups': []},
+        local_only.id: {'roles': ['user-editor'], 'groups': []},
+    }
+    with repository.global_connection() as conn:
+        granted = json.loads(conn.execute("SELECT workspace_ids_json FROM users WHERE username = 'analyst'").fetchone()[0])
+    assert granted == sorted([shared.id, local_only.id])
 
 
 def test_admin_export_job_creates_a_disk_backed_download(client) -> None:
@@ -3398,7 +3505,7 @@ def test_outgoing_server_transfer_waits_for_acceptance_and_streams_package(clien
             state['uploaded'] = True
             return FakeResponse({'status': 'received'})
 
-    def fake_export(target, destination, workspace_ids=None, progress_callback=None, include_generated_outputs=True):
+    def fake_export(target, destination, workspace_ids=None, progress_callback=None, include_generated_outputs=True, include_input_files=True):
         destination.write_bytes(b'streamed-transfer-package')
         if progress_callback:
             progress_callback(len(b'streamed-transfer-package'))
@@ -4926,7 +5033,20 @@ def test_cancelled_backup_removes_its_partial_archive(client, tmp_path: Path) ->
         app_module.create_recurring_database_backup(config, cancel_callback=cancel_during_archive)
 
     assert list(tmp_path.glob('drivetest-analyzer-backup-*.zip')) == []
+    assert list(tmp_path.glob('.drivetest-analyzer-backup-*.partial')) == []
     assert list(tmp_path.glob('drivetest-analyzer-export-*')) == []
+
+
+def test_backup_folders_need_their_workspace_database(client) -> None:
+    import src.DriveTestAnalyzer as app_module
+
+    assert app_module.backup_components(['app_database', 'dashboards', 'input', 'output', 'unknown']) == ['app_database', 'dashboards']
+    assert app_module.backup_components(['workspace_database', 'output', 'input']) == ['workspace_database', 'output', 'input']
+    # Schedules saved before the rule keep their other parts.
+    app_module.repository.set_application_state(app_module.RECURRING_BACKUP_STATE_KEY, json.dumps({
+        'enabled': True, 'components': ['dashboards', 'input', 'output'],
+    }))
+    assert app_module.recurring_backup_settings()['components'] == ['dashboards']
 
 
 def test_backup_removes_snapshot_folders_left_by_killed_backups(client, tmp_path: Path) -> None:
@@ -4947,6 +5067,11 @@ def test_backup_removes_snapshot_folders_left_by_killed_backups(client, tmp_path
     in_use.mkdir()
     (in_use / 'snapshot.db').write_bytes(b'being written')
     os.utime(in_use, (old, old))
+    killed_zip = tmp_path / '.drivetest-analyzer-backup-20260101-060000.zip.partial'
+    killed_zip.write_bytes(b'PK')
+    os.utime(killed_zip, (old, old))
+    writing_zip = tmp_path / '.drivetest-analyzer-backup-20260102-060000.zip.partial'
+    writing_zip.write_bytes(b'PK')
     config = app_module.recurring_backup_settings() | {
         'components': ['app_database'],
         'workspace_ids': [],
@@ -4955,9 +5080,30 @@ def test_backup_removes_snapshot_folders_left_by_killed_backups(client, tmp_path
 
     destination = app_module.create_recurring_database_backup(config)
 
-    assert destination.is_file()
+    assert destination.is_file() and zipfile.is_zipfile(destination)
+    assert not (tmp_path / f'.{destination.name}.partial').exists()
     assert not any(folder.exists() for folder in orphans)
     assert (in_use / 'snapshot.db').is_file()
+    assert not killed_zip.exists()
+    assert writing_zip.is_file()
+
+
+def test_backup_list_marks_zips_cut_short_as_incomplete(client) -> None:
+    import src.DriveTestAnalyzer as app_module
+
+    login(client)
+    backup_root = app_module.application_data_dir / 'scheduled-backups'
+    backup_root.mkdir(parents=True, exist_ok=True)
+    complete = backup_root / 'drivetest-analyzer-backup-20260101-060000.zip'
+    with zipfile.ZipFile(complete, 'w') as archive:
+        archive.writestr('manifest.json', '{}')
+    cut_short = backup_root / 'drivetest-analyzer-backup-20260102-060000.zip'
+    cut_short.write_bytes(complete.read_bytes()[:20])
+    (backup_root / '.drivetest-analyzer-backup-20260103-060000.zip.partial').write_bytes(b'PK')
+
+    files = client.get('/api/admin/backup-files', params={'backup_path': str(backup_root)}).json()['files']
+
+    assert {item['name']: item['incomplete'] for item in files} == {complete.name: False, cut_short.name: True}
 
 
 def test_dashboard_library_open_close_and_view_actions_include_labels() -> None:

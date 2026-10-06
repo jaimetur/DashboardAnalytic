@@ -2185,14 +2185,19 @@ class Repository:
                     (self._workspace_ids_json(workspace_ids), int(row['id'])),
                 )
 
-    def remap_workspace_access(self, workspace_id_map: dict[str, str]) -> None:
-        """Translate imported workspace grants from source ids to local ids."""
+    def remap_workspace_access(self, workspace_id_map: dict[str, str], *, drop: Iterable[str] = ()) -> None:
+        """Translate imported workspace grants and access rules from source ids to local ids.
+
+        Every id is translated at once, so a source id that is also a different local id
+        is never translated twice. Grants and rules of the ``drop`` ids are removed.
+        """
         normalized = {
             str(source).strip(): str(destination).strip()
             for source, destination in workspace_id_map.items()
             if str(source).strip() and str(destination).strip()
         }
-        if not normalized:
+        dropped = {str(workspace_id).strip() for workspace_id in drop} - set(normalized)
+        if not normalized and not dropped:
             return
         with self.global_connection() as conn:
             self._ensure_user_workspace_columns(conn)
@@ -2200,11 +2205,54 @@ class Repository:
                 workspace_ids = [
                     normalized.get(workspace_id, workspace_id)
                     for workspace_id in self._workspace_ids_from_json(row['workspace_ids_json'])
+                    if workspace_id not in dropped
                 ]
                 conn.execute(
                     'UPDATE users SET workspace_ids_json = ? WHERE id = ?',
                     (self._workspace_ids_json(workspace_ids), int(row['id'])),
                 )
+        rules: dict[str, dict[str, list]] = {}
+        for workspace_id, rule in self.workspace_access_rules().items():
+            if workspace_id in dropped:
+                continue
+            merged = rules.setdefault(normalized.get(workspace_id, workspace_id), {'roles': [], 'groups': []})
+            merged['roles'] = list(dict.fromkeys(merged['roles'] + rule['roles']))
+            merged['groups'] = list(dict.fromkeys(merged['groups'] + rule['groups']))
+        self.set_application_state(self.WORKSPACE_ACCESS_RULES_KEY, json.dumps(rules, sort_keys=True))
+
+    def workspace_access_snapshot(self, workspace_ids: Iterable[str]) -> dict[str, Any]:
+        """The users granted and the access rules of some workspaces, to re-apply after replacing this database."""
+        selected = {str(workspace_id).strip() for workspace_id in workspace_ids if str(workspace_id).strip()}
+        users: dict[str, list[str]] = {}
+        with self.global_connection() as conn:
+            conn.executescript(GLOBAL_SCHEMA)
+            self._ensure_user_workspace_columns(conn)
+            for row in conn.execute('SELECT username, workspace_ids_json FROM users').fetchall():
+                granted = [workspace_id for workspace_id in self._workspace_ids_from_json(row['workspace_ids_json']) if workspace_id in selected]
+                if granted:
+                    users[str(row['username']).casefold()] = granted
+        rules = {workspace_id: rule for workspace_id, rule in self.workspace_access_rules().items() if workspace_id in selected}
+        return {'users': users, 'rules': rules}
+
+    def restore_workspace_access(self, snapshot: dict[str, Any]) -> None:
+        """Re-apply a ``workspace_access_snapshot`` to the users that still exist."""
+        users = snapshot.get('users') or {}
+        if users:
+            with self.global_connection() as conn:
+                self._ensure_user_workspace_columns(conn)
+                for row in conn.execute('SELECT id, username, workspace_ids_json FROM users').fetchall():
+                    granted = users.get(str(row['username']).casefold())
+                    if granted:
+                        workspace_ids = self._workspace_ids_from_json(row['workspace_ids_json']) + list(granted)
+                        conn.execute(
+                            'UPDATE users SET workspace_ids_json = ? WHERE id = ?',
+                            (self._workspace_ids_json(workspace_ids), int(row['id'])),
+                        )
+        rules = snapshot.get('rules') or {}
+        if rules:
+            self.set_application_state(
+                self.WORKSPACE_ACCESS_RULES_KEY, json.dumps({**self.workspace_access_rules(), **rules}, sort_keys=True),
+            )
 
     def list_active_users_by_usernames(self, usernames: list[str]) -> list[str]:
         normalized = [username.strip() for username in usernames if username and username.strip()]
@@ -2458,6 +2506,11 @@ class Repository:
                 'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
                 (key, value),
             )
+
+    def delete_application_state(self, key: str) -> None:
+        with self.global_connection() as conn:
+            conn.executescript(GLOBAL_SCHEMA)
+            conn.execute('DELETE FROM application_state WHERE key = ?', (key,))
 
     def list_calculated_dimensions(self) -> list[dict[str, Any]]:
         with self.connection() as conn:

@@ -69,6 +69,10 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     object.__setattr__(settings, "ppt_templates_dir", ppt_templates_dir)
     app_module.repository.db_path = settings.database_path
     app_module.repository.set_global_database(settings.database_path)
+    # Backups resolve their folder from the application data directory, which
+    # otherwise still points to the developer's real storage-paths.conf folder.
+    object.__setattr__(settings, "data_dir", data_dir)
+    monkeypatch.setattr(app_module, "application_data_dir", data_dir)
     app_module.SESSIONS.clear()
     # Bundled Network Insights content is seeded explicitly by the tests that need it.
 
