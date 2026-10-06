@@ -164,3 +164,6 @@
 .report-jobs .rj-enabled-text strong { color: #174d31; font-size: 1rem; }
 .report-jobs .rj-enabled-text small { color: var(--muted); font-weight: 500; }
 .report-jobs .rj-enabled-switch:has(input:not(:checked)) .rj-enabled-text strong { color: #8a3b2e; }
+/* Weekly schedule: the seven days share one row beside the recurrence and time. */
+.report-jobs #rj-schedule-weekdays { grid-column: span 3; flex-wrap: nowrap; align-self: end; padding-bottom: .55rem; overflow-x: auto; }
+@media (max-width: 900px) { .report-jobs #rj-schedule-weekdays { grid-column: 1 / -1; flex-wrap: wrap; } }
