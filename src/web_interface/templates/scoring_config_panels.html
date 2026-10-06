@@ -35,10 +35,14 @@
   .scoring-config-panel .scoring-config-subpanel-body { display: grid; gap: 1rem; min-width: 0; }
   .scoring-config-panel .scoring-config-settings-group .scoring-config-toolbar { justify-content: flex-start; align-items: end; margin: 0; }
   .scoring-config-panel .scoring-config-settings-group .inline-actions { margin: 0; display: flex; flex-wrap: wrap; gap: .65rem; }
+  .scoring-config-panel .scoring-config-reliable { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem 1rem; padding: .7rem 0; border-bottom: 1px solid #c8ded3; color: #2f5d4a; }
+  .scoring-config-panel .scoring-config-reliable small { font-weight: 650; }
   .scoring-config-panel .scoring-config-allocation-controls { display: grid; grid-template-columns: minmax(11rem, 14rem) minmax(16rem, 22rem) max-content; align-items: start; gap: 1rem; padding: 1rem 0; border-top: 1px solid #c8ded3; border-bottom: 1px solid #c8ded3; }
   .scoring-config-panel .scoring-config-allocation-controls > button { align-self: start; margin-top: 1.5rem; }
   .scoring-config-panel [data-scoring-distribute-points] { background: #7752a3; border-color: #66448e; color: #fff; }
   .scoring-config-panel [data-scoring-distribute-points]:hover:not(:disabled) { background: #604085; }
+  .scoring-config-panel [data-scoring-reliable-netcheck] { background: #1f7a5a; border-color: #17644a; color: #fff; }
+  .scoring-config-panel [data-scoring-reliable-netcheck]:hover:not(:disabled) { background: #17644a; }
   .scoring-config-panel [data-scoring-config-export] { background: #267c79; border-color: #267c79; color: #fff; font-weight: 700; }
   .scoring-config-panel [data-scoring-config-export]:hover { background: #1a625f; color: #fff; }
   .scoring-config-panel [data-scoring-config-import] { background: #f5d6d6; border-color: #dfb3b3; color: #783737; font-weight: 700; }
@@ -317,6 +321,10 @@
           </div>
             <button type="button" class="ghost-link" data-scoring-distribute-points disabled><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v6M5 15V9h14v6M2 15h6v6H2zM16 15h6v6h-6z" /></svg><span data-button-label>Distribute points keeping percentages</span></button>
           </div>
+          <div class="scoring-config-reliable" data-scoring-reliable>
+            <small data-scoring-reliable-summary>Most Reliable Network scoring: no KPI has Most Reliable points, so scoring jobs show only the Best Network scoring.</small>
+            <button type="button" class="ghost-link" data-scoring-reliable-netcheck disabled title="Give the NetCheck 2026 Most Reliable points to its 10 KPIs in Drive - City and Drive - Connecting Roads; other KPIs get no Most Reliable points."><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6zM9 12l2 2 4-4" /></svg><span data-button-label>Load NetCheck 2026 Most Reliable points</span></button>
+          </div>
         <p><strong>CDR filters</strong></p>
         <div class="scoring-config-source-fields" data-scoring-environment-source-fields>
           <label>G_Level_1
@@ -353,6 +361,7 @@
               <col style="width: 5%">
               <col style="width: 4.25%">
               <col style="width: 4.25%">
+              <col style="width: 4.25%">
               <col style="width: 3.5%">
               <col style="width: 3.5%">
               <col style="width: 3.5%">
@@ -365,10 +374,10 @@
               <col style="width: 8%">
             </colgroup>
             <thead>
-              <tr><th scope="col" rowspan="2">Code</th><th scope="col" rowspan="2">KPI</th><th scope="col" rowspan="2">Category</th><th scope="col" rowspan="2">Type</th><th scope="col" rowspan="2">Direction</th><th scope="col" rowspan="2">Mapping</th><th scope="col" rowspan="2">Max points</th><th scope="col" rowspan="2">Environment Weight (%)</th><th scope="col" rowspan="2">Global weight (%)</th><th scope="colgroup" colspan="4">KPI thresholds</th><th scope="colgroup" colspan="4" title="Percentage of the KPI’s maximum points awarded at each threshold. The NetCheck defaults are constants within workbook scoring formulas, not separate workbook columns.">Score interpolation anchors (%)</th><th scope="col" rowspan="2">KPI Definition</th><th scope="col" rowspan="2">Actions</th></tr>
+              <tr><th scope="col" rowspan="2">Code</th><th scope="col" rowspan="2">KPI</th><th scope="col" rowspan="2">Category</th><th scope="col" rowspan="2">Type</th><th scope="col" rowspan="2">Direction</th><th scope="col" rowspan="2">Mapping</th><th scope="col" rowspan="2">Max points</th><th scope="col" rowspan="2">Environment Weight (%)</th><th scope="col" rowspan="2">Global weight (%)</th><th scope="col" rowspan="2" title="Maximum points of each KPI in the Most Reliable Network scoring. KPIs without points are left out of that scoring; thresholds and score anchors are shared with Best Network.">Most Reliable points</th><th scope="colgroup" colspan="4">KPI thresholds</th><th scope="colgroup" colspan="4" title="Percentage of the KPI’s maximum points awarded at each threshold. The NetCheck defaults are constants within workbook scoring formulas, not separate workbook columns.">Score interpolation anchors (%)</th><th scope="col" rowspan="2">KPI Definition</th><th scope="col" rowspan="2">Actions</th></tr>
               <tr><th scope="col">Low</th><th scope="col">Medium</th><th scope="col">High</th><th scope="col">Ultra</th><th scope="col">Low</th><th scope="col">Medium</th><th scope="col">High</th><th scope="col">Ultra</th></tr>
             </thead>
-            <tbody data-scoring-kpi-rows><tr><td colspan="19">Loading scoring configuration…</td></tr></tbody>
+            <tbody data-scoring-kpi-rows><tr><td colspan="20">Loading scoring configuration…</td></tr></tbody>
           </table>
         </div>
 

@@ -23,6 +23,8 @@ from src.modules.cdr_reporting import (
     _named_slide_layout, _remove_all_slides, _set_slide_header,
     _set_structural_slide_text,
 )
+from src.modules.scoring import most_reliable_result
+from src.modules.scoring_config import BEST_NETWORK_SCORING, MOST_RELIABLE_SCORING, SCORING_LABELS
 from src.modules.scoring_vendors import normalize_scoring_vendor_result
 from src.modules.scoring_views import (
     THRESHOLD_COLORS, _gap_order_key, _hierarchy_display_value, build_scoring_views, refresh_baseline_warning, scoring_coverage_notes,
@@ -43,6 +45,8 @@ _SCORING_EXPANDED_CATEGORY = '#DCE5E9'
 _KPI_TYPE_COLORS = {'Reliable': '#D8EFCA', 'Diff': '#FFF2CC'}
 _LEGACY_CAMPAIGN_WARNING = 'Campaigns are scored separately; the supplied Tableau Prep flow pools campaigns.'
 _SCOPE_FILTER_FIELDS = ('Operator', 'Vendor', 'Region', 'Cluster', 'City', 'Campaign')
+_SCORING_SECTION_TITLES = {BEST_NETWORK_SCORING: 'Best Network Scoring',
+                           MOST_RELIABLE_SCORING: 'Most Reliable Network Scoring'}
 
 
 def _table_for_mode(matrix: dict, table_mode: str) -> dict:
@@ -177,6 +181,10 @@ def _scope(context: dict[str, Any], *, environment_label: bool = False) -> str:
 def _chart_subtitle(matrix: dict[str, Any]) -> str:
     environment = str(matrix.get('context', {}).get('environment') or '').strip()
     return matrix.get('environment_subtitle', _environment_display_label(environment))
+
+
+def _scoring_chart_title(matrix: dict[str, Any], suffix: str) -> str:
+    return f"{matrix.get('scoring_label') or SCORING_LABELS[BEST_NETWORK_SCORING]} Scoring {suffix}"
 
 
 def _slide(presentation, title: str, subtitle: str):
@@ -700,10 +708,13 @@ def _scoring_environment_title(environment: str, configuration: dict) -> str:
 
 def _add_scoring_intro_slides(
     presentation, job: dict[str, Any], result: dict[str, Any], *, environment: str | None = None,
+    scoring: str | None = None,
 ) -> None:
     configuration = job.get('configuration') or result.get('configuration') or {}
-    title = (_scoring_environment_title(environment, configuration) if environment
-             else 'Scoring & GAP Analysis')
+    if environment:
+        title = _scoring_block_title(scoring, _scoring_environment_title(environment, configuration))
+    else:
+        title = _SCORING_SECTION_TITLES[scoring] if scoring else 'Scoring & GAP Analysis'
     subtitle = _scoring_filter_subtitle(job, environment)
     campaigns = _campaigns_for_export(job, result)
     plan = job.get('_scoring_display_selections')
@@ -1098,7 +1109,7 @@ def _stacked_category_chart(presentation, matrix: dict) -> None:
         for page in pages:
             _stacked_category_chart(presentation, page)
         return
-    slide = _slide(presentation, 'Best Network Scoring per Category', _chart_subtitle(matrix))
+    slide = _slide(presentation, _scoring_chart_title(matrix, 'per Category'), _chart_subtitle(matrix))
     categories = list(dict.fromkeys(row['category'] for row in matrix['rows']))
     operators = list(matrix['operators'])
     _stacked_chart_page_note(slide, matrix)
@@ -1343,7 +1354,7 @@ def _format_stacked_segment_labels(chart) -> None:
 def _best_network(presentation, matrices: list[dict]) -> None:
     voice_categories = {'CLASSIC CALLS', 'WHATSAPP CALLS', 'MULTI RAB'}
     for matrix in [page for source in matrices for page in _stacked_chart_pages(source)]:
-        slide = _slide(presentation, 'Best Network Scoring per Service', _chart_subtitle(matrix))
+        slide = _slide(presentation, _scoring_chart_title(matrix, 'per Service'), _chart_subtitle(matrix))
         _stacked_chart_page_note(slide, matrix)
         hierarchy_columns = matrix.get('hierarchy_columns', [])
         if hierarchy_columns:
@@ -1491,7 +1502,7 @@ def _hierarchy_chart(presentation, matrix: dict) -> None:
             _hierarchy_chart(presentation, page)
         return
     columns = matrix.get('hierarchy_columns', [])
-    slide = _slide(presentation, 'Best Network Scoring per Category', _chart_subtitle(matrix))
+    slide = _slide(presentation, _scoring_chart_title(matrix, 'per Category'), _chart_subtitle(matrix))
     _stacked_chart_page_note(slide, matrix)
     data = CategoryChartData()
     _add_hierarchy_chart_categories(data, columns)
@@ -2180,25 +2191,27 @@ def _gap_tables(presentation, matrices: list[dict]) -> None:
             _text(slide, 'KPIs are ordered by GAP, from lowest to highest. GAP Priority does not affect this order.', 7.12, height=.25, size=9)
 
 
-def export_scoring_powerpoint(job: dict[str, Any], result: dict[str, Any], template_path: Path,
-                             operator_mapping_groups: list[dict[str, Any]] | None = None,
-                             *, table_mode: str = 'expanded', gap_layout: str = 'end',
-                             environment: str = 'all', show_gap_values: bool = True,
-                             split_charts: bool = True,
-                             vendor_mapping_groups: list[dict[str, Any]] | None = None) -> bytes:
-    """Export saved points as comparison matrices, charts and prioritized gaps."""
-    if not template_path.is_file():
-        raise ValueError('The configured CDR PowerPoint template is missing.')
-    if table_mode not in {'expanded', 'summary'}:
-        raise ValueError('Table mode must be expanded or summary.')
-    if gap_layout not in {'end', 'adjacent'}:
-        raise ValueError('GAP layout must be end or adjacent.')
-    job = dict(job)
-    result = normalize_scoring_vendor_result(result, operator_mapping_groups)
-    if '_scoring_display_selections' not in job:
-        job['_scoring_display_selections'] = prepare_scoring_display_selections(job, result, template_path)
-    presentation = Presentation(template_path)
-    _remove_all_slides(presentation)
+def _scoring_block_title(scoring: str | None, title: str) -> str:
+    """Name the scoring in block titles when the document carries both scorings."""
+    return f'{SCORING_LABELS[scoring]} — {title}' if scoring else title
+
+
+def _scoring_slide_notes(result: dict[str, Any]) -> list[str]:
+    coverage_notes = scoring_coverage_notes(result)
+    coverage_details = [f"{'All Environments' if environment == 'Combined' else environment} — {note}"
+                        for environment, notes in coverage_notes.items() for note in notes]
+    slide_warnings = [str(notice) for notice in result.get('notices', [])]
+    slide_warnings.extend(str(warning) for warning in result.get('warnings', [])
+                          if str(warning) != _LEGACY_CAMPAIGN_WARNING)
+    slide_warnings.extend(coverage_details)
+    return slide_warnings
+
+
+def _add_scoring_block(presentation, job: dict[str, Any], result: dict[str, Any],
+                       operator_mapping_groups: list[dict[str, Any]] | None, *, scoring: str | None,
+                       table_mode: str, gap_layout: str, environment: str, show_gap_values: bool,
+                       split_charts: bool, vendor_mapping_groups: list[dict[str, Any]] | None) -> None:
+    """Add the charts, tables and GAP slides of one scoring; scoring is None when the job has only Best Network."""
     views = _export_environment_views(
         build_scoring_views(job, result, operator_mapping_groups, vendor_mapping_groups=vendor_mapping_groups), environment,
     )
@@ -2207,9 +2220,10 @@ def export_scoring_powerpoint(job: dict[str, Any], result: dict[str, Any], templ
     for matrix_key in ('score_tables', 'gap_summary_tables', 'gap_tables',
                        'hierarchy_score_tables', 'hierarchy_gap_tables'):
         for matrix in views.get(matrix_key, []):
-            matrix['environment_subtitle'] = _scoring_environment_title(
-                matrix['context']['environment'], configuration,
+            matrix['environment_subtitle'] = _scoring_block_title(
+                scoring, _scoring_environment_title(matrix['context']['environment'], configuration),
             )
+            matrix['scoring_label'] = SCORING_LABELS[scoring or BEST_NETWORK_SCORING]
     environment_allocations = maximum_allocations_from_configuration(configuration)
     combined_allocations = scaled_environment_allocations(environment_allocations, result.get('environment_scaling'))
     for matrix_key in ('score_tables', 'hierarchy_score_tables'):
@@ -2221,7 +2235,8 @@ def export_scoring_powerpoint(job: dict[str, Any], result: dict[str, Any], templ
                 name: str(scope.get('display_name') or _environment_display_label(name))
                 for name, scope in configuration.get('scope', {}).get('environments', {}).items()
             }
-    _add_scoring_intro_slides(presentation, job, result)
+    if scoring is not None:
+        _add_scoring_intro_slides(presentation, job, result, scoring=scoring)
     subtitle = 'All Environments' if environment == 'all' else _scoring_environment_title(environment, configuration)
     matrices = views['score_tables']
     hierarchy_matrices = views.get('hierarchy_score_tables', [])
@@ -2235,7 +2250,7 @@ def export_scoring_powerpoint(job: dict[str, Any], result: dict[str, Any], templ
         for matrix in hierarchy_matrices:
             grouped_hierarchy.setdefault(str(matrix['context'].get('environment') or 'Unspecified'), []).append(matrix)
         for current_environment, environment_matrices in grouped_hierarchy.items():
-            _add_scoring_intro_slides(presentation, job, result, environment=current_environment)
+            _add_scoring_intro_slides(presentation, job, result, environment=current_environment, scoring=scoring)
             for matrix in environment_matrices:
                 _best_network(presentation, [matrix])
                 _hierarchy_chart(presentation, matrix)
@@ -2275,7 +2290,7 @@ def export_scoring_powerpoint(job: dict[str, Any], result: dict[str, Any], templ
         for matrix in matrices:
             grouped_scores.setdefault(str(matrix['context'].get('environment') or 'Unspecified'), []).append(matrix)
         for current_environment, environment_matrices in grouped_scores.items():
-            _add_scoring_intro_slides(presentation, job, result, environment=current_environment)
+            _add_scoring_intro_slides(presentation, job, result, environment=current_environment, scoring=scoring)
             for matrix in environment_matrices:
                 _best_network(presentation, [matrix])
                 _stacked_category_chart(presentation, matrix)
@@ -2291,15 +2306,47 @@ def export_scoring_powerpoint(job: dict[str, Any], result: dict[str, Any], templ
     else:
         slide = _slide(presentation, 'Scoring Tables', subtitle)
         _text(slide, 'No scoring measurements are available for this saved job.', 1.8, height=1, size=16)
-    coverage_notes = scoring_coverage_notes(result)
-    coverage_details = [f"{'All Environments' if environment == 'Combined' else environment} — {note}"
-                        for environment, notes in coverage_notes.items() for note in notes]
-    slide_warnings = [str(notice) for notice in result.get('notices', [])]
-    slide_warnings.extend(str(warning) for warning in result.get('warnings', [])
-                          if str(warning) != _LEGACY_CAMPAIGN_WARNING)
-    slide_warnings.extend(coverage_details)
-    for slide in presentation.slides:
-        slide.notes_slide.notes_text_frame.text = '\n'.join(slide_warnings)
+
+
+def export_scoring_powerpoint(job: dict[str, Any], result: dict[str, Any], template_path: Path,
+                             operator_mapping_groups: list[dict[str, Any]] | None = None,
+                             *, table_mode: str = 'expanded', gap_layout: str = 'end',
+                             environment: str = 'all', show_gap_values: bool = True,
+                             split_charts: bool = True,
+                             vendor_mapping_groups: list[dict[str, Any]] | None = None) -> bytes:
+    """Export saved points as comparison matrices, charts and prioritized gaps."""
+    if not template_path.is_file():
+        raise ValueError('The configured CDR PowerPoint template is missing.')
+    if table_mode not in {'expanded', 'summary'}:
+        raise ValueError('Table mode must be expanded or summary.')
+    if gap_layout not in {'end', 'adjacent'}:
+        raise ValueError('GAP layout must be end or adjacent.')
+    job = dict(job)
+    result = normalize_scoring_vendor_result(result, operator_mapping_groups)
+    if '_scoring_display_selections' not in job:
+        job['_scoring_display_selections'] = prepare_scoring_display_selections(job, result, template_path)
+    presentation = Presentation(template_path)
+    _remove_all_slides(presentation)
+    _add_scoring_intro_slides(presentation, job, result)
+    blocks: list[tuple[str | None, dict[str, Any], dict[str, Any]]] = [(None, job, result)]
+    reliable = most_reliable_result(result, str(job.get('baseline_operator') or 'EE'), job.get('configuration'))
+    if reliable is not None:
+        # Both scorings share the cover, filters and aggregation; each one has its own block.
+        blocks = [(BEST_NETWORK_SCORING, job, result),
+                  (MOST_RELIABLE_SCORING, {**job, 'configuration': reliable['configuration']}, reliable)]
+    for scoring, block_job, block_result in blocks:
+        # The cover keeps the notes of the first scoring.
+        first_slide = len(presentation.slides) if block_result is not result else 0
+        _add_scoring_block(
+            presentation, block_job, block_result, operator_mapping_groups, scoring=scoring,
+            table_mode=table_mode, gap_layout=gap_layout, environment=environment,
+            show_gap_values=show_gap_values, split_charts=split_charts,
+            vendor_mapping_groups=vendor_mapping_groups,
+        )
+        notes = '\n'.join(_scoring_slide_notes(block_result))
+        for index, slide in enumerate(presentation.slides):
+            if index >= first_slide:
+                slide.notes_slide.notes_text_frame.text = notes
     output = BytesIO()
     presentation.save(output)
     return output.getvalue()

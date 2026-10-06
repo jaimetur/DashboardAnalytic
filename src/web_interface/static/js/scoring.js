@@ -93,6 +93,7 @@
           : resultTabNames.has(stored.result_tab) ? stored.result_tab : null,
         scrollY: Number.isFinite(stored.scroll_y) && stored.scroll_y >= 0 ? stored.scroll_y : null,
         environment: typeof stored.environment === 'string' && stored.environment ? stored.environment : 'all',
+        scoring: stored.scoring === 'most_reliable' ? 'most_reliable' : 'best_network',
         showKpiValues: stored.show_kpi_values === true,
         showGapValues: stored.show_gap_values === true,
         gapLayout: ['end', 'adjacent'].includes(stored.gap_layout) ? stored.gap_layout : 'end',
@@ -118,6 +119,7 @@
         result_tab: activeResultTab,
         scroll_y: window.scrollY,
         environment: selectedEnvironment,
+        scoring: typeof selectedScoring === 'undefined' ? 'best_network' : selectedScoring,
         show_kpi_values: Boolean(showKpiValuesToggle?.checked),
         show_gap_values: showGapValues(),
         gap_layout: selectedGapLayout(),
@@ -221,6 +223,8 @@
   const selectedJobCard = root.querySelector('[data-selected-job-card]');
   const environmentControl = root.querySelector('[data-result-environment-control]');
   const environmentSelect = root.querySelector('[data-result-environment]');
+  const scoringKindControl = root.querySelector('[data-result-scoring-control]');
+  const scoringKindSelect = root.querySelector('[data-result-scoring]');
   const chartPane = root.querySelector('[data-result-pane="charts"]');
   const chartOverlay = root.querySelector('[data-scoring-chart-overlay]');
   const chartDialog = root.querySelector('[data-scoring-chart-dialog]');
@@ -250,6 +254,8 @@
   let selectedJobId = restoredScoringViewState.jobId;
   let selectedJob = null;
   let selectedEnvironment = restoredScoringViewState.environment || 'all';
+  // Best Network or Most Reliable: both scorings share the job, its filters and its aggregation.
+  let selectedScoring = restoredScoringViewState.scoring || 'best_network';
   let currentEffectiveEnvironment = null;
   let environmentDefaultJobId = null;
   let currentResults = null;
@@ -1149,6 +1155,41 @@
     };
   }
 
+  function effectiveScoring(payload = typeof currentResults === 'undefined' ? null : currentResults) {
+    const requested = typeof selectedScoring === 'undefined' ? 'best_network' : selectedScoring;
+    return requested === 'most_reliable' && payload?.scorings?.most_reliable ? 'most_reliable' : 'best_network';
+  }
+
+  function scoringLabel() {
+    return effectiveScoring() === 'most_reliable' ? 'Most Reliable' : 'Best Network';
+  }
+
+  // The selected scoring's results, in the shape of a Best Network payload.
+  function activeScoringPayload(payload = currentResults) {
+    if (!payload || effectiveScoring(payload) !== 'most_reliable') return payload;
+    const reliable = payload.scorings.most_reliable;
+    return {
+      ...payload, views: reliable.views || {}, configuration: reliable.configuration,
+      notices: reliable.notices || [], warnings: reliable.warnings || [], coverage_notes: reliable.coverage_notes || {},
+      environment_scaling: reliable.environment_scaling || null, totals: reliable.totals || [],
+      charts: reliable.totals || [], gap_totals: reliable.gap_totals || [], scoring: [], gap: [],
+    };
+  }
+
+  function activeScoringConfiguration() {
+    return effectiveScoring() === 'most_reliable'
+      ? activeScoringPayload()?.configuration || {}
+      : selectedJob?.configuration || currentResults?.configuration || {};
+  }
+
+  function syncResultScoring(payload) {
+    if (!scoringKindControl || !scoringKindSelect) return;
+    const available = Boolean(payload?.scorings?.most_reliable);
+    scoringKindControl.hidden = !available;
+    scoringKindSelect.disabled = !available;
+    scoringKindSelect.value = effectiveScoring(payload);
+  }
+
   function setExportLinks(jobId, enabled) {
     for (const [kind, selector] of [['scoring', '[data-export-scoring]'], ['gap', '[data-export-gap]'], ['ppt', '[data-export-ppt]']]) {
       const link = root.querySelector(selector);
@@ -1157,7 +1198,10 @@
       link.tabIndex = enabled ? 0 : -1;
       const query = `table_mode=${encodeURIComponent(selectedTableMode())}&gap_layout=${encodeURIComponent(selectedGapLayout())}&environment=${encodeURIComponent(selectedEnvironment || 'all')}`;
       const gapOption = kind === 'ppt' ? `&show_gap_values=${showGapValues() ? 'true' : 'false'}` : '';
-      link.href = enabled ? `${exportBase}/${encodeURIComponent(jobId)}/export/${kind}?${query}${gapOption}` : '#';
+      // CSV files carry the selected scoring; PowerPoint and Word carry both scorings.
+      const scoringOption = kind !== 'ppt' && typeof effectiveScoring === 'function'
+        && effectiveScoring() === 'most_reliable' ? '&scoring=most_reliable' : '';
+      link.href = enabled ? `${exportBase}/${encodeURIComponent(jobId)}/export/${kind}?${query}${gapOption}${scoringOption}` : '#';
     }
   }
 
@@ -3659,7 +3703,7 @@
       series: String(row.category),
     }));
     const categorySeriesStyles = Object.fromEntries(categories.map(category => [category, {label: category}]));
-    const stackedChart = makeSvgChart('Best Network Scoring per Category', stackedRows, selected.operatorTable, {
+    const stackedChart = makeSvgChart(`${scoringLabel()} Scoring per Category`, stackedRows, selected.operatorTable, {
       stacked: true,
       categoryOrder: operators,
       categoryLabels: operatorLabels,
@@ -3674,7 +3718,7 @@
       ),
     });
     stackedChart.style.minWidth = '0';
-    pane.append(makeExpandableChartCard('Best Network Scoring per Category', contextLabel(selected.context, {environmentPrefix: false}), stackedChart));
+    pane.append(makeExpandableChartCard(`${scoringLabel()} Scoring per Category`, contextLabel(selected.context, {environmentPrefix: false}), stackedChart));
     const clusteredChart = makeSvgChart('Scoring per Category', selected.rows, selected.operatorTable, {
       legendEntries: operatorLegend,
       fitWidth: chartFitWidth(pane),
@@ -3745,7 +3789,7 @@
     }));
     const seriesStyles = Object.fromEntries(kpiCategories.map(category => [category, {label: category}]));
     appendContextHeader(pane, tableData, 'score', 'Scoring Charts');
-    const chart = makeSvgChart('Best Network Scoring per Category', rows, tableData, {
+    const chart = makeSvgChart(`${scoringLabel()} Scoring per Category`, rows, tableData, {
       stacked: true,
       categoryOrder: columns.map(column => column.id),
       categoryLabels,
@@ -3768,7 +3812,7 @@
     });
     chart.style.minWidth = '0';
     pane.append(makeExpandableChartCard(
-      'Best Network Scoring per Category', contextLabel(tableData.context, {environmentPrefix: false}), chart,
+      `${scoringLabel()} Scoring per Category`, contextLabel(tableData.context, {environmentPrefix: false}), chart,
     ));
     const clusteredRows = sourceRows.map(row => ({
       category: String(row.category),
@@ -3941,7 +3985,7 @@
     svg.style.maxWidth = 'none';
     svg.style.minHeight = '0';
     svg.setAttribute('role', 'img');
-    svg.setAttribute('aria-label', 'Best Network Scoring per Service');
+    svg.setAttribute('aria-label', `${scoringLabel()} Scoring per Service`);
     if (operatorLegendRows.length) {
       operatorLegendRows.forEach((row, rowIndex) => {
         let x = left + Math.max(0, (width - left - right - (row.width - 22)) / 2);
@@ -4087,7 +4131,7 @@
     if (!allocations.length) return [{name: requested, ...bestNetworkTotals(tableData).allocation, color: palette[0]}];
     // Environments without results in any series give their points to the others,
     // in proportion, as the Combined scores do; the configured points stay visible.
-    const results = typeof currentResults === 'undefined' ? null : currentResults;
+    const results = typeof currentResults === 'undefined' ? null : activeScoringPayload(currentResults);
     const scaled = new Set(combined ? results?.environment_scaling?.scaled_environments || [] : []);
     const total = allocations.reduce((sum, item) => sum + item.Voice + item.Data, 0);
     const kept = allocations.filter(item => !scaled.has(item.name)).reduce((sum, item) => sum + item.Voice + item.Data, 0);
@@ -4339,7 +4383,7 @@
       || scoreTables.find(table => comparisonIdentity(table, 'score') === contextSelections.get('score'))
       || scoreTables[0];
     if (!card || !selected) return;
-    const configuration = selectedJob?.configuration || currentResults?.configuration || {};
+    const configuration = activeScoringConfiguration();
     const allocations = maximumAllocationEnvironments(selected, allTables, configuration);
     const categories = maximumAllocationCategories(selected, allocations, configuration);
     if (!categories.length) return;
@@ -4354,7 +4398,7 @@
     if (!hierarchyTable && !scoreTables.length) {
       const empty = document.createElement('div');
       empty.className = 'scoring-empty';
-      empty.textContent = 'No Best Network chart is available for this environment.';
+      empty.textContent = `No ${scoringLabel()} chart is available for this environment.`;
       pane.append(empty);
       return;
     }
@@ -4373,8 +4417,8 @@
     layout.className = 'scoring-best-network-layout';
     const meta = contextLabel(selected.context, {environmentPrefix: false});
     const bars = makeBestNetworkBars(selected, data);
-    layout.append(makeExpandableChartCard('Best Network Scoring per Service', meta, bars));
-    const configuration = selectedJob?.configuration || currentResults?.configuration || {};
+    layout.append(makeExpandableChartCard(`${scoringLabel()} Scoring per Service`, meta, bars));
+    const configuration = activeScoringConfiguration();
     const allocations = maximumAllocationEnvironments(selected, allTables, configuration);
     const donut = makeMaximumAllocationDonut(allocations);
     layout.append(makeExpandableChartCard('Maximum score per environment & service', meta, donut));
@@ -4607,9 +4651,11 @@
     });
   }
 
-  function renderResult(payload, job, panesToRender = [activeResultTab]) {
-    currentResults = payload;
-    currentResultsJobId = jobIdOf(job || payload.job || {}) || null;
+  function renderResult(savedPayload, job, panesToRender = [activeResultTab]) {
+    currentResults = savedPayload;
+    currentResultsJobId = jobIdOf(job || savedPayload.job || {}) || null;
+    syncResultScoring(savedPayload);
+    const payload = activeScoringPayload(savedPayload);
     const shouldRenderPane = name => panesToRender.includes(name);
     const scoringRows = payload.scoring ?? payload.scoring_rows ?? [];
     const gapRows = payload.gap ?? payload.gap_rows ?? [];
@@ -4709,6 +4755,7 @@
 
   function renderNoResult(text) {
     environmentControl.hidden = false;
+    syncResultScoring(null);
     environmentSelect.disabled = true;
     for (const pane of resultPanes) {
       disconnectScoringValueObservers(pane);
@@ -4946,8 +4993,9 @@
     scheduleSelectionSave();
   });
   root.addEventListener('change', event => {
-    if ([environmentSelect, showKpiValuesToggle, showGapValuesToggle, gapLayoutSelect].includes(event.target)) {
+    if ([environmentSelect, scoringKindSelect, showKpiValuesToggle, showGapValuesToggle, gapLayoutSelect].includes(event.target)) {
       if (event.target === environmentSelect) selectedEnvironment = environmentSelect.value;
+      if (event.target === scoringKindSelect) selectedScoring = scoringKindSelect.value === 'most_reliable' ? 'most_reliable' : 'best_network';
       persistScoringViewState();
     }
     if (event.target === scoringProfileSelect) {
@@ -4966,6 +5014,10 @@
     }
     if (event.target === environmentSelect && currentResults) {
       selectedEnvironment = environmentSelect.value;
+      renderResult(currentResults, selectedJob);
+      return;
+    }
+    if (event.target === scoringKindSelect && currentResults) {
       renderResult(currentResults, selectedJob);
       return;
     }
@@ -5006,7 +5058,8 @@
       renderResult(currentResults, selectedJob);
       return;
     }
-    const views = currentResults.views && typeof currentResults.views === 'object' ? currentResults.views : {};
+    const activeResults = activeScoringPayload(currentResults);
+    const views = activeResults.views && typeof activeResults.views === 'object' ? activeResults.views : {};
     const allTables = kind === 'gap'
       ? (views.gap_tables ?? currentResults.gap_tables ?? currentResults.scoring_views?.gap_tables ?? [])
       : kind === 'gap-summary'

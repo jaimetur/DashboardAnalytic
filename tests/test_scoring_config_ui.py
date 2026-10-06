@@ -82,7 +82,7 @@ def test_scoring_kpi_mapping_methods_are_explicit_and_persisted():
     assert 'metric.mapping_method = mappingMethod;' in script
     assert "? template.mapping_method" in script
     assert ": 'piecewise_linear';" in script
-    assert 'cell.colSpan = 19;' in script
+    assert 'cell.colSpan = 20;' in script
 
 
 def test_kpi_categories_are_selectable_saved_and_created_with_a_first_kpi():

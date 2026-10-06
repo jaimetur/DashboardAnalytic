@@ -2,6 +2,8 @@
 
 Calculate KPI scores from processed Data, Voice and Speech CDRs, then compare each operator with a reference operator. Results belong to the workspace and do not require a Dashboard or Report Template.
 
+Each job calculates the NetCheck **Best Network** scoring, which rates every KPI of the methodology. When the methodology has Most Reliable points, the job also shows the **Most Reliable** scoring, which rates a subset of KPIs with its own maximum points, with the same CDRs, filters, aggregation and GAP reference (see [Most Reliable Network scoring](#most-reliable-network-scoring)).
+
 > [!NOTE]
 > **Start with a saved methodology.** It defines the environments, KPI formulas, thresholds and maximum points. The selected job keeps a snapshot of these rules.
 
@@ -12,6 +14,7 @@ Calculate KPI scores from processed Data, Voice and Speech CDRs, then compare ea
 | Calculate or recalculate a comparison | [Calculate and review](#calculate-and-review) |
 | Understand filters and aggregation | [Filters and aggregation](#filters-and-aggregation) |
 | Read scores, GAPs and coverage warnings | [Results and workspace settings](#results-and-workspace-settings) |
+| Show or configure the Most Reliable scoring | [Most Reliable Network scoring](#most-reliable-network-scoring) |
 | Change environments, KPIs or weights | [Methodology](#methodology) |
 | Edit formulas and scoring rules | [KPI definitions](#editing-replacing-adding-and-removing-kpis) |
 | Understand methodology JSON | [Portable JSON reference](#portable-json-reference) |
@@ -123,6 +126,10 @@ Filter choices use cached CDR catalogues. If an older CDR lacks expected choices
 
 ## Results and workspace settings
 
+### Choose a scoring
+
+The **Scoring** selector, beside Environment, switches the tables, charts, GAP analysis, notes and CSV exports between **Best Network** and **Most Reliable**. It appears when the job's methodology has Most Reliable points; otherwise the job shows only Best Network. The browser remembers the choice for the session.
+
 ### Choose an environment
 
 The **Environment** selector applies to all result tabs and exports. An individual environment shows its own contribution; **All Environments** combines the configured environments.
@@ -186,12 +193,12 @@ Columns represent combinations of the selected levels, such as City and Campaign
 
 | Chart | Use it to… |
 | --- | --- |
-| **Best Network Scoring per Service** | Compare total points and Data/Voice contributions; Data stacks below Voice |
-| **Best Network Scoring per Category** | Compare category contributions within each operator/context stack |
+| **Best Network / Most Reliable Scoring per Service** | Compare total points and Data/Voice contributions; Data stacks below Voice |
+| **Best Network / Most Reliable Scoring per Category** | Compare category contributions within each operator/context stack |
 | **Scoring per Category** | Compare operators directly within each category |
 | **Maximum score allocation donuts** | Inspect configured environment, service and category maxima and shares |
 
-Voice and Speech KPIs contribute to **Voice**; Data KPIs contribute to **Data**, regardless of category names. Allocation donuts show **maximum available allocation**, not earned scores.
+Voice and Speech KPIs contribute to **Voice**; Data KPIs contribute to **Data**, regardless of category names. Allocation donuts show **maximum available allocation**, not earned scores. Chart titles and donuts follow the selected scoring.
 
 Hover bars, segments, totals or donut sectors for values and context. Double-click charts for an enlarged view. Dense web charts scroll horizontally. Operator Mapping supplies labels, order and colors.
 
@@ -322,7 +329,8 @@ Distribution changes points, not formulas or thresholds. Relative shares can be 
 | **Direction** | Whether higher or lower measurements are better |
 | **Mapping** | Linear, Quadratic or Smooth curve interpolation |
 | **KPI Type** | Reliable / Diff display classification |
-| **Max points / weight** | The KPI's contribution to the environment |
+| **Max points / weight** | The KPI's contribution to the environment in the Best Network scoring |
+| **Most Reliable points** | The KPI's maximum points in the Most Reliable scoring; empty or 0 leaves it out |
 | **Thresholds / score anchors** | Measurement boundaries and normalized score awarded at each boundary |
 
 KPI Type is descriptive: it does not change the formula, mapping or GAP arithmetic. Calculation basis is read-only information derived from the formula; it does not set the denominator.
@@ -380,6 +388,29 @@ The Interactivity packet-error formula has explicit IFNULL behavior for lost, di
 
 Limits: **256 KPIs**, **32 environments** per methodology and **64 methodologies** per workspace. New fields or unsupported operations require engine support, not just a JSON edit.
 
+### Most Reliable Network scoring
+
+NetCheck publishes two rankings. **Best Network** rates every KPI. **Most Reliable** rates only the reliability KPIs, with its own maximum points, and uses the same formulas, thresholds, score anchors and mapping as Best Network: each KPI keeps its normalized score and only its maximum points change.
+
+| | Best Network | Most Reliable |
+| --- | --- | --- |
+| KPIs | Every KPI with Max points | Only KPIs with Most Reliable points |
+| Points of a KPI | Normalized score × Max points | Normalized score × Most Reliable points |
+| Thresholds, anchors, mapping | The methodology's | The same |
+| GAP | Compared − reference Best Network points | Compared − reference Most Reliable points |
+
+#### Configure it
+
+1. Open **Workspace Config → Scoring & GAP Analysis Setup** and the methodology.
+2. In **KPI Definitions, Scoring & Thresholds**, enter the **Most Reliable points** of each KPI in each environment. The line above the table counts the KPIs and points of the selected environment and of all environments.
+3. Or select **Load NetCheck 2026 Most Reliable points** to fill in the NetCheck 2026 allocation (see [Most Reliable reference points](#most-reliable-reference-points)). It finds the KPIs by category and name, gives the points to the environments whose source is Drive/City and Drive/Connecting Roads, and leaves every other KPI and environment without Most Reliable points.
+4. **Save Methodology**, then calculate or recalculate the job.
+
+Most Reliable points are part of the methodology: changing them gives the methodology a different identity, so **Calculate Scoring** creates a new job and **Recalculate** updates a selected one. The Most Reliable results are derived from the saved KPI scores of the job, so they never read the CDRs again. A new environment or a new KPI starts without Most Reliable points.
+
+> [!NOTE]
+> **Environments without Most Reliable points contribute nothing to it.** The Most Reliable maximum of an environment is the sum of its KPIs' Most Reliable points; All Environments adds them, and [environments without results are scaled](#incomplete-coverage-and-achievable-scoring) the same way as in Best Network.
+
 ### Portable JSON reference
 
 #### Envelope and required content
@@ -423,6 +454,7 @@ The following minimal example contains one KPI. A complete benchmark must includ
           "contexts": {
             "Drive - City": {
               "max_points": 650,
+              "most_reliable_points": 650,
               "thresholds": {"low": 85, "medium": 98, "high": 100, "ultra": null}
             }
           }
@@ -445,13 +477,15 @@ The following minimal example contains one KPI. A complete benchmark must includ
 | `metrics` | Nonempty collection of identified KPI definitions |
 | Metric `calculation` | Formula and source filters; the formula determines the denominator |
 | Metric `mapping_method` | `piecewise_linear`, `piecewise_quadratic` or `piecewise_smoothstep` |
-| Metric `contexts` | Each environment's thresholds, maximum points and optional score anchors |
+| Metric `contexts` | Each environment's thresholds, maximum points, optional score anchors and optional `most_reliable_points` |
 | `interpolation` | Optional default score anchors |
 | `aggregation_hierarchy` | All five dimensions in order |
 | `gap_priority` | KPI code order; removed codes are dropped and new codes appended |
 | `next_kpi_number` | High-water mark for generated codes |
 
 Environment totals and positive-point relative weights are derived from KPI maximum points, so exports do not duplicate them. Relative shares for zero-point environments are retained.
+
+`most_reliable_points` is optional; omitted or 0 leaves the KPI out of the Most Reliable scoring of that environment. Files without it are still imported and keep their identity.
 
 Reference filenames, workbook cells, denominator descriptions and Tableau grouping keys are not needed for an operational methodology and are omitted. Optional mapping/anchor settings use supported defaults when omitted; retain explicit settings when customized.
 
@@ -525,20 +559,22 @@ For All Environments, only valid environment contributions common to both sides 
 
 | Action | Contents |
 | --- | --- |
-| **Scoring CSV** | Expanded scoring results, category subtotals and totals |
-| **GAP CSV** | Expanded GAP results and their existing numeric fields |
-| **PowerPoint** | Saved results with editable tables and charts, covers and environment transitions |
+| **Scoring CSV** | Expanded scoring results, category subtotals and totals of the selected scoring |
+| **GAP CSV** | Expanded GAP results and their existing numeric fields of the selected scoring |
+| **PowerPoint** | Saved results with editable tables and charts, covers and environment transitions, for both scorings |
 | **Word** | The same report as the PowerPoint, one landscape page per slide exactly as in PowerPoint (rendered with LibreOffice, included in the Docker image; without it the slide tables and charts are rebuilt) |
 
 **Export PowerPoint** and **Export Word**, at the top right of the Scoring Calculation panel beside NR Mode, export the selected job like the results tools; a progress dialog stays open while the document is generated. Selecting one environment exports that environment. **All Environments** exports the aggregate and available individual environments. Exports use saved job results; they do not recalculate KPIs.
 
-CSV preserves stored names, numeric values and its schema. Its existing category/final GAP aggregates remain valid-KPI means. The new **Total KPI GAP** footer is a web/PowerPoint display total; it does not redefine CSV GAP fields. `gap_partial` and `gap_environments` identify partial coverage.
+CSV preserves stored names, numeric values and its schema; the Most Reliable CSV has the same columns with the Most Reliable points (`scoring=most_reliable` in the export address). Its existing category/final GAP aggregates remain valid-KPI means. The new **Total KPI GAP** footer is a web/PowerPoint display total; it does not redefine CSV GAP fields. `gap_partial` and `gap_environments` identify partial coverage.
 
 ### What is in the PowerPoint?
 
+When the job has a Most Reliable scoring, the document contains both scorings after the cover: a **Best Network Scoring** section and then a **Most Reliable Network Scoring** section, each with its own environment blocks. Slide subtitles and environment transitions name the scoring (for example *Most Reliable — Drive - City*) and slide notes carry the notes of that scoring. Reporting Jobs generate the same document for their Scoring artifact, so one PowerPoint or Word file carries both scorings with the filters and aggregation of the entry. Without Most Reliable points the document has only the Best Network blocks.
+
 Each environment block contains:
 
-1. Best Network Scoring per Service and per Category.
+1. Best Network (or Most Reliable) Scoring per Service and per Category.
 2. Scoring per Category.
 3. Scoring Tables — Summary and Breakdown.
 4. All Operators GAP comparison, then individual operator comparisons.
@@ -667,3 +703,22 @@ This is the **original NetCheck 2026 reference**, not a promise that a customize
 | K30 | VIDEO STREAM | VIDEO STREAMING IRRITATING EXPERIENCE [%] | 27.0400 | 14.5600 |
 | K31 | INTERACTIVITY | INTERACTIVITY PACKET ERROR RATIO [%] | 5.0700 | 2.7300 |
 | K32 | INTERACTIVITY | INTERACTIVITY MEDIAN RTT [MS] | 20.2800 | 10.9200 |
+
+### Most Reliable reference points
+
+`Netcheck_Score_Mapping_2026Q2_Mostreliable_Drive_City_Road.xlsx` rates 10 KPIs with **650.02** points in Drive - City and **350.02** in Drive - Connecting Roads (Voice 350.02, Data 650.02, 1,000.04 in total); the KPIs underlined in the NetCheck Q2 2026 report are the same. Thresholds and score anchors are the Best Network ones. **Load NetCheck 2026 Most Reliable points** applies these values.
+
+| Code | Category | KPI | City points | Road points |
+|---|---|---|---:|---:|
+| K1 | CLASSIC CALLS | CALL SUCCESS RATIO [%] | 92.14 | 49.61 |
+| K4 | CLASSIC CALLS | POLQA < 1.6 [%] | 44.36 | 23.89 |
+| K7 | WHATSAPP CALLS | CALL SUCCESS RATIO [%] | 61.43 | 33.08 |
+| K8 | WHATSAPP CALLS | POLQA < 1.6 [%] | 29.58 | 15.93 |
+| K12 | TRANSFER | FDFS DL SUCCESS RATIO [%] | 63.38 | 34.13 |
+| K14 | TRANSFER | FDFS UL SUCCESS RATIO [%] | 38.03 | 20.48 |
+| K16 | TRANSFER | FDTT DL THROUGHPUT > 2Mbit/s [%] | 101.40 | 54.60 |
+| K21 | TRANSFER | FDTT UL THROUGHPUT > 1Mbit/s [%] | 50.70 | 27.30 |
+| K27 | HTTP/HTTPS BROWSING | BROWSING SUCCESS RATIO [%] | 84.50 | 45.50 |
+| K28 | VIDEO STREAM | VIDEO STREAMING SUCCESS RATIO [%] | 84.50 | 45.50 |
+
+Regression tests reproduce the workbook's City and Road totals for each operator from its KPI values.

@@ -11,6 +11,8 @@ from src.modules.column_names import column_identity, resolve_column_name
 from src.modules.scoring_vendors import scoring_vendor_group
 from src.modules.scoring_config import (
     configuration_hash,
+    MOST_RELIABLE_SCORING,
+    most_reliable_configuration,
     SUPPORTED_MAPPING_METHODS,
     _is_legacy_two_environment_configuration,
     validate_scoring_configuration,
@@ -21,6 +23,10 @@ from src.modules.scoring_config import (
 METHOD_VERSION = 'campaign-gap-global-kpi-v7'
 AGGREGATION_CONTRACT_VERSION = 2
 _SHARED = ['Operator', 'Campaign', 'G_Level_1', 'G_Level_2']
+_INCOMPLETE_COVERAGE_WARNING = (
+    'Incomplete KPI or environment coverage: partial points are shown without renormalizing weights; '
+    'a complete benchmark score is unavailable.'
+)
 _LEVEL_SOURCE_ALIASES = {
     'Region': ('Region', 'G_Level_2'),
     'City': ('City', 'G_Level_4'),
@@ -422,24 +428,8 @@ def calculate_scoring(
     # Scaling is information, not a coverage problem: it is shown apart from the warnings.
     notices = scaling_warnings(totals)
     if any(not row['complete_coverage'] for row in totals):
-        warnings.append('Incomplete KPI or environment coverage: partial points are shown without renormalizing weights; a complete benchmark score is unavailable.')
-
-    def reference_for(row, records, identity):
-        return _reference_for(row, records, identity, keys, baseline_operator, baseline_aliases)
-
-    gap = []
-    for row in rows:
-        if _is_baseline(str(row['operator']), baseline_operator, baseline_aliases):
-            continue
-        baseline = reference_for(row, rows, 'kpi_code')
-        if baseline is None:
-            warnings.append(f'Baseline {baseline_operator} is unavailable for one or more comparison groups.')
-        elif baseline['weighted_points'] is not None and row['weighted_points'] is not None:
-            gap.append({**{key: row.get(key) for key in keys}, 'dataset_type': row['dataset_type'], 'kpi': row['kpi'],
-                        'kpi_code': row['kpi_code'], 'category': row['category'], 'kpi_type': row['kpi_type'],
-                        'baseline_operator': baseline_operator,
-                        'baseline_actual_operator': baseline['operator'], 'baseline_points': baseline['weighted_points'], 'operator_points': row['weighted_points'],
-                        'gap_points': row['weighted_points'] - baseline['weighted_points']})
+        warnings.append(_INCOMPLETE_COVERAGE_WARNING)
+    gap = _gap_rows(rows, keys, baseline_operator, baseline_aliases, warnings)
     gap_totals = _gap_totals(totals, keys, baseline_operator, baseline_aliases)
     return {'scoring': rows, 'global_kpis': global_kpis,
             'totals': totals, 'charts': [dict(row) for row in totals], 'gap': gap,
@@ -451,6 +441,77 @@ def calculate_scoring(
             'method_version': method_version, 'configuration': config,
             'configuration_hash': configuration_hash(config), 'gap_direction': 'operator_minus_reference',
             'baseline_aliases': baseline_aliases}
+
+
+def _gap_rows(rows: list[dict], keys: list[str], baseline_operator: str, baseline_aliases: list[str],
+              warnings: list[str]) -> list[dict]:
+    gap = []
+    for row in rows:
+        if _is_baseline(str(row['operator']), baseline_operator, baseline_aliases):
+            continue
+        baseline = _reference_for(row, rows, 'kpi_code', keys, baseline_operator, baseline_aliases)
+        if baseline is None:
+            warnings.append(f'Baseline {baseline_operator} is unavailable for one or more comparison groups.')
+        elif baseline['weighted_points'] is not None and row['weighted_points'] is not None:
+            gap.append({**{key: row.get(key) for key in keys}, 'dataset_type': row['dataset_type'], 'kpi': row['kpi'],
+                        'kpi_code': row['kpi_code'], 'category': row['category'], 'kpi_type': row['kpi_type'],
+                        'baseline_operator': baseline_operator,
+                        'baseline_actual_operator': baseline['operator'], 'baseline_points': baseline['weighted_points'], 'operator_points': row['weighted_points'],
+                        'gap_points': row['weighted_points'] - baseline['weighted_points']})
+    return gap
+
+
+def most_reliable_result(result: dict, baseline_operator: str = 'EE', configuration: dict | None = None) -> dict | None:
+    """The Most Reliable Network scoring of a saved result, or None when its methodology has none.
+
+    Most Reliable rates a subset of the KPIs with its own maximum points and the same
+    thresholds, so it reuses the saved KPI measurements and scores: no CDR is read
+    again, and every job whose methodology snapshot has Most Reliable points shows it.
+    """
+    if not isinstance(result, dict):
+        return None
+    rows = result.get('scoring')
+    snapshot = result.get('configuration') or configuration
+    if not isinstance(rows, list) or not isinstance(snapshot, dict):
+        return None
+    try:
+        config = most_reliable_configuration(snapshot)
+        if config is None:
+            return None
+        dimensions = list(result.get('aggregation_levels') or ['Operator'])
+        if 'Operator' not in dimensions:
+            dimensions.append('Operator')
+        keys = [_key_name(field) for field in dict.fromkeys(['Campaign', *dimensions, 'environment'])]
+        metrics = {metric['code']: metric for metric in config['metrics']}
+        reliable_rows = []
+        for row in rows:
+            metric = metrics.get(row.get('kpi_code'))
+            context = metric['contexts'].get(row.get('environment')) if metric else None
+            if context is None:
+                continue
+            maximum = context['max_points']
+            score = row.get('score')
+            reliable_rows.append({**row, 'max_points': maximum,
+                                  'weighted_points': score * maximum if score is not None else None})
+        totals = _totals(reliable_rows, keys, config)
+    except (KeyError, TypeError, ValueError):
+        return None
+    aliases = list(result.get('baseline_aliases') or [baseline_operator])
+    # Keep the calculation warnings, except those about KPIs outside the Most Reliable scoring.
+    warnings = [warning for warning in result.get('warnings') or [] if warning != _INCOMPLETE_COVERAGE_WARNING
+                and not ((match := re.fullmatch(r'\w+: (\S+) requires missing column .+', str(warning)))
+                         and match.group(1) not in metrics)]
+    if any(not row['complete_coverage'] for row in totals):
+        warnings.append(_INCOMPLETE_COVERAGE_WARNING)
+    gap = _gap_rows(reliable_rows, keys, baseline_operator, aliases, [])
+    return {**result, 'scoring': reliable_rows,
+            'global_kpis': [row for row in result.get('global_kpis') or [] if row.get('kpi_code') in metrics],
+            'totals': totals, 'charts': [dict(row) for row in totals], 'gap': gap,
+            'gap_totals': _gap_totals(totals, keys, baseline_operator, aliases),
+            'warnings': warnings, 'notices': scaling_warnings(totals),
+            'environment_scaling': environment_scaling(totals),
+            'configuration': config, 'configuration_hash': configuration_hash(config),
+            'scoring_kind': MOST_RELIABLE_SCORING}
 
 
 def _reference_for(row, records, identity, keys, baseline_operator, baseline_aliases):

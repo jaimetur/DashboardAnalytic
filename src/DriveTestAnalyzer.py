@@ -15456,7 +15456,11 @@ def scoring_jobs_result(job_id: int, user: SessionUser = Depends(current_user)) 
         normalize_result_gaps(job.get('result') or {}), task_repository.list_operator_mapping_groups(),
     )
     views = {}
+    scorings = {}
     if result.get('scoring') or result.get('score_rows'):
+        from src.modules.scoring import most_reliable_result
+        from src.modules.scoring_config import MOST_RELIABLE_SCORING, SCORING_LABELS
+        baseline = str(job.get('baseline_operator') or 'EE')
         try:
             fallback = (task_repository.get_scoring_configuration()
                         if not result.get('configuration') and not job.get('configuration') else None)
@@ -15464,12 +15468,27 @@ def scoring_jobs_result(job_id: int, user: SessionUser = Depends(current_user)) 
                 job, result, task_repository.list_operator_mapping_groups(), fallback,
                 vendor_mapping_groups=task_repository.list_vendor_mapping_groups(),
             )
-            refresh_baseline_warning(result, views, str(job.get('baseline_operator') or 'EE'))
+            refresh_baseline_warning(result, views, baseline)
+            # The Most Reliable scoring is derived from the same saved KPI scores and filters.
+            reliable = most_reliable_result(result, baseline, job.get('configuration') or fallback)
+            if reliable is not None:
+                reliable_views = build_scoring_views(
+                    job, reliable, task_repository.list_operator_mapping_groups(),
+                    vendor_mapping_groups=task_repository.list_vendor_mapping_groups(),
+                )
+                refresh_baseline_warning(reliable, reliable_views, baseline)
+                scorings[MOST_RELIABLE_SCORING] = {
+                    'label': SCORING_LABELS[MOST_RELIABLE_SCORING], 'views': reliable_views,
+                    'configuration': reliable['configuration'], 'notices': reliable['notices'],
+                    'warnings': reliable['warnings'], 'environment_scaling': reliable['environment_scaling'],
+                    'totals': reliable['totals'], 'gap_totals': reliable['gap_totals'],
+                    'coverage_notes': scoring_coverage_notes(reliable),
+                }
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
     result['coverage_notes'] = scoring_coverage_notes(result)
     return {'job': {key: value for key, value in job.items() if key != 'result'}, **result,
-            'views': views}
+            'views': views, 'scorings': scorings}
 
 
 @app.delete('/api/scoring/jobs/{job_id}')
@@ -15519,10 +15538,13 @@ def scoring_job_export(
     environment: str = 'all',
     show_gap_values: bool = True,
     split_charts: bool = True,
+    scoring: str = 'best_network',
     user: SessionUser = Depends(current_user),
 ) -> Response:
     if table_mode is not None and table_mode not in {'expanded', 'summary'}:
         raise HTTPException(status_code=400, detail='Table mode must be expanded or summary.')
+    if scoring not in {'best_network', 'most_reliable'}:
+        raise HTTPException(status_code=400, detail='Scoring must be best_network or most_reliable.')
     if gap_layout is not None and gap_layout not in {'end', 'adjacent'}:
         raise HTTPException(status_code=400, detail='GAP layout must be end or adjacent.')
     task_repository = scoring_repository(user)
@@ -15566,6 +15588,13 @@ def scoring_job_export(
         if selected_environment not in valid_environments:
             raise HTTPException(status_code=400, detail='The selected scoring environment is not available for this job.')
     if export_kind in {'scoring', 'gap'}:
+        if scoring == 'most_reliable':
+            # The CSV keeps its schema; it carries the Most Reliable points instead of the Best Network ones.
+            from src.modules.scoring import most_reliable_result
+            reliable = most_reliable_result(result, str(job.get('baseline_operator') or 'EE'), export_configuration)
+            if reliable is None:
+                raise HTTPException(status_code=400, detail='This scoring job has no Most Reliable scoring.')
+            result = reliable
         if table_mode is not None:
             from src.modules.scoring_exports import export_scoring_csv
             try:

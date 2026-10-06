@@ -491,6 +491,7 @@ Choose the environment to edit, or create, rename or delete one. Keep at least o
 | Edit weights by Points | Edit absolute KPI allocations. |
 | Edit weights by Weight (%) | Edit relative shares while preserving the environment total and redistributing the other shares proportionally. |
 | Distribute points keeping percentages | Allocate a new total using a reference environment's relative KPI shares. Thresholds and formulas are not copied. |
+| Load NetCheck 2026 Most Reliable points | Give the NetCheck 2026 Most Reliable points to its 10 KPIs in Drive - City and Drive - Connecting Roads; the line beside it counts the KPIs and Most Reliable points of the selected environment and of all environments. |
 
 Creating an environment copies KPI rules and proportions from the selected reference; its own CDR filters determine the rows included. NetCheck 2026 includes Walk with zero initial points and editable relative weights.
 
@@ -504,6 +505,7 @@ Expand this subpanel to edit KPI specifications, thresholds and weights for the 
 - Add or delete KPIs; at least one must remain. New KPIs receive stable K-number identifiers. Moving or deleting rows does not renumber other KPIs.
 - Move KPIs within their category, change their category or reorder whole categories. Category totals show points, environment-relative weights and global weights.
 - Renaming a KPI code updates its saved GAP priority reference without changing its priority.
+- Set the **Most Reliable points** of each KPI in the selected environment: the KPIs with points form the Most Reliable Network scoring, with the same thresholds; empty or 0 leaves a KPI out of it. See [Most Reliable Network scoring](scoring-gap-analysis.md#most-reliable-network-scoring).
 
 Max Points displays two decimal places while retaining full precision for calculation and unchanged allocations when saved. The formula determines the calculation basis; formulas and filters must use supported engine fields and operations.
 

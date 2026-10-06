@@ -69,6 +69,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
   const environmentTotalSummary = root.querySelector('[data-environment-total-summary]');
   const environmentTotalLabel = root.querySelector('[data-environment-total-label]');
   const distributePointsButton = root.querySelector('[data-scoring-distribute-points]');
+  const reliableSummary = root.querySelector('[data-scoring-reliable-summary]');
+  const reliablePresetButton = root.querySelector('[data-scoring-reliable-netcheck]');
   const createEnvironmentButton = root.querySelector('[data-scoring-environment-create]');
   const renameEnvironmentButton = root.querySelector('[data-scoring-environment-rename]');
   const deleteEnvironmentButton = root.querySelector('[data-scoring-environment-delete]');
@@ -511,9 +513,11 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     const ultraMode = row.querySelector('[data-ultra-mode]')?.value || 'none';
     const ultraValue = row.querySelector('[data-ultra-value]')?.value ?? '';
     const numericPoints = Number(points);
+    const reliableInput = row.querySelector('[data-most-reliable-points]');
     const cached = {
       ...existing,
       max_points: points,
+      ...(reliableInput ? {most_reliable_points: reliableInput.value.trim()} : {}),
       thresholds,
       ultra_mode: ultraMode,
       ultra_value: ultraValue,
@@ -556,6 +560,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       const raw = draft?.score_mapping?.[key] ?? Number(saved.score_mapping?.[key]) * 100;
       if (input) input.value = raw === null || raw === undefined || Number.isNaN(Number(raw)) ? '' : String(raw);
     });
+    setReliableInputValue(row.querySelector('[data-most-reliable-points]'), draft?.most_reliable_points ?? saved.most_reliable_points);
     const share = draft?.weight_share ?? row._weightShareDrafts?.[environment] ?? saved.weight_share;
     if (Number.isFinite(Number(share))) setRowEnvironmentShare(row, environment, Number(share));
     syncUltraInput(row);
@@ -570,6 +575,96 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     if (Number.isFinite(draft)) return draft;
     const value = Number(metricForRow(row)?.contexts?.[environment]?.max_points);
     return Number.isFinite(value) ? value : 0;
+  };
+
+  // Most Reliable points: the KPIs with points form the Most Reliable Network scoring.
+  const reliablePointsValue = (value) => {
+    const number = Number(value);
+    return String(value ?? '').trim() !== '' && Number.isFinite(number) && number > 0 ? number : 0;
+  };
+
+  const reliablePointsForRow = (row, environment) => {
+    if (environment === environmentSelect.value) {
+      return reliablePointsValue(row.querySelector('[data-most-reliable-points]')?.value);
+    }
+    const draft = row._contextDrafts?.[environment]?.most_reliable_points;
+    if (draft !== undefined) return reliablePointsValue(draft);
+    return reliablePointsValue(metricForRow(row)?.contexts?.[environment]?.most_reliable_points);
+  };
+
+  const setReliableInputValue = (input, value) => {
+    if (!input) return;
+    const points = reliablePointsValue(value);
+    input.value = points > 0 ? String(Number(points.toFixed(4))) : '';
+  };
+
+  const updateReliableSummary = () => {
+    if (!reliableSummary) return;
+    const rows = rowMetrics();
+    const environment = environmentSelect.value;
+    const environmentPoints = rows.map((row) => reliablePointsForRow(row, environment));
+    const kpis = environmentPoints.filter((points) => points > 0).length;
+    const environmentTotal = environmentPoints.reduce((sum, points) => sum + points, 0);
+    const globalTotal = environmentKeys().reduce((sum, key) => sum + rows.reduce(
+      (total, row) => total + reliablePointsForRow(row, key), 0,
+    ), 0);
+    reliableSummary.textContent = globalTotal > 0
+      ? `Most Reliable Network scoring: ${kpis} KPI${kpis === 1 ? '' : 's'} with ${scoringConfigMath.formatPointDisplay(environmentTotal)} points in ${environmentLabel(environment)}; ${scoringConfigMath.formatPointDisplay(globalTotal)} points in all environments.`
+      : 'Most Reliable Network scoring: no KPI has Most Reliable points, so scoring jobs show only the Best Network scoring.';
+  };
+
+  // NetCheck 2026 Most Reliable allocation: [code, category, KPI, Drive - City points, Drive - Connecting Roads points].
+  const netcheckMostReliablePoints = [
+    ['K1', 'CLASSIC CALLS', 'CALL SUCCESS RATIO [%]', 92.14, 49.61],
+    ['K4', 'CLASSIC CALLS', 'POLQA < 1.6 [%]', 44.36, 23.89],
+    ['K7', 'WHATSAPP CALLS', 'CALL SUCCESS RATIO [%]', 61.43, 33.08],
+    ['K8', 'WHATSAPP CALLS', 'POLQA < 1.6 [%]', 29.58, 15.93],
+    ['K12', 'TRANSFER', 'FDFS DL SUCCESS RATIO [%]', 63.38, 34.13],
+    ['K14', 'TRANSFER', 'FDFS UL SUCCESS RATIO [%]', 38.03, 20.48],
+    ['K16', 'TRANSFER', 'FDTT DL THROUGHPUT > 2Mbit/s [%]', 101.4, 54.6],
+    ['K21', 'TRANSFER', 'FDTT UL THROUGHPUT > 1Mbit/s [%]', 50.7, 27.3],
+    ['K27', 'HTTP/HTTPS BROWSING', 'BROWSING SUCCESS RATIO [%]', 84.5, 45.5],
+    ['K28', 'VIDEO STREAM', 'VIDEO STREAMING SUCCESS RATIO [%]', 84.5, 45.5],
+  ];
+
+  const netcheckEnvironmentColumn = (environment) => {
+    const filters = configuration?.scope?.environments?.[environment]?.source_filters || {};
+    if (String(filters.G_Level_1 || '').toLowerCase() !== 'drive') return null;
+    const level2 = String(filters.G_Level_2 || '').replace(/\s+/g, '').toLowerCase();
+    if (level2 === 'city') return 3;
+    return ['connectingroads', 'connectionroad'].includes(level2) ? 4 : null;
+  };
+
+  const loadNetcheckReliablePoints = () => {
+    const rows = rowMetrics();
+    rows.forEach((row) => captureSelectedContext(row));
+    const normalized = (value) => String(value || '').trim().toLowerCase();
+    const matched = new Set();
+    rows.forEach((row) => {
+      const category = normalized(row.querySelector('[data-kpi-category]')?.value);
+      const label = normalized(row.querySelector('[data-kpi-label]')?.value);
+      const code = String(row.querySelector('[data-kpi-code-input]')?.value || '').trim();
+      const reference = netcheckMostReliablePoints.find((item) => normalized(item[1]) === category && normalized(item[2]) === label)
+        || netcheckMostReliablePoints.find((item) => item[0] === code && normalized(item[2]) === label);
+      if (reference) matched.add(reference[0]);
+      environmentKeys().forEach((environment) => {
+        const column = netcheckEnvironmentColumn(environment);
+        const points = reference && column ? reference[column] : 0;
+        contextDraftsForRow(row)[environment] = {
+          ...(row._contextDrafts?.[environment] || {}), most_reliable_points: points ? String(points) : '',
+        };
+        if (environment === environmentSelect.value) setReliableInputValue(row.querySelector('[data-most-reliable-points]'), points);
+      });
+    });
+    const environments = environmentKeys().filter((environment) => netcheckEnvironmentColumn(environment));
+    updateReliableSummary();
+    kpiDirty = true;
+    if (!matched.size || !environments.length) {
+      setStatus(kpiStatus, 'No NetCheck 2026 Most Reliable KPI or Drive - City / Drive - Connecting Roads environment was found in this methodology.', 'error');
+      return;
+    }
+    const missing = netcheckMostReliablePoints.filter((item) => !matched.has(item[0])).map((item) => `${item[1]} ${item[2]}`);
+    setStatus(kpiStatus, `Unsaved Most Reliable points for ${matched.size} KPIs in ${environments.map(environmentLabel).join(' and ')}. Other KPIs and environments have no Most Reliable points.${missing.length ? ` Not found: ${missing.join(', ')}.` : ''} Save the methodology to apply them.`, missing.length ? 'error' : 'success');
   };
 
   const setRowEnvironmentPoints = (row, environment, points) => {
@@ -715,6 +810,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     if (environmentTotalWeightInput) environmentTotalWeightInput.disabled = !configuration;
     updateEnvironmentTotalSummary();
     updateCategoryTotals();
+    updateReliableSummary();
   };
 
   const syncWeightMode = () => {
@@ -787,7 +883,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     row.dataset.kpiCategoryHeading = category;
     const cell = document.createElement('th');
     cell.scope = 'colgroup';
-    cell.colSpan = 19;
+    cell.colSpan = 20;
     const name = document.createElement('span');
     name.className = 'scoring-config-category-name';
     name.textContent = category;
@@ -932,6 +1028,12 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     const globalWeightOutput = document.createElement('span');
     globalWeightOutput.dataset.weightGlobalPercent = '';
     globalWeightCell.append(globalWeightOutput);
+    const reliableCell = appendCell(row, 'scoring-config-reliable-points', 'Most Reliable Points');
+    const reliableInput = appendNumericInput(reliableCell, '', `Most Reliable points for ${metric.kpi || metric.code}`, {
+      'data-most-reliable-points': '', min: '0', placeholder: '0',
+      title: 'Maximum points of this KPI in the Most Reliable Network scoring. Empty or 0 leaves the KPI out of that scoring.',
+    });
+    setReliableInputValue(reliableInput, context.most_reliable_points);
 
     for (const key of ['low', 'medium', 'high']) {
       const cell = appendCell(row, '', `${key[0].toUpperCase()}${key.slice(1)} Threshold`);
@@ -1124,6 +1226,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     updateDerivedWeights();
     setKpiSaveDisabled(false);
     if (distributePointsButton) distributePointsButton.disabled = !configuration || !environmentKeys().length;
+    if (reliablePresetButton) reliablePresetButton.disabled = !configuration || !environmentKeys().length;
   };
 
   const priorityMetric = (code) => (configuration?.metrics || []).find((metric) => metric.code === code);
@@ -1444,6 +1547,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       const context = metric.contexts[environment];
       readNumeric(row, '[data-max-points]', `Maximum points for ${label}`);
       context.max_points = pointsForRow(row, environment);
+      const reliableValue = row.querySelector('[data-most-reliable-points]')?.value.trim() || '';
+      if (reliableValue && (!Number.isFinite(Number(reliableValue)) || Number(reliableValue) < 0)) {
+        throw new Error(`Most Reliable points for ${label} must be a number of at least 0.`);
+      }
       context.thresholds = context.thresholds || {};
       const thresholds = {};
       for (const key of ['low', 'medium', 'high']) {
@@ -1497,6 +1604,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
         metric.contexts[environment] = metric.contexts[environment] || {};
         metric.contexts[environment].max_points = pointsForRow(row, environment);
         metric.contexts[environment].weight_share = sharesByEnvironment.get(environment)?.[index] || 0;
+        const reliablePoints = reliablePointsForRow(row, environment);
+        if (reliablePoints > 0) metric.contexts[environment].most_reliable_points = reliablePoints;
+        else delete metric.contexts[environment].most_reliable_points;
         if (environment !== environmentSelect.value) applyCachedContextDraft(metric, row, environment, metric.kpi || metric.code, metric.direction);
       });
       environmentKeys().forEach((environment) => {
@@ -1897,6 +2007,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       metric.contexts[environment] = metric.contexts[environment] || {};
       metric.contexts[environment].max_points = 0;
       metric.contexts[environment].weight_share = 0;
+      delete metric.contexts[environment].most_reliable_points;
     });
     delete metric.validation_examples;
     delete metric.sources;
@@ -2127,6 +2238,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     const ultraMode = ultra === null || ultra === undefined ? 'none' : typeof ultra === 'object' ? String(ultra.rule || 'none') : 'fixed';
     return {
       max_points: String(context.max_points ?? 0),
+      most_reliable_points: String(context.most_reliable_points ?? ''),
       thresholds: Object.fromEntries(['low', 'medium', 'high'].map((key) => [key, String(context.thresholds?.[key] ?? '')])),
       ultra_mode: ultraMode,
       ultra_value: typeof ultra === 'number' ? String(ultra) : '',
@@ -2171,6 +2283,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
         const share = distribution.shares[index] || 0;
         context.max_points = allocatedPoints[index] || 0;
         context.weight_share = share;
+        delete context.most_reliable_points;
         return {row, context, share};
       });
       configuration.scope = scope;
@@ -2365,6 +2478,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       target.dataset.pointEdited = 'true';
       updateDerivedWeights();
     }
+    if (target.matches('[data-most-reliable-points]')) updateReliableSummary();
     if (target.matches('[data-environment-g1]')) {
       const environment = configuration?.scope?.environments?.[environmentSelect.value];
       if (environment) environment.source_filters.G_Level_1 = target.value;
@@ -2470,6 +2584,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
   });
 
   distributePointsButton?.addEventListener('click', distributeEnvironmentPoints);
+  reliablePresetButton?.addEventListener('click', loadNetcheckReliablePoints);
   createEnvironmentButton?.addEventListener('click', createEnvironment);
   renameEnvironmentButton?.addEventListener('click', renameEnvironment);
   deleteEnvironmentButton?.addEventListener('click', deleteEnvironment);

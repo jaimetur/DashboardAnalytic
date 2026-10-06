@@ -131,8 +131,8 @@
   .scoring-job-picker .scoring-job-list { max-height: min(28rem,55vh); }
   .scoring-results-selector-row, .scoring-results-value-row { display: flex; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: .5rem; }
   .scoring-results-selector-row { width: 100%; padding: .48rem .58rem; border: 1px solid #a9c5dc; border-radius: 12px; background: #eaf3fa; }
-  .scoring-results-selector-row .scoring-environment-filter { width: 100%; color: #244e70; }
-  .scoring-results-selector-row .scoring-environment-filter select { flex: 1; width: 0; border-color: #91b2cf; background: #fff; color: #183d5b; min-width: 0; max-width: none; min-height: 2.1rem; }
+  .scoring-results-selector-row .scoring-environment-filter { flex: 1 1 auto; width: auto; min-width: 0; color: #244e70; }
+  .scoring-results-selector-row .scoring-environment-filter select { flex: 1; width: auto; border-color: #91b2cf; background: #fff; color: #183d5b; min-width: 9rem; max-width: none; min-height: 2.1rem; }
   .scoring-results-value-row { flex-wrap: nowrap; min-height: calc(2.9rem + 2px); padding: .4rem .52rem; border: 1px solid #d9d5c5; border-radius: 12px; background: #f6f4eb; }
   .scoring-results-value-row .scoring-kpi-values-toggle { color: #385352; }
   .scoring-results-value-row .scoring-kpi-values-toggle[data-show-gap-label] { color: #78501b; }
@@ -458,6 +458,12 @@
           <div><p class="eyebrow">Saved scoring results</p><h3 id="scoring-results-title">Scoring results</h3></div>
           <div class="scoring-results-controls">
             <div class="scoring-results-selector-row" data-scoring-results-selector-row>
+              <label class="scoring-environment-filter" data-result-scoring-control hidden>Scoring
+                <select data-result-scoring aria-label="Show the Best Network or the Most Reliable Network scoring of the selected job" disabled>
+                  <option value="best_network">Best Network</option>
+                  <option value="most_reliable">Most Reliable</option>
+                </select>
+              </label>
               <label class="scoring-environment-filter" data-result-environment-control>Environment
                 <select data-result-environment aria-label="Filter scoring tables, charts and GAP analysis by environment; defaults to the first complete environment when all environments are incomplete" disabled><option value="all">All Environments</option></select>
               </label>

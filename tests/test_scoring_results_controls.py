@@ -81,14 +81,15 @@ def test_best_network_charts_start_scoring_charts_and_legacy_tab_migrates():
     allocation_renderer = _function_source(script, 'renderCategoryAllocation')
     assert allocation_renderer.index("makeExpandableChartCard('Maximum score per environment & category'") >= 0
     assert "pane.insertBefore(layout, card)" in allocation_renderer
-    assert renderer.index("makeExpandableChartCard('Best Network Scoring per Service'") < renderer.index(
+    assert renderer.index("makeExpandableChartCard(`${scoringLabel()} Scoring per Service`") < renderer.index(
         "makeExpandableChartCard('Maximum score per environment & service'"
     )
     assert "pane.insertBefore(layout, pane.querySelector(':scope > .scoring-best-network-layout, :scope > .scoring-chart-card'))" in renderer
     assert "renderBestNetworkChart(chartPane, scoreTables, hierarchyScoreTable, allScoreTables)" in script
     assert "renderCategoryAllocation(chartPane, scoreTables, hierarchyScoreTable, allScoreTables)" in script
     assert script.index('renderCategoryAllocation(chartPane,') < script.index('renderBestNetworkChart(chartPane,')
-    assert 'Best Network Scoring per Category' in script
+    assert '`${scoringLabel()} Scoring per Category`' in script
+    assert "effectiveScoring() === 'most_reliable' ? 'Most Reliable' : 'Best Network'" in script
     assert 'Scoring per Category' in script
 
     payload = {
@@ -479,7 +480,7 @@ def test_scoring_chart_pairs_render_five_operator_two_category_views():
         'formatChartNumber', 'stackedSegmentLabelSize', 'bestNetworkHorizontalGeometry',
         'fitBestNetworkChartWidth', 'makeSvgChart', 'makeBestNetworkBars', 'lightenHexColor',
         'hierarchyColumnOperator', 'hierarchyColumnIsReference', 'chartOperatorLegend',
-        'makeExpandableChartCard',
+        'makeExpandableChartCard', 'effectiveScoring', 'scoringLabel',
         'renderCharts', 'renderHierarchyCharts', 'svgElement', 'hierarchyChartColor',
         'hierarchyDisplayValue', 'hierarchyPathEntry', 'hierarchyPrefixKey', 'appendHierarchyAxisBands',
         'hierarchyPathValueLabel', 'hierarchyPathFullLabel', 'chartFitWidth', 'styleIncompleteValue',
@@ -831,7 +832,8 @@ def test_gap_value_choice_is_sent_only_to_powerpoint_export():
     script = SCORING_SCRIPT.read_text(encoding='utf-8')
 
     assert "const gapOption = kind === 'ppt' ? `&show_gap_values=${showGapValues() ? 'true' : 'false'}` : '';" in script
-    assert "link.href = enabled ? `${exportBase}/${encodeURIComponent(jobId)}/export/${kind}?${query}${gapOption}` : '#';" in script
+    assert "link.href = enabled ? `${exportBase}/${encodeURIComponent(jobId)}/export/${kind}?${query}${gapOption}${scoringOption}` : '#';" in script
+    assert "const scoringOption = kind !== 'ppt' && typeof effectiveScoring === 'function'" in script
     assert "const query = `table_mode=${encodeURIComponent(selectedTableMode())}&gap_layout=${encodeURIComponent(selectedGapLayout())}&environment=${encodeURIComponent(selectedEnvironment || 'all')}`;" in script
 
 
