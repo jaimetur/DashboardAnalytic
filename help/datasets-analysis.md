@@ -126,7 +126,8 @@ First compare group sample counts. Then inspect the CDF and group benchmark. If 
 
 ## Performance
 
-- Opening the page reads cached metadata.
+- Opening the page reads cached metadata; which metrics have values in each CDR is checked once and kept until the CDR changes.
 - Full analysis starts only after **Update Analysis**.
+- The page shows the first four metrics at once; the other metrics and the Processed Metrics table appear as they are calculated, a few at a time, while you already work with the first ones.
 - Repeated dataset/filter/metric combinations reuse in-memory cache entries.
 - Large caches are process-local and are cleared by an application restart.

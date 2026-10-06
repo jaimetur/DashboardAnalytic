@@ -1339,9 +1339,11 @@ function drawChart(container) {
   );
 }
 
-function setupCdfRangeControls() {
+function setupCdfRangeControls(root = document) {
   // Visible X range with two handles: the start and the end of the CDF axis.
-  document.querySelectorAll('.chart-card[data-chart-kind="cdf"]').forEach((container) => {
+  root.querySelectorAll('.chart-card[data-chart-kind="cdf"]').forEach((container) => {
+    if (container.dataset.cdfRangeReady) return;
+    container.dataset.cdfRangeReady = '1';
     const payload = JSON.parse(container.dataset.chart || '{"labels":[],"series":[],"type":"line"}');
     const control = container.querySelector('[data-cdf-range-control]');
     const slider = container.querySelector('[data-cdf-range-slider]');
@@ -8331,7 +8333,7 @@ if (appLogsPanel) {
   syncAppLogRows({resetMobilePage: true});
 }
 
-document.querySelectorAll('[data-chart-aggregation-select]').forEach((select) => {
+function bindChartAggregationSelect(select) {
   select.addEventListener('change', () => {
     const metric = String(select.dataset.metric || '').trim();
     if (!metric) return;
@@ -8357,7 +8359,8 @@ document.querySelectorAll('[data-chart-aggregation-select]').forEach((select) =>
     showLoadingOverlay(`Updating ${metric} comparison`);
     window.location.search = params.toString();
   });
-});
+}
+document.querySelectorAll('[data-chart-aggregation-select]').forEach(bindChartAggregationSelect);
 
 document.querySelectorAll('[data-summary-control]').forEach((node) => {
   ['click', 'mousedown', 'mouseup', 'keydown'].forEach((eventName) => {
@@ -8397,7 +8400,7 @@ document.querySelectorAll('[data-global-cdf-grouping-select]').forEach((select) 
   });
 });
 
-document.querySelectorAll('[data-chart-cdf-grouping-select]').forEach((select) => {
+function bindChartCdfGroupingSelect(select) {
   select.addEventListener('change', () => {
     const metric = String(select.dataset.metric || '').trim();
     if (!metric) return;
@@ -8422,7 +8425,73 @@ document.querySelectorAll('[data-chart-cdf-grouping-select]').forEach((select) =
     showLoadingOverlay(`Updating ${metric} CDF comparison`);
     window.location.search = params.toString();
   });
-});
+}
+document.querySelectorAll('[data-chart-cdf-grouping-select]').forEach(bindChartCdfGroupingSelect);
+
+// CDR Analysis shows its first metrics at once; the pending metrics and the Processed Metrics
+// table arrive in small batches and are drawn as soon as each batch is ready.
+(function loadPendingDatasetsAnalysisParts() {
+  const pendingPanels = Array.from(document.querySelectorAll('[data-pending-panel]'));
+  const pendingTable = document.querySelector('[data-pending-table]');
+  if (!pendingPanels.length && !pendingTable) return;
+  const batchSize = 3;
+  const metrics = pendingPanels.map((panel) => panel.dataset.pendingPanel);
+  const selectorFor = (attribute, metric) => `[${attribute}="${CSS.escape(metric)}"]`;
+  const fetchParts = async (extra) => {
+    const params = new URLSearchParams(window.location.search);
+    extra.forEach(([key, value]) => params.append(key, value));
+    const response = await fetch(`/datasets-analysis/metrics?${params.toString()}`, {credentials: 'same-origin'});
+    if (!response.ok) throw new Error(`The metrics request returned ${response.status}.`);
+    const holder = document.createElement('template');
+    holder.innerHTML = await response.text();
+    return holder.content;
+  };
+  const activate = (node) => {
+    node.querySelectorAll('[data-chart]').forEach((container) => { drawChart(container); setupChartInteractions(container); });
+    setupCdfRangeControls(node);
+    node.querySelectorAll('[data-chart-aggregation-select]').forEach(bindChartAggregationSelect);
+    node.querySelectorAll('[data-chart-cdf-grouping-select]').forEach(bindChartCdfGroupingSelect);
+  };
+  const replaceWith = (target, template) => {
+    if (!target || !template) return null;
+    const fragment = template.content.cloneNode(true);
+    const element = fragment.firstElementChild;
+    target.replaceWith(fragment);
+    return element;
+  };
+  const markFailed = (metric, message) => {
+    [document.querySelector(selectorFor('data-pending-panel', metric)), document.querySelector(selectorFor('data-pending-kpi', metric))].forEach((node) => {
+      if (!node) return;
+      node.classList.add('metric-failed');
+      node.querySelectorAll('.metric-pending-note, .metric-pending-pill').forEach((note) => { note.textContent = message; });
+    });
+  };
+  (async () => {
+    for (let index = 0; index < metrics.length; index += batchSize) {
+      const batch = metrics.slice(index, index + batchSize);
+      try {
+        const content = await fetchParts(batch.map((metric) => ['part', metric]));
+        batch.forEach((metric) => {
+          replaceWith(document.querySelector(selectorFor('data-pending-kpi', metric)), content.querySelector(selectorFor('data-loaded-kpi', metric)));
+          const panel = replaceWith(document.querySelector(selectorFor('data-pending-panel', metric)), content.querySelector(selectorFor('data-loaded-panel', metric)));
+          if (panel) activate(panel);
+          const failed = content.querySelector(selectorFor('data-failed-metric', metric));
+          if (failed) markFailed(metric, failed.content.textContent.trim());
+        });
+      } catch (error) {
+        batch.forEach((metric) => markFailed(metric, 'Not loaded. Reload the page to try again.'));
+      }
+    }
+    if (pendingTable) {
+      try {
+        const content = await fetchParts([['table', '1']]);
+        replaceWith(pendingTable, content.querySelector('[data-loaded-table]'));
+      } catch (error) {
+        pendingTable.querySelector('.empty-state-inline').textContent = 'The processed metrics were not loaded. Reload the page to try again.';
+      }
+    }
+  })();
+})();
 
 const queueNode = document.querySelector('[data-queue-status-url]');
 if (queueNode) {

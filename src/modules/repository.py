@@ -10,6 +10,7 @@ import io
 from datetime import datetime
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
+import hashlib
 import json
 import logging
 from pathlib import Path
@@ -3651,28 +3652,46 @@ class Repository:
             return pd.read_sql_query(query, conn, params=params)
 
     def list_metrics_with_non_null_data(self, dataset_id: int, metrics: list[str]) -> list[str]:
+        """Return the metrics with at least one value in the stored rows of a dataset.
+
+        Scanning a large CDR for every metric takes seconds, so the answer of each
+        metric is kept in the workspace state until the dataset or its columns change.
+        """
         table_name = self.dataset_rows_table_name(dataset_id)
-        existing_columns = set(self.list_dataset_row_columns(dataset_id))
+        columns = self.list_dataset_row_columns(dataset_id)
+        existing_columns = set(columns)
         selected_metrics = [metric for metric in metrics if metric in existing_columns]
         if not selected_metrics:
             return []
 
-        aliases = [f"metric_count_{index}" for index, _ in enumerate(selected_metrics)]
-        count_expressions = ", ".join(
-            f"SUM(CASE WHEN {self._quote_identifier(metric)} IS NOT NULL "
-            f"AND TRIM(CAST({self._quote_identifier(metric)} AS TEXT)) != '' "
-            f"THEN 1 ELSE 0 END) AS {self._quote_identifier(alias)}"
-            for metric, alias in zip(selected_metrics, aliases, strict=False)
-        )
-        query = f"SELECT {count_expressions} FROM {self._quote_identifier(table_name)}"
-        with self.connection() as conn:
-            row = conn.execute(query).fetchone()
-        if not row:
-            return []
-        return [
-            metric for metric, alias in zip(selected_metrics, aliases, strict=False)
-            if int(row[alias] or 0) > 0
-        ]
+        dataset = self.get_dataset(dataset_id)
+        signature = json.dumps([
+            str(dataset['updated_at'] or dataset['uploaded_at'] or '') if dataset else '',
+            int(dataset['row_count'] or 0) if dataset else 0,
+            hashlib.sha1('\x1f'.join(columns).encode('utf-8')).hexdigest(),
+        ])
+        state_key = f'metric_non_null_{int(dataset_id)}'
+        try:
+            cached = json.loads(self.get_workspace_state(state_key) or '{}')
+        except (TypeError, json.JSONDecodeError):
+            cached = {}
+        known: dict[str, bool] = cached.get('metrics', {}) if cached.get('signature') == signature else {}
+        missing = [metric for metric in selected_metrics if metric not in known]
+        if missing:
+            aliases = [f"metric_count_{index}" for index, _ in enumerate(missing)]
+            count_expressions = ", ".join(
+                f"SUM(CASE WHEN {self._quote_identifier(metric)} IS NOT NULL "
+                f"AND TRIM(CAST({self._quote_identifier(metric)} AS TEXT)) != '' "
+                f"THEN 1 ELSE 0 END) AS {self._quote_identifier(alias)}"
+                for metric, alias in zip(missing, aliases, strict=False)
+            )
+            query = f"SELECT {count_expressions} FROM {self._quote_identifier(table_name)}"
+            with self.connection() as conn:
+                row = conn.execute(query).fetchone()
+            for metric, alias in zip(missing, aliases, strict=False):
+                known[metric] = bool(row and int(row[alias] or 0) > 0)
+            self.set_workspace_state(state_key, json.dumps({'signature': signature, 'metrics': known}))
+        return [metric for metric in selected_metrics if known.get(metric)]
 
     def update_dataset_profile(self, dataset_id: int, **fields: Any) -> None:
         if not fields:

@@ -31,12 +31,12 @@ from src.modules.column_names import column_identity, compact_campaign_value, op
 NETWORK_INSIGHTS_KINDS = ('data', 'voice', 'speech')
 # Bump when the normalised samples or the analysis payload change shape.
 SAMPLES_CACHE_VERSION = 3
-ANALYSIS_CACHE_VERSION = 4
-INVENTORY_CACHE_VERSION = 3
-OBSERVED_CACHE_VERSION = 6
+ANALYSIS_CACHE_VERSION = 5
+INVENTORY_CACHE_VERSION = 4
+OBSERVED_CACHE_VERSION = 7
 # Columns of the Observed Sites/Cells (from CDRs) tables.
 OBSERVED_COLUMNS = (
-    'Operator', 'Vendor', 'Region', 'City', 'Cluster', 'Technology', 'Site_ID', 'Cell_ID', 'Band',
+    'Operator', 'Vendor', 'Region', 'Cluster', 'City', 'Technology', 'Site_ID', 'Cell_ID', 'Band',
     'CDR_Types', 'Campaigns', 'Samples', 'Latitude', 'Longitude', 'RSRP_Mean', 'SINR_Mean',
 )
 SPECTRUM_HOLDINGS_STATE_KEY = 'network_spectrum_holdings'
@@ -675,7 +675,7 @@ def licensed_spectrum_summary(holdings: list[dict[str, Any]]) -> list[dict[str, 
 # operator and sheet, so each logical field lists the accepted headers.
 INVENTORY_FIELDS = {
     'site': ('Site_ID', 'Site ID', 'eNBId', 'eNodeB ID', 'MBNL_ID'),
-    'cell': ('CId___ECI', 'CELL_NAME', 'Cell Name', 'cellId', 'Cell ID'),
+    'cell': ('CId___ECI', 'CELL_NAME', 'Cell Name', 'cellId', 'Cell ID', 'Cid__ECI', 'GCID', 'ECI', 'Cell_ID', 'Global CI'),
     'scenario': ('eMOCNScenario',),
     'network': ('Network',),
     'host_network': ('Host Network',),
@@ -1099,6 +1099,8 @@ def install_network_insights_routes(core: Any) -> None:
         grid_metres: float = 250
         min_samples: int = 3
         map_operator: str = ''
+        # Summaries draw the maps of every group, not only the one shown on the page.
+        map_all_groups: bool = False
 
     class SpectrumRequest(BaseModel):
         holdings: list[dict[str, Any]] = Field(default_factory=list)
@@ -1488,9 +1490,19 @@ def install_network_insights_routes(core: Any) -> None:
                 row['technology'] = label
             map_operators = [row['operator'] for row in overview]
             map_operator = request.map_operator if request.map_operator in map_operators else (map_operators[0] if map_operators else '')
-            operator_samples = frame.loc[frame['operator'] == map_operator]
-            coverage_cells, coverage_grid = grid_cells(operator_samples, rsrp, coverage_threshold, request.grid_metres, request.min_samples)
-            interference_cells, interference_grid = grid_cells(operator_samples, sinr, interference_threshold, request.grid_metres, request.min_samples)
+            def group_maps(operator: str) -> dict[str, Any]:
+                operator_samples = frame.loc[frame['operator'] == operator]
+                coverage_cells, coverage_grid = grid_cells(operator_samples, rsrp, coverage_threshold, request.grid_metres, request.min_samples)
+                interference_cells, interference_grid = grid_cells(operator_samples, sinr, interference_threshold, request.grid_metres, request.min_samples)
+                return {
+                    'operator': operator,
+                    'coverage': map_payload(coverage_cells, RSRP_CLASSES, f'{operator} · Mean {label} RSRP per {coverage_grid:g} m grid', 'dBm', _osm_map_tile_geometry),
+                    'coverage_hotspots': hotspots(coverage_cells), 'coverage_grid_metres': coverage_grid,
+                    'interference': map_payload(interference_cells, SINR_CLASSES, f'{operator} · Mean {label} SINR per {interference_grid:g} m grid', 'dB', _osm_map_tile_geometry),
+                    'interference_hotspots': hotspots(interference_cells), 'interference_grid_metres': interference_grid,
+                }
+
+            selected_maps = group_maps(map_operator)
             return {
                 'technology': radio, 'technology_label': label,
                 'coverage_threshold': coverage_threshold, 'interference_threshold': interference_threshold,
@@ -1500,11 +1512,9 @@ def install_network_insights_routes(core: Any) -> None:
                     'sinr_cdf': cdf_payload(frame, sinr, None, f'{label} SINR', 'SINR (dB)', colours, dash_groups=dash_groups, widths=widths),
                 },
                 'maps': {
-                    'operator': map_operator, 'operators': map_operators,
-                    'coverage': map_payload(coverage_cells, RSRP_CLASSES, f'{map_operator} · Mean {label} RSRP per {coverage_grid:g} m grid', 'dBm', _osm_map_tile_geometry),
-                    'coverage_hotspots': hotspots(coverage_cells), 'coverage_grid_metres': coverage_grid,
-                    'interference': map_payload(interference_cells, SINR_CLASSES, f'{map_operator} · Mean {label} SINR per {interference_grid:g} m grid', 'dB', _osm_map_tile_geometry),
-                    'interference_hotspots': hotspots(interference_cells), 'interference_grid_metres': interference_grid,
+                    **selected_maps, 'operators': map_operators,
+                    **({'groups': [selected_maps if operator == map_operator else group_maps(operator) for operator in map_operators]}
+                       if request.map_all_groups else {}),
                 },
             }
 
@@ -2106,6 +2116,7 @@ def install_network_insights_routes(core: Any) -> None:
             nr_mode = str((selection or {}).get('nr_mode') or 'NSA').upper()
             request.datasets = {kind: [row['id'] for row in available if row['kind'] == kind and str(row['nr_mode']).upper() == nr_mode]
                                 for kind in NETWORK_INSIGHTS_KINDS}
+        request.map_all_groups = True
         analysis = run_analysis(request)
         names = {row['id']: row['file_name'] for row in available}
         description = {

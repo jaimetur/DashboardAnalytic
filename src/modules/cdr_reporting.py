@@ -15,6 +15,7 @@ import re
 import shutil
 import ssl
 import subprocess
+import tempfile
 import threading
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -118,19 +119,31 @@ class _DashboardCanvasRenderer:
 
     def __init__(self) -> None:
         script = Path(__file__).with_name("dashboard_canvas_renderer.mjs")
-        self.process = subprocess.Popen(
-            [_node_executable(), str(script)],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            bufsize=1,
-        )
-        ready_line = self.process.stdout.readline() if self.process.stdout else ""
-        ready = json.loads(ready_line or "{}")
-        if not ready.get("ready"):
+        node = _node_executable()
+        error = ""
+        # Chromium occasionally fails to start on a busy machine; one retry avoids failing a whole export.
+        for _attempt in range(2):
+            # Node's own errors explain a failed start, so they are kept instead of discarded.
+            self.stderr = tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace")
+            self.process = subprocess.Popen(
+                [node, str(script)],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=self.stderr,
+                text=True,
+                bufsize=1,
+            )
+            ready_line = self.process.stdout.readline() if self.process.stdout else ""
+            try:
+                ready = json.loads(ready_line or "{}")
+            except json.JSONDecodeError:
+                ready = {"error": ready_line.strip()}
+            if ready.get("ready"):
+                break
             self.close()
-            raise RuntimeError(ready.get("error") or "Unable to start the Dashboard Canvas renderer.")
+            error = str(ready.get("error") or "") or self._stderr_tail() or f"{node} exited with code {self.process.poll()}"
+        else:
+            raise RuntimeError(f"Unable to start the Dashboard Canvas renderer: {error}")
         self.request_id = 0
         self.renderer_version = DASHBOARD_CANVAS_RENDERER_VERSION
 
@@ -151,6 +164,14 @@ class _DashboardCanvasRenderer:
             raise RuntimeError("The Dashboard Canvas renderer returned an invalid response.")
         hits = response.get("hits")
         return base64.b64decode(response["png"]), hits if isinstance(hits, list) else []
+
+    def _stderr_tail(self) -> str:
+        try:
+            self.stderr.seek(0)
+            lines = [line.strip() for line in self.stderr.read().splitlines() if line.strip()]
+        except (OSError, ValueError):
+            return ""
+        return " ".join(lines[-3:])[:500]
 
     def close(self) -> None:
         process = getattr(self, "process", None)

@@ -71,11 +71,12 @@ def test_network_word_uses_landscape_fixed_single_line_tables(tmp_path):
         document = Document(output)
         section = document.sections[0]
         assert section.page_width > section.page_height
-        table = document.tables[0]
+        columns, values = overview_table(source)
+        # The Overview cards come first; the RF Quality Overview table follows them.
+        table = next(table for table in document.tables if [cell.text for cell in table.rows[0].cells] == columns)
         assert table.autofit is False
         assert table.columns[0].width > table.columns[1].width
         assert sum(column.width for column in table.columns) <= section.page_width - section.left_margin - section.right_margin + 9144
-        columns, values = overview_table(source)
         assert [cell.text for cell in table.rows[0].cells] == columns
         assert [[cell.text for cell in row.cells] for row in list(table.rows)[1:]] == values
         assert table.rows[0]._tr.trPr.find(qn('w:tblHeader')) is not None

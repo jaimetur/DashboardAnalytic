@@ -382,6 +382,34 @@ def _selected_count(filters: dict[str, Any], key: str) -> int | None:
     return len(values) if values else None
 
 
+class _SharedAttrDict(dict):
+    """Frame metadata shared by every derived frame instead of being deep-copied."""
+
+    def __deepcopy__(self, memo: dict) -> '_SharedAttrDict':
+        return self
+
+
+class _SharedAttrList(list):
+    """Frame metadata shared by every derived frame instead of being deep-copied."""
+
+    def __deepcopy__(self, memo: dict) -> '_SharedAttrList':
+        return self
+
+
+def shared_frame_attrs(settings: dict[str, Any]) -> dict[str, Any]:
+    """Wrap read-only chart mapping settings for ``DataFrame.attrs``.
+
+    pandas deep-copies ``attrs`` into every frame derived by filtering or
+    grouping, which costs about half a second per CDR Analysis with the full
+    Operator and Vendor mapping settings; shared values skip that copy.
+    """
+    return {
+        key: _SharedAttrDict(value) if isinstance(value, dict)
+        else _SharedAttrList(value) if isinstance(value, list) else value
+        for key, value in settings.items()
+    }
+
+
 def _chart_mapping_group(df: pd.DataFrame, dimension: str, value: object) -> dict[str, Any] | None:
     mapping_type = 'operator' if dimension in {'operator', 'subscriber'} else 'vendor' if dimension in {'vendor', 'vendor_only', 'operator_vendor'} else ''
     if not mapping_type:
@@ -690,6 +718,25 @@ def _build_comparison_chart(
     }
 
 
+# Columns besides the analysed metric that the tables, records and scorecards of an analysis read.
+ANALYSIS_SUPPORT_COLUMNS = frozenset({
+    'success', 'setup_time_seconds', 'duration_seconds', 'quality_score', 'handovers', 'latency_ms',
+    'jitter_ms', 'packet_loss_pct', 'throughput_mbps',
+})
+
+
+def _declared_dataset_kind(frame: pd.DataFrame) -> str:
+    declared_kind = _resolve_column(frame, 'dataset_kind')
+    if declared_kind:
+        declared_values = frame[declared_kind].dropna().astype(str).str.strip().str.casefold()
+        if not declared_values.empty and declared_values.iloc[0] in {'data', 'voice', 'speech', 'generic'}:
+            return declared_values.iloc[0]
+    return infer_dataset_kind(
+        frame,
+        str(frame.get('source_file', pd.Series(dtype='object')).iloc[0]) if 'source_file' in frame.columns else '',
+    )
+
+
 def build_analysis(
     df: pd.DataFrame, filters: dict[str, Any], metric: str, *, prefiltered: bool = False,
     shared: dict[str, Any] | None = None,
@@ -699,25 +746,33 @@ def build_analysis(
     if filtered.empty:
         raise ValueError('No rows match the selected filters')
 
-    declared_kind = _resolve_column(filtered, 'dataset_kind')
-    dataset_kind = ''
-    if declared_kind:
-        declared_values = filtered[declared_kind].dropna().astype(str).str.strip().str.casefold()
-        if not declared_values.empty and declared_values.iloc[0] in {'data', 'voice', 'speech', 'generic'}:
-            dataset_kind = declared_values.iloc[0]
-    if not dataset_kind:
-        dataset_kind = infer_dataset_kind(
-            filtered,
-            str(filtered.get('source_file', pd.Series(dtype='object')).iloc[0]) if 'source_file' in filtered.columns else '',
-        )
+    frame_key = id(filtered)
+    if shared is not None and shared.get('frame_key') == frame_key:
+        dataset_kind, column_names, numeric_columns, categorical_columns = shared['frame_profile']
+    else:
+        dataset_kind = _declared_dataset_kind(filtered)
+        column_names = filtered.columns.tolist()
+        numeric_columns = filtered.select_dtypes(include=['number']).columns.tolist()
+        categorical_columns = filtered.select_dtypes(exclude=['number']).columns.tolist()
+        if shared is not None:
+            # The kind and the column profile depend on the frame, not on the metric.
+            shared['frame_key'] = frame_key
+            shared['frame_profile'] = (dataset_kind, column_names, numeric_columns, categorical_columns)
     selected_metric = _infer_metric(filtered, metric, dataset_kind)
     # Boolean indexing already returns a new frame; the analysis never modifies it.
-    analysis_frame = filtered[pd.to_numeric(filtered[selected_metric], errors='coerce').notna()]
+    has_value = pd.to_numeric(filtered[selected_metric], errors='coerce').notna()
+    other_metrics = set((shared or {}).get('metric_columns') or ()) - {selected_metric} - ANALYSIS_SUPPORT_COLUMNS
+    if other_metrics:
+        # The other requested metrics are not used by this one; copying them for every metric of a
+        # large CDR costs seconds.
+        analysis_frame = filtered.loc[has_value, [column for column in column_names if column not in other_metrics]]
+    else:
+        analysis_frame = filtered[has_value]
     summary = DatasetSummary(
         rows=len(analysis_frame.index),
-        columns=analysis_frame.columns.tolist(),
-        numeric_columns=analysis_frame.select_dtypes(include=['number']).columns.tolist(),
-        categorical_columns=analysis_frame.select_dtypes(exclude=['number']).columns.tolist(),
+        columns=column_names,
+        numeric_columns=numeric_columns,
+        categorical_columns=categorical_columns,
     )
     metric_series = pd.to_numeric(analysis_frame[selected_metric], errors='coerce').dropna()
     if metric_series.empty:

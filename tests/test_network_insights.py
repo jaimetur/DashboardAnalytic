@@ -1179,6 +1179,8 @@ def test_lte_nr_summary_export_has_separate_technology_sections(client, tmp_path
     document = Document(io.BytesIO(response.content))
     headings = [paragraph.text for paragraph in document.paragraphs if paragraph.style.name.startswith('Heading')]
     assert 'RF Quality Overview · LTE' in headings and 'RF Quality Overview · NR' in headings
-    assert 'Coverage Map · NR' in headings
+    # One maps section per technology and group.
+    assert any(heading.startswith('Coverage & Interference Maps · NR · ') for heading in headings)
+    assert 'RF Quality · LTE' in headings and 'Overview · NR' in headings
     text = '\n'.join(paragraph.text for paragraph in document.paragraphs)
     assert 'NR thresholds: low coverage below -120.0 dBm RSRP' in text

@@ -56,7 +56,7 @@ from starlette.background import BackgroundTask
 DEFAULT_TRANSFER_PORT = 7278
 
 from src.config import PROJECT_ROOT, settings
-from src.modules.analytics import build_analysis
+from src.modules.analytics import build_analysis, shared_frame_attrs
 from src.modules.background_scheduler import BackgroundTaskScheduler
 from src.modules.auth import SessionUser, verify_password
 from src.modules.cdr_types import (
@@ -99,6 +99,11 @@ from src.utils.filesystem import ensure_directories, safe_join
 SESSION_COOKIE = 'bench_automations_session'
 SESSIONS: dict[str, SessionUser] = {}
 ANALYSIS_CACHE: dict[str, dict[str, Any]] = {}
+# CDR Analysis shows these first metrics at once and loads the rest progressively.
+DATASETS_ANALYSIS_INITIAL_METRICS = 4
+# The prepared rows of the CDR whose pending metrics the open CDR Analysis page is loading.
+PREPARED_ANALYSIS_FRAME_CACHE: dict[str, pd.DataFrame] = {}
+PREPARED_ANALYSIS_FRAME_LOCK = Lock()
 DATAFRAME_CACHE: dict[str, pd.DataFrame] = {}
 CHART_PREVIEW_DATA_CACHE: dict[str, tuple[pd.DataFrame, dict[str, Any]]] = {}
 CHART_PREVIEW_FRAME_CACHE: dict[str, pd.DataFrame] = {}
@@ -413,7 +418,7 @@ def help_document_label(relative_path: str) -> str:
 FEATURES: tuple[dict[str, Any], ...] = (
     {'key': 'workspace', 'label': 'Workspace', 'pages': ('/workspace',), 'paths': ()},
     {'key': 'datasets-analysis', 'label': 'CDR Analysis', 'pages': ('/datasets-analysis',), 'paths': (
-        '/datasets-analysis/analyze', '/datasets-analysis/export', '/datasets-analysis/summary',
+        '/datasets-analysis/analyze', '/datasets-analysis/export', '/datasets-analysis/summary', '/datasets-analysis/metrics',
         '/dashboard/analyze', '/dashboard/export',
     )},
     {'key': 'network-insights', 'label': 'Network Insights', 'paths': ('/network-insights', '/api/network-insights')},
@@ -1095,6 +1100,7 @@ def materialize_workspace_calculated_dimensions(
             progress_callback(min(completed_steps, total_steps), total_steps, f'Rebuilding {dataset["dataset_kind"]} reporting table')
     DATAFRAME_CACHE.clear()
     ANALYSIS_CACHE.clear()
+    PREPARED_ANALYSIS_FRAME_CACHE.clear()
     CHART_PREVIEW_DATA_CACHE.clear()
     task_repository.set_workspace_state('calculated_dimensions_need_materialization', '0')
     return len(datasets)
@@ -1666,6 +1672,7 @@ def materialize_workspace_auto_fields_incrementally(
             )
     DATAFRAME_CACHE.clear()
     ANALYSIS_CACHE.clear()
+    PREPARED_ANALYSIS_FRAME_CACHE.clear()
     CHART_PREVIEW_DATA_CACHE.clear()
     task_repository.set_workspace_state('calculated_dimensions_need_materialization', '0')
     return {
@@ -2581,6 +2588,7 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
         object.__setattr__(settings, 'slides_templates_dir', workspace.slides_templates_dir)
         repository.db_path = workspace.database_path
         ANALYSIS_CACHE.clear()
+        PREPARED_ANALYSIS_FRAME_CACHE.clear()
         DATAFRAME_CACHE.clear()
         _clear_chart_preview_caches()
         active_workspace = workspace
@@ -2642,6 +2650,7 @@ def close_active_workspace() -> None:
     if active_workspace:
         workspace_registry.close_active(active_workspace.id)
     ANALYSIS_CACHE.clear()
+    PREPARED_ANALYSIS_FRAME_CACHE.clear()
     DATAFRAME_CACHE.clear()
     _clear_chart_preview_caches()
     active_workspace = None
@@ -3654,7 +3663,8 @@ def get_cached_analysis(dataset_path: Path, filters: dict[str, Any], metric: str
 
 def store_cached_analysis(dataset_path: Path, filters: dict[str, Any], metric: str, analysis: Any) -> Any:
     ANALYSIS_CACHE[build_analysis_cache_key(dataset_path, filters, metric)] = analysis
-    if len(ANALYSIS_CACHE) > 64:
+    # One entry per metric: room for several complete CDR analyses (a Data CDR alone has about 50 metrics).
+    if len(ANALYSIS_CACHE) > 400:
         oldest_key = next(iter(ANALYSIS_CACHE))
         ANALYSIS_CACHE.pop(oldest_key, None)
     return analysis
@@ -5347,6 +5357,8 @@ def workspace_combined_tables(
             ):
                 active_recreations[kind] = dict(job)
     combined: list[dict[str, Any]] = []
+    all_datasets = task_repository.list_datasets()
+    pending_counts: dict[str, str] = {}
     with task_repository.connection() as connection:
         for kind in ('data', 'voice', 'speech'):
             table_name = task_repository.reporting_rows_table_name(kind)
@@ -5355,22 +5367,33 @@ def workspace_combined_tables(
             ).fetchone()
             if not exists:
                 continue
-            row_count = connection.execute(
-                f'SELECT COUNT(*) AS count FROM {task_repository._quote_identifier(table_name)}',
-            ).fetchone()['count']
-            column_count = len(task_repository._table_columns(connection, table_name))
-            updated_at = combined_reporting_updated_at(task_repository, kind)
-            if not updated_at:
-                dataset_dates = [
-                    str(dataset['updated_at'] or dataset['uploaded_at'] or '')
-                    for dataset in task_repository.list_datasets()
-                    if str(dataset['dataset_kind'] or '').casefold() == kind
-                ]
-                updated_at = max(dataset_dates, default='')
-            source_datasets = [
-                dataset for dataset in task_repository.list_datasets()
-                if dataset['status'] == 'ready' and str(dataset['dataset_kind'] or '').casefold() == kind
+            kind_datasets = [
+                dataset for dataset in all_datasets if str(dataset['dataset_kind'] or '').casefold() == kind
             ]
+            updated_at = combined_reporting_updated_at(task_repository, kind)
+            # Counting millions of combined rows takes about a second, so the count is kept
+            # until the table or any CDR of its type changes.
+            count_signature = json.dumps([updated_at, [
+                [int(dataset['id']), str(dataset['status'] or ''), int(dataset['row_count'] or 0),
+                 str(dataset['updated_at'] or '')]
+                for dataset in kind_datasets
+            ]])
+            try:
+                cached_count = json.loads(task_repository.get_workspace_state(f'combined_row_count_{kind}') or '{}')
+            except (TypeError, json.JSONDecodeError):
+                cached_count = {}
+            if cached_count.get('signature') == count_signature:
+                row_count = int(cached_count.get('count') or 0)
+            else:
+                row_count = connection.execute(
+                    f'SELECT COUNT(*) AS count FROM {task_repository._quote_identifier(table_name)}',
+                ).fetchone()['count']
+                pending_counts[f'combined_row_count_{kind}'] = json.dumps({'signature': count_signature, 'count': int(row_count or 0)})
+            column_count = len(task_repository._table_columns(connection, table_name))
+            if not updated_at:
+                dataset_dates = [str(dataset['updated_at'] or dataset['uploaded_at'] or '') for dataset in kind_datasets]
+                updated_at = max(dataset_dates, default='')
+            source_datasets = [dataset for dataset in kind_datasets if dataset['status'] == 'ready']
             expected_row_count = sum(int(dataset['row_count'] or 0) for dataset in source_datasets)
             recreation_job = active_recreations.get(kind)
             is_recalculating = recreation_job is not None
@@ -5396,6 +5419,8 @@ def workspace_combined_tables(
                 'needs_recalculation': needs_recalculation,
                 'updated_at_label': format_local_timestamp(updated_at) if updated_at else '—',
             })
+    for state_key, value in pending_counts.items():
+        task_repository.set_workspace_state(state_key, value)
     return combined
 
 
@@ -6725,6 +6750,7 @@ def _restore_workspace_operator_mappings(workspace: Workspace, payload: bytes) -
         save_spectrum_holdings(task_repository, spectrum_holdings)
     if active_workspace and workspace.id == active_workspace.id:
         ANALYSIS_CACHE.clear()
+        PREPARED_ANALYSIS_FRAME_CACHE.clear()
         DATAFRAME_CACHE.clear()
         _clear_chart_preview_caches()
 
@@ -9620,7 +9646,11 @@ def default_cdf_grouping(dataset: dict[str, Any] | None) -> str:
     return 'operator' if 'operator' in ((dataset or {}).get('available_cdf_groupings') or []) else 'all'
 
 
-def build_datasets_analysis_payload(selected_dataset: dict[str, Any] | None, request: Request, username: str | None = None) -> tuple[dict[str, Any] | None, list[dict[str, Any]], list[str], dict[str, Any], str | None, bool]:
+def build_datasets_analysis_payload(
+    selected_dataset: dict[str, Any] | None, request: Request, username: str | None = None, *,
+    initial_metric_limit: int | None = None, metric_subset: list[str] | None = None, include_table: bool = True,
+    progress: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]], list[str], dict[str, Any], str | None, bool]:
     if not selected_dataset:
         return None, [], [], {}, None, False
     if not selected_dataset['is_ready']:
@@ -9669,34 +9699,88 @@ def build_datasets_analysis_payload(selected_dataset: dict[str, Any] | None, req
         elif selected_values:
             filters['extra_filters'][dimension] = selected_values
 
-    query_columns = build_analysis_query_columns(selected_dataset, selected_metrics, filters, aggregation_overrides, cdf_overrides)
-    ensure_dataset_query_table(selected_dataset, query_columns, filters)
-    if repository.dataset_rows_table_exists(selected_dataset['id']):
-        df = repository.load_dataset_rows(selected_dataset['id'], query_columns, filters)
+    def metric_filters_for(metric: str) -> dict[str, Any]:
+        return {
+            **filters,
+            'aggregation': aggregation_overrides.get(metric, aggregation),
+            'cdf_grouping': cdf_overrides.get(metric, cdf_grouping),
+            'extra_filters': dict(filters.get('extra_filters') or {}),
+        }
+
+    # A page shows its first metrics and every metric already analysed at once; the browser then
+    # requests the pending metrics and the Processed Metrics table in batches (``metric_subset``).
+    if metric_subset is not None:
+        wanted = set(metric_subset)
+        target_metrics = [metric for metric in selected_metrics if metric in wanted]
     else:
-        if not dataset_path.exists():
-            return None, [], selected_metrics, filter_options, 'The processed dataset is registered, but its source file is missing and no materialized query table exists. Reupload or retry processing this dataset.', False
-        df = load_cached_dataset(dataset_path)
-        repository.replace_dataset_rows(selected_dataset['id'], df)
-    if str(selected_dataset.get('dataset_kind') or '').casefold() in CDR_DATASET_KINDS:
-        # General CDR Analysis filters use source-faithful table values.
-        # Canonical Operator/Vendor labels and theme metadata belong only to
-        # the in-memory analysis/chart frame.
-        mapping_settings = repository.chart_mapping_settings()
-        df = apply_operator_mappings(df, mapping_settings['operator_mappings'])
-        df.attrs.update(mapping_settings)
-        df = normalise_operator_aliases(df)
+        target_metrics = list(selected_metrics)
+    cached_analyses = {
+        metric: analysis for metric in target_metrics
+        if (analysis := get_cached_analysis(dataset_path, metric_filters_for(metric), metric)) is not None
+    }
+    pending_metrics: set[str] = set()
+    if initial_metric_limit is not None:
+        pending_metrics = {
+            metric for index, metric in enumerate(target_metrics)
+            if index >= initial_metric_limit and metric not in cached_analyses
+        }
+    metrics_to_build = [metric for metric in target_metrics if metric not in cached_analyses and metric not in pending_metrics]
+    table_cache_key = (
+        build_analysis_cache_key(dataset_path, {**filters, 'aggregation_overrides': aggregation_overrides}, '__processed_metrics__:' + '\x1f'.join(selected_metrics))
+        if include_table else ''
+    )
+    table_entry = ANALYSIS_CACHE.get(table_cache_key) if include_table else None
+    build_table = include_table and table_entry is None and not pending_metrics
+    # The page reads only the metrics it shows; the first batch of pending metrics prepares one frame
+    # with every selected metric, which the following batches and the table reuse.
+    shares_frame = metric_subset is not None
+    load_metrics = list(selected_metrics) if (build_table or shares_frame) else metrics_to_build
+    if not (build_table or metrics_to_build):
+        load_metrics = []
+    df = pd.DataFrame()
+    prepared_key = ''
+    if load_metrics:
+        query_columns = build_analysis_query_columns(selected_dataset, load_metrics, filters, aggregation_overrides, cdf_overrides)
+        prepared_key = json.dumps([
+            str(repository.db_path), int(selected_dataset['id']), str(selected_dataset.get('updated_at') or ''),
+            sorted(query_columns), {key: value for key, value in filters.items() if key not in {'aggregation', 'cdf_grouping'}},
+        ], sort_keys=True, default=str)
+        with PREPARED_ANALYSIS_FRAME_LOCK:
+            cached_frame = PREPARED_ANALYSIS_FRAME_CACHE.get(prepared_key)
+        if cached_frame is not None:
+            df = cached_frame
+            load_metrics = []
+    if load_metrics:
+        ensure_dataset_query_table(selected_dataset, query_columns, filters)
+        if repository.dataset_rows_table_exists(selected_dataset['id']):
+            df = repository.load_dataset_rows(selected_dataset['id'], query_columns, filters)
+        else:
+            if not dataset_path.exists():
+                return None, [], selected_metrics, filter_options, 'The processed dataset is registered, but its source file is missing and no materialized query table exists. Reupload or retry processing this dataset.', False
+            df = load_cached_dataset(dataset_path)
+            repository.replace_dataset_rows(selected_dataset['id'], df)
+        if str(selected_dataset.get('dataset_kind') or '').casefold() in CDR_DATASET_KINDS:
+            # General CDR Analysis filters use source-faithful table values.
+            # Canonical Operator/Vendor labels and theme metadata belong only to
+            # the in-memory analysis/chart frame.
+            mapping_settings = repository.chart_mapping_settings()
+            df = apply_operator_mappings(df, mapping_settings['operator_mappings'])
+            df.attrs.update(shared_frame_attrs(mapping_settings))
+            df = normalise_operator_aliases(df)
+        if shares_frame:
+            with PREPARED_ANALYSIS_FRAME_LOCK:
+                # One frame: the CDR currently being completed by the open page.
+                PREPARED_ANALYSIS_FRAME_CACHE.clear()
+                PREPARED_ANALYSIS_FRAME_CACHE[prepared_key] = df
     analyses: list[dict[str, Any]] = []
-    shared_analysis: dict[str, Any] = {}
-    for metric in selected_metrics:
+    shared_analysis: dict[str, Any] = {'metric_columns': set(selected_metrics)}
+    for metric in target_metrics:
+        if metric in pending_metrics:
+            analyses.append({'metric': metric, 'result': None})
+            continue
         try:
-            metric_filters = {
-                **filters,
-                'aggregation': aggregation_overrides.get(metric, aggregation),
-                'cdf_grouping': cdf_overrides.get(metric, cdf_grouping),
-                'extra_filters': dict(filters.get('extra_filters') or {}),
-            }
-            analysis = get_cached_analysis(dataset_path, metric_filters, metric)
+            metric_filters = metric_filters_for(metric)
+            analysis = cached_analyses.get(metric)
             if analysis is None:
                 with warnings.catch_warnings(record=True) as captured_warnings:
                     warnings.simplefilter('always')
@@ -9726,7 +9810,7 @@ def build_datasets_analysis_payload(selected_dataset: dict[str, Any] | None, req
                         'error': str(exc),
                     }),
                 )
-            if analyses:
+            if any(item['result'] is not None for item in analyses):
                 continue
             return None, [], selected_metrics, filter_options, str(exc), False
         except Exception as exc:
@@ -9741,13 +9825,19 @@ def build_datasets_analysis_payload(selected_dataset: dict[str, Any] | None, req
                         'error': str(exc),
                     }),
                 )
-            if analyses:
+            if any(item['result'] is not None for item in analyses):
                 continue
             return None, [], selected_metrics, filter_options, str(exc), False
 
-    primary_analysis = analyses[0]['result'] if analyses else None
-    if primary_analysis is not None:
-        primary_analysis.table_rows = build_datasets_analysis_table_rows(df, selected_metrics, primary_analysis.filters.get('aggregation'))
+    primary_analysis = next((item['result'] for item in analyses if item['result'] is not None), None)
+    if progress is not None:
+        progress['pending_metrics'] = [metric for metric in target_metrics if metric in pending_metrics]
+        progress['table_pending'] = bool(include_table and table_entry is None and not build_table)
+    if primary_analysis is not None and include_table:
+        if build_table:
+            table_entry = {'rows': build_datasets_analysis_table_rows(df, selected_metrics, primary_analysis.filters.get('aggregation'))}
+            ANALYSIS_CACHE[table_cache_key] = table_entry
+        primary_analysis.table_rows = table_entry['rows'] if table_entry else []
     return primary_analysis, analyses, selected_metrics, filter_options, None, True
 
 
@@ -11462,6 +11552,7 @@ def delete_workspace_cache(
         cancel_dashboard_tasks(workspace.database_path)
     if active_workspace and active_workspace.id == workspace_id:
         ANALYSIS_CACHE.clear()
+        PREPARED_ANALYSIS_FRAME_CACHE.clear()
         DATAFRAME_CACHE.clear()
         _clear_chart_preview_caches()
     job_id = uuid4().hex
@@ -12374,7 +12465,10 @@ def datasets_analysis(
     datasets, ready_datasets, input_kind_options, selected_dataset = build_dataset_view_state(dataset_id, input_kind, CDR_DATASET_KINDS)
     selected_dataset = refresh_selected_dataset_if_stale(selected_dataset)
     selected_dataset = enrich_selected_dataset_for_analysis(selected_dataset)
-    analysis, analyses, selected_metrics, filter_options, analysis_error, analysis_loaded = build_datasets_analysis_payload(selected_dataset, request, user.username)
+    progress: dict[str, Any] = {}
+    analysis, analyses, selected_metrics, filter_options, analysis_error, analysis_loaded = build_datasets_analysis_payload(
+        selected_dataset, request, user.username, initial_metric_limit=DATASETS_ANALYSIS_INITIAL_METRICS, progress=progress,
+    )
     if analysis_loaded and selected_dataset and not analysis_error:
         saved_selection['dataset_id'] = int(selected_dataset['id'])
         saved_selection['queries'][str(selected_dataset['id'])] = request.url.query
@@ -12384,6 +12478,7 @@ def datasets_analysis(
         request,
         'datasets_analysis.html',
         {
+            **datasets_analysis_view_context(request, selected_dataset, filter_options),
             'summary_datasets': dataset_summary_candidates() if active_workspace else [],
             'user': user,
             'datasets': datasets,
@@ -12393,18 +12488,66 @@ def datasets_analysis(
             'analyses': analyses,
             'analysis_loaded': analysis_loaded,
             'selected_metrics': selected_metrics,
-            'selected_date_from': '' if ignore_event_time_filtering() else request.query_params.get('date_from') or '',
-            'selected_date_to': '' if ignore_event_time_filtering() else request.query_params.get('date_to') or '',
-            'selected_aggregation': request.query_params.get('aggregation') or (selected_dataset.get('default_aggregation') if selected_dataset else 'all') or 'all',
-            'aggregation_overrides': parse_aggregation_overrides(request.query_params.get('aggregation_overrides') or ''),
-            'selected_cdf_grouping': request.query_params.get('cdf_grouping') or default_cdf_grouping(selected_dataset),
-            'cdf_overrides': parse_cdf_overrides(request.query_params.get('cdf_overrides') or ''),
-            'filter_options': filter_options,
+            'pending_metrics': progress.get('pending_metrics') or [],
+            'table_pending': bool(progress.get('table_pending')),
             'input_kind': input_kind,
             'input_kind_options': input_kind_options,
-            'filter_dimensions': [
-                dimension for dimension in FILTER_DIMENSIONS_BY_KIND.get((selected_dataset or {}).get('dataset_kind') or 'generic', FILTER_DIMENSIONS)
-            ],
+            'error': analysis_error,
+        },
+    )
+
+
+def datasets_analysis_view_context(
+    request: Request, selected_dataset: dict[str, Any] | None, filter_options: dict[str, Any],
+) -> dict[str, Any]:
+    """Template values shared by the CDR Analysis page and its progressively loaded metrics."""
+    return {
+        'selected_date_from': '' if ignore_event_time_filtering() else request.query_params.get('date_from') or '',
+        'selected_date_to': '' if ignore_event_time_filtering() else request.query_params.get('date_to') or '',
+        'selected_aggregation': request.query_params.get('aggregation') or (selected_dataset.get('default_aggregation') if selected_dataset else 'all') or 'all',
+        'aggregation_overrides': parse_aggregation_overrides(request.query_params.get('aggregation_overrides') or ''),
+        'selected_cdf_grouping': request.query_params.get('cdf_grouping') or default_cdf_grouping(selected_dataset),
+        'cdf_overrides': parse_cdf_overrides(request.query_params.get('cdf_overrides') or ''),
+        'filter_options': filter_options,
+        'filter_dimensions': [
+            dimension for dimension in FILTER_DIMENSIONS_BY_KIND.get((selected_dataset or {}).get('dataset_kind') or 'generic', FILTER_DIMENSIONS)
+        ],
+    }
+
+
+@app.get('/datasets-analysis/metrics', response_class=HTMLResponse)
+def datasets_analysis_metrics(
+    request: Request,
+    dataset_id: int | None = Query(default=None),
+    input_kind: str | None = Query(default=None),
+    part: list[str] = Query(default=[]),
+    table: bool = Query(default=False),
+    user: SessionUser = Depends(current_user),
+) -> HTMLResponse:
+    """Render the metric panels (and the Processed Metrics table) the CDR Analysis page left pending."""
+    if not active_workspace:
+        raise HTTPException(status_code=400, detail='Open a workspace before using CDR Analysis.')
+    _datasets, _ready, _options, selected_dataset = build_dataset_view_state(dataset_id, input_kind, CDR_DATASET_KINDS)
+    selected_dataset = enrich_selected_dataset_for_analysis(refresh_selected_dataset_if_stale(selected_dataset))
+    requested = [value for value in part if value]
+    if table:
+        # The table follows the comparison of the first metric, which the page already analysed.
+        requested_metrics = [value for value in request.query_params.getlist('metric') if value]
+        first_metric = (requested_metrics or (selected_dataset or {}).get('selectable_metrics') or [''])[0]
+        requested = [first_metric, *requested]
+    analysis, analyses, _selected, filter_options, analysis_error, _loaded = build_datasets_analysis_payload(
+        selected_dataset, request, user.username, metric_subset=requested, include_table=table,
+    )
+    return render_template(
+        request,
+        'datasets_analysis_metrics.html',
+        {
+            **datasets_analysis_view_context(request, selected_dataset, filter_options),
+            'selected_dataset': selected_dataset,
+            'analysis': analysis,
+            'analyses': [item for item in analyses if item['metric'] in set(part)],
+            'requested_parts': [value for value in part if value],
+            'include_table': table,
             'error': analysis_error,
         },
     )
@@ -12574,7 +12717,7 @@ def _combined_reporting_frame(
         mapping_settings = {}
         operator_mappings = {}
     combined = apply_operator_mappings(combined, operator_mappings)
-    combined.attrs.update(mapping_settings)
+    combined.attrs.update(shared_frame_attrs(mapping_settings))
     combined = normalise_operator_aliases(combined)
     # Data tests may legitimately fall back to LTE or report NR SA at the
     # failure instant. Treating that sample RAT as a report-wide NSA/SA filter
@@ -13550,7 +13693,7 @@ def _chart_builder_context(payload: dict[str, Any]) -> tuple[pd.DataFrame, Catal
         result = apply_operator_mappings(
             pd.concat(frames, ignore_index=True, sort=False), operator_mappings,
         )
-        result.attrs.update(mapping_settings)
+        result.attrs.update(shared_frame_attrs(mapping_settings))
         return normalise_operator_aliases(result)
     return _bounded_preview_frame(CHART_PREVIEW_FRAME_CACHE, frame_key, load_frame, 4), entry
 
@@ -15729,6 +15872,7 @@ def _run_dataset_management_changes(task_repository: Repository, job: dict[str, 
         with STOP_REQUESTS_LOCK:
             STOP_REQUESTS.difference_update(key for key in STOP_REQUESTS if key[0] == workspace_key)
         ANALYSIS_CACHE.clear()
+        PREPARED_ANALYSIS_FRAME_CACHE.clear()
         DATAFRAME_CACHE.clear()
         _clear_chart_preview_caches()
         invalidate_workspace_size_cache()
@@ -15858,6 +16002,7 @@ def rename_dataset_file(
     # old path after the move. Clear both caches so no view can retain the
     # previous source-file label or path.
     ANALYSIS_CACHE.clear()
+    PREPARED_ANALYSIS_FRAME_CACHE.clear()
     DATAFRAME_CACHE.clear()
     repository.add_log(user.username, 'rename_dataset', json.dumps({
         'dataset_id': dataset_id,
@@ -15911,6 +16056,7 @@ def move_admin_dataset(
     with STOP_REQUESTS_LOCK:
         STOP_REQUESTS.difference_update(key for key in STOP_REQUESTS if key[0] == workspace_key)
     ANALYSIS_CACHE.clear()
+    PREPARED_ANALYSIS_FRAME_CACHE.clear()
     DATAFRAME_CACHE.clear()
     _clear_chart_preview_caches()
     invalidate_workspace_size_cache()
@@ -18064,6 +18210,7 @@ async def update_admin_database_table(request: Request, user: SessionUser = Depe
     except sqlite3.IntegrityError as exc:
         raise HTTPException(status_code=400, detail=f'The update violates a database constraint: {exc}.') from exc
     ANALYSIS_CACHE.clear()
+    PREPARED_ANALYSIS_FRAME_CACHE.clear()
     DATAFRAME_CACHE.clear()
     if table in {'operator_mappings', 'vendor_mappings', 'chart_mapping_groups'}:
         _clear_chart_preview_caches()
@@ -18115,6 +18262,7 @@ def save_admin_operator_mapping_group(
             status_code=status.HTTP_303_SEE_OTHER,
         )
     ANALYSIS_CACHE.clear()
+    PREPARED_ANALYSIS_FRAME_CACHE.clear()
     DATAFRAME_CACHE.clear()
     _clear_chart_preview_caches()
     repository.add_log(user.username, 'operator_mapping_group_save', json.dumps({
@@ -18175,6 +18323,7 @@ def save_admin_vendor_mapping_group(
             status_code=status.HTTP_303_SEE_OTHER,
         )
     ANALYSIS_CACHE.clear()
+    PREPARED_ANALYSIS_FRAME_CACHE.clear()
     DATAFRAME_CACHE.clear()
     _clear_chart_preview_caches()
     repository.add_log(user.username, 'vendor_mapping_group_save', json.dumps({
@@ -18209,6 +18358,7 @@ def delete_admin_operator_mapping_group(
             status_code=status.HTTP_303_SEE_OTHER,
         )
     ANALYSIS_CACHE.clear()
+    PREPARED_ANALYSIS_FRAME_CACHE.clear()
     DATAFRAME_CACHE.clear()
     _clear_chart_preview_caches()
     repository.add_log(user.username, 'operator_mapping_group_delete', canonical_value.strip())
@@ -18236,6 +18386,7 @@ def delete_admin_vendor_mapping_group(
             status_code=status.HTTP_303_SEE_OTHER,
         )
     ANALYSIS_CACHE.clear()
+    PREPARED_ANALYSIS_FRAME_CACHE.clear()
     DATAFRAME_CACHE.clear()
     _clear_chart_preview_caches()
     repository.add_log(user.username, 'vendor_mapping_group_delete', canonical_value.strip())
@@ -18262,6 +18413,7 @@ def move_admin_chart_mapping_group(
             f'/workspace-config?{urlencode({parameter: str(exc)})}', status_code=status.HTTP_303_SEE_OTHER,
         )
     ANALYSIS_CACHE.clear()
+    PREPARED_ANALYSIS_FRAME_CACHE.clear()
     DATAFRAME_CACHE.clear()
     _clear_chart_preview_caches()
     repository.add_log(user.username, f'{mapping_type}_mapping_group_move', json.dumps({
@@ -18296,6 +18448,7 @@ async def delete_admin_database_table_row(request: Request, user: SessionUser = 
     except sqlite3.IntegrityError as exc:
         raise HTTPException(status_code=400, detail=f'The row cannot be deleted because of a database constraint: {exc}.') from exc
     ANALYSIS_CACHE.clear()
+    PREPARED_ANALYSIS_FRAME_CACHE.clear()
     DATAFRAME_CACHE.clear()
     if table in {'operator_mappings', 'vendor_mappings', 'chart_mapping_groups'}:
         _clear_chart_preview_caches()

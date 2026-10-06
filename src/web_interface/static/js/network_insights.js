@@ -225,8 +225,9 @@
 
   // Modal shown while an analysis runs; Hide leaves it running in the background.
   const progress = {timer: null, started: 0};
-  const showProgress = message => {
+  const showProgress = (message, title = 'Network analysis in progress') => {
     const dialog = $('ni-progress-dialog');
+    $('ni-progress-title').textContent = title;
     $('ni-progress-message').textContent = message;
     progress.started = Date.now();
     const tick = () => { $('ni-progress-elapsed').textContent = `Elapsed: ${Math.floor((Date.now() - progress.started) / 1000)} s`; };
@@ -276,6 +277,8 @@
     const label = kind === 'word' ? 'Word' : 'PowerPoint';
     button.disabled = true; button.classList.add('is-busy');
     status(`Generating the Summary Network Insights ${label}… Charts and maps are rendered at full size.`, 'busy');
+    showProgress(`Preparing the Summary Network Insights ${label}: the analysis of the selected CDRs, its charts and the maps of every group are rendered at full size, so it can take a minute or more. The document downloads when it is ready.`,
+      `Preparing the ${label} document`);
     try {
       const response = await fetch(`/api/network-insights/export/${kind}`, {
         method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(requestBody(analysis?.maps?.operator || '')),
@@ -296,6 +299,7 @@
       status(error.message, 'error');
     } finally {
       button.disabled = false; button.classList.remove('is-busy');
+      hideProgress();
     }
   }));
 
@@ -552,11 +556,11 @@
     return `<section class="ni-inventory" data-ni-inventory="${escapeHtml(inventory.operator)}" data-ni-operator-label="${escapeHtml(inventory.operator_label || inventory.operator)}" data-ni-source="${escapeHtml(inventory.source || 'inventory')}" data-ni-filters="${escapeHtml(JSON.stringify(filters))}">
       <h3>${escapeHtml(inventory.operator_label || inventory.operator)} · ${siteTableTitle(inventory.source)}</h3>
       <div class="ni-map-toolbar">
-        <button type="button" class="ni-secondary-action" data-ni-inventory-export>Export CSV</button>
+        <button type="button" class="ni-secondary-action ni-export-action" data-ni-inventory-export>Export CSV</button>
         ${active ? `<button type="button" class="ni-secondary-action" data-ni-filters-clear>Clear ${integer(active)} filter${active === 1 ? '' : 's'}</button>` : ''}
-        <button type="button" class="ni-secondary-action" data-ni-inventory-page="${inventory.page - 1}" ${inventory.page === 0 ? 'disabled' : ''}>Previous</button>
+        <button type="button" class="ni-secondary-action ni-page-action" data-ni-inventory-page="${inventory.page - 1}" ${inventory.page === 0 ? 'disabled' : ''}>Previous</button>
         <span class="form-note">Page ${integer(inventory.page + 1)} of ${integer(lastPage + 1)} · ${integer(inventory.total_rows)} rows · ${integer(inventory.columns.length)} columns</span>
-        <button type="button" class="ni-secondary-action" data-ni-inventory-page="${inventory.page + 1}" ${inventory.page >= lastPage ? 'disabled' : ''}>Next</button>
+        <button type="button" class="ni-secondary-action ni-page-action" data-ni-inventory-page="${inventory.page + 1}" ${inventory.page >= lastPage ? 'disabled' : ''}>Next</button>
       </div>
       <div class="table-wrap ni-table-wrap"><table class="ni-table"><thead><tr>${inventory.columns.map(column => `<th${inventory.key_columns.includes(column) ? ' class="ni-inventory-key-column"' : ''}><span class="ni-column-head">${escapeHtml(column)}<button type="button" class="ni-column-filter${filters[column] ? ' is-active' : ''}" data-ni-filter-column="${escapeHtml(column)}" title="Filter ${escapeHtml(column)}" aria-label="Filter ${escapeHtml(column)}">▾</button></span></th>`).join('')}</tr></thead>
       <tbody>${inventory.rows.map(row => `<tr>${row.map((value, index) => `<td${inventory.key_columns.includes(inventory.columns[index]) ? ' class="ni-inventory-key-column"' : ''}>${escapeHtml(value ?? '')}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${inventory.columns.length || 1}" class="form-note">${active ? 'No rows match the column filters.' : 'No rows.'}</td></tr>`}</tbody></table></div>
@@ -766,7 +770,7 @@
         const maximum = inventory.rows.reduce((maximum, row) => Math.max(maximum, row.sites), 1);
         const available = inventory.available_groups.includes(group);
         return `<section class="ni-inventory"><h3>${escapeHtml(inventory.operator)} <span>${escapeHtml(inventory.file_name)}</span></h3>
-          <a class="ghost-link" href="/api/network-insights/deployment/${inventory.id}/export?group=${encodeURIComponent(group)}" download>Export CSV</a>
+          <a class="ghost-link ni-export-action" href="/api/network-insights/deployment/${inventory.id}/export?group=${encodeURIComponent(group)}" download>Export CSV</a>
           ${available ? '' : `<p class="form-note">This inventory has no ${escapeHtml(payload.group_label)} column; totals are shown instead.</p>`}
           <table class="ni-table"><thead><tr><th>${escapeHtml(available ? payload.group_label : 'Inventory')}</th><th>Sites</th><th>Cells</th><th></th></tr></thead><tbody>${inventory.rows.map(row => `<tr>
             <td>${escapeHtml(row.group)}</td><td class="num">${integer(row.sites)}</td><td class="num">${integer(row.cells)}</td>

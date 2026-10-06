@@ -72,7 +72,7 @@
     <div class="collapsible-panel-body">
       <div class="ni-map-toolbar">
         <label>View / Group by<select id="ni-deployment-group">{% for key, label in network_insights_config.deployment_groups.items() %}<option value="{{ key }}"{% if key == 'cluster' and not network_insights_config.clusters_available %} disabled title="Import Clusters polygons or an inventory with a Cluster field to enable this view."{% endif %}>{{ label }}</option>{% endfor %}<option value="observed">Observed Sites/Cells (from CDRs)</option><option value="inventory">Full Sites/Cells Inventory</option></select></label>
-        <button type="button" id="ni-deployment-export-all" class="ni-secondary-action" disabled>Export All to CSV</button>
+        <button type="button" id="ni-deployment-export-all" class="ni-secondary-action ni-export-action" disabled>Export All to CSV</button>
         <p class="form-note" id="ni-deployment-status"></p>
       </div>
       <div id="ni-deployment" class="ni-deployment"></div>

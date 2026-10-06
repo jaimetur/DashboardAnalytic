@@ -34,6 +34,10 @@
 .network-insights .ni-analyse:disabled{opacity:.6;cursor:progress}
 .network-insights .ni-secondary-action{padding:.5rem 1rem;border:1px solid #6b8f95;border-radius:999px;background:#fff;color:#2e2a6b;font-weight:750}
 .network-insights .ni-secondary-action:hover{background:var(--ni-soft)}
+/* Export CSV stands out from the paging and filter actions. */
+.network-insights .ni-export-action{display:inline-flex;align-items:center;justify-content:center;width:auto;padding:.5rem 1.1rem;border:0;border-radius:999px;background:linear-gradient(125deg,#1e1b4b,#4f46e5);color:#fff;font-weight:800;text-decoration:none;box-shadow:0 6px 14px rgba(30,27,75,.25)}
+.network-insights .ni-export-action:hover{background:linear-gradient(125deg,#17153b,#4338ca);color:#fff}
+.network-insights .ni-inventory > .ni-export-action{margin:.6rem 0 .9rem}
 .ni-overview{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
 .ni-operator-card{padding:14px 16px;border:1px solid var(--ni-border);border-top:5px solid var(--ni-operator,#4338ca);border-radius:12px;background:#fff;box-shadow:0 6px 16px rgba(49,46,129,.08)}
 .ni-operator-card h3{margin:0 0 .6rem;color:var(--ni-operator,#4338ca);font-size:1.12rem}
@@ -184,3 +188,7 @@
 .ni-filter-menu .excel-column-filter-footer button:last-child{border-color:#312e81;background:linear-gradient(135deg,#312e81,#4338ca);color:#fff}
 .ni-filter-menu .excel-column-filter-options{max-height:220px}
 .ni-filter-menu > .form-note{margin:0;font-size:.74rem}
+.network-insights .ni-export-action:disabled{opacity:.5;cursor:not-allowed;box-shadow:none}
+.network-insights .ni-page-action{border:0;background:linear-gradient(125deg,#0b6e69,#14a39a);color:#fff;font-weight:800;box-shadow:0 6px 14px rgba(11,110,105,.25)}
+.network-insights .ni-page-action:hover:not(:disabled){background:linear-gradient(125deg,#095a56,#0f8a82);color:#fff}
+.network-insights .ni-page-action:disabled{background:#d9e6e5;color:#7d9694;box-shadow:none;cursor:not-allowed}

@@ -1,0 +1,13 @@
+{% import 'datasets_analysis_metric_parts.html' as metric_parts with context %}
+{# Pending CDR Analysis parts, swapped into the page by app.js. #}
+{% set built = analyses | map(attribute='metric') | list %}
+{% for analysis_item in analyses %}
+<template data-loaded-kpi="{{ analysis_item.metric }}">{{ metric_parts.kpi_card(analysis_item.result) }}</template>
+<template data-loaded-panel="{{ analysis_item.metric }}">{{ metric_parts.metric_panel(analysis_item.result) }}</template>
+{% endfor %}
+{% for metric in requested_parts if metric not in built %}
+<template data-failed-metric="{{ metric }}">{{ error or 'This metric has no values for the selected filters.' }}</template>
+{% endfor %}
+{% if include_table %}
+<template data-loaded-table>{% if analysis %}{{ metric_parts.processed_table(analysis) }}{% else %}<div class="table-wrap data-table-wrap"><article class="empty-state-inline">{{ error or 'No tabular rows match the selected filters for the current KPI.' }}</article></div>{% endif %}</template>
+{% endif %}

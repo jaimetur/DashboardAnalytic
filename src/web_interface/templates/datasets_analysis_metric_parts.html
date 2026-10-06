@@ -1,0 +1,196 @@
+{# Per-metric parts of CDR Analysis, shared by the page and its progressively loaded metrics. #}
+{% macro kpi_card(current_analysis) %}
+          <article class="executive-metric-subpanel">
+            <div class="section-head executive-subpanel-head">
+              <div>
+                <p class="eyebrow">Selected Metric</p>
+                <h3>{{ current_analysis.selected_metric }}</h3>
+              </div>
+              <span class="pill">{{ current_analysis.metric_kpis.samples }} samples</span>
+            </div>
+            <section class="metric-detail-grid">
+              {% for key, value in current_analysis.metric_kpis.items() %}
+              {% if key not in ['metric', 'samples'] %}
+              <article class="metric-stat-card">
+                <span>{{ key.replace('_', ' ') }}</span>
+                <strong>{{ value }}</strong>
+              </article>
+              {% endif %}
+              {% endfor %}
+            </section>
+          </article>
+{% endmacro %}
+
+{% macro pending_kpi(metric) %}
+          <article class="executive-metric-subpanel metric-pending" data-pending-kpi="{{ metric }}">
+            <div class="section-head executive-subpanel-head">
+              <div>
+                <p class="eyebrow">Selected Metric</p>
+                <h3>{{ metric }}</h3>
+              </div>
+              <span class="pill metric-pending-pill"><span class="metric-pending-spinner" aria-hidden="true"></span> Loading…</span>
+            </div>
+          </article>
+{% endmacro %}
+
+{% macro metric_panel(current_analysis) %}
+          <article class="multi-metric-panel">
+            <div class="section-head compact-toolbar">
+              <div>
+                <p class="eyebrow">Metric View</p>
+                <h2>{{ current_analysis.selected_metric }}</h2>
+              </div>
+              <span class="table-help">Current comparison: {{ format_aggregation_label(current_analysis.filters.aggregation) }}</span>
+            </div>
+            <section class="viz-grid">
+              <article class="wide-visual">
+                <div class="section-head">
+                  <div>
+                    <p class="eyebrow">Distribution</p>
+                    <h2>CDF Curve</h2>
+                  </div>
+                  <label class="chart-aggregation-control">
+                    <span>Compare CDF by</span>
+                    <select
+                      data-chart-cdf-grouping-select
+                      data-metric="{{ current_analysis.selected_metric }}"
+                      data-current-overrides="{{ format_cdf_overrides(cdf_overrides) }}"
+                      data-global-cdf-grouping="{{ selected_cdf_grouping or 'all' }}"
+                    >
+                      <option value="all" {% if (current_analysis.filters.cdf_grouping or 'all')|lower == 'all' %}selected{% endif %}>Single CDF</option>
+                      {% for item in ['operator', 'operator_vendor', 'vendor', 'market', 'region', 'cluster', 'city'] %}
+                      <option value="{{ item }}" {% if item == ((current_analysis.filters.cdf_grouping or 'all')|lower) %}selected{% endif %} {% if item not in selected_dataset.available_cdf_groupings %}disabled{% endif %}>{{ format_aggregation_label(item) }}</option>
+                      {% endfor %}
+                    </select>
+                  </label>
+                </div>
+                <div class="chart-card chart-card-cdf" data-chart='{{ current_analysis.cdf_chart | tojson }}' data-chart-kind="cdf" data-metric="{{ current_analysis.selected_metric }}">
+                  <svg class="chart-svg" viewBox="0 0 600 280" preserveAspectRatio="none"></svg>
+                  <div class="cdf-range-control" data-cdf-range-control hidden>
+                    <div class="cdf-range-head">
+                      <span>Visible X Range</span>
+                      <strong data-cdf-range-value></strong>
+                    </div>
+                    <div class="cdf-range-dual" data-cdf-range-dual>
+                      <input type="range" data-cdf-range-min-slider aria-label="Visible X range start">
+                      <input type="range" data-cdf-range-slider aria-label="Visible X range end">
+                    </div>
+                  </div>
+                </div>
+              </article>
+              <article class="wide-visual">
+                <div class="section-head">
+                  <div>
+                    <p class="eyebrow">Comparison</p>
+                    <h2>Group Benchmark</h2>
+                  </div>
+                  <label class="chart-aggregation-control">
+                    <span>Compare by</span>
+                    <select
+                      data-chart-aggregation-select
+                      data-metric="{{ current_analysis.selected_metric }}"
+                      data-current-overrides="{{ format_aggregation_overrides(aggregation_overrides) }}"
+                      data-global-aggregation="{{ selected_aggregation or 'all' }}"
+                    >
+                      <option value="all" {% if (current_analysis.filters.aggregation or 'all')|lower == 'all' %}selected{% endif %}>Auto / raw view</option>
+                      {% for item in ['operator', 'operator_vendor', 'vendor', 'region', 'cluster', 'city', 'market', 'period', 'session_type', 'test_name', 'direction', 'technology_primary', 'source_sheet'] %}
+                      <option value="{{ item }}" {% if item == ((current_analysis.filters.aggregation or 'all')|lower) %}selected{% endif %} {% if item not in selected_dataset.available_aggregations %}disabled{% endif %}>{{ format_aggregation_label(item) }}</option>
+                      {% endfor %}
+                    </select>
+                  </label>
+                </div>
+                <div class="chart-card" data-chart='{{ current_analysis.comparison_chart | tojson }}'>
+                  <svg class="chart-svg" viewBox="0 0 600 280" preserveAspectRatio="none"></svg>
+                </div>
+              </article>
+            </section>
+            <section class="grouped-scorecard-stack">
+              <div class="section-head compact-toolbar score-group-head">
+                <div>
+                  <p class="eyebrow">Grouped Percentiles</p>
+                  <h3>By {{ format_aggregation_label(current_analysis.filters.aggregation) }}</h3>
+                </div>
+              </div>
+              {% if current_analysis.scorecard_groups %}
+              <div class="table-wrap grouped-scorecard-table-wrap">
+                <table class="grouped-scorecard-table">
+                  <thead>
+                    <tr>
+                      <th>Group</th>
+                      <th>P10</th>
+                      <th>P25</th>
+                      <th>P50</th>
+                      <th>P75</th>
+                      <th>P90</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for group in current_analysis.scorecard_groups %}
+                    <tr>
+                      <td>{{ group['group'] }}</td>
+                      {% for percentile in ['P10', 'P25', 'P50', 'P75', 'P90'] %}
+                      {% set ns = namespace(value='-') %}
+                      {% for item in group['items'] %}
+                      {% if item.label == percentile %}
+                      {% set ns.value = item.value %}
+                      {% endif %}
+                      {% endfor %}
+                      <td>{{ ns.value | two_decimals }}</td>
+                      {% endfor %}
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+              {% else %}
+              <article class="empty-state-inline">No percentile groups are available for the current comparison.</article>
+              {% endif %}
+            </section>
+          </article>
+{% endmacro %}
+
+{% macro pending_panel(metric) %}
+          <article class="multi-metric-panel metric-pending" data-pending-panel="{{ metric }}">
+            <div class="section-head compact-toolbar">
+              <div>
+                <p class="eyebrow">Metric View</p>
+                <h2>{{ metric }}</h2>
+              </div>
+              <span class="table-help metric-pending-note"><span class="metric-pending-spinner" aria-hidden="true"></span> Calculating charts and percentiles…</span>
+            </div>
+            <div class="metric-pending-body" aria-hidden="true"></div>
+          </article>
+{% endmacro %}
+
+{% macro processed_table(analysis) %}
+        <div class="table-wrap data-table-wrap">
+          {% if analysis.table_rows %}
+          <table>
+            <thead>
+              <tr>
+                {% for header in analysis.table_rows[0].keys() %}
+                <th>{{ header }}</th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in analysis.table_rows %}
+              <tr>
+                {% for value in row.values() %}
+                <td>{{ value | two_decimals }}</td>
+                {% endfor %}
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% else %}
+          <article class="empty-state-inline">No tabular rows match the selected filters for the current KPI.</article>
+          {% endif %}
+        </div>
+{% endmacro %}
+
+{% macro pending_table() %}
+        <div class="table-wrap data-table-wrap" data-pending-table>
+          <article class="empty-state-inline"><span class="metric-pending-spinner" aria-hidden="true"></span> Loading the processed metrics of every selected KPI…</article>
+        </div>
+{% endmacro %}
