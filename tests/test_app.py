@@ -10407,3 +10407,18 @@ def test_module_tabs_take_order_title_icon_and_colour_from_interface_settings(cl
     settings = app_module.load_module_labels(app_module.repository)
     assert list(settings) == [module for module, _name in app_module.MAIN_MODULES]
     assert settings['network-insights']['title'] == 'Network Insights' and settings['network-insights']['tab_color'] == '#4F46E5'
+
+
+def test_periodic_page_polls_do_not_count_as_application_activity(client) -> None:
+    import src.DriveTestAnalyzer as app_module
+
+    login_super(client)
+    with app_module.APPLICATION_ACTIVITY_LOCK:
+        app_module.LAST_INTERACTIVE_APPLICATION_ACTIVITY = 0.0
+    # Pages check incoming transfers and backups on their own; Dashboard charts are
+    # still prepared once nobody uses the application for five minutes.
+    for path in ('/admin/import-export/transfers/offers', '/api/admin/backup-status', '/api/background-tasks'):
+        client.get(path)
+    assert app_module.LAST_INTERACTIVE_APPLICATION_ACTIVITY == 0.0
+    client.get('/workspace')
+    assert app_module.LAST_INTERACTIVE_APPLICATION_ACTIVITY > 0.0

@@ -2840,8 +2840,11 @@ APPLICATION_ACTIVITY_LOCK = Lock()
 LAST_INTERACTIVE_APPLICATION_ACTIVITY = monotonic()
 LAST_IDLE_DASHBOARD_WARMUP_ACTIVITY = 0.0
 IDLE_DASHBOARD_WARMUP_CALLBACK: Callable[[], None] | None = None
+# Requests pages repeat on their own, which do not mean someone is using the
+# application: Dashboard charts are prepared after five minutes without others.
 PASSIVE_APPLICATION_REQUEST_PATHS = {
-    '/api/background-tasks', '/api/workspaces/sizes',
+    '/api/background-tasks', '/api/workspaces/sizes', '/admin/import-export/transfers/offers',
+    '/api/admin/backup-status', '/api/admin/backup-files',
     '/api/e2e-dashboards/statuses', '/api/e2e-dashboards/ppt-jobs',
     '/api/reporting-old/jobs', '/api/reporting-old/chart-jobs',
 }

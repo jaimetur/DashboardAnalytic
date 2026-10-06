@@ -73,6 +73,7 @@
 - While the Auto-calculated Fields of the active workspace are being materialized, every page says so, since analyses and exports may be slower or fail until it finishes.
 - Failed requests answered by a reverse proxy or by a server error (for example a timeout) show their cause, such as `The server did not answer in time (HTTP 504)`, instead of a generic message like `Unable to analyse the selected CDRs.`
 - An incoming transfer left receiving or importing when the server stopped is marked as interrupted when it starts again, instead of being shown as a running task that could not be stopped; nothing is imported again without approval.
+- Dashboard charts are prepared in the background again once nobody uses the application for five minutes: the periodic checks of incoming transfers and backups that pages make on their own counted as use, so with any page open the charts were only prepared when a Dashboard was opened.
 
 #### 📚 Documentation:
 - Added the [Non-Qualified Calls](help/non-qualified-calls.md) guide and updated the overview, web interface, administrator, workspace, CDR Analysis, Network Insights, E2E Dashboards, Scoring, Reporting, Query Builder, project structure and roadmap documents.
