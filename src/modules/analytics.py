@@ -48,7 +48,7 @@ MIN_CDF_POINTS_PER_SERIES = 192
 CDF_DEFAULT_Y_THRESHOLD = 0.95
 # The visible CDF range starts where the first curve reaches this share of its samples,
 # leaving out long, nearly empty lower tails.
-CDF_DEFAULT_Y_LOWER_THRESHOLD = 0.01
+CDF_DEFAULT_Y_LOWER_THRESHOLD = 0.05
 METRIC_AXIS_TITLES = {
     'polqa_lq_avg': 'POLQA LQ Avg',
     'lq': 'LQ',

@@ -65,7 +65,7 @@ Controls adapt to the selected dataset.
 - **CDF Curve** shows the empirical KPI distribution. **Global CDF Comparison** and **Compare CDF by** draw one curve per value of the chosen dimension (Operator by default, listed first), up to eight curves.
 - **Group Benchmark** compares the selected aggregation. Bar labels that do not fit are rotated.
 - Every chart has floating zoom controls in its top-right corner (−, level, + and reset) and, as in E2E Dashboards, zooms into a rectangle dragged over it: a CDF narrows its X and Y range, and a bar chart widens to fit the selected bars and scrolls to them. Hovering a bar shows its value, and hovering a CDF shows the probability of every curve at that value.
-- **Visible X Range** has two handles to adjust the start and the end of the CDF axis; a rectangle zoom moves them too.
+- **Visible X Range** has two handles to adjust the start and the end of the CDF axis. By default it starts where the first curve reaches 5% of its samples and ends where every curve reaches 95%, leaving out nearly empty tails; a rectangle zoom moves both handles and reset returns to these defaults.
 - **Grouped Percentiles** and **Processed Metrics** show decimal values with two digits; Processed Metrics lists Cluster after Region, and percentiles by Vendor or Operator_Vendor follow the order of the Vendor filters.
 - Metric cards provide compact numerical summaries.
 
