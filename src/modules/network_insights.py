@@ -2145,11 +2145,19 @@ def install_network_insights_routes(core: Any) -> None:
         suffix = 'docx' if export_kind == 'word' else 'pptx'
         stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         destination = core.safe_join(core.settings.export_dir, f'{stamp}_summary_network_insights.{suffix}')
-        write_summary(request.model_dump(), export_kind, destination)
+        try:
+            write_summary(request.model_dump(), export_kind, destination)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            # The reason reaches the page's error dialog and the server console.
+            import traceback
+            traceback.print_exc()
+            raise HTTPException(500, f'The {export_kind} export failed: {exc}') from exc
         core.repository.try_add_log(user.username, f'export_network_insights_{export_kind}', json.dumps({'file': destination.name}))
         media_type = ('application/vnd.openxmlformats-officedocument.wordprocessingml.document' if export_kind == 'word'
                       else 'application/vnd.openxmlformats-officedocument.presentationml.presentation')
-        return FileResponse(destination, filename=f'{stamp} - Summary Network Insights.{suffix}', media_type=media_type)
+        return FileResponse(destination, filename=f'{stamp} - Network Insights - Summary.{suffix}', media_type=media_type)
 
     @app.get('/api/network-insights/spectrum')
     def network_insights_spectrum(user=Depends(insights_user)):

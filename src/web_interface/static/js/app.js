@@ -6379,7 +6379,10 @@ async function submitDownloadForm(form) {
     });
     if (!response.ok) {
       hideLoadingOverlay();
-      alert(`Download failed with status ${response.status}.`);
+      // The server explains the failure; the status alone does not tell what went wrong.
+      const payload = await response.json().catch(() => ({}));
+      const reason = typeof payload.detail === 'string' && payload.detail ? payload.detail : `The server answered with status ${response.status}.`;
+      showInfoDialog(reason, {tone: 'error', title: 'The document could not be generated'});
       return;
     }
     const blob = await response.blob();

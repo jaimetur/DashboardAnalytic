@@ -526,9 +526,9 @@ For All Environments, only valid environment contributions common to both sides 
 | **Scoring CSV** | Expanded scoring results, category subtotals and totals |
 | **GAP CSV** | Expanded GAP results and their existing numeric fields |
 | **PowerPoint** | Saved results with editable tables and charts, covers and environment transitions |
-| **Word** | The same report as the PowerPoint, one landscape page per slide, with its tables and charts |
+| **Word** | The same report as the PowerPoint, one landscape page per slide exactly as in PowerPoint (rendered with LibreOffice, included in the Docker image; without it the slide tables and charts are rebuilt) |
 
-**Export PowerPoint** and **Export Word**, at the top right of the Scoring Calculation panel beside NR Mode, export the selected job like the results tools. Selecting one environment exports that environment. **All Environments** exports the aggregate and available individual environments. Exports use saved job results; they do not recalculate KPIs.
+**Export PowerPoint** and **Export Word**, at the top right of the Scoring Calculation panel beside NR Mode, export the selected job like the results tools; a progress dialog stays open while the document is generated. Selecting one environment exports that environment. **All Environments** exports the aggregate and available individual environments. Exports use saved job results; they do not recalculate KPIs.
 
 CSV preserves stored names, numeric values and its schema. Its existing category/final GAP aggregates remain valid-KPI means. The new **Total KPI GAP** footer is a web/PowerPoint display total; it does not redefine CSV GAP fields. `gap_partial` and `gap_environments` identify partial coverage.
 

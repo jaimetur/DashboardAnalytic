@@ -204,19 +204,11 @@ def with_colors(distributions: list[dict[str, Any]], options: dict[str, Any]) ->
 
 
 def _cover_selection(cover, lines: list[str]) -> None:
-    """The report selection (filters, progress periods and generation time) under the cover subtitle."""
-    subtitle = next((shape for shape in cover.placeholders if shape.placeholder_format.idx == 1), None)
-    if subtitle is None or not lines:
-        return
-    frame = subtitle.text_frame
-    frame.word_wrap = True
-    # The template shrinks the subtitle to fit; the selection keeps a readable size instead.
-    frame.auto_size = MSO_AUTO_SIZE.NONE
-    size = 14 if len(lines) <= 4 else 12 if len(lines) <= 7 else 10
-    for line in lines:
-        paragraph = frame.add_paragraph()
-        paragraph.text = line
-        paragraph.font.size = Pt(size)
+    """The report selection (filters, progress periods and generation time) below the cover's line."""
+    from src.modules.exports import cover_details, remove_empty_placeholders
+
+    cover_details(cover, lines)
+    remove_empty_placeholders(cover)
 
 
 def report_panels(summary: dict[str, Any], breakdowns: list[dict[str, Any]], progress: dict[str, Any],

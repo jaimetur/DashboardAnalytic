@@ -107,7 +107,7 @@ Empty fixed, derived and Auto-calculated fields remain visible. Stronger header 
 
 **Export PowerPoint** and **Export Word** open one dialog. With **Use the current filters, metrics and chart settings** (checked when an analysis is open) the document is the open CDR exactly as on screen: its metrics and filters, each chart's **Compare by** and **Compare CDF by**, and each CDF's **Visible X Range**. Unchecking it exports the CDRs selected in the dialog (the open CDR by default; CDR Data, Voice and Speech panels with **Select All** each) with every KPI and no filters, the same summary available as a [Reporting](reporting.md) artifact.
 
-PowerPoint exports use the workspace PowerPoint template (`assets/ppt-templates/Template_CDR_analysis.pptx`): a title slide names the CDR and lists its type, metrics and every filter, the content slides use the template's title layout and the deck ends with its closing slide.
+Word exports contain the same report as PowerPoint, one landscape page per slide (rendered with LibreOffice when it is installed, as in the Docker image). PowerPoint exports use the workspace PowerPoint template (`assets/ppt-templates/Template_CDR_analysis.pptx`): a title slide names the CDR and lists its type, metrics and every filter, the content slides use the template's title layout and the deck ends with its closing slide.
 
 Analysis filters do not overwrite stored dataset rows. Analysis filters do not overwrite stored dataset rows. For a complete template-driven report, use E2E Dashboards or the restricted Reporting (old) workflow.
 

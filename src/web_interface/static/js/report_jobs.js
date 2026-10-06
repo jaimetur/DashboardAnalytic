@@ -498,6 +498,54 @@
 
   // A Scoring artifact offers the Scoring calculation options: NR Mode, CDRs,
   // filters, Main Cities, aggregation levels, methodology and GAP reference.
+  // Artifact lists: the module in bold on the first level and, when it has several entries,
+  // its entries indented below it. Items are texts or elements (download links).
+  const ARTIFACT_MODULE_LABELS = {
+    dataset_analysis: 'CDR Analysis', network_insights: 'Network Insights', dashboards: 'E2E Dashboards',
+    scoring: 'Scoring & GAP Analysis', non_qualified_calls: 'Non-Qualified Calls',
+  };
+  function artifactEntryTitle(title, module) {
+    const text = String(title || '');
+    if (text.includes(' · ')) return text.slice(text.indexOf(' · ') + 3);
+    return text.startsWith(module) ? text.slice(module.length).trim() || text : text;
+  }
+  // The formats at the end of an entry, "(PPT/Word/Excel)", each in its own colour.
+  const FORMAT_CLASSES = {PPT: 'rj-format-ppt', Word: 'rj-format-word', Excel: 'rj-format-excel'};
+  function withColouredFormats(text) {
+    const fragment = document.createDocumentFragment();
+    const match = /^(.*?)\(((?:PPT|Word|Excel)(?:\/(?:PPT|Word|Excel))*)\)\s*$/.exec(String(text || ''));
+    if (!match) { fragment.append(String(text || '')); return fragment; }
+    if (match[1]) fragment.append(match[1]);
+    fragment.append('(');
+    match[2].split('/').forEach((format, index) => {
+      if (index) fragment.append('/');
+      fragment.append(node('span', format, `rj-format ${FORMAT_CLASSES[format]}`));
+    });
+    fragment.append(')');
+    return fragment;
+  }
+  function renderArtifactGroups(list, groups) {
+    groups.forEach((group) => {
+      const item = node('li');
+      item.append(node('strong', group.module, 'rj-artifact-module'));
+      const entries = group.items.map((entry) => {
+        if (typeof entry === 'string') return withColouredFormats(entry);
+        if (!entry.classList?.contains('rj-error')) entry.replaceChildren(withColouredFormats(entry.textContent));
+        return entry;
+      });
+      if (entries.length > 1) {
+        const nested = node('ul', undefined, 'rj-artifact-entries');
+        entries.forEach((entry) => { const row = node('li'); row.append(entry); nested.append(row); });
+        item.append(nested);
+      } else if (entries.length) {
+        const text = entries[0].textContent || '';
+        item.append(document.createTextNode(text.startsWith('(') ? ' ' : ' · '), entries[0]);
+        // A fragment empties when appended; the row text above was read before that.
+      }
+      list.append(item);
+    });
+  }
+
   let scoringFormatId = 0;
   function scoringEntry(entry = {}) {
     const card = node('div', undefined, 'rj-entry');
@@ -993,7 +1041,8 @@
       if (!task.enabled) row.classList.add('rj-disabled');
       if (editingId === task.id) row.classList.add('rj-editing');
       const artifacts = node('ul', undefined, 'rj-artifacts');
-      task.artifacts.forEach((text) => artifacts.append(node('li', text)));
+      if (task.artifact_groups) renderArtifactGroups(artifacts, task.artifact_groups);
+      else task.artifacts.forEach((text) => artifacts.append(node('li', text)));
       const last = task.last_run;
       const lastCell = node('td', last ? localTime(last.started_at || last.created_at) : '—');
       const statusCell = node('td');
@@ -1058,16 +1107,21 @@
       if (['queued', 'running'].includes(run.status)) statusCell.append(node('small', ` ${run.progress}% · ${run.message}`));
       else if (run.error) statusCell.append(node('small', ` ${run.error}`, 'rj-error'));
       const artifacts = node('ul', undefined, 'rj-artifacts');
+      // Grouped by module like the jobs table; each entry keeps its download link.
+      const byModule = new Map();
       run.artifacts.forEach((item, index) => {
-        const entry = node('li');
+        const module = ARTIFACT_MODULE_LABELS[item.module] || item.module || 'Artifacts';
+        const title = artifactEntryTitle(item.title, module);
+        let content;
         if (item.status === 'ready') {
-          const link = node('a', item.title); link.href = `/api/reporting/runs/${run.id}/artifacts/${index}`; link.title = item.file_name;
-          entry.append(link);
+          content = node('a', title); content.href = `/api/reporting/runs/${run.id}/artifacts/${index}`; content.title = item.file_name;
         } else {
-          entry.append(node('span', `${item.title}: ${item.error || 'failed'}`, 'rj-error'));
+          content = node('span', `${title}: ${item.error || 'failed'}`, 'rj-error');
         }
-        artifacts.append(entry);
+        if (!byModule.has(module)) byModule.set(module, []);
+        byModule.get(module).push(content);
       });
+      renderArtifactGroups(artifacts, [...byModule].map(([module, items]) => ({module, items})));
       const actions = node('div', undefined, 'table-actions');
       if (run.artifacts.some((item) => item.status === 'ready')) actions.append(downloadLink(run));
       if (state.can_edit && !['queued', 'running'].includes(run.status)) {

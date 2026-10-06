@@ -1,6 +1,7 @@
 """PowerPoint and Word summaries of a Network Insights analysis."""
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
@@ -9,13 +10,13 @@ from typing import Any
 from docx import Document
 from docx.shared import Inches as DocxInches, Pt as DocxPt, RGBColor as DocxRGBColor
 from docx.enum.section import WD_ORIENT, WD_SECTION
-from docx.enum.text import WD_BREAK
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from PIL import Image
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE
-from pptx.enum.text import MSO_AUTO_SIZE
+from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE, PP_ALIGN
 from pptx import Presentation
 from pptx.util import Inches, Pt
 
@@ -178,13 +179,31 @@ def deployment_table_groups(deployment: dict[str, Any]) -> list[tuple[str, list[
         return [group for grouping in deployment['groupings'] for group in deployment_table_groups(grouping)]
     panels = []
     for inventory in deployment.get('inventories') or []:
-        rows = [[row['group'], _number(row['sites'], 0), _number(row['cells'], 0)] for row in inventory.get('rows') or []]
+        source = inventory.get('rows') or []
+        maximum = max((int(row['cells'] or 0) for row in source), default=0) or 1
+        # As on the page, a bar shows each group's cells against the largest group.
+        rows = [[row['group'], _number(row['sites'], 0), _number(row['cells'], 0), share_bar(int(row['cells'] or 0) / maximum)]
+                for row in source]
         totals = inventory.get('totals') or {}
         if totals:
-            rows.append(['Total', _number(totals.get('sites'), 0), _number(totals.get('cells'), 0)])
+            rows.append(['Total', _number(totals.get('sites'), 0), _number(totals.get('cells'), 0), ''])
         if rows:
-            panels.append((f"{inventory.get('operator')} ({inventory.get('file_name')})", [deployment.get('group_label') or 'Group', 'Sites', 'Cells'], rows))
+            panels.append((f"{inventory.get('operator')} ({inventory.get('file_name')})", [deployment.get('group_label') or 'Group', 'Sites', 'Cells', ''], rows))
     return [(f"Network Deployment · {deployment.get('group_label') or 'All'}", panels)] if panels else []
+
+
+SHARE_BAR_BLOCKS = 10
+SHARE_BAR_FILL = '4F46E5'
+
+
+def share_bar(share: float) -> str:
+    """A text bar: filled blocks for the share, light blocks for the rest of the track."""
+    filled = max(1 if share > 0 else 0, round(max(0.0, min(1.0, share)) * SHARE_BAR_BLOCKS))
+    return '\u2588' * filled + '\u2591' * (SHARE_BAR_BLOCKS - filled)
+
+
+def _is_share_bar(text: str) -> bool:
+    return bool(text) and set(text) <= {'\u2588', '\u2591'} and '\u2591' in text or (bool(text) and set(text) == {'\u2588'} and len(text) == SHARE_BAR_BLOCKS)
 
 
 CLASS_BAR_COLUMNS = ('RSRP classes', 'SINR classes')
@@ -212,7 +231,7 @@ def overview_cards(analysis: dict[str, Any], section: dict[str, Any]) -> list[di
     return cards
 
 
-def rf_quality_table(section: dict[str, Any]) -> tuple[list[str], list[list[str]], list[tuple[list[dict[str, Any]], list[dict[str, Any]]]]]:
+def rf_quality_table(section: dict[str, Any], colours: dict[str, str] | None = None) -> tuple[list[str], list[list[str]], list[tuple]]:
     """The table under the RF Quality CDFs; the class columns are drawn as coloured bars from the returned classes."""
     label = section.get('technology_label') or ''
     columns = ['Group', 'Samples', f'{label} RSRP samples'.strip(), 'Median RSRP', 'P10 RSRP', 'Low coverage', 'RSRP classes',
@@ -222,7 +241,8 @@ def rf_quality_table(section: dict[str, Any]) -> tuple[list[str], list[list[str]
         rows.append([str(row.get('operator') or ''), _number(row.get('samples'), 0), _number(row.get('rsrp_samples', row.get('samples')), 0),
                      _number(row.get('rsrp_median')), _number(row.get('rsrp_p10')), _number(row.get('low_coverage_share'), suffix='%'), '',
                      _number(row.get('sinr_median')), _number(row.get('sinr_p10')), _number(row.get('high_interference_share'), suffix='%'), ''])
-        bars.append((row.get('rsrp_classes') or [], row.get('sinr_classes') or []))
+        # The third item is the group's colour, drawn as a swatch before its name as on the page.
+        bars.append((row.get('rsrp_classes') or [], row.get('sinr_classes') or [], (colours or {}).get(row.get('operator'))))
     return columns, rows, bars
 
 
@@ -291,6 +311,39 @@ def _ppt_table_parts(columns: list[str], rows: list[list[str]], width: float):
     return [([columns[index] for index in part], [[row[index] for index in part] for row in rows]) for part in parts]
 
 
+# Tables follow the page: a light teal header, light lavender alternate rows, thin lines and right-aligned numbers.
+TABLE_HEADER_FILL = 'D9EEF1'
+TABLE_HEADER_TEXT = '16505A'
+TABLE_ODD_FILL = 'F7F7FF'
+TABLE_EVEN_FILL = 'FFFFFF'
+TABLE_TEXT = '1F2433'
+TABLE_LINE = 'E3E8F5'
+NUMERIC_TEXT = re.compile(r'^[\s+\-−]?[\d.,]+\s*(%|pp|dB|dBm|MHz| d|\s)*$|^[—–-]$')
+
+
+def _numeric_columns(rows: list[list[str]], count: int) -> set[int]:
+    """Columns whose values are all numbers (counts, shares, dB…), which are aligned right as on the page."""
+    return {index for index in range(1, count)
+            if rows and all(NUMERIC_TEXT.match(str(row[index]).strip() or '—') for row in rows if index < len(row))}
+
+
+def _ppt_cell_line(cell, colour: str) -> None:
+    properties = cell._tc.get_or_add_tcPr()
+    # DrawingML expects the cell lines before the cell fill.
+    for position, side in enumerate(('a:lnL', 'a:lnR', 'a:lnT', 'a:lnB')):
+        existing = properties.find(qn(side))
+        if existing is not None:
+            properties.remove(existing)
+        line = OxmlElement(side)
+        line.set('w', '6350')
+        fill = OxmlElement('a:solidFill')
+        colour_element = OxmlElement('a:srgbClr')
+        colour_element.set('val', colour)
+        fill.append(colour_element)
+        line.append(fill)
+        properties.insert(position, line)
+
+
 def _add_table(slide, columns: list[str], rows: list[list[str]], left: float, top: float, width: float,
                *, row_height: float = 0.32, maximum_font: float = 10):
     shape = slide.shapes.add_table(len(rows) + 1, len(columns), Inches(left), Inches(top), Inches(width), Inches(row_height * (len(rows) + 1)))
@@ -298,18 +351,29 @@ def _add_table(slide, columns: list[str], rows: list[list[str]], left: float, to
     widths, font_size = _table_geometry(columns, rows, width, maximum_font)
     for index, column_width in enumerate(widths):
         table.columns[index].width = Inches(column_width)
+    numeric = _numeric_columns(rows, len(columns))
+    # The template's banded style is replaced by the colours of the page.
+    table.first_row = table.horz_banding = False
     for row_index, values in enumerate([columns, *rows]):
+        fill = TABLE_HEADER_FILL if row_index == 0 else (TABLE_ODD_FILL if row_index % 2 else TABLE_EVEN_FILL)
         for column, value in enumerate(values):
             cell = table.cell(row_index, column)
             cell.text = _single_line(value)
-            cell.margin_left = cell.margin_right = Inches(0.05)
+            cell.margin_left = cell.margin_right = Inches(0.07)
             cell.margin_top = cell.margin_bottom = Inches(0.04)
             cell.text_frame.word_wrap = False
+            cell.fill.solid()
+            cell.fill.fore_color.rgb = RGBColor.from_string(fill)
+            cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+            _ppt_cell_line(cell, TABLE_LINE)
             for paragraph in cell.text_frame.paragraphs:
                 paragraph.space_before = paragraph.space_after = Pt(0)
+                paragraph.alignment = PP_ALIGN.RIGHT if column in numeric else PP_ALIGN.LEFT
                 for run in paragraph.runs:
                     run.font.size = Pt(font_size)
                     run.font.bold = row_index == 0
+                    run.font.color.rgb = RGBColor.from_string(
+                        TABLE_HEADER_TEXT if row_index == 0 else SHARE_BAR_FILL if _is_share_bar(str(value)) else TABLE_TEXT)
     for row in table.rows:
         row.height = Inches(row_height)
     return table
@@ -453,6 +517,17 @@ def _add_bar_table(slide, columns: list[str], rows: list[list[str]], bars: list[
                 run.text = CLASS_BAR_BLOCK * count
                 run.font.size = size
                 run.font.color.rgb = RGBColor.from_string(colour.lstrip('#').upper())
+    for row_index, classes in enumerate(bars, start=1):
+        colour = classes[2] if len(classes) > 2 else None
+        if colour and re.fullmatch(r'#[0-9A-Fa-f]{6}', str(colour)):
+            paragraph = table.cell(row_index, 0).text_frame.paragraphs[0]
+            first = paragraph.runs[0] if paragraph.runs else None
+            swatch = paragraph.add_run()
+            swatch.text = '\u25A0 '
+            swatch.font.size = first.font.size if first is not None else Pt(9)
+            swatch.font.color.rgb = RGBColor.from_string(str(colour).lstrip('#').upper())
+            if first is not None:
+                first._r.addprevious(swatch._r)
 
 def _visual_slides(presentation: Presentation, title: str, panels: list[tuple[str, BytesIO | None, str, Any]],
                    below: tuple[list[str], list[list[str]], list[Any]] | None = None) -> None:
@@ -506,6 +581,8 @@ def export_network_insights_powerpoint(destination: Path, analysis: dict[str, An
     _remove_all_slides(presentation)
     cover = presentation.slides.add_slide(_named_slide_layout(presentation, 'Title Page'))
     _set_structural_slide_text(cover, 'Summary Network Insights', 'Dashboard Analytic')
+    from src.modules.exports import remove_empty_placeholders
+    remove_empty_placeholders(cover)
     selection_slide = _slide(presentation, 'Analysis Selection')
     left, top, width, height = _content_frame(selection_slide)
     shape = selection_slide.shapes.add_textbox(Inches(left), Inches(top), Inches(width), Inches(height))
@@ -522,7 +599,7 @@ def export_network_insights_powerpoint(destination: Path, analysis: dict[str, An
         _overview_slides(presentation, f'Overview{suffix}', overview_cards(analysis, section))
     for suffix, section, cdfs, _groups in visuals:
         if cdfs:
-            _visual_slides(presentation, f'RF Quality{suffix}', cdfs, rf_quality_table(section))
+            _visual_slides(presentation, f'RF Quality{suffix}', cdfs, rf_quality_table(section, analysis.get('colours')))
     for suffix, _section, _cdfs, groups in visuals:
         for group, panels in groups:
             _visual_slides(presentation, f'Coverage & Interference Maps{suffix}' + (f' · {group}' if group else ''), panels)
@@ -547,8 +624,9 @@ def export_network_insights_powerpoint(destination: Path, analysis: dict[str, An
 
 def _docx_table(document: Document, columns: list[str], rows: list[list[str]], width: float | None = None):
     table = document.add_table(rows=1, cols=len(columns))
-    table.style = 'Light Grid Accent 1'
     table.autofit = False
+    _docx_table_lines(table)
+    numeric = _numeric_columns(rows, len(columns))
     section = document.sections[-1]
     if width is None:
         width = (section.page_width - section.left_margin - section.right_margin) / 914400
@@ -573,14 +651,37 @@ def _docx_table(document: Document, columns: list[str], rows: list[list[str]], w
                 item.set(qn('w:type'), 'dxa')
                 margins.append(item)
             properties.append(margins)
+            shading = OxmlElement('w:shd')
+            shading.set(qn('w:val'), 'clear')
+            shading.set(qn('w:color'), 'auto')
+            shading.set(qn('w:fill'), TABLE_HEADER_FILL if row_index == 0 else (TABLE_ODD_FILL if row_index % 2 else TABLE_EVEN_FILL))
+            properties.append(shading)
             for paragraph in cell.paragraphs:
                 paragraph.paragraph_format.space_before = paragraph.paragraph_format.space_after = DocxPt(0)
                 paragraph.paragraph_format.line_spacing = 1
+                if index in numeric:
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
                 for run in paragraph.runs:
                     run.font.name = 'Arial'
                     run.font.size = DocxPt(font)
                     run.bold = row_index == 0
+                    run.font.color.rgb = DocxRGBColor.from_string(
+                        TABLE_HEADER_TEXT if row_index == 0 else SHARE_BAR_FILL if _is_share_bar(str(value)) else TABLE_TEXT)
     return table
+
+
+def _docx_table_lines(table) -> None:
+    """Thin light lines around and inside the table, as on the page."""
+    properties = table._tbl.tblPr
+    borders = OxmlElement('w:tblBorders')
+    for side in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'):
+        border = OxmlElement(f'w:{side}')
+        border.set(qn('w:val'), 'single')
+        border.set(qn('w:sz'), '4')
+        border.set(qn('w:space'), '0')
+        border.set(qn('w:color'), TABLE_LINE)
+        borders.append(border)
+    properties.append(borders)
 
 
 DOCX_COLUMN_GAP = 0.3
@@ -663,6 +764,16 @@ def _docx_bar_table(document: Document, columns: list[str], rows: list[list[str]
                 run.font.size = size
                 run.font.name = 'Arial'
                 run.font.color.rgb = DocxRGBColor.from_string(colour.lstrip('#').upper())
+    for row_index, classes in enumerate(bars, start=1):
+        colour = classes[2] if len(classes) > 2 else None
+        if colour and re.fullmatch(r'#[0-9A-Fa-f]{6}', str(colour)):
+            paragraph = table.cell(row_index, 0).paragraphs[0]
+            first = paragraph.runs[0] if paragraph.runs else None
+            swatch = paragraph.add_run('\u25A0 ')
+            swatch.font.size = first.font.size if first is not None else DocxPt(8)
+            swatch.font.color.rgb = DocxRGBColor.from_string(str(colour).lstrip('#').upper())
+            if first is not None:
+                first._r.addprevious(swatch._r)
 
 def export_network_insights_word(destination: Path, analysis: dict[str, Any], deployment: dict[str, Any],
                                  selection: dict[str, Any], render: ChartRenderer) -> Path:
@@ -711,7 +822,7 @@ def export_network_insights_word(destination: Path, analysis: dict[str, Any], de
     for suffix, section, cdfs, _groups in visuals:
         if cdfs:
             _docx_side_by_side(document, f'RF Quality{suffix}', [(caption, (image, note, None)) for caption, image, note, _table in cdfs], add_image, new_page=True)
-            columns, rows, bars = rf_quality_table(section)
+            columns, rows, bars = rf_quality_table(section, analysis.get('colours'))
             if rows:
                 _docx_bar_table(document, columns, rows, bars)
     for suffix, _section, _cdfs, groups in visuals:

@@ -249,3 +249,9 @@
 .report-jobs .rj-card[data-rj-module].is-tab-hidden { display: none !important; }
 .report-jobs .rj-card[data-rj-module] .rj-filters label { color: color-mix(in srgb, var(--rj-accent) 80%, #17232d); }
 .report-jobs .rj-artifact-tab .rj-tab-icon { display: inline-block; width: 1.05rem; height: 1.05rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: 0 0 auto; }
+.report-jobs .rj-artifact-module { font-weight: 700; }
+.report-jobs .rj-artifact-entries { margin: .1rem 0 .2rem; padding-left: 1.1rem; list-style: circle; display: grid; gap: .1rem; }
+.report-jobs .rj-format { font-weight: 800; }
+.report-jobs .rj-format-ppt { color: #c4461f; }
+.report-jobs .rj-format-word { color: #2b5797; }
+.report-jobs .rj-format-excel { color: #1d7044; }

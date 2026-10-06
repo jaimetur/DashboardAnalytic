@@ -17,6 +17,17 @@
             .replace(/'/g, "&#39;");
     }
 
+    // Inline text is escaped before links and images are parsed; their parts are unescaped
+    // before being escaped again so "&" is not shown as "&amp;".
+    function unescapeHtml(text) {
+        return String(text)
+            .replaceAll("&lt;", "<")
+            .replaceAll("&gt;", ">")
+            .replaceAll("&quot;", '"')
+            .replaceAll("&#39;", "'")
+            .replaceAll("&amp;", "&");
+    }
+
     function splitTableRow(line) {
         const trimmed = String(line || "").trim().replace(/^\|/, "").replace(/\|$/, "");
         return trimmed.split("|").map((cell) => cell.trim());
@@ -136,9 +147,10 @@
             });
 
             let html = escapeHtml(tokenized);
-            html = html.replace(/\[!\[([^\]]*)\]\(([^)]+)\)\]\(([^)]+)\)/g, (_m, alt, imgUrl, linkUrl) => {
-                const resolvedLink = resolveUrl(linkUrl, false);
-                const resolvedImg = resolveUrl(imgUrl, true);
+            html = html.replace(/\[!\[([^\]]*)\]\(([^)]+)\)\]\(([^)]+)\)/g, (_m, escapedAlt, imgUrl, linkUrl) => {
+                const alt = unescapeHtml(escapedAlt);
+                const resolvedLink = resolveUrl(unescapeHtml(linkUrl), false);
+                const resolvedImg = resolveUrl(unescapeHtml(imgUrl), true);
                 const isInternal = resolvedLink.startsWith("#")
                     || (resolvedLink.startsWith("/") && !resolvedLink.startsWith("//"));
                 const targetAttrs = isInternal ? "" : ` target="_blank" rel="noopener noreferrer"`;
@@ -146,10 +158,11 @@
             });
 
             html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_m, alt, rawTarget) =>
-                `<img src="${escapeHtml(resolveUrl(parseMdTarget(rawTarget), true))}" alt="${escapeHtml(alt)}">`
+                `<img src="${escapeHtml(resolveUrl(parseMdTarget(unescapeHtml(rawTarget)), true))}" alt="${escapeHtml(unescapeHtml(alt))}">`
             );
-            html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label, rawTarget) => {
-                const resolved = resolveUrl(parseMdTarget(rawTarget), false);
+            html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, escapedLabel, rawTarget) => {
+                const label = unescapeHtml(escapedLabel);
+                const resolved = resolveUrl(parseMdTarget(unescapeHtml(rawTarget)), false);
                 const isInternal = resolved.startsWith("#")
                     || (resolved.startsWith("/") && !resolved.startsWith("//"));
                 const targetAttrs = isInternal ? "" : ` target="_blank" rel="noopener noreferrer"`;

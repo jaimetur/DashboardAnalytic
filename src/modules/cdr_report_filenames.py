@@ -26,7 +26,7 @@ def build_cdr_report_filename(
     max_stem_bytes = 240 - len(safe_campaigns.encode('utf-8'))
     safe_scope = _filename_part(scope_label, 40)
     fixed_bytes = len(
-        f'{export_time:%Y%m%d_%H%M%S} - {nr_mode_label} -  -  - {safe_scope}'.encode('utf-8')
+        f'{export_time:%Y%m%d_%H%M%S} - E2E Dashboards - {nr_mode_label} -  -  - {safe_scope}'.encode('utf-8')
     )
     zone_budget = max_stem_bytes - fixed_bytes - 4
     safe_zone = _filename_part(zone_label, zone_budget) if zone_label else ''
@@ -34,12 +34,13 @@ def build_cdr_report_filename(
     name_budget = max(
         4,
         max_stem_bytes - len(
-            f'{export_time:%Y%m%d_%H%M%S} - {nr_mode_label} -  - {" - ".join(suffix_parts)}'.encode('utf-8')
+            f'{export_time:%Y%m%d_%H%M%S} - E2E Dashboards - {nr_mode_label} -  - {" - ".join(suffix_parts)}'.encode('utf-8')
         ),
     )
     safe_name = _filename_part(dashboard_name, name_budget) or _filename_part('Dashboard', name_budget)
     timestamp = export_time.strftime('%Y%m%d_%H%M%S')
-    return ' - '.join((timestamp, nr_mode_label, safe_name, *suffix_parts)) + safe_campaigns + '.pptx'
+    # Every document starts with its time stamp and module.
+    return ' - '.join((timestamp, 'E2E Dashboards', nr_mode_label, safe_name, *suffix_parts)) + safe_campaigns + '.pptx'
 
 
 SCORING_LIST_MAX_CHARACTERS = 110

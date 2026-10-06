@@ -297,6 +297,8 @@
       status(`Summary Network Insights ${label} downloaded.`, 'done');
     } catch (error) {
       status(error.message, 'error');
+      hideProgress();
+      globalThis.showInfoDialog?.(error.message, {tone: 'error', title: 'The document could not be generated'});
     } finally {
       button.disabled = false; button.classList.remove('is-busy');
       hideProgress();

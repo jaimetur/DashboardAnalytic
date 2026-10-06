@@ -398,6 +398,35 @@ def recurrence_label(schedule: dict[str, Any]) -> str:
     return 'Manual only'
 
 
+def artifact_groups(definition: dict[str, Any], dashboard_names: dict[str, str] | None = None) -> list[dict[str, Any]]:
+    """The artifacts of a job by module: [{'module', 'items'}], each item an entry name with its formats.
+
+    The jobs table lists a module once and, when it has several entries, its entries indented below it.
+    """
+    def formats(values: list[str] | None, default: str = 'powerpoint') -> str:
+        return f"({'/'.join(FORMAT_LABELS.get(value, value) for value in values or [default])})"
+
+    groups: list[dict[str, Any]] = []
+    section = definition.get('dataset_analysis') or {}
+    if section.get('enabled'):
+        groups.append({'module': 'CDR Analysis', 'items': [formats(section.get('formats'))]})
+    network = [f"{network_entry_name(entry)} {formats(entry.get('formats'))}" for entry in definition.get('network_insights') or []]
+    if network:
+        groups.append({'module': 'Network Insights', 'items': network})
+    dashboards = [f"{entry.get('label') or (dashboard_names or {}).get(entry.get('dashboard_id', ''), entry.get('dashboard_id', ''))} (PPT)"
+                  for entry in definition.get('dashboards') or []]
+    if dashboards:
+        groups.append({'module': 'E2E Dashboards', 'items': dashboards})
+    scoring = [f"{entry.get('label') or entry.get('nr_mode', 'NSA') + ' ' + ' → '.join(entry.get('aggregation_levels') or ['Operator'])} "
+               f"{formats(entry.get('formats'))}" for entry in definition.get('scoring') or []]
+    if scoring:
+        groups.append({'module': 'Scoring & GAP Analysis', 'items': scoring})
+    for key, config in (definition.get('modules') or {}).items():
+        provider = ARTIFACT_PROVIDERS.get(key)
+        groups.append({'module': provider['label'] if provider else key, 'items': [formats(config.get('formats'))]})
+    return groups
+
+
 def artifact_labels(definition: dict[str, Any], dashboard_names: dict[str, str] | None = None) -> list[str]:
     labels = []
     section = definition.get('dataset_analysis') or {}
@@ -1247,7 +1276,8 @@ def install_report_task_routes(core: Any) -> None:
 
     def serialize_task(task, runs_by_id, dashboard_names) -> dict[str, Any]:
         last = runs_by_id.get(task['last_run_id']) if task['last_run_id'] else None
-        return {**task, 'artifacts': artifact_labels(task['definition'], dashboard_names), 'last_run': last}
+        return {**task, 'artifacts': artifact_labels(task['definition'], dashboard_names),
+                'artifact_groups': artifact_groups(task['definition'], dashboard_names), 'last_run': last}
 
     # -- routes -------------------------------------------------------------
     @app.get('/reporting', response_class=HTMLResponse)

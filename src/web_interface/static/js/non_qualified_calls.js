@@ -1124,7 +1124,9 @@
       link.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (error) {
-      toast(error.message, 'error');
+      globalThis.hideLoadingOverlay?.();
+      if (typeof globalThis.showInfoDialog === 'function') globalThis.showInfoDialog(error.message, {tone: 'error', title: 'The document could not be generated'});
+      else toast(error.message, 'error');
     } finally {
       globalThis.hideLoadingOverlay?.();
       button.disabled = false;

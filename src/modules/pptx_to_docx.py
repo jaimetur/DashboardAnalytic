@@ -6,7 +6,12 @@ images from their data, and pictures and text boxes are copied in reading order.
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
+import tempfile
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 from docx import Document
@@ -134,8 +139,66 @@ def _slide_title(slide: Any) -> tuple[str, Any]:
     return '', None
 
 
+def _soffice() -> str | None:
+    """LibreOffice, from the environment, the PATH or its usual macOS location."""
+    candidates = [os.environ.get('DASHBOARD_ANALYTIC_SOFFICE', ''), shutil.which('soffice') or '', shutil.which('libreoffice') or '',
+                  '/Applications/LibreOffice.app/Contents/MacOS/soffice']
+    return next((path for path in candidates if path and Path(path).is_file() and os.access(path, os.X_OK)), None)
+
+
+def slide_images(content: bytes, dpi: int = 160) -> list[bytes] | None:
+    """Every slide as a PNG, rendered by LibreOffice through PDF, or None when LibreOffice is unavailable."""
+    soffice = _soffice()
+    try:
+        import pymupdf
+    except ImportError:
+        return None
+    if soffice is None:
+        return None
+    with tempfile.TemporaryDirectory() as folder:
+        source = Path(folder) / 'report.pptx'
+        source.write_bytes(content)
+        # A private profile lets the conversion run while the user has LibreOffice open.
+        profile = (Path(folder) / 'profile').as_uri()
+        try:
+            subprocess.run([soffice, f'-env:UserInstallation={profile}', '--headless', '--convert-to', 'pdf',
+                            '--outdir', folder, str(source)], check=True, capture_output=True, timeout=300)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        pdf = Path(folder) / 'report.pdf'
+        if not pdf.is_file():
+            return None
+        with pymupdf.open(pdf) as document:
+            return [page.get_pixmap(dpi=dpi).tobytes('png') for page in document]
+
+
 def pptx_to_docx(content: bytes, title: str = '') -> bytes:
-    """Convert a generated PowerPoint into a landscape Word document with one page per slide."""
+    """Convert a generated PowerPoint into a landscape Word document with one page per slide.
+
+    With LibreOffice, every page shows the slide exactly as in PowerPoint (layout, colours, tables and charts);
+    without it, the slide content is rebuilt: headings, tables with their colours and charts drawn from their data.
+    """
+    images = slide_images(content)
+    if images:
+        document = Document()
+        section = document.sections[0]
+        section.orientation = WD_ORIENT.LANDSCAPE
+        section.page_width, section.page_height = Inches(11.69), Inches(8.27)
+        section.left_margin = section.right_margin = Inches(0.5)
+        section.top_margin = section.bottom_margin = Inches(0.5)
+        usable_width = (section.page_width - section.left_margin - section.right_margin) / EMU_PER_INCH
+        usable_height = (section.page_height - section.top_margin - section.bottom_margin) / EMU_PER_INCH - 0.3
+        for index, image in enumerate(images):
+            with Image.open(BytesIO(image)) as raster:
+                ratio = raster.width / raster.height
+            width = min(usable_width, usable_height * ratio)
+            paragraph = document.paragraphs[0] if index == 0 and document.paragraphs else document.add_paragraph()
+            paragraph.alignment = 1
+            paragraph.paragraph_format.page_break_before = index > 0
+            paragraph.add_run().add_picture(BytesIO(image), width=Inches(width))
+        output = BytesIO()
+        document.save(output)
+        return output.getvalue()
     presentation = Presentation(BytesIO(content))
     document = Document()
     section = document.sections[0]

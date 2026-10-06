@@ -37,7 +37,7 @@ The same summaries are available directly: **Export PowerPoint** and **Export Wo
 
 ## Reporting Jobs
 
-The **Reporting Jobs** table lists every job with its name, artifacts, next run, recurrence, whether it sends email, the time of its last run and its status, followed by its actions in one row.
+The **Reporting Jobs** table lists every job with its name, artifacts (each module in bold, with its entries indented below it when it has several), next run, recurrence, whether it sends email, the time of its last run and its status, followed by its actions in one row.
 
 | Action | Result |
 | --- | --- |
@@ -75,7 +75,7 @@ Times use the application timezone set in Application Config. The scheduler chec
 
 ## Run history
 
-**Run History** shows each run with its trigger, start time, status, email result and artifacts. Each artifact links to its file; ⬇ downloads them all as a ZIP.
+**Run History** shows each run with its trigger, start time, status, email result and artifacts, grouped by module as in the jobs table. Each artifact links to its file; ⬇ downloads them all as a ZIP.
 
 | Status | Meaning |
 | --- | --- |

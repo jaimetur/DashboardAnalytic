@@ -8,13 +8,14 @@ from docx import Document
 from PIL import Image, ImageDraw, ImageFont
 from pptx import Presentation
 from pptx.dml.color import RGBColor
-from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
-from pptx.enum.text import PP_ALIGN
+from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE, PP_PLACEHOLDER
+from pptx.enum.text import MSO_AUTO_SIZE, PP_ALIGN
 from pptx.util import Inches, Pt
 
 from src.utils.fonts import load_image_font
 
-POWERPOINT_EXPORT_VERSION = "2026-07-14-v8"
+# Bump whenever the PowerPoint layout changes: exports are cached by this version and their content.
+POWERPOINT_EXPORT_VERSION = "2026-10-06-v11"
 PPT_WIDTH_IN = 13.333
 PPT_HEIGHT_IN = 7.5
 SLIDE_WIDTH = 1280
@@ -32,6 +33,9 @@ BLUE = "#245A96"
 LINE = "#D9E4E8"
 GRID = "#C3D2D9"
 DARK_BG = "#143048"
+CONTENT_LAYOUT = "Title + 1 rows + 1 columns"
+# How much lower the content of a slide with a subtitle starts.
+SUBTITLE_CONTENT_SHIFT = 0.5
 SERIES_COLORS = ["#0B7A75", "#DD653E", "#245A96", "#B84D3A", "#6D46A8", "#228A5D", "#C78B1D", "#4D6A88"]
 
 
@@ -157,8 +161,21 @@ def _filters_summary(filters: dict[str, Any]) -> str:
     return " | ".join(fragments) if fragments else "No filters selected"
 
 
+FILTER_VALUES_SHOWN = 4
+FILTER_LINE_LIMIT = 140
+
+
+def _compact_filter(part: str) -> str:
+    """One readable filter line: a long list shows its first values and how many there are."""
+    label, separator, values_text = part.partition(": ")
+    values = [value for value in values_text.split(", ") if value] if separator else []
+    if len(values) > FILTER_VALUES_SHOWN + 1:
+        part = f"{label}: {', '.join(values[:FILTER_VALUES_SHOWN])} … ({len(values)} values)"
+    return part if len(part) <= FILTER_LINE_LIMIT else part[:FILTER_LINE_LIMIT - 1].rstrip(", ") + "…"
+
+
 def _filters_lines(filters_text: str) -> list[str]:
-    lines = [line.strip() for line in str(filters_text or "").split(" | ") if line.strip()]
+    lines = [_compact_filter(line.strip()) for line in str(filters_text or "").split(" | ") if line.strip()]
     return lines or ["No filters selected"]
 
 
@@ -277,6 +294,16 @@ def _downsample_series(labels: list[float], series: list[float], limit: int = MA
     return sampled_labels, sampled_series
 
 
+def _is_hex_color(value: Any) -> bool:
+    text = str(value or "")
+    return len(text) == 7 and text.startswith("#") and all(char in "0123456789abcdefABCDEF" for char in text[1:])
+
+
+def _series_color(series: dict[str, Any], index: int) -> str:
+    color = series.get("color")
+    return color if _is_hex_color(color) else SERIES_COLORS[index % len(SERIES_COLORS)]
+
+
 def _draw_bar_chart(chart: dict[str, Any]) -> BytesIO:
     labels = [str(value) for value in chart.get("labels", [])]
     values = [float(value) for value in chart.get("series", [])]
@@ -297,24 +324,38 @@ def _draw_bar_chart(chart: dict[str, Any]) -> BytesIO:
 
     compact_labels = labels[:8]
     compact_values = values[:8]
-    max_value = max(compact_values) if compact_values else 1.0
-    max_value = max(max_value, 1.0)
+    # Negative means (RSRP, SINR…) are drawn below a zero line, positive ones above it.
+    high = max([0.0, *compact_values]) or (1.0 if not any(value < 0 for value in compact_values) else 0.0)
+    low = min([0.0, *compact_values])
+    span = (high - low) or 1.0
     count = max(1, len(compact_values))
     gap = 16
     usable_width = right - left - gap * (count + 1)
     bar_width = max(36, usable_width // count)
     chart_height = bottom - top - 24
+    zero = bottom - int((0 - low) / span * chart_height)
+    if low < 0:
+        draw.line((left, zero, right, zero), fill=MUTED, width=2)
 
+    colors = list(chart.get("colors") or [])
     for index, (label, value) in enumerate(zip(compact_labels, compact_values, strict=False)):
+        # Each bar keeps its Operator or Vendor colour, as on the page.
+        bar_color = colors[index] if index < len(colors) and _is_hex_color(colors[index]) else ORANGE
         x0 = left + gap + index * (bar_width + gap)
         x1 = x0 + bar_width
-        bar_height = int((value / max_value) * chart_height)
-        y0 = bottom - bar_height
-        draw.rounded_rectangle((x0, y0, x1, bottom), radius=10, fill=ORANGE)
+        end = zero - int(value / span * chart_height)
+        y0, y1 = min(end, zero), max(end, zero)
+        bar_height = y1 - y0
+        if bar_height > 0:
+            draw.rounded_rectangle((x0, y0, x1, y1), radius=min(10, bar_height // 2), fill=bar_color)
         value_text = _format_value(value)
         text_width = draw.textlength(value_text, font=value_font)
-        label_y = y0 + 8 if bar_height > 28 else max(top + 8, y0 - 20)
-        label_color = "#FFFFFF" if bar_height > 28 else TEXT
+        if bar_height > 28:
+            label_y = y0 + 8 if value >= 0 else y1 - 28
+            label_color = "#FFFFFF"
+        else:
+            label_y = max(top + 8, y0 - 20) if value >= 0 else min(bottom - 22, y1 + 4)
+            label_color = TEXT
         draw.text((x0 + (bar_width - text_width) / 2, label_y), value_text, font=value_font, fill=label_color)
         short_label = label if len(label) <= 14 else f"{label[:12]}.."
         text_width = draw.textlength(short_label, font=axis_font)
@@ -423,7 +464,8 @@ def _draw_line_chart(chart: dict[str, Any]) -> BytesIO:
         draw.text((left - 18 - tick_width, py - 8), tick_label, font=axis_font, fill=MUTED)
 
     for index, s in enumerate(series_collection[:8]):
-        color = SERIES_COLORS[index % len(SERIES_COLORS)]
+        # Each curve keeps its Operator or Vendor colour, as on the page.
+        color = _series_color(s, index)
         points: list[tuple[float, float]] = []
         for x_value, y_value in zip(s["labels"], s["series"], strict=False):
             px = left + ((x_value - min_x) / (max_x - min_x)) * (right - left)
@@ -440,7 +482,7 @@ def _draw_line_chart(chart: dict[str, Any]) -> BytesIO:
     legend_x = 48
     legend_y = SLIDE_HEIGHT - 64
     for index, s in enumerate(series_collection[:8]):
-        color = SERIES_COLORS[index % len(SERIES_COLORS)]
+        color = _series_color(s, index)
         draw.rounded_rectangle((legend_x, legend_y, legend_x + 16, legend_y + 16), radius=4, fill=color)
         draw.text((legend_x + 24, legend_y - 2), str(s["name"])[:18], font=legend_font, fill=MUTED)
         legend_x += 140
@@ -452,6 +494,19 @@ def _draw_line_chart(chart: dict[str, Any]) -> BytesIO:
     image.convert("RGB").save(buffer, format="PNG")
     buffer.seek(0)
     return buffer
+
+
+def _card_value(value: Any) -> str:
+    """A statistic that fits its small card: fewer decimals as the number grows."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return _format_value(value)
+    if abs(number) >= 10000:
+        return f"{number:,.0f}"
+    if abs(number) >= 100:
+        return f"{number:,.1f}"
+    return f"{number:,.2f}".rstrip("0").rstrip(".") if number % 1 else f"{number:,.0f}"
 
 
 def _add_metric_cards(slide, analyses: list[dict[str, Any]], *, start_y: float = 1.64, card_h: float = 2.45) -> None:
@@ -481,19 +536,20 @@ def _add_metric_cards(slide, analyses: list[dict[str, Any]], *, start_y: float =
         ]
         inner_cols = 3
         stat_w = 1.12
-        stat_h = 0.66
         stat_gap_x = 0.12
         stat_gap_y = 0.1
         start_stat_x = x + 0.16
         start_stat_y = y + 0.62
+        # The two rows of statistics fill the card, whatever its height, without overflowing it.
+        stat_h = min(0.66, (card_h - 0.62 - 0.14 - stat_gap_y) / 2)
         for metric_index, (label, value) in enumerate(summary):
             inner_row = metric_index // inner_cols
             inner_col = metric_index % inner_cols
             sx = start_stat_x + inner_col * (stat_w + stat_gap_x)
             sy = start_stat_y + inner_row * (stat_h + stat_gap_y)
             _add_panel(slide, sx, sy, stat_w, stat_h, fill="#21435B", line="#2B536B")
-            _add_textbox(slide, sx + 0.08, sy + 0.08, stat_w - 0.16, 0.12, label, size=8, bold=True, color="#AFC3D2")
-            _add_textbox(slide, sx + 0.08, sy + 0.28, stat_w - 0.16, 0.16, _format_value(value), size=11, bold=True, color="#FFFFFF")
+            _add_textbox(slide, sx + 0.08, sy + 0.05, stat_w - 0.16, 0.12, label, size=8, bold=True, color="#AFC3D2")
+            _add_textbox(slide, sx + 0.08, sy + stat_h * 0.42, stat_w - 0.16, 0.16, _card_value(value), size=11, bold=True, color="#FFFFFF")
 
 
 def _add_kpi_grid(slide, items: list[tuple[str, Any]], *, left: float, top: float, width: float, columns: int, card_height: float = 0.9,
@@ -607,6 +663,7 @@ def _build_powerpoint_payload(report: dict[str, Any]) -> dict[str, Any]:
         "dataset_type": report.get("dataset_type") or "Other",
         "filters_text": report.get("filters_text") or "No filters selected",
         "selected_metrics": report.get("selected_metrics") or [],
+        "available_metric_count": report.get("available_metric_count") or 0,
         "global_kpis": (primary or {}).get("global_kpis") or {},
         "analyses": analyses,
     }
@@ -647,11 +704,22 @@ def _init_presentation() -> Presentation:
     return presentation
 
 
-def _content_slide(presentation: Presentation, title: str) -> tuple[Any, float]:
+def _content_slide(presentation: Presentation, title: str, subtitle: str = "") -> tuple[Any, float]:
     """A content slide with its title; returns the slide and how much lower its content starts."""
     if getattr(presentation, "cdr_template", False):
-        slide = presentation.slides.add_slide(_named_layout(presentation, "Title Only"))
+        # The template's white content layout, as the other modules' reports; its chart and text
+        # placeholders are removed because the slide draws its own content.
+        layout = _named_layout(presentation, CONTENT_LAYOUT) or _named_layout(presentation, "Title Only")
+        slide = presentation.slides.add_slide(layout)
         slide.shapes.title.text = title
+        for placeholder in list(slide.placeholders):
+            if placeholder.placeholder_format.type not in {PP_PLACEHOLDER.TITLE, PP_PLACEHOLDER.CENTER_TITLE}:
+                placeholder.element.getparent().remove(placeholder.element)
+        if subtitle:
+            # The analysed CDR is the subtitle, in the template's subtitle style under the title.
+            from src.modules.cdr_reporting import _set_slide_header
+            _set_slide_header(slide, title, subtitle)
+            return slide, TEMPLATE_CONTENT_SHIFT + SUBTITLE_CONTENT_SHIFT
         return slide, TEMPLATE_CONTENT_SHIFT
     slide = presentation.slides.add_slide(presentation.slide_layouts[6])
     _add_full_bg(slide, BG)
@@ -659,20 +727,58 @@ def _content_slide(presentation: Presentation, title: str) -> tuple[Any, float]:
     return slide, 0.0
 
 
-def _title_slide(presentation: Presentation, title: str, lines: list[str]) -> None:
-    """The template's title page: the report title and, below it, what the filters include."""
+def _title_slide(presentation: Presentation, title: str, lines: list[str], details: list[str] | None = None) -> Any:
+    """The template's title page: the report title, what it covers under it and, below the template's line,
+    the details (filters) in one or two columns so every line stays readable."""
     slide = presentation.slides.add_slide(_named_layout(presentation, "Title Page"))
     slide.shapes.title.text = title
     subtitle = next((shape for shape in slide.placeholders if shape.placeholder_format.idx == 1), None)
-    if subtitle is None:
+    if subtitle is not None:
+        frame = subtitle.text_frame
+        frame.word_wrap = True
+        frame.auto_size = MSO_AUTO_SIZE.NONE
+        for index, line in enumerate(lines[:2]):
+            paragraph = frame.paragraphs[0] if index == 0 else frame.add_paragraph()
+            paragraph.text = line
+            # The size is set on the text itself so every viewer keeps it.
+            for run in paragraph.runs:
+                run.font.size = Pt(18 if index == 0 else 13)
+                run.font.bold = index == 0
+                # The template condenses its letters; these lines keep normal spacing.
+                run.font._rPr.set('spc', '0')
+    cover_details(slide, [*lines[2:], *(details or [])])
+    remove_empty_placeholders(slide)
+    return slide
+
+
+def remove_empty_placeholders(slide) -> None:
+    """Drop the template's empty placeholders (speaker, organisation, date) that PowerPoint shows as prompts."""
+    for placeholder in list(slide.placeholders):
+        if placeholder.has_text_frame and not placeholder.text_frame.text.strip():
+            placeholder.element.getparent().remove(placeholder.element)
+
+
+def cover_details(slide, lines: list[str], *, top: float = 5.9, height: float = 0.9) -> None:
+    """Cover lines below the template's decorative line: one column, or two when there are many."""
+    shown = lines[:12]
+    if not shown:
         return
-    frame = subtitle.text_frame
-    frame.word_wrap = True
-    size = 16 if len(lines) <= 3 else 13 if len(lines) <= 6 else 10
-    for index, line in enumerate(lines):
-        paragraph = frame.paragraphs[0] if index == 0 else frame.add_paragraph()
-        paragraph.text = line
-        paragraph.font.size = Pt(size)
+    columns = 1 if len(shown) <= 5 else 2
+    per_column = (len(shown) + columns - 1) // columns
+    size = 10.5 if per_column <= 4 else 9.5
+    width = 12.2 / columns
+    for column in range(columns):
+        textbox = slide.shapes.add_textbox(Inches(0.52 + column * width), Inches(top), Inches(width - 0.2), Inches(height))
+        frame = textbox.text_frame
+        frame.word_wrap = True
+        frame.auto_size = MSO_AUTO_SIZE.NONE
+        for index, line in enumerate(shown[column * per_column:(column + 1) * per_column]):
+            paragraph = frame.paragraphs[0] if index == 0 else frame.add_paragraph()
+            paragraph.text = line
+            paragraph.space_after = Pt(1)
+            for run in paragraph.runs:
+                run.font.size = Pt(size)
+                run.font.color.rgb = _rgb("#FFFFFF")
 
 
 def _closing_slide(presentation: Presentation) -> None:
@@ -696,8 +802,10 @@ def _append_dataset_report_slides(presentation: Presentation, payload: dict[str,
     filter_lines = _filters_lines(payload["filters_text"])
     if getattr(presentation, "cdr_template", False):
         metrics = payload["selected_metrics"]
-        metric_line = f"Metrics ({len(metrics)}): {', '.join(metrics[:8])}{', …' if len(metrics) > 8 else ''}"
-        _title_slide(presentation, f"CDR Analysis · {payload['dataset_name']}", [payload["dataset_type"], metric_line, *filter_lines])
+        available = int(payload.get("available_metric_count") or 0)
+        metric_line = (f"Metrics: All Metrics ({len(metrics)})" if available and len(metrics) >= available
+                       else f"Metrics ({len(metrics)}): {', '.join(metrics[:8])}{', …' if len(metrics) > 8 else ''}")
+        _title_slide(presentation, "CDR Analysis", [payload["dataset_name"], f"{payload['dataset_type']} · {metric_line}"], filter_lines)
     else:
         cover = presentation.slides.add_slide(presentation.slide_layouts[6])
         _add_full_bg(cover, DARK_BG)
@@ -709,7 +817,7 @@ def _append_dataset_report_slides(presentation: Presentation, payload: dict[str,
         _add_panel(cover, 8.75, 0.75, 3.85, 5.95, fill="#1C4665", line="#2D607B")
         _add_textbox(cover, 9.0, 1.05, 3.2, 0.28, "Export Contents", size=14, bold=True, color="#FFFFFF")
         contents = [
-            "Dataset Summary",
+            "CDR Summary",
             "Global Metrics",
             "Metric KPI cards",
             "Visual Analytics per metric",
@@ -719,8 +827,8 @@ def _append_dataset_report_slides(presentation: Presentation, payload: dict[str,
             _add_badge(cover, 9.0, 1.55 + index * 0.72, 3.0, label, fill=BLUE)
     summary_lines = _structured_filters_summary_lines(payload["filters_text"])
 
-    global_slide, shift = _content_slide(presentation, "Dataset Summary")
-    _add_badge(global_slide, 9.95, 0.34 + shift, 2.75, payload["dataset_name"][:28], fill=TEAL)
+    dataset_name = payload["dataset_name"]
+    global_slide, shift = _content_slide(presentation, "CDR Summary", dataset_name)
     _add_multiline_textbox(global_slide, 0.55, 0.72 + shift, 12.1, 0.18, summary_lines, size=9, color=MUTED)
     global_items = [(key, value) for key, value in payload["global_kpis"].items() if key not in {"date_from", "date_to"}]
     _add_kpi_grid(global_slide, global_items[:16], left=0.55, top=1.58 + shift, width=12.2, columns=4,
@@ -728,16 +836,15 @@ def _append_dataset_report_slides(presentation: Presentation, payload: dict[str,
 
     metric_card_pages = [payload["analyses"][index:index + 6] for index in range(0, len(payload["analyses"]), 6)] or [[]]
     for page_index, metric_page in enumerate(metric_card_pages, start=1):
-        metric_slide, shift = _content_slide(presentation, "Dataset Summary")
-        title = "Selected Metric Cards" if len(metric_card_pages) == 1 else f"Selected Metric Cards · Page {page_index}"
-        _add_textbox(metric_slide, 0.55, 0.72 + shift, 6.0, 0.24, title, size=12, bold=True, color=ORANGE)
-        _add_multiline_textbox(metric_slide, 0.55, 0.96 + shift, 12.1, 0.18, summary_lines, size=9, color=MUTED)
-        _add_metric_cards(metric_slide, metric_page, start_y=1.64 + shift, card_h=2.45 if not shift else 2.1)
+        title = "Selected Metric Cards" if len(metric_card_pages) == 1 else f"Selected Metric Cards · {page_index}/{len(metric_card_pages)}"
+        metric_slide, shift = _content_slide(presentation, title, dataset_name)
+        _add_multiline_textbox(metric_slide, 0.55, 0.72 + shift, 12.1, 0.18, summary_lines, size=9, color=MUTED)
+        _add_metric_cards(metric_slide, metric_page, start_y=1.4 + shift, card_h=2.45 if not shift else 1.95)
 
     for analysis_item in payload["analyses"]:
         result = analysis_item["result"]
         metric_name = result.get("selected_metric") or analysis_item.get("metric") or "Metric"
-        visual, shift = _content_slide(presentation, f"Visual Analytics · {metric_name}")
+        visual, shift = _content_slide(presentation, f"Visual Analytics · {metric_name}", dataset_name)
         _add_multiline_textbox(visual, 0.55, 0.72 + shift, 12.1, 0.18, summary_lines, size=9, color=MUTED)
         cdf_image = _draw_line_chart(result.get("cdf_chart") or {})
         comparison_image = _draw_bar_chart(result.get("comparison_chart") or {})
@@ -750,7 +857,7 @@ def _append_dataset_report_slides(presentation: Presentation, payload: dict[str,
         _add_grouped_scorecard_table(visual, (result.get("scorecard_groups") or [])[:8], left=0.55, top=below + 0.76, width=12.2, height=0.84)
 
     primary_result = payload["analyses"][0]["result"] if payload["analyses"] else {}
-    table_slide, shift = _content_slide(presentation, "Processed Metrics")
+    table_slide, shift = _content_slide(presentation, "Processed Metrics", dataset_name)
     _add_multiline_textbox(table_slide, 0.55, 0.72 + shift, 12.1, 0.18, summary_lines, size=9, color=MUTED)
     _add_data_table(table_slide, primary_result.get("table_rows") or [], left=0.55, top=1.56 + shift, width=12.2, height=5.28 - shift)
 
@@ -773,8 +880,8 @@ def export_dataset_summary_powerpoint(destination: Path, reports: list[dict[str,
     presentation = _init_presentation()
     if getattr(presentation, "cdr_template", False):
         names = [f"{report.get('dataset_name') or 'Dataset'} ({report.get('dataset_type') or 'Other'})" for report in reports]
-        _title_slide(presentation, title, [f"{len(reports)} dataset(s) · all KPIs · no filters", *names[:10],
-                                           *([f"… and {len(names) - 10} more"] if len(names) > 10 else [])])
+        _title_slide(presentation, title, [f"{len(reports)} CDR(s)", "All KPIs · no filters"],
+                     [*names[:11], *([f"… and {len(names) - 11} more"] if len(names) > 11 else [])])
     else:
         _dataset_summary_cover(presentation, title, reports)
     for report in reports:

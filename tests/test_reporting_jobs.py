@@ -425,3 +425,19 @@ def test_module_artifacts_always_include_a_document_with_their_excel():
         assert word_and_excel['modules']['document_and_excel_test']['formats'] == ['word', 'excel']
     finally:
         report_tasks.ARTIFACT_PROVIDERS.pop('document_and_excel_test', None)
+
+
+def test_job_artifacts_are_grouped_by_module_with_their_entries():
+    from src.modules import report_tasks
+
+    groups = report_tasks.artifact_groups({
+        'dataset_analysis': {'enabled': True, 'formats': ['powerpoint', 'word']},
+        'network_insights': [{'nr_mode': 'NSA', 'technology': 'lte', 'formats': ['powerpoint']},
+                             {'nr_mode': 'SA', 'technology': 'lte_nr', 'formats': ['word']}],
+        'dashboards': [{'dashboard_id': 'd1', 'label': 'Main Cities'}],
+        'scoring': [], 'modules': {},
+    })
+    assert [group['module'] for group in groups] == ['CDR Analysis', 'Network Insights', 'E2E Dashboards']
+    assert groups[0]['items'] == ['(PPT/Word)']
+    assert len(groups[1]['items']) == 2 and groups[1]['items'][1].endswith('(Word)')
+    assert groups[2]['items'] == ['Main Cities (PPT)']

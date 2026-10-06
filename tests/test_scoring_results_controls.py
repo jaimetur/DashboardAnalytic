@@ -868,10 +868,9 @@ const results = [];
       showConfirmDialog: testCase.choice === 'no-dialog' ? undefined
         : async (message, options) => { dialog = {message, ...options}; return testCase.choice; },
       URL,
-      window: {
-        location: {href: 'https://example.test/scoring/jobs/1/export/ppt?environment=DriveCity',
-          assign: url => { assigned = url; }},
-      },
+      // The export downloads behind a progress dialog instead of navigating.
+      downloadScoringDocument: async url => { assigned = url; },
+      window: {location: {href: 'https://example.test/scoring/jobs/1/export/ppt?environment=DriveCity'}},
     };
     vm.createContext(context);
     vm.runInContext(Object.values(payload.snippets).join('\n'), context);

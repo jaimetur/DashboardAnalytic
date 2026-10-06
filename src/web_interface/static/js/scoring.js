@@ -1181,7 +1181,38 @@
     }
     const url = new URL(link.href, window.location.href);
     url.searchParams.set('split_charts', String(splitCharts));
-    window.location.assign(url.href);
+    await downloadScoringDocument(url.href, 'PowerPoint');
+  }
+
+  // A progress dialog stays open while the document is generated, then the browser downloads it.
+  async function downloadScoringDocument(href, label) {
+    globalThis.showLoadingOverlay?.(`Preparing the ${label} document`,
+      `Preparing the Scoring & GAP Analysis ${label} of the selected job with its tables and charts. The document downloads when it is ready.`);
+    try {
+      const response = await fetch(href, {credentials: 'same-origin'});
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(typeof payload.detail === 'string' ? payload.detail : `The ${label} export failed.`);
+      }
+      const disposition = response.headers.get('Content-Disposition') || '';
+      const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+      const plain = /filename="([^"]+)"/i.exec(disposition)?.[1];
+      const name = encoded ? decodeURIComponent(encoded) : plain || `Scoring & GAP Analysis.${label === 'Word' ? 'docx' : 'pptx'}`;
+      const url = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = name;
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      globalThis.hideLoadingOverlay?.();
+      if (typeof showInfoDialog === 'function') showInfoDialog(error.message, {tone: 'error', title: 'The document could not be generated'});
+      else window.alert(error.message);
+    } finally {
+      globalThis.hideLoadingOverlay?.();
+    }
   }
 
   function normalizeRows(data) {
@@ -4963,14 +4994,14 @@
       const pptLink = root.querySelector('[data-export-ppt]');
       if (!pptLink || pptLink.getAttribute('aria-disabled') === 'true') {
         const message = 'Select a completed scoring job to export it.';
-        if (typeof showAlertDialog === 'function') showAlertDialog(message, {title: 'No scoring job selected'});
+        if (typeof showInfoDialog === 'function') showInfoDialog(message, {tone: 'warning', title: 'No scoring job selected'});
         else window.alert(message);
         return;
       }
       if (documentButton.dataset.scoringDocumentExport === 'word') {
         const url = new URL(pptLink.href, window.location.href);
         url.pathname = url.pathname.replace(/\/export\/ppt$/, '/export/word');
-        window.location.assign(url.href);
+        void downloadScoringDocument(url.href, 'Word');
       } else {
         void generateScoringPpt(pptLink);
       }

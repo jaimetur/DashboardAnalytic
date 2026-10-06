@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import traceback
 import calendar
 import io
 import os
@@ -65,7 +66,7 @@ from src.modules.cdr_types import (
 from src.modules.column_names import MAIN_CDR_FIELDS, PREVIEW_METADATA_FIELDS, VENDOR_FIELD_IDENTITIES, clean_column_name, column_identity, resolve_column_name, sort_vendor_values, vendor_filter_column, vendor_filter_value, vendor_filter_values, vendor_match_values
 from src.modules.report_layouts import canonical_layout_name, selectable_layout_name
 from src.modules.cdr_reporting import entry_dynamic_fields, DYNAMIC_LAYOUTS, CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalog_chart_payload, catalog_kpi_fields, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, is_empty_catalog_chart, materialize_calculated_dimensions, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_label_format, parse_label_position, parse_legend_position, parse_template_boolean, prepare_catalog_chart_preview_frame, prepare_multivendor_catalog_entry, preview_catalog_chart_data, render_catalog_chart_preview, render_catalog_chart_preview_with_hover, render_cdr_report, render_unavailable_source_chart, report_chart_renderer_name, reset_dashboard_canvas_renderer, split_calculated_dimension_aliases
-from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_dataset_summary_powerpoint, export_dataset_summary_word, export_powerpoint_report, export_word_report
+from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_dataset_summary_powerpoint, export_powerpoint_report
 from src.modules.email_delivery import DEFAULT_MAX_ATTACHMENTS_MB, EMAIL_SECURITY_MODES, email_delivery_settings, invalid_recipients, parse_recipients, save_email_delivery_settings, send_email
 from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column, add_vfuk_gcid_column, apply_operator_mappings, ensure_fixed_cdr_fields, get_dataset_source_columns, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.geospatial import assign_clusters, assign_regions, validate_cluster_mapping, validate_region_mapping
@@ -3169,19 +3170,34 @@ def format_aggregation_label(value: str | None) -> str:
     return normalized.replace('_', ' ').title()
 
 
-def _summarize_export_filters(filters: dict[str, Any] | None) -> str:
+def _all_values_label(label: str) -> str:
+    """'All Cities', 'All Operators', 'All Technologies'… for a filter that keeps every value."""
+    plural = label[:-1] + 'ies' if label.endswith('y') and not label.endswith(('ay', 'ey', 'oy', 'uy')) else label + 's'
+    return f'All {plural}'
+
+
+def _summarize_export_filters(filters: dict[str, Any] | None, options: dict[str, Any] | None = None) -> str:
+    """The filters of an export; a filter that keeps every value of the CDR reads 'All <values>'."""
     if not filters:
         return 'No filters selected'
+    options = options or {}
+
+    def describe(key: str, values: list[Any]) -> str:
+        label = format_aggregation_label(key)
+        available = {str(value) for value in options.get(key) or [] if str(value).strip()}
+        if available and available <= {str(value) for value in values}:
+            return f'{label}: {_all_values_label(label)}'
+        return f"{label}: {', '.join(str(item) for item in values)}"
+
     fragments: list[str] = []
     for key in ['market', 'period']:
         values = filters.get(key) or []
         if values:
-            fragments.append(f"{format_aggregation_label(key)}: {', '.join(str(item) for item in values)}")
+            fragments.append(describe(key, values))
     for key, value in (filters.get('extra_filters') or {}).items():
         if not value or value == ['__none__']:
             continue
-        values = value if isinstance(value, list) else [value]
-        fragments.append(f"{format_aggregation_label(key)}: {', '.join(str(item) for item in values)}")
+        fragments.append(describe(key, value if isinstance(value, list) else [value]))
     if filters.get('date_from'):
         fragments.append(f"Date From: {filters['date_from']}")
     if filters.get('date_to'):
@@ -16725,8 +16741,9 @@ def build_dataset_summary_reports(
         reports.append({
             'dataset_name': enriched['file_name'],
             'dataset_type': enriched.get('input_kind_label') or 'Other',
-            'filters_text': _summarize_export_filters(analysis.filters),
+            'filters_text': _summarize_export_filters(analysis.filters, enriched.get('filter_options')),
             'selected_metrics': selected_metrics,
+            'available_metric_count': len(enriched.get('selectable_metrics') or []),
             'analyses': [{'metric': item['metric'], 'result': asdict(item['result'])} for item in analyses],
         })
     if not reports:
@@ -16740,7 +16757,14 @@ def write_dataset_summary(
     """Write the Summary CDR Analysis as PowerPoint ('powerpoint') or Word ('word')."""
     reports, errors = build_dataset_summary_reports(dataset_ids, username, **options)
     if export_kind == 'word':
-        export_dataset_summary_word(destination, reports)
+        # The Word document is the PowerPoint summary: one landscape page per slide.
+        from src.modules.pptx_to_docx import pptx_to_docx
+        presentation = destination.with_suffix('.pptx')
+        export_dataset_summary_powerpoint(presentation, reports)
+        try:
+            destination.write_bytes(pptx_to_docx(presentation.read_bytes()))
+        finally:
+            presentation.unlink(missing_ok=True)
     else:
         export_dataset_summary_powerpoint(destination, reports)
     return destination, reports, errors
@@ -16764,7 +16788,7 @@ def export_dataset_summary(
     repository.add_log(user.username, f'export_dataset_summary_{export_kind}', json.dumps({'dataset_ids': dataset_ids, 'file': destination.name}))
     media_type = ('application/vnd.openxmlformats-officedocument.wordprocessingml.document' if export_kind == 'word'
                   else 'application/vnd.openxmlformats-officedocument.presentationml.presentation')
-    return FileResponse(destination, filename=f'{stamp} - Summary CDR Analysis.{suffix}', media_type=media_type)
+    return FileResponse(destination, filename=f'{stamp} - CDR Analysis - Summary.{suffix}', media_type=media_type)
 
 
 @app.post('/dashboard/export/{export_kind}', include_in_schema=False)
@@ -16838,41 +16862,51 @@ def export_report(
         raise HTTPException(status_code=400, detail=analysis_error or 'Analysis state is not ready for export')
 
     file_stem = Path(selected_dataset['stored_path']).stem
-    filters_text = _summarize_export_filters(analysis.filters)
+    filters_text = _summarize_export_filters(analysis.filters, selected_dataset.get('filter_options'))
     visible_ranges = parse_cdf_ranges(cdf_ranges)
     report_payload = {
         'dataset_name': selected_dataset['file_name'],
         'dataset_type': selected_dataset.get('input_kind_label') or 'Other',
         'filters_text': filters_text,
         'selected_metrics': selected_metrics,
+        'available_metric_count': len(selected_dataset.get('selectable_metrics') or []),
         'analyses': [{'metric': item['metric'], 'result': with_cdf_range(asdict(item['result']), visible_ranges.get(item['metric']))}
                      for item in analyses],
     }
 
-    if export_kind == 'word':
-        destination = safe_join(settings.export_dir, f'{file_stem}_report.docx')
-        export_word_report(destination, with_cdf_range(asdict(analysis), visible_ranges.get(analysis.selected_metric)))
-        media_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    else:
-        report_hash = hashlib.sha1(
-            json.dumps(
-                {
-                    'version': POWERPOINT_EXPORT_VERSION,
-                    'payload': report_payload,
-                },
-                sort_keys=True,
-                default=str,
-            ).encode('utf-8')
-        ).hexdigest()[:10]
-        destination = safe_join(settings.export_dir, f'{file_stem}_report_{report_hash}.pptx')
-        if not destination.exists():
-            export_powerpoint_report(destination, report_payload)
-        media_type = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+    report_hash = hashlib.sha1(
+        json.dumps(
+            {
+                'version': POWERPOINT_EXPORT_VERSION,
+                'payload': report_payload,
+            },
+            sort_keys=True,
+            default=str,
+        ).encode('utf-8')
+    ).hexdigest()[:10]
+    presentation = safe_join(settings.export_dir, f'{file_stem}_report_{report_hash}.pptx')
+    try:
+        if not presentation.exists():
+            export_powerpoint_report(presentation, report_payload)
+        if export_kind == 'word':
+            # The Word document is the same report: one landscape page per slide, as in PowerPoint.
+            from src.modules.pptx_to_docx import pptx_to_docx
+            destination = presentation.with_suffix('.docx')
+            if not destination.exists():
+                destination.write_bytes(pptx_to_docx(presentation.read_bytes()))
+            media_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        else:
+            destination = presentation
+            media_type = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+    except Exception as exc:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f'The {export_kind} export failed: {exc}') from exc
 
     repository.add_log(user.username, f'export_{export_kind}', destination.name)
     original_name = Path(selected_dataset['file_name']).name
     original_stem = Path(original_name).stem
-    download_name = f'{original_stem}.docx' if export_kind == 'word' else f'{original_stem}.pptx'
+    # Every document starts with its time stamp and module: yyyymmdd_hhmmss - CDR Analysis - <CDR>.
+    download_name = f"{datetime.now():%Y%m%d_%H%M%S} - CDR Analysis - {original_stem}.{'docx' if export_kind == 'word' else 'pptx'}"
     return FileResponse(destination, filename=download_name, media_type=media_type)
 
 
