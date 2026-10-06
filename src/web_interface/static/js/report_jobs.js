@@ -737,9 +737,7 @@
       ? 'Without email, each run only keeps its artifacts for download.'
       : 'Email delivery is not configured yet: set the SMTP server in Config → Application Config → Email Delivery.';
     syncEditor();
-    $('rj-editor').hidden = false;
-    $('rj-editor').open = true;
-    $('rj-editor').scrollIntoView({behavior: 'smooth', block: 'start'});
+    openEditor(task?.id ?? null);
   }
 
   function syncEditor() {
@@ -791,6 +789,28 @@
   };
   document.getElementById('rj-enabled')?.addEventListener('change', syncEnabledLabel);
 
+  // The editor is a sub-panel of the saved jobs: it unfolds to edit and folds away on Cancel or Save.
+  function openEditor(taskId) {
+    const editor = $('rj-editor');
+    const panel = editor.closest('details');
+    if (panel) panel.open = true;
+    document.querySelectorAll('#rj-tasks tr.rj-editing').forEach((row) => row.classList.remove('rj-editing'));
+    if (taskId !== null) document.querySelector(`#rj-tasks tr[data-task-id="${taskId}"]`)?.classList.add('rj-editing');
+    editor.hidden = false;
+    editor.classList.remove('is-closing');
+    editor.classList.add('is-opening');
+    editor.addEventListener('animationend', () => editor.classList.remove('is-opening'), {once: true});
+    editor.scrollIntoView({behavior: 'smooth', block: 'start'});
+  }
+  function closeEditor() {
+    const editor = $('rj-editor');
+    editingId = null;
+    document.querySelectorAll('#rj-tasks tr.rj-editing').forEach((row) => row.classList.remove('rj-editing'));
+    if (editor.hidden) return;
+    editor.classList.add('is-closing');
+    editor.addEventListener('animationend', () => { editor.hidden = true; editor.classList.remove('is-closing'); }, {once: true});
+  }
+
   async function ensureOptions() {
     options = await api('/api/reporting/options');
     if (options.catalogues_pending) {
@@ -837,7 +857,9 @@
     }
     body.replaceChildren(...state.tasks.map((task) => {
       const row = node('tr');
+      row.dataset.taskId = task.id;
       if (!task.enabled) row.classList.add('rj-disabled');
+      if (editingId === task.id) row.classList.add('rj-editing');
       const artifacts = node('ul', undefined, 'rj-artifacts');
       task.artifacts.forEach((text) => artifacts.append(node('li', text)));
       const last = task.last_run;
@@ -966,7 +988,7 @@
     else if (host.id === 'rj-scoring') host.append(scoringEntry());
     else if (options.dashboards.length) host.append(dashboardEntry());
   }));
-  $('rj-cancel').addEventListener('click', () => { $('rj-editor').hidden = true; editingId = null; });
+  $('rj-cancel').addEventListener('click', closeEditor);
   $('rj-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const button = $('rj-save');
@@ -977,7 +999,7 @@
         method: editingId ? 'PUT' : 'POST', body: JSON.stringify(payload),
       });
       status(`${result.task.name} saved.`, 'done');
-      $('rj-editor').hidden = true; editingId = null;
+      closeEditor();
       await refresh();
     } catch (error) {
       status(error.message, 'error');

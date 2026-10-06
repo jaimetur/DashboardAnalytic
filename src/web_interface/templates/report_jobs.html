@@ -21,12 +21,9 @@
           <tbody><tr><td colspan="8" class="form-note">Loading Reporting Jobs…</td></tr></tbody>
         </table>
       </div>
-    </div>
-  </details>
-
-  <details class="panel collapsible-panel report-jobs-editor" id="rj-editor" open hidden data-panel-state-key="reporting:editor">
-    <summary class="collapsible-summary"><div><p class="eyebrow">Reporting Job</p><h2 id="rj-editor-title">New Reporting Job</h2></div><span class="collapse-chip">Collapse</span></summary>
-    <form class="collapsible-panel-body report-jobs-form" id="rj-form" novalidate>
+      <section class="rj-editor-subpanel report-jobs-editor" id="rj-editor" hidden aria-labelledby="rj-editor-title">
+        <div class="rj-editor-head"><p class="eyebrow">Reporting Job</p><h3 id="rj-editor-title">New Reporting Job</h3></div>
+        <form class="report-jobs-form" id="rj-form" novalidate>
       <div class="rj-job-head">
         <label class="rj-name">Name<input type="text" id="rj-name" maxlength="160" required></label>
         <label class="rj-enabled-switch" title="A disabled job keeps its configuration but never runs on its schedule">
@@ -99,7 +96,10 @@
         <button type="submit" id="rj-save">Save Reporting Job</button>
       </div>
     </form>
+        </section>
+    </div>
   </details>
+
 
   <details class="panel collapsible-panel" open data-panel-state-key="reporting:runs">
     <summary class="collapsible-summary"><div><p class="eyebrow">Executions</p><h2>Run History</h2></div><span class="collapse-chip">Collapse</span></summary>
