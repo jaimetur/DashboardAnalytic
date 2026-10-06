@@ -731,7 +731,8 @@
       return row;
     }));
     $('rj-enabled').checked = task ? Boolean(task.enabled) : true;
-    $('rj-timezone').textContent = `Times use the application timezone ${options.timezone}. A job only runs while its workspace is the active workspace; a run that falls due meanwhile starts when the workspace is opened again.`;
+    syncEnabledLabel();
+    $('rj-timezone').textContent = `Times use the application timezone ${options.timezone}. Enabled jobs run whenever the application is running, also when another workspace is open; a run that fell due while the application was stopped starts at the next check.`;
     $('rj-email-note').textContent = options.email_configured
       ? 'Without email, each run only keeps its artifacts for download.'
       : 'Email delivery is not configured yet: set the SMTP server in Config → Application Config → Email Delivery.';
@@ -782,6 +783,13 @@
       enabled: $('rj-enabled').checked,
     };
   }
+
+  // The switch says whether the job runs on its schedule.
+  const syncEnabledLabel = () => {
+    const label = document.querySelector('[data-rj-enabled-label]');
+    if (label) label.textContent = $('rj-enabled').checked ? 'Job enabled' : 'Job disabled';
+  };
+  document.getElementById('rj-enabled')?.addEventListener('change', syncEnabledLabel);
 
   async function ensureOptions() {
     options = await api('/api/reporting/options');

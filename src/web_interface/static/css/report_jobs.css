@@ -7,7 +7,7 @@
 .reporting-jobs-table { width: 100%; border-collapse: collapse; }
 .reporting-jobs-table th, .reporting-jobs-table td { padding: .55rem .6rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 .reporting-jobs-table th { position: sticky; top: 0; background: #2f6e4b; color: #fff; font-size: .82rem; }
-.reporting-jobs-table tr.rj-disabled td { opacity: .6; }
+.reporting-jobs-table tr.rj-disabled td:not(:last-child) { opacity: .6; }
 .reporting-jobs-table small { color: var(--muted); }
 .rj-artifacts { margin: 0; padding-left: 1rem; display: grid; gap: .15rem; font-size: .86rem; }
 .rj-status { display: inline-block; padding: .12rem .5rem; border-radius: 999px; font-size: .78rem; font-weight: 800; background: #e9eef2; color: #3d4b55; }
@@ -150,3 +150,17 @@
 .report-jobs .rj-multi .rj-multi-toggle:hover { background: #d0ebdb; color: #174d31; }
 .report-jobs .rj-multi-field { display: grid; gap: .3rem; min-width: 0; }
 .report-jobs .rj-multi-label { color: #1f6b43; font-size: .82rem; font-weight: 800; }
+/* Job header: the name and a visible Enabled switch, before the schedule, the delivery and the artifacts. */
+.report-jobs .rj-job-head { display: flex; flex-wrap: wrap; align-items: end; gap: 1rem 1.5rem; }
+.report-jobs .rj-job-head .rj-name { flex: 1 1 22rem; }
+.report-jobs label.rj-enabled-switch { display: flex; flex-direction: row; align-items: center; gap: .7rem; padding: .55rem .9rem; border: 1px solid rgba(47, 138, 87, .35); border-radius: 14px; background: #fff; cursor: pointer; }
+.report-jobs .rj-enabled-switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.report-jobs .rj-switch { position: relative; flex: 0 0 auto; width: 2.8rem; height: 1.55rem; border-radius: 999px; background: #c9d3cd; transition: background .15s ease; }
+.report-jobs .rj-switch::after { content: ''; position: absolute; top: .18rem; left: .2rem; width: 1.2rem; height: 1.2rem; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .25); transition: transform .15s ease; }
+.report-jobs .rj-enabled-switch input:checked + .rj-switch { background: #2f8a57; }
+.report-jobs .rj-enabled-switch input:checked + .rj-switch::after { transform: translateX(1.22rem); }
+.report-jobs .rj-enabled-switch input:focus-visible + .rj-switch { outline: 3px solid rgba(47, 138, 87, .35); outline-offset: 2px; }
+.report-jobs .rj-enabled-text { display: grid; gap: .1rem; }
+.report-jobs .rj-enabled-text strong { color: #174d31; font-size: 1rem; }
+.report-jobs .rj-enabled-text small { color: var(--muted); font-weight: 500; }
+.report-jobs .rj-enabled-switch:has(input:not(:checked)) .rj-enabled-text strong { color: #8a3b2e; }

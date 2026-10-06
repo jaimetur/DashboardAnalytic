@@ -27,7 +27,33 @@
   <details class="panel collapsible-panel report-jobs-editor" id="rj-editor" open hidden data-panel-state-key="reporting:editor">
     <summary class="collapsible-summary"><div><p class="eyebrow">Reporting Job</p><h2 id="rj-editor-title">New Reporting Job</h2></div><span class="collapse-chip">Collapse</span></summary>
     <form class="collapsible-panel-body report-jobs-form" id="rj-form" novalidate>
-      <label class="rj-name">Name<input type="text" id="rj-name" maxlength="160" required></label>
+      <div class="rj-job-head">
+        <label class="rj-name">Name<input type="text" id="rj-name" maxlength="160" required></label>
+        <label class="rj-enabled-switch" title="A disabled job keeps its configuration but never runs on its schedule">
+          <input type="checkbox" id="rj-enabled" checked>
+          <span class="rj-switch" aria-hidden="true"></span>
+          <span class="rj-enabled-text"><strong data-rj-enabled-label>Job enabled</strong><small>Runs on its schedule. ▶ Run now works either way.</small></span>
+        </label>
+      </div>
+      <h3>Schedule</h3>
+      <section class="rj-card rj-grid">
+        <label>Recurrence<select id="rj-schedule-mode">
+          <option value="manual">Manual only</option><option value="once">Once</option><option value="daily">Daily</option>
+          <option value="weekly">Weekly</option><option value="monthly">Monthly</option>
+        </select></label>
+        <label data-rj-schedule="once">Date<input type="date" id="rj-schedule-date"></label>
+        <label data-rj-schedule="once daily weekly monthly">Time<input type="time" id="rj-schedule-time" value="08:00"></label>
+        <label data-rj-schedule="monthly">Day of the month<input type="number" id="rj-schedule-day" min="1" max="31" value="1"></label>
+        <div class="rj-inline" data-rj-schedule="weekly" id="rj-schedule-weekdays"></div>
+        <p class="form-note rj-wide" id="rj-timezone"></p>
+      </section>
+
+      <h3>Delivery</h3>
+      <section class="rj-card">
+        <label class="rj-card-toggle"><input type="checkbox" id="rj-send-email"><strong>Send the artifacts by email</strong><small id="rj-email-note">Without email, each run only keeps its artifacts for download.</small></label>
+        <label class="rj-card-body" data-rj-email-body>Recipients<textarea id="rj-recipients" rows="2" placeholder="name@example.com, team@example.com"></textarea></label>
+      </section>
+
 
       <h3>Artifacts</h3>
       <p class="form-note">Check each type of artifact to include; unchecked types keep their configuration but are not generated.</p>
@@ -67,26 +93,6 @@
       </section>
       <div id="rj-providers" class="rj-entries"></div>
       <p class="form-note" id="rj-modules-note" hidden></p>
-
-      <h3>Delivery</h3>
-      <section class="rj-card">
-        <label class="rj-card-toggle"><input type="checkbox" id="rj-send-email"><strong>Send the artifacts by email</strong><small id="rj-email-note">Without email, each run only keeps its artifacts for download.</small></label>
-        <label class="rj-card-body" data-rj-email-body>Recipients<textarea id="rj-recipients" rows="2" placeholder="name@example.com, team@example.com"></textarea></label>
-      </section>
-
-      <h3>Schedule</h3>
-      <section class="rj-card rj-grid">
-        <label>Recurrence<select id="rj-schedule-mode">
-          <option value="manual">Manual only</option><option value="once">Once</option><option value="daily">Daily</option>
-          <option value="weekly">Weekly</option><option value="monthly">Monthly</option>
-        </select></label>
-        <label data-rj-schedule="once">Date<input type="date" id="rj-schedule-date"></label>
-        <label data-rj-schedule="once daily weekly monthly">Time<input type="time" id="rj-schedule-time" value="08:00"></label>
-        <label data-rj-schedule="monthly">Day of the month<input type="number" id="rj-schedule-day" min="1" max="31" value="1"></label>
-        <div class="rj-inline" data-rj-schedule="weekly" id="rj-schedule-weekdays"></div>
-        <label class="rj-check rj-format-chip"><input type="checkbox" id="rj-enabled" checked><span>Enabled</span></label>
-        <p class="form-note rj-wide" id="rj-timezone"></p>
-      </section>
 
       <div class="form-actions">
         <button type="button" class="rj-secondary" id="rj-cancel">Cancel</button>
