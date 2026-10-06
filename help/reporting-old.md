@@ -95,7 +95,7 @@ Charts Panel browses report-rendered and standalone Chart Sets. Filter by NR Mod
 - Administrators can open the exact source template and row.
 - Temporary preview changes do not modify the stored template until Update Template and Save are used in the editor.
 
-Reports, Chart Sets, Dashboard exports and interactive previews share the Dashboard Canvas renderer for consistent geometry, colours, hierarchy, legends and semantic tooltips. `DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER=pil` enables the legacy server painter when required.
+Reports, Chart Sets, Dashboard exports and interactive previews share the Dashboard Canvas renderer for consistent geometry, colours, hierarchy, legends and semantic tooltips. `DRIVETEST_ANALYZER_REPORT_CHART_RENDERER=pil` enables the legacy server painter when required.
 
 ## Troubleshooting
 

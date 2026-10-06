@@ -1,6 +1,6 @@
 # Technical considerations
 
-This article collects rules that affect data interpretation, performance, persistence and generated output. Read it before comparing Dashboard Analytic with another analytical tool.
+This article collects rules that affect data interpretation, performance, persistence and generated output. Read it before comparing DriveTest Analyzer with another analytical tool.
 
 > [!IMPORTANT]
 > **Source values and presentation.** Stored source values and chart labels are different layers. Canonical chart aliases do not rewrite uploaded workbooks or source Operator values.
@@ -31,7 +31,7 @@ This article collects rules that affect data interpretation, performance, persis
 
 ## Storage boundaries
 
-Dashboard Analytic separates global configuration from workspace data.
+DriveTest Analyzer separates global configuration from workspace data.
 
 ### Global configuration
 
@@ -185,7 +185,7 @@ Reporting (old), Chart Builder and Report Template Editor use the shared Interac
 
 Live charts draw their Canvas models in the user's browser. Server-side Report, Chart Set and Dashboard exports send those same models through a persistent Node/Chromium renderer, which keeps chart geometry and semantic tooltips aligned with the interactive view. Docker includes these runtime dependencies; source deployments using `dashboard-canvas` need Node.js, a supported Chromium-family browser and the WebSocket module.
 
-`DASHBOARD_ANALYTIC_CHROMIUM` can select an explicit browser executable, while `DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER=pil` selects the legacy painter.
+`DRIVETEST_ANALYZER_CHROMIUM` can select an explicit browser executable, while `DRIVETEST_ANALYZER_REPORT_CHART_RENDERER=pil` selects the legacy painter.
 
 The shared preview cache separates expensive data work from presentation work:
 
@@ -212,7 +212,7 @@ Chart models are generated only when the corresponding chart is viewed or includ
 
 The combined-table revision in these cache keys advances only when rows are inserted or rebuilt. Adding or filling columns (for example when another Dashboard or template needs a new field) records a separate timestamp and keeps every prepared universe valid.
 
-Manage Dashboards status checks read each universe manifest directly from its fingerprint-derived path and are reused until datasets, combined rows, auto-calculated fields, mappings, templates or manifests change. Only the most recently used Dashboard snapshots keep their pandas chart frames in memory (3 by default, configurable with `DASHBOARD_ANALYTIC_DASHBOARD_FRAME_CACHE_SNAPSHOTS`); older snapshots rebuild them from the combined tables on demand, which bounds memory use on smaller servers.
+Manage Dashboards status checks read each universe manifest directly from its fingerprint-derived path and are reused until datasets, combined rows, auto-calculated fields, mappings, templates or manifests change. Only the most recently used Dashboard snapshots keep their pandas chart frames in memory (3 by default, configurable with `DRIVETEST_ANALYZER_DASHBOARD_FRAME_CACHE_SNAPSHOTS`); older snapshots rebuild them from the combined tables on demand, which bounds memory use on smaller servers.
 
 ## Filtered dataset preview
 

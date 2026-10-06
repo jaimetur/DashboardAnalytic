@@ -9,7 +9,7 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Polygon
 
-import src.DashboardAnalytic as app_module
+import src.DriveTestAnalyzer as app_module
 from src.modules.geospatial import validate_cluster_mapping, validate_region_mapping
 from src.modules.repository import Repository
 

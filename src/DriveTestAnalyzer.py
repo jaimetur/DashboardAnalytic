@@ -93,6 +93,7 @@ from src.modules.runtime_config import IGNORE_EVENT_TIME_FILTERING_ENV, env_flag
 from src.modules.query_builder import MAX_PREVIEW_ROWS, execute_query, iter_query_csv, query_column_values, validate_query
 from src.runtime_logs import execution_log_entries
 from src.modules.workspaces import Workspace, WorkspaceRegistry
+from src.branding import BACKUP_FILE_PATTERNS, canonical_format
 from src.version import __app_name__, __release_date__, __version__
 from src.utils.filesystem import ensure_directories, safe_join
 
@@ -189,10 +190,10 @@ def configured_background_task_limit(value: object) -> int:
 
 DEPLOYMENT_RUNTIME_DEFAULTS = {
     'timezone': str(os.environ.get('TZ') or '').strip(),
-    'report_chart_renderer': str(os.environ.get('DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER') or 'dashboard-canvas').strip(),
-    'chromium_path': str(os.environ.get('DASHBOARD_ANALYTIC_CHROMIUM') or '').strip(),
+    'report_chart_renderer': str(os.environ.get('DRIVETEST_ANALYZER_REPORT_CHART_RENDERER') or 'dashboard-canvas').strip(),
+    'chromium_path': str(os.environ.get('DRIVETEST_ANALYZER_CHROMIUM') or '').strip(),
     'ignore_event_time_filtering': env_flag(IGNORE_EVENT_TIME_FILTERING_ENV),
-    'max_background_tasks': configured_background_task_limit(os.environ.get('DASHBOARD_ANALYTIC_MAX_BACKGROUND_TASKS')),
+    'max_background_tasks': configured_background_task_limit(os.environ.get('DRIVETEST_ANALYZER_MAX_BACKGROUND_TASKS')),
 }
 
 
@@ -223,21 +224,21 @@ def apply_runtime_configuration(values: dict[str, Any]) -> None:
         os.environ['TZ'] = timezone_name
         if hasattr(time_module, 'tzset'):
             time_module.tzset()
-    os.environ['DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER'] = str(
+    os.environ['DRIVETEST_ANALYZER_REPORT_CHART_RENDERER'] = str(
         values.get('report_chart_renderer') or 'dashboard-canvas'
     ).strip()
     chromium_path = str(values.get('chromium_path') or '').strip()
     if chromium_path:
-        os.environ['DASHBOARD_ANALYTIC_CHROMIUM'] = chromium_path
+        os.environ['DRIVETEST_ANALYZER_CHROMIUM'] = chromium_path
     elif DEPLOYMENT_RUNTIME_DEFAULTS['chromium_path']:
-        os.environ['DASHBOARD_ANALYTIC_CHROMIUM'] = DEPLOYMENT_RUNTIME_DEFAULTS['chromium_path']
+        os.environ['DRIVETEST_ANALYZER_CHROMIUM'] = DEPLOYMENT_RUNTIME_DEFAULTS['chromium_path']
     else:
-        os.environ.pop('DASHBOARD_ANALYTIC_CHROMIUM', None)
+        os.environ.pop('DRIVETEST_ANALYZER_CHROMIUM', None)
     os.environ[IGNORE_EVENT_TIME_FILTERING_ENV] = (
         'true' if bool(values.get('ignore_event_time_filtering')) else 'false'
     )
     max_background_tasks = configured_background_task_limit(values.get('max_background_tasks'))
-    os.environ['DASHBOARD_ANALYTIC_MAX_BACKGROUND_TASKS'] = str(max_background_tasks)
+    os.environ['DRIVETEST_ANALYZER_MAX_BACKGROUND_TASKS'] = str(max_background_tasks)
     # Keep at least one logical CPU available for interactive requests.
     BACKGROUND_TASK_SCHEDULER.configure(min(max_background_tasks, max(1, (os.cpu_count() or 2) - 1), 4))
 
@@ -2873,7 +2874,7 @@ def idle_dashboard_warmup_loop(stop_event: Event) -> None:
 
 STARTUP_READY = Event()
 STARTUP_GRACE_SECONDS = 3.0
-STARTUP_STATUS: dict[str, str] = {'message': 'Starting Dashboard Analytic…', 'error': ''}
+STARTUP_STATUS: dict[str, str] = {'message': 'Starting DriveTest Analyzer…', 'error': ''}
 
 
 def _prepare_active_workspace() -> None:
@@ -3035,7 +3036,7 @@ async def track_interactive_application_requests(request: Request, call_next):
 
 STARTUP_PAGE = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Dashboard Analytic</title>
+<title>DriveTest Analyzer</title>
 <style>
   :root { color-scheme: light dark; --bg: #f4f7f8; --card: #fff; --text: #10314a; --muted: #5b6b78; --accent: #08736d; }
   @media (prefers-color-scheme: dark) { :root { --bg: #0f1a22; --card: #17252f; --text: #e6f0f4; --muted: #9db0bc; --accent: #3cc2b6; } }
@@ -3047,7 +3048,7 @@ STARTUP_PAGE = """<!doctype html>
 </style></head>
 <body><main role="status" aria-live="polite">
   <div class="spinner" aria-hidden="true"></div>
-  <h1>Dashboard Analytic is starting</h1>
+  <h1>DriveTest Analyzer is starting</h1>
   <p><strong id="startup-message">__MESSAGE__</strong></p>
   <p>The first start after an update can take a few minutes while the workspace database is upgraded. This page opens the application as soon as it is ready.</p>
 </main>
@@ -3075,7 +3076,7 @@ async def wait_for_startup(request: Request, call_next):
         return JSONResponse({'ready': False, 'message': STARTUP_STATUS['message']}, headers={'Cache-Control': 'no-store'})
     headers = {'Retry-After': '5', 'Cache-Control': 'no-store'}
     if path.startswith('/api/') or request.method != 'GET':
-        detail = f"Dashboard Analytic is starting: {STARTUP_STATUS['message']} Try again in a moment."
+        detail = f"DriveTest Analyzer is starting: {STARTUP_STATUS['message']} Try again in a moment."
         return JSONResponse({'detail': detail}, status_code=status.HTTP_503_SERVICE_UNAVAILABLE, headers=headers)
     page = STARTUP_PAGE.replace('__MESSAGE__', html.escape(STARTUP_STATUS['message']))
     return HTMLResponse(page, status_code=status.HTTP_503_SERVICE_UNAVAILABLE, headers=headers)
@@ -3652,11 +3653,12 @@ def ensure_not_stopped(dataset_id: int, task_repository: Repository | None = Non
 
 
 def build_analysis_cache_key(dataset_path: Path, filters: dict[str, Any], metric: str) -> str:
-    stat = dataset_path.stat()
+    # A missing source file still has a key, so the page can report it instead of failing on its stat.
+    stat = dataset_path.stat() if dataset_path.exists() else None
     payload = {
         'path': str(dataset_path.resolve()),
-        'mtime_ns': stat.st_mtime_ns,
-        'size': stat.st_size,
+        'mtime_ns': stat.st_mtime_ns if stat else None,
+        'size': stat.st_size if stat else None,
         'metric': metric or '',
         'filters': filters,
     }
@@ -5636,7 +5638,7 @@ def build_default_access_accounts() -> list[dict[str, str]]:
     return available_accounts
 
 
-ARCHIVE_FORMAT = 'dashboard-analytic-export'
+ARCHIVE_FORMAT = 'drivetest-analyzer-export'
 ARCHIVE_VERSION = 1
 ARCHIVE_COMPONENTS = frozenset({
     'app_database', 'workspace_components',
@@ -5841,7 +5843,7 @@ def _archive_database(
     """Add a consistent SQLite snapshot, compacting databases with substantial free space."""
     if not database_path.exists():
         return
-    with tempfile.TemporaryDirectory(prefix='dashboard-analytic-export-', dir=scratch_dir) as temporary_dir:
+    with tempfile.TemporaryDirectory(prefix='drivetest-analyzer-export-', dir=scratch_dir) as temporary_dir:
         snapshot = Path(temporary_dir) / 'snapshot.db'
         with closing(sqlite3.connect(database_path)) as source, source:
             page_count = int(source.execute('PRAGMA page_count').fetchone()[0])
@@ -5954,15 +5956,15 @@ def ensure_backup_path_is_within_config(path: Path) -> Path:
 
 def recurring_backup_status(config: dict[str, Any]) -> dict[str, str | int]:
     root = recurring_backup_path(config)
-    files = sorted(root.glob('dashboard-analytic-backup-*.zip'), key=lambda item: item.stat().st_mtime) if root.is_dir() else []
+    files = sorted((item for pattern in BACKUP_FILE_PATTERNS for item in root.glob(pattern)), key=lambda item: item.stat().st_mtime) if root.is_dir() else []
     total = sum(item.stat().st_size for item in files)
     last = backup_started_at_label(files[-1]) if files else 'No successful backup yet'
     return {'count': len(files), 'size': format_workspace_size(total), 'last_success': last, 'next_run': recurring_backup_next_run(config)}
 
 
 def backup_started_at_label(path: Path) -> str:
-    """Read the start timestamp embedded in a Dashboard Analytic backup filename."""
-    match = re.fullmatch(r'dashboard-analytic-backup-(\d{8}-\d{6})\.zip', path.name)
+    """Read the start timestamp embedded in a DriveTest Analyzer backup filename."""
+    match = re.fullmatch(r'(?:drivetest-analyzer|dashboard-analytic)-backup-(\d{8}-\d{6})\.zip', path.name)
     if match:
         return datetime.strptime(match.group(1), '%Y%m%d-%H%M%S').strftime('%Y-%m-%d %H:%M')
     return datetime.fromtimestamp(path.stat().st_mtime).astimezone().strftime('%Y-%m-%d %H:%M')
@@ -6001,7 +6003,7 @@ def create_recurring_database_backup(
     timestamp = datetime.now().astimezone().strftime('%Y%m%d-%H%M%S')
     backup_root = recurring_backup_path(config)
     backup_root.mkdir(parents=True, exist_ok=True)
-    destination = backup_root / f'dashboard-analytic-backup-{timestamp}.zip'
+    destination = backup_root / f'drivetest-analyzer-backup-{timestamp}.zip'
     def ensure_not_cancelled() -> None:
         if cancel_callback:
             cancel_callback()
@@ -6146,7 +6148,7 @@ def create_recurring_database_backup(
         destination.unlink(missing_ok=True)
         raise
     report_progress('Finalising backup ZIP', 98.0)
-    backups = sorted(backup_root.glob('dashboard-analytic-backup-*.zip'), key=lambda item: item.stat().st_mtime, reverse=True)
+    backups = sorted((item for pattern in BACKUP_FILE_PATTERNS for item in backup_root.glob(pattern)), key=lambda item: item.stat().st_mtime, reverse=True)
     for stale in backups[max(1, int(config['max_backups'])):]:
         stale.unlink(missing_ok=True)
     return destination
@@ -6386,12 +6388,12 @@ def _backup_archive_components(archive_path: Path) -> list[str]:
                 manifest = {}
     except zipfile.BadZipFile as exc:
         raise ValueError('The selected backup is not a valid ZIP archive.') from exc
-    if isinstance(manifest, dict) and manifest.get('format') == ARCHIVE_FORMAT:
+    if isinstance(manifest, dict) and canonical_format(manifest.get('format')) == ARCHIVE_FORMAT:
         declared = archive_restore_components(manifest)
         if declared:
             return declared
     if isinstance(manifest, dict) and (
-        (manifest.get('format') == ARCHIVE_FORMAT and manifest.get('kind') == 'database-backup')
+        (canonical_format(manifest.get('format')) == ARCHIVE_FORMAT and manifest.get('kind') == 'database-backup')
         or manifest.get('format') == 'database-backup'
     ):
         declared = archive_restore_components(manifest)
@@ -6425,7 +6427,7 @@ def _backup_archive_components(archive_path: Path) -> list[str]:
     if any(name.startswith('workspaces/') and '/output/' in name for name in names):
         components.append('output')
     if not components:
-        raise ValueError('The selected ZIP does not contain a compatible Dashboard Analytic backup.')
+        raise ValueError('The selected ZIP does not contain a compatible DriveTest Analyzer backup.')
     return components
 
 
@@ -6467,7 +6469,7 @@ def restore_database_backup(
     present = set(_backup_archive_components(archive_path))
     if not selected or not selected <= present:
         raise ValueError('Select only components contained in the backup.')
-    with zipfile.ZipFile(archive_path) as archive, tempfile.TemporaryDirectory(prefix='dashboard-analytic-restore-') as temporary_dir:
+    with zipfile.ZipFile(archive_path) as archive, tempfile.TemporaryDirectory(prefix='drivetest-analyzer-restore-') as temporary_dir:
         staging = Path(temporary_dir)
         names = [member.filename for member in archive.infolist() if not member.is_dir()]
         name_set = set(names)
@@ -6711,7 +6713,7 @@ def _operator_mappings_archive_payload(workspace: Workspace) -> bytes:
         workspace.database_path, repository.global_db_path, workspace_registry.registry_path,
     )
     return json.dumps({
-        'format': 'dashboard-analytic-operator-mappings',
+        'format': 'drivetest-analyzer-operator-mappings',
         'version': 3,
         'mappings': task_repository.list_operator_mapping_groups(),
         'vendor_mappings': task_repository.list_vendor_mapping_groups(),
@@ -6739,7 +6741,7 @@ def _restore_workspace_operator_mappings(workspace: Workspace, payload: bytes) -
         raise ValueError(f'Operator & Vendor Maps for "{workspace.name}" are invalid.') from exc
     if (
         not isinstance(document, dict)
-        or document.get('format') != 'dashboard-analytic-operator-mappings'
+        or canonical_format(document.get('format')) != 'drivetest-analyzer-operator-mappings'
         or document.get('version') not in {1, 2, 3}
         or not isinstance(groups, list)
     ):
@@ -6777,7 +6779,7 @@ def _main_cities_archive_payload(workspace: Workspace) -> bytes:
         workspace.database_path, repository.global_db_path, workspace_registry.registry_path,
     )
     return json.dumps({
-        'format': 'dashboard-analytic-main-cities',
+        'format': 'drivetest-analyzer-main-cities',
         'version': 1,
         'cities': task_repository.list_main_cities(),
     }, ensure_ascii=False, indent=2).encode('utf-8')
@@ -6803,7 +6805,7 @@ def _restore_workspace_main_cities(workspace: Workspace, payload: bytes) -> None
         raise ValueError(f'Main Cities for "{workspace.name}" are invalid.') from exc
     if (
         not isinstance(document, dict)
-        or document.get('format') != 'dashboard-analytic-main-cities'
+        or canonical_format(document.get('format')) != 'drivetest-analyzer-main-cities'
         or document.get('version') != 1
         or not isinstance(cities, list)
         or any(not isinstance(city, str) for city in cities)
@@ -6863,7 +6865,7 @@ def _dashboard_archive_payload(workspace: Workspace) -> bytes:
         dashboards = {}
     if not isinstance(dashboards, dict):
         dashboards = {}
-    return json.dumps({'format': 'dashboard-analytic-dashboards', 'version': 1, 'dashboards': dashboards}, ensure_ascii=False, indent=2).encode('utf-8')
+    return json.dumps({'format': 'drivetest-analyzer-dashboards', 'version': 1, 'dashboards': dashboards}, ensure_ascii=False, indent=2).encode('utf-8')
 
 
 def _exported_calculated_dimensions(workspace: Workspace) -> list[dict[str, object]]:
@@ -6907,7 +6909,7 @@ def _query_builder_queries_payload(workspace: Workspace) -> dict[str, Any]:
         datasets_by_id = {int(row['id']): row for row in dataset_rows}
         saved_queries = task_repository.list_query_builder_queries()
     except sqlite3.OperationalError:
-        return {'format': 'dashboard-analytic-query-builder-queries', 'version': 1, 'queries': []}
+        return {'format': 'drivetest-analyzer-query-builder-queries', 'version': 1, 'queries': []}
     queries = []
     descriptors_by_id: dict[int, dict[str, Any]] = {}
     for row in saved_queries:
@@ -6930,7 +6932,7 @@ def _query_builder_queries_payload(workspace: Workspace) -> dict[str, Any]:
             'dataset_descriptors': [descriptors_by_id[dataset_id] for dataset_id in dataset_ids],
             'created_by': str(row['created_by']),
         })
-    return {'format': 'dashboard-analytic-query-builder-queries', 'version': 1, 'queries': queries}
+    return {'format': 'drivetest-analyzer-query-builder-queries', 'version': 1, 'queries': queries}
 
 
 def _query_builder_source_sha256(stored_path: object) -> str | None:
@@ -7158,13 +7160,13 @@ def export_archive_filename(target: str | Iterable[str]) -> str:
     # Include seconds so each visible download can be identified unambiguously.
     targets = normalize_export_targets(target)
     if len(targets) > 1:
-        return f'dashboard-analytic-selection_{datetime.now().strftime("%Y%m%d-%H%M%S")}.zip'
+        return f'drivetest-analyzer-selection_{datetime.now().strftime("%Y%m%d-%H%M%S")}.zip'
     target = targets[0]
     generated_at = datetime.now().strftime('%Y%m%d-%H%M%S')
     if target == 'config':
-        return f'dashboard-analytic-config_{generated_at}.zip'
+        return f'drivetest-analyzer-config_{generated_at}.zip'
     if target == 'slides-templates':
-        return f'dashboard-analytic-slides-templates_{generated_at}.zip'
+        return f'drivetest-analyzer-slides-templates_{generated_at}.zip'
     if target == 'auto-calculated-fields':
         workspace_name = active_workspace.name if active_workspace else 'workspace'
         return f'{workspace_name}_auto-calculated-fields_{generated_at}.zip'
@@ -7190,9 +7192,9 @@ def export_archive_filename(target: str | Iterable[str]) -> str:
         workspace_name = active_workspace.name if active_workspace else 'workspace'
         return f'{workspace_name}_nq-call-tracking_{generated_at}.zip'
     if target == 'config-with-templates':
-        return f'dashboard-analytic-config-with-slides-templates_{generated_at}.zip'
+        return f'drivetest-analyzer-config-with-slides-templates_{generated_at}.zip'
     if target == 'full-environment':
-        return f'dashboard-analytic-full-environment_{generated_at}.zip'
+        return f'drivetest-analyzer-full-environment_{generated_at}.zip'
     if target.startswith('workspace:'):
         workspace = workspace_registry.get(target.removeprefix('workspace:'))
         if workspace:
@@ -7446,7 +7448,7 @@ def build_export_archive_file(
     workspace_components: list[str] = []
     workspaces: list[dict[str, Any]] = []
     source_workspace: dict[str, Any] | None = None
-    with tempfile.TemporaryDirectory(prefix='dashboard-analytic-bundle-', dir=destination.parent) as temporary_dir:
+    with tempfile.TemporaryDirectory(prefix='drivetest-analyzer-bundle-', dir=destination.parent) as temporary_dir:
         temporary_root = Path(temporary_dir)
         for index, selected_target in enumerate(targets, start=1):
             package_path = temporary_root / f'{index:03d}.zip'
@@ -7489,7 +7491,7 @@ def build_export_archive_file(
 
 def build_export_archive(target: str) -> tuple[bytes, str]:
     """Compatibility helper for small programmatic exports and tests."""
-    with tempfile.TemporaryDirectory(prefix='dashboard-analytic-export-') as temporary_dir:
+    with tempfile.TemporaryDirectory(prefix='drivetest-analyzer-export-') as temporary_dir:
         destination = Path(temporary_dir) / 'package.zip'
         filename = build_export_archive_file(target, destination)
         return destination.read_bytes(), filename
@@ -8271,12 +8273,12 @@ def read_import_manifest(source: bytes | Path) -> dict[str, Any]:
         with zipfile.ZipFile(archive_source) as archive:
             manifest = json.loads(archive.read('manifest.json').decode('utf-8'))
     except (KeyError, UnicodeDecodeError, json.JSONDecodeError, zipfile.BadZipFile) as exc:
-        raise ValueError('The selected file is not a valid Dashboard Analytic export package.') from exc
+        raise ValueError('The selected file is not a valid DriveTest Analyzer export package.') from exc
     legacy_database_backup = isinstance(manifest, dict) and manifest.get('format') == 'database-backup' and manifest.get('version') == 1
     if not isinstance(manifest, dict) or (
-        not legacy_database_backup and (manifest.get('format') != ARCHIVE_FORMAT or manifest.get('version') != ARCHIVE_VERSION)
+        not legacy_database_backup and (canonical_format(manifest.get('format')) != ARCHIVE_FORMAT or manifest.get('version') != ARCHIVE_VERSION)
     ):
-        raise ValueError('The selected file is not a compatible Dashboard Analytic export package.')
+        raise ValueError('The selected file is not a compatible DriveTest Analyzer export package.')
     return manifest
 
 
@@ -8347,7 +8349,7 @@ def _apply_import_archive(
     includes_dashboards: bool = False,
 ) -> str:
     """Apply a disk-backed package and return its user-facing completion message."""
-    with zipfile.ZipFile(package_path) as archive, tempfile.TemporaryDirectory(prefix='dashboard-analytic-import-') as temporary_dir:
+    with zipfile.ZipFile(package_path) as archive, tempfile.TemporaryDirectory(prefix='drivetest-analyzer-import-') as temporary_dir:
         staging_root = Path(temporary_dir)
         kind = manifest.get('kind')
         total_extract_bytes = max(sum(member.file_size for member in archive.infolist() if not member.is_dir()), 1)
@@ -13359,7 +13361,7 @@ def _chart_png_zip_response(directory: Path, filename: str) -> FileResponse:
     charts = sorted(path for path in directory.glob('*.png') if path.is_file())
     if not charts:
         raise HTTPException(status_code=404, detail='Rendered charts are not available.')
-    with tempfile.NamedTemporaryFile(prefix='dashboard-analytic-charts-', suffix='.zip', delete=False) as handle:
+    with tempfile.NamedTemporaryFile(prefix='drivetest-analyzer-charts-', suffix='.zip', delete=False) as handle:
         archive_path = Path(handle.name)
     with zipfile.ZipFile(archive_path, 'w', compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
         for chart in charts:
@@ -14051,7 +14053,7 @@ def export_saved_query_builder_query(query_id: int, user: SessionUser = Depends(
         for dataset_id in dataset_ids
     ]
     payload = {
-        'format': 'dashboard-analytic-query-builder-query',
+        'format': 'drivetest-analyzer-query-builder-query',
         'version': 1,
         'query': {
             'name': str(query['name']),
@@ -17506,7 +17508,7 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
     ):
         raise HTTPException(status_code=400, detail='The transfer offer has incompatible content components.')
     source_address = request.client.host if request.client else 'unknown'
-    source = str(payload.get('source') or 'Dashboard Analytic server')[:160]
+    source = str(payload.get('source') or 'DriveTest Analyzer server')[:160]
     content = str(payload.get('content') or kind)[:160]
     workspaces = [str(value)[:160] for value in payload.get('workspaces', []) if value] if isinstance(payload.get('workspaces'), list) else []
     secret_hash = hashlib.sha256(secret.encode('utf-8')).hexdigest()

@@ -1,4 +1,4 @@
-Dashboard Analytic Docker usage
+DriveTest Analyzer Docker usage
 
 1. Review the existing .env file if needed.
 2. Review ports and volume paths.

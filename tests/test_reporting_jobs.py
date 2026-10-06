@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-import src.DashboardAnalytic as core
+import src.DriveTestAnalyzer as core
 from src.modules import report_tasks
 from src.modules.report_tasks import (
     next_run_after, normalize_definition, normalize_schedule, recurrence_label, register_report_artifact_provider,

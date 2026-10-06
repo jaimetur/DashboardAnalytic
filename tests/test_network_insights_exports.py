@@ -88,7 +88,7 @@ def test_network_word_uses_landscape_fixed_single_line_tables(tmp_path):
 
 def test_network_summaries_include_all_grouped_deployment_views_and_exclude_full_inventory(client, tmp_path, monkeypatch):
     import pandas as pd
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
     from src.modules import network_insights as ni, network_insights_export as export
     from src.modules.repository import local_now_iso
 

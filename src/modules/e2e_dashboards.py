@@ -177,12 +177,12 @@ DASHBOARD_SELECTION_CACHE_VERSION = 16
 DASHBOARD_WARMUP_LATEST_COUNTS = 4
 # Only the most recently used Dashboard snapshots keep their chart frames in
 # memory; older snapshots rebuild them on demand from the combined tables.
-DASHBOARD_FRAME_CACHE_SNAPSHOTS = max(1, int(os.environ.get('DASHBOARD_ANALYTIC_DASHBOARD_FRAME_CACHE_SNAPSHOTS') or 3))
+DASHBOARD_FRAME_CACHE_SNAPSHOTS = max(1, int(os.environ.get('DRIVETEST_ANALYZER_DASHBOARD_FRAME_CACHE_SNAPSHOTS') or 3))
 # Grouped compact reads for eligible charts; 0 restores complete reads.
-DASHBOARD_COMPACT_READS = os.environ.get('DASHBOARD_ANALYTIC_COMPACT_READS', '1') != '0'
+DASHBOARD_COMPACT_READS = os.environ.get('DRIVETEST_ANALYZER_COMPACT_READS', '1') != '0'
 # Per-CDR column cache: any universe or comparison mode is assembled from it in
 # memory; 0 restores SQLite reads for every chart.
-DASHBOARD_COLUMN_CACHE = os.environ.get('DASHBOARD_ANALYTIC_COLUMN_CACHE', '1') != '0'
+DASHBOARD_COLUMN_CACHE = os.environ.get('DRIVETEST_ANALYZER_COLUMN_CACHE', '1') != '0'
 # Source reads persisted beside the workspace so other sessions, restarts and
 # exports reuse them. Very large complete reads are not persisted.
 DASHBOARD_FRAME_CACHE_VERSION = 1
@@ -1622,7 +1622,7 @@ def install_dashboard_routes(core):
         workspace_name = str(workspace.name if workspace else 'Workspace')
         archive_path = f'workspaces/{workspace_name}/dashboards/dashboards.json'
         payload = json.dumps({
-            'format': 'dashboard-analytic-dashboards', 'version': 1,
+            'format': 'drivetest-analyzer-dashboards', 'version': 1,
             'dashboards': {dashboard_id: definition},
         }, ensure_ascii=False, indent=2).encode('utf-8')
         temporary = tempfile.NamedTemporaryFile(prefix='dashboard-export-', suffix='.zip', delete=False)
@@ -1631,7 +1631,7 @@ def install_dashboard_routes(core):
         try:
             with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED, compresslevel=1) as bundle:
                 bundle.writestr('manifest.json', json.dumps({
-                    'format': 'dashboard-analytic-export', 'version': 1, 'kind': 'dashboards',
+                    'format': 'drivetest-analyzer-export', 'version': 1, 'kind': 'dashboards',
                     'components': ['workspace_components'], 'workspace_components': ['dashboards'],
                     'source_workspace': {'id': workspace.id, 'name': workspace_name} if workspace else {},
                     'archive_path': archive_path,

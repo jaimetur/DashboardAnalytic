@@ -255,3 +255,6 @@
 .report-jobs .rj-format-ppt { color: #c4461f; }
 .report-jobs .rj-format-word { color: #2b5797; }
 .report-jobs .rj-format-excel { color: #1d7044; }
+.report-jobs a.rj-format { text-decoration: none; }
+.report-jobs a.rj-format:hover, .report-jobs a.rj-format:focus-visible { text-decoration: underline; text-underline-offset: 2px; }
+.report-jobs .rj-duration { color: #5b6377; font-weight: 600; white-space: nowrap; }

@@ -14,7 +14,7 @@ import pandas as pd
 import pytest
 from pptx import Presentation
 
-import src.DashboardAnalytic as app_module
+import src.DriveTestAnalyzer as app_module
 from src.modules import scoring_jobs
 from src.modules.repository import Repository, local_now_iso
 from tests.scoring_fixtures import scoring_configuration
@@ -488,7 +488,10 @@ def test_scoring_exports_accept_expanded_and_summary_table_modes(scoring_api):
     assert summary_word.headers['content-disposition'].endswith('.docx')
     from docx import Document as WordDocument
     word_document = WordDocument(BytesIO(summary_word.content))
-    assert word_document.tables and any(paragraph.style.name == 'Heading 1' for paragraph in word_document.paragraphs)
+    # With LibreOffice each slide is a page image; without it the slides are rebuilt as headings and tables.
+    assert word_document.inline_shapes or (
+        word_document.tables and any(paragraph.style.name == 'Heading 1' for paragraph in word_document.paragraphs)
+    )
 
     assert legacy_csv.status_code == 200
     assert city_raw_csv.status_code == 200

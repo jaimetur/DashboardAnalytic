@@ -78,7 +78,7 @@
   const requestedJobId = new URLSearchParams(window.location.search).get('job_id');
   const requestedJobIdPending = {value: requestedJobId};
   const scoringViewStorageKey = [
-    'dashboard-analytic', 'scoring-view',
+    'drivetest-analyzer', 'scoring-view',
     encodeURIComponent(document.body.dataset.authenticatedUser || 'anonymous'),
     encodeURIComponent(root.dataset.scoringWorkspaceId || 'unknown'),
   ].join(':');

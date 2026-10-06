@@ -947,7 +947,7 @@ def test_initialize_migrates_legacy_scoring_job_status_constraint(repository):
 
 
 def test_workspace_database_backup_restore_keeps_completed_scoring_results(client, tmp_path: Path, scoring_engine):
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     _engine, _calls = scoring_engine
     workspace = app_module.active_workspace

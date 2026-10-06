@@ -41,7 +41,7 @@ SERIES_COLORS = ["#0B7A75", "#DD653E", "#245A96", "#B84D3A", "#6D46A8", "#228A5D
 
 def export_word_report(destination: Path, analysis: dict[str, Any]) -> Path:
     document = Document()
-    document.add_heading("Dashboard Analytic Report", level=0)
+    document.add_heading("DriveTest Analyzer Report", level=0)
     document.add_paragraph(f"Metric analysed: {analysis['selected_metric']}")
     document.add_paragraph(f"Filtered rows: {analysis['kpis']['rows']}")
 
@@ -809,7 +809,7 @@ def _append_dataset_report_slides(presentation: Presentation, payload: dict[str,
     else:
         cover = presentation.slides.add_slide(presentation.slide_layouts[6])
         _add_full_bg(cover, DARK_BG)
-        _add_textbox(cover, 0.7, 0.8, 7.8, 0.4, "Dashboard Analytic", size=28, bold=True, color="#FFFFFF")
+        _add_textbox(cover, 0.7, 0.8, 7.8, 0.4, "DriveTest Analyzer", size=28, bold=True, color="#FFFFFF")
         _add_textbox(cover, 0.7, 1.35, 8.5, 0.35, payload["dataset_name"], size=22, bold=True, color="#D9EEF3")
         _add_badge(cover, 0.7, 2.05, 1.4, payload["dataset_type"], fill=TEAL)
         for line_index, filter_line in enumerate(filter_lines[:8]):
@@ -865,7 +865,7 @@ def _append_dataset_report_slides(presentation: Presentation, payload: dict[str,
 def _dataset_summary_cover(presentation: Presentation, title: str, reports: list[dict[str, Any]]) -> None:
     cover = presentation.slides.add_slide(presentation.slide_layouts[6])
     _add_full_bg(cover, DARK_BG)
-    _add_textbox(cover, 0.7, 0.8, 9.5, 0.45, "Dashboard Analytic", size=28, bold=True, color="#FFFFFF")
+    _add_textbox(cover, 0.7, 0.8, 9.5, 0.45, "DriveTest Analyzer", size=28, bold=True, color="#FFFFFF")
     _add_textbox(cover, 0.7, 1.4, 11.5, 0.4, title, size=24, bold=True, color="#D9EEF3")
     _add_textbox(cover, 0.7, 2.05, 11.5, 0.3, f"{len(reports)} dataset(s) · all KPIs · no filters", size=13, color="#E4EEF1")
     for index, report in enumerate(reports[:14]):
@@ -896,7 +896,7 @@ def export_dataset_summary_word(destination: Path, reports: list[dict[str, Any]]
     from docx.shared import Inches as DocxInches
 
     document = Document()
-    document.add_heading(f"Dashboard Analytic · {title}", level=0)
+    document.add_heading(f"DriveTest Analyzer · {title}", level=0)
     document.add_paragraph(f"{len(reports)} dataset(s), all KPIs, no filters.")
     for report in reports:
         payload = _build_powerpoint_payload(report)

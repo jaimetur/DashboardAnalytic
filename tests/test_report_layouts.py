@@ -81,7 +81,7 @@ def test_editor_filter_accepts_grid_variants_without_comments_only():
 
 
 def test_template_editor_layout_suggestions_include_supported_names_only():
-    from src.DashboardAnalytic import catalogue_layout_names
+    from src.DriveTestAnalyzer import catalogue_layout_names
 
     choices = catalogue_layout_names('nsa')
 

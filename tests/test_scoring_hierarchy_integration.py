@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import src.DashboardAnalytic as app_module
+import src.DriveTestAnalyzer as app_module
 from src.modules import scoring_jobs
 from tests.test_scoring_api import scoring_api
 

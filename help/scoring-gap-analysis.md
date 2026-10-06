@@ -382,7 +382,7 @@ Limits: **256 KPIs**, **32 environments** per methodology and **64 methodologies
 
 #### Envelope and required content
 
-Exchange format **version 3** uses the same envelope for one methodology or a complete collection. A one-methodology export has one item in `profiles`; Admin exports can contain all items.
+Exchange format **version 3** uses the same envelope for one methodology or a complete collection. Files exported before the rename to DriveTest Analyzer, with the format `dashboard-analytic-scoring-configuration`, are still accepted. A one-methodology export has one item in `profiles`; Admin exports can contain all items.
 
 The internal JSON names `profiles` and `active_profile_id` remain format identifiers. In the interface, these entities are called **methodologies**, and the active ID identifies the default.
 
@@ -390,7 +390,7 @@ The following minimal example contains one KPI. A complete benchmark must includ
 
 ```json
 {
-  "format": "dashboard-analytic-scoring-configuration",
+  "format": "drivetest-analyzer-scoring-configuration",
   "version": 3,
   "active_profile_id": "netcheck-2026",
   "profiles": [

@@ -40,11 +40,11 @@
             <option value="dashboard-canvas" {% if configuration.report_chart_renderer == 'dashboard-canvas' %}selected{% endif %}>Dashboard Canvas</option>
             <option value="pil" {% if configuration.report_chart_renderer == 'pil' %}selected{% endif %}>PIL legacy renderer</option>
           </select>
-          <span class="table-help">Overrides DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER.</span>
+          <span class="table-help">Overrides DRIVETEST_ANALYZER_REPORT_CHART_RENDERER.</span>
         </label>
         <label>Chromium Executable
           <input type="text" name="chromium_path" value="{{ configuration.chromium_path }}" placeholder="Auto-detect Chromium or Chrome">
-          <span class="table-help">Overrides DASHBOARD_ANALYTIC_CHROMIUM. Leave empty to use deployment configuration or automatic detection.</span>
+          <span class="table-help">Overrides DRIVETEST_ANALYZER_CHROMIUM. Leave empty to use deployment configuration or automatic detection.</span>
         </label>
       </section>
 

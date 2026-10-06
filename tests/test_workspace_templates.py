@@ -8,7 +8,7 @@ import pytest
 
 from src.modules.repository import Repository
 from src.modules.workspaces import WorkspaceRegistry
-import src.DashboardAnalytic as app_module
+import src.DriveTestAnalyzer as app_module
 
 
 def test_new_workspaces_have_empty_independent_template_libraries(tmp_path):

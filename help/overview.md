@@ -1,6 +1,6 @@
 # Product overview
 
-Dashboard Analytic turns processed CDR datasets into interactive KPI analysis, reusable charts and template-driven PowerPoint reports. It is a multi-user application: datasets, generated output, Auto-calculated Fields and Report Templates are isolated by workspace, while users and access permissions are shared configuration.
+DriveTest Analyzer turns processed CDR datasets into interactive KPI analysis, reusable charts and template-driven PowerPoint reports. It is a multi-user application: datasets, generated output, Auto-calculated Fields and Report Templates are isolated by workspace, while users and access permissions are shared configuration.
 
 > [!NOTE]
 > **Workspace ownership.** Open the intended workspace before selecting datasets, methodologies or templates. Application Config and user accounts have a separate global scope.
@@ -158,7 +158,7 @@ See [Network Insights](network-insights.md).
 
 ## E2E Dashboards
 
-E2E Dashboards is the main analysis module and the complete template-driven workflow behind Dashboard Analytic. A saved Dashboard binds a name and NR Mode to a workspace Report Template, filters, hidden fields, slide comments and an optional saved Dataset Universe. Scope, selected Data/Voice/Speech CDRs and dates can be applied temporarily or saved independently from filters.
+E2E Dashboards is the main analysis module and the complete template-driven workflow behind DriveTest Analyzer. A saved Dashboard binds a name and NR Mode to a workspace Report Template, filters, hidden fields, slide comments and an optional saved Dataset Universe. Scope, selected Data/Voice/Speech CDRs and dates can be applied temporarily or saved independently from filters.
 
 The definition can be opened repeatedly, duplicated, exported or moved with its workspace without copying source rows into it.
 

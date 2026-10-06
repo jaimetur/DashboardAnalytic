@@ -898,7 +898,7 @@
       cancel: () => request.abort(),
     };
     const publish = (detail) => window.dispatchEvent(new CustomEvent(
-      'dashboard-analytic:background-task', {detail: {...taskBase, ...detail}},
+      'drivetest-analyzer:background-task', {detail: {...taskBase, ...detail}},
     ));
     submitButton.disabled = true;
     submitButton.textContent = 'Uploading in background…';
@@ -1144,8 +1144,8 @@
           status.textContent = 'Clearing cache';
           status.className = 'workspace-status-pill workspace-status-clearing-cache';
         }
-        window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));
-        window.dispatchEvent(new Event('dashboard-analytic:workspace-cache-clear-started'));
+        window.dispatchEvent(new Event('drivetest-analyzer:refresh-background-tasks'));
+        window.dispatchEvent(new Event('drivetest-analyzer:workspace-cache-clear-started'));
       } catch (error) {
         if (submitter instanceof HTMLButtonElement) submitter.disabled = false;
         showInfoDialog(error instanceof Error ? error.message : 'Workspace cache could not be cleared.', {
@@ -1188,8 +1188,8 @@
           headers: {'X-Requested-With': 'XMLHttpRequest'},
         });
         if (!response.ok) throw new Error('Workspace could not be deleted.');
-        window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));
-        window.dispatchEvent(new Event('dashboard-analytic:workspace-deletion-started'));
+        window.dispatchEvent(new Event('drivetest-analyzer:refresh-background-tasks'));
+        window.dispatchEvent(new Event('drivetest-analyzer:workspace-deletion-started'));
       } catch (error) {
         if (submitter instanceof HTMLButtonElement) submitter.disabled = false;
         if (status) {
@@ -1356,8 +1356,8 @@
   // Keep the size column current even while no workspace lifecycle operation
   // is active; the server invalidates its size snapshot on every cache write.
   startPolling();
-  window.addEventListener('dashboard-analytic:workspace-cache-clear-started', startPolling);
-  window.addEventListener('dashboard-analytic:workspace-deletion-started', startPolling);
+  window.addEventListener('drivetest-analyzer:workspace-cache-clear-started', startPolling);
+  window.addEventListener('drivetest-analyzer:workspace-deletion-started', startPolling);
 })();
 </script>
 {% endblock %}

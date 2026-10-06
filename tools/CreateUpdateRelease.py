@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create releases or update Dashboard Analytic release metadata."""
+"""Create releases or update DriveTest Analyzer release metadata."""
 
 from __future__ import annotations
 
@@ -326,7 +326,7 @@ def ask_dirty_tree_action(parent: tk.Misc, changes: str) -> DirtyTreeAction:
 def main() -> None:
     current_version, current_date = read_release_metadata()
     root = tk.Tk()
-    root.title('Create or update Dashboard Analytic release')
+    root.title('Create or update DriveTest Analyzer release')
     root.geometry('650x290')
     root.resizable(False, False)
 

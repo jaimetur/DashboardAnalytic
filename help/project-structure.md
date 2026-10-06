@@ -18,9 +18,9 @@
 > **Source and runtime data.** Keep uploaded datasets, workspace databases, generated output and backups out of source control. The default runtime folders are excluded from Git and Docker build context. Cache files are regenerable; user data is not.
 
 ```text
-DashboardAnalytic/
+DriveTestAnalyzer/
 ├── src/
-│   ├── DashboardAnalytic.py
+│   ├── DriveTestAnalyzer.py
 │   ├── main.py
 │   ├── config.py
 │   ├── version.py
@@ -49,7 +49,7 @@ Runtime `config/` and `data/` directories use project-local defaults but are exc
 ## Python application layer
 
 - `src/main.py`: shared source, PyCharm and Docker launcher using `APP_HOST`, `APP_PORT` and the timestamped Uvicorn logging configuration.
-- `src/DashboardAnalytic.py`: FastAPI application, page/API routes, workspace activation, shared background-task orchestration, Admin portability and classic Reporting jobs.
+- `src/DriveTestAnalyzer.py`: FastAPI application, page/API routes, workspace activation, shared background-task orchestration, Admin portability and classic Reporting jobs.
 - `src/config.py`: environment and `storage-paths.conf` resolution.
 - `src/version.py`: application version and release date shown by the UI.
 - `src/modules/repository.py`: global/workspace SQLite schemas, migrations and persistence methods.
@@ -160,7 +160,7 @@ Report Templates become CSV files only inside portable export, transfer and back
 - `help/technical-considerations.md`: data interpretation, persistence, caching and job semantics.
 - Other Help chapters: focused operational and deployment guides.
 
-The Help navigation order and labels are curated in `src/DashboardAnalytic.py`. Renaming an article requires updating that list, incoming links and related tests.
+The Help navigation order and labels are curated in `src/DriveTestAnalyzer.py`. Renaming an article requires updating that list, incoming links and related tests.
 
 ## Tests, tooling and delivery
 

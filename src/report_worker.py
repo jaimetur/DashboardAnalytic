@@ -11,7 +11,7 @@ from threading import Thread
 from time import sleep
 from pathlib import Path
 
-import src.DashboardAnalytic as app_module
+import src.DriveTestAnalyzer as app_module
 from src.dataset_worker import use_parent_databases
 
 

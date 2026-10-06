@@ -55,7 +55,7 @@ Use development mode for source changes. It is not the recommended production co
 ## Example environment
 
 ```env
-APP_NAME=Dashboard Analytic
+APP_NAME=DriveTest Analyzer
 APP_PORT=7278
 APP_DEV_PORT=7279
 APP_SECRET_KEY=replace-this-value
@@ -64,13 +64,15 @@ APP_DATA_DIR=/app/data
 APP_ASSETS_DIR=/app/assets
 TZ=Europe/Madrid
 
-HOST_CONFIG_DIR=/volume1/docker/stacks/dashboardanalytic/config
-HOST_DATA_DIR=/volume1/docker/stacks/dashboardanalytic/data
+HOST_CONFIG_DIR=/volume1/docker/stacks/drivetestanalyzer/config
+HOST_DATA_DIR=/volume1/docker/stacks/drivetestanalyzer/data
 
-IMAGE_REPOSITORY=jaimetur/dashboard-analytic
+IMAGE_REPOSITORY=jaimetur/drivetest-analyzer
 IMAGE_TAG=latest
-CONTAINER_NAME=dashboardanalytic
+CONTAINER_NAME=drivetest-analyzer
 ```
+
+Deployments created while the application was named Dashboard Analytic keep their mounted config and data folders unchanged. To update one, set `IMAGE_REPOSITORY` to `jaimetur/drivetest-analyzer` (the former `jaimetur/dashboard-analytic` image no longer receives new releases) and, optionally, `APP_NAME` and `CONTAINER_NAME` to the new name, then pull and recreate the container.
 
 ## Persistence
 

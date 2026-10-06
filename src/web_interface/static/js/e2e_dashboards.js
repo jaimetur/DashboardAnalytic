@@ -42,13 +42,13 @@
   let pptDashboardViewer = null;
   let dashboardPptJobsLoaded = false, dashboardPptJobsRefreshing = false;
   const authenticatedSession = document.body.dataset.authenticatedSession || 'anonymous';
-  const openStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:open:${authenticatedSession}`;
-  const filtersOpenStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:filters-open:${authenticatedSession}`;
-  const libraryStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:library`;
-  const scrollStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:scroll`;
-  const preparedStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:prepared`;
-  const universeStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:universes`;
-  const presentationEffectStorageKey = 'dashboard-analytic:e2e-dashboards:presentation-effect';
+  const openStorageKey = `drivetest-analyzer:e2e-dashboards:${config.workspace}:open:${authenticatedSession}`;
+  const filtersOpenStorageKey = `drivetest-analyzer:e2e-dashboards:${config.workspace}:filters-open:${authenticatedSession}`;
+  const libraryStorageKey = `drivetest-analyzer:e2e-dashboards:${config.workspace}:library`;
+  const scrollStorageKey = `drivetest-analyzer:e2e-dashboards:${config.workspace}:scroll`;
+  const preparedStorageKey = `drivetest-analyzer:e2e-dashboards:${config.workspace}:prepared`;
+  const universeStorageKey = `drivetest-analyzer:e2e-dashboards:${config.workspace}:universes`;
+  const presentationEffectStorageKey = 'drivetest-analyzer:e2e-dashboards:presentation-effect';
   try {
     const storedPresentationEffect = localStorage.getItem(presentationEffectStorageKey);
     const effectSelect = $('ds-presentation-effect');
@@ -103,7 +103,7 @@
     if (!token || token !== backgroundPreparationToken) return;
     const rendering = detail.includes('Rendering Dashboard charts') || detail.includes('render Dashboard charts');
     const queued = String(statusValue || '').toLowerCase() === 'queued';
-    window.dispatchEvent(new CustomEvent('dashboard-analytic:background-task', {detail: {
+    window.dispatchEvent(new CustomEvent('drivetest-analyzer:background-task', {detail: {
       id: token, workspace_id: config.workspace, workspace_name: backgroundWorkspaceName(), is_active: true,
       dashboard_name: definition?.name || 'Dashboard',
       label: queued
@@ -113,7 +113,7 @@
       stop_task_id: `dashboard-prepare:${token}`,
       stop_url: `/api/background-tasks/${encodeURIComponent(config.workspace)}/stop`,
     }}));
-    window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));
+    window.dispatchEvent(new Event('drivetest-analyzer:refresh-background-tasks'));
   };
   const dismissPreparationStatus = () => {
     if (!backgroundPreparationToken) return;
@@ -606,7 +606,7 @@
     if (values.length) dashboard.filters[selectionField] = values;
     return dashboard;
   };
-  const pptDialogStorageKey = dashboardId => `dashboard-analytic:e2e-dashboards:${config.workspace}:ppt-dialog:${config.username || authenticatedSession}:${dashboardId}`;
+  const pptDialogStorageKey = dashboardId => `drivetest-analyzer:e2e-dashboards:${config.workspace}:ppt-dialog:${config.username || authenticatedSession}:${dashboardId}`;
   // The PPT export dialog scrolls its body, which would clip an opened
   // selector menu. The menu is fixed right below its field instead, so it can
   // overflow the panel and the dialog without anything scrolling.
@@ -1187,7 +1187,7 @@
     }
     status(`Dashboard PPT export queued for “${exportDefinition.name}”.`);
     await refreshDashboardPptJobs();
-    window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));
+    window.dispatchEvent(new Event('drivetest-analyzer:refresh-background-tasks'));
   }
   const updateDashboardTemplate = async (id, item, technology, templateName) => {
     const normalizedTechnology = config.templates[technology] ? technology : 'nsa';
@@ -2346,7 +2346,7 @@
       const payload = await awaitBackgroundPreparation(preparationToken, controller.signal);
       if (current !== sequence) return;
       applyPreparedPayload(payload);
-      window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));
+      window.dispatchEvent(new Event('drivetest-analyzer:refresh-background-tasks'));
     } catch (error) {
       if (current === sequence && error.name !== 'AbortError' && error.message.includes('interrupted')) {
         setDashboardStatus(dashboardIdAtStart, 'data-needed', 'Data needed'); facetsLoading = false; facets();
@@ -2525,7 +2525,7 @@
     await api(`/${id}`,'DELETE'); delete dashboards[id]; dashboardStatuses.delete(id); if (id === activeId) closeDashboard(); else { library(); status(`Deleted “${item.name}”.`); }
   }
   bind('ds-import',() => $('ds-import-file').click());
-  $('ds-import-file').onchange = safe(async () => { const file = $('ds-import-file').files[0]; if (!file) return; const payload = JSON.parse(await file.text()); const legacy = payload.format === 'dashboard-analytic-dashboard-set' && payload.version === 1; if (!legacy && (payload.format !== 'dashboard-analytic-dashboard' || payload.version !== 2)) throw new Error('Unsupported Dashboard file.'); if (!await confirmDiscard()) return; payload.definition.name = nextName(payload.definition.name, dashboardNrMode(payload.definition)); const id = dashboardId(), result = await api(`/${id}`,'PUT',payload.definition); dashboards[id] = result.definition; await openDashboard(id); $('ds-import-file').value = ''; });
+  $('ds-import-file').onchange = safe(async () => { const file = $('ds-import-file').files[0]; if (!file) return; const payload = JSON.parse(await file.text()); const format = String(payload.format || '').replace(/^dashboard-analytic-/, 'drivetest-analyzer-'); const legacy = format === 'drivetest-analyzer-dashboard-set' && payload.version === 1; if (!legacy && (format !== 'drivetest-analyzer-dashboard' || payload.version !== 2)) throw new Error('Unsupported Dashboard file.'); if (!await confirmDiscard()) return; payload.definition.name = nextName(payload.definition.name, dashboardNrMode(payload.definition)); const id = dashboardId(), result = await api(`/${id}`,'PUT',payload.definition); dashboards[id] = result.definition; await openDashboard(id); $('ds-import-file').value = ''; });
   function closeDashboard() { delete $('ds-viewer-export-ppt').dataset.dashboardPptId; $('ds-viewer-export-ppt').disabled = true; clearTimeout(facetsRefreshTimer); dismissPreparationStatus(); stopPresentation(); rememberOpen(''); rememberFiltersOpen(false); ++sequence; clearTimeout(timer); controller?.abort(); preparing = null; activeId = ''; dashboardFiltersOpen = false; definition = null; savedDefinition = ''; appliedFilterState = ''; appliedSelectionState = ''; appliedDashboardDefinition = null; prepared = null; dirty = false; updateUnsavedFiltersBadge(); setViewEnabled(false); setPreparationState('hidden'); $('ds-filter-panel').hidden = true; document.dispatchEvent(new CustomEvent('page-panel-navigation:update')); setActiveDashboardHeading(''); $('ds-name').value = ''; setNrMode('nsa'); syncNewDashboardNameFromTemplate(); library(); status('Dashboard closed.'); }
   $('ds-name').oninput = () => { if (definition) { definition.name = $('ds-name').value; updateDirtyState(); } };
   $('ds-nr-mode').onchange = () => {
@@ -2668,7 +2668,7 @@
   // the PPT export uses too). They last for the browser session.
   const legendVisibilityStates = new Map();
   const legendCharts = new Map();
-  const legendVisibilityStorageKey = id => `dashboard-analytic:e2e-dashboards:${config.workspace}:legend:${authenticatedSession}:${id}`;
+  const legendVisibilityStorageKey = id => `drivetest-analyzer:e2e-dashboards:${config.workspace}:legend:${authenticatedSession}:${id}`;
   const legendVisibility = (id = activeId) => {
     if (!legendVisibilityStates.has(id)) {
       let stored = {};
@@ -2965,8 +2965,8 @@
   }
   function dashboardViewerBrand(className = 'ds-structural-brand') {
     const brand = node('div', undefined, className);
-    const mark = document.createElement('img'); mark.src = config.brand_mark; mark.alt = `${config.app_name || 'Dashboard Analytic'} logo`; mark.width = 72; mark.height = 72;
-    brand.append(node('strong', config.app_name || 'Dashboard Analytic'), mark);
+    const mark = document.createElement('img'); mark.src = config.brand_mark; mark.alt = `${config.app_name || 'DriveTest Analyzer'} logo`; mark.width = 72; mark.height = 72;
+    brand.append(node('strong', config.app_name || 'DriveTest Analyzer'), mark);
     return brand;
   }
   // Regions and Cities come from the same per-CDR catalogue as the PPT cover.
@@ -3546,7 +3546,7 @@
     const frame = $('ds-editor-frame');
     frame.dataset.editorFocusRow = String(row);
     if (frame.contentDocument?.readyState === 'complete') {
-      frame.contentWindow?.postMessage({type: 'dashboard-analytic:focus-template-row', row}, window.location.origin);
+      frame.contentWindow?.postMessage({type: 'drivetest-analyzer:focus-template-row', row}, window.location.origin);
     }
   };
   function scheduleTemplateEditorPreload() {
@@ -4189,10 +4189,10 @@
   });
   window.addEventListener('message', event => {
     if (event.origin !== window.location.origin || event.source !== $('ds-editor-frame').contentWindow) return;
-    if (event.data?.type === 'dashboard-analytic:template-saved') {
+    if (event.data?.type === 'drivetest-analyzer:template-saved') {
       templateEditorSaved = true;
     }
-    if (event.data?.type === 'dashboard-analytic:close-template-editor') void closeTemplateEditor();
+    if (event.data?.type === 'drivetest-analyzer:close-template-editor') void closeTemplateEditor();
   });
   let navigationPromptOpen = false;
   document.addEventListener('click', event => {
@@ -4278,6 +4278,6 @@
   })();
   window.setInterval(refreshDashboardStatuses, 2000);
   window.setInterval(refreshDashboardPptJobs, 2000);
-  window.addEventListener('dashboard-analytic:refresh-background-tasks', () => { void refreshDashboardStatuses(); void refreshDashboardPptJobs(); });
+  window.addEventListener('drivetest-analyzer:refresh-background-tasks', () => { void refreshDashboardStatuses(); void refreshDashboardPptJobs(); });
   window.addEventListener('focus', () => { void refreshDashboardStatuses(); void refreshDashboardPptJobs(); });
 })();

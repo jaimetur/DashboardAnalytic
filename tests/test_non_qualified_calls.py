@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 from openpyxl import load_workbook
 
-import src.DashboardAnalytic as core
+import src.DriveTestAnalyzer as core
 from src.modules import non_qualified_calls as nq
 from src.modules.repository import local_now_iso
 

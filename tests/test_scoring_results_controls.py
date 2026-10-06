@@ -95,7 +95,7 @@ def test_best_network_charts_start_scoring_charts_and_legacy_tab_migrates():
         'snippets': {
             'readScoringViewState': _function_source(script, 'readScoringViewState'),
         },
-        'storageKey': 'dashboard-analytic:scoring-view:test:workspace',
+        'storageKey': 'drivetest-analyzer:scoring-view:test:workspace',
         'legacyState': {'result_tab': 'best-network'},
     }
     program = r"""
@@ -1030,7 +1030,7 @@ def test_scoring_view_state_round_trips_filters_and_false_checkboxes():
     }
     payload = {
         'snippets': snippets,
-        'storageKey': 'dashboard-analytic:scoring-view:jaime:workspace-a',
+        'storageKey': 'drivetest-analyzer:scoring-view:jaime:workspace-a',
         'initial': {
             'job_id': 'job-17', 'result_tab': 'gap', 'scroll_y': 321,
             'environment': 'DriveCity', 'gap_layout': 'sideways',

@@ -1,6 +1,6 @@
 # Non-Qualified Calls
 
-Non-Qualified Calls brings the CDR Drive Test follow-up into Dashboard Analytic: an executive summary of every call and test that did not complete, a drill-down table of those calls, and a shared follow-up of each one with a status, a responsible team, an assignee and a comment thread that every user of the workspace sees.
+Non-Qualified Calls brings the CDR Drive Test follow-up into DriveTest Analyzer: an executive summary of every call and test that did not complete, a drill-down table of those calls, and a shared follow-up of each one with a status, a responsible team, an assignee and a comment thread that every user of the workspace sees.
 
 The module is in development, so its main tab shows a red **NEW** label. It is hidden from every user until an admin or super-admin activates it in [Admin → Features Activation](administrator-config.md).
 

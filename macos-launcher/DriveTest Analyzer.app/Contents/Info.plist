@@ -5,15 +5,15 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleDisplayName</key>
-    <string>Dashboard Analytic</string>
+    <string>DriveTest Analyzer</string>
     <key>CFBundleExecutable</key>
-    <string>DashboardAnalyticLauncher</string>
+    <string>DriveTestAnalyzerLauncher</string>
     <key>CFBundleIconFile</key>
-    <string>DashboardAnalytic</string>
+    <string>DriveTestAnalyzer</string>
     <key>CFBundleIdentifier</key>
-    <string>com.jaimetur.dashboardanalytic.launcher</string>
+    <string>com.jaimetur.drivetestanalyzer.launcher</string>
     <key>CFBundleName</key>
-    <string>Dashboard Analytic</string>
+    <string>DriveTest Analyzer</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

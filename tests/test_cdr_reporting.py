@@ -597,7 +597,7 @@ def test_multirab_lte_uses_nsa_fallback_when_call_mode_is_unknown() -> None:
 
 
 def test_combined_reporting_frame_keeps_every_data_attempt_before_template_filters(tmp_path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     repository = Repository(tmp_path / 'workspace.db')
     dataset_id = 1
@@ -2393,7 +2393,7 @@ def test_horizontal_line_legend_reduces_columns_for_long_cdf_labels() -> None:
 
 
 def test_reporting_query_columns_splits_map_coordinates() -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     entry = CatalogEntry(
         9, 'Map', '', '', 'DL Thput vs RF', 'CDR-Data',
@@ -2421,7 +2421,7 @@ def test_map_renderer_keeps_a_colour_key_for_every_filtered_point() -> None:
 
 
 def test_reporting_query_columns_splits_multi_kpi_cdf_metrics() -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     entry = CatalogEntry(
         43, 'FDTT DL SINR', '', '', 'FDTT DL SINR', 'CDR-Data',
@@ -2436,7 +2436,7 @@ def test_reporting_query_columns_splits_multi_kpi_cdf_metrics() -> None:
 
 
 def test_reporting_query_columns_include_calculated_dimension_dependencies() -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     entry = CatalogEntry(
         22, 'LTE PCell ARFCN', '', '', 'LTE PCell ARFCN', 'CDR-Data',
@@ -2553,7 +2553,7 @@ def test_dashboard_canvas_renderer_uses_configured_node_path(monkeypatch, tmp_pa
     node = tmp_path / 'node'
     node.write_text('', encoding='utf-8')
     node.chmod(0o755)
-    monkeypatch.setenv('DASHBOARD_ANALYTIC_NODE_PATH', str(node))
+    monkeypatch.setenv('DRIVETEST_ANALYZER_NODE_PATH', str(node))
 
     assert reporting._node_executable() == str(node)
 
@@ -3357,7 +3357,7 @@ def test_reporting_module_is_available_to_authenticated_users(client) -> None:
 
 
 def test_processing_report_and_chart_jobs_can_be_stopped_then_deleted(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     report_id = app_module.repository.create_report_job(
@@ -3399,7 +3399,7 @@ def test_processing_report_and_chart_jobs_can_be_stopped_then_deleted(client) ->
 
 
 def test_chart_set_selector_excludes_published_but_processing_job(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     chart_set = app_module.persist_report_charts(
@@ -3425,7 +3425,7 @@ def test_chart_set_selector_excludes_published_but_processing_job(client) -> Non
 
 
 def test_persisted_chart_set_keeps_template_order_when_rendered_by_cdr_source(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     chart_set = app_module.persist_report_charts(
@@ -3444,7 +3444,7 @@ def test_persisted_chart_set_keeps_template_order_when_rendered_by_cdr_source(cl
 
 
 def test_chart_set_persists_precomputed_hover_targets(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     chart_set = app_module.persist_report_charts(
         'NSA Slide Template', 'single',
@@ -3456,7 +3456,7 @@ def test_chart_set_persists_precomputed_hover_targets(client) -> None:
 
 
 def test_chart_set_ignores_obsolete_hover_target_geometry(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     chart_set = app_module.persist_report_charts(
         'NSA Slide Template', 'single',
@@ -3472,7 +3472,7 @@ def test_chart_set_ignores_obsolete_hover_target_geometry(client) -> None:
 
 
 def test_chart_set_can_disable_tooltips_without_creating_sidecars(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     chart_set = app_module.persist_report_charts(
         'NSA Slide Template', 'single',
@@ -3489,7 +3489,7 @@ def test_chart_set_can_disable_tooltips_without_creating_sidecars(client) -> Non
 
 
 def test_chart_set_writes_sidecars_directly_to_its_final_generation(tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     published: list[str] = []
 
@@ -3514,7 +3514,7 @@ def test_chart_set_writes_sidecars_directly_to_its_final_generation(tmp_path: Pa
 
 
 def test_interrupted_chart_set_reuses_only_verified_assets(tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     directory = tmp_path / 'charts' / '20260914-120000'
     directory.mkdir(parents=True)
@@ -3537,7 +3537,7 @@ def test_interrupted_chart_set_reuses_only_verified_assets(tmp_path: Path) -> No
 
 
 def test_retrying_a_failed_chart_job_reuses_its_row(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     job_id = app_module.repository.create_report_chart_job(
@@ -3555,7 +3555,7 @@ def test_retrying_a_failed_chart_job_reuses_its_row(client) -> None:
 
 
 def test_deleting_a_ready_chart_job_removes_its_chart_set(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     chart_set = app_module.persist_report_charts(
@@ -3626,7 +3626,7 @@ def test_netcheck_reporting_generates_template_backed_pptx(client) -> None:
 
     assert report.status_code == 202
     job = wait_for_report_job(client, report.json()['job_id'])
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     assert job['status'] == 'ready'
     assert job['slides'] == 17
@@ -3654,7 +3654,7 @@ def test_netcheck_reporting_generates_template_backed_pptx(client) -> None:
 
 
 def test_reporting_chart_dataset_reuses_one_source_frame_and_projects_chart_columns(monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     first = CatalogEntry(
         slide=1, slide_title='Slide', slide_subtitle='', layout='', chart_title='First',
@@ -3693,7 +3693,7 @@ def test_reporting_chart_dataset_reuses_one_source_frame_and_projects_chart_colu
 
 
 def test_reporting_generates_template_chart_previews(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     uploads = [
@@ -3829,7 +3829,7 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
 
 
 def test_reporting_accepts_partial_cdr_sources_and_marks_missing_chart_sources(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     uploaded = client.post(
@@ -3869,7 +3869,7 @@ def test_reporting_accepts_partial_cdr_sources_and_marks_missing_chart_sources(c
 
 
 def test_chart_preview_focus_row_matches_the_editors_sorted_row(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     content = (
@@ -3899,7 +3899,7 @@ def test_chart_preview_focus_row_matches_the_editors_sorted_row(client) -> None:
 
 
 def test_template_chart_image_preview_uses_combined_reporting_rows(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     catalogue_content = (
@@ -3973,7 +3973,7 @@ def test_reporting_requires_at_least_one_cdr_source(client) -> None:
 
 
 def test_partial_cdr_report_worker_receives_unavailable_frames(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     uploaded = client.post(
@@ -4002,7 +4002,7 @@ def test_partial_cdr_report_worker_receives_unavailable_frames(client, monkeypat
 
 
 def test_temporary_preview_accepts_dataset_ids_with_legacy_multiplication_separator(monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     monkeypatch.setattr(app_module.repository, 'list_datasets', lambda: [
         {'id': 2, 'status': 'ready', 'dataset_kind': 'voice'},
@@ -4013,7 +4013,7 @@ def test_temporary_preview_accepts_dataset_ids_with_legacy_multiplication_separa
 
 
 def test_report_chart_generation_failures_return_json_and_are_logged(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     for filename, kind, content in (
@@ -4055,7 +4055,7 @@ def test_report_chart_generation_failures_return_json_and_are_logged(client, mon
 
 
 def test_report_generation_failures_show_the_error_and_are_logged(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     for filename, kind, content in (
@@ -4090,7 +4090,7 @@ def test_report_generation_failures_show_the_error_and_are_logged(client, monkey
 
 
 def test_reporting_concatenates_multiple_campaign_cdrs_per_source(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     uploads = [

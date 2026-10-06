@@ -27,6 +27,7 @@ from pathlib import Path
 from threading import Event, Lock, Thread
 from typing import Any
 
+from src.branding import canonical_format
 from src.modules.column_names import sort_vendor_values
 
 REPORT_TASKS_TABLE = 'report_tasks'
@@ -670,7 +671,7 @@ def export_tasks_document(task_repository: Any) -> bytes:
     names = {int(row['id']): str(row['file_name']) for row in task_repository.list_datasets()}
     used = set().union(*(_definition_dataset_ids(task['definition']) for task in tasks)) if tasks else set()
     document = {
-        'format': 'dashboard-analytic-reporting-jobs', 'version': 1,
+        'format': 'drivetest-analyzer-reporting-jobs', 'version': 1,
         'dataset_names': {str(dataset_id): names[dataset_id] for dataset_id in sorted(used) if dataset_id in names},
         'reporting_jobs': [{key: task[key] for key in ('name', 'definition', 'send_email', 'recipients', 'schedule', 'enabled')} for task in tasks],
     }
@@ -680,8 +681,8 @@ def export_tasks_document(task_repository: Any) -> bytes:
 def import_tasks_document(task_repository: Any, content: bytes | str, username: str, *, parse_recipients, invalid_recipients) -> int:
     """Add or replace (by name) the Reporting Jobs of an exported document."""
     document = json.loads(content)
-    if not isinstance(document, dict) or document.get('format') != 'dashboard-analytic-reporting-jobs':
-        raise ValueError('The file is not a Dashboard Analytic Reporting Jobs export.')
+    if not isinstance(document, dict) or canonical_format(document.get('format')) != 'drivetest-analyzer-reporting-jobs':
+        raise ValueError('The file is not a DriveTest Analyzer Reporting Jobs export.')
     # Datasets are matched by file name, since IDs differ between workspaces.
     source_names = {int(key): str(value) for key, value in (document.get('dataset_names') or {}).items() if str(key).isdigit()}
     destination = {}

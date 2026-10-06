@@ -3,7 +3,7 @@ import sqlite3
 
 import pandas as pd
 
-import src.DashboardAnalytic as app_module
+import src.DriveTestAnalyzer as app_module
 from src.modules.repository import Repository
 from tests.test_scoring_api import scoring_api
 

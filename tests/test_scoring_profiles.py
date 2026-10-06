@@ -15,7 +15,7 @@ def test_legacy_single_configuration_import_becomes_one_named_profile():
     configuration = scoring_configuration()
 
     profiles = unwrap_scoring_profiles_payload({
-        'format': 'dashboard-analytic-scoring-configuration',
+        'format': 'drivetest-analyzer-scoring-configuration',
         'version': 1,
         'configuration': configuration,
     })

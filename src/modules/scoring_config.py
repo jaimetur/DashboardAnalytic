@@ -9,8 +9,9 @@ import re
 from pathlib import Path
 from typing import Any
 
+from src.branding import canonical_format
 
-CONFIGURATION_FORMAT = 'dashboard-analytic-scoring-configuration'
+CONFIGURATION_FORMAT = 'drivetest-analyzer-scoring-configuration'
 CONFIGURATION_FORMAT_VERSION = 1
 PROFILE_COLLECTION_VERSION = 3
 MAX_SCORING_METRICS = 256
@@ -104,7 +105,7 @@ def unwrap_scoring_configuration_payload(payload: object) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError('Scoring configuration must be an object.')
     if 'format' in payload:
-        if payload.get('format') != CONFIGURATION_FORMAT:
+        if canonical_format(payload.get('format')) != CONFIGURATION_FORMAT:
             raise ValueError('Unsupported scoring configuration file format.')
         version = payload.get('version')
         if (not isinstance(version, int) or isinstance(version, bool)
@@ -775,7 +776,7 @@ def unwrap_scoring_profiles_payload(payload: object) -> dict[str, Any] | None:
     """Unwrap current profile collections and migrate supported legacy single-profile files."""
     if not isinstance(payload, dict):
         raise ValueError('Scoring configuration must be an object.')
-    if payload.get('format') == CONFIGURATION_FORMAT:
+    if canonical_format(payload.get('format')) == CONFIGURATION_FORMAT:
         version = payload.get('version')
         if isinstance(version, bool) or not isinstance(version, int):
             raise ValueError('Unsupported scoring configuration file version.')

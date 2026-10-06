@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from src.branding import canonical_format
 from src.modules.column_names import column_identity
 from src.modules.nr_mode import normalize_nr_mode
 from src.modules.repository import Repository
@@ -13,7 +14,7 @@ from src.modules.scoring_config import complete_aggregation_hierarchy
 
 
 SCORING_SELECTION_STATE_KEY = 'scoring_calculation_selection_v1'
-SCORING_SELECTION_FORMAT = 'dashboard-analytic-scoring-selection'
+SCORING_SELECTION_FORMAT = 'drivetest-analyzer-scoring-selection'
 SCORING_SELECTION_VERSION = 1
 SCORING_CONTEXT_FILTER_FIELDS = ('Region', 'Cluster', 'City', 'Operator', 'Operator_Vendor', 'Vendor', 'Campaign')
 # Filters that are not aggregation levels: saved selections only list them when used.
@@ -277,7 +278,7 @@ def load_scoring_selection(repository: Repository) -> tuple[dict[str, Any], list
         return _default_selection(repository), ['Saved scoring selection could not be read and has been reset.']
     if not isinstance(document, dict):
         return _default_selection(repository), ['Saved scoring selection could not be read and has been reset.']
-    if document.get('format') == SCORING_SELECTION_FORMAT and document.get('version') == SCORING_SELECTION_VERSION:
+    if canonical_format(document.get('format')) == SCORING_SELECTION_FORMAT and document.get('version') == SCORING_SELECTION_VERSION:
         selection = document.get('selection')
     else:
         # Accept a flat selection document to ease recovery from early versions.
@@ -314,7 +315,7 @@ def save_scoring_selection(
         except (TypeError, json.JSONDecodeError):
             existing = {}
         revisions: dict[str, int] = {}
-        if isinstance(existing, dict) and existing.get('format') == SCORING_SELECTION_FORMAT:
+        if isinstance(existing, dict) and canonical_format(existing.get('format')) == SCORING_SELECTION_FORMAT:
             raw_revisions = existing.get('client_revisions')
             if isinstance(raw_revisions, dict):
                 for existing_client, existing_revision in raw_revisions.items():

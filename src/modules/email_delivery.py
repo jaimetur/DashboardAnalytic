@@ -62,7 +62,7 @@ def email_delivery_settings(repository: Any, *, include_password: bool = False) 
         'security': security if security in EMAIL_SECURITY_MODES else 'starttls',
         'username': str(values.get('username') or '').strip(),
         'from_address': str(values.get('from_address') or '').strip(),
-        'from_name': str(values.get('from_name') or 'Dashboard Analytic').strip(),
+        'from_name': str(values.get('from_name') or 'DriveTest Analyzer').strip(),
         'max_attachments_mb': max(1, _int(values.get('max_attachments_mb'), DEFAULT_MAX_ATTACHMENTS_MB)),
         'password_configured': bool(values.get('password')),
     }

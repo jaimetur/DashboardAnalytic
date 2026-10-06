@@ -6,14 +6,14 @@ set -euo pipefail
 script_dir="${0:A:h}"
 project_root="${script_dir:h}"
 launcher_dir="${project_root}/macos-launcher"
-app_bundle="${launcher_dir}/Dashboard Analytic.app"
+app_bundle="${launcher_dir}/DriveTest Analyzer.app"
 app_contents="${app_bundle}/Contents"
-launcher_source="${launcher_dir}/DashboardAnalyticLauncher.m"
+launcher_source="${launcher_dir}/DriveTestAnalyzerLauncher.m"
 info_plist_source="${app_contents}/Info.plist"
-icon_source="${app_contents}/Resources/DashboardAnalytic.icns"
+icon_source="${app_contents}/Resources/DriveTestAnalyzer.icns"
 launch_script_source="${app_contents}/Resources/launch-server.zsh"
-app_executable="${app_contents}/MacOS/DashboardAnalyticLauncher"
-output_path="${1:-${script_dir}/Dashboard Analytic Installer.pkg}"
+app_executable="${app_contents}/MacOS/DriveTestAnalyzerLauncher"
+output_path="${1:-${script_dir}/DriveTest Analyzer Installer.pkg}"
 
 for source_file in \
     "$launcher_source" \
@@ -39,11 +39,11 @@ fi
 
 /usr/bin/plutil -lint "$info_plist_source" >/dev/null
 bundle_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$info_plist_source")"
-temporary_directory="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/dashboard-analytic-installer.XXXXXX")"
-temporary_executable="${temporary_directory}/DashboardAnalyticLauncher"
+temporary_directory="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/drivetest-analyzer-installer.XXXXXX")"
+temporary_executable="${temporary_directory}/DriveTestAnalyzerLauncher"
 package_root="${temporary_directory}/root"
 component_plist="${temporary_directory}/components.plist"
-temporary_package="${temporary_directory}/Dashboard Analytic Installer.pkg"
+temporary_package="${temporary_directory}/DriveTest Analyzer Installer.pkg"
 
 cleanup() {
     /bin/rm -rf -- "$temporary_directory"
@@ -70,7 +70,7 @@ trap cleanup EXIT INT TERM HUP
 /usr/bin/xattr -cr "$app_bundle"
 
 /bin/mkdir -p "$package_root"
-/usr/bin/ditto --norsrc --noqtn "$app_bundle" "${package_root}/Dashboard Analytic.app"
+/usr/bin/ditto --norsrc --noqtn "$app_bundle" "${package_root}/DriveTest Analyzer.app"
 /usr/bin/pkgbuild --analyze --root "$package_root" "$component_plist"
 /usr/libexec/PlistBuddy -c 'Set :0:BundleIsRelocatable false' "$component_plist"
 
@@ -78,7 +78,7 @@ COPYFILE_DISABLE=1 /usr/bin/pkgbuild \
     --root "$package_root" \
     --component-plist "$component_plist" \
     --install-location "/Applications" \
-    --identifier "com.jaimetur.dashboardanalytic.installer" \
+    --identifier "com.jaimetur.drivetestanalyzer.installer" \
     --version "$bundle_version" \
     "$temporary_package"
 

@@ -3,7 +3,7 @@ import json
 import pandas as pd
 import pytest
 
-import src.DashboardAnalytic as app_module
+import src.DriveTestAnalyzer as app_module
 from src.modules.geospatial import assign_clusters, assign_regions
 
 

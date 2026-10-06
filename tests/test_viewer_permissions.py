@@ -3,7 +3,7 @@ import io
 import pandas as pd
 import pytest
 
-import src.DashboardAnalytic as core
+import src.DriveTestAnalyzer as core
 
 
 def _viewer(client, username='viewer', role='user-viewer'):

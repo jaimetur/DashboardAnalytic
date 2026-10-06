@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import re
 
-import src.DashboardAnalytic as app_module
+import src.DriveTestAnalyzer as app_module
 from src.modules.repository import Repository
 from tests.scoring_fixtures import scoring_configuration
 from src.modules.scoring_config import complete_aggregation_hierarchy

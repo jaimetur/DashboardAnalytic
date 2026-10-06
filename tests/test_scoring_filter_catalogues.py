@@ -7,7 +7,7 @@ import sqlite3
 
 from pptx import Presentation
 
-import src.DashboardAnalytic as app_module
+import src.DriveTestAnalyzer as app_module
 from src.modules import scoring_jobs
 from src.modules.repository import Repository
 from tests.test_scoring_api import scoring_api

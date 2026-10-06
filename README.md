@@ -1,10 +1,10 @@
 <p align="center">
-  <img src="src/web_interface/static/img/brand-mark.png" alt="Dashboard Analytic logo" width="320">
+  <img src="src/web_interface/static/img/brand-mark.png" alt="DriveTest Analyzer logo" width="320">
 </p>
 
-# Dashboard Analytic
+# DriveTest Analyzer
 
-Dashboard Analytic is a multi-user web application for processing CDR datasets, exploring KPI performance, building charts and generating template-driven PowerPoint reports. Every workspace keeps its datasets, database, generated output and Report Templates isolated; users and access permissions remain global application configuration.
+DriveTest Analyzer is a multi-user web application for processing CDR datasets, exploring KPI performance, building charts and generating template-driven PowerPoint reports. Every workspace keeps its datasets, database, generated output and Report Templates isolated; users and access permissions remain global application configuration.
 
 After login, the application opens **Help Home** by default.
 
@@ -181,18 +181,18 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
-python -m uvicorn src.DashboardAnalytic:app --reload --port 7279
+python -m uvicorn src.DriveTestAnalyzer:app --reload --port 7279
 ```
 
 Open `http://127.0.0.1:7279`.
 
 ### macOS launcher
 
-The project keeps `Dashboard Analytic.app` under `macos-launcher/`. It uses the Dashboard Analytic logo as its icon and a universal native executable for Apple Silicon and Intel Macs. Its control window starts the local server on port `7278` without opening the browser automatically.
+The project keeps `DriveTest Analyzer.app` under `macos-launcher/`. It uses the DriveTest Analyzer logo as its icon and a universal native executable for Apple Silicon and Intel Macs. Its control window starts the local server on port `7278` without opening the browser automatically.
 
 Use **Open in Browser** to open the configured local URL, **Restart Server** to stop the current process cleanly before starting its replacement, or **Stop Server and Quit**. Closing the window, pressing `⌘Q`, or choosing **Quit** in the Dock also stops the server cleanly. The launcher monitors forced application termination so the server cannot remain orphaned after its window disappears.
 
-It reuses a working project `.venv` when available; otherwise, including when that environment contains Intel-only packages, it creates the separate native `.dashboard-analytic-venv` environment and installs the dependencies. Python 3.12 or later must be available on the Mac.
+It reuses a working project `.venv` when available; otherwise, including when that environment contains Intel-only packages, it creates the separate native `.drivetest-analyzer-venv` environment and installs the dependencies. Python 3.12 or later must be available on the Mac.
 
 Build the complete installer from the project root:
 
@@ -200,9 +200,9 @@ Build the complete installer from the project root:
 ./macos-installer/build-installer.zsh
 ```
 
-The script compiles the universal native executable into `macos-launcher/Dashboard Analytic.app`, signs the application bundle, and creates `macos-installer/Dashboard Analytic Installer.pkg`. Double-click the resulting package and follow the standard Installer prompts to install the launcher in `/Applications`; administrator approval may be requested by macOS.
+The script compiles the universal native executable into `macos-launcher/DriveTest Analyzer.app`, signs the application bundle, and creates `macos-installer/DriveTest Analyzer Installer.pkg`. Double-click the resulting package and follow the standard Installer prompts to install the launcher in `/Applications`; administrator approval may be requested by macOS.
 
-When opened from `/Applications`, the launcher asks for the project folder once and remembers it in Application Support. Keep the project folder available: the launcher runs its source code and stores its PID and log in `.dashboard-analytic-runtime/`.
+When opened from `/Applications`, the launcher asks for the project folder once and remembers it in Application Support. Keep the project folder available: the launcher runs its source code and stores its PID and log in `.drivetest-analyzer-runtime/`.
 
 Run tests with:
 
@@ -223,14 +223,16 @@ Local storage roots can be set in [`storage-paths.conf`](storage-paths.conf). En
 | `APP_CONFIG_DIR` | Global database, users, permissions and transfer offers. |
 | `APP_DATA_DIR` | Workspace registry, workspaces, Report Templates and transfer packages. |
 | `APP_ASSETS_DIR` | Bundled assets and PowerPoint masters. |
-| `DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER` | Report, Chart Set and preview renderer. Defaults to `dashboard-canvas`; set `pil` to use the legacy server-side painter. |
-| `DASHBOARD_ANALYTIC_DASHBOARD_FRAME_CACHE_SNAPSHOTS` | Recently used Dashboard snapshots that keep chart data frames in memory. Defaults to `3`; lower it on servers with little RAM. |
+| `DRIVETEST_ANALYZER_REPORT_CHART_RENDERER` | Report, Chart Set and preview renderer. Defaults to `dashboard-canvas`; set `pil` to use the legacy server-side painter. |
+| `DRIVETEST_ANALYZER_DASHBOARD_FRAME_CACHE_SNAPSHOTS` | Recently used Dashboard snapshots that keep chart data frames in memory. Defaults to `3`; lower it on servers with little RAM. |
 | `TZ` | Container timezone, for example `Europe/Madrid`. |
 | `HOST_CONFIG_DIR` | Host path mounted as persistent configuration. |
 | `HOST_DATA_DIR` | Host path mounted as persistent data. |
 | `IMAGE_REPOSITORY` | Published container repository. |
 | `IMAGE_TAG` | Container tag to deploy. |
 | `CONTAINER_NAME` | Production container name. |
+
+Before version 0.6.0 the application was named Dashboard Analytic. Variables with the former `DASHBOARD_ANALYTIC_` prefix are still read when the matching `DRIVETEST_ANALYZER_` variable is not set, and export packages, JSON exports and backups created with the former name (format identifiers and backup files starting with `dashboard-analytic-`) are still imported and restored.
 
 Do not commit real secrets or customer data. Change the bootstrap passwords after the first deployment.
 
@@ -283,7 +285,7 @@ docker compose --env-file docker/.env -f docker/docker-compose-dev.yml up --buil
 ### Example production environment
 
 ```env
-APP_NAME=Dashboard Analytic
+APP_NAME=DriveTest Analyzer
 APP_PORT=7278
 APP_SECRET_KEY=replace-with-a-long-private-value
 APP_CONFIG_DIR=/app/config
@@ -291,12 +293,12 @@ APP_DATA_DIR=/app/data
 APP_ASSETS_DIR=/app/assets
 TZ=Europe/Madrid
 
-HOST_CONFIG_DIR=/volume1/docker/stacks/dashboardanalytic/config
-HOST_DATA_DIR=/volume1/docker/stacks/dashboardanalytic/data
+HOST_CONFIG_DIR=/volume1/docker/stacks/drivetestanalyzer/config
+HOST_DATA_DIR=/volume1/docker/stacks/drivetestanalyzer/data
 
-IMAGE_REPOSITORY=jaimetur/dashboard-analytic
+IMAGE_REPOSITORY=jaimetur/drivetest-analyzer
 IMAGE_TAG=latest
-CONTAINER_NAME=dashboardanalytic
+CONTAINER_NAME=drivetest-analyzer
 ```
 
 ### Persistent layout
@@ -347,13 +349,13 @@ Required repository secrets:
 Inspect a published manifest:
 
 ```bash
-docker buildx imagetools inspect ${DOCKERHUB_USERNAME}/dashboard-analytic:latest
+docker buildx imagetools inspect ${DOCKERHUB_USERNAME}/drivetest-analyzer:latest
 ```
 
 ## Repository layout
 
 ```text
-DashboardAnalytic/
+DriveTestAnalyzer/
 ├── src/                    # FastAPI application, modules and browser UI
 ├── tests/                  # Unit and integration tests
 ├── docker/                 # Dockerfiles, Compose and environment settings

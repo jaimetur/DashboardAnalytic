@@ -98,7 +98,7 @@ OSM_TILE_MAX_COUNT = 48
 OSM_TILE_MAX_ZOOM = 18
 OSM_TILE_CACHE_DIR = settings.data_dir / '.map-tiles-cache' / 'openstreetmap'
 OSM_TLS_CONTEXT = ssl.create_default_context(cafile=certifi.where())
-REPORT_CHART_RENDERER_ENV = "DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER"
+REPORT_CHART_RENDERER_ENV = "DRIVETEST_ANALYZER_REPORT_CHART_RENDERER"
 _DASHBOARD_CANVAS_RENDERER = None
 _DASHBOARD_CANVAS_RENDERER_LOCK = threading.RLock()
 # The browser worker keeps a copy of dashboard_charts.js in memory. Bump this
@@ -109,7 +109,7 @@ DASHBOARD_CANVAS_RENDERER_VERSION = 10
 
 def _node_executable() -> str:
     """Locate Node when a desktop launcher starts without the shell PATH."""
-    configured = os.environ.get('DASHBOARD_ANALYTIC_NODE_PATH', '').strip()
+    configured = os.environ.get('DRIVETEST_ANALYZER_NODE_PATH', '').strip()
     candidates = [configured, shutil.which('node'), '/opt/homebrew/bin/node', '/usr/local/bin/node']
     return next((candidate for candidate in candidates if candidate and Path(candidate).is_file() and os.access(candidate, os.X_OK)), 'node')
 
@@ -5665,7 +5665,7 @@ def _load_osm_tile(zoom: int, x: int, y: int) -> Image.Image | None:
                 return cached.convert('RGB')
         request = Request(
             f'https://tile.openstreetmap.org/{zoom}/{x}/{y}.png',
-            headers={'User-Agent': 'DashboardAnalytic/0.2.3 (cached Map chart renderer)'},
+            headers={'User-Agent': 'DriveTestAnalyzer/0.2.3 (cached Map chart renderer)'},
         )
         with urlopen(request, timeout=2.5, context=OSM_TLS_CONTEXT) as response:
             payload = response.read()

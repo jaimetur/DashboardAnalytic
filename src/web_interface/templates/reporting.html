@@ -1208,7 +1208,7 @@
       if (event.target === reportTemplateEditor || event.target.closest('[data-report-template-editor-close]')) closeTemplateEditor();
     });
     window.addEventListener('message', (event) => {
-      if (event.origin === window.location.origin && event.data?.type === 'dashboard-analytic:close-template-editor') closeTemplateEditor();
+      if (event.origin === window.location.origin && event.data?.type === 'drivetest-analyzer:close-template-editor') closeTemplateEditor();
     });
     reportChartSetSelect?.addEventListener('change', async () => {
       const [source, identifier] = String(reportChartSetSelect.value || '').split(':', 2);

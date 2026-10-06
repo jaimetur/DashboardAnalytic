@@ -1,3 +1,20 @@
+// Browser state saved before the rename to DriveTest Analyzer used the "dashboard-analytic:" prefix.
+// Move it once to the current prefix so remembered filters, panels and drafts survive the update.
+(() => {
+  const legacyPrefix = 'dashboard-analytic:';
+  for (const storageName of ['localStorage', 'sessionStorage']) {
+    try {
+      const storage = window[storageName];
+      const legacyKeys = Array.from({length: storage.length}, (_value, index) => storage.key(index)).filter(key => key?.startsWith(legacyPrefix));
+      for (const key of legacyKeys) {
+        const currentKey = `drivetest-analyzer:${key.slice(legacyPrefix.length)}`;
+        if (storage.getItem(currentKey) === null) storage.setItem(currentKey, storage.getItem(key));
+        storage.removeItem(key);
+      }
+    } catch (_error) { /* Ignore storage failures. */ }
+  }
+})();
+
 function normalizeVendorFilterValue(value) {
   let configured = {};
   try { configured = JSON.parse(document.getElementById('vendor-filter-operators')?.textContent || '{}'); } catch {}
@@ -204,7 +221,7 @@ function configureCalculatedDimensionFieldAutocomplete(input, getColumns) {
   };
 }
 
-const autoCalculatedFieldJobStorageKey = 'dashboard-analytic:auto-calculated-field-jobs';
+const autoCalculatedFieldJobStorageKey = 'drivetest-analyzer:auto-calculated-field-jobs';
 const storedAutoCalculatedFieldJobs = () => {
   try {
     const value = JSON.parse(window.localStorage.getItem(autoCalculatedFieldJobStorageKey) || '[]');
@@ -3847,7 +3864,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   };
   focusCatalogueRow(requestedRowIndex);
   window.addEventListener('message', (event) => {
-    if (event.origin !== window.location.origin || event.data?.type !== 'dashboard-analytic:focus-template-row') return;
+    if (event.origin !== window.location.origin || event.data?.type !== 'drivetest-analyzer:focus-template-row') return;
     focusCatalogueRow(Number(event.data.row));
   });
   reenumerate?.addEventListener('click', () => {
@@ -3930,12 +3947,12 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     });
   });
   addFilter?.addEventListener('click', () => addFilterCondition());
-  closeDialog?.addEventListener('click', () => window.parent.postMessage({type: 'dashboard-analytic:close-template-editor'}, window.location.origin));
+  closeDialog?.addEventListener('click', () => window.parent.postMessage({type: 'drivetest-analyzer:close-template-editor'}, window.location.origin));
   document.addEventListener('keydown', (event) => {
     if (event.defaultPrevented || event.key !== 'Escape' || !helper.hidden) return;
     if (hasUnsavedCatalogueChanges()) { event.preventDefault(); return; }
     event.preventDefault();
-    window.parent.postMessage({type: 'dashboard-analytic:close-template-editor'}, window.location.origin);
+    window.parent.postMessage({type: 'drivetest-analyzer:close-template-editor'}, window.location.origin);
   });
   const displayChartType = (value) => String(value || '').replace(/\b\w+/g, (word) => (
     word.toLocaleLowerCase() === 'cdf'
@@ -4134,7 +4151,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       // edited-cell tint and any inline added-text marks; subsequent edits are
       // compared with these newly saved values.
       acceptCurrentCatalogueAsBaseline();
-      if (window.parent !== window) window.parent.postMessage({type: 'dashboard-analytic:template-saved'}, window.location.origin);
+      if (window.parent !== window) window.parent.postMessage({type: 'drivetest-analyzer:template-saved'}, window.location.origin);
       hideLoadingOverlay();
       showInfoDialog(`Report Template '${payload.template || 'selected template'}' has been saved.`, {
         title: 'Report Template saved',
@@ -4300,7 +4317,7 @@ adminTemplateEditor?.addEventListener('click', (event) => {
   if (event.target === adminTemplateEditor || event.target.closest('[data-admin-template-editor-close]')) closeAdminTemplateEditor();
 });
 window.addEventListener('message', (event) => {
-  if (event.origin === window.location.origin && event.data?.type === 'dashboard-analytic:close-template-editor') closeAdminTemplateEditor();
+  if (event.origin === window.location.origin && event.data?.type === 'drivetest-analyzer:close-template-editor') closeAdminTemplateEditor();
 });
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && adminTemplateEditor && !adminTemplateEditor.hidden) closeAdminTemplateEditor();
@@ -4648,10 +4665,10 @@ window.addEventListener('keydown', (event) => {
 });
 const logTypeFilter = document.querySelector('[data-log-type-filter]');
 const persistencePathnames = new Set(['/datasets-analysis', '/admin']);
-const datasetsAnalysisStateKey = 'dashboard-analytic:/datasets-analysis:last-query';
-const datasetsAnalysisStateKeyPrefix = 'dashboard-analytic:/datasets-analysis:last-query:dataset:';
-const activeDatasetStateKey = 'dashboard-analytic:active-dataset';
-const adminScrollRestoreKey = 'dashboard-analytic:/admin:scroll-restore';
+const datasetsAnalysisStateKey = 'drivetest-analyzer:/datasets-analysis:last-query';
+const datasetsAnalysisStateKeyPrefix = 'drivetest-analyzer:/datasets-analysis:last-query:dataset:';
+const activeDatasetStateKey = 'drivetest-analyzer:active-dataset';
+const adminScrollRestoreKey = 'drivetest-analyzer:/admin:scroll-restore';
 let hasPendingLocationRestore = false;
 
 function preserveAdminScrollPosition() {
@@ -4897,7 +4914,7 @@ function buildPersistenceKey(control) {
   const explicitForm = control.getAttribute('form');
   const ownerForm = control.form;
   const formKey = explicitForm || ownerForm?.id || ownerForm?.getAttribute('action') || 'standalone';
-  return `dashboard-analytic:${window.location.pathname}:${formKey}:${control.name}`;
+  return `drivetest-analyzer:${window.location.pathname}:${formKey}:${control.name}`;
 }
 
 function serializeControlValue(control) {
@@ -4990,7 +5007,7 @@ function setupPersistentPanelState() {
   document.querySelectorAll('details[data-panel-state-key]').forEach((panel) => {
     const sessionScoped = panel.dataset.panelStateStorage === 'session';
     const sessionMarker = document.body.dataset.authenticatedSession || 'anonymous';
-    const stateKey = `dashboard-analytic:panel:${panel.dataset.panelStateKey}${sessionScoped ? `:${sessionMarker}` : ''}`;
+    const stateKey = `drivetest-analyzer:panel:${panel.dataset.panelStateKey}${sessionScoped ? `:${sessionMarker}` : ''}`;
     const storage = sessionScoped ? window.sessionStorage : window.localStorage;
     const storedValue = storage.getItem(stateKey);
     if (storedValue !== null) {
@@ -6387,7 +6404,7 @@ async function submitDownloadForm(form) {
     }
     const blob = await response.blob();
     const fallbackName = form.action.includes('/import-export/export')
-      ? 'dashboard-analytic-export.zip'
+      ? 'drivetest-analyzer-export.zip'
       : (form.action.includes('/powerpoint') ? 'report.pptx' : 'report.docx');
     const filename = resolveDownloadFilename(response, fallbackName);
     const blobUrl = window.URL.createObjectURL(blob);
@@ -6718,7 +6735,7 @@ document.querySelectorAll('[data-import-package-form]').forEach((form) => {
         return;
       }
       confirmed.value = '1';
-      showLoadingOverlay('Importing package', 'Please wait while Dashboard Analytic imports the selected package.');
+      showLoadingOverlay('Importing package', 'Please wait while DriveTest Analyzer imports the selected package.');
       const importData = new FormData();
       importData.set('upload_id', uploadId);
       importData.set('confirmed_import', 'true');
@@ -6831,7 +6848,7 @@ function selectTransferDestination() {
   const error = overlay.querySelector('[data-server-transfer-error]');
   const accept = overlay.querySelector('[data-server-transfer-connect]');
   const cancel = overlay.querySelector('[data-server-transfer-cancel]');
-  const destinationStorageKey = 'dashboard-analytic:transfer-destination';
+  const destinationStorageKey = 'drivetest-analyzer:transfer-destination';
   try {
     const saved = JSON.parse(window.localStorage.getItem(destinationStorageKey) || 'null');
     if (url instanceof HTMLInputElement && saved?.destinationUrl) url.value = saved.destinationUrl;
@@ -6970,13 +6987,13 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
         if (transferCancelUrl) await fetch(transferCancelUrl, {method: 'POST', credentials: 'same-origin', headers: {Accept: 'application/json'}}).catch(() => {});
         return;
       }
-      try { window.localStorage.setItem('dashboard-analytic:active-transfer', JSON.stringify({job_id: payload.job_id, status_url: payload.status_url})); } catch (_error) { /* Ignore storage failures. */ }
+      try { window.localStorage.setItem('drivetest-analyzer:active-transfer', JSON.stringify({job_id: payload.job_id, status_url: payload.status_url})); } catch (_error) { /* Ignore storage failures. */ }
       const pollTransfer = async () => {
         const statusResponse = await fetch(payload.status_url, {credentials: 'same-origin', headers: {Accept: 'application/json'}});
         const transfer = await statusResponse.json().catch(() => ({}));
         if (!statusResponse.ok) throw new Error(transfer.detail || 'The transfer status could not be read.');
         if (transfer.status === 'ready') {
-          try { window.localStorage.removeItem('dashboard-analytic:active-transfer'); } catch (_error) { /* Ignore storage failures. */ }
+          try { window.localStorage.removeItem('drivetest-analyzer:active-transfer'); } catch (_error) { /* Ignore storage failures. */ }
           hideLoadingOverlay();
           showInfoDialog(transfer.notice || 'The destination server received and imported the package successfully.', {
             title: 'Server Transfer Complete',
@@ -6985,11 +7002,11 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
           return;
         }
         if (transfer.status === 'failed') {
-          try { window.localStorage.removeItem('dashboard-analytic:active-transfer'); } catch (_error) { /* Ignore storage failures. */ }
+          try { window.localStorage.removeItem('drivetest-analyzer:active-transfer'); } catch (_error) { /* Ignore storage failures. */ }
           throw new Error(transfer.error || 'The destination server could not complete the transfer.');
         }
         if (transfer.status === 'cancelled' || transfer.status === 'cancelling') {
-          try { window.localStorage.removeItem('dashboard-analytic:active-transfer'); } catch (_error) { /* Ignore storage failures. */ }
+          try { window.localStorage.removeItem('drivetest-analyzer:active-transfer'); } catch (_error) { /* Ignore storage failures. */ }
           hideLoadingOverlay();
           return;
         }
@@ -7042,7 +7059,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
           hideLoadingOverlay();
           const link = document.createElement('a');
           link.href = status.download_url;
-          link.download = status.filename || 'dashboard-analytic-export.zip';
+          link.download = status.filename || 'drivetest-analyzer-export.zip';
           document.body.appendChild(link);
           link.click();
           link.remove();
@@ -7263,7 +7280,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       pollingOffers = false;
     }
   };
-  window.addEventListener('dashboard-analytic:review-incoming-transfer', (event) => {
+  window.addEventListener('drivetest-analyzer:review-incoming-transfer', (event) => {
     // The System tasks card is a durable fallback for browsers which delayed
     // the automatic prompt while the page was in the background.
     const offerId = String(event?.detail?.offerId || '');
@@ -7330,18 +7347,18 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
 (() => {
   if (!document.querySelector('[data-server-transfer-listener]')) return;
   let saved;
-  try { saved = JSON.parse(window.localStorage.getItem('dashboard-analytic:active-transfer') || 'null'); } catch (_error) { saved = null; }
+  try { saved = JSON.parse(window.localStorage.getItem('drivetest-analyzer:active-transfer') || 'null'); } catch (_error) { saved = null; }
   if (!saved?.status_url) return;
   const poll = async () => {
     const response = await fetch(saved.status_url, {credentials: 'same-origin', headers: {Accept: 'application/json'}, cache: 'no-store'});
     const transfer = await response.json().catch(() => ({}));
     if (!response.ok || transfer.status === 'failed') {
-      try { window.localStorage.removeItem('dashboard-analytic:active-transfer'); } catch (_error) { /* Ignore storage failures. */ }
+      try { window.localStorage.removeItem('drivetest-analyzer:active-transfer'); } catch (_error) { /* Ignore storage failures. */ }
       if (transfer.error) showInfoDialog(transfer.error, {title: 'Server Transfer Error', tone: 'error'});
       return;
     }
     if (transfer.status === 'ready') {
-      try { window.localStorage.removeItem('dashboard-analytic:active-transfer'); } catch (_error) { /* Ignore storage failures. */ }
+      try { window.localStorage.removeItem('drivetest-analyzer:active-transfer'); } catch (_error) { /* Ignore storage failures. */ }
       showInfoDialog(transfer.notice || 'The server transfer completed successfully.', {title: 'Server Transfer Complete', tone: 'info'});
       return;
     }
@@ -8131,7 +8148,7 @@ if (logTypeFilter) {
 
 const appLogsPanel = document.querySelector('[data-app-logs-panel]');
 if (appLogsPanel) {
-  const appLogFiltersStorageKey = 'dashboard-analytic:/app-logs:filters';
+  const appLogFiltersStorageKey = 'drivetest-analyzer:/app-logs:filters';
   const userFilter = appLogsPanel.querySelector('[data-app-log-user-filter]');
   const executorFilter = appLogsPanel.querySelector('[data-app-log-executor-filter]');
   const dateFilter = appLogsPanel.querySelector('[data-app-log-date-filter]');
@@ -8904,7 +8921,7 @@ if (queueNode) {
     return `Queued ${Math.max(0, Math.floor((Date.now() / 1000 - timestamp) / 60))}m ago`;
   };
 
-  window.addEventListener('dashboard-analytic:background-task', (event) => {
+  window.addEventListener('drivetest-analyzer:background-task', (event) => {
     const task = event.detail;
     if (!task || !task.id) return;
     if (['complete', 'completed', 'cancelled'].includes(String(task.status || '').toLowerCase())) {
@@ -9063,7 +9080,7 @@ if (queueNode) {
 
     const panelStateKey = String(group.workspace_id);
     panel.dataset.backgroundTaskPanelKey = panelStateKey;
-    const minimizedKey = `dashboard-analytic:background-task-panel:${group.workspace_id}:minimized`;
+    const minimizedKey = `drivetest-analyzer:background-task-panel:${group.workspace_id}:minimized`;
     const minimize = document.createElement('button');
     minimize.type = 'button';
     minimize.className = 'background-task-minimize-button';
@@ -9084,7 +9101,7 @@ if (queueNode) {
     setMinimized(minimized);
     panel.append(minimize);
 
-    const positionKey = `dashboard-analytic:background-task-panel:${group.workspace_id}:position`;
+    const positionKey = `drivetest-analyzer:background-task-panel:${group.workspace_id}:position`;
     const pin = document.createElement('button');
     pin.type = 'button';
     pin.className = 'background-task-pin-button';
@@ -9258,7 +9275,7 @@ if (queueNode) {
         review.textContent = 'Review transfer';
         review.title = 'Review and accept or reject the incoming server transfer';
         review.addEventListener('click', () => {
-          window.dispatchEvent(new CustomEvent('dashboard-analytic:review-incoming-transfer', {
+          window.dispatchEvent(new CustomEvent('drivetest-analyzer:review-incoming-transfer', {
             detail: {offerId: String(task.review_transfer_offer_id)},
           }));
         });
@@ -9439,7 +9456,7 @@ if (queueNode) {
 
   poll();
   pollingInterval = window.setInterval(poll, 2000);
-  window.addEventListener('dashboard-analytic:refresh-background-tasks', poll);
+  window.addEventListener('drivetest-analyzer:refresh-background-tasks', poll);
   window.addEventListener('focus', poll);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
 })();

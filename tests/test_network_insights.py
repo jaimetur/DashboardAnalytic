@@ -9,7 +9,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-import src.DashboardAnalytic as app_module
+import src.DriveTestAnalyzer as app_module
 from src.modules import network_insights as ni
 from src.modules.cdr_reporting import _explicit_bucket_labels, _osm_map_tile_geometry, _status_chart_categories
 from src.modules.repository import local_now_iso
@@ -377,7 +377,7 @@ def test_histogram_legacy_png_renderer_accepts_combined_rf_samples(monkeypatch) 
     from src.modules.cdr_reporting import render_catalog_chart_preview
     from src.modules.rf_catalog_source import pool_rf_frames
 
-    monkeypatch.setenv('DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER', 'pil')
+    monkeypatch.setenv('DRIVETEST_ANALYZER_REPORT_CHART_RENDERER', 'pil')
     catalogue = app_module.load_template_catalogue(TEMPLATE_PATH.read_bytes(), 'nsa')
     entry = next(entry for entry in catalogue if entry.source_kind == 'all' and entry.chart_type == 'Histogram Line' and entry.kpi == 'LTE_RSRP')
     combined = pool_rf_frames({'data': pd.DataFrame({

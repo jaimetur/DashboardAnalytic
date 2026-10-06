@@ -141,7 +141,7 @@ def _slide_title(slide: Any) -> tuple[str, Any]:
 
 def _soffice() -> str | None:
     """LibreOffice, from the environment, the PATH or its usual macOS location."""
-    candidates = [os.environ.get('DASHBOARD_ANALYTIC_SOFFICE', ''), shutil.which('soffice') or '', shutil.which('libreoffice') or '',
+    candidates = [os.environ.get('DRIVETEST_ANALYZER_SOFFICE', ''), shutil.which('soffice') or '', shutil.which('libreoffice') or '',
                   '/Applications/LibreOffice.app/Contents/MacOS/soffice']
     return next((path for path in candidates if path and Path(path).is_file() and os.access(path, os.X_OK)), None)
 

@@ -102,7 +102,7 @@ def test_query_builder_column_filters_apply_before_pagination_and_csv(tmp_path: 
 
 
 def test_query_builder_filter_values_ignores_own_filter_and_supports_search(client, monkeypatch, tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
     monkeypatch.setattr(app_module.repository, 'list_datasets', lambda: [

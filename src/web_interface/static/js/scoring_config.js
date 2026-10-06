@@ -32,7 +32,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
 
   const kpiPanel = root.querySelector('[data-scoring-kpi-panel]');
   if (kpiPanel) {
-    const panelStateKey = 'dashboard-analytic:scoring-kpi-panel';
+    const panelStateKey = 'drivetest-analyzer:scoring-kpi-panel';
     const persistKpiPanel = () => {
       try {
         window.sessionStorage.setItem(panelStateKey, kpiPanel.open ? 'open' : 'closed');

@@ -112,7 +112,7 @@ Exports run as disk-backed jobs and show estimated progress. The ZIP download st
 > [!WARNING]
 > **Review replacement scope.** Import and Restore can replace existing data. Review the detected components and affected workspaces in the overwrite confirmation.
 
-1. Select a Dashboard Analytic ZIP or Scoring & GAP Analysis Configuration JSON and wait for its upload.
+1. Select a DriveTest Analyzer ZIP or Scoring & GAP Analysis Configuration JSON and wait for its upload.
 2. Review the manifest-detected content, affected workspaces and overwrite warnings.
 3. For Dashboard, Report Template, Main Cities, Operator & Vendor Maps, Scoring & GAP Analysis Configuration or Auto-calculated Field packages, choose one or more accessible destination workspaces; a matching source name is preselected when available.
 4. Confirm import.

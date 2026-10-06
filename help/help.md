@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="src/web_interface/static/img/brand-mark.png" alt="Dashboard Analytic logo" width="320">
+  <img src="src/web_interface/static/img/brand-mark.png" alt="DriveTest Analyzer logo" width="320">
 </p>
 
-# Dashboard Analytic Help
+# DriveTest Analyzer Help
 
 > [!TIP]
 > **Start with your task.** Choose a guide below, then use its task index or the Page Sections navigation to reach the relevant workflow.

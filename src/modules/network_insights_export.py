@@ -580,7 +580,7 @@ def export_network_insights_powerpoint(destination: Path, analysis: dict[str, An
     presentation = Presentation(template or settings.ppt_templates_dir / 'Template_CDR_analysis.pptx')
     _remove_all_slides(presentation)
     cover = presentation.slides.add_slide(_named_slide_layout(presentation, 'Title Page'))
-    _set_structural_slide_text(cover, 'Summary Network Insights', 'Dashboard Analytic')
+    _set_structural_slide_text(cover, 'Summary Network Insights', 'DriveTest Analyzer')
     from src.modules.exports import remove_empty_placeholders
     remove_empty_placeholders(cover)
     selection_slide = _slide(presentation, 'Analysis Selection')
@@ -792,7 +792,7 @@ def export_network_insights_word(destination: Path, analysis: dict[str, Any], de
     if needed > 10.49:
         section.page_width = DocxInches(max(16.54, min(22, needed + 1.2)))
         section.page_height = DocxInches(11.69)
-    document.add_heading('Dashboard Analytic · Summary Network Insights', level=0)
+    document.add_heading('DriveTest Analyzer · Summary Network Insights', level=0)
     for line in summary_selection_lines(selection):
         document.add_paragraph(line, style='List Bullet')
     for warning in analysis.get('warnings') or []:

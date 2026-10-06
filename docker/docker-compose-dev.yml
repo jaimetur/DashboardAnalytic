@@ -8,8 +8,8 @@ services:
       - .env
     environment:
       TZ: ${TZ:-Europe/Madrid}
-      DASHBOARD_ANALYTIC_BIND_PORT: "7278"
-      DASHBOARD_ANALYTIC_RELOAD: "true"
+      DRIVETEST_ANALYZER_BIND_PORT: "7278"
+      DRIVETEST_ANALYZER_RELOAD: "true"
     ports:
       - "${APP_DEV_PORT}:7278"
     volumes:

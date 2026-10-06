@@ -1,6 +1,6 @@
 #!/bin/zsh
 
-# Opening the app starts the local Dashboard Analytic server. Quitting the
+# Opening the app starts the local DriveTest Analyzer server. Quitting the
 # application sends a signal to this process and stops the server cleanly.
 set -u
 launcher_pid="$PPID"
@@ -26,15 +26,19 @@ project_root="${launcher_dir:h:h:h}"
 if [[ ! -f "${project_root}/src/main.py" ]] && [[ -f "${project_root:h}/src/main.py" ]]; then
     project_root="${project_root:h}"
 fi
-project_location_file="${HOME}/Library/Application Support/Dashboard Analytic/project-path"
+project_location_file="${HOME}/Library/Application Support/DriveTest Analyzer/project-path"
+# Project folder remembered by the launcher before the rename from Dashboard Analytic.
+legacy_project_location_file="${HOME}/Library/Application Support/Dashboard Analytic/project-path"
 
 if [[ ! -f "${project_root}/src/main.py" ]]; then
     if [[ -f "$project_location_file" ]]; then
         project_root="$(<"$project_location_file")"
+    elif [[ -f "$legacy_project_location_file" ]]; then
+        project_root="$(<"$legacy_project_location_file")"
     fi
     if [[ ! -f "${project_root}/src/main.py" ]]; then
         selected_project="$(/usr/bin/osascript <<'APPLESCRIPT'
-set selectedFolder to choose folder with prompt "Select the Dashboard Analytic project folder"
+set selectedFolder to choose folder with prompt "Select the DriveTest Analyzer project folder"
 POSIX path of selectedFolder
 APPLESCRIPT
 )" || exit 0
@@ -43,14 +47,14 @@ APPLESCRIPT
 fi
 
 if [[ ! -f "${project_root}/src/main.py" ]]; then
-    show_message "Dashboard Analytic" "The selected folder is not a Dashboard Analytic project."
+    show_message "DriveTest Analyzer" "The selected folder is not a DriveTest Analyzer project."
     exit 1
 fi
 
-/bin/mkdir -p "${HOME}/Library/Application Support/Dashboard Analytic"
+/bin/mkdir -p "${HOME}/Library/Application Support/DriveTest Analyzer"
 print -r -- "$project_root" > "$project_location_file"
 
-runtime_dir="${project_root}/.dashboard-analytic-runtime"
+runtime_dir="${project_root}/.drivetest-analyzer-runtime"
 pid_file="${runtime_dir}/server.pid"
 log_file="${runtime_dir}/server.log"
 port="${APP_PORT:-7278}"
@@ -76,7 +80,7 @@ stop_server() {
         /bin/kill -9 "$pid" 2>/dev/null || true
     fi
     /bin/rm -f "$pid_file"
-    notify "Dashboard Analytic" "Server stopped."
+    notify "DriveTest Analyzer" "Server stopped."
 }
 
 cleanup_done=0
@@ -101,12 +105,12 @@ fi
 /bin/mkdir -p "$runtime_dir"
 
 if /usr/sbin/lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
-    show_message "Dashboard Analytic" "Port ${port} is already in use. Stop the process using it or set APP_PORT to a different port."
+    show_message "DriveTest Analyzer" "Port ${port} is already in use. Stop the process using it or set APP_PORT to a different port."
     exit 1
 fi
 
 project_venv_python="${project_root}/.venv/bin/python"
-managed_venv="${project_root}/.dashboard-analytic-venv"
+managed_venv="${project_root}/.drivetest-analyzer-venv"
 managed_venv_python="${managed_venv}/bin/python"
 python_bin=""
 
@@ -126,19 +130,19 @@ if [[ -z "$python_bin" ]]; then
     done
 
     if [[ -z "$bootstrap_python" ]]; then
-        show_message "Dashboard Analytic" "Python 3.12 or later is required. Install it and open this application again."
+        show_message "DriveTest Analyzer" "Python 3.12 or later is required. Install it and open this application again."
         exit 1
     fi
 
     /bin/rm -rf "$managed_venv"
     "$bootstrap_python" -m venv "$managed_venv" || {
-        show_message "Dashboard Analytic" "The native virtual environment could not be created. Check the project folder permissions."
+        show_message "DriveTest Analyzer" "The native virtual environment could not be created. Check the project folder permissions."
         exit 1
     }
     python_bin="$managed_venv_python"
     "$python_bin" -m pip install --upgrade pip >>"$log_file" 2>&1
     "$python_bin" -m pip install -r "${project_root}/requirements.txt" >>"$log_file" 2>&1 || {
-        show_message "Dashboard Analytic" "Dependencies could not be installed. Check ${log_file}."
+        show_message "DriveTest Analyzer" "Dependencies could not be installed. Check ${log_file}."
         exit 1
     }
 fi
@@ -167,11 +171,11 @@ while (( local_attempt < 50 )); do
     fi
     if ! /bin/kill -0 "$server_pid" 2>/dev/null; then
         /bin/rm -f "$pid_file"
-        show_message "Dashboard Analytic" "The server could not start. Check ${log_file}."
+        show_message "DriveTest Analyzer" "The server could not start. Check ${log_file}."
         exit 1
     fi
     if /usr/bin/curl --silent --output /dev/null --max-time 1 "$url"; then
-        notify "Dashboard Analytic" "Server started at ${url}. Use Open in Browser from the launcher window."
+        notify "DriveTest Analyzer" "Server started at ${url}. Use Open in Browser from the launcher window."
         supervise_server
         exit 0
     fi
@@ -179,5 +183,5 @@ while (( local_attempt < 50 )); do
     ((local_attempt++))
 done
 
-notify "Dashboard Analytic" "The server is still starting at ${url}. Use Open in Browser from the launcher window when ready."
+notify "DriveTest Analyzer" "The server is still starting at ${url}. Use Open in Browser from the launcher window when ready."
 supervise_server

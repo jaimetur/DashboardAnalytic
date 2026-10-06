@@ -266,7 +266,7 @@ def export_word(destination: Path, lines: list[str], summary: dict[str, Any], br
     section.page_width, section.page_height = DocxInches(11.69), DocxInches(8.27)
     section.left_margin = section.right_margin = DocxInches(0.6)
     section.top_margin = section.bottom_margin = DocxInches(0.6)
-    document.add_heading('Dashboard Analytic · Non-Qualified Calls', level=0)
+    document.add_heading('DriveTest Analyzer · Non-Qualified Calls', level=0)
     document.add_paragraph('Executive Summary and Progress Status')
     for line in lines:
         document.add_paragraph(line, style='List Bullet')

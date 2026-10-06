@@ -649,8 +649,8 @@ def count_rows(
 
 
 def default_memory_bytes() -> int:
-    return int(os.environ.get('DASHBOARD_ANALYTIC_COLUMN_CACHE_MEMORY_MB') or 1024) * 1024 ** 2
+    return int(os.environ.get('DRIVETEST_ANALYZER_COLUMN_CACHE_MEMORY_MB') or 1024) * 1024 ** 2
 
 
 def default_disk_bytes() -> int:
-    return int(os.environ.get('DASHBOARD_ANALYTIC_COLUMN_CACHE_DISK_MB') or 8192) * 1024 ** 2
+    return int(os.environ.get('DRIVETEST_ANALYZER_COLUMN_CACHE_DISK_MB') or 8192) * 1024 ** 2

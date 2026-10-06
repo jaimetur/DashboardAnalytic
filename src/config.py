@@ -55,12 +55,12 @@ def project_path(env_var: str, default: str) -> Path:
 
 @dataclass(frozen=True)
 class Settings:
-    app_name: str = os.getenv("APP_NAME", "Dashboard Analytic")
+    app_name: str = os.getenv("APP_NAME", "DriveTest Analyzer")
     app_release_date: str = os.getenv("APP_RELEASE_DATE", "2026-07-14")
     app_host: str = os.getenv("APP_HOST", "0.0.0.0")
     app_port: int = int(os.getenv("APP_PORT", "7278"))
     dev_port: int = int(os.getenv("APP_DEV_PORT", "7279"))
-    secret_key: str = os.getenv("APP_SECRET_KEY", "change-me-dashoboard-analytic")
+    secret_key: str = os.getenv("APP_SECRET_KEY", "change-me-drivetest-analyzer")
     template_dir: Path = project_path("APP_TEMPLATE_DIR", "src/web_interface/templates")
     static_dir: Path = project_path("APP_STATIC_DIR", "src/web_interface/static")
     allowed_extensions: tuple[str, ...] = (".csv", ".xlsx", ".xls", ".xlsm", ".geojson", ".json", ".zip")

@@ -13,8 +13,8 @@ from threading import Thread
 from time import sleep
 from pathlib import Path
 
-import src.DashboardAnalytic as app_module
-from src.DashboardAnalytic import (
+import src.DriveTestAnalyzer as app_module
+from src.DriveTestAnalyzer import (
     _process_dataset,
     process_region_mapping,
     process_vendor_clearing,

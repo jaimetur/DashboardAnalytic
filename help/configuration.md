@@ -1,6 +1,6 @@
 # Deployment Configuration
 
-Dashboard Analytic separates application settings, storage roots and Docker deployment variables. Source installations can set the three storage roots in `storage-paths.conf`; real environment variables take precedence. Docker deployments normally keep all settings in `docker/.env`.
+DriveTest Analyzer separates application settings, storage roots and Docker deployment variables. Source installations can set the three storage roots in `storage-paths.conf`; real environment variables take precedence. Docker deployments normally keep all settings in `docker/.env`.
 
 > [!IMPORTANT]
 > **Three storage roots.** Keep configuration, workspace data and writable assets on persistent storage. Code template/static overrides are separate settings.
@@ -22,20 +22,22 @@ Dashboard Analytic separates application settings, storage roots and Docker depl
 
 | Variable | Purpose | Default or typical value |
 | --- | --- | --- |
-| `APP_NAME` | Application-name setting retained by the runtime configuration. Current release branding remains Dashboard Analytic. | `Dashboard Analytic` |
+| `APP_NAME` | Application-name setting retained by the runtime configuration. Current release branding remains DriveTest Analyzer. | `DriveTest Analyzer` |
 | `APP_HOST` | Bind address used when launching `python src/main.py`. | `0.0.0.0` |
 | `APP_PORT` | Source launcher port and production host port in Compose. | `7278` |
 | `APP_DEV_PORT` | Development host port mapped to the container service. | `7279` |
 | `APP_SECRET_KEY` | Signs authenticated session cookies. | A long private random value |
-| `DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER` | Renderer for Reports, Chart Sets, previews and Dashboard exports. | `dashboard-canvas`; use `pil` only for the legacy painter |
-| `DASHBOARD_ANALYTIC_CHROMIUM` | Optional explicit Chromium-family executable used by the server Canvas renderer. | Auto-detected supported browser |
-| `DASHBOARD_ANALYTIC_DASHBOARD_FRAME_CACHE_SNAPSHOTS` | Number of recently used Dashboard snapshots that keep their chart data frames in memory. Lower it on servers with little RAM. | `3` |
+| `DRIVETEST_ANALYZER_REPORT_CHART_RENDERER` | Renderer for Reports, Chart Sets, previews and Dashboard exports. | `dashboard-canvas`; use `pil` only for the legacy painter |
+| `DRIVETEST_ANALYZER_CHROMIUM` | Optional explicit Chromium-family executable used by the server Canvas renderer. | Auto-detected supported browser |
+| `DRIVETEST_ANALYZER_DASHBOARD_FRAME_CACHE_SNAPSHOTS` | Number of recently used Dashboard snapshots that keep their chart data frames in memory. Lower it on servers with little RAM. | `3` |
 | `TZ` | IANA timezone used by Docker and displayed/persisted timestamps. | `Europe/Madrid` |
 | `IGNORE_EVENT_TIME_FILTERING` | When true, ignores date and template filters based on Event_Start_Time or Event_End_Time. | `false` |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURITY` | Default SMTP server, port and encryption (`starttls`, `ssl` or `none`) for Reporting emails. Application Config → Email Delivery overrides them. | Not set; `587`; `starttls` |
 | `SMTP_USERNAME`, `SMTP_PASSWORD` | Default SMTP account. The password is used whenever no password is saved in Application Config. | Not set |
-| `SMTP_FROM`, `SMTP_FROM_NAME` | Default sender address and name of Reporting emails. | Not set; `Dashboard Analytic` |
+| `SMTP_FROM`, `SMTP_FROM_NAME` | Default sender address and name of Reporting emails. | Not set; `DriveTest Analyzer` |
 | `SMTP_MAX_ATTACHMENTS_MB` | Default limit for the total size of a Reporting email's attachments. | `20` |
+
+Before version 0.6.0 the application was named Dashboard Analytic. Variables with the former `DASHBOARD_ANALYTIC_` prefix are still read when the matching `DRIVETEST_ANALYZER_` variable is not set, and export packages, JSON exports and backups created with the former name (format identifiers and backup files starting with `dashboard-analytic-`) are still imported and restored.
 
 ## Application Config page
 
@@ -64,9 +66,9 @@ Always replace `APP_SECRET_KEY` outside local development. Changing it invalidat
 Only these three variables are accepted in `storage-paths.conf`:
 
 ```text
-APP_CONFIG_DIR = /srv/dashboard-analytic/config
-APP_DATA_DIR = /srv/dashboard-analytic/data
-APP_ASSETS_DIR = /srv/dashboard-analytic/assets
+APP_CONFIG_DIR = /srv/drivetest-analyzer/config
+APP_DATA_DIR = /srv/drivetest-analyzer/data
+APP_ASSETS_DIR = /srv/drivetest-analyzer/assets
 ```
 
 Relative paths are resolved from the project root. `~` and environment-variable references are expanded. If the file is absent, the defaults are `config/`, `data/` and `assets/` inside the project. Environment variables with the same names override the file, which lets Docker use `/app/config`, `/app/data` and `/app/assets` without editing a developer's local configuration.

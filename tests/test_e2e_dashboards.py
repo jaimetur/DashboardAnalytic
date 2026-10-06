@@ -17,7 +17,7 @@ from pptx.dml.color import RGBColor
 from pptx.enum.dml import MSO_THEME_COLOR
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
-import src.DashboardAnalytic as core
+import src.DriveTestAnalyzer as core
 from src.modules.e2e_dashboards import DashboardDefinition, filter_frame
 
 
@@ -27,7 +27,7 @@ def definition(**changes):
 
 def test_dashboard_uses_combined_tables_without_projection_or_warmup_queue():
     source = (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
-    assert 'dashboard-analytics.sqlite3' not in source
+    assert 'drivetest-analyzers.sqlite3' not in source
     assert 'def ensure_projection' not in source
     assert 'def enqueue_prefetch' not in source
     assert 'def prefetch_workspace_dashboards' not in source
@@ -152,7 +152,7 @@ def test_saving_the_embedded_template_rebuilds_the_dashboard_immediately():
     assert "const expandedChartIndex = !$('ds-chart-expanded-overlay').hidden" in script
     assert "await openExpandedChart(refreshedChart, null, 'dashboard', {preserveFocus: true});" in script
     assert 'function expandedChartOverlay(show, {preserveFocus = false} = {})' in script
-    assert "if (event.data?.type === 'dashboard-analytic:template-saved')" in script
+    assert "if (event.data?.type === 'drivetest-analyzer:template-saved')" in script
     assert 'await rebuildDashboardAfterTemplateSave();' in script
     assert 'templateEditorSaved = false;' in script
 
@@ -384,11 +384,11 @@ def test_dashboard_export_uses_the_admin_import_archive_format(client):
     assert exported.status_code == 200
     with zipfile.ZipFile(BytesIO(exported.content)) as archive:
         manifest = json.loads(archive.read('manifest.json'))
-        assert manifest['format'] == 'dashboard-analytic-export'
+        assert manifest['format'] == 'drivetest-analyzer-export'
         assert manifest['kind'] == 'dashboards'
         assert manifest['workspace_components'] == ['dashboards']
         document = json.loads(archive.read(manifest['archive_path']))
-    assert document['format'] == 'dashboard-analytic-dashboards'
+    assert document['format'] == 'drivetest-analyzer-dashboards'
     assert document['dashboards'] == {dashboard_id: payload}
 
 
@@ -811,17 +811,17 @@ def test_dashboard_ppt_filename_summarizes_complete_geography_selections(client,
         return row['output_file']
 
     assert re.fullmatch(
-        r'\d{8}_\d{6} - NSA - Comparison - Operator Comparison - All Regions\.pptx',
+        r'\d{8}_\d{6} - E2E Dashboards - NSA - Comparison - Operator Comparison - All Regions\.pptx',
         queued_name(['South', 'North'], ['London', 'Leeds']),
     )
     first_north_export = queued_name(['North'], ['London'])
     assert re.fullmatch(
-        r'\d{8}_\d{6} - NSA - Comparison - Operator Comparison - North\.pptx',
+        r'\d{8}_\d{6} - E2E Dashboards - NSA - Comparison - Operator Comparison - North\.pptx',
         first_north_export,
     )
     second_north_export = queued_name(['North'], ['London'], ['A'])
     assert re.fullmatch(
-        r'\d{8}_\d{6} - NSA - Comparison - Operator Comparison - North\.pptx',
+        r'\d{8}_\d{6} - E2E Dashboards - NSA - Comparison - Operator Comparison - North\.pptx',
         second_north_export,
     )
     assert second_north_export != first_north_export
@@ -1544,13 +1544,13 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'height: 14rem;' in dashboard_styles
     assert '.multiselect-option[hidden], .multiselect-group-label[hidden] { display: none !important; }' in app_styles
     task_panel_start = app_script.index("const root = document.getElementById('background-task-panels');")
-    task_listener = app_script.index("window.addEventListener('dashboard-analytic:background-task'")
+    task_listener = app_script.index("window.addEventListener('drivetest-analyzer:background-task'")
     assert task_listener > task_panel_start
     assert "This Auto-calculated Field has unsaved changes. Close without saving them?" in app_script
     assert "const confirmTertiary = document.getElementById('confirm-tertiary');" in app_script
     assert "const handleTertiary = () => close('tertiary');" in app_script
     assert "overlay.addEventListener('click', (event) => { if (event.target === overlay) void requestFinish(); });" in app_script
-    assert "window.parent.postMessage({type: 'dashboard-analytic:template-saved'}, window.location.origin);" in app_script
+    assert "window.parent.postMessage({type: 'drivetest-analyzer:template-saved'}, window.location.origin);" in app_script
     assert "openTemplateEditor(expandedChart?.focus_row, sourceDefinition)" in dashboard_script
     assert 'const hasAppliedUnsavedFilterChanges = () => Boolean(' in dashboard_script
     assert "confirmLabel: 'Use Current Filters'" in dashboard_script
@@ -1619,7 +1619,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "if (templateChanged && expandedChartMode !== 'ppt') {" in dashboard_script
     assert dashboard_script.count('forgetPrepared();') >= 2
     assert "'Reload the current Report Template, rebuild its slides and render every chart in this Dashboard again?'" in dashboard_script
-    assert "event.data?.type === 'dashboard-analytic:template-saved'" in dashboard_script
+    assert "event.data?.type === 'drivetest-analyzer:template-saved'" in dashboard_script
     chart_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/dashboard_charts.js').read_text(encoding='utf-8')
     assert "const percent = (value, digits = 1) => `${(Number(value) * 100).toFixed(digits)}%`;" in chart_script
     # Clicking a legend entry hides or shows its series for every chart type;
@@ -1781,7 +1781,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "params.set('preparation_id', preparationToken);" in dashboard_script
     assert "dashboard_name: definition?.name || 'Dashboard'," in dashboard_script
     assert "let preparationToken = '';" in dashboard_script
-    assert "window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));" in dashboard_script
+    assert "window.dispatchEvent(new Event('drivetest-analyzer:refresh-background-tasks'));" in dashboard_script
     assert 'let dashboardPptJobsLoaded = false, dashboardPptJobsRefreshing = false;' in dashboard_script
     assert "previous.status !== 'ready'" in dashboard_script
     assert "renderDashboardPptJobs(jobs, newlyReady[0]?.id || '');" in dashboard_script
@@ -1811,7 +1811,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "bind('ds-reload-universe', () => {" in dashboard_script
     assert "copyDefinitionFields(definition, savedDashboardDefinition(), universeDefinitionFields);" in dashboard_script
     assert "await api(`/prepare?${params}`, 'POST', definition, controller.signal);" in dashboard_script
-    assert "window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));" in dashboard_script
+    assert "window.dispatchEvent(new Event('drivetest-analyzer:refresh-background-tasks'));" in dashboard_script
     assert "title: 'Unsaved Dashboard filters'" in dashboard_script
     assert "confirmLabel: 'Save Filters'" in dashboard_script
     assert "title: 'Unsaved Dataset Universe'" in dashboard_script
@@ -2247,7 +2247,7 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypa
     charts_dir = output_path.parent / 'dashboard-charts'
     assert output_path.is_file()
     assert re.fullmatch(
-        r'\d{8}_\d{6} - NSA - Comparison - Multivendor Comparison\.pptx',
+        r'\d{8}_\d{6} - E2E Dashboards - NSA - Comparison - Multivendor Comparison\.pptx',
         output_path.name,
     )
     assert output_path.parent.name == output_path.stem
@@ -2650,7 +2650,7 @@ def test_adding_a_dataset_builds_a_new_chart_model_with_every_campaign(client):
 
 def test_dashboard_api_session_expires_on_application_process_restart(client):
     setup_dashboard(client)
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     app_module.SESSIONS.clear()
 

@@ -511,6 +511,7 @@
   }
   // The formats at the end of an entry, "(PPT/Word/Excel)", each in its own colour.
   const FORMAT_CLASSES = {PPT: 'rj-format-ppt', Word: 'rj-format-word', Excel: 'rj-format-excel'};
+  const FILE_FORMATS = {pptx: 'PPT', ppt: 'PPT', docx: 'Word', doc: 'Word', xlsx: 'Excel', xls: 'Excel', csv: 'CSV'};
   function withColouredFormats(text) {
     const fragment = document.createDocumentFragment();
     const match = /^(.*?)\(((?:PPT|Word|Excel)(?:\/(?:PPT|Word|Excel))*)\)\s*$/.exec(String(text || ''));
@@ -528,11 +529,7 @@
     groups.forEach((group) => {
       const item = node('li');
       item.append(node('strong', group.module, 'rj-artifact-module'));
-      const entries = group.items.map((entry) => {
-        if (typeof entry === 'string') return withColouredFormats(entry);
-        if (!entry.classList?.contains('rj-error')) entry.replaceChildren(withColouredFormats(entry.textContent));
-        return entry;
-      });
+      const entries = group.items.map((entry) => (typeof entry === 'string' ? withColouredFormats(entry) : entry));
       if (entries.length > 1) {
         const nested = node('ul', undefined, 'rj-artifact-entries');
         entries.forEach((entry) => { const row = node('li'); row.append(entry); nested.append(row); });
@@ -733,7 +730,7 @@
   // Artifacts are organised in tabs: one per artifact type, in its module colour, with a check when it is
   // included in the job. Every artifact stays in the form, so saving reads all of them.
   // The selected artifact tab is remembered by the browser, so reloading the page keeps it.
-  const ARTIFACT_TAB_KEY = 'dashboard-analytic:reporting-artifact-tab';
+  const ARTIFACT_TAB_KEY = 'drivetest-analyzer:reporting-artifact-tab';
   let activeArtifact = (() => { try { return localStorage.getItem(ARTIFACT_TAB_KEY) || ''; } catch { return ''; } })();
   const ARTIFACT_TAB_ICONS = {
     dataset_analysis: '.module-tab-datasets-analysis', network_insights: '.module-tab-network-insights',
@@ -849,7 +846,7 @@
   }
 
   // The open Job Editor is kept as a draft in this browser, so reloading the page reopens it as it was.
-  const DRAFT_KEY = 'dashboard-analytic:reporting-job-draft';
+  const DRAFT_KEY = 'drivetest-analyzer:reporting-job-draft';
   const readDraft = () => { try { return JSON.parse(window.localStorage.getItem(DRAFT_KEY) || 'null'); } catch { return null; } };
   const clearDraft = () => { try { window.localStorage.removeItem(DRAFT_KEY); } catch { /* Storage unavailable. */ } };
   let draftTimer = 0;
@@ -1020,6 +1017,15 @@
     badge.title = run.error || run.message || '';
     return badge;
   };
+  // How long a finished run took, "45s", "3m 12s" or "1h 05m".
+  const runDuration = (run) => {
+    const start = Date.parse(run.started_at || ''); const end = Date.parse(run.finished_at || '');
+    if (Number.isNaN(start) || Number.isNaN(end) || end < start) return '';
+    const seconds = Math.round((end - start) / 1000);
+    if (seconds < 60) return `${seconds}s`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, '0')}s`;
+    return `${Math.floor(seconds / 3600)}h ${String(Math.floor(seconds / 60) % 60).padStart(2, '0')}m`;
+  };
   const downloadLink = (run) => {
     const link = node('a', '⬇', 'icon-action rj-download');
     link.href = `/api/reporting/runs/${run.id}/download`;
@@ -1104,24 +1110,48 @@
       const row = node('tr');
       const statusCell = node('td');
       statusCell.append(statusBadge(run));
+      const duration = runDuration(run);
       if (['queued', 'running'].includes(run.status)) statusCell.append(node('small', ` ${run.progress}% · ${run.message}`));
-      else if (run.error) statusCell.append(node('small', ` ${run.error}`, 'rj-error'));
+      else if (duration) statusCell.append(node('small', ` in ${duration}`, 'rj-duration'));
+      if (!['queued', 'running'].includes(run.status) && run.error) statusCell.append(node('small', ` ${run.error}`, 'rj-error'));
       const artifacts = node('ul', undefined, 'rj-artifacts');
-      // Grouped by module like the jobs table; each entry keeps its download link.
+      // Grouped like the jobs table: one line per entry with its formats, "NSA LTE (PPT/Word)", where each
+      // format is the download link of its file; failed files follow with their error.
       const byModule = new Map();
       run.artifacts.forEach((item, index) => {
         const module = ARTIFACT_MODULE_LABELS[item.module] || item.module || 'Artifacts';
         const title = artifactEntryTitle(item.title, module);
-        let content;
-        if (item.status === 'ready') {
-          content = node('a', title); content.href = `/api/reporting/runs/${run.id}/artifacts/${index}`; content.title = item.file_name;
-        } else {
-          content = node('span', `${title}: ${item.error || 'failed'}`, 'rj-error');
+        if (!byModule.has(module)) byModule.set(module, new Map());
+        const entries = byModule.get(module);
+        if (item.status !== 'ready') {
+          entries.set(`failed-${index}`, {failed: node('span', `${title}: ${item.error || 'failed'}`, 'rj-error')});
+          return;
         }
-        if (!byModule.has(module)) byModule.set(module, []);
-        byModule.get(module).push(content);
+        const match = /^(.*?)\s*\((PPT|Word|Excel)\)\s*$/.exec(title);
+        const base = match ? match[1] : title;
+        const extension = String(item.file_name || '').split('.').pop().toLowerCase();
+        const format = match ? match[2] : (FILE_FORMATS[extension] || extension.toUpperCase() || 'File');
+        // Same-named entries (two dashboards called alike) stay apart: a format already present starts a new line.
+        let key = base;
+        for (let copy = 2; entries.has(key) && entries.get(key).formats.some((link) => link.textContent === format); copy += 1) key = `${base}\u0000${copy}`;
+        if (!entries.has(key)) entries.set(key, {base, formats: []});
+        const link = node('a', format, `rj-format ${FORMAT_CLASSES[format] || ''}`);
+        link.href = `/api/reporting/runs/${run.id}/artifacts/${index}`;
+        link.title = item.file_name;
+        entries.get(key).formats.push(link);
       });
-      renderArtifactGroups(artifacts, [...byModule].map(([module, items]) => ({module, items})));
+      renderArtifactGroups(artifacts, [...byModule].map(([module, entries]) => ({
+        module,
+        items: [...entries].map(([, entry]) => {
+          if (entry.failed) return entry.failed;
+          const line = document.createDocumentFragment();
+          if (entry.base) line.append(`${entry.base} `);
+          line.append('(');
+          entry.formats.forEach((link, position) => { if (position) line.append('/'); line.append(link); });
+          line.append(')');
+          return line;
+        }),
+      })));
       const actions = node('div', undefined, 'table-actions');
       if (run.artifacts.some((item) => item.status === 'ready')) actions.append(downloadLink(run));
       if (state.can_edit && !['queued', 'running'].includes(run.status)) {

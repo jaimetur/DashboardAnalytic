@@ -17,7 +17,7 @@ if __package__ in {None, ""}:
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
 
-from src.DashboardAnalytic import app
+from src.DriveTestAnalyzer import app
 from src.config import settings
 from src.runtime_logs import ExecutionLogHandler
 
@@ -80,10 +80,10 @@ def environment_flag(name: str) -> bool:
 
 
 if __name__ == "__main__":
-    reload_enabled = environment_flag('DASHBOARD_ANALYTIC_RELOAD')
-    bind_port = int(os.environ.get('DASHBOARD_ANALYTIC_BIND_PORT') or settings.app_port)
+    reload_enabled = environment_flag('DRIVETEST_ANALYZER_RELOAD')
+    bind_port = int(os.environ.get('DRIVETEST_ANALYZER_BIND_PORT') or settings.app_port)
     uvicorn.run(
-        'src.DashboardAnalytic:app' if reload_enabled else app,
+        'src.DriveTestAnalyzer:app' if reload_enabled else app,
         host=settings.app_host,
         port=bind_port,
         proxy_headers=True,

@@ -18,7 +18,7 @@ const rendererSource = fs.readFileSync(
 
 function browserExecutable() {
   const candidates = [
-    process.env.DASHBOARD_ANALYTIC_CHROMIUM,
+    process.env.DRIVETEST_ANALYZER_CHROMIUM,
     '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',

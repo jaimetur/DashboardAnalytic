@@ -4,18 +4,18 @@
 <dict>
 	<key>files</key>
 	<dict>
-		<key>Resources/DashboardAnalytic.icns</key>
+		<key>Resources/DriveTestAnalyzer.icns</key>
 		<data>
 		fP0JV0Az8z2U9j0aLvAG0O3NuFQ=
 		</data>
 		<key>Resources/launch-server.zsh</key>
 		<data>
-		Qlxc0hWbSan5RKzNO+Fz1V0mrCM=
+		laTdz+ELGHkex1a7CyQMOhlBIAw=
 		</data>
 	</dict>
 	<key>files2</key>
 	<dict>
-		<key>Resources/DashboardAnalytic.icns</key>
+		<key>Resources/DriveTestAnalyzer.icns</key>
 		<dict>
 			<key>hash2</key>
 			<data>
@@ -26,7 +26,7 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			tmfrmYxmowjpvyHS1OBgZXLQJoZX8hGpxjGr75lTQtc=
+			mzmxuzd5NDZnJeUUI9TP5LuCfNLu3cxLbFwADW4u65g=
 			</data>
 		</dict>
 	</dict>

@@ -7,7 +7,7 @@ import zipfile
 
 import pytest
 
-import src.DashboardAnalytic as app_module
+import src.DriveTestAnalyzer as app_module
 from src.modules.repository import Repository
 from src.modules.scoring_config import (
     default_scoring_profile, scoring_profiles_document,
@@ -89,7 +89,7 @@ def test_scoring_configuration_export_import_round_trip(client, tmp_path: Path, 
     with zipfile.ZipFile(package_path) as archive:
         member = manifest['archive_path']
         document = json.loads(archive.read(member))
-    assert document['format'] == 'dashboard-analytic-scoring-configuration'
+    assert document['format'] == 'drivetest-analyzer-scoring-configuration'
     assert document['version'] == 3
     assert document['active_profile_id'] == expected_profiles['active_profile_id']
     assert document == scoring_profiles_document(expected_profiles)
@@ -273,7 +273,7 @@ def test_scoring_json_import_export_uses_workspace_database(client):
     repository.set_workspace_state('scoring_configuration', '')
     assert client.get('/api/workspace-config/scoring-configuration').status_code == 409
     assert 'Import a Scoring Configuration' in client.get('/scoring').text
-    document = {'format': 'dashboard-analytic-scoring-configuration', 'version': 1,
+    document = {'format': 'drivetest-analyzer-scoring-configuration', 'version': 1,
                 'configuration': scoring_configuration()}
     response = client.post('/api/workspace-config/scoring-configuration/import', files={
         'package': ('scoring.json', json.dumps(document).encode(), 'application/json'),
@@ -339,7 +339,7 @@ def test_legacy_bare_json_and_v1_zip_import_create_a_single_default_profile(clie
     with zipfile.ZipFile(legacy_archive, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr('manifest.json', json.dumps(manifest))
         archive.writestr(archive_path, json.dumps({
-            'format': 'dashboard-analytic-scoring-configuration',
+            'format': 'drivetest-analyzer-scoring-configuration',
             'version': 1,
             'configuration': configuration,
         }))
@@ -382,7 +382,7 @@ def test_json_profile_merge_replaces_matching_ids_and_preserves_default_and_othe
     added.update({'id': 'new-profile', 'name': 'New Profile'})
     added['configuration']['version'] = 'New Version'
     document = {
-        'format': 'dashboard-analytic-scoring-configuration', 'version': 3,
+        'format': 'drivetest-analyzer-scoring-configuration', 'version': 3,
         'active_profile_id': 'new-profile', 'profiles': [incoming, added],
     }
 
@@ -406,7 +406,7 @@ def test_json_profile_merge_rejects_invalid_collection_without_changing_saved_pr
     _, repository = _workspace_repository()
     before = repository.get_scoring_profiles()
     invalid = {
-        'format': 'dashboard-analytic-scoring-configuration', 'version': 3,
+        'format': 'drivetest-analyzer-scoring-configuration', 'version': 3,
         'active_profile_id': 'missing', 'profiles': [before['profiles'][0]],
     }
 
@@ -484,7 +484,7 @@ def test_admin_importer_accepts_scoring_configuration_json(client, collection_fo
         document = scoring_profiles_document(profiles)
     else:
         document = {
-            'format': 'dashboard-analytic-scoring-configuration',
+            'format': 'drivetest-analyzer-scoring-configuration',
             'version': 1,
             'configuration': configuration,
         }
@@ -518,7 +518,7 @@ def test_unconfigured_workspace_configuration_backup_round_trip(client):
     assert not repository.get_workspace_state('scoring_configuration')
 
     legacy_empty_payload = json.dumps({
-        'format': 'dashboard-analytic-scoring-configuration',
+        'format': 'drivetest-analyzer-scoring-configuration',
         'version': 1,
         'configuration': None,
     }).encode('utf-8')

@@ -32,7 +32,7 @@ def login(client) -> None:
 
 
 def test_query_builder_saved_query_can_be_deleted(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     app_module.repository.save_query_builder_query('Temporary query', '', 'SELECT 1', [], 'admin')
@@ -52,7 +52,7 @@ def test_query_builder_saved_query_can_be_deleted(client) -> None:
 
 
 def test_query_builder_assistant_uses_ready_source_columns(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     monkeypatch.setattr(app_module.repository, 'list_datasets', lambda: [
@@ -80,7 +80,7 @@ def test_query_builder_assistant_uses_ready_source_columns(client, monkeypatch) 
 
 
 def test_query_builder_background_run_and_cancel(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
     from threading import Event
 
     login(client)
@@ -172,7 +172,7 @@ vm.runInNewContext(`${helper}\nrequestExecutionResult('background-test','same-qu
 
 
 def test_query_builder_dataset_restore_matches_exact_name_then_unique_kind_and_hash(tmp_path: Path, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     source_path = tmp_path / 'source.csv'
     source_path.write_bytes(b'Operator,Value\nVodafone,1\n')
@@ -227,7 +227,7 @@ def test_query_builder_dataset_restore_matches_exact_name_then_unique_kind_and_h
 
 
 def test_query_builder_restore_rejects_unresolved_sources_before_saving_any_queries(monkeypatch, tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     source_path = tmp_path / 'present.csv'
     source_path.write_bytes(b'value\n1\n')
@@ -920,7 +920,7 @@ def test_query_builder_executes_union_all_with_disjoint_columns_and_grouped_filt
 
 
 def test_query_builder_run_returns_offset_pages_and_rejects_invalid_offsets(client, monkeypatch, tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     monkeypatch.setattr(app_module.repository, 'list_datasets', lambda: [
@@ -977,7 +977,7 @@ def test_query_builder_column_filters_cover_complete_results_pages_and_csv(clien
     import csv
     import io
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     monkeypatch.setattr(app_module.repository, 'list_datasets', lambda: [
@@ -1031,7 +1031,7 @@ def test_query_builder_column_filters_cover_complete_results_pages_and_csv(clien
 
 
 def test_query_builder_filter_values_are_distinct_faceted_searchable_and_typed(client, monkeypatch, tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     monkeypatch.setattr(app_module.repository, 'list_datasets', lambda: [
@@ -1124,7 +1124,7 @@ def test_query_builder_csv_stream_includes_more_than_one_hundred_thousand_rows(t
 
 
 def test_login_does_not_reinitialize_the_active_workspace(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     initialize_calls = 0
 
@@ -1147,7 +1147,7 @@ def test_login_does_not_reinitialize_the_active_workspace(client, monkeypatch) -
 
 
 def test_login_reports_a_busy_workspace_without_an_internal_server_error(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     def fail_activation(_workspace_id: str) -> None:
         raise sqlite3.OperationalError('database is locked')
@@ -1166,7 +1166,7 @@ def test_login_reports_a_busy_workspace_without_an_internal_server_error(client,
 
 
 def test_passive_polling_stops_without_redirecting_after_an_expired_session() -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     script = (app_module.PROJECT_ROOT / 'src' / 'web_interface' / 'static' / 'js' / 'app.js').read_text(encoding='utf-8')
 
@@ -1176,7 +1176,7 @@ def test_passive_polling_stops_without_redirecting_after_an_expired_session() ->
 
 
 def test_expired_passive_polling_returns_an_inert_response_without_unauthorized_errors(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     app_module.SESSIONS.clear()
     client.cookies.clear()
@@ -1275,7 +1275,7 @@ def test_report_template_timestamp_migration_does_not_rewrite_complete_rows(tmp_
 
 
 def test_catalogue_editor_offers_result_group_for_every_cdr_source(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     dimensions = app_module.parse_calculated_dimensions(app_module.default_calculated_dimensions())
     columns = app_module.catalogue_editor_columns([], dimensions)
@@ -1284,7 +1284,7 @@ def test_catalogue_editor_offers_result_group_for_every_cdr_source(client) -> No
 
 
 def test_cdr_all_assistance_fields_union_every_individual_source(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
     from src.modules.rf_catalog_source import RF_CATALOG_FIELDS
 
     columns = app_module.catalogue_editor_columns([], ())
@@ -1294,7 +1294,7 @@ def test_cdr_all_assistance_fields_union_every_individual_source(client) -> None
 
 
 def test_cdr_all_filter_value_assistance_reads_every_source_dataset(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     datasets = [
@@ -1335,7 +1335,7 @@ def test_cdr_all_filter_value_assistance_reads_every_source_dataset(client, monk
 
 
 def test_catalogue_editor_offers_declarative_distribution_bucket_fields(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     columns = app_module.catalogue_editor_columns([], ())
 
@@ -1343,7 +1343,7 @@ def test_catalogue_editor_offers_declarative_distribution_bucket_fields(client) 
 
 
 def test_configuration_access_matches_editor_and_viewer_roles(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     app_module.SESSIONS['viewer-config-access'] = app_module.SessionUser(username='viewer', role='user-viewer')
     client.cookies.set(app_module.SESSION_COOKIE, 'viewer-config-access')
@@ -1394,7 +1394,7 @@ def test_configuration_access_matches_editor_and_viewer_roles(client) -> None:
 
 
 def test_config_page_persists_runtime_overrides(client, monkeypatch) -> None:
-    monkeypatch.setenv('DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER', 'dashboard-canvas')
+    monkeypatch.setenv('DRIVETEST_ANALYZER_REPORT_CHART_RENDERER', 'dashboard-canvas')
     monkeypatch.setenv('IGNORE_EVENT_TIME_FILTERING', 'false')
     login(client)
     page = client.get('/application-config')
@@ -1415,20 +1415,20 @@ def test_config_page_persists_runtime_overrides(client, monkeypatch) -> None:
         'max_background_tasks': '1',
     }, follow_redirects=False)
     assert response.status_code == 303
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     persisted = app_module.runtime_configuration()
     assert persisted['timezone'] == 'UTC'
     assert persisted['report_chart_renderer'] == 'pil'
     assert persisted['ignore_event_time_filtering'] is True
     assert persisted['max_background_tasks'] == 1
-    assert app_module.os.environ['DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER'] == 'pil'
+    assert app_module.os.environ['DRIVETEST_ANALYZER_REPORT_CHART_RENDERER'] == 'pil'
     assert app_module.os.environ['IGNORE_EVENT_TIME_FILTERING'] == 'true'
 
 
 def test_cdr_materialisation_adds_workspace_dimensions_to_dataset_rows() -> None:
     import pandas as pd
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     dimensions = app_module.parse_calculated_dimensions(app_module.default_calculated_dimensions())
     frame = app_module.materialize_calculated_dimensions(pd.DataFrame({
@@ -1545,7 +1545,7 @@ END''',
 
 
 def test_incremental_auto_field_materialization_compiles_tableau_if_expression(tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
     from src.modules.repository import Repository
 
     repository = Repository(tmp_path / 'if-expression.db')
@@ -1581,7 +1581,7 @@ END''',
 
 
 def test_incremental_auto_field_materialization_updates_columns_in_place(tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
     from src.modules.repository import Repository
 
     repository = Repository(tmp_path / 'incremental.db')
@@ -1625,7 +1625,7 @@ def test_incremental_auto_field_materialization_updates_columns_in_place(tmp_pat
 
 
 def test_incremental_auto_fields_preserve_ordered_dependencies(tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
     from src.modules.repository import Repository
 
     repository = Repository(tmp_path / 'dependencies.db')
@@ -1660,7 +1660,7 @@ def test_incremental_auto_fields_preserve_ordered_dependencies(tmp_path: Path) -
 def test_incremental_auto_field_materialization_yields_between_write_batches(
     tmp_path: Path, monkeypatch,
 ) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
     from src.modules.repository import Repository
 
     repository = Repository(tmp_path / 'batched-auto-fields.db')
@@ -1702,7 +1702,7 @@ def test_incremental_auto_field_materialization_yields_between_write_batches(
 
 
 def test_incremental_auto_fields_use_fallback_when_rule_columns_are_missing(tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
     from src.modules.repository import Repository
 
     repository = Repository(tmp_path / 'missing-source.db')
@@ -1725,7 +1725,7 @@ def test_incremental_auto_fields_use_fallback_when_rule_columns_are_missing(tmp_
 
 
 def test_incremental_auto_fields_update_existing_combined_reporting_table(tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
     from src.modules.repository import Repository
 
     repository = Repository(tmp_path / 'combined.db')
@@ -1757,7 +1757,7 @@ def test_incremental_auto_fields_update_existing_combined_reporting_table(tmp_pa
 
 
 def test_incremental_auto_fields_reconcile_new_dataset_into_existing_combined_table(tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
     from src.modules.repository import Repository
 
     repository = Repository(tmp_path / 'combined-membership.db')
@@ -1789,7 +1789,7 @@ def test_incremental_auto_fields_reconcile_new_dataset_into_existing_combined_ta
 
 
 def test_incremental_auto_fields_create_missing_combined_reporting_table(tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
     from src.modules.repository import Repository
 
     repository = Repository(tmp_path / 'new-combined.db')
@@ -1815,7 +1815,7 @@ def test_incremental_auto_fields_create_missing_combined_reporting_table(tmp_pat
 
 
 def test_combined_tables_materialize_fixed_preview_fields_and_every_saved_template_kpi(tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
     from src.modules.column_names import MAIN_CDR_FIELDS, PREVIEW_METADATA_FIELDS, column_identity
     from src.modules.repository import Repository
 
@@ -1858,7 +1858,7 @@ def test_combined_tables_materialize_fixed_preview_fields_and_every_saved_templa
 
 
 def test_template_field_changes_add_combined_columns_and_keep_unused_fields(tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
     from src.modules.column_names import column_identity
     from src.modules.repository import Repository
 
@@ -1906,7 +1906,7 @@ def test_template_field_changes_add_combined_columns_and_keep_unused_fields(tmp_
 
 
 def test_template_column_reconciliation_is_queued_only_for_missing_fields(tmp_path: Path, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
     from src.modules.repository import Repository
     from src.modules.workspaces import Workspace
 
@@ -1956,7 +1956,7 @@ def test_template_column_reconciliation_is_queued_only_for_missing_fields(tmp_pa
 
 
 def test_recreate_combined_table_recovers_empty_source_rows_and_required_columns(tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
     from src.modules.repository import Repository
     from src.modules.workspaces import Workspace
 
@@ -2019,7 +2019,7 @@ def test_replacing_calculated_dimensions_marks_materialization_pending_atomicall
 
 
 def test_starting_auto_field_job_does_not_repeat_pending_state_write(tmp_path: Path, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
     from src.modules.cdr_reporting import parse_calculated_dimensions
     from src.modules.repository import Repository
     from src.modules.workspaces import Workspace
@@ -2058,7 +2058,7 @@ def test_starting_auto_field_job_does_not_repeat_pending_state_write(tmp_path: P
 
 
 def test_workspace_calculated_dimensions_panel_exports_and_imports_json(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     page = client.get('/workspace')
@@ -2124,7 +2124,7 @@ def test_workspace_calculated_dimensions_panel_exports_and_imports_json(client) 
 
 
 def test_saving_calculated_dimensions_without_materialization_does_not_start_a_job(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     dimensions = app_module.calculated_dimensions_json(app_module.load_workspace_calculated_dimensions())
@@ -2153,7 +2153,7 @@ def test_saving_calculated_dimensions_without_materialization_does_not_start_a_j
 
 
 def test_materialization_status_returns_every_active_workspace_job(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     workspace_id = app_module.active_workspace.id
@@ -2189,7 +2189,7 @@ def test_materialization_status_returns_every_active_workspace_job(client, monke
 
 
 def test_stopped_materialization_status_retains_its_real_progress(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     workspace_id = app_module.active_workspace.id
@@ -2211,7 +2211,7 @@ def test_stopped_materialization_status_retains_its_real_progress(client, monkey
 
 
 def test_combined_table_progress_matches_its_active_recreation_job(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     client.post(
@@ -2247,7 +2247,7 @@ def test_combined_table_progress_matches_its_active_recreation_job(client, monke
 
 
 def test_renaming_calculated_dimension_rebuilds_references_in_templates_and_dashboards(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     app_module.repository.set_workspace_state(app_module.DASHBOARD_STATE_KEY, json.dumps({
@@ -2284,7 +2284,7 @@ def test_renaming_calculated_dimension_rebuilds_references_in_templates_and_dash
 
 
 def test_reporting_deletion_requires_admin(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     endpoints = [
         '/reporting-old/chart-sets/delete-all',
@@ -2351,7 +2351,7 @@ def test_login_page_loads(client) -> None:
     response = client.get("/login")
     assert response.status_code == 200
     assert "Log in" in response.text
-    assert "Dashboard Analytic" in response.text
+    assert "DriveTest Analyzer" in response.text
     assert __release_date__ in response.text
     assert "Default Access:" in response.text
     assert "<strong class=\"login-default-role login-default-role-super-admin\">Role: super-admin</strong>" in response.text
@@ -2379,7 +2379,7 @@ def test_successful_login_and_authenticated_root_open_help_home(client) -> None:
 
 
 def test_new_environment_creates_the_three_bootstrap_roles(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     roles = {row['username']: row['role'] for row in app_module.repository.list_users()}
     assert roles['super'] == 'super-admin'
@@ -2388,7 +2388,7 @@ def test_new_environment_creates_the_three_bootstrap_roles(client) -> None:
 
 
 def test_admin_can_create_user_editor_and_legacy_user_becomes_viewer(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     created = client.post('/admin/users', data={
@@ -2405,7 +2405,7 @@ def test_admin_can_create_user_editor_and_legacy_user_becomes_viewer(client) -> 
 
 
 def test_bootstrap_users_are_not_recreated_after_the_first_start(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     with app_module.repository.global_connection() as conn:
         conn.execute("DELETE FROM users WHERE username = ?", ('super',))
@@ -2420,7 +2420,7 @@ def test_bootstrap_users_are_not_recreated_after_the_first_start(client) -> None
 
 
 def test_login_page_hides_missing_default_access_accounts(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     with app_module.repository.global_connection() as conn:
         conn.execute("DELETE FROM users WHERE username = ?", ("demo",))
@@ -2433,7 +2433,7 @@ def test_login_page_hides_missing_default_access_accounts(client) -> None:
 
 
 def test_login_page_hides_default_access_when_password_differs_from_default(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     with app_module.repository.global_connection() as conn:
         conn.execute(
@@ -2449,7 +2449,7 @@ def test_login_page_hides_default_access_when_password_differs_from_default(clie
 
 
 def test_login_page_hides_default_access_section_when_no_default_users_exist(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     with app_module.repository.global_connection() as conn:
         conn.execute("DELETE FROM users WHERE username IN (?, ?, ?)", ("super", "admin", "demo"))
@@ -2462,7 +2462,7 @@ def test_login_page_hides_default_access_section_when_no_default_users_exist(cli
 
 
 def test_login_username_is_case_insensitive_and_rejects_case_duplicates(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     admin = next(row for row in app_module.repository.list_users() if row['username'] == 'admin')
     app_module.repository.set_user_workspace_access(int(admin['id']), ['default'])
@@ -2496,7 +2496,7 @@ def test_bootstrap_demo_can_access_default_workspace(client) -> None:
 
 
 def test_bootstrap_users_have_default_workspace_access(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     granted_admin = client.post(
         '/login',
@@ -2524,7 +2524,7 @@ def test_bootstrap_users_have_default_workspace_access(client) -> None:
 
 
 def test_admin_import_export_packages_detect_configuration_and_workspaces(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login_super(client)
     app_module.repository.set_application_state(app_module.RECURRING_BACKUP_STATE_KEY, '')
@@ -2568,7 +2568,7 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
         assert 'config/workspace-registry.db' not in archive.namelist()
     assert manifest == {
         'components': ['app_database'],
-        'format': 'dashboard-analytic-export',
+        'format': 'drivetest-analyzer-export',
         'includes_slides_templates': False,
         'kind': 'config',
         'version': 1,
@@ -2671,7 +2671,7 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
 
 
 def test_multi_selection_export_applies_containment_rules_and_builds_importable_bundle(client, tmp_path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login_super(client)
     assert app_module.normalize_export_targets([
@@ -2685,7 +2685,7 @@ def test_multi_selection_export_applies_containment_rules_and_builds_importable_
     filename = app_module.build_export_archive_file(
         ['config', 'workspace:default'], package_path, include_generated_outputs=False,
     )
-    assert filename.startswith('dashboard-analytic-selection_')
+    assert filename.startswith('drivetest-analyzer-selection_')
     with zipfile.ZipFile(package_path) as archive:
         manifest = json.loads(archive.read('manifest.json'))
         assert manifest['kind'] == 'bundle'
@@ -2719,7 +2719,7 @@ def test_multi_selection_export_applies_containment_rules_and_builds_importable_
 
 
 def test_auto_calculated_fields_export_does_not_materialize_active_cdrs(client, tmp_path, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login_super(client)
 
@@ -2737,7 +2737,7 @@ def test_auto_calculated_fields_export_does_not_materialize_active_cdrs(client, 
 
 
 def test_operator_mappings_export_and_import_replace_the_selected_workspace_groups(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
     from src.modules.network_insights import load_spectrum_holdings, save_spectrum_holdings
 
     login_super(client)
@@ -2753,7 +2753,7 @@ def test_operator_mappings_export_and_import_replace_the_selected_workspace_grou
         payload = json.loads(archive.read(manifest['archive_path']))
     assert manifest['kind'] == 'operator-mappings'
     assert manifest['workspace_components'] == ['operator_mappings']
-    assert payload['format'] == 'dashboard-analytic-operator-mappings'
+    assert payload['format'] == 'drivetest-analyzer-operator-mappings'
     assert payload['version'] == 3
     assert payload['spectrum_holdings'][0]['band'] == 'n78'
     assert any(group['canonical'] == 'Portable Carrier' for group in payload['mappings'])
@@ -2790,7 +2790,7 @@ def test_operator_mappings_export_and_import_replace_the_selected_workspace_grou
 
 
 def test_main_cities_workspace_config_save_deduplicates_case_insensitively(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     saved = client.post('/workspace-config/main-cities/save', data={
@@ -2803,7 +2803,7 @@ def test_main_cities_workspace_config_save_deduplicates_case_insensitively(clien
 
 
 def test_main_cities_export_import_restores_selected_workspace(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login_super(client)
     app_module.repository.set_main_cities(['London', 'Leeds'])
@@ -2818,7 +2818,7 @@ def test_main_cities_export_import_restores_selected_workspace(client) -> None:
     assert manifest['workspace_components'] == ['main_cities']
     assert manifest['archive_path'] == 'workspaces/Default/main-cities/main-cities.json'
     assert payload == {
-        'format': 'dashboard-analytic-main-cities', 'version': 1, 'cities': ['London', 'Leeds'],
+        'format': 'drivetest-analyzer-main-cities', 'version': 1, 'cities': ['London', 'Leeds'],
     }
     assert app_module.manifest_requires_destination_workspaces(manifest)
 
@@ -2844,14 +2844,14 @@ def test_main_cities_export_import_restores_selected_workspace(client) -> None:
 
 
 def test_main_cities_restore_rejects_invalid_payloads(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     app_module.repository.set_main_cities(['London'])
 
     for payload in (
-        b'{"format":"dashboard-analytic-main-cities","version":2,"cities":["Leeds"]}',
-        b'{"format":"dashboard-analytic-main-cities","version":1,"cities":["Leeds",4]}',
+        b'{"format":"drivetest-analyzer-main-cities","version":2,"cities":["Leeds"]}',
+        b'{"format":"drivetest-analyzer-main-cities","version":1,"cities":["Leeds",4]}',
         b'not-json',
     ):
         with pytest.raises(ValueError, match='Main Cities'):
@@ -2861,7 +2861,7 @@ def test_main_cities_restore_rejects_invalid_payloads(client) -> None:
 
 
 def test_full_environment_import_remaps_permissions_to_replaced_workspace_id(client, tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login_super(client)
     source_workspace = app_module.workspace_registry.create('Imported Team')
@@ -2893,7 +2893,7 @@ def test_full_environment_import_remaps_permissions_to_replaced_workspace_id(cli
 
 
 def test_config_import_replaces_global_users_and_preserves_user_ids(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login_super(client)
     created = client.post(
@@ -2976,7 +2976,7 @@ def test_admin_export_job_creates_a_disk_backed_download(client) -> None:
 
 
 def test_export_scheduler_tasks_use_the_dedicated_background_task_panel(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     job_id = 'export-panel-test'
@@ -3016,7 +3016,7 @@ def test_full_environment_export_job_uses_selected_workspaces(client) -> None:
 
 
 def test_workspace_export_can_exclude_generated_dashboards_reports_and_chart_sets(client, tmp_path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login_super(client)
     report = app_module.settings.output_dir / 'reports' / 'generated.pptx'
@@ -3075,7 +3075,7 @@ def test_voice_and_speech_import_without_measured_kpis_remain_ready(client) -> N
         )
         assert response.status_code == 200
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
     datasets = app_module.repository.list_datasets()
     assert [dataset['status'] for dataset in datasets] == ['ready', 'ready']
     assert all('attempt_count' in json.loads(dataset['available_metrics_json']) for dataset in datasets)
@@ -3118,7 +3118,7 @@ def test_admin_import_stream_upload_avoids_multipart_staging(client) -> None:
 
 
 def test_recover_complete_transfer_packages_and_remove_incomplete_ones(client, monkeypatch, tmp_path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     package, _ = app_module.build_export_archive('config')
     complete_path = tmp_path / 'incoming-transfer-complete.upload'
@@ -3244,7 +3244,7 @@ def test_server_transfer_listener_keeps_a_persistent_pending_offer_reminder() ->
 
 
 def test_incoming_transfer_offer_survives_process_memory_loss(client, monkeypatch, tmp_path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     monkeypatch.setattr(app_module, 'export_package_dir', lambda: tmp_path)
     secret = 'persistent-transfer-test-secret-long-enough'
@@ -3268,7 +3268,7 @@ def test_incoming_transfer_offer_survives_process_memory_loss(client, monkeypatc
 
 
 def test_equivalent_pending_transfer_offer_is_reused_with_the_new_secret(client, monkeypatch, tmp_path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     monkeypatch.setattr(app_module, 'export_package_dir', lambda: tmp_path)
     payload = {
@@ -3305,7 +3305,7 @@ def test_equivalent_pending_transfer_offer_is_reused_with_the_new_secret(client,
 
 
 def test_new_transfer_offer_supersedes_old_pending_requests_from_same_server(client, monkeypatch, tmp_path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     monkeypatch.setattr(app_module, 'export_package_dir', lambda: tmp_path)
     offer_ids = []
@@ -3329,7 +3329,7 @@ def test_new_transfer_offer_supersedes_old_pending_requests_from_same_server(cli
 
 
 def test_persisted_pending_transfer_offer_expires_after_approval_window(client, monkeypatch, tmp_path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     monkeypatch.setattr(app_module, 'export_package_dir', lambda: tmp_path)
     secret = 'expiring-transfer-offer-secret-long-enough'
@@ -3359,7 +3359,7 @@ def test_persisted_pending_transfer_offer_expires_after_approval_window(client, 
 
 
 def test_outgoing_server_transfer_waits_for_acceptance_and_streams_package(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     state = {'uploaded': False, 'bytes': 0, 'post_attempts': 0, 'client_kwargs': {}}
 
@@ -3424,7 +3424,7 @@ def test_outgoing_server_transfer_waits_for_acceptance_and_streams_package(clien
 
 
 def test_transfer_owner_can_request_job_cancellation(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     job_id = 'cancel-transfer-test'
@@ -3439,7 +3439,7 @@ def test_transfer_owner_can_request_job_cancellation(client) -> None:
 
 
 def test_transfer_url_explicit_port_overrides_prefilled_default_port() -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     assert app_module.normalize_transfer_destination('https://destination.example:8443', 7278) == 'https://destination.example:8443'
     assert app_module.normalize_transfer_destination('destination.example', 7278) == 'http://destination.example:7278'
@@ -3449,7 +3449,7 @@ def test_transfer_url_explicit_port_overrides_prefilled_default_port() -> None:
 
 
 def test_private_transfer_addresses_bypass_environment_proxies() -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     assert app_module.transfer_uses_environment_proxy('http://192.168.1.17:7278') is False
     assert app_module.transfer_uses_environment_proxy('http://127.0.0.1:7278') is False
@@ -3459,7 +3459,7 @@ def test_private_transfer_addresses_bypass_environment_proxies() -> None:
 
 
 def test_private_transfer_connection_error_has_docker_lan_diagnostics() -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     message = app_module.transfer_connection_error('http://192.168.1.17:7278')
     assert 'contacted directly without using Docker or system proxy settings' in message
@@ -3468,7 +3468,7 @@ def test_private_transfer_connection_error_has_docker_lan_diagnostics() -> None:
 
 
 def test_admin_export_and_transfer_are_limited_to_templates_and_accessible_workspaces(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     restricted = app_module.workspace_registry.create('Restricted Team')
     login(client)
@@ -3523,7 +3523,7 @@ def test_admin_export_and_transfer_are_limited_to_templates_and_accessible_works
     config_package = BytesIO()
     with zipfile.ZipFile(config_package, 'w') as archive:
         archive.writestr('manifest.json', json.dumps({
-            'format': 'dashboard-analytic-export', 'version': 1, 'kind': 'config',
+            'format': 'drivetest-analyzer-export', 'version': 1, 'kind': 'config',
         }))
     config_package.seek(0)
     blocked_import = client.post(
@@ -3629,7 +3629,7 @@ def test_admin_can_retry_stuck_dataset(client) -> None:
         follow_redirects=False,
     )
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     app_module.repository.update_dataset_profile(1, status="failed", progress=100, dataset_kind=None, row_count=None, column_count=None, default_metric=None)
     retry_response = client.post("/datasets-analysis/retry/1", follow_redirects=False)
@@ -3660,7 +3660,7 @@ def test_ready_dataset_can_be_reprocessed_and_return_to_admin(client) -> None:
 
 
 def test_chart_builder_uses_dashboard_canvas_model(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     app_module.repository.replace_operator_mapping_group(None, 'VF', ['Vodafone'])
@@ -3722,7 +3722,7 @@ def test_workspace_bulk_dataset_actions_reprocess_in_dependency_order(client, mo
         files={"dataset_files": ("cdr.csv", BytesIO(b"operator,Cell_ID_A,score\n3,200 -> 200,91\n"), "text/csv")},
         follow_redirects=False,
     )
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     app_module.repository.update_dataset_profile(
         3,
@@ -3803,7 +3803,7 @@ def test_admin_dataset_table_includes_ordered_global_icon_actions(client, monkey
     assert '.admin-stack .admin-dataset-bulk-actions :is(.queue-reprocess-all, .queue-stop-all) {' in styles.text
     assert '.admin-stack .admin-dataset-bulk-actions .queue-remove-all {' in styles.text
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     monkeypatch.setattr(app_module, 'enqueue_dataset_processing', lambda *_args, **_kwargs: object())
     response = client.post(
@@ -3825,7 +3825,7 @@ def test_admin_dataset_rows_can_be_reordered_in_descending_order_and_all_ids_are
             follow_redirects=False,
         )
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     app_module.repository.update_dataset_profile(
         3,
@@ -3921,7 +3921,7 @@ def test_admin_dataset_rows_can_be_reordered_in_descending_order_and_all_ids_are
 
 def test_database_management_orders_individual_dataset_tables_by_numeric_id_descending(client) -> None:
     login(client)
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     for dataset_number in range(1, 13):
         dataset_id, _ = app_module.repository.add_dataset(
@@ -3949,7 +3949,7 @@ def test_workspace_stop_all_stops_queued_and_processing_datasets(client) -> None
             files={"dataset_files": (name, BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
             follow_redirects=False,
         )
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     app_module.repository.update_dataset_profile(1, status='processing', progress=40)
     app_module.repository.update_dataset_profile(2, status='queued', progress=0)
@@ -3969,7 +3969,7 @@ def test_workspace_stop_all_stops_queued_and_processing_datasets(client) -> None
 
 
 def test_queued_dataset_can_be_stopped_individually_across_worker_memory(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     dataset_id, _ = app_module.repository.add_dataset(
@@ -3991,7 +3991,7 @@ def test_queued_dataset_can_be_stopped_individually_across_worker_memory(client)
 
 
 def test_stopping_isolated_dataset_worker_terminates_its_process(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     class StoppableProcess:
         terminated = False
@@ -4030,7 +4030,7 @@ def test_workspace_remove_all_deletes_every_non_processing_dataset(client) -> No
             files={"dataset_files": (name, BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
             follow_redirects=False,
         )
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     source_paths = [Path(row['stored_path']) for row in app_module.repository.list_datasets()]
     response = client.post('/workspace/delete-datasets', follow_redirects=False)
@@ -4048,7 +4048,7 @@ def test_admin_cannot_retry_queued_dataset(client) -> None:
         files={"dataset_files": ("sample.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
         follow_redirects=False,
     )
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     app_module.repository.update_dataset_profile(1, status="queued", progress=0)
 
@@ -4066,7 +4066,7 @@ def test_admin_can_delete_queued_dataset(client) -> None:
         follow_redirects=False,
     )
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     dataset = app_module.repository.get_dataset(1)
     assert dataset is not None
@@ -4087,7 +4087,7 @@ def test_admin_can_stop_processing_dataset(client) -> None:
         follow_redirects=False,
     )
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     app_module.repository.update_dataset_profile(1, status="processing", progress=33)
     processing_page = client.get('/workspace').text
@@ -4124,7 +4124,7 @@ def test_reupload_same_file_reuses_existing_dataset_entry(client) -> None:
     assert first_upload.status_code == 303
     assert second_upload.status_code == 303
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     datasets = app_module.repository.list_datasets()
     assert len(datasets) == 1
@@ -4139,7 +4139,7 @@ def test_reupload_preserves_original_upload_date_for_dataset_ordering(client) ->
         files={"dataset_files": ("sample.csv", BytesIO(payload), "text/csv")},
         follow_redirects=False,
     )
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     original_upload = '2025-01-02 03:04:05'
     with app_module.repository.connection() as conn:
@@ -4168,7 +4168,7 @@ def test_reupload_preserves_original_upload_date_for_dataset_ordering(client) ->
 
 
 def test_workspace_management_save_updates_name_and_user_access(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login_super(client)
     created = client.post('/workspace/create', data={'name': 'Germany'}, follow_redirects=False)
@@ -4212,7 +4212,7 @@ def test_workspace_management_save_updates_name_and_user_access(client) -> None:
 
 
 def test_workspace_management_isolates_dataset_databases_and_remembers_last_opened_workspace(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     admin = next(row for row in app_module.repository.list_users() if row['username'] == 'admin')
@@ -4318,7 +4318,7 @@ def test_workspace_management_isolates_dataset_databases_and_remembers_last_open
 
 
 def test_workspace_remove_preserves_files_unless_explicitly_requested(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     first = app_module.workspace_registry.create('Preserve files')
@@ -4351,7 +4351,7 @@ def test_workspace_remove_preserves_files_unless_explicitly_requested(client) ->
 
 
 def test_workspace_cache_clear_removes_only_derived_dashboard_artifacts(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     workspace = app_module.workspace_registry.get('default')
@@ -4408,7 +4408,7 @@ def test_workspace_cache_clear_removes_only_derived_dashboard_artifacts(client, 
 
 
 def test_opening_workspace_removes_only_cache_from_previous_versions(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     workspace = app_module.workspace_registry.get('default')
@@ -4467,7 +4467,7 @@ def test_opening_workspace_removes_only_cache_from_previous_versions(client) -> 
 
 
 def test_workspace_management_reports_every_supported_row_status(client, tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'})
     workspace = app_module.workspace_registry.get('default')
@@ -4534,7 +4534,7 @@ def test_workspace_management_reports_every_supported_row_status(client, tmp_pat
 
 
 def test_workspace_status_reports_cancelled_duplicate_for_live_row_removal(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     with app_module.WORKSPACE_LIFECYCLE_JOBS_LOCK:
@@ -4553,7 +4553,7 @@ def test_workspace_status_reports_cancelled_duplicate_for_live_row_removal(clien
 
 
 def test_interrupted_background_jobs_become_retryable_failures(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     source = app_module.settings.input_dir / 'interrupted.csv'
     source.write_text('value\n1\n', encoding='utf-8')
@@ -4587,7 +4587,7 @@ def test_interrupted_background_jobs_become_retryable_failures(client) -> None:
 
 
 def test_interrupted_dataset_processing_is_resumed_instead_of_failed(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     workspace = app_module.active_workspace
@@ -4624,7 +4624,7 @@ def test_interrupted_dataset_processing_is_resumed_instead_of_failed(client) -> 
 
 
 def test_restart_recovery_preserves_descending_order_for_a_saved_cdr_batch(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     workspace = app_module.active_workspace
@@ -4657,7 +4657,7 @@ def test_restart_recovery_preserves_descending_order_for_a_saved_cdr_batch(clien
 
 
 def test_ready_dataset_progress_cannot_be_replaced_by_a_late_worker_update(client, tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     workspace = app_module.active_workspace
     assert workspace is not None
@@ -4674,7 +4674,7 @@ def test_ready_dataset_progress_cannot_be_replaced_by_a_late_worker_update(clien
 
 
 def test_inconsistent_ready_dataset_pauses_recovered_queue_until_retry(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     workspace = app_module.active_workspace
@@ -4699,7 +4699,7 @@ def test_inconsistent_ready_dataset_pauses_recovered_queue_until_retry(client) -
 
 
 def test_background_card_uses_the_dataset_worker_step(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     workspace = app_module.active_workspace
     assert workspace is not None
@@ -4720,7 +4720,7 @@ def test_background_card_uses_the_dataset_worker_step(client) -> None:
 
 
 def test_queued_dataset_message_tracks_its_current_blocker(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     workspace = app_module.active_workspace
     assert workspace is not None
@@ -4748,7 +4748,7 @@ def test_queued_dataset_message_tracks_its_current_blocker(client) -> None:
 
 
 def test_legacy_vendor_recovery_queues_without_writing_in_workspace_request(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     workspace = app_module.active_workspace
     assert workspace is not None
@@ -4792,7 +4792,7 @@ def test_legacy_vendor_recovery_queues_without_writing_in_workspace_request(clie
 
 
 def test_dataset_executor_defaults_to_one_fifo_background_worker(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     assert app_module._dataset_processing_executor(app_module.repository)._max_workers == 1
 
@@ -4859,7 +4859,7 @@ def test_background_task_scheduler_orders_workspace_phases_and_dataset_ids() -> 
 
 
 def test_workspace_dataset_priority_uses_fifo_for_individual_cdrs_and_descending_ids_for_batches() -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     assert app_module.workspace_dataset_job_priority(1, 8, 'data') == (1, 0, 0)
     assert app_module.workspace_dataset_job_priority(1, 3, 'speech') == (1, 0, 0)
@@ -4868,7 +4868,7 @@ def test_workspace_dataset_priority_uses_fifo_for_individual_cdrs_and_descending
 
 
 def test_combined_recreation_is_queued_while_cdr_processing_is_pending(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     workspace = app_module.active_workspace
@@ -4893,7 +4893,7 @@ def test_combined_recreation_is_queued_while_cdr_processing_is_pending(client, m
 
 
 def test_opening_workspace_page_does_not_enqueue_materialization(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     monkeypatch.setattr(
@@ -4904,7 +4904,7 @@ def test_opening_workspace_page_does_not_enqueue_materialization(client, monkeyp
 
 
 def test_cancelled_backup_removes_its_partial_archive(client, tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     source_file = app_module.settings.input_dir / 'cancelled-backup-source.txt'
@@ -4925,8 +4925,8 @@ def test_cancelled_backup_removes_its_partial_archive(client, tmp_path: Path) ->
     with pytest.raises(InterruptedError):
         app_module.create_recurring_database_backup(config, cancel_callback=cancel_during_archive)
 
-    assert list(tmp_path.glob('dashboard-analytic-backup-*.zip')) == []
-    assert list(tmp_path.glob('dashboard-analytic-export-*')) == []
+    assert list(tmp_path.glob('drivetest-analyzer-backup-*.zip')) == []
+    assert list(tmp_path.glob('drivetest-analyzer-export-*')) == []
 
 
 def test_dashboard_library_open_close_and_view_actions_include_labels() -> None:
@@ -5134,7 +5134,7 @@ def test_dashboard_reduced_and_filtered_universes_share_one_combined_count_query
 
 
 def test_large_datasets_share_one_memory_slot_per_workspace(client, monkeypatch, tmp_path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
     from src.modules.repository import Repository
 
     monkeypatch.setattr(app_module, 'HEAVY_DATASET_PROCESSING_THRESHOLD_BYTES', 10)
@@ -5155,7 +5155,7 @@ def test_large_datasets_share_one_memory_slot_per_workspace(client, monkeypatch,
 
 
 def test_ready_chart_set_job_supports_relaunch_and_row_reuse(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     job_id = app_module.repository.create_report_chart_job(
         technology='nsa', scope='single', dataset_ids={'data': [], 'voice': [], 'speech': []},
@@ -5177,7 +5177,7 @@ def test_ready_chart_set_job_supports_relaunch_and_row_reuse(client) -> None:
 
 
 def test_workspace_management_lists_restricted_workspaces_without_enabling_actions(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     restricted = app_module.workspace_registry.create('Restricted workspace')
@@ -5195,7 +5195,7 @@ def test_workspace_management_lists_restricted_workspaces_without_enabling_actio
 
 
 def test_global_background_tasks_groups_active_and_other_workspaces(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
     from src.modules.repository import Repository
 
     login_super(client)
@@ -5272,7 +5272,7 @@ def test_global_background_tasks_groups_active_and_other_workspaces(client) -> N
 
 
 def test_background_task_poll_closes_workspace_database_connection(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     real_connect = app_module.sqlite3.connect
@@ -5316,7 +5316,7 @@ def test_background_task_poll_closes_workspace_database_connection(client, monke
 
 
 def test_dataset_background_task_reports_running_and_completed_duration(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     workspace = app_module.active_workspace
@@ -5373,7 +5373,7 @@ def test_dataset_background_task_reports_running_and_completed_duration(client) 
 
 
 def test_every_global_background_task_exposes_execution_timing(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     started_at = time.time() - 12
@@ -5395,7 +5395,7 @@ def test_every_global_background_task_exposes_execution_timing(client) -> None:
 
 
 def test_queued_background_task_reports_queue_age_without_execution_duration(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     queued_at = time.time() - 420
@@ -5418,7 +5418,7 @@ def test_queued_background_task_reports_queue_age_without_execution_duration(cli
 
 
 def test_reprocessed_dataset_queue_age_uses_current_queue_transition(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     workspace = app_module.active_workspace
@@ -5458,7 +5458,7 @@ def test_workspace_dataset_upload_uses_non_blocking_progress_card(client) -> Non
     assert page.status_code == 200
     assert 'data-background-upload' in page.text
     assert "new XMLHttpRequest()" in page.text
-    assert "dashboard-analytic:background-task" in page.text
+    assert "drivetest-analyzer:background-task" in page.text
     assert 'cancel: () => request.abort()' in page.text
     assert "detail: 'Uploading files', progress: uploadProgress" in page.text
     assert 'if (progress !== null) uploadProgress = progress;' in page.text
@@ -5470,7 +5470,7 @@ def test_workspace_dataset_upload_uses_non_blocking_progress_card(client) -> Non
     assert 'const minimizedPanels = new Map();' in app_script
     assert "typeof task?.cancel === 'function'" in app_script
     assert 'await task.cancel();' in app_script
-    assert "const minimizedKey = `dashboard-analytic:background-task-panel:${group.workspace_id}:minimized`;" in app_script
+    assert "const minimizedKey = `drivetest-analyzer:background-task-panel:${group.workspace_id}:minimized`;" in app_script
     assert "localStorage.getItem(minimizedKey) === 'true'" in app_script
     assert 'localStorage.setItem(minimizedKey, String(value))' in app_script
     assert 'const locallyStoppedTaskIds = new Set();' in app_script
@@ -5491,7 +5491,7 @@ def test_workspace_dataset_upload_uses_non_blocking_progress_card(client) -> Non
 
 
 def test_background_task_stop_endpoint_stops_accessible_workspace_work(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     workspace = app_module.active_workspace
@@ -5536,7 +5536,7 @@ def test_background_task_stop_endpoint_stops_accessible_workspace_work(client) -
 
 
 def test_orphaned_auto_field_materialization_can_be_stopped_from_background_panel(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     workspace = app_module.active_workspace
@@ -5569,7 +5569,7 @@ def test_orphaned_auto_field_materialization_can_be_stopped_from_background_pane
 
 
 def test_incoming_transfer_cannot_stop_after_import_begins(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login_super(client)
     workspace = app_module.active_workspace
@@ -5606,7 +5606,7 @@ def test_incoming_transfer_cannot_stop_after_import_begins(client, monkeypatch) 
 
 
 def test_import_can_stop_while_queued_but_not_while_replacing_data(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     workspace = app_module.active_workspace
@@ -5643,7 +5643,7 @@ def test_import_can_stop_while_queued_but_not_while_replacing_data(client, monke
 
 
 def test_persisted_materialization_stop_is_observed_across_workers(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     workspace = app_module.active_workspace
@@ -5678,7 +5678,7 @@ def test_persisted_materialization_stop_is_observed_across_workers(client, monke
 
 
 def test_interactive_template_save_fails_fast_while_workspace_writer_is_busy(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     template = app_module.report_catalogue_options('nsa')[0]
@@ -5702,7 +5702,7 @@ def test_interactive_template_save_fails_fast_while_workspace_writer_is_busy(cli
 
 
 def test_interactive_template_validation_rejects_invalid_content_before_save(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     template = app_module.report_catalogue_options('nsa')[0]
@@ -5727,7 +5727,7 @@ def test_interactive_template_validation_rejects_invalid_content_before_save(cli
 
 
 def test_interactive_template_save_schedules_materialization_after_releasing_workspace_writer(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     template = app_module.report_catalogue_options('nsa')[0]
@@ -5773,7 +5773,7 @@ def test_interactive_template_save_schedules_materialization_after_releasing_wor
 
 
 def test_interactive_template_save_returns_before_dashboard_comment_reconciliation(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     template = app_module.report_catalogue_options('nsa')[0]
@@ -5807,7 +5807,7 @@ def test_interactive_template_save_returns_before_dashboard_comment_reconciliati
 
 
 def test_template_filter_only_edit_skips_dashboard_comment_scan() -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     fixture = (app_module.PROJECT_ROOT / 'tests' / 'fixtures' / 'NSA Slide Template.csv').read_bytes()
     entries = app_module.parse_catalog_csv(fixture, 'nsa')
@@ -5823,7 +5823,7 @@ def test_template_filter_only_edit_skips_dashboard_comment_scan() -> None:
 
 
 def test_dashboard_interruption_succeeds_when_its_audit_log_is_locked(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     workspace = app_module.active_workspace
@@ -5843,7 +5843,7 @@ def test_dashboard_interruption_succeeds_when_its_audit_log_is_locked(client, mo
 
 
 def test_queued_import_continues_after_its_workspace_is_closed(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     source_path = app_module.settings.input_dir / 'continue-after-close.csv'
@@ -5872,7 +5872,7 @@ def test_queued_import_continues_after_its_workspace_is_closed(client) -> None:
 
 
 def test_cdr_import_finishes_before_its_combined_table_recreation(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     source_path = app_module.settings.input_dir / 'separate-combined-recreation.csv'
@@ -5898,7 +5898,7 @@ def test_cdr_import_finishes_before_its_combined_table_recreation(client, monkey
 
 
 def test_workspace_import_replaces_an_open_workspace_and_removes_old_files(client, tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login_super(client)
     original = app_module.active_workspace
@@ -5950,7 +5950,7 @@ def test_workspace_import_replaces_an_open_workspace_and_removes_old_files(clien
 
 
 def test_workspace_import_keeps_chart_sets_visible_in_reporting(client, tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login_super(client)
     source = app_module.active_workspace
@@ -5982,7 +5982,7 @@ def test_workspace_import_keeps_chart_sets_visible_in_reporting(client, tmp_path
 
 
 def test_delete_all_reports_removes_orphaned_output_directories(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login_super(client)
     reports_root = Path(app_module.settings.output_dir) / 'reports'
@@ -6027,7 +6027,7 @@ def test_admin_panel_is_available_for_admin(client) -> None:
 
 
 def test_admin_operator_mapping_panel_groups_and_edits_aliases(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     initial_mappings = app_module.repository.list_operator_mappings()
@@ -6086,7 +6086,7 @@ def test_admin_operator_mapping_panel_groups_and_edits_aliases(client) -> None:
 
 
 def test_admin_vendor_mappings_support_aliases_colours_and_reordering(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     groups = app_module.repository.list_vendor_mapping_groups()
@@ -6118,7 +6118,7 @@ def test_admin_vendor_mappings_support_aliases_colours_and_reordering(client) ->
 
 
 def test_canonical_mapping_renames_update_all_templates_and_dashboards_exactly(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     app_module.repository.replace_operator_mapping_group(
@@ -6217,7 +6217,7 @@ def test_canonical_mapping_renames_update_all_templates_and_dashboards_exactly(c
 
 
 def test_paginated_dataset_viewers_preserve_the_exact_horizontal_scroll_offset() -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     script = app_module.PROJECT_ROOT.joinpath(
         'src/web_interface/static/js/app.js',
@@ -6230,7 +6230,7 @@ def test_paginated_dataset_viewers_preserve_the_exact_horizontal_scroll_offset()
 
 
 def test_admin_recurring_backup_settings_are_persisted(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     saved = client.post('/admin/database/backups', data={
@@ -6271,7 +6271,7 @@ def test_admin_recurring_backup_settings_are_persisted(client) -> None:
 
 
 def test_scheduled_backup_records_automatic_lifecycle_in_app_logs(client, monkeypatch, tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     now = datetime.now().astimezone()
@@ -6300,7 +6300,7 @@ def test_scheduled_backup_records_automatic_lifecycle_in_app_logs(client, monkey
 
 
 def test_manual_database_backup_uses_current_form_selection_without_enabling_schedule(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     captured: dict[str, object] = {}
@@ -6339,7 +6339,7 @@ def test_backup_notices_render_in_backup_protection_not_database_view(client) ->
 
 
 def test_backup_skips_stale_workspace_registry_entries(monkeypatch, tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     def workspace(identifier: str, *, database_exists: bool):
         root = tmp_path / identifier
@@ -6382,7 +6382,7 @@ def test_backup_skips_stale_workspace_registry_entries(monkeypatch, tmp_path: Pa
 
 
 def test_dashboard_backup_declares_dashboard_component_for_selective_restore(client, tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     app_module.repository.set_workspace_state(
@@ -6406,7 +6406,7 @@ def test_dashboard_backup_declares_dashboard_component_for_selective_restore(cli
 
 
 def test_operator_mapping_backup_supports_selective_restore(client, tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     app_module.repository.replace_operator_mapping_group(None, 'Backup Carrier', ['Backup Alias'])
@@ -6444,7 +6444,7 @@ def test_operator_mapping_backup_supports_selective_restore(client, tmp_path: Pa
 
 
 def test_main_cities_backup_supports_selective_restore(client, tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     app_module.repository.set_main_cities(['London', 'Leeds'])
@@ -6474,7 +6474,7 @@ def test_main_cities_backup_supports_selective_restore(client, tmp_path: Path) -
 
 
 def test_login_and_admin_remain_available_after_closing_the_active_workspace(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     app_module.close_active_workspace()
@@ -6489,7 +6489,7 @@ def test_login_and_admin_remain_available_after_closing_the_active_workspace(cli
 
 
 def test_admin_database_management_lists_and_updates_active_workspace_tables(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     client.post(
@@ -6581,7 +6581,7 @@ def test_admin_database_management_lists_and_updates_active_workspace_tables(cli
 
 
 def test_admin_dataset_management_renames_dataset_file_and_materialised_source_labels(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     upload = client.post(
@@ -6631,7 +6631,7 @@ def test_admin_dataset_management_renames_dataset_file_and_materialised_source_l
 
 
 def test_admin_dataset_management_rename_returns_compact_json_for_interactive_table(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     upload = client.post(
@@ -6656,7 +6656,7 @@ def test_admin_dataset_management_rename_returns_compact_json_for_interactive_ta
 
 
 def test_admin_dataset_management_applies_staged_names_and_order_in_background(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     for name in ('first.csv', 'second.csv'):
@@ -6700,7 +6700,7 @@ def test_dashboard_upload_accepts_multiple_files(client) -> None:
     )
     assert response.status_code == 303
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     datasets = app_module.repository.list_datasets()
     assert len(datasets) == 2
@@ -6717,7 +6717,7 @@ def test_workspace_upload_persists_selected_dataset_kind(client) -> None:
     )
     assert response.status_code == 303
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     dataset = app_module.repository.get_dataset(1)
     assert dataset is not None
@@ -6781,11 +6781,11 @@ def test_workspace_preview_and_cdr_dashboard_action(client) -> None:
 
     dashboard_response = client.get('/datasets-analysis?dataset_id=1&input_kind=data')
     assert dashboard_response.status_code == 200
-    assert 'href="/workspace/preview/1" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview">Preview Dataset</a>' in dashboard_response.text
+    assert 'href="/workspace/preview/1" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview"><svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>Preview Dataset</a>' in dashboard_response.text
 
 
 def test_operator_mapping_is_applied_to_charts_but_not_materialized_tables(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     app_module.repository.replace_operator_mapping_group(
@@ -6840,7 +6840,7 @@ def test_operator_mapping_is_applied_to_charts_but_not_materialized_tables(clien
 
 
 def test_operator_storage_migration_recovers_raw_values_from_the_source(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     app_module.repository.replace_operator_mapping_group(
@@ -6874,7 +6874,7 @@ def test_operator_storage_migration_recovers_raw_values_from_the_source(client) 
 
 
 def test_combined_recreation_migrates_individual_operator_storage_before_rebuilding(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     app_module.repository.replace_operator_mapping_group(
@@ -6916,7 +6916,7 @@ def test_combined_recreation_migrates_individual_operator_storage_before_rebuild
 
 def test_workspace_lists_combined_cdr_with_preview_and_kind_filter_metadata(client) -> None:
     login(client)
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     client.post(
         "/datasets-analysis/upload",
@@ -6991,7 +6991,7 @@ def test_workspace_lists_combined_cdr_with_preview_and_kind_filter_metadata(clie
 
 def test_combined_dataset_missing_rows_are_flagged_and_require_confirmation(client, tmp_path: Path) -> None:
     login(client)
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     source_path = tmp_path / 'cdr_data.csv'
     source_path.write_text('operator,score\nVodafone UK,91\nVodafone UK,92\n', encoding='utf-8')
@@ -7023,7 +7023,7 @@ def test_combined_dataset_missing_rows_are_flagged_and_require_confirmation(clie
 
 def test_combined_recreation_returns_materialization_job_for_progress(client, monkeypatch) -> None:
     login(client)
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     monkeypatch.setattr(
         app_module,
@@ -7040,7 +7040,7 @@ def test_combined_recreation_returns_materialization_job_for_progress(client, mo
 
 
 def test_recreating_the_same_combined_kind_stops_the_previous_job_before_queueing_a_replacement(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     workspace = app_module.active_workspace
@@ -7071,7 +7071,7 @@ def test_recreating_the_same_combined_kind_stops_the_previous_job_before_queuein
 
 
 def test_combined_recreation_keeps_its_success_response_when_audit_logging_is_unavailable(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     monkeypatch.setattr(
@@ -7089,7 +7089,7 @@ def test_combined_recreation_keeps_its_success_response_when_audit_logging_is_un
 
 def test_queued_dataset_actions_remain_compact_icons_during_live_updates(client) -> None:
     login(client)
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     source = app_module.settings.input_dir / 'queued.csv'
     source.write_text('value\n1\n', encoding='utf-8')
@@ -7133,7 +7133,7 @@ def test_queued_dataset_actions_remain_compact_icons_during_live_updates(client)
 
 
 def test_cdr_preview_groups_every_non_source_field_after_source_sheet(tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     source = tmp_path / 'source.csv'
     source.write_text('Campaign,Operator,score\nUK_Q3_2026,VF,91\n', encoding='utf-8')
@@ -7146,7 +7146,7 @@ def test_cdr_preview_groups_every_non_source_field_after_source_sheet(tmp_path: 
 
 
 def test_cdr_preview_uses_clean_duplicate_names_and_orders_vendor_after_operator_vendor(tmp_path: Path) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
     from src.modules.column_names import clean_column_name
 
     source = tmp_path / 'source.csv'
@@ -7163,7 +7163,7 @@ def test_cdr_preview_uses_clean_duplicate_names_and_orders_vendor_after_operator
 
 
 def test_cdr_preview_badges_follow_physical_source_columns(tmp_path: Path, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     monkeypatch.setattr(app_module.repository, 'list_calculated_dimensions', lambda: [])
 
@@ -7216,7 +7216,7 @@ def test_cdr_preview_badges_follow_physical_source_columns(tmp_path: Path, monke
 
 
 def test_cdr_preview_paginates_and_filters_every_column(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     cdr_rows = [
@@ -7379,7 +7379,7 @@ def test_workspace_uses_persisted_vendor_flags_without_reloading_cdr_files(clien
         files={'dataset_files': ('cdr_data.csv', BytesIO(b'operator,score\nVodafone UK,91\n'), 'text/csv')},
         follow_redirects=False,
     )
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     def source_reload_should_not_run(*_args, **_kwargs):
         raise AssertionError('Workspace should use the persisted Vendor flags, not reload CDR files.')
@@ -7389,7 +7389,7 @@ def test_workspace_uses_persisted_vendor_flags_without_reloading_cdr_files(clien
 
 
 def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mapping(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     client.post(
@@ -7516,7 +7516,7 @@ def test_workspace_recovers_legacy_vendor_mapping_failures(client) -> None:
         files={'dataset_files': ('legacy_cdr.csv', BytesIO(b'Operator,score\n3,91\n'), 'text/csv')},
         follow_redirects=False,
     )
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     app_module.repository.update_dataset_profile(
         1,
@@ -7571,7 +7571,7 @@ def test_workspace_upload_can_map_selected_cdr_vendor_during_processing(client) 
     assert 'data-column-kind="Vendor-Map"' in operator_vendor_badge
     assert 'data-column-kind="Vendor-Map"' in vendor_badge
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
     dataset = app_module.serialize_dataset_row(app_module.repository.get_dataset(2))
     assert dataset['vendor_mapping_applied'] is True
 
@@ -7594,7 +7594,7 @@ def test_retry_reuses_persisted_vendor_mapping_selections(client) -> None:
         files={'dataset_files': ('retry_mapped.csv', BytesIO(b'Operator,Cell_ID_A,score\n3,200 -> 200,91\n'), 'text/csv')},
         follow_redirects=False,
     )
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     original = app_module.repository.get_dataset(2)
     assert original is not None
@@ -7631,7 +7631,7 @@ def test_workspace_recovers_database_lock_failure_with_saved_vendor_mapping(clie
         files={'dataset_files': ('locked_mapped.csv', BytesIO(b'Operator,Cell_ID_A,score\n3,200 -> 200,91\n'), 'text/csv')},
         follow_redirects=False,
     )
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     app_module.repository.update_dataset_profile(
         2, status='failed', progress=100, vendor_mapping_applied=False,
@@ -7700,7 +7700,7 @@ def test_workspace_batch_upload_processes_uploaded_mapping_before_its_cdr(client
     preview = client.get('/workspace/preview/2')
     assert '>3_Nokia<' in preview.text
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
     cdr = app_module.serialize_dataset_row(app_module.repository.get_dataset(2))
     assert cdr['vendor_mapping_applied'] is True
 
@@ -7723,7 +7723,7 @@ def test_dataset_processing_fails_when_selected_vendor_mapping_cannot_be_applied
     )
 
     assert response.status_code == 303
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     cdr = app_module.serialize_dataset_row(app_module.repository.get_dataset(2))
     assert cdr['status'] == 'failed'
@@ -7760,7 +7760,7 @@ def test_vfuk_preview_limits_mapping_sheets_and_displays_materialised_gcid(clien
 
     # Simulate a mapping that was processed before the GCID materialisation
     # was introduced; opening its preview must upgrade the stored rows.
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
     stored_rows = app_module.repository.load_dataset_rows(
         1,
         app_module.repository.list_dataset_row_columns(1),
@@ -7988,7 +7988,7 @@ def test_dataset_selector_only_lists_ready_datasets(client) -> None:
         follow_redirects=False,
     )
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     app_module.repository.update_dataset_profile(2, status="stopped", progress=50)
 
@@ -8039,7 +8039,7 @@ def test_dashboard_ignores_non_ready_dataset_id_in_selector_flow(client) -> None
         follow_redirects=False,
     )
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     app_module.repository.update_dataset_profile(2, status="failed", progress=100, last_error="broken")
 
@@ -8132,7 +8132,7 @@ def test_admin_can_update_user_identity_fields(client) -> None:
     )
     assert create_response.status_code == 303
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     users = app_module.repository.list_users()
     analyst = next(row for row in users if row["username"] == "analyst")
@@ -8156,7 +8156,7 @@ def test_admin_can_update_user_identity_fields(client) -> None:
 
 
 def test_automatic_user_field_update_preserves_the_canonical_username(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login_super(client)
     created = client.post(
@@ -8187,7 +8187,7 @@ def test_admin_can_delete_user(client) -> None:
     )
     assert create_response.status_code == 303
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     user_row = next(row for row in app_module.repository.list_users() if row["username"] == "temporary")
     delete_response = client.post(f"/admin/users/{user_row['id']}/delete", follow_redirects=False)
@@ -8196,7 +8196,7 @@ def test_admin_can_delete_user(client) -> None:
 
 
 def test_password_reset_uses_the_expected_account_defaults(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login_super(client)
     custom = client.post(
@@ -8223,7 +8223,7 @@ def test_password_reset_uses_the_expected_account_defaults(client) -> None:
 def test_admin_cannot_delete_current_signed_in_user(client) -> None:
     login(client)
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     admin_row = next(row for row in app_module.repository.list_users() if row["username"] == "admin")
     response = client.post(f"/admin/users/{admin_row['id']}/delete")
@@ -8234,7 +8234,7 @@ def test_admin_cannot_delete_current_signed_in_user(client) -> None:
 def test_super_admin_cannot_demote_or_deactivate_last_active_super_admin(client) -> None:
     login_super(client)
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     admin_row = next(row for row in app_module.repository.list_users() if row["username"] == "super")
     response = client.post(
@@ -8255,7 +8255,7 @@ def test_super_admin_cannot_demote_or_deactivate_last_active_super_admin(client)
 def test_admin_cannot_delete_super_admin_even_if_not_current_user(client) -> None:
     login_super(client)
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     create_response = client.post(
         "/admin/users",
@@ -8304,7 +8304,7 @@ def test_admin_cannot_assign_or_modify_super_admin_roles(client) -> None:
     )
     assert created.status_code == 303
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     managed_user = next(row for row in app_module.repository.list_users() if row["username"] == "managed-user")
     promoted = client.post(
@@ -8334,7 +8334,7 @@ def test_top_navigation_shows_document_links(client) -> None:
     login(client)
     response = client.get("/workspace")
     assert response.status_code == 200
-    assert "<h1>Dashboard Analytic</h1>" in response.text
+    assert "<h1>DriveTest Analyzer</h1>" in response.text
     assert f"v{__version__} · {__release_date__}" in response.text
     assert 'href="/documents/view/readme"' in response.text
     assert 'href="/documents/view/changelog"' in response.text
@@ -8450,7 +8450,7 @@ def test_non_admin_navigation_hides_admin_tab(client) -> None:
 
 def test_admin_imports_report_catalogue(client) -> None:
     from src.modules.cdr_reporting import CATALOG_HEADERS
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     content = legacy_template_csv('8,Completed Call Ratio,Voice quality,Title and 1 column + Comments,Completed call ratio,CDR-Voice,Call_Status,100% Stacked Vertical Bars,Call Family = VoLTE,Operator,Campaign,Completed/Dropped/Failed,,,,,,,,')
@@ -8479,7 +8479,7 @@ def test_admin_imports_report_catalogue(client) -> None:
 def test_legacy_layout_alias_is_canonicalized_through_template_import_and_export(client) -> None:
     import csv
     import io
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
     from src.modules.cdr_reporting import CATALOG_HEADERS
 
     login(client)
@@ -8511,7 +8511,7 @@ def test_legacy_layout_alias_is_canonicalized_through_template_import_and_export
 
 def test_admin_import_preserves_hyphens_in_uploaded_template_name(client) -> None:
     from src.modules.cdr_reporting import CATALOG_HEADERS
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     content = legacy_template_csv('1,Imported template,,Title and 1 column + Comments,,,,Title Slide,,,,,')
@@ -8527,7 +8527,7 @@ def test_admin_import_preserves_hyphens_in_uploaded_template_name(client) -> Non
 
 def test_importing_an_existing_template_requires_explicit_overwrite(client) -> None:
     from src.modules.cdr_reporting import CATALOG_HEADERS
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     original = legacy_template_csv('1,Original,,Title and 1 column + Comments,,,,Title Slide,,,,,')
@@ -8558,7 +8558,7 @@ def test_importing_an_existing_template_requires_explicit_overwrite(client) -> N
 
 
 def test_admin_import_converts_a_legacy_catalogue_when_requested(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     legacy = (
@@ -8581,7 +8581,7 @@ def test_admin_import_converts_a_legacy_catalogue_when_requested(client) -> None
 
 def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(client) -> None:
     from src.modules.cdr_reporting import CATALOG_HEADERS
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     first = legacy_template_csv('8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,')
@@ -8745,7 +8745,7 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
 
 
 def test_reporting_chart_viewer_uses_hover_canvas_dataset_and_zoom_controls(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login_super(client)
     reporting = client.get('/reporting-old')
@@ -8783,7 +8783,7 @@ def test_reporting_chart_viewer_uses_hover_canvas_dataset_and_zoom_controls(clie
 
 
 def test_admin_catalogue_rename_supports_background_json_save(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     default_name = next(item['identifier'] for item in app_module.report_catalogue_options('nsa') if item['active'])
@@ -8799,7 +8799,7 @@ def test_admin_catalogue_rename_supports_background_json_save(client) -> None:
 
 
 def test_report_template_rename_keeps_special_characters_in_action_urls(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     template = app_module.report_catalogue_options('nsa')[0]
@@ -8820,7 +8820,7 @@ def test_report_template_rename_keeps_special_characters_in_action_urls(client) 
 
 def test_admin_renaming_named_catalogue_renames_its_csv_file(client) -> None:
     from src.modules.cdr_reporting import CATALOG_HEADERS
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     content = legacy_template_csv('8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,')
@@ -8865,7 +8865,7 @@ def test_admin_renaming_named_catalogue_renames_its_csv_file(client) -> None:
 
 def test_admin_duplicates_template_using_the_source_template_name(client) -> None:
     from src.modules.cdr_reporting import CATALOG_HEADERS
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     content = legacy_template_csv('8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,')
@@ -8887,7 +8887,7 @@ def test_admin_duplicates_template_using_the_source_template_name(client) -> Non
 
 def test_template_registry_does_not_rescan_legacy_csv_directories(client) -> None:
     from src.modules.cdr_reporting import CATALOG_HEADERS
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     library_dir = app_module.settings.slides_templates_dir / 'library' / 'nsa'
@@ -8902,7 +8902,7 @@ def test_template_registry_does_not_rescan_legacy_csv_directories(client) -> Non
 
 
 def test_template_registry_ignores_unregistered_library_csvs(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     rogue = app_module.settings.slides_templates_dir / 'library' / 'nsa' / 'nsa NSA Slide Template slides template.csv'
     rogue.parent.mkdir(parents=True, exist_ok=True)
@@ -8913,7 +8913,7 @@ def test_template_registry_ignores_unregistered_library_csvs(client) -> None:
 
 def test_admin_importer_selects_template_type_and_moves_a_named_template(client) -> None:
     from src.modules.cdr_reporting import CATALOG_HEADERS
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     content = legacy_template_csv('8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,')
@@ -9066,7 +9066,7 @@ def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
 
 
 def test_reporting_old_help_follows_its_feature(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     for username, role in [('someone', 'super-admin'), ('EJAITUR', 'user-viewer')]:
         token = f'help-reporting-{role}'
@@ -9114,7 +9114,7 @@ def test_dashboard_analysis_reuses_cached_result_on_reload(client, monkeypatch) 
     )
     assert upload_response.status_code == 303
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     calls = {"count": 0}
     original_load_dataset = app_module.load_dataset
@@ -9148,7 +9148,7 @@ def test_dashboard_analysis_reuses_cached_dataset_frame_across_metric_changes(cl
     )
     assert upload_response.status_code == 303
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     calls = {"count": 0}
     original_load_dataset = app_module.load_dataset
@@ -9216,7 +9216,7 @@ def test_dashboard_shows_date_range_filters_and_applies_them(client) -> None:
 
 
 def test_date_filters_are_disabled_and_ignored_when_event_time_filtering_is_disabled(client, monkeypatch) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     monkeypatch.setenv('IGNORE_EVENT_TIME_FILTERING', 'true')
     login(client)
@@ -9297,7 +9297,7 @@ def test_dashboard_adaptive_filters_populate_netcheck_a_columns_for_existing_cdr
     )
     assert upload_response.status_code == 303
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     table_name = app_module.repository.dataset_rows_table_name(1)
     with app_module.repository.connection() as conn:
@@ -9445,7 +9445,7 @@ def test_workspace_logs_capture_analysis_warnings(client, monkeypatch) -> None:
         follow_redirects=False,
     )
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     original_build_analysis = app_module.build_analysis
 
@@ -9491,7 +9491,7 @@ def test_dashboard_materializes_legacy_ready_dataset_on_first_analysis(client) -
     )
     assert upload_response.status_code == 303
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     app_module.repository.drop_dataset_rows(1)
     assert not app_module.repository.dataset_rows_table_exists(1)
@@ -9513,7 +9513,7 @@ def test_dashboard_reuses_materialized_table_when_legacy_columns_only_differ_by_
     )
     assert upload_response.status_code == 303
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     legacy_frame = pd.DataFrame({
         "Market": ["ES", "ES"],
@@ -9553,7 +9553,7 @@ def test_dashboard_refreshes_stale_dataset_normalization_before_render(client) -
     )
     assert upload_response.status_code == 303
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     with app_module.repository.connection() as conn:
         table_name = app_module.repository.dataset_rows_table_name(1)
@@ -9620,7 +9620,7 @@ def test_dataset_status_persists_completed_processing_duration(client) -> None:
         files={"dataset_files": ("timed.csv", BytesIO(b"market,score\nES,91\n"), "text/csv")},
         follow_redirects=False,
     )
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     app_module.repository.update_dataset_profile(
         1,
@@ -9658,7 +9658,7 @@ def test_dataset_status_persists_completed_processing_duration(client) -> None:
 def test_dashboard_handles_missing_source_file_without_500(client) -> None:
     login(client)
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     with app_module.repository.connection() as conn:
         conn.execute(
@@ -9690,7 +9690,7 @@ def test_materialized_dataset_handles_case_insensitive_duplicate_columns(client)
     )
     assert upload_response.status_code == 303
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     dataset = app_module.repository.get_dataset(1)
     assert dataset is not None
@@ -9701,7 +9701,7 @@ def test_materialized_dataset_handles_case_insensitive_duplicate_columns(client)
 def test_failed_dataset_shows_last_error_in_queue(client) -> None:
     login(client)
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     with app_module.repository.connection() as conn:
         conn.execute(
@@ -9764,7 +9764,7 @@ def test_workspace_dataset_table_defaults_to_descending_ids_and_has_sortable_col
 def test_app_logs_combines_operational_and_audit_activity(client) -> None:
     login(client)
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     app_module.repository.add_log(
         "admin",
@@ -9820,17 +9820,17 @@ def test_docker_uses_the_timestamped_server_launcher() -> None:
     launcher = (root / 'src/main.py').read_text(encoding='utf-8')
 
     assert 'CMD ["python", "-m", "src.main"]' in dockerfile
-    assert 'DASHBOARD_ANALYTIC_BIND_PORT: "7278"' in production_compose
-    assert 'DASHBOARD_ANALYTIC_RELOAD: "true"' in development_compose
+    assert 'DRIVETEST_ANALYZER_BIND_PORT: "7278"' in production_compose
+    assert 'DRIVETEST_ANALYZER_RELOAD: "true"' in development_compose
     assert 'command: python -m src.main' in development_compose
     assert "'fmt': '[%(asctime)s] %(levelprefix)s %(message)s'" in launcher
-    assert "'src.DashboardAnalytic:app' if reload_enabled else app" in launcher
+    assert "'src.DriveTestAnalyzer:app' if reload_enabled else app" in launcher
 
 
 def test_app_logs_use_the_configured_timezone_for_display_and_date_filter(client, monkeypatch) -> None:
     login(client)
 
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     monkeypatch.setenv('TZ', 'Europe/Madrid')
     app_module.repository.add_log('admin', 'timezone_display_test', '{}')
@@ -9851,7 +9851,7 @@ def test_app_logs_use_the_configured_timezone_for_display_and_date_filter(client
 
 
 def test_app_logs_normalises_user_case_and_records_login_outcomes(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     failed = client.post('/login', data={
         'username': 'ADMIN', 'password': 'wrong-password', 'workspace_id': 'default',
@@ -9899,7 +9899,7 @@ def test_nr_mode_is_suggested_from_the_cdr_file_name() -> None:
 
 
 def test_uploaded_cdrs_store_the_selected_or_suggested_nr_mode(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     response = client.post(
@@ -9939,7 +9939,7 @@ def test_uploaded_cdrs_store_the_selected_or_suggested_nr_mode(client) -> None:
 
 
 def test_existing_cdrs_receive_a_suggested_nr_mode_on_migration(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     source = app_module.settings.input_dir / 'Legacy_SA_Data.csv'
@@ -9961,13 +9961,13 @@ def test_dashboard_filter_multiselect_action_toggles_select_all_and_none() -> No
 
 
 def test_startup_page_answers_while_the_active_workspace_is_opened(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     assert app_module.STARTUP_READY.is_set()
     app_module.STARTUP_READY.clear()
     try:
         page = client.get('/login')
-        assert page.status_code == 503 and 'Dashboard Analytic is starting' in page.text
+        assert page.status_code == 503 and 'DriveTest Analyzer is starting' in page.text
         assert client.get('/api/startup-status').json()['ready'] is False
         assert client.get('/api/background-tasks').status_code == 503
     finally:
@@ -9977,7 +9977,7 @@ def test_startup_page_answers_while_the_active_workspace_is_opened(client) -> No
 
 
 def test_workspaces_record_the_cdr_type_they_handle(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
     from src.modules.cdr_types import workspace_cdr_type
 
     login(client)
@@ -9994,7 +9994,7 @@ def test_workspaces_record_the_cdr_type_they_handle(client) -> None:
 
 
 def test_workspace_table_changes_the_cdr_type(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     login(client)
     workspace = app_module.active_workspace
@@ -10027,7 +10027,7 @@ def test_datasets_analysis_filters_are_shared_and_cdf_compares_operators(client)
 
 
 def test_cdr_analysis_export_keeps_each_cdf_visible_range(client) -> None:
-    import src.DashboardAnalytic as app_module
+    import src.DriveTestAnalyzer as app_module
 
     assert app_module.parse_cdf_ranges('{"LQ": [1.5, 4.2], "bad": [3, 1], "x": "y"}') == {'LQ': (1.5, 4.2)}
     result = app_module.with_cdf_range({'cdf_chart': {'x_view_max_default': 5}}, (1.5, 4.2))

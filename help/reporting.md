@@ -75,7 +75,7 @@ Times use the application timezone set in Application Config. The scheduler chec
 
 ## Run history
 
-**Run History** shows each run with its trigger, start time, status, email result and artifacts, grouped by module as in the jobs table. Each artifact links to its file; ⬇ downloads them all as a ZIP.
+**Run History** shows each run with its trigger, start time, status (with how long the run took once it finishes), email result and artifacts, grouped by module as in the jobs table: one line per entry with its formats, such as `NSA LTE (PPT/Word)`, where each format links to its file. ⬇ downloads them all as a ZIP.
 
 | Status | Meaning |
 | --- | --- |

@@ -1,6 +1,6 @@
 #import <Cocoa/Cocoa.h>
 
-@interface DashboardAnalyticAppDelegate : NSObject <NSApplicationDelegate, NSWindowDelegate>
+@interface DriveTestAnalyzerAppDelegate : NSObject <NSApplicationDelegate, NSWindowDelegate>
 
 @property(nonatomic, strong) NSWindow *window;
 @property(nonatomic, strong) NSTextField *statusLabel;
@@ -14,7 +14,7 @@
 
 @end
 
-@implementation DashboardAnalyticAppDelegate
+@implementation DriveTestAnalyzerAppDelegate
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
     (void)notification;
@@ -33,9 +33,9 @@
     NSMenuItem *applicationMenuItem = [[NSMenuItem alloc] initWithTitle:@"" action:nil keyEquivalent:@""];
     [mainMenu addItem:applicationMenuItem];
 
-    NSMenu *applicationMenu = [[NSMenu alloc] initWithTitle:@"Dashboard Analytic"];
+    NSMenu *applicationMenu = [[NSMenu alloc] initWithTitle:@"DriveTest Analyzer"];
     NSMenuItem *quitItem = [[NSMenuItem alloc]
-        initWithTitle:@"Stop Server and Quit Dashboard Analytic"
+        initWithTitle:@"Stop Server and Quit DriveTest Analyzer"
         action:@selector(terminate:)
         keyEquivalent:@"q"];
     [applicationMenu addItem:quitItem];
@@ -47,7 +47,7 @@
     NSRect frame = NSMakeRect(0, 0, 620, 210);
     NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable;
     self.window = [[NSWindow alloc] initWithContentRect:frame styleMask:style backing:NSBackingStoreBuffered defer:NO];
-    self.window.title = @"Dashboard Analytic";
+    self.window.title = @"DriveTest Analyzer";
     self.window.delegate = self;
     self.window.releasedWhenClosed = NO;
     [self.window center];
@@ -59,7 +59,7 @@
     iconView.imageScaling = NSImageScaleProportionallyUpOrDown;
     [contentView addSubview:iconView];
 
-    NSTextField *titleLabel = [NSTextField labelWithString:@"Dashboard Analytic"];
+    NSTextField *titleLabel = [NSTextField labelWithString:@"DriveTest Analyzer"];
     titleLabel.frame = NSMakeRect(136, 145, 456, 28);
     titleLabel.font = [NSFont boldSystemFontOfSize:20];
     [contentView addSubview:titleLabel];
@@ -102,11 +102,11 @@
     NSString *port = [NSProcessInfo processInfo].environment[@"APP_PORT"] ?: @"7278";
     self.serverURL = [NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%@", port]];
 
-    __weak DashboardAnalyticAppDelegate *weakSelf = self;
+    __weak DriveTestAnalyzerAppDelegate *weakSelf = self;
     task.terminationHandler = ^(NSTask *finishedTask) {
         (void)finishedTask;
         dispatch_async(dispatch_get_main_queue(), ^{
-            DashboardAnalyticAppDelegate *strongSelf = weakSelf;
+            DriveTestAnalyzerAppDelegate *strongSelf = weakSelf;
             if (strongSelf == nil) {
                 return;
             }
@@ -135,7 +135,7 @@
     self.restartButton.enabled = YES;
     self.stopButton.enabled = YES;
     self.stopButton.title = @"Stop Server and Quit";
-    self.statusLabel.stringValue = @"The local server is active. Keep this window open while using Dashboard Analytic.";
+    self.statusLabel.stringValue = @"The local server is active. Keep this window open while using DriveTest Analyzer.";
 }
 
 - (void)showLaunchError:(NSString *)message {
@@ -146,7 +146,7 @@
     self.stopButton.enabled = YES;
 
     NSAlert *alert = [[NSAlert alloc] init];
-    alert.messageText = @"Dashboard Analytic could not start";
+    alert.messageText = @"DriveTest Analyzer could not start";
     alert.informativeText = message;
     [alert addButtonWithTitle:@"Quit"];
     [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse returnCode) {
@@ -160,7 +160,7 @@
 
     if (self.serverURL == nil || ![[NSWorkspace sharedWorkspace] openURL:self.serverURL]) {
         NSAlert *alert = [[NSAlert alloc] init];
-        alert.messageText = @"Dashboard Analytic could not open the browser";
+        alert.messageText = @"DriveTest Analyzer could not open the browser";
         alert.informativeText = @"Open the local server address manually in your browser.";
         [alert addButtonWithTitle:@"OK"];
         [alert beginSheetModalForWindow:self.window completionHandler:nil];
@@ -229,7 +229,7 @@ int main(int argc, const char *argv[]) {
 
     @autoreleasepool {
         NSApplication *application = [NSApplication sharedApplication];
-        DashboardAnalyticAppDelegate *delegate = [[DashboardAnalyticAppDelegate alloc] init];
+        DriveTestAnalyzerAppDelegate *delegate = [[DriveTestAnalyzerAppDelegate alloc] init];
         application.delegate = delegate;
         [application run];
     }

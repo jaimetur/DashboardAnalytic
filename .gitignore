@@ -4,7 +4,11 @@ __pycache__/
 *.db
 .pytest_cache/
 .venv
+.drivetest-analyzer-venv
+/.drivetest-analyzer-runtime/
+# Launcher folders created before the rename from Dashboard Analytic
 .dashboard-analytic-venv
+/.dashboard-analytic-runtime/
 .venv_macmini/
 .env
 .env.local
