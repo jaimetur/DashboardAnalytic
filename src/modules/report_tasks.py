@@ -25,7 +25,7 @@ from datetime import date, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from threading import Event, Lock, Thread
-from typing import Any
+from typing import Any, Callable
 
 from src.branding import canonical_format
 from src.modules.column_names import sort_vendor_values
@@ -508,8 +508,11 @@ def get_task(task_repository: Any, task_id: int) -> dict[str, Any] | None:
 
 
 def save_task(task_repository: Any, task_id: int | None, payload: dict[str, Any], username: str,
-              *, parse_recipients, invalid_recipients) -> dict[str, Any]:
-    """Create or update a Reporting Job after validating every field."""
+              *, parse_recipients, invalid_recipients, reassign_owner: bool = False) -> dict[str, Any]:
+    """Create or update a Reporting Job after validating every field.
+
+    A new job belongs to ``username``; an updated one keeps its owner unless ``reassign_owner`` is set.
+    """
     name = str(payload.get('name') or '').strip()
     if not name:
         raise ValueError('Enter a name for the Reporting Job.')
@@ -542,6 +545,8 @@ def save_task(task_repository: Any, task_id: int | None, payload: dict[str, Any]
             'enabled = ?, next_run_at = ?, updated_at = ? WHERE id = ?', (*values, now, task_id),
         ).rowcount == 0:
             raise ValueError('Reporting Job not found.')
+        if reassign_owner:
+            connection.execute(f'UPDATE {REPORT_TASKS_TABLE} SET created_by = ? WHERE id = ?', (username, task_id))
     return get_task(task_repository, task_id)
 
 
@@ -674,13 +679,21 @@ def export_tasks_document(task_repository: Any) -> bytes:
     document = {
         'format': 'drivetest-analyzer-reporting-jobs', 'version': 1,
         'dataset_names': {str(dataset_id): names[dataset_id] for dataset_id in sorted(used) if dataset_id in names},
-        'reporting_jobs': [{key: task[key] for key in ('name', 'definition', 'send_email', 'recipients', 'schedule', 'enabled')} for task in tasks],
+        'reporting_jobs': [{key: task[key] for key in ('name', 'definition', 'send_email', 'recipients', 'schedule', 'enabled', 'created_by')} for task in tasks],
     }
     return json.dumps(document, ensure_ascii=False, indent=2).encode('utf-8')
 
 
-def import_tasks_document(task_repository: Any, content: bytes | str, username: str, *, parse_recipients, invalid_recipients) -> int:
-    """Add or replace (by name) the Reporting Jobs of an exported document."""
+def import_tasks_document(
+    task_repository: Any, content: bytes | str, username: str, *, parse_recipients, invalid_recipients,
+    user_exists: Callable[[str], bool] = lambda _name: False,
+) -> int:
+    """Add or replace (by name) the Reporting Jobs of an exported document.
+
+    Jobs run with the feature access of their owner, so each job keeps the owner
+    it had on the source server when that user exists here; otherwise it belongs
+    to ``username``, the user who imports it.
+    """
     document = json.loads(content)
     if not isinstance(document, dict) or canonical_format(document.get('format')) != 'drivetest-analyzer-reporting-jobs':
         raise ValueError('The file is not a DriveTest Analyzer Reporting Jobs export.')
@@ -699,9 +712,11 @@ def import_tasks_document(task_repository: Any, content: bytes | str, username: 
         if schedule.get('mode') == 'once' and next_run_after(normalize_schedule(schedule), now_local()) is None:
             schedule['mode'] = 'manual'  # A past single execution cannot be scheduled again.
         definition = _remap_dataset_ids(item.get('definition') or {}, mapping)
+        source_owner = str(item.get('created_by') or '').strip()
+        owner = source_owner if source_owner and user_exists(source_owner) else username
         save_task(task_repository, existing.get(str(item.get('name') or '').strip().casefold()),
-                  {**item, 'definition': definition, 'schedule': schedule}, username,
-                  parse_recipients=parse_recipients, invalid_recipients=invalid_recipients)
+                  {**item, 'definition': definition, 'schedule': schedule}, owner,
+                  parse_recipients=parse_recipients, invalid_recipients=invalid_recipients, reassign_owner=True)
         imported += 1
     return imported
 

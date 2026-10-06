@@ -6481,6 +6481,7 @@ def _backup_archive_file(backup_path: str, filename: str) -> Path:
 def restore_database_backup(
     archive_path: Path, components: Iterable[str],
     progress_callback: Callable[[str, int, int], None] | None = None,
+    importing_user: str = 'import',
 ) -> None:
     """Restore selected backup parts after the UI has confirmed overwriting data."""
     manifest = read_import_manifest(archive_path)
@@ -6489,7 +6490,7 @@ def restore_database_backup(
         # Portable Import/Export packages share the same Restore picker.  The
         # import implementation already validates their manifest and applies
         # their own safe workspace/application-configuration semantics.
-        _apply_import_archive(archive_path, manifest)
+        _apply_import_archive(archive_path, manifest, importing_user=importing_user)
         return
     selected = set(components)
     present = set(_backup_archive_components(archive_path))
@@ -6636,7 +6637,7 @@ def restore_database_backup(
                 if member in names:
                     if progress_callback:
                         progress_callback(f'Restoring Reporting Jobs for {workspace_name}', completed_steps, total_steps)
-                    _restore_workspace_reporting_jobs(workspace, archive.read(member))
+                    _restore_workspace_reporting_jobs(workspace, archive.read(member), importing_user)
                     advance(f'Reporting Jobs restored for {workspace_name}')
             if 'nq_call_tracking' in selected:
                 member = f'{prefix}nq-call-tracking/nq-call-tracking.json'
@@ -6690,7 +6691,7 @@ def start_manual_database_restore(archive_path: Path, components: Iterable[str],
                 with MANUAL_RESTORE_JOBS_LOCK:
                     job.update(message=message, progress=min(99, round(completed * 100 / total, 1)) if total else 0)
 
-            restore_database_backup(archive_path, components, report_progress)
+            restore_database_backup(archive_path, components, report_progress, importing_user=username)
             with MANUAL_RESTORE_JOBS_LOCK:
                 job.update(status='ready', message='Backup restored', progress=100, finished_at=datetime.now(timezone.utc).timestamp())
             repository.try_add_log(username, 'manual_database_restore_completed', json.dumps({'job_id': job_id}))
@@ -7107,14 +7108,15 @@ def _archive_workspace_reporting_jobs(
         progress_callback(len(payload))
 
 
-def _restore_workspace_reporting_jobs(workspace: Workspace, payload: bytes) -> int:
+def _restore_workspace_reporting_jobs(workspace: Workspace, payload: bytes, importing_user: str) -> int:
     """Add or replace (by name) the Reporting Jobs of a package in a workspace."""
     from src.modules.report_tasks import import_tasks_document
 
     task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
     try:
-        return import_tasks_document(task_repository, payload, 'import',
-                                     parse_recipients=parse_recipients, invalid_recipients=invalid_recipients)
+        return import_tasks_document(task_repository, payload, importing_user,
+                                     parse_recipients=parse_recipients, invalid_recipients=invalid_recipients,
+                                     user_exists=lambda username: bool((record := repository.get_user(username)) and record.active))
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         raise ValueError(f'Reporting Jobs for "{workspace.name}" are invalid: {exc}') from exc
 
@@ -8382,6 +8384,7 @@ def _apply_import_archive(
     destination_workspace_ids: Iterable[str] = (),
     parent_task_id: str = '',
     includes_dashboards: bool = False,
+    importing_user: str = 'import',
 ) -> str:
     """Apply a disk-backed package and return its user-facing completion message."""
     with zipfile.ZipFile(package_path) as archive, tempfile.TemporaryDirectory(prefix='drivetest-analyzer-import-') as temporary_dir:
@@ -8432,6 +8435,7 @@ def _apply_import_archive(
                     destination_workspace_ids=destination_workspace_ids,
                     parent_task_id=parent_task_id,
                     includes_dashboards=bundle_includes_dashboards,
+                    importing_user=importing_user,
                 ))
             if progress_callback:
                 progress_callback('finalising', 100.0)
@@ -8440,7 +8444,7 @@ def _apply_import_archive(
             components = _backup_archive_components(package_path)
             if progress_callback:
                 progress_callback('restoring backup', 15.0)
-            restore_database_backup(package_path, components)
+            restore_database_backup(package_path, components, importing_user=importing_user)
             if progress_callback:
                 progress_callback('finalising', 100.0)
             return 'Database backup restored successfully.'
@@ -8612,7 +8616,7 @@ def _apply_import_archive(
             if not destinations:
                 raise ValueError('Select at least one destination workspace.')
             payload = archive.read(member)
-            imported_count = sum(_restore_workspace_reporting_jobs(workspace, payload) for workspace in destinations)
+            imported_count = sum(_restore_workspace_reporting_jobs(workspace, payload, importing_user) for workspace in destinations)
             return f'Imported {imported_count} Reporting Jobs into {len(destinations)} workspaces.'
         if kind == 'nq-call-tracking':
             member = str(manifest.get('archive_path') or '')
@@ -8696,6 +8700,7 @@ def _run_import_job(job_id: str) -> None:
             package_path, manifest, update_progress,
             destination_workspace_ids=job.get('destination_workspace_ids') or (),
             parent_task_id=f'import:{job_id}',
+            importing_user=str(job.get('owner') or 'import'),
         )
         with IMPORT_JOBS_LOCK:
             job.update({'status': 'ready', 'progress': 100.0, 'notice': notice, 'finished_at': datetime.now(timezone.utc).timestamp()})
@@ -8944,6 +8949,7 @@ def _run_received_transfer(offer_id: str) -> None:
             package_path, manifest, update_progress,
             offer.get('destination_workspace_ids') or (),
             parent_task_id=f'incoming-transfer:{offer_id}',
+            importing_user=str(offer.get('accepted_by') or 'import'),
         )
         with TRANSFER_LOCK:
             offer.update({'status': 'ready', 'phase': 'complete', 'progress': 100.0, 'notice': notice, 'finished_at': datetime.now(timezone.utc).timestamp()})
@@ -18151,7 +18157,7 @@ async def import_admin_package(
             destinations = matching_template_workspaces(manifest, accessible_workspaces(user))
             if not destinations:
                 raise ValueError('Select destination workspaces using the Import / Export / Transfer panel.')
-        notice = _apply_import_archive(package_path, manifest, destination_workspace_ids=destinations)
+        notice = _apply_import_archive(package_path, manifest, destination_workspace_ids=destinations, importing_user=user.username)
     except (ValueError, OSError, sqlite3.Error, zipfile.BadZipFile) as exc:
         return RedirectResponse(
             f'/admin?{urlencode({"import_export_error": str(exc)})}',

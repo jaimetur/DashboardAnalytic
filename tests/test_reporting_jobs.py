@@ -251,11 +251,40 @@ def test_reporting_job_runs_emails_and_travels_with_exports(client, monkeypatch,
         # Reporting Jobs travel with workspace packages.
         document = json.loads(report_tasks.export_tasks_document(core.repository))
         assert {item['name'] for item in document['reporting_jobs']} == {'Weekly check', 'Weekly check (copy)'}
-        assert core._restore_workspace_reporting_jobs(core.active_workspace, json.dumps(document).encode()) == 2
+        assert core._restore_workspace_reporting_jobs(core.active_workspace, json.dumps(document).encode(), 'super') == 2
         assert len(client.get('/api/reporting/state').json()['tasks']) == 2
         assert client.delete(f"/api/reporting/tasks/{copy['id']}").status_code == 200
     finally:
         report_tasks.ARTIFACT_PROVIDERS.pop('fake', None)
+
+
+def test_imported_reporting_jobs_keep_an_owner_that_exists_here(client):
+    login(client)
+    workspace_user('editor', 'user-editor')
+    definition = {'scoring': [{'nr_mode': 'NSA'}]}
+    document = {
+        'format': 'drivetest-analyzer-reporting-jobs', 'version': 1, 'dataset_names': {},
+        'reporting_jobs': [
+            {'name': 'Owned by editor', 'definition': definition, 'schedule': {'mode': 'manual'}, 'created_by': 'editor'},
+            {'name': 'Owner from elsewhere', 'definition': definition, 'schedule': {'mode': 'manual'}, 'created_by': 'nobody-here'},
+            {'name': 'Older export', 'definition': definition, 'schedule': {'mode': 'manual'}},
+        ],
+    }
+    # A job imported by an earlier version keeps the placeholder owner until it is imported again.
+    with core.repository.connection() as connection:
+        report_tasks.ensure_report_task_tables(core.repository)
+        connection.execute(
+            "INSERT INTO report_tasks (name, definition_json, send_email, recipients_json, schedule_json, enabled, "
+            "created_by, created_at, updated_at) VALUES ('Older export', ?, 0, '[]', '{\"mode\": \"manual\"}', 1, 'import', '', '')",
+            (json.dumps(definition),),
+        )
+
+    assert core._restore_workspace_reporting_jobs(core.active_workspace, json.dumps(document).encode(), 'super') == 3
+
+    owners = {task['name']: task['created_by'] for task in report_tasks.list_tasks(core.repository)}
+    assert owners == {'Owned by editor': 'editor', 'Owner from elsewhere': 'super', 'Older export': 'super'}
+    exported = json.loads(report_tasks.export_tasks_document(core.repository))
+    assert {item['name']: item['created_by'] for item in exported['reporting_jobs']} == owners
 
 
 def test_reporting_jobs_only_include_modules_of_their_author(client):

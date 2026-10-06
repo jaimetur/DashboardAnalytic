@@ -39,6 +39,7 @@
 - **Scoring charts** leave out of the bottom axis the hierarchy levels that have the same value under every bar (such as a single campaign), and long axis labels wrap at `_`, `-` and `/` or are shortened instead of overlapping their neighbours; bar tooltips keep the complete path.
 
 #### 🐛 Bug fixes:
+- Reporting Jobs brought by a backup restore, an import or a server transfer keep the owner they had on the source server when that user exists and is active here, and otherwise belong to the user who restores, imports or accepts them. They were previously owned by a placeholder `import` user with the default role, so their artifacts of modules limited to some roles (for example Network Insights and Non-Qualified Calls) failed with "import no longer has access". Jobs already imported that way get their owner on the next import of the same jobs.
 - Backups delete, once they finish, the database snapshot folders (`drivetest-analyzer-export-*` and the former `dashboard-analytic-export-*`) that backups killed mid-copy (container stopped, computer shut down) left in the backup folder; folders changed in the last six hours are kept in case another backup is still using them.
 - Column filter menus of Network Insights inventories and other Excel-style tables stay attached to their column while the page or the table scrolls.
 - Non-Qualified Calls filter dropdowns are no longer clipped, and the By CDR card and the Progress View legends show complete names.
