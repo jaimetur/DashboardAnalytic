@@ -738,6 +738,19 @@
       : 'Email delivery is not configured yet: set the SMTP server in Config → Application Config → Email Delivery.';
     syncEditor();
     openEditor(task?.id ?? null);
+    // What the job looks like when the editor opens, to detect unsaved changes.
+    editorSnapshot = JSON.stringify(editorPayload());
+  }
+
+  // Leaving the editor with unsaved changes asks first.
+  let editorSnapshot = null;
+  const editorDirty = () => editorOpen && editorSnapshot !== null && JSON.stringify(editorPayload()) !== editorSnapshot;
+  async function confirmDiscard() {
+    if (!editorDirty()) return true;
+    const copy = '<p>This Reporting Job has unsaved changes.</p><p>Discard them and close the Job Editor?</p>';
+    return typeof window.showConfirmDialog === 'function'
+      ? Boolean(await window.showConfirmDialog('', {title: 'Discard Changes', copyHtml: copy, confirmLabel: 'Discard changes', cancelLabel: 'Keep editing'}))
+      : window.confirm('Discard the unsaved changes of this Reporting Job?');
   }
 
   function syncEditor() {
@@ -830,6 +843,7 @@
   function closeEditor() {
     const editor = editorElement;
     editingId = null;
+    editorSnapshot = null;
     document.querySelectorAll('#rj-tasks tr.rj-editing').forEach((row) => row.classList.remove('rj-editing'));
     if (editor.hidden) return;
     editor.classList.add('is-closing');
@@ -906,7 +920,7 @@
       if (last && last.artifacts.some((item) => item.status === 'ready')) actions.append(downloadLink(last));
       if (state.can_edit) {
         actions.append(
-          actionButton('✎', 'Edit', async () => { await ensureOptions(); fillEditor(task); }),
+          actionButton('✎', 'Edit', async () => { if (!await confirmDiscard()) return; await ensureOptions(); fillEditor(task); }),
           actionButton('⧉', 'Duplicate (disabled copy)', async () => {
             await api(`/api/reporting/tasks/${task.id}/duplicate`, {method: 'POST'});
             status(`${task.name} duplicated.`, 'done'); await refresh();
@@ -1000,6 +1014,7 @@
     if (event.target.closest('#rj-form')) syncEditor();
   });
   $('rj-new').addEventListener('click', async () => {
+    if (!await confirmDiscard()) return;
     try { await ensureOptions(); fillEditor(null); } catch (error) { status(error.message, 'error'); }
   });
   $('rj-add-dashboard').addEventListener('click', () => {
@@ -1019,8 +1034,8 @@
     else if (host.id === 'rj-scoring') host.append(scoringEntry());
     else if (options.dashboards.length) host.append(dashboardEntry());
   }));
-  $('rj-cancel').addEventListener('click', closeEditor);
-  $('rj-editor-close').addEventListener('click', closeEditor);
+  $('rj-cancel').addEventListener('click', async () => { if (await confirmDiscard()) closeEditor(); });
+  $('rj-editor-close').addEventListener('click', async () => { if (await confirmDiscard()) closeEditor(); });
   $('rj-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const button = $('rj-save');
