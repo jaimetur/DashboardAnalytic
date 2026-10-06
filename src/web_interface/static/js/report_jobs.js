@@ -50,7 +50,7 @@
   // Only one dropdown is open at a time; a click outside or Escape closes it.
   // ``preset`` adds a first "Main Cities" choice: with ``dynamic`` it is a
   // flag read at run time (getPreset()), otherwise it checks those values.
-  function multiPicker(label, values, selected = [], {allLabel = '', preset = null} = {}) {
+  function multiPicker(label, values, selected = [], {emptyLabel = 'All', preset = null} = {}) {
     const wrapper = node('details', undefined, 'workspace-user-picker rj-multi');
     const summary = node('summary');
     const caption = node('span', '', 'rj-multi-caption');
@@ -92,7 +92,10 @@
     const refresh = () => {
       if (presetBox && preset.dynamic) boxes.forEach((box) => { box.disabled = presetBox.checked; });
       const count = boxes.filter((box) => box.checked && !box.disabled).length;
-      caption.textContent = `${label}: ${presetBox?.checked && preset.dynamic ? preset.label : count ? `${count} selected` : (allLabel || 'All')}`;
+      const enabled = boxes.filter((box) => !box.disabled).length;
+      // Everything selected reads All; an empty selection restricts nothing (filters read All, metrics say so).
+      const state = count === 0 ? emptyLabel : count === enabled ? 'All' : `${count} of ${enabled}`;
+      caption.textContent = `${label}: ${presetBox?.checked && preset.dynamic ? preset.label : state}`;
       summary.title = caption.textContent;
     };
     presetBox?.addEventListener('change', () => {
@@ -625,7 +628,8 @@
     const savedMetrics = dataset.metrics && !Array.isArray(dataset.metrics) ? dataset.metrics : {};
     $('rj-da-metrics').replaceChildren(...Object.entries(options.cdr_kinds || {}).map(([kind, label]) => {
       const metrics = (options.cdr_metrics || {})[kind] || [];
-      const picker = multiPicker(`${label} Metrics`, metrics, (savedMetrics[kind] || []).length ? savedMetrics[kind] : metrics);
+      const picker = multiPicker(`${label} Metrics`, metrics, (savedMetrics[kind] || []).length ? savedMetrics[kind] : metrics,
+        {emptyLabel: 'None (all included)'});
       picker.dataset.rjMetrics = kind;
       return picker;
     }));
