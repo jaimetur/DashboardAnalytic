@@ -473,7 +473,7 @@ def test_scoring_chart_pairs_render_five_operator_two_category_views():
     names = (
         'firstValue', 'isReferenceOperator', 'operatorPresentation', 'safeHexColor',
         'scoringChartScale', 'configuredChartMaximum',
-        'wrappedSvgLabelLines', 'setChartTooltip', 'formattedChartPoints',
+        'wrappedSvgLabelLines', 'fittedSvgLabelLines', 'setChartTooltip', 'formattedChartPoints',
         'chartEnvironmentName', 'categoryLegendGray', 'chartCategoryLegend', 'chartLegendTextWidth',
         'chartLegendRows', 'categoryLegendTextLines', 'categoryLegendTextColor',
         'formatChartNumber', 'stackedSegmentLabelSize', 'bestNetworkHorizontalGeometry',
