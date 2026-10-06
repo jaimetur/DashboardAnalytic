@@ -453,6 +453,13 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .operator-mappings-panel .collapsible-panel-body { display: grid; gap: 1rem; }
 .operator-mappings-panel .lede, .operator-mappings-panel .form-note { margin: 0; }
 .operator-mappings-table { min-width: 820px; table-layout: fixed; }
+/* Groups with unsaved changes, and the bar that saves them together. */
+.operator-mappings-table tr.mapping-row-unsaved > td { background: #fff7e6; }
+.operator-mappings-table tr.mapping-row-unsaved > td:first-child { box-shadow: inset 4px 0 0 #b7791f; }
+.operator-mappings-table .icon-action.mapping-save-pending { background: linear-gradient(135deg, #b7791f, #d99a35); border-color: #9a6416; color: #fff; }
+.mapping-save-all-bar { display: flex; align-items: center; justify-content: flex-end; gap: 0.8rem; margin: 0 0 0.6rem; }
+.mapping-unsaved-count { color: var(--muted); font-size: 0.9rem; }
+.mapping-save-all-bar.has-unsaved .mapping-unsaved-count { color: #8a5a10; font-weight: 700; }
 .operator-mappings-table .mapping-order-column { width: 6rem; }
 .operator-mappings-table .mapping-colour-column { width: 4.5rem; }
 .operator-mappings-table .mapping-canonical-column { width: 25%; }

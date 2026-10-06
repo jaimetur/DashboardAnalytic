@@ -7804,6 +7804,13 @@ function isChartMappingForm(form) {
   }
 }
 
+// Colour inputs report lowercase values and text may differ only in line endings
+// or surrounding spaces, none of which is an edit.
+function chartMappingFieldChanged(field) {
+  const normalise = (value) => (field.type === 'color' ? String(value).toLowerCase() : String(value).replace(/\r\n/g, '\n').trim());
+  return normalise(field.value) !== normalise(field.defaultValue);
+}
+
 // Unsaved edits of the other rows (and of the new-group form) survive the refresh
 // of a mapping table after one row is saved, moved or deleted.
 function unsavedChartMappingEdits(body, submittedForm = null) {
@@ -7814,7 +7821,7 @@ function unsavedChartMappingEdits(body, submittedForm = null) {
     if (!row || (submittedForm?.id && formId === submittedForm.id)) return;
     const fields = {};
     row.querySelectorAll(`[form="${CSS.escape(formId || '')}"]:is([name="color"], [name="canonical_value"], [name="aliases"])`).forEach((field) => {
-      if (field.value !== field.defaultValue) fields[field.name] = field.value;
+      if (chartMappingFieldChanged(field)) fields[field.name] = field.value;
     });
     if (Object.keys(fields).length) edits.rows[original.value] = fields;
   });
@@ -7822,7 +7829,7 @@ function unsavedChartMappingEdits(body, submittedForm = null) {
   if (createForm && createForm !== submittedForm) {
     const fields = {};
     createForm.querySelectorAll('[name="color"], [name="canonical_value"], [name="aliases"]').forEach((field) => {
-      if (field.value !== field.defaultValue) fields[field.name] = field.value;
+      if (chartMappingFieldChanged(field)) fields[field.name] = field.value;
     });
     if (Object.keys(fields).length) edits.create = fields;
   }
@@ -7876,6 +7883,7 @@ async function submitChartMappingForm(form) {
     const unsavedEdits = unsavedChartMappingEdits(currentBody, rejected ? null : form);
     currentBody.replaceWith(freshBody);
     restoreChartMappingEdits(freshBody, unsavedEdits);
+    refreshChartMappingUnsavedState(panel);
     bindChartMappingForms(freshBody);
     freshBody.querySelectorAll('form[data-confirm]').forEach(bindConfirmForm);
     window.requestAnimationFrame(() => window.scrollTo({
@@ -7903,6 +7911,132 @@ function bindChartMappingForms(root = document) {
 }
 
 bindChartMappingForms();
+
+// Rows whose colour, label or source labels differ from the saved values are
+// marked, counted, and can be saved together with Save all changes.
+const CHART_MAPPING_PANEL_SELECTOR = '[data-panel-state-key="admin:operator-mappings"], [data-panel-state-key="admin:vendor-mappings"]';
+
+function chartMappingRows(panel) {
+  return Array.from(panel.querySelectorAll('input[name="original_canonical"]')).map((original) => {
+    const formId = original.getAttribute('form') || '';
+    const fields = Array.from(panel.querySelectorAll(`[form="${CSS.escape(formId)}"]:is([name="color"], [name="canonical_value"], [name="aliases"])`));
+    return {
+      original: original.value, form: document.getElementById(formId), row: original.closest('tr'),
+      unsaved: fields.some(chartMappingFieldChanged),
+    };
+  });
+}
+
+function refreshChartMappingUnsavedState(panel) {
+  if (!(panel instanceof HTMLElement)) return;
+  const rows = chartMappingRows(panel);
+  rows.forEach(({row, form, unsaved}) => {
+    row?.classList.toggle('mapping-row-unsaved', unsaved);
+    const saveButton = form?.id ? panel.querySelector(`button[type="submit"][form="${CSS.escape(form.id)}"]`) : null;
+    saveButton?.classList.toggle('mapping-save-pending', unsaved);
+  });
+  const count = rows.filter((item) => item.unsaved).length;
+  const label = panel.querySelector('[data-mapping-unsaved-count]');
+  if (label) label.textContent = count ? `${count} ${count === 1 ? 'group has' : 'groups have'} unsaved changes` : 'No unsaved changes';
+  panel.querySelector('[data-mapping-save-all-bar]')?.classList.toggle('has-unsaved', count > 0);
+  const saveAll = panel.querySelector('[data-mapping-save-all]');
+  if (saveAll instanceof HTMLButtonElement) {
+    saveAll.disabled = !count;
+    saveAll.textContent = count ? `Save all changes (${count})` : 'Save all changes';
+  }
+}
+
+async function saveAllChartMappings(panel) {
+  const panelKey = panel.dataset.panelStateKey;
+  const body = panel.querySelector('.collapsible-panel-body');
+  const pending = chartMappingRows(panel).filter((item) => item.unsaved && item.form instanceof HTMLFormElement);
+  if (!body || !pending.length) return;
+  const scrollTop = window.scrollY;
+  const scrollLeft = window.scrollX;
+  const edits = unsavedChartMappingEdits(body);
+  const failures = [];
+  let lastDocument = null;
+  panel.querySelectorAll('button').forEach((button) => { button.disabled = true; });
+  for (const {original, form} of pending) {
+    try {
+      const response = await fetch(form.action, {
+        method: 'POST', body: new FormData(form), credentials: 'same-origin',
+        headers: {'X-Requested-With': 'XMLHttpRequest'},
+      });
+      if (!response.ok) throw new Error(`status ${response.status}`);
+      lastDocument = new DOMParser().parseFromString(await response.text(), 'text/html');
+      const error = lastDocument.querySelector(`[data-panel-state-key="${panelKey}"] .alert-error`)?.textContent.trim();
+      if (error) failures.push(`${original}: ${error}`);
+      else delete edits.rows[original];
+    } catch (error) {
+      failures.push(`${original}: ${error instanceof Error ? error.message : 'not saved'}`);
+    }
+  }
+  const freshBody = lastDocument?.querySelector(`[data-panel-state-key="${panelKey}"] .collapsible-panel-body`);
+  if (freshBody instanceof HTMLElement) {
+    body.replaceWith(freshBody);
+    // Groups that could not be saved keep what was typed in them.
+    restoreChartMappingEdits(freshBody, edits);
+    const saved = pending.length - failures.length;
+    freshBody.querySelectorAll('.alert').forEach((alert) => alert.remove());
+    if (saved) {
+      const notice = document.createElement('div');
+      notice.className = 'alert alert-success';
+      notice.textContent = `${saved} ${saved === 1 ? 'group' : 'groups'} saved.`;
+      freshBody.querySelector('.lede')?.after(notice);
+    }
+    bindChartMappingForms(freshBody);
+    freshBody.querySelectorAll('form[data-confirm]').forEach(bindConfirmForm);
+  } else {
+    panel.querySelectorAll('button').forEach((button) => { button.disabled = false; });
+  }
+  refreshChartMappingUnsavedState(panel);
+  window.requestAnimationFrame(() => window.scrollTo({top: scrollTop, left: scrollLeft, behavior: 'auto'}));
+  if (failures.length) {
+    showInfoDialog(`These groups were not saved:\n${failures.join('\n')}`, {title: 'Some mappings were not saved', tone: 'error'});
+  }
+}
+
+document.addEventListener('input', (event) => {
+  const panel = event.target instanceof Element ? event.target.closest(CHART_MAPPING_PANEL_SELECTOR) : null;
+  if (panel) refreshChartMappingUnsavedState(panel);
+});
+document.addEventListener('change', (event) => {
+  const panel = event.target instanceof Element ? event.target.closest(CHART_MAPPING_PANEL_SELECTOR) : null;
+  if (panel) refreshChartMappingUnsavedState(panel);
+});
+document.addEventListener('click', (event) => {
+  const button = event.target instanceof Element ? event.target.closest('[data-mapping-save-all]') : null;
+  const panel = button?.closest(CHART_MAPPING_PANEL_SELECTOR);
+  if (panel instanceof HTMLElement) saveAllChartMappings(panel);
+});
+document.querySelectorAll(CHART_MAPPING_PANEL_SELECTOR).forEach(refreshChartMappingUnsavedState);
+// Leaving through a link of the application asks with the application's own dialog.
+// Reloading, closing the tab or going back can only show the browser's dialog.
+let leavingWithUnsavedMappings = false;
+document.addEventListener('click', async (event) => {
+  const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
+  if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  if (link.target && link.target !== '_self') return;
+  if (link.hasAttribute('download')) return;
+  const destination = new URL(link.href, window.location.href);
+  if (destination.origin !== window.location.origin || (destination.pathname === window.location.pathname && destination.hash)) return;
+  const unsaved = document.querySelectorAll('.mapping-row-unsaved').length;
+  if (!unsaved) return;
+  event.preventDefault();
+  const leave = await showConfirmDialog(
+    `${unsaved} Operator or Vendor Map ${unsaved === 1 ? 'group has' : 'groups have'} unsaved changes. Leave this page without saving them?`,
+    {title: 'Unsaved mapping changes', confirmLabel: 'Leave without saving', cancelLabel: 'Stay on this page'},
+  );
+  if (!leave) return;
+  leavingWithUnsavedMappings = true;
+  window.location.assign(destination.href);
+}, true);
+window.addEventListener('beforeunload', (event) => {
+  if (leavingWithUnsavedMappings || !document.querySelector('.mapping-row-unsaved')) return;
+  event.preventDefault();
+  event.returnValue = '';
+});
 
 function sizeAdminDatasetNameColumn(panel = document) {
   const table = panel.querySelector?.('.admin-datasets-table');

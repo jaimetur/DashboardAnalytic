@@ -6304,6 +6304,12 @@ def test_admin_vendor_mappings_support_aliases_colours_and_reordering(client) ->
     assert {action.rsplit('/', 1)[1] for action in form_actions} == {'save', 'move', 'delete'}
     assert all(re.fullmatch(route_pattern.replace('\\/', '/'), action) for action in form_actions)
     assert 'restoreChartMappingEdits(freshBody, unsavedEdits);' in script
+    # Groups with unsaved changes are marked and can be saved together.
+    assert page.text.count('data-mapping-save-all-bar') == 2
+    assert 'async function saveAllChartMappings(panel)' in script
+    assert "row?.classList.toggle('mapping-row-unsaved', unsaved);" in script
+    assert "field.type === 'color' ? String(value).toLowerCase()" in script
+    assert "title: 'Unsaved mapping changes', confirmLabel: 'Leave without saving'" in script
 
 
 def test_canonical_mapping_renames_update_all_templates_and_dashboards_exactly(client) -> None:
