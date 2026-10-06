@@ -1563,8 +1563,10 @@ def install_dashboard_routes(core):
                     for vendor, family in rows:
                         if vendor and family:
                             vendor_families[_normalise_vendor(vendor, mappings, settings['vendor_mappings'])] = str(family)
+        chart_mapping_settings = task_repository.chart_mapping_settings()
         return expand_dynamic_layouts(entries, values_by_field, multivendor=definition.scope == 'multivendor',
-                                      operator_mappings=mappings, vendor_mappings=task_repository.chart_mapping_settings()['vendor_mappings'], vendor_comparison=definition.vendor_comparison, vendor_families=vendor_families)
+                                      operator_mappings=mappings, vendor_mappings=chart_mapping_settings['vendor_mappings'], vendor_comparison=definition.vendor_comparison, vendor_families=vendor_families,
+                                      mapping_groups=chart_mapping_settings)
 
     @app.get('/e2e-dashboards', response_class=HTMLResponse)
     def page(request: Request, user=Depends(dashboard_user)):

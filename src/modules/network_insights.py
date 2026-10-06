@@ -19,13 +19,14 @@ from pathlib import Path
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from itertools import chain
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 from uuid import uuid4
 
 import numpy as np
 import pandas as pd
 
 from src.modules.column_names import column_identity, compact_campaign_value, operator_vendor_filter_values, sort_vendor_values, vendor_filter_values
+from src.modules.mapping_order import dimension_order_key
 from src.modules.output_layout import NETWORK_INSIGHTS_FOLDER, module_output_dir
 
 
@@ -384,13 +385,14 @@ def operator_colours(operators: Iterable[str], mapping_groups: Iterable[dict[str
 def cdf_payload(
     samples: pd.DataFrame, value_column: str, group: str | None, title: str, metric_label: str,
     colours: dict[str, str], *, points: int = 120, dash_groups: dict[str, str] | None = None,
-    widths: dict[str, int] | None = None,
+    widths: dict[str, int] | None = None, order_key: Callable[[str], Any] | None = None,
 ) -> dict[str, Any]:
     """Build a Canvas CDF model (one curve per Operator and group).
 
     ``dash_groups`` maps each Operator label to its secondary grouping value,
     so curves sharing an Operator colour use a different line style per value.
     ``widths`` maps each label to its line width (newer campaigns are thicker).
+    ``order_key`` orders the curves by their Operator label (see ``mapping_order``).
     """
     dash_values = sorted(set(dash_groups.values()), key=str.casefold) if dash_groups else []
     series = []
@@ -398,8 +400,10 @@ def cdf_payload(
     keys = ['operator', *([group] if group else [])]
     lows, highs = [], []
     group_values = list(dict.fromkeys(samples[group])) if group else []
-    for key, part in samples.groupby(keys, sort=False, dropna=False):
-        key = key if isinstance(key, tuple) else (key,)
+    grouped = [(key if isinstance(key, tuple) else (key,), part) for key, part in samples.groupby(keys, sort=False, dropna=False)]
+    if order_key:
+        grouped.sort(key=lambda item: order_key(str(item[0][0])))
+    for key, part in grouped:
         values = part[value_column].dropna().sort_values()
         if values.empty:
             continue
@@ -1451,6 +1455,16 @@ def install_network_insights_routes(core: Any) -> None:
             families = dict(zip(labels, family_values.fillna('').astype(str), strict=True)) if family_values is not None else {}
             widths = campaign_line_widths(dict(zip(labels, filtered['campaign'].fillna('').astype(str), strict=True)), families)
         mapping_groups = task_repository.list_operator_mapping_groups()
+        vendor_mapping_groups = task_repository.list_vendor_mapping_groups()
+
+        def group_order(label: str) -> tuple[Any, ...]:
+            """Groups in Operator Map and Vendor Map order, one grouping field after another."""
+            parts = str(label).split(' · ')
+            return tuple(
+                dimension_order_key(field, part, mapping_groups, vendor_mapping_groups) or (0, 0, part.casefold())
+                for field, part in zip(groups, parts)
+            ) if groups and len(parts) == len(groups) else ((1, 0, str(label).casefold()),)
+
         if 'operator' in groups:
             source_colours = operator_colours(original_operators, mapping_groups)
             colours = {label: source_colours[operator]
@@ -1471,7 +1485,7 @@ def install_network_insights_routes(core: Any) -> None:
             if not frame[rsrp].notna().any():
                 warnings.append(f'The selected CDRs carry no {label} RSRP samples.')
             overview = rf_summary(frame, radio, None, coverage_threshold, interference_threshold)
-            overview.sort(key=lambda row: str(row['operator']).casefold())
+            overview.sort(key=lambda row: group_order(row['operator']))
             comparison = None
             if len(campaigns) >= 2 and 'campaign' not in groups:
                 previous, latest = campaigns[-2], campaigns[-1]
@@ -1509,8 +1523,8 @@ def install_network_insights_routes(core: Any) -> None:
                 'coverage_threshold': coverage_threshold, 'interference_threshold': interference_threshold,
                 'overview': overview, 'rf_rows': overview, 'comparison': comparison,
                 'charts': {
-                    'rsrp_cdf': cdf_payload(frame, rsrp, None, f'{label} RSRP', 'RSRP (dBm)', colours, dash_groups=dash_groups, widths=widths),
-                    'sinr_cdf': cdf_payload(frame, sinr, None, f'{label} SINR', 'SINR (dB)', colours, dash_groups=dash_groups, widths=widths),
+                    'rsrp_cdf': cdf_payload(frame, rsrp, None, f'{label} RSRP', 'RSRP (dBm)', colours, dash_groups=dash_groups, widths=widths, order_key=group_order),
+                    'sinr_cdf': cdf_payload(frame, sinr, None, f'{label} SINR', 'SINR (dB)', colours, dash_groups=dash_groups, widths=widths, order_key=group_order),
                 },
                 'maps': {
                     **selected_maps, 'operators': map_operators,

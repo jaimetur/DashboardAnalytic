@@ -7,7 +7,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.modules.column_names import column_identity, resolve_column_name, vendor_filter_rank
+from src.modules.column_names import column_identity, resolve_column_name
+from src.modules.mapping_order import dimension_order_key, mapping_group, split_operator_vendor
 from src.modules.runtime_config import ignore_event_time_filtering
 
 from src.modules.ingestion import DatasetSummary, infer_dataset_kind
@@ -415,15 +416,12 @@ def _chart_mapping_group(df: pd.DataFrame, dimension: str, value: object) -> dic
     if not mapping_type:
         return None
     text = str(value or '').strip()
-    if mapping_type == 'vendor':
-        text = text.rsplit('_', 1)[-1].strip()
-    normalized = text.casefold()
+    if dimension == 'operator_vendor':
+        # The Vendor is what follows the Operator prefix (``3_Ericsson_Mixed`` -> ``Ericsson_Mixed``);
+        # a Vendor column already holds the Vendor itself.
+        text = split_operator_vendor(text, df.attrs.get('operator_mapping_groups', []))[1]
     groups = df.attrs.get(f'{mapping_type}_mapping_groups', [])
-    for group in groups if isinstance(groups, list) else []:
-        labels = [group.get('canonical'), *(group.get('aliases') or [])]
-        if normalized in {str(label or '').strip().casefold() for label in labels}:
-            return group
-    return None
+    return mapping_group(text, groups if isinstance(groups, list) else [])
 
 
 def _chart_category_key(df: pd.DataFrame, dimension: str, value: object) -> tuple[int, str]:
@@ -440,24 +438,11 @@ ORDERED_DIMENSIONS = {'operator', 'subscriber', 'vendor', 'vendor_only', 'operat
 
 def _category_order_key(df: pd.DataFrame, dimension: str, value: object) -> tuple:
     """Operators and vendors in the order of the Operator Maps and Vendor Maps tables of Workspace Config;
-    unmapped values follow, vendors before mixed groups and operators without a vendor, alphabetically."""
-    def single(role: str, text: object) -> tuple:
-        group = _chart_mapping_group(df, role, text)
-        if group:
-            return 0, int(group.get('position', 0)), 0, str(text).casefold()
-        return 1, 0, vendor_filter_rank(text) if role == 'vendor' else 0, str(text).casefold()
-
-    normalized = column_identity(dimension)
-    if normalized in {'operator', 'subscriber'}:
-        return single('operator', value)
-    if normalized == 'operatorvendor':
-        # <Operator>_<Vendor>: operators in their map order, then vendors in theirs.
-        text = str(value or '').strip()
-        if vendor_filter_rank(text) == 2:
-            return (*single('operator', text.rsplit(' - ', 1)[0]), 2)
-        operator_text = text.rsplit('_', 1)[0] if '_' in text else text
-        return (*single('operator', operator_text), *single('vendor', text))
-    return single('vendor', value)
+    Operator_Vendor by Operator, then by Vendor within it. See ``mapping_order``."""
+    key = dimension_order_key(
+        dimension, value, df.attrs.get('operator_mapping_groups', []), df.attrs.get('vendor_mapping_groups', []),
+    )
+    return key if key is not None else (0, 0, str(value).casefold())
 
 
 def _chart_category_color(df: pd.DataFrame, dimension: str, value: object) -> str | None:

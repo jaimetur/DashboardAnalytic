@@ -7,6 +7,7 @@ import math
 import re
 from typing import Any
 
+from src.modules.mapping_order import vendor_order_key
 from src.modules.scoring_vendors import normalize_scoring_vendor_result
 from src.modules.scoring_config import validate_scoring_configuration
 
@@ -144,7 +145,8 @@ def scoring_coverage_notes(result: dict[str, Any]) -> dict[str, list[str]]:
 
 def build_scoring_views(job: dict[str, Any] | None, result: dict[str, Any] | None,
                         operator_mapping_groups: list[dict[str, Any]] | None = None,
-                        workspace_configuration: dict[str, Any] | None = None) -> dict[str, list[dict[str, Any]]]:
+                        workspace_configuration: dict[str, Any] | None = None, *,
+                        vendor_mapping_groups: list[dict[str, Any]] | None = None) -> dict[str, list[dict[str, Any]]]:
     """Build reference-style KPI matrices and signed GAP tables with numerical ordering for individual comparisons.
 
     The source ``result`` remains untouched. Combined values use every configured
@@ -230,6 +232,7 @@ def build_scoring_views(job: dict[str, Any] | None, result: dict[str, Any] | Non
     hierarchy_score_tables, hierarchy_gap_tables = _build_hierarchy_tables(
         score_tables, hierarchy_levels, requested_baseline, baseline_aliases,
         operator_mapping_groups or [], metrics, gap_priority_rank,
+        vendor_mapping_groups=vendor_mapping_groups or [],
     ) if hierarchy_levels else ([], [])
 
     return {
@@ -378,6 +381,8 @@ def _hierarchy_column_sort_key(column: dict[str, Any]) -> tuple[Any, ...]:
         value = item.get('value')
         if item['level'] == 'Operator':
             values.append((0, column.get('operator_position', 0), str(value or '').casefold()))
+        elif item['level'] == 'Vendor' and column.get('vendor_order') is not None:
+            values.append((1, *column['vendor_order']))
         else:
             values.append((1, '' if value is None else str(value).casefold(), '' if value is None else str(value)))
     return tuple(values)
@@ -393,7 +398,8 @@ def _missing_hierarchy_value() -> dict[str, Any]:
 def _build_hierarchy_tables(
     score_tables: list[dict[str, Any]], hierarchy_levels: list[str], requested_baseline: str,
     baseline_aliases: list[str], operator_mapping_groups: list[dict[str, Any]],
-    metrics: list[dict[str, Any]], gap_priority_rank: dict[str, int],
+    metrics: list[dict[str, Any]], gap_priority_rank: dict[str, int], *,
+    vendor_mapping_groups: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Flatten new-contract per-context views into one complete leaf matrix per Environment."""
     levels = [level for level in hierarchy_levels if level == 'Operator' or level in _HIERARCHY_CONTEXT_FIELDS]
@@ -444,6 +450,9 @@ def _build_hierarchy_tables(
                     'context': leaf_context,
                     'is_reference': is_reference,
                     'operator_position': int(operator_position) if operator_position is not None else 1_000_000,
+                    'vendor_order': vendor_order_key(
+                        leaf_context.get('vendor'), vendor_mapping_groups or [], operator_mapping_groups,
+                    ) if 'Vendor' in levels else None,
                     'color': str(base_style.get('color') or '#365F91').upper(),
                 }
                 if leaf_id not in columns_by_id:

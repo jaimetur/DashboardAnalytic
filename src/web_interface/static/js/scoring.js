@@ -255,7 +255,7 @@
   let currentResults = null;
   let currentResultsJobId = null;
   let activeResultTab = restoredScoringViewState.resultTab
-    || root.querySelector('[data-result-tab][aria-selected="true"]')?.dataset.resultTab || 'scoring';
+    || root.querySelector('[data-result-tab][aria-selected="true"]')?.dataset.resultTab || 'charts';
   for (const tab of root.querySelectorAll('[data-result-tab]')) {
     const selected = tab.dataset.resultTab === activeResultTab;
     tab.setAttribute('aria-selected', String(selected));

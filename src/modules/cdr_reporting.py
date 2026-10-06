@@ -29,6 +29,7 @@ from typing import Callable, Iterable, Mapping
 
 import numpy as np
 import pandas as pd
+from src.modules.mapping_order import operator_vendor_order_key, vendor_order_key
 from src.modules.report_layouts import DYNAMIC_LAYOUTS, canonical_layout_name, grid_layout_name, dynamic_layout_axes
 from src.modules.column_names import (
     MAIN_CDR_FIELDS, OPERATOR_VENDOR_FIELD, VENDOR_FIELD, VENDOR_FILTER_IDENTITIES, column_identity, compact_campaign_value,
@@ -500,10 +501,19 @@ def expand_dynamic_layouts(
     vendor_mappings: dict[str, str] | None = None,
     vendor_comparison: str = "operator_vendor",
     vendor_families: dict[str, str] | None = None,
+    mapping_groups: dict[str, list] | None = None,
 ) -> list[CatalogEntry]:
-    """Resolve both grid axes and paginate vendor families without mixing contexts."""
+    """Resolve both grid axes and paginate vendor families without mixing contexts.
+
+    ``mapping_groups`` carries the ordered Operator and Vendor Map groups, so
+    Vendor pages follow the Vendor Map order.
+    """
     display_frame = pd.DataFrame()
-    display_frame.attrs.update(operator_mappings=operator_mappings or {}, vendor_mappings=vendor_mappings or {})
+    display_frame.attrs.update(
+        operator_mappings=operator_mappings or {}, vendor_mappings=vendor_mappings or {},
+        operator_mapping_groups=list((mapping_groups or {}).get('operator_mapping_groups') or []),
+        vendor_mapping_groups=list((mapping_groups or {}).get('vendor_mapping_groups') or []),
+    )
     def pages_for(field, values, bounded):
         if vendor_comparison == 'vendor_only' and _normalise_catalog_name(field) == 'vendor':
             values = sorted(values, key=lambda value: _vendor_only_display_sort_key(value, display_frame))
@@ -3590,16 +3600,9 @@ def _operator_display_sort_key(value: object, frame: pd.DataFrame | None = None)
     return rank, label.casefold()
 
 
-def _vendor_display_sort_key(value: object, frame: pd.DataFrame | None = None) -> tuple[int, str, int, str]:
-    """Order ``Operator_Vendor`` values from the two Admin mapping tables."""
-    text = str(value).strip()
-    operator_group = _mapping_prefix_group(text, 'operator', frame)
-    normalized_operator = str(operator_group.get('canonical')) if operator_group else _operator_sort_label(text)
-    normalized_vendor = _vendor_label(text, frame).casefold()
-    vendor_group = _mapping_group(normalized_vendor, 'vendor', frame)
-    vendor_rank = int(vendor_group.get('position', 0)) if vendor_group else len(_mapping_groups(frame, 'vendor'))
-    operator_rank, operator_label = _operator_display_sort_key(normalized_operator, frame)
-    return operator_rank, operator_label, vendor_rank, normalized_vendor
+def _vendor_display_sort_key(value: object, frame: pd.DataFrame | None = None) -> tuple[object, ...]:
+    """Order ``Operator_Vendor`` values by Operator Map, then by Vendor Map within each Operator."""
+    return operator_vendor_order_key(value, _mapping_groups(frame, 'operator'), _mapping_groups(frame, 'vendor'))
 
 
 def _vendor_only_display_info(value: object, frame: pd.DataFrame | None = None) -> tuple[int, str]:
@@ -3627,9 +3630,9 @@ def _vendor_only_display_info(value: object, frame: pd.DataFrame | None = None) 
     return 0, text
 
 
-def _vendor_only_display_sort_key(value: object, frame: pd.DataFrame | None = None) -> tuple[int, str]:
-    rank, label = _vendor_only_display_info(value, frame)
-    return rank, label.casefold()
+def _vendor_only_display_sort_key(value: object, frame: pd.DataFrame | None = None) -> tuple[object, ...]:
+    """Vendors in Vendor Map order, then unmapped Vendors, then Operators without a Vendor in Operator Map order."""
+    return vendor_order_key(value, _mapping_groups(frame, 'vendor'), _mapping_groups(frame, 'operator'))
 
 
 def _multivendor_vendor_sort_key(value: object, frame: pd.DataFrame | None = None) -> tuple[object, ...]:
@@ -7590,7 +7593,7 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
                 column = _catalog_column(source_frame, field, False)
                 if column:
                     values[field].update(str(value) for value in source_frame[column].dropna().unique() if not multivendor or vendor_comparison == "vendor_only" or _normalise_catalog_name(field) not in {"operatorvendor", "vendor"} or not any(term in str(value).casefold() for term in ("mixed", "other")))
-        catalog = expand_dynamic_layouts(catalog, {field: sorted(items, key=str.casefold) for field, items in values.items()}, multivendor=multivendor, operator_mappings=source_frame.attrs.get("operator_mappings", {}), vendor_mappings=source_frame.attrs.get("vendor_mappings", {}), vendor_comparison=vendor_comparison, vendor_families=vendor_families)
+        catalog = expand_dynamic_layouts(catalog, {field: sorted(items, key=str.casefold) for field, items in values.items()}, multivendor=multivendor, operator_mappings=source_frame.attrs.get("operator_mappings", {}), vendor_mappings=source_frame.attrs.get("vendor_mappings", {}), vendor_comparison=vendor_comparison, vendor_families=vendor_families, mapping_groups={key: source_frame.attrs.get(key, []) for key in ("operator_mapping_groups", "vendor_mapping_groups")})
     render_catalog = [prepare_multivendor_catalog_entry(entry) if multivendor else entry for entry in catalog]
     for entry in render_catalog:
         catalogue_slides[entry.slide].append(entry)

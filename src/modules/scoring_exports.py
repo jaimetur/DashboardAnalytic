@@ -59,7 +59,7 @@ def _table_for_mode(matrix: dict, table_mode: str) -> dict:
 
 def export_scoring_csv(job: dict[str, Any], result: dict[str, Any], kind: str,
                        table_mode: str, operator_mapping_groups: list[dict[str, Any]] | None = None,
-                       *, environment: str = 'all') -> str:
+                       *, environment: str = 'all', vendor_mapping_groups: list[dict[str, Any]] | None = None) -> str:
     """Export the displayed table mode in a flat, explicit comparison format.
 
     Legacy CSV URLs without table_mode keep their original raw-result schema.
@@ -67,7 +67,7 @@ def export_scoring_csv(job: dict[str, Any], result: dict[str, Any], kind: str,
     """
     if kind not in {'scoring', 'gap'}:
         raise ValueError('CSV table kind must be scoring or gap.')
-    views = build_scoring_views(job, result, operator_mapping_groups)
+    views = build_scoring_views(job, result, operator_mapping_groups, vendor_mapping_groups=vendor_mapping_groups)
     matrix_key = 'hierarchy_score_tables' if kind == 'scoring' else 'hierarchy_gap_tables'
     matrices = views.get(matrix_key) or views.get('score_tables' if kind == 'scoring' else 'gap_summary_tables', [])
     _validate_environment(views, environment)
@@ -2174,7 +2174,8 @@ def export_scoring_powerpoint(job: dict[str, Any], result: dict[str, Any], templ
                              operator_mapping_groups: list[dict[str, Any]] | None = None,
                              *, table_mode: str = 'expanded', gap_layout: str = 'end',
                              environment: str = 'all', show_gap_values: bool = True,
-                             split_charts: bool = True) -> bytes:
+                             split_charts: bool = True,
+                             vendor_mapping_groups: list[dict[str, Any]] | None = None) -> bytes:
     """Export saved points as comparison matrices, charts and prioritized gaps."""
     if not template_path.is_file():
         raise ValueError('The configured CDR PowerPoint template is missing.')
@@ -2188,7 +2189,9 @@ def export_scoring_powerpoint(job: dict[str, Any], result: dict[str, Any], templ
         job['_scoring_display_selections'] = prepare_scoring_display_selections(job, result, template_path)
     presentation = Presentation(template_path)
     _remove_all_slides(presentation)
-    views = _export_environment_views(build_scoring_views(job, result, operator_mapping_groups), environment)
+    views = _export_environment_views(
+        build_scoring_views(job, result, operator_mapping_groups, vendor_mapping_groups=vendor_mapping_groups), environment,
+    )
     refresh_baseline_warning(result, views, str(job.get('baseline_operator') or 'EE'))
     configuration = job.get('configuration') or result.get('configuration') or {}
     for matrix_key in ('score_tables', 'gap_summary_tables', 'gap_tables',

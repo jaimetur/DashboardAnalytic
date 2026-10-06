@@ -15361,7 +15361,10 @@ def scoring_jobs_result(job_id: int, user: SessionUser = Depends(current_user)) 
         try:
             fallback = (task_repository.get_scoring_configuration()
                         if not result.get('configuration') and not job.get('configuration') else None)
-            views = build_scoring_views(job, result, task_repository.list_operator_mapping_groups(), fallback)
+            views = build_scoring_views(
+                job, result, task_repository.list_operator_mapping_groups(), fallback,
+                vendor_mapping_groups=task_repository.list_vendor_mapping_groups(),
+            )
             refresh_baseline_warning(result, views, str(job.get('baseline_operator') or 'EE'))
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -15397,7 +15400,10 @@ def build_scoring_job_powerpoint(task_repository: Repository, job_id: int) -> tu
     export_job = _scoring_export_job_with_catalogue_defaults(task_repository, job)
     template = settings.ppt_templates_dir / TEMPLATE_NAMES['nsa']
     export_job['_scoring_display_selections'] = prepare_scoring_display_selections(export_job, result, template)
-    content = export_scoring_powerpoint(export_job, result, template, operator_mapping_groups)
+    content = export_scoring_powerpoint(
+        export_job, result, template, operator_mapping_groups,
+        vendor_mapping_groups=task_repository.list_vendor_mapping_groups(),
+    )
     filename = build_scoring_report_filename(
         datetime.now(), export_job.get('nr_mode') or 'NSA', export_job.get('context_filters'),
         display_selections=export_job['_scoring_display_selections'],
@@ -15431,6 +15437,7 @@ def scoring_job_export(
         normalize_result_gaps(job.get('result') or {}), task_repository.list_operator_mapping_groups(),
     )
     operator_mapping_groups = task_repository.list_operator_mapping_groups()
+    vendor_mapping_groups = task_repository.list_vendor_mapping_groups()
     export_configuration = job.get('configuration') or result.get('configuration')
     selected_environment = str(environment or 'all').strip() or 'all'
     if selected_environment.casefold() == 'all':
@@ -15447,6 +15454,7 @@ def scoring_job_export(
         try:
             saved_views = build_scoring_views(
                 job, result, operator_mapping_groups, workspace_configuration,
+                vendor_mapping_groups=vendor_mapping_groups,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -15465,7 +15473,7 @@ def scoring_job_export(
                 content = export_scoring_csv(
                     job, result, export_kind, table_mode,
                     operator_mapping_groups,
-                    environment=selected_environment,
+                    environment=selected_environment, vendor_mapping_groups=vendor_mapping_groups,
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -15505,6 +15513,7 @@ def scoring_job_export(
             content = export_scoring_powerpoint(
                 export_job, result, settings.ppt_templates_dir / TEMPLATE_NAMES['nsa'],
                 operator_mapping_groups, table_mode=table_mode or 'expanded',
+                vendor_mapping_groups=vendor_mapping_groups,
                 gap_layout=gap_layout or 'end', environment=selected_environment,
                 show_gap_values=show_gap_values,
                 split_charts=split_charts,

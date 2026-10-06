@@ -28,6 +28,7 @@ from threading import Lock
 from typing import Any
 
 from src.modules.column_names import column_identity, sort_vendor_values
+from src.modules.mapping_order import dimension_order_key
 
 NQ_CALLS_TABLE = 'nq_calls'
 NQ_CALL_SOURCES_TABLE = 'nq_call_sources'
@@ -630,14 +631,19 @@ def query_calls(task_repository: Any, request: dict[str, Any], username: str) ->
         for call in calls:
             call['last_comment'] = last_comments.get(call['call_key'])
         breakdowns = []
+        mapping_settings = task_repository.chart_mapping_settings()
         for field, label in BREAKDOWNS:
             values = connection.execute(
                 f'SELECT {field} AS value, COUNT(*) AS count FROM ({filtered}) GROUP BY {field} ORDER BY count DESC, value LIMIT 12',
                 all_params,
             ).fetchall()
-            breakdowns.append({'field': field, 'label': label, 'items': [
-                {'value': str(row['value'] or ''), 'count': int(row['count'])} for row in values
-            ]})
+            items = [{'value': str(row['value'] or ''), 'count': int(row['count'])} for row in values]
+            # The largest Operators and Vendors are listed in Operator Map and Vendor Map order.
+            if field in {'operator', 'vendor', 'operator_vendor'}:
+                items.sort(key=lambda item, field=field: dimension_order_key(
+                    field, item['value'], mapping_settings['operator_mapping_groups'], mapping_settings['vendor_mapping_groups'],
+                ))
+            breakdowns.append({'field': field, 'label': label, 'items': items})
         names = {str(row['id']): str(row['file_name']) for row in connection.execute('SELECT id, file_name FROM datasets')}
         for breakdown in breakdowns:
             if breakdown['field'] == 'dataset_id':
