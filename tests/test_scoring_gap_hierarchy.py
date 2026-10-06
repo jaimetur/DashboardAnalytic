@@ -139,8 +139,15 @@ def test_hierarchy_partial_gap_uses_only_the_intersecting_environment():
     assert row['gap_environments'][combined_leaf] == ['DriveCity']
 
 
+def _city_rows_with_one_road_series():
+    """City rows, plus road rows for one other series: the road has results in some series, so nothing is scaled."""
+    road = [row for row in _source_rows(('Connectionroad',))
+            if row['Campaign'] == '2026-Q4' and row['Operator'] == 'O2 UK']
+    return _source_rows(('City',)) + road
+
+
 def test_missing_road_keeps_city_gap_and_combined_marks_common_environment_gap_partial():
-    city_result, city_views = _calculate(_source_rows(('City',)))
+    city_result, city_views = _calculate(_city_rows_with_one_road_series())
     city_matrix = _gap_matrix(city_views, 'DriveCity')
     city_leaf = _leaf(city_matrix, 'O2 UK', 'Nokia', '2026-Q2')
     assert _kpi_row(city_matrix)['gaps'][city_leaf] < 0
@@ -155,7 +162,7 @@ def test_missing_road_keeps_city_gap_and_combined_marks_common_environment_gap_p
     assert combined_row['gap_environments'][combined_leaf] == ['DriveCity']
     assert '* marks a partial GAP calculated only from common available environment contributions (DriveCity).' in combined['note']
 
-    scalar_result, scalar_views = _calculate(_source_rows(('City',)), hierarchical=False)
+    scalar_result, scalar_views = _calculate(_city_rows_with_one_road_series(), hierarchical=False)
     scalar = _summary_for(scalar_views, 'Combined')
     scalar_row = _kpi_row(scalar)
     scalar_city = _kpi_row(_summary_for(scalar_views, 'DriveCity'))
@@ -232,3 +239,18 @@ def test_scalar_combined_gap_requires_common_environment_coverage():
     assert row['gaps']['O2 UK'] is None
     assert row['gap_partial']['O2 UK'] is False
     assert row['gap_environments']['O2 UK'] == []
+
+
+def test_road_without_results_in_any_series_scales_the_combined_gap():
+    result, views = _calculate(_source_rows(('City',)))
+    assert result['environment_scaling']['scaled_environments'] == ['DriveConnectionroad']
+    city = _gap_matrix(views, 'DriveCity')
+    combined = _gap_matrix(views, 'Combined')
+    city_leaf = _leaf(city, 'O2 UK', 'Nokia', '2026-Q2')
+    combined_leaf = _leaf(combined, 'O2 UK', 'Nokia', '2026-Q2')
+    metric = next(item for item in result['configuration']['metrics'] if item['code'] == 'K1')
+    factor = sum(context['max_points'] for name, context in metric['contexts'].items()
+                 if name in {'DriveCity', 'DriveConnectionroad'}) / metric['contexts']['DriveCity']['max_points']
+    # The Combined GAP is the City GAP scaled to the full maximum, and it is not partial.
+    assert _kpi_row(combined)['gaps'][combined_leaf] == pytest.approx(_kpi_row(city)['gaps'][city_leaf] * factor)
+    assert _kpi_row(combined)['gap_partial'][combined_leaf] is False
