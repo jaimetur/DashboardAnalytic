@@ -10401,7 +10401,7 @@ def test_module_tabs_take_order_title_icon_and_colour_from_interface_settings(cl
     assert reporting.startswith('# Scheduled Reporting') and 'Use **Scheduled Reporting**' in reporting
     index = client.get('/api/documents/help-index').json()
     assert {'readme', 'changelog'} <= set(index['icons'])
-    assert all(item.get('icon') for item in index['documents'] if item['relative_path'] in {'reporting.md', 'app-logs.md', 'chart-builder.md'})
+    assert all(item.get('icon') for item in index['documents'] if item['relative_path'] in {'reporting.md', 'app-logs.md', 'chart-builder.md', 'overview.md', 'docker-deployment.md', 'roadmap.md'})
     features = [row['key'] for row in app_module.feature_activation_context()]
     assert features == order
 

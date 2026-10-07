@@ -116,6 +116,16 @@ ADMINISTRATIVE_ICONS: dict[str, dict[str, str]] = {
 }
 ADMINISTRATIVE_HELP_ICONS = {'app-logs.md': 'app-logs', 'app-config.md': 'config', 'workspace-config.md': 'config',
                              'administrator-config.md': 'admin'}
+# Icons of the General and Reference Help chapters, in the colour of Readme and Changelog.
+DOCUMENT_HELP_ICONS: dict[str, str] = {
+    'overview.md': '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/>',
+    'technical-considerations.md': '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M10 10h4v4h-4zM9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>',
+    'configuration.md': '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
+    'docker-deployment.md': '<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/>',
+    'web-interface.md': '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
+    'project-structure.md': '<path d="M4 3v15h7M4 8h7"/><rect x="11" y="5" width="9" height="6" rx="1.5"/><rect x="11" y="15" width="9" height="6" rx="1.5"/>',
+    'roadmap.md': '<path d="m9 4-6 2v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14M15 6v14"/>',
+}
 
 STAGE_COLOURS = {'alpha': '#D7263D', 'beta': '#FFD60A', 'new': '#2563EB', 'stable': '#1F8A4C'}
 
@@ -243,9 +253,11 @@ def ordered_help_documents(documents: tuple[str, ...] | list[str], labels: dict[
 
 
 def help_chapter_icons(labels: dict[str, dict[str, Any]]) -> dict[str, dict[str, str]]:
-    """Icon and colour of the tab of each Help chapter of a main or administrative module."""
-    icons = {document: {'icon': ADMINISTRATIVE_ICONS[icon]['d'], 'icon_color': ADMINISTRATIVE_ICONS[icon]['color']}
-             for document, icon in ADMINISTRATIVE_HELP_ICONS.items()}
+    """Icon and colour of each Help chapter: its module tab, or a document icon for General and Reference."""
+    icons = {document: {'icon': icon, 'icon_color': ADMINISTRATIVE_ICONS['readme']['color']}
+             for document, icon in DOCUMENT_HELP_ICONS.items()}
+    icons |= {document: {'icon': ADMINISTRATIVE_ICONS[icon]['d'], 'icon_color': ADMINISTRATIVE_ICONS[icon]['color']}
+              for document, icon in ADMINISTRATIVE_HELP_ICONS.items()}
     return icons | {document: {'icon': TAB_ICONS[label['tab_icon']]['d'], 'icon_color': label['tab_color']}
                     for module, label in labels.items() if label['tab_icon'] for document in MODULE_TABS[module]['docs']}
 
