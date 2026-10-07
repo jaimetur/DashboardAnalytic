@@ -211,19 +211,58 @@
     return wrapper;
   }
 
-  function optionGroup(title, options, values, onChange) {
+  function optionGroup(title, options, values, onChange, diffPrefix) {
     const group = el('fieldset', 'scoring-report-group');
     group.append(el('legend', '', title));
-    for (const [key, label] of options) group.append(checkbox(label, values[key], (checked) => onChange(key, checked)));
+    for (const [key, label] of options) {
+      const box = checkbox(label, values[key], (checked) => onChange(key, checked));
+      box.dataset.diffKey = `${diffPrefix}:${key}`;
+      group.append(box);
+    }
     return group;
+  }
+
+  // The comparable value of one setting of a scenario (see markDifferences), or undefined where it does not apply.
+  function settingValue(scenario, key) {
+    const [kind, name, group, option] = key.split(':');
+    if (kind === 'filter') {
+      return JSON.stringify([[...(scenario.context_filters[name] || [])].map(String).sort(), name === 'City' && Boolean(scenario.main_cities)]);
+    }
+    if (kind === 'level') return String(scenario.aggregation_levels.includes(name));
+    const options = scenario.scorings[name];
+    if (group === 'enabled') return String(Boolean(options.enabled));
+    if (!options.enabled) return undefined;
+    if (group === 'environments') return options.environments;
+    if (option === 'operators') return JSON.stringify([...(options.gap.operators || [])].sort());
+    return String(Boolean(options[group]?.[option]));
+  }
+
+  // Highlights in every scenario the settings whose value is not the same in all of them.
+  function markDifferences(list, scenarios) {
+    const nodes = [...list.querySelectorAll('[data-diff-key]')];
+    const changed = new Set();
+    if (scenarios.length > 1) {
+      for (const key of new Set(nodes.map((node) => node.dataset.diffKey))) {
+        const values = scenarios.map((scenario) => settingValue(scenario, key)).filter((value) => value !== undefined);
+        if (new Set(values).size > 1) changed.add(key);
+      }
+    }
+    for (const node of nodes) {
+      const scenario = scenarios[Number(node.closest('[data-scenario-index]')?.dataset.scenarioIndex)];
+      node.classList.toggle('is-scenario-diff', changed.has(node.dataset.diffKey)
+        && Boolean(scenario) && settingValue(scenario, node.dataset.diffKey) !== undefined);
+    }
   }
 
   function scoringPanel(scenario, key, label, operators, rerender) {
     const options = scenario.scorings[key];
     const panel = el('section', `scoring-report-scoring scoring-report-${key}`);
     const head = el('div', 'scoring-report-scoring-head');
-    head.append(checkbox(`${label} scoring`, options.enabled, (checked) => { options.enabled = checked; rerender(); }));
+    const enabled = checkbox(`${label} scoring`, options.enabled, (checked) => { options.enabled = checked; rerender(); });
+    enabled.dataset.diffKey = `scoring:${key}:enabled`;
+    head.append(enabled);
     const environments = el('select');
+    environments.dataset.diffKey = `scoring:${key}:environments`;
     for (const [value, text] of [['all', 'All Environments only'], ['split', 'All Environments and each environment']]) {
       const option = el('option', '', text);
       option.value = value;
@@ -238,12 +277,14 @@
     const body = el('div', 'scoring-report-scoring-body');
     body.append(
       optionGroup('Scoring Charts', CHART_OPTIONS.map(([option, text]) => [option, text.startsWith('Scoring per') ? `${label} ${text}` : text]),
-        options.charts, (option, checked) => { options.charts[option] = checked; }),
-      optionGroup('Scoring Tables', TABLE_OPTIONS, options.tables, (option, checked) => { options.tables[option] = checked; }),
+        options.charts, (option, checked) => { options.charts[option] = checked; }, `scoring:${key}:charts`),
+      optionGroup('Scoring Tables', TABLE_OPTIONS, options.tables, (option, checked) => { options.tables[option] = checked; }, `scoring:${key}:tables`),
     );
-    const gap = optionGroup('GAP Analysis', GAP_OPTIONS, options.gap, (option, checked) => { options.gap[option] = checked; });
-    gap.prepend(checklist('Operators to compare', operators, options.gap.operators,
-      (values) => { options.gap.operators = values; }));
+    const gap = optionGroup('GAP Analysis', GAP_OPTIONS, options.gap, (option, checked) => { options.gap[option] = checked; }, `scoring:${key}:gap`);
+    const compared = checklist('Operators to compare', operators, options.gap.operators,
+      (values) => { options.gap.operators = values; });
+    compared.dataset.diffKey = `scoring:${key}:gap:operators`;
+    gap.prepend(compared);
     body.append(gap);
     panel.append(body);
     return panel;
@@ -252,6 +293,7 @@
   function scenarioCard(state, index, context, rerender) {
     const scenario = state.scenarios[index];
     const card = el('article', 'scoring-report-scenario');
+    card.dataset.scenarioIndex = String(index);
     const head = el('div', 'scoring-report-scenario-head');
     const name = el('input');
     name.type = 'text';
@@ -309,6 +351,7 @@
         if (mirrored.length) scenario.context_filters[partnerField] = mirrored; else delete scenario.context_filters[partnerField];
         partner.setSelection(mirrored);
       }, {preset, allOption: true});
+      pickers[field].dataset.diffKey = `filter:${field}`;
       filters.append(pickers[field]);
     }
     const levels = el('div', 'scoring-report-levels');
@@ -319,6 +362,7 @@
           || (item === level ? checked : scenario.aggregation_levels.includes(item)));
       });
       if (level === 'Operator') { box.querySelector('input').disabled = true; box.title = 'Operator is required'; }
+      box.dataset.diffKey = `level:${level}`;
       levels.append(box);
     }
     const scorings = el('div', 'scoring-report-scorings');
@@ -651,7 +695,12 @@
       function render() {
         list.replaceChildren(...state.scenarios.map((_scenario, index) => scenarioCard(state, index, context, render)));
         add.disabled = state.scenarios.length >= 20;
+        markDifferences(list, state.scenarios);
       }
+      // Settings change without rendering again (checkboxes, selects, Select All / None): refresh the highlights.
+      const refreshDifferences = () => queueMicrotask(() => markDifferences(list, state.scenarios));
+      list.addEventListener('change', refreshDifferences);
+      list.addEventListener('click', refreshDifferences);
       render();
       dialog.append(header, list, add, footer);
       dialog.addEventListener('cancel', (event) => { event.preventDefault(); close(null); });

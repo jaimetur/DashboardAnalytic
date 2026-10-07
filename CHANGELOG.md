@@ -10,6 +10,7 @@
 #### 🌟 New Features:
 
 #### 🚀 Enhancements:
+- **Scoring report editor:** with several scenarios, the settings whose value differs between them (filters, aggregation levels, scorings, environments and chart, table and GAP options) are highlighted in amber in every scenario, and the highlights follow each change.
 
 #### 🐛 Bug fixes:
 

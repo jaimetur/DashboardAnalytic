@@ -115,3 +115,46 @@ def test_every_reporting_artifact_with_cdrs_offers_the_two_automatic_choices():
     assert "allCompleteChoice(dataset.cdr_selection === 'all_complete'), automaticPreview());" in script
     # Dashboards keep their own CDR list with the same two choices.
     assert "{selection: config.cdr_selection || '', preview: automaticPreview(nrMode.value)}" in script
+
+
+@pytest.mark.skipif(not shutil.which('node'), reason='Node.js is required')
+def test_settings_that_differ_between_scenarios_are_highlighted_in_every_scenario():
+    program = _function('settingValue') + _function('markDifferences') + r'''
+const options = (enabled = true) => ({enabled, environments: 'all', charts: {service: true}, tables: {kpi_values: false},
+  gap: {operators: ['VF', '3'], profile: true}});
+const scenario = (filters, levels, mostReliable = true) => ({context_filters: filters, main_cities: false, aggregation_levels: levels,
+  scorings: {best_network: options(), most_reliable: options(mostReliable)}});
+const scenarios = [scenario({}, ['Operator', 'Campaign']), scenario({City: ['London']}, ['Operator', 'City', 'Campaign']),
+  scenario({}, ['Operator', 'Campaign'], false)];
+const keys = ['filter:City', 'filter:Region', 'level:City', 'level:Campaign', 'scoring:best_network:charts:service',
+  'scoring:most_reliable:enabled', 'scoring:most_reliable:environments', 'scoring:best_network:gap:operators'];
+const nodes = scenarios.flatMap((_item, index) => keys.map(key => {
+  const classes = new Set();
+  return {index, dataset: {diffKey: key}, classes, classList: {toggle: (name, on) => (on ? classes.add(name) : classes.delete(name))},
+    closest: () => ({dataset: {scenarioIndex: String(index)}})};
+}));
+const list = {querySelectorAll: () => nodes};
+const highlighted = () => scenarios.map((_item, index) => nodes.filter(node => node.index === index && node.classes.has('is-scenario-diff'))
+  .map(node => node.dataset.diffKey));
+markDifferences(list, scenarios);
+const result = {differences: highlighted()};
+scenarios[0].scorings.best_network.charts.service = false;
+markDifferences(list, scenarios);
+result.afterChange = highlighted()[2];
+markDifferences(list, scenarios.slice(0, 1));
+result.single = highlighted()[0];
+console.log(JSON.stringify(result));
+'''
+    completed = subprocess.run(['node', '-e', program], capture_output=True, text=True, check=True)
+    result = json.loads(completed.stdout)
+    # The City filter and level and the left-out Most Reliable scoring differ: they are highlighted in every scenario
+    # where they apply (a left-out scoring has no environments to compare).
+    assert result['differences'] == [
+        ['filter:City', 'level:City', 'scoring:most_reliable:enabled'],
+        ['filter:City', 'level:City', 'scoring:most_reliable:enabled'],
+        ['filter:City', 'level:City', 'scoring:most_reliable:enabled'],
+    ]
+    # A changed option is highlighted at once, also in the scenarios that kept it.
+    assert 'scoring:best_network:charts:service' in result['afterChange']
+    # A single scenario has nothing to compare.
+    assert result['single'] == []

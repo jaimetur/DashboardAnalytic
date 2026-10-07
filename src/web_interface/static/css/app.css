@@ -4130,6 +4130,10 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
 .scoring-report-dialog .scoring-report-check input { flex: none; width: auto; min-height: 0; margin: 0; }
 .scoring-report-dialog .scoring-report-check span { text-align: left; white-space: normal; }
 .scoring-report-dialog .scoring-report-scenario-head input { min-height: 2rem; padding: .3rem .6rem; }
+/* Settings whose value differs between the scenarios. */
+.scoring-report-dialog .scoring-report-check.is-scenario-diff { margin: 0 -.3rem; padding: .05rem .3rem; border-radius: 6px; background: #fff1c7; box-shadow: inset 0 0 0 1px #f0c35a; color: #7a4b00; }
+.scoring-report-dialog .scoring-report-check.is-scenario-diff span { font-weight: 700; }
+.scoring-report-picker.is-scenario-diff > summary, .scoring-report-dialog select.is-scenario-diff { border-color: #e0a526; background-color: #fff1c7; color: #7a4b00; font-weight: 700; }
 
 /* Workspace Config → Campaign Maps. */
 .campaign-maps { display: grid; gap: 1.4rem; margin-top: 1.2rem; }
