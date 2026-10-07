@@ -3897,10 +3897,14 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
 .vendor-mapping-select-all { padding: .2rem .7rem; border: 1px solid rgba(16, 49, 74, .25); border-radius: 999px; background: #f3f7fa; color: var(--brand); font: inherit; font-size: .76rem; font-weight: 700; box-shadow: none; cursor: pointer; }
 .vendor-mapping-rules { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .7rem; align-items: start; }
 .vendor-mapping-rules .vendor-mapping-rule { font-size: .86rem; }
+/* The Vendor rule takes two columns; Region and Cluster share the third. */
+.vendor-mapping-rules > .vendor-mapping-rule { grid-column: span 2; }
+.vendor-mapping-rules-side { display: grid; gap: .7rem; }
 .vendor-mapping-dialog[data-vendor-mapping-dialog] .vendor-mapping-fields { grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: start; }
 .vendor-mapping-dialog[data-vendor-mapping-dialog] .vendor-mapping-fields .form-note { padding: .45rem .6rem; font-size: .76rem; }
 @media (max-width: 1000px) {
   .vendor-mapping-cdr-groups, .vendor-mapping-rules, .vendor-mapping-dialog[data-vendor-mapping-dialog] .vendor-mapping-fields { grid-template-columns: minmax(0, 1fr); }
+  .vendor-mapping-rules > .vendor-mapping-rule { grid-column: auto; }
 }
 
 /* The administrative tabs sit just above the main module tabs, leaving room for the module stage labels. */

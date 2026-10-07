@@ -14,6 +14,7 @@
 #### 🐛 Bug fixes:
 
 #### 📚 Documentation:
+- The **Vendor mapping rule** card of Workspace describes the current rule: every Vodafone and Three Operator is mapped (other spellings, such as Vodafone SA or VF_SA, keep their own name as prefix), Operators without a Vendor get `<Operator> - All`, and the result fills `Operator_Vendor`, `Vendor` and `Vendor_Operator`.
 
 ---
 

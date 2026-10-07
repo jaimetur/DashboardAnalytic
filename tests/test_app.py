@@ -7673,6 +7673,7 @@ def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mappin
     assert 'data-loading-label="Mapping Vendors to CDR samples"' not in workspace.text
     assert 'Vendor mapping rule' in workspace.text
     assert 'The same non-empty Vendor at both endpoints returns' in workspace.text and '_Non-Ericsson_Mixed' in workspace.text
+    assert '<strong>Vodafone UK and Three UK</strong>' in workspace.text and 'result is <code>&lt;Operator&gt; - All</code>' in workspace.text
     live_status = client.get('/api/datasets/status').json()['datasets']
     assert next(dataset for dataset in live_status if dataset['id'] == 1)['can_map_vendors'] is True
 
