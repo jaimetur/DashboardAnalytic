@@ -4006,6 +4006,10 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
 .document-export-action.document-export-powerpoint:hover:not(:disabled) { background: linear-gradient(125deg, #9c3b22, #c95a33); color: #fff; }
 .document-export-action.document-export-word { background: linear-gradient(125deg, #1f4e96, #3b7bd4); }
 .document-export-action.document-export-word:hover:not(:disabled) { background: linear-gradient(125deg, #1a427f, #2f68b8); color: #fff; }
+/* PowerPoint or Word choice: the colours of the document export buttons. */
+.confirm-overlay.confirm-variant-document-format #confirm-accept { border-color: transparent; background: linear-gradient(125deg, #b7472a, #e0693f); color: #fff; }
+.confirm-overlay.confirm-variant-document-format #confirm-secondary { border-color: transparent; background: linear-gradient(125deg, #1f4e96, #3b7bd4); color: #fff; }
+.confirm-overlay.confirm-variant-document-format :is(#confirm-accept, #confirm-secondary):hover { filter: brightness(.92); }
 .document-export-action:disabled { opacity: .6; cursor: progress; }
 .icon-button, .action-link-preview { display: inline-flex; align-items: center; gap: .45rem; }
 /* Icon-only Preview buttons keep their hidden label out of the layout so the icon stays centred. */
@@ -4060,12 +4064,25 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
 .scoring-report-header h2 { margin: 0; color: #1450a8; font-size: 1.15rem; }
 .scoring-report-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
 .scoring-report-toolbar select { min-width: 13rem; }
+.scoring-report-dialog .scoring-report-tool { display: inline-flex; align-items: center; gap: .35rem; font-weight: 700; }
+.scoring-report-dialog .scoring-report-tool svg { width: 1rem; height: 1rem; flex: none; }
+.scoring-report-dialog .scoring-report-tool.is-save { border-color: #2f8a57; background: #2f8a57; color: #fff; }
+.scoring-report-dialog .scoring-report-tool.is-delete { border-color: #c62828; background: #c62828; color: #fff; }
+.scoring-report-dialog .scoring-report-tool:is(.is-export, .is-import) { border-color: #5b4fc7; background: #ece9fb; color: #3f33a8; }
+.scoring-report-dialog .scoring-report-tool:not(:disabled):hover { filter: brightness(.93); }
 .scoring-report-scenarios { display: grid; gap: .9rem; padding: 1rem 1.1rem .4rem; }
 .scoring-report-scenario { padding: .8rem; border: 1px solid #c9d7e3; border-radius: 12px; background: #fff; box-shadow: 0 1px 3px rgba(23, 35, 45, .08); }
 .scoring-report-scenario-head { display: flex; align-items: center; gap: .6rem; margin-bottom: .6rem; }
 .scoring-report-scenario-head input { flex: 1; min-width: 0; font-weight: 750; }
 .scoring-report-index { display: inline-grid; place-items: center; width: 1.8rem; height: 1.8rem; border-radius: 50%; background: #1450a8; color: #fff; }
 .scoring-report-actions { display: flex; gap: .3rem; }
+.scoring-report-dialog .scoring-report-action { display: inline-flex; align-items: center; gap: .3rem; font-weight: 700; }
+.scoring-report-dialog .scoring-report-action svg { width: 1rem; height: 1rem; flex: none; }
+.scoring-report-dialog .scoring-report-action.is-move { border-color: #9fb6c8; background: #eef3f7; color: #35556b; }
+.scoring-report-dialog .scoring-report-action.is-duplicate { border-color: #1f6fd1; background: #1f6fd1; color: #fff; }
+.scoring-report-dialog .scoring-report-action.is-remove { border-color: #c62828; background: #c62828; color: #fff; }
+.scoring-report-dialog .scoring-report-action:not(:disabled):hover { filter: brightness(.93); }
+.scoring-report-dialog .scoring-report-action:disabled { opacity: .45; cursor: not-allowed; }
 .scoring-report-filters { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr)); gap: .4rem; }
 .scoring-report-picker { position: relative; min-width: 0; max-width: 100%; }
 .scoring-report-picker > summary { overflow: hidden; padding: .35rem .55rem; border: 1px solid #b9c9d6; border-radius: 8px; background: #fff; cursor: pointer; font-size: .78rem; white-space: nowrap; text-overflow: ellipsis; }
@@ -4073,6 +4090,7 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
 .scoring-report-dialog .scoring-report-picker-search { position: sticky; top: 0; z-index: 1; width: 100%; min-height: 0; margin: 0 0 .2rem; padding: .35rem .55rem; border: 1px solid #b9c9d6; border-radius: 8px; background: #fff; font-size: .78rem; box-sizing: border-box; }
 .scoring-report-dialog .scoring-report-check[hidden] { display: none; }
 .scoring-report-dialog .scoring-report-all { padding-bottom: .2rem; border-bottom: 1px solid #e2e9ef; font-weight: 700; }
+.scoring-report-dialog .scoring-report-picker-toggle { width: 100%; min-height: 0; margin: 0 0 .2rem; padding: .4rem .55rem; border: 0; border-radius: 8px; background: rgba(11, 122, 117, 0.08); color: var(--brand); font-size: .76rem; font-weight: 700; text-align: left; box-shadow: none; cursor: pointer; }
 .scoring-report-levels { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .8rem; margin: .6rem 0; font-size: .82rem; }
 .scoring-report-label { font-weight: 750; color: #31545a; }
 .scoring-report-check { display: inline-flex; align-items: center; gap: .35rem; font-size: .8rem; white-space: nowrap; }

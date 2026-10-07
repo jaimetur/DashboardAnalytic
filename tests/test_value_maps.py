@@ -48,6 +48,11 @@ def test_vendor_operator_is_operator_vendor_the_other_way_round():
     values = mapper()
     assert values.map('vendor_operator', 'ERIC_Vodafone UK') == 'Ericsson_VF'
     assert values.operator_vendors(['Ericsson_VF']) == ['VF_Ericsson']
+    # Vendors with underscores keep their whole name (they are not split again at their last underscore).
+    mixed = ValueMapper({}, {'mixed': 'Non-Ericsson_Mixed', 'ericsson_mixed': 'Ericsson_Mixed'}, OPERATORS, VENDORS)
+    assert mixed.map('vendor_operator', 'Ericsson_Mixed_3') == 'Ericsson_Mixed_3'
+    assert mixed.values('vendor_operator', mixed.vendor_operators(['3_Ericsson_Mixed', '3_Non-Ericsson_Mixed'])) == [
+        'Ericsson_Mixed_3', 'Non-Ericsson_Mixed_3']
     # By Vendor, then Operator; Operators without a Vendor last, in the same "<Operator> - All" form.
     vendor_operators = ['EE - All', 'Nokia_3', 'Ericsson_3', 'Nokia_VF', 'Ericsson_VF', 'VF - All']
     assert sorted(vendor_operators, key=lambda value: dimension_order_key('Vendor_Operator', value, OPERATORS, VENDORS)) == [

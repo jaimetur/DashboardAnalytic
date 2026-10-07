@@ -192,7 +192,11 @@ def test_report_api_generates_scenarios_and_remembers_the_configuration(scoring_
     assert saved.status_code == 200, saved.text
     assert [item['name'] for item in client.get('/api/scoring/report-configurations').json()['configurations']] == ['Weekly']
 
-    response = client.post(f'/scoring/jobs/{job_id}/report/ppt', json={'configuration': configuration})
+    # The report uses the CDRs, NR Mode, methodology and GAP reference of the Calculation panel.
+    job = scoring_jobs.get_scoring_job(repository, job_id)
+    selection = {key: job[key] for key in ('dataset_ids', 'nr_mode', 'baseline_operator', 'scoring_profile_id')}
+    assert client.post('/api/scoring/report/ppt', json={'configuration': configuration}).status_code == 400
+    response = client.post('/api/scoring/report/ppt', json={'configuration': configuration, **selection})
     assert response.status_code == 200, response.text
     assert 'National' in response.headers['content-disposition'] and 'Leeds' in response.headers['content-disposition']
     titles = [title.split(' | ')[0] for title in _titles(response.content)]
@@ -209,7 +213,7 @@ def test_report_api_generates_scenarios_and_remembers_the_configuration(scoring_
     imported = client.post('/api/scoring/report-configurations/import',
                            files={'package': ('reports.json', json.dumps(exported), 'application/json')})
     assert [item['name'] for item in imported.json()['configurations']] == ['Weekly']
-    bad = client.post(f'/scoring/jobs/{job_id}/report/ppt', json={'configuration': {'scenarios': []}})
+    bad = client.post('/api/scoring/report/ppt', json={'configuration': {'scenarios': []}, **selection})
     assert bad.status_code == 400
 
 
@@ -239,3 +243,9 @@ def test_levels_with_a_single_value_are_left_out_of_report_scenarios(monkeypatch
     # The Campaign level splits nothing: the scenario is calculated again without it.
     assert calculated == [['Operator', 'City', 'Campaign'], ['Operator', 'City']]
     assert job['aggregation_levels'] == ['Operator', 'City']
+
+
+def test_report_configurations_remember_the_configuration_they_were_chosen_from():
+    scenario = {'name': 'National', 'scorings': {'best_network': {'enabled': True}}}
+    assert normalize_report_configuration({'scenarios': [scenario], 'name': ' Weekly '})['name'] == 'Weekly'
+    assert 'name' not in normalize_report_configuration({'scenarios': [scenario]})

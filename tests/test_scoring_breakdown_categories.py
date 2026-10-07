@@ -36,3 +36,18 @@ def test_breakdown_category_spans_its_kpis_and_subtotal(hierarchy):
         assert origin + cell.span_height - 1 == end
         assert cell.text and not cell.text.endswith(' total')
         assert str(cell.fill.fore_color.rgb) == str(table.cell(end, 1).fill.fore_color.rgb)
+
+
+def test_breakdown_slides_keep_up_to_fifty_bars_together():
+    from src.modules.scoring_exports import BREAKDOWN_BARS_PER_SLIDE, _breakdown_pages
+
+    categories = [f'C{index}' for index in range(1, 11)]
+    assert BREAKDOWN_BARS_PER_SLIDE == 50
+    # 10 categories × 5 operators = 50 bars: one slide.
+    assert _breakdown_pages(categories, 5) == [categories]
+    # 12 × 5 = 60 bars: two balanced slides of 30 bars.
+    twelve = [f'C{index}' for index in range(1, 13)]
+    assert _breakdown_pages(twelve, 5) == [twelve[:6], twelve[6:]]
+    # Not splitting keeps every category together; a category wider than the limit stays alone.
+    assert _breakdown_pages(twelve, 5, split=False) == [twelve]
+    assert _breakdown_pages(['A', 'B'], 60) == [['A'], ['B']]

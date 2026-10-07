@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+import re
 
 import src.DriveTestAnalyzer as app_module
 from src.modules import scoring_jobs
@@ -10,6 +10,14 @@ from tests.test_scoring_api import scoring_api
 
 DEFAULT_HIERARCHY = ['Operator', 'Vendor', 'Region', 'City', 'Campaign']
 CUSTOM_HIERARCHY = ['Campaign', 'Operator', 'Region', 'Vendor', 'City']
+# Cluster follows Region when a hierarchy does not place it.
+SAVED_HIERARCHY = ['Campaign', 'Operator', 'Region', 'Cluster', 'Vendor', 'City']
+
+
+def page_hierarchy(client) -> list[str]:
+    page = client.get('/scoring')
+    config = re.search(r'<script type="application/json" data-scoring-config>(.*?)</script>', page.text, re.DOTALL)
+    return json.loads(config.group(1))['aggregation_hierarchy']
 
 
 def test_scoring_hierarchy_controls_and_saved_job_order(scoring_api):
@@ -21,10 +29,9 @@ def test_scoring_hierarchy_controls_and_saved_job_order(scoring_api):
         positions = [page.text.index(f'{selector}="{level}"') if selector.endswith('filter')
                      else page.text.index(f'value="{level}" data-aggregation-level') for level in DEFAULT_HIERARCHY]
         assert positions == sorted(positions)
-    configuration = scoring_api['repository'].get_scoring_configuration()
-    configuration['aggregation_hierarchy'] = CUSTOM_HIERARCHY
-    saved = client.put('/api/workspace-config/scoring-configuration', json=configuration)
+    saved = client.put('/api/scoring/aggregation-hierarchy', json={'levels': CUSTOM_HIERARCHY})
     assert saved.status_code == 200, saved.text
+    assert saved.json()['aggregation_hierarchy'] == SAVED_HIERARCHY
     page = client.get('/scoring')
     positions = [page.text.index(f'data-scoring-context-filter="{level}"') for level in CUSTOM_HIERARCHY]
     assert positions == sorted(positions)
@@ -35,42 +42,26 @@ def test_scoring_hierarchy_controls_and_saved_job_order(scoring_api):
     job = response.json()['job']
     assert job['aggregation_levels'] == ['Campaign', 'Operator', 'Region']
     assert job['aggregation_contract_version'] == 2
-    assert job['aggregation_hierarchy'] == CUSTOM_HIERARCHY
+    assert job['aggregation_hierarchy'] == SAVED_HIERARCHY
+    assert client.put('/api/scoring/aggregation-hierarchy', json={'levels': DEFAULT_HIERARCHY}).status_code == 200
+    historical = scoring_jobs.get_scoring_job(scoring_api['repository'], job['id'])
+    assert historical['aggregation_hierarchy'] == SAVED_HIERARCHY
+
+
+def test_hierarchy_is_an_application_setting_outside_the_methodologies(scoring_api):
+    client, repository = scoring_api['client'], scoring_api['repository']
+    assert client.put('/api/scoring/aggregation-hierarchy', json={'levels': ['Operator', 'Operator']}).status_code == 400
+    assert client.put('/api/scoring/aggregation-hierarchy', json={'levels': CUSTOM_HIERARCHY}).status_code == 200
+    assert page_hierarchy(client) == SAVED_HIERARCHY
+    # Methodologies neither save nor export a hierarchy, and a hierarchy in an imported methodology is ignored.
+    configuration = repository.get_scoring_configuration()
+    assert 'aggregation_hierarchy' not in configuration
     configuration['aggregation_hierarchy'] = DEFAULT_HIERARCHY
     assert client.put('/api/workspace-config/scoring-configuration', json=configuration).status_code == 200
-    historical = scoring_jobs.get_scoring_job(scoring_api['repository'], job['id'])
-    assert historical['aggregation_hierarchy'] == CUSTOM_HIERARCHY
-    assert historical['configuration']['aggregation_hierarchy'] == CUSTOM_HIERARCHY
-
-
-def test_hierarchy_round_trip_json_zip_and_configuration_backup(scoring_api, tmp_path: Path):
-    client, repository = scoring_api['client'], scoring_api['repository']
-    configuration = repository.get_scoring_configuration()
-    configuration['aggregation_hierarchy'] = CUSTOM_HIERARCHY
-    assert client.put('/api/workspace-config/scoring-configuration', json=configuration).status_code == 200
+    assert 'aggregation_hierarchy' not in repository.get_scoring_configuration()
     document = client.get('/api/workspace-config/scoring-configuration/export').json()
-    assert document['profiles'][0]['configuration']['aggregation_hierarchy'] == CUSTOM_HIERARCHY
-    workspace = app_module.active_workspace
-    package = tmp_path / 'scoring-hierarchy.zip'
-    app_module._build_single_export_archive_file('scoring-configuration', package, [workspace.id])
-    manifest = app_module.read_import_manifest(package)
-    backup = app_module.create_recurring_database_backup({
-        'components': ['scoring_configuration'], 'workspace_ids': [workspace.id],
-        'backup_path': str(tmp_path), 'max_backups': 5,
-    })
-    default = dict(configuration, aggregation_hierarchy=DEFAULT_HIERARCHY)
-    repository.replace_scoring_configuration(default)
-    app_module._apply_import_archive(package, manifest, destination_workspace_ids=[workspace.id])
-    assert repository.get_scoring_configuration()['aggregation_hierarchy'] == CUSTOM_HIERARCHY
-    repository.replace_scoring_configuration(default)
-    app_module.restore_database_backup(backup, ['scoring_configuration'])
-    assert repository.get_scoring_configuration()['aggregation_hierarchy'] == CUSTOM_HIERARCHY
-    repository.replace_scoring_configuration(default)
-    imported = client.post('/api/workspace-config/scoring-configuration/import', files={
-        'package': ('hierarchy.json', json.dumps(document).encode(), 'application/json'),
-    })
-    assert imported.status_code == 200, imported.text
-    assert imported.json()['profiles'][0]['configuration']['aggregation_hierarchy'] == CUSTOM_HIERARCHY
+    assert 'aggregation_hierarchy' not in document['profiles'][0]['configuration']
+    assert page_hierarchy(client) == SAVED_HIERARCHY
 
 
 def test_reporting_follows_scoring_in_module_and_help_navigation(scoring_api):

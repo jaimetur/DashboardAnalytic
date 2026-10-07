@@ -193,11 +193,11 @@ def _scoring_chart_title(matrix: dict[str, Any], suffix: str) -> str:
     return f"{matrix.get('scoring_label') or SCORING_LABELS[BEST_NETWORK_SCORING]} Scoring {suffix}"
 
 
-# Titles stay on one line: the template title is 40pt and a character is about 0.41em wide in its
-# font (bold focus included) and 0.48em in the substitutes of viewers without it, so a longer title
-# is made smaller with the wider measure and never wraps.
+# Titles stay on one line: the template title is 40pt in Ericsson Hilda, where a character is about
+# 0.41em wide (bold focus included), and its placeholder is 27.5 cm wide. Only a title wider than
+# the placeholder at 40pt is made smaller, measured with a small margin over the font's width.
 TITLE_FONT_PT = 40
-TITLE_CHARACTER_EM = .48
+TITLE_CHARACTER_EM = .42
 TITLE_MIN_FONT_PT = 20
 
 
@@ -248,34 +248,27 @@ def _slide(presentation, title: str, subtitle: str):
 
 
 def _emphasize_title(paragraph) -> None:
-    """NetCheck-style title: the subject in regular weight and its focus ("per City") in bold."""
-    heading, separator, focus = paragraph.text.partition(' per ')
-    if not separator or ' — ' in paragraph.text:
-        return
+    """NetCheck-style title: the subject in regular weight and, in bold, what tells it from the slides next
+    to it: the part after " — " ("GAP Analysis — 3 vs EE", "Scoring Tables — Summary") or the focus
+    ("Best Network Scoring per City")."""
+    text = paragraph.text
+    if ' — ' in text:
+        heading, separator, focus = text.partition(' — ')
+        parts = ((heading + separator, False), (focus, True))
+    else:
+        heading, separator, focus = text.partition(' per ')
+        if not separator:
+            return
+        parts = ((heading + ' ', False), ('per ' + focus, True))
     properties = deepcopy(paragraph.runs[0]._r.rPr) if paragraph.runs else None
     paragraph.clear()
-    for text, bold in ((heading + ' ', False), ('per ' + focus, True)):
+    for text, bold in parts:
         run = paragraph.add_run()
         if properties is not None:
             run._r.insert(0, deepcopy(properties))
         run.text = text
         run.font.bold = bold
         run.font.color.rgb = RGBColor.from_string(TITLE_BLUE.lstrip('#'))
-
-
-def _accent_gap_comparison_title(slide) -> None:
-    paragraph = slide.shapes.title.text_frame.paragraphs[0]
-    heading, separator, comparison = paragraph.text.partition(' — ')
-    if not separator:
-        return
-    properties = deepcopy(paragraph.runs[0]._r.rPr) if paragraph.runs else None
-    paragraph.clear()
-    for text, color in ((heading + separator, TITLE_BLUE.lstrip('#')), (comparison, 'A34E16')):
-        run = paragraph.add_run()
-        if properties is not None:
-            run._r.insert(0, deepcopy(properties))
-        run.text = text
-        run.font.color.rgb = RGBColor.from_string(color)
 
 
 def _text(slide, text: str, top: float, *, left: float = .55, width: float = 12.2,
@@ -1099,13 +1092,28 @@ def _fill_series(series, color: str) -> None:
     series.format.line.width = Pt(.5)
 
 
+# A Breakdown chart keeps every category on one slide up to this number of bars; above it, the
+# categories are spread over as few slides as possible, each with a similar number of bars.
+BREAKDOWN_BARS_PER_SLIDE = 50
+
+
+def _breakdown_pages(categories: list, bars_per_category: int, split: bool = True) -> list[list]:
+    """The categories of each Breakdown slide: all on one slide unless they need more than
+    BREAKDOWN_BARS_PER_SLIDE bars (and splitting is allowed)."""
+    bars_per_category = max(1, bars_per_category)
+    if not split or len(categories) * bars_per_category <= BREAKDOWN_BARS_PER_SLIDE:
+        return [list(categories)] if categories else []
+    per_slide = max(1, BREAKDOWN_BARS_PER_SLIDE // bars_per_category)
+    slides = ceil(len(categories) / per_slide)
+    size = ceil(len(categories) / slides)
+    return [list(categories[start:start + size]) for start in range(0, len(categories), size)]
+
+
 def _charts(presentation, matrices: list[dict]) -> None:
     for matrix in matrices:
         categories = list(dict.fromkeys(row['category'] for row in matrix['rows']))
-        categories_per_slide = max(1, 20 // max(1, len(matrix['operators'])))
-        if matrix.get('_split_charts') is not False and len(categories) > categories_per_slide:
-            chunks = [categories[start:start + categories_per_slide]
-                      for start in range(0, len(categories), categories_per_slide)]
+        chunks = _breakdown_pages(categories, len(matrix['operators']), matrix.get('_split_charts') is not False)
+        if len(chunks) > 1:
             for index, chunk in enumerate(chunks, 1):
                 page = dict(matrix, rows=[row for row in matrix['rows'] if row['category'] in chunk],
                             _stacked_chart_page=f'Page {index} of {len(chunks)}')
@@ -1648,8 +1656,8 @@ def _hierarchy_chart(presentation, matrix: dict) -> None:
 def _hierarchy_category_comparison_chart(presentation, matrix: dict) -> None:
     """Show each category with readable hierarchy labels and one series per operator."""
     categories = list(dict.fromkeys(row['category'] for row in matrix['rows']))
-    category_groups = [categories] if matrix.get('_split_charts') is False else [[category] for category in categories]
-    for category_group in category_groups:
+    category_groups = _breakdown_pages(categories, len(matrix['hierarchy_columns']), matrix.get('_split_charts') is not False)
+    for page_index, category_group in enumerate(category_groups, 1):
         metrics = [row for row in matrix['rows'] if row['category'] in category_group]
         columns = [dict(column, comparison_category=category,
                         path=[{'level': 'Category', 'value': category}] + column['path'])
@@ -1659,7 +1667,10 @@ def _hierarchy_category_comparison_chart(presentation, matrix: dict) -> None:
                        for column in columns), default=0.0)
         operators = list(dict.fromkeys(column['operator'] for column in columns))
         slide = _slide(presentation, _scoring_chart_title(matrix, 'per Category (Breakdown)'), _chart_subtitle(matrix))
-        heading = category_group[0] if len(category_group) == 1 else 'All Categories'
+        heading = ('All Categories' if len(category_group) == len(categories)
+                   else category_group[0] if len(category_group) == 1 else ', '.join(category_group))
+        if len(category_groups) > 1:
+            heading = f'{heading} · Page {page_index} of {len(category_groups)}'
         _text(slide, heading, 1.42, left=.7, width=11.9, height=.25, size=12, color='#4A5B65')
         data = CategoryChartData()
         _add_hierarchy_chart_categories(data, columns)
@@ -2126,8 +2137,6 @@ def _hierarchy_gap_tables(presentation, matrices: list[dict], *,
         levels = matrix['hierarchy_levels']
         metrics = [row for row in matrix['rows'] if row.get('row_type') != 'category']
         slide = _slide(presentation, title, _chart_subtitle(matrix))
-        if not title.startswith('GAP Analysis — All vs '):
-            _accent_gap_comparison_title(slide)
         header_rows = len(levels) + 1
         row_count = header_rows + len(metrics) + 1
         table_height = 4.65
@@ -2248,7 +2257,6 @@ def _gap_tables(presentation, matrices: list[dict]) -> None:
             comparison = f'{_operator_label(matrix, matrix["operator"])} vs {_operator_label(matrix, matrix["baseline_operator"])}'
             subtitle = _chart_subtitle(matrix) + page_label
             slide = _slide(presentation, 'GAP Analysis — ' + comparison, subtitle)
-            _accent_gap_comparison_title(slide)
             if not rows:
                 _text(slide, 'No comparable KPI gaps are available. See the scoring matrix for missing values.', 1.8, height=1, size=16)
                 continue

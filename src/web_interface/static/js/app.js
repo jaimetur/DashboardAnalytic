@@ -97,8 +97,12 @@ function vendorOnlyFilterChoices(field, values, additionalOperators = []) {
     if (isVendorOperator) {
       const operator = operatorLabels.find((name) => label.toLocaleLowerCase().endsWith(`_${name.toLocaleLowerCase()}`));
       const vendor = operator ? label.slice(0, label.length - operator.length - 1) : label;
-      return [0, entryRank, position(vendorOrder, vendorCanonical, vendor),
-        operator ? position(operatorOrder, operatorAliases, operator) : operatorOrder.length];
+      // The mixed group of a Vendor follows that Vendor of each Operator (Ericsson_3, Ericsson_Mixed_3, Ericsson_VF);
+      // the other mixed groups (Non-Ericsson_Mixed) come last of all, after the Operators without a Vendor.
+      const base = (vendor.match(/^(.+?)[\s_]+Mixed$/i) || [])[1] || '';
+      const family = base && !/^non/i.test(base) && !/mixed|othervendor|allvendor/.test(identity(base)) ? base : '';
+      const operatorPosition = operator ? position(operatorOrder, operatorAliases, operator) : operatorOrder.length;
+      return [base && !family ? 2 : 0, family ? 0 : entryRank, position(vendorOrder, vendorCanonical, family || vendor), operatorPosition * 2 + (family ? 1 : 0)];
     }
     if (isOperatorVendor) {
       const operator = operatorLabels.find((name) => label.toLocaleLowerCase().startsWith(`${name.toLocaleLowerCase()}_`));
@@ -6706,7 +6710,7 @@ function importWarningDetails(payload) {
   if (kind === 'scoring-configuration') {
     return {
       title: 'Overwrite Scoring & GAP Analysis Configuration?',
-      message: 'Choose the destination workspaces next. The package data will replace their Scoring & GAP Analysis Configuration, including its available KPI methodology profiles, aggregation hierarchy and GAP KPI priorities.',
+      message: 'Choose the destination workspaces next. The package data will replace their Scoring & GAP Analysis Configuration, including its available KPI methodology profiles and GAP KPI priorities.',
     };
   }
   if (kind === 'auto-calculated-fields') {
@@ -7599,6 +7603,9 @@ function showConfirmDialog(message, options = {}) {
   const hasAlternatives = hasSecondary || hasTertiary;
   confirmOverlay.classList.toggle('confirm-wide-actions', hasAlternatives && options.wideActions === true);
   confirmOverlay.classList.toggle('confirm-four-actions', hasTertiary);
+  // A variant styles the buttons for one kind of choice, such as 'document-format' (PowerPoint or Word).
+  const variantClass = options.variant ? `confirm-variant-${options.variant}` : '';
+  if (variantClass) confirmOverlay.classList.add(variantClass);
   if (confirmSecondary) {
     confirmSecondary.textContent = options.secondaryLabel || 'Alternative';
     confirmSecondary.hidden = !hasSecondary;
@@ -7631,6 +7638,7 @@ function showConfirmDialog(message, options = {}) {
       confirmCancel.textContent = 'Cancel';
       confirmOverlay.classList.remove('confirm-wide-actions');
       confirmOverlay.classList.remove('confirm-four-actions');
+      if (variantClass) confirmOverlay.classList.remove(variantClass);
       if (confirmSecondary) {
         confirmSecondary.hidden = true;
         confirmSecondary.textContent = 'Alternative';

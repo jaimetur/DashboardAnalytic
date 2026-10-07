@@ -1189,3 +1189,29 @@ def test_lte_nr_summary_export_has_separate_technology_sections(client, tmp_path
     assert 'RF Quality · LTE' in headings and 'Overview · NR' in headings
     text = '\n'.join(paragraph.text for paragraph in document.paragraphs)
     assert 'NR thresholds: low coverage below -120.0 dBm RSRP' in text
+
+
+def test_processes_can_still_fork_after_a_worker_thread_loads_the_polygon_libraries():
+    """Polygons load PROJ in request threads; once such a thread exits, forks must still work."""
+    import subprocess
+    import sys
+
+    program = '''
+import os, threading, warnings
+warnings.simplefilter('ignore')
+import src.DriveTestAnalyzer
+def load_polygon_libraries():
+    import geopandas, pyproj
+    pyproj.CRS('EPSG:27700')
+worker = threading.Thread(target=load_polygon_libraries)
+worker.start()
+worker.join()
+pid = os.fork()
+if pid == 0:
+    os._exit(0)
+print(os.waitstatus_to_exitcode(os.waitpid(pid, 0)[1]))
+'''
+    completed = subprocess.run([sys.executable, '-c', program], capture_output=True, text=True,
+                               cwd=Path(__file__).resolve().parents[1], timeout=120)
+    assert completed.returncode == 0, completed.stderr[-2000:]
+    assert completed.stdout.strip().splitlines()[-1] == '0'

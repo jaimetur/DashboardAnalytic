@@ -158,3 +158,16 @@ def test_profile_bars_line_up_with_their_rows():
     bold = [run.text for run in note.text_frame.paragraphs[0].runs if run.font.bold]
     operator = slide.shapes.title.text_frame.text.split('\n')[0].removeprefix('KPI GAP Profile — ').split(' vs ')[0]
     assert bold[0] == operator and any('Best Network points' in text for text in bold)
+
+
+def test_kpi_gap_profile_slides_cover_every_selected_city():
+    from src.modules.scoring_insight_slides import MAX_PROFILE_SCOPES, _block_profiles
+
+    cities = ['Belfast', 'Bristol', 'Cardiff', 'Edinburgh', 'Leeds', 'London', 'Sheffield']
+    profiles = [{'operator': operator, 'reference': 'EE', 'context': {'city': city}}
+                for city in cities for operator in ('VF', 'EE', '3')]
+    kept = _block_profiles(profiles)
+    # One profile per city and compared operator; the reference has none.
+    assert [(item['context']['city'], item['operator']) for item in kept] == [
+        (city, operator) for city in cities for operator in ('VF', '3')]
+    assert MAX_PROFILE_SCOPES == 12

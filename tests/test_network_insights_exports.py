@@ -3,6 +3,7 @@ import zipfile
 
 from docx import Document
 from docx.oxml.ns import qn
+from lxml import etree
 from pptx import Presentation
 
 import io
@@ -57,9 +58,11 @@ def test_network_ppt_preserves_dashboard_template_and_fits_group_cells(tmp_path)
             assert all(run.font.size.pt >= 8 for cell in row.cells for run in cell.text_frame.paragraphs[0].runs)
         actual.extend([[cell.text for cell in row.cells] for row in list(table.rows)[1:]])
     assert actual == values
+    # The same XML content; python-pptx may write a part again with another XML declaration.
+    canonical = lambda xml: etree.tostring(etree.fromstring(xml), method='c14n')
     with zipfile.ZipFile(output) as generated, zipfile.ZipFile(TEMPLATE) as original:
-        assert generated.read('ppt/theme/theme1.xml') == original.read('ppt/theme/theme1.xml')
-        assert generated.read('ppt/slideMasters/slideMaster1.xml') == original.read('ppt/slideMasters/slideMaster1.xml')
+        for part in ('ppt/theme/theme1.xml', 'ppt/slideMasters/slideMaster1.xml'):
+            assert canonical(generated.read(part)) == canonical(original.read(part))
 
 
 def test_network_word_uses_landscape_fixed_single_line_tables(tmp_path):

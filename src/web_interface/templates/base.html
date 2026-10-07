@@ -16,6 +16,7 @@
   <!-- Campaign labels and order of the active workspace, for every page script. -->
   <script id="campaign-map" type="application/json">{{ campaign_map | default({}) | tojson }}</script>
   <script src="{{ static_path('js/campaign_labels.js') }}?v={{ asset_version('js/campaign_labels.js') }}"></script>
+  <script src="{{ static_path('js/operator_vendor_pairs.js') }}?v={{ asset_version('js/operator_vendor_pairs.js') }}"></script>
 </head>
 <body data-ignore-event-time-filtering="{{ 'true' if ignore_event_time_filtering else 'false' }}"{% if user %} data-authenticated-user="{{ user.username | lower }}" data-authenticated-role="{{ user.role }}" data-authenticated-session="{{ user.session_marker }}"{% endif %}{% if embedded_template_editor %} data-embedded-template-editor{% endif %}{% if embedded_preview %} data-embedded-dataset-preview{% endif %}>
   <div class="shell">

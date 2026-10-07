@@ -199,15 +199,32 @@ def test_results_controls_are_grouped_with_icons_and_unique_environment_heading(
     for nav in shortcut_navs:
         kpi_shortcut = nav.xpath('./a[@data-config-shortcut="kpi"]')[0]
         assert kpi_shortcut.get('href') == '/workspace-config#scoring-methodology-environments'
-        assert kpi_shortcut.xpath('./span')[0].text == 'Methodology Environments'
+        assert kpi_shortcut.xpath('./span')[0].text == 'Scoring Methodologies'
+        # The Calculation toolbar generates a report from the selection; the Results toolbar exports the selected job.
+        report = nav.xpath('following-sibling::div[@class="scoring-export-actions"]/a[@data-generate-report or @data-export-ppt]')
+        assert report and report[0].xpath('./span')[0].text in {
+            'Generate Scoring Report (PPT/Word)', 'Export Selected Scoring Report (PPT/Word)'}
         assert kpi_shortcut.xpath('./svg/path/@d') == [
             'M2 17h16M3 17V7h5v10M5 10h1M5 13h1M12 3l-2 14M16 3l2 14M14 4v2m0 3v2m0 3v2',
         ]
-        assert nav.xpath('./a[@data-config-shortcut="hierarchy"][@href="/workspace-config#scoring-aggregation-hierarchy"]')
-        gap_shortcut = nav.xpath('./a[@data-config-shortcut="gap"]')[0]
-        assert gap_shortcut.get('href') == '/workspace-config#scoring-gap-priority'
-        assert gap_shortcut.xpath('./span')[0].text == 'KPI Priorities'
-    header = re.search(r'<div class="scoring-results-head">(.*?)<div class="scoring-result-tabs"', template, re.S)
+        # Only Methodology stays here: KPI Priorities is gone and the hierarchy lives in Aggregation levels.
+        assert not nav.xpath('./a[@data-config-shortcut="gap"]')
+        assert not nav.xpath('./a[@data-config-shortcut="hierarchy"]')
+    labels = [link.xpath('./span')[0].text for link in tree.xpath('//div[@class="scoring-export-actions"]/a')]
+    assert labels == ['Generate Scoring Report (PPT/Word)', 'Export Selected Scoring Report (PPT/Word)']
+    # The former PowerPoint and Word buttons of the Calculation panel are gone.
+    assert 'data-scoring-document-export' not in template
+    hierarchy = tree.xpath('//a[@data-config-shortcut="hierarchy"]')
+    # It opens a dialog on this page to order the application's aggregation hierarchy.
+    assert len(hierarchy) == 1 and hierarchy[0].get('href') == '#' and hierarchy[0].get('data-scoring-hierarchy-open') is not None
+    dialog = tree.xpath('//dialog[@data-scoring-hierarchy-dialog]')[0]
+    assert 'shared by every workspace and methodology' in dialog.text_content()
+    assert not dialog.xpath('.//*[@data-scoring-hierarchy-methodology]')
+    # On the line of the Aggregation levels, at its right, with the note below the levels.
+    panel = hierarchy[0].xpath('ancestor::div[@class="scoring-levels-row"]/parent::div')[0]
+    assert panel.xpath('./div[@class="scoring-picker-head"]/strong')[0].text == 'Aggregation levels'
+    assert panel.xpath('./p[contains(@class, "scoring-levels-note")]')[0].text == 'Operator is required.'
+    header = re.search(r'<div class="scoring-results-head">(.*?)<div class="scoring-results-tabbed">', template, re.S)
     assert header
     markup = header.group(1)
     primary = re.search(r'<div class="scoring-results-primary">(.*?)</div>\s*<div class="scoring-results-tools">', markup, re.S)
@@ -217,15 +234,20 @@ def test_results_controls_are_grouped_with_icons_and_unique_environment_heading(
     right_markup = tools.group(1)
     assert left_markup.index('data-result-environment-control') < left_markup.index('data-scoring-results-value-row')
     assert left_markup.index('data-show-kpi-values') < left_markup.index('data-show-gap-values')
-    assert right_markup.index('data-config-shortcut="kpi"') < right_markup.index('data-export-scoring')
-    assert right_markup.index('data-config-shortcut="gap"') < right_markup.index('data-export-scoring')
-    for marker in (
-        'data-config-shortcut="kpi"', 'data-config-shortcut="hierarchy"', 'data-config-shortcut="gap"',
-        'data-export-scoring', 'data-export-gap', 'data-export-ppt',
-    ):
+    assert right_markup.index('data-config-shortcut="kpi"') < right_markup.index('data-export-ppt')
+    assert 'data-export-scoring' not in right_markup and 'data-export-gap' not in right_markup
+    for marker in ('data-config-shortcut="kpi"', 'data-export-ppt'):
         anchor = re.search(rf'<a\b[^>]*{re.escape(marker)}[^>]*>(.*?)</a>', right_markup, re.S)
         assert anchor and '<svg ' in anchor.group(1) and 'viewBox="0 0 20 20"' in anchor.group(1)
-    assert '.scoring-results-head { display: grid; grid-template-columns: minmax(0,1fr) auto;' in template
+    assert re.search(r'<a\b[^>]*data-export-ppt[^>]*>.*?<span>Export Selected Scoring Report \(PPT/Word\)</span></a>', right_markup, re.S)
+    # Export to CSV sits above the Scoring and GAP tables, in the GAP export colour.
+    for pane, marker in (('scoring', 'data-export-scoring'), ('gap', 'data-export-gap')):
+        toolbar = re.search(rf'<div class="scoring-table-export" data-table-export="{pane}">(.*?)</div>', template, re.S)
+        assert toolbar and marker in toolbar.group(1) and '<span>Export to CSV</span>' in toolbar.group(1)
+        assert template.index(f'data-result-pane="{pane}"') < template.index(f'data-table-export="{pane}"')
+    assert '.scoring-table-export a {' in template and 'linear-gradient(135deg,#1688bb,#145584)' in template
+    # The job selector takes the width the controls leave, not the width of the buttons row.
+    assert '.scoring-results-head { display: grid; grid-template-columns: fit-content(38rem) minmax(0,1fr);' in template
     assert '.scoring-results-tools { grid-column: 2; grid-row: 1; display: flex; align-items: center; justify-content: flex-end; flex-wrap: nowrap;' in template
     assert '.scoring-results-config-shortcuts svg, .scoring-export-actions svg {' in template
     assert 'fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;' in template
@@ -486,6 +508,8 @@ def test_scoring_chart_pairs_render_five_operator_two_category_views():
         'hierarchyPathValueLabel', 'hierarchyPathFullLabel', 'chartFitWidth', 'styleIncompleteValue',
     )
     payload = {'snippets': {name: _function_source(script, name) for name in names}}
+    # Zoom is attached in the browser; this test renders the charts only.
+    payload['snippets']['zoomStubs'] = 'function enableMapZoom() {}\nfunction enableContentZoom() {}'
     program = r"""
 const vm = require('node:vm');
 const payload = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
@@ -789,10 +813,12 @@ def test_operator_color_and_reference_markers_stay_on_operator_headers():
 def test_export_links_have_distinct_high_contrast_colors():
     template = SCORING_TEMPLATE.read_text(encoding='utf-8')
 
-    for marker in ('data-config-shortcut="kpi"', 'data-config-shortcut="hierarchy"',
-                   'data-config-shortcut="gap"', 'data-export-scoring', 'data-export-gap', 'data-export-ppt'):
-        assert re.search(rf'\.scoring-results-tools a\[{re.escape(marker)}\] \{{ background: linear-gradient\(', template)
+    assert re.search(r'\.scoring-results-tools a\[data-config-shortcut="kpi"\] \{ background: linear-gradient\(', template)
+    # Both report buttons share the PowerPoint export colour.
+    assert '.scoring-results-tools a:is([data-export-ppt], [data-generate-report]) { background: linear-gradient(' in template
     assert '.scoring-results-tools a[data-config-shortcut] { color: #fff;' in template
+    # Both Export to CSV buttons share the GAP export colour.
+    assert re.search(r'\.scoring-table-export a \{[^}]*background: linear-gradient\(135deg,#1688bb,#145584\)', template)
 
 
 def test_gap_value_toggle_defaults_off_and_only_changes_scoring_tables():
@@ -837,119 +863,83 @@ def test_gap_value_choice_is_sent_only_to_powerpoint_export():
     assert "const query = `table_mode=${encodeURIComponent(selectedTableMode())}&gap_layout=${encodeURIComponent(selectedGapLayout())}&environment=${encodeURIComponent(selectedEnvironment || 'all')}`;" in script
 
 
-def test_dense_powerpoint_export_choice_controls_split_parameter_and_cancel():
+def test_export_selected_scoring_report_only_asks_for_powerpoint_or_word():
     script = SCORING_SCRIPT.read_text(encoding='utf-8')
-    payload = {
-        'snippets': {
-            'environmentOf': _function_source(script, 'environmentOf'),
-            'pptHasDenseCharts': _function_source(script, 'pptHasDenseCharts'),
-            'generateScoringPpt': _function_source(script, 'generateScoringPpt'),
-        },
-    }
+    payload = {'snippets': {'exportSelectedScoringReport': _function_source(script, 'exportSelectedScoringReport')}}
     program = r"""
 const vm = require('node:vm');
 const payload = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
-const dense = environment => ({context: {environment}, hierarchy_columns: Array(21).fill({})});
-const atLimit = {context: {environment: 'DriveCity'}, hierarchy_columns: Array(20).fill({}),
-  rows: [{category: 'Only category'}]};
-const cases = [
-  {choice: 'confirm', environment: 'DriveCity', tables: [dense('DriveCity')]},
-  {choice: 'secondary', environment: 'DriveCity', tables: [dense('DriveCity')]},
-  {choice: 'cancel', environment: 'DriveCity', tables: [dense('DriveCity')]},
-  {choice: 'confirm', environment: 'all', tables: [dense('DriveCity'), dense('Walk')]},
-  {choice: 'no-dialog', environment: 'DriveCity', tables: [atLimit]},
-];
 const results = [];
 (async () => {
-  for (const testCase of cases) {
-    let assigned = null;
+  for (const choice of ['confirm', 'secondary', null]) {
+    let downloaded = null;
     let dialog = null;
     const context = {
-      currentResults: {views: {hierarchy_score_tables: testCase.tables}},
-      selectedEnvironment: testCase.environment,
-      showConfirmDialog: testCase.choice === 'no-dialog' ? undefined
-        : async (message, options) => { dialog = {message, ...options}; return testCase.choice; },
-      URL,
-      // The export downloads behind a progress dialog instead of navigating.
-      downloadScoringDocument: async url => { assigned = url; },
-      window: {location: {href: 'https://example.test/scoring/jobs/1/export/ppt?environment=DriveCity'}},
+      URL, window: {location: {href: 'https://example.test/scoring'}},
+      showConfirmDialog: async (message, options) => { dialog = {message, ...options}; return choice; },
+      downloadScoringDocument: async (url, label) => { downloaded = {url, label}; },
     };
     vm.createContext(context);
-    vm.runInContext(Object.values(payload.snippets).join('\n'), context);
-    await vm.runInContext("generateScoringPpt({href: window.location.href})", context);
-    results.push({
-      choice: testCase.choice,
-      assigned,
-      splitCharts: assigned && new URL(assigned).searchParams.get('split_charts'),
-      dialog,
-    });
+    vm.runInContext(Object.values(payload.snippets).join('\\n'), context);
+    await vm.runInContext("exportSelectedScoringReport({href: 'https://example.test/scoring/jobs/7/export/ppt?environment=all'})", context);
+    results.push({downloaded, dialog});
   }
   process.stdout.write(JSON.stringify(results));
 })().catch(error => { console.error(error); process.exitCode = 1; });
 """
-
     result = _run_node_json(program, payload)
-
-    assert [item['splitCharts'] for item in result] == ['true', 'false', None, 'true', 'false']
-    assert result[2]['assigned'] is None
-    assert result[4]['dialog'] is None
-    assert all(item['dialog']['title'] == 'PowerPoint chart layout' for item in result[:4])
-    assert all('more than 20 bars' in item['dialog']['message']
-               and 'more than 40 bars' in item['dialog']['message'] for item in result[:4])
-    assert all(item['dialog']['confirmLabel'] == 'Yes, split charts' for item in result[:4])
-    assert all(item['dialog']['secondaryLabel'] == 'No, keep all bars on one slide' for item in result[:4])
-    assert all(item['dialog']['cancelLabel'] == 'Cancel' for item in result[:4])
+    assert [item['downloaded'] for item in result] == [
+        {'url': 'https://example.test/scoring/jobs/7/export/ppt?environment=all', 'label': 'PowerPoint'},
+        {'url': 'https://example.test/scoring/jobs/7/export/word?environment=all', 'label': 'Word'},
+        None,
+    ]
+    dialog = result[0]['dialog']
+    assert (dialog['title'], dialog['confirmLabel'], dialog['secondaryLabel'], dialog['variant']) == (
+        'Export Selected Scoring Report', 'PowerPoint', 'Word', 'document-format')
 
 
-def test_dense_chart_thresholds_respect_best_network_and_category_bar_limits():
+def test_generate_scoring_report_uses_the_calculation_selection():
     script = SCORING_SCRIPT.read_text(encoding='utf-8')
-    payload = {
-        'snippets': {
-            'environmentOf': _function_source(script, 'environmentOf'),
-            'pptHasDenseCharts': _function_source(script, 'pptHasDenseCharts'),
-        },
-    }
+    payload = {'snippets': {'generateScoringReport': _function_source(script, 'generateScoringReport')}}
     program = r"""
 const vm = require('node:vm');
 const payload = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
-const context = {};
-vm.createContext(context);
-vm.runInContext(Object.values(payload.snippets).join('\n'), context);
-const hierarchy = count => ({
-  context: {environment: 'DriveCity'}, hierarchy_columns: Array(count).fill({}),
-  rows: [{category: 'Only category'}],
-});
-const simple = (categoryCount, environment = 'DriveCity') => ({
-  context: {environment}, operators: ['A', 'B', 'C', 'D'],
-  rows: Array.from({length: categoryCount}, (_value, index) => ({category: `Category ${index}`})),
-});
-const checks = [
-  ['best-network-20', {hierarchy_score_tables: [hierarchy(20)]}, 'DriveCity'],
-  ['best-network-21', {hierarchy_score_tables: [hierarchy(21)]}, 'DriveCity'],
-  ['category-40', {score_tables: [simple(10)]}, 'DriveCity'],
-  ['category-44', {score_tables: [simple(11)]}, 'DriveCity'],
-  ['selected-environment-excludes-dense', {score_tables: [simple(11, 'Walk')]}, 'DriveCity'],
-  ['all-environments-includes-dense', {score_tables: [simple(11, 'Walk')]}, 'all'],
-];
-const result = checks.map(([name, payload, environment]) => [
-  name, context.pptHasDenseCharts(payload, environment),
-]);
-process.stdout.write(JSON.stringify(result));
+const results = [];
+(async () => {
+  for (const datasetIds of [[], ['4', '5', '6']]) {
+    let request = null;
+    let warning = null;
+    const context = {
+      window: {ScoringReportEditor: {open: async () => ({action: 'word', configuration: {scenarios: [{name: 'National'}]}}),
+                                     defaultConfiguration: defaults => ({scenarios: [], defaults})}},
+      fetch: async () => ({ok: false}),
+      calculationPayload: () => ({dataset_ids: datasetIds, nr_mode: 'SA', baseline_operator: 'EE', scoring_profile_id: 'netcheck',
+                                  aggregation_levels: ['Operator', 'City'], context_filters: {City: ['Leeds']}}),
+      contextFilterDefinitions: [], contextFilterSelects: new Map(), mainCities: [], operatorGroups: [],
+      showInfoDialog: message => { warning = message; },
+      downloadScoringDocument: async (url, label, init) => { request = {url, label, body: JSON.parse(init.body)}; },
+    };
+    vm.createContext(context);
+    vm.runInContext(Object.values(payload.snippets).join('\\n'), context);
+    await vm.runInContext('generateScoringReport()', context);
+    results.push({request, warning});
+  }
+  process.stdout.write(JSON.stringify(results));
+})().catch(error => { console.error(error); process.exitCode = 1; });
 """
-
-    result = _run_node_json(program, payload)
-
-    assert result == [
-        ['best-network-20', False], ['best-network-21', True],
-        ['category-40', False], ['category-44', True],
-        ['selected-environment-excludes-dense', False], ['all-environments-includes-dense', True],
-    ]
+    without_cdrs, with_cdrs = _run_node_json(program, payload)
+    assert without_cdrs['request'] is None and 'Select the CDRs' in without_cdrs['warning']
+    assert with_cdrs['request']['url'] == '/api/scoring/report/word' and with_cdrs['request']['label'] == 'Word'
+    body = with_cdrs['request']['body']
+    assert (body['dataset_ids'], body['nr_mode'], body['baseline_operator'], body['scoring_profile_id']) == (
+        [4, 5, 6], 'SA', 'EE', 'netcheck')
+    assert body['configuration'] == {'scenarios': [{'name': 'National'}]}
 
 
 def test_scoring_tab_is_plural_and_subtotals_and_totals_share_category_background():
     template = SCORING_TEMPLATE.read_text(encoding='utf-8')
 
-    assert 'data-result-tab="scoring">Scoring Tables</button>' in template
+    assert re.search(r'data-result-tab="scoring"><svg [^>]*>.*?</svg><span>Scoring Tables</span></button>', template, re.S)
     assert 'data-result-tab="scoring">Scoring Table</button>' not in template
     assert re.search(
         r'\.scoring-comparison-table tbody tr\.scoring-category-subtotal > td,\s*'
@@ -1020,7 +1010,7 @@ process.stdout.write(JSON.stringify({
 
     assert template.count('data-warning-box') == 1
     assert 'data-environment-warning' not in template
-    assert template.index('data-warning-box') < template.index('data-result-tab=')
+    assert template.index('data-warning-box') < template.index('<div class="scoring-results-tabbed">')
     assert '.scoring-warning-maximum { font-size: 1.15em; font-weight: 800; }' in template
 
 
@@ -1589,3 +1579,76 @@ main().catch(error => { console.error(error); process.exitCode = 1; });
         'scoring_profile_id': 'profile-a', 'nr_mode': 'NSA', 'baseline_operator': 'Operator A',
         'context_filters': {'Region': ['North']},
     }
+
+
+def test_result_tabs_have_their_own_colours_on_a_panel_holding_every_result():
+    template = SCORING_TEMPLATE.read_text(encoding='utf-8')
+    from lxml import html
+    tabbed = html.fromstring(template).xpath('//div[@class="scoring-results-tabbed"]')[0]
+    tabs = tabbed.xpath('./div[@class="scoring-result-tabs"]/button')
+    assert [tab.get('data-result-tab') for tab in tabs] == ['charts', 'scoring', 'gap']
+    assert all(tab.xpath('./svg') for tab in tabs)
+    # The three result panes sit in one panel below the tabs.
+    panes = tabbed.xpath('./div[@class="scoring-result-panels"]/div[@role="tabpanel"]')
+    assert [pane.get('data-result-pane') for pane in panes] == ['charts', 'scoring', 'gap']
+    for tab, colour in (('scoring', '#0f766e'), ('gap', '#c2410c')):
+        assert f'.scoring-result-tab[data-result-tab="{tab}"] {{ --tab-color: {colour}; }}' in template
+        assert f'.scoring-results-tabbed:has([data-result-tab="{tab}"][aria-selected="true"]) {{ --result-accent: {colour}; }}' in template
+
+
+def test_kpi_gap_profile_and_points_lost_map_share_location_and_operators():
+    script = SCORING_SCRIPT.read_text(encoding='utf-8')
+    controls = script[script.index('  function gapInsightControls(pane, items) {'):script.index('  function renderKpiGapProfiles(')]
+    # One location, several operators: shared by both sections.
+    assert "insightSelect('gap-insight-scope'" in controls
+    assert "chip.dataset.gapInsightOperator = item.operator;" in controls
+    profiles = script[script.index('  function renderKpiGapProfiles('):script.index('  // Points lost per area:')]
+    assert 'gapInsightControls(pane, profiles)' in profiles and "inScope.filter(item => chosen.includes(item.operator))" in profiles
+    maps = script[script.index('  function renderPointsLossMaps('):script.index("  // One operator's map with the note")]
+    # The map adds the analysis per City, Region or Cluster; several operators show their maps side by side.
+    assert 'gapInsightControls(pane, entries.map(' in maps
+    # Per City, Per Region and Per Cluster are always listed; those without results are disabled.
+    assert "insightSelect('points-loss-view', allViews.map(item => [item, `Per ${item}`]), 'Analysis')" in maps
+    assert "option.disabled = !views.includes(option.value);" in maps
+    assert "grid.append(pointsLossMapCard(entry, payload, jobId, chosen.length > 1));" in maps
+    # Every operator is chosen by default.
+    assert "if (!chosen.length) chosen = [...names];" in controls
+    # Maps zoom with a dragged rectangle or the floating buttons, which hide as soon as the pointer leaves.
+    zoom = script[script.index('  function addZoomToolbar(box, zoomIn, zoomOut, reset) {'):]
+    assert "['+', 'Zoom in'" in zoom and "['−', 'Zoom out'" in zoom and "'Show the whole map'" in zoom
+    assert "box.addEventListener('pointerleave', () => toolbar.classList.remove('is-visible'));" in zoom
+    assert "svg.addEventListener('pointerdown'" in zoom and "svg.addEventListener('pointerup', finish)" in zoom
+    # The zoomed view keeps the map's proportions, so the map (and the table below it) keep their size.
+    assert "const ratio = box.width > 0 && box.height > 0 ? box.width / box.height : original[2] / original[3];" in zoom
+    # A wide chart that scrolls sideways is fitted to the visible width while zoomed, so the chosen area is centred there.
+    assert "const scroller = svg.closest('.scoring-chart-scroll');" in zoom and "fitToVisibleBox(!whole);" in zoom
+    # Toggling an operator keeps at least one; the GAP comparison follows a single operator and the reverse.
+    assert "if (!chosen.length) return;\n      insightSelections.set('gap-insight-operators', JSON.stringify(chosen));" in script
+    assert "if (hierarchyGapOperator.value.startsWith('operator:')) insightSelections.set('gap-insight-operators'" in script
+    # The selections are kept on reload and reset when the page is opened again.
+    assert "const insightSelections = new Map(pageReloaded ? Object.entries(restoredScoringViewState.insightSelections || {}) : []);" in script
+    assert "insight_selections: typeof insightSelections === 'undefined' ? {} : Object.fromEntries(insightSelections)," in script
+    program = _function_source(script, 'lossScopeLabel') + """
+const hierarchyDisplayValue = item => item.value;
+process.stdout.write(JSON.stringify([lossScopeLabel({city: 'London'}), lossScopeLabel({}), lossScopeLabel({region: 'North', campaign: '2026-Q2'})]));
+"""
+    assert _run_node_json(program, {}) == [
+        {'title': 'City', 'value': 'London'}, {'title': 'Scope', 'value': ''},
+        {'title': 'Region · Campaign', 'value': 'North · 2026-Q2'}]
+
+
+def test_charts_maps_and_tables_open_larger_and_charts_zoom():
+    script = SCORING_SCRIPT.read_text(encoding='utf-8')
+    template = SCORING_TEMPLATE.read_text(encoding='utf-8')
+    # Every Scoring chart zooms like the maps; the zoom buttons do not open the larger view.
+    assert "if (svg) enableMapZoom(card, svg);" in script
+    assert "if (!event.target.closest('.scoring-map-zoom')) openExpandedChart(card);" in script
+    # Maps and the tables of Scoring Tables and GAP Analysis open larger with a double click; charts and maps zoom there.
+    assert "root.addEventListener('dblclick', event => {" in script
+    assert "openExpandedView(map.querySelector('svg'), ['Points Lost Map', operator]" in script
+    assert "openExpandedView(table, heading?.textContent?.trim() || 'Scoring table', meta, table, 'Table');" in script
+    assert "if (copy.matches?.('svg')) enableMapZoom(holder, copy);" in script
+    # Content that is not one SVG (such as the location cards) zooms by scaling it inside its box.
+    assert "else enableContentZoom(card, scroll);" in script and "else if (!isTable) enableContentZoom(holder, holder);" in script
+    # The larger view takes the whole screen but 5% on each side.
+    assert 'width: 90vw; height: 90vh; height: 90dvh;' in template

@@ -1,6 +1,18 @@
 (() => {
   const root = document.querySelector('[data-scoring-workspace]');
   if (!root) return;
+  // Export to CSV sits above the Scoring and GAP tables; the panes are redrawn, so it is kept here
+  // and placed back at the top of its pane after each drawing.
+  const tableExports = {
+    scoring: root.querySelector('[data-table-export="scoring"]'),
+    gap: root.querySelector('[data-table-export="gap"]'),
+  };
+  const exportLinks = {
+    scoring: tableExports.scoring?.querySelector('[data-export-scoring]'),
+    gap: tableExports.gap?.querySelector('[data-export-gap]'),
+    // Export Report (PPT/Word) is in the Calculation and the Results toolbars.
+    ppt: [...root.querySelectorAll('[data-export-ppt]')],
+  };
 
   const chartTooltip = document.createElement('div');
   chartTooltip.className = 'scoring-chart-tooltip';
@@ -103,6 +115,9 @@
             value === 'all' || (typeof value === 'string' && value.startsWith('operator:')
               && value.length > 'operator:'.length)
           ))) : {},
+        insightSelections: stored.insight_selections && typeof stored.insight_selections === 'object'
+          && !Array.isArray(stored.insight_selections)
+          ? Object.fromEntries(Object.entries(stored.insight_selections).filter(([, value]) => typeof value === 'string')) : {},
       };
     } catch (_error) {
       return {};
@@ -125,6 +140,8 @@
         gap_layout: selectedGapLayout(),
         gap_comparisons: typeof gapComparisonSelections === 'undefined'
           ? {} : Object.fromEntries(gapComparisonSelections),
+        // Location, operators and analysis of the KPI GAP Profile and Points Lost Map, and the other insight selectors.
+        insight_selections: typeof insightSelections === 'undefined' ? {} : Object.fromEntries(insightSelections),
       }));
     } catch (_error) {
       // View state is optional when browser session storage is unavailable.
@@ -176,16 +193,11 @@
       && levels.every(level => catalogueKeyByLevel.has(level)) ? levels : null;
   };
   const scoringProfiles = (Array.isArray(scoringConfig.scoring_profiles) ? scoringConfig.scoring_profiles : [])
-    .filter(profile => profile && typeof profile.id === 'string' && typeof profile.name === 'string')
-    .map(profile => ({...profile, aggregation_hierarchy: validHierarchy(profile.aggregation_hierarchy)}))
-    .filter(profile => profile.aggregation_hierarchy);
+    .filter(profile => profile && typeof profile.id === 'string' && typeof profile.name === 'string');
   const scoringProfileById = new Map(scoringProfiles.map(profile => [profile.id, profile]));
   const activeProfileId = String(scoringConfig.active_profile_id || '');
-  const initialProfile = scoringProfileById.get(scoringProfileSelect?.value)
-    || scoringProfileById.get(activeProfileId);
-  const configuredHierarchy = validHierarchy(initialProfile?.aggregation_hierarchy)
-    || validHierarchy(scoringConfig.aggregation_hierarchy) || defaultHierarchy;
-  let currentHierarchy = [...configuredHierarchy];
+  // The aggregation hierarchy is an application setting shared by every workspace and methodology.
+  let currentHierarchy = [...(validHierarchy(scoringConfig.aggregation_hierarchy) || defaultHierarchy)];
   // Operator_Vendor and Vendor_Operator precede Vendor; they filter but are not aggregation levels.
   const filterCatalogueKeys = new Map([...catalogueKeyByLevel, ['Operator_Vendor', 'operator_vendors'], ['Vendor_Operator', 'vendor_operators']]);
   const contextFilterKeys = hierarchy => hierarchy.flatMap(key => (key === 'Vendor' ? ['Operator_Vendor', 'Vendor_Operator', 'Vendor'] : [key]));
@@ -266,6 +278,9 @@
     try { return performance.getEntriesByType('navigation')[0]?.type === 'reload'; } catch { return false; }
   })();
   let activeResultTab = (pageReloaded && restoredScoringViewState.resultTab) || 'charts';
+  // Insight selections (such as the KPI GAP Profile and Points Lost Map location and operators) are kept
+  // when the page is reloaded; opening the page again starts from the defaults.
+  const insightSelections = new Map(pageReloaded ? Object.entries(restoredScoringViewState.insightSelections || {}) : []);
   const showResultTab = name => {
     activeResultTab = name;
     for (const tab of root.querySelectorAll('[data-result-tab]')) {
@@ -437,7 +452,7 @@
     }
   }
 
-  function applyProfileHierarchy(hierarchy) {
+  function applyHierarchy(hierarchy) {
     const ordered = validHierarchy(hierarchy);
     if (!ordered) return false;
     const selected = new Set(aggregationInputs.filter(input => input.checked).map(input => input.value));
@@ -456,6 +471,76 @@
     updateSelection();
     return true;
   }
+
+  // The application's aggregation hierarchy is ordered in a dialog of this page.
+  const hierarchyDialog = root.querySelector('[data-scoring-hierarchy-dialog]');
+  const hierarchyList = hierarchyDialog?.querySelector('[data-scoring-hierarchy-list]');
+  const hierarchyStatus = hierarchyDialog?.querySelector('[data-scoring-hierarchy-status]');
+  const canEditHierarchy = hierarchyDialog?.dataset.canEdit === 'true';
+  let hierarchyDraft = [];
+
+  function renderHierarchyDraft() {
+    hierarchyList.replaceChildren(...hierarchyDraft.map((level, index) => {
+      const item = document.createElement('li');
+      const label = document.createElement('span');
+      label.textContent = level === 'Operator' ? 'Operator (required)' : level;
+      item.append(label);
+      if (canEditHierarchy) {
+        for (const [text, offset, title] of [['↑', -1, 'Move up'], ['↓', 1, 'Move down']]) {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.textContent = text;
+          button.title = title;
+          button.setAttribute('aria-label', `${title}: ${level}`);
+          button.disabled = index + offset < 0 || index + offset >= hierarchyDraft.length;
+          button.addEventListener('click', () => {
+            [hierarchyDraft[index], hierarchyDraft[index + offset]] = [hierarchyDraft[index + offset], hierarchyDraft[index]];
+            renderHierarchyDraft();
+          });
+          item.append(button);
+        }
+      }
+      return item;
+    }));
+  }
+
+  function openHierarchyDialog() {
+    if (!hierarchyDialog) return;
+    hierarchyDraft = [...currentHierarchy];
+    hierarchyStatus.textContent = '';
+    hierarchyStatus.dataset.tone = '';
+    renderHierarchyDraft();
+    hierarchyDialog.showModal();
+  }
+
+  hierarchyDialog?.querySelector('[data-scoring-hierarchy-cancel]')?.addEventListener('click', () => hierarchyDialog.close());
+  hierarchyDialog?.querySelector('[data-scoring-hierarchy-form]')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const save = hierarchyDialog.querySelector('[data-scoring-hierarchy-save]');
+    if (!save || !canEditHierarchy) return;
+    save.disabled = true;
+    try {
+      const response = await fetch('/api/scoring/aggregation-hierarchy', {
+        method: 'PUT', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({levels: hierarchyDraft}),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : 'The aggregation hierarchy could not be saved.');
+      applyHierarchy(validHierarchy(payload.aggregation_hierarchy) || [...hierarchyDraft]);
+      scheduleSelectionSave();
+      hierarchyDialog.close();
+      setMessage('Aggregation hierarchy saved.', 'success');
+    } catch (error) {
+      hierarchyStatus.textContent = error.message;
+      hierarchyStatus.dataset.tone = 'error';
+    } finally {
+      save.disabled = false;
+    }
+  });
+  root.querySelector('[data-scoring-hierarchy-open]')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    openHierarchyDialog();
+  });
 
   function selectedContextFilters() {
     return Object.fromEntries(contextFilterDefinitions.map(({key}) => {
@@ -572,10 +657,7 @@
 
       const profileId = String(selection?.scoring_profile_id || activeProfileId);
       const profile = scoringProfileById.get(profileId);
-      if (profile) {
-        scoringProfileSelect.value = profile.id;
-        applyProfileHierarchy(profile.aggregation_hierarchy);
-      }
+      if (profile) scoringProfileSelect.value = profile.id;
       const levels = new Set((Array.isArray(selection?.aggregation_levels) ? selection.aggregation_levels : []).map(String));
       for (const input of aggregationInputs) input.checked = input.value === 'Operator' || levels.has(input.value);
 
@@ -1201,8 +1283,8 @@
   }
 
   function setExportLinks(jobId, enabled) {
-    for (const [kind, selector] of [['scoring', '[data-export-scoring]'], ['gap', '[data-export-gap]'], ['ppt', '[data-export-ppt]']]) {
-      const link = root.querySelector(selector);
+    for (const [kind, link] of Object.entries(exportLinks).flatMap(([name, links]) => [links].flat().map(item => [name, item]))) {
+      if (!link) continue;
       link.hidden = false;
       link.setAttribute('aria-disabled', String(!enabled));
       link.tabIndex = enabled ? 0 : -1;
@@ -1215,48 +1297,23 @@
     }
   }
 
-  function pptHasDenseCharts(payload, environment) {
-    const views = payload?.views || payload?.scoring_views || payload || {};
-    const hierarchy = Array.isArray(views.hierarchy_score_tables) ? views.hierarchy_score_tables : [];
-    const tables = hierarchy.length ? hierarchy : (views.score_tables || []);
-    return tables.some(table => {
-      if (environment !== 'all' && environmentOf(table) !== environment) return false;
-      const bestNetworkBars = table.hierarchy_columns?.length || table.operators?.length || 0;
-      const categories = new Set((table.rows || []).map(row => row.category)).size;
-      const categoryBars = categories * bestNetworkBars;
-      return bestNetworkBars > 20 || categoryBars > 40;
-    });
-  }
-
-  async function generateScoringPpt(link) {
-    let splitCharts = false;
-    if (pptHasDenseCharts(currentResults, selectedEnvironment || 'all')) {
-      const message = 'Some Best Network charts contain more than 20 bars or Scoring charts contain more than 40 bars. Split charts across multiple slides?';
-      const choice = typeof showConfirmDialog === 'function'
-        ? await showConfirmDialog(message, {
-          title: 'PowerPoint chart layout', confirmLabel: 'Yes, split charts',
-          secondaryLabel: 'No, keep all bars on one slide', cancelLabel: 'Cancel', wideActions: true,
-        })
-        : (window.confirm(message) ? 'confirm' : 'secondary');
-      if (choice !== 'confirm' && choice !== 'secondary') return;
-      splitCharts = choice === 'confirm';
-    }
-    const url = new URL(link.href, window.location.href);
-    url.searchParams.set('split_charts', String(splitCharts));
-    await downloadScoringDocument(url.href, 'PowerPoint');
-  }
-
   // A progress dialog stays open while the document is generated, then the browser downloads it.
-  // The PowerPoint and Word exports open the report editor: one or more scenarios with
-  // their filters, aggregation and the content of each scoring, from the selected job's CDRs.
-  async function openScoringReport(format) {
-    const jobId = currentResultsJobId || selectedJobId;
-    if (!jobId || !window.ScoringReportEditor) return false;
+  // Generate Scoring Report (Calculation panel) opens the report editor: one or more scenarios with
+  // their filters, aggregation and the content of each scoring, from the CDRs, NR Mode, methodology
+  // and GAP reference selected in the Calculation panel.
+  async function generateScoringReport() {
+    if (!window.ScoringReportEditor) return;
+    const selection = calculationPayload();
+    if (!selection.dataset_ids.length) {
+      const message = 'Select the CDRs of the report in the Calculation panel.';
+      if (typeof showInfoDialog === 'function') showInfoDialog(message, {tone: 'warning', title: 'No CDRs selected'});
+      else window.alert(message);
+      return;
+    }
     const filterOptions = Object.fromEntries(contextFilterDefinitions.map(({key}) => [key,
       [...(contextFilterSelects.get(key)?.options || [])].filter(option => option.value && !option.disabled).map(option => option.value)]));
-    const job = selectedJob || currentResults?.job || {};
     const defaults = {
-      filters: job.context_filters || {}, levels: job.aggregation_levels || job.levels || ['Operator'],
+      filters: selection.context_filters || {}, levels: selection.aggregation_levels || ['Operator'],
       mainCities: false, operators: filterOptions.Operator || [],
     };
     let state = null;
@@ -1270,16 +1327,34 @@
       title: 'Scoring & GAP Analysis report',
       configuration: state?.last || window.ScoringReportEditor.defaultConfiguration(defaults),
       context: {filterOptions, operators: filterOptions.Operator || [], mainCities, defaults, operatorGroups},
-      actions: format === 'word' ? [['word', 'Generate Word'], ['ppt', 'Generate PowerPoint']]
-        : [['ppt', 'Generate PowerPoint'], ['word', 'Generate Word']],
+      actions: [['word', 'Generate Word'], ['ppt', 'Generate PowerPoint']],
     });
-    if (!choice) return true;
-    await downloadScoringDocument(`${exportBase}/${encodeURIComponent(jobId)}/report/${choice.action}`,
+    if (!choice) return;
+    await downloadScoringDocument(`/api/scoring/report/${choice.action}`,
       choice.action === 'word' ? 'Word' : 'PowerPoint', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({configuration: choice.configuration, split_charts: true}),
+        body: JSON.stringify({
+          configuration: choice.configuration, split_charts: true, dataset_ids: selection.dataset_ids.map(Number),
+          nr_mode: selection.nr_mode, baseline_operator: selection.baseline_operator,
+          scoring_profile_id: selection.scoring_profile_id || null,
+        }),
       });
-    return true;
+  }
+
+  // Export Selected Scoring Report (Results panel) exports the selected job as it was calculated (its
+  // CDRs, aggregation levels and filters): it only asks for PowerPoint or Word.
+  async function exportSelectedScoringReport(link) {
+    const message = 'Export the selected scoring report with the CDRs, aggregation levels and filters it was calculated with.';
+    const choice = typeof showConfirmDialog === 'function'
+      ? await showConfirmDialog(message, {
+        title: 'Export Selected Scoring Report', confirmLabel: 'PowerPoint', secondaryLabel: 'Word', cancelLabel: 'Cancel',
+        variant: 'document-format',
+      })
+      : 'confirm';
+    if (choice !== 'confirm' && choice !== 'secondary') return;
+    const url = new URL(link.href, window.location.href);
+    if (choice === 'secondary') url.pathname = url.pathname.replace(/\/export\/ppt$/, '/export/word');
+    await downloadScoringDocument(url.href, choice === 'secondary' ? 'Word' : 'PowerPoint');
   }
 
   async function downloadScoringDocument(href, label, init = {}) {
@@ -3698,7 +3773,13 @@
     scroll.className = 'scoring-chart-scroll';
     scroll.append(chart);
     card.append(heading, scroll);
-    card.addEventListener('dblclick', () => openExpandedChart(card));
+    // Charts zoom like the maps: a dragged rectangle or the floating buttons.
+    const svg = chart?.matches?.('svg[viewBox]') ? chart : chart?.querySelector?.('svg.scoring-chart-svg');
+    if (svg) enableMapZoom(card, svg);
+    else enableContentZoom(card, scroll);
+    card.addEventListener('dblclick', event => {
+      if (!event.target.closest('.scoring-map-zoom')) openExpandedChart(card);
+    });
     card.addEventListener('keydown', event => {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
@@ -4474,15 +4555,35 @@
   }
 
   function openExpandedChart(card) {
-    const sourceChart = card?.querySelector('.scoring-chart-svg');
-    if (!sourceChart || !chartOverlay || !expandedChart) return;
-    chartFocusReturn = card;
-    const title = card.querySelector('h4')?.textContent || 'Scoring chart';
+    if (!card) return;
+    // The chart itself, or the whole content of cards made of several parts (such as the location cards).
+    const source = card.querySelector('.scoring-chart-svg')
+      || card.querySelector('.scoring-chart-scroll')?.firstElementChild;
+    openExpandedView(source, card.querySelector('h4')?.textContent || 'Scoring chart',
+      card.dataset.chartMeta || (selectedEnvironment ? environmentLabel(selectedEnvironment) : ''), card);
+  }
+
+  // A larger view of one chart, map or table, taking the whole screen but 5% on each side.
+  // Charts and maps zoom there too.
+  function openExpandedView(source, title, meta, focusReturn, kind = 'Scoring chart') {
+    if (!source || !chartOverlay || !expandedChart) return;
+    chartFocusReturn = focusReturn || null;
+    const kindLabel = chartOverlay.querySelector('[data-scoring-chart-kind]');
+    if (kindLabel) kindLabel.textContent = kind;
     expandedChartTitle.textContent = title;
-    expandedChartMeta.textContent = card.dataset.chartMeta || (selectedEnvironment ? environmentLabel(selectedEnvironment) : '');
-    const chart = sourceChart.cloneNode(true);
-    chart.style.minWidth = '0';
-    expandedChart.replaceChildren(chart);
+    expandedChartMeta.textContent = meta || '';
+    const copy = source.cloneNode(true);
+    copy.querySelectorAll?.('.scoring-map-zoom, .scoring-map-zoom-rect').forEach(node => node.remove());
+    if (copy.style) copy.style.minWidth = '0';
+    const isTable = copy.matches?.('table, .scoring-insight-table-wrap, .table-wrap') || false;
+    expandedChart.classList.toggle('is-table', isTable);
+    // A new holder each time, so the zoom of an earlier view does not stay attached.
+    const holder = document.createElement('div');
+    holder.className = 'scoring-expanded-holder';
+    holder.append(copy);
+    expandedChart.replaceChildren(holder);
+    if (copy.matches?.('svg')) enableMapZoom(holder, copy);
+    else if (!isTable) enableContentZoom(holder, holder);
     previousBodyOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     chartOverlay.hidden = false;
@@ -4504,7 +4605,6 @@
   const insightVoiceColor = '#F2A900';
   const insightDataColor = '#0E6B66';
   const insightFallbackColors = ['#E60000', '#0B6E8F', '#7A3DB8', '#00A3AD', '#F2A900', '#4CA65A', '#8C564B', '#5B6770'];
-  const insightSelections = new Map();
 
   function insightItems(payload, kind, environment) {
     const items = payload?.views?.insights?.[kind];
@@ -4768,6 +4868,49 @@
     return wrapper;
   }
 
+  // The KPI GAP Profile and the Points Lost Map share their location (for example City: London) and
+  // operators: choosing them in one section chooses them in the other. Several operators can be chosen.
+  function gapInsightControls(pane, items) {
+    const scopeKey = item => JSON.stringify(item.context || {});
+    const controls = document.createElement('div');
+    controls.className = 'scoring-loss-controls';
+    const scopes = [...new Map(items.map(item => [scopeKey(item), item.context || {}])).entries()];
+    let scope = scopes[0]?.[0] ?? '{}';
+    if (scopes.length > 1) {
+      const {wrapper, value} = insightSelect('gap-insight-scope', scopes.map(([key, context]) => [key, lossScopeLabel(context).value]),
+        lossScopeLabel(scopes[0][1]).title);
+      controls.append(wrapper);
+      scope = value;
+    }
+    const inScope = items.filter(item => scopeKey(item) === scope);
+    const operators = [...new Map(inScope.map(item => [item.operator, item])).values()];
+    // By default every operator is chosen.
+    let stored = null;
+    try { stored = JSON.parse(insightSelections.get('gap-insight-operators') || 'null'); } catch (_error) { stored = null; }
+    const names = operators.map(item => item.operator);
+    let chosen = Array.isArray(stored) ? stored.filter(operator => names.includes(operator)) : [];
+    if (!chosen.length) chosen = [...names];
+    const group = document.createElement('div');
+    group.className = 'scoring-environment-filter scoring-loss-operators';
+    group.setAttribute('role', 'group');
+    group.setAttribute('aria-label', 'Operators');
+    group.append(document.createTextNode('Operators'));
+    for (const item of operators) {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'scoring-loss-operator';
+      chip.dataset.gapInsightOperator = item.operator;
+      chip.dataset.gapInsightOperators = JSON.stringify(chosen);
+      chip.setAttribute('aria-pressed', String(chosen.includes(item.operator)));
+      chip.textContent = item.label;
+      const color = safeHexColor(item.color);
+      if (color) chip.style.setProperty('--operator-color', color);
+      group.append(chip);
+    }
+    controls.append(group);
+    return {controls, inScope, chosen};
+  }
+
   function renderKpiGapProfiles(pane, payload, environment) {
     if (!environment) return;
     const profiles = insightItems(payload, 'kpi_gap_profiles', environment).filter(profile => profile.operator !== profile.reference);
@@ -4777,41 +4920,29 @@
     const heading = document.createElement('h4');
     heading.className = 'scoring-table-section-title';
     heading.textContent = 'KPI GAP Profile';
-    // The profile follows the operator chosen in the GAP comparison above it, and the reverse.
-    const comparisonSelect = pane.querySelector('[data-hierarchy-gap-operator], [data-gap-summary-operator]');
-    const compared = comparisonSelect?.value?.startsWith('operator:') ? comparisonSelect.value.slice('operator:'.length) : null;
-    const current = profiles[Number(insightSelections.get('gap-profile'))];
-    if (compared && current?.operator !== compared) {
-      const sameContext = profiles.findIndex(item => item.operator === compared
-        && JSON.stringify(item.context) === JSON.stringify(current?.context));
-      const firstMatch = profiles.findIndex(item => item.operator === compared);
-      const index = sameContext >= 0 ? sameContext : firstMatch;
-      if (index >= 0) insightSelections.set('gap-profile', String(index));
+    const {controls, inScope, chosen} = gapInsightControls(pane, profiles);
+    section.append(heading, controls);
+    for (const profile of inScope.filter(item => chosen.includes(item.operator))) {
+      const tables = document.createElement('div');
+      tables.className = 'scoring-insight-pair';
+      tables.append(profileTable(profile, 'maximum'), profileTable(profile, 'reference'));
+      const lost = profile.to_maximum.reduce((sum, row) => sum + (Number(row.total_gap_to_maximum) || 0), 0);
+      const gap = profile.to_reference.reduce((sum, row) => sum + (Number(row.total_gap_to_reference) || 0), 0);
+      const note = document.createElement('p');
+      note.className = 'scoring-insight-note';
+      const operator = document.createElement('strong');
+      operator.textContent = profile.label;
+      const reference = document.createElement('strong');
+      reference.textContent = profile.reference_label;
+      const lostText = document.createElement('strong');
+      lostText.textContent = `${insightNumber(lost, 2)} ${scoringLabel()} points`;
+      const gapText = document.createElement('strong');
+      gapText.textContent = `${gap >= 0 ? '+' : ''}${insightNumber(gap, 2)} points`;
+      note.append(operator, ' loses ', lostText, ' against the maximum; its GAP to ', reference, ' is ', gapText,
+        '. Gap to Maximum is the KPI maximum minus the points scored; Gap to the reference is the operator points minus the reference points.');
+      if (profile.underline_most_reliable) note.append(' Underlined KPIs are used for the Most Reliable Network scoring.');
+      section.append(tables, note);
     }
-    const {wrapper, value} = insightSelect('gap-profile', profiles.map((profile, index) => [
-      String(index), [`${profile.label} vs ${profile.reference_label}`, insightContextLabel(profile.context)].filter(Boolean).join(' · '),
-    ]), 'Comparison');
-    const profile = profiles[Number(value)] || profiles[0];
-    const tables = document.createElement('div');
-    tables.className = 'scoring-insight-pair';
-    tables.append(profileTable(profile, 'maximum'), profileTable(profile, 'reference'));
-    const lost = profile.to_maximum.reduce((sum, row) => sum + (Number(row.total_gap_to_maximum) || 0), 0);
-    const gap = profile.to_reference.reduce((sum, row) => sum + (Number(row.total_gap_to_reference) || 0), 0);
-    const note = document.createElement('p');
-    note.className = 'scoring-insight-note';
-    note.innerHTML = '';
-    const operator = document.createElement('strong');
-    operator.textContent = profile.label;
-    const reference = document.createElement('strong');
-    reference.textContent = profile.reference_label;
-    const lostText = document.createElement('strong');
-    lostText.textContent = `${insightNumber(lost, 2)} ${scoringLabel()} points`;
-    const gapText = document.createElement('strong');
-    gapText.textContent = `${gap >= 0 ? '+' : ''}${insightNumber(gap, 2)} points`;
-    note.append(operator, ' loses ', lostText, ' against the maximum; its GAP to ', reference, ' is ', gapText,
-      '. Gap to Maximum is the KPI maximum minus the points scored; Gap to the reference is the operator points minus the reference points.');
-    if (profile.underline_most_reliable) note.append(' Underlined KPIs are used for the Most Reliable Network scoring.');
-    section.append(heading, wrapper, tables, note);
     pane.append(section);
   }
 
@@ -4898,6 +5029,18 @@
     return svg;
   }
 
+  // The location (for example a City) of a points-lost map, shown in its selector.
+  function lossScopeLabel(context) {
+    const names = {vendor: 'Vendor', region: 'Region', cluster: 'Cluster', city: 'City', campaign: 'Campaign'};
+    const fields = Object.keys(names).filter(field => context?.[field] !== undefined && context?.[field] !== null && context?.[field] !== '');
+    return {
+      title: fields.map(field => names[field]).join(' · ') || 'Scope',
+      value: fields.map(field => (field === 'campaign' ? hierarchyDisplayValue({level: 'Campaign', value: context[field]}) : String(context[field]))).join(' · '),
+    };
+  }
+
+  // Points Lost Map: choose the location (for example London), the operators (their maps side by
+  // side) and the analysis per City, Region or Cluster.
   function renderPointsLossMaps(pane, payload, environment, jobId) {
     if (!environment || !jobId) return;
     const maps = insightItems(payload, 'points_loss_maps', environment).filter(item => !item.is_reference);
@@ -4915,18 +5058,34 @@
     const heading = document.createElement('h4');
     heading.className = 'scoring-table-section-title';
     heading.textContent = 'Points Lost Map';
-    // Like the KPI GAP Profile, the map follows the operator chosen in the GAP comparison.
-    const comparisonSelect = pane.querySelector('[data-hierarchy-gap-operator], [data-gap-summary-operator]');
-    const compared = comparisonSelect?.value?.startsWith('operator:') ? comparisonSelect.value.slice('operator:'.length) : null;
-    const current = entries[Number(insightSelections.get('points-loss'))];
-    if (compared && current?.ranking.operator !== compared) {
-      const index = entries.findIndex(entry => entry.ranking.operator === compared && entry.title === (current?.title || 'City'));
-      if (index >= 0) insightSelections.set('points-loss', String(index));
+    // Location and operators are shared with the KPI GAP Profile; then the analysis per City, Region or Cluster.
+    const {controls, inScope, chosen} = gapInsightControls(pane, entries.map(entry => ({...entry.ranking, entry})));
+    const allViews = ['City', 'Region', 'Cluster'];
+    const views = allViews.filter(view => inScope.some(item => item.entry.title === view));
+    const {wrapper: viewControl, value: storedView} = insightSelect('points-loss-view', allViews.map(item => [item, `Per ${item}`]), 'Analysis');
+    const view = views.includes(storedView) ? storedView : views[0];
+    const viewSelect = viewControl.querySelector('select');
+    viewSelect.value = view;
+    for (const option of viewSelect.options) {
+      option.disabled = !views.includes(option.value);
+      if (option.disabled) option.title = `These results have no ${option.value} data`;
     }
-    const {wrapper, value} = insightSelect('points-loss', entries.map((entry, index) => [String(index),
-      [`${entry.ranking.label} per ${entry.title}`, insightContextLabel(entry.ranking.context)].filter(Boolean).join(' · ')]), 'Map');
-    const entry = entries[Number(value)] || entries[0];
+    controls.append(viewControl);
+    const candidates = inScope.filter(item => item.entry.title === view).map(item => item.entry);
+    const grid = document.createElement('div');
+    grid.className = `scoring-loss-map-grid${chosen.length > 1 ? ' is-multiple' : ''}`;
+    for (const entry of candidates.filter(item => chosen.includes(item.ranking.operator))) {
+      grid.append(pointsLossMapCard(entry, payload, jobId, chosen.length > 1));
+    }
+    section.append(heading, controls, grid);
+    pane.append(section);
+  }
+
+  // One operator's map with the note and the ranking of the areas where it loses most points.
+  function pointsLossMapCard(entry, payload, jobId, compact) {
     const {ranking, layer} = entry;
+    const card = document.createElement('article');
+    card.className = 'scoring-loss-map-card';
     const bars = ranking.areas.filter(area => area.name !== 'Not specified').slice(0, maxLossBars);
     const listed = bars.reduce((sum, area) => sum + area.points, 0);
     const note = document.createElement('p');
@@ -4941,7 +5100,7 @@
       operator, ` loses its ${scoringLabel()} points (${insightNumber(ranking.total, 1)} in total). `, listedText,
       ` account for ${ranking.total ? Math.round(listed / ranking.total * 100) : 0}% of the points lost.`);
     const content = document.createElement('div');
-    content.className = 'scoring-loss-map';
+    content.className = `scoring-loss-map${compact ? ' is-compact' : ''}`;
     const mapBox = document.createElement('div');
     mapBox.className = 'scoring-loss-map-figure';
     mapBox.textContent = 'Loading map…';
@@ -4953,14 +5112,202 @@
     tableBox.className = 'scoring-insight-table-wrap';
     tableBox.append(table);
     content.append(mapBox, tableBox);
-    section.append(heading, wrapper, note, content);
-    pane.append(section);
+    card.append(note, content);
     const values = Object.fromEntries((layer || ranking).areas.filter(area => area.name !== 'Not specified')
       .map(area => [area.name, area.points]));
     (layer ? lossBoundaries(jobId, layer.field) : Promise.resolve({})).then(boundaries => {
       const svg = lossMapSvg(layer ? boundaries : {}, values, ranking.areas, payload?.views?.insights?.points_loss_background || []);
       mapBox.replaceChildren(svg);
+      enableMapZoom(mapBox, svg);
     });
+    return card;
+  }
+
+  // The floating zoom buttons (zoom in, zoom out, whole view), shown while the pointer is over the box.
+  function addZoomToolbar(box, zoomIn, zoomOut, reset) {
+    const toolbar = document.createElement('div');
+    toolbar.className = 'scoring-map-zoom';
+    for (const [text, title, action] of [['+', 'Zoom in', zoomIn], ['−', 'Zoom out', zoomOut], ['⤢', 'Show the whole map', reset]]) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = text;
+      button.title = title;
+      button.setAttribute('aria-label', title);
+      button.addEventListener('click', event => { event.stopPropagation(); action(); });
+      toolbar.append(button);
+    }
+    box.append(toolbar);
+    box.addEventListener('pointerenter', () => toolbar.classList.add('is-visible'));
+    box.addEventListener('pointerleave', () => toolbar.classList.remove('is-visible'));
+  }
+
+  // Zoom for content that is not one SVG (such as the location cards): the content is scaled inside
+  // its box, which keeps its size; a dragged rectangle or the floating buttons zoom it.
+  function enableContentZoom(box, viewport) {
+    const content = viewport.firstElementChild;
+    if (!content) return;
+    viewport.classList.add('scoring-content-zoom');
+    let scale = 1, x = 0, y = 0;
+    const render = () => {
+      content.style.transformOrigin = '0 0';
+      content.style.transform = scale === 1 ? '' : `translate(${x}px, ${y}px) scale(${scale})`;
+      viewport.classList.toggle('is-zoomed', scale !== 1);
+    };
+    const reset = () => { scale = 1; x = 0; y = 0; render(); };
+    // Keep the scaled content covering the box.
+    const clamp = () => {
+      x = Math.min(0, Math.max(viewport.clientWidth - content.offsetWidth * scale, x));
+      y = Math.min(0, Math.max(viewport.clientHeight - content.offsetHeight * scale, y));
+    };
+    const zoomTo = (next, centerX, centerY) => {
+      if (next <= 1.001) { reset(); return; }
+      scale = Math.min(8, next);
+      x = viewport.clientWidth / 2 - centerX * scale;
+      y = viewport.clientHeight / 2 - centerY * scale;
+      clamp();
+      render();
+    };
+    const center = () => [(viewport.clientWidth / 2 - x) / scale, (viewport.clientHeight / 2 - y) / scale];
+    addZoomToolbar(box, () => zoomTo(scale / .6, ...center()), () => zoomTo(scale * .6, ...center()), reset);
+    const local = event => {
+      const bounds = viewport.getBoundingClientRect();
+      return {x: event.clientX - bounds.left + viewport.scrollLeft, y: event.clientY - bounds.top + viewport.scrollTop};
+    };
+    let start = null;
+    let rectangle = null;
+    viewport.addEventListener('pointerdown', event => {
+      if (event.button !== 0 || event.target.closest('.scoring-map-zoom')) return;
+      start = local(event);
+      rectangle = document.createElement('div');
+      rectangle.className = 'scoring-content-zoom-rect';
+      viewport.append(rectangle);
+      viewport.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+    });
+    viewport.addEventListener('pointermove', event => {
+      if (!start || !rectangle) return;
+      const point = local(event);
+      Object.assign(rectangle.style, {
+        left: `${Math.min(start.x, point.x)}px`, top: `${Math.min(start.y, point.y)}px`,
+        width: `${Math.abs(point.x - start.x)}px`, height: `${Math.abs(point.y - start.y)}px`,
+      });
+    });
+    viewport.addEventListener('pointerup', event => {
+      if (!start || !rectangle) return;
+      const point = local(event);
+      rectangle.remove();
+      const width = Math.abs(point.x - start.x), height = Math.abs(point.y - start.y);
+      // A click (or a tiny rectangle) does not zoom; the rectangle is measured in unscaled content units.
+      if (width > viewport.clientWidth * .02 && height > viewport.clientHeight * .02) {
+        const left = (Math.min(start.x, point.x) - x) / scale, top = (Math.min(start.y, point.y) - y) / scale;
+        zoomTo(scale * Math.min(viewport.clientWidth / width, viewport.clientHeight / height),
+          left + width / scale / 2, top + height / scale / 2);
+      }
+      start = null;
+      rectangle = null;
+    });
+    viewport.addEventListener('pointercancel', () => { rectangle?.remove(); start = null; rectangle = null; });
+  }
+
+  // Map zoom: drag a rectangle with the mouse to zoom into it, or use the floating buttons shown
+  // while the pointer is over the map (they hide as soon as it leaves).
+  function enableMapZoom(box, svg) {
+    // The whole view, kept on the element so a copy (the enlarged view) zooms out to it as well.
+    svg.dataset.zoomOriginal ||= svg.getAttribute('viewBox') || '';
+    const original = svg.dataset.zoomOriginal.split(/\s+/).map(Number);
+    if (original.length !== 4 || original.some(value => !Number.isFinite(value))) return;
+    let view = (svg.getAttribute('viewBox') || '').split(/\s+/).map(Number);
+    if (view.length !== 4 || view.some(value => !Number.isFinite(value))) view = [...original];
+    // A wide chart that scrolls sideways is fitted to the visible width (keeping its height) while zoomed,
+    // so the chosen area is centred in what is visible; the whole view gives it back its size.
+    const scroller = svg.closest('.scoring-chart-scroll');
+    const fitToVisibleBox = zoomed => {
+      if (!scroller) return;
+      if (zoomed && !svg.dataset.zoomFitted) {
+        svg.dataset.zoomFitted = JSON.stringify([svg.style.width, svg.style.minWidth, svg.style.height]);
+        const height = svg.getBoundingClientRect().height;
+        Object.assign(svg.style, {width: `${scroller.clientWidth}px`, minWidth: '0', height: `${height}px`});
+        scroller.scrollLeft = 0;
+      } else if (!zoomed && svg.dataset.zoomFitted) {
+        const [width, minWidth, height] = JSON.parse(svg.dataset.zoomFitted);
+        Object.assign(svg.style, {width, minWidth, height});
+        delete svg.dataset.zoomFitted;
+      }
+    };
+    const apply = next => {
+      let [x, y, width, height] = next;
+      const whole = width >= original[2] && height >= original[3];
+      fitToVisibleBox(!whole);
+      // The zoomed view takes the proportions of the box the chart or map is shown in (so its size, and what
+      // follows it, do not change): the shorter side grows around the centre of the chosen area.
+      const box = svg.getBoundingClientRect();
+      const ratio = box.width > 0 && box.height > 0 ? box.width / box.height : original[2] / original[3];
+      if (width / height > ratio) {
+        const grown = width / ratio;
+        y -= (grown - height) / 2;
+        height = grown;
+      } else {
+        const grown = height * ratio;
+        x -= (grown - width) / 2;
+        width = grown;
+      }
+      // Never further out than the whole map, and always inside it.
+      if (width >= original[2] || height >= original[3]) {
+        view = [...original];
+        fitToVisibleBox(false);
+      } else {
+        x = Math.min(Math.max(x, original[0]), original[0] + original[2] - width);
+        y = Math.min(Math.max(y, original[1]), original[1] + original[3] - height);
+        view = [x, y, width, height];
+      }
+      svg.setAttribute('viewBox', view.map(value => value.toFixed(2)).join(' '));
+    };
+    const scaleAround = factor => {
+      const [x, y, width, height] = view;
+      const centerX = x + width / 2, centerY = y + height / 2;
+      apply([centerX - width * factor / 2, centerY - height * factor / 2, width * factor, height * factor]);
+    };
+    addZoomToolbar(box, () => scaleAround(.6), () => scaleAround(1 / .6), () => apply([...original]));
+    const toSvg = event => {
+      const point = svg.createSVGPoint();
+      point.x = event.clientX;
+      point.y = event.clientY;
+      const matrix = svg.getScreenCTM();
+      return matrix ? point.matrixTransform(matrix.inverse()) : point;
+    };
+    let start = null;
+    let rectangle = null;
+    svg.addEventListener('pointerdown', event => {
+      if (event.button !== 0) return;
+      start = toSvg(event);
+      rectangle = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rectangle.setAttribute('class', 'scoring-map-zoom-rect');
+      svg.append(rectangle);
+      svg.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+    });
+    svg.addEventListener('pointermove', event => {
+      if (!start || !rectangle) return;
+      const point = toSvg(event);
+      rectangle.setAttribute('x', Math.min(start.x, point.x));
+      rectangle.setAttribute('y', Math.min(start.y, point.y));
+      rectangle.setAttribute('width', Math.abs(point.x - start.x));
+      rectangle.setAttribute('height', Math.abs(point.y - start.y));
+    });
+    const finish = event => {
+      if (!start || !rectangle) return;
+      const point = toSvg(event);
+      rectangle.remove();
+      const width = Math.abs(point.x - start.x), height = Math.abs(point.y - start.y);
+      // A click (or a tiny rectangle) does not zoom.
+      if (width > view[2] * .02 && height > view[3] * .02) {
+        apply([Math.min(start.x, point.x), Math.min(start.y, point.y), width, height]);
+      }
+      start = null;
+      rectangle = null;
+    };
+    svg.addEventListener('pointerup', finish);
+    svg.addEventListener('pointercancel', () => { rectangle?.remove(); start = null; rectangle = null; });
   }
 
   function renderCampaignComparisons(pane, payload, environment) {
@@ -5271,6 +5618,7 @@
         renderTable(scoringPane, detailRows, 'This job has no scoring table rows.', {hideGapColumns: true});
       }
       renderCampaignComparisons(scoringPane, payload, effectiveEnvironment);
+      if (tableExports.scoring) scoringPane.prepend(tableExports.scoring);
     }
     if (shouldRenderPane('charts')) {
       chartPane.classList.remove('scoring-chart-grid');
@@ -5304,6 +5652,7 @@
       }
       renderKpiGapProfiles(gapPane, payload, effectiveEnvironment);
       renderPointsLossMaps(gapPane, payload, effectiveEnvironment, jobIdOf(job || payload.job || {}));
+      if (tableExports.gap) gapPane.prepend(tableExports.gap);
     }
     const warnings = payload.warnings ?? job?.warnings ?? [];
     renderWarnings(scoringCoverageWarnings({...payload, warnings}, job, effectiveEnvironment));
@@ -5560,7 +5909,7 @@
     if (event.target === scoringProfileSelect) {
       calculationMatchKey = '';
       const profile = scoringProfileById.get(scoringProfileSelect.value);
-      if (profile && applyProfileHierarchy(profile.aggregation_hierarchy)) {
+      if (profile) {
         setMessage(`This calculation will use ${profile.name}.`, 'success');
         scheduleSelectionSave();
       }
@@ -5578,17 +5927,7 @@
     }
     if (event.target.matches?.('[data-insight-select]') && currentResults) {
       insightSelections.set(event.target.dataset.insightSelect, event.target.value);
-      if (event.target.dataset.insightSelect === 'gap-profile') {
-        // Keep the GAP comparison on the operator of the chosen profile.
-        const profile = insightItems(activeScoringPayload(currentResults), 'kpi_gap_profiles', currentEffectiveEnvironment)
-          .filter(item => item.operator !== item.reference)[Number(event.target.value)];
-        const comparison = root.querySelector('[data-result-pane="gap"] [data-hierarchy-gap-operator], [data-result-pane="gap"] [data-gap-summary-operator]');
-        const key = comparison?.dataset.hierarchyGapStateKey || comparison?.dataset.gapSummaryStateKey;
-        if (profile && key && [...comparison.options].some(option => option.value === `operator:${profile.operator}`)) {
-          gapComparisonSelections.set(key, `operator:${profile.operator}`);
-          persistScoringViewState();
-        }
-      }
+      persistScoringViewState();
       renderResult(currentResults, selectedJob);
       return;
     }
@@ -5613,6 +5952,8 @@
     const gapSummaryOperator = event.target.closest('[data-gap-summary-operator]');
     if (gapSummaryOperator && currentResults) {
       gapComparisonSelections.set(gapSummaryOperator.dataset.gapSummaryStateKey, gapSummaryOperator.value);
+      // The KPI GAP Profile and the Points Lost Map follow the operator chosen here.
+      if (gapSummaryOperator.value.startsWith('operator:')) insightSelections.set('gap-insight-operators', JSON.stringify([gapSummaryOperator.value.slice('operator:'.length)]));
       persistScoringViewState();
       renderResult(currentResults, selectedJob);
       return;
@@ -5620,6 +5961,8 @@
     const hierarchyGapOperator = event.target.closest('[data-hierarchy-gap-operator]');
     if (hierarchyGapOperator && currentResults) {
       gapComparisonSelections.set(hierarchyGapOperator.dataset.hierarchyGapStateKey, hierarchyGapOperator.value);
+      // The KPI GAP Profile and the Points Lost Map follow the operator chosen here.
+      if (hierarchyGapOperator.value.startsWith('operator:')) insightSelections.set('gap-insight-operators', JSON.stringify([hierarchyGapOperator.value.slice('operator:'.length)]));
       persistScoringViewState();
       renderResult(currentResults, selectedJob);
       return;
@@ -5698,38 +6041,38 @@
       });
       return;
     }
-    const documentButton = event.target.closest('[data-scoring-document-export]');
-    if (documentButton) {
-      // Both buttons export the selected job, like the PowerPoint link of its results.
-      const pptLink = root.querySelector('[data-export-ppt]');
-      if (!pptLink || pptLink.getAttribute('aria-disabled') === 'true') {
-        const message = 'Select a completed scoring job to export it.';
-        if (typeof showInfoDialog === 'function') showInfoDialog(message, {tone: 'warning', title: 'No scoring job selected'});
-        else window.alert(message);
-        return;
+    const insightOperator = event.target.closest('[data-gap-insight-operator]');
+    if (insightOperator && currentResults) {
+      let chosen = [];
+      try { chosen = JSON.parse(insightOperator.dataset.gapInsightOperators || '[]'); } catch (_error) { chosen = []; }
+      const operator = insightOperator.dataset.gapInsightOperator;
+      chosen = chosen.includes(operator) ? chosen.filter(item => item !== operator) : [...chosen, operator];
+      if (!chosen.length) return;
+      insightSelections.set('gap-insight-operators', JSON.stringify(chosen));
+      persistScoringViewState();
+      // With one operator, the GAP comparison above follows it.
+      const comparison = root.querySelector('[data-result-pane="gap"] [data-hierarchy-gap-operator], [data-result-pane="gap"] [data-gap-summary-operator]');
+      const key = comparison?.dataset.hierarchyGapStateKey || comparison?.dataset.gapSummaryStateKey;
+      if (chosen.length === 1 && key && [...comparison.options].some(option => option.value === `operator:${chosen[0]}`)) {
+        gapComparisonSelections.set(key, `operator:${chosen[0]}`);
+        persistScoringViewState();
       }
-      if (window.ScoringReportEditor) {
-        void openScoringReport(documentButton.dataset.scoringDocumentExport === 'word' ? 'word' : 'ppt');
-        return;
-      }
-      if (documentButton.dataset.scoringDocumentExport === 'word') {
-        const url = new URL(pptLink.href, window.location.href);
-        url.pathname = url.pathname.replace(/\/export\/ppt$/, '/export/word');
-        void downloadScoringDocument(url.href, 'Word');
-      } else {
-        void generateScoringPpt(pptLink);
-      }
+      renderResult(currentResults, selectedJob, ['gap']);
       return;
     }
-    const exportLink = event.target.closest('.scoring-export-actions a');
+    if (event.target.closest('[data-generate-report]')) {
+      event.preventDefault();
+      void generateScoringReport();
+      return;
+    }
+    const exportLink = event.target.closest('.scoring-export-actions a, .scoring-table-export a');
     if (exportLink?.getAttribute('aria-disabled') === 'true') {
       event.preventDefault();
       return;
     }
     if (exportLink?.matches('[data-export-ppt]')) {
       event.preventDefault();
-      if (window.ScoringReportEditor) void openScoringReport('ppt');
-      else void generateScoringPpt(exportLink);
+      void exportSelectedScoringReport(exportLink);
       return;
     }
     const tab = event.target.closest('[data-result-tab]');
@@ -5748,6 +6091,25 @@
     if (currentResults) renderResult(currentResults, selectedJob, [name]);
   });
   expandedChartClose?.addEventListener('click', closeExpandedChart);
+  // Double-clicking a map or a table of the Scoring Tables and GAP Analysis tabs opens it larger.
+  root.addEventListener('dblclick', event => {
+    if (event.target.closest('.scoring-chart-card, .scoring-map-zoom, [data-scoring-chart-overlay]')) return;
+    const pane = event.target.closest('[data-result-pane]');
+    if (!pane) return;
+    const meta = selectedEnvironment ? environmentLabel(selectedEnvironment) : '';
+    const map = event.target.closest('.scoring-loss-map-figure');
+    if (map?.querySelector('svg')) {
+      const operator = map.closest('.scoring-loss-map-card')?.querySelector('.scoring-insight-note strong')?.textContent;
+      openExpandedView(map.querySelector('svg'), ['Points Lost Map', operator].filter(Boolean).join(' — '), meta, map, 'Map');
+      return;
+    }
+    const table = event.target.closest('table');
+    if (!table) return;
+    // The title of the section the table belongs to: the nearest heading above it in its tab.
+    const heading = table.closest('.scoring-insight-section')?.querySelector('h4')
+      || [...pane.querySelectorAll('h3, h4')].filter(item => item.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).at(-1);
+    openExpandedView(table, heading?.textContent?.trim() || 'Scoring table', meta, table, 'Table');
+  });
   chartOverlay?.addEventListener('click', event => {
     if (event.target === chartOverlay) closeExpandedChart();
   });

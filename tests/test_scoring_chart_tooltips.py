@@ -64,7 +64,8 @@ def test_category_legend_is_a_continuous_gray_band_inside_each_scoring_chart():
     assert "class: 'scoring-chart-category-legend-label'" in script
     assert 'const categories = [...new Set(selected.rows.map(row => String(row.category)))];' in script
     assert 'categoryLegendEntries,' in script
-    assert "expandedChart.replaceChildren(chart);" in script
+    # The enlarged view shows a copy of the chart (with its legend) and zooms it.
+    assert 'holder.append(copy);' in script and 'expandedChart.replaceChildren(holder);' in script
     assert '.scoring-chart-svg .scoring-chart-category-legend-title' in template
     assert '.scoring-chart-svg .scoring-chart-category-legend-label' in template
     assert '.scoring-chart-svg .scoring-chart-category-legend-segment' in template

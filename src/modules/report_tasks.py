@@ -148,6 +148,17 @@ def _formats(values: Any) -> list[str]:
     return selected or ['powerpoint']
 
 
+CDR_SELECTIONS = ('newest', 'all_complete')
+
+
+def _cdr_selection(entry: dict[str, Any], legacy: str) -> str:
+    """The automatic CDR choice used when no CDR is selected by hand: the newest complete set of Data,
+    Voice and Speech CDRs or every complete set, chosen again at each run. `legacy` is the choice of
+    jobs saved before it existed."""
+    value = entry.get('cdr_selection')
+    return value if value in CDR_SELECTIONS else legacy
+
+
 def _network_entries(value: Any) -> list[dict[str, Any]]:
     """Network Insights entries; jobs saved with a single selection keep it as one entry."""
     if isinstance(value, dict):
@@ -160,6 +171,8 @@ def _network_entry(entry: dict[str, Any]) -> dict[str, Any]:
     return {
         'label': str(entry.get('label') or '').strip()[:120],
         'formats': _formats(entry.get('formats')),
+        # Without CDRs chosen by hand, the CDRs of the automatic choice at each run.
+        'cdr_selection': _cdr_selection(entry, 'all_complete'),
         'selection': {
             'nr_mode': 'SA' if str(selection.get('nr_mode') or '').upper() == 'SA' else 'NSA',
             'datasets': _datasets_by_kind(selection.get('datasets')),
@@ -258,8 +271,9 @@ def normalize_definition(raw: Any) -> dict[str, Any]:
         'dataset_analysis': {
             'enabled': bool(dataset_analysis.get('enabled')),
             'formats': _formats(dataset_analysis.get('formats')),
-            # An empty list selects every ready CDR dataset at run time.
+            # An empty list uses, at run time, the CDRs of the automatic choice in each NR Mode.
             'dataset_ids': _ids(dataset_analysis.get('dataset_ids')),
+            'cdr_selection': _cdr_selection(dataset_analysis, 'all_complete'),
             # The same filters as Network Insights; empty filters include every value.
             'filters': {field: values for field in NETWORK_FILTER_FIELDS
                         if (values := _strings((dataset_analysis.get('filters') or {}).get(field)))},
@@ -294,8 +308,10 @@ def normalize_definition(raw: Any) -> dict[str, Any]:
             'scope': entry.get('scope') if entry.get('scope') in {'single', 'multivendor'} else 'single',
             'vendor_comparison': entry.get('vendor_comparison') if entry.get('vendor_comparison') in {'operator_vendor', 'vendor_only'} else 'operator_vendor',
             'datasets': _datasets_by_kind(entry.get('datasets')),
-            # Every ready Data, Voice and Speech CDR of the Dashboard's NR Mode at each run.
-            'all_datasets': bool(entry.get('all_datasets')),
+            # The CDRs of the automatic choice in the Dashboard's NR Mode at each run, or '' for the
+            # CDRs chosen by hand (or the Dashboard's own); jobs saved with every ready CDR use every complete set.
+            'cdr_selection': (entry['cdr_selection'] if entry.get('cdr_selection') in CDR_SELECTIONS
+                              else 'all_complete' if entry.get('all_datasets') else ''),
             'date_from': _date_text(entry.get('date_from')), 'date_to': _date_text(entry.get('date_to')),
             'filters': {str(field): _strings(values) for field, values in (entry.get('filters') or {}).items()
                         if str(field).strip() and _strings(values)} if isinstance(entry.get('filters'), dict) else {},
@@ -307,8 +323,10 @@ def normalize_definition(raw: Any) -> dict[str, Any]:
         definition['scoring'].append({
             'label': str(entry.get('label') or '').strip()[:120],
             'nr_mode': nr_mode if nr_mode in {'NSA', 'SA'} else 'NSA',
-            # An empty list uses the newest complete set of CDRs at run time.
+            # An empty list uses, at run time, the newest complete set of CDRs or, with
+            # cdr_selection 'all_complete', every CDR of a complete Data, Voice and Speech set.
             'dataset_ids': _ids(entry.get('dataset_ids')),
+            'cdr_selection': _cdr_selection(entry, 'newest'),
             'scoring_profile_id': str(entry.get('scoring_profile_id') or '').strip(),
             'baseline_operator': str(entry.get('baseline_operator') or 'EE').strip() or 'EE',
             # PowerPoint and/or Word; jobs saved before Word was offered keep PowerPoint.
@@ -859,8 +877,12 @@ def install_report_task_routes(core: Any) -> None:
     def dataset_names(task_repository) -> dict[int, str]:
         return {int(row['id']): str(row['file_name']) for row in task_repository.list_datasets()}
 
-    def generate_dataset_analysis(section, folder, stamp, username, names) -> list[dict[str, Any]]:
+    def generate_dataset_analysis(section, folder, stamp, username, names, task_repository) -> list[dict[str, Any]]:
         artifacts = []
+        try:
+            dataset_ids = section['dataset_ids'] or automatic_cdrs_every_mode(task_repository, section.get('cdr_selection') or 'all_complete')
+        except (RuntimeError, ValueError) as exc:
+            return [failed_artifact('dataset_analysis', 'CDR Analysis', exc)]
         for export_kind in section['formats']:
             suffix = 'docx' if export_kind == 'word' else 'pptx'
             title = f"CDR Analysis ({FORMAT_LABELS[export_kind]})"
@@ -869,7 +891,7 @@ def install_report_task_routes(core: Any) -> None:
                 filters = {CDR_ANALYSIS_FILTER_DIMENSIONS[field]: values for field, values in (section.get('filters') or {}).items()
                            if field in CDR_ANALYSIS_FILTER_DIMENSIONS}
                 _path, reports, errors = core.write_dataset_summary(
-                    section['dataset_ids'], export_kind, destination, username, filters=filters,
+                    dataset_ids, export_kind, destination, username, filters=filters,
                     metrics=section.get('metrics') or None, aggregation=section.get('aggregation') or 'all',
                     cdf_grouping=section.get('cdf_grouping') or 'operator',
                 )
@@ -887,17 +909,24 @@ def install_report_task_routes(core: Any) -> None:
                 artifacts.append(failed_artifact('dataset_analysis', title, exc))
         return artifacts
 
-    def generate_network_insights(section, folder, stamp, index=1) -> list[dict[str, Any]]:
+    def generate_network_insights(section, folder, stamp, index=1, task_repository=None) -> list[dict[str, Any]]:
         from src.modules.network_insights_export import summary_selection_lines
 
         artifacts = []
         name = network_entry_name(section)
+        selection = section['selection']
+        if not any(selection.get('datasets', {}).values()) and task_repository is not None:
+            try:
+                selection = {**selection, 'datasets': cdrs_by_kind(task_repository, automatic_cdrs(
+                    task_repository, selection['nr_mode'], section.get('cdr_selection') or 'all_complete'))}
+            except (RuntimeError, ValueError) as exc:
+                return [failed_artifact('network_insights', f'Network Insights · {name}', exc)]
         for export_kind in section['formats']:
             suffix = 'docx' if export_kind == 'word' else 'pptx'
             title = f"Network Insights · {name} ({FORMAT_LABELS[export_kind]})"
             destination = artifact_path(folder, stamp, 'Network Insights', name, f'.{suffix}')
             try:
-                description = core.write_network_insights_summary(section['selection'], export_kind, destination)
+                description = core.write_network_insights_summary(selection, export_kind, destination)
                 artifacts.append(ready_artifact('network_insights', title, destination, summary_selection_lines(description)))
             except Exception as exc:
                 artifacts.append(failed_artifact('network_insights', title, getattr(exc, 'detail', exc)))
@@ -931,16 +960,9 @@ def install_report_task_routes(core: Any) -> None:
     def dashboard_definition(stored: dict[str, Any], entry: dict[str, Any], task_repository=None) -> dict[str, Any]:
         """The saved Dashboard with the artifact's Scope, CDRs, dates and filters."""
         definition = dict(stored)
-        if entry.get('all_datasets') and task_repository is not None:
+        if entry.get('cdr_selection') in CDR_SELECTIONS and task_repository is not None:
             nr_mode = 'SA' if str(stored.get('technology') or 'nsa').upper() == 'SA' else 'NSA'
-            entry = {**entry, 'datasets': {
-                kind: ids for kind in ('data', 'voice', 'speech')
-                if (ids := sorted((int(row['id']) for row in task_repository.list_datasets()
-                                   if row['status'] == 'ready' and str(row['dataset_kind']) == kind
-                                   and core.dataset_nr_mode(row['dataset_kind'], row['nr_mode'], row['file_name']) == nr_mode), reverse=True))
-            }}
-            if not entry['datasets']:
-                raise RuntimeError(f'There are no ready {nr_mode} CDRs.')
+            entry = {**entry, 'datasets': cdrs_by_kind(task_repository, automatic_cdrs(task_repository, nr_mode, entry['cdr_selection']))}
         definition.update({
             'scope': entry['scope'], 'vendor_comparison': entry['vendor_comparison'],
             'date_from': entry.get('date_from') or 'Oldest', 'date_to': entry.get('date_to') or 'Newest',
@@ -975,18 +997,56 @@ def install_report_task_routes(core: Any) -> None:
                 f"GAP reference: {job.get('baseline_operator') or entry.get('baseline_operator') or 'EE'}",
                 f"Report scenarios: {', '.join(scenarios) or '—'}"]
 
+    def automatic_cdrs(task_repository, nr_mode: str, selection: str) -> list[int]:
+        """The CDRs an automatic choice selects now: the newest complete set or every complete set of the NR Mode."""
+        if selection == 'all_complete':
+            return core.select_all_complete_cdrs(task_repository, nr_mode)
+        candidates = [row for row in task_repository.list_datasets()
+                      if row['status'] == 'ready' and str(row['dataset_kind']) in {'data', 'voice', 'speech'}
+                      and core.dataset_nr_mode(row['dataset_kind'], row['nr_mode'], row['file_name']) == nr_mode]
+        if not candidates:
+            raise RuntimeError(f"There are no ready {nr_mode} CDRs.")
+        newest = max(candidates, key=lambda row: int(row['id']))
+        return core.select_latest_companion_cdrs(task_repository, int(newest['id']))
+
+    def automatic_cdrs_every_mode(task_repository, selection: str) -> list[int]:
+        """The CDRs an automatic choice selects now in NSA and in SA, for artifacts without an NR Mode."""
+        chosen: list[int] = []
+        errors = []
+        for nr_mode in ('NSA', 'SA'):
+            try:
+                chosen.extend(automatic_cdrs(task_repository, nr_mode, selection))
+            except (RuntimeError, ValueError) as exc:
+                errors.append(str(exc))
+        if not chosen:
+            raise RuntimeError(' '.join(errors) or 'There are no complete sets of Data, Voice and Speech CDRs.')
+        return chosen
+
+    def cdrs_by_kind(task_repository, dataset_ids: list[int]) -> dict[str, list[int]]:
+        kinds = {int(row['id']): str(row['dataset_kind']) for row in task_repository.list_datasets()}
+        grouped: dict[str, list[int]] = {}
+        for dataset_id in dataset_ids:
+            if kinds.get(int(dataset_id)) in {'data', 'voice', 'speech'}:
+                grouped.setdefault(kinds[int(dataset_id)], []).append(int(dataset_id))
+        return grouped
+
+    def automatic_cdr_preview(task_repository) -> dict[str, dict[str, list[int]]]:
+        """The CDRs each automatic choice would select now, per NR Mode (none when it cannot choose)."""
+        preview: dict[str, dict[str, list[int]]] = {}
+        for nr_mode in ('NSA', 'SA'):
+            preview[nr_mode] = {}
+            for selection in ('newest', 'all_complete'):
+                try:
+                    preview[nr_mode][selection] = [int(value) for value in automatic_cdrs(task_repository, nr_mode, selection)]
+                except (RuntimeError, ValueError):
+                    preview[nr_mode][selection] = []
+        return preview
+
     def generate_scoring(entry, task_repository, folder, stamp, username, names, run_id) -> dict[str, Any]:
         title = f"Scoring · {scoring_entry_name(entry)}"
         try:
-            dataset_ids = entry.get('dataset_ids') or []
-            if not dataset_ids:
-                candidates = [row for row in task_repository.list_datasets()
-                              if row['status'] == 'ready' and str(row['dataset_kind']) in {'data', 'voice', 'speech'}
-                              and core.dataset_nr_mode(row['dataset_kind'], row['nr_mode'], row['file_name']) == entry['nr_mode']]
-                if not candidates:
-                    raise RuntimeError(f"There are no ready {entry['nr_mode']} CDRs.")
-                newest = max(candidates, key=lambda row: int(row['id']))
-                dataset_ids = core.select_latest_companion_cdrs(task_repository, int(newest['id']))
+            dataset_ids = entry.get('dataset_ids') or automatic_cdrs(
+                task_repository, entry['nr_mode'], entry.get('cdr_selection') or 'newest')
             report = entry['report']
             update_run(task_repository, run_id, message=f'Calculating {title}')
             base = {'dataset_ids': dataset_ids, 'nr_mode': entry['nr_mode'],
@@ -1051,9 +1111,9 @@ def install_report_task_routes(core: Any) -> None:
                              for module, permitted in allowed.items() if not permitted and module in MODULE_FEATURES},
                           'modules': {key: value for key, value in (definition.get('modules') or {}).items() if allowed.get(key)}}
             if definition.get('dataset_analysis', {}).get('enabled'):
-                steps.append(('CDR Analysis', lambda: generate_dataset_analysis(definition['dataset_analysis'], folder, stamp, user.username, names)))
+                steps.append(('CDR Analysis', lambda: generate_dataset_analysis(definition['dataset_analysis'], folder, stamp, user.username, names, task_repository)))
             for index, entry in enumerate(definition.get('network_insights') or [], start=1):
-                steps.append(('Network Insights', lambda entry=entry, index=index: generate_network_insights(entry, folder, stamp, index)))
+                steps.append(('Network Insights', lambda entry=entry, index=index: generate_network_insights(entry, folder, stamp, index, task_repository)))
             for entry in definition.get('dashboards') or []:
                 steps.append(('Dashboard', lambda entry=entry: [generate_dashboard(entry, task_repository, folder, stamp, user, run_id)]))
             for entry in definition.get('scoring') or []:
@@ -1263,6 +1323,8 @@ def install_report_task_routes(core: Any) -> None:
             'operator_groups': [{'canonical': group['canonical'], 'aliases': group['aliases']}
                                 for group in task_repository.list_operator_mapping_groups()],
             'methodologies': methodologies, 'active_methodology': active_methodology,
+            # The CDRs the automatic choices select now, per NR Mode (they choose again at each run).
+            'automatic_cdrs': automatic_cdr_preview(task_repository),
             'values': mapped(catalogue),
             # The filter values of each CDR, so every entry lists only the values of the CDRs it uses.
             'values_by_dataset': {

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import csv
 from copy import deepcopy
 from io import BytesIO
@@ -18,7 +20,7 @@ import src.DriveTestAnalyzer as app_module
 from src.modules import scoring_jobs
 from src.modules.repository import Repository, local_now_iso
 from tests.scoring_fixtures import scoring_configuration
-from src.modules.scoring_config import complete_aggregation_hierarchy
+from src.modules.scoring_config import load_aggregation_hierarchy
 
 
 def _login(client) -> None:
@@ -144,8 +146,8 @@ def test_scoring_page_requires_login_and_renders_workspace_controls(client, scor
     assert 'Operator is required' in page.text
     assert 'data-calculate-scoring' in page.text
     assert 'data-recalculate-scoring' in page.text
-    assert 'data-result-tab="scoring">Scoring Tables</button>' in page.text
-    assert 'data-result-tab="charts">Scoring Charts</button>' in page.text
+    assert re.search(r'data-result-tab="scoring"><svg [^>]*>.*?</svg><span>Scoring Tables</span></button>', page.text, re.S)
+    assert re.search(r'data-result-tab="charts"><svg [^>]*>.*?</svg><span>Scoring Charts</span></button>', page.text, re.S)
     assert 'GAP Analysis' in page.text
     assert 'data-result-tab="best-network"' not in page.text
 
@@ -163,13 +165,9 @@ def test_scoring_page_exposes_profile_choices_and_active_profile(scoring_api, mo
 
     assert page.status_code == 200
     profiles = captured['scoring_profiles']
-    assert profiles == [{
-        'id': 'netcheck-2026',
-        'name': 'NetCheck 2026',
-        'aggregation_hierarchy': complete_aggregation_hierarchy(scoring_api['repository'].get_scoring_configuration()['aggregation_hierarchy']),
-    }]
+    assert profiles == [{'id': 'netcheck-2026', 'name': 'NetCheck 2026'}]
     assert captured['scoring_active_profile_id'] == 'netcheck-2026'
-    assert captured['aggregation_levels'] == profiles[0]['aggregation_hierarchy']
+    assert captured['aggregation_levels'] == load_aggregation_hierarchy(scoring_api['repository'])
 
 
 def test_scoring_baseline_options_follow_mapping_without_scanning_cdr_rows(scoring_api, monkeypatch):
@@ -417,9 +415,7 @@ def test_scoring_job_can_select_inactive_profile_without_changing_workspace_defa
     inactive = deepcopy(profiles['profiles'][0])
     inactive.update({'id': 'netcheck-2025', 'name': 'NetCheck 2025'})
     inactive['configuration']['version'] = 'NetCheck 2025'
-    inactive['configuration']['aggregation_hierarchy'] = [
-        'Region', 'Operator', 'Vendor', 'City', 'Campaign',
-    ]
+    assert client.put('/api/scoring/aggregation-hierarchy', json={'levels': ['Region', 'Operator', 'Vendor', 'City', 'Campaign']}).status_code == 200
     inactive['configuration']['metrics'][0]['contexts']['DriveCity']['max_points'] = 88
     profiles['profiles'].append(inactive)
     repository.replace_scoring_profiles(profiles)
@@ -436,7 +432,7 @@ def test_scoring_job_can_select_inactive_profile_without_changing_workspace_defa
     assert job['scoring_profile_id'] == 'netcheck-2025'
     assert job['scoring_profile_name'] == 'NetCheck 2025'
     assert job['configuration']['metrics'][0]['contexts']['DriveCity']['max_points'] == 88
-    assert job['aggregation_hierarchy'] == inactive['configuration']['aggregation_hierarchy']
+    assert job['aggregation_hierarchy'] == ['Region', 'Cluster', 'Operator', 'Vendor', 'City', 'Campaign']
     assert job['aggregation_levels'] == ['Region', 'Operator', 'City']
     assert repository.get_scoring_profiles()['active_profile_id'] == active_id
     assert repository.get_scoring_configuration() == active_configuration

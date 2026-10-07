@@ -236,18 +236,28 @@
 .report-jobs .rj-card[data-rj-module] .rj-inline label.rj-check:has(input:checked) {
   border-color: color-mix(in srgb, var(--rj-accent) 60%, white); background: var(--rj-tint); color: var(--rj-accent);
 }
-/* Artifact tabs: one tab per artifact type in its module colour; only the selected artifact is shown. */
-.report-jobs .rj-artifact-tabs { display: flex; flex-wrap: wrap; gap: .5rem; margin: .3rem 0 -.2rem; }
+/* Artifact tabs: one tab per artifact type in its module colour, on top of the panel of the selected
+   artifact (the only one shown). The selected tab has the panel's border and header background and
+   covers the panel's top border, so both read as one piece; the others stay lower and muted. */
+/* The negative bottom margin cancels the form's row gap, so the tabs sit on the panel. */
+.report-jobs .rj-artifact-tabs { position: relative; z-index: 1; display: flex; flex-wrap: wrap; align-items: flex-end; gap: .25rem; margin: .3rem 0 -1rem; padding: 0 .6rem 0 0; }
 .report-jobs .rj-artifact-tab {
-  --rj-accent: #1f5f3a; display: inline-flex; align-items: center; gap: .45rem; padding: .55rem 1rem;
-  border: 1px solid color-mix(in srgb, var(--rj-accent) 35%, transparent); border-radius: 999px; background: #fff;
-  color: var(--rj-accent); font: inherit; font-weight: 800; cursor: pointer;
+  --rj-accent: #1f5f3a; display: inline-flex; align-items: center; gap: .45rem; margin-bottom: 0; padding: .45rem .95rem;
+  border: 1px solid color-mix(in srgb, var(--rj-accent) 22%, transparent); border-bottom: 0; border-radius: 10px 10px 0 0;
+  background: color-mix(in srgb, var(--rj-accent) 4%, #f4f6f8); color: color-mix(in srgb, var(--rj-accent) 75%, #6b7785);
+  font: inherit; font-weight: 800; cursor: pointer;
 }
-.report-jobs .rj-artifact-tab[aria-selected="true"] { background: var(--rj-accent); color: #fff; box-shadow: 0 6px 14px color-mix(in srgb, var(--rj-accent) 30%, transparent); }
+.report-jobs .rj-artifact-tab:hover { background: color-mix(in srgb, var(--rj-accent) 10%, white); color: var(--rj-accent); }
+.report-jobs .rj-artifact-tab[aria-selected="true"] {
+  margin-bottom: -1px; padding: .62rem 1.15rem .6rem; border-color: color-mix(in srgb, var(--rj-accent) 28%, transparent);
+  border-top: 3px solid var(--rj-accent); background: color-mix(in srgb, var(--rj-accent) 7%, white); color: var(--rj-accent);
+}
+/* Module artifacts (such as Non-Qualified Calls) sit inside #rj-providers, below the other panels. */
+.report-jobs :is(.rj-artifact-tabs ~ .rj-card, .rj-artifact-tabs ~ #rj-providers > .rj-card)[data-rj-module] { margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 14px; }
+.report-jobs :is(.rj-artifact-tabs ~ .rj-card, .rj-artifact-tabs ~ #rj-providers > .rj-card)[data-rj-module] > .rj-card-toggle { border-top-left-radius: 0; }
 .report-jobs .rj-artifact-tab .rj-tab-state { display: inline-grid; place-items: center; width: 1.1rem; height: 1.1rem; border-radius: 50%; border: 2px solid currentColor; font-size: .7rem; line-height: 1; opacity: .55; }
 .report-jobs .rj-artifact-tab.is-included .rj-tab-state { opacity: 1; background: currentColor; }
 .report-jobs .rj-artifact-tab.is-included .rj-tab-state::after { content: '✓'; color: #fff; }
-.report-jobs .rj-artifact-tab.is-included[aria-selected="true"] .rj-tab-state::after { color: var(--rj-accent); }
 .report-jobs .rj-artifact-tab[data-module="dataset_analysis"] { --rj-accent: #0c4c8c; }
 .report-jobs .rj-artifact-tab[data-module="network_insights"] { --rj-accent: #4338ca; }
 .report-jobs .rj-artifact-tab[data-module="dashboards"] { --rj-accent: #5b3f99; }

@@ -11,6 +11,7 @@ import pytest
 
 from src.modules import scoring_jobs
 from src.modules.repository import Repository, SCHEMA, SCORING_CONFIGURATION_STATE_KEY, local_now_iso
+from src.modules.scoring_config import save_aggregation_hierarchy
 from scoring_fixtures import scoring_configuration
 
 
@@ -436,9 +437,7 @@ def test_explicit_inactive_profile_sets_job_snapshot_and_hierarchy_without_switc
     inactive = copy.deepcopy(profiles['profiles'][0])
     inactive.update({'id': 'netcheck-2025', 'name': 'NetCheck 2025'})
     inactive['configuration']['version'] = 'NetCheck 2025'
-    inactive['configuration']['aggregation_hierarchy'] = [
-        'Region', 'Operator', 'Vendor', 'City', 'Campaign',
-    ]
+    save_aggregation_hierarchy(repository, ['Region', 'Operator', 'Vendor', 'City', 'Campaign'])
     inactive['configuration']['metrics'][0]['contexts']['DriveCity']['max_points'] = 88
     profiles['profiles'].append(inactive)
     repository.replace_scoring_profiles(profiles)
@@ -451,7 +450,7 @@ def test_explicit_inactive_profile_sets_job_snapshot_and_hierarchy_without_switc
     assert selected['scoring_profile_id'] == 'netcheck-2025'
     assert selected['scoring_profile_name'] == 'NetCheck 2025'
     assert selected['configuration']['metrics'][0]['contexts']['DriveCity']['max_points'] == 88
-    assert selected['aggregation_hierarchy'] == inactive['configuration']['aggregation_hierarchy']
+    assert selected['aggregation_hierarchy'] == ['Region', 'Cluster', 'Operator', 'Vendor', 'City', 'Campaign']
     assert selected['aggregation_levels'] == ['Region', 'Operator', 'City']
     assert repository.get_scoring_profiles()['active_profile_id'] == active_id
     assert repository.get_scoring_configuration() == active_configuration
@@ -497,9 +496,7 @@ def test_unknown_explicit_profile_is_rejected(repository):
 
 def test_job_levels_follow_configured_hierarchy_and_snapshot_contract(repository, scoring_engine):
     engine, _calls = scoring_engine
-    configuration = scoring_configuration()
-    configuration['aggregation_hierarchy'] = ['Campaign', 'City', 'Operator', 'Region', 'Vendor']
-    repository.replace_scoring_configuration(configuration)
+    save_aggregation_hierarchy(repository, ['Campaign', 'City', 'Operator', 'Region', 'Vendor'])
     repository.replace_operator_mapping_groups([
         {'canonical': 'Vodafone UK', 'aliases': ['VF_UK'], 'color': '#FF0000'},
     ])
@@ -512,7 +509,7 @@ def test_job_levels_follow_configured_hierarchy_and_snapshot_contract(repository
     assert not reused
     assert job['levels'] == ['Campaign', 'City', 'Operator', 'Region', 'Vendor']
     assert job['aggregation_levels'] == job['levels']
-    assert job['aggregation_hierarchy'] == configuration['aggregation_hierarchy']
+    assert job['aggregation_hierarchy'] == ['Campaign', 'City', 'Operator', 'Region', 'Cluster', 'Vendor']
     assert job['aggregation_contract_version'] == 2
     completed = scoring_jobs.run_scoring_job(repository, job['id'])
     assert completed['status'] == 'completed'

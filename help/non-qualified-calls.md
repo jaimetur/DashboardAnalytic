@@ -16,7 +16,7 @@ Each call keeps a stable identity built from its service, Operator, Campaign and
 
 The **Filters** panel restricts the summary, the table and the Excel export together:
 
-- **CDRs**, **Campaign**, **Operator**, **Operator_Vendor**, **Vendor_Operator**, **Vendor**, **Region**, **Cluster**, **City**, **Service**, **Technology**, **Test Name**, **Result**, **Failure Classification** and **Failure Category**, from the indexed calls. **Operator_Vendor** is the `<Operator>_<Vendor>` identity and **Vendor** the vendor alone; **City** offers the workspace **Main Cities** first.
+- **CDRs**, **Campaign**, **Operator**, **Operator_Vendor**, **Vendor_Operator**, **Vendor**, **Region**, **Cluster**, **City**, **Service**, **Technology**, **Test Name**, **Result**, **Failure Classification** and **Failure Category**, from the indexed calls. **Operator_Vendor** is the `<Operator>_<Vendor>` identity, **Vendor_Operator** the same identity as `<Vendor>_<Operator>` (both stay in sync) and **Vendor** the vendor alone; **City** offers the workspace **Main Cities** first.
 - **Status**, **Team**, **Assignee**, **Root Domain** and **Root Cause**, from the follow-up. **Unassigned** selects calls without a team or assignee, and **Not classified** calls without a root cause.
 - **Search** finds text in the call fields (Operator, Vendor, Campaign, Region, City, Technology, test, result, failure fields and cell) and in the comments.
 - **Open calls only**, **Assigned to me** and **Without comments**.

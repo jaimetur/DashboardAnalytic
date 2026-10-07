@@ -70,7 +70,7 @@ def test_definitions_keep_every_module_option_and_need_an_artifact():
     })
     assert definition['dashboards'] == [{
         'dashboard_id': 'd1', 'label': '', 'scope': 'multivendor', 'vendor_comparison': 'vendor_only',
-        'datasets': {'data': [3, 4]}, 'all_datasets': False, 'date_from': '2026-01-01', 'date_to': '', 'filters': {'Operator': ['EE']},
+        'datasets': {'data': [3, 4]}, 'cdr_selection': '', 'date_from': '2026-01-01', 'date_to': '', 'filters': {'Operator': ['EE']},
     }]
     scoring = definition['scoring'][0]
     scenario = scoring['report']['scenarios'][0]
@@ -266,6 +266,60 @@ def test_reporting_job_runs_emails_and_travels_with_exports(client, monkeypatch,
         report_tasks.ARTIFACT_PROVIDERS.pop('fake', None)
 
 
+def test_scoring_entries_can_use_every_complete_set_of_cdrs_at_each_run(client, monkeypatch):
+    definition = normalize_definition({'scoring': [
+        {**SCORING_ENTRY, 'cdr_selection': 'all_complete'}, SCORING_ENTRY, {**SCORING_ENTRY, 'cdr_selection': 'other'}]})
+    assert [entry['cdr_selection'] for entry in definition['scoring']] == ['all_complete', 'newest', 'newest']
+    calls = []
+    monkeypatch.setattr(core, 'select_all_complete_cdrs', lambda repository, nr_mode: calls.append(nr_mode) or [11, 12, 13])
+
+    def build(repository, base, report, username):
+        calls.append(base['dataset_ids'])
+        return b'pptx', 'Scoring.pptx', {'dataset_ids': base['dataset_ids']}
+
+    monkeypatch.setattr(core, 'build_scoring_report_document', build)
+    login(client)
+    payload = {'name': 'Every complete set', 'schedule': {'mode': 'manual'},
+               'definition': {'scoring': [{**SCORING_ENTRY, 'cdr_selection': 'all_complete'}]}}
+    created = client.post('/api/reporting/tasks', json=payload)
+    assert created.status_code == 200, created.text
+    assert created.json()['task']['definition']['scoring'][0]['cdr_selection'] == 'all_complete'
+    run = wait_for_run(client, client.post(f"/api/reporting/tasks/{created.json()['task']['id']}/run").json()['run_id'])
+    assert calls == ['NSA', [11, 12, 13]], run
+    # The editor shows the CDRs each automatic choice selects now, per NR Mode.
+    def every_complete_set(repository, nr_mode):
+        if nr_mode == 'SA':
+            raise ValueError('There is no complete set of Data, Voice and Speech CDRs in SA NR Mode.')
+        return [11, 12, 13]
+
+    monkeypatch.setattr(core, 'select_all_complete_cdrs', every_complete_set)
+    preview = client.get('/api/reporting/options').json()['automatic_cdrs']
+    assert preview == {'NSA': {'newest': [], 'all_complete': [11, 12, 13]}, 'SA': {'newest': [], 'all_complete': []}}
+
+
+def test_cdr_analysis_uses_the_automatic_choice_in_each_nr_mode(client, monkeypatch):
+    def every_complete_set(repository, nr_mode):
+        if nr_mode == 'SA':
+            raise ValueError('There is no complete set of Data, Voice and Speech CDRs in SA NR Mode.')
+        return [21, 22, 23]
+
+    used = []
+
+    def write_summary(dataset_ids, export_kind, destination, username, **kwargs):
+        used.append(list(dataset_ids))
+        Path(destination).write_bytes(b'pptx')
+        return destination, [], []
+
+    monkeypatch.setattr(core, 'select_all_complete_cdrs', every_complete_set)
+    monkeypatch.setattr(core, 'write_dataset_summary', write_summary)
+    login(client)
+    created = client.post('/api/reporting/tasks', json={'name': 'CDR Analysis complete sets', 'schedule': {'mode': 'manual'},
+                                                         'definition': {'dataset_analysis': {'enabled': True, 'cdr_selection': 'all_complete'}}})
+    assert created.status_code == 200, created.text
+    run = wait_for_run(client, client.post(f"/api/reporting/tasks/{created.json()['task']['id']}/run").json()['run_id'])
+    assert used == [[21, 22, 23]], run
+
+
 def test_imported_reporting_jobs_keep_an_owner_that_exists_here(client):
     login(client)
     workspace_user('editor', 'user-editor')
@@ -342,9 +396,18 @@ def test_network_insights_entries_keep_their_own_selection_and_read_single_selec
         normalize_definition({'network_insights': {'enabled': False, 'selection': {}}})
 
 
-def test_dashboard_entries_can_use_every_ready_cdr_of_their_nr_mode():
-    definition = normalize_definition({'dashboards': [{'dashboard_id': 'd1', 'all_datasets': True}]})
-    assert definition['dashboards'][0]['all_datasets'] is True and definition['dashboards'][0]['datasets'] == {}
+def test_every_artifact_with_cdrs_offers_the_two_automatic_choices():
+    definition = normalize_definition({
+        'dataset_analysis': {'enabled': True, 'cdr_selection': 'newest'},
+        'network_insights': [{'cdr_selection': 'all_complete', 'selection': {'nr_mode': 'SA'}}, {'selection': {}}],
+        'dashboards': [{'dashboard_id': 'd1', 'cdr_selection': 'newest'}, {'dashboard_id': 'd2', 'all_datasets': True},
+                       {'dashboard_id': 'd3', 'datasets': {'data': [5]}}],
+    })
+    assert definition['dataset_analysis']['cdr_selection'] == 'newest'
+    # Jobs saved with every ready CDR use every complete set; a Dashboard without one uses its CDRs.
+    assert [entry['cdr_selection'] for entry in definition['network_insights']] == ['all_complete', 'all_complete']
+    assert [entry['cdr_selection'] for entry in definition['dashboards']] == ['newest', 'all_complete', '']
+    assert normalize_definition({'dataset_analysis': {'enabled': True}})['dataset_analysis']['cdr_selection'] == 'all_complete'
 
 
 def test_reporting_runs_appear_in_background_tasks(client):

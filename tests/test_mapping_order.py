@@ -57,3 +57,12 @@ def test_scoring_hierarchy_orders_the_vendor_level_by_the_vendor_map():
     ]
     ordered = [column['path'][1]['value'] for column in sorted(columns, key=_hierarchy_column_sort_key)]
     assert ordered == ['Ericsson', 'Huawei', 'Samsung', 'Ericsson_Mixed', 'Non-Ericsson_Mixed']
+
+
+def test_vendor_operator_orders_ericsson_mixed_with_ericsson_and_other_mixed_groups_last():
+    values = ['Non-Ericsson_Mixed_3', 'Ericsson_Mixed_VF_UK', 'Huawei_3', 'Ericsson_VF_UK', 'Ericsson_Mixed_3',
+              'Ericsson_3', 'NSN_VF_UK', 'EE - All']
+    # Non-Ericsson_Mixed comes last of all, even after the Operators without a Vendor.
+    expected = ['Ericsson_3', 'Ericsson_Mixed_3', 'Ericsson_VF_UK', 'Ericsson_Mixed_VF_UK', 'Huawei_3', 'NSN_VF_UK',
+                'EE - All', 'Non-Ericsson_Mixed_3']
+    assert sorted(values, key=lambda value: dimension_order_key('Vendor_Operator', value, OPERATORS, VENDORS)) == expected

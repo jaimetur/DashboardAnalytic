@@ -52,7 +52,7 @@
   const campaignLabel = (value) => (globalThis.campaignLabel ? globalThis.campaignLabel(value) : String(value ?? ''));
   const campaignCompare = (left, right) => (globalThis.campaignCompare ? globalThis.campaignCompare(left, right) : 0);
 
-  function multiPicker(label, values, selected = [], {preset = null} = {}) {
+  function multiPicker(label, values, selected = [], {preset = null, onChange = null} = {}) {
     const wrapper = node('details', undefined, 'workspace-user-picker rj-multi');
     const summary = node('summary');
     const caption = node('span', '', 'rj-multi-caption');
@@ -89,6 +89,7 @@
         listed.forEach((box) => { box.checked = select; });
         if (presetBox && !preset.dynamic) presetBox.checked = false;
         refresh();
+        onChange?.();
       });
       search.after(toggleAll);
     }
@@ -108,7 +109,7 @@
       }
       refresh();
     });
-    menu.addEventListener('change', refresh);
+    menu.addEventListener('change', () => { refresh(); onChange?.(); });
     search.addEventListener('input', () => {
       const query = search.value.trim().toLocaleLowerCase();
       boxes.forEach((box) => { box.parentElement.hidden = Boolean(query) && !box.value.toLocaleLowerCase().includes(query); });
@@ -129,6 +130,13 @@
       return checked.length === boxes.filter((box) => !box.disabled).length ? [] : checked;
     };
     field.getPreset = () => Boolean(presetBox?.checked);
+    field.checkedValues = () => boxes.filter((box) => box.checked && !box.disabled).map((box) => box.value);
+    field.listedValues = () => boxes.map((box) => box.value);
+    field.setCheckedValues = (checked) => {
+      const wanted = new Set(checked.map(String));
+      boxes.forEach((box) => { box.checked = wanted.has(box.value); });
+      refresh();
+    };
     return field;
   }
   document.addEventListener('click', (event) => {
@@ -191,7 +199,13 @@
       const values = valuesForDatasets(datasetIds);
       pickers = definitions.map(([key, text]) => {
         const preset = presetFor(key, pickers.length ? presets[key] : undefined);
-        const picker = multiPicker(text, values[text] || [], current[key] || [], preset ? {preset} : {});
+        // Operator_Vendor and Vendor_Operator hold the same values the other way round: they stay in sync.
+        const partnerKey = {operator_vendors: 'vendor_operators', vendor_operators: 'operator_vendors'}[key];
+        const onChange = partnerKey ? () => {
+          const partner = container.picker(partnerKey);
+          if (partner) partner.setCheckedValues(operatorVendorPairs.mirrorValues(picker.checkedValues(), partner.listedValues()));
+        } : null;
+        const picker = multiPicker(text, values[text] || [], current[key] || [], {...(preset ? {preset} : {}), onChange});
         picker.dataset.rjFilter = key;
         return [key, picker];
       });
@@ -254,15 +268,44 @@
 
   // CDRs grouped in one card per type, each with Select All/None, as in Network Insights.
   const KIND_LABELS = {data: 'CDR Data', voice: 'CDR Voice', speech: 'CDR Speech'};
-  function datasetPicker(container, datasets, selected, allText) {
+  // Every artifact with CDRs (except Non-Qualified Calls) chooses them by hand or with one of two
+  // automatic choices, made again at each run; the server previews the CDRs each one selects now.
+  const NEWEST_COMPLETE_TEXT = 'Newest complete set of Data, Voice and Speech CDRs at each run';
+  const ALL_COMPLETE_TEXT = 'All complete sets of Data, Voice and Speech CDRs at each run';
+  const ALL_COMPLETE_TITLE = 'Every CDR whose campaigns have Data, Voice and Speech CDRs, chosen again at each run';
+  const allCompleteChoice = (checked) => ({text: ALL_COMPLETE_TEXT, checked, title: ALL_COMPLETE_TITLE});
+  // The CDRs each automatic choice selects now in one NR Mode, or in both for artifacts without one.
+  const automaticPreview = (nrMode = '') => {
+    const modes = nrMode ? [nrMode] : ['NSA', 'SA'];
+    const ids = (selection) => modes.flatMap((mode) => options.automatic_cdrs?.[mode]?.[selection] || []);
+    return {primary: ids('newest'), alternative: ids('all_complete')};
+  };
+
+  // `alternative` offers a second automatic choice (for example every complete set of CDRs);
+  // the two automatic choices exclude each other and disable the CDR list. `preview` lists the CDRs
+  // each automatic choice selects now ({primary, alternative}), shown checked in the disabled list;
+  // by default the first choice selects every listed CDR.
+  function datasetPicker(container, datasets, selected, allText, alternative = null, preview = null) {
+    preview = preview || {primary: datasets.map((item) => item.id)};
     container.replaceChildren();
     const all = node('label', undefined, 'rj-check rj-format-chip');
-    const allBox = node('input'); allBox.type = 'checkbox'; allBox.checked = !selected.length;
+    const allBox = node('input'); allBox.type = 'checkbox'; allBox.checked = !selected.length && !alternative?.checked;
     all.append(allBox, node('span', allText));
+    let alternativeBox = null;
+    const automatic = node('div', undefined, 'rj-inline rj-dataset-automatic');
+    automatic.append(all);
+    if (alternative) {
+      const chip = node('label', undefined, 'rj-check rj-format-chip');
+      alternativeBox = node('input'); alternativeBox.type = 'checkbox'; alternativeBox.checked = !selected.length && Boolean(alternative.checked);
+      chip.append(alternativeBox, node('span', alternative.text));
+      if (alternative.title) chip.title = alternative.title;
+      automatic.append(chip);
+    }
     const groups = node('div', undefined, 'rj-dataset-groups');
     const chosen = new Set(selected.map(Number));
     const boxes = [];
     const toggles = [];
+    const toggleSyncs = [];
     for (const kind of [...new Set(['data', 'voice', 'speech', ...datasets.map((item) => item.kind)])]) {
       const items = datasets.filter((item) => item.kind === kind);
       if (!items.length) continue;
@@ -290,20 +333,31 @@
         card.dispatchEvent(new Event('change', {bubbles: true}));
       });
       card.addEventListener('change', syncToggle);
+      toggleSyncs.push(syncToggle);
       syncToggle();
       toggles.push(toggle);
       groups.append(card);
     }
     if (!boxes.length) groups.append(node('p', 'No ready CDRs.', 'form-note'));
+    const isAutomatic = () => allBox.checked || Boolean(alternativeBox?.checked);
     const sync = () => {
-      groups.classList.toggle('is-disabled', allBox.checked);
-      boxes.forEach((box) => { box.disabled = allBox.checked; });
-      toggles.forEach((toggle) => { toggle.disabled = allBox.checked; });
+      groups.classList.toggle('is-disabled', isAutomatic());
+      boxes.forEach((box) => { box.disabled = isAutomatic(); });
+      toggles.forEach((toggle) => { toggle.disabled = isAutomatic(); });
+      // An automatic choice shows the CDRs it selects now; choosing CDRs by hand starts from them.
+      const shown = preview && (alternativeBox?.checked ? preview.alternative : allBox.checked ? preview.primary : null);
+      if (shown) {
+        const ids = new Set(shown.map(Number));
+        boxes.forEach((box) => { box.checked = ids.has(Number(box.value)); });
+      }
+      toggleSyncs.forEach((syncToggle) => syncToggle());
     };
-    allBox.addEventListener('change', sync);
+    allBox.addEventListener('change', () => { if (allBox.checked && alternativeBox) alternativeBox.checked = false; sync(); });
+    alternativeBox?.addEventListener('change', () => { if (alternativeBox.checked) allBox.checked = false; sync(); });
     sync();
-    container.append(all, groups);
-    container.getValue = () => (allBox.checked ? [] : boxes.filter((box) => box.checked).map((box) => Number(box.value)));
+    container.append(alternative ? automatic : all, groups);
+    container.getValue = () => (isAutomatic() ? [] : boxes.filter((box) => box.checked).map((box) => Number(box.value)));
+    container.getAlternative = () => Boolean(alternativeBox?.checked);
   }
 
   // Output formats as compact chips under the artifact's own checkbox; at least one stays checked.
@@ -343,16 +397,26 @@
   };
 
   // -- artifact entries ---------------------------------------------------
-  // CDR checklists grouped by type; getValue() returns {kind: [ids]}.
-  function datasetsByKind(container, datasets, selected, allText = '', allSelected = false) {
+  // CDR checklists grouped by type; getValue() returns {kind: [ids]}. `automatic` ({selection, preview})
+  // offers the two automatic choices ('newest' or 'all_complete'), which exclude each other, lock the
+  // list and show checked the CDRs they select now; choosing CDRs by hand starts from them.
+  function datasetsByKind(container, datasets, selected, automatic = null) {
     container.replaceChildren();
     const groups = node('div', undefined, 'rj-dataset-groups');
-    const allBox = node('input'); allBox.type = 'checkbox'; allBox.checked = allSelected;
-    if (allText) {
-      const all = node('label', undefined, 'rj-check rj-format-chip');
-      all.append(allBox, node('span', allText));
-      container.append(all);
+    const choiceBoxes = {};
+    if (automatic) {
+      const row = node('div', undefined, 'rj-inline rj-dataset-automatic');
+      for (const [key, text, title] of [['newest', NEWEST_COMPLETE_TEXT, ''], ['all_complete', ALL_COMPLETE_TEXT, ALL_COMPLETE_TITLE]]) {
+        const chip = node('label', undefined, 'rj-check rj-format-chip');
+        const box = node('input'); box.type = 'checkbox'; box.checked = automatic.selection === key;
+        chip.append(box, node('span', text));
+        if (title) chip.title = title;
+        row.append(chip);
+        choiceBoxes[key] = box;
+      }
+      container.append(row);
     }
+    const automaticSelection = () => Object.keys(choiceBoxes).find((key) => choiceBoxes[key].checked) || '';
     container.append(groups);
     const toggles = [];
     const chosen = new Set(Object.values(selected || {}).flat().map(Number));
@@ -386,18 +450,25 @@
       groups.append(group);
     });
     if (!boxes.length) groups.append(node('p', 'No ready CDRs for this NR Mode.', 'form-note'));
-    // "Every ready CDR" selects every listed CDR now and every ready one at each run.
     const syncAll = () => {
-      groups.classList.toggle('is-disabled', allBox.checked);
-      boxes.forEach((box) => { box.disabled = allBox.checked; });
-      toggles.forEach((toggle) => { toggle.disabled = allBox.checked; });
+      const selection = automaticSelection();
+      groups.classList.toggle('is-disabled', Boolean(selection));
+      const shown = selection && new Set((selection === 'all_complete' ? automatic.preview.alternative : automatic.preview.primary).map(Number));
+      boxes.forEach((box) => { box.disabled = Boolean(selection); if (shown) box.checked = shown.has(Number(box.value)); });
+      toggles.forEach((toggle) => { toggle.disabled = Boolean(selection); });
+      // Each CDR type updates its Select All / None button.
+      groups.querySelectorAll('.rj-dataset-group').forEach((group) => group.dispatchEvent(new Event('change')));
     };
-    allBox.addEventListener('change', () => { syncAll(); container.dispatchEvent(new Event('change', {bubbles: true})); });
+    Object.entries(choiceBoxes).forEach(([key, box]) => box.addEventListener('change', () => {
+      if (box.checked) Object.entries(choiceBoxes).forEach(([other, otherBox]) => { if (other !== key) otherBox.checked = false; });
+      syncAll();
+      container.dispatchEvent(new Event('change', {bubbles: true}));
+    }));
     syncAll();
-    container.allSelected = () => Boolean(allText) && allBox.checked;
+    container.automaticSelection = automaticSelection;
     container.getValue = () => {
       const value = {};
-      boxes.filter((box) => allBox.checked || box.checked).forEach((box) => { (value[box.dataset.kind] ||= []).push(Number(box.value)); });
+      boxes.filter((box) => box.checked).forEach((box) => { (value[box.dataset.kind] ||= []).push(Number(box.value)); });
       return value;
     };
   }
@@ -478,7 +549,7 @@
       dateFrom.value = /^\d{4}-\d{2}-\d{2}$/.test(config.date_from || '') ? config.date_from : '';
       dateTo.value = /^\d{4}-\d{2}-\d{2}$/.test(config.date_to || '') ? config.date_to : '';
       datasetsByKind(datasets, options.datasets.filter((item) => item.nr_mode === nrMode.value), config.datasets && Object.keys(config.datasets).length ? config.datasets : saved.datasets,
-        'Every ready Data, Voice and Speech CDR of this NR Mode at each run', Boolean(config.all_datasets));
+        {selection: config.cdr_selection || '', preview: automaticPreview(nrMode.value)});
       renderFilters({}, config.filters || {});
       comparisonField.hidden = scope.value !== 'multivendor';
       scheduleLoad();
@@ -500,7 +571,8 @@
     else { current = {saved: {}, fields: []}; datasetsByKind(datasets, [], {}); }
     card.getValue = () => ({
       dashboard_id: dashboard.value, label: label.value.trim(), scope: scope.value, vendor_comparison: comparison.value,
-      datasets: datasets.getValue(), all_datasets: Boolean(datasets.allSelected?.()), date_from: dateFrom.value, date_to: dateTo.value,
+      datasets: datasets.automaticSelection?.() ? {} : datasets.getValue(), cdr_selection: datasets.automaticSelection?.() || '',
+      date_from: dateFrom.value, date_to: dateTo.value,
       filters: Object.fromEntries(pickers.map(([name, picker]) => [name, picker.getValue()]).filter(([, values]) => values.length)),
     });
     return card;
@@ -568,12 +640,12 @@
     // The report editor lists the values of the selected CDRs, or of every CDR of the NR Mode.
     const cdrsInUse = () => datasets.getValue().length ? datasets.getValue()
       : options.datasets.filter((item) => item.nr_mode === nrMode.value).map((item) => item.id);
-    const renderDatasets = (selected) => {
+    const renderDatasets = (selected, allComplete = false) => {
       datasetPicker(datasets, options.datasets.filter((item) => item.nr_mode === nrMode.value),
-        selected, 'Newest complete set of Data, Voice and Speech CDRs at each run');
+        selected, NEWEST_COMPLETE_TEXT, allCompleteChoice(allComplete), automaticPreview(nrMode.value));
     };
-    nrMode.addEventListener('change', () => renderDatasets([]));
-    renderDatasets(entry.dataset_ids || []);
+    nrMode.addEventListener('change', () => renderDatasets([], datasets.getAlternative()));
+    renderDatasets(entry.dataset_ids || [], entry.cdr_selection === 'all_complete');
     const formats = node('div', undefined, 'rj-formats');
     formatChoices(formats, `rj-scoring-${scoringFormatId += 1}`, entry.formats || ['powerpoint'], ['powerpoint', 'word']);
     // The report scenarios (filters and aggregation) and content, edited with the Scoring & GAP
@@ -609,7 +681,8 @@
     card.append(entryHead(card, 'Scoring', () => [nrMode.value, label.value.trim()].filter(Boolean).join(' · ')),
       formats, head, node('strong', 'CDRs'), datasets, reportRow);
     card.getValue = () => ({
-      label: label.value.trim(), nr_mode: nrMode.value, dataset_ids: datasets.getValue(), formats: formats.getValue(),
+      label: label.value.trim(), nr_mode: nrMode.value, dataset_ids: datasets.getValue(),
+      cdr_selection: datasets.getAlternative() ? 'all_complete' : 'newest', formats: formats.getValue(),
       scoring_profile_id: methodology.value, baseline_operator: baseline.value.trim() || 'EE',
       report,
     });
@@ -720,14 +793,14 @@
     // The filters list the values of the selected CDRs, or of every CDR of the NR Mode.
     const cdrsInUse = () => datasets.getValue().length ? datasets.getValue()
       : options.datasets.filter((item) => item.nr_mode === nrMode.value).map((item) => item.id);
-    const renderDatasets = (selected) => {
+    const renderDatasets = (selected, allComplete = false) => {
       datasetPicker(datasets, options.datasets.filter((item) => item.nr_mode === nrMode.value),
-        selected, 'Every ready Data, Voice and Speech CDR of this NR Mode at each run');
+        selected, NEWEST_COMPLETE_TEXT, allCompleteChoice(allComplete), automaticPreview(nrMode.value));
       filters.refresh(cdrsInUse());
     };
-    nrMode.addEventListener('change', () => renderDatasets([]));
+    nrMode.addEventListener('change', () => renderDatasets([], datasets.getAlternative()));
     datasets.addEventListener('change', () => filters.refresh(cdrsInUse()));
-    renderDatasets(Object.values(selection.datasets || {}).flat());
+    renderDatasets(Object.values(selection.datasets || {}).flat(), entry.cdr_selection === 'all_complete');
     card.append(entryHead(card, 'Network Insights', () => [nrMode.value, technology.selectedOptions[0]?.textContent, label.value.trim()].filter(Boolean).join(' · ')),
       formats, head, grouping, node('strong', 'Filters'), filters, node('strong', 'CDRs'), datasets);
     card.getValue = () => {
@@ -736,6 +809,7 @@
       options.datasets.filter((item) => ids.has(item.id)).forEach((item) => { (byKind[item.kind] ||= []).push(item.id); });
       return {
         label: label.value.trim(), formats: formats.getValue(),
+        cdr_selection: datasets.getAlternative() ? 'all_complete' : 'newest',
         selection: {
           datasets: byKind, nr_mode: nrMode.value, technology: technology.value,
           group: [...grouping.querySelectorAll('input:checked')].map((box) => box.value),
@@ -776,8 +850,10 @@
       const icon = document.querySelector(`.module-tabs ${ARTIFACT_TAB_ICONS[card.dataset.rjModule] || '.none'} .module-tab-icon`)?.cloneNode(true);
       // Its own class: the navigation hides its tab icons on narrow windows.
       icon?.setAttribute('class', 'rj-tab-icon');
-      tab.append(node('span', '', 'rj-tab-state'), ...(icon ? [icon] : []),
-        node('span', card.querySelector(':scope > .rj-card-toggle strong')?.textContent || card.dataset.rjModule));
+      // The inclusion check follows the artifact name.
+      tab.append(...(icon ? [icon] : []),
+        node('span', card.querySelector(':scope > .rj-card-toggle strong')?.textContent || card.dataset.rjModule),
+        node('span', '', 'rj-tab-state'));
       tab.addEventListener('click', () => {
         activeArtifact = card.dataset.rjModule;
         try { localStorage.setItem(ARTIFACT_TAB_KEY, activeArtifact); } catch { /* Storage unavailable: the tab is still selected. */ }
@@ -800,7 +876,8 @@
     $('rj-name').value = task?.name || '';
     $('rj-da-enabled').checked = Boolean(dataset.enabled);
     formatChoices(document.querySelector('[data-rj-formats="rj-da"]'), 'rj-da', dataset.formats || ['powerpoint']);
-    datasetPicker($('rj-da-datasets'), options.datasets, dataset.dataset_ids || [], 'Every ready CDR dataset at each run');
+    datasetPicker($('rj-da-datasets'), options.datasets, dataset.dataset_ids || [], NEWEST_COMPLETE_TEXT,
+      allCompleteChoice(dataset.cdr_selection === 'all_complete'), automaticPreview());
     $('rj-da-aggregation').replaceWith(Object.assign(singleChoiceRow('Global Comparison', options.cdr_aggregations || {}, dataset.aggregation || 'all'), {id: 'rj-da-aggregation'}));
     $('rj-da-cdf').replaceWith(Object.assign(singleChoiceRow('Global CDF Comparison', options.cdr_cdf_groupings || {}, dataset.cdf_grouping || 'operator'), {id: 'rj-da-cdf'}));
     // One metric selector per CDR type; All (the default) includes every metric, also future ones.
@@ -925,6 +1002,7 @@
         dataset_analysis: {
           enabled: $('rj-da-enabled').checked && options.allowed_modules.dataset_analysis, formats: document.querySelector('[data-rj-formats="rj-da"]').getValue(),
           dataset_ids: $('rj-da-datasets').getValue(),
+          cdr_selection: $('rj-da-datasets').getAlternative() ? 'all_complete' : 'newest',
           metrics: Object.fromEntries([...$('rj-da-metrics').querySelectorAll('[data-rj-metrics]')]
             .map((picker) => [picker.dataset.rjMetrics, picker.getValue()]).filter(([, chosen]) => chosen.length)),
           filters: Object.fromEntries([...$('rj-da-filters').querySelectorAll('[data-rj-filter]')]

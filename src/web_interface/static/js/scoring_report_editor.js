@@ -83,13 +83,20 @@
     });
     const summary = el('summary');
     const display = (value) => (campaignField(label) ? globalThis.campaignLabel(value) || value : value);
-    const update = () => {
-      // Chosen values in the order of the list.
-      const chosen = [...known.filter((value) => selection.has(value)), ...[...selection].filter((value) => !known.includes(value))].map(display);
-      summary.textContent = `${label}: ${preset?.checked ? preset.label : chosen.length ? chosen.join(', ') : 'All'}`;
-      summary.title = summary.textContent;
-    };
+    const known = [...new Set([...(values || []), ...(selected || [])])];
+    if (campaignField(label) && typeof globalThis.campaignCompare === 'function') known.sort(globalThis.campaignCompare);
     const selection = new Set(selected || []);
+    // All: no restriction, so every value of the CDRs at generation time is included (also new ones).
+    let allMode = allOption && !selection.size && !preset?.checked;
+    // A preset (Main Cities) is resolved when the report is generated; its values are shown checked.
+    const presetKeys = new Set((preset?.values || []).map((value) => String(value).toLocaleLowerCase()));
+    const inPreset = (value) => presetKeys.has(String(value).toLocaleLowerCase());
+    const isChecked = (value) => allMode || (preset?.checked ? inPreset(value) : selection.has(value));
+    const setPreset = (checked) => {
+      if (!preset || preset.checked === checked) return;
+      preset.checked = checked;
+      preset.onChange(checked);
+    };
     const list = el('div', 'scoring-report-picker-list');
     // Typing filters the listed values; presets such as Main Cities stay visible.
     const search = el('input', 'scoring-report-picker-search');
@@ -97,6 +104,34 @@
     search.placeholder = 'Filter values…';
     search.setAttribute('aria-label', `Filter ${label} values`);
     const valueRows = [];
+    const valueBoxes = new Map();
+    let allBox = null;
+    let presetBox = null;
+    const render = () => {
+      if (allBox) allBox.checked = allMode;
+      if (presetBox) presetBox.checked = Boolean(preset.checked);
+      valueBoxes.forEach((box, value) => { box.checked = isChecked(value); });
+      // One value is shown by name, several by their number (as the other filters of the application).
+      const chosen = [...known.filter((value) => selection.has(value)), ...[...selection].filter((value) => !known.includes(value))].map(display);
+      const total = known.length;
+      const text = preset?.checked ? `${preset.label} (${known.filter(inPreset).length}/${total})`
+        : allMode || !chosen.length ? 'All'
+          : chosen.length === 1 ? chosen[0] : `${chosen.length}/${total} selected`;
+      summary.textContent = `${label}: ${text}`;
+      summary.title = preset?.checked || allMode || chosen.length < 2 ? summary.textContent : `${label}: ${chosen.join(', ')}`;
+    };
+    const commit = () => {
+      onChange([...selection]);
+      render();
+    };
+    // Editing single values starts from what is shown checked (All or the preset).
+    const materialize = () => {
+      const shown = known.filter(isChecked);
+      selection.clear();
+      shown.forEach((value) => selection.add(value));
+      allMode = false;
+      setPreset(false);
+    };
     search.addEventListener('input', () => {
       const query = search.value.trim().toLocaleLowerCase();
       valueRows.forEach((row) => { row.hidden = Boolean(query) && !row.textContent.toLocaleLowerCase().includes(query); });
@@ -107,37 +142,44 @@
       valueRows.forEach((row) => { row.hidden = false; });
       if (valueRows.length > 1) search.focus();
     });
-    const known = [...new Set([...(values || []), ...(selected || [])])];
-    if (campaignField(label) && typeof globalThis.campaignCompare === 'function') known.sort(globalThis.campaignCompare);
-    // All: no restriction, so every value of the CDRs at generation time is included (also new ones).
-    let allBox = null;
-    let presetBox = null;
-    const valueBoxes = new Map();
-    const syncBoxes = () => {
-      const all = Boolean(allBox?.checked);
-      valueBoxes.forEach((box, value) => { box.checked = all || selection.has(value); box.disabled = all; });
-    };
+    if (known.length > 1) {
+      // Select All / None acts on the listed values (those matching the search).
+      const toggle = el('button', 'scoring-report-picker-toggle', 'Select All / None');
+      toggle.type = 'button';
+      toggle.addEventListener('click', () => {
+        const listed = known.filter((value) => !valueRows[known.indexOf(value)].hidden);
+        const selectAll = listed.some((value) => !isChecked(value));
+        if (listed.length === known.length) {
+          selection.clear();
+          setPreset(false);
+          allMode = selectAll && allOption;
+          if (selectAll && !allOption) known.forEach((value) => selection.add(value));
+        } else {
+          materialize();
+          listed.forEach((value) => { if (selectAll) selection.add(value); else selection.delete(value); });
+        }
+        commit();
+      });
+      list.append(toggle);
+    }
     if (preset) {
       const presetRow = checkbox(preset.label, preset.checked, (checked) => {
-        preset.checked = checked;
-        preset.onChange(checked);
-        if (allBox && checked) { allBox.checked = false; syncBoxes(); }
-        update();
+        selection.clear();
+        setPreset(checked);
+        // Without the preset the filter goes back to every value.
+        allMode = !checked && allOption;
+        commit();
       });
       presetBox = presetRow.querySelector('input');
       list.append(presetRow);
     }
     if (allOption && known.length) {
-      const allRow = checkbox('All', !selection.size && !preset?.checked, (checked) => {
+      const allRow = checkbox('All', allMode, (checked) => {
         selection.clear();
-        if (checked) {
-          if (presetBox?.checked) { presetBox.checked = false; preset.checked = false; preset.onChange(false); }
-        } else {
-          known.forEach((value) => selection.add(value));
-        }
-        onChange([...selection]);
-        syncBoxes();
-        update();
+        setPreset(false);
+        allMode = checked;
+        if (!checked) known.forEach((value) => selection.add(value));
+        commit();
       }, 'Every value of the selected CDRs when the report is generated, also values that appear later');
       allRow.classList.add('scoring-report-all');
       allBox = allRow.querySelector('input');
@@ -145,22 +187,27 @@
     }
     if (!known.length) list.append(el('span', 'scoring-report-muted', 'No values in the selected CDRs'));
     for (const value of known) {
-      const row = checkbox(display(value), selection.has(value), (checked) => {
+      const row = checkbox(display(value), isChecked(value), (checked) => {
+        materialize();
         if (checked) selection.add(value); else selection.delete(value);
-        // Clearing every value means All again.
-        if (allBox) allBox.checked = !selection.size && !preset?.checked;
-        onChange([...selection]);
-        syncBoxes();
-        update();
+        commit();
       });
       valueBoxes.set(value, row.querySelector('input'));
       valueRows.push(row);
       list.append(row);
     }
-    syncBoxes();
     if (valueRows.length > 1) list.prepend(search);
-    update();
+    render();
     wrapper.append(summary, list);
+    wrapper.knownValues = () => [...known];
+    // Replaces the chosen values (none means All) without calling onChange.
+    wrapper.setSelection = (values) => {
+      selection.clear();
+      values.forEach((value) => selection.add(value));
+      setPreset(false);
+      allMode = allOption && !selection.size;
+      render();
+    };
     return wrapper;
   }
 
@@ -214,35 +261,55 @@
     name.addEventListener('input', () => { scenario.name = name.value; });
     head.append(el('strong', 'scoring-report-index', `${index + 1}`), name);
     const actions = el('div', 'scoring-report-actions');
-    const action = (text, title, disabled, handler) => {
-      const button = el('button', 'ghost-link', text);
+    // Move arrows, Duplicate and Remove each have their own colour; Duplicate and Remove an icon.
+    const ICONS = {
+      duplicate: '<rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M13 4.5V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h.5"/>',
+      remove: '<path d="M3.5 5.5h13M8 5.5V4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1.5M5.5 5.5l.8 10.6a1 1 0 0 0 1 .9h5.4a1 1 0 0 0 1-.9l.8-10.6M8.5 8.5v5.5M11.5 8.5v5.5"/>',
+    };
+    const action = (text, title, disabled, handler, kind) => {
+      const button = el('button', `ghost-link scoring-report-action is-${kind}`);
+      if (ICONS[kind]) {
+        button.insertAdjacentHTML('beforeend', `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[kind]}</svg>`);
+      }
+      button.append(el('span', '', text));
       button.type = 'button';
       button.title = title;
+      button.setAttribute('aria-label', title);
       button.disabled = disabled;
       button.addEventListener('click', handler);
       actions.append(button);
     };
-    action('↑', 'Move up', index === 0, () => { state.scenarios.splice(index - 1, 0, ...state.scenarios.splice(index, 1)); rerender(); });
-    action('↓', 'Move down', index === state.scenarios.length - 1, () => { state.scenarios.splice(index + 1, 0, ...state.scenarios.splice(index, 1)); rerender(); });
+    action('↑', 'Move up', index === 0, () => { state.scenarios.splice(index - 1, 0, ...state.scenarios.splice(index, 1)); rerender(); }, 'move');
+    action('↓', 'Move down', index === state.scenarios.length - 1, () => { state.scenarios.splice(index + 1, 0, ...state.scenarios.splice(index, 1)); rerender(); }, 'move');
     action('Duplicate', 'Duplicate this scenario', state.scenarios.length >= 20, () => {
       const copy = clone(scenario);
       copy.name = `${scenario.name} (copy)`;
       state.scenarios.splice(index + 1, 0, copy);
       rerender();
-    });
-    action('Remove', 'Remove this scenario', state.scenarios.length <= 1, () => { state.scenarios.splice(index, 1); rerender(); });
+    }, 'duplicate');
+    action('Remove', 'Remove this scenario', state.scenarios.length <= 1, () => { state.scenarios.splice(index, 1); rerender(); }, 'remove');
     head.append(actions);
     card.append(head);
 
     const filters = el('div', 'scoring-report-filters');
+    // Operator_Vendor and Vendor_Operator hold the same values the other way round: they stay in sync.
+    const pickers = {};
+    const PAIRED = {Operator_Vendor: 'Vendor_Operator', Vendor_Operator: 'Operator_Vendor'};
     for (const field of FILTERS) {
       const preset = field === 'City' && (context.mainCities || []).length ? {
-        label: 'Main Cities', checked: scenario.main_cities,
+        label: 'Main Cities', checked: scenario.main_cities, values: context.mainCities,
         onChange: (checked) => { scenario.main_cities = checked; },
       } : null;
-      filters.append(checklist(field, context.filterOptions?.[field] || [], scenario.context_filters[field] || [], (values) => {
+      pickers[field] = checklist(field, context.filterOptions?.[field] || [], scenario.context_filters[field] || [], (values) => {
         if (values.length) scenario.context_filters[field] = values; else delete scenario.context_filters[field];
-      }, {preset, allOption: true}));
+        const partnerField = PAIRED[field];
+        const partner = partnerField && pickers[partnerField];
+        if (!partner) return;
+        const mirrored = globalThis.operatorVendorPairs.mirrorValues(values, partner.knownValues());
+        if (mirrored.length) scenario.context_filters[partnerField] = mirrored; else delete scenario.context_filters[partnerField];
+        partner.setSelection(mirrored);
+      }, {preset, allOption: true});
+      filters.append(pickers[field]);
     }
     const levels = el('div', 'scoring-report-levels');
     levels.append(el('span', 'scoring-report-label', 'Aggregation levels:'));
@@ -306,6 +373,35 @@
       if (input) { input.focus(); input.select(); } else accept.focus();
     });
   }
+
+  // A small dialog with several choices: resolves with the key of the chosen one, or null when closed.
+  function choose(host, {title, copy = '', choices}) {
+    return new Promise((resolve) => {
+      const dialog = el('dialog', 'scoring-report-ask');
+      dialog.append(el('h3', '', title));
+      if (copy) dialog.append(el('p', 'scoring-report-ask-copy', copy));
+      const actions = el('div', 'scoring-report-ask-actions');
+      let result = null;
+      for (const [key, label, className] of choices) {
+        const button = el('button', className || 'ghost-link', label);
+        button.type = 'button';
+        button.addEventListener('click', () => { result = key; dialog.close(); });
+        actions.append(button);
+      }
+      dialog.append(actions);
+      dialog.addEventListener('close', () => { dialog.remove(); resolve(result); });
+      host.append(dialog);
+      dialog.showModal();
+    });
+  }
+
+  // Icons of the saved configuration buttons.
+  const TOOL_ICONS = {
+    save: '<path d="M4 3.5h9.5L16.5 6.5V16a.5.5 0 0 1-.5.5H4a.5.5 0 0 1-.5-.5V4a.5.5 0 0 1 .5-.5z"/><path d="M6.5 3.5v4h6v-4M6.5 16.5v-5h7v5"/>',
+    delete: '<path d="M3.5 5.5h13M8 5.5V4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1.5M5.5 5.5l.8 10.6a1 1 0 0 0 1 .9h5.4a1 1 0 0 0 1-.9l.8-10.6M8.5 8.5v5.5M11.5 8.5v5.5"/>',
+    export: '<path d="M10 3v9M6.5 8.5 10 12l3.5-3.5M4 14v2a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-2"/>',
+    import: '<path d="M10 12V3M6.5 6.5 10 3l3.5 3.5M4 14v2a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-2"/>',
+  };
 
   // PowerPoint and Word actions use the colours and icons of the export buttons of every module.
   const DOCUMENT_ACTIONS = {
@@ -372,6 +468,9 @@
       };
       const knownOperators = {filterOperators: context.filterOptions.Operator || [], gapOperators: context.operators};
       const state = operators.configuration(clone(configuration || defaultConfiguration(context.defaults)), knownOperators);
+      // The configuration it was chosen from, shown in the selector when the editor opens.
+      const openedName = String(state.name || '');
+      delete state.name;
       const dialog = el('dialog', 'scoring-report-dialog');
       const header = el('div', 'scoring-report-header');
       header.append(el('h2', '', title));
@@ -384,6 +483,24 @@
       // The Default configuration is always listed after the placeholder and before the saved ones.
       const DEFAULT_NAME = 'Default';
       const DEFAULT_VALUE = '__default__';
+      // The configuration chosen in the selector (the placeholder until one is chosen) and the
+      // scenarios as it was loaded or saved, to tell unsaved changes.
+      let current = '';
+      let baseline = JSON.stringify(state.scenarios);
+      let openedValue = openedName.toLocaleLowerCase() === DEFAULT_NAME.toLocaleLowerCase() ? DEFAULT_VALUE : openedName;
+      const markSaved = () => { baseline = JSON.stringify(state.scenarios); };
+      // Key order does not matter when comparing configurations.
+      const canonical = (value) => JSON.stringify(value, (_key, item) => (item && typeof item === 'object' && !Array.isArray(item)
+        ? Object.fromEntries(Object.entries(item).sort(([left], [right]) => left.localeCompare(right))) : item));
+      const matchingConfiguration = () => {
+        const opened = canonical(state.scenarios);
+        const match = savedConfigurations.find((item) => canonical(
+          operators.configuration(clone(item.configuration), knownOperators).scenarios) === opened);
+        if (match) return match.name;
+        return canonical(operators.configuration(defaultConfiguration(context.defaults), knownOperators).scenarios) === opened
+          ? DEFAULT_VALUE : '';
+      };
+      const hasUnsavedChanges = () => JSON.stringify(state.scenarios) !== baseline;
       const refreshSaved = (payload) => {
         savedConfigurations = payload?.configurations || [];
         saved.replaceChildren(el('option', '', savedConfigurations.length ? 'Saved configurations…' : 'No saved configurations'));
@@ -396,9 +513,16 @@
           option.value = item.name;
           saved.append(option);
         }
+        const listed = (value) => value && [...saved.options].some((option) => option.value === value);
+        current = listed(current) ? current : listed(openedValue) && !current ? openedValue : '';
+        // Reports saved without the name of their configuration: the configuration with the same content.
+        if (!current && !openedName && !hasUnsavedChanges()) current = matchingConfiguration();
+        saved.value = current;
       };
-      const button = (text, handler, className = 'ghost-link', titleText = '') => {
-        const node = el('button', className, text);
+      const button = (text, handler, kind, titleText = '') => {
+        const node = el('button', `ghost-link scoring-report-tool is-${kind}`);
+        node.insertAdjacentHTML('beforeend', `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${TOOL_ICONS[kind]}</svg>`);
+        node.append(el('span', '', text));
         node.type = 'button';
         if (titleText) node.title = titleText;
         node.addEventListener('click', handler);
@@ -406,52 +530,74 @@
         return node;
       };
       toolbar.append(saved);
-      const useDefault = () => {
-        state.scenarios = defaultConfiguration(context.defaults).scenarios;
+      // Choosing a configuration in the selector loads it (Default included).
+      const load = (value) => {
+        if (value === DEFAULT_VALUE) {
+          state.scenarios = defaultConfiguration(context.defaults).scenarios;
+          setStatus('Default configuration: one scenario with the calculation filters and aggregation.', 'success');
+        } else {
+          const item = savedConfigurations.find((entry) => entry.name === value);
+          if (!item) return;
+          state.scenarios = operators.configuration(clone(item.configuration), knownOperators).scenarios;
+          setStatus(`Loaded “${item.name}”.`, 'success');
+        }
         render();
-        saved.value = DEFAULT_VALUE;
-        setStatus('Default configuration: one scenario with the calculation filters and aggregation.', 'success');
+        markSaved();
+        current = value;
+        saved.value = value;
       };
-      button('Load', () => {
-        if (saved.value === DEFAULT_VALUE) { useDefault(); return; }
-        const item = savedConfigurations.find((entry) => entry.name === saved.value);
-        if (!item) { setStatus('Choose a saved configuration to load.', 'error'); return; }
-        state.scenarios = operators.configuration(clone(item.configuration), knownOperators).scenarios;
-        render();
-        setStatus(`Loaded “${item.name}”.`, 'success');
-      }, 'ghost-link', 'Replace the scenarios with the chosen saved configuration');
-      button('Save as…', async () => {
-        const current = (saved.value !== DEFAULT_VALUE && saved.value) || state.scenarios[0]?.name || '';
+      const saveAs = async () => {
+        const proposed = (current !== DEFAULT_VALUE && current) || state.scenarios[0]?.name || '';
         const name = await ask(dialog, {
-          title: 'Save report configuration', value: current,
+          title: 'Save report configuration', value: proposed,
           copy: 'Name of the configuration in this workspace. Saving with the name of a saved configuration replaces it.',
         });
-        if (!name) return;
+        if (!name) return false;
         if (name.toLocaleLowerCase() === DEFAULT_NAME.toLocaleLowerCase()) {
           setStatus('“Default” is the name of the default configuration: choose another name.', 'error');
-          return;
+          return false;
         }
         try {
-          refreshSaved(await api('/api/scoring/report-configurations', {
+          const payload = await api('/api/scoring/report-configurations', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({name: name.trim(), configuration: state}),
-          }));
-          saved.value = name.trim();
+            body: JSON.stringify({name: name.trim(), configuration: {scenarios: state.scenarios}}),
+          });
+          current = name.trim();
+          refreshSaved(payload);
+          markSaved();
           setStatus(`Saved “${name.trim()}”.`, 'success');
-        } catch (error) { setStatus(error.message, 'error'); }
-      }, 'ghost-link', 'Save these scenarios with a name in the workspace');
+          return true;
+        } catch (error) {
+          setStatus(error.message, 'error');
+          return false;
+        }
+      };
+      saved.addEventListener('change', async () => {
+        const wanted = saved.value;
+        saved.value = current;
+        if (!wanted || wanted === current) return;
+        if (hasUnsavedChanges()) {
+          const choice = await choose(dialog, {
+            title: 'Unsaved changes',
+            copy: 'The scenarios have changes that are not saved. Save them before loading another configuration, or discard them?',
+            choices: [['cancel', 'Cancel'], ['discard', 'Discard changes', 'danger-button'], ['save', 'Save as…', 'primary-button']],
+          });
+          if (choice === 'save') { if (!await saveAs()) return; } else if (choice !== 'discard') return;
+        }
+        load(wanted);
+      });
+      button('Save as…', saveAs, 'save', 'Save these scenarios with a name in the workspace');
       button('Delete', async () => {
-        if (!saved.value) { setStatus('Choose a saved configuration to delete.', 'error'); return; }
-        if (saved.value === DEFAULT_VALUE) { setStatus('The Default configuration cannot be deleted.', 'error'); return; }
-        if (!await ask(dialog, {title: 'Delete report configuration', copy: `Delete the saved report configuration “${saved.value}”?`,
+        if (!current) { setStatus('Choose a saved configuration to delete.', 'error'); return; }
+        if (current === DEFAULT_VALUE) { setStatus('The Default configuration cannot be deleted.', 'error'); return; }
+        if (!await ask(dialog, {title: 'Delete report configuration', copy: `Delete the saved report configuration “${current}”?`,
           confirmLabel: 'Delete', danger: true})) return;
         try {
-          refreshSaved(await api(`/api/scoring/report-configurations?name=${encodeURIComponent(saved.value)}`, {method: 'DELETE'}));
+          refreshSaved(await api(`/api/scoring/report-configurations?name=${encodeURIComponent(current)}`, {method: 'DELETE'}));
           setStatus('Configuration deleted.', 'success');
         } catch (error) { setStatus(error.message, 'error'); }
-      });
-      button('Default', useDefault, 'ghost-link', 'Go back to the default report configuration');
-      button('Export JSON', () => { window.location.href = '/api/scoring/report-configurations/export'; }, 'ghost-link',
+      }, 'delete', 'Delete the chosen saved configuration');
+      button('Export JSON', () => { window.location.href = '/api/scoring/report-configurations/export'; }, 'export',
         'Download every saved report configuration');
       const importInput = el('input');
       importInput.type = 'file';
@@ -469,7 +615,7 @@
         importInput.value = '';
       });
       toolbar.append(importInput);
-      button('Import JSON', () => importInput.click(), 'ghost-link', 'Add report configurations from a JSON file');
+      button('Import JSON', () => importInput.click(), 'import', 'Add report configurations from a JSON file');
       header.append(toolbar);
 
       const list = el('div', 'scoring-report-scenarios');
@@ -496,7 +642,9 @@
             return;
           }
           state.scenarios.forEach((scenario, index) => { scenario.name = scenario.name.trim() || `Scenario ${index + 1}`; });
-          close({configuration: clone(state), action});
+          // The chosen configuration's name is kept while its scenarios have no unsaved changes.
+          const chosenName = current && !hasUnsavedChanges() ? (current === DEFAULT_VALUE ? DEFAULT_NAME : current) : '';
+          close({configuration: {...clone(state), ...(chosenName ? {name: chosenName} : {})}, action});
         });
         footer.append(node);
       }
@@ -510,7 +658,7 @@
       document.body.append(dialog);
       dialog.showModal();
       refreshSaved(null);
-      api('/api/scoring/report-configurations').then(refreshSaved).catch(() => {});
+      api('/api/scoring/report-configurations').then((payload) => { refreshSaved(payload); openedValue = ''; }).catch(() => {});
     });
   }
 

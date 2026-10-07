@@ -21,6 +21,7 @@ from src.modules.scoring_config import (
     DEFAULT_AGGREGATION_HIERARCHY,
     complete_aggregation_hierarchy,
     configuration_hash,
+    load_aggregation_hierarchy,
     _is_legacy_two_environment_configuration,
     validate_scoring_configuration,
 )
@@ -388,6 +389,34 @@ def validate_complete_scoring_cdr_selection(
     return normalized_ids
 
 
+def select_all_complete_cdrs(repository: Repository, nr_mode: str) -> list[int]:
+    """Every ready CDR of the NR Mode whose campaigns all have Data, Voice and Speech CDRs."""
+    mode = normalize_nr_mode(nr_mode)
+    candidates = [
+        row for row in repository.list_datasets()
+        if str(row['status'] or '').casefold() == 'ready'
+        and str(row['dataset_kind'] or '').strip().casefold() in CDR_DATASET_KINDS
+        and normalize_nr_mode(row['nr_mode']) == mode
+        and repository.dataset_rows_table_exists(int(row['id']))
+        and repository.dataset_row_count(int(row['id'])) > 0
+    ]
+    campaign_index = _read_campaigns(repository, [int(row['id']) for row in candidates])
+    # CDRs without a Campaign form their own set, complete when every type has one.
+    campaigns_of = {
+        int(row['id']): {str(campaign).strip().casefold() for campaign in campaign_index.get(int(row['id']), [])
+                         if str(campaign).strip()} or {''}
+        for row in candidates
+    }
+    by_kind: dict[str, set[str]] = {kind: set() for kind in ('data', 'voice', 'speech')}
+    for row in candidates:
+        by_kind[str(row['dataset_kind']).strip().casefold()].update(campaigns_of[int(row['id'])])
+    complete = by_kind['data'] & by_kind['voice'] & by_kind['speech']
+    selected = sorted(int(row['id']) for row in candidates if campaigns_of[int(row['id'])] <= complete)
+    if not selected:
+        raise ValueError(f'There is no complete set of Data, Voice and Speech CDRs in {mode} NR Mode.')
+    return validate_complete_scoring_cdr_selection(repository, selected, mode)
+
+
 def select_latest_companion_cdrs(repository: Repository, dataset_id: int) -> list[int]:
     """Pair a newly processed CDR with the newest compatible CDRs for every type."""
     anchor_id = int(dataset_id)
@@ -689,7 +718,8 @@ def _prepare_scoring_job(
     sources, _campaigns, source_fingerprint = _source_snapshot(
         repository, normalized_ids, expected_nr_mode=nr_mode,
     )
-    normalized_levels = _normalize_levels(levels, sources, configuration['aggregation_hierarchy'])
+    aggregation_hierarchy = load_aggregation_hierarchy(repository)
+    normalized_levels = _normalize_levels(levels, sources, aggregation_hierarchy)
     selected_mode = normalize_nr_mode(nr_mode) if nr_mode else str(sources[0]['metadata']['nr_mode'])
     if selected_mode not in NR_MODES:
         raise ValueError('NR Mode must be NSA or SA.')
@@ -720,7 +750,7 @@ def _prepare_scoring_job(
         'baseline_aliases': baseline_aliases,
         'context_filters': normalized_context_filters,
         'resolved_context_filters': resolved_context_filters,
-        'aggregation_hierarchy': list(configuration['aggregation_hierarchy']),
+        'aggregation_hierarchy': list(aggregation_hierarchy),
         'aggregation_contract_version': AGGREGATION_CONTRACT_VERSION,
         'operator_mappings': operator_mappings,
     }

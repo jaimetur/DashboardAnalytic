@@ -150,3 +150,21 @@ def test_scoring_api_rejects_mixed_campaign_coverage(cdr_selection_workspace):
     assert response.status_code == 400
     assert 'must cover each campaign with Data, Voice and Speech' in response.json()['detail']
     assert scoring_jobs.list_scoring_jobs(cdr_selection_workspace['repository']) == []
+
+
+def test_all_complete_cdrs_select_every_cdr_of_campaigns_with_data_voice_and_speech(cdr_selection_workspace):
+    repository = cdr_selection_workspace['repository']
+    add_cdr = cdr_selection_workspace['add_cdr']
+    q2_ids = cdr_selection_workspace['dataset_ids']
+    q1_ids = [add_cdr(name=f'UK_Q1_NSA_{kind.title()}.csv', kind=kind, campaign='2026-Q1') for kind in ('data', 'voice', 'speech')]
+    second_q2_voice = add_cdr(name='UK_Q2_NSA_Voice_Rerun.csv', kind='voice')
+    # Q3 has no Speech CDR, and SA CDRs belong to the other NR Mode.
+    incomplete = [add_cdr(name=f'UK_Q3_NSA_{kind.title()}.csv', kind=kind, campaign='2026-Q3') for kind in ('data', 'voice')]
+    sa_data = add_cdr(name='UK_Q2_SA_Data.csv', kind='data', nr_mode='SA')
+
+    selected = scoring_jobs.select_all_complete_cdrs(repository, 'NSA')
+
+    assert set(selected) == {*q2_ids, *q1_ids, second_q2_voice}
+    assert not set(selected) & {*incomplete, sa_data}
+    with pytest.raises(ValueError, match='no complete set'):
+        scoring_jobs.select_all_complete_cdrs(repository, 'SA')

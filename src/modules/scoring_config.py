@@ -21,9 +21,40 @@ SUPPORTED_MAPPING_METHODS = frozenset({'piecewise_linear', 'piecewise_quadratic'
 _PROFILE_ID = re.compile(r'[a-z0-9][a-z0-9_-]{0,63}\Z')
 DEFAULT_AGGREGATION_HIERARCHY = ['Operator', 'Vendor', 'Region', 'City', 'Campaign']
 _AGGREGATION_FIELDS = frozenset(DEFAULT_AGGREGATION_HIERARCHY)
-# Levels added after configurations were saved; a saved hierarchy without them keeps
-# its identity (and its calculated jobs) and gets them in their default position.
+# Levels added after a hierarchy was saved; a saved hierarchy without them gets them in
+# their default position.
 OPTIONAL_AGGREGATION_LEVELS = {'Cluster': 'Region'}
+# The aggregation hierarchy is an application setting shared by every workspace and
+# methodology (it is not part of a methodology).
+AGGREGATION_HIERARCHY_STATE_KEY = 'scoring_aggregation_hierarchy'
+
+
+def validate_aggregation_hierarchy(hierarchy: object) -> list[str]:
+    """The hierarchy when it lists every aggregation level exactly once (Cluster may be left out)."""
+    if (not isinstance(hierarchy, list)
+            or any(not isinstance(field, str) for field in hierarchy)
+            or len(set(hierarchy)) != len(hierarchy)
+            or not _AGGREGATION_FIELDS <= set(hierarchy) <= _AGGREGATION_FIELDS | set(OPTIONAL_AGGREGATION_LEVELS)):
+        raise ValueError('The aggregation hierarchy must list Operator, Vendor, Region, City and Campaign exactly once, '
+                         'optionally with Cluster.')
+    return complete_aggregation_hierarchy(hierarchy)
+
+
+def load_aggregation_hierarchy(repository: Any) -> list[str]:
+    """The application's aggregation hierarchy, or the default one."""
+    getter = getattr(repository, 'get_application_state', None)
+    try:
+        stored = json.loads(getter(AGGREGATION_HIERARCHY_STATE_KEY) or 'null') if callable(getter) else None
+        return validate_aggregation_hierarchy(stored)
+    except (TypeError, ValueError):
+        return complete_aggregation_hierarchy()
+
+
+def save_aggregation_hierarchy(repository: Any, hierarchy: object) -> list[str]:
+    """Validate and save the application's aggregation hierarchy."""
+    levels = validate_aggregation_hierarchy(hierarchy)
+    repository.set_application_state(AGGREGATION_HIERARCHY_STATE_KEY, json.dumps(levels))
+    return levels
 
 
 def complete_aggregation_hierarchy(hierarchy: object = None) -> list[str]:
@@ -593,15 +624,6 @@ def validate_scoring_configuration(payload: object) -> dict[str, Any]:
     version = configuration.get('version')
     if not isinstance(version, str) or not version.strip():
         raise ValueError('Scoring configuration version must be a non-empty string.')
-    aggregation_hierarchy = configuration.get('aggregation_hierarchy', DEFAULT_AGGREGATION_HIERARCHY)
-    if (not isinstance(aggregation_hierarchy, list)
-            or any(not isinstance(field, str) for field in aggregation_hierarchy)
-            or len(set(aggregation_hierarchy)) != len(aggregation_hierarchy)
-            or not _AGGREGATION_FIELDS <= set(aggregation_hierarchy) <= _AGGREGATION_FIELDS | set(OPTIONAL_AGGREGATION_LEVELS)):
-        raise ValueError(
-            'Scoring configuration aggregation_hierarchy must list Operator, Vendor, Region, City and Campaign '
-            'exactly once, optionally with Cluster.'
-        )
     _validate_scope(configuration.get('scope'))
     interpolation = _validate_interpolation(configuration.get('interpolation', {
         'score_range': [0, 1], 'method': 'piecewise_linear', 'clamp_to_range': True,
@@ -665,7 +687,8 @@ def validate_scoring_configuration(payload: object) -> dict[str, Any]:
         raise ValueError('GAP priority must list unique KPI codes from this configuration.')
     validated = copy.deepcopy(configuration)
     validated['interpolation'] = interpolation
-    validated['aggregation_hierarchy'] = list(aggregation_hierarchy)
+    # The aggregation hierarchy is an application setting, not part of a methodology.
+    validated.pop('aggregation_hierarchy', None)
     validated['metrics'] = validated_metrics
     highest_kpi_number = max(
         (int(match.group(1)) for code in codes

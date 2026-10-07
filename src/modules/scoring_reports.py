@@ -109,7 +109,12 @@ def normalize_report_configuration(raw: Any) -> dict[str, Any]:
     normalized = [normalize_scenario(item, index) for index, item in enumerate(scenarios)]
     if not any(any(options['enabled'] for options in scenario['scorings'].values()) for scenario in normalized):
         raise ValueError('Include the Best Network or the Most Reliable Network scoring in at least one scenario.')
-    return {'scenarios': normalized}
+    configuration: dict[str, Any] = {'scenarios': normalized}
+    # The saved configuration (or Default) it was chosen from, shown again in the editor's selector.
+    name = str(raw.get('name') or '').strip()[:80]
+    if name:
+        configuration['name'] = name
+    return configuration
 
 
 def default_report_configuration(*, context_filters: dict[str, Any] | None = None,

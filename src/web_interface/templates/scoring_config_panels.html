@@ -212,8 +212,6 @@
   .scoring-config-panel .scoring-config-transfer-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 1.25rem 1.5rem; margin: 1rem 0 0; }
   .scoring-config-panel .scoring-config-transfer-actions > .inline-actions { margin: 0; min-width: 0; }
   .scoring-config-panel .scoring-config-transfer-link { flex: 1 1 18rem; color: #245e69; font-weight: 650; }
-  .scoring-config-panel .scoring-config-hierarchy-level { font-weight: 750; }
-  .scoring-config-panel .scoring-config-hierarchy-required { margin-left: .45rem; color: #607681; font-size: .76rem; font-weight: 600; }
   @container scoring-kpi-table (max-width: 1100px) {
     .scoring-config-panel .scoring-config-table,
     .scoring-config-panel .scoring-config-table tbody { display: block; width: 100%; }
@@ -385,25 +383,6 @@
         <div class="scoring-config-actions"><button type="submit" data-scoring-kpi-save disabled><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h13l4 4v14H3V3zM7 3v6h10V3M7 21v-8h10v8" /></svg><span data-button-label>Save Methodology</span></button></div>
         </div>
         </details>
-  <details id="scoring-aggregation-hierarchy" class="panel collapsible-panel scoring-config-panel scoring-config-section" open data-panel-state-key="workspace-config:scoring-aggregation-hierarchy">
-    <summary class="collapsible-summary">
-      <div><p class="eyebrow">Methodology Aggregation Hierarchy</p><h2>Methodology Aggregation Hierarchy</h2></div>
-      <span class="collapse-chip">Collapse</span>
-    </summary>
-    <div class="collapsible-panel-body">
-      <p class="scoring-config-intro">Set the order used to group scoring results and filter values. Move each dimension into the desired hierarchy position. Operator remains required for every scoring job.</p>
-      <div data-scoring-hierarchy-form>
-        <div class="scoring-config-table-scroll" role="region" aria-label="Scoring aggregation hierarchy order" tabindex="0">
-          <table class="scoring-config-priority-table">
-            <thead><tr><th scope="col">Position</th><th scope="col">Aggregation level</th><th scope="col">Order</th></tr></thead>
-            <tbody data-scoring-hierarchy-rows><tr><td colspan="3">Loading aggregation hierarchy…</td></tr></tbody>
-          </table>
-        </div>
-        <div class="scoring-config-actions"><button type="submit" data-scoring-kpi-save disabled><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h13l4 4v14H3V3zM7 3v6h10V3M7 21v-8h10v8" /></svg><span data-button-label>Save Methodology</span></button></div>
-
-      </div>
-    </div>
-  </details>
 
   <details id="scoring-gap-priority" class="panel collapsible-panel scoring-config-panel scoring-config-section" open data-panel-state-key="workspace-config:scoring-gap-priority">
     <summary class="collapsible-summary">

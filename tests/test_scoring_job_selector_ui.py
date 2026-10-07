@@ -146,7 +146,8 @@ def test_export_actions_remain_visible_and_disabled_until_results_are_available(
     program = r'''
 const links = ['scoring', 'gap', 'ppt'].map(() => ({hidden: true, attributes: {},
   setAttribute(key, value) {this.attributes[key] = value;}}));
-const root = {querySelector: selector => links[['[data-export-scoring]', '[data-export-gap]', '[data-export-ppt]'].indexOf(selector)]};
+// The CSV links sit above their tables; Export Report (PPT/Word) is in both toolbars.
+const exportLinks = {scoring: links[0], gap: links[1], ppt: [links[2]]};
 const exportBase = '/scoring/jobs';
 const selectedTableMode = () => 'expanded';
 const selectedGapLayout = () => 'end';

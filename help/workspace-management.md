@@ -204,7 +204,7 @@ Vendor mapping is required only for Vendor Comparison.
   - Ericsson at either endpoint with a different or missing Vendor at the other returns `<Operator>_Ericsson_Mixed`;
   - every other different or missing combination returns `<Operator>_Non-Ericsson_Mixed`.
 - Operators without a multivendor mapping use their canonical `Operator`. CDRs mapped before this rule keep `Vodafone_Mixed Vendor`, `Vodafone_Other Vendor` or `3_Mixed Vendor` until they are mapped again.
-- `Vendor` removes the recognised operator prefix from the mapped `Operator_Vendor`, allowing analytics to count the physical vendors independently of the operator. `Vendor_Operator` is `Operator_Vendor` the other way round (`<Vendor>_<Operator>`, and `<Operator> - All` for operators without a vendor); it is derived when the CDRs are read, so every CDR has it without being mapped again. CDRs processed before these names are migrated once when the workspace opens: the former `Vendor` becomes `Operator_Vendor` and the former `Vendor_Only` becomes `Vendor`.
+- `Vendor` removes the recognised operator prefix from the mapped `Operator_Vendor`, allowing analytics to count the physical vendors independently of the operator. `Vendor_Operator` is `Operator_Vendor` the other way round (`<Vendor>_<Operator>`, and `<Operator> - All` for operators without a vendor); it is derived when the CDRs are read, so every CDR has it without being mapped again. Every filter that offers both keeps them in sync: selecting values in one selects the same identities in the other. CDRs processed before these names are migrated once when the workspace opens: the former `Vendor` becomes `Operator_Vendor` and the former `Vendor_Only` becomes `Vendor`.
 
 #### During Upload
 

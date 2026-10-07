@@ -467,7 +467,7 @@ For global runtime settings, see [Application Config](app-config.md). Admin's [D
 
 ## Scoring & GAP Analysis Setup
 
-A methodology defines the complete scoring setup: its title, environments, KPI definitions and weights, aggregation hierarchy and KPI priorities. Select or create a methodology before editing its settings.
+A methodology defines the complete scoring setup: its title, environments, KPI definitions and weights and KPI priorities. Select or create a methodology before editing its settings. The aggregation hierarchy is an application setting ordered from the Aggregation levels of [Scoring & GAP Analysis](scoring-gap-analysis.md#3-set-filters-aggregation-and-reference), not part of a methodology.
 
 ### Methodology controls
 
@@ -476,13 +476,13 @@ A methodology defines the complete scoring setup: its title, environments, KPI d
 | Create / Duplicate Methodology | Start a new definition or use an existing methodology as the basis for a revision. |
 | Rename / edit title | Change the methodology identity or descriptive title. |
 | Set Default | Choose the saved methodology initially offered for future scoring jobs. |
-| Save Methodology | Validate and persist the complete methodology, including all three subpanels. |
+| Save Methodology | Validate and persist the complete methodology, including every subpanel. |
 | Export Methodology (JSON) | Download the selected methodology only. |
 | Import Methodology (JSON) | Import a portable methodology document. |
 | Admin Export / Backup | Package every saved methodology and the default selection together. |
 
 > [!IMPORTANT]
-> **One save operation.** Save Methodology appears above the subpanels and inside each one for convenience. Every instance saves the same complete setup; there are no independent hierarchy or priority saves.
+> **One save operation.** Save Methodology appears above the subpanels and inside each one for convenience. Every instance saves the same complete setup; there are no independent priority saves.
 
 The database is the source of record. Invalid edits do not replace the saved configuration. Historical jobs keep their methodology snapshot; changing the saved methodology changes the identity of subsequent calculations.
 
@@ -513,10 +513,6 @@ Expand this subpanel to edit KPI specifications, thresholds and weights for the 
 - KPIs whose **Type** is **Reliable** form the Most Reliable Network scoring, with the same thresholds: set their **Most Reliable points** in the selected environment (the column can only be edited on Reliable KPIs). The line above the table counts the Reliable KPIs and their points. See [Most Reliable Network scoring](scoring-gap-analysis.md#most-reliable-network-scoring).
 
 Max Points displays two decimal places while retaining full precision for calculation and unchanged allocations when saved. The formula determines the calculation basis; formulas and filters must use supported engine fields and operations.
-
-### Methodology Aggregation Hierarchy
-
-Reorder Operator, Vendor, Region, Cluster, City and Campaign. Operator is mandatory for calculations. Methodologies saved before Cluster existed keep their calculated jobs and place Cluster right after Region. The hierarchy controls the selection panels and hierarchical result tables, charts and PowerPoint output.
 
 ### Methodology KPIs Priorities for GAP analysis
 
@@ -566,7 +562,7 @@ For RF histograms, select **Operator**: the first definition is LTE and the seco
 
 ### Vendor-only filter labels
 
-Across the application, values follow the Operator Maps and Vendor Maps order: `Vendor` lists pure vendors first, then the mixed, other and all-vendor groups, then the operators without a vendor; `Operator_Vendor` is ordered by Operator and, within one Operator, by Vendor; `Vendor_Operator` (`<Vendor>_<Operator>`) by Vendor and, within one Vendor, by Operator. In both, operators without a vendor (`<Operator> - All`) come last, in Operator Maps order, and values missing from the maps follow the mapped ones alphabetically. Operator-only identities follow with the display suffix ** - All**, based on canonical Operator identities, their configured aliases and cached CDR operators. Configured vendor identities take precedence, so actual vendors remain in the first group. Vendor mapping stores `Operator - All` in `Operator_Vendor` and `Vendor` for operator-only identities. Dataset exports, combined CDRs, transfers and backups preserve that value; legacy operator-only values without the suffix remain supported. This applies to Dashboard filters, Network Insights, data-preview column filters, Query Builder column filters and Report Template filter assistance.
+Across the application, values follow the Operator Maps and Vendor Maps order: `Vendor` lists pure vendors first, then the mixed, other and all-vendor groups, then the operators without a vendor; `Operator_Vendor` is ordered by Operator and, within one Operator, by Vendor; `Vendor_Operator` (`<Vendor>_<Operator>`) by Vendor and, within one Vendor, by Operator, with the mixed group of a vendor beside that vendor for each Operator (`Ericsson_3`, `Ericsson_Mixed_3`, `Ericsson_VF_UK`, `Ericsson_Mixed_VF_UK`) and the other mixed groups (`Non-Ericsson_Mixed`) last of all, after the operators without a vendor. In both, operators without a vendor (`<Operator> - All`) come last, in Operator Maps order, and values missing from the maps follow the mapped ones alphabetically. Operator-only identities follow with the display suffix ** - All**, based on canonical Operator identities, their configured aliases and cached CDR operators. Configured vendor identities take precedence, so actual vendors remain in the first group. Vendor mapping stores `Operator - All` in `Operator_Vendor` and `Vendor` for operator-only identities. Dataset exports, combined CDRs, transfers and backups preserve that value; legacy operator-only values without the suffix remain supported. This applies to Dashboard filters, Network Insights, data-preview column filters, Query Builder column filters and Report Template filter assistance.
 
 CDR catalogue caches retain the `Operator_Vendor`, `Vendor`, `Region`, `Cluster`, `City`, `Campaign` and `Operator` universes. CDR processing refreshes them from their source columns, and catalogues of CDRs processed before Cluster existed are backfilled once. The caches remain part of workspace database backups and restores.
 

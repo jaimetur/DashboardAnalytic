@@ -22,7 +22,8 @@ TITLE_BLUE = '#1450A8'
 CARD_COLOR = '#F2F3F5'
 LOSS_COLOR = '#E8414F'
 WIN_COLOR = '#4CA65A'
-MAX_PROFILE_SCOPES = 4
+# KPI GAP profiles for every location the location cards show (one per City, Cluster or Region).
+MAX_PROFILE_SCOPES = 12
 PROFILE_TABLE_BOTTOM = 6.68
 MAX_GROUP_SLIDES = 6
 MAX_COMPARISONS = 8

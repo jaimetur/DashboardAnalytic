@@ -161,3 +161,21 @@ def test_generated_scoring_pptx_serializes_valid_table_and_combo_chart_structure
             './/p:sldId', namespaces=NS,
         )]
         assert len(slide_ids) == len(set(slide_ids))
+
+
+def test_titles_keep_the_template_size_while_they_fit_the_title_placeholder():
+    from pptx.util import Pt
+    from src.modules.scoring_exports import _fit_slide_title_on_one_line
+
+    presentation = Presentation(TEMPLATE)
+    layout = next(layout for layout in presentation.slide_layouts if layout.name == 'Title Only')
+    sizes = {}
+    for text in ('Best Network Scoring per Category (Breakdown)', 'Most Reliable Network Scoring per Category (Breakdown)'):
+        title = presentation.slides.add_slide(layout).shapes.title
+        title.text_frame.text = text
+        paragraph = title.text_frame.paragraphs[0]
+        _fit_slide_title_on_one_line(title, paragraph)
+        sizes[text] = paragraph.runs[0].font.size
+    # The 27.5 cm placeholder holds the Breakdown title at the template's 40pt; only a longer title shrinks.
+    assert sizes['Best Network Scoring per Category (Breakdown)'] is None
+    assert Pt(20) <= sizes['Most Reliable Network Scoring per Category (Breakdown)'] < Pt(40)

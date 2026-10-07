@@ -25,7 +25,6 @@
   .scoring-dataset-filter-grid > label { width: 100%; max-width: 15rem; }
   .scoring-nr-row { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 1rem; }
   .scoring-nr-row > label { display: grid; gap: .35rem; width: 100%; max-width: 15rem; }
-  .scoring-document-exports { display: flex; flex-wrap: wrap; gap: .6rem; }
   .scoring-dataset-filter-grid select[data-nr-filter] { min-height: 2.45rem; }
   .scoring-picker { min-width: 0; padding: .85rem; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.64); }
   .scoring-controls .scoring-picker { border-color: #b4d6c5; background: #e5f3eb; }
@@ -33,6 +32,25 @@
   .scoring-picker-head { display: flex; align-items: center; justify-content: space-between; gap: .7rem; margin-bottom: .6rem; }
   .scoring-picker-head strong { color: var(--text); font-size: .88rem; }
   .scoring-picker-head span { color: var(--muted); font-size: .76rem; }
+  /* Aggregation levels: the hierarchy shortcut at the right of the levels, the note below them. */
+  .scoring-levels-row { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem .9rem; }
+  .scoring-levels-shortcut { margin-left: auto; }
+  .scoring-hierarchy-dialog { width: min(26rem, calc(100vw - 2rem)); padding: 0; border: 0; border-radius: 14px; box-shadow: 0 18px 48px rgba(16,32,48,.32); }
+  .scoring-hierarchy-dialog::backdrop { background: rgba(14,26,38,.45); }
+  .scoring-hierarchy-form { display: grid; gap: .75rem; padding: 1.2rem 1.3rem; }
+  .scoring-hierarchy-form h3 { margin: 0; color: #245b43; }
+  .scoring-hierarchy-copy { margin: 0; color: var(--muted); font-size: .82rem; line-height: 1.4; }
+  .scoring-hierarchy-list { display: grid; gap: .4rem; margin: 0; padding: 0; list-style: none; counter-reset: scoring-hierarchy; }
+  .scoring-hierarchy-list li { display: flex; align-items: center; gap: .5rem; padding: .4rem .6rem; border: 1px solid rgba(11,122,117,.25); border-radius: 10px; background: rgba(11,122,117,.06); counter-increment: scoring-hierarchy; }
+  .scoring-hierarchy-list li::before { content: counter(scoring-hierarchy) '.'; min-width: 1.3rem; color: var(--muted); font-weight: 800; }
+  .scoring-hierarchy-list li span { flex: 1 1 auto; font-weight: 750; }
+  .scoring-hierarchy-list button { width: 1.9rem; min-height: 1.9rem; padding: 0; border: 1px solid rgba(11,122,117,.35); border-radius: 8px; background: #fff; color: #0b7a75; font-weight: 800; }
+  .scoring-hierarchy-list button:disabled { opacity: .35; cursor: default; }
+  .scoring-hierarchy-status { min-height: 1.1em; margin: 0; font-size: .8rem; font-weight: 700; }
+  .scoring-hierarchy-status[data-tone="error"] { color: #a3263a; }
+  .scoring-hierarchy-actions { display: flex; justify-content: flex-end; gap: .5rem; }
+  .scoring-hierarchy-cancel { border: 1px solid rgba(11,122,117,.35); background: #fff; color: #0b7a75; }
+  .scoring-levels-shortcut svg { flex: 0 0 auto; width: 1rem; height: 1rem; margin-right: .3rem; }
   .scoring-picker-note { margin: .5rem .1rem 0; color: var(--muted); font-size: .69rem; }
   .scoring-dataset-list { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,18rem),1fr)); gap: .45rem; max-height: 15rem; overflow: auto; padding: .1rem .15rem .1rem 0; }
   .scoring-dataset-groups { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .6rem; }
@@ -60,7 +78,6 @@
   .scoring-config-shortcuts a { display: inline-flex; align-items: center; min-height: 1.8rem; padding: .28rem .58rem; border: 1px solid transparent; border-radius: 999px; font-size: .69rem; font-weight: 800; text-decoration: none; transition: filter .15s ease, border-color .15s ease; }
   .scoring-config-shortcuts a[data-config-shortcut="kpi"] { border-color: #8ab7b0; background: #e6f3f0; color: #174f49; }
   .scoring-config-shortcuts a[data-config-shortcut="hierarchy"] { border-color: #9db4d3; background: #eaf0fa; color: #274a77; }
-  .scoring-config-shortcuts a[data-config-shortcut="gap"] { border-color: #d3ad69; background: #fff1d4; color: #70420d; }
   .scoring-config-shortcuts a:hover { filter: brightness(.96); }
   .scoring-profile-choice { display: inline-flex; align-items: center; gap: .45rem; min-height: 2.25rem; padding: .3rem .55rem; border: 1px solid #8ab7b0; border-radius: 999px; background: #e6f3f0; color: #174f49; font-size: .75rem; font-weight: 800; }
   .scoring-profile-choice select { width: auto; min-width: 11rem; max-width: min(100%, 20rem); min-height: 1.8rem; padding: .2rem 1.7rem .2rem .45rem; border-color: rgba(23,79,73,.28); color: #173f3b; font-size: .76rem; font-weight: 700; }
@@ -112,7 +129,7 @@
   .scoring-status[data-status="processing"], .scoring-status[data-status="queued"] { background: #fff2d4; color: #8b5c08; }
   .scoring-job-progress { height: .3rem; overflow: hidden; border-radius: 999px; background: rgba(25,42,53,.1); }
   .scoring-job-progress span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg,var(--brand),#43b189); transition: width .2s ease; }
-  .scoring-results-head { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: start; gap: 1rem; }
+  .scoring-results-head { display: grid; grid-template-columns: fit-content(38rem) minmax(0,1fr); align-items: start; gap: 1rem; }
   .scoring-results-primary { display: contents; }
   .scoring-results-primary h3 { margin: 0; }
   .scoring-results-controls { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; align-items: flex-start; width: fit-content; min-width: 16.5rem; max-width: 100%; gap: .6rem; }
@@ -177,6 +194,30 @@
   .scoring-loss-map-figure { min-height: 12rem; color: #6b7a85; font-size: .8rem; }
   .scoring-loss-map-svg { display: block; width: 100%; max-height: 36rem; }
   @media (max-width: 900px) { .scoring-loss-map { grid-template-columns: minmax(0, 1fr); } }
+  /* Points Lost Map: location, operators (their maps side by side) and analysis per City, Region or Cluster. */
+  .scoring-loss-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .55rem 1.3rem; margin: .2rem 0 .75rem; }
+  .scoring-loss-controls .scoring-insight-select { margin: 0; }
+  .scoring-loss-controls .scoring-insight-select select { min-width: 11rem; }
+  .scoring-loss-operators { flex-wrap: wrap; }
+  .scoring-loss-operator { --operator-color: #455b65; min-height: 0; padding: .3rem .8rem; border: 1.5px solid color-mix(in srgb, var(--operator-color) 45%, transparent); border-radius: 999px; background: #fff; color: var(--operator-color); font-size: .76rem; font-weight: 800; box-shadow: none; cursor: pointer; }
+  .scoring-loss-operator:hover:not(:disabled) { background: color-mix(in srgb, var(--operator-color) 10%, white); color: var(--operator-color); box-shadow: none; transform: none; }
+  .scoring-loss-operator[aria-pressed="true"], .scoring-loss-operator[aria-pressed="true"]:hover:not(:disabled) { border-color: var(--operator-color); background: var(--operator-color); color: #fff; }
+  .scoring-loss-map-grid { display: grid; gap: 1.2rem; }
+  .scoring-loss-map-grid.is-multiple { grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr)); }
+  .scoring-loss-map-card { min-width: 0; }
+  .scoring-loss-map.is-compact { grid-template-columns: minmax(0, 1fr); }
+  /* Map zoom: a rectangle dragged with the mouse, or the floating buttons shown while the pointer is over the map. */
+  .scoring-loss-map-figure { position: relative; }
+  .scoring-loss-map-figure > svg { cursor: crosshair; touch-action: none; user-select: none; }
+  .scoring-map-zoom { position: absolute; top: .5rem; right: .5rem; z-index: 2; display: flex; flex-direction: column; gap: .25rem; padding: .3rem; border: 1px solid #d7e0e7; border-radius: 10px; background: rgba(255, 255, 255, .94); box-shadow: 0 6px 16px rgba(18, 31, 43, .18); opacity: 0; pointer-events: none; transition: opacity .15s ease; }
+  .scoring-map-zoom:not(.is-visible) { transition: none; }
+  .scoring-map-zoom.is-visible { opacity: 1; pointer-events: auto; }
+  .scoring-map-zoom button { width: 2rem; height: 2rem; min-height: 0; padding: 0; border: 1px solid #c9d4dc; border-radius: 7px; background: #fff; color: #244e70; font-size: 1rem; font-weight: 800; line-height: 1; box-shadow: none; cursor: pointer; }
+  .scoring-map-zoom button:hover { background: #eef4f9; transform: none; box-shadow: none; }
+  .scoring-map-zoom-rect { fill: rgba(31, 111, 209, .12); stroke: #1f6fd1; stroke-width: 1.5; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
+  .scoring-content-zoom { position: relative; touch-action: none; user-select: none; }
+  .scoring-content-zoom.is-zoomed { overflow: hidden; }
+  .scoring-content-zoom-rect { position: absolute; z-index: 3; border: 1.5px dashed #1f6fd1; background: rgba(31, 111, 209, .12); pointer-events: none; }
   .scoring-insight-reliable { text-decoration: underline; }
   .scoring-insight-note { margin: .6rem 0 0; color: #4a5b65; font-size: .78rem; }
   .scoring-insight-compare { max-width: 68rem; overflow-x: auto; }
@@ -192,20 +233,31 @@
   .scoring-results-tools a[aria-disabled="true"] { opacity: .5; cursor: not-allowed; box-shadow: none; }
   .scoring-results-tools a:focus-visible { outline: 2px solid #1b607e; outline-offset: 3px; }
   .scoring-results-tools a[data-config-shortcut="kpi"] { background: linear-gradient(135deg,#087c83,#11505f); }
-  .scoring-results-tools a[data-config-shortcut="hierarchy"] { background: linear-gradient(135deg,#496bc7,#283e89); }
-  .scoring-results-tools a[data-config-shortcut="gap"] { background: linear-gradient(135deg,#9250b5,#602b83); }
-  .scoring-results-tools a[data-export-scoring] { background: linear-gradient(135deg,#22865d,#105739); }
-  .scoring-results-tools a[data-export-gap] { background: linear-gradient(135deg,#1688bb,#145584); }
-  .scoring-results-tools a[data-export-ppt] { background: linear-gradient(135deg,#db7823,#a6420d); }
+  /* Export to CSV above the Scoring and GAP tables: the table shown, in the GAP export colour. */
+  .scoring-table-export { display: flex; justify-content: flex-end; margin: 0 0 .65rem; }
+  .scoring-table-export a { display: inline-flex; align-items: center; gap: .4rem; min-height: 2.15rem; padding: .4rem .72rem; border: 1px solid rgba(255,255,255,.2); border-radius: 999px; background: linear-gradient(135deg,#1688bb,#145584); color: #fff; font-size: .75rem; font-weight: 750; text-decoration: none; box-shadow: 0 6px 14px rgba(20,85,132,.18); }
+  .scoring-table-export a:hover:not([aria-disabled="true"]) { filter: brightness(1.1); }
+  .scoring-table-export a[aria-disabled="true"] { opacity: .5; cursor: not-allowed; box-shadow: none; }
+  .scoring-table-export svg { flex: 0 0 auto; width: 1.15rem; height: 1.15rem; }
+  .scoring-results-tools a:is([data-export-ppt], [data-generate-report]) { background: linear-gradient(135deg,#db7823,#a6420d); }
   .scoring-results-tools svg * { fill: none; stroke: currentColor; }
   .scoring-results-config-shortcuts svg, .scoring-export-actions svg { flex: 0 0 auto; width: 1.15rem; height: 1.15rem; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
   .scoring-export-actions { display: flex; flex-wrap: nowrap; gap: .45rem; }
   .scoring-export-actions a[hidden] { display: none; }
-  .scoring-result-tabs { display: flex; flex-wrap: wrap; gap: .4rem; margin: .9rem 0 .65rem; border-bottom: 1px solid var(--line); }
-  .scoring-result-tab { padding: .55rem .75rem; border: 1px solid #e4bf91; border-radius: 10px 10px 0 0; background: #fff0d1; color: #75411f; font-size: .78rem; font-weight: 750; box-shadow: none; }
-  .scoring-result-tab:hover:not(:disabled) { border-color: #d3a46c; background: #ffe6bb; color: #633612; box-shadow: none; transform: none; }
-  .scoring-result-tab[aria-selected="true"] { border-color: #78b6b0; background: #dff1ef; color: #074c49; font-weight: 850; box-shadow: inset 0 -3px var(--brand); }
-  .scoring-result-tab:focus-visible { outline: 3px solid rgba(11,122,117,.32); outline-offset: 2px; }
+  /* Result tabs: each in its own colour, on top of the panel that holds the selected results. The
+     selected tab joins the panel, whose top border takes its colour. */
+  .scoring-results-tabbed { --result-accent: #4f46e5; margin-top: .9rem; }
+  .scoring-results-tabbed:has([data-result-tab="scoring"][aria-selected="true"]) { --result-accent: #0f766e; }
+  .scoring-results-tabbed:has([data-result-tab="gap"][aria-selected="true"]) { --result-accent: #c2410c; }
+  .scoring-result-tabs { position: relative; z-index: 1; display: flex; flex-wrap: wrap; align-items: flex-end; gap: .3rem; margin: 0; padding: 0; border: 0; }
+  .scoring-result-tab { --tab-color: #4f46e5; display: inline-flex; align-items: center; gap: .45rem; margin-bottom: 0; padding: .5rem 1.05rem; border: 1px solid color-mix(in srgb, var(--tab-color) 26%, transparent); border-bottom: 0; border-radius: 12px 12px 0 0; background: color-mix(in srgb, var(--tab-color) 7%, #f6f7f9); color: color-mix(in srgb, var(--tab-color) 82%, #44505c); font-size: .82rem; font-weight: 800; letter-spacing: .01em; box-shadow: none; transition: background .15s ease, color .15s ease; }
+  .scoring-result-tab[data-result-tab="scoring"] { --tab-color: #0f766e; }
+  .scoring-result-tab[data-result-tab="gap"] { --tab-color: #c2410c; }
+  .scoring-result-tab svg { width: 1rem; height: 1rem; flex: none; }
+  .scoring-result-tab:hover:not(:disabled) { border-color: color-mix(in srgb, var(--tab-color) 45%, transparent); background: color-mix(in srgb, var(--tab-color) 14%, white); color: var(--tab-color); box-shadow: none; transform: none; }
+  .scoring-result-tab[aria-selected="true"], .scoring-result-tab[aria-selected="true"]:hover:not(:disabled) { margin-bottom: -1px; padding: .62rem 1.2rem .66rem; border-color: var(--tab-color); background: linear-gradient(135deg, var(--tab-color), color-mix(in srgb, var(--tab-color) 72%, #000)); color: #fff; box-shadow: 0 -4px 12px color-mix(in srgb, var(--tab-color) 22%, transparent); }
+  .scoring-result-tab:focus-visible { outline: 3px solid color-mix(in srgb, var(--tab-color) 35%, transparent); outline-offset: 2px; }
+  .scoring-result-panels { padding: 1rem; border: 1px solid color-mix(in srgb, var(--result-accent) 28%, transparent); border-top: 3px solid var(--result-accent); border-radius: 0 14px 14px 14px; background: #fff; box-shadow: 0 8px 22px rgba(18, 31, 43, .07); }
   .scoring-result-pane[hidden] { display: none; }
   .scoring-table-wrap { max-height: none; overflow-x: auto; overflow-y: visible; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.72); }
   .scoring-table-section-title { margin: .75rem 0 .45rem; color: #245e5a; font-size: .86rem; }
@@ -300,7 +352,7 @@
   .scoring-chart-grid { display: grid; grid-template-columns: minmax(0,1fr); gap: .8rem; }
   .scoring-best-network-layout { display: grid; grid-template-columns: minmax(0,2fr) minmax(17rem,1fr); gap: .8rem; align-items: stretch; }
   .scoring-best-network-layout .scoring-chart-card { min-width: 0; }
-  .scoring-chart-card { min-width: 0; padding: 1rem; border: 1px solid var(--line); border-radius: 13px; background: rgba(255,255,255,.82); cursor: zoom-in; }
+  .scoring-chart-card { min-width: 0; padding: 1rem; border: 1px solid var(--line); border-radius: 13px; background: rgba(255,255,255,.82); cursor: default; }
   .scoring-chart-card h4 { margin: 0 0 .6rem; color: #245e5a; font-size: 1.3rem; font-weight: 800; }
   .scoring-chart-svg { display: block; width: 100%; height: auto; min-height: 26rem; overflow: visible; }
   .scoring-chart-svg.scoring-best-network-bars { min-width: 0; max-width: none; min-height: 0; }
@@ -324,16 +376,23 @@
   .scoring-chart-svg .scoring-allocation-unit { fill: #5c707a; font-size: 12px; font-weight: 700; }
   .scoring-chart-svg .scoring-allocation-legend { fill: #3d535e; font-size: 13px; font-weight: 700; }
   .scoring-chart-card:focus-visible { outline: 3px solid rgba(11,122,117,.35); outline-offset: 2px; }
-  .scoring-chart-overlay { position: fixed; inset: 0; z-index: 12000; display: grid; place-items: center; padding: .5rem; background: rgba(21,34,45,.62); backdrop-filter: blur(3px); }
+  .scoring-chart-overlay { position: fixed; inset: 0; z-index: 12000; display: grid; place-items: center; padding: 0; background: rgba(21,34,45,.62); backdrop-filter: blur(3px); }
   .scoring-chart-overlay[hidden] { display: none !important; }
-  .scoring-chart-expanded-dialog { display: grid; grid-template-rows: auto minmax(0,1fr); gap: .85rem; box-sizing: border-box; width: min(calc(100vw - 1rem),1840px); height: min(calc(100dvh - 1rem),1200px); padding: 1rem 1.2rem; overflow: hidden; border: 1px solid rgba(25,42,53,.18); border-radius: 20px; background: linear-gradient(180deg,#fffdfd,#f6f8f7); box-shadow: 0 24px 70px rgba(17,29,38,.4); }
+  .scoring-chart-expanded-dialog { display: grid; grid-template-rows: auto minmax(0,1fr); gap: .85rem; box-sizing: border-box; width: 90vw; height: 90vh; height: 90dvh; padding: 1rem 1.2rem; overflow: hidden; border: 1px solid rgba(25,42,53,.18); border-radius: 20px; background: linear-gradient(180deg,#fffdfd,#f6f8f7); box-shadow: 0 24px 70px rgba(17,29,38,.4); }
   .scoring-chart-expanded-header { display: flex; align-items: center; justify-content: space-between; gap: .75rem; min-width: 0; }
   .scoring-chart-expanded-header > div { min-width: 0; }
   .scoring-chart-expanded-header .eyebrow { margin: 0 0 .2rem; }
   .scoring-chart-expanded-header h3 { margin: 0 0 .2rem; color: #203744; font-size: clamp(1rem,1.7vw,1.5rem); }
   .scoring-chart-expanded-header p:not(.eyebrow) { margin: 0; color: var(--muted); font-size: .76rem; }
   .scoring-chart-expanded-close { flex: 0 0 auto; width: 2.25rem; min-width: 2.25rem; height: 2.25rem; min-height: 2.25rem; padding: 0; border-radius: 50%; font-size: 1.3rem; line-height: 1; }
-  .scoring-chart-expanded-content { display: grid; align-content: center; min-width: 0; min-height: 0; overflow: auto; padding: .25rem; border: 1px solid rgba(25,42,53,.12); border-radius: 12px; background: #fff; }
+  .scoring-chart-expanded-content { position: relative; display: grid; align-content: center; min-width: 0; min-height: 0; overflow: auto; padding: .25rem; border: 1px solid rgba(25,42,53,.12); border-radius: 12px; background: #fff; }
+  /* Charts and maps fit the larger view (and zoom there); tables start at the top and scroll. */
+  .scoring-expanded-holder { position: relative; width: 100%; height: 100%; min-height: 0; }
+  .scoring-expanded-holder > svg { display: block; width: 100%; height: 100%; min-height: 0; max-height: none; }
+  .scoring-chart-expanded-content.is-table { align-content: start; }
+  .scoring-chart-expanded-content.is-table .scoring-expanded-holder { height: auto; }
+  .scoring-expanded-holder > table { width: 100%; }
+  .scoring-chart-card { position: relative; }
   .scoring-chart-expanded-content .scoring-chart-svg { width: 100%; min-width: 0 !important; min-height: 0; height: auto; }
   .scoring-chart-tooltip { position: fixed; z-index: 13000; max-width: min(25rem,calc(100vw - 1rem)); padding: .48rem .62rem; border: 1px solid rgba(255,255,255,.18); border-radius: 8px; background: #20333d; color: #fff; box-shadow: 0 6px 20px rgba(18,32,40,.24); font-size: .72rem; line-height: 1.45; white-space: pre-line; pointer-events: none; }
   .scoring-chart-tooltip[hidden] { display: none !important; }
@@ -349,7 +408,7 @@
   .scoring-warning-maximum { font-size: 1.15em; font-weight: 800; }
   @media(max-width:1300px) { .scoring-notes-stack { grid-row: 5; } .scoring-results-head { grid-template-columns: minmax(0,1fr); } .scoring-results-controls { grid-column: 1; } .scoring-job-selector { grid-column: 1; grid-row: 4; } .scoring-results-tools { grid-column: 1; grid-row: 3; justify-content: flex-start; width: 100%; overflow-x: auto; padding: .2rem 0; } .scoring-results-config-shortcuts, .scoring-results-tools > .scoring-export-actions { justify-content: flex-end; } }
   @media(max-width:900px) { .scoring-filter-grid,.scoring-jobs-layout { grid-template-columns: 1fr; } .scoring-job-list { max-height: 22rem; } }
-  @media(max-width:600px) { .scoring-context-filter-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .scoring-dataset-list { grid-template-columns: 1fr; } .scoring-controls-foot { align-items: stretch; } .scoring-actions { width: 100%; } .scoring-actions button { flex: 1 1 100%; } .scoring-chart-expanded-dialog { width: calc(100vw - .5rem); height: calc(100dvh - .5rem); padding: .65rem; gap: .5rem; border-radius: 14px; } .scoring-chart-expanded-header h3 { font-size: 1rem; } .scoring-chart-expanded-header p:not(.eyebrow) { display: none; } }
+  @media(max-width:600px) { .scoring-context-filter-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .scoring-dataset-list { grid-template-columns: 1fr; } .scoring-controls-foot { align-items: stretch; } .scoring-actions { width: 100%; } .scoring-actions button { flex: 1 1 100%; } .scoring-chart-expanded-dialog { padding: .65rem; gap: .5rem; border-radius: 14px; } .scoring-chart-expanded-header h3 { font-size: 1rem; } .scoring-chart-expanded-header p:not(.eyebrow) { display: none; } }
   .scoring-calculation-actions { display: flex; align-items: stretch; justify-content: space-between; flex-wrap: wrap; gap: 1rem; }
   .scoring-calculation-actions > .scoring-calculation-shortcuts { align-items: stretch; grid-column: auto; grid-row: auto; justify-content: flex-end; width: auto; max-width: 100%; margin-left: auto; padding: 0; overflow: visible; }
   .scoring-calculation-shortcuts > .scoring-results-config-shortcuts { flex-wrap: wrap; align-items: stretch; justify-content: flex-end; }
@@ -382,10 +441,6 @@
             {% endfor %}
           </select>
         </label>
-        <div class="scoring-document-exports" aria-label="Export the selected scoring job">
-          <button type="button" class="document-export-action document-export-powerpoint" data-scoring-document-export="ppt" title="The selected scoring job in PowerPoint"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4M7 13l3-3 2 2 4-4"/></svg>Export PowerPoint</button>
-          <button type="button" class="document-export-action document-export-word" data-scoring-document-export="word" title="The selected scoring job in Word"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M8.5 12l1.2 5 1.8-4 1.8 4 1.2-5"/></svg>Export Word</button>
-        </div>
       </div>
       <div class="scoring-picker">
         <div class="scoring-picker-head"><strong>CDR datasets</strong><span data-visible-count>{{ scoring_datasets | length }} available</span></div>
@@ -427,7 +482,7 @@
       <div class="scoring-context-filter-grid" data-scoring-context-filters>
         {% for level in aggregation_levels %}{% for field in (['Operator_Vendor', 'Vendor_Operator', 'Vendor'] if level == 'Vendor' else [level]) %}
         <label>{{ field }}
-          <select multiple size="1" data-scoring-context-filter="{{ field }}" data-multiselect-auto-close="1000" data-multiselect-empty-label="All values" aria-label="Filter by {{ field }}">
+          <select multiple size="1" data-scoring-context-filter="{{ field }}"{% if field in ['Operator_Vendor', 'Vendor_Operator'] %} data-operator-vendor-pair="{{ field | lower }}"{% endif %} data-multiselect-auto-close="1000" data-multiselect-empty-label="All values" aria-label="Filter by {{ field }}">
             <option value="" disabled>No values</option>
           </select>
         </label>
@@ -436,15 +491,19 @@
       <p class="scoring-context-filter-note">Values come from the selected CDR catalogues. Leaving a filter empty includes all values. Main Cities uses the workspace city list.</p>
     </div>
     <div class="scoring-picker">
-      <div class="scoring-picker-head"><strong>Aggregation levels</strong><span>Operator is required</span></div>
-      <div class="scoring-levels" data-aggregation-levels>
-        {% for level in aggregation_levels %}
-        <label class="scoring-level-option{% if level == 'Operator' %} is-required{% endif %}">
-          <input type="checkbox" value="{{ level }}" data-aggregation-level {% if level == 'Operator' %}checked disabled{% endif %}>
-          <span>{{ level }}</span>
-        </label>
-        {% endfor %}
+      <div class="scoring-picker-head"><strong>Aggregation levels</strong></div>
+      <div class="scoring-levels-row">
+        <div class="scoring-levels" data-aggregation-levels>
+          {% for level in aggregation_levels %}
+          <label class="scoring-level-option{% if level == 'Operator' %} is-required{% endif %}">
+            <input type="checkbox" value="{{ level }}" data-aggregation-level {% if level == 'Operator' %}checked disabled{% endif %}>
+            <span>{{ level }}</span>
+          </label>
+          {% endfor %}
+        </div>
+        <span class="scoring-config-shortcuts scoring-levels-shortcut"><a data-config-shortcut="hierarchy" href="#" role="button" data-scoring-hierarchy-open title="Order the aggregation hierarchy of the application"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="7" y="2" width="6" height="4" rx="1"/><path d="M10 6v4M4 14v-4h12v4"/><rect x="1" y="14" width="6" height="4" rx="1"/><rect x="13" y="14" width="6" height="4" rx="1"/></svg><span>Aggregation hierarchy</span></a></span>
       </div>
+      <p class="scoring-context-filter-note scoring-levels-note">Operator is required.</p>
     </div>
     <div class="scoring-picker" aria-labelledby="scoring-gap-reference-title">
       <div class="scoring-picker-head"><strong id="scoring-gap-reference-title">GAP reference operator</strong></div>
@@ -478,10 +537,11 @@
 
       <div class="scoring-results-tools scoring-calculation-shortcuts">
         <nav class="scoring-config-shortcuts scoring-results-config-shortcuts" aria-label="Scoring configuration sections">
-          <a data-config-shortcut="kpi" href="/workspace-config#scoring-methodology-environments"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2 17h16M3 17V7h5v10M5 10h1M5 13h1M12 3l-2 14M16 3l2 14M14 4v2m0 3v2m0 3v2"/></svg><span>Methodology Environments</span></a>
-          <a data-config-shortcut="hierarchy" href="/workspace-config#scoring-aggregation-hierarchy"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="7" y="2" width="6" height="4" rx="1"/><path d="M10 6v4M4 14v-4h12v4"/><rect x="1" y="14" width="6" height="4" rx="1"/><rect x="13" y="14" width="6" height="4" rx="1"/></svg><span>Aggregation hierarchy</span></a>
-          <a data-config-shortcut="gap" href="/workspace-config#scoring-gap-priority"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 4h9M8 10h6M8 16h3M3 2v5m-1-4 1-1 1 1M2 10h2m-2 5h2m0 0-2 3h2"/></svg><span>KPI Priorities</span></a>
+          <a data-config-shortcut="kpi" href="/workspace-config#scoring-methodology-environments"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2 17h16M3 17V7h5v10M5 10h1M5 13h1M12 3l-2 14M16 3l2 14M14 4v2m0 3v2m0 3v2"/></svg><span>Scoring Methodologies</span></a>
         </nav>
+        <div class="scoring-export-actions" aria-label="Generate a scoring report">
+          <a href="#" data-generate-report role="button" title="Choose the report content and generate it from the CDRs, NR Mode, methodology and GAP reference selected above"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2 3h16M10 3V1M10 14v4m-3 0h6"/><rect x="3" y="3" width="14" height="11" rx="1"/><path d="m8 6 5 3-5 3z"/></svg><span>Generate Scoring Report (PPT/Word)</span></a>
+        </div>
       </div>
       <p class="scoring-note scoring-calculation-message" data-scoring-message role="status" aria-live="polite">Choose at least one CDR to calculate scoring.</p>
     </div>
@@ -518,14 +578,10 @@
         </div>
         <div class="scoring-results-tools">
           <nav class="scoring-config-shortcuts scoring-results-config-shortcuts" aria-label="Scoring configuration sections">
-            <a data-config-shortcut="kpi" href="/workspace-config#scoring-methodology-environments"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2 17h16M3 17V7h5v10M5 10h1M5 13h1M12 3l-2 14M16 3l2 14M14 4v2m0 3v2m0 3v2"/></svg><span>Methodology Environments</span></a>
-            <a data-config-shortcut="hierarchy" href="/workspace-config#scoring-aggregation-hierarchy"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="7" y="2" width="6" height="4" rx="1"/><path d="M10 6v4M4 14v-4h12v4"/><rect x="1" y="14" width="6" height="4" rx="1"/><rect x="13" y="14" width="6" height="4" rx="1"/></svg><span>Aggregation hierarchy</span></a>
-            <a data-config-shortcut="gap" href="/workspace-config#scoring-gap-priority"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 4h9M8 10h6M8 16h3M3 2v5m-1-4 1-1 1 1M2 10h2m-2 5h2m0 0-2 3h2"/></svg><span>KPI Priorities</span></a>
+            <a data-config-shortcut="kpi" href="/workspace-config#scoring-methodology-environments"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2 17h16M3 17V7h5v10M5 10h1M5 13h1M12 3l-2 14M16 3l2 14M14 4v2m0 3v2m0 3v2"/></svg><span>Scoring Methodologies</span></a>
           </nav>
           <div class="scoring-export-actions" aria-label="Export selected job">
-            <a href="#" data-export-scoring aria-disabled="true" tabindex="-1"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="2" y="2" width="12" height="15" rx="1"/><path d="M2 7h12M2 12h7M7 2v15M16 10v8m-3-3 3 3 3-3"/></svg><span>Scoring CSV</span></a>
-            <a href="#" data-export-gap aria-disabled="true" tabindex="-1"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2 17V3M2 17h8M5 13V8m4 5V4m4 8V7M16 11v7m-3-3 3 3 3-3"/></svg><span>GAP CSV</span></a>
-            <a href="#" data-export-ppt aria-disabled="true" tabindex="-1"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2 3h16M10 3V1M10 14v4m-3 0h6"/><rect x="3" y="3" width="14" height="11" rx="1"/><path d="m8 6 5 3-5 3z"/></svg><span>PowerPoint</span></a>
+            <a href="#" data-export-ppt aria-disabled="true" tabindex="-1"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2 3h16M10 3V1M10 14v4m-3 0h6"/><rect x="3" y="3" width="14" height="11" rx="1"/><path d="m8 6 5 3-5 3z"/></svg><span>Export Selected Scoring Report (PPT/Word)</span></a>
           </div>
         </div>
         <details class="scoring-job-selector" data-scoring-job-selector>
@@ -542,14 +598,18 @@
       <div class="scoring-warning-box" data-warning-box role="status" aria-live="polite" hidden><svg class="scoring-warning-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M10.3 4.5a2 2 0 0 1 3.4 0l8 13.5a2 2 0 0 1-1.7 3H4a2 2 0 0 1-1.7-3z"/><path d="M12 9v4m0 4h.01"/></svg><strong>Calculation notes</strong><ul class="scoring-warnings" data-warning-list></ul></div>
       </div>
       </div>
+      <div class="scoring-results-tabbed">
       <div class="scoring-result-tabs" role="tablist" aria-label="Scoring outputs">
-        <button type="button" class="scoring-result-tab" role="tab" aria-selected="true" aria-controls="scoring-chart-pane" data-result-tab="charts">Scoring Charts</button>
-        <button type="button" class="scoring-result-tab" role="tab" aria-selected="false" aria-controls="scoring-table-pane" data-result-tab="scoring">Scoring Tables</button>
-        <button type="button" class="scoring-result-tab" role="tab" aria-selected="false" aria-controls="scoring-gap-pane" data-result-tab="gap">GAP Analysis</button>
+        <button type="button" class="scoring-result-tab" role="tab" aria-selected="true" aria-controls="scoring-chart-pane" data-result-tab="charts"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17h14M5.5 14V9M10 14V5M14.5 14v-3"/></svg><span>Scoring Charts</span></button>
+        <button type="button" class="scoring-result-tab" role="tab" aria-selected="false" aria-controls="scoring-table-pane" data-result-tab="scoring"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="14" height="12" rx="1.5"/><path d="M3 8h14M3 12h14M8 4v12"/></svg><span>Scoring Tables</span></button>
+        <button type="button" class="scoring-result-tab" role="tab" aria-selected="false" aria-controls="scoring-gap-pane" data-result-tab="gap"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15l4-4 3 3 5-6"/><path d="M12.5 8H16v3.5"/></svg><span>GAP Analysis</span></button>
       </div>
+      <div class="scoring-result-panels">
       <div class="scoring-result-pane" id="scoring-chart-pane" role="tabpanel" data-result-pane="charts"><div class="scoring-empty">No scoring charts are selected.</div></div>
-      <div class="scoring-result-pane" id="scoring-table-pane" role="tabpanel" data-result-pane="scoring" hidden><div class="scoring-empty">No scoring table is selected.</div></div>
-      <div class="scoring-result-pane" id="scoring-gap-pane" role="tabpanel" data-result-pane="gap" hidden><div class="scoring-empty">No GAP analysis is selected.</div></div>
+      <div class="scoring-result-pane" id="scoring-table-pane" role="tabpanel" data-result-pane="scoring" hidden><div class="scoring-table-export" data-table-export="scoring"><a href="#" data-export-scoring aria-disabled="true" tabindex="-1" title="The scoring table shown below as CSV"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M11.5 2H5.5A1.5 1.5 0 0 0 4 3.5v13A1.5 1.5 0 0 0 5.5 18h9a1.5 1.5 0 0 0 1.5-1.5V6.5z"/><path d="M11.5 2v4.5H16"/><path d="M10 9.5v5.5M7.6 12.6 10 15l2.4-2.4"/></svg><span>Export to CSV</span></a></div><div class="scoring-empty">No scoring table is selected.</div></div>
+      <div class="scoring-result-pane" id="scoring-gap-pane" role="tabpanel" data-result-pane="gap" hidden><div class="scoring-table-export" data-table-export="gap"><a href="#" data-export-gap aria-disabled="true" tabindex="-1" title="The GAP table shown below as CSV"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M11.5 2H5.5A1.5 1.5 0 0 0 4 3.5v13A1.5 1.5 0 0 0 5.5 18h9a1.5 1.5 0 0 0 1.5-1.5V6.5z"/><path d="M11.5 2v4.5H16"/><path d="M10 9.5v5.5M7.6 12.6 10 15l2.4-2.4"/></svg><span>Export to CSV</span></a></div><div class="scoring-empty">No GAP analysis is selected.</div></div>
+      </div>
+      </div>
 
     </article>
     <article class="panel scoring-jobs-panel">
@@ -560,12 +620,25 @@
   <div class="scoring-chart-overlay" data-scoring-chart-overlay hidden>
     <section class="scoring-chart-expanded-dialog" role="dialog" aria-modal="true" aria-labelledby="scoring-chart-expanded-title" tabindex="-1" data-scoring-chart-dialog>
       <header class="scoring-chart-expanded-header">
-        <div><p class="eyebrow">Scoring chart</p><h3 id="scoring-chart-expanded-title" data-scoring-chart-title>Expanded scoring chart</h3><p data-scoring-chart-meta></p></div>
+        <div><p class="eyebrow" data-scoring-chart-kind>Scoring chart</p><h3 id="scoring-chart-expanded-title" data-scoring-chart-title>Expanded scoring chart</h3><p data-scoring-chart-meta></p></div>
         <button type="button" class="scoring-chart-expanded-close" data-scoring-chart-close aria-label="Close expanded chart" title="Close">×</button>
       </header>
       <div class="scoring-chart-expanded-content" data-scoring-expanded-chart></div>
     </section>
   </div>
+  {% set can_edit_hierarchy = user and user.role in ['user-editor', 'admin', 'super-admin'] %}
+  <dialog class="scoring-hierarchy-dialog" data-scoring-hierarchy-dialog data-can-edit="{{ 'true' if can_edit_hierarchy else 'false' }}" aria-labelledby="scoring-hierarchy-title">
+    <form method="dialog" class="scoring-hierarchy-form" data-scoring-hierarchy-form>
+      <h3 id="scoring-hierarchy-title">Aggregation hierarchy</h3>
+      <p class="scoring-hierarchy-copy">Order used to group the scoring results and to list the filters. It is an application setting shared by every workspace and methodology. Operator is always one of the aggregation levels.{% if not can_edit_hierarchy %} Only editors can change it.{% endif %}</p>
+      <ol class="scoring-hierarchy-list" data-scoring-hierarchy-list></ol>
+      <p class="scoring-hierarchy-status" data-scoring-hierarchy-status role="status" aria-live="polite"></p>
+      <div class="scoring-hierarchy-actions">
+        <button type="button" class="scoring-hierarchy-cancel" data-scoring-hierarchy-cancel>{{ 'Cancel' if can_edit_hierarchy else 'Close' }}</button>
+        {% if can_edit_hierarchy %}<button type="submit" class="scoring-hierarchy-save" data-scoring-hierarchy-save>Save hierarchy</button>{% endif %}
+      </div>
+    </form>
+  </dialog>
   <script type="application/json" data-scoring-config>{{ {'main_cities': scoring_main_cities | default([], true), 'operator_groups': scoring_operator_groups | default([], true), 'aggregation_hierarchy': aggregation_levels | default(['Operator', 'Vendor', 'Region', 'Cluster', 'City', 'Campaign'], true), 'scoring_profiles': scoring_profiles | default([], true), 'active_profile_id': scoring_active_profile_id | default('', true)} | tojson }}</script>
 </section>
 {% endblock %}

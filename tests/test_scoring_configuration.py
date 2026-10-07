@@ -7,7 +7,6 @@ import pandas as pd
 
 from src.modules.scoring import _aggregate, interpolate_score, method_version_for_configuration
 from src.modules.scoring_config import (
-    DEFAULT_AGGREGATION_HIERARCHY,
     configuration_hash,
     validate_scoring_configuration,
 )
@@ -23,7 +22,7 @@ def test_test_configuration_fixture_is_complete_and_independent():
     second = scoring_configuration()
 
     assert len(first['metrics']) == 32
-    assert first['aggregation_hierarchy'] == DEFAULT_AGGREGATION_HIERARCHY
+    assert 'aggregation_hierarchy' not in first
     assert first['gap_priority'] == [item['code'] for item in first['metrics']]
     assert set(metric(first, 'K5')['contexts']['DriveCity']['score_mapping']) == {
         'low_score', 'medium_score', 'high_score', 'ultra_score',
@@ -32,19 +31,14 @@ def test_test_configuration_fixture_is_complete_and_independent():
     assert metric(second, 'K1')['contexts']['DriveCity']['max_points'] > 0
 
 
-def test_legacy_configuration_defaults_hierarchy_and_custom_order_changes_identity():
+def test_methodologies_do_not_carry_the_application_aggregation_hierarchy():
     configuration = scoring_configuration()
-    legacy = dict(configuration)
-    legacy.pop('aggregation_hierarchy')
+    legacy = dict(configuration, aggregation_hierarchy=['Campaign', 'City', 'Region', 'Vendor', 'Operator'])
 
     validated_legacy = validate_scoring_configuration(legacy)
-    reordered = dict(configuration)
-    reordered['aggregation_hierarchy'] = ['Campaign', 'City', 'Region', 'Vendor', 'Operator']
 
-    assert validated_legacy['aggregation_hierarchy'] == DEFAULT_AGGREGATION_HIERARCHY
+    assert 'aggregation_hierarchy' not in validated_legacy
     assert configuration_hash(validated_legacy) == configuration_hash(configuration)
-    assert configuration_hash(reordered) != configuration_hash(configuration)
-    assert method_version_for_configuration(reordered) != method_version_for_configuration(configuration)
 
 
 def test_minimal_import_defaults_interpolation_and_uses_only_supported_methodology_fields():
@@ -161,7 +155,6 @@ def test_invalid_global_interpolation_anchor_order_is_rejected_with_explicit_con
         (lambda c: metric(c, 'K1')['contexts']['DriveCity']['score_mapping'].__setitem__('high_score', 1.1), 'at most 1'),
         (lambda c: metric(c, 'K1')['contexts']['DriveCity']['score_mapping'].__setitem__('high_score', 0.7), 'monotonic'),
         (lambda c: c.__setitem__('gap_priority', ['K1'] * 32), 'unique KPI codes'),
-        (lambda c: c.__setitem__('aggregation_hierarchy', ['Operator', 'Vendor', 'Region', 'City', 'City']), 'aggregation_hierarchy'),
         (lambda c: metric(c, 'K1')['calculation'].__setitem__('formula', 'AVG(Other)'), 'unsupported voice field'),
         (lambda c: c['scope']['environments']['DriveCity']['source_filters'].__setitem__('G_Level_2', ''), 'non-empty'),
     ],

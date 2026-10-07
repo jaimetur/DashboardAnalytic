@@ -48,7 +48,6 @@ def _configuration_with_custom_gap_sections(repository: Repository) -> dict:
     configuration['title'] = 'Urban Drive Quality'
     configuration['scope']['environments']['DriveCity']['source_filters']['G_Level_2'] = 'City QA'
     configuration['metrics'][0]['mapping_method'] = 'piecewise_quadratic'
-    configuration['aggregation_hierarchy'] = list(reversed(configuration['aggregation_hierarchy']))
     priorities = configuration['gap_priority']
     configuration['gap_priority'] = [priorities[1], priorities[0], *priorities[2:]]
     return configuration
@@ -70,9 +69,6 @@ def test_scoring_configuration_export_import_round_trip(client, tmp_path: Path, 
     second_profile['configuration']['metrics'][0]['contexts']['Walk']['max_points'] = 10
     second_profile['configuration']['metrics'][1]['contexts']['Walk']['max_points'] = 30
     second_configuration = second_profile['configuration']
-    second_configuration['aggregation_hierarchy'] = (
-        second_configuration['aggregation_hierarchy'][1:] + second_configuration['aggregation_hierarchy'][:1]
-    )
     priorities = second_configuration['gap_priority']
     second_configuration['gap_priority'] = priorities[1:] + priorities[:1]
     profiles['profiles'].append(second_profile)
@@ -102,7 +98,7 @@ def test_scoring_configuration_export_import_round_trip(client, tmp_path: Path, 
     assert all(profile['configuration']['metrics'][0]['mapping_method'] == mapping_method
                for profile in document['profiles'])
     assert all(
-        profile['configuration']['aggregation_hierarchy'] != scoring_configuration()['aggregation_hierarchy']
+        'aggregation_hierarchy' not in profile['configuration']
         and profile['configuration']['gap_priority'] != scoring_configuration()['gap_priority']
         for profile in document['profiles']
     )
@@ -133,9 +129,6 @@ def test_partial_backup_restores_only_scoring_configuration(client, tmp_path: Pa
     second_profile.update({'id': 'netcheck-2025', 'name': 'NetCheck 2025'})
     second_profile['configuration']['version'] = 'NetCheck 2025'
     second_configuration = second_profile['configuration']
-    second_configuration['aggregation_hierarchy'] = (
-        second_configuration['aggregation_hierarchy'][1:] + second_configuration['aggregation_hierarchy'][:1]
-    )
     priorities = second_configuration['gap_priority']
     second_configuration['gap_priority'] = priorities[1:] + priorities[:1]
     profiles['profiles'].append(second_profile)
@@ -158,7 +151,7 @@ def test_partial_backup_restores_only_scoring_configuration(client, tmp_path: Pa
 
     assert repository.get_scoring_profiles() == expected_profiles
     assert all(
-        profile['configuration']['aggregation_hierarchy'] != scoring_configuration()['aggregation_hierarchy']
+        'aggregation_hierarchy' not in profile['configuration']
         and profile['configuration']['gap_priority'] != scoring_configuration()['gap_priority']
         for profile in repository.get_scoring_profiles()['profiles']
     )

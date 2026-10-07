@@ -2110,6 +2110,9 @@
       head.append(remove); facet.append(head);
       const values = document.createElement('select'); values.multiple = true; values.size = 1; values.dataset.multiselectAutoClose = '1000'; values.setAttribute('aria-label', `${label} filter`);
       values.dataset.multiselectDynamicAll = 'true';
+      // Operator_Vendor and Vendor_Operator hold the same values the other way round: they stay in sync.
+      if (identity(field) === 'operatorvendor') values.dataset.operatorVendorPair = 'operator_vendor';
+      if (identity(field) === 'vendoroperator') values.dataset.operatorVendorPair = 'vendor_operator';
       if (['vendor', 'vendoronly'].includes(identity(field))) {
         values.dataset.multiselectVendorOnly = 'true';
         values.dataset.multiselectOperatorValues = JSON.stringify(

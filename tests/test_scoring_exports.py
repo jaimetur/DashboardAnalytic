@@ -365,9 +365,9 @@ def test_dense_hierarchy_powerpoint_can_keep_all_chart_leaves_on_one_slide():
 
 
 @pytest.mark.parametrize(('category_count', 'split_charts', 'expected_slides'), [
-    (5, True, 1), (6, True, 2), (6, False, 1),
+    (12, True, 1), (13, True, 2), (13, False, 1),
 ])
-def test_simple_category_charts_split_by_category_groups_at_twenty_bars(
+def test_simple_category_charts_split_by_category_groups_above_fifty_bars(
     category_count, split_charts, expected_slides,
 ):
     result = _result()
@@ -390,14 +390,15 @@ def test_simple_category_charts_split_by_category_groups_at_twenty_bars(
     charts = [_charts_on_slide(slide)[0] for slide in category_slides]
     observed_categories = [category.label for chart in charts for category in chart.plots[0].categories]
     assert observed_categories == categories
-    if category_count == 5:
-        assert len(charts[0].plots[0].categories) * len(OPERATORS) == 20
+    if category_count == 12:
+        assert len(charts[0].plots[0].categories) * len(OPERATORS) == 48
     elif split_charts:
-        assert [len(chart.plots[0].categories) * len(OPERATORS) for chart in charts] == [20, 4]
+        # 52 bars do not fit one slide: two balanced pages.
+        assert [len(chart.plots[0].categories) * len(OPERATORS) for chart in charts] == [28, 24]
         assert ['Page 1 of 2' in _slide_text(slide) for slide in category_slides] == [True, False]
         assert 'Page 2 of 2' in _slide_text(category_slides[1])
     else:
-        assert len(charts[0].plots[0].categories) * len(OPERATORS) == 24
+        assert len(charts[0].plots[0].categories) * len(OPERATORS) == 52
 
 
 @pytest.mark.parametrize(('bar_count', 'has_data_labels', 'number_format'), [
@@ -655,8 +656,9 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     expected_gap_table = views['gap_tables'][0]
     assert gap_slide.shapes.title.text.split('\n')[0] == 'GAP Analysis — Three UK vs EE'
     title_runs = gap_slide.shapes.title.text_frame.paragraphs[0].runs
-    assert title_runs[-1].text == 'Three UK vs EE'
-    assert str(title_runs[-1].font.color.rgb) == 'A34E16'
+    # What tells consecutive slides apart is in bold, in the colour of the rest of the title.
+    assert [(run.text, run.font.bold) for run in title_runs] == [('GAP Analysis — ', False), ('Three UK vs EE', True)]
+    assert {str(run.font.color.rgb) for run in title_runs} == {'1450A8'}
     assert 'Environment:' not in gap_slide.shapes.title.text
     expected_gap_rows = [row for row in expected_gap_table['expanded_rows']
                          if row.get('row_type') != 'category'
@@ -685,11 +687,11 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     ]
     category_chart_slides = [slide for slide in presentation.slides
                               if slide.shapes.title.text.split('\n')[0] == 'Best Network Scoring per Category (Breakdown)']
-    assert len(category_chart_slides) == 2
-    assert [len(_charts_on_slide(slide)[0].plots[0].categories) for slide in category_chart_slides] == [5, 2]
-    assert 'Page 1 of 2' in _slide_text(category_chart_slides[0])
-    assert 'Page 2 of 2' in _slide_text(category_chart_slides[1])
-    assert titles[6:8] == ['Scoring Tables — Summary', 'Scoring Tables — Breakdown']
+    # 7 categories × 4 operators = 28 bars stay on one slide.
+    assert len(category_chart_slides) == 1
+    assert len(_charts_on_slide(category_chart_slides[0])[0].plots[0].categories) == 7
+    assert 'Page 1 of' not in _slide_text(category_chart_slides[0])
+    assert titles[5:7] == ['Scoring Tables — Summary', 'Scoring Tables — Breakdown']
     gap_start = titles.index('GAP Analysis — All vs EE')
     assert presentation.slides[gap_start].shapes.title.text.split('\n')[1] == 'Best Network — Drive - City'
     # The GAP tables end the block, followed by the KPI GAP Profiles.
@@ -746,7 +748,8 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     assert 'Average KPI GAP' not in _slide_text(summary_slide)
 
     chart_shapes = [chart for slide in presentation.slides for chart in _charts_on_slide(slide)]
-    assert len(chart_shapes) == 8
+    # One Breakdown slide (28 bars) instead of two.
+    assert len(chart_shapes) == 7
     best_network_chart = chart_shapes[0]
     assert best_network_chart.chart_type == XL_CHART_TYPE.COLUMN_STACKED
     best_service_slide = next(slide for slide in presentation.slides
@@ -834,7 +837,8 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     assert chart.plots[0].overlap == -20
     assert chart.legend.font.size.pt == 10
     categories = [category.label for category in chart.plots[0].categories]
-    assert categories == list(dict.fromkeys(metric['category'] for metric in METRICS))[:5]
+    # Every category on one Breakdown slide (they need fewer than 50 bars).
+    assert categories == list(dict.fromkeys(metric['category'] for metric in METRICS))
     assert [series.name for series in chart.series] == list(MAPPED_OPERATOR_ORDER)
     for series in chart.series:
         expected = [sum(row['weighted_points'] for row in result['scoring']
@@ -845,9 +849,6 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     assert chart.legend.position == XL_LEGEND_POSITION.TOP
     assert chart.legend.include_in_layout is False
     assert chart.value_axis.maximum_scale > max(value for series in chart.series for value in series.values if value is not None)
-    final_category_chart = _charts_on_slide(category_chart_slides[1])[0]
-    assert [category.label for category in final_category_chart.plots[0].categories] == \
-        list(dict.fromkeys(metric['category'] for metric in METRICS))[5:]
     flat_chart_slide = next(slide for slide, title in zip(presentation.slides, titles)
                             if title == 'Best Network Scoring per Category')
     flat_chart_group = next(shape for shape in flat_chart_slide.shapes
@@ -1095,13 +1096,20 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     expected_category_count = len({metric['category'] for metric in result['configuration']['metrics']})
     assert titles.count('Best Network Scoring per Category') == 1
     assert titles.count('Best Network Scoring per Service') == 1
-    assert titles.count('Best Network Scoring per Category (Breakdown)') == expected_category_count
+    # Up to 50 bars per Breakdown slide, in as few slides as possible.
+    from src.modules.scoring_exports import BREAKDOWN_BARS_PER_SLIDE, _breakdown_pages
+    breakdown_slides = [slide for slide, title in zip(presentation.slides, titles)
+                        if title == 'Best Network Scoring per Category (Breakdown)']
+    bars = [len(_charts_on_slide(slide)[0].plots[0].categories) for slide in breakdown_slides]
+    assert all(count <= BREAKDOWN_BARS_PER_SLIDE for count in bars)
+    assert len(breakdown_slides) == len(_breakdown_pages(list(range(expected_category_count)), sum(bars) // expected_category_count))
     category_comparison_slide = next(slide for slide, title in zip(presentation.slides, titles)
                                      if title == 'Best Network Scoring per Category (Breakdown)')
     category_comparison_chart = _charts_on_slide(category_comparison_slide)[0]
     assert category_comparison_chart.plots[0].gap_width == 120
     assert category_comparison_chart.plots[0].overlap == 100
-    assert category_comparison_chart.plots[0].data_labels.font.size.pt == 10
+    # Value labels fit the width of each bar (4–10pt), so a Breakdown slide with more bars has smaller ones.
+    assert 4 <= category_comparison_chart.plots[0].data_labels.font.size.pt <= 10
     assert category_comparison_chart.category_axis.tick_labels.font.size.pt == 9
     assert category_comparison_chart.legend.font.size.pt == 11
     category_subtitle = category_comparison_slide.shapes.title.text_frame.paragraphs[1]
@@ -1296,13 +1304,12 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
         page_chart = page_chart_shape.chart
         page_paths = page_chart.plots[0].categories.flattened_labels
         page_operators = list(dict.fromkeys(path[1] for path in page_paths))
-        headings = [shape.text for shape in page_slide.shapes if shape.has_text_frame
-                    and shape.text in categories]
-        assert len(headings) == 1
-        category = headings[0]
-        assert len(page_paths) == len(all_leaf_paths)
+        # A Breakdown slide holds as many whole categories as fit in 50 bars; each bar's path starts with its category.
+        page_categories = list(dict.fromkeys(path[0] for path in page_paths))
+        assert set(page_categories) <= set(categories)
+        assert len(page_paths) == len(all_leaf_paths) * len(page_categories) <= 50
         assert page_chart.plots[0].overlap == 100
-        assert page_chart.plots[0].data_labels.font.size.pt == 10
+        assert 4 <= page_chart.plots[0].data_labels.font.size.pt <= 10
         assert page_chart.category_axis.tick_labels.font.size.pt == 9
         assert _legend_visible_series_names(page_chart) == page_operators
         _assert_chart_hierarchy_grid(
@@ -1316,12 +1323,13 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
                     expected_values.append(None)
                     continue
                 matching = [row for row in scoring_rows
-                            if row['category'] == category and row['operator'] == series.name
+                            if row['category'] == path[0] and row['operator'] == series.name
                             and row['region'] == path[2]
                             and _hierarchy_display_value({'level': 'Campaign', 'value': row['campaign']}) == path[3]]
                 expected_values.append(sum(row['weighted_points'] for row in matching) if matching else None)
             _assert_sparse_series_values(series, expected_values)
-        observed_paths_by_category[category].extend(tuple(path) for path in page_paths)
+        for path in page_paths:
+            observed_paths_by_category[path[0]].append(tuple(path))
     assert {category: set(paths) for category, paths in observed_paths_by_category.items()} == \
         expected_paths_by_category
     assert all(len(paths) == len(expected_paths_by_category[category])

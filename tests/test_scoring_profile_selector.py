@@ -9,7 +9,6 @@ import re
 import src.DriveTestAnalyzer as app_module
 from src.modules.repository import Repository
 from tests.scoring_fixtures import scoring_configuration
-from src.modules.scoring_config import complete_aggregation_hierarchy
 
 
 class _ScoringProfileSelectParser(HTMLParser):
@@ -57,9 +56,6 @@ def test_scoring_calculation_selector_lists_profiles_and_defaults_to_active(clie
     active_id = profiles['active_profile_id']
     alternate = deepcopy(profiles['profiles'][0])
     alternate.update({'id': 'netcheck-alt', 'name': 'Alternative methodology'})
-    alternate['configuration']['aggregation_hierarchy'] = [
-        'Region', 'Operator', 'Vendor', 'City', 'Campaign',
-    ]
     profiles['profiles'].append(alternate)
     repository.replace_scoring_profiles(profiles)
 
@@ -79,7 +75,8 @@ def test_scoring_calculation_selector_lists_profiles_and_defaults_to_active(clie
     alternate_page_profile = next(
         profile for profile in page_config['scoring_profiles'] if profile['id'] == 'netcheck-alt'
     )
-    assert alternate_page_profile['aggregation_hierarchy'] == complete_aggregation_hierarchy(alternate['configuration']['aggregation_hierarchy'])
+    # The aggregation hierarchy is an application setting, not part of a methodology.
+    assert alternate_page_profile == {'id': 'netcheck-alt', 'name': 'Alternative methodology'}
     assert page_config['active_profile_id'] == active_id
 
     script = (Path(__file__).parents[1] / 'src/web_interface/static/js/scoring.js').read_text(encoding='utf-8')

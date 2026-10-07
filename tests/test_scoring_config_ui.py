@@ -134,7 +134,6 @@ def test_scoring_config_panels_have_stable_ordered_deep_link_targets():
 
     panel_ids = [
         'scoring-methodology-environments',
-        'scoring-aggregation-hierarchy',
         'scoring-gap-priority',
     ]
     panel_positions = [template.index(f'id="{panel_id}"') for panel_id in panel_ids]
@@ -237,7 +236,7 @@ def test_gap_priority_controls_support_inline_position_editor():
 const fs = require('fs');
 const source = fs.readFileSync(SCRIPT_PATH, 'utf8');
 const setupStart = source.indexOf('  const movePriorityRow =');
-const setupEnd = source.indexOf("  hierarchyForm?.addEventListener('click'", setupStart);
+const setupEnd = source.indexOf("  requestJson('/api/workspace-config/scoring-source-levels')", setupStart);
 if (setupStart < 0 || setupEnd < 0) throw new Error('Priority handler block not found');
 const setup = source.slice(setupStart, setupEnd);
 function create(names) {
@@ -510,9 +509,10 @@ def test_scoring_gap_setup_parent_keeps_child_anchor_ids_and_opens_ancestors():
     script = PANEL_SCRIPT.read_text(encoding='utf-8')
 
     assert 'id="scoring-gap-analysis-setup"' in template
-    for panel_id in ['scoring-kpi-configuration', 'scoring-methodology-environments',
-                     'scoring-aggregation-hierarchy', 'scoring-gap-priority']:
+    for panel_id in ['scoring-kpi-configuration', 'scoring-methodology-environments', 'scoring-gap-priority']:
         assert f'id="{panel_id}"' in template
+    # The aggregation hierarchy is an application setting edited from the Scoring page.
+    assert 'scoring-aggregation-hierarchy' not in template
     assert "ancestor.tagName?.toLowerCase() === 'details'" in script
     assert 'if (window.location.hash) openScoringConfigHashTarget();' in script
 
@@ -551,14 +551,13 @@ def test_environment_save_and_add_category_locations_and_source_dropdowns():
     assert 'addKpi(peers.at(-1) || null, category, {categoryCreated: true})' in script
 
 
-def test_methodology_layout_uses_one_form_and_four_shared_save_buttons():
+def test_methodology_layout_uses_one_form_and_shared_save_buttons():
     from lxml import html
 
     tree = html.fromstring(PANEL_TEMPLATE.read_text(encoding='utf-8'))
     form = tree.xpath('//form[@data-scoring-kpi-form]')[0]
     environments = form.xpath('.//details[@aria-labelledby="scoring-environment-controls-title"]')[0]
     kpis = form.xpath('.//*[@data-scoring-kpi-panel]')[0]
-    hierarchy = form.xpath('.//*[@id="scoring-aggregation-hierarchy"]')[0]
     priority = form.xpath('.//*[@id="scoring-gap-priority"]')[0]
     assert kpis.xpath('.//tbody[@data-scoring-kpi-rows]')
     assert kpis.get('open') is None
@@ -569,13 +568,12 @@ def test_methodology_layout_uses_one_form_and_four_shared_save_buttons():
     assert hint.text == 'Expand this panel to edit KPI specifications, thresholds and weights for the selected environment.'
     assert environments.get('open') is not None
     assert environments in kpis.iterancestors()
-    assert hierarchy.getparent() is priority.getparent()
-    assert all('scoring-config-section' in panel.get('class', '') for panel in [environments, hierarchy, priority])
+    assert all('scoring-config-section' in panel.get('class', '') for panel in [environments, priority])
     assert not tree.xpath('//details[@id="scoring-kpi-configuration"]')
     assert not tree.xpath('//*[@class and contains(@class, "scoring-config-methodology-group")]')
     buttons = form.xpath('.//button[@data-scoring-kpi-save]')
-    assert len(buttons) == 4
-    assert [button.text_content().strip() for button in buttons] == ['Save Methodology'] * 4
+    assert len(buttons) == 3
+    assert [button.text_content().strip() for button in buttons] == ['Save Methodology'] * 3
     assert all(button.get('type') == 'submit' and form in button.iterancestors() for button in buttons)
     assert len(form.xpath('.//*[@data-scoring-kpi-status]')) == 1
     status = form.xpath('.//*[@data-scoring-kpi-status]')[0]
@@ -584,7 +582,6 @@ def test_methodology_layout_uses_one_form_and_four_shared_save_buttons():
     template = PANEL_TEMPLATE.read_text(encoding='utf-8')
     assert template.index('data-scoring-kpi-status') < template.index('scoring-environment-controls-title')
     assert environments.xpath('.//button[@data-scoring-kpi-save]')
-    assert hierarchy.xpath('.//button[@data-scoring-kpi-save]')
     assert priority.xpath('.//button[@data-scoring-kpi-save]')
     delete_button = form.xpath('.//button[@data-scoring-profile-action="delete"]')[0]
     save_button = delete_button.getprevious()
@@ -619,7 +616,7 @@ def test_methodology_import_export_controls_use_requested_colors():
     assert 'color: #fff' in export_rules[-1].group(1)
 
 
-def test_methodology_save_commits_pending_hierarchy_and_clears_all_dirty_sections():
+def test_methodology_save_commits_every_section_and_clears_all_dirty_sections():
     script = PANEL_SCRIPT.read_text(encoding='utf-8')
     start = script.index('  const saveKpis = async () => {')
     end = script.index('  const hasUnsavedChanges =', start)
@@ -627,12 +624,8 @@ def test_methodology_save_commits_pending_hierarchy_and_clears_all_dirty_section
 const activeProfileId = 'methodology', environmentSelect = {value: 'City'};
 const kpiStatus = {}, kpiSave = {disabled: false};
 const setKpiSaveDisabled = disabled => {kpiSave.disabled = disabled;};
-let kpiDirty = true, priorityDirty = true, hierarchyDirty = true, hierarchyOrder = [];
-const defaultHierarchy = ['Operator', 'Vendor', 'Region', 'City', 'Campaign'];
-const hierarchyDimensions = new Set(defaultHierarchy);
-const requested = ['Operator', 'City', 'Campaign', 'Region', 'Vendor'];
-const hierarchyRows = {querySelectorAll: () => requested.map(aggregationLevel => ({dataset:{aggregationLevel}}))};
-let configuration = {title: 'Old title', aggregation_hierarchy: defaultHierarchy};
+let kpiDirty = true, priorityDirty = true;
+let configuration = {title: 'Old title'};
 let savedId = '', verifySave = false, saveCalls = 0;
 const readKpiRows = latest => ({...latest, title: 'Updated methodology', scope:{environments:{City:{}, Train:{}}}, metrics:[{code:'K1', contexts:{City:{max_points: 7}, Train:{max_points: 4}}}], gap_priority:['K2','K1']});
 const saveConfiguration = async (update, profileId, preserveScope, verify) => {
@@ -640,16 +633,16 @@ const saveConfiguration = async (update, profileId, preserveScope, verify) => {
 };
 const setStatus = () => {}, render = () => {};
 ''' + script[start:end] + '''
-(async () => { await saveKpis(); console.log(JSON.stringify({configuration,kpiDirty,priorityDirty,hierarchyDirty,savedId,verifySave,saveCalls})); })();
+(async () => { await saveKpis(); console.log(JSON.stringify({configuration,kpiDirty,priorityDirty,savedId,verifySave,saveCalls})); })();
 '''
     completed = subprocess.run(['node', '-e', program], capture_output=True, text=True, check=True)
     actual = json.loads(completed.stdout)
-    assert actual['configuration']['aggregation_hierarchy'] == ['Operator', 'City', 'Campaign', 'Region', 'Vendor']
+    assert 'aggregation_hierarchy' not in actual['configuration']
     assert set(actual['configuration']['scope']['environments']) == {'City', 'Train'}
     assert actual['configuration']['gap_priority'] == ['K2', 'K1']
     assert actual['configuration']['title'] == 'Updated methodology'
     assert actual['configuration']['metrics'][0]['contexts']['Train']['max_points'] == 4
-    assert not any(actual[field] for field in ('kpiDirty', 'priorityDirty', 'hierarchyDirty'))
+    assert not any(actual[field] for field in ('kpiDirty', 'priorityDirty'))
     assert actual['savedId'] == 'methodology'
     assert actual['verifySave'] is True
     assert actual['saveCalls'] == 1

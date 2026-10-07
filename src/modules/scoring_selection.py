@@ -10,7 +10,7 @@ from src.modules.column_names import column_identity
 from src.modules.nr_mode import normalize_nr_mode
 from src.modules.repository import Repository
 from src.modules.scoring_vendors import scoring_vendor_name, scoring_vendor_operators
-from src.modules.scoring_config import complete_aggregation_hierarchy
+from src.modules.scoring_config import load_aggregation_hierarchy
 
 
 SCORING_SELECTION_STATE_KEY = 'scoring_calculation_selection_v1'
@@ -116,13 +116,6 @@ def _fallback_selection(
     }
 
 
-def _profile_hierarchy(profiles: dict[str, dict[str, Any]], profile_id: str) -> list[str]:
-    profile = profiles.get(profile_id)
-    configuration = profile.get('configuration') if isinstance(profile, dict) else None
-    hierarchy = configuration.get('aggregation_hierarchy') if isinstance(configuration, dict) else None
-    return complete_aggregation_hierarchy(hierarchy)
-
-
 def _normalize_context_filters(
     raw_filters: object,
     hierarchy: list[str],
@@ -183,7 +176,7 @@ def _normalize_selection(
         selected_profile_id = ''
     elif not selected_profile_id:
         selected_profile_id = active_profile_id
-    hierarchy = _profile_hierarchy(profiles, selected_profile_id)
+    hierarchy = load_aggregation_hierarchy(repository)
     hierarchy_by_identity = {column_identity(level): level for level in hierarchy}
 
     raw_mode = normalize_nr_mode(raw_selection.get('nr_mode'))

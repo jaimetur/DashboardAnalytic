@@ -59,7 +59,8 @@ class ValueMapper:
             operator = _normalise_operator_label(operator, self.operator_mappings)
             if not vendor:
                 return f'{operator} - All'
-            return f'{_normalise_vendor(vendor, self.operator_mappings, self.vendor_mappings)}_{operator}'
+            # The whole Vendor is one label: Ericsson_Mixed is not an Operator_Vendor value.
+            return f'{_normalise_operator_label(vendor, self.vendor_mappings)}_{operator}'
         return _normalise_vendor(value, self.operator_mappings, self.vendor_mappings)
 
     def vendor_operators(self, operator_vendors: Iterable[Any]) -> list[str]:

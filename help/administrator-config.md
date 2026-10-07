@@ -86,7 +86,7 @@ Reporting Jobs can only include artifacts of the modules active for their author
 - Report Templates from the active workspace
 - Main Cities from the active workspace
 - Mappings & Reference Data from the active workspace
-- Scoring & GAP Analysis Configuration from the active workspace (all saved methodologies, default methodology, KPI definitions, aggregation hierarchy and GAP KPI priorities)
+- Scoring & GAP Analysis Configuration from the active workspace (all saved methodologies, default methodology, KPI definitions and GAP KPI priorities)
 - Auto-calculated Fields from the active workspace
 - Query Builder Queries from the active workspace
 - Reporting Jobs from the active workspace
@@ -159,13 +159,13 @@ Database Management has two clearly separated subsections: **Backup Protection**
 
 In **Backup**, select one or more content types:
 
-- **Configuration Content: Application database** stores the shared application configuration.
+- **Configuration Content: Application database** stores the shared application configuration, including the Scoring aggregation hierarchy.
 - **Workspace Content: Workspace Database** stores the selected workspace SQLite databases.
 - **Workspace Content: Dashboards** stores one JSON file with every Dashboard definition and its comments for each selected workspace.
 - **Workspace Content: Report Templates** stores one CSV file for each Report Template.
 - **Workspace Content: Main Cities** stores the workspace city selection.
 - **Workspace Content: Mappings & Reference Data** stores one JSON file containing every canonical Operator and Vendor, alias, row position and thematic colour, plus the Spectrum Holdings and Campaign Maps.
-- **Workspace Content: Scoring & GAP Analysis Configuration** stores all saved methodologies, their default selection, KPI definitions, aggregation hierarchy and GAP KPI priorities; import and restore recover all three Scoring Setup subpanels together.
+- **Workspace Content: Scoring & GAP Analysis Configuration** stores all saved methodologies, their default selection, KPI definitions and GAP KPI priorities; import and restore recover every Scoring Setup subpanel together.
 - **Workspace Content: Auto-calculated Fields** stores one JSON file containing every selected workspace definition.
 - **Workspace Content: NQ Call Tracking** stores one JSON file with the Non-Qualified Calls statuses, teams, follow-up, comments and history; restore merges it into the workspace without duplicating comments or history.
 - **Workspace Content: Input** stores raw dataset files when explicitly selected.

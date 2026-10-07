@@ -44,6 +44,14 @@ from zoneinfo import ZoneInfo, available_timezones
 import httpx
 import pandas as pd
 from PIL import Image
+
+# PROJ (pyproj, loaded by geopandas for polygons) must first be loaded by the main thread: when a
+# worker thread that later exits loads it first, every later fork of the process (dataset workers,
+# LibreOffice conversions) dies with SIGSEGV in the child.
+try:
+    import pyproj  # noqa: F401
+except ImportError:  # pragma: no cover - geopandas installs it
+    pass
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
@@ -81,6 +89,7 @@ from src.modules.scoring_jobs import (
     list_scoring_jobs,
     recover_interrupted_scoring_jobs,
     run_scoring_job,
+    select_all_complete_cdrs,
     select_latest_companion_cdrs,
     validate_complete_scoring_cdr_selection,
 )
@@ -15397,27 +15406,21 @@ def _scoring_export_job_with_catalogue_defaults(
 @app.get('/scoring', response_class=HTMLResponse)
 def scoring_page(request: Request, user: SessionUser = Depends(current_user)) -> HTMLResponse:
     task_repository = scoring_repository(user)
-    from src.modules.scoring_config import complete_aggregation_hierarchy
+    from src.modules.scoring_config import load_aggregation_hierarchy
     configuration_error = ''
-    aggregation_hierarchy = complete_aggregation_hierarchy()
+    aggregation_hierarchy = load_aggregation_hierarchy(task_repository)
     active_profile_id = ''
     active_profile_name = ''
     scoring_profiles: list[dict[str, Any]] = []
     try:
         profile_collection = task_repository.get_scoring_profiles()
-        scoring_profiles = [{
-            'id': profile['id'],
-            'name': profile['name'],
-            'aggregation_hierarchy': complete_aggregation_hierarchy(profile['configuration'].get('aggregation_hierarchy')),
-        } for profile in profile_collection['profiles']]
+        scoring_profiles = [{'id': profile['id'], 'name': profile['name']} for profile in profile_collection['profiles']]
         active_profile_id = profile_collection['active_profile_id']
         active_profile = next(
             profile for profile in profile_collection['profiles']
             if profile['id'] == active_profile_id
         )
-        configuration = active_profile['configuration']
         active_profile_name = active_profile['name']
-        aggregation_hierarchy = complete_aggregation_hierarchy(configuration.get('aggregation_hierarchy'))
     except ValueError as exc:
         configuration_error = str(exc)
     ready_cdrs = [row for row in task_repository.list_datasets()
@@ -15880,6 +15883,11 @@ def build_scoring_report_document(task_repository: Repository, base: dict[str, A
 class ScoringReportRequest(BaseModel):
     configuration: dict[str, Any]
     split_charts: bool = True
+    # The CDRs, NR Mode, methodology and GAP reference chosen in the Calculation panel.
+    dataset_ids: list[int] = []
+    nr_mode: str = 'NSA'
+    baseline_operator: str = 'EE'
+    scoring_profile_id: str | None = None
 
 
 class ScoringReportConfigurationRequest(BaseModel):
@@ -15887,19 +15895,19 @@ class ScoringReportConfigurationRequest(BaseModel):
     configuration: dict[str, Any]
 
 
-@app.post('/scoring/jobs/{job_id}/report/{export_kind}')
-def scoring_job_report(
-    job_id: int, export_kind: str, payload: ScoringReportRequest, user: SessionUser = Depends(current_user),
-) -> Response:
-    """PowerPoint or Word report with the scenarios of a report configuration, from the selected job's CDRs."""
+@app.post('/api/scoring/report/{export_kind}')
+def scoring_report(export_kind: str, payload: ScoringReportRequest, user: SessionUser = Depends(current_user)) -> Response:
+    """PowerPoint or Word report with the scenarios of a report configuration, from the CDRs, NR Mode,
+    methodology and GAP reference chosen in the Calculation panel."""
     if export_kind not in {'ppt', 'word'}:
         raise HTTPException(status_code=404, detail='Unknown scoring report format.')
+    if not payload.dataset_ids:
+        raise HTTPException(status_code=400, detail='Select the CDRs of the report in the Calculation panel.')
     task_repository = scoring_repository(user)
-    job = get_scoring_job(task_repository, job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail='Scoring job not found.')
     from src.modules.scoring_reports import remember_last_configuration
-    base = {key: job.get(key) for key in ('dataset_ids', 'nr_mode', 'baseline_operator', 'scoring_profile_id')}
+    base = {'dataset_ids': list(payload.dataset_ids), 'nr_mode': payload.nr_mode,
+            'baseline_operator': payload.baseline_operator.strip() or 'EE',
+            'scoring_profile_id': payload.scoring_profile_id or None}
     try:
         content, filename, _first = build_scoring_report_document(
             task_repository, base, payload.configuration, user.username, split_charts=payload.split_charts,
@@ -17717,6 +17725,26 @@ async def save_workspace_scoring_profiles(
         'profile_count': len(profiles['profiles']),
     }))
     return JSONResponse(profiles, headers={'Cache-Control': 'no-store'})
+
+
+class ScoringHierarchyPayload(BaseModel):
+    levels: list[str]
+
+
+@app.put('/api/scoring/aggregation-hierarchy')
+def save_scoring_aggregation_hierarchy(
+    payload: ScoringHierarchyPayload, user: SessionUser = Depends(config_editor_user),
+) -> JSONResponse:
+    """Save the application's aggregation hierarchy, shared by every workspace and methodology."""
+    from src.modules.scoring_config import save_aggregation_hierarchy
+
+    task_repository = scoring_repository(user)
+    try:
+        levels = save_aggregation_hierarchy(task_repository, list(payload.levels))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc) or 'The aggregation hierarchy is invalid.') from exc
+    task_repository.try_add_log(user.username, 'save_scoring_aggregation_hierarchy', json.dumps({'levels': levels}))
+    return JSONResponse({'aggregation_hierarchy': levels}, headers={'Cache-Control': 'no-store'})
 
 
 @app.get('/api/workspace-config/scoring-configuration/export')
