@@ -105,6 +105,7 @@ from src.modules.query_builder import MAX_PREVIEW_ROWS, execute_query, iter_quer
 from src.runtime_logs import execution_log_entries
 from src.modules.workspaces import Workspace, WorkspaceRegistry
 from src.branding import BACKUP_FILE_PATTERNS, BACKUP_SCRATCH_PATTERNS, canonical_format
+from src.modules.mapping_renames import rename_saved_filters
 from src.modules.module_labels import (
     ICONS as MODULE_LABEL_ICONS, MAIN_MODULES, MAX_LABEL_LENGTH as MAX_MODULE_LABEL_LENGTH, MAX_SHORT_TITLE_LENGTH,
     MAX_TITLE_LENGTH, MODULE_LABELS_STATE_KEY, MODULE_TABS, TAB_ICONS, load_module_labels, module_label_badges, module_tabs,
@@ -18906,6 +18907,7 @@ def save_admin_operator_mapping_group(
     mapping_settings = repository.chart_mapping_settings()
     renamed_templates = 0
     renamed_dashboards = 0
+    renamed_filters = 0
     try:
         if original and original.casefold() != canonical.casefold() and any(
             str(group.get('canonical') or '').strip().casefold() == canonical.casefold()
@@ -18923,6 +18925,8 @@ def save_admin_operator_mapping_group(
             renamed_dashboards = rename_chart_mapping_dashboard_references(
                 'operator', original, canonical, mapping_settings,
             )
+            # Reporting Jobs, Scoring report configurations and the other saved filters follow the new name.
+            renamed_filters = rename_saved_filters(repository, 'operator', original, canonical, mapping_settings)
     except (ValueError, sqlite3.IntegrityError) as exc:
         return RedirectResponse(
             f'/workspace-config?{urlencode({"operator_mapping_error": str(exc)})}',
@@ -18938,10 +18942,12 @@ def save_admin_operator_mapping_group(
         'aliases': parsed_aliases,
         'renamed_templates': renamed_templates,
         'renamed_dashboards': renamed_dashboards,
+        'renamed_filters': renamed_filters,
     }))
     notice = 'Operator Mapping saved.'
-    if renamed_templates or renamed_dashboards:
-        notice += f' Updated {renamed_templates} Report Template(s) and {renamed_dashboards} Dashboard(s).'
+    if renamed_templates or renamed_dashboards or renamed_filters:
+        notice += (f' Updated {renamed_templates} Report Template(s), {renamed_dashboards} Dashboard(s)'
+                   f' and {renamed_filters} Reporting Job(s) or saved filter(s).')
     return RedirectResponse(
         f'/workspace-config?{urlencode({"operator_mapping_notice": notice})}',
         status_code=status.HTTP_303_SEE_OTHER,
@@ -19027,6 +19033,7 @@ def save_admin_vendor_mapping_group(
     mapping_settings = repository.chart_mapping_settings()
     renamed_templates = 0
     renamed_dashboards = 0
+    renamed_filters = 0
     try:
         if original and original.casefold() != canonical.casefold() and any(
             str(group.get('canonical') or '').strip().casefold() == canonical.casefold()
@@ -19044,6 +19051,8 @@ def save_admin_vendor_mapping_group(
             renamed_dashboards = rename_chart_mapping_dashboard_references(
                 'vendor', original, canonical, mapping_settings,
             )
+            # Reporting Jobs, Scoring report configurations and the other saved filters follow the new name.
+            renamed_filters = rename_saved_filters(repository, 'vendor', original, canonical, mapping_settings)
     except (ValueError, sqlite3.IntegrityError) as exc:
         return RedirectResponse(
             f'/workspace-config?{urlencode({"vendor_mapping_error": str(exc)})}',
@@ -19057,10 +19066,12 @@ def save_admin_vendor_mapping_group(
         'original_canonical': original_canonical, 'canonical': canonical,
         'aliases': parsed_aliases, 'color': color,
         'renamed_templates': renamed_templates, 'renamed_dashboards': renamed_dashboards,
+        'renamed_filters': renamed_filters,
     }))
     notice = 'Vendor Mapping saved.'
-    if renamed_templates or renamed_dashboards:
-        notice += f' Updated {renamed_templates} Report Template(s) and {renamed_dashboards} Dashboard(s).'
+    if renamed_templates or renamed_dashboards or renamed_filters:
+        notice += (f' Updated {renamed_templates} Report Template(s), {renamed_dashboards} Dashboard(s)'
+                   f' and {renamed_filters} Reporting Job(s) or saved filter(s).')
     return RedirectResponse(
         f'/workspace-config?{urlencode({"vendor_mapping_notice": notice})}',
         status_code=status.HTTP_303_SEE_OTHER,

@@ -572,6 +572,28 @@ def save_task(task_repository: Any, task_id: int | None, payload: dict[str, Any]
     return get_task(task_repository, task_id)
 
 
+def rename_definition_values(task_repository: Any, transform: Callable[[dict[str, Any]], dict[str, Any]]) -> int:
+    """Apply ``transform`` to every Reporting Job definition (a renamed Operator or Vendor); returns how many changed.
+
+    A changed job is saved again, so a Job Editor draft of its previous version is not restored.
+    """
+    ensure_report_task_tables(task_repository)
+    changed = 0
+    now = now_local().isoformat()
+    with task_repository.connection() as connection:
+        for row in connection.execute(f'SELECT id, definition_json FROM {REPORT_TASKS_TABLE}').fetchall():
+            try:
+                definition = json.loads(row['definition_json'] or '{}')
+            except (TypeError, ValueError):
+                continue
+            renamed = transform(definition)
+            if renamed != definition:
+                connection.execute(f'UPDATE {REPORT_TASKS_TABLE} SET definition_json = ?, updated_at = ? WHERE id = ?',
+                                   (json.dumps(renamed, ensure_ascii=False), now, row['id']))
+                changed += 1
+    return changed
+
+
 def delete_task(task_repository: Any, task_id: int) -> list[str]:
     """Delete a Reporting Job and its runs; returns the run folders to remove."""
     ensure_report_task_tables(task_repository)

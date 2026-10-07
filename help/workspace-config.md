@@ -408,7 +408,7 @@ The table groups raw Operator labels under one canonical identity for charts. Ea
 
 Use **Add canonical mapping** to create a group. Change its label, aliases or colour and press **Save** to update it. **Move up** and **Move down** set its position in Operator charts and in Subscriber dimensions; the first and last rows cannot move beyond the table. **Delete** removes the entire group, including its aliases, after confirmation.
 
-Canonical renames update exact matching references in Report Templates and saved Dashboards.
+Canonical renames update exact matching references in Report Templates and saved Dashboards, and the values of the Operator, Operator_Vendor, Vendor_Operator and Vendor filters saved in Reporting Jobs (including the GAP reference operator and the Scoring report scenarios), saved Scoring report configurations, the last Scoring calculation, the CDR Analysis filters of each CDR and the Non-Qualified Calls filters (`VF_UK` → `VF` also turns `VF_UK_Ericsson` into `VF_Ericsson` and `Ericsson_VF_UK` into `Ericsson_VF`). Campaign filters keep the full campaign value, so changing the Campaign Maps never requires renaming them.
 
 The colour picker sets the group's chart theme colour; charts can derive related shades to distinguish campaigns or series. Order and colour are presentation choices, while aliases make source labels such as `Vodafone UK` resolve to the intended canonical Operator. Every filter, table, chart, legend and report of the tool shows the canonical Operator, and choosing it selects all its source labels; only Preview Dataset shows the source labels as they are.
 
@@ -418,7 +418,7 @@ They do not rewrite source workbooks, stored CDR rows or combined CDR tables. Sa
 
 The Vendor table has the same **Order**, **Colour**, **Canonical label**, **Mapped source labels** and **Actions** controls. Use **Add canonical mapping**, **Save**, **Move up**, **Move down** or confirmed **Delete** to manage a Vendor and all its aliases. Alias matching is case-insensitive, the canonical label maps to itself, and an alias cannot belong to two Vendor groups.
 
-Renaming a canonical Vendor updates exact matching Report Template and saved Dashboard references.
+Renaming a canonical Vendor updates exact matching Report Template and saved Dashboard references, and the same saved filters as an Operator rename.
 
 Vendor order determines the chart sequence for Vendor dimensions and the Vendor portion of combined `Operator_Vendor` categories. The selected colour gives a Vendor a consistent chart identity, with related shades where multiple series need distinction. Every filter, table, chart and report shows the canonical Vendor (and the canonical Operator and Vendor of an `Operator_Vendor`), and choosing it selects all its source spellings; they do not alter materialized CDR values, which only Preview Dataset shows. Group changes refresh chart caches without rematerializing source data.
 

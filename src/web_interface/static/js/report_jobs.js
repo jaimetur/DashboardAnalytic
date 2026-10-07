@@ -18,6 +18,8 @@
   let state = {tasks: [], runs: [], can_edit: false};
   let options = null;
   let editingId = null;
+  // When the edited job was last saved on the server, so a draft of an older version is not restored.
+  let editingUpdatedAt = '';
   let pollTimer = null;
 
   const status = (message, tone = '') => {
@@ -872,6 +874,7 @@
     const dataset = definition.dataset_analysis || {};
     const network = definition.network_insights || [];
     editingId = task?.id ?? null;
+    editingUpdatedAt = task?.updated_at || '';
     $('rj-editor-title').textContent = task?.id ? `Edit ${task.name}` : 'New Reporting Job';
     $('rj-name').value = task?.name || '';
     $('rj-da-enabled').checked = Boolean(dataset.enabled);
@@ -955,7 +958,7 @@
       if (!editorOpen || !options) return;
       try {
         window.localStorage.setItem(DRAFT_KEY, JSON.stringify({
-          workspace: state.workspace_id, editingId, snapshot: editorSnapshot, payload: editorPayload(),
+          workspace: state.workspace_id, editingId, editingUpdatedAt, snapshot: editorSnapshot, payload: editorPayload(),
         }));
       } catch { /* Storage unavailable: the editor simply does not survive a reload. */ }
     }, 300);
@@ -965,6 +968,12 @@
     if (!draft || !state.can_edit || draft.workspace !== state.workspace_id || !draft.payload) return;
     const task = draft.editingId !== null ? state.tasks.find((item) => item.id === draft.editingId) : null;
     if (draft.editingId !== null && !task) { clearDraft(); return; }
+    // The job changed on the server since the draft (imported, transferred or saved elsewhere): open what is saved.
+    if (task && draft.editingUpdatedAt !== task.updated_at) {
+      clearDraft();
+      status('The unsaved changes of the Job Editor were discarded because the job changed since then.', 'info');
+      return;
+    }
     await ensureOptions();
     const recipients = String(draft.payload.recipients || '').split(/[,;\n]/).map((item) => item.trim()).filter(Boolean);
     fillEditor({...(task || {}), ...draft.payload, recipients, id: task ? task.id : undefined, name: draft.payload.name || task?.name || ''});
