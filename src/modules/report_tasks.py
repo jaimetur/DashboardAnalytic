@@ -28,7 +28,7 @@ from threading import Event, Lock, Thread
 from typing import Any, Callable
 
 from src.branding import canonical_format
-from src.modules.column_names import sort_vendor_values
+from src.modules.value_maps import ValueMapper
 from src.modules.output_layout import REPORTING_JOBS_FOLDER, module_output_dir
 
 REPORT_TASKS_TABLE = 'report_tasks'
@@ -36,18 +36,18 @@ REPORT_TASK_RUNS_TABLE = 'report_task_runs'
 REPORT_FORMATS = ('powerpoint', 'word')
 SCHEDULE_MODES = ('manual', 'once', 'daily', 'weekly', 'monthly')
 WEEKDAY_NAMES = ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday')
-SCORING_LEVELS = ('Operator', 'Vendor', 'Region', 'Cluster', 'City', 'Campaign')
-SCORING_FILTER_FIELDS = ('Operator', 'Operator_Vendor', 'Vendor', 'Region', 'Cluster', 'City', 'Campaign')
-NETWORK_FILTER_FIELDS = ('operators', 'operator_vendors', 'vendors', 'campaigns', 'regions', 'clusters', 'cities')
+NETWORK_FILTER_FIELDS = ('operators', 'operator_vendors', 'vendor_operators', 'vendors', 'campaigns', 'regions', 'clusters', 'cities')
 # CDR Analysis artifacts: the global aggregation of the charts and the CDF comparison, one choice each.
 CDR_ANALYSIS_AGGREGATIONS = {
-    'all': 'Auto', 'operator': 'Operator', 'operator_vendor': 'Operator_Vendor', 'vendor': 'Vendor',
+    'all': 'Auto', 'operator': 'Operator', 'operator_vendor': 'Operator_Vendor', 'vendor_operator': 'Vendor_Operator',
+    'vendor': 'Vendor',
     'market': 'Market', 'region': 'Region', 'cluster': 'Cluster', 'city': 'City',
 }
 CDR_ANALYSIS_CDF_GROUPINGS = {'all': 'Single CDF', **{key: label for key, label in CDR_ANALYSIS_AGGREGATIONS.items() if key != 'all'}}
 # Network Insights filter names and the CDR Analysis dimension each one filters.
 CDR_ANALYSIS_FILTER_DIMENSIONS = {
-    'operators': 'operator', 'operator_vendors': 'operator_vendor', 'vendors': 'vendor', 'regions': 'region',
+    'operators': 'operator', 'operator_vendors': 'operator_vendor', 'vendor_operators': 'vendor_operator', 'vendors': 'vendor',
+    'regions': 'region',
     'clusters': 'cluster', 'cities': 'city', 'campaigns': 'campaign',
 }
 RUN_FINAL_STATUSES = ('sent', 'completed', 'partial', 'failed')
@@ -207,10 +207,18 @@ def _datasets_by_kind(value: Any) -> dict[str, list[int]]:
     return {str(kind): _ids(ids) for kind, ids in value.items() if _ids(ids)}
 
 
-def _filters(value: Any, fields: tuple[str, ...]) -> dict[str, list[str]]:
-    if not isinstance(value, dict):
-        return {}
-    return {field: _strings(value.get(field)) for field in fields if _strings(value.get(field))}
+def _scoring_report(value: Any) -> dict[str, Any]:
+    """The scenarios and content of a Scoring artifact's report, which every Scoring artifact needs."""
+    from src.modules.scoring_reports import normalize_report_configuration
+    if not isinstance(value, dict) or not value.get('scenarios'):
+        raise ValueError('Configure the report content of every Scoring artifact.')
+    return normalize_report_configuration(value)
+
+
+def scoring_entry_name(entry: dict[str, Any]) -> str:
+    """The artifact name: its label, or the NR Mode and the report scenarios."""
+    scenarios = ', '.join(scenario['name'] for scenario in (entry.get('report') or {}).get('scenarios') or [])
+    return entry.get('label') or ' '.join(part for part in (entry.get('nr_mode', 'NSA'), scenarios) if part)
 
 
 def _date_text(value: Any) -> str:
@@ -296,20 +304,17 @@ def normalize_definition(raw: Any) -> dict[str, Any]:
         if not isinstance(entry, dict):
             continue
         nr_mode = str(entry.get('nr_mode') or 'NSA').upper()
-        levels = [level for level in _strings(entry.get('aggregation_levels')) if level in SCORING_LEVELS]
         definition['scoring'].append({
             'label': str(entry.get('label') or '').strip()[:120],
             'nr_mode': nr_mode if nr_mode in {'NSA', 'SA'} else 'NSA',
             # An empty list uses the newest complete set of CDRs at run time.
             'dataset_ids': _ids(entry.get('dataset_ids')),
-            'aggregation_levels': ['Operator', *[level for level in levels if level != 'Operator']],
-            'context_filters': _filters(entry.get('context_filters'), SCORING_FILTER_FIELDS),
-            # The workspace Main Cities at run time, like the Scoring module's Main Cities option.
-            'main_cities': bool(entry.get('main_cities')),
             'scoring_profile_id': str(entry.get('scoring_profile_id') or '').strip(),
             'baseline_operator': str(entry.get('baseline_operator') or 'EE').strip() or 'EE',
             # PowerPoint and/or Word; jobs saved before Word was offered keep PowerPoint.
             'formats': [value for value in _formats(entry.get('formats')) if value in {'powerpoint', 'word'}] or ['powerpoint'],
+            # Scenarios (filters and aggregation) and content of the report.
+            'report': _scoring_report(entry.get('report')),
         })
     if not (definition['dataset_analysis']['enabled'] or definition['network_insights']
             or definition['dashboards'] or definition['scoring'] or definition['modules']):
@@ -419,8 +424,7 @@ def artifact_groups(definition: dict[str, Any], dashboard_names: dict[str, str] 
                   for entry in definition.get('dashboards') or []]
     if dashboards:
         groups.append({'module': 'E2E Dashboards', 'items': dashboards})
-    scoring = [f"{entry.get('label') or entry.get('nr_mode', 'NSA') + ' ' + ' → '.join(entry.get('aggregation_levels') or ['Operator'])} "
-               f"{formats(entry.get('formats'))}" for entry in definition.get('scoring') or []]
+    scoring = [f"{scoring_entry_name(entry)} {formats(entry.get('formats'))}" for entry in definition.get('scoring') or []]
     if scoring:
         groups.append({'module': 'Scoring & GAP Analysis', 'items': scoring})
     for key, config in (definition.get('modules') or {}).items():
@@ -443,7 +447,7 @@ def artifact_labels(definition: dict[str, Any], dashboard_names: dict[str, str] 
     scoring = definition.get('scoring') or []
     if scoring:
         for entry in scoring:
-            name = entry.get('label') or f"{entry.get('nr_mode', 'NSA')} {' → '.join(entry.get('aggregation_levels') or ['Operator'])}"
+            name = scoring_entry_name(entry)
             formats = '/'.join(FORMAT_LABELS[value] for value in entry.get('formats') or ['powerpoint'])
             labels.append(f"{MODULE_LABELS['scoring']} · {name} ({formats})")
     for key, config in (definition.get('modules') or {}).items():
@@ -965,17 +969,14 @@ def install_report_task_routes(core: Any) -> None:
             return failed_artifact('dashboards', title, getattr(exc, 'detail', exc))
 
     def scoring_details(job: dict[str, Any], entry: dict[str, Any], names: dict[int, str]) -> list[str]:
-        filters = job.get('context_filters') or {}
-        lines = [f"NR Mode: {job.get('nr_mode') or '—'} · Aggregation: {' → '.join(job.get('levels') or ['Operator'])}",
-                 f"CDRs: {', '.join(names.get(int(value), str(value)) for value in job.get('dataset_ids') or []) or '—'}"]
-        lines.extend(f'{field}: {", ".join(values)}' for field, values in filters.items() if values)
-        if entry.get('main_cities'):
-            lines.append('City: Main Cities')
-        lines.append(f"GAP reference: {job.get('baseline_operator') or entry.get('baseline_operator') or 'EE'}")
-        return lines
+        scenarios = [scenario['name'] for scenario in (entry.get('report') or {}).get('scenarios') or []]
+        return [f"NR Mode: {job.get('nr_mode') or '—'}",
+                f"CDRs: {', '.join(names.get(int(value), str(value)) for value in job.get('dataset_ids') or []) or '—'}",
+                f"GAP reference: {job.get('baseline_operator') or entry.get('baseline_operator') or 'EE'}",
+                f"Report scenarios: {', '.join(scenarios) or '—'}"]
 
     def generate_scoring(entry, task_repository, folder, stamp, username, names, run_id) -> dict[str, Any]:
-        title = f"Scoring · {entry.get('label') or entry['nr_mode'] + ' ' + ' → '.join(entry['aggregation_levels'])}"
+        title = f"Scoring · {scoring_entry_name(entry)}"
         try:
             dataset_ids = entry.get('dataset_ids') or []
             if not dataset_ids:
@@ -986,20 +987,12 @@ def install_report_task_routes(core: Any) -> None:
                     raise RuntimeError(f"There are no ready {entry['nr_mode']} CDRs.")
                 newest = max(candidates, key=lambda row: int(row['id']))
                 dataset_ids = core.select_latest_companion_cdrs(task_repository, int(newest['id']))
-            context_filters = dict(entry.get('context_filters') or {})
-            if entry.get('main_cities'):
-                context_filters['City'] = list(task_repository.list_main_cities())
-            selected = core.validate_complete_scoring_cdr_selection(
-                task_repository, dataset_ids, entry['nr_mode'], context_filters=context_filters)
+            report = entry['report']
             update_run(task_repository, run_id, message=f'Calculating {title}')
-            job, cached = core.create_scoring_job(
-                task_repository, selected, entry['aggregation_levels'], entry['nr_mode'], username=username,
-                baseline_operator=entry.get('baseline_operator') or 'EE', context_filters=context_filters,
-                scoring_profile_id=entry.get('scoring_profile_id') or None,
-            )
-            if not cached:
-                core.run_scoring_job(task_repository, int(job['id']))
-            content, filename, export_job = core.build_scoring_job_powerpoint(task_repository, int(job['id']))
+            base = {'dataset_ids': dataset_ids, 'nr_mode': entry['nr_mode'],
+                    'baseline_operator': entry.get('baseline_operator') or 'EE',
+                    'scoring_profile_id': entry.get('scoring_profile_id') or None}
+            content, filename, export_job = core.build_scoring_report_document(task_repository, base, report, username)
             artifacts = []
             for export_format in entry.get('formats') or ['powerpoint']:
                 suffix = '.docx' if export_format == 'word' else '.pptx'
@@ -1077,6 +1070,10 @@ def install_report_task_routes(core: Any) -> None:
                            progress=max(1, round(index * 90 / max(len(steps), 1))))
                 artifacts.extend(step())
                 update_run(task_repository, run_id, artifacts=artifacts)
+            # A file listed as ready must still exist when the run ends; otherwise it failed.
+            for item in artifacts:
+                if item['status'] == 'ready' and not (folder / item['file_name']).is_file():
+                    item.update(status='failed', file_name='', size=0, error='The file was not kept after it was generated.')
             ready = [item for item in artifacts if item['status'] == 'ready']
             email_status, error = '', ''
             if task['send_email'] and ready:
@@ -1244,6 +1241,17 @@ def install_report_task_routes(core: Any) -> None:
         # (it can take minutes for large CDRs) and the editor says so instead of waiting.
         catalogues_pending = complete_catalogues_in_background(task_repository, [item['id'] for item in datasets])
         catalogue = task_repository.cdr_catalogue_values()
+        # Operators and Vendors with their Operator and Vendor Maps labels, as every module shows them.
+        mapper = ValueMapper.from_repository(task_repository)
+
+        def mapped(values: dict[str, Any]) -> dict[str, list[Any]]:
+            return {'Operator': mapper.values('operator', values.get('operators', [])),
+                    'Operator_Vendor': mapper.values('operator_vendor', values.get('vendors', [])),
+                    'Vendor_Operator': mapper.values('vendor_operator', values.get('vendor_operators', [])),
+                    'Vendor': mapper.values('vendor', values.get('vendors_only', [])),
+                    'Region': values.get('regions', []), 'Cluster': values.get('clusters', []),
+                    'City': values.get('cities', []), 'Campaign': values.get('campaigns', [])}
+
         return {
             'allowed_modules': {module: core.user_has_feature(user, feature) for module, feature in MODULE_FEATURES.items()},
             'providers': [provider_options(key, provider, user)
@@ -1251,21 +1259,18 @@ def install_report_task_routes(core: Any) -> None:
             'datasets': datasets, 'dashboards': dashboards,
             'dashboard_filter_fields': list(ADAPTATIVE_FILTER_FIELDS),
             'main_cities': list(task_repository.list_main_cities()),
+            # The Scoring report editor shows and saves Operators with their Operator Maps label.
+            'operator_groups': [{'canonical': group['canonical'], 'aliases': group['aliases']}
+                                for group in task_repository.list_operator_mapping_groups()],
             'methodologies': methodologies, 'active_methodology': active_methodology,
-            'values': {'Operator': catalogue.get('operators', []), 'Operator_Vendor': sort_vendor_values(catalogue.get('vendors', [])),
-                       'Vendor': sort_vendor_values(catalogue.get('vendors_only', [])), 'Region': catalogue.get('regions', []),
-                       'Cluster': catalogue.get('clusters', []), 'City': catalogue.get('cities', []),
-                       'Campaign': catalogue.get('campaigns', [])},
+            'values': mapped(catalogue),
             # The filter values of each CDR, so every entry lists only the values of the CDRs it uses.
             'values_by_dataset': {
-                dataset_id: {'Operator': catalogue_values['operators'], 'Operator_Vendor': catalogue_values['vendors'],
-                             'Vendor': catalogue_values['vendors_only'], 'Region': catalogue_values['regions'],
-                             'Cluster': catalogue_values['clusters'], 'City': catalogue_values['cities'],
-                             'Campaign': catalogue_values['campaigns']}
+                dataset_id: mapped(catalogue_values)
                 for dataset_id, catalogue_values in task_repository.cdr_catalogues_by_dataset([item['id'] for item in datasets]).items()
             },
             'catalogues_pending': catalogues_pending,
-            'scoring_levels': list(SCORING_LEVELS), 'formats': list(REPORT_FORMATS),
+            'formats': list(REPORT_FORMATS),
             # CDR Analysis: the metrics of the ready CDRs, and its aggregation and CDF comparison choices.
             'cdr_metrics': {kind: list(dict.fromkeys(
                 metric for dataset in datasets if dataset['kind'] == kind
@@ -1314,6 +1319,12 @@ def install_report_task_routes(core: Any) -> None:
         tools = getattr(core, 'dashboard_reporting', None)
         dashboard_names = {str(key): str(value.get('name') or key) for key, value in tools.list_dashboards(task_repository).items()
                            if isinstance(value, dict)} if tools is not None else {}
+        # Run History links only the files that still exist.
+        for run in runs:
+            folder = Path(run['output_dir']) if run.get('output_dir') else None
+            for item in run['artifacts']:
+                if item.get('status') == 'ready':
+                    item['available'] = bool(folder and item.get('file_name') and (folder / item['file_name']).is_file())
         return {
             'tasks': [serialize_task(task, runs_by_id, dashboard_names) for task in list_tasks(task_repository)],
             'runs': runs, 'can_edit': user.role in {'user-editor', 'admin', 'super-admin'},

@@ -342,7 +342,7 @@ def test_dense_hierarchy_powerpoint_can_keep_all_chart_leaves_on_one_slide():
     assert len(category_chart.plots[0].categories.flattened_labels) == 24
     assert len({path[-1] for path in category_chart.plots[0].categories.flattened_labels}) == len(campaigns)
     comparison_slides = [slide for slide in presentation.slides
-                         if slide.shapes.title.text.split('\n')[0] == 'Scoring per Category']
+                         if slide.shapes.title.text.split('\n')[0] == 'Best Network Scoring per Category (Breakdown)']
     assert len(comparison_slides) == 1
     comparison_chart = _charts_on_slide(comparison_slides[0])[0]
     comparison_paths = comparison_chart.plots[0].categories.flattened_labels
@@ -385,7 +385,7 @@ def test_simple_category_charts_split_by_category_groups_at_twenty_bars(
     )
 
     category_slides = [slide for slide in presentation.slides
-                       if slide.shapes.title.text.split('\n')[0] == 'Scoring per Category']
+                       if slide.shapes.title.text.split('\n')[0] == 'Best Network Scoring per Category (Breakdown)']
     assert len(category_slides) == expected_slides
     charts = [_charts_on_slide(slide)[0] for slide in category_slides]
     observed_categories = [category.label for chart in charts for category in chart.plots[0].categories]
@@ -459,7 +459,7 @@ def test_hierarchy_category_comparison_hides_labels_only_above_sixty_bars(
     )
 
     category_slides = [slide for slide in presentation.slides
-                       if slide.shapes.title.text.split('\n')[0] == 'Scoring per Category']
+                       if slide.shapes.title.text.split('\n')[0] == 'Best Network Scoring per Category (Breakdown)']
     assert len(category_slides) == len({row['category'] for row in result['scoring']})
     for slide in category_slides:
         chart = _charts_on_slide(slide)[0]
@@ -684,15 +684,16 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
         'Best Network Scoring per Service', 'Best Network Scoring per Category',
     ]
     category_chart_slides = [slide for slide in presentation.slides
-                              if slide.shapes.title.text.split('\n')[0] == 'Scoring per Category']
+                              if slide.shapes.title.text.split('\n')[0] == 'Best Network Scoring per Category (Breakdown)']
     assert len(category_chart_slides) == 2
     assert [len(_charts_on_slide(slide)[0].plots[0].categories) for slide in category_chart_slides] == [5, 2]
     assert 'Page 1 of 2' in _slide_text(category_chart_slides[0])
     assert 'Page 2 of 2' in _slide_text(category_chart_slides[1])
     assert titles[6:8] == ['Scoring Tables — Summary', 'Scoring Tables — Breakdown']
     gap_start = titles.index('GAP Analysis — All vs EE')
-    assert presentation.slides[gap_start].shapes.title.text.split('\n')[1] == 'Drive - City'
-    assert all(title.startswith('GAP Analysis') for title in titles[gap_start:])
+    assert presentation.slides[gap_start].shapes.title.text.split('\n')[1] == 'Best Network — Drive - City'
+    # The GAP tables end the block, followed by the KPI GAP Profiles.
+    assert all(title.startswith(('GAP Analysis', 'KPI GAP Profile')) for title in titles[gap_start:])
     for slide in presentation.slides:
         if slide.shapes.title.text.startswith('GAP Analysis') and any(shape.has_table for shape in slide.shapes):
             assert sum(shape.name.startswith('GAP Color Scale Segment ') for shape in slide.shapes) == 24
@@ -700,7 +701,7 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
             expected_arrows = 0 if slide.shapes.title.text.startswith('GAP Analysis — All vs ') else 1
             assert sum(shape.name == 'GAP KPI Priority Arrow' for shape in slide.shapes) == expected_arrows
             assert sum(shape.name == 'GAP KPI Priority Label' for shape in slide.shapes) == expected_arrows
-    assert len(titles[gap_start:]) == 4
+    assert sum(title.startswith('GAP Analysis') for title in titles[gap_start:]) == 4
     intro_slides = [presentation.slides[index] for index in range(2)]
     assert [slide.slide_layout.name for slide in intro_slides] == ['Title Page', 'Title Page']
     cover_text = _slide_text(presentation.slides[0]).replace('\x0b', '\n')
@@ -708,8 +709,8 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     expected_filter_text = 'Non-Standalone\nAggregations & Filters:\nAggregation: Operator\nOperator: All Operators\nVendor: All Vendors\nRegion: All Regions\nCity: All Cities'
     assert expected_filter_text in cover_text
     assert expected_filter_text in transition_text
-    assert 'Campaigns: UK_Q2_2026' in cover_text
-    assert 'Campaigns: UK_Q2_2026' in transition_text
+    assert 'Campaigns: 2026-Q2' in cover_text
+    assert 'Campaigns: 2026-Q2' in transition_text
     assert next(shape for shape in presentation.slides[0].shapes if shape.name == 'Scoring Campaigns').top > Inches(5.66)
     assert next(shape for shape in presentation.slides[1].shapes if shape.name == 'Scoring Campaigns').top > Inches(1.7)
 
@@ -857,10 +858,10 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
         list(dict.fromkeys(metric['category'] for metric in METRICS)),
     )
     clustered_slide = next(slide for slide, title in zip(presentation.slides, titles)
-                           if title == 'Scoring per Category')
+                           if title == 'Best Network Scoring per Category (Breakdown)')
     assert not any(shape.name == 'Scoring Chart Category Shade Key' for shape in _nested_shapes(clustered_slide.shapes))
     subtitle = clustered_slide.shapes.title.text_frame.paragraphs[1]
-    assert str(clustered_slide.shapes.title.text_frame.paragraphs[0].font.color.rgb) == '17232D'
+    assert str(clustered_slide.shapes.title.text_frame.paragraphs[0].font.color.rgb) == '1450A8'
     assert subtitle.font.size.pt == 14
     assert str(subtitle.font.color.rgb) == '245A96'
     category_environment_donut = chart_shapes[4]
@@ -888,7 +889,7 @@ def test_powerpoint_exports_one_reference_style_scoring_matrix_with_signed_gaps_
     assert reference_bottom.get('w') == metadata_bottom.get('w')
     assert reference_bottom.find('.//{http://schemas.openxmlformats.org/drawingml/2006/main}srgbClr').get('val') == metadata_bottom.find('.//{http://schemas.openxmlformats.org/drawingml/2006/main}srgbClr').get('val')
 
-    assert 'UK_Q2_2026' in '\n'.join(_slide_text(slide) for slide in presentation.slides)
+    assert '2026-Q2' in '\n'.join(_slide_text(slide) for slide in presentation.slides)
     visible = '\n'.join(_slide_text(slide) for slide in presentation.slides)
     assert all(warning not in visible for warning in WARNINGS)
     assert all(all(warning in slide.notes_slide.notes_text_frame.text for warning in WARNINGS)
@@ -967,7 +968,7 @@ def test_cover_campaigns_prefer_scored_contexts_and_include_context_filters():
         text = _slide_text(slide).replace('\x0b', '\n')
         assert 'Standalone' in text and 'Aggregation: Operator, City' in text
         assert 'City: London' in text
-        assert 'Campaigns: UK_Q2_2026' in text
+        assert 'Campaigns: 2026-Q2' in text
         assert 'Wrong_source_campaign' not in text
 
 
@@ -990,7 +991,7 @@ def test_intro_slides_show_all_canonical_scope_filters_without_overlapping_campa
         assert 'Operator: O2 UK' in text
         assert 'Vendor: All Vendors' in text
         assert 'Campaign: UK_Q2_2026, UK_Q3_2026' not in text
-        assert 'Campaigns: UK_Q2_2026' in text
+        assert 'Campaigns: 2026-Q2' in text
         ordered_labels = [
             'Aggregation: Operator', 'Operator: O2 UK', 'Vendor: All Vendors',
             'Region: North, South', 'City: All Cities',
@@ -1094,9 +1095,9 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     expected_category_count = len({metric['category'] for metric in result['configuration']['metrics']})
     assert titles.count('Best Network Scoring per Category') == 1
     assert titles.count('Best Network Scoring per Service') == 1
-    assert titles.count('Scoring per Category') == expected_category_count
+    assert titles.count('Best Network Scoring per Category (Breakdown)') == expected_category_count
     category_comparison_slide = next(slide for slide, title in zip(presentation.slides, titles)
-                                     if title == 'Scoring per Category')
+                                     if title == 'Best Network Scoring per Category (Breakdown)')
     category_comparison_chart = _charts_on_slide(category_comparison_slide)[0]
     assert category_comparison_chart.plots[0].gap_width == 120
     assert category_comparison_chart.plots[0].overlap == 100
@@ -1104,14 +1105,14 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     assert category_comparison_chart.category_axis.tick_labels.font.size.pt == 9
     assert category_comparison_chart.legend.font.size.pt == 11
     category_subtitle = category_comparison_slide.shapes.title.text_frame.paragraphs[1]
-    assert str(category_comparison_slide.shapes.title.text_frame.paragraphs[0].font.color.rgb) == '17232D'
+    assert str(category_comparison_slide.shapes.title.text_frame.paragraphs[0].font.color.rgb) == '1450A8'
     assert category_subtitle.font.size.pt == 14
     assert str(category_subtitle.font.color.rgb) == '245A96'
     best_network_slide = next(slide for slide, title in zip(presentation.slides, titles)
                               if title == 'Best Network Scoring per Service')
     assert best_network_slide.shapes.title.text == \
-        'Best Network Scoring per Service\nDrive - City'
-    assert str(best_network_slide.shapes.title.text_frame.paragraphs[0].font.color.rgb) == '17232D'
+        'Best Network Scoring per Service\nBest Network — Drive - City'
+    assert str(best_network_slide.shapes.title.text_frame.paragraphs[0].font.color.rgb) == '1450A8'
     assert best_network_slide.shapes.title.text_frame.paragraphs[1].font.size.pt == 14
     best_network_chart, environment_donut, donut = _charts_on_slide(best_network_slide)
     best_network_categories = best_network_chart.plots[0].categories
@@ -1223,7 +1224,7 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     assert len(observed_leaf_paths) == len(all_leaf_paths)
 
     chart_slide = chart_slides[0]
-    assert chart_slide.shapes.title.text == 'Best Network Scoring per Category\nDrive - City'
+    assert chart_slide.shapes.title.text == 'Best Network Scoring per Category\nBest Network — Drive - City'
     chart_group = next(shape for shape in chart_slide.shapes
                        if shape.name == 'Scoring Chart With Category Key')
     chart_shape = next(shape for shape in chart_group.shapes if shape.has_chart)
@@ -1278,7 +1279,7 @@ def test_multilevel_hierarchy_export_uses_editable_nested_tables_and_one_chart_p
     assert not any(shape.name == 'Hierarchy Operator Legend' for shape in chart_slide.shapes)
     _assert_category_shade_bar(chart_group, chart_shape, categories)
     comparison_slides = [slide for slide, title in zip(presentation.slides, titles)
-                         if title == 'Scoring per Category']
+                         if title == 'Best Network Scoring per Category (Breakdown)']
     observed_paths_by_category = {category: [] for category in categories}
     expected_paths_by_category = {
         category: {
@@ -1462,7 +1463,7 @@ def test_unselected_campaign_stays_metadata_without_becoming_a_hierarchy_header(
 
     presentation = _export(result, operator_mapping_groups=_mapping_groups(), job_fields=job_fields)
     intro_text = '\n'.join(_slide_text(presentation.slides[index]) for index in (0, 1))
-    assert 'Campaigns: UK_Q2_2026' in intro_text
+    assert 'Campaigns: 2026-Q2' in intro_text
 
 
 @pytest.mark.parametrize('hierarchy', [False, True])
@@ -1478,7 +1479,11 @@ def test_content_slide_subtitles_match_environment_transition(hierarchy):
         if slide.slide_layout.name == 'Title Page':
             environment_title = title
         else:
-            assert slide.shapes.title.text_frame.paragraphs[1].text == environment_title
+            # The subtitle names the scoring, and the environment unless it is All Environments.
+            expected = ('Best Network' if environment_title == 'All Environments'
+                        else f'Best Network — {environment_title}')
+            # Insight slides add their context (City, Campaign…) after it.
+            assert slide.shapes.title.text_frame.paragraphs[1].text.startswith(expected)
     assert environment_title == 'Drive - City'
 
 
@@ -1544,7 +1549,7 @@ def test_saved_environment_display_name_replaces_historical_name_in_ppt():
     content = [slide for slide in slides if slide.slide_layout.name != 'Title Page']
     assert content
     for slide in content:
-        assert slide.shapes.title.text_frame.paragraphs[1].text == 'Drive - City QA'
+        assert slide.shapes.title.text_frame.paragraphs[1].text.startswith(('Best Network — Drive - City QA', 'Best Network'))
     assert any('Drive - City QA' in _slide_text(slide) for slide in slides)
 
 

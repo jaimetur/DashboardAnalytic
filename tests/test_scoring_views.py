@@ -69,7 +69,8 @@ def test_reference_matrix_contains_all_32_kpis_and_four_preserved_operator_colum
     assert [row['kpi_code'] for row in table['rows']] == [metric['code'] for metric in METRICS]
     assert table['operators'] == ['Vodafone UK', 'O2 UK', 'Three UK', 'EE (UK)']
     assert table['baseline_operator'] == 'EE (UK)'
-    assert table['context']['region'] == 'North'
+    # The results hold one Region (North): a level with a single value is left out of the views.
+    assert table['context'].get('region') is None
     assert table['context']['environment'] == 'DriveCity'
     assert 'dataset_type' not in table['context']
     assert all(set(row['values']) == set(table['operators']) for row in table['rows'])

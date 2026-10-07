@@ -60,7 +60,7 @@ Choose **Clusters — Geospatial** for cluster boundary files. It accepts the sa
 
 Cluster files must contain non-empty, valid Polygon or MultiPolygon geometries with a coordinate reference system and non-blank names in `Cluster`, `Cluster_ID`, `Cluster_Name`, `ClusterName` or `Name`. Validation registers the dataset as Processed, with no CDR NR Mode or KPI analysis. Preview exposes its validation metadata; the original polygon file remains in the workspace input directory. Clusters appear in the Dataset Type filter and their metadata table is available in Database Management.
 
-Cluster polygons are the required input shown in **Network Insights → Cluster Sites Density**. Importing them does not yet calculate site density. Like Region Mapping, they can be applied to CDRs: the **Cluster mapping** selector beside each CDR when importing (the newest ready Clusters dataset is proposed) and the **Cluster Mapping** field of the Map dialog (shown disabled, with a note, until the workspace has a ready Clusters dataset; Region Mapping behaves the same way) fill the CDR `Cluster` column with the name of the polygon containing each sample. Existing non-empty `Cluster` values from the source CDR are kept, and samples without coordinates or outside every polygon stay empty. They are preserved by workspace duplication, export/import, transfer and backup/restore when workspace data and input files are included. Database-only backups retain registration metadata but require the original input files to recover the polygons.
+Cluster polygons are the required input shown in **Network Insights → Cluster Sites Density**. Importing them does not yet calculate site density. Scoring & GAP Analysis draws the **Points Lost Map** per Cluster (and per Region with Region Mapping) on the polygons applied to the scored CDRs. Like Region Mapping, they can be applied to CDRs: the **Cluster mapping** selector beside each CDR when importing (the newest ready Clusters dataset is proposed) and the **Cluster Mapping** field of the Map dialog (shown disabled, with a note, until the workspace has a ready Clusters dataset; Region Mapping behaves the same way) fill the CDR `Cluster` column with the name of the polygon containing each sample. Existing non-empty `Cluster` values from the source CDR are kept, and samples without coordinates or outside every polygon stay empty. They are preserved by workspace duplication, export/import, transfer and backup/restore when workspace data and input files are included. Database-only backups retain registration metadata but require the original input files to recover the polygons.
 
 ### NR Mode
 
@@ -110,7 +110,7 @@ The processor materialises every fixed field even when all its values are empty.
 
 | Field | Stored value / fallback rule |
 | --- | --- |
-| `Operator` | Imports and preserves the source `Operator`, `Operator_A`, `Home_Operator_A` or `Home_Operator` value. Workspace Operator Mappings affect chart presentation and chart-template filters only; Dataset Preview, CDR Analysis selectors and combined CDR tables remain source-faithful. |
+| `Operator` | Imports and preserves the source `Operator`, `Operator_A`, `Home_Operator_A` or `Home_Operator` value. Every filter, table, chart and report shows it with its Operator Maps label, and a mapped selection matches every source spelling; only Dataset Preview and the stored CDR tables keep the source value. |
 | `Subscriber` | Keeps the source `Subscriber` or legacy `Suscriber` value. If the complete field is absent or empty, it copies `Operator`. |
 | `Vendor` | Stores `Operator_Vendor` for operators resolved through a multivendor cell mapping and the canonical `Operator` for all other operators. This is the single official comparison field used by filters, legends and reports. |
 | `Operator_Vendor` | The `<Operator>_<Vendor>` identity from the source CDR or the vendor mapping (`<Operator> - All` for operators without a vendor). |
@@ -199,12 +199,12 @@ Vendor mapping is required only for Vendor Comparison.
 #### Assignment Rule
 
 - The CDR must provide `Operator` and a supported serving-cell field such as `Cell_ID_A`, `Cell_IDs_A`, `Cell_ID`, `Global CI`, `GCID`, `GCI`, `CGI` or `ECI`.
-- The mapper resolves the first and last cells recorded in the CDR value. Vodafone UK (`Vodafone_` prefix) and 3UK (`3_` prefix) follow the same rule:
+- The VFUK file applies to every spelling of Vodafone (Vodafone UK, VF, VFUK, and the names of tests configured in another mode such as Vodafone SA, Vodafone VoNR or VF_SA) and the 3UK file to every spelling of Three: they share the same cells. The mapper resolves the first and last cells recorded in the CDR value. Vodafone UK (`Vodafone_` prefix), 3UK (`3_` prefix) and the other spellings (their own name as prefix, for example `Vodafone VoNR_`) follow the same rule:
   - the same non-empty Vendor at both endpoints returns `<Operator>_<Vendor>`;
   - Ericsson at either endpoint with a different or missing Vendor at the other returns `<Operator>_Ericsson_Mixed`;
   - every other different or missing combination returns `<Operator>_Non-Ericsson_Mixed`.
 - Operators without a multivendor mapping use their canonical `Operator`. CDRs mapped before this rule keep `Vodafone_Mixed Vendor`, `Vodafone_Other Vendor` or `3_Mixed Vendor` until they are mapped again.
-- `Vendor` removes the recognised operator prefix from the mapped `Operator_Vendor`, allowing analytics to count the physical vendors independently of the operator. CDRs processed before these names are migrated once when the workspace opens: the former `Vendor` becomes `Operator_Vendor` and the former `Vendor_Only` becomes `Vendor`.
+- `Vendor` removes the recognised operator prefix from the mapped `Operator_Vendor`, allowing analytics to count the physical vendors independently of the operator. `Vendor_Operator` is `Operator_Vendor` the other way round (`<Vendor>_<Operator>`, and `<Operator> - All` for operators without a vendor); it is derived when the CDRs are read, so every CDR has it without being mapped again. CDRs processed before these names are migrated once when the workspace opens: the former `Vendor` becomes `Operator_Vendor` and the former `Vendor_Only` becomes `Vendor`.
 
 #### During Upload
 

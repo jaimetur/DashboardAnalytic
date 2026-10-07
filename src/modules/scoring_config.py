@@ -70,12 +70,16 @@ _LEGACY_KPI_CODES = (
     'C27', 'C28', 'C29', 'C30', 'C31', 'C32', 'C33', 'C34', 'C35', 'C36', 'C37',
 )
 _LEGACY_KPI_CODE_MAP = {code: f'K{index}' for index, code in enumerate(_LEGACY_KPI_CODES, start=1)}
-# The Most Reliable Network scoring rates a subset of the KPIs with its own maximum
-# points, stored per environment context; the Best Network scoring uses max_points.
+# The Most Reliable Network scoring rates the KPIs whose KPI Type is Reliable with their
+# own maximum points, stored per environment context; the Best Network scoring uses max_points.
 MOST_RELIABLE_POINTS = 'most_reliable_points'
+RELIABLE_KPI_TYPE = 'Reliable'
+# Most Reliable points copied with two decimals can miss the environment total by a few
+# hundredths (650.02 for 650): within this tolerance they are scaled to the Best Network total.
+_RELIABLE_ROUNDING_TOLERANCE = .1
 BEST_NETWORK_SCORING = 'best_network'
 MOST_RELIABLE_SCORING = 'most_reliable'
-SCORING_LABELS = {BEST_NETWORK_SCORING: 'Best Network', MOST_RELIABLE_SCORING: 'Most Reliable'}
+SCORING_LABELS = {BEST_NETWORK_SCORING: 'Best Network', MOST_RELIABLE_SCORING: 'Most Reliable Network'}
 _LEGACY_2026_PROFILE_ID = 'netcheck-2026'
 _LEGACY_2026_VERSION = '2026Q2'
 _LEGACY_2026_ENVIRONMENT = 'DriveConnectionroad'
@@ -533,6 +537,31 @@ def _normalize_legacy_kpi_codes(configuration: dict[str, Any]) -> dict[str, Any]
     return validate_scoring_configuration(configuration)
 
 
+def is_reliable_kpi(metric: object) -> bool:
+    """Whether a KPI takes part in the Most Reliable Network scoring: its KPI Type is Reliable."""
+    return (isinstance(metric, dict) and isinstance(metric.get('kpi_type'), str)
+            and metric['kpi_type'].strip().casefold() == RELIABLE_KPI_TYPE.casefold())
+
+
+def _normalize_reliable_points(metrics: list[dict[str, Any]], environments: list[str]) -> None:
+    """Keep Most Reliable points only on Reliable KPIs and correct their rounding per environment."""
+    for metric in metrics:
+        if not is_reliable_kpi(metric):
+            for context in metric['contexts'].values():
+                context.pop(MOST_RELIABLE_POINTS, None)
+    for name in environments:
+        contexts = [metric['contexts'][name] for metric in metrics if MOST_RELIABLE_POINTS in metric['contexts'][name]]
+        reliable_total = sum(context[MOST_RELIABLE_POINTS] for context in contexts)
+        best_network_total = sum(metric['contexts'][name]['max_points'] for metric in metrics)
+        # Already exact (within float noise): leave the points, so validation is idempotent.
+        if reliable_total <= 0 or abs(reliable_total - best_network_total) < 1e-6:
+            continue
+        if abs(reliable_total - best_network_total) <= _RELIABLE_ROUNDING_TOLERANCE:
+            factor = best_network_total / reliable_total
+            for context in contexts:
+                context[MOST_RELIABLE_POINTS] = round(context[MOST_RELIABLE_POINTS] * factor, 10)
+
+
 def validate_scoring_configuration(payload: object) -> dict[str, Any]:
     """Validate a self-contained workspace configuration without reading seed files."""
     configuration = _add_legacy_walk_context(unwrap_scoring_configuration_payload(payload))
@@ -654,6 +683,7 @@ def validate_scoring_configuration(payload: object) -> dict[str, Any]:
     validated['gap_priority'] = [
         *normalized_priority, *(code for code in codes if code not in prioritized),
     ]
+    _normalize_reliable_points(validated_metrics, context_names)
     _refresh_weight_totals(validated)
     if validated['scope']['total_max_points'] <= 0:
         raise ValueError('At least one KPI weight must be greater than zero.')
@@ -661,12 +691,12 @@ def validate_scoring_configuration(payload: object) -> dict[str, Any]:
 
 
 def has_most_reliable_scoring(configuration: object) -> bool:
-    """Whether a methodology gives Most Reliable points to at least one KPI context."""
+    """Whether a methodology gives Most Reliable points to at least one Reliable KPI."""
     metrics = configuration.get('metrics') if isinstance(configuration, dict) else None
     return any(
         isinstance(context, dict) and isinstance(context.get(MOST_RELIABLE_POINTS), (int, float))
         and not isinstance(context.get(MOST_RELIABLE_POINTS), bool) and context[MOST_RELIABLE_POINTS] > 0
-        for metric in metrics or [] if isinstance(metric, dict)
+        for metric in metrics or [] if is_reliable_kpi(metric)
         for context in (metric.get('contexts') or {}).values()
     )
 
@@ -674,14 +704,13 @@ def has_most_reliable_scoring(configuration: object) -> bool:
 def most_reliable_configuration(configuration: object) -> dict[str, Any] | None:
     """The methodology seen by the Most Reliable scoring, or None when it has no Most Reliable points.
 
-    Only the KPIs with Most Reliable points take part, and those points become their
+    The KPIs whose KPI Type is Reliable take part with their Most Reliable points as
     maximum points; formulas, thresholds and score anchors stay the methodology's.
     """
     if not has_most_reliable_scoring(configuration):
         return None
     derived = validate_scoring_configuration(configuration)
-    metrics = [metric for metric in derived['metrics']
-               if any(context.get(MOST_RELIABLE_POINTS, 0) > 0 for context in metric['contexts'].values())]
+    metrics = [metric for metric in derived['metrics'] if is_reliable_kpi(metric)]
     for metric in metrics:
         for context in metric['contexts'].values():
             context['max_points'] = context.pop(MOST_RELIABLE_POINTS, 0.0)

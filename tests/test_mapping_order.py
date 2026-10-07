@@ -31,8 +31,9 @@ def test_vendors_follow_the_vendor_map_and_operators_without_a_vendor_come_last(
 def test_operator_vendor_values_follow_the_operator_map_then_the_vendor_map():
     values = ['VF_UK_Huawei', '3_Samsung', '3_Ericsson_Mixed', 'EE_Huawei', '3_Ericsson', 'VF_UK_Ericsson',
               '3 - All', 'EE - All', 'O2_Non-Ericsson_Mixed', 'EE_Ericsson']
-    expected = ['EE_Ericsson', 'EE_Huawei', 'EE - All', '3_Ericsson', '3_Samsung', '3_Ericsson_Mixed', '3 - All',
-                'VF_UK_Ericsson', 'VF_UK_Huawei', 'O2_Non-Ericsson_Mixed']
+    # Operators without a Vendor come after every Operator with Vendors, in Operator Map order.
+    expected = ['EE_Ericsson', 'EE_Huawei', '3_Ericsson', '3_Samsung', '3_Ericsson_Mixed',
+                'VF_UK_Ericsson', 'VF_UK_Huawei', 'O2_Non-Ericsson_Mixed', 'EE - All', '3 - All']
     assert sorted(values, key=lambda value: dimension_order_key('Operator_Vendor', value, OPERATORS, VENDORS)) == expected
     frame = frame_with_maps()
     assert sorted(values, key=lambda value: _vendor_display_sort_key(value, frame)) == expected

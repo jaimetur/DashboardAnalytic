@@ -89,7 +89,7 @@ def test_best_network_charts_start_scoring_charts_and_legacy_tab_migrates():
     assert "renderCategoryAllocation(chartPane, scoreTables, hierarchyScoreTable, allScoreTables)" in script
     assert script.index('renderCategoryAllocation(chartPane,') < script.index('renderBestNetworkChart(chartPane,')
     assert '`${scoringLabel()} Scoring per Category`' in script
-    assert "effectiveScoring() === 'most_reliable' ? 'Most Reliable' : 'Best Network'" in script
+    assert "effectiveScoring() === 'most_reliable' ? 'Most Reliable Network' : 'Best Network'" in script
     assert 'Scoring per Category' in script
 
     payload = {
@@ -1291,6 +1291,8 @@ def test_scoring_job_title_and_cdr_summary_use_saved_filters_and_source_names():
         _function_source(script, 'selectedContextFilters'),
         _function_source(script, 'savedJobFilterValues'),
         _function_source(script, 'campaignLabels'),
+        _function_source(script, 'hierarchyDisplayValue'),
+        _function_source(script, 'insightCampaignKey'),
         _function_source(script, 'jobCampaigns'),
         _function_source(script, 'jobCardTitleSegments'),
         _function_source(script, 'jobCardTitle'),
@@ -1338,7 +1340,7 @@ process.stdout.write(JSON.stringify({title: context.title, cdrSummary: context.c
     result = _run_node_json(program, payload)
 
     assert result['title'].split(' ● ')[1:] == [
-        'NSA', 'All Regions', 'All Clusters', 'All Cities', 'All Operators', 'All Vendors', 'UK_Q2_2026',
+        'NSA', 'All Regions', 'All Clusters', 'All Cities', 'All Operators', 'All Vendors', '2026-Q2',
     ]
     assert result['cdrSummary'] == 'data.csv, voice.csv'
     assert result['metadataCdrSummary'] == 'data.csv, voice.csv'
@@ -1348,7 +1350,7 @@ process.stdout.write(JSON.stringify({title: context.title, cdrSummary: context.c
     assert result['partialVendors'] == ['Nokia']
     assert result['legacyVendors'] == ['Ericsson']
     assert result['fallbackTitle'].split(' ● ')[1:] == [
-        'SA', 'All Regions', 'All Clusters', 'All Cities', 'All Operators', 'All Vendors', 'UK_Q3_2026',
+        'SA', 'All Regions', 'All Clusters', 'All Cities', 'All Operators', 'All Vendors', '2026-Q3',
     ]
 
 

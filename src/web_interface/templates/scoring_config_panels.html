@@ -41,8 +41,6 @@
   .scoring-config-panel .scoring-config-allocation-controls > button { align-self: start; margin-top: 1.5rem; }
   .scoring-config-panel [data-scoring-distribute-points] { background: #7752a3; border-color: #66448e; color: #fff; }
   .scoring-config-panel [data-scoring-distribute-points]:hover:not(:disabled) { background: #604085; }
-  .scoring-config-panel [data-scoring-reliable-netcheck] { background: #1f7a5a; border-color: #17644a; color: #fff; }
-  .scoring-config-panel [data-scoring-reliable-netcheck]:hover:not(:disabled) { background: #17644a; }
   .scoring-config-panel [data-scoring-config-export] { background: #267c79; border-color: #267c79; color: #fff; font-weight: 700; }
   .scoring-config-panel [data-scoring-config-export]:hover { background: #1a625f; color: #fff; }
   .scoring-config-panel [data-scoring-config-import] { background: #f5d6d6; border-color: #dfb3b3; color: #783737; font-weight: 700; }
@@ -114,21 +112,23 @@
   .scoring-config-panel .scoring-config-table tbody tr:last-child td { border-bottom: 0; }
   .scoring-config-panel .scoring-config-table tbody tr:nth-child(even) { background: rgba(239, 244, 246, .45); }
   .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(-n+6),
-  .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(18) { background: #edf4f8; }
+  .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(19) { background: #edf4f8; }
+  .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(10) { background: #e6f4f1; }
   .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(n+7):nth-child(-n+9) { background: #eef7ec; }
-  .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(n+10):nth-child(-n+13) { background: #fff6e4; }
-  .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(n+14):nth-child(-n+17) { background: #f4effb; }
+  .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(n+11):nth-child(-n+14) { background: #fff6e4; }
+  .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(n+15):nth-child(-n+18) { background: #f4effb; }
   .scoring-config-panel .scoring-config-table thead tr:first-child th { background: #cadfe0; }
   .scoring-config-panel .scoring-config-table thead tr:first-child th:nth-child(-n+6),
-  .scoring-config-panel .scoring-config-table thead tr:first-child th:nth-child(n+12) { background: #d3e2ec; }
+  .scoring-config-panel .scoring-config-table thead tr:first-child th:nth-child(n+13) { background: #d3e2ec; }
+  .scoring-config-panel .scoring-config-table thead tr:first-child th:nth-child(10) { background: #c8e6de; }
   .scoring-config-panel .scoring-config-table thead tr:first-child th:nth-child(n+7):nth-child(-n+9) { background: #d7e8d2; }
-  .scoring-config-panel .scoring-config-table thead tr:first-child th:nth-child(10),
-  .scoring-config-panel .scoring-config-table thead tr:nth-child(2) th:nth-child(-n+4) { background: #f3deb1; }
   .scoring-config-panel .scoring-config-table thead tr:first-child th:nth-child(11),
+  .scoring-config-panel .scoring-config-table thead tr:nth-child(2) th:nth-child(-n+4) { background: #f3deb1; }
+  .scoring-config-panel .scoring-config-table thead tr:first-child th:nth-child(12),
   .scoring-config-panel .scoring-config-table thead tr:nth-child(2) th:nth-child(n+5) { background: #dcd0ee; }
   .scoring-config-panel .scoring-config-calculation { text-align: center; }
   .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(-n+6) input,
-  .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(18) textarea { background: rgba(255, 255, 255, .78); }
+  .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(19) textarea { background: rgba(255, 255, 255, .78); }
   .scoring-config-panel .scoring-config-table tbody tr:not(.scoring-config-category-row) td:nth-child(n+7):nth-child(-n+9) input { background: #fff; }
   .scoring-config-panel .scoring-config-category-row th { position: static; padding: .4rem .5rem; background: #eef4f3; color: #31545a; font-size: .75rem; font-weight: 750; letter-spacing: .025em; }
   .scoring-config-panel .scoring-config-table input,
@@ -322,8 +322,7 @@
             <button type="button" class="ghost-link" data-scoring-distribute-points disabled><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v6M5 15V9h14v6M2 15h6v6H2zM16 15h6v6h-6z" /></svg><span data-button-label>Distribute points keeping percentages</span></button>
           </div>
           <div class="scoring-config-reliable" data-scoring-reliable>
-            <small data-scoring-reliable-summary>Most Reliable Network scoring: no KPI has Most Reliable points, so scoring jobs show only the Best Network scoring.</small>
-            <button type="button" class="ghost-link" data-scoring-reliable-netcheck disabled title="Give the NetCheck 2026 Most Reliable points to its 10 KPIs in Drive - City and Drive - Connecting Roads; other KPIs get no Most Reliable points."><svg class="scoring-config-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6zM9 12l2 2 4-4" /></svg><span data-button-label>Load NetCheck 2026 Most Reliable points</span></button>
+            <small data-scoring-reliable-summary>Most Reliable Network scoring: the KPIs whose Type is Reliable, with their Most Reliable points.</small>
           </div>
         <p><strong>CDR filters</strong></p>
         <div class="scoring-config-source-fields" data-scoring-environment-source-fields>
@@ -374,7 +373,7 @@
               <col style="width: 8%">
             </colgroup>
             <thead>
-              <tr><th scope="col" rowspan="2">Code</th><th scope="col" rowspan="2">KPI</th><th scope="col" rowspan="2">Category</th><th scope="col" rowspan="2">Type</th><th scope="col" rowspan="2">Direction</th><th scope="col" rowspan="2">Mapping</th><th scope="col" rowspan="2">Max points</th><th scope="col" rowspan="2">Environment Weight (%)</th><th scope="col" rowspan="2">Global weight (%)</th><th scope="col" rowspan="2" title="Maximum points of each KPI in the Most Reliable Network scoring. KPIs without points are left out of that scoring; thresholds and score anchors are shared with Best Network.">Most Reliable points</th><th scope="colgroup" colspan="4">KPI thresholds</th><th scope="colgroup" colspan="4" title="Percentage of the KPI’s maximum points awarded at each threshold. The NetCheck defaults are constants within workbook scoring formulas, not separate workbook columns.">Score interpolation anchors (%)</th><th scope="col" rowspan="2">KPI Definition</th><th scope="col" rowspan="2">Actions</th></tr>
+              <tr><th scope="col" rowspan="2">Code</th><th scope="col" rowspan="2">KPI</th><th scope="col" rowspan="2">Category</th><th scope="col" rowspan="2">Type</th><th scope="col" rowspan="2">Direction</th><th scope="col" rowspan="2">Mapping</th><th scope="col" rowspan="2">Max points</th><th scope="col" rowspan="2">Environment Weight (%)</th><th scope="col" rowspan="2">Global weight (%)</th><th scope="col" rowspan="2" title="Maximum points of each Reliable KPI in the Most Reliable Network scoring: the KPIs whose Type is Reliable take part in it. Thresholds and score anchors are shared with Best Network.">Most Reliable points</th><th scope="colgroup" colspan="4">KPI thresholds</th><th scope="colgroup" colspan="4" title="Percentage of the KPI’s maximum points awarded at each threshold. The NetCheck defaults are constants within workbook scoring formulas, not separate workbook columns.">Score interpolation anchors (%)</th><th scope="col" rowspan="2">KPI Definition</th><th scope="col" rowspan="2">Actions</th></tr>
               <tr><th scope="col">Low</th><th scope="col">Medium</th><th scope="col">High</th><th scope="col">Ultra</th><th scope="col">Low</th><th scope="col">Medium</th><th scope="col">High</th><th scope="col">Ultra</th></tr>
             </thead>
             <tbody data-scoring-kpi-rows><tr><td colspan="20">Loading scoring configuration…</td></tr></tbody>

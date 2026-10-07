@@ -131,8 +131,9 @@ def test_hierarchy_partial_gap_uses_only_the_intersecting_environment():
     _, views = _calculate(rows)
     city_matrix = _gap_matrix(views, 'DriveCity')
     combined = _gap_matrix(views, 'Combined')
-    city_leaf = _leaf(city_matrix, 'O2 UK', 'Nokia', '2026-Q2')
-    combined_leaf = _leaf(combined, 'O2 UK', 'Nokia', '2026-Q2')
+    # One Vendor (Nokia) and one Campaign (2026-Q2): those levels split nothing and are left out.
+    city_leaf = _leaf(city_matrix, 'O2 UK', None, None)
+    combined_leaf = _leaf(combined, 'O2 UK', None, None)
     row = _kpi_row(combined)
     assert row['gaps'][combined_leaf] == pytest.approx(_kpi_row(city_matrix)['gaps'][city_leaf])
     assert row['gap_partial'][combined_leaf] is True
@@ -193,7 +194,7 @@ def test_missing_road_keeps_city_gap_and_combined_marks_common_environment_gap_p
     combined_gap_tables = [
         shape.table
         for slide in presentation.slides
-        if slide.shapes.title.text == 'GAP Analysis — All vs EE\nAll Environments'
+        if slide.shapes.title.text == 'GAP Analysis — All vs EE\nBest Network'
         for shape in slide.shapes if shape.has_table
     ]
     assert combined_gap_tables

@@ -46,7 +46,7 @@ Mappings, logs and generic datasets are excluded from the CDR Analysis selector.
 Controls adapt to the selected dataset.
 
 - **Metrics** lists only measurements: the service KPIs first (POLQA LQ, LQ, Mean Data Rate, call setup time, delays, RTT, throughput, jitter and packet loss), then the radio and service measurements of the CDR (RSRP, RSRQ, SINR, CQI, MCS, BLER, transmit power and throughput averages). Identifiers, phone numbers, IMEI/IMSI/MSISDN, software versions, timestamps, durations, transferred bytes, bands, PCI/ARFCN, quarters, speeds and minimum or maximum columns are not offered. Every available metric is selected by default.
-- Filters follow the order Source Sheet, Operator, **Operator_Vendor** (`<Operator>_<Vendor>`), **Vendor** (the vendor alone), Market, Region, **Cluster**, City, Test Name and the remaining dimensions; dimensions without values in the CDR are disabled. Every filter lists the values found in the rows of the open CDR.
+- Filters follow the order Source Sheet, Operator, **Operator_Vendor** (`<Operator>_<Vendor>`), **Vendor_Operator** (`<Vendor>_<Operator>`), **Vendor** (the vendor alone), Market, Region, **Cluster**, City, Test Name and the remaining dimensions; dimensions without values in the CDR are disabled. Every filter lists the values found in the rows of the open CDR.
 - **Open Dataset** shows the analysis at once. The last metrics and filters applied with **Update Analysis** to each CDR are shared by every user of the workspace and restored in every session; **Reset** clears them and shows the default analysis.
 - Date ranges appear only when a usable date field exists.
 - Technical identifiers and coordinates are not offered as KPIs.

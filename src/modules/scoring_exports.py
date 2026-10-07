@@ -17,13 +17,19 @@ from pptx.enum.chart import XL_CHART_TYPE, XL_DATA_LABEL_POSITION, XL_LEGEND_POS
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE, PP_ALIGN
 from pptx.oxml.xmlchemy import OxmlElement
-from pptx.util import Inches, Pt
+from pptx.util import Emu, Inches, Pt
 
 from src.modules.cdr_reporting import (
     _named_slide_layout, _remove_all_slides, _set_slide_header,
     _set_structural_slide_text,
 )
+from src.modules.column_names import campaign_sort_key, compact_campaign_value
 from src.modules.scoring import most_reliable_result
+from src.modules.scoring_points_loss import map_boundaries
+from src.modules.scoring_insight_slides import (
+    TITLE_BLUE, add_campaign_comparison_slides, add_kpi_gap_profile_slides, add_location_card_slides,
+    add_points_loss_slides, add_trend_slides,
+)
 from src.modules.scoring_config import BEST_NETWORK_SCORING, MOST_RELIABLE_SCORING, SCORING_LABELS
 from src.modules.scoring_vendors import normalize_scoring_vendor_result
 from src.modules.scoring_views import (
@@ -78,7 +84,7 @@ def export_scoring_csv(job: dict[str, Any], result: dict[str, Any], kind: str,
     _validate_environment(views, environment)
     if environment != 'all':
         matrices = [matrix for matrix in matrices if matrix.get('context', {}).get('environment') == environment]
-    fields = ['table_type', 'row_type', 'environment', 'operator', 'vendor', 'region', 'city', 'campaign',
+    fields = ['table_type', 'row_type', 'environment', 'operator', 'vendor', 'region', 'cluster', 'city', 'campaign',
               'reference_operator', 'category', 'kpi_code', 'kpi', 'kpi_type', 'kpi_value',
               'score_points', 'max_points', 'score_weight_percent', 'gap_points', 'complete',
               'gap_partial', 'gap_environments']
@@ -104,7 +110,7 @@ def export_scoring_csv(job: dict[str, Any], result: dict[str, Any], kind: str,
                 value = row.get('values', {}).get(operator, {})
                 writer.writerow({
                     'table_type': kind, 'row_type': row.get('row_type', 'kpi'),
-                    **{field: context.get(field) for field in ('environment', 'vendor', 'region', 'city', 'campaign')},
+                    **{field: context.get(field) for field in ('environment', 'vendor', 'region', 'cluster', 'city', 'campaign')},
                     'operator': column.get('operator', operator), 'reference_operator': matrix['baseline_operator'],
                     **{field: row.get(field, '') for field in ('category', 'kpi_code', 'kpi', 'kpi_type')},
                     'kpi_value': value.get('value'), 'score_points': value.get('points'),
@@ -187,6 +193,31 @@ def _scoring_chart_title(matrix: dict[str, Any], suffix: str) -> str:
     return f"{matrix.get('scoring_label') or SCORING_LABELS[BEST_NETWORK_SCORING]} Scoring {suffix}"
 
 
+# Titles stay on one line: the template title is 40pt and a character is about 0.41em wide in its
+# font (bold focus included) and 0.48em in the substitutes of viewers without it, so a longer title
+# is made smaller with the wider measure and never wraps.
+TITLE_FONT_PT = 40
+TITLE_CHARACTER_EM = .48
+TITLE_MIN_FONT_PT = 20
+
+
+def _fit_slide_title_on_one_line(title_shape, paragraph) -> None:
+    """Make a title that would wrap smaller, so it fits its placeholder on one line."""
+    text = paragraph.text.strip()
+    if not text or title_shape.width is None:
+        return
+    text_frame = title_shape.text_frame
+    insets = (text_frame.margin_left if text_frame.margin_left is not None else Emu(72000)) + (text_frame.margin_right or 0)
+    width_pt = (int(title_shape.width) - int(insets)) / 12700
+    size = width_pt / (len(text) * TITLE_CHARACTER_EM)
+    if size >= TITLE_FONT_PT:
+        return
+    size = max(TITLE_MIN_FONT_PT, floor(size * 2) / 2)
+    text_frame.word_wrap = False
+    for run in paragraph.runs:
+        run.font.size = Pt(size)
+
+
 def _slide(presentation, title: str, subtitle: str):
     layout = _named_slide_layout(presentation, 'Title Only')
     if layout is None:
@@ -200,16 +231,36 @@ def _slide(presentation, title: str, subtitle: str):
         paragraphs = title_shape.text_frame.paragraphs
         if paragraphs:
             title_paragraph = paragraphs[0]
-            title_paragraph.font.color.rgb = RGBColor.from_string('17232D')
+            title_paragraph.font.color.rgb = RGBColor.from_string(TITLE_BLUE.lstrip('#'))
             for run in title_paragraph.runs:
-                run.font.color.rgb = RGBColor.from_string('17232D')
+                run.font.color.rgb = RGBColor.from_string(TITLE_BLUE.lstrip('#'))
+            _emphasize_title(title_paragraph)
+            _fit_slide_title_on_one_line(title_shape, title_paragraph)
         for subtitle_paragraph in paragraphs[1:]:
             subtitle_paragraph.font.size = Pt(14)
+            subtitle_paragraph.font.bold = True
             subtitle_paragraph.font.color.rgb = RGBColor.from_string('245A96')
             for run in subtitle_paragraph.runs:
                 run.font.size = Pt(14)
+                run.font.bold = True
                 run.font.color.rgb = RGBColor.from_string('245A96')
     return slide
+
+
+def _emphasize_title(paragraph) -> None:
+    """NetCheck-style title: the subject in regular weight and its focus ("per City") in bold."""
+    heading, separator, focus = paragraph.text.partition(' per ')
+    if not separator or ' — ' in paragraph.text:
+        return
+    properties = deepcopy(paragraph.runs[0]._r.rPr) if paragraph.runs else None
+    paragraph.clear()
+    for text, bold in ((heading + ' ', False), ('per ' + focus, True)):
+        run = paragraph.add_run()
+        if properties is not None:
+            run._r.insert(0, deepcopy(properties))
+        run.text = text
+        run.font.bold = bold
+        run.font.color.rgb = RGBColor.from_string(TITLE_BLUE.lstrip('#'))
 
 
 def _accent_gap_comparison_title(slide) -> None:
@@ -219,7 +270,7 @@ def _accent_gap_comparison_title(slide) -> None:
         return
     properties = deepcopy(paragraph.runs[0]._r.rPr) if paragraph.runs else None
     paragraph.clear()
-    for text, color in ((heading + separator, '17232D'), (comparison, 'A34E16')):
+    for text, color in ((heading + separator, TITLE_BLUE.lstrip('#')), (comparison, 'A34E16')):
         run = paragraph.add_run()
         if properties is not None:
             run._r.insert(0, deepcopy(properties))
@@ -422,7 +473,8 @@ def _campaigns_for_export(job: dict[str, Any], result: dict[str, Any]) -> list[s
     def collect(value: Any) -> None:
         if value is None:
             return
-        label = str(value).strip()
+        # Shown as everywhere else (2026-Q2-SA); spellings of one campaign are listed once.
+        label = compact_campaign_value(str(value).strip())
         if label and label.casefold() not in {item.casefold() for item in campaigns}:
             campaigns.append(label)
 
@@ -437,7 +489,7 @@ def _campaigns_for_export(job: dict[str, Any], result: dict[str, Any]) -> list[s
                              if str(field).casefold() in {'campaign', 'period', 'quarter'} and value is not None), None)
             collect(campaign)
     if campaigns:
-        return sorted(campaigns, key=str.casefold)
+        return sorted(campaigns, key=campaign_sort_key)
 
     source_metadata = job.get('source_metadata', [])
     if isinstance(source_metadata, dict):
@@ -453,7 +505,7 @@ def _campaigns_for_export(job: dict[str, Any], result: dict[str, Any]) -> list[s
         fallback = job.get('campaigns', [])
         for campaign in fallback if isinstance(fallback, list) else [fallback]:
             collect(campaign)
-    return sorted(campaigns, key=str.casefold)
+    return sorted(campaigns, key=campaign_sort_key)
 
 
 def _filter_value(value: Any) -> str:
@@ -706,16 +758,41 @@ def _scoring_environment_title(environment: str, configuration: dict) -> str:
     return _environment_display_label(environment)
 
 
+_TITLE_PAGE_TITLE_SIZE = 80
+# Average glyph width of the template title font, in ems.
+_TITLE_GLYPH_WIDTH = .34
+
+
+def _fit_title_on_one_line(slide, title: str) -> None:
+    """Shrink a cover or transition title that is wider than its placeholder so it keeps one line."""
+    shape = next((item for item in slide.placeholders if item.placeholder_format.type in {1, 3}), None)
+    if shape is None or not title:
+        return
+    width = shape.width / Inches(1) - .2
+    size = min(_TITLE_PAGE_TITLE_SIZE, floor(width * 72 / (_TITLE_GLYPH_WIDTH * len(title))))
+    if size >= _TITLE_PAGE_TITLE_SIZE:
+        return
+    shape.text_frame.word_wrap = False
+    for paragraph in shape.text_frame.paragraphs:
+        paragraph.font.size = Pt(size)
+        for run in paragraph.runs:
+            run.font.size = Pt(size)
+
+
 def _add_scoring_intro_slides(
     presentation, job: dict[str, Any], result: dict[str, Any], *, environment: str | None = None,
-    scoring: str | None = None,
+    scoring: str | None = None, title: str | None = None, subtitle: str | None = None,
 ) -> None:
     configuration = job.get('configuration') or result.get('configuration') or {}
-    if environment:
+    if title is not None:
+        pass
+    elif environment:
         title = _scoring_block_title(scoring, _scoring_environment_title(environment, configuration))
     else:
         title = _SCORING_SECTION_TITLES[scoring] if scoring else 'Scoring & GAP Analysis'
-    subtitle = _scoring_filter_subtitle(job, environment)
+    if job.get('_scenario_name') and scoring and (environment or title == _SCORING_SECTION_TITLES[scoring]):
+        title = f"{job['_scenario_name']} — {title}"
+    subtitle = _scoring_filter_subtitle(job, environment) if subtitle is None else subtitle
     campaigns = _campaigns_for_export(job, result)
     plan = job.get('_scoring_display_selections')
     campaign_value = ', '.join(plan['values']['campaign']) if plan else ', '.join(campaigns) or 'All Campaigns'
@@ -728,6 +805,7 @@ def _add_scoring_intro_slides(
         raise ValueError(f"The PowerPoint template needs a '{layout_name}' layout for scoring exports.")
     slide = presentation.slides.add_slide(layout)
     _set_structural_slide_text(slide, title, subtitle)
+    _fit_title_on_one_line(slide, title)
     _fit_scoring_intro_subtitle(presentation, slide, layout_name, subtitle)
     campaign_top = 5.9
     campaign_shape = _text(slide, campaign_text, campaign_top, left=.52, width=10.68, height=.32,
@@ -831,11 +909,12 @@ def _summary_extreme_columns(values: dict[str, dict], columns: list[dict]) -> tu
 
 
 def _score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap_layout: str = 'end',
-                  show_gap_values: bool = True, title: str = 'Scoring Tables — Breakdown') -> None:
-    if gap_layout == 'adjacent':
+                  show_gap_values: bool = True, title: str = 'Scoring Tables — Breakdown',
+                  show_kpi_values: bool = False) -> None:
+    if gap_layout == 'adjacent' or show_kpi_values:
         matrices = [_scalar_matrix_as_hierarchy(matrix) for matrix in matrices]
         _hierarchy_score_tables(presentation, matrices, legend, gap_layout=gap_layout,
-                                show_gap_values=show_gap_values, title=title)
+                                show_gap_values=show_gap_values, title=title, show_kpi_values=show_kpi_values)
         return
 
     for matrix in matrices:
@@ -1032,7 +1111,7 @@ def _charts(presentation, matrices: list[dict]) -> None:
                             _stacked_chart_page=f'Page {index} of {len(chunks)}')
                 _charts(presentation, [page])
             continue
-        slide = _slide(presentation, 'Scoring per Category', _chart_subtitle(matrix))
+        slide = _slide(presentation, _scoring_chart_title(matrix, 'per Category (Breakdown)'), _chart_subtitle(matrix))
         _stacked_chart_page_note(slide, matrix)
         data = CategoryChartData()
         data.categories = categories
@@ -1579,7 +1658,7 @@ def _hierarchy_category_comparison_chart(presentation, matrix: dict) -> None:
                            if row['category'] == column['comparison_category'])
                        for column in columns), default=0.0)
         operators = list(dict.fromkeys(column['operator'] for column in columns))
-        slide = _slide(presentation, 'Scoring per Category', _chart_subtitle(matrix))
+        slide = _slide(presentation, _scoring_chart_title(matrix, 'per Category (Breakdown)'), _chart_subtitle(matrix))
         heading = category_group[0] if len(category_group) == 1 else 'All Categories'
         _text(slide, heading, 1.42, left=.7, width=11.9, height=.25, size=12, color='#4A5B65')
         data = CategoryChartData()
@@ -1753,22 +1832,27 @@ def _hierarchy_header_groups(table, columns: list[dict], levels: list[str], *, s
                   color='#FFFF00', foreground='#17232D', size=leaf_font_size, bold=True)
 
 
-def _score_column_plan(columns: list[dict], gap_layout: str, *, show_gap_values: bool = True) -> list[tuple[dict, str]]:
-    scores = [(column, 'Score') for column in columns]
+def _score_column_plan(columns: list[dict], gap_layout: str, *, show_gap_values: bool = True,
+                       show_kpi_values: bool = False) -> list[tuple[dict, str]]:
+    """Leaf columns of a scoring table; KPI values, when shown, precede each Score column."""
+    scores = [item for column in columns
+              for item in ([(column, 'Value')] if show_kpi_values else []) + [(column, 'Score')]]
     if not show_gap_values:
         return scores
     gaps = [(column, 'GAP') for column in columns if not column.get('is_reference')]
     if gap_layout == 'end':
         return scores + gaps
     return [item for column in columns for item in (
-        [(column, 'Score')] if column.get('is_reference') else [(column, 'Score'), (column, 'GAP')]
+        ([(column, 'Value')] if show_kpi_values else [])
+        + ([(column, 'Score')] if column.get('is_reference') else [(column, 'Score'), (column, 'GAP')])
     )]
 
 
 def _score_column_headers(table, plan: list[tuple[dict, str]], levels: list[str],
                           *, gap_layout: str, leaf_width: float, fixed_count: int = 5) -> None:
-    groups = [('Score', 0, sum(kind == 'Score' for _, kind in plan)),
-              ('GAP', sum(kind == 'Score' for _, kind in plan), len(plan))]
+    score_count = sum(kind in {'Score', 'Value'} for _, kind in plan)
+    score_label = 'Value / Score' if any(kind == 'Value' for _, kind in plan) else 'Score'
+    groups = [(score_label, 0, score_count), ('GAP', score_count, len(plan))]
     if gap_layout == 'adjacent' and any(kind == 'GAP' for _, kind in plan):
         groups = [('Score / GAP', 0, len(plan))]
     for label, start, end in groups:
@@ -1789,7 +1873,8 @@ def _score_column_headers(table, plan: list[tuple[dict, str]], levels: list[str]
                 next_column, next_kind = plan[end + 1]
                 next_prefix = tuple((entry['level'], entry.get('value'))
                                     for entry in next_column['path'][:depth + 1])
-                if next_prefix != prefix or (gap_layout == 'end' and next_kind != kind):
+                if next_prefix != prefix or (gap_layout == 'end' and next_kind != kind
+                                             and {kind, next_kind} != {'Value', 'Score'}):
                     break
                 end += 1
             cell = table.cell(depth + 1, fixed_count + start)
@@ -1802,14 +1887,15 @@ def _score_column_headers(table, plan: list[tuple[dict, str]], levels: list[str]
                   foreground=_header_foreground(color), size=size, bold=True)
             start = end + 1
     for index, (column, kind) in enumerate(plan, fixed_count):
-        color = '#FFFF00' if kind == 'GAP' else column['color']
+        color = '#FFFF00' if kind == 'GAP' else '#E6ECFA' if kind == 'Value' else column['color']
         cell = table.cell(len(levels) + 1, index)
         _cell(cell, kind, color=color, foreground=_header_foreground(color),
               size=min(7, max(2.5, leaf_width * 12)), bold=True)
 
 
 def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dict], *, gap_layout: str = 'end',
-                            show_gap_values: bool = True, title: str = 'Scoring Tables — Breakdown') -> None:
+                            show_gap_values: bool = True, title: str = 'Scoring Tables — Breakdown',
+                            show_kpi_values: bool = False) -> None:
     for matrix in matrices:
         is_summary = matrix.get('table_mode') == 'summary'
         fixed_count = 4 if is_summary else 5
@@ -1818,7 +1904,8 @@ def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dic
         columns = matrix['hierarchy_columns']
         levels = matrix['hierarchy_levels']
         metrics = matrix['rows']
-        plan = _score_column_plan(columns, gap_layout, show_gap_values=show_gap_values)
+        plan = _score_column_plan(columns, gap_layout, show_gap_values=show_gap_values,
+                                  show_kpi_values=show_kpi_values and not is_summary)
         total_label = _score_total_label(
             [*metrics, matrix['total']],
             [column['id'] for column, kind in plan if kind == 'Score'],
@@ -1865,6 +1952,7 @@ def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dic
             for column, kind in plan:
                 value = metric['values'][column['id']]
                 numeric_texts.append(_gap_number(metric, column['id']) if kind == 'GAP'
+                                     else _kpi_value_text(metric, value) if kind == 'Value'
                                      else _number(value['points']) + ('*' if value['points'] is not None and not value['complete'] else ''))
         numeric_font = _hierarchy_content_font(
             numeric_texts, leaf_width, maximum=min(11, min(body_heights) * 72 * .82),
@@ -1894,6 +1982,9 @@ def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dic
                     _cell(table.cell(row_offset, index), _gap_number(metric, leaf_id),
                           color=row_color or metric.get('gap_colors', {}).get(leaf_id, THRESHOLD_COLORS['Unavailable']),
                           size=numeric_font, bold=True)
+                elif kind == 'Value':
+                    _cell(table.cell(row_offset, index), _kpi_value_text(metric, value),
+                          color=row_color or _WHITE, size=numeric_font)
                 else:
                     partial = value['points'] is not None and not value['complete']
                     score_color = (_SUMMARY_BEST_COLOR if leaf_id in best else
@@ -1911,7 +2002,7 @@ def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dic
             _cell(table.cell(total_index, index), label, color=total_color, bold=True, left=index < 2, size=data_font)
         for index, (column, kind) in enumerate(plan, fixed_count):
             value = total['values'][column['id']]
-            text = (_gap_number(total, column['id']) if kind == 'GAP' else
+            text = (_gap_number(total, column['id']) if kind == 'GAP' else '' if kind == 'Value' else
                     _number(value['points']) + ('*' if value['points'] is not None and not value['complete'] else ''))
             color = (_SUMMARY_BEST_COLOR if kind == 'Score' and column['id'] in best else
                      _SUMMARY_WORST_COLOR if kind == 'Score' and column['id'] in worst else total_color)
@@ -1929,6 +2020,14 @@ def _hierarchy_score_tables(presentation, matrices: list[dict], legend: list[dic
                 ).table
                 _cell(legend_table.cell(0, 0), item.get('band', ''), color=item['color'], size=8)
         _text(slide, matrix['coverage_note'], 7.27, size=8, height=.18)
+
+
+def _kpi_value_text(metric: dict, value: dict) -> str:
+    """Measured KPI value of a Breakdown row; category subtotals have none."""
+    if metric.get('row_type') == 'category':
+        return ''
+    measured = value.get('value')
+    return _number(measured) if isinstance(measured, (int, float)) and not isinstance(measured, bool) else 'N/A'
 
 
 def _remove_summary_category_column(table) -> None:
@@ -2196,6 +2295,16 @@ def _scoring_block_title(scoring: str | None, title: str) -> str:
     return f'{SCORING_LABELS[scoring]} — {title}' if scoring else title
 
 
+def _scoring_block_subtitle(scoring: str | None, environment: str, configuration: dict) -> str:
+    """Slide subtitle of a block: the scoring, and the environment unless it is All Environments."""
+    label = SCORING_LABELS[scoring or BEST_NETWORK_SCORING]
+    if configuration.get('_scenario_name'):
+        label = f"{configuration['_scenario_name']} · {label}"
+    if str(environment).casefold() in {'combined', 'all', 'all environments'}:
+        return label
+    return f'{label} — {_scoring_environment_title(environment, configuration)}'
+
+
 def _scoring_slide_notes(result: dict[str, Any]) -> list[str]:
     coverage_notes = scoring_coverage_notes(result)
     coverage_details = [f"{'All Environments' if environment == 'Combined' else environment} — {note}"
@@ -2207,21 +2316,113 @@ def _scoring_slide_notes(result: dict[str, Any]) -> list[str]:
     return slide_warnings
 
 
+def _option(options: dict | None, group: str, key: str, default: bool = True) -> bool:
+    """A report scenario option; without a scenario every slide is included."""
+    if options is None:
+        return default
+    return bool((options.get(group) or {}).get(key, default))
+
+
+def _compared_operator(options: dict | None, operator: str, label: str | None = None) -> bool:
+    """Whether a scenario compares this operator with the reference; an empty choice compares all."""
+    chosen = {str(name).casefold() for name in ((options or {}).get('gap') or {}).get('operators') or []}
+    return not chosen or str(operator).casefold() in chosen or str(label or '').casefold() in chosen
+
+
+def _latest_campaign_maps(maps: list[dict]) -> list[dict]:
+    """With several campaigns, the points-lost maps of the latest one."""
+    campaigns = [item['context'].get('campaign') for item in maps if item['context'].get('campaign')]
+    if len(set(campaigns)) <= 1:
+        return maps
+    latest = max(campaigns, key=campaign_sort_key)
+    return [item for item in maps if item['context'].get('campaign') in (None, latest)]
+
+
+def _add_insight_slides(presentation, views: dict, environment: str, scoring: str | None, configuration: dict,
+                        *, stage: str, options: dict | None = None) -> None:
+    """Add the NetCheck-style insight slides of one environment block.
+
+    After the service chart (stage ``charts``): the location cards and the scoring trend.
+    After the GAP tables (stage ``gaps``): the KPI GAP profiles and the campaign comparison.
+    """
+    insights = views.get('insights') or {}
+    key = 'Combined' if str(environment).casefold() in {'all environments', 'combined', 'all'} else environment
+    # Like the NetCheck reports, the insights summarise All Environments; a single exported
+    # environment gets its own.
+    if views.get('_export_environment') == 'all' and key != 'Combined':
+        return
+    label = SCORING_LABELS[scoring or BEST_NETWORK_SCORING]
+    subtitle = _scoring_block_subtitle(scoring, key, configuration)
+    items = {name: [item for item in values if isinstance(item, dict) and item.get('environment') == key]
+             for name, values in insights.items()}
+    done = views.setdefault('_insight_slides', set())
+    if (key, stage) in done:
+        return
+    done.add((key, stage))
+    if stage == 'charts':
+        if _option(options, 'charts', 'location_cards'):
+            add_location_card_slides(presentation, items.get('location_cards', []), scoring_label=label,
+                                     subtitle=subtitle, new_slide=_slide)
+        if _option(options, 'charts', 'trend'):
+            add_trend_slides(presentation, items.get('campaign_trends', []), scoring_label=label,
+                             subtitle=subtitle, new_slide=_slide)
+        return
+    styles = next((table.get('operator_styles') for table in views.get('score_tables', [])
+                   if table.get('operator_styles')), {}) or {}
+    if _option(options, 'gap', 'profile'):
+        profiles = [item for item in items.get('kpi_gap_profiles', [])
+                    if _compared_operator(options, item['operator'], item.get('label'))]
+        add_kpi_gap_profile_slides(
+            presentation, profiles, scoring_label=label, subtitle=subtitle,
+            environment_labels={name: _scoring_environment_title(name, configuration)
+                                for name in configuration.get('scope', {}).get('environments', {})},
+            new_slide=_slide, operator_colors={name: style.get('color') for name, style in styles.items()},
+        )
+    if _option(options, 'gap', 'points_loss_map'):
+        maps = [item for item in items.get('points_loss_maps', [])
+                if not item.get('is_reference') and _compared_operator(options, item['operator'], item.get('label'))]
+        add_points_loss_slides(presentation, _latest_campaign_maps(maps), insights.get('points_loss_background') or [],
+                               scoring_label=label, subtitle=subtitle, new_slide=_slide,
+                               boundaries=views.get('_points_loss_boundaries'))
+    if _option(options, 'tables', 'campaign_comparison'):
+        comparisons = [item for item in items.get('campaign_comparisons', [])
+                       if options is None or _compared_operator(options, item['operator'], item.get('label'))]
+        add_campaign_comparison_slides(presentation, comparisons, scoring_label=label,
+                                       subtitle=subtitle, new_slide=_slide)
+
+
 def _add_scoring_block(presentation, job: dict[str, Any], result: dict[str, Any],
                        operator_mapping_groups: list[dict[str, Any]] | None, *, scoring: str | None,
                        table_mode: str, gap_layout: str, environment: str, show_gap_values: bool,
-                       split_charts: bool, vendor_mapping_groups: list[dict[str, Any]] | None) -> None:
-    """Add the charts, tables and GAP slides of one scoring; scoring is None when the job has only Best Network."""
+                       split_charts: bool, vendor_mapping_groups: list[dict[str, Any]] | None,
+                       options: dict | None = None, section_cover: bool = True) -> None:
+    """Add the charts, tables and GAP slides of one scoring; scoring is None when the job has only Best Network.
+
+    ``options`` are the content options of a report scenario: All Environments only or
+    a block per environment, and the charts, tables and GAP slides to include.
+    """
+    combined_only = options is not None and options.get('environments') != 'split'
+    if options is not None:
+        show_gap_values = _option(options, 'tables', 'gap_values', False)
+    show_kpi_values = _option(options, 'tables', 'kpi_values', False)
     views = _export_environment_views(
         build_scoring_views(job, result, operator_mapping_groups, vendor_mapping_groups=vendor_mapping_groups), environment,
     )
     refresh_baseline_warning(result, views, str(job.get('baseline_operator') or 'EE'))
+    views['_export_environment'] = 'all' if combined_only else environment
+    boundary_cache: dict[str, dict] = {}
+
+    def points_loss_boundaries(field: str) -> dict:
+        if field not in boundary_cache:
+            boundary_cache[field] = map_boundaries(result, field)
+        return boundary_cache[field]
+    views['_points_loss_boundaries'] = points_loss_boundaries
     configuration = job.get('configuration') or result.get('configuration') or {}
     for matrix_key in ('score_tables', 'gap_summary_tables', 'gap_tables',
                        'hierarchy_score_tables', 'hierarchy_gap_tables'):
         for matrix in views.get(matrix_key, []):
-            matrix['environment_subtitle'] = _scoring_block_title(
-                scoring, _scoring_environment_title(matrix['context']['environment'], configuration),
+            matrix['environment_subtitle'] = _scoring_block_subtitle(
+                scoring, matrix['context']['environment'], configuration,
             )
             matrix['scoring_label'] = SCORING_LABELS[scoring or BEST_NETWORK_SCORING]
     environment_allocations = maximum_allocations_from_configuration(configuration)
@@ -2235,11 +2436,28 @@ def _add_scoring_block(presentation, job: dict[str, Any], result: dict[str, Any]
                 name: str(scope.get('display_name') or _environment_display_label(name))
                 for name, scope in configuration.get('scope', {}).get('environments', {}).items()
             }
-    if scoring is not None:
+    if scoring is not None and section_cover:
         _add_scoring_intro_slides(presentation, job, result, scoring=scoring)
     subtitle = 'All Environments' if environment == 'all' else _scoring_environment_title(environment, configuration)
     matrices = views['score_tables']
     hierarchy_matrices = views.get('hierarchy_score_tables', [])
+
+    def keep(environment_name: str) -> bool:
+        return not combined_only or environment_name.casefold() in {'all environments', 'combined'}
+
+    def environment_cover(environment_name: str) -> None:
+        # With All Environments only, the scoring cover already introduces the block.
+        if not combined_only:
+            _add_scoring_intro_slides(presentation, job, result, environment=environment_name, scoring=scoring)
+
+    def score_tables(matrix: dict, render) -> None:
+        for mode, title, key in (('summary', 'Scoring Tables — Summary', 'summary'),
+                                 ('expanded', 'Scoring Tables — Breakdown', 'breakdown')):
+            if _option(options, 'tables', key):
+                render(presentation, [_table_for_mode(matrix, mode)], views.get('threshold_legend', []),
+                       gap_layout=gap_layout, show_gap_values=show_gap_values, title=title,
+                       show_kpi_values=show_kpi_values and mode == 'expanded')
+
     use_hierarchy = bool(hierarchy_matrices) and len(hierarchy_matrices[0].get('hierarchy_levels', [])) > 1
     if use_hierarchy:
         gap_by_environment = {
@@ -2250,59 +2468,71 @@ def _add_scoring_block(presentation, job: dict[str, Any], result: dict[str, Any]
         for matrix in hierarchy_matrices:
             grouped_hierarchy.setdefault(str(matrix['context'].get('environment') or 'Unspecified'), []).append(matrix)
         for current_environment, environment_matrices in grouped_hierarchy.items():
-            _add_scoring_intro_slides(presentation, job, result, environment=current_environment, scoring=scoring)
+            if not keep(current_environment):
+                continue
+            environment_cover(current_environment)
             for matrix in environment_matrices:
-                _best_network(presentation, [matrix])
-                _hierarchy_chart(presentation, matrix)
-                _hierarchy_category_comparison_chart(presentation, matrix)
-                for mode, title in (('summary', 'Scoring Tables — Summary'),
-                                    ('expanded', 'Scoring Tables — Breakdown')):
-                    _hierarchy_score_tables(
-                        presentation, [_table_for_mode(matrix, mode)], views.get('threshold_legend', []),
-                        gap_layout=gap_layout, show_gap_values=show_gap_values, title=title,
-                    )
+                if _option(options, 'charts', 'service'):
+                    _best_network(presentation, [matrix])
+                _add_insight_slides(presentation, views, current_environment, scoring, configuration,
+                                    stage='charts', options=options)
+                if _option(options, 'charts', 'category'):
+                    _hierarchy_chart(presentation, matrix)
+                if _option(options, 'charts', 'breakdown'):
+                    _hierarchy_category_comparison_chart(presentation, matrix)
+                score_tables(matrix, _hierarchy_score_tables)
                 gap_matrix = gap_by_environment.get(matrix['context'].get('environment'))
-                if gap_matrix is None:
-                    continue
-                # Finish the full comparison block before advancing to the next environment.
-                reference = _operator_label(gap_matrix, gap_matrix['baseline_operator'])
-                compared_columns = [column for column in gap_matrix['hierarchy_columns']
-                                    if not column.get('is_reference')]
-                if compared_columns:
-                    all_matrix = _hierarchy_gap_projection(_table_for_mode(gap_matrix, 'expanded'), compared_columns)
-                    _hierarchy_gap_tables(
-                        presentation, [all_matrix], title=f'GAP Analysis — All vs {reference}',
-                    )
-                compared_operators = dict.fromkeys(
-                    column['operator'] for column in gap_matrix['hierarchy_columns']
-                    if not column.get('is_reference')
-                )
-                for operator in compared_operators:
-                    operator_columns = [column for column in gap_matrix['hierarchy_columns']
-                                        if column['operator'] == operator]
-                    operator_matrix = _hierarchy_gap_projection(_table_for_mode(gap_matrix, 'expanded'), operator_columns)
-                    _hierarchy_gap_tables(
-                        presentation, [operator_matrix],
-                        title=f'GAP Analysis — {operator} vs {reference}', show_priority=True,
-                    )
+                if gap_matrix is not None:
+                    # Finish the full comparison block before advancing to the next environment.
+                    reference = _operator_label(gap_matrix, gap_matrix['baseline_operator'])
+                    compared_columns = [column for column in gap_matrix['hierarchy_columns']
+                                        if not column.get('is_reference')
+                                        and _compared_operator(options, column['operator'],
+                                                               _operator_label(gap_matrix, column['operator']))]
+                    if compared_columns and _option(options, 'gap', 'all_operators'):
+                        all_matrix = _hierarchy_gap_projection(_table_for_mode(gap_matrix, 'expanded'), compared_columns)
+                        title = (f'GAP Analysis — All vs {reference}' if options is None
+                                 or not (options.get('gap') or {}).get('operators')
+                                 else f'GAP Analysis — Compared operators vs {reference}')
+                        _hierarchy_gap_tables(presentation, [all_matrix], title=title)
+                    if _option(options, 'gap', 'individual'):
+                        for operator in dict.fromkeys(column['operator'] for column in compared_columns):
+                            operator_columns = [column for column in gap_matrix['hierarchy_columns']
+                                                if column['operator'] == operator]
+                            operator_matrix = _hierarchy_gap_projection(_table_for_mode(gap_matrix, 'expanded'),
+                                                                        operator_columns)
+                            _hierarchy_gap_tables(
+                                presentation, [operator_matrix],
+                                title=f'GAP Analysis — {operator} vs {reference}', show_priority=True,
+                            )
+                _add_insight_slides(presentation, views, current_environment, scoring, configuration,
+                                    stage='gaps', options=options)
     elif matrices:
         grouped_scores: dict[str, list[dict[str, Any]]] = {}
         for matrix in matrices:
             grouped_scores.setdefault(str(matrix['context'].get('environment') or 'Unspecified'), []).append(matrix)
         for current_environment, environment_matrices in grouped_scores.items():
-            _add_scoring_intro_slides(presentation, job, result, environment=current_environment, scoring=scoring)
+            if not keep(current_environment):
+                continue
+            environment_cover(current_environment)
             for matrix in environment_matrices:
-                _best_network(presentation, [matrix])
-                _stacked_category_chart(presentation, matrix)
-                _charts(presentation, [matrix])
-                for mode, title in (('summary', 'Scoring Tables — Summary'),
-                                    ('expanded', 'Scoring Tables — Breakdown')):
-                    _score_tables(
-                        presentation, [_table_for_mode(matrix, mode)], views.get('threshold_legend', []),
-                        gap_layout=gap_layout, show_gap_values=show_gap_values, title=title,
-                    )
-                _gap_summary_tables(presentation, [_table_for_mode(table, 'expanded') for table in views['gap_summary_tables'] if table['context'] == matrix['context']])
-                _gap_tables(presentation, [_table_for_mode(table, 'expanded') for table in views['gap_tables'] if table['context'] == matrix['context']])
+                if _option(options, 'charts', 'service'):
+                    _best_network(presentation, [matrix])
+                if _option(options, 'charts', 'category'):
+                    _stacked_category_chart(presentation, matrix)
+                if _option(options, 'charts', 'breakdown'):
+                    _charts(presentation, [matrix])
+                score_tables(matrix, _score_tables)
+                if _option(options, 'gap', 'all_operators'):
+                    _gap_summary_tables(presentation, [_table_for_mode(table, 'expanded') for table in views['gap_summary_tables']
+                                                       if table['context'] == matrix['context']])
+                if _option(options, 'gap', 'individual'):
+                    _gap_tables(presentation, [_table_for_mode(table, 'expanded') for table in views['gap_tables']
+                                               if table['context'] == matrix['context']
+                                               and _compared_operator(options, table.get('operator', ''),
+                                                                      _operator_label(table, table.get('operator', '')))])
+            _add_insight_slides(presentation, views, current_environment, scoring, configuration,
+                                stage='gaps', options=options)
     else:
         slide = _slide(presentation, 'Scoring Tables', subtitle)
         _text(slide, 'No scoring measurements are available for this saved job.', 1.8, height=1, size=16)
@@ -2347,6 +2577,71 @@ def export_scoring_powerpoint(job: dict[str, Any], result: dict[str, Any], templ
         for index, slide in enumerate(presentation.slides):
             if index >= first_slide:
                 slide.notes_slide.notes_text_frame.text = notes
+    output = BytesIO()
+    presentation.save(output)
+    return output.getvalue()
+
+
+def export_scoring_report(entries: list[dict[str, Any]], template_path: Path,
+                          operator_mapping_groups: list[dict[str, Any]] | None = None, *,
+                          gap_layout: str = 'end', split_charts: bool = True,
+                          vendor_mapping_groups: list[dict[str, Any]] | None = None) -> bytes:
+    """One document with the scenarios of a scoring report.
+
+    Each entry has a normalized ``scenario`` and the completed ``job`` and ``result`` of
+    its filters and aggregation. Every scenario adds, for each scoring it includes, a
+    cover with its filters followed by the slides its options choose.
+    """
+    if not template_path.is_file():
+        raise ValueError('The configured CDR PowerPoint template is missing.')
+    if not entries:
+        raise ValueError('A scoring report needs at least one scenario.')
+    presentation = Presentation(template_path)
+    _remove_all_slides(presentation)
+    several = len(entries) > 1
+    prepared = []
+    for entry in entries:
+        job = dict(entry['job'])
+        result = normalize_scoring_vendor_result(entry['result'], operator_mapping_groups)
+        if '_scoring_display_selections' not in job:
+            job['_scoring_display_selections'] = prepare_scoring_display_selections(job, result, template_path)
+        prepared.append((entry['scenario'], job, result))
+    first_scenario, first_job, first_result = prepared[0]
+    if several:
+        mode = _scoring_filter_subtitle(first_job).split('\n', 1)[0]
+        names = ', '.join(scenario['name'] for scenario, _job, _result in prepared)
+        _add_scoring_intro_slides(presentation, first_job, first_result,
+                                  subtitle=f'{mode}\nScenarios: {names}')
+    else:
+        _add_scoring_intro_slides(presentation, first_job, first_result)
+    for scenario, job, result in prepared:
+        baseline = str(job.get('baseline_operator') or 'EE')
+        blocks = [(BEST_NETWORK_SCORING, job, result)]
+        reliable = most_reliable_result(result, baseline, job.get('configuration'))
+        if reliable is not None:
+            blocks.append((MOST_RELIABLE_SCORING, {**job, 'configuration': reliable['configuration']}, reliable))
+        for scoring, block_job, block_result in blocks:
+            options = scenario['scorings'][scoring]
+            if not options.get('enabled'):
+                continue
+            if several:
+                block_job = {**block_job, '_scenario_name': scenario['name']}
+                configuration = dict(block_job.get('configuration') or block_result.get('configuration') or {})
+                configuration['_scenario_name'] = scenario['name']
+                block_job['configuration'] = configuration
+            first_slide = len(presentation.slides)
+            _add_scoring_block(
+                presentation, block_job, block_result, operator_mapping_groups, scoring=scoring,
+                table_mode='expanded', gap_layout=gap_layout, environment='all',
+                show_gap_values=False, split_charts=split_charts,
+                vendor_mapping_groups=vendor_mapping_groups, options=options,
+            )
+            notes = '\n'.join(_scoring_slide_notes(block_result))
+            for index, slide in enumerate(presentation.slides):
+                if index >= first_slide or index == 0:
+                    if index == 0 and slide.notes_slide.notes_text_frame.text:
+                        continue
+                    slide.notes_slide.notes_text_frame.text = notes
     output = BytesIO()
     presentation.save(output)
     return output.getvalue()

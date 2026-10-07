@@ -19,8 +19,14 @@ from tests.scoring_fixtures import scoring_configuration
 from tests.test_scoring_api import scoring_api  # noqa: F401  (fixture)
 from tests.test_scoring_exports import TEMPLATE
 
-# Netcheck_Score_Mapping_2026Q2_Mostreliable_Drive_City_Road.xlsx: KPI code, City and Road points.
+# NetCheck 2026 Most Reliable allocation: each KPI's global points split 65% City / 35% Road.
 RELIABLE_POINTS = {
+    'K1': (92.1375, 49.6125), 'K4': (44.3625, 23.8875), 'K7': (61.425, 33.075), 'K8': (29.575, 15.925),
+    'K12': (63.375, 34.125), 'K14': (38.025, 20.475), 'K16': (101.4, 54.6), 'K21': (50.7, 27.3),
+    'K27': (84.5, 45.5), 'K28': (84.5, 45.5),
+}
+# Netcheck_Score_Mapping_2026Q2_Mostreliable_Drive_City_Road.xlsx rounds them to two decimals.
+WORKBOOK_POINTS = {
     'K1': (92.14, 49.61), 'K4': (44.36, 23.89), 'K7': (61.43, 33.08), 'K8': (29.58, 15.93),
     'K12': (63.38, 34.13), 'K14': (38.03, 20.48), 'K16': (101.4, 54.6), 'K21': (50.7, 27.3),
     'K27': (84.5, 45.5), 'K28': (84.5, 45.5),
@@ -60,11 +66,11 @@ WORKBOOK_TOTALS = {
 }
 
 
-def _reliable_configuration():
+def _reliable_configuration(points=RELIABLE_POINTS):
     configuration = scoring_configuration()
     for metric in configuration['metrics']:
-        if metric['code'] in RELIABLE_POINTS:
-            city, road = RELIABLE_POINTS[metric['code']]
+        if metric['code'] in points:
+            city, road = points[metric['code']]
             metric['contexts']['DriveCity']['most_reliable_points'] = city
             metric['contexts']['DriveConnectionroad']['most_reliable_points'] = road
     return validate_scoring_configuration(configuration)
@@ -114,7 +120,7 @@ def test_most_reliable_points_are_validated_and_only_change_identity_when_set():
     reliable = _reliable_configuration()
     assert has_most_reliable_scoring(reliable)
     assert configuration_hash(reliable) != configuration_hash(plain)
-    assert reliable['metrics'][0]['contexts']['DriveCity']['most_reliable_points'] == 92.14
+    assert reliable['metrics'][0]['contexts']['DriveCity']['most_reliable_points'] == 92.1375
     # Best Network keeps its own maximum points.
     assert reliable['scope']['total_max_points'] == pytest.approx(1000)
 
@@ -125,33 +131,72 @@ def test_most_reliable_configuration_keeps_the_subset_with_its_points_and_thresh
     assert [metric['code'] for metric in derived['metrics']] == list(RELIABLE_POINTS)
     assert derived['gap_priority'] == [code for code in reliable['gap_priority'] if code in RELIABLE_POINTS]
     k1 = derived['metrics'][0]
-    assert k1['contexts']['DriveCity']['max_points'] == 92.14
-    assert k1['contexts']['DriveConnectionroad']['max_points'] == 49.61
+    assert k1['contexts']['DriveCity']['max_points'] == 92.1375
+    assert k1['contexts']['DriveConnectionroad']['max_points'] == 49.6125
     assert k1['contexts']['Walk']['max_points'] == 0
     assert k1['contexts']['DriveCity']['thresholds'] == reliable['metrics'][0]['contexts']['DriveCity']['thresholds']
     environments = derived['scope']['environments']
-    assert environments['DriveCity']['total_points'] == pytest.approx(650.02)
-    assert environments['DriveConnectionroad']['total_points'] == pytest.approx(350.02)
+    assert environments['DriveCity']['total_points'] == pytest.approx(650)
+    assert environments['DriveConnectionroad']['total_points'] == pytest.approx(350)
+    voice = sum(context['max_points'] for metric in derived['metrics'] if metric['source_kind'] != 'data'
+                for context in metric['contexts'].values())
+    assert voice == pytest.approx(350)
     assert derived['scoring'] == 'most_reliable'
 
 
 def test_most_reliable_scoring_matches_the_netcheck_workbook():
     result = most_reliable_result(_workbook_result(_reliable_configuration()), 'EE')
+    # The workbook rounds the points to two decimals: totals differ by less than 0.05 points.
     for environment, expected in WORKBOOK_TOTALS.items():
         totals = _overall(result, environment)
         for operator, points in zip(OPERATORS, expected):
-            assert totals[operator]['weighted_points'] == pytest.approx(points)
+            assert totals[operator]['weighted_points'] == pytest.approx(points, abs=.05)
             assert totals[operator]['complete_coverage'] is True
     combined = _overall(result, 'Combined')
-    assert combined['EE']['max_points'] == pytest.approx(1000.04)
+    assert combined['EE']['max_points'] == pytest.approx(1000)
     for index, operator in enumerate(OPERATORS):
         assert combined[operator]['weighted_points'] == pytest.approx(
-            WORKBOOK_TOTALS['DriveCity'][index] + WORKBOOK_TOTALS['DriveConnectionroad'][index])
+            WORKBOOK_TOTALS['DriveCity'][index] + WORKBOOK_TOTALS['DriveConnectionroad'][index], abs=.1)
     # The GAP subtracts the reference's Most Reliable points.
     o2_gap = next(row for row in result['gap'] if row['operator'] == 'O2 UK' and row['kpi_code'] == 'K1'
                   and row['environment'] == 'DriveCity')
-    assert o2_gap['gap_points'] == pytest.approx(85.50279661063796 - 88.24071942517398)
+    assert o2_gap['gap_points'] == pytest.approx(85.50279661063796 - 88.24071942517398, abs=.01)
     assert {row['kpi_code'] for row in result['scoring']} == set(RELIABLE_POINTS)
+
+
+def test_rounded_points_are_scaled_to_the_environment_totals():
+    rounded = _reliable_configuration(WORKBOOK_POINTS)
+    derived = most_reliable_configuration(rounded)
+    environments = derived['scope']['environments']
+    assert environments['DriveCity']['total_points'] == pytest.approx(650, abs=1e-6)
+    assert environments['DriveConnectionroad']['total_points'] == pytest.approx(350, abs=1e-6)
+    k1 = rounded['metrics'][0]['contexts']['DriveCity']['most_reliable_points']
+    assert k1 == pytest.approx(RELIABLE_POINTS['K1'][0], abs=.001)
+    # Validation is idempotent, so the methodology keeps its identity.
+    assert configuration_hash(validate_scoring_configuration(rounded)) == configuration_hash(rounded)
+    # Totals far from the Best Network totals are kept as they are.
+    custom = scoring_configuration()
+    custom['metrics'][0]['contexts']['DriveCity']['most_reliable_points'] = 92.14
+    assert validate_scoring_configuration(custom)['metrics'][0]['contexts']['DriveCity']['most_reliable_points'] == 92.14
+
+
+def test_only_reliable_kpis_take_part_in_most_reliable():
+    configuration = scoring_configuration()
+    k1, k2 = configuration['metrics'][0], configuration['metrics'][1]
+    assert (k1['kpi_type'], k2['kpi_type']) == ('Reliable', 'Diff')
+    k1['contexts']['DriveCity']['most_reliable_points'] = 100
+    k2['contexts']['DriveCity']['most_reliable_points'] = 50
+    validated = validate_scoring_configuration(configuration)
+    assert 'most_reliable_points' not in validated['metrics'][1]['contexts']['DriveCity']
+    derived = most_reliable_configuration(validated)
+    assert 'K2' not in {metric['code'] for metric in derived['metrics']}
+    # Every Reliable KPI takes part; those without points have no maximum.
+    reliable = {metric['code'] for metric in configuration['metrics'] if metric['kpi_type'] == 'Reliable'}
+    assert {metric['code'] for metric in derived['metrics']} == reliable
+    # A Diff KPI with points gives no Most Reliable scoring.
+    only_diff = scoring_configuration()
+    only_diff['metrics'][1]['contexts']['DriveCity']['most_reliable_points'] = 50
+    assert most_reliable_configuration(only_diff) is None
 
 
 def test_most_reliable_result_reuses_saved_scores_and_is_absent_without_points():
@@ -168,7 +213,7 @@ def test_most_reliable_result_reuses_saved_scores_and_is_absent_without_points()
                        and row['environment'] == 'DriveCity')
     assert reliable_k1['score'] == best_k1['score'] == 1
     assert best_k1['weighted_points'] == pytest.approx(73.4825)
-    assert reliable_k1['weighted_points'] == pytest.approx(92.14)
+    assert reliable_k1['weighted_points'] == pytest.approx(92.1375)
     # Warnings about KPIs outside Most Reliable are left out.
     assert any('K2 requires missing column' in warning for warning in result['warnings'])
     assert not any('K2 requires missing column' in warning for warning in reliable['warnings'])
@@ -204,16 +249,18 @@ def test_powerpoint_carries_both_scorings_in_one_document():
     best = titles.index(next(title for title in titles if title.startswith('Best Network Scoring')))
     reliable = titles.index(next(title for title in titles if title.startswith('Most Reliable Network Scoring')))
     assert 0 < best < reliable
+    assert 'Best Network Scoring per Service | Best Network' in titles[best:reliable]
     assert any(title.startswith('Best Network Scoring per Service | Best Network — ') for title in titles[best:reliable])
-    assert any(title.startswith('Most Reliable Scoring per Service | Most Reliable — ') for title in titles[reliable:])
-    assert any(title.startswith('GAP Analysis — O2 UK vs EE | Most Reliable — ') for title in titles[reliable:])
+    assert any(title.startswith('Most Reliable Network Scoring per Service | Most Reliable Network — ')
+               for title in titles[reliable:])
+    assert any(title.startswith('GAP Analysis — O2 UK vs EE | Most Reliable Network') for title in titles[reliable:])
 
 
 def test_powerpoint_without_most_reliable_points_is_unchanged():
     configuration = validate_scoring_configuration(scoring_configuration())
     job = {'levels': ['Operator'], 'baseline_operator': 'EE', 'configuration': configuration}
     titles = _slide_titles(export_scoring_powerpoint(job, _workbook_result(configuration), TEMPLATE))
-    assert not any('Most Reliable' in title or 'Best Network —' in title for title in titles)
+    assert not any('Most Reliable' in title for title in titles)
     assert any(title.startswith('Best Network Scoring per Service') for title in titles)
 
 
@@ -224,7 +271,8 @@ def test_most_reliable_points_survive_methodology_export_and_import():
         'profiles': [{'id': 'netcheck-2026', 'name': 'NetCheck 2026', 'configuration': deepcopy(configuration)}],
     })
     restored = unwrap_scoring_profiles_payload(document)['profiles'][0]['configuration']
-    assert restored['metrics'][0]['contexts']['DriveCity']['most_reliable_points'] == 92.14
+    assert restored['metrics'][0]['contexts']['DriveCity']['most_reliable_points'] == 92.1375
+    assert restored['metrics'][0]['contexts']['DriveCity']['max_points'] == pytest.approx(73.4825)
     assert configuration_hash(most_reliable_configuration(restored)) == configuration_hash(
         most_reliable_configuration(configuration))
 
@@ -259,7 +307,7 @@ def test_scoring_job_api_returns_and_exports_the_most_reliable_scoring(scoring_a
 
     payload = client.get(f'/api/scoring/jobs/{job_id}').json()
     reliable = payload['scorings']['most_reliable']
-    assert reliable['label'] == 'Most Reliable'
+    assert reliable['label'] == 'Most Reliable Network'
     assert [metric['code'] for metric in reliable['configuration']['metrics']] == list(RELIABLE_POINTS)
     city = next(table for table in reliable['views']['score_tables'] if table['context']['environment'] == 'DriveCity')
     assert {row['kpi_code'] for row in city['expanded_rows'] if row.get('kpi_code')} == set(RELIABLE_POINTS)

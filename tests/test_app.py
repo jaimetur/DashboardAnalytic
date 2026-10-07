@@ -2541,14 +2541,14 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     assert admin_response.text.index('<optgroup label="Full Workspace"') < admin_response.text.index('<optgroup label="Full Environment">')
     assert 'Config</option>' in admin_response.text
     assert 'Main Cities (from active workspace)</option>' in admin_response.text
-    assert 'Operator &amp; Vendor Maps (from active workspace)</option>' in admin_response.text
-    assert admin_response.text.index('Main Cities (from active workspace)</option>') < admin_response.text.index('Operator &amp; Vendor Maps (from active workspace)</option>')
+    assert 'Mappings &amp; Reference Data (from active workspace)</option>' in admin_response.text
+    assert admin_response.text.index('Main Cities (from active workspace)</option>') < admin_response.text.index('Mappings &amp; Reference Data (from active workspace)</option>')
     assert 'Scoring &amp; GAP Analysis Configuration (from active workspace)' in admin_response.text
-    assert 'Full Environment (Application Config + Dashboards + Report Templates + Main Cities + Operator &amp; Vendor Maps + Scoring &amp; GAP Analysis Configuration + Auto-calculated Fields + Query Builder Queries + Reporting Jobs + NQ Call Tracking + Selected Workspaces)' in admin_response.text
-    assert admin_response.text.index('Main Cities (workspace city selection)') < admin_response.text.index('Operator &amp; Vendor Maps (aliases, order and theme colors)')
+    assert 'Full Environment (Application Config + Dashboards + Report Templates + Main Cities + Mappings &amp; Reference Data + Scoring &amp; GAP Analysis Configuration + Auto-calculated Fields + Query Builder Queries + Reporting Jobs + NQ Call Tracking + Selected Workspaces)' in admin_response.text
+    assert admin_response.text.index('Main Cities (workspace city selection)') < admin_response.text.index('Mappings &amp; Reference Data (Operator and Vendor aliases, order and theme colors')
     assert 'Scoring &amp; GAP Analysis Configuration (KPI methodology profiles, aggregation hierarchy and GAP KPI priorities)' in admin_response.text
-    assert "main_cities: 'Main Cities', operator_mappings: 'Operator & Vendor Maps', scoring_configuration: 'Scoring & GAP Analysis Configuration'" in admin_response.text
-    assert "['Workspace Content', ['workspace_database', 'dashboards', 'report_templates', 'main_cities', 'operator_mappings', 'scoring_configuration'" in admin_response.text
+    assert "main_cities: 'Main Cities', mappings_reference_data: 'Mappings & Reference Data', scoring_configuration: 'Scoring & GAP Analysis Configuration'" in admin_response.text
+    assert "['Workspace Content', ['workspace_database', 'dashboards', 'report_templates', 'main_cities', 'mappings_reference_data', 'scoring_configuration'" in admin_response.text
     assert {'main_cities', 'scoring_configuration'} <= set(app_module.recurring_backup_settings()['components'])
     assert 'value="main_cities" selected' in admin_response.text
     assert 'value="scoring_configuration" selected' in admin_response.text
@@ -2650,15 +2650,16 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
         assert full_manifest['workspaces'][0]['id'] == 'default'
         assert {'super', 'admin', 'demo'} <= set(full_manifest['workspaces'][0]['access_usernames'])
         assert 'dashboards' in full_manifest['workspace_components']
-        assert 'operator_mappings' in full_manifest['workspace_components']
+        assert 'mappings_reference_data' in full_manifest['workspace_components']
         assert 'main_cities' in full_manifest['workspace_components']
         exported_dashboards = json.loads(archive.read('workspaces/Default/dashboards/dashboards.json'))
         assert exported_dashboards['dashboards']['exported-dashboard']['name'] == 'Exported Dashboard'
-        exported_mappings = json.loads(archive.read('workspaces/Default/operator-mappings/operator-mappings.json'))
-        assert exported_mappings['version'] == 3
+        exported_mappings = json.loads(archive.read('workspaces/Default/mappings-reference-data/mappings-reference-data.json'))
+        assert exported_mappings['version'] == 1
         assert exported_mappings['spectrum_holdings'] == []
-        assert exported_mappings['mappings'][0]['canonical'] == 'VF'
-        assert exported_mappings['mappings'][0]['color'] == '#E15759'
+        assert exported_mappings['campaign_map']['format'] == '{year}-Q{quarter}{-mode}'
+        assert exported_mappings['operator_mappings'][0]['canonical'] == 'VF'
+        assert exported_mappings['operator_mappings'][0]['color'] == '#E15759'
         assert exported_mappings['vendor_mappings'][0]['canonical'] == 'Ericsson'
         assert exported_mappings['vendor_mappings'][0]['color'] == '#2E8B57'
         exported_main_cities = json.loads(archive.read('workspaces/Default/main-cities/main-cities.json'))
@@ -2774,7 +2775,7 @@ def test_auto_calculated_fields_export_does_not_materialize_active_cdrs(client, 
         assert json.loads(archive.read(manifest['archive_path']))
 
 
-def test_operator_mappings_export_and_import_replace_the_selected_workspace_groups(client) -> None:
+def test_mappings_reference_data_export_and_import_replace_the_selected_workspace_groups(client) -> None:
     import src.DriveTestAnalyzer as app_module
     from src.modules.network_insights import load_spectrum_holdings, save_spectrum_holdings
 
@@ -2783,18 +2784,18 @@ def test_operator_mappings_export_and_import_replace_the_selected_workspace_grou
     app_module.repository.replace_vendor_mapping_group(None, 'Portable Vendor', ['PV'], '#123456')
     save_spectrum_holdings(app_module.repository, [{'operator': 'Portable Carrier', 'band': 'n78', 'bandwidth_mhz': 60}])
 
-    exported = client.get('/admin/import-export/export?export_target=operator-mappings')
+    exported = client.get('/admin/import-export/export?export_target=mappings-reference-data')
 
     assert exported.status_code == 200
     with zipfile.ZipFile(BytesIO(exported.content)) as archive:
         manifest = json.loads(archive.read('manifest.json'))
         payload = json.loads(archive.read(manifest['archive_path']))
-    assert manifest['kind'] == 'operator-mappings'
-    assert manifest['workspace_components'] == ['operator_mappings']
-    assert payload['format'] == 'drivetest-analyzer-operator-mappings'
-    assert payload['version'] == 3
+    assert manifest['kind'] == 'mappings-reference-data'
+    assert manifest['workspace_components'] == ['mappings_reference_data']
+    assert payload['format'] == 'drivetest-analyzer-mappings-reference-data'
+    assert payload['version'] == 1
     assert payload['spectrum_holdings'][0]['band'] == 'n78'
-    assert any(group['canonical'] == 'Portable Carrier' for group in payload['mappings'])
+    assert any(group['canonical'] == 'Portable Carrier' for group in payload['operator_mappings'])
     assert any(
         group['canonical'] == 'Portable Vendor' and group['color'] == '#123456'
         for group in payload['vendor_mappings']
@@ -2805,10 +2806,10 @@ def test_operator_mappings_export_and_import_replace_the_selected_workspace_grou
     save_spectrum_holdings(app_module.repository, [])
     inspected = client.post(
         '/admin/import-export/inspect',
-        files={'package': ('operator-mappings.zip', BytesIO(exported.content), 'application/zip')},
+        files={'package': ('mappings-reference-data.zip', BytesIO(exported.content), 'application/zip')},
     )
     assert inspected.status_code == 200
-    assert inspected.json()['kind'] == 'operator-mappings'
+    assert inspected.json()['kind'] == 'mappings-reference-data'
     assert inspected.json()['destination_workspaces'] == [{'id': 'default', 'name': 'Default'}]
     started = client.post('/admin/import-export/import/jobs', data={
         'upload_id': inspected.headers['X-Import-Upload-Id'],
@@ -6663,14 +6664,14 @@ def test_dashboard_backup_declares_dashboard_component_for_selective_restore(cli
     assert app_module._backup_archive_components(archive_path) == ['dashboards']
 
 
-def test_operator_mapping_backup_supports_selective_restore(client, tmp_path: Path) -> None:
+def test_mappings_reference_data_backup_supports_selective_restore(client, tmp_path: Path) -> None:
     import src.DriveTestAnalyzer as app_module
 
     login(client)
     app_module.repository.replace_operator_mapping_group(None, 'Backup Carrier', ['Backup Alias'])
     app_module.repository.replace_vendor_mapping_group(None, 'Backup Vendor', ['Backup Vendor Alias'], '#654321')
     archive_path = app_module.create_recurring_database_backup({
-        'components': ['operator_mappings'],
+        'components': ['mappings_reference_data'],
         'backup_path': str(tmp_path / 'backups'),
         'max_backups': 30,
         'workspace_ids': ['default'],
@@ -6678,21 +6679,21 @@ def test_operator_mapping_backup_supports_selective_restore(client, tmp_path: Pa
 
     with zipfile.ZipFile(archive_path) as archive:
         manifest = json.loads(archive.read('manifest.json'))
-        assert 'workspaces/Default/operator-mappings/operator-mappings.json' in archive.namelist()
-    assert manifest['workspace_components'] == ['operator_mappings']
-    assert app_module._backup_archive_components(archive_path) == ['operator_mappings']
+        assert 'workspaces/Default/mappings-reference-data/mappings-reference-data.json' in archive.namelist()
+    assert manifest['workspace_components'] == ['mappings_reference_data']
+    assert app_module._backup_archive_components(archive_path) == ['mappings_reference_data']
 
     app_module.repository.delete_operator_mapping_group('Backup Carrier')
     app_module.repository.delete_vendor_mapping_group('Backup Vendor')
     progress_steps = []
     app_module.restore_database_backup(
-        archive_path, ['operator_mappings'],
+        archive_path, ['mappings_reference_data'],
         lambda message, completed, total: progress_steps.append((message, completed, total)),
     )
 
     assert app_module.repository.list_operator_mappings()['backup alias'] == 'Backup Carrier'
     assert progress_steps[-1][1:] == (1, 1)
-    assert 'Operator & Vendor Maps restored' in progress_steps[-1][0]
+    assert 'Mappings & Reference Data restored' in progress_steps[-1][0]
     restored_vendor = next(
         group for group in app_module.repository.list_vendor_mapping_groups()
         if group['canonical'] == 'Backup Vendor'
@@ -9573,8 +9574,9 @@ def test_dashboard_adaptive_filters_populate_netcheck_a_columns_for_existing_cdr
     response = client.get("/datasets-analysis?dataset_id=1&metric=Call_Duration&aggregation=all&load=1")
     assert response.status_code == 200
     assert 'select name="operator" multiple' in response.text
-    assert 'value="Vodafone UK"' in response.text
-    assert 'value="Three UK"' in response.text
+    # Operators are listed with their Operator Maps labels: Vodafone UK is VF and Three UK is 3.
+    assert 'value="VF"' in response.text
+    assert 'value="3"' in response.text
     assert 'select name="session_type" multiple' in response.text
     assert 'value="VoLTE"' in response.text
     assert 'value="VoNR"' in response.text

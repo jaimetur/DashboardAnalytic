@@ -2090,7 +2090,7 @@
       const selected = Array.isArray(definition.filters[field])
         ? definition.filters[field].map(value => String(value)) : [];
       const custom = definition.custom_fields.includes(field);
-      const label = ['vendor', 'vendoronly'].includes(identity(field)) ? 'Vendor' : identity(field) === 'operatorvendor' ? 'Operator_Vendor' : custom ? field : field === 'technology_primary' ? 'Technology' : field.replaceAll('_',' ').replace(/\b\w/g, letter => letter.toUpperCase());
+      const label = ['vendor', 'vendoronly'].includes(identity(field)) ? 'Vendor' : identity(field) === 'operatorvendor' ? 'Operator_Vendor' : identity(field) === 'vendoroperator' ? 'Vendor_Operator' : custom ? field : field === 'technology_primary' ? 'Technology' : field.replaceAll('_',' ').replace(/\b\w/g, letter => letter.toUpperCase());
       const aliases = Object.entries(filterAliases).find(([name]) => identity(name) === identity(field))?.[1] || [];
       if (aliases.length > 1) {
         const aliasTooltip = `Supported columns by priority:\n${aliases.map((alias, index) => `${index + 1}. ${alias}`).join('\n')}`;
@@ -2789,7 +2789,14 @@
   // Dashboard (every slide, the expanded viewer and its PPT export).
   const setDashboardLegendStates = states => {
     const state = legendVisibility();
+    // Hiding or showing a value also drops the explicit states of the labels
+    // that contain it at some level ("O2 · 2026-Q1" for O2), which would
+    // otherwise keep those series or columns as they were.
+    const containsLevel = (candidate, label) => candidate !== label && candidate.split(' · ').includes(label);
     states.forEach((hidden, label) => {
+      [state.dashboard, ...state.charts.values()].forEach(labels => {
+        [...labels.keys()].filter(candidate => containsLevel(candidate, label)).forEach(candidate => labels.delete(candidate));
+      });
       state.dashboard.set(label, hidden);
       state.charts.forEach(chartStates => chartStates.delete(label));
     });

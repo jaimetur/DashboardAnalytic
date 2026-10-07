@@ -7,6 +7,7 @@ show the Executive Summary and the Progress View with the look of the web page.
 from __future__ import annotations
 
 import math
+import re
 from io import BytesIO
 from typing import Any
 
@@ -24,7 +25,8 @@ BORDER = '#f0c4d3'
 TRACK = '#f3dfe6'
 RASPBERRY = '#b0234f'
 PALETTE = ['#b0234f', '#0f6f7d', '#e08a1e', '#6a63c9', '#2e8b57', '#245a96', '#b85b20', '#7b8790', '#5b6b2e', '#c8365f']
-KPI_COLORS = {'total': '#b0234f', 'open': '#d14a68', 'closed': '#2e8b57', 'team': '#0f6f7d', 'commented': '#6a63c9'}
+KPI_COLORS = {'total': '#b0234f', 'open': '#d14a68', 'closed': '#2e8b57', 'attended': '#e08a1e', 'team': '#0f6f7d',
+              'commented': '#6a63c9'}
 SERVICE_LABELS = {'voice': 'Voice', 'speech': 'Speech', 'data': 'Data'}
 
 
@@ -81,45 +83,57 @@ class Panel:
         return output
 
 
-def _kpi_row(panel: Panel, cards: list[tuple[str, str, str, str]], top: float, height: float) -> None:
-    gap = 0.18
+def _kpi_row(panel: Panel, cards: list[tuple[str, str, str, str]], top: float, height: float, *, compact: bool = False) -> None:
+    gap = 0.15 if compact else 0.18
     width = (panel.width - gap * (len(cards) - 1)) / len(cards)
     for index, (label, value, note, kind) in enumerate(cards):
         left = index * (width + gap)
         panel.card(left, top, width, height, KPI_COLORS.get(kind, RASPBERRY))
+        if compact:
+            panel.text(left + 0.14, top + 0.15, label.upper(), 7.5, bold=True, color=MUTED, width=width - 0.26)
+            panel.text(left + 0.14, top + 0.3, value, 16, bold=True, color=DARK, width=width - 0.26)
+            panel.text(left + 0.14, top + height - 0.22, note, 7.5, color=MUTED, width=width - 0.26)
+            continue
         panel.text(left + 0.16, top + 0.2, label.upper(), 8.5, bold=True, color=MUTED, width=width - 0.3)
         panel.text(left + 0.16, top + 0.42, value, 22, bold=True, color=DARK, width=width - 0.3)
         panel.text(left + 0.16, top + height - 0.3, note, 8.5, color=MUTED, width=width - 0.3)
 
 
 def _bar_card(panel: Panel, left: float, top: float, width: float, height: float, title: str,
-              items: list[tuple[str, int, str]], *, label_above: bool = False) -> None:
-    """A breakdown card: a bar per value, longest first, as in the Executive Summary of the page."""
+              items: list[tuple[str, int, str]], *, label_above: bool = False, compact: bool = False) -> None:
+    """A breakdown card: a bar per value, longest first, as in the Executive Summary of the page.
+
+    ``compact`` cards (the one-slide Executive Summary) use smaller text and rows.
+    """
     panel.card(left, top, width, height)
-    panel.text(left + 0.18, top + 0.16, title, 12, bold=True, color=DARK, width=width - 0.36)
-    row = 0.42 if label_above else 0.3
-    rows = max(1, int((height - 0.6) / row))
+    title_size, label_size, pad = (9.5, 7.5, 0.12) if compact else (12, 9, 0.18)
+    panel.text(left + pad, top + (0.12 if compact else 0.16), title, title_size, bold=True, color=DARK, width=width - 2 * pad)
+    row = (0.34 if label_above else 0.235) if compact else (0.42 if label_above else 0.3)
+    first = 0.46 if compact else 0.58
+    rows = max(1, int((height - first + row / 2) / row))
     shown = items[:rows]
     if not shown:
-        panel.text(left + 0.18, top + 0.6, 'No calls.', 9, color=MUTED)
+        panel.text(left + pad, top + first, 'No calls.', label_size, color=MUTED)
         return
     maximum = max(1, *(count for _label, count, _color in shown))
-    label_width = 0 if label_above else min(1.6, width * 0.38)
-    count_width = 0.6
+    label_width = 0 if label_above else min(1.6, width * (0.42 if compact else 0.38))
+    count_width = 0.42 if compact else 0.6
+    gap = 0.06 if compact else 0.1
+    thickness = 0.045 if compact else 0.06
     for index, (label, count, color) in enumerate(shown):
-        y = top + 0.58 + index * row
-        track_left = left + 0.18 + label_width + (0 if label_above else 0.1)
-        track_width = width - 0.36 - label_width - (0 if label_above else 0.1) - count_width
+        y = top + first + index * row
+        track_left = left + pad + label_width + (0 if label_above else gap)
+        track_width = width - 2 * pad - label_width - (0 if label_above else gap) - count_width
         if label_above:
-            panel.text(left + 0.18, y - 0.08, label, 8.5, bold=True, color=TEXT, width=width - 0.36)
-            y += 0.16
+            panel.text(left + pad, y - 0.08, label, label_size - 0.5, bold=True, color=TEXT, width=width - 2 * pad)
+            y += 0.14 if compact else 0.16
         else:
-            panel.text(left + 0.18, y, label, 9, bold=True, color=TEXT, width=label_width, anchor='lm')
-        bar_top, bar_bottom = _px(y - 0.06), _px(y + 0.06)
-        panel.draw.rounded_rectangle([_px(track_left), bar_top, _px(track_left + track_width), bar_bottom], radius=_px(0.06), fill=TRACK)
+            panel.text(left + pad, y, label, label_size, bold=True, color=TEXT, width=label_width, anchor='lm')
+        bar_top, bar_bottom = _px(y - thickness), _px(y + thickness)
+        panel.draw.rounded_rectangle([_px(track_left), bar_top, _px(track_left + track_width), bar_bottom], radius=_px(thickness), fill=TRACK)
         fill = max(0.05, track_width * count / maximum)
-        panel.draw.rounded_rectangle([_px(track_left), bar_top, _px(track_left + fill), bar_bottom], radius=_px(0.06), fill=color or RASPBERRY)
-        panel.text(left + width - 0.18, y, _number(count), 9, bold=True, color=DARK, anchor='rm')
+        panel.draw.rounded_rectangle([_px(track_left), bar_top, _px(track_left + fill), bar_bottom], radius=_px(thickness), fill=color or RASPBERRY)
+        panel.text(left + width - pad, y, _number(count), label_size, bold=True, color=DARK, anchor='rm')
 
 
 def _donut_card(panel: Panel, left: float, top: float, width: float, height: float, title: str,
@@ -153,13 +167,21 @@ def _donut_card(panel: Panel, left: float, top: float, width: float, height: flo
         panel.text(left + 0.36, y, label, 8.5, bold=True, color=TEXT, width=width - 0.62 - value_width, anchor='lm')
         panel.text(left + width - 0.16, y, value, 8, color=MUTED, anchor='rm')
 
+def campaign_label(value: str) -> str:
+    """A campaign as every chart and table shows it (UK_Q2_SA_2026 reads 2026-Q2-SA)."""
+    from src.modules.column_names import compact_campaign_value
+
+    return compact_campaign_value(value) or value
+
+
 def _items(distribution: dict[str, Any], colours: dict[tuple[str, str], str]) -> list[tuple[str, int, str]]:
     field = distribution.get('field') or ''
     empty = 'Unassigned' if field in {'team', 'assignee'} else 'Not classified'
     items = []
     for index, item in enumerate(distribution.get('items') or []):
         value = str(item.get('value') or '')
-        label = item.get('label') or (SERVICE_LABELS.get(value, value) if field == 'service' else value) or empty
+        shown = SERVICE_LABELS.get(value, value) if field == 'service' else campaign_label(value) if field == 'campaign' else value
+        label = item.get('label') or shown or empty
         colour = item.get('color') or colours.get((field, value)) or PALETTE[index % len(PALETTE)]
         items.append((str(label), int(item.get('count') or 0), colour))
     return items
@@ -168,38 +190,40 @@ def _items(distribution: dict[str, Any], colours: dict[tuple[str, str], str]) ->
 def _option_colours(options: dict[str, Any]) -> dict[tuple[str, str], str]:
     colours = {('status', item['name']): item['color'] for item in options.get('statuses') or [] if item.get('color')}
     colours.update({('team', item['name']): item['color'] for item in options.get('teams') or [] if item.get('color')})
+    # The root domains in their colours, from the Root Cause Analysis of the report.
+    domains = (options.get('root_causes') or {}).get('domains') or []
+    colours.update({('root_domain', item['value']): item['color'] for item in domains if item.get('color')})
     return colours
 
 
 def executive_summary_panels(summary: dict[str, Any], breakdowns: list[dict[str, Any]], options: dict[str, Any]) -> list[tuple[str, BytesIO]]:
-    """The Executive Summary: the indicator cards with the first breakdowns, then the other breakdowns three at a time."""
+    """The Executive Summary on one slide: the indicator cards above and every breakdown in a grid of two rows."""
     total = int(summary.get('total') or 0)
     colours = _option_colours(options)
     cards = [
         ('Non-Qualified Calls', _number(total), 'Calls and tests that did not complete', 'total'),
         ('Open', _number(summary.get('open')), f"{_share(summary.get('open') or 0, total)} still under follow-up", 'open'),
         ('Closed', _number(summary.get('closed')), f"{_share(summary.get('closed') or 0, total)} resolved or not applicable", 'closed'),
+        ('Attended', _number(summary.get('attended')), f"{_share(summary.get('attended') or 0, total)} followed up or commented", 'attended'),
         ('With Team', _number(summary.get('with_team')), f"{_share(summary.get('with_team') or 0, total)} have a responsible team", 'team'),
         ('Commented', _number(summary.get('commented')), f"{_share(summary.get('commented') or 0, total)} have comments", 'commented'),
     ]
-    regular = [breakdown for breakdown in breakdowns if breakdown.get('field') != 'dataset_id']
-    wide = [breakdown for breakdown in breakdowns if breakdown.get('field') == 'dataset_id']
-    panels = []
-    first = Panel()
-    _kpi_row(first, cards, 0, 1.25)
-    _bar_row(first, regular[:3], colours, 1.45, first.height - 1.45)
-    panels.append(('Executive Summary', first.png()))
-    rest = regular[3:]
-    for index in range(0, len(rest), 3):
-        panel = Panel()
-        _bar_row(panel, rest[index:index + 3], colours, 0, panel.height)
-        pages = (len(rest) + 2) // 3
-        panels.append(('Executive Summary · Breakdowns' + (f' · {index // 3 + 1}/{pages}' if pages > 1 else ''), panel.png()))
-    for breakdown in wide:
-        panel = Panel()
-        _bar_card(panel, 0, 0, panel.width, panel.height, breakdown['label'], _items(breakdown, colours), label_above=True)
-        panels.append((f"Executive Summary · {breakdown['label'].removeprefix('By ')}", panel.png()))
-    return panels
+    panel = Panel()
+    kpi_height = 0.82
+    _kpi_row(panel, cards, 0, kpi_height, compact=True)
+    shown = breakdowns[:12]
+    if shown:
+        gap = 0.15
+        rows = 1 if len(shown) <= 4 else 2
+        columns = -(-len(shown) // rows)
+        top = kpi_height + gap
+        width = (panel.width - gap * (columns - 1)) / columns
+        height = (panel.height - top - gap * (rows - 1)) / rows
+        for index, breakdown in enumerate(shown):
+            row, column = divmod(index, columns)
+            _bar_card(panel, column * (width + gap), top + row * (height + gap), width, height, breakdown['label'],
+                      _items(breakdown, colours), compact=True)
+    return [('Executive Summary', panel.png())]
 
 
 def _bar_row(panel: Panel, breakdowns: list[dict[str, Any]], colours: dict[tuple[str, str], str], top: float, height: float) -> None:
@@ -374,4 +398,38 @@ def table_panels(title: str, columns: list[str], rows: list[list[str]], rows_per
                            anchor='rm' if numeric else 'lm')
                 x += widths[index]
         panels.append((title + (f' · {number}/{len(pages)}' if len(pages) > 1 else ''), panel.png()))
+    return panels
+
+
+def root_cause_panels(stats: dict[str, Any]) -> list[tuple[str, BytesIO]]:
+    """The Root Cause Analysis: the calls per domain and per cause, and Classic vs WhatsApp per domain."""
+    summary = stats.get('summary') or {}
+    total = int(summary.get('total') or 0)
+    cards = [
+        ('Calls', _number(total), 'Non-Qualified Calls of the selection', 'total'),
+        ('Labelled', _number(summary.get('labelled')), f"{_share(summary.get('labelled') or 0, total)} have a root cause", 'closed'),
+        ('Suggested', _number(summary.get('suggested')),
+         'Counted with their suggested root cause' if stats.get('include_suggestions') else 'Not counted', 'team'),
+        ('Not Classified', _number(summary.get('unclassified')), f"{_share(summary.get('unclassified') or 0, total)} without a root cause", 'open'),
+    ]
+    first = Panel()
+    _kpi_row(first, cards, 0, 1.25)
+    gap = 0.18
+    half = (first.width - gap) / 2
+    _bar_card(first, 0, 1.45, half, first.height - 1.45, 'By Root Domain',
+              [(item['value'], int(item['count']), item.get('color') or RASPBERRY) for item in stats.get('domains') or []])
+    _bar_card(first, half + gap, 1.45, half, first.height - 1.45, 'By Root Cause',
+              [(f"{item['domain']} · {item['cause']}", int(item['count']), item.get('color') or RASPBERRY)
+               for item in stats.get('causes') or []])
+    panels = [('Root Cause Analysis', first.png())]
+    colours = {item['value']: item.get('color') or RASPBERRY for item in stats.get('domains') or []}
+    types = stats.get('call_types') or []
+    if types:
+        panel = Panel()
+        width = (panel.width - gap * (len(types) - 1)) / len(types)
+        for index, row in enumerate(types):
+            items = [(name, int(row['counts'].get(name, 0)), colours.get(name, RASPBERRY))
+                     for name in stats.get('columns') or [] if row['counts'].get(name)]
+            _donut_card(panel, index * (width + gap), 0, width, panel.height, f"{row['name']} · {_number(row['total'])} calls", items)
+        panels.append(('Root Cause Analysis · Classic vs WhatsApp', panel.png()))
     return panels

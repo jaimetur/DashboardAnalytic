@@ -25,17 +25,19 @@ from uuid import uuid4
 import numpy as np
 import pandas as pd
 
-from src.modules.column_names import column_identity, compact_campaign_value, operator_vendor_filter_values, sort_vendor_values, vendor_filter_values
+from src.modules.column_names import campaign_sort_key, column_identity, compact_campaign_value, operator_vendor_filter_values, vendor_filter_values
+from src.modules.mapping_order import swap_operator_vendor, swap_vendor_operator
+from src.modules.value_maps import ValueMapper, field_kind
 from src.modules.mapping_order import dimension_order_key
 from src.modules.output_layout import NETWORK_INSIGHTS_FOLDER, module_output_dir
 
 
 NETWORK_INSIGHTS_KINDS = ('data', 'voice', 'speech')
 # Bump when the normalised samples or the analysis payload change shape.
-SAMPLES_CACHE_VERSION = 3
-ANALYSIS_CACHE_VERSION = 5
+SAMPLES_CACHE_VERSION = 4
+ANALYSIS_CACHE_VERSION = 6
 INVENTORY_CACHE_VERSION = 4
-OBSERVED_CACHE_VERSION = 7
+OBSERVED_CACHE_VERSION = 8
 # Columns of the Observed Sites/Cells (from CDRs) tables.
 OBSERVED_COLUMNS = (
     'Operator', 'Vendor', 'Region', 'Cluster', 'City', 'Technology', 'Site_ID', 'Cell_ID', 'Band',
@@ -256,6 +258,9 @@ def normalise_samples(frame: pd.DataFrame, kind: str, columns: dict[str, str]) -
         result[field] = values.fillna('').astype(str).str.strip()
     campaigns = {value: compact_campaign_value(value) or value for value in pd.unique(result['campaign'])}
     result['campaign'] = result['campaign'].map(campaigns)
+    groups = [{'canonical': name} for name in pd.unique(result['operator']) if name]
+    swapped = {value: swap_operator_vendor(value, groups) for value in pd.unique(result['operator_vendor'])}
+    result['vendor_operator'] = result['operator_vendor'].map(swapped)
     for field in ('latitude', 'longitude', 'lte_rsrp', 'nr_rsrp', 'lte_sinr', 'nr_sinr', 'lte_bandwidth', 'nr_bandwidth'):
         source = columns.get(field)
         result[field] = pd.to_numeric(frame[source], errors='coerce') if source in frame.columns else math.nan
@@ -819,7 +824,8 @@ def operator_family(name: object) -> str:
 
 
 SAMPLE_FILTERS = (
-    ('operator', 'operators'), ('operator_vendor', 'operator_vendors'), ('vendor', 'vendors'), ('region', 'regions'),
+    ('operator', 'operators'), ('operator_vendor', 'operator_vendors'), ('vendor_operator', 'vendor_operators'),
+    ('vendor', 'vendors'), ('region', 'regions'),
     ('cluster', 'clusters'), ('city', 'cities'), ('campaign', 'campaigns'),
 )
 
@@ -832,7 +838,7 @@ def filter_samples(samples: pd.DataFrame, request: Any) -> pd.DataFrame:
         values = list(getattr(request, key, None) or [])
         if field == 'vendor':
             values = vendor_filter_values(values, operators)
-        elif field == 'operator_vendor':
+        elif field in {'operator_vendor', 'vendor_operator'}:
             values = operator_vendor_filter_values(values, operators)
         wanted = {str(value).casefold() for value in values if str(value).strip()}
         if wanted and field in filtered:
@@ -1091,6 +1097,7 @@ def install_network_insights_routes(core: Any) -> None:
         group: list[str] | str = Field(default_factory=lambda: ['operator', 'campaign'])
         operators: list[str] = Field(default_factory=list)
         operator_vendors: list[str] = Field(default_factory=list)
+        vendor_operators: list[str] = Field(default_factory=list)
         vendors: list[str] = Field(default_factory=list)
         campaigns: list[str] = Field(default_factory=list)
         regions: list[str] = Field(default_factory=list)
@@ -1189,7 +1196,8 @@ def install_network_insights_routes(core: Any) -> None:
             'version': SAMPLES_CACHE_VERSION,
             'database': str(Path(task_repository.db_path).resolve()),
             'datasets': {kind: [(dataset_id, available[dataset_id]['updated_at']) for dataset_id in ids] for kind, ids in selected.items()},
-            'mappings': task_repository.chart_mapping_settings().get('operator_mappings'),
+            'mappings': {key: value for key, value in task_repository.chart_mapping_settings().items()
+                         if key in {'operator_mappings', 'vendor_mappings'}},
         }, sort_keys=True, default=str)
         return hashlib.sha256(fingerprint.encode()).hexdigest(), selected
 
@@ -1203,7 +1211,9 @@ def install_network_insights_routes(core: Any) -> None:
         # Each CDR's samples are stored on their own, so adding or removing a
         # CDR from the selection only reads the CDRs not analysed before.
         revisions = {row['id']: row['updated_at'] for row in ready_cdrs(task_repository)}
-        mappings = task_repository.chart_mapping_settings().get('operator_mappings')
+        # The samples hold mapped Operators and Vendors: a change of either map reads them again.
+        settings = task_repository.chart_mapping_settings()
+        mappings = {'operator': settings.get('operator_mappings'), 'vendor': settings.get('vendor_mappings')}
         pairs = [(kind, dataset_id) for kind, ids in selected.items() for dataset_id in ids]
         # CDRs not read before are read in parallel; SQLite reads release the GIL.
         with ThreadPoolExecutor(max_workers=max(1, min(4, len(pairs)))) as executor:
@@ -1312,7 +1322,7 @@ def install_network_insights_routes(core: Any) -> None:
         """Filter values of the selected CDRs from their catalogues; vendor_only returns the vendor fields."""
         task_repository = bound_repository()
         available = {row['id']: row for row in ready_cdrs(task_repository)}
-        fields = ('operator_vendor', 'vendor') if vendor_only else ('operator', 'region', 'cluster', 'city', 'campaign')
+        fields = ('operator_vendor', 'vendor_operator', 'vendor') if vendor_only else ('operator', 'region', 'cluster', 'city', 'campaign')
         values = {field: set() for field in fields}
         mappings = task_repository.chart_mapping_settings()
         selected = {dataset_id: kind for kind in NETWORK_INSIGHTS_KINDS
@@ -1331,21 +1341,20 @@ def install_network_insights_routes(core: Any) -> None:
                 column = columns.get('cluster')
                 cluster_values = task_repository.list_distinct_dataset_row_values(dataset_id, column, limit=None) if column else []
                 task_repository.set_cdr_catalogue_clusters(dataset_id, cluster_values)
-        catalogue_keys = {'operator_vendor': 'vendors', 'vendor': 'vendors_only', 'city': 'cities'}
+        catalogue_keys = {'operator_vendor': 'vendors', 'vendor_operator': 'vendor_operators', 'vendor': 'vendors_only', 'city': 'cities'}
         catalogues = task_repository.cdr_catalogues_by_dataset(selected)
         for catalogue in catalogues.values():
             for field in values:
                 values[field].update(catalogue.get(catalogue_keys.get(field, field + 's'), []))
-        if values.get('operator'):
-            frame = pd.DataFrame({'Operator': sorted(values['operator'])})
-            frame = core.apply_operator_mappings(frame, mappings.get('operator_mappings') or {})
-            frame.attrs.update(mappings)
-            frame = core.normalise_operator_aliases(frame)
-            values['operator'] = set(frame['Operator'].dropna().astype(str))
+        # Operators and Vendors with their Operator and Vendor Maps labels, as in the samples.
+        mapper = ValueMapper.from_settings(mappings)
+        for field in ('operator', 'operator_vendor', 'vendor_operator', 'vendor'):
+            if values.get(field):
+                values[field] = mapper.values(field_kind(field), values[field])
         if 'campaign' in values:
             values['campaign'] = {compact_campaign_value(value) or value for value in values['campaign']}
         return {'options': {field + 's' if field != 'city' else 'cities': (
-            sort_vendor_values if field in {'operator_vendor', 'vendor'} else lambda items: sorted(items, key=str.casefold)
+            list if field in {'operator', 'operator_vendor', 'vendor_operator', 'vendor'} else lambda items: sorted(items, key=str.casefold)
         )([value for value in items if str(value).strip()]) for field, items in values.items()}}
 
     def analysis_key(task_repository, request: AnalysisRequest) -> str:
@@ -1408,11 +1417,12 @@ def install_network_insights_routes(core: Any) -> None:
         options = {
             'operators': [value for value in dict.fromkeys(samples['operator']) if value],
             'operator_vendors': sorted({value for value in samples['operator_vendor'] if value}, key=str.casefold),
+            'vendor_operators': sorted({value for value in samples['vendor_operator'] if value}, key=str.casefold),
             'vendors': sorted({value for value in samples['vendor'] if value}, key=str.casefold),
             'regions': sorted({value for value in samples['region'] if value}, key=str.casefold),
             'clusters': sorted({value for value in samples['cluster'] if value}, key=str.casefold),
             'cities': sorted({value for value in samples['city'] if value}, key=str.casefold),
-            'campaigns': sorted({value for value in samples['campaign'] if value}, key=str.casefold),
+            'campaigns': sorted({value for value in samples['campaign'] if value}, key=campaign_sort_key),
         }
         filtered = filter_samples(samples, request)
         if filtered.empty:
@@ -1658,7 +1668,10 @@ def install_network_insights_routes(core: Any) -> None:
         frame = index['frame']
         normalise = inventory_filter_normalizer(task_repository)
         mask = pd.Series(True, index=frame.index)
-        for field, values in (('Operator', request.operators), ('Operator_Vendor', request.operator_vendors),
+        operator_groups = [{'canonical': name} for name in pd.unique(frame['Operator']) if name] if 'Operator' in frame else []
+        operator_vendors = [*request.operator_vendors,
+                            *(swap_vendor_operator(value, operator_groups) for value in request.vendor_operators)]
+        for field, values in (('Operator', request.operators), ('Operator_Vendor', operator_vendors),
                               ('Vendor', request.vendors), ('Region', request.regions),
                               ('Cluster', request.clusters), ('City', request.cities)):
             wanted = {normalise(value, field) for value in values if str(value).strip()}
@@ -1673,7 +1686,7 @@ def install_network_insights_routes(core: Any) -> None:
         """One row per LTE cell (or site without cell identity) observed in the selected CDRs."""
         samples_identity, _selected = samples_key(task_repository, request.datasets)
         selection = {key: value for key, value in request.model_dump().items()
-                     if key in {'operators', 'operator_vendors', 'vendors', 'campaigns', 'regions', 'clusters', 'cities', 'technology'}}
+                     if key in {'operators', 'operator_vendors', 'vendor_operators', 'vendors', 'campaigns', 'regions', 'clusters', 'cities', 'technology'}}
         digest = hashlib.sha256(json.dumps([OBSERVED_CACHE_VERSION, samples_identity, selection,
                                             inventory_polygon_sources(task_repository)], sort_keys=True, default=str).encode()).hexdigest()
 

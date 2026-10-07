@@ -60,7 +60,7 @@ function vendorOnlyFilterChoices(field, values, additionalOperators = []) {
     .map(value => operatorAliases.get(identity(value)) || identity(value)));
   for (const canonical of operatorAliases.values()) operators.add(canonical);
   const entries = values.map(value => ({value, label: String(value ?? ''), operator: false}));
-  if (!['vendor', 'vendoronly', 'vendorv3', 'operatorvendor', 'opvendor'].includes(identity(field))) return entries;
+  if (!['vendor', 'vendoronly', 'vendorv3', 'operatorvendor', 'opvendor', 'vendoroperator'].includes(identity(field))) return entries;
   for (const entry of entries) {
     entry.label = entry.label.replace(/\s+- All(?: Vendors)?$/i, '');
     const key = identity(entry.label);
@@ -76,8 +76,43 @@ function vendorOnlyFilterChoices(field, values, additionalOperators = []) {
     const vendorKey = identity(canonical || entry.value);
     return ['mixed', 'othervendor', 'allvendor'].some(part => vendorKey.includes(part)) ? 1 : 0;
   };
-  return entries.sort((left, right) => rank(left) - rank(right)
-    || String(left.label ?? '').localeCompare(String(right.label ?? ''), undefined, {sensitivity: 'base'}));
+  // Then the order of the Operator and Vendor Maps (as mapping_order.py): Operator_Vendor by its Operator and,
+  // within one Operator, by its Vendor; Operators without a Vendor after every Operator with Vendors.
+  const operatorOrder = (configured.operator_order || []).map(identity);
+  const vendorOrder = (configured.vendor_order || []).map(identity);
+  const position = (order, aliases, value) => {
+    const key = identity(value);
+    const canonical = aliases.get(key) || key;
+    const index = order.indexOf(canonical);
+    return index < 0 ? order.length : index;
+  };
+  const vendorCanonical = new Map(Object.entries(configured.vendors || {}).map(([alias, canonical]) => [identity(alias), identity(canonical)]));
+  const operatorLabels = Object.keys(configured.operators || {}).sort((left, right) => right.length - left.length);
+  const isOperatorVendor = ['operatorvendor', 'opvendor'].includes(identity(field));
+  const isVendorOperator = identity(field) === 'vendoroperator';
+  const mapKey = (entry) => {
+    const label = String(entry.label ?? '').replace(/\s+- All(?: Vendors)?$/i, '');
+    const entryRank = rank(entry);
+    if (entryRank === 2) return [isOperatorVendor || isVendorOperator ? 1 : 2, position(operatorOrder, operatorAliases, label), 0, 0];
+    if (isVendorOperator) {
+      const operator = operatorLabels.find((name) => label.toLocaleLowerCase().endsWith(`_${name.toLocaleLowerCase()}`));
+      const vendor = operator ? label.slice(0, label.length - operator.length - 1) : label;
+      return [0, entryRank, position(vendorOrder, vendorCanonical, vendor),
+        operator ? position(operatorOrder, operatorAliases, operator) : operatorOrder.length];
+    }
+    if (isOperatorVendor) {
+      const operator = operatorLabels.find((name) => label.toLocaleLowerCase().startsWith(`${name.toLocaleLowerCase()}_`));
+      const vendor = operator ? label.slice(operator.length + 1) : label;
+      return [0, operator ? position(operatorOrder, operatorAliases, operator) : operatorOrder.length,
+        entryRank, position(vendorOrder, vendorCanonical, vendor)];
+    }
+    return [entryRank, position(vendorOrder, vendorCanonical, label), 0, 0];
+  };
+  return entries.sort((left, right) => {
+    const [a, b] = [mapKey(left), mapKey(right)];
+    return a[0] - b[0] || a[1] - b[1] || a[2] - b[2] || a[3] - b[3]
+      || String(left.label ?? '').localeCompare(String(right.label ?? ''), undefined, {sensitivity: 'base'});
+  });
 }
 window.vendorOnlyFilterChoices = vendorOnlyFilterChoices;
 
@@ -5302,7 +5337,7 @@ function setupWorkspaceUserPickers() {
 
 // Workspace content exported from the active workspace; its Full Workspace package already contains all of it.
 const workspaceElementExportTargets = new Set([
-  'dashboards', 'slides-templates', 'main-cities', 'operator-mappings', 'vendor-mappings', 'scoring-configuration',
+  'dashboards', 'slides-templates', 'main-cities', 'mappings-reference-data', 'scoring-configuration',
   'auto-calculated-fields', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking',
 ]);
 
@@ -5356,6 +5391,21 @@ function normalizeExportTargetSelection(select) {
   });
 }
 
+// Campaign selectors show the labels and order of the workspace Campaign Maps
+// (campaign_labels.js); option values keep the original campaigns.
+function isCampaignSelect(select, field) {
+  return [field, select.id, select.name].some((name) => /(^|[\s_-])campaigns?$/i.test(String(name || '').trim()));
+}
+
+function labelCampaignOptions(select) {
+  if (typeof globalThis.campaignLabel !== 'function') return;
+  const options = Array.from(select.options).filter((option) => option.value && option.parentElement === select);
+  options.forEach((option) => { option.textContent = globalThis.campaignLabel(option.value) || option.textContent; });
+  if (typeof globalThis.campaignCompare !== 'function' || options.length < 2) return;
+  const sorted = [...options].sort((left, right) => globalThis.campaignCompare(left.value, right.value));
+  if (sorted.some((option, index) => option !== options[index])) sorted.forEach((option) => select.appendChild(option));
+}
+
 function setupCustomMultiSelects() {
   document.querySelectorAll('select[multiple]:not([data-native-multiselect])').forEach((select) => {
     if (select.dataset.multiselectReady === '1') return;
@@ -5375,6 +5425,7 @@ function setupCustomMultiSelects() {
         return option;
       }));
     }
+    if (isCampaignSelect(select, filterField)) labelCampaignOptions(select);
 
     const shell = document.createElement('div');
     shell.className = 'multiselect-shell';
@@ -6640,9 +6691,9 @@ function importWarningDetails(payload) {
       message: 'Choose the destination workspaces next. The original workspace is preselected when it exists. Dashboard definitions and saved filters will be replaced in those workspaces; generated caches are not imported.',
     };
   }
-  if (kind === 'operator-mappings') {
+  if (kind === 'mappings-reference-data') {
     return {
-      title: 'Overwrite Operator & Vendor Maps?',
+      title: 'Overwrite Mappings & Reference Data?',
       message: 'Choose the destination workspaces next. Their complete Operator and Vendor aliases, order and theme colors will be replaced. Stored CDR values will not be modified or rematerialized.',
     };
   }
@@ -6689,7 +6740,7 @@ function importPackageContents(payload) {
   const labels = {
     config: 'Application Config', workspace: 'Full Workspace', 'full-environment': 'Full Environment',
     dashboards: 'Dashboards', 'slides-templates': 'Report Templates',
-    'operator-mappings': 'Operator & Vendor Maps', 'main-cities': 'Main Cities',
+    'mappings-reference-data': 'Mappings & Reference Data', 'main-cities': 'Main Cities',
     'scoring-configuration': 'Scoring & GAP Analysis Configuration',
     'auto-calculated-fields': 'Auto-calculated Fields',
     'query-builder-queries': 'Query Builder Queries', 'reporting-jobs': 'Reporting Jobs',
@@ -6697,7 +6748,7 @@ function importPackageContents(payload) {
   };
   const targets = Array.isArray(payload.targets) && payload.targets.length ? payload.targets : [payload.kind];
   const workspaceTargets = new Set([
-    'dashboards', 'slides-templates', 'main-cities', 'operator-mappings',
+    'dashboards', 'slides-templates', 'main-cities', 'mappings-reference-data',
     'scoring-configuration', 'auto-calculated-fields',
   ]);
   const workspaceContents = targets.length && targets.every((item) => workspaceTargets.has(String(item)));
@@ -6720,7 +6771,7 @@ function selectAutoCalculatedFieldWorkspaces(workspaces, kind = 'auto-calculated
     ? 'Templates will be imported into every selected workspace. The original workspace is preselected when it exists. Matching template names will be overwritten.'
     : kind === 'dashboards'
       ? 'Dashboard definitions and their saved filters will replace the Dashboard list in every selected workspace. The original workspace is preselected when present; generated caches are not imported.'
-      : kind === 'operator-mappings'
+      : kind === 'mappings-reference-data'
         ? 'The complete Operator/Vendor mapping and color configuration will replace aliases, order and theme colors in every selected workspace. Stored CDR values will remain unchanged.'
       : kind === 'bundle'
         ? 'Workspace elements in the selection will be imported into every selected workspace. Full Workspace packages keep their own workspace identity.'
@@ -7295,7 +7346,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
         'full-environment': 'Full Environment',
         dashboards: 'Dashboards',
         'slides-templates': 'Report Templates',
-        'operator-mappings': 'Operator & Vendor Maps',
+        'mappings-reference-data': 'Mappings & Reference Data',
         'main-cities': 'Main Cities',
         'scoring-configuration': 'Scoring & GAP Analysis Configuration',
         'auto-calculated-fields': 'Auto-calculated Fields',
@@ -7304,7 +7355,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
         output: 'Generated outputs',
         report_templates: 'Report Templates',
         main_cities: 'Main Cities',
-        operator_mappings: 'Operator & Vendor Maps',
+        mappings_reference_data: 'Mappings & Reference Data',
         scoring_configuration: 'Scoring & GAP Analysis Configuration',
         auto_calculated_fields: 'Auto-calculated Fields',
         'query-builder-queries': 'Query Builder Queries',
@@ -7332,7 +7383,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
             ? 'Next, choose the destination workspaces. The original workspace will be preselected when present. Matching templates will be overwritten; CDR tables will not be rebuilt.'
             : offer.kind === 'dashboards'
               ? 'Next, choose the destination workspaces. The original workspace will be preselected when present. Dashboard definitions and saved filters will be restored; generated caches are not transferred.'
-            : offer.kind === 'operator-mappings'
+            : offer.kind === 'mappings-reference-data'
               ? 'Next, choose the destination workspaces. Their complete Operator/Vendor aliases, order and theme colors will be replaced without modifying stored CDR values.'
           : 'After the complete package is received, it will be imported automatically and may overwrite matching configuration or workspaces.';
         const copyHtml = [
@@ -7350,7 +7401,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
         confirmOverlay?.classList.remove('incoming-transfer-confirm', 'incoming-transfer-offer');
       }
       let destinationWorkspaceIds = [];
-      if (accepted && (offer.requires_destination_workspaces || ['auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings'].includes(offer.kind))) {
+      if (accepted && (offer.requires_destination_workspaces || ['auto-calculated-fields', 'slides-templates', 'dashboards', 'mappings-reference-data'].includes(offer.kind))) {
         const matchingIds = (payload.destination_workspaces || []).filter((workspace) =>
           (offer.workspaces || []).some((name) => String(name).toLowerCase() === workspace.name.toLowerCase())
         ).map((workspace) => workspace.id);

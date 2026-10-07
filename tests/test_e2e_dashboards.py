@@ -694,10 +694,10 @@ def test_dashboard_campaigns_keep_their_nr_mode_suffix(client):
 
     assert options.status_code == 200, options.text
     # Compact labels keep an SA/NSA suffix; a Campaign filter limits them.
-    assert options.json()['campaigns'] == ['2026-Q1', '2026-Q2_SA']
+    assert options.json()['campaigns'] == ['2026-Q1', '2026-Q2-SA']
     payload['filters'] = {'Campaign': ['NetCheck_UK_2026_Q2_SA']}
     filtered = client.post('/api/e2e-dashboards/geography-options', json=payload)
-    assert filtered.json()['campaigns'] == ['2026-Q2_SA']
+    assert filtered.json()['campaigns'] == ['2026-Q2-SA']
 
     # The PPT cover lists the Campaigns above the Scope in a larger font.
     core.repository.add_report_template('nsa', 'Campaign cover', (
@@ -716,17 +716,17 @@ def test_dashboard_campaigns_keep_their_nr_mode_suffix(client):
             break
         time.sleep(0.05)
     assert job['status'] == 'ready', job
-    assert job['cover']['campaigns'] == 'Campaigns: 2026-Q1, 2026-Q2_SA'
+    assert job['cover']['campaigns'] == 'Campaigns: 2026-Q1, 2026-Q2-SA'
     # The job Filters list the Campaigns right above the Operators.
-    assert job['filters'].index('Campaigns: 2026-Q1, 2026-Q2_SA') + 1 == job['filters'].index('Operator: All Operators')
+    assert job['filters'].index('Campaigns: 2026-Q1, 2026-Q2-SA') + 1 == job['filters'].index('Operator: All Operators')
     with core.repository.connection() as connection:
         row = connection.execute('SELECT output_path FROM dashboard_ppt_jobs WHERE id = ?', (job_id,)).fetchone()
     # Exports comparing several Campaigns name them at the end of the file name.
-    assert row['output_path'].endswith(' - Operator Comparison - 2026-Q1_vs_2026-Q2_SA.pptx')
+    assert row['output_path'].endswith(' - Operator Comparison - 2026-Q1_vs_2026-Q2-SA.pptx')
     slide = Presentation(row['output_path']).slides[0]
     details = {shape.name: shape for shape in slide.shapes if shape.name.startswith('dashboard-ppt-')}
     campaigns, scope = details['dashboard-ppt-campaigns'], details['dashboard-ppt-scope']
-    assert campaigns.text == 'Campaigns: 2026-Q1, 2026-Q2_SA'
+    assert campaigns.text == 'Campaigns: 2026-Q1, 2026-Q2-SA'
     # Campaigns sit between the subtitle and the template's decorative line,
     # while the Scope and geography stay below that line.
     subtitle = next(shape for shape in slide.placeholders if shape.placeholder_format.type == 4)
@@ -1845,7 +1845,7 @@ def test_dashboards_lifecycle_and_layout(client):
     selection_key_source = dashboard_module[dashboard_module.index('def persistent_selection_key'):dashboard_module.index('def selected_date_bounds')]
     assert "'scope': definition.scope," not in selection_key_source
     assert "'schema': DASHBOARD_SELECTION_CACHE_VERSION," in selection_key_source
-    assert 'DASHBOARD_SELECTION_CACHE_VERSION = 16' in dashboard_module
+    assert 'DASHBOARD_SELECTION_CACHE_VERSION = 17' in dashboard_module
     assert "kind: sorted([" in selection_key_source
     assert "kind: sorted(set(dataset_ids))" in selection_key_source
     assert "field: sorted(set(values))" in selection_key_source
@@ -2074,7 +2074,7 @@ def test_dashboards_lifecycle_and_layout(client):
     result = client.post('/api/e2e-dashboards/prepare', json=payload)
     assert result.status_code == 200, result.text
     preview = result.json()
-    assert preview['filter_fields'] == ['Operator', 'Operator_Vendor', 'Vendor', 'Market', 'Region', 'Cluster', 'City', 'Campaign', 'RAT', 'Session Type', 'Call Status']
+    assert preview['filter_fields'] == ['Operator', 'Operator_Vendor', 'Vendor_Operator', 'Vendor', 'Market', 'Region', 'Cluster', 'City', 'Campaign', 'RAT', 'Session Type', 'Call Status']
     assert 'Technology' not in preview['options']
     assert preview['options']['Operator'] == ['A', 'B']
     assert preview['options']['City'] == ['Leeds', 'London']
@@ -3010,19 +3010,24 @@ def test_dashboard_profile_facets_show_values_outside_the_saved_filter(client, m
     assert preview.json()['options']['Operator'] == ['A', 'B']
 
 
-def test_dashboard_operator_facets_keep_the_values_stored_in_the_combined_table(client):
+def test_dashboard_operator_facets_show_and_filter_the_mapped_operators(client):
     payload = setup_dashboard(client)
     core.repository.replace_operator_mapping_group(None, 'Alpha', ['A'])
 
     preview = client.post('/api/e2e-dashboards/prepare', json=payload)
 
     assert preview.status_code == 200, preview.text
-    assert preview.json()['options']['Operator'] == ['A', 'B']
+    # The combined table stores A; the Operator Maps show it as Alpha everywhere.
+    assert preview.json()['options']['Operator'] == ['Alpha', 'B']
     options = client.post('/api/e2e-dashboards/filter-options', json={
         'definition': payload, 'field': 'Operator',
     })
     assert options.status_code == 200, options.text
-    assert options.json()['values'] == ['A', 'B']
+    assert options.json()['values'] == ['Alpha', 'B']
+    # Choosing the mapped label selects the rows stored with its source spelling.
+    filtered = client.post('/api/e2e-dashboards/prepare', json={**payload, 'filters': {'Operator': ['Alpha']}})
+    assert filtered.status_code == 200, filtered.text
+    assert sum(filtered.json()['rows'].values()) > 0
 
 
 def test_dashboard_reuses_normalized_snapshot_for_every_chart(client, monkeypatch):

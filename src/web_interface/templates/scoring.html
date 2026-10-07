@@ -147,6 +147,42 @@
   .scoring-environment-filter select { width: auto; min-width: 12rem; max-width: min(100%, 20rem); min-height: 2.1rem; padding: .32rem 1.8rem .32rem .6rem; font-size: .76rem; }
   .scoring-results-value-row select[data-scoring-gap-layout] { width: 12rem; min-width: 12rem; }
   .scoring-environment-filter[hidden] { display: none; }
+  .scoring-location-cards { display: grid; grid-template-columns: minmax(10rem, 13rem) repeat(auto-fill, minmax(12rem, 1fr)); gap: .6rem; align-items: stretch; }
+  .scoring-location-panel { grid-row: span 2; display: flex; flex-direction: column; justify-content: center; gap: .6rem; padding: 1rem; border-radius: 4px; background: #0b2a5b; color: #fff; text-align: center; font-size: .78rem; line-height: 1.35; }
+  .scoring-location-panel p { margin: 0; }
+  .scoring-location-panel strong { font-size: .95rem; }
+  .scoring-location-card { padding: .55rem .5rem .3rem; border-radius: 4px; background: #f2f3f5; box-shadow: 0 1px 3px rgba(23,35,45,.12); }
+  .scoring-location-card h5 { margin: 0 0 .2rem; color: #1450a8; font-size: .82rem; font-weight: 800; letter-spacing: .02em; }
+  .scoring-location-card-chart { display: block; width: 100%; height: auto; }
+  .scoring-location-legend { display: flex; justify-content: center; gap: 1.6rem; margin-top: .55rem; color: #4a5b65; font-size: .75rem; }
+  .scoring-location-legend i { display: inline-block; width: .8rem; height: .8rem; margin-right: .35rem; vertical-align: -.1rem; }
+  .scoring-trend-chart { display: block; width: 100%; min-width: 46rem; height: auto; }
+  .scoring-insight-select { margin: .2rem 0 .55rem; }
+  .scoring-insight-select select { min-width: 18rem; max-width: 100%; }
+  .scoring-insight-section { margin-top: 1.4rem; }
+  .scoring-insight-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(30rem, 1fr)); gap: 1rem; }
+  .scoring-insight-table-wrap { overflow-x: auto; }
+  .scoring-insight-banner { padding: .3rem .6rem; background: #c8102e; color: #fff; font-weight: 800; text-align: right; font-size: .85rem; }
+  .scoring-insight-table { width: 100%; min-width: 0; border-collapse: collapse; font-size: .72rem; }
+  .scoring-insight-table th { padding: .3rem .4rem; background: #e9ecef; color: #263746; text-align: left; font-weight: 750; white-space: normal; vertical-align: bottom; }
+  .scoring-insight-table th:nth-child(n+4) { min-width: 4.2rem; text-align: right; }
+  .scoring-insight-table td { padding: .18rem .4rem; border-bottom: 1px solid #eef0f2; white-space: nowrap; }
+  .scoring-insight-table tbody tr:nth-child(even) td { background-color: #f7f8f9; }
+  .scoring-insight-table .scoring-insight-number, .scoring-insight-table .scoring-insight-bar-cell { text-align: right; font-variant-numeric: tabular-nums; }
+  .scoring-insight-table .scoring-insight-total, .scoring-insight-table .scoring-insight-delta { font-weight: 800; }
+  .scoring-insight-table td.scoring-insight-bar-cell { position: relative; }
+  .scoring-insight-databar { position: absolute; left: .15rem; top: 15%; bottom: 15%; box-sizing: border-box; border: 1px solid var(--databar-color); background: linear-gradient(90deg, var(--databar-color), color-mix(in srgb, var(--databar-color) 12%, #fff)); pointer-events: none; }
+  .scoring-insight-databar-value { position: relative; }
+  .scoring-loss-map { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; align-items: start; }
+  .scoring-loss-map-figure { min-height: 12rem; color: #6b7a85; font-size: .8rem; }
+  .scoring-loss-map-svg { display: block; width: 100%; max-height: 36rem; }
+  @media (max-width: 900px) { .scoring-loss-map { grid-template-columns: minmax(0, 1fr); } }
+  .scoring-insight-reliable { text-decoration: underline; }
+  .scoring-insight-note { margin: .6rem 0 0; color: #4a5b65; font-size: .78rem; }
+  .scoring-insight-compare { max-width: 68rem; overflow-x: auto; }
+  .scoring-insight-total { margin: .5rem 0 0; text-align: right; font-weight: 800; }
+  .scoring-insight-loss { color: #c62835; }
+  .scoring-insight-gain { color: #2f8a3e; }
   .scoring-kpi-values-toggle { display: inline-flex; align-items: center; gap: .35rem; color: var(--muted); font-size: .74rem; font-weight: 750; white-space: nowrap; }
   .scoring-kpi-values-toggle input { width: 1rem; height: 1rem; margin: 0; accent-color: var(--brand); }
   .scoring-results-config-shortcuts { margin: 0; display: flex; flex-wrap: nowrap; gap: .45rem; }
@@ -367,7 +403,7 @@
               {% for dataset in kind_datasets %}
               <label class="scoring-dataset-option" data-dataset-option data-dataset-kind="{{ dataset.dataset_kind }}" data-dataset-name="{{ dataset.original_name }}" data-nr-mode="{{ dataset.nr_mode or '' }}" data-uploaded-at="{{ dataset.uploaded_at or dataset.created_at or '' }}" data-catalogue="{{ dataset.catalogue | default({}, true) | tojson | forceescape }}">
                 <input type="checkbox" value="{{ dataset.id }}" data-dataset-id>
-                <span class="scoring-dataset-copy"><strong title="{{ dataset.original_name }}">{{ dataset.original_name }}</strong><small>{{ kind_label }}{% if dataset.campaign %} · {{ dataset.campaign }}{% endif %}{% if dataset.nr_mode %} · {{ dataset.nr_mode }}{% endif %}</small></span>
+                <span class="scoring-dataset-copy"><strong title="{{ dataset.original_name }}">{{ dataset.original_name }}</strong><small>{{ kind_label }}{% if dataset.campaign %} · {{ dataset.campaign | campaign_label }}{% endif %}{% if dataset.nr_mode %} · {{ dataset.nr_mode }}{% endif %}</small></span>
               </label>
               {% endfor %}
               <p class="scoring-empty" data-kind-empty hidden>No ready {{ kind_label }} CDR datasets are available for this NR Mode.</p>
@@ -389,7 +425,7 @@
     <div class="scoring-picker" aria-labelledby="scoring-context-filters-title">
       <div class="scoring-picker-head"><strong id="scoring-context-filters-title">Context filters</strong><span>From selected CDRs</span></div>
       <div class="scoring-context-filter-grid" data-scoring-context-filters>
-        {% for level in aggregation_levels %}{% for field in (['Operator_Vendor', 'Vendor'] if level == 'Vendor' else [level]) %}
+        {% for level in aggregation_levels %}{% for field in (['Operator_Vendor', 'Vendor_Operator', 'Vendor'] if level == 'Vendor' else [level]) %}
         <label>{{ field }}
           <select multiple size="1" data-scoring-context-filter="{{ field }}" data-multiselect-auto-close="1000" data-multiselect-empty-label="All values" aria-label="Filter by {{ field }}">
             <option value="" disabled>No values</option>
@@ -534,5 +570,6 @@
 </section>
 {% endblock %}
 {% block extra_scripts %}
+<script src="{{ static_path('js/scoring_report_editor.js') }}?v={{ asset_version('js/scoring_report_editor.js') }}"></script>
 <script src="{{ static_path('js/scoring.js') }}?v={{ asset_version('js/scoring.js') }}"></script>
 {% endblock %}

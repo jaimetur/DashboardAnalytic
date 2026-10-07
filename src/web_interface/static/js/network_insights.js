@@ -124,6 +124,8 @@
   };
   // An unfiltered selector (every value or none) sends no restriction.
   const filterValues = id => (allSelected(id) ? [] : selectedValues(id));
+  // Campaigns as the workspace Campaign Maps show them (campaign_labels.js); the filter keeps the full value.
+  const campaignLabel = (value) => (globalThis.campaignLabel ? globalThis.campaignLabel(value) : String(value ?? ''));
   const fillSelector = (id, values) => {
     const control = $(id);
     const restored = pendingFilterRestore.get(id);
@@ -133,14 +135,14 @@
     control.dataset.multiselectNoValuesLabel = 'No values available';
     control.replaceChildren(...values.map(value => {
       const option = document.createElement('option');
-      option.value = value; option.textContent = value;
+      option.value = value; option.textContent = id === 'ni-campaigns' ? campaignLabel(value) : value;
       option.selected = keepAll || previous.has(value);
       return option;
     }));
     control.dispatchEvent(new Event('multiselect:options-updated'));
   };
 
-  const filterNames = ['operators', 'operator_vendors', 'vendors', 'regions', 'clusters', 'cities', 'campaigns'];
+  const filterNames = ['operators', 'operator_vendors', 'vendor_operators', 'vendors', 'regions', 'clusters', 'cities', 'campaigns'];
   const fillFilterOptions = options => {
     if (options.operators) $('ni-vendors').dataset.multiselectOperatorValues = JSON.stringify(options.operators);
     for (const field of filterNames) {
@@ -209,6 +211,7 @@
     group: selectedValues('ni-group'),
     operators: filterValues('ni-operators'),
     operator_vendors: filterValues('ni-operator_vendors'),
+    vendor_operators: filterValues('ni-vendor_operators'),
     vendors: filterValues('ni-vendors'),
     campaigns: filterValues('ni-campaigns'),
     regions: filterValues('ni-regions'),
@@ -545,7 +548,7 @@
     const host = $('ni-licensed');
     const classes = config.band_classes || [];
     if (!summary.length) {
-      host.innerHTML = `<p class="ni-pending-box"><strong>Pending input.</strong> No licensed spectrum is configured for this workspace yet. ${config.can_edit ? 'Add each Operator\'s holdings (band, duplex, class and MHz) in <a href="/workspace-config#spectrum-holdings">Workspace Config → Operator &amp; Vendor Maps → Spectrum Holdings</a>.' : 'Ask an editor to add them in Workspace Config.'}</p>`;
+      host.innerHTML = `<p class="ni-pending-box"><strong>Pending input.</strong> No licensed spectrum is configured for this workspace yet. ${config.can_edit ? 'Add each Operator\'s holdings (band, duplex, class and MHz) in <a href="/workspace-config#spectrum-holdings">Workspace Config → Mappings &amp; Reference Data → Spectrum Holdings</a>.' : 'Ask an editor to add them in Workspace Config.'}</p>`;
       return;
     }
     const maximum = Math.max(...summary.map(row => row.total), 1);

@@ -1,6 +1,6 @@
 # Workspace Config
 
-Workspace Config is a dedicated page for settings owned by the active workspace: Report Templates Management, Main Cities, Operator & Vendor Maps (including Spectrum Holdings) and Scoring & GAP Analysis Setup. These settings remain workspace-scoped and are included in the applicable import, export, transfer, backup and restore workflows.
+Workspace Config is a dedicated page for settings owned by the active workspace: Report Templates Management, Main Cities, Mappings & Reference Data (Operator, Vendor and Campaign Maps and Spectrum Holdings) and Scoring & GAP Analysis Setup. These settings remain workspace-scoped and are included in the applicable import, export, transfer, backup and restore workflows.
 
 > [!IMPORTANT]
 > **Workspace settings.** Every edit on this page belongs to the active workspace. Application Config controls shared runtime settings.
@@ -18,11 +18,11 @@ Open **Config → Workspace Config** from the main navigation at `/workspace-con
 | Report Templates Management | [Open section](#report-templates-management) |
 | Report Template Editor | [Open section](#report-template-editor) |
 | Report Template reference | [Open section](#report-template-reference) |
-| Operator & Vendor Maps | [Open section](#operator-vendor-maps) |
+| Mappings & Reference Data | [Open section](#mappings-reference-data) |
+| Campaign Maps | [Open section](#campaign-maps) |
 | Spectrum Holdings | [Open section](#spectrum-holdings) |
 | CDR type | [Open section](#cdr-type) |
 | Main Cities | [Open section](#main-cities) |
-| Non-Qualified Calls Teams | [Open section](#non-qualified-calls-teams) |
 | Portable operations | [Open section](#portable-operations) |
 | Scoring & GAP Analysis Setup | [Open section](#scoring-gap-analysis-setup) |
 
@@ -398,9 +398,9 @@ Rows sharing a `Slide` number create separate charts on one slide. They must sha
 
 Operator and Vendor aliases resolve to the canonical values configured in Workspace Config without changing the source workbook. Their table order controls Operator, Subscriber, Vendor and combined Operator_Vendor chart dimensions. Each canonical row defines its chart theme colour; multiple campaigns or operators using one identity receive contrasting shades derived from that colour.
 
-## Operator & Vendor Maps
+## Mappings & Reference Data
 
-The Operator & Vendor Maps panel contains Operator Maps, Vendor Maps and Spectrum Holdings as independently collapsible subpanels. Their light blue headers distinguish them from the dark parent header. Existing mapping controls and saved expansion states remain available inside each subpanel.
+The Mappings & Reference Data panel contains Operator Maps, Vendor Maps, Campaign Maps and Spectrum Holdings as independently collapsible subpanels. Their light blue headers distinguish them from the dark parent header. Existing mapping controls and saved expansion states remain available inside each subpanel.
 
 ### Operator Maps
 
@@ -410,7 +410,7 @@ Use **Add canonical mapping** to create a group. Change its label, aliases or co
 
 Canonical renames update exact matching references in Report Templates and saved Dashboards.
 
-The colour picker sets the group's chart theme colour; charts can derive related shades to distinguish campaigns or series. Order and colour are presentation choices, while aliases make source labels such as `Vodafone UK` resolve to the intended canonical Operator. These settings affect chart grouping, legends and template filters.
+The colour picker sets the group's chart theme colour; charts can derive related shades to distinguish campaigns or series. Order and colour are presentation choices, while aliases make source labels such as `Vodafone UK` resolve to the intended canonical Operator. Every filter, table, chart, legend and report of the tool shows the canonical Operator, and choosing it selects all its source labels; only Preview Dataset shows the source labels as they are.
 
 They do not rewrite source workbooks, stored CDR rows or combined CDR tables. Saving, moving or deleting a group clears chart caches so later views use the new settings.
 
@@ -420,7 +420,17 @@ The Vendor table has the same **Order**, **Colour**, **Canonical label**, **Mapp
 
 Renaming a canonical Vendor updates exact matching Report Template and saved Dashboard references.
 
-Vendor order determines the chart sequence for Vendor dimensions and the Vendor portion of combined `Operator_Vendor` categories. The selected colour gives a Vendor a consistent chart identity, with related shades where multiple series need distinction. Aliases reconcile different source spellings for chart display and filters; they do not alter materialized CDR values. Group changes refresh chart caches without rematerializing source data.
+Vendor order determines the chart sequence for Vendor dimensions and the Vendor portion of combined `Operator_Vendor` categories. The selected colour gives a Vendor a consistent chart identity, with related shades where multiple series need distinction. Every filter, table, chart and report shows the canonical Vendor (and the canonical Operator and Vendor of an `Operator_Vendor`), and choosing it selects all its source spellings; they do not alter materialized CDR values, which only Preview Dataset shows. Group changes refresh chart caches without rematerializing source data.
+
+### Campaign Maps
+
+Campaign Maps set how every chart, table, legend, filter and PowerPoint or Word report of the workspace names and orders campaigns. They follow a pattern rather than a list, so campaigns uploaded later, such as `2026-Q3` or `2027-Q1`, follow it without editing the map.
+
+- **Label format** writes the label from the parts read in the campaign name: `{year}` (2026), `{yy}` (26), `{quarter}` (2), `{mode}` (SA or NSA) and `{market}` (the country code, such as UK). Characters inside the braces of a marker are written only when the campaign has that part: the default `{year}-Q{quarter}{-mode}` shows `UK_Q2_2026` as `2026-Q2` and `UK_Q2_SA_2026` as `2026-Q2-SA`.
+- **Order inside a quarter** orders campaigns by year and quarter, and the campaigns of one quarter by mode: by default first the campaign without mode, then NSA, then SA. Use the arrows to change it.
+- **Exceptions** give their own label to campaigns that do not follow the pattern, one or more source campaigns per label. They are ordered by the year and quarter of their label, after the campaigns of that quarter, or first, in the table order, when the label has none. Campaigns without a year and quarter and without an exception keep their name.
+
+The **Preview** lists the campaigns of the ready CDRs of the workspace with the labels and order of the map being edited. **Default map** fills the default map; **Save Campaign Maps** applies it and refreshes chart caches. Labels are only visual: filters, stored CDR values and saved selections keep the original campaigns.
 
 ### Spectrum Holdings
 
@@ -445,17 +455,13 @@ The **Workspace Configuration** panel at the top chooses the **CDR type** of the
 
 ## Main Cities
 
-The Main Cities panel appears before Operator & Vendor Maps and lists cities found in ready CDR datasets for the active workspace. Use the center buttons to move selected or all cities between the available list and the selected list, then choose **Save Main Cities**. The setting belongs to this workspace.
+The Main Cities panel appears before Mappings & Reference Data and lists cities found in ready CDR datasets for the active workspace. Use the center buttons to move selected or all cities between the available list and the selected list, then choose **Save Main Cities**. The setting belongs to this workspace.
 
 Every City selector — Dashboard filters, the PowerPoint export, Scoring, Network Insights, Non-Qualified Calls and Reporting Jobs — offers **Main Cities** as its first option. Applying it selects the configured cities that are available in the current selection.
 
-## Non-Qualified Calls Teams
-
-When Non-Qualified Calls is active for the account, **Non-Qualified Calls Teams** lists the teams that follow up the Non-Qualified Calls of the workspace with their colour and **members**. Add, rename, reorder or remove teams and choose the workspace users of each one in its filterable selector; a user can belong to several teams. A call assigned to a team with members can only be assigned to one of them, and a team without members accepts every user. `user-viewer` accounts see the teams read-only. Teams in use by a call cannot be removed. See [Non-Qualified Calls](non-qualified-calls.md).
-
 ## Portable operations
 
-Administrators use Admin's existing **Import / Export / Transfer** and **Backup Protection** controls to move or restore workspace settings. Main Cities is a portable component alongside Report Templates and Operator & Vendor Maps; full-workspace packages and database backups also retain the setting. Spectrum Holdings travel inside the Operator & Vendor Maps package (format version 3); importing an older package leaves the destination's Spectrum Holdings unchanged.
+Administrators use Admin's existing **Import / Export / Transfer** and **Backup Protection** controls to move or restore workspace settings. Main Cities is a portable component alongside Report Templates and Mappings & Reference Data; full-workspace packages and database backups also retain the setting. The Mappings & Reference Data package (`mappings-reference-data/mappings-reference-data.json`) contains the Operator and Vendor Maps, Spectrum Holdings and Campaign Maps, and importing it replaces all of them in the destination workspace.
 
 For global runtime settings, see [Application Config](app-config.md). Admin's [Database Viewer](administrator-config.md#database-viewer) documents the underlying Operator and Vendor mapping tables.
 
@@ -491,7 +497,6 @@ Choose the environment to edit, or create, rename or delete one. Keep at least o
 | Edit weights by Points | Edit absolute KPI allocations. |
 | Edit weights by Weight (%) | Edit relative shares while preserving the environment total and redistributing the other shares proportionally. |
 | Distribute points keeping percentages | Allocate a new total using a reference environment's relative KPI shares. Thresholds and formulas are not copied. |
-| Load NetCheck 2026 Most Reliable points | Give the NetCheck 2026 Most Reliable points to its 10 KPIs in Drive - City and Drive - Connecting Roads; the line beside it counts the KPIs and Most Reliable points of the selected environment and of all environments. |
 
 Creating an environment copies KPI rules and proportions from the selected reference; its own CDR filters determine the rows included. NetCheck 2026 includes Walk with zero initial points and editable relative weights.
 
@@ -505,7 +510,7 @@ Expand this subpanel to edit KPI specifications, thresholds and weights for the 
 - Add or delete KPIs; at least one must remain. New KPIs receive stable K-number identifiers. Moving or deleting rows does not renumber other KPIs.
 - Move KPIs within their category, change their category or reorder whole categories. Category totals show points, environment-relative weights and global weights.
 - Renaming a KPI code updates its saved GAP priority reference without changing its priority.
-- Set the **Most Reliable points** of each KPI in the selected environment: the KPIs with points form the Most Reliable Network scoring, with the same thresholds; empty or 0 leaves a KPI out of it. See [Most Reliable Network scoring](scoring-gap-analysis.md#most-reliable-network-scoring).
+- KPIs whose **Type** is **Reliable** form the Most Reliable Network scoring, with the same thresholds: set their **Most Reliable points** in the selected environment (the column can only be edited on Reliable KPIs). The line above the table counts the Reliable KPIs and their points. See [Most Reliable Network scoring](scoring-gap-analysis.md#most-reliable-network-scoring).
 
 Max Points displays two decimal places while retaining full precision for calculation and unchanged allocations when saved. The formula determines the calculation basis; formulas and filters must use supported engine fields and operations.
 
@@ -561,7 +566,7 @@ For RF histograms, select **Operator**: the first definition is LTE and the seco
 
 ### Vendor-only filter labels
 
-Across the application, `Vendor` and `Operator_Vendor` filters list their values in the same order: pure vendors first (Ericsson, Huawei, Nokia, Samsung…), then the mixed, other and all-vendor groups, then the operators without a vendor, each block alphabetically. Operator-only identities follow with the display suffix ** - All**, based on canonical Operator identities, their configured aliases and cached CDR operators. Configured vendor identities take precedence, so actual vendors remain in the first group. Vendor mapping stores `Operator - All` in `Operator_Vendor` and `Vendor` for operator-only identities. Dataset exports, combined CDRs, transfers and backups preserve that value; legacy operator-only values without the suffix remain supported. This applies to Dashboard filters, Network Insights, data-preview column filters, Query Builder column filters and Report Template filter assistance.
+Across the application, values follow the Operator Maps and Vendor Maps order: `Vendor` lists pure vendors first, then the mixed, other and all-vendor groups, then the operators without a vendor; `Operator_Vendor` is ordered by Operator and, within one Operator, by Vendor; `Vendor_Operator` (`<Vendor>_<Operator>`) by Vendor and, within one Vendor, by Operator. In both, operators without a vendor (`<Operator> - All`) come last, in Operator Maps order, and values missing from the maps follow the mapped ones alphabetically. Operator-only identities follow with the display suffix ** - All**, based on canonical Operator identities, their configured aliases and cached CDR operators. Configured vendor identities take precedence, so actual vendors remain in the first group. Vendor mapping stores `Operator - All` in `Operator_Vendor` and `Vendor` for operator-only identities. Dataset exports, combined CDRs, transfers and backups preserve that value; legacy operator-only values without the suffix remain supported. This applies to Dashboard filters, Network Insights, data-preview column filters, Query Builder column filters and Report Template filter assistance.
 
 CDR catalogue caches retain the `Operator_Vendor`, `Vendor`, `Region`, `Cluster`, `City`, `Campaign` and `Operator` universes. CDR processing refreshes them from their source columns, and catalogues of CDRs processed before Cluster existed are backfilled once. The caches remain part of workspace database backups and restores.
 

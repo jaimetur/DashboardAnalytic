@@ -263,17 +263,20 @@ def test_all_environment_ppt_finishes_each_full_block_aggregate_first(levels):
     assert titles.count('Scoring Tables — Breakdown') == 3
     assert titles.count('Best Network Scoring per Service') == 3
     category_count = len({metric['category'] for metric in result['configuration']['metrics']})
-    expected_category_slides = 3 if len(levels) == 1 else 3 * category_count
-    assert titles.count('Scoring per Category') == expected_category_slides
+    # The results hold one Region and one Campaign: levels with a single value are left out, so
+    # both variants export the single-level slides (one Breakdown chart per environment).
+    expected_category_slides = 3
+    assert category_count
+    assert titles.count('Best Network Scoring per Category (Breakdown)') == expected_category_slides
     for slide in presentation.slides:
         text = '\n'.join(shape.text for shape in slide.shapes if shape.has_text_frame)
         if slide.shapes.title:
             assert all('Environment:' not in paragraph.text
                        for paragraph in slide.shapes.title.text_frame.paragraphs)
         if slide.shapes.title and slide.shapes.title.text.startswith('Scoring Tables'):
-            assert any(environment in text for environment in (
-                'All Environments', 'Drive - City', 'Drive - Connecting Roads',
-            ))
+            # Environment blocks name their environment; the All Environments block names only the scoring.
+            subtitle = slide.shapes.title.text.split('\n')[1]
+            assert subtitle in {'Best Network', 'Best Network — Drive - City', 'Best Network — Drive - Connecting Roads'}
     selected = Presentation(BytesIO(export_scoring_powerpoint(job, result, TEMPLATE, environment='DriveCity')))
     assert [slide.shapes.title.text.split('\n')[0] for slide in selected.slides].count('Scoring Tables — Summary') == 1
     assert [slide.shapes.title.text.split('\n')[0] for slide in selected.slides].count('Scoring Tables — Breakdown') == 1

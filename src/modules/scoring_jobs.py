@@ -13,7 +13,7 @@ from typing import Any, Iterable
 
 import pandas as pd
 
-from src.modules.column_names import column_identity, resolve_column_name
+from src.modules.column_names import campaign_sort_key, column_identity, resolve_column_name
 from src.modules.scoring_vendors import scoring_vendor_name, scoring_vendor_operators
 from src.modules.nr_mode import NR_MODES, normalize_nr_mode
 from src.modules.repository import Repository, local_now_iso
@@ -31,18 +31,20 @@ DEFAULT_BASELINE_OPERATOR = 'EE'
 DEFAULT_LEVELS = ('Operator',)
 INTERRUPTED_JOB_MESSAGE = 'Interrupted because the application restarted. Retry the job to run it again.'
 AGGREGATION_CONTRACT_VERSION = 2
-SCORING_CONTEXT_FILTER_FIELDS = ('Region', 'Cluster', 'City', 'Operator', 'Operator_Vendor', 'Vendor', 'Campaign')
+SCORING_CONTEXT_FILTER_FIELDS = ('Region', 'Cluster', 'City', 'Operator', 'Operator_Vendor', 'Vendor_Operator', 'Vendor', 'Campaign')
 SCORING_CONTEXT_FILTER_COLUMNS = {
     'Region': ('Region', 'g_level_2'),
     'Cluster': ('Cluster',),
     'City': ('City', 'g_level_4'),
     'Operator': ('Operator',),
     'Operator_Vendor': ('Operator_Vendor',),
+    # Vendor_Operator selections are translated to Operator_Vendor values (_expand_vendor_context_filters).
+    'Vendor_Operator': ('Operator_Vendor',),
     'Vendor': ('Vendor',),
     'Campaign': ('Campaign',),
 }
 # Filters added after cached jobs existed only take part in a job's identity when used.
-SCORING_OPTIONAL_CONTEXT_FILTERS = frozenset({'Cluster', 'Operator_Vendor'})
+SCORING_OPTIONAL_CONTEXT_FILTERS = frozenset({'Cluster', 'Operator_Vendor', 'Vendor_Operator'})
 
 
 def _scoring_engine():
@@ -157,6 +159,32 @@ def _expand_operator_context_filter(
                 if not any(existing.casefold() == value.casefold() for existing in expanded['Operator']):
                     expanded['Operator'].append(value)
     expanded['Operator'].sort(key=lambda value: (value.casefold(), value))
+    return expanded
+
+
+def _expand_vendor_context_filters(
+    repository: Repository, context_filters: dict[str, list[str]], catalogues: dict[int, dict[str, list[str]]],
+) -> dict[str, list[str]]:
+    """Include the source spellings of mapped Vendor and Operator_Vendor selections, as for Operators."""
+    from src.modules.value_maps import ValueMapper
+
+    settings_getter = getattr(repository, 'chart_mapping_settings', None)
+    if not callable(settings_getter) or not any(context_filters.get(field) for field in ('Vendor', 'Operator_Vendor', 'Vendor_Operator')):
+        return context_filters
+    mapper = ValueMapper.from_settings(settings_getter())
+    expanded = {field: list(values) for field, values in context_filters.items()}
+    # Vendor_Operator is Operator_Vendor the other way round: it selects those values (both: their intersection).
+    if expanded.get('Vendor_Operator'):
+        wanted = mapper.operator_vendors(expanded['Vendor_Operator'])
+        if expanded.get('Operator_Vendor'):
+            chosen = {value.casefold() for value in expanded['Operator_Vendor']}
+            wanted = [value for value in wanted if value.casefold() in chosen] or ['\u0000']
+        expanded['Operator_Vendor'] = wanted
+        expanded['Vendor_Operator'] = []
+    for field, kind, key in (('Vendor', 'vendor', 'vendors_only'), ('Operator_Vendor', 'operator_vendor', 'vendors')):
+        if expanded.get(field):
+            sources = [value for catalogue in catalogues.values() for value in catalogue.get(key) or []]
+            expanded[field] = sorted(mapper.expand(kind, expanded[field], sources), key=lambda value: (value.casefold(), value))
     return expanded
 
 
@@ -587,7 +615,7 @@ def _row_to_job(
             str(campaign).strip()
             for item in metadata_list if isinstance(item, dict)
             for campaign in item.get('campaigns', []) if str(campaign).strip()
-        }, key=str.casefold),
+        }, key=campaign_sort_key),
         'nr_mode': str(row['nr_mode'] or ''),
         'levels': [str(value) for value in levels if str(value).strip()],
         'aggregation_levels': [str(value) for value in levels if str(value).strip()],
@@ -641,6 +669,7 @@ def _prepare_scoring_job(
         scoring_vendor_name(value, vendor_operators) for value in normalized_context_filters['Vendor']
     }, key=str.casefold)
     resolved_context_filters = _expand_operator_context_filter(repository, normalized_context_filters)
+    resolved_context_filters = _expand_vendor_context_filters(repository, resolved_context_filters, vendor_catalogues)
     profile_getter = getattr(repository, 'get_scoring_profile', None)
     if callable(profile_getter):
         if scoring_profile_id is None or (
@@ -991,6 +1020,32 @@ def _load_source_frames(
     }
 
 
+def _attach_mapping_boundaries(repository: Repository, dataset_ids: list[int], result: dict[str, Any]) -> None:
+    """Save the Clusters and Region Mapping polygons applied to the CDRs for the points-lost maps."""
+    document = result.get('points_loss')
+    if not isinstance(document, dict):
+        return
+    from src.modules.scoring_points_loss import mapping_boundaries
+
+    rows = {int(row['id']): row for row in repository.list_datasets()}
+    boundaries = {}
+    for field, applied, mapping in (('Cluster', 'cluster_mapping_applied', 'cluster_mapping_dataset_id'),
+                                    ('Region', 'region_mapping_applied', 'region_mapping_dataset_id')):
+        mapping_ids = [rows[dataset_id][mapping] for dataset_id in dataset_ids
+                       if dataset_id in rows and rows[dataset_id][applied] and rows[dataset_id][mapping]]
+        mapping_row = rows.get(int(mapping_ids[-1])) if mapping_ids else None
+        if mapping_row is None or not mapping_row['stored_path']:
+            continue
+        try:
+            polygons = mapping_boundaries(Path(str(mapping_row['stored_path'])), field)
+        except Exception:  # The map is optional; a missing or unreadable mapping file only drops its polygons.
+            continue
+        if polygons:
+            boundaries[field] = polygons
+    if boundaries:
+        document['boundaries'] = boundaries
+
+
 def run_scoring_job(repository: Repository, job_id: int) -> dict[str, Any] | None:
     """Calculate one queued job, persist its result, and retain failures for review."""
     job = get_scoring_job(repository, job_id, include_internal_snapshot=True)
@@ -1033,7 +1088,8 @@ def run_scoring_job(repository: Repository, job_id: int) -> dict[str, Any] | Non
             raise ValueError('A selected CDR changed after this job was queued. Create a new scoring job.')
         update_progress(6, 'Reading processed CDR rows')
         engine = _scoring_engine()
-        required_columns = getattr(engine, 'required_input_columns')
+        # The points-lost map also reads the area and coordinate columns.
+        required_columns = getattr(engine, 'load_input_columns', None) or getattr(engine, 'required_input_columns')
         for source in sources:
             source['levels'] = job['levels']
         frames = _load_source_frames(
@@ -1063,6 +1119,7 @@ def run_scoring_job(repository: Repository, job_id: int) -> dict[str, Any] | Non
         result = calculate(frames, job['levels'], **call_kwargs)
         if not isinstance(result, dict):
             raise TypeError('The scoring engine must return a result object.')
+        _attach_mapping_boundaries(repository, dataset_ids, result)
         result.setdefault('configuration', configuration)
         result.setdefault('configuration_hash', configuration_hash(configuration))
         result.setdefault('gap_direction', 'operator_minus_reference')

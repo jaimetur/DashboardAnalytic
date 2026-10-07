@@ -1,6 +1,6 @@
 # Application Config
 
-Application Config stores application-wide runtime overrides. It is separate from Workspace Config, which groups the Report Templates, Main Cities, Operator & Vendor Maps and scoring methodology panels for the active workspace.
+Application Config stores application-wide runtime overrides. It is separate from Workspace Config, which groups the Report Templates, Main Cities, Mappings & Reference Data and scoring methodology panels for the active workspace.
 
 > [!IMPORTANT]
 > **Application-wide settings.** Saved values affect every workspace and take precedence over the corresponding environment defaults.

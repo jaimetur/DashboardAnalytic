@@ -618,12 +618,11 @@ def test_scoring_job_results_cache_force_and_exports(scoring_api):
         slide = scoring_slides[mode]
         scoring_table = next(shape.table for shape in slide.shapes if shape.has_table)
         assert [scoring_table.cell(0, column).text for column in range(fixed_count)] == expected_headers[mode]
-        assert [scoring_table.cell(1, column).text for column in range(fixed_count, fixed_count + 4)] == expected_operators
-        assert all(scoring_table.cell(2, column).text == 'North'
-                   for column in range(fixed_count, fixed_count + 4))
-        assert all(scoring_table.cell(3, column).text == 'Score'
-                   for column in range(fixed_count, fixed_count + 4))
-        assert str(scoring_table.cell(1, fixed_count).fill.fore_color.rgb) == 'AABBCC'
+        # The results hold one Region (North): that level splits nothing and is left out, so the
+        # operators head the columns without a Region row.
+        assert [scoring_table.cell(0, column).text for column in range(fixed_count, fixed_count + 4)] == expected_operators
+        assert 'North' not in [scoring_table.cell(1, column).text for column in range(fixed_count, fixed_count + 4)]
+        assert str(scoring_table.cell(0, fixed_count).fill.fore_color.rgb) == 'AABBCC'
 
     forced = client.post('/api/scoring/jobs', json={**payload, 'force': True})
     assert forced.status_code == 200

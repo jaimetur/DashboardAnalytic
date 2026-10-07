@@ -651,6 +651,25 @@ def test_workspace_vendor_assignment_writes_the_normalized_vendor_field() -> Non
     assert mapped.columns[:3].tolist() == ['Operator_Vendor', 'Vendor', 'Operator']
 
 
+def test_vendor_mapping_files_apply_to_every_spelling_of_their_operator() -> None:
+    # Tests configured in SA or VoNR mode name the same networks differently; they share their cells.
+    cdr = pd.DataFrame({
+        'Operator': ['Vodafone VoNR', 'VF_SA', 'Vodafone SA', 'Three SA', 'O2 (UK)'],
+        'Cell_ID_A': ['100 -> 100', '100', '100 -> 999', '200 -> 200', '300'],
+    })
+    vodafone_mapping = pd.DataFrame({
+        'source_sheet': ['4G'], 'eNodeB ID': [0], 'Local Cell ID': [100], 'OP/ Vendor': ['Ericsson'],
+    })
+    three_mapping = pd.DataFrame({'Cid__ECI': [200], 'Vendor': ['Nokia']})
+
+    mapped = assign_cdr_vendors(cdr, vodafone_mapping, three_mapping)
+
+    assert mapped['Operator_Vendor'].tolist() == [
+        'Vodafone VoNR_Ericsson', 'VF_SA_Ericsson', 'Vodafone SA_Ericsson_Mixed', 'Three SA_Nokia', 'O2 (UK) - All',
+    ]
+    assert mapped['Vendor'].tolist() == ['Ericsson', 'Ericsson', 'Ericsson_Mixed', 'Nokia', 'O2 (UK) - All']
+
+
 def test_workspace_vendor_assignment_replaces_source_vendor_collisions() -> None:
     cdr = pd.DataFrame({
         'source_sheet': ['Vodafone'],
@@ -1799,7 +1818,7 @@ def test_multivendor_rendering_rewrites_display_and_grouping_and_excludes_unreso
     filtered = _apply_catalog_filters(frame, rendered, True, 'LQ')
     grouped, primary, series = _apply_catalog_grouping(filtered, rendered, True, 'LQ')
     assert grouped[primary].tolist() == ['Ericsson · VF']
-    assert grouped[series].tolist() == ['Ericsson · VF · 2026-Q2_SA']
+    assert grouped[series].tolist() == ['Ericsson · VF · 2026-Q2-SA']
 
     already_filtered = replace(entry, filters='vendor NOT CONTAINS (Mixed, Other)')
     assert prepare_multivendor_catalog_entry(already_filtered).filters == already_filtered.filters
@@ -2080,8 +2099,8 @@ def test_campaign_grouping_displays_only_year_and_quarter() -> None:
     grouped, _primary, series = _apply_catalog_grouping(frame, entry, False, 'LQ')
 
     assert grouped['Campaign'].tolist() == ['2024 Q3 NSA', 'UK_Q4_2025', 'UK_Q2_SA_2026']
-    assert grouped['__catalog_column_0'].tolist() == ['2024-Q3_NSA', '2025-Q4', '2026-Q2_SA']
-    assert grouped[series].tolist() == ['2024-Q3_NSA', '2025-Q4', '2026-Q2_SA']
+    assert grouped['__catalog_column_0'].tolist() == ['2024-Q3-NSA', '2025-Q4', '2026-Q2-SA']
+    assert grouped[series].tolist() == ['2024-Q3-NSA', '2025-Q4', '2026-Q2-SA']
 
 
 def test_cdf_renders_a_curve_for_each_complete_rows_and_columns_combination() -> None:

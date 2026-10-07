@@ -21,10 +21,18 @@ def _presentation(result):
     return Presentation(BytesIO(export_scoring_powerpoint(_job(), result, TEMPLATE)))
 
 
+def _in_environment(slide, environment):
+    # All Environments slides name only the scoring in their subtitle.
+    if environment == 'All Environments':
+        lines = slide.shapes.title.text.split('\n') if slide.shapes.title else []
+        return len(lines) > 1 and lines[1] == 'Best Network'
+    return environment in _slide_text(slide)
+
+
 def _environment_matrix_slide(presentation, environment):
     for slide in presentation.slides:
         title = slide.shapes.title.text.split('\n')[0] if slide.shapes.title else ''
-        if title != 'Scoring Tables — Breakdown' or environment not in _slide_text(slide):
+        if title != 'Scoring Tables — Breakdown' or not _in_environment(slide, environment):
             continue
         matrix = next(
             shape.table for shape in slide.shapes
@@ -37,7 +45,7 @@ def _environment_matrix_slide(presentation, environment):
 def _chart_for_environment(presentation, title, environment, chart_type):
     for slide in presentation.slides:
         slide_title = slide.shapes.title.text.split('\n')[0] if slide.shapes.title else ''
-        if slide_title != title or environment not in _slide_text(slide):
+        if slide_title != title or not _in_environment(slide, environment):
             continue
         for shape in _nested_shapes(slide.shapes):
             if shape.has_chart and shape.chart.chart_type == chart_type:
@@ -116,7 +124,7 @@ def test_all_environments_ppt_uses_full_allocation_in_tables_and_charts():
         assert float(points) == pytest.approx(combined['total']['values'][operator]['points'])
 
     category_chart = _chart_for_environment(
-        presentation, 'Scoring per Category', 'All Environments', XL_CHART_TYPE.COLUMN_CLUSTERED,
+        presentation, 'Best Network Scoring per Category (Breakdown)', 'All Environments', XL_CHART_TYPE.COLUMN_CLUSTERED,
     )
     for series in category_chart.series:
         assert sum(float(value) for value in series.values if value is not None) == pytest.approx(

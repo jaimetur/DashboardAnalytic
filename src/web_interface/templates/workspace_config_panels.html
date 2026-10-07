@@ -116,39 +116,13 @@
     </div>
   </details>
 
-  {% if features['non-qualified-calls'] %}
-  <link rel="stylesheet" href="{{ static_path('css/non_qualified_calls.css') }}?v={{ asset_version('css/non_qualified_calls.css') }}">
-  <details id="nq-teams" class="panel collapsible-panel nq-teams-panel" open data-panel-state-key="workspace-config:nq-teams">
+  <details id="mappings-reference-data" class="panel collapsible-panel mappings-reference-data-panel" open data-panel-state-key="workspace-config:mappings-reference-data">
     <summary class="collapsible-summary">
-      <div><p class="eyebrow">Follow-Up</p><h2>Non-Qualified Calls Teams</h2></div>
+      <div><p class="eyebrow">Workspace normalization</p><h2>Mappings &amp; Reference Data</h2></div>
       <span class="collapse-chip">Collapse</span>
     </summary>
     <div class="collapsible-panel-body">
-      {% if active_workspace %}
-      <p class="lede">Teams that follow up the Non-Qualified Calls of <strong>"{{ active_workspace.name }}"</strong> and their members. A user can belong to several teams. A call assigned to a team with members can only be assigned to one of them; a team without members accepts every user of the workspace.</p>
-      <div class="nq-teams-editor" data-nq-teams>
-        <p class="form-note">Loading teams…</p>
-      </div>
-      <p class="form-note" data-nq-teams-status role="status" aria-live="polite"></p>
-      <div class="form-actions nq-teams-actions" data-nq-teams-actions hidden>
-        <button type="button" class="nq-secondary-action" data-nq-teams-add>Add Team</button>
-        <button type="button" class="nq-primary-action" data-nq-teams-save>Save Teams</button>
-      </div>
-      {% else %}
-      <p class="form-note">Open a workspace before configuring Non-Qualified Calls Teams.</p>
-      {% endif %}
-    </div>
-  </details>
-  <script defer src="{{ static_path('js/nq_teams.js') }}?v={{ asset_version('js/nq_teams.js') }}"></script>
-  {% endif %}
-
-  <details id="operator-vendor-maps" class="panel collapsible-panel operator-vendor-maps-panel" open data-panel-state-key="workspace-config:operator-vendor-maps">
-    <summary class="collapsible-summary">
-      <div><p class="eyebrow">Workspace normalization</p><h2>Operator &amp; Vendor Maps</h2></div>
-      <span class="collapse-chip">Collapse</span>
-    </summary>
-    <div class="collapsible-panel-body">
-      <div class="operator-vendor-map-subpanels">
+      <div class="mappings-reference-data-subpanels">
   <details class="panel collapsible-panel operator-mappings-panel" open data-panel-state-key="admin:operator-mappings">
     <summary class="collapsible-summary">
       <div>
@@ -238,6 +212,56 @@
       </form>
       <p class="form-note">Saving, deleting or reordering a group refreshes chart caches without changing materialized CDR values.</p>
       {% else %}<p class="form-note">Open a workspace before managing Vendor Mappings.</p>{% endif %}
+    </div>
+  </details>
+
+  <details id="campaign-maps" class="panel collapsible-panel operator-mappings-panel campaign-maps-panel" open data-panel-state-key="workspace-config:campaign-maps">
+    <summary class="collapsible-summary">
+      <div><p class="eyebrow">Workspace normalization</p><h2>Campaign Maps</h2></div>
+      <span class="collapse-chip">Collapse</span>
+    </summary>
+    <div class="collapsible-panel-body">
+      {% if active_workspace %}
+      <p class="lede">How every chart, table, legend, filter and PowerPoint or Word report shows and orders the campaigns of <strong>"{{ active_workspace.name }}"</strong>. The label format applies to every campaign, so new campaigns follow it without editing the map; filters and stored CDR values keep the original campaigns.</p>
+      <script id="campaign-map-campaigns" type="application/json">{{ workspace_campaigns | default([]) | tojson }}</script>
+      <div class="campaign-maps" data-campaign-maps>
+        <div class="campaign-map-settings">
+          <section>
+            <h3>Label format</h3>
+            <input class="table-input campaign-map-format" type="text" maxlength="80" data-campaign-format aria-label="Campaign label format" spellcheck="false">
+            <p class="form-note">Markers: <code>{year}</code> 2026, <code>{yy}</code> 26, <code>{quarter}</code> 2, <code>{mode}</code> SA or NSA, <code>{market}</code> the country code such as UK. Characters inside the braces of a marker are written only when the campaign has that part: <code>{-mode}</code> writes <em>-SA</em> for an SA campaign and nothing for the others. Campaigns without a year and quarter keep their name.</p>
+          </section>
+          <section>
+            <h3>Order inside a quarter</h3>
+            <p class="form-note">Campaigns are ordered by year and quarter, and the campaigns of one quarter in this order.</p>
+            <ol class="campaign-map-modes" data-campaign-modes></ol>
+          </section>
+        </div>
+        <section>
+          <h3>Exceptions</h3>
+          <p class="form-note">Campaigns that do not follow the pattern get their own label. They are ordered by the year and quarter of their label (after the campaigns of that quarter), or first, in this order, when the label has none. No exceptions are needed while every campaign follows the format.</p>
+          <div class="table-wrap operator-mappings-table-wrap campaign-map-exceptions-wrap">
+            <table class="operator-mappings-table campaign-map-exceptions">
+              <thead><tr><th class="mapping-order-column">Order</th><th class="mapping-canonical-column">Label</th><th class="mapping-aliases-column">Source campaigns</th><th class="mapping-actions-column">Actions</th></tr></thead>
+              <tbody data-campaign-exceptions></tbody>
+            </table>
+          </div>
+          <button type="button" class="secondary-button" data-campaign-exception-add>Add exception</button>
+        </section>
+        <section>
+          <h3>Preview</h3>
+          <p class="form-note">The campaigns of the ready CDRs of this workspace, in the order and with the labels of the map being edited.</p>
+          <div class="table-wrap campaign-map-preview" data-campaign-preview></div>
+        </section>
+        <p class="campaign-map-message" data-campaign-message role="status" aria-live="polite"></p>
+        <div class="campaign-map-actions">
+          <button type="button" class="secondary-button" data-campaign-default title="Fill the default map: {year}-Q{quarter}{-mode}, then NSA and SA, no exceptions">Default map</button>
+          <button type="button" data-campaign-save>Save Campaign Maps</button>
+        </div>
+      </div>
+      <p class="form-note">Saving refreshes chart caches; it never changes the stored CDR values. The map travels with the Mappings &amp; Reference Data in Import / Export, transfers and backups.</p>
+      <script defer src="{{ static_path('js/campaign_maps.js') }}?v={{ asset_version('js/campaign_maps.js') }}"></script>
+      {% else %}<p class="form-note">Open a workspace before managing Campaign Maps.</p>{% endif %}
     </div>
   </details>
 

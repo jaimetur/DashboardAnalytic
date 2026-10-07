@@ -337,19 +337,19 @@ def test_spectrum_holdings_api_workspace_config_and_archive(client) -> None:
     assert 'spectrum_holdings_error' in invalid.headers['location']
 
     workspace = app_module.active_workspace
-    archive = json.loads(app_module._operator_mappings_archive_payload(workspace))
-    assert archive['version'] == 3
+    archive = json.loads(app_module._mappings_reference_data_archive_payload(workspace))
+    assert archive['version'] == 1
     assert [row['band'] for row in archive['spectrum_holdings']] == ['B20', 'B40']
 
     ni.save_spectrum_holdings(app_module.repository, [])
-    app_module._restore_workspace_operator_mappings(workspace, json.dumps(archive).encode())
+    app_module._restore_workspace_mappings_reference_data(workspace, json.dumps(archive).encode())
     assert len(ni.load_spectrum_holdings(app_module.repository)) == 2
 
-    legacy = {key: value for key, value in archive.items() if key != 'spectrum_holdings'} | {'version': 2}
-    app_module._restore_workspace_operator_mappings(workspace, json.dumps(legacy).encode())
-    assert len(ni.load_spectrum_holdings(app_module.repository)) == 2
+    incomplete = {key: value for key, value in archive.items() if key != 'spectrum_holdings'}
+    with pytest.raises(ValueError, match='Mappings & Reference Data'):
+        app_module._restore_workspace_mappings_reference_data(workspace, json.dumps(incomplete).encode())
     with pytest.raises(ValueError, match='Spectrum Holdings'):
-        app_module._restore_workspace_operator_mappings(workspace, json.dumps(archive | {'spectrum_holdings': [{'operator': 'EE'}]}).encode())
+        app_module._restore_workspace_mappings_reference_data(workspace, json.dumps(archive | {'spectrum_holdings': [{'operator': 'EE'}]}).encode())
 
 
 def test_combined_rf_source_pools_samples_instead_of_type_means() -> None:

@@ -58,7 +58,7 @@
                       data-global-cdf-grouping="{{ selected_cdf_grouping or 'all' }}"
                     >
                       <option value="all" {% if (current_analysis.filters.cdf_grouping or 'all')|lower == 'all' %}selected{% endif %}>Single CDF</option>
-                      {% for item in ['operator', 'operator_vendor', 'vendor', 'market', 'region', 'cluster', 'city'] %}
+                      {% for item in ['operator', 'operator_vendor', 'vendor_operator', 'vendor', 'market', 'region', 'cluster', 'city'] %}
                       <option value="{{ item }}" {% if item == ((current_analysis.filters.cdf_grouping or 'all')|lower) %}selected{% endif %} {% if item not in selected_dataset.available_cdf_groupings %}disabled{% endif %}>{{ format_aggregation_label(item) }}</option>
                       {% endfor %}
                     </select>
@@ -93,7 +93,7 @@
                       data-global-aggregation="{{ selected_aggregation or 'all' }}"
                     >
                       <option value="all" {% if (current_analysis.filters.aggregation or 'all')|lower == 'all' %}selected{% endif %}>Auto / raw view</option>
-                      {% for item in ['operator', 'operator_vendor', 'vendor', 'region', 'cluster', 'city', 'market', 'period', 'session_type', 'test_name', 'direction', 'technology_primary', 'source_sheet'] %}
+                      {% for item in ['operator', 'operator_vendor', 'vendor_operator', 'vendor', 'region', 'cluster', 'city', 'market', 'period', 'session_type', 'test_name', 'direction', 'technology_primary', 'source_sheet'] %}
                       <option value="{{ item }}" {% if item == ((current_analysis.filters.aggregation or 'all')|lower) %}selected{% endif %} {% if item not in selected_dataset.available_aggregations %}disabled{% endif %}>{{ format_aggregation_label(item) }}</option>
                       {% endfor %}
                     </select>

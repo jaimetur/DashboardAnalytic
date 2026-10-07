@@ -7,8 +7,9 @@ from typing import Iterable
 
 import pandas as pd
 
-from src.modules.column_names import column_identity, resolve_column_name
+from src.modules.column_names import campaign_sort_key, column_identity, resolve_column_name
 from src.modules.scoring_vendors import scoring_vendor_group
+from src.modules import scoring_points_loss as points_loss
 from src.modules.scoring_config import (
     configuration_hash,
     MOST_RELIABLE_SCORING,
@@ -52,6 +53,11 @@ def required_input_columns(kind: str, levels: Iterable[str] = ()) -> list[str]:
         if field not in fields:
             fields = fields + [field]
     return list(dict.fromkeys(fields))
+
+
+def load_input_columns(kind: str, levels: Iterable[str] = ()) -> list[str]:
+    """Columns read from the CDR rows: the scoring fields plus the areas and coordinates of the points-lost map."""
+    return list(dict.fromkeys([*required_input_columns(kind, levels), *points_loss.source_columns(kind)]))
 
 
 def _required_configuration(configuration: dict | None) -> dict:
@@ -282,6 +288,9 @@ def calculate_scoring(
     warnings = []
     rows = []
     global_kpis = []
+    # Where each KPI loses its points: area shares of the tests that cause the loss.
+    loss_shares: list[dict] = []
+    geometry = points_loss.AreaGeometry()
     normalized_operator_mappings = {
         str(alias).strip().casefold(): str(canonical).strip()
         for alias, canonical in (operator_mappings or {}).items()
@@ -333,6 +342,7 @@ def calculate_scoring(
         if missing_group:
             warnings.append(f'{kind.title()}: missing grouping columns: {", ".join(missing_group)}; no scores calculated.')
             continue
+        points_loss.attach_location(frame, source, kind, resolve_column_name)
         frame['environment'] = None
         environment_masks = {}
         for environment, context in config['scope']['environments'].items():
@@ -373,6 +383,15 @@ def calculate_scoring(
                              'dataset_type': kind.title(), 'kpi_type': metric.get('kpi_type'),
                              'unit': metric.get('unit'), 'value': value, 'sample_count': count, 'score': None,
                              'weighted_points': None, 'max_points': context['max_points']})
+                if value is not None:
+                    try:
+                        weights = points_loss.test_weights(group, metric, context['thresholds'], _condition, _filter)
+                    except (KeyError, ValueError, TypeError):
+                        weights = None
+                    shares = points_loss.area_shares(group, weights) if weights is not None else {}
+                    if shares:
+                        loss_shares.append({**metadata, 'kpi_code': metric['code'], 'areas': shares})
+        geometry.add(frame[valid])
         global_valid = frame['__matched_environments'].map(bool) & frame['Operator'].notna()
         if campaign_selected:
             global_valid &= frame['Campaign'].notna()
@@ -432,12 +451,13 @@ def calculate_scoring(
     gap = _gap_rows(rows, keys, baseline_operator, baseline_aliases, warnings)
     gap_totals = _gap_totals(totals, keys, baseline_operator, baseline_aliases)
     return {'scoring': rows, 'global_kpis': global_kpis,
+            'points_loss': {'version': 1, **geometry.document(), 'shares': loss_shares},
             'totals': totals, 'charts': [dict(row) for row in totals], 'gap': gap,
             'gap_totals': gap_totals, 'warnings': list(dict.fromkeys(warnings)), 'notices': notices,
             'environment_scaling': environment_scaling(totals),
             'aggregation_levels': dimensions,
             'aggregation_contract_version': AGGREGATION_CONTRACT_VERSION,
-            'campaigns': sorted(campaign_values.values(), key=lambda value: (value.casefold(), value)),
+            'campaigns': sorted(campaign_values.values(), key=lambda value: (campaign_sort_key(value), value)),
             'method_version': method_version, 'configuration': config,
             'configuration_hash': configuration_hash(config), 'gap_direction': 'operator_minus_reference',
             'baseline_aliases': baseline_aliases}

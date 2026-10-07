@@ -4,7 +4,10 @@ Operators follow the Operator Maps table of Workspace Config and Vendors the
 Vendor Maps table. ``Operator_Vendor`` values are ordered by their Operator and,
 within one Operator, by their Vendor. Labels missing from the maps follow the
 mapped ones (pure Vendors before mixed, other and all-vendor groups), and
-Operators without a Vendor come last, in Operator Map order.
+Operators without a Vendor (``<Operator> - All``) come after every Operator with
+Vendors, in Operator Map order. ``Vendor_Operator`` (``<Vendor>_<Operator>``, the same
+identity the other way round) is ordered by its Vendor and, within one Vendor, by its
+Operator, with the Operators without a Vendor last in the same ``<Operator> - All`` form.
 """
 from __future__ import annotations
 
@@ -70,13 +73,57 @@ def split_operator_vendor(value: object, operator_groups: Iterable[dict[str, Any
     return text[:len(best)], _SEPARATOR.sub('', text[len(best):], count=1)
 
 
+def split_vendor_operator(value: object, operator_groups: Iterable[dict[str, Any]] | None) -> tuple[str, str]:
+    """Split ``<Vendor>_<Operator>`` at the longest Operator label it ends with; ``('', operator)`` without a Vendor."""
+    text = str(value or '').strip()
+    if _ALL_SUFFIX.search(text):
+        return '', _ALL_SUFFIX.sub('', text)
+    best = ''
+    for group in operator_groups or []:
+        for label in [group.get('canonical'), *(group.get('aliases') or [])]:
+            candidate = str(label or '').strip()
+            if (candidate and len(candidate) > len(best) and len(text) > len(candidate) + 1
+                    and text.casefold().endswith('_' + candidate.casefold())):
+                best = candidate
+    if not best:
+        vendor, separator, operator = text.rpartition('_')
+        return (vendor, operator) if separator else ('', text)
+    return text[:-len(best) - 1], text[-len(best):]
+
+
+def swap_operator_vendor(value: object, operator_groups: Iterable[dict[str, Any]] | None) -> str:
+    """``<Operator>_<Vendor>`` as ``<Vendor>_<Operator>``; ``<Operator> - All`` stays as it is."""
+    text = str(value or '').strip()
+    if not text or _ALL_SUFFIX.search(text):
+        return text
+    operator, vendor = split_operator_vendor(text, operator_groups)
+    return f'{vendor}_{operator}' if vendor else text
+
+
+def swap_vendor_operator(value: object, operator_groups: Iterable[dict[str, Any]] | None) -> str:
+    """``<Vendor>_<Operator>`` back to ``<Operator>_<Vendor>``."""
+    text = str(value or '').strip()
+    vendor, operator = split_vendor_operator(text, operator_groups)
+    return f'{operator}_{vendor}' if vendor else text
+
+
+def vendor_operator_order_key(
+    value: object, operator_groups: Iterable[dict[str, Any]] | None, vendor_groups: Iterable[dict[str, Any]] | None,
+) -> tuple[Any, ...]:
+    vendor, operator = split_vendor_operator(value, operator_groups)
+    if not vendor:
+        return (1, 3, UNMAPPED, '', *operator_order_key(operator, operator_groups))
+    return (0, *vendor_order_key(vendor, vendor_groups, operator_groups), *operator_order_key(operator, operator_groups))
+
+
 def operator_vendor_order_key(
     value: object, operator_groups: Iterable[dict[str, Any]] | None, vendor_groups: Iterable[dict[str, Any]] | None,
 ) -> tuple[Any, ...]:
     operator, vendor = split_operator_vendor(value, operator_groups)
-    # An Operator without a Vendor (``<Operator> - All``) comes after that Operator's Vendors.
-    vendor_key = vendor_order_key(vendor, vendor_groups, operator_groups) if vendor else (3, UNMAPPED, '')
-    return (*operator_order_key(operator, operator_groups), *vendor_key)
+    # Operators without a Vendor (``<Operator> - All``) come after every Operator with Vendors.
+    if not vendor:
+        return (1, *operator_order_key(operator, operator_groups), 3, UNMAPPED, '')
+    return (0, *operator_order_key(operator, operator_groups), *vendor_order_key(vendor, vendor_groups, operator_groups))
 
 
 def dimension_order_key(
@@ -91,4 +138,6 @@ def dimension_order_key(
         return vendor_order_key(value, vendor_groups, operator_groups)
     if identity == 'operatorvendor':
         return operator_vendor_order_key(value, operator_groups, vendor_groups)
+    if identity == 'vendoroperator':
+        return vendor_operator_order_key(value, operator_groups, vendor_groups)
     return None

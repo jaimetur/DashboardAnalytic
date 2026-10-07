@@ -64,7 +64,8 @@ def test_scoring_vendor_catalogue_uses_pure_labels_without_scanning_rows(scoring
         if item['file_name'] == 'UK_Q2_2026_NSA_Data.csv'
     )
     assert catalogue['operators'] == ['3', 'EE', 'O2', 'VF_SA', 'VF_UK']
-    assert catalogue['vendors'] == ['EE - All', 'Ericsson', 'Huawei', 'Mixed_Vendor', 'O2 - All', 'VF_SA - All']
+    # Vendor Maps order: vendors, then mixed groups, then Operators without a Vendor in Operator Maps order.
+    assert catalogue['vendors'] == ['Ericsson', 'Huawei', 'Mixed_Vendor', 'EE - All', 'O2 - All', 'VF_SA - All']
 
 
 def test_operator_catalogue_replacement_preserves_unspecified_values_and_database_copy(scoring_api, tmp_path):

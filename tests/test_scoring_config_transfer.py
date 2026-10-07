@@ -525,3 +525,26 @@ def test_unconfigured_workspace_configuration_backup_round_trip(client):
     repository.replace_scoring_configuration(scoring_configuration())
     app_module._restore_workspace_scoring_configuration(workspace, legacy_empty_payload)
     assert not repository.get_workspace_state('scoring_configuration')
+
+
+def test_scoring_report_configurations_travel_with_the_scoring_configuration_backup(client, tmp_path: Path) -> None:
+    from src.modules.scoring_reports import (
+        default_scenario, load_report_state, remember_last_configuration, save_named_configuration,
+    )
+    _login(client)
+    workspace, repository = _workspace_repository()
+    repository.replace_scoring_configuration(scoring_configuration())
+    save_named_configuration(repository, 'Weekly', {'scenarios': [default_scenario(name='National'),
+                                                                  default_scenario(name='London')]})
+    remember_last_configuration(repository, {'scenarios': [default_scenario(name='Main Cities')]})
+    expected = load_report_state(repository)
+    backup_path = app_module.create_recurring_database_backup({
+        'components': ['scoring_configuration'], 'workspace_ids': [workspace.id],
+        'backup_path': str(tmp_path), 'max_backups': 5,
+    })
+    save_named_configuration(repository, 'Other', {'scenarios': [default_scenario()]})
+    app_module.restore_database_backup(backup_path, ['scoring_configuration'])
+    assert load_report_state(repository) == expected
+    # Packages created before report configurations existed keep the current ones.
+    app_module._restore_workspace_scoring_report_configurations(workspace, None)
+    assert load_report_state(repository) == expected

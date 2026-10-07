@@ -25,7 +25,8 @@ from typing import Literal
 from uuid import uuid4
 
 import pandas as pd
-from src.modules.column_names import column_identity, compact_campaign_value, sort_vendor_values, vendor_filter_column, vendor_filter_value, vendor_filter_values, vendor_match_values
+from src.modules.column_names import campaign_sort_key, column_identity, compact_campaign_value, sort_vendor_values, vendor_filter_column, vendor_filter_value, vendor_filter_values, vendor_match_values
+from src.modules.value_maps import ValueMapper, field_kind
 from src.modules.nr_mode import DEFAULT_NR_MODE, dataset_nr_mode, normalize_nr_mode
 from src.modules.output_layout import DASHBOARDS_FOLDER, module_output_dir
 from fastapi import BackgroundTasks, Depends, HTTPException, Request
@@ -163,6 +164,8 @@ def dataset_matches_nr_mode(dataset, nr_mode) -> bool:
 
 FILTER_COLUMNS = {
     'Market': ('market',), 'Operator': ('operator',), 'Operator_Vendor': ('Operator_Vendor',), 'Vendor': ('Vendor',),
+    # Vendor_Operator is Operator_Vendor the other way round: it reads that column (see mapped_filter_options).
+    'Vendor_Operator': ('Operator_Vendor',),
     'Region': ('Region', 'G_Level_2', 'G Level 2'), 'Cluster': ('Cluster',),
     'City': ('City', 'G_Level_4', 'G Level 4'), 'Campaign': ('Campaign', 'campaign'),
     'Session Type': ('session_type',),
@@ -170,10 +173,11 @@ FILTER_COLUMNS = {
     'Call Status': ('Call_Status', 'call_status', 'status'),
 }
 ADAPTATIVE_FILTER_FIELDS = (
-    'Operator', 'Operator_Vendor', 'Vendor', 'Market', 'Region', 'Cluster', 'City', 'Campaign', 'RAT', 'Session Type', 'Call Status',
+    'Operator', 'Operator_Vendor', 'Vendor_Operator', 'Vendor', 'Market', 'Region', 'Cluster', 'City', 'Campaign', 'RAT',
+    'Session Type', 'Call Status',
 )
 DASHBOARD_RENDER_CACHE_VERSION = 22
-DASHBOARD_SELECTION_CACHE_VERSION = 16
+DASHBOARD_SELECTION_CACHE_VERSION = 17
 # Pre-cached universes: every CDR plus the latest 1..N CDRs of each type.
 DASHBOARD_WARMUP_LATEST_COUNTS = 4
 # Only the most recently used Dashboard snapshots keep their chart frames in
@@ -2553,9 +2557,16 @@ def install_dashboard_routes(core):
         """
         terms = []
         excluded = identity(exclude) if exclude else ''
+        mapper = ValueMapper.from_repository(task_repository)
         for field_name, values in definition.filters.items():
             if identity(vendor_filter_column(field_name)) in {'vendor', 'operatorvendor'}:
                 values = vendor_match_values(field_name, values, task_repository.list_operator_mappings())
+            # Operators and Vendors are chosen with their mapped labels: match every source spelling.
+            kind = field_kind(vendor_filter_column(field_name))
+            if kind == 'vendor_operator' and values:
+                values = mapper.sources('operator_vendor', mapper.operator_vendors(values))
+            elif kind and values:
+                values = mapper.sources(kind, values)
             if identity(field_name) == excluded:
                 continue
             normalized_expression = filter_sql_normalized_expression(
@@ -3101,6 +3112,18 @@ def install_dashboard_routes(core):
                 connection.execute('DELETE FROM dashboard_filter_selections WHERE id = ?', (row['id'],))
             return selection_id, cache_key, options, row_counts, universe_row_counts, True
 
+    def mapped_values(field, values, mapper):
+        """The values of one filter with their Operator and Vendor Maps labels (Vendor_Operator from Operator_Vendor)."""
+        kind = field_kind(vendor_filter_column(field))
+        if kind == 'vendor_operator':
+            return mapper.values('vendor_operator', mapper.vendor_operators(mapper.values('operator_vendor', values)))
+        return mapper.values(kind, values) if kind else values
+
+    def mapped_filter_options(options, task_repository):
+        """Operator, Vendor, Operator_Vendor and Vendor_Operator values with their Operator and Vendor Maps labels."""
+        mapper = ValueMapper.from_repository(task_repository)
+        return {field: mapped_values(field, values, mapper) for field, values in options.items()}
+
     def load_filter_options_batch(definition, field_names, task_repository):
         """Load several unrestricted filter catalogues of the selected CDRs at once.
 
@@ -3117,7 +3140,9 @@ def install_dashboard_routes(core):
             if not known_default and not any(identity(field) == identity(item) for item in requested_definition.custom_fields):
                 requested_definition.custom_fields.append(field)
         ensure_combined_filter_columns(requested_definition, task_repository, dimensions, selected_by_kind)
-        options = profile_filter_options(requested_definition, dimensions, selected_by_kind, fields, task_repository)
+        options = mapped_filter_options(
+            profile_filter_options(requested_definition, dimensions, selected_by_kind, fields, task_repository), task_repository,
+        )
         return {field: [str(value) for value in options.get(field, [])] for field in fields}
 
     def load_filter_options(definition, field_name, task_repository):
@@ -3153,6 +3178,8 @@ def install_dashboard_routes(core):
                 values.update(str(row['value']) for row in rows)
         if not resolved:
             raise HTTPException(400, f'The selected CDRs do not contain the {field_name} field.')
+        if field_kind(vendor_filter_column(field_name)):
+            return mapped_values(field_name, values, ValueMapper.from_repository(task_repository))
         return sorted(values, key=str.casefold)
 
     def unfiltered_definition(definition):
@@ -3208,7 +3235,7 @@ def install_dashboard_routes(core):
     def dashboard_campaign_values(
         definition, selected_by_kind, task_repository, *, wait: bool = True,
     ) -> tuple[list[str], bool]:
-        """Return the compact Campaigns (for example ``2026-Q2`` or ``2026-Q2_SA``) behind a Dashboard.
+        """Return the compact Campaigns (for example ``2026-Q2`` or ``2026-Q2-SA``) behind a Dashboard.
 
         A Campaign filter limits them to its values; otherwise every Campaign of
         the selected CDRs is read from their cached catalogue. CDRs catalogued
@@ -3234,7 +3261,7 @@ def install_dashboard_routes(core):
         # A Campaign filter only names the Campaigns its CDRs actually contain.
         values = values_present_in_cdrs(configured, available) if configured else available
         labels = {compact_campaign_value(value) for value in values}
-        return sorted((label for label in labels if label), key=str.casefold), pending
+        return sorted((label for label in labels if label), key=campaign_sort_key), pending
 
     def dashboard_campaigns_label(campaigns: list[str]) -> str:
         if not campaigns:
@@ -3252,11 +3279,12 @@ def install_dashboard_routes(core):
         campaigns, campaigns_pending = dashboard_campaign_values(
             definition, selected_by_kind, task_repository, wait=False,
         )
+        mapper = ValueMapper.from_repository(task_repository)
         return {
             'campaigns': campaigns,
             'campaigns_pending': campaigns_pending,
-            'operators': operators,
-            'vendors': options['vendors'],
+            'operators': mapper.values('operator', operators),
+            'vendors': mapper.values('vendor', options['vendors']),
             'regions': options['regions'],
             'cities': options['cities'],
         }
@@ -3358,7 +3386,7 @@ def install_dashboard_routes(core):
                     chart['position'] = position
         token = uuid4().hex
         payload = {
-            'slides': list(slides.values()), 'options': options,
+            'slides': list(slides.values()), 'options': mapped_filter_options(options, task_repository),
             'filter_fields': list(ADAPTATIVE_FILTER_FIELDS),
             'available_fields': sorted(available_fields, key=str.casefold),
             'rows': row_counts,

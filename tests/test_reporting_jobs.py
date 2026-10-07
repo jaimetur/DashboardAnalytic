@@ -11,8 +11,11 @@ from src.modules.report_tasks import (
     next_run_after, normalize_definition, normalize_schedule, recurrence_label, register_report_artifact_provider,
     safe_file_name,
 )
+from src.modules.scoring_reports import default_report_configuration
 
 TZ = timezone(timedelta(hours=2))
+# Every Scoring artifact is configured with the report editor.
+SCORING_ENTRY = {'nr_mode': 'NSA', 'report': default_report_configuration()}
 
 
 def login(client, username='super', password='super123'):
@@ -62,16 +65,21 @@ def test_definitions_keep_every_module_option_and_need_an_artifact():
         'dashboards': [{'dashboard_id': 'd1', 'scope': 'multivendor', 'vendor_comparison': 'vendor_only',
                         'datasets': {'data': [3, '4']}, 'date_from': '2026-01-01',
                         'filters': {'Operator': ['EE', ''], 'RAT': []}}],
-        'scoring': [{'nr_mode': 'sa', 'aggregation_levels': ['Campaign', 'Bogus'], 'context_filters': {'Vendor': ['Huawei']},
-                     'main_cities': True}],
+        'scoring': [{'nr_mode': 'sa', 'label': 'Weekly', 'report': default_report_configuration(
+            context_filters={'Vendor': ['Huawei']}, aggregation_levels=['Operator', 'Campaign'], main_cities=True)}],
     })
     assert definition['dashboards'] == [{
         'dashboard_id': 'd1', 'label': '', 'scope': 'multivendor', 'vendor_comparison': 'vendor_only',
         'datasets': {'data': [3, 4]}, 'all_datasets': False, 'date_from': '2026-01-01', 'date_to': '', 'filters': {'Operator': ['EE']},
     }]
     scoring = definition['scoring'][0]
-    assert (scoring['nr_mode'], scoring['aggregation_levels'], scoring['context_filters'], scoring['main_cities']) == (
+    scenario = scoring['report']['scenarios'][0]
+    assert (scoring['nr_mode'], scenario['aggregation_levels'], scenario['context_filters'], scenario['main_cities']) == (
         'SA', ['Operator', 'Campaign'], {'Vendor': ['Huawei']}, True)
+    # Filters and aggregation belong to the report scenarios only.
+    assert not {'aggregation_levels', 'context_filters', 'main_cities'} & set(scoring)
+    with pytest.raises(ValueError, match='Configure the report content'):
+        normalize_definition({'scoring': [{'nr_mode': 'NSA'}]})
     assert safe_file_name('Scoring: A/B ' + 'x' * 300 + '.pptx').endswith('.pptx')
 
 
@@ -261,7 +269,7 @@ def test_reporting_job_runs_emails_and_travels_with_exports(client, monkeypatch,
 def test_imported_reporting_jobs_keep_an_owner_that_exists_here(client):
     login(client)
     workspace_user('editor', 'user-editor')
-    definition = {'scoring': [{'nr_mode': 'NSA'}]}
+    definition = {'scoring': [SCORING_ENTRY]}
     document = {
         'format': 'drivetest-analyzer-reporting-jobs', 'version': 1, 'dataset_names': {},
         'reporting_jobs': [
@@ -295,7 +303,7 @@ def test_reporting_jobs_only_include_modules_of_their_author(client):
         'scoring': {'default': 'none', 'allow': {'roles': ['super-admin']}},
     })
     try:
-        payload = {'name': 'Scoring only', 'definition': {'scoring': [{'nr_mode': 'NSA'}]}, 'schedule': {'mode': 'manual'}}
+        payload = {'name': 'Scoring only', 'definition': {'scoring': [SCORING_ENTRY]}, 'schedule': {'mode': 'manual'}}
         response = client.post('/api/reporting/tasks', json=payload)
         assert response.status_code == 403
         assert 'Scoring' in response.json()['detail']
@@ -342,7 +350,7 @@ def test_dashboard_entries_can_use_every_ready_cdr_of_their_nr_mode():
 def test_reporting_runs_appear_in_background_tasks(client):
     login(client)
     task = client.post('/api/reporting/tasks', json={
-        'name': 'Background check', 'definition': {'scoring': [{'nr_mode': 'NSA'}]}, 'schedule': {'mode': 'manual'},
+        'name': 'Background check', 'definition': {'scoring': [SCORING_ENTRY]}, 'schedule': {'mode': 'manual'},
     }).json()['task']
     report_tasks.create_run(core.repository, report_tasks.get_task(core.repository, task['id']), 'manual', 'super')
     groups = client.get('/api/background-tasks').json()
@@ -470,3 +478,17 @@ def test_job_artifacts_are_grouped_by_module_with_their_entries():
     assert groups[0]['items'] == ['(PPT/Word)']
     assert len(groups[1]['items']) == 2 and groups[1]['items'][1].endswith('(Word)')
     assert groups[2]['items'] == ['Main Cities (PPT)']
+
+
+def test_cdr_analysis_word_keeps_the_powerpoint_of_the_same_run(tmp_path, monkeypatch):
+    # The PowerPoint and the Word of one CDR Analysis artifact share their name; building the Word
+    # from an intermediate presentation must not replace or remove the PowerPoint next to it.
+    monkeypatch.setattr(core, 'build_dataset_summary_reports', lambda *_args, **_kwargs: ([], []))
+    monkeypatch.setattr(core, 'export_dataset_summary_powerpoint', lambda path, _reports: Path(path).write_bytes(b'pptx'))
+    monkeypatch.setattr('src.modules.pptx_to_docx.pptx_to_docx', lambda content, *_args: b'docx')
+    powerpoint = tmp_path / '20261007_120000 - CDR Analysis.pptx'
+    core.write_dataset_summary([1], 'powerpoint', powerpoint, 'super')
+    word = tmp_path / '20261007_120000 - CDR Analysis.docx'
+    core.write_dataset_summary([1], 'word', word, 'super')
+    assert powerpoint.read_bytes() == b'pptx' and word.read_bytes() == b'docx'
+    assert sorted(path.name for path in tmp_path.iterdir()) == sorted([powerpoint.name, word.name])

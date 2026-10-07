@@ -7,13 +7,15 @@ import math
 import re
 from typing import Any
 
+from src.modules.column_names import campaign_sort_key
 from src.modules.mapping_order import vendor_order_key
 from src.modules.scoring_vendors import normalize_scoring_vendor_result
 from src.modules.scoring_config import validate_scoring_configuration
+from src.modules.scoring_insights import build_scoring_insights
 
 
 _ENVIRONMENT_ORDER = ('DriveCity', 'DriveConnectionroad', 'Walk')
-_SCOPE_FIELDS = ('campaign', 'region', 'city', 'vendor', 'dataset_type')
+_SCOPE_FIELDS = ('campaign', 'region', 'cluster', 'city', 'vendor', 'dataset_type')
 THRESHOLD_COLORS = {
     'Low': '#F8CCCC',
     'Medium': '#FFE3A3',
@@ -81,7 +83,7 @@ def scoring_coverage_notes(result: dict[str, Any]) -> dict[str, list[str]]:
     weighted_environments = [name for name, value in environment_configuration.items()
                              if (_number(value.get('total_points')) or 0) > 0]
     environments = list(dict.fromkeys(str(row.get('environment')) for row in totals))
-    context_fields = ('operator', 'vendor', 'region', 'city', 'campaign', 'dataset_type')
+    context_fields = ('operator', 'vendor', 'region', 'cluster', 'city', 'campaign', 'dataset_type')
     grouped: dict[str, dict[tuple, dict[str, Any]]] = {environment: {} for environment in environments}
     for total in totals:
         if total.get('category') != 'Overall' or total.get('complete_coverage') is not False:
@@ -180,6 +182,18 @@ def build_scoring_views(job: dict[str, Any] | None, result: dict[str, Any] | Non
     levels = job.get('levels', job.get('aggregation_levels', [])) or []
     if isinstance(levels, str):
         levels = [levels]
+    # A level with a single value in the results (for example one Campaign) splits nothing:
+    # charts, tables and documents leave it out, as if it had not been chosen.
+    single = single_value_levels(levels, result)
+    if single:
+        levels = [level for level in levels if level not in single]
+        hidden = {_key(_HIERARCHY_CONTEXT_FIELDS[_HIERARCHY_LEVELS[_level_identity(level)]]) for level in single}
+        job = {**job, 'levels': levels, 'aggregation_levels': levels}
+        result = {**result, **{
+            name: [{key: (None if _key(key) in hidden else value) for key, value in record.items()}
+                   for record in _records(result.get(name))]
+            for name in ('scoring', 'score_rows', 'totals', 'charts', 'global_kpis') if name in result
+        }}
     include_dataset_type = any(_level_identity(level) == 'datasettype' for level in levels)
     requested_baseline = str(job.get('baseline_operator') or job.get('baseline') or 'EE').strip() or 'EE'
     baseline_aliases = job.get('baseline_aliases') or result.get('baseline_aliases') or _mapping_aliases(
@@ -244,8 +258,10 @@ def build_scoring_views(job: dict[str, Any] | None, result: dict[str, Any] | Non
         vendor_mapping_groups=vendor_mapping_groups or [],
     ) if hierarchy_levels else ([], [])
 
+    selected_levels = [level for level in (_HIERARCHY_LEVELS.get(_level_identity(item)) for item in levels) if level]
     return {
         'score_tables': score_tables,
+        'insights': build_scoring_insights(score_tables, configuration, selected_levels, result),
         'gap_tables': gap_tables,
         'gap_summary_tables': gap_summary_tables,
         'hierarchy_score_tables': hierarchy_score_tables,
@@ -280,6 +296,24 @@ _HIERARCHY_CONTEXT_FIELDS = {
 }
 
 
+def single_value_levels(levels: list[str], result: dict[str, Any]) -> list[str]:
+    """Aggregation levels other than Operator with at most one value in the scoring result.
+
+    Such a level does not split anything, so reports leave it out.
+    """
+    records = _records(result.get('scoring', result.get('score_rows', []))) + _records(result.get('totals', result.get('charts', [])))
+    single = []
+    for level in levels:
+        name = _HIERARCHY_LEVELS.get(_level_identity(level))
+        field = _HIERARCHY_CONTEXT_FIELDS.get(name or '')
+        if not field:
+            continue
+        values = {_hashable(_field(record, field)) for record in records}
+        if len(values) <= 1:
+            single.append(level)
+    return single
+
+
 def _hierarchy_levels(job: dict[str, Any], result: dict[str, Any]) -> list[str]:
     """Return selected hierarchy levels only for jobs using the new aggregation contract."""
     try:
@@ -305,16 +339,14 @@ def _hierarchy_levels(job: dict[str, Any], result: dict[str, Any]) -> list[str]:
 
 
 def _hierarchy_display_value(entry: dict[str, Any]) -> str:
-    """Shorten quarter campaign labels without changing comparison identities."""
+    """Shorten quarter campaign labels (2026-Q2-SA) without changing comparison identities."""
+    from src.modules.column_names import compact_campaign_value
+
     value = entry.get('value')
     text = str(value) if value is not None else 'Not specified'
     if entry.get('level') != 'Campaign':
         return text
-    year_first = re.search(r'(?<!\d)((?:19|20)\d{2})[-_ ]*Q([1-4])(?!\d)', text, re.IGNORECASE)
-    if year_first:
-        return f'{year_first[1]}-Q{year_first[2]}'
-    quarter_first = re.search(r'(?<![a-z0-9])Q([1-4])[-_ ]*((?:19|20)\d{2})(?!\d)', text, re.IGNORECASE)
-    return f'{quarter_first[2]}-Q{quarter_first[1]}' if quarter_first else text
+    return compact_campaign_value(text) or text
 
 
 def _hierarchy_leaf_id(path: list[dict[str, Any]]) -> str:
@@ -393,6 +425,9 @@ def _hierarchy_column_sort_key(column: dict[str, Any]) -> tuple[Any, ...]:
             values.append((0, column.get('operator_position', 0), str(value or '').casefold()))
         elif item['level'] == 'Vendor' and column.get('vendor_order') is not None:
             values.append((1, *column['vendor_order']))
+        elif item['level'] == 'Campaign':
+            # Chronological, with the plain, NSA and SA campaigns of a quarter in that order.
+            values.append((1, campaign_sort_key(value), '' if value is None else str(value)))
         else:
             values.append((1, '' if value is None else str(value).casefold(), '' if value is None else str(value)))
     return tuple(values)
@@ -1762,7 +1797,7 @@ def _coverage_note(
 
 def _make_title(prefix: str, context: dict[str, Any]) -> str:
     labels = []
-    for field in ('campaign', 'region', 'city', 'vendor', 'dataset_type', 'environment'):
+    for field in ('campaign', 'region', 'cluster', 'city', 'vendor', 'dataset_type', 'environment'):
         value = context.get(field)
         if value is not None and str(value).strip():
             labels.append(str(value))
@@ -1809,8 +1844,10 @@ def _hashable(value: Any) -> Any:
     return str(value)
 
 
-def _scope_sort_key(scope: tuple[Any, ...]) -> tuple[str, ...]:
-    return tuple('' if value is None else str(value).casefold() for value in scope)
+def _scope_sort_key(scope: tuple[Any, ...]) -> tuple[Any, ...]:
+    """Scopes ordered by campaign (chronologically, plain, NSA then SA), then by the other fields."""
+    campaign, *others = scope or (None,)
+    return (campaign_sort_key(campaign or ''), *('' if value is None else str(value).casefold() for value in others))
 
 
 def _environment_sort_key(environment: str) -> tuple[int, str]:

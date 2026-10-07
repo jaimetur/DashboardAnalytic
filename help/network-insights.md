@@ -40,7 +40,7 @@ Analyse the network behind the measured performance: radio quality (RSRP and SIN
 **Group by** accepts several dimensions; they form a hierarchy in the selector order, with Campaign last. Each Overview card, table row, CDF curve and map group is one combination, for example `EE · 2026-Q2`.
 
 - **Operator** is always checked and disabled unless **Vendor** is checked. With Vendor checked, Operator becomes selectable: uncheck it to pool the selected operators by vendor, or keep it to split each operator by vendor.
-- **Operator_Vendor** uses the `<Operator>_<Vendor>` identity and **Vendor** the vendor alone: actual vendors, then Mixed, Other and All Vendor(s), then operators without a mapped vendor as **Operator - All**. **Cluster** follows Regions and is also available in **Group by**.
+- **Operator_Vendor** uses the `<Operator>_<Vendor>` identity, **Vendor_Operator** the same identity as `<Vendor>_<Operator>` and **Vendor** the vendor alone: actual vendors, then Mixed, Other and All Vendor(s), then operators without a mapped vendor as **Operator - All**. **Cluster** follows Regions and is also available in **Group by**.
 - Curves of the same Operator (or Vendor) share its colour. Campaigns differ by line width: the latest campaign is the thickest and older campaigns are progressively thinner, as in E2E Dashboards. Other secondary groups, such as Region or City, use a different line style.
 - The change between the two latest campaigns appears only when Campaign is not a grouping dimension.
 - eNodeBs and cells are counted per source operator, also when operators are pooled.
@@ -165,7 +165,7 @@ Speech falls back to the `Recording_*` fields when the `Playing_*` fields are ab
 
 ## Persistence and transfers
 
-Analyses are calculated on demand. Spectrum Holdings belong to the workspace and travel with the **Operator & Vendor Maps** export, transfers and backups. Workspace templates and Dashboards travel with Report Templates and Dashboards.
+Analyses are calculated on demand. Spectrum Holdings belong to the workspace and travel with the **Mappings & Reference Data** export, transfers and backups. Workspace templates and Dashboards travel with Report Templates and Dashboards.
 
 Network Insights remembers the selected CDRs, NR Mode, Technology, grouping, filters, thresholds, map grid and deployment grouping in this browser, separately for each workspace and user. Unavailable CDRs or values are omitted when restored. Opening or reloading Network Insights with the same selection as the last analysis shows that analysis again at once, from the results the workspace keeps; once the selection changes, press **Analyse Network** to calculate it. These browser preferences are not included in workspace exports or backups.
 

@@ -1112,6 +1112,15 @@ class Repository:
                     )
                 except (TypeError, json.JSONDecodeError):
                     continue
+        # Vendor_Operator: the Operator_Vendor values the other way round, split at a known Operator.
+        from src.modules.mapping_order import swap_operator_vendor
+
+        operator_groups = self.list_operator_mapping_groups()
+        for catalogue in catalogues.values():
+            groups = [*operator_groups, *({'canonical': name} for name in catalogue['operators'])]
+            catalogue['vendor_operators'] = sorted(
+                {swap_operator_vendor(value, groups) for value in catalogue['vendors']}, key=str.casefold,
+            )
         return catalogues
 
     def cdr_catalogue_values(self, dataset_ids: Iterable[int] | None = None) -> dict[str, list[str]]:
@@ -1122,7 +1131,7 @@ class Repository:
                 dataset_ids = [int(row[0]) for row in conn.execute('SELECT dataset_id FROM cdr_catalogues')]
         catalogues = self.cdr_catalogues_by_dataset(dataset_ids)
         return {field: sorted({value for catalogue in catalogues.values() for value in catalogue[field]}, key=str.casefold)
-                for field in ('vendors', 'vendors_only', 'regions', 'clusters', 'cities', 'campaigns', 'operators')}
+                for field in ('vendors', 'vendors_only', 'vendor_operators', 'regions', 'clusters', 'cities', 'campaigns', 'operators')}
 
     def missing_cdr_vendor_only_ids(self, dataset_ids: Iterable[int]) -> list[int]:
         """Identify CDRs whose Vendor_Only cache has not been populated."""
@@ -2591,11 +2600,15 @@ class Repository:
         return list(grouped.values())
 
     def chart_mapping_settings(self) -> dict[str, Any]:
+        from src.modules.campaign_maps import load_campaign_map
+
         return {
             'operator_mappings': self.list_operator_mappings(),
             'operator_mapping_groups': self.list_operator_mapping_groups(),
             'vendor_mappings': self.list_vendor_mappings(),
             'vendor_mapping_groups': self.list_vendor_mapping_groups(),
+            # Part of the chart cache keys: a new Campaign Map repaints the cached charts.
+            'campaign_map': load_campaign_map(self),
         }
 
     def replace_operator_mapping_group(

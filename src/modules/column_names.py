@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 
 COLUMN_IDENTITY_ALIASES = {
@@ -14,6 +16,8 @@ COLUMN_IDENTITY_ALIASES = {
 # "<Operator> - All" in both.
 OPERATOR_VENDOR_FIELD = 'Operator_Vendor'
 VENDOR_FIELD = 'Vendor'
+# <Vendor>_<Operator>: Operator_Vendor the other way round, derived when it is read (see mapping_order).
+VENDOR_OPERATOR_FIELD = 'Vendor_Operator'
 
 MAIN_CDR_FIELDS = (
     'Operator', 'Subscriber', OPERATOR_VENDOR_FIELD, VENDOR_FIELD,
@@ -45,6 +49,10 @@ def vendor_only_value(vendor: object, operator: object = '') -> str:
     text = '' if vendor is None else str(vendor).strip()
     if not text or '_' not in text:
         return text
+    # An Operator whose name holds underscores (for example VF_SA) is removed whole.
+    operator_text = str(operator or '').strip()
+    if operator_text and text.casefold().startswith(operator_text.casefold() + '_'):
+        return text[len(operator_text) + 1:]
     prefix, remainder = text.split('_', 1)
     normalized_prefix = re.sub(r'[^a-z0-9]+', '', prefix.casefold())
     normalized_operator = re.sub(r'[^a-z0-9]+', '', str(operator or '').casefold())
@@ -76,13 +84,164 @@ def campaign_parts(value: object) -> tuple[str | None, str | None, str | None]:
     )
 
 
-def compact_campaign_value(value: object) -> str:
-    """Return a compact comparison/display value while preserving optional radio mode."""
-    year, quarter, mode = campaign_parts(value)
+# Campaign Maps (Workspace Config): how every chart, table, legend, filter and report
+# shows campaigns. The label format uses markers filled from each campaign, so new
+# campaigns follow it without editing the map: {year}, {yy}, {quarter}, {mode} (SA or
+# NSA) and {market} (the country code such as UK). Characters inside the braces around
+# a marker are written only when the campaign has that part: "{-mode}" writes "-SA" for
+# an SA campaign and nothing otherwise. Campaigns are ordered by year and quarter, and
+# the campaigns of one quarter by ``mode_order`` ("" is the campaign without a mode).
+# Exceptions give their own label to campaigns that do not follow the pattern; they are
+# ordered by the year and quarter of their label, or first (in their table order) when
+# the label has none.
+DEFAULT_CAMPAIGN_FORMAT = '{year}-Q{quarter}{-mode}'
+DEFAULT_CAMPAIGN_MODE_ORDER = ('', 'NSA', 'SA')
+DEFAULT_CAMPAIGN_MAP = {'format': DEFAULT_CAMPAIGN_FORMAT, 'mode_order': list(DEFAULT_CAMPAIGN_MODE_ORDER), 'exceptions': []}
+CAMPAIGN_FORMAT_MARKER = re.compile(r'\{([^A-Za-z{}]*)(year|yy|quarter|mode|market)([^A-Za-z{}]*)\}')
+_campaign_map_override: ContextVar[dict | None] = ContextVar('campaign_map_override', default=None)
+_campaign_map_resolver: Callable[[], dict | None] | None = None
+
+
+def normalize_campaign_map(config: object) -> dict:
+    """A valid Campaign Map: label format, order of the radio modes and exceptions."""
+    config = config if isinstance(config, dict) else {}
+    label_format = str(config.get('format') or '').strip() or DEFAULT_CAMPAIGN_FORMAT
+    if len(label_format) > 80:
+        raise ValueError('The campaign label format is limited to 80 characters.')
+    unknown = [name for name in re.findall(r'\{[^A-Za-z{}]*([A-Za-z_]+)[^A-Za-z{}]*\}', label_format)
+               if name not in {'year', 'yy', 'quarter', 'mode', 'market'}]
+    if unknown:
+        raise ValueError(f'Unknown campaign label markers: {", ".join(sorted(set(unknown)))}. '
+                         'Use {year}, {yy}, {quarter}, {mode} and {market}.')
+    if not CAMPAIGN_FORMAT_MARKER.search(label_format):
+        raise ValueError('The campaign label format needs at least one marker such as {year} or {quarter}.')
+    modes = [str(value or '').strip().upper() for value in config.get('mode_order') or []]
+    modes = [mode for mode in dict.fromkeys(modes) if mode in DEFAULT_CAMPAIGN_MODE_ORDER]
+    modes += [mode for mode in DEFAULT_CAMPAIGN_MODE_ORDER if mode not in modes]
+    exceptions, seen_sources, seen_labels = [], set(), set()
+    for item in config.get('exceptions') or []:
+        if not isinstance(item, dict):
+            raise ValueError('The campaign exceptions are invalid.')
+        label = re.sub(r'\s+', ' ', str(item.get('label') or '')).strip()[:80]
+        raw_sources = item.get('sources')
+        if isinstance(raw_sources, str):
+            raw_sources = raw_sources.splitlines()
+        sources = list(dict.fromkeys(source for value in raw_sources or [] if (source := str(value).strip())))
+        if not label and not sources:
+            continue
+        if not label:
+            raise ValueError('Every campaign exception needs a label.')
+        if not sources:
+            raise ValueError(f'The campaign exception "{label}" needs at least one source campaign.')
+        if label.casefold() in seen_labels:
+            raise ValueError(f'The campaign label "{label}" is repeated.')
+        repeated = [source for source in sources if source.casefold() in seen_sources]
+        if repeated:
+            raise ValueError(f'These campaigns belong to more than one exception: {", ".join(repeated)}.')
+        seen_labels.add(label.casefold())
+        seen_sources.update(source.casefold() for source in sources)
+        exceptions.append({'label': label, 'sources': sources})
+    return {'format': label_format, 'mode_order': modes, 'exceptions': exceptions}
+
+
+def set_campaign_map_resolver(resolver: Callable[[], dict | None] | None) -> None:
+    """Install the function returning the Campaign Map of the active workspace."""
+    global _campaign_map_resolver
+    _campaign_map_resolver = resolver
+
+
+@contextmanager
+def use_campaign_map(config: dict | None):
+    """Use a workspace's Campaign Map in this context (jobs of a workspace that is not active)."""
+    token = _campaign_map_override.set(normalize_campaign_map(config) if config is not None else None)
+    try:
+        yield
+    finally:
+        _campaign_map_override.reset(token)
+
+
+def current_campaign_map() -> dict:
+    override = _campaign_map_override.get()
+    if override is not None:
+        return override
+    if _campaign_map_resolver is not None:
+        try:
+            resolved = _campaign_map_resolver()
+        except Exception:  # noqa: BLE001 - labels fall back to the default map when the workspace cannot be read.
+            resolved = None
+        if resolved is not None:
+            return resolved
+    return DEFAULT_CAMPAIGN_MAP
+
+
+def _campaign_text(value: object) -> str:
+    text = '' if value is None else str(value).strip()
+    return '' if text.casefold() in {'<na>', 'nan', 'nat', 'none'} else text
+
+
+def campaign_market(value: object) -> str:
+    """The country code that starts or ends a campaign (UK in UK_Q2_2026), if any."""
+    for token in re.split(r'[^A-Za-z0-9]+', _campaign_text(value)):
+        if re.fullmatch(r'[A-Z]{2,3}', token) and token not in {'SA', 'NSA'}:
+            return token
+    return ''
+
+
+def _exception_for(text: str, config: dict) -> tuple[int, dict] | None:
+    key = text.casefold()
+    for index, item in enumerate(config.get('exceptions') or []):
+        if key == item['label'].casefold() or any(key == source.casefold() for source in item['sources']):
+            return index, item
+    return None
+
+
+def format_campaign(value: object, config: dict | None = None) -> str:
+    """The label of a campaign with a Campaign Map (the workspace's one by default)."""
+    config = config or current_campaign_map()
+    text = _campaign_text(value)
+    if not text:
+        return ''
+    exception = _exception_for(text, config)
+    if exception:
+        return exception[1]['label']
+    year, quarter, mode = campaign_parts(text)
     if not year or not quarter:
-        text = '' if value is None else str(value).strip()
-        return '' if text.casefold() in {'<na>', 'nan', 'nat', 'none'} else text
-    return f'{year}-{quarter}{f"_{mode}" if mode else ""}'
+        return text
+    parts = {'year': year, 'yy': year[-2:], 'quarter': quarter[1:], 'mode': mode or '', 'market': campaign_market(text)}
+
+    def marker(match: re.Match) -> str:
+        filled = parts[match.group(2)]
+        return f'{match.group(1)}{filled}{match.group(3)}' if filled else ''
+
+    return CAMPAIGN_FORMAT_MARKER.sub(marker, config.get('format') or DEFAULT_CAMPAIGN_FORMAT)
+
+
+def compact_campaign_value(value: object) -> str:
+    """The campaign as every chart, table, legend, filter and report shows it (see Campaign Maps).
+
+    With the default map UK_Q2_2026 reads 2026-Q2, UK_Q2_NSA_2026 reads 2026-Q2-NSA and
+    UK_Q2_SA_2026 (or 2026-Q2_SA) reads 2026-Q2-SA; values without a year and quarter are
+    kept. Comparisons normalise both sides with it, so any spelling matches the same campaign.
+    """
+    return format_campaign(value)
+
+
+def campaign_sort_key(value: object, config: dict | None = None) -> tuple[int, int, int, int, str]:
+    """Campaign order with a Campaign Map: year, quarter, then the order of the radio modes.
+
+    Campaigns and exception labels without a year and quarter come first, exceptions in
+    their table order.
+    """
+    config = config or current_campaign_map()
+    text = _campaign_text(value)
+    exception = _exception_for(text, config)
+    label = exception[1]['label'] if exception else text
+    year, quarter, mode = campaign_parts(label if exception else text)
+    if not year or not quarter:
+        return (-1, -1, exception[0] if exception else len(config.get('exceptions') or []), 0, label.casefold())
+    modes = config.get('mode_order') or list(DEFAULT_CAMPAIGN_MODE_ORDER)
+    rank = modes.index(mode or '') if (mode or '') in modes else len(modes)
+    return (int(year), int(quarter[1]), rank, exception[0] + 1 if exception else 0, label.casefold())
 
 
 def column_identity(value: object) -> str:

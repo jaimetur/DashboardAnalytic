@@ -223,6 +223,13 @@
 .report-jobs .rj-card[data-rj-module] .rj-card-body > strong, .report-jobs .rj-card[data-rj-module] .rj-entry > strong { color: var(--rj-accent); }
 .report-jobs .rj-card[data-rj-module] .rj-secondary { border-color: color-mix(in srgb, var(--rj-accent) 45%, transparent); color: var(--rj-accent); }
 .report-jobs .rj-card[data-rj-module] .rj-secondary:hover { background: var(--rj-tint); }
+/* Configure report… and Use default of the Scoring report content. */
+.report-jobs .rj-card[data-rj-module] .rj-scoring-report .ghost-link {
+  padding: .45rem .9rem; border: 1px solid color-mix(in srgb, var(--rj-accent) 45%, transparent);
+  background: #fff; color: var(--rj-accent); font-weight: 700;
+}
+.report-jobs .rj-card[data-rj-module] .rj-scoring-report .ghost-link:hover { background: var(--rj-tint); }
+.report-jobs .rj-scoring-report .rj-report-missing { color: #b3261e; font-weight: 700; }
 .report-jobs .rj-card[data-rj-module] input[type="checkbox"] { accent-color: var(--rj-accent); }
 .report-jobs .rj-card[data-rj-module] .rj-inline-label, .report-jobs .rj-card[data-rj-module] .rj-formats > strong { color: var(--rj-accent); }
 .report-jobs .rj-card[data-rj-module] label.rj-format-chip:has(input:checked),

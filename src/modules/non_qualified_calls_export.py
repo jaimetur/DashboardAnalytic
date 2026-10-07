@@ -1,4 +1,4 @@
-"""Non-Qualified Calls report: Executive Summary and Progress Status in PowerPoint and Word."""
+"""Non-Qualified Calls report: Executive Summary, Progress Status and Root Cause Analysis in PowerPoint and Word."""
 
 from datetime import datetime
 from pathlib import Path
@@ -18,11 +18,20 @@ from src.modules.network_insights_export import _content_frame, _docx_table, _sl
 
 FILTER_LABELS = (
     ('datasets', 'CDRs'), ('service', 'Service'), ('campaign', 'Campaign'), ('operator', 'Operator'),
-    ('operator_vendor', 'Operator_Vendor'), ('vendor', 'Vendor'), ('region', 'Region'), ('cluster', 'Cluster'),
+    ('operator_vendor', 'Operator_Vendor'), ('vendor_operator', 'Vendor_Operator'), ('vendor', 'Vendor'),
+    ('region', 'Region'), ('cluster', 'Cluster'),
     ('city', 'City'), ('technology', 'Technology'), ('test_name', 'Test Name'), ('result', 'Result'),
     ('failure_classification', 'Failure Classification'), ('failure_category', 'Failure Category'),
-    ('status', 'Status'), ('team', 'Team'), ('assignee', 'Assignee'),
+    ('status', 'Status'), ('team', 'Team'), ('assignee', 'Assignee'), ('root_domain', 'Root Domain'),
+    ('root_cause', 'Root Cause'), ('nr_mode', 'NR Mode'), ('call_type', 'Call Type'), ('period', 'Period'),
+    ('age', 'Age of Open Calls'), ('root_pair', 'Root Domain · Cause'),
+    ('effective_domain', 'Root Domain (with suggestions)'), ('effective_cause', 'Root Domain · Cause (with suggestions)'),
+    ('node', 'eNB / gNB'), ('state', 'Follow-up'), ('rca_state', 'Root Cause'),
 )
+STATE_LABELS = {
+    'closed': 'Closed', 'attended': 'Attended', 'not_attended': 'Not attended', 'with_team': 'With team',
+    'assigned': 'Assigned', 'commented': 'Commented', 'labelled': 'With a root cause', 'suggested': 'Suggested root cause',
+}
 FLAG_LABELS = {'open_only': 'Open calls only', 'without_comments': 'Without comments'}
 GRANULARITY_LABELS = {'week': 'Week', 'month': 'Month', 'quarter': 'Quarter', 'year': 'Year'}
 RASPBERRY = RGBColor(0xB0, 0x23, 0x4F)
@@ -35,7 +44,11 @@ def selection_lines(filters: dict[str, Any], dataset_names: dict[str, str], gran
         values = [str(value) for value in filters.get(key) or [] if str(value).strip()]
         if key == 'datasets':
             values = [dataset_names.get(value, value) for value in values]
-        values = ['Unassigned' if value == '__unassigned__' else value for value in values]
+        empty = 'Not classified' if key in {'root_domain', 'effective_domain', 'root_pair'} else 'Unassigned'
+        values = [empty if value == '__unassigned__' else value for value in values]
+        # "RF||Coverage" and "month:2026-07" read "RF · Coverage" and "2026-07".
+        values = [value.partition(':')[2] if key == 'period' else value.strip('|').replace('||', ' · ') for value in values]
+        values = [STATE_LABELS.get(value, value) if key in {'state', 'rca_state'} else value for value in values]
         if values:
             lines.append(f'{label}: {", ".join(values)}')
     lines.extend(text for key, text in FLAG_LABELS.items() if filters.get(key))
@@ -62,6 +75,7 @@ def summary_table(summary: dict[str, Any]) -> tuple[list[str], list[list[str]]]:
         ['Non-Qualified Calls', f'{total:,}', '100%' if total else '0%'],
         ['Open', f"{summary['open']:,}", _share(summary['open'], total)],
         ['Closed', f"{summary['closed']:,}", _share(summary['closed'], total)],
+        ['Attended', f"{summary.get('attended', 0):,}", _share(summary.get('attended', 0), total)],
         ['With Team', f"{summary['with_team']:,}", _share(summary['with_team'], total)],
         ['Assigned', f"{summary['assigned']:,}", _share(summary['assigned'], total)],
         ['Commented', f"{summary['commented']:,}", _share(summary['commented'], total)],
@@ -214,13 +228,43 @@ def _cover_selection(cover, lines: list[str]) -> None:
 def report_panels(summary: dict[str, Any], breakdowns: list[dict[str, Any]], progress: dict[str, Any],
                   options: dict[str, Any]) -> list[tuple[str, Any]]:
     """The Executive Summary and Progress View drawn like the page, as (title, PNG) panels."""
-    from src.modules.non_qualified_calls_visuals import executive_summary_panels, progress_view_panels
-
-    from src.modules.non_qualified_calls_visuals import table_panels
+    from src.modules.non_qualified_calls_visuals import (
+        executive_summary_panels, progress_view_panels, root_cause_panels, table_panels,
+    )
 
     label = GRANULARITY_LABELS.get(progress['granularity'], 'Month')
     tables = [panel for title, columns, rows in detail_tables(progress) for panel in table_panels(title, columns, rows)]
-    return [*executive_summary_panels(summary, breakdowns, options), *progress_view_panels(progress, options, label), *tables]
+    root_causes = options.get('root_causes')
+    analysis = []
+    if root_causes:
+        analysis = [*root_cause_panels(root_causes),
+                    *(panel for title, columns, rows in root_cause_tables(root_causes)
+                      for panel in table_panels(title, columns, rows))]
+    return [*executive_summary_panels(summary, breakdowns, options), *progress_view_panels(progress, options, label),
+            *tables, *analysis]
+
+
+def matrix_table(stats: dict[str, Any], key: str, title: str) -> tuple[list[str], list[list[str]]]:
+    """Calls of each group (call type, NR mode or technology) per root domain."""
+    columns = stats['columns']
+    return [title, *columns, 'Total'], [
+        [row['name'], *[f"{row['counts'].get(column, 0):,}" for column in columns], f"{row['total']:,}"]
+        for row in stats[key]
+    ]
+
+
+def node_table(stats: dict[str, Any]) -> tuple[list[str], list[list[str]]]:
+    return ['eNB / gNB', 'Operator', 'Site', 'Host', 'Vendor', 'Calls', 'Main Domain'], [
+        [row['node'], row['operator'], row['site'] or '—', row['host'] or '—', row['vendor'] or '—',
+         f"{row['calls']:,}", row['top_domain'] or '—'] for row in stats['nodes']
+    ]
+
+
+def root_cause_tables(stats: dict[str, Any]) -> list[tuple[str, list[str], list[list[str]]]]:
+    """The Root Cause Analysis tables: NR mode and technology per domain, and the eNB/gNB with most calls."""
+    return [('Root Cause Analysis · NSA vs SA', *matrix_table(stats, 'nr_modes', 'NR Mode')),
+            ('Root Cause Analysis · Technology', *matrix_table(stats, 'technologies', 'Technology')),
+            ('Root Cause Analysis · eNB / gNB', *node_table(stats))]
 
 
 def detail_tables(progress: dict[str, Any]) -> list[tuple[str, list[str], list[list[str]]]]:

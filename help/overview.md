@@ -58,7 +58,7 @@ The header is available throughout the authenticated application.
 
 ## Application and workspace configuration
 
-**Application Config** controls runtime settings shared by every workspace. The dedicated **Workspace Config** page groups Report Templates Management, Main Cities, Operator & Vendor Maps (including Spectrum Holdings) and Scoring & GAP Analysis Setup for the active workspace. These are separate scopes: changing a workspace template or chart mapping does not change application runtime settings. See [Application Config](app-config.md) and [Workspace Config](workspace-config.md).
+**Application Config** controls runtime settings shared by every workspace. The dedicated **Workspace Config** page groups Report Templates Management, Main Cities, Mappings & Reference Data (Operator, Vendor and Campaign Maps and Spectrum Holdings) and Scoring & GAP Analysis Setup for the active workspace. These are separate scopes: changing a workspace template or chart mapping does not change application runtime settings. See [Application Config](app-config.md) and [Workspace Config](workspace-config.md).
 
 ## Background tasks and floating cards
 
@@ -294,7 +294,7 @@ The **Admin** tab opens Administrator Config for `admin` and `super-admin` roles
 
 ### Workspace Config
 
-- Manage workspace Report Templates, Main Cities, Operator & Vendor Maps and scoring methodologies on the dedicated Workspace Config page.
+- Manage workspace Report Templates, Main Cities, Mappings & Reference Data and scoring methodologies on the dedicated Workspace Config page.
 - Use its Page Sections navigator to reach the required configuration panel.
 - Open a workspace to manage its templates and chart mappings.
 

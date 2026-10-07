@@ -26,7 +26,9 @@ def test_priority_arrow_is_only_on_individual_gap_slides(levels, operators):
         assert any(shape.name.startswith('GAP Color Scale Segment ') for shape in slide.shapes)
         table_shape = next(shape for shape in slide.shapes if shape.has_table)
         table = table_shape.table
-        header_rows = len(levels) + 1 if len(levels) > 1 else 1
+        # The results hold one Region and one Campaign: levels with a single value are left out,
+        # so every table has the single-level header.
+        header_rows = 1
         # KPI rows are followed by the Total KPI GAP row.
         assert len(table.rows) == header_rows + len(result['configuration']['metrics']) + 1
         assert table.cell(len(table.rows) - 1, 0).text == 'Total KPI GAP'

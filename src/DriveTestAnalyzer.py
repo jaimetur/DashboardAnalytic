@@ -63,7 +63,9 @@ from src.modules.auth import SessionUser, verify_password
 from src.modules.cdr_types import (
     CDR_TYPES, DEFAULT_CDR_TYPE, cdr_type_options, normalize_cdr_type, set_workspace_cdr_type, workspace_cdr_type,
 )
-from src.modules.column_names import MAIN_CDR_FIELDS, PREVIEW_METADATA_FIELDS, VENDOR_FIELD_IDENTITIES, clean_column_name, column_identity, resolve_column_name, sort_vendor_values, vendor_filter_column, vendor_filter_value, vendor_filter_values, vendor_match_values
+from src.modules.column_names import DEFAULT_CAMPAIGN_MAP, MAIN_CDR_FIELDS, compact_campaign_value, PREVIEW_METADATA_FIELDS, VENDOR_FIELD_IDENTITIES, clean_column_name, normalize_campaign_map, set_campaign_map_resolver, column_identity, resolve_column_name, sort_vendor_values, vendor_filter_column, vendor_filter_value, vendor_filter_values, vendor_match_values
+from src.modules.mapping_order import swap_operator_vendor
+from src.modules.value_maps import ValueMapper, field_kind
 from src.modules.report_layouts import canonical_layout_name, selectable_layout_name
 from src.modules.cdr_reporting import entry_dynamic_fields, DYNAMIC_LAYOUTS, CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalog_chart_payload, catalog_kpi_fields, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, is_empty_catalog_chart, materialize_calculated_dimensions, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_label_format, parse_label_position, parse_legend_position, parse_template_boolean, prepare_catalog_chart_preview_frame, prepare_multivendor_catalog_entry, preview_catalog_chart_data, render_catalog_chart_preview, render_catalog_chart_preview_with_hover, render_cdr_report, render_unavailable_source_chart, report_chart_renderer_name, reset_dashboard_canvas_renderer, split_calculated_dimension_aliases
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_dataset_summary_powerpoint, export_powerpoint_report
@@ -278,6 +280,16 @@ workspace_registry = WorkspaceRegistry(
 )
 repository.set_workspace_registry_database(workspace_registry.registry_path)
 active_workspace: Workspace | None = None
+
+
+def _active_campaign_map() -> dict | None:
+    """The Campaign Map of the active workspace, used by every campaign label and order."""
+    from src.modules.campaign_maps import load_campaign_map
+
+    return load_campaign_map(repository) if active_workspace else None
+
+
+set_campaign_map_resolver(_active_campaign_map)
 _workspace_size_cache: dict[str, tuple[float, int]] = {}
 _workspace_cache_size_cache: dict[str, tuple[float, int]] = {}
 _workspace_size_cache_lock = Lock()
@@ -285,15 +297,15 @@ _workspace_size_cache_lock = Lock()
 # repeatedly walking every large Workspace merely to refresh header labels.
 _WORKSPACE_SIZE_CACHE_SECONDS = 300.0
 FILTER_DIMENSIONS = [
-    'market', 'period', 'operator', 'operator_vendor', 'vendor', 'test_name', 'region', 'cluster', 'city', 'campaign',
-    'session_type', 'direction', 'technology_primary', 'RAT', 'RAT_A',
+    'market', 'period', 'operator', 'operator_vendor', 'vendor_operator', 'vendor', 'test_name', 'region', 'cluster', 'city',
+    'campaign', 'session_type', 'direction', 'technology_primary', 'RAT', 'RAT_A',
     'Sample_RAT_A', 'source_sheet',
 ]
 FILTER_DIMENSIONS_BY_KIND = {
-    'voice': ['source_sheet', 'operator', 'operator_vendor', 'vendor', 'market', 'region', 'cluster', 'city', 'session_type', 'technology_primary'],
-    'speech': ['source_sheet', 'operator', 'operator_vendor', 'vendor', 'market', 'region', 'cluster', 'city', 'session_type', 'technology_primary'],
-    'data': ['source_sheet', 'operator', 'operator_vendor', 'vendor', 'market', 'region', 'cluster', 'city', 'test_name', 'direction', 'technology_primary'],
-    'generic': ['source_sheet', 'operator', 'operator_vendor', 'vendor', 'market', 'region', 'cluster', 'city'],
+    'voice': ['source_sheet', 'operator', 'operator_vendor', 'vendor_operator', 'vendor', 'market', 'region', 'cluster', 'city', 'session_type', 'technology_primary'],
+    'speech': ['source_sheet', 'operator', 'operator_vendor', 'vendor_operator', 'vendor', 'market', 'region', 'cluster', 'city', 'session_type', 'technology_primary'],
+    'data': ['source_sheet', 'operator', 'operator_vendor', 'vendor_operator', 'vendor', 'market', 'region', 'cluster', 'city', 'test_name', 'direction', 'technology_primary'],
+    'generic': ['source_sheet', 'operator', 'operator_vendor', 'vendor_operator', 'vendor', 'market', 'region', 'cluster', 'city'],
 }
 COMMON_ANALYSIS_COLUMNS = [
     'dataset_kind', 'source_file', 'market', 'period', 'operator', 'operator_vendor', 'vendor', 'test_name', 'region', 'cluster', 'city',
@@ -3190,6 +3202,8 @@ def format_aggregation_label(value: str | None) -> str:
         return 'Technology'
     if normalized.lower() == 'operator_vendor':
         return 'Operator_Vendor'
+    if normalized.lower() == 'vendor_operator':
+        return 'Vendor_Operator'
     return normalized.replace('_', ' ').title()
 
 
@@ -3270,7 +3284,7 @@ def is_metric_candidate(column: str) -> bool:
         'campaign_year', 'campaign_quarter', 'hour_bucket', 'day_bucket',
         'dataset_id', 'user_id', 'row_id', 'record_id', 'session_id', 'call_id', 'test_id', 'campaign_id',
         'campaign', 'benchmark', 'period', 'market', 'region', 'zone', 'city',
-        'operator', 'subscriber', 'suscriber', 'operator_vendor', 'vendor', 'vendor_only',
+        'operator', 'subscriber', 'suscriber', 'operator_vendor', 'vendor_operator', 'vendor', 'vendor_only',
         'technology', 'rat', 'rat_a', 'l2_call_mode_a', 'playing_technology',
         'session_type', 'type_of_test', 'test_name',
         'call_status', 'status', 'result', 'test_result',
@@ -3755,6 +3769,8 @@ def build_analysis_query_columns(
         *(str(value).strip() for value in cdf_overrides.values()),
     }
     requested.update(grouping for grouping in requested_groupings if grouping and grouping != 'all')
+    # vendor_operator is derived from operator_vendor after loading (see normalise_operator_aliases).
+    requested.discard('vendor_operator')
     return sorted(column for column in requested if column)
 
 
@@ -5206,6 +5222,8 @@ def render_template(request: Request, template_name: str, context: dict[str, Any
         'asset_version': asset_version,
         'static_path': lambda asset_path: str(request.app.url_path_for('static', path=asset_path)),
         'active_workspace': active_workspace,
+        # Campaign labels and order of the active workspace, for every page script.
+        'campaign_map': _active_campaign_map() or DEFAULT_CAMPAIGN_MAP,
         'active_workspace_size': format_workspace_size(workspace_disk_usage(active_workspace)) if active_workspace and not embedded_template_editor else None,
         'header_workspaces': header_workspaces,
         'header_workspace_access': header_workspace_access,
@@ -5236,6 +5254,9 @@ def render_template(request: Request, template_name: str, context: dict[str, Any
                         for group in repository.list_vendor_mapping_groups()
                         for value in [group.get('canonical', ''), *group.get('aliases', [])] if value},
             'observed_operators': repository.cdr_catalogue_values().get('operators', []),
+            # The canonical labels in map order (object keys such as "3" would be reordered by browsers).
+            'operator_order': [str(group['canonical']) for group in repository.list_operator_mapping_groups()],
+            'vendor_order': [str(group['canonical']) for group in repository.list_vendor_mapping_groups()],
         } if active_workspace and isinstance(template_user, SessionUser) else {},
         **context,
     }
@@ -5314,8 +5335,17 @@ def enrich_selected_dataset_for_analysis(selected_dataset: dict[str, Any] | None
     for key in ('operator_vendor', 'vendor'):
         if filter_options.get(key):
             filter_options[key] = sort_vendor_values(filter_options[key])
+    # Vendor_Operator: the Operator_Vendor values the other way round, derived when they are read.
+    if filter_options.get('operator_vendor'):
+        operator_groups = [*repository.list_operator_mapping_groups(),
+                           *({'canonical': name} for name in filter_options.get('operator') or [])]
+        filter_options['vendor_operator'] = [swap_operator_vendor(value, operator_groups) for value in filter_options['operator_vendor']]
+        if 'operator_vendor' in (selected_dataset.get('available_aggregations') or []):
+            aggregations = list(selected_dataset['available_aggregations'])
+            aggregations.insert(aggregations.index('operator_vendor') + 1, 'vendor_operator')
+            selected_dataset['available_aggregations'] = list(dict.fromkeys(aggregations))
     selected_dataset['available_cdf_groupings'] = [
-        item for item in ['operator', 'operator_vendor', 'vendor', 'market', 'region', 'cluster', 'city']
+        item for item in ['operator', 'operator_vendor', 'vendor_operator', 'vendor', 'market', 'region', 'cluster', 'city']
         if len(filter_options.get(item, []) or []) > 1
     ]
     return selected_dataset
@@ -5349,7 +5379,7 @@ def build_datasets_analysis_table_rows(df: pd.DataFrame, selected_metrics: list[
         return sorted(grouped_rows, key=lambda item: -int(item.get('samples') or 0))[:50]
 
     preferred_columns: list[str] = []
-    for column in ['market', 'operator', 'operator_vendor', 'vendor', 'region', 'cluster', 'city', 'session_type', 'test_name', 'direction', 'technology_primary', 'source_sheet', 'event_start_time', 'status']:
+    for column in ['market', 'operator', 'operator_vendor', 'vendor_operator', 'vendor', 'region', 'cluster', 'city', 'session_type', 'test_name', 'direction', 'technology_primary', 'source_sheet', 'event_start_time', 'status']:
         if column in df.columns and column not in preferred_columns:
             preferred_columns.append(column)
     preferred_columns.extend(metric for metric in usable_metrics if metric not in preferred_columns)
@@ -5682,7 +5712,7 @@ ARCHIVE_COMPONENTS = frozenset({
     'app_database', 'workspace_components',
 })
 WORKSPACE_ARCHIVE_COMPONENTS = frozenset({
-    'workspace_database', 'input', 'output', 'dashboards', 'report_templates', 'operator_mappings',
+    'workspace_database', 'input', 'output', 'dashboards', 'report_templates', 'mappings_reference_data',
     'auto_calculated_fields', 'query_builder_queries', 'reporting_jobs', 'nq_call_tracking', 'main_cities',
     'scoring_configuration',
 })
@@ -5693,13 +5723,13 @@ ARCHIVE_KIND_COMPONENTS = {
     'slides-templates': ('workspace_components',),
     'auto-calculated-fields': ('workspace_components',),
     'dashboards': ('workspace_components',),
-    'operator-mappings': ('workspace_components',),
+    'mappings-reference-data': ('workspace_components',),
     'main-cities': ('workspace_components',),
     'scoring-configuration': ('workspace_components',),
     'bundle': (),
 }
 WORKSPACE_ELEMENT_EXPORT_TARGETS = frozenset({
-    'slides-templates', 'auto-calculated-fields', 'dashboards', 'operator-mappings', 'query-builder-queries',
+    'slides-templates', 'auto-calculated-fields', 'dashboards', 'mappings-reference-data', 'query-builder-queries',
     'reporting-jobs', 'nq-call-tracking', 'main-cities', 'scoring-configuration',
 })
 STATIC_EXPORT_TARGETS = frozenset({'config', 'config-with-templates', 'full-environment'})
@@ -5750,7 +5780,7 @@ def archive_workspace_components(manifest: dict[str, Any]) -> list[str]:
         'slides-templates': ('report_templates',),
         'auto-calculated-fields': ('auto_calculated_fields',),
         'dashboards': ('dashboards',),
-        'operator-mappings': ('operator_mappings',),
+        'mappings-reference-data': ('mappings_reference_data',),
         'main-cities': ('main_cities',),
         'scoring-configuration': ('scoring_configuration',),
         'query-builder-queries': ('query_builder_queries',),
@@ -5822,7 +5852,7 @@ def full_workspace_archive_components(*, include_input_files: bool = True, inclu
         components.append('input')
     if include_generated_outputs:
         components.append('output')
-    return [*components, 'dashboards', 'report_templates', 'main_cities', 'operator_mappings', 'scoring_configuration', 'auto_calculated_fields', 'query_builder_queries', 'reporting_jobs', 'nq_call_tracking']
+    return [*components, 'dashboards', 'report_templates', 'main_cities', 'mappings_reference_data', 'scoring_configuration', 'auto_calculated_fields', 'query_builder_queries', 'reporting_jobs', 'nq_call_tracking']
 
 
 def archive_workspace_components_for_target(
@@ -5835,8 +5865,8 @@ def archive_workspace_components_for_target(
         return ['auto_calculated_fields']
     if target == 'dashboards':
         return ['dashboards']
-    if target == 'operator-mappings':
-        return ['operator_mappings']
+    if target == 'mappings-reference-data':
+        return ['mappings_reference_data']
     if target == 'main-cities':
         return ['main_cities']
     if target == 'scoring-configuration':
@@ -5954,7 +5984,7 @@ def recurring_backup_settings() -> dict[str, Any]:
         'enabled': False,
         'components': [
             'app_database', 'workspace_database', 'dashboards', 'report_templates',
-            'operator_mappings', 'main_cities', 'auto_calculated_fields', 'scoring_configuration',
+            'mappings_reference_data', 'main_cities', 'auto_calculated_fields', 'scoring_configuration',
         ],
         'workspace_ids': [],
         'recurrence': 'daily', 'execution_time': '02:00', 'weekly_day': 0, 'monthly_day': 1, 'max_backups': 30,
@@ -5975,7 +6005,7 @@ def recurring_backup_settings() -> dict[str, Any]:
         ) if saved.get(legacy_key, True)]
     legacy_components = {
         'full_workspaces': (
-            'workspace_database', 'report_templates', 'operator_mappings', 'main_cities',
+            'workspace_database', 'report_templates', 'mappings_reference_data', 'main_cities',
             'auto_calculated_fields', 'scoring_configuration',
         ),
         'slides_templates': ('report_templates',),
@@ -6093,7 +6123,7 @@ def create_recurring_database_backup(
     workspace_manifest_components = [
         component for component in (
             'workspace_database', 'dashboards', 'input', 'output', 'report_templates',
-            'operator_mappings', 'main_cities', 'auto_calculated_fields', 'query_builder_queries',
+            'mappings_reference_data', 'main_cities', 'auto_calculated_fields', 'query_builder_queries',
             'reporting_jobs', 'nq_call_tracking', 'scoring_configuration',
         )
         if component in components
@@ -6125,12 +6155,13 @@ def create_recurring_database_backup(
                 for technology in TEMPLATE_NAMES
                 for row in template_repository.list_report_templates(technology)
             )
-        if 'operator_mappings' in components:
-            total_bytes += len(_operator_mappings_archive_payload(workspace))
+        if 'mappings_reference_data' in components:
+            total_bytes += len(_mappings_reference_data_archive_payload(workspace))
         if 'main_cities' in components:
             total_bytes += len(_main_cities_archive_payload(workspace))
         if 'scoring_configuration' in components:
             total_bytes += len(_scoring_configuration_archive_payload(workspace))
+            total_bytes += len(_scoring_report_configurations_archive_payload(workspace))
         if 'query_builder_queries' in components:
             total_bytes += len(json.dumps(_query_builder_queries_payload(workspace), ensure_ascii=False).encode('utf-8'))
         if 'reporting_jobs' in components:
@@ -6177,9 +6208,9 @@ def create_recurring_database_backup(
                 if 'report_templates' in components:
                     report_progress(f'Archiving Report Templates for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                     _archive_workspace_report_templates(archive, workspace, f'{archive_workspace_root}/report-templates', archived_bytes)
-                if 'operator_mappings' in components:
-                    report_progress(f'Exporting Operator & Vendor Maps for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
-                    _archive_workspace_operator_mappings(archive, workspace, archive_workspace_root, archived_bytes)
+                if 'mappings_reference_data' in components:
+                    report_progress(f'Exporting Mappings & Reference Data for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
+                    _archive_workspace_mappings_reference_data(archive, workspace, archive_workspace_root, archived_bytes)
                 if 'main_cities' in components:
                     report_progress(f'Exporting Main Cities for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                     _archive_workspace_main_cities(archive, workspace, archive_workspace_root, archived_bytes)
@@ -6502,8 +6533,8 @@ def _backup_archive_components(archive_path: Path) -> list[str]:
         components.append('dashboards')
     if any(name.startswith('workspaces/') and '/report-templates/' in name for name in names):
         components.append('report_templates')
-    if any(name.startswith('workspaces/') and '/operator-mappings/operator-mappings.json' in name for name in names):
-        components.append('operator_mappings')
+    if any(name.startswith('workspaces/') and '/mappings-reference-data/mappings-reference-data.json' in name for name in names):
+        components.append('mappings_reference_data')
     if any(name.startswith('workspaces/') and '/main-cities/main-cities.json' in name for name in names):
         components.append('main_cities')
     if any(name.startswith('workspaces/') and '/scoring-configuration/scoring-configuration.json' in name for name in names):
@@ -6575,7 +6606,7 @@ def restore_database_backup(
             for component, member in (
                 ('workspace_database', f'{prefix}database.sqlite'),
                 ('dashboards', f'{prefix}dashboards/dashboards.json'),
-                ('operator_mappings', f'{prefix}operator-mappings/operator-mappings.json'),
+                ('mappings_reference_data', f'{prefix}mappings-reference-data/mappings-reference-data.json'),
                 ('main_cities', f'{prefix}main-cities/main-cities.json'),
                 ('scoring_configuration', f'{prefix}scoring-configuration/scoring-configuration.json'),
             ):
@@ -6654,13 +6685,13 @@ def restore_database_backup(
                     )
                     shutil.rmtree(workspace.slides_templates_dir, ignore_errors=True)
                 shutil.rmtree(workspace.database_path.parent / 'slides-templates', ignore_errors=True)
-            if 'operator_mappings' in selected:
-                member = f'{prefix}operator-mappings/operator-mappings.json'
+            if 'mappings_reference_data' in selected:
+                member = f'{prefix}mappings-reference-data/mappings-reference-data.json'
                 if member in names:
                     if progress_callback:
-                        progress_callback(f'Restoring Operator & Vendor Maps for {workspace_name}', completed_steps, total_steps)
-                    _restore_workspace_operator_mappings(workspace, archive.read(member))
-                    advance(f'Operator & Vendor Maps restored for {workspace_name}')
+                        progress_callback(f'Restoring Mappings & Reference Data for {workspace_name}', completed_steps, total_steps)
+                    _restore_workspace_mappings_reference_data(workspace, archive.read(member))
+                    advance(f'Mappings & Reference Data restored for {workspace_name}')
             if 'main_cities' in selected:
                 member = f'{prefix}main-cities/main-cities.json'
                 if member in names:
@@ -6674,6 +6705,9 @@ def restore_database_backup(
                     if progress_callback:
                         progress_callback(f'Restoring Scoring & GAP Analysis Configuration for {workspace_name}', completed_steps, total_steps)
                     _restore_workspace_scoring_configuration(workspace, archive.read(member))
+                    reports_member = _scoring_report_configurations_member(member)
+                    _restore_workspace_scoring_report_configurations(
+                        workspace, archive.read(reports_member) if reports_member in names else None)
                     advance(f'Scoring & GAP Analysis Configuration restored for {workspace_name}')
             if 'auto_calculated_fields' in selected:
                 member = next((candidate for candidate in (
@@ -6803,67 +6837,70 @@ def _workspace_archive_metadata(workspace: Workspace) -> dict[str, Any]:
 DASHBOARD_STATE_KEY = 'e2e_dashboards_v2'
 
 
-def _operator_mappings_archive_payload(workspace: Workspace) -> bytes:
-    """Serialize complete Operator and Vendor chart mappings and Spectrum Holdings."""
+def _mappings_reference_data_archive_payload(workspace: Workspace) -> bytes:
+    """Serialize complete Operator and Vendor chart mappings, Spectrum Holdings and the Campaign Map."""
+    from src.modules.campaign_maps import load_campaign_map
     from src.modules.network_insights import load_spectrum_holdings
 
     task_repository = Repository(
         workspace.database_path, repository.global_db_path, workspace_registry.registry_path,
     )
     return json.dumps({
-        'format': 'drivetest-analyzer-operator-mappings',
-        'version': 3,
-        'mappings': task_repository.list_operator_mapping_groups(),
+        'format': 'drivetest-analyzer-mappings-reference-data',
+        'version': 1,
+        'operator_mappings': task_repository.list_operator_mapping_groups(),
         'vendor_mappings': task_repository.list_vendor_mapping_groups(),
         'spectrum_holdings': load_spectrum_holdings(task_repository),
+        'campaign_map': load_campaign_map(task_repository),
     }, ensure_ascii=False, indent=2).encode('utf-8')
 
 
-def _archive_workspace_operator_mappings(
+def _archive_workspace_mappings_reference_data(
     archive: zipfile.ZipFile,
     workspace: Workspace,
     archive_prefix: str,
     progress_callback: Callable[[int], None] | None = None,
 ) -> None:
-    payload = _operator_mappings_archive_payload(workspace)
-    archive.writestr(f'{archive_prefix}/operator-mappings/operator-mappings.json', payload)
+    payload = _mappings_reference_data_archive_payload(workspace)
+    archive.writestr(f'{archive_prefix}/mappings-reference-data/mappings-reference-data.json', payload)
     if progress_callback:
         progress_callback(len(payload))
 
 
-def _restore_workspace_operator_mappings(workspace: Workspace, payload: bytes) -> None:
+def _restore_workspace_mappings_reference_data(workspace: Workspace, payload: bytes) -> None:
+    """Replace the Operator and Vendor Maps, Spectrum Holdings and the Campaign Map of the workspace."""
     try:
         document = json.loads(payload.decode('utf-8'))
-        groups = document.get('mappings') if isinstance(document, dict) else None
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError(f'Operator & Vendor Maps for "{workspace.name}" are invalid.') from exc
+        raise ValueError(f'Mappings & Reference Data for "{workspace.name}" are invalid.') from exc
     if (
         not isinstance(document, dict)
-        or canonical_format(document.get('format')) != 'drivetest-analyzer-operator-mappings'
-        or document.get('version') not in {1, 2, 3}
-        or not isinstance(groups, list)
+        or canonical_format(document.get('format')) != 'drivetest-analyzer-mappings-reference-data'
+        or document.get('version') != 1
+        or not isinstance(document.get('operator_mappings'), list)
+        or not isinstance(document.get('vendor_mappings'), list)
+        or not isinstance(document.get('spectrum_holdings'), list)
+        or not isinstance(document.get('campaign_map'), dict)
     ):
-        raise ValueError(f'Operator & Vendor Maps for "{workspace.name}" are invalid.')
+        raise ValueError(f'Mappings & Reference Data for "{workspace.name}" are invalid.')
+    from src.modules.campaign_maps import save_campaign_map
     from src.modules.network_insights import normalise_spectrum_holdings, save_spectrum_holdings
 
-    version = document.get('version')
-    vendor_groups = document.get('vendor_mappings') if version >= 2 else None
-    spectrum_holdings = document.get('spectrum_holdings') if version >= 3 else None
-    if (version >= 2 and not isinstance(vendor_groups, list)) or (version >= 3 and not isinstance(spectrum_holdings, list)):
-        raise ValueError(f'Operator & Vendor Maps for "{workspace.name}" are invalid.')
     try:
-        spectrum_holdings = normalise_spectrum_holdings(spectrum_holdings) if spectrum_holdings is not None else None
+        campaign_map = normalize_campaign_map(document['campaign_map'])
+    except ValueError as exc:
+        raise ValueError(f'Campaign Maps for "{workspace.name}" are invalid: {exc}') from exc
+    try:
+        spectrum_holdings = normalise_spectrum_holdings(document['spectrum_holdings'])
     except ValueError as exc:
         raise ValueError(f'Spectrum Holdings for "{workspace.name}" are invalid: {exc}') from exc
     task_repository = Repository(
         workspace.database_path, repository.global_db_path, workspace_registry.registry_path,
     )
-    task_repository.replace_operator_mapping_groups(groups)
-    if vendor_groups is not None:
-        task_repository.replace_vendor_mapping_groups(vendor_groups)
-    # Older archives predate Spectrum Holdings and leave them untouched.
-    if spectrum_holdings is not None:
-        save_spectrum_holdings(task_repository, spectrum_holdings)
+    task_repository.replace_operator_mapping_groups(document['operator_mappings'])
+    task_repository.replace_vendor_mapping_groups(document['vendor_mappings'])
+    save_spectrum_holdings(task_repository, spectrum_holdings)
+    save_campaign_map(task_repository, campaign_map)
     if active_workspace and workspace.id == active_workspace.id:
         ANALYSIS_CACHE.clear()
         PREPARED_ANALYSIS_FRAME_CACHE.clear()
@@ -6934,8 +6971,41 @@ def _archive_workspace_scoring_configuration(
 ) -> None:
     payload = _scoring_configuration_archive_payload(workspace)
     archive.writestr(f'{archive_prefix}/scoring-configuration/scoring-configuration.json', payload)
+    # Saved Scoring report configurations travel with the methodologies.
+    reports = _scoring_report_configurations_archive_payload(workspace)
+    archive.writestr(f'{archive_prefix}/scoring-configuration/{SCORING_REPORT_CONFIGURATIONS_MEMBER}', reports)
     if progress_callback:
-        progress_callback(len(payload))
+        progress_callback(len(payload) + len(reports))
+
+
+SCORING_REPORT_CONFIGURATIONS_MEMBER = 'scoring-report-configurations.json'
+
+
+def _scoring_report_configurations_archive_payload(workspace: Workspace) -> bytes:
+    from src.modules.scoring_reports import load_report_state, report_configurations_document
+    task_repository = Repository(
+        workspace.database_path, repository.global_db_path, workspace_registry.registry_path,
+    )
+    return json.dumps(report_configurations_document(load_report_state(task_repository)),
+                      ensure_ascii=False, indent=2).encode('utf-8')
+
+
+def _scoring_report_configurations_member(member: str) -> str:
+    return member.rsplit('/', 1)[0] + '/' + SCORING_REPORT_CONFIGURATIONS_MEMBER
+
+
+def _restore_workspace_scoring_report_configurations(workspace: Workspace, payload: bytes | None) -> None:
+    """Replace the saved report configurations; packages created before they existed have none."""
+    if payload is None:
+        return
+    from src.modules.scoring_reports import import_report_configurations
+    try:
+        task_repository = Repository(
+            workspace.database_path, repository.global_db_path, workspace_registry.registry_path,
+        )
+        import_report_configurations(task_repository, json.loads(payload.decode('utf-8')), replace=True)
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise ValueError(f'Scoring report configurations for "{workspace.name}" are invalid.') from exc
 
 
 def _restore_workspace_scoring_configuration(workspace: Workspace, payload: bytes) -> None:
@@ -7237,7 +7307,7 @@ def _archive_workspace(
     )
     _archive_workspace_dashboards(archive, workspace, archive_prefix, progress_callback)
     _archive_workspace_report_templates(archive, workspace, f'{archive_prefix}/report-templates', progress_callback)
-    _archive_workspace_operator_mappings(archive, workspace, archive_prefix, progress_callback)
+    _archive_workspace_mappings_reference_data(archive, workspace, archive_prefix, progress_callback)
     _archive_workspace_main_cities(archive, workspace, archive_prefix, progress_callback)
     _archive_workspace_scoring_configuration(archive, workspace, archive_prefix, progress_callback)
     archive.writestr(
@@ -7272,9 +7342,9 @@ def export_archive_filename(target: str | Iterable[str]) -> str:
     if target == 'dashboards':
         workspace_name = active_workspace.name if active_workspace else 'workspace'
         return f'{workspace_name}_dashboards_{generated_at}.zip'
-    if target == 'operator-mappings':
+    if target == 'mappings-reference-data':
         workspace_name = active_workspace.name if active_workspace else 'workspace'
-        return f'{workspace_name}_operator-mappings_{generated_at}.zip'
+        return f'{workspace_name}_mappings-reference-data_{generated_at}.zip'
     if target == 'main-cities':
         workspace_name = active_workspace.name if active_workspace else 'workspace'
         return f'{workspace_name}_main-cities_{generated_at}.zip'
@@ -7389,20 +7459,20 @@ def _build_single_export_archive_file(
             )
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
             _archive_workspace_dashboards(archive, source_workspace, f'workspaces/{source_workspace.name}', progress_callback)
-        elif target == 'operator-mappings':
+        elif target == 'mappings-reference-data':
             source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
             source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
             if not source_workspace:
-                raise ValueError('Open a workspace before exporting Operator & Vendor Maps.')
-            archive_path = f'workspaces/{source_workspace.name}/operator-mappings/operator-mappings.json'
+                raise ValueError('Open a workspace before exporting Mappings & Reference Data.')
+            archive_path = f'workspaces/{source_workspace.name}/mappings-reference-data/mappings-reference-data.json'
             manifest = archive_manifest(
-                'operator-mappings',
+                'mappings-reference-data',
                 source_workspace={'id': source_workspace.id, 'name': source_workspace.name},
                 workspace_components=archive_workspace_components_for_target(target),
                 archive_path=archive_path,
             )
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
-            _archive_workspace_operator_mappings(
+            _archive_workspace_mappings_reference_data(
                 archive, source_workspace, f'workspaces/{source_workspace.name}', progress_callback,
             )
         elif target == 'main-cities':
@@ -7665,10 +7735,10 @@ def estimate_export_bytes(
         source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
         if source_workspace:
             total = len(json.dumps(_exported_calculated_dimensions(source_workspace)).encode('utf-8'))
-    elif target == 'operator-mappings':
+    elif target == 'mappings-reference-data':
         source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
         source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
-        total = len(_operator_mappings_archive_payload(source_workspace)) if source_workspace else 0
+        total = len(_mappings_reference_data_archive_payload(source_workspace)) if source_workspace else 0
     elif target == 'main-cities':
         source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
         source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
@@ -7676,7 +7746,8 @@ def estimate_export_bytes(
     elif target == 'scoring-configuration':
         source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
         source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
-        total = len(_scoring_configuration_archive_payload(source_workspace)) if source_workspace else 0
+        total = (len(_scoring_configuration_archive_payload(source_workspace))
+                 + len(_scoring_report_configurations_archive_payload(source_workspace))) if source_workspace else 0
     elif target.startswith('workspace:'):
         workspace = workspace_registry.get(target.removeprefix('workspace:'))
         if workspace:
@@ -7775,10 +7846,10 @@ def _recovered_transfer_details(manifest: dict[str, Any]) -> tuple[str, list[str
         source = manifest.get('source_workspace')
         name = str(source.get('name') or '') if isinstance(source, dict) else ''
         return ('Auto-calculated Fields', [name] if name else [])
-    if kind == 'operator-mappings':
+    if kind == 'mappings-reference-data':
         source = manifest.get('source_workspace')
         name = str(source.get('name') or '') if isinstance(source, dict) else ''
-        return ('Operator & Vendor Maps', [name] if name else [])
+        return ('Mappings & Reference Data', [name] if name else [])
     if kind == 'main-cities':
         source = manifest.get('source_workspace')
         name = str(source.get('name') or '') if isinstance(source, dict) else ''
@@ -7836,7 +7907,7 @@ def _recover_unimported_transfer_packages() -> None:
             kind = str(manifest.get('kind') or '')
             if kind not in {
                 'config', 'workspace', 'full-environment', 'slides-templates',
-                'auto-calculated-fields', 'dashboards', 'operator-mappings', 'main-cities',
+                'auto-calculated-fields', 'dashboards', 'mappings-reference-data', 'main-cities',
                 'scoring-configuration', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking', 'database-backup', 'bundle',
             }:
                 raise ValueError('Unsupported transfer package.')
@@ -8640,13 +8711,13 @@ def _apply_import_archive(
             for workspace in destinations:
                 _restore_workspace_dashboards(workspace, payload)
             return f'Imported Dashboards into {len(destinations)} workspaces.'
-        if kind == 'operator-mappings':
+        if kind == 'mappings-reference-data':
             member = str(manifest.get('archive_path') or '')
             if (
                 member not in archive.namelist()
-                or not re.fullmatch(r'workspaces/[^/]+/operator-mappings/operator-mappings\.json', member)
+                or not re.fullmatch(r'workspaces/[^/]+/mappings-reference-data/mappings-reference-data\.json', member)
             ):
-                raise ValueError('The package does not contain valid Operator & Vendor Maps.')
+                raise ValueError('The package does not contain valid Mappings & Reference Data.')
             destinations = [workspace_registry.get(workspace_id) for workspace_id in destination_workspace_ids]
             destinations = [workspace for workspace in destinations if workspace]
             if not destinations:
@@ -8658,8 +8729,8 @@ def _apply_import_archive(
                 raise ValueError('Select at least one destination workspace.')
             payload = archive.read(member)
             for workspace in destinations:
-                _restore_workspace_operator_mappings(workspace, payload)
-            return f'Imported Operator & Vendor Maps into {len(destinations)} workspaces.'
+                _restore_workspace_mappings_reference_data(workspace, payload)
+            return f'Imported Mappings & Reference Data into {len(destinations)} workspaces.'
         if kind == 'main-cities':
             member = str(manifest.get('archive_path') or '')
             if (
@@ -8697,8 +8768,11 @@ def _apply_import_archive(
             if not destinations:
                 raise ValueError('Select at least one destination workspace.')
             payload = archive.read(member)
+            reports_member = _scoring_report_configurations_member(member)
+            reports = archive.read(reports_member) if reports_member in archive.namelist() else None
             for workspace in destinations:
                 _restore_workspace_scoring_configuration(workspace, payload)
+                _restore_workspace_scoring_report_configurations(workspace, reports)
             return f'Imported Scoring & GAP Analysis Configuration into {len(destinations)} workspaces.'
         if kind == 'auto-calculated-fields':
             try:
@@ -8999,7 +9073,7 @@ def _transfer_content_label(target: str | Iterable[str]) -> str:
         'full-environment': 'Full Environment',
         'auto-calculated-fields': 'Auto-calculated Fields',
         'dashboards': 'Dashboards',
-        'operator-mappings': 'Operator & Vendor Maps',
+        'mappings-reference-data': 'Mappings & Reference Data',
         'main-cities': 'Main Cities',
         'scoring-configuration': 'Scoring & GAP Analysis Configuration',
         'query-builder-queries': 'Query Builder Queries',
@@ -9428,7 +9502,7 @@ def transfer_job_payload(job_id: str, user: SessionUser) -> dict[str, Any] | Non
 def require_import_export_permission(user: SessionUser, target: str) -> None:
     """Authorize imports; admins may restore templates and fields into accessible workspaces."""
     if user.role == 'super-admin' or target in {
-        'slides-templates', 'auto-calculated-fields', 'dashboards', 'operator-mappings', 'main-cities',
+        'slides-templates', 'auto-calculated-fields', 'dashboards', 'mappings-reference-data', 'main-cities',
         'scoring-configuration', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking',
     }:
         return
@@ -9463,7 +9537,7 @@ def require_export_permission(user: SessionUser, target: str) -> None:
     """Authorize exports and transfers without exposing other workspaces."""
     if user.role == 'super-admin':
         return
-    if target in {'auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings', 'main-cities', 'scoring-configuration', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking'}:
+    if target in {'auto-calculated-fields', 'slides-templates', 'dashboards', 'mappings-reference-data', 'main-cities', 'scoring-configuration', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking'}:
         if active_workspace and repository.user_has_workspace_access(user.username, active_workspace.id):
             return
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Open a workspace you can access first.')
@@ -9629,13 +9703,13 @@ def render_admin_template(
         {'value': 'dashboards', 'label': 'Dashboards (from active workspace)', 'disabled': not active_workspace},
         {'value': 'slides-templates', 'label': 'Report Templates (from active workspace)', 'disabled': not active_workspace},
         {'value': 'main-cities', 'label': 'Main Cities (from active workspace)', 'disabled': not active_workspace},
-        {'value': 'operator-mappings', 'label': 'Operator & Vendor Maps (from active workspace)', 'disabled': not active_workspace},
+        {'value': 'mappings-reference-data', 'label': 'Mappings & Reference Data (from active workspace)', 'disabled': not active_workspace},
         {'value': 'scoring-configuration', 'label': 'Scoring & GAP Analysis Configuration (from active workspace)', 'disabled': not active_workspace},
         {'value': 'auto-calculated-fields', 'label': 'Auto-calculated Fields (from active workspace)', 'disabled': not active_workspace},
         {'value': 'query-builder-queries', 'label': 'Query Builder Queries (from active workspace)', 'disabled': not active_workspace},
         {'value': 'reporting-jobs', 'label': 'Reporting Jobs (from active workspace)', 'disabled': not active_workspace},
         {'value': 'nq-call-tracking', 'label': 'NQ Call Tracking (from active workspace)', 'disabled': not active_workspace},
-        {'value': 'full-environment', 'label': 'Full Environment (Application Config + Dashboards + Report Templates + Main Cities + Operator & Vendor Maps + Scoring & GAP Analysis Configuration + Auto-calculated Fields + Query Builder Queries + Reporting Jobs + NQ Call Tracking + Selected Workspaces)'},
+        {'value': 'full-environment', 'label': 'Full Environment (Application Config + Dashboards + Report Templates + Main Cities + Mappings & Reference Data + Scoring & GAP Analysis Configuration + Auto-calculated Fields + Query Builder Queries + Reporting Jobs + NQ Call Tracking + Selected Workspaces)'},
         *[
             {'value': f'workspace:{workspace.id}', 'label': f'Full Workspace: {workspace.name}'}
             for workspace in accessible_workspaces(user)
@@ -9648,14 +9722,14 @@ def render_admin_template(
         export_options = [
             option for option in export_options
             if option['value'] in {
-                'slides-templates', 'auto-calculated-fields', 'dashboards', 'operator-mappings', 'main-cities', 'scoring-configuration',
+                'slides-templates', 'auto-calculated-fields', 'dashboards', 'mappings-reference-data', 'main-cities', 'scoring-configuration',
             } or option['value'].startswith('workspace:')
         ]
     export_option_groups = [
         ('Configuration Content', [option for option in export_options if option['value'] == 'config']),
         ('Current Workspace Content', [
             option for option in export_options
-            if option['value'] in {'dashboards', 'slides-templates', 'main-cities', 'operator-mappings', 'scoring-configuration', 'auto-calculated-fields', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking'}
+            if option['value'] in {'dashboards', 'slides-templates', 'main-cities', 'mappings-reference-data', 'scoring-configuration', 'auto-calculated-fields', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking'}
         ]),
         ('Full Workspace', [option for option in export_options if option['value'].startswith('workspace:')]),
         ('Full Environment', [option for option in export_options if option['value'] == 'full-environment']),
@@ -9700,6 +9774,7 @@ def render_admin_template(
             'main_cities_error': request.query_params.get('main_cities_error') or None,
             'vendor_mapping_groups': repository.list_vendor_mapping_groups() if active_workspace else [],
             'vendor_mapping_notice': request.query_params.get('vendor_mapping_notice') or None,
+            'workspace_campaigns': workspace_campaign_values() if active_workspace else [],
             'vendor_mapping_error': request.query_params.get('vendor_mapping_error') or None,
             **spectrum_holdings_context(request),
             'recurring_backup': recurring_backup_settings(),
@@ -9892,8 +9967,14 @@ def build_datasets_analysis_payload(
     if not selected_dataset['is_ready']:
         return None, [], [], {}, selected_dataset.get('last_error') if selected_dataset.get('status') == 'failed' else None, False
 
-    filter_options = selected_dataset.get('filter_options') or {}
-    filter_options = {'input_kind': [selected_dataset.get('dataset_kind') or 'generic'], **filter_options}
+    # Operators and Vendors are listed with their Operator and Vendor Maps labels; a selection
+    # is expanded to the source values the CDR table holds before it is queried.
+    source_filter_options = selected_dataset.get('filter_options') or {}
+    value_mapper = ValueMapper.from_repository(repository)
+    filter_options = {'input_kind': [selected_dataset.get('dataset_kind') or 'generic'], **{
+        key: value_mapper.values(field_kind(key), values) if field_kind(key) and isinstance(values, list) else values
+        for key, values in source_filter_options.items()
+    }}
     if not should_load_analysis(request):
         return None, [], [], filter_options, None, False
 
@@ -9930,10 +10011,25 @@ def build_datasets_analysis_payload(
                 filters[dimension] = ['__none__']
             continue
         selected_values = choose_filter_values(request.query_params.getlist(dimension), filter_options, dimension)
+        if selected_values and dimension == 'vendor_operator':
+            # The table holds Operator_Vendor: a Vendor_Operator selection stands for those values.
+            selected_values = value_mapper.expand('operator_vendor', value_mapper.operator_vendors(selected_values),
+                                                  source_filter_options.get('operator_vendor') or [])
+            current = filters['extra_filters'].get('operator_vendor')
+            if dimension in explicit_empty_filters:
+                filters['extra_filters']['operator_vendor'] = ['__none__']
+            else:
+                filters['extra_filters']['operator_vendor'] = (
+                    [value for value in current if value in selected_values] or ['__none__'] if current else selected_values)
+            continue
+        if selected_values and field_kind(dimension):
+            selected_values = value_mapper.expand(field_kind(dimension), selected_values, source_filter_options.get(dimension) or [])
         if dimension in explicit_empty_filters:
             filters['extra_filters'][dimension] = ['__none__']
         elif selected_values:
-            filters['extra_filters'][dimension] = selected_values
+            filters['extra_filters'][dimension] = (
+                [value for value in filters['extra_filters'][dimension] if value in selected_values] or ['__none__']
+                if dimension == 'operator_vendor' and filters['extra_filters'].get(dimension) else selected_values)
 
     def metric_filters_for(metric: str) -> dict[str, Any]:
         return {
@@ -9996,9 +10092,8 @@ def build_datasets_analysis_payload(
             df = load_cached_dataset(dataset_path)
             repository.replace_dataset_rows(selected_dataset['id'], df)
         if str(selected_dataset.get('dataset_kind') or '').casefold() in CDR_DATASET_KINDS:
-            # General CDR Analysis filters use source-faithful table values.
-            # Canonical Operator/Vendor labels and theme metadata belong only to
-            # the in-memory analysis/chart frame.
+            # The table keeps the source values (the filters above were expanded to them);
+            # the analysis/chart frame shows the canonical Operator/Vendor labels and theme.
             mapping_settings = repository.chart_mapping_settings()
             df = apply_operator_mappings(df, mapping_settings['operator_mappings'])
             df.attrs.update(shared_frame_attrs(mapping_settings))
@@ -15336,14 +15431,19 @@ def scoring_page(request: Request, user: SessionUser = Depends(current_user)) ->
     incomplete_catalogue_ids.update(task_repository.missing_cdr_vendor_only_ids(dataset_ids))
     catalogues = task_repository.cdr_catalogues_by_dataset(dataset_ids)
     vendor_operators = scoring_vendor_operators(catalogues, task_repository.list_operator_mapping_groups())
+    value_mapper = ValueMapper.from_repository(task_repository)
     datasets = []
     for row in ready_cdrs:
         item = dict(row)
         item['original_name'] = item['file_name']
         item['catalogue'] = dict(catalogues[item['id']])
-        # Scoring filters: Vendor is the vendor alone and Operator_Vendor the operator-specific vendor.
-        item['catalogue']['operator_vendors'] = list(item['catalogue'].get('vendors') or [])
-        item['catalogue']['vendors'] = list(item['catalogue'].get('vendors_only') or [])
+        # Scoring filters: Vendor is the vendor alone and Operator_Vendor the operator-specific vendor,
+        # all with their Operator and Vendor Maps labels.
+        item['catalogue']['operators'] = value_mapper.values('operator', item['catalogue'].get('operators') or [])
+        item['catalogue']['operator_vendors'] = value_mapper.values('operator_vendor', item['catalogue'].get('vendors') or [])
+        item['catalogue']['vendor_operators'] = value_mapper.values(
+            'vendor_operator', value_mapper.vendor_operators(item['catalogue']['operator_vendors']))
+        item['catalogue']['vendors'] = value_mapper.values('vendor', item['catalogue'].get('vendors_only') or [])
         item['campaign'] = ', '.join(item['catalogue']['campaigns'])
         item['nr_mode'] = dataset_nr_mode(item['dataset_kind'], item['nr_mode'], item['file_name'])
         datasets.append(item)
@@ -15487,8 +15587,22 @@ def scoring_jobs_result(job_id: int, user: SessionUser = Depends(current_user)) 
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
     result['coverage_notes'] = scoring_coverage_notes(result)
-    return {'job': {key: value for key, value in job.items() if key != 'result'}, **result,
+    # The points-lost shares and polygons reach the page through the views' insights and the boundaries endpoint.
+    return {'job': {key: value for key, value in job.items() if key != 'result'},
+            **{key: value for key, value in result.items() if key != 'points_loss'},
             'views': views, 'scorings': scorings}
+
+
+@app.get('/api/scoring/jobs/{job_id}/boundaries/{field}')
+def scoring_jobs_boundaries(job_id: int, field: str, user: SessionUser = Depends(current_user)) -> dict[str, Any]:
+    """Polygons of a points-lost map layer: the bundled ITL3 areas or the job's Clusters or Region Mapping."""
+    from src.modules.scoring_points_loss import MAP_FIELDS, map_boundaries
+    if field not in MAP_FIELDS:
+        raise HTTPException(status_code=404, detail='Unknown points-lost map layer.')
+    job = get_scoring_job(scoring_repository(user), job_id, include_result=True)
+    if not job:
+        raise HTTPException(status_code=404, detail='Scoring job not found.')
+    return {'field': field, 'boundaries': map_boundaries(job.get('result') or {}, field)}
 
 
 @app.delete('/api/scoring/jobs/{job_id}')
@@ -15664,6 +15778,213 @@ def scoring_job_export(
             'Content-Disposition': disposition,
         })
     raise HTTPException(status_code=404, detail='Unknown scoring export format.')
+
+
+_SCENARIO_JOB_WAIT_SECONDS = 15 * 60
+
+
+def _scenario_scoring_job(task_repository: Repository, base: dict[str, Any], scenario: dict[str, Any],
+                          username: str) -> dict[str, Any]:
+    """The completed scoring job of a report scenario: an identical saved job, or a new calculation.
+
+    Aggregation levels with a single value in the selected CDRs (for example one Campaign)
+    split nothing, so the scenario is calculated again without them.
+    """
+    from src.modules.scoring_views import single_value_levels
+
+    context_filters = {field: list(values) for field, values in scenario['context_filters'].items()}
+    if scenario.get('main_cities'):
+        context_filters['City'] = list(task_repository.list_main_cities())
+    try:
+        selected = validate_complete_scoring_cdr_selection(
+            task_repository, base['dataset_ids'], base['nr_mode'], context_filters=context_filters,
+        )
+    except ValueError as exc:
+        raise ValueError(f'Scenario "{scenario["name"]}": {exc}') from exc
+    levels = list(scenario['aggregation_levels'])
+    job = _completed_scenario_job(task_repository, base, scenario, selected, levels, context_filters, username)
+    single = single_value_levels(levels, job.get('result') or {})
+    if single:
+        levels = [level for level in levels if level not in single]
+        job = _completed_scenario_job(task_repository, base, scenario, selected, levels, context_filters, username)
+    return job
+
+
+def _completed_scenario_job(task_repository: Repository, base: dict[str, Any], scenario: dict[str, Any],
+                            selected: Any, levels: list[str], context_filters: dict[str, Any],
+                            username: str) -> dict[str, Any]:
+    try:
+        job, cached = create_scoring_job(
+            task_repository, selected, levels, base['nr_mode'], username=username,
+            baseline_operator=base.get('baseline_operator') or 'EE', context_filters=context_filters,
+            scoring_profile_id=base.get('scoring_profile_id') or None,
+        )
+    except ValueError as exc:
+        raise ValueError(f'Scenario "{scenario["name"]}": {exc}') from exc
+    if job['status'] != 'completed' and not cached:
+        run_scoring_job(task_repository, int(job['id']))
+    deadline = time_module.monotonic() + _SCENARIO_JOB_WAIT_SECONDS
+    while True:
+        job = get_scoring_job(task_repository, int(job['id']), include_result=True)
+        if job is None or job['status'] in {'completed', 'failed'} or time_module.monotonic() > deadline:
+            break
+        # An identical calculation is already running: wait for it.
+        time_module.sleep(2)
+    if job is None or job['status'] != 'completed':
+        detail = (job or {}).get('error') or 'the calculation did not finish'
+        raise ValueError(f'Scenario "{scenario["name"]}" could not be calculated: {detail}.')
+    return job
+
+
+def build_scoring_report_document(task_repository: Repository, base: dict[str, Any], configuration: Any,
+                                  username: str, *, split_charts: bool = True) -> tuple[bytes, str, dict[str, Any]]:
+    """PowerPoint of a scoring report: every scenario of the configuration, from its own scoring job.
+
+    ``base`` gives the CDRs, NR Mode, GAP reference and methodology shared by the scenarios.
+    """
+    from src.modules.scoring_exports import export_scoring_report, prepare_scoring_display_selections
+    from src.modules.scoring_reports import normalize_report_configuration
+    from src.modules.scoring_views import normalize_result_gaps
+    from src.modules.cdr_report_filenames import build_scoring_report_filename
+
+    report = normalize_report_configuration(configuration)
+    operator_mapping_groups = task_repository.list_operator_mapping_groups()
+    template = settings.ppt_templates_dir / TEMPLATE_NAMES['nsa']
+    entries = []
+    for scenario in report['scenarios']:
+        job = _scenario_scoring_job(task_repository, base, scenario, username)
+        result = normalize_scoring_vendor_result(normalize_result_gaps(job.get('result') or {}), operator_mapping_groups)
+        if not job.get('configuration') and not result.get('configuration'):
+            job['configuration'] = task_repository.get_scoring_configuration()
+        export_job = _scoring_export_job_with_catalogue_defaults(task_repository, job)
+        export_job['_scoring_display_selections'] = prepare_scoring_display_selections(export_job, result, template)
+        entries.append({'scenario': scenario, 'job': export_job, 'result': result})
+    content = export_scoring_report(
+        entries, template, operator_mapping_groups, split_charts=split_charts,
+        vendor_mapping_groups=task_repository.list_vendor_mapping_groups(),
+    )
+    first = entries[0]['job']
+    if len(entries) == 1:
+        filename = build_scoring_report_filename(
+            datetime.now(), first.get('nr_mode') or 'NSA', first.get('context_filters'),
+            display_selections=first['_scoring_display_selections'],
+        )
+    else:
+        names = ', '.join(entry['scenario']['name'] for entry in entries)
+        stem = re.sub(r'[\\/:*?"<>|]+', '-', f"{datetime.now():%Y%m%d_%H%M%S} - Scoring & GAP Analysis - "
+                                             f"{first.get('nr_mode') or 'NSA'} - {names}")[:200].rstrip(' .-')
+        filename = f'{stem}.pptx'
+    return content, filename, first
+
+
+class ScoringReportRequest(BaseModel):
+    configuration: dict[str, Any]
+    split_charts: bool = True
+
+
+class ScoringReportConfigurationRequest(BaseModel):
+    name: str
+    configuration: dict[str, Any]
+
+
+@app.post('/scoring/jobs/{job_id}/report/{export_kind}')
+def scoring_job_report(
+    job_id: int, export_kind: str, payload: ScoringReportRequest, user: SessionUser = Depends(current_user),
+) -> Response:
+    """PowerPoint or Word report with the scenarios of a report configuration, from the selected job's CDRs."""
+    if export_kind not in {'ppt', 'word'}:
+        raise HTTPException(status_code=404, detail='Unknown scoring report format.')
+    task_repository = scoring_repository(user)
+    job = get_scoring_job(task_repository, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail='Scoring job not found.')
+    from src.modules.scoring_reports import remember_last_configuration
+    base = {key: job.get(key) for key in ('dataset_ids', 'nr_mode', 'baseline_operator', 'scoring_profile_id')}
+    try:
+        content, filename, _first = build_scoring_report_document(
+            task_repository, base, payload.configuration, user.username, split_charts=payload.split_charts,
+        )
+        remember_last_configuration(task_repository, payload.configuration)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    media_type = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+    if export_kind == 'word':
+        from src.modules.pptx_to_docx import pptx_to_docx
+        content = pptx_to_docx(content, 'Scoring & GAP Analysis')
+        filename = str(Path(filename).with_suffix('.docx'))
+        media_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    return Response(content, media_type=media_type, headers={
+        'Content-Disposition': f"attachment; filename*=UTF-8''{quote(filename)}",
+    })
+
+
+@app.get('/api/scoring/report-configurations')
+def scoring_report_configurations(user: SessionUser = Depends(current_user)) -> dict[str, Any]:
+    from src.modules.scoring_reports import load_report_state
+    return load_report_state(scoring_repository(user))
+
+
+@app.post('/api/scoring/report-configurations')
+def scoring_report_configuration_save(
+    payload: ScoringReportConfigurationRequest, user: SessionUser = Depends(workspace_editor_user),
+) -> dict[str, Any]:
+    from src.modules.repository import local_now_iso
+    from src.modules.scoring_reports import save_named_configuration
+    try:
+        return save_named_configuration(scoring_repository(user), payload.name, payload.configuration,
+                                        updated_at=local_now_iso())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.put('/api/scoring/report-configurations/last')
+def scoring_report_configuration_last(
+    payload: ScoringReportRequest, user: SessionUser = Depends(current_user),
+) -> dict[str, Any]:
+    """Remember the configuration in use, so the next session opens it."""
+    from src.modules.scoring_reports import load_report_state, remember_last_configuration
+    task_repository = scoring_repository(user)
+    try:
+        remember_last_configuration(task_repository, payload.configuration)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return load_report_state(task_repository)
+
+
+@app.delete('/api/scoring/report-configurations')
+def scoring_report_configuration_delete(
+    name: str, user: SessionUser = Depends(workspace_editor_user),
+) -> dict[str, Any]:
+    from src.modules.scoring_reports import delete_named_configuration
+    return delete_named_configuration(scoring_repository(user), name)
+
+
+@app.get('/api/scoring/report-configurations/export')
+def scoring_report_configurations_export(user: SessionUser = Depends(current_user)) -> Response:
+    from src.modules.scoring_reports import load_report_state, report_configurations_document
+    content = json.dumps(report_configurations_document(load_report_state(scoring_repository(user))),
+                         ensure_ascii=False, indent=2)
+    return Response(content.encode('utf-8'), media_type='application/json', headers={
+        'Content-Disposition': 'attachment; filename="scoring-report-configurations.json"',
+    })
+
+
+@app.post('/api/scoring/report-configurations/import')
+async def scoring_report_configurations_import(
+    package: UploadFile = File(...), replace: bool = Form(False),
+    user: SessionUser = Depends(workspace_editor_user),
+) -> dict[str, Any]:
+    from src.modules.scoring_reports import import_report_configurations
+    try:
+        payload = await package.read(2 * 1024 * 1024 + 1)
+        if len(payload) > 2 * 1024 * 1024:
+            raise ValueError('Scoring report configurations JSON must not exceed 2 MiB.')
+        return import_report_configurations(scoring_repository(user), json.loads(payload.decode('utf-8')),
+                                            replace=replace)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        await package.close()
 
 
 @app.get('/api/reporting-old/jobs')
@@ -17023,9 +17344,10 @@ def write_dataset_summary(
     """Write the Summary CDR Analysis as PowerPoint ('powerpoint') or Word ('word')."""
     reports, errors = build_dataset_summary_reports(dataset_ids, username, **options)
     if export_kind == 'word':
-        # The Word document is the PowerPoint summary: one landscape page per slide.
+        # The Word document is the PowerPoint summary: one landscape page per slide. The intermediate
+        # presentation has its own name, so it never replaces a PowerPoint written next to it.
         from src.modules.pptx_to_docx import pptx_to_docx
-        presentation = destination.with_suffix('.pptx')
+        presentation = destination.with_name(f'.{destination.stem}.{uuid4().hex}.pptx')
         export_dataset_summary_powerpoint(presentation, reports)
         try:
             destination.write_bytes(pptx_to_docx(presentation.read_bytes()))
@@ -17735,7 +18057,7 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
     kind = str(payload.get('kind') or '')
     if kind not in {
             'config', 'workspace', 'full-environment', 'slides-templates',
-            'auto-calculated-fields', 'dashboards', 'operator-mappings', 'main-cities',
+            'auto-calculated-fields', 'dashboards', 'mappings-reference-data', 'main-cities',
             'scoring-configuration', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking', 'database-backup', 'bundle',
     }:
         raise HTTPException(status_code=400, detail='The offered export type is not supported.')
@@ -18265,7 +18587,7 @@ def _retain_import_upload(upload_id: str, package_path: Path, user: SessionUser)
     kind = str(manifest.get('kind') or '')
     if kind not in {
         'config', 'workspace', 'full-environment', 'slides-templates',
-        'auto-calculated-fields', 'dashboards', 'operator-mappings', 'main-cities',
+        'auto-calculated-fields', 'dashboards', 'mappings-reference-data', 'main-cities',
         'scoring-configuration', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking', 'database-backup', 'bundle',
     }:
         raise ValueError('The export package type is not supported.')
@@ -18596,6 +18918,66 @@ def save_admin_operator_mapping_group(
         f'/workspace-config?{urlencode({"operator_mapping_notice": notice})}',
         status_code=status.HTTP_303_SEE_OTHER,
     )
+
+
+def workspace_campaign_values() -> list[str]:
+    """The campaigns of the ready CDRs of the active workspace (for the Campaign Maps preview)."""
+    dataset_ids = [int(row['id']) for row in repository.list_datasets()
+                   if str(row['status'] or '') == 'ready' and str(row['dataset_kind'] or '') in CDR_DATASET_KINDS]
+    if not dataset_ids:
+        return []
+    try:
+        return list(repository.cdr_catalogue_values(dataset_ids).get('campaigns') or [])
+    except Exception:  # noqa: BLE001 - CDRs catalogued before Campaigns were cached have no campaigns yet.
+        return []
+
+
+class CampaignMapPayload(BaseModel):
+    campaign_map: dict[str, Any] | None = None
+
+
+@app.get('/api/workspace-config/campaign-map')
+def get_campaign_map(user: SessionUser = Depends(current_user)) -> dict[str, Any]:
+    from src.modules.campaign_maps import campaign_map_preview, load_campaign_map
+
+    if not active_workspace:
+        raise HTTPException(status_code=409, detail='Open a workspace before editing Campaign Maps.')
+    config = load_campaign_map(repository)
+    return {'campaign_map': config, 'default': DEFAULT_CAMPAIGN_MAP,
+            'preview': campaign_map_preview(workspace_campaign_values(), config)}
+
+
+@app.post('/api/workspace-config/campaign-map/preview')
+def preview_campaign_map(payload: CampaignMapPayload, user: SessionUser = Depends(current_user)) -> dict[str, Any]:
+    """The workspace campaigns with the labels and order of a map being edited."""
+    from src.modules.campaign_maps import campaign_map_preview
+
+    if not active_workspace:
+        raise HTTPException(status_code=409, detail='Open a workspace before editing Campaign Maps.')
+    try:
+        config = normalize_campaign_map(payload.campaign_map or DEFAULT_CAMPAIGN_MAP)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {'campaign_map': config, 'preview': campaign_map_preview(workspace_campaign_values(), config)}
+
+
+@app.put('/api/workspace-config/campaign-map')
+def save_workspace_campaign_map(payload: CampaignMapPayload, user: SessionUser = Depends(config_editor_user)) -> dict[str, Any]:
+    """Save the Campaign Map of the active workspace; no map restores the default one."""
+    from src.modules.campaign_maps import campaign_map_preview, save_campaign_map
+
+    if not active_workspace:
+        raise HTTPException(status_code=409, detail='Open a workspace before editing Campaign Maps.')
+    try:
+        config = save_campaign_map(repository, payload.campaign_map, user.username)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # Labels and order change in every chart: rebuild the cached previews and models.
+    ANALYSIS_CACHE.clear()
+    PREPARED_ANALYSIS_FRAME_CACHE.clear()
+    DATAFRAME_CACHE.clear()
+    _clear_chart_preview_caches()
+    return {'campaign_map': config, 'preview': campaign_map_preview(workspace_campaign_values(), config)}
 
 
 @app.post('/workspace-config/vendor-mappings/save')
@@ -20181,6 +20563,8 @@ def format_two_decimals(value: Any) -> Any:
 
 
 templates.env.filters['two_decimals'] = format_two_decimals
+# Campaigns as the active workspace's Campaign Maps show them.
+templates.env.filters['campaign_label'] = lambda value: compact_campaign_value(value) or value
 
 # Register the template-driven dashboard workspace after the shared reporting helpers.
 from src.modules.e2e_dashboards import (

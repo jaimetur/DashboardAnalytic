@@ -3,7 +3,7 @@
 This article collects rules that affect data interpretation, performance, persistence and generated output. Read it before comparing DriveTest Analyzer with another analytical tool.
 
 > [!IMPORTANT]
-> **Source values and presentation.** Stored source values and chart labels are different layers. Canonical chart aliases do not rewrite uploaded workbooks or source Operator values.
+> **Source values and presentation.** Stored source values and the labels the tool shows are different layers. Operators, Vendors and Campaigns are shown everywhere with their Operator, Vendor and Campaign Maps labels, and a mapped selection matches every source spelling; only Preview Dataset shows the source values. The maps never rewrite uploaded workbooks or stored CDR values.
 
 > [!NOTE]
 > **Compare equivalent selections.** Match CDRs, NR Mode, filters, aggregation levels and missing-value rules before comparing results with another tool.
@@ -64,9 +64,9 @@ The workspace registry is local to the deployment. Full Environment imports rebu
 
 The importer preserves source fields and adds normalised fields used across modules. Common examples include:
 
-- `Campaign`, preserving source text; filters and chart labels can present recognised values as `YYYY-Qn`, `YYYY-Qn_SA` or `YYYY-Qn_NSA`.
+- `Campaign`, preserving source text; filters and chart labels present recognised values with the workspace [Campaign Maps](workspace-config.md#campaign-maps), by default as `YYYY-Qn`, `YYYY-Qn-NSA` or `YYYY-Qn-SA`.
 - `Operator`, preserving source values; configured aliases supply canonical labels for charts and comparisons.
-- `Operator_Vendor`, the `<Operator>_<Vendor>` identity populated by explicit vendor mapping, and `Vendor`, which removes a recognised operator prefix for real vendors. Both store `Operator - All` for operators without an assigned vendor. Workspaces created before these names are migrated once at startup (`Vendor` → `Operator_Vendor`, `Vendor_Only` → `Vendor`), together with their stored filter values and Report Templates.
+- `Operator_Vendor`, the `<Operator>_<Vendor>` identity populated by explicit vendor mapping (and `Vendor_Operator`, the same identity as `<Vendor>_<Operator>`, derived when the CDRs are read), and `Vendor`, which removes a recognised operator prefix for real vendors. Both store `Operator - All` for operators without an assigned vendor. Workspaces created before these names are migrated once at startup (`Vendor` → `Operator_Vendor`, `Vendor_Only` → `Vendor`), together with their stored filter values and Report Templates.
 - `Call Family`, derived from call/session mode.
 - `Test Family`, derived from the available test type/name fields.
 - `Rate Bucket`, calculated for distribution charts from configured bucket limits.
@@ -123,12 +123,14 @@ This design keeps the business rule visible in the template and makes comparison
 
 ## Campaign ordering
 
-When `Campaign` is used as an aggregation dimension, values are ordered chronologically from oldest to newest. Recognised forms such as `2026 Q2`, `2026-Q2` and year/quarter source fields resolve to the display form `2026-Q2`.
+Every chart, table, legend and PowerPoint or Word report shows a campaign as its year and quarter, followed by its radio mode when it has one: **2026-Q2**, **2026-Q2-NSA** or **2026-Q2-SA** (for example `UK_Q2_SA_2026`, `2026 Q2 SA` or `2026-Q2_SA` all read `2026-Q2-SA`). Values without a year and quarter are shown as they are. Filters keep the full campaign, and the Excel and CSV exports keep the original values.
+
+Campaigns are ordered chronologically from oldest to newest; inside a quarter, the campaign without a mode comes first, then NSA, then SA. Values without a year and quarter come first, by name. These are the defaults: the label format, the order inside a quarter and exceptions for campaigns that do not follow the pattern are set per workspace in [Campaign Maps](workspace-config.md#campaign-maps).
 
 Example:
 
 ```text
-2025-Q4 → 2026-Q1 → 2026-Q2
+2025-Q4 → 2026-Q1 → 2026-Q2 → 2026-Q2-NSA → 2026-Q2-SA
 ```
 
 ## Template execution semantics

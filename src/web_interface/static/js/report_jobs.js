@@ -11,9 +11,7 @@
   };
   const FORMAT_LABELS = {powerpoint: 'PowerPoint', word: 'Word', excel: 'Excel'};
   const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-  const SCORING_FILTERS = [['Operator', 'Operator'], ['Operator_Vendor', 'Operator_Vendor'], ['Vendor', 'Vendor'],
-    ['Region', 'Region'], ['Cluster', 'Cluster'], ['City', 'City'], ['Campaign', 'Campaign']];
-  const NETWORK_FILTERS = [['operators', 'Operator'], ['operator_vendors', 'Operator_Vendor'], ['vendors', 'Vendor'],
+  const NETWORK_FILTERS = [['operators', 'Operator'], ['operator_vendors', 'Operator_Vendor'], ['vendor_operators', 'Vendor_Operator'], ['vendors', 'Vendor'],
     ['regions', 'Region'], ['clusters', 'Cluster'], ['cities', 'City'], ['campaigns', 'Campaign']];
   const STATUS_LABELS = {queued: 'Queued', running: 'Running', sent: 'Sent', completed: 'Completed', partial: 'Partial', failed: 'Failed'};
 
@@ -50,6 +48,10 @@
   // Only one dropdown is open at a time; a click outside or Escape closes it.
   // ``preset`` adds a first "Main Cities" choice: with ``dynamic`` it is a
   // flag read at run time (getPreset()), otherwise it checks those values.
+  // Campaigns as the workspace Campaign Maps show and order them (campaign_labels.js); filters keep the full value.
+  const campaignLabel = (value) => (globalThis.campaignLabel ? globalThis.campaignLabel(value) : String(value ?? ''));
+  const campaignCompare = (left, right) => (globalThis.campaignCompare ? globalThis.campaignCompare(left, right) : 0);
+
   function multiPicker(label, values, selected = [], {preset = null} = {}) {
     const wrapper = node('details', undefined, 'workspace-user-picker rj-multi');
     const summary = node('summary');
@@ -72,7 +74,7 @@
     const boxes = values.map((value) => {
       const row = node('label', undefined, 'rj-multi-option');
       const box = node('input'); box.type = 'checkbox'; box.value = String(value); box.checked = chosen.has(String(value));
-      row.append(box, node('span', String(value)));
+      row.append(box, node('span', label === 'Campaign' ? campaignLabel(value) : String(value)));
       menu.append(row);
       return box;
     });
@@ -167,8 +169,16 @@
     ids.forEach((id) => Object.entries((options.values_by_dataset || {})[id] || {}).forEach(([field, values]) => {
       values.forEach((value) => (union[field] ||= new Set()).add(value));
     }));
+    // Operators and Vendors keep the order of the Operator and Vendor Maps, as the server lists them.
+    const MAPPED_FIELDS = ['Operator', 'Vendor', 'Operator_Vendor', 'Vendor_Operator'];
+    const mapOrder = (field, value) => {
+      const index = (options.values?.[field] || []).indexOf(value);
+      return index < 0 ? Number.MAX_SAFE_INTEGER : index;
+    };
     return Object.fromEntries(Object.entries(union).map(([field, values]) => [field, [...values].sort((left, right) => (
-      (['Vendor', 'Operator_Vendor'].includes(field) ? vendorRank(left) - vendorRank(right) : 0)
+      (MAPPED_FIELDS.includes(field) ? mapOrder(field, left) - mapOrder(field, right) : 0)
+      || (['Vendor', 'Operator_Vendor', 'Vendor_Operator'].includes(field) ? vendorRank(left) - vendorRank(right) : 0)
+      || (field === 'Campaign' ? campaignCompare(left, right) : 0)
       || String(left).localeCompare(String(right), undefined, {sensitivity: 'base'})))]));
   };
   // A row of filter pickers whose values follow the CDRs of the entry; refresh() keeps what is already chosen.
@@ -554,44 +564,54 @@
     remove.addEventListener('click', () => card.remove());
     const head = node('div', undefined, 'rj-grid rj-one-row');
     head.append(field('NR Mode', nrMode), field('Name in the email', label), field('Methodology', methodology), field('GAP reference operator', baseline), remove);
-    const levels = node('div', undefined, 'rj-inline');
-    levels.append(node('span', 'Aggregation levels:', 'rj-inline-label'));
-    const levelBoxes = options.scoring_levels.map((level) => {
-      const row = node('label', undefined, 'rj-check');
-      const box = node('input'); box.type = 'checkbox'; box.value = level;
-      box.checked = level === 'Operator' || (entry.aggregation_levels || []).includes(level); box.disabled = level === 'Operator';
-      // As in Scoring & GAP Analysis, Operator is always part of the aggregation.
-      if (level === 'Operator') row.title = 'Operator is required';
-      row.append(box, node('span', level));
-      levels.append(row);
-      return box;
-    });
-    // Main Cities is the City filter's first choice: the workspace list at each run.
-    const filters = scopedFilters(SCORING_FILTERS, entry.context_filters || {},
-      (key, checked) => (key === 'City' ? mainCitiesPreset(checked ?? Boolean(entry.main_cities), true) : null),
-      'rj-filters rj-filters-one-row');
     const datasets = node('div', undefined, 'rj-picker');
-    // The filters list the values of the selected CDRs, or of every CDR of the NR Mode.
+    // The report editor lists the values of the selected CDRs, or of every CDR of the NR Mode.
     const cdrsInUse = () => datasets.getValue().length ? datasets.getValue()
       : options.datasets.filter((item) => item.nr_mode === nrMode.value).map((item) => item.id);
     const renderDatasets = (selected) => {
       datasetPicker(datasets, options.datasets.filter((item) => item.nr_mode === nrMode.value),
         selected, 'Newest complete set of Data, Voice and Speech CDRs at each run');
-      filters.refresh(cdrsInUse());
     };
     nrMode.addEventListener('change', () => renderDatasets([]));
-    datasets.addEventListener('change', () => filters.refresh(cdrsInUse()));
     renderDatasets(entry.dataset_ids || []);
     const formats = node('div', undefined, 'rj-formats');
     formatChoices(formats, `rj-scoring-${scoringFormatId += 1}`, entry.formats || ['powerpoint'], ['powerpoint', 'word']);
+    // The report scenarios (filters and aggregation) and content, edited with the Scoring & GAP
+    // Analysis report editor; every Scoring artifact must have one.
+    let report = entry.report || null;
+    const reportSummary = node('span', '', '');
+    const reportRow = node('div', undefined, 'rj-inline rj-scoring-report');
+    const currentDefaults = () => ({filters: {}, levels: ['Operator'], mainCities: false,
+      operators: valuesForDatasets(cdrsInUse()).Operator || []});
+    const describeReport = () => {
+      const scenarios = report?.scenarios || [];
+      reportSummary.textContent = scenarios.length
+        ? `${scenarios.length} scenario${scenarios.length === 1 ? '' : 's'}: ${scenarios.map((item) => item.name).join(', ')}`
+        : 'Not configured: choose the scenarios and content of the report';
+      reportSummary.classList.toggle('rj-report-missing', !scenarios.length);
+    };
+    const configure = node('button', 'Configure report…', 'ghost-link'); configure.type = 'button';
+    configure.title = 'Choose the scenarios (filters and aggregation) and the slides of each scoring';
+    configure.addEventListener('click', async () => {
+      if (!window.ScoringReportEditor) return;
+      const defaults = currentDefaults();
+      const choice = await window.ScoringReportEditor.open({
+        title: 'Scoring report of this artifact',
+        configuration: report || window.ScoringReportEditor.defaultConfiguration(defaults),
+        context: {filterOptions: valuesForDatasets(cdrsInUse()), operators: defaults.operators,
+          mainCities: options.main_cities || [], defaults, operatorGroups: options.operator_groups || []},
+        actions: [['apply', 'Apply to this artifact']],
+      });
+      if (choice) { report = choice.configuration; describeReport(); }
+    });
+    reportRow.append(node('span', 'Report content:', 'rj-inline-label'), reportSummary, configure);
+    describeReport();
     card.append(entryHead(card, 'Scoring', () => [nrMode.value, label.value.trim()].filter(Boolean).join(' · ')),
-      formats, head, levels, node('strong', 'Filters'), filters, node('strong', 'CDRs'), datasets);
+      formats, head, node('strong', 'CDRs'), datasets, reportRow);
     card.getValue = () => ({
       label: label.value.trim(), nr_mode: nrMode.value, dataset_ids: datasets.getValue(), formats: formats.getValue(),
       scoring_profile_id: methodology.value, baseline_operator: baseline.value.trim() || 'EE',
-      aggregation_levels: levelBoxes.filter((box) => box.checked).map((box) => box.value),
-      main_cities: Boolean(filters.picker('City')?.getPreset()),
-      context_filters: Object.fromEntries(Object.entries(filters.values()).filter(([, values]) => values.length)),
+      report,
     });
     return card;
   }
@@ -1121,6 +1141,8 @@
       // format is the download link of its file; failed files follow with their error.
       const byModule = new Map();
       run.artifacts.forEach((item, index) => {
+        // Only the files of this run that still exist are listed (the index stays the download link).
+        if (item.status === 'ready' && item.available === false) return;
         const module = ARTIFACT_MODULE_LABELS[item.module] || item.module || 'Artifacts';
         const title = artifactEntryTitle(item.title, module);
         if (!byModule.has(module)) byModule.set(module, new Map());
@@ -1155,7 +1177,7 @@
         }),
       })));
       const actions = node('div', undefined, 'table-actions');
-      if (run.artifacts.some((item) => item.status === 'ready')) actions.append(downloadLink(run));
+      if (run.artifacts.some((item) => item.status === 'ready' && item.available !== false)) actions.append(downloadLink(run));
       if (state.can_edit && !['queued', 'running'].includes(run.status)) {
         actions.append(actionButton('×', 'Delete this run and its artifacts', async () => {
           if (!await confirmDelete('Delete Run', `

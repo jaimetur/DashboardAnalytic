@@ -29,10 +29,12 @@ from typing import Callable, Iterable, Mapping
 
 import numpy as np
 import pandas as pd
-from src.modules.mapping_order import operator_vendor_order_key, vendor_order_key
+from src.modules.mapping_order import operator_vendor_order_key, swap_operator_vendor, vendor_operator_order_key, vendor_order_key
 from src.modules.report_layouts import DYNAMIC_LAYOUTS, canonical_layout_name, grid_layout_name, dynamic_layout_axes
 from src.modules.column_names import (
-    MAIN_CDR_FIELDS, OPERATOR_VENDOR_FIELD, VENDOR_FIELD, VENDOR_FILTER_IDENTITIES, column_identity, compact_campaign_value,
+    MAIN_CDR_FIELDS, OPERATOR_VENDOR_FIELD, VENDOR_FIELD, VENDOR_FILTER_IDENTITIES, VENDOR_OPERATOR_FIELD, campaign_sort_key,
+    column_identity,
+    compact_campaign_value,
     mapped_vendor_only_value, operator_vendor_value, resolve_column_name, vendor_filter_column, vendor_filter_value, vendor_only_value,
 )
 import certifi
@@ -1547,6 +1549,21 @@ def _normalise_operator(value: object) -> str:
     return text
 
 
+def _vendor_mapping_family(value: object) -> str | None:
+    """'Vodafone UK' or '3' when the Operator is any spelling of Vodafone or Three.
+
+    Tests configured in another mode name the same network differently (for example
+    Vodafone SA, Vodafone VoNR or VF_SA): they share its cells, so its Vendor mapping file
+    applies to all of them.
+    """
+    key = re.sub(r"[^a-z0-9]+", "", str(value or "").casefold())
+    if key.startswith(("vodafone", "vf")):
+        return "Vodafone UK"
+    if key.startswith(("three", "h3g")) or re.match(r"^3(?![0-9])", key):
+        return "3"
+    return None
+
+
 def _normalise_operator_label(value: object, mappings: dict[str, str] | None = None) -> str:
     """Return an Admin-configured label, or preserve the supplied label."""
     text = str(value or "").strip()
@@ -1648,6 +1665,22 @@ def normalise_operator_aliases(frame: pd.DataFrame, mappings: dict[str, str] | N
                 return value
             return _normalise_vendor(value, configured, vendor_mappings)
         result[vendor_column] = _map_distinct_values(result[vendor_column], mapped_vendor)
+    # Vendor_Operator: the mapped Operator_Vendor the other way round (<Vendor>_<Operator>).
+    operator_vendor_column = next(
+        (column for column in result.columns if _normalise_catalog_name(str(column)) == "operatorvendor"), None,
+    )
+    if operator_vendor_column is not None and not any(
+        _normalise_catalog_name(str(column)) == "vendoroperator" for column in result.columns
+    ):
+        groups = [{'canonical': label} for label in dict.fromkeys(configured.values())]
+
+        def swapped(value: object) -> object:
+            if pd.isna(value) or not str(value).strip():
+                return value
+            return swap_operator_vendor(value, groups)
+        # Same naming style as its source column (operator_vendor in CDR Analysis frames).
+        derived = 'vendor_operator' if str(operator_vendor_column).islower() else VENDOR_OPERATOR_FIELD
+        result[derived] = _map_distinct_values(result[operator_vendor_column], swapped)
     result.attrs['operator_aliases_normalized'] = True
     result.attrs['operator_mappings'] = configured
     result.attrs['vendor_mappings'] = vendor_mappings
@@ -1699,10 +1732,15 @@ def vendor_from_cells(operator: object, cells: object, vendor_lookup: dict[str, 
     ``<Operator>_Ericsson_Mixed``; every other different or missing combination
     returns ``<Operator>_Non-Ericsson_Mixed``.
     """
+    family = _vendor_mapping_family(operator)
     normalized_operator = _normalise_operator(operator)
-    if normalized_operator not in {"Vodafone UK", "3"}:
+    if family is None:
         return normalized_operator
-    prefix = "Vodafone" if normalized_operator == "Vodafone UK" else "3"
+    # The base Operator keeps its short prefix; another spelling (Vodafone VoNR, VF_SA) keeps its name.
+    if normalized_operator == family:
+        prefix = "Vodafone" if family == "Vodafone UK" else "3"
+    else:
+        prefix = str(operator or "").strip()
     global_cells = _split_global_cells(cells)
     first = vendor_lookup.get(global_cells[0]) if global_cells else None
     last = vendor_lookup.get(global_cells[-1]) if global_cells else None
@@ -1837,7 +1875,7 @@ def enrich_multivendor(df: pd.DataFrame, vodafone_mapping: pd.DataFrame, three_m
         vendor_from_cells(
             operator,
             cells,
-            vodafone_lookup if _normalise_operator(operator) == "Vodafone UK" else three_lookup,
+            vodafone_lookup if _vendor_mapping_family(operator) == "Vodafone UK" else three_lookup,
         )
         for operator, cells in result[[operator_column, cell_column]].itertuples(index=False)
     ]
@@ -1883,13 +1921,14 @@ def assign_cdr_vendors(
     assigned_vendors: list[object] = []
     for operator, cells in result[[operator_column, cell_column]].itertuples(index=False):
         normalized_operator = _normalise_operator(operator)
-        if normalized_operator == "Vodafone UK":
+        family = _vendor_mapping_family(operator)
+        if family == "Vodafone UK":
             if vodafone_mapping is None:
                 assigned_vendors.append(normalized_operator)
             else:
                 mapped_value = vendor_from_cells(operator, cells, vodafone_lookup)
                 assigned_vendors.append(mapped_value)
-        elif normalized_operator == "3":
+        elif family == "3":
             if three_mapping is None:
                 assigned_vendors.append(normalized_operator)
             else:
@@ -2416,20 +2455,13 @@ def _latest_campaign_value(series: pd.Series) -> str | None:
     return max(values, key=_campaign_sort_key)
 
 
-def _campaign_sort_key(value: object) -> tuple[int, int, str]:
-    """Sort campaign values chronologically when their year/quarter is present."""
-    text = str(value).strip()
-    year_match = re.search(r"(?:19|20)\d{2}", text)
-    quarter_match = re.search(r"(?:^|[^A-Z0-9])Q\s*([1-4])(?:[^0-9]|$)", text, flags=re.I)
-    return (
-        int(year_match.group(0)) if year_match else -1,
-        int(quarter_match.group(1)) if quarter_match else -1,
-        text.casefold(),
-    )
+def _campaign_sort_key(value: object) -> tuple[int, int, int, str]:
+    """Sort campaign values chronologically: year, quarter, then the plain, NSA and SA campaigns."""
+    return campaign_sort_key(value)
 
 
 def _campaign_display_value(value: object) -> str:
-    """Reduce NetCheck campaign identifiers to a stable year/quarter label."""
+    """Reduce NetCheck campaign identifiers to a stable year/quarter label such as 2026-Q2-SA."""
     return compact_campaign_value(value)
 
 
@@ -2920,6 +2952,9 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
             return _vendor_only_display_sort_key(value, frame)
         if normalized_dimension == "operatorvendor":
             return vendor_sort_key(value)
+        if normalized_dimension == "vendoroperator":
+            # By Vendor (Vendor Maps), then Operator (Operator Maps); Operators without a Vendor last.
+            return vendor_operator_order_key(value, _mapping_groups(frame, 'operator'), _mapping_groups(frame, 'vendor'))
         if normalized_dimension in {"operator", "subscriber"}:
             return _operator_display_sort_key(value, frame)
         return (str(value).casefold(),)
