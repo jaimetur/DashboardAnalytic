@@ -7,7 +7,6 @@ import pytest
 from pptx import Presentation
 
 from src.modules.scoring_exports import export_scoring_powerpoint
-from src.modules.scoring_insight_slides import short_operator_label
 from src.modules.scoring_views import build_scoring_views
 from tests.scoring_synthetic import CITIES, most_reliable_result, synthetic_result
 from tests.test_scoring_exports import TEMPLATE
@@ -116,11 +115,6 @@ def test_most_reliable_insights_use_its_points():
     assert profile['underline_most_reliable'] is False
 
 
-def test_short_operator_labels_follow_the_netcheck_cards():
-    assert [short_operator_label(label) for label in ('Vodafone UK', 'Three UK', 'EE', 'O2 UK', '3')] == [
-        'Vod', 'Three', 'EE', 'O2', '3']
-
-
 def test_powerpoint_adds_the_insight_slides_to_all_environments():
     job, result = synthetic_result()
     presentation = Presentation(BytesIO(export_scoring_powerpoint(job, result, TEMPLATE)))
@@ -136,7 +130,10 @@ def test_powerpoint_adds_the_insight_slides_to_all_environments():
     assert all('Drive - ' not in title for title in insight_titles)
     assert sum(1 for title in first if title == 'Best Network Scoring per City') == 1
     cards = next(slide for slide, title in zip(presentation.slides, first) if title == 'Best Network Scoring per City')
-    assert sum(1 for shape in cards.shapes if shape.name.startswith('Scoring Location Chart')) == len(CITIES)
+    charts = [shape for shape in cards.shapes if shape.name.startswith('Scoring Location Chart')]
+    assert len(charts) == len(CITIES)
+    # The cards show the operator labels as mapped, never shortened.
+    assert set(charts[0].chart.plots[0].categories) == {'EE', 'O2 UK', 'Three UK', 'Vodafone UK'}
     assert next(shape for shape in cards.shapes if shape.name == 'Scoring Location Cards Panel').text_frame.text.count(
         'Total: 1,000 points') == 1
 

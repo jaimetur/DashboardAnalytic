@@ -31,15 +31,6 @@ _FONT = 'Arial'
 FALLBACK_COLORS = ('#E60000', '#0B6E8F', '#7A3DB8', '#00A3AD', '#F2A900', '#4CA65A', '#8C564B', '#5B6770')
 
 
-def short_operator_label(label: str) -> str:
-    """Short card labels, as in the NetCheck per-city rankings: Vod, Three, EE, O2."""
-    words = str(label).replace('_', ' ').split()
-    if not words:
-        return str(label)
-    first = words[0]
-    return first if len(first) <= 5 else first[:3]
-
-
 def _rgb(color: str) -> RGBColor:
     return RGBColor.from_string(color.lstrip('#'))
 
@@ -193,7 +184,7 @@ def add_location_card_slides(presentation, groups: list[dict[str, Any]], *, scor
             heading = slide.shapes.add_textbox(Inches(left + .05), Inches(top + .05), Inches(width - .1), Inches(.32))
             _write(heading.text_frame, [(str(card['label']).upper(), 12 if columns <= 4 else 10, True, TITLE_BLUE)])
             data = CategoryChartData()
-            data.categories = [short_operator_label(item['label']) for item in card['operators']]
+            data.categories = [str(item['label']) for item in card['operators']]
             data.add_series('Voice', [item['voice'] for item in card['operators']])
             data.add_series('Data', [item['data'] for item in card['operators']])
             data.add_series('Total', [item['total'] for item in card['operators']])

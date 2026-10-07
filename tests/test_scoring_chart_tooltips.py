@@ -21,6 +21,8 @@ def test_chart_tooltips_use_delegated_pointer_and_keyboard_events_with_fallbacks
     assert "root.addEventListener('focusin'" in script
     assert "root.addEventListener('focusout'" in script
     assert "target?.closest?.('[data-chart-tooltip]')" in script
+    # Marks with an explicit tooltip work in every chart, such as the location cards.
+    assert "anchor.hasAttribute('data-chart-tooltip') || anchor.closest('.scoring-chart-svg')" in script
     assert "anchor?.getAttribute('aria-label')" in script
     assert "anchor?.getAttribute('title')" in script
     assert "anchor?.querySelector('title')?.textContent" in script

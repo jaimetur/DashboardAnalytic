@@ -225,7 +225,7 @@ The ITL3 boundaries are bundled with the application (Office for National Statis
 | **Best Network / Most Reliable Network Scoring per Category** | Compare category contributions within each operator/context stack |
 | **Best Network / Most Reliable Network Scoring per Category (Breakdown)** | Compare operators directly within each category |
 | **Maximum score allocation donuts** | Inspect configured environment, service and category maxima and shares |
-| **Scoring per City / Cluster / Region** | When City, Cluster or Region is an aggregation level with 2 to 12 values: one card per value with each operator's Voice and Data points and its total |
+| **Scoring per City / Cluster / Region** | When City, Cluster or Region is an aggregation level with 2 to 12 values: one card per value with each operator's Voice and Data points and its total, labelled with the operator names of the mapping table (hover a bar for its points) |
 | **Scoring Trend** | When Campaign is an aggregation level with more than four campaigns: each operator's total points per campaign, one line per operator |
 
 Voice and Speech KPIs contribute to **Voice**; Data KPIs contribute to **Data**, regardless of category names. Allocation donuts show **maximum available allocation**, not earned scores. Chart titles and donuts follow the selected scoring.
@@ -629,7 +629,7 @@ Each block contains, as chosen in the scenario:
 
 The All Environments block also contains, when they apply and are chosen:
 
-- **Scoring per City / Cluster / Region** after the service chart: a dark blue panel with the maximum points and up to 12 cards with Voice (amber) and Data (teal) stacked bars and the totals, for the latest campaign.
+- **Scoring per City / Cluster / Region** after the service chart: a dark blue panel with the maximum points and up to 12 cards with Voice (amber) and Data (teal) stacked bars and the totals, labelled with the operator names of the mapping table, for the latest campaign.
 - **Scoring Trend** after the cards: a line chart per combination of the other levels (up to six).
 - **KPI GAP Profile** after the GAP tables: one slide per compared operator with the Gap to Maximum and Gap to reference tables and their gradient data bars in every column, for each combination of the other levels, such as each selected City, Cluster or Region (up to twelve; the latest campaign's when there are more). The note names the operator in its colour and the totals in bold.
 - **Points Lost per City** after the profiles: one slide per compared operator with the ITL3 map coloured by the points lost and its yellow–red scale, and the cities and routes that lose most as bars (up to 30), with the share of the points lost they account for. Workspaces with Clusters or Region Mapping polygons add a **Points Lost per Cluster** or **per Region** slide. Without ITL3 areas (data outside the UK) the cities are bubbles over the test locations.

@@ -27,7 +27,7 @@
       || target?.closest?.('[aria-label], [title]');
     return anchor && root.contains(anchor)
       && !anchor.matches('svg')
-      && anchor.closest('.scoring-chart-svg') ? anchor : null;
+      && (anchor.hasAttribute('data-chart-tooltip') || anchor.closest('.scoring-chart-svg')) ? anchor : null;
   }
 
   function chartTooltipText(anchor) {
@@ -4626,11 +4626,6 @@
     return match ? Number(match[1]) * 100 + Number(match[2]) * 10 + ({NSA: 1, SA: 2}[match[3]] || 0) : Number.NEGATIVE_INFINITY;
   }
 
-  function shortOperatorLabel(label) {
-    const first = String(label || '').replace(/_/g, ' ').trim().split(/\s+/)[0] || String(label || '');
-    return first.length <= 5 ? first : first.slice(0, 3);
-  }
-
   function insightContextLabel(context) {
     const names = {vendor: 'Vendor', region: 'Region', cluster: 'Cluster', city: 'City', campaign: 'Campaign'};
     return Object.entries(names).filter(([field]) => context?.[field] !== undefined && context?.[field] !== null && context?.[field] !== '')
@@ -4684,8 +4679,10 @@
       }
       const total = svgElement(svg, 'text', {x: x + barWidth / 2, y: baseline - voiceHeight - dataHeight - 6, 'text-anchor': 'middle', 'font-size': 12, 'font-weight': 800, fill: '#17232d'});
       total.textContent = `${insightNumber(item.total)}${item.complete ? '' : '*'}`;
-      const label = svgElement(svg, 'text', {x: x + barWidth / 2, y: baseline + 18, 'text-anchor': 'middle', 'font-size': 12, fill: '#4a5b65'});
-      label.textContent = shortOperatorLabel(item.label);
+      const labelText = String(item.label ?? '');
+      const labelSize = Math.max(8, Math.min(12, step / Math.max(1, labelText.length * .62)));
+      const label = svgElement(svg, 'text', {x: x + barWidth / 2, y: baseline + 18, 'text-anchor': 'middle', 'font-size': labelSize, fill: '#4a5b65'});
+      label.textContent = labelText;
       group.append(total, label);
       svg.append(group);
     });
