@@ -1,3 +1,3 @@
 __app_name__ = "DriveTest Analyzer"
-__version__ = "0.6.0"
-__release_date__ = "2026-10-06"
+__version__ = "0.6.1"
+__release_date__ = "2026-10-08"
