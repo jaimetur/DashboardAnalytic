@@ -47,7 +47,7 @@ def _result():
 def test_points_lost_are_spread_over_the_cities_routes_and_itl3_areas():
     job, result = _result()
     maps = build_scoring_views(job, result)['insights']['points_loss_maps']
-    vodafone = {item['field']: item for item in maps if item['operator'] == 'Vodafone UK'}
+    vodafone = {item['field']: item for item in maps if item['operator'] == 'Vodafone UK' and item['environment'] == 'Combined'}
     assert {'City', 'ITL3'} <= set(vodafone)
     cities = {area['name']: area for area in vodafone['City']['areas']}
     # Leeds loses most of the city points; the road is a route between cities.
@@ -61,6 +61,28 @@ def test_points_lost_are_spread_over_the_cities_routes_and_itl3_areas():
     assert cities['Leeds']['points'] < areas['Leeds'] < cities['Leeds']['points'] + cities['Sheffield to Leeds']['points']
     # EE completes every call: it loses no points and gets no map.
     assert not any(item['operator'] == 'EE' for item in maps)
+    # Each environment has its own maps; All Environments names, beside each area, where it loses points.
+    environments = {item['environment'] for item in maps} - {'Combined'}
+    assert environments and all(cities[name]['environments'] for name in cities)
+    for environment in environments:
+        city = next(item for item in maps if item['operator'] == 'Vodafone UK' and item['environment'] == environment
+                    and item['field'] == 'City')
+        assert all(not area['environments'] for area in city['areas'])
+    # The ITL3 areas of each City's tests (of every operator), to show it alone on the map.
+    assert cities['Leeds']['itl3'] == {'Leeds': 120} and set(cities['Sheffield to Leeds']['itl3']) >= {'Sheffield', 'Leeds'}
+
+
+def test_itl3_areas_take_the_points_of_the_city_or_route_that_loses_most_in_them():
+    areas = [
+        {'name': 'London', 'points': 12.5, 'kind': 'place', 'itl3': {'Westminster and City of London': 60, 'Camden': 39,
+                                                                     'West Surrey': 1}},
+        {'name': 'Coventry', 'points': 5.5, 'kind': 'place', 'itl3': {'Coventry': 50}},
+        {'name': 'Coventry to Corby', 'points': 1.7, 'kind': 'route', 'itl3': {'Coventry': 10, 'Leicestershire': 30}},
+        # Calculated before the ITL3 areas of each City were kept: the area of its location.
+        {'name': 'Leeds', 'points': 3.6, 'kind': 'place', 'latitude': 53.80, 'longitude': -1.55},
+    ]
+    assert points_loss.row_area_values(areas) == {
+        'Westminster and City of London': 12.5, 'Camden': 12.5, 'Coventry': 5.5, 'Leicestershire': 1.7, 'Leeds': 3.6}
 
 
 def test_bundled_itl3_boundaries_cover_the_uk():
@@ -96,6 +118,9 @@ def test_powerpoint_maps_the_points_lost_of_the_compared_operators():
                  and slide.shapes.title.text_frame.text.startswith('Points Lost per City — Vodafone UK'))
     names = {shape.name for shape in slide.shapes}
     assert {'Scoring Points Lost Map', 'Scoring Points Lost Bars', 'Scoring Points Lost Scale'} <= names
+    # The operator, large, above the map and the ranking.
+    heading = next(shape for shape in slide.shapes if shape.name == 'Scoring Points Lost Operator')
+    assert heading.text_frame.text == 'Vodafone UK' and heading.text_frame.paragraphs[0].runs[0].font.size.pt == 24
     scenario = default_scenario(operators=['Vodafone UK', 'Three UK'])
     for options in scenario['scorings'].values():
         options['gap']['points_loss_map'] = False
@@ -133,3 +158,15 @@ def test_job_api_serves_the_map_layers_without_the_raw_shares(scoring_api, monke
     # Without a Clusters dataset applied to the CDRs the Cluster layer has no polygons.
     assert client.get(f'/api/scoring/jobs/{job_id}/boundaries/Cluster').json()['boundaries'] == {}
     assert client.get(f'/api/scoring/jobs/{job_id}/boundaries/Unknown').status_code == 404
+
+
+def test_the_web_map_links_the_ranking_and_the_areas():
+    from pathlib import Path
+
+    script = (Path(__file__).resolve().parents[1] / 'src/web_interface/static/js/scoring.js').read_text(encoding='utf-8')
+    # Each column is headed by its operator; rows and areas choose each other, and chosen rows centre the map.
+    assert "title.className = 'scoring-loss-map-operator';" in script
+    assert 'function lossMapSelection(card, svg, rows, links)' in script and 'selection.zoom.fit({x, y, width, height});' in script
+    assert 'if (event.shiftKey && onSelect) onSelect(area, event); else apply(area);' in script
+    # All Environments names the environments of each area.
+    assert "...(withEnvironments ? ['Environment'] : [])" in script

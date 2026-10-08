@@ -215,6 +215,18 @@
   .scoring-map-zoom button { width: 2rem; height: 2rem; min-height: 0; padding: 0; border: 1px solid #c9d4dc; border-radius: 7px; background: #fff; color: #244e70; font-size: 1rem; font-weight: 800; line-height: 1; box-shadow: none; cursor: pointer; }
   .scoring-map-zoom button:hover { background: #eef4f9; transform: none; box-shadow: none; }
   .scoring-map-zoom-rect { fill: rgba(31, 111, 209, .12); stroke: #1f6fd1; stroke-width: 1.5; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
+  .scoring-map-zoom-rect.is-selecting { fill: rgba(232, 65, 79, .1); stroke: #c8102e; }
+  /* The operator of each Points Lost column, and the rows or areas chosen to show alone. */
+  .scoring-loss-map-operator { margin: 0 0 .35rem; font-size: 1.45rem; font-weight: 800; line-height: 1.2; color: #17232d; }
+  .scoring-loss-environment { color: #4a5b65; font-size: .78rem; }
+  .scoring-loss-map-hint { margin: .4rem 0 0; color: #6b7a85; font-size: .74rem; }
+  .scoring-loss-map-card:focus { outline: none; }
+  .scoring-loss-map-svg [data-area] { transition: fill .15s, opacity .15s; }
+  .scoring-loss-map-svg [data-area].is-dimmed { opacity: .35; }
+  .scoring-loss-map-card tr.is-selectable { cursor: pointer; }
+  .scoring-loss-map-card tr.is-selectable:hover td { background: #f3f7fb; }
+  .scoring-loss-map-card tr.is-selected td { background: #fff1c7; font-weight: 700; }
+  .scoring-loss-map-card tr.is-dimmed { opacity: .35; }
   .scoring-content-zoom { position: relative; touch-action: none; user-select: none; }
   .scoring-content-zoom.is-zoomed { overflow: hidden; }
   .scoring-content-zoom-rect { position: absolute; z-index: 3; border: 1.5px dashed #1f6fd1; background: rgba(31, 111, 209, .12); pointer-events: none; }

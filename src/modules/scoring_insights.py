@@ -66,9 +66,13 @@ def _points_loss_maps(result: dict[str, Any] | None, score_tables: list[dict[str
             place = located.get(name) or {}
             areas.append({'name': name, 'points': points, 'share': points / item['total'] if item['total'] else 0,
                           'latitude': place.get('latitude'), 'longitude': place.get('longitude'),
-                          'kind': place.get('kind', 'place'), 'route': place.get('points') or []})
+                          'kind': place.get('kind', 'place'), 'route': place.get('points') or [],
+                          # The ITL3 areas holding its tests and how many: the City (or route) alone on the map.
+                          'itl3': place.get('itl3') or {},
+                          # All environments: the environments where the area loses points, most first.
+                          'environments': (item.get('environments') or {}).get(name, [])})
         maps.append({
-            'environment': COMBINED, 'operator': operator, 'label': style.get('label') or operator,
+            'environment': item.get('environment') or COMBINED, 'operator': operator, 'label': style.get('label') or operator,
             'color': style.get('color'), 'is_reference': operator in references, 'field': item['field'],
             'context': {field: value for field, value in context.items()
                         if field != 'operator' and value not in (None, '')},

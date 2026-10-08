@@ -2391,7 +2391,9 @@ def _add_insight_slides(presentation, views: dict, environment: str, scoring: st
                 if not item.get('is_reference') and _compared_operator(options, item['operator'], item.get('label'))]
         add_points_loss_slides(presentation, _latest_campaign_maps(maps), insights.get('points_loss_background') or [],
                                scoring_label=label, subtitle=subtitle, new_slide=_slide,
-                               boundaries=views.get('_points_loss_boundaries'))
+                               boundaries=views.get('_points_loss_boundaries'),
+                               environment_labels={name: _scoring_environment_title(name, configuration)
+                                                   for name in configuration.get('scope', {}).get('environments', {})})
     if _option(options, 'tables', 'campaign_comparison'):
         comparisons = [item for item in items.get('campaign_comparisons', [])
                        if options is None or _compared_operator(options, item['operator'], item.get('label'))]

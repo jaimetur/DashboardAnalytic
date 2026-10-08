@@ -4964,7 +4964,7 @@
     return lossBoundaryCache.get(key);
   }
 
-  function lossMapSvg(boundaries, values, areas, background) {
+  function lossMapSvg(boundaries, values, areas, background, describe = null) {
     const svgNs = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(svgNs, 'svg');
     svg.classList.add('scoring-loss-map-svg');
@@ -4987,7 +4987,7 @@
     const span = (positive.length ? Math.max(...positive) : 0) - low || 1;
     const tooltip = (element, name, value) => {
       const title = document.createElementNS(svgNs, 'title');
-      title.textContent = `${name}: ${insightNumber(value, 2)} points lost`;
+      title.textContent = describe ? describe(name, value) : `${name}: ${insightNumber(value, 2)} points lost`;
       element.append(title);
     };
     if (rings.length) {
@@ -4996,6 +4996,8 @@
         path.setAttribute('d', `M${ring.map(([x, y]) => project(x, y).map(value => value.toFixed(1)).join(',')).join('L')}Z`);
         const value = values[name] || 0;
         path.setAttribute('fill', value > 0 ? lossColor((value - low) / span) : '#eaecef');
+        path.dataset.area = name;
+        path.dataset.value = String(value);
         path.setAttribute('stroke', '#fff');
         path.setAttribute('stroke-width', '.6');
         tooltip(path, name, value);
@@ -5019,6 +5021,7 @@
         const circle = document.createElementNS(svgNs, 'circle');
         Object.entries({cx: x.toFixed(1), cy: y.toFixed(1), r: radius.toFixed(1), fill: color, stroke: '#fff'})
           .forEach(([key, value]) => circle.setAttribute(key, value));
+        circle.dataset.area = area.name;
         tooltip(circle, area.name, area.points);
         svg.append(circle);
       }
@@ -5083,6 +5086,10 @@
     const {ranking, layer} = entry;
     const card = document.createElement('article');
     card.className = 'scoring-loss-map-card';
+    // The operator of the column, large and in its colour.
+    const title = document.createElement('h5');
+    title.className = 'scoring-loss-map-operator';
+    title.textContent = ranking.label;
     const bars = ranking.areas.filter(area => area.name !== 'Not specified').slice(0, maxLossBars);
     const listed = bars.reduce((sum, area) => sum + area.points, 0);
     const note = document.createElement('p');
@@ -5090,11 +5097,13 @@
     const operator = document.createElement('strong');
     operator.textContent = ranking.label;
     const color = safeHexColor(ranking.color);
-    if (color) operator.style.color = color;
+    if (color) { operator.style.color = color; title.style.color = color; }
     const listedText = document.createElement('strong');
     listedText.textContent = `The ${bars.length} ${entry.title === 'City' ? 'cities and routes' : `${entry.title.toLowerCase()}s`} listed`;
-    note.append(layer && layer.field === 'ITL3' ? 'The map colours each ITL3 area by the points ' : 'The map shows where ',
-      operator, ` loses its ${scoringLabel()} points (${insightNumber(ranking.total, 1)} in total). `, listedText,
+    const byRows = layer && layer.field === 'ITL3' && ranking.field !== 'ITL3';
+    note.append(byRows ? 'The map colours each ITL3 area by the points ' : 'The map shows where ',
+      operator, byRows ? ` loses in the city or route that loses most in it (${insightNumber(ranking.total, 1)} ${scoringLabel()} points lost in total; hover an area to see them). `
+        : ` loses its ${scoringLabel()} points (${insightNumber(ranking.total, 1)} in total). `, listedText,
       ` account for ${ranking.total ? Math.round(listed / ranking.total * 100) : 0}% of the points lost.`);
     const content = document.createElement('div');
     content.className = `scoring-loss-map${compact ? ' is-compact' : ''}`;
@@ -5102,22 +5111,209 @@
     mapBox.className = 'scoring-loss-map-figure';
     mapBox.textContent = 'Loading map…';
     const peak = Math.max(0, ...bars.map(area => area.points));
-    const table = insightTable(['Area', 'Points lost', 'Share'], bars.map(area => [area.name,
+    // All environments: beside each area, the environments where it loses points (most first).
+    const withEnvironments = bars.some(area => area.environments?.length);
+    const table = insightTable(['Area', ...(withEnvironments ? ['Environment'] : []), 'Points lost', 'Share'], bars.map(area => [area.name,
+      ...(withEnvironments ? [{text: (area.environments || []).map(name => environmentLabel(name)).join(', '),
+        className: 'scoring-loss-environment'}] : []),
       gapBarCell(area.points, peak, {loss: true, total: true}),
       {text: `${insightNumber(area.share * 100, 1)}%`, className: 'scoring-insight-number'}]));
     const tableBox = document.createElement('div');
     tableBox.className = 'scoring-insight-table-wrap';
     tableBox.append(table);
+    const hint = document.createElement('p');
+    hint.className = 'scoring-loss-map-hint';
+    hint.textContent = 'Click a row or an area to show it alone; Ctrl/⌘-click adds more, Shift+click chooses the rows in between and Shift+drag selects several areas. Click it again or Esc to show all.';
     content.append(mapBox, tableBox);
-    card.append(note, content);
+    card.append(title, note, content, hint);
     const values = Object.fromEntries((layer || ranking).areas.filter(area => area.name !== 'Not specified')
       .map(area => [area.name, area.points]));
+    const rows = [...table.querySelectorAll('tbody tr')];
+    rows.forEach((row, index) => {
+      row.dataset.area = bars[index]?.name || '';
+      row.dataset.points = String(bars[index]?.points || 0);
+    });
     (layer ? lossBoundaries(jobId, layer.field) : Promise.resolve({})).then(boundaries => {
-      const svg = lossMapSvg(layer ? boundaries : {}, values, ranking.areas, payload?.views?.insights?.points_loss_background || []);
+      const links = lossAreaLinks(ranking, layer, layer ? boundaries : {});
+      // ITL3 areas take the points of the city or route that loses most in them (its tests are there).
+      const rowAreas = byRows ? lossRowValues(ranking.areas, links) : null;
+      const describe = rowAreas ? (name, _value) => {
+        const lines = rowAreas.rows[name] || [];
+        const lost = values[name] ? ` (${insightNumber(values[name], 2)} points lost in this area)` : '';
+        return lines.length ? `${name}${lost}\n${lines.slice(0, 4).map(([row, points]) => `${row}: ${insightNumber(points, 2)} points lost`).join('\n')}`
+          : `${name}: no listed city or route`;
+      } : null;
+      const svg = lossMapSvg(layer ? boundaries : {}, rowAreas ? rowAreas.values : values, ranking.areas,
+        payload?.views?.insights?.points_loss_background || [], describe);
       mapBox.replaceChildren(svg);
-      enableMapZoom(mapBox, svg);
+      const select = lossMapSelection(card, svg, rows, links);
+      select.zoom = enableMapZoom(mapBox, svg, select);
     });
     return card;
+  }
+
+  // The map areas of each listed City, route, Region or Cluster, with the share of its tests in each.
+  function lossAreaLinks(ranking, layer, boundaries) {
+    const links = new Map();
+    const inside = ([x, y], ring) => {
+      let found = false;
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const [xi, yi] = ring[i], [xj, yj] = ring[j];
+        if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) found = !found;
+      }
+      return found;
+    };
+    // Results calculated before the ITL3 areas of each City were kept: the areas holding its location.
+    const locate = area => {
+      const spots = area.kind === 'route' && area.route?.length ? area.route.map(([lat, lon]) => [lon, lat])
+        : area.latitude !== null && area.latitude !== undefined ? [[area.longitude, area.latitude]] : [];
+      const counts = {};
+      for (const spot of spots) {
+        const name = Object.keys(boundaries).find(key => boundaries[key].some(ring => inside(spot, ring)));
+        if (name) counts[name] = (counts[name] || 0) + 1;
+      }
+      return counts;
+    };
+    for (const area of ranking.areas) {
+      const shares = !layer || layer.field === ranking.field ? {[area.name]: 1}
+        : Object.keys(area.itl3 || {}).length ? area.itl3 : locate(area);
+      const total = Object.values(shares).reduce((sum, value) => sum + value, 0);
+      if (total <= 0) continue;
+      // Areas with a few stray tests (under 2% of them) do not belong to the city or route.
+      const kept = Object.entries(shares).filter(([, value]) => value / total >= .02);
+      const used = kept.length ? kept : [Object.entries(shares).sort((left, right) => right[1] - left[1])[0]];
+      const sum = used.reduce((total, [, value]) => total + value, 0);
+      links.set(area.name, Object.fromEntries(used.map(([name, value]) => [name, value / sum])));
+    }
+    return links;
+  }
+
+  // The points of the city or route that loses most in each map area, and every one measured there.
+  function lossRowValues(areas, links) {
+    const values = {};
+    const rows = {};
+    for (const area of areas) {
+      if (area.name === 'Not specified') continue;
+      for (const name of Object.keys(links.get(area.name) || {})) {
+        values[name] = Math.max(values[name] || 0, area.points);
+        (rows[name] ||= []).push([area.name, area.points]);
+      }
+    }
+    Object.values(rows).forEach(list => list.sort((left, right) => right[1] - left[1]));
+    return {values, rows};
+  }
+
+  // Choosing rows of the ranking shows their areas alone on the map, and choosing areas on the map
+  // (a click, or Shift and a dragged rectangle) leaves the rows of those areas lit in the ranking.
+  function lossMapSelection(card, svg, rows, links) {
+    const marks = [...svg.querySelectorAll('[data-area]')];
+    marks.forEach(mark => { mark.dataset.fill = mark.getAttribute('fill') || ''; });
+    const chosenRows = new Set();
+    const chosenAreas = new Set();
+    const refresh = () => {
+      if (chosenRows.size) {
+        // The areas of the chosen rows' tests, with the points of the row that loses most in each.
+        const values = {};
+        for (const row of chosenRows) {
+          const points = Number(rows.find(item => item.dataset.area === row)?.dataset.points) || 0;
+          for (const area of Object.keys(links.get(row) || {})) values[area] = Math.max(values[area] || 0, points);
+        }
+        // The scale of the whole map, so a chosen area keeps the colour of its points.
+        const positive = [...Object.values(values), ...marks.map(mark => Number(mark.dataset.value) || 0)].filter(value => value > 0);
+        const low = positive.length ? Math.min(...positive) : 0;
+        const span = (positive.length ? Math.max(...positive) : 0) - low || 1;
+        marks.forEach(mark => {
+          const value = values[mark.dataset.area] || 0;
+          mark.setAttribute('fill', value > 0 ? lossColor((value - low) / span) : '#eaecef');
+          mark.classList.toggle('is-dimmed', !(value > 0));
+        });
+      } else {
+        marks.forEach(mark => {
+          mark.setAttribute('fill', mark.dataset.fill);
+          mark.classList.toggle('is-dimmed', chosenAreas.size > 0 && !chosenAreas.has(mark.dataset.area));
+        });
+      }
+      const lit = row => (chosenRows.size ? chosenRows.has(row)
+        : !chosenAreas.size || Object.keys(links.get(row) || {}).some(area => chosenAreas.has(area)));
+      rows.forEach(row => {
+        row.classList.toggle('is-selected', chosenRows.has(row.dataset.area));
+        row.classList.toggle('is-dimmed', !lit(row.dataset.area));
+      });
+      card.classList.toggle('has-loss-selection', chosenRows.size > 0 || chosenAreas.size > 0);
+      // The map centres and zooms on the chosen rows' areas, and shows it all again without them.
+      if (chosenRows.size) {
+        const boxes = marks.filter(mark => !mark.classList.contains('is-dimmed')).map(mark => mark.getBBox());
+        if (boxes.length && selection.zoom) {
+          const x = Math.min(...boxes.map(box => box.x)), y = Math.min(...boxes.map(box => box.y));
+          const width = Math.max(...boxes.map(box => box.x + box.width)) - x, height = Math.max(...boxes.map(box => box.y + box.height)) - y;
+          selection.zoom.fit({x, y, width, height});
+          zoomedToRows = true;
+        }
+      } else if (zoomedToRows) {
+        selection.zoom?.reset();
+        zoomedToRows = false;
+      }
+    };
+    let zoomedToRows = false;
+    // The row a Shift+click range starts from.
+    let anchor = null;
+    const choose = (set, other, names, add) => {
+      other.clear();
+      if (!add) {
+        const same = names.length === set.size && names.every(name => set.has(name));
+        set.clear();
+        if (same) { refresh(); return; }
+      }
+      for (const name of names) {
+        if (add && set.has(name) && names.length === 1) set.delete(name); else set.add(name);
+      }
+      refresh();
+    };
+    for (const row of rows) {
+      row.classList.add('is-selectable');
+      // Shift+click chooses every row from the last one clicked; Ctrl/⌘ keeps the rows already chosen.
+      row.addEventListener('mousedown', event => { if (event.shiftKey) event.preventDefault(); });
+      row.addEventListener('click', event => {
+        const index = rows.indexOf(row);
+        if (event.shiftKey && anchor !== null) {
+          const range = rows.slice(Math.min(anchor, index), Math.max(anchor, index) + 1).map(item => item.dataset.area);
+          chosenAreas.clear();
+          if (!(event.ctrlKey || event.metaKey)) chosenRows.clear();
+          range.forEach(name => chosenRows.add(name));
+          refresh();
+          return;
+        }
+        anchor = index;
+        choose(chosenRows, chosenAreas, [row.dataset.area], event.ctrlKey || event.metaKey);
+      });
+    }
+    card.tabIndex = -1;
+    card.addEventListener('keydown', event => {
+      if (event.key !== 'Escape') return;
+      chosenRows.clear();
+      chosenAreas.clear();
+      refresh();
+    });
+    const selection = {
+      zoom: null,
+      // A click on an area chooses it; a click outside every area shows all.
+      onClick(element, event) {
+        const name = element?.closest?.('[data-area]')?.dataset.area;
+        if (!name) { chosenRows.clear(); chosenAreas.clear(); refresh(); return; }
+        choose(chosenAreas, chosenRows, [name], event.ctrlKey || event.metaKey);
+        card.focus({preventScroll: true});
+      },
+      // Shift and a dragged rectangle choose every area it touches.
+      onSelect([x, y, width, height], event) {
+        const names = [...new Set(marks.filter(mark => {
+          const box = mark.getBBox();
+          return box.x < x + width && box.x + box.width > x && box.y < y + height && box.y + box.height > y;
+        }).map(mark => mark.dataset.area))];
+        choose(chosenAreas, chosenRows, names, event.ctrlKey || event.metaKey);
+        card.focus({preventScroll: true});
+      },
+    };
+    return selection;
   }
 
   // The floating zoom buttons (zoom in, zoom out, whole view), shown while the pointer is over the box.
@@ -5208,7 +5404,7 @@
 
   // Map zoom: drag a rectangle with the mouse to zoom into it, or use the floating buttons shown
   // while the pointer is over the map (they hide as soon as it leaves).
-  function enableMapZoom(box, svg) {
+  function enableMapZoom(box, svg, {onClick = null, onSelect = null} = {}) {
     // The whole view, kept on the element so a copy (the enlarged view) zooms out to it as well.
     svg.dataset.zoomOriginal ||= svg.getAttribute('viewBox') || '';
     const original = svg.dataset.zoomOriginal.split(/\s+/).map(Number);
@@ -5278,7 +5474,7 @@
       if (event.button !== 0) return;
       start = toSvg(event);
       rectangle = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-      rectangle.setAttribute('class', 'scoring-map-zoom-rect');
+      rectangle.setAttribute('class', `scoring-map-zoom-rect${event.shiftKey && onSelect ? ' is-selecting' : ''}`);
       svg.append(rectangle);
       svg.setPointerCapture?.(event.pointerId);
       event.preventDefault();
@@ -5296,15 +5492,26 @@
       const point = toSvg(event);
       rectangle.remove();
       const width = Math.abs(point.x - start.x), height = Math.abs(point.y - start.y);
-      // A click (or a tiny rectangle) does not zoom.
+      // A click (or a tiny rectangle) does not zoom; with Shift the rectangle chooses areas instead.
+      const area = [Math.min(start.x, point.x), Math.min(start.y, point.y), width, height];
       if (width > view[2] * .02 && height > view[3] * .02) {
-        apply([Math.min(start.x, point.x), Math.min(start.y, point.y), width, height]);
+        if (event.shiftKey && onSelect) onSelect(area, event); else apply(area);
+      } else if (onClick) {
+        onClick(document.elementFromPoint(event.clientX, event.clientY), event);
       }
       start = null;
       rectangle = null;
     };
     svg.addEventListener('pointerup', finish);
     svg.addEventListener('pointercancel', () => { rectangle?.remove(); start = null; rectangle = null; });
+    return {
+      // Centres an area of the map with a margin, never closer than a twelfth of the whole map.
+      fit({x, y, width, height}) {
+        const grownWidth = Math.max(width * 1.3, original[2] / 12), grownHeight = Math.max(height * 1.3, original[3] / 12);
+        apply([x + width / 2 - grownWidth / 2, y + height / 2 - grownHeight / 2, grownWidth, grownHeight]);
+      },
+      reset: () => apply([...original]),
+    };
   }
 
   function renderCampaignComparisons(pane, payload, environment) {

@@ -236,7 +236,12 @@ class AreaGeometry:
                 continue
             for area, group in located.groupby(located[column].fillna(NOT_SPECIFIED)):
                 entry = self.areas[field].setdefault(str(area), {
-                    'latitude_sum': 0.0, 'longitude_sum': 0.0, 'tests': 0, 'places': 0, 'points': []})
+                    'latitude_sum': 0.0, 'longitude_sum': 0.0, 'tests': 0, 'places': 0, 'points': [], 'itl3': {}})
+                # The ITL3 areas of the tests of each City or route, to show it alone on the ITL3 map.
+                itl3 = AREA_COLUMN.format('ITL3')
+                if field == 'City' and itl3 in group:
+                    for name, count in group[itl3].dropna().value_counts().items():
+                        entry['itl3'][str(name)] = entry['itl3'].get(str(name), 0) + int(count)
                 entry['latitude_sum'] += float(group[LATITUDE].sum())
                 entry['longitude_sum'] += float(group[LONGITUDE].sum())
                 entry['tests'] += len(group)
@@ -260,17 +265,59 @@ class AreaGeometry:
                     # A City value of Connecting Roads tests is a route between cities.
                     'kind': 'place' if entry['places'] * 2 >= entry['tests'] else 'route',
                     'points': entry['points'] if entry['places'] * 2 < entry['tests'] else [],
+                    **({'itl3': entry['itl3']} if entry['itl3'] else {}),
                 }
                 for area, entry in entries.items()
             }
         return {'areas': areas, 'background': self.background}
 
 
+def row_area_links(areas: list[dict[str, Any]], field: str = 'ITL3') -> dict[str, list[str]]:
+    """The boundary areas of each City or route, the one with most of its tests first.
+
+    A City or route belongs to the areas holding its tests (``itl3``, at least 2% of them);
+    results calculated before that was kept use the areas of its location or route points.
+    """
+    from shapely import points as shapely_points
+
+    index = _boundary_index(field) if field in BOUNDARY_FIELDS else None
+    links: dict[str, list[str]] = {}
+    for area in areas:
+        if area.get('name') == NOT_SPECIFIED:
+            continue
+        counts = dict(area.get('itl3') or {}) if field == 'ITL3' else {}
+        if not counts and index is not None:
+            spots = ([(lon, lat) for lat, lon in area['route']] if area.get('kind') == 'route' and area.get('route')
+                     else [(area['longitude'], area['latitude'])] if area.get('latitude') is not None else [])
+            if spots:
+                _geometries, names, tree = index
+                _rows, polygons = tree.query(shapely_points(spots), predicate='intersects')
+                for polygon in polygons:
+                    counts[names[polygon]] = counts.get(names[polygon], 0) + 1
+        total = sum(counts.values())
+        if total:
+            ordered = sorted(counts, key=lambda name: -counts[name])
+            links[area['name']] = [name for name in ordered if counts[name] / total >= .02] or ordered[:1]
+    return links
+
+
+def row_area_values(areas: list[dict[str, Any]], field: str = 'ITL3') -> dict[str, float]:
+    """Each boundary area with the points of the City or route that loses most in it."""
+    points = {area['name']: float(area['points']) for area in areas}
+    values: dict[str, float] = {}
+    for row, names in row_area_links(areas, field).items():
+        for name in names:
+            values[name] = max(values.get(name, 0.0), points[row])
+    return values
+
+
 def points_loss_maps(result: dict[str, Any], keys: list[str]) -> list[dict[str, Any]]:
-    """Points lost per area for each scoring series (all environments together).
+    """Points lost per area for each scoring series, all environments together and in each one.
 
     Each KPI loses its maximum points minus the points scored; the loss is spread over
     the areas by their shares. ``keys`` are the series fields other than the environment.
+    The maps of all environments (``environment`` None) give each area the points it loses
+    in each environment, most first (``environments``).
     """
     document = result.get('points_loss') if isinstance(result, dict) else None
     if not isinstance(document, dict) or not document.get('shares'):
@@ -279,6 +326,7 @@ def points_loss_maps(result: dict[str, Any], keys: list[str]) -> list[dict[str, 
     for row in result.get('scoring') or []:
         rows[(tuple(row.get(key) for key in keys), row.get('environment'), row.get('kpi_code'))] = row
     series: dict[tuple, dict[str, dict[str, float]]] = {}
+    by_environment: dict[tuple, dict[str, dict[str, dict[str, float]]]] = {}
     for entry in document['shares']:
         identity = tuple(entry.get(key) for key in keys)
         row = rows.get((identity, entry.get('environment'), entry.get('kpi_code')))
@@ -291,16 +339,27 @@ def points_loss_maps(result: dict[str, Any], keys: list[str]) -> list[dict[str, 
         lost = max(0.0, maximum - float(points))
         if lost <= 0:
             continue
-        target = series.setdefault(identity, {})
-        for field, shares in (entry.get('areas') or {}).items():
-            areas = target.setdefault(field, {})
-            for area, share in shares.items():
-                areas[area] = areas.get(area, 0.0) + lost * float(share)
+        environment = str(entry.get('environment') or '')
+        for key in ((identity, None), (identity, environment)):
+            target = series.setdefault(key, {})
+            for field, shares in (entry.get('areas') or {}).items():
+                areas = target.setdefault(field, {})
+                for area, share in shares.items():
+                    areas[area] = areas.get(area, 0.0) + lost * float(share)
+                    if key[1] is None:
+                        split = by_environment.setdefault(identity, {}).setdefault(field, {}).setdefault(area, {})
+                        split[environment] = split.get(environment, 0.0) + lost * float(share)
     maps = []
-    for identity, fields in series.items():
+    for (identity, environment), fields in series.items():
         context = dict(zip(keys, identity))
         for field, areas in fields.items():
             if not areas:
                 continue
-            maps.append({'context': context, 'field': field, 'areas': areas, 'total': sum(areas.values())})
+            item = {'context': context, 'field': field, 'areas': areas, 'total': sum(areas.values()),
+                    'environment': environment}
+            if environment is None:
+                split = by_environment.get(identity, {}).get(field, {})
+                item['environments'] = {area: [name for name, _points in sorted(
+                    split.get(area, {}).items(), key=lambda pair: -pair[1]) if name] for area in areas}
+            maps.append(item)
     return maps
