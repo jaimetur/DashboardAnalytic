@@ -47,7 +47,9 @@
         <label>Assignee<select data-nq-filter="assignee" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Assignee"></select></label>
         <label>Root Domain<select data-nq-filter="root_domain" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Root Domain"></select></label>
         <label>Root Cause<select data-nq-filter="root_cause" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Root Cause"></select></label>
+        <label title="How the CDRs see each call: the latest version, changed between CDRs, a newer version in a CDR that is not chosen, not in the Final CDR of its campaign, or Completed in a newer CDR (listed only when chosen here)">CDR Version<select data-nq-filter="version" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="CDR Version"></select></label>
       </div>
+      <div class="nq-filter-grid nq-field-filter-grid" id="nq-field-filters" hidden></div>
       <div class="nq-filter-row">
         <label class="nq-search">Search<input type="search" id="nq-search" placeholder="Operator, city, cell, failure or comment text…" autocomplete="off"></label>
         <label class="nq-toggle"><input type="checkbox" data-nq-flag="open_only"> Open calls only</label>
@@ -64,6 +66,19 @@
       <div class="nq-kpis" id="nq-kpis"></div>
       <p class="nq-hint">Click any bar to drill down into its calls; click it again to remove that filter.</p>
       <div class="nq-breakdowns" id="nq-breakdowns"></div>
+    </div>
+  </details>
+
+  <details class="panel collapsible-panel nq-rates-panel" open data-panel-state-key="non-qualified-calls:rates">
+    <summary class="collapsible-summary"><div><p class="eyebrow">Management view</p><h2>NQ Rate by Campaign and Operator</h2></div><span class="collapse-chip">Collapse</span></summary>
+    <div class="collapsible-panel-body">
+      <div class="nq-progress-head">
+        <p class="nq-hint">How many calls of each campaign and operator are Non-Qualified, out of every call of the CDRs. Each call counts once, in the most recent CDR that has it (a Final CDR before the Daily ones). Only the CDRs, Service, Campaign, Operator and NR Mode filters apply. Click a cell to drill down into its calls.</p>
+        <div class="nq-rate-tabs" id="nq-rate-tabs" role="tablist" aria-label="Service"></div>
+      </div>
+      <div class="nq-rate-overview" id="nq-rate-overview"></div>
+      <div class="nq-table-wrap nq-rate-wrap"><table class="nq-rate-table" id="nq-rate-table"></table></div>
+      <div class="nq-rate-legend" id="nq-rate-legend"></div>
     </div>
   </details>
 
@@ -118,7 +133,9 @@
         <div class="nq-toolbar-actions">
           <label class="nq-page-size">Rows<select id="nq-page-size">{% for size in nq_page_sizes %}<option value="{{ size }}"{% if size == 50 %} selected{% endif %}>{{ size }}</option>{% endfor %}</select></label>
           {% if nq_can_edit %}<button type="button" class="nq-secondary-action" id="nq-options-open" title="Configure the statuses and teams">Statuses &amp; Teams</button>
-          <button type="button" class="nq-secondary-action" id="nq-root-open" title="Configure the root cause domains and causes">Root Causes</button>{% endif %}
+          <button type="button" class="nq-secondary-action" id="nq-root-open" title="Configure the root cause domains and causes">Root Causes</button>
+          <button type="button" class="nq-secondary-action" id="nq-fields-open" title="Configure the analysis fields every call is followed up with">Analysis Fields</button>
+          <button type="button" class="nq-secondary-action" id="nq-columns-open" title="Choose the optional columns of the table, including CDR columns">Columns</button>{% endif %}
           <button type="button" class="nq-primary-action" id="nq-export" title="Every call that matches the filters, with its comments and history">Export Excel</button>
         </div>
       </div>
@@ -152,6 +169,7 @@
     <select id="nq-bulk-team" aria-label="Set the team of the selected calls"><option value="">Set team…</option></select>
     <select id="nq-bulk-assignee" aria-label="Assign the selected calls"><option value="">Assign to…</option></select>
     <select id="nq-bulk-root" aria-label="Set the root cause of the selected calls"><option value="">Set root cause…</option></select>
+    <select id="nq-bulk-field" aria-label="Set an analysis field of the selected calls" hidden><option value="">Set field…</option></select>
     <button type="button" class="nq-link-action" id="nq-bulk-suggest" title="Label the selected calls without a root cause with their suggested root cause">Apply suggestions</button>
     <button type="button" class="nq-link-action is-danger" id="nq-bulk-history" title="Delete every history entry of the selected calls" hidden>Clear history</button>
     <button type="button" class="nq-link-action" id="nq-bulk-clear">Clear selection</button>
@@ -172,6 +190,7 @@
   <div class="nq-drawer-tracking" id="nq-drawer-tracking"></div>
   <div class="nq-drawer-tabs" role="tablist">
     <button type="button" role="tab" class="is-active" data-nq-tab="activity" aria-selected="true">Activity</button>
+    <button type="button" role="tab" data-nq-tab="analysis" aria-selected="false">Analysis</button>
     <button type="button" role="tab" data-nq-tab="details" aria-selected="false">Call Details</button>
   </div>
   <div class="nq-drawer-body">
@@ -183,7 +202,19 @@
         <div class="nq-composer-actions"><span class="nq-composer-note" id="nq-composer-note"></span><button type="submit" class="nq-primary-action">Add Comment</button></div>
       </form>
     </section>
+    <section data-nq-panel="analysis" hidden>
+      <form class="nq-analysis-form" id="nq-analysis-form"></form>
+      <section class="nq-samples" id="nq-samples" hidden>
+        <h3>Speech Samples</h3>
+        <p class="form-note">Each Non-Qualified sample of the call keeps its own follow-up: open it to set its status, root cause and analysis fields or to comment on it.</p>
+        <ul class="nq-sample-list" id="nq-sample-list"></ul>
+      </section>
+    </section>
     <section data-nq-panel="details" hidden>
+      <section class="nq-versions" id="nq-versions" hidden>
+        <h3>CDRs with this call</h3>
+        <ul class="nq-version-list" id="nq-version-list"></ul>
+      </section>
       <dl class="nq-detail-grid" id="nq-detail-grid"></dl>
       <label class="nq-search nq-field-search">All CDR fields<input type="search" id="nq-field-search" placeholder="Filter fields…" autocomplete="off"></label>
       <table class="nq-fields-table"><tbody id="nq-fields"></tbody></table>
@@ -223,6 +254,28 @@
     </div>
     <p class="nq-options-error" id="nq-root-error" role="alert"></p>
     <footer><button type="button" class="nq-secondary-action" id="nq-root-cancel">Cancel</button><button type="submit" class="nq-primary-action" id="nq-root-save">Save</button></footer>
+  </form>
+</dialog>
+<dialog class="nq-options-dialog nq-fields-dialog" id="nq-fields-dialog" aria-labelledby="nq-fields-title">
+  <form method="dialog" class="nq-options-form" id="nq-fields-form">
+    <header><h2 id="nq-fields-title">Analysis Fields</h2><p class="form-note">The workspace's own follow-up fields, shared by every user. A list offers its values (each with a colour); text, long text, number, date and Yes / No fields are typed in. Fields shown in the table get a column; fields shown in the Summary get a breakdown; required fields must be filled before a call is closed. Renaming a list value updates every call; a value or field in use cannot be removed.</p>
+      <div class="nq-fields-import"><label class="nq-secondary-action nq-file-action">Import from Excel<input type="file" id="nq-fields-workbook" accept=".xlsx,.xlsm" hidden></label><span class="form-note">The first row names the fields and the rows below list the values of each list.</span></div>
+    </header>
+    <ul class="nq-field-defs" id="nq-field-defs"></ul>
+    <div class="nq-root-actions"><button type="button" class="nq-secondary-action" id="nq-fields-add">Add Field</button></div>
+    <p class="nq-options-error" id="nq-fields-error" role="alert"></p>
+    <footer><button type="button" class="nq-secondary-action" id="nq-fields-cancel">Cancel</button><button type="submit" class="nq-primary-action" id="nq-fields-save">Save</button></footer>
+  </form>
+</dialog>
+<dialog class="nq-options-dialog nq-columns-dialog" id="nq-columns-dialog" aria-labelledby="nq-columns-title">
+  <form method="dialog" class="nq-options-form" id="nq-columns-form">
+    <header><h2 id="nq-columns-title">Table Columns</h2><p class="form-note">The optional columns of the Calls table for every user of this workspace. Analysis fields get their column in Analysis Fields. CDR columns show the value of the CDR version shown for each call; changing them indexes the calls again.</p></header>
+    <div class="nq-options-columns">
+      <section><h3>Call columns</h3><div class="nq-rule-fields" id="nq-columns-builtin"></div></section>
+      <section><h3>CDR columns <small id="nq-columns-count"></small></h3><input type="search" id="nq-columns-search" placeholder="Filter CDR columns…" aria-label="Filter CDR columns"><div class="nq-rule-fields nq-cdr-columns" id="nq-columns-cdr"></div></section>
+    </div>
+    <p class="nq-options-error" id="nq-columns-error" role="alert"></p>
+    <footer><button type="button" class="nq-secondary-action" id="nq-columns-cancel">Cancel</button><button type="submit" class="nq-primary-action" id="nq-columns-save">Save</button></footer>
   </form>
 </dialog>
 {% endif %}

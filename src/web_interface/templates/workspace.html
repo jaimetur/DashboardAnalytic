@@ -234,26 +234,7 @@
         </form>
       </div>
     </div>
-    <div class="table-wrap queue-table-wrap">
-      <table class="queue-table" data-queue-sortable-table>
-        <thead>
-          <tr>
-            <th aria-sort="descending"><button type="button" class="queue-sort-button" data-queue-sort-key="id" data-queue-sort-type="number">ID<span aria-hidden="true" data-queue-sort-indicator>↓</span></button></th>
-            <th><button type="button" class="queue-sort-button" data-queue-sort-key="dataset" data-queue-sort-type="text">Dataset<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
-            <th><button type="button" class="queue-sort-button" data-queue-sort-key="kind" data-queue-sort-type="text">Input Type<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
-            <th><button type="button" class="queue-sort-button" data-queue-sort-key="nr-mode" data-queue-sort-type="text">NR Mode<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
-            <th><button type="button" class="queue-sort-button" data-queue-sort-key="rows" data-queue-sort-type="number">Rows<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
-            <th><button type="button" class="queue-sort-button" data-queue-sort-key="columns" data-queue-sort-type="number">Columns<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
-            <th><button type="button" class="queue-sort-button" data-queue-sort-key="size" data-queue-sort-type="number">Size<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
-            <th><button type="button" class="queue-sort-button" data-queue-sort-key="status" data-queue-sort-type="text">Status<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
-            <th><button type="button" class="queue-sort-button" data-queue-sort-key="progress" data-queue-sort-type="number">Progress<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
-            <th><button type="button" class="queue-sort-button" data-queue-sort-key="uploaded" data-queue-sort-type="text">Uploaded<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
-            <th><button type="button" class="queue-sort-button" data-queue-sort-key="updated" data-queue-sort-type="text">Updated<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for dataset in datasets %}
+    {% macro dataset_row(dataset, layout) %}
           <tr class="{% if selected_dataset and selected_dataset.id == dataset.id %}active-row{% endif %}" data-dataset-row data-dataset-id="{{ dataset.id }}" data-dataset-kind="{{ dataset.dataset_kind or 'generic' }}" data-queue-status="{{ dataset.status }}">
             <td data-label="ID" data-queue-id data-queue-sort-value="{{ dataset.id }}" data-queue-sort-cell="id">{{ dataset.id }}</td>
             <td data-label="Dataset" data-queue-sort-value="{{ dataset.file_name }}" data-queue-sort-cell="dataset">
@@ -268,6 +249,24 @@
               </select>
               {% else %}—{% endif %}
             </td>
+            {% if layout == 'cdr' %}
+            <td data-label="CDR Type" data-queue-cdr-stage data-queue-sort-value="{{ dataset.cdr_stage_label }}" data-queue-sort-cell="cdr-stage">
+              {% if dataset.cdr_stage %}
+              <select class="queue-nr-mode-select queue-cdr-stage-select" data-dataset-cdr-stage-select data-dataset-id="{{ dataset.id }}" data-update-url="/workspace/datasets/{{ dataset.id }}/cdr-stage" aria-label="CDR Type for {{ dataset.file_name }}" title="A Final CDR replaces the Daily CDRs of its campaigns in the combined tables">
+                {% for value, label in cdr_stage_options %}<option value="{{ value }}"{% if dataset.cdr_stage == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+              </select>
+              {% else %}—{% endif %}
+            </td>
+            <td data-label="Combined" data-queue-combined data-queue-sort-value="{{ '1' if dataset.combined_included else '0' }}" data-queue-sort-cell="combined">
+              <div class="queue-combined-cell">
+                <span class="queue-combined-state {{ 'is-included' if dataset.combined_included else 'is-excluded' }}" data-combined-state title="{{ dataset.combined_reason }}">{{ 'Included' if dataset.combined_included else 'Excluded' }}</span>
+                <select class="queue-combined-select" data-dataset-combined-select data-dataset-id="{{ dataset.id }}" data-update-url="/workspace/datasets/{{ dataset.id }}/combined-mode" aria-label="Combined tables for {{ dataset.file_name }}" title="Auto: Final CDRs are included, Daily CDRs until a Final CDR of their campaign arrives">
+                  {% for value, label in combined_mode_options %}<option value="{{ value }}"{% if dataset.combined_mode == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+                </select>
+                <small class="queue-combined-reason" data-combined-reason>{{ dataset.combined_reason }}</small>
+              </div>
+            </td>
+            {% endif %}
             <td data-label="Rows" data-queue-rows data-queue-sort-value="{{ dataset.row_count or 0 }}" data-queue-sort-cell="rows">{{ '{:,}'.format(dataset.row_count or 0) }}</td>
             <td data-label="Columns" data-queue-columns data-queue-sort-value="{{ dataset.column_count or 0 }}" data-queue-sort-cell="columns">{{ '{:,}'.format(dataset.column_count or 0) }}</td>
             <td data-label="Size" data-queue-size data-queue-sort-value="{{ dataset.size_bytes }}" data-queue-sort-cell="size">{{ dataset.size_mb_label }}</td>
@@ -343,13 +342,163 @@
               </div>
             </td>
           </tr>
-          {% else %}
-          {% if not combined_tables %}
-          <tr>
-            <td colspan="12"><article class="empty-state-inline">No datasets available.</article></td>
+    {% endmacro %}
+    {% macro compact_dataset_row(dataset) %}
+          <tr class="{% if selected_dataset and selected_dataset.id == dataset.id %}active-row{% endif %}" data-dataset-row data-dataset-id="{{ dataset.id }}" data-dataset-kind="{{ dataset.dataset_kind or 'generic' }}" data-queue-status="{{ dataset.status }}">
+            <td data-label="ID" data-queue-id data-queue-sort-value="{{ dataset.id }}" data-queue-sort-cell="id">{{ dataset.id }}</td>
+            <td data-label="Dataset" data-queue-sort-value="{{ dataset.file_name }}" data-queue-sort-cell="dataset">
+              <div class="queue-dataset-name" data-queue-file-name>{{ dataset.file_name }}</div>
+              <div class="queue-dataset-kind" data-queue-kind data-queue-sort-value="{{ dataset.input_kind_label }}">{{ dataset.input_kind_label }}</div>
+            </td>
+            <td data-label="Rows" data-queue-rows data-queue-sort-value="{{ dataset.row_count or 0 }}" data-queue-sort-cell="rows">{{ '{:,}'.format(dataset.row_count or 0) }}</td>
+            <td data-label="Status" data-queue-sort-value="{{ dataset.status_label }}" data-queue-sort-cell="status">
+              <div class="queue-progress-cell">
+                <span class="queue-status-pill queue-status-{{ dataset.status }}" data-queue-status-pill>{{ dataset.status_label }}</span>
+                <div class="progress-shell visual-progress-shell">
+                  <div class="progress-bar status-{{ dataset.status }}" data-queue-progress-bar style="width: {{ dataset.progress }}%"></div>
+                </div>
+                <span class="queue-progress-label" data-queue-progress-label title="Total processing time">
+                  <span data-queue-progress-percent>{{ dataset.progress }}%</span>
+                  <span class="queue-progress-separator" data-queue-progress-separator{% if not dataset.elapsed_label %} hidden{% endif %} aria-hidden="true">·</span>
+                  <span data-queue-elapsed{% if not dataset.elapsed_label %} hidden{% endif %}>{{ dataset.elapsed_label }}</span>
+                </span>
+                <span class="queue-progress-step" data-queue-progress-step{% if dataset.status != 'processing' or not dataset.processing_step %} hidden{% endif %}>{{ dataset.processing_step if dataset.status == 'processing' else '' }}</span>
+                {% if dataset.last_error and dataset.status in ['failed', 'stopped'] %}
+                <p class="dataset-error" data-queue-error>{{ dataset.last_error }}</p>
+                {% endif %}
+              </div>
+            </td>
+            <td data-label="Updated" data-queue-updated data-queue-sort-value="{{ dataset.updated_at or dataset.uploaded_at or '' }}" data-queue-sort-cell="updated">{{ (dataset.updated_at_local or dataset.uploaded_at_local or '').replace('T', ' ').replace(' ', '\n') }}</td>
+            <td data-label="Actions">
+              <div class="queue-actions">
+                {% if dataset.status == 'ready' %}
+                <a class="ghost-link action-link-preview" href="/workspace/preview/{{ dataset.id }}" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview" title="Preview dataset" aria-label="Preview dataset">Preview</a>
+                {% else %}
+                <button type="button" class="ghost-link action-link-preview" disabled title="Preview is only available for ready datasets" aria-label="Preview unavailable">Preview</button>
+                {% endif %}
+                {% if dataset.status == 'ready' and dataset.dataset_kind in ['data', 'voice', 'speech'] %}
+                <a
+                  class="ghost-link action-link-primary"
+                  href="/datasets-analysis?dataset_id={{ dataset.id }}{% if dataset.dataset_kind %}&input_kind={{ dataset.dataset_kind }}{% endif %}"
+                  data-datasets-analysis-open-link
+                  data-dataset-id="{{ dataset.id }}"
+                  title="Show analysis"
+                  aria-label="Show analysis"
+                  {% if dataset.dataset_kind %}data-input-kind="{{ dataset.dataset_kind }}"{% endif %}
+                >Show Analysis</a>
+                {% else %}
+                <button type="button" class="ghost-link action-link-primary" disabled title="Analysis is only available for ready CDR datasets" aria-label="Analysis unavailable">Show Analysis</button>
+                {% endif %}
+                {% if dataset.can_map_mappings %}
+                <button
+                  type="button"
+                  class="ghost-link action-link-map-vendors"
+                  data-mapping-map-open
+                  data-dataset-id="{{ dataset.id }}"
+                  data-dataset-name="{{ dataset.file_name }}"
+                title="Map Vendor, Region & Cluster">Map</button>
+                {% else %}
+                <button type="button" class="ghost-link action-link-map-vendors" disabled title="Map Vendor, Region & Cluster is not available for this dataset">Map</button>
+                {% endif %}
+                {% if dataset.can_clear_mappings %}
+                <button type="button" class="action-link-clear-vendors" data-mapping-clear-open data-dataset-id="{{ dataset.id }}" title="Clear Vendor, Region & Cluster Mapping">Clear</button>
+                {% else %}
+                <button type="button" class="action-link-clear-vendors" disabled title="No Vendor, Region & Cluster Mapping is available">Clear</button>
+                {% endif %}
+                {% if dataset.status in ['queued', 'processing'] %}
+                <form method="post" action="/datasets-analysis/stop/{{ dataset.id }}" data-confirm="Stop processing for '{{ dataset.file_name }}'?" data-confirm-title="Stop processing" data-confirm-label="Stop processing">
+                  <button type="submit" class="warning-button icon-action action-link-stop" aria-label="Stop processing" title="Stop processing">Stop Processing</button>
+                </form>
+                {% else %}
+                <form method="post" action="/datasets-analysis/retry/{{ dataset.id }}" data-confirm="Reprocess dataset '{{ dataset.file_name }}' from its source file?" data-confirm-title="Reprocess dataset" data-confirm-label="Reprocess dataset" data-loading-label="Reprocessing dataset">
+                  <button type="submit" class="warning-button icon-action action-link-reprocess" aria-label="Reprocess dataset" title="Reprocess dataset"{% if not dataset.can_reprocess %} disabled{% endif %}>Reprocess Dataset</button>
+                </form>
+                {% endif %}
+                <form method="post" action="/datasets-analysis/delete/{{ dataset.id }}" data-confirm="Delete dataset '{{ dataset.file_name }}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
+                  <button type="submit" class="danger-button icon-action" aria-label="Delete dataset" title="Delete dataset"{% if dataset.status == 'processing' %} disabled{% endif %}>Delete Dataset</button>
+                </form>
+              </div>
+            </td>
           </tr>
-          {% endif %}
-          {% endfor %}
+    {% endmacro %}
+    {% set cdr_kinds = ['data', 'voice', 'speech'] %}
+    {% set final_cdrs = datasets | selectattr('dataset_kind', 'in', cdr_kinds) | rejectattr('cdr_stage', 'equalto', 'daily') | list %}
+    {% set daily_cdrs = datasets | selectattr('dataset_kind', 'in', cdr_kinds) | selectattr('cdr_stage', 'equalto', 'daily') | list %}
+    {% set vendor_datasets = datasets | selectattr('dataset_kind', 'in', ['mapping_vodafone', 'mapping_three']) | list %}
+    {% set geo_datasets = datasets | selectattr('dataset_kind', 'in', ['mapping_region', 'clusters']) | list %}
+    {% set other_datasets = datasets | rejectattr('dataset_kind', 'in', ['data', 'voice', 'speech', 'mapping_vodafone', 'mapping_three', 'mapping_region', 'clusters']) | list %}
+    <div class="dataset-cards">
+      <section class="dataset-card dataset-card-cdr dataset-card-final" data-dataset-card="cdr-final">
+        <header class="dataset-card-head">
+          <div><p class="eyebrow">CDRs</p><h3>Final CDRs <span class="dataset-card-count">{{ final_cdrs | length }}</span></h3></div>
+          <p class="form-note">The CDRs delivered after each campaign. They replace the Daily CDRs of their campaigns in the combined tables.</p>
+        </header>
+        <div class="table-wrap queue-table-wrap">
+          <table class="queue-table" data-queue-sortable-table>
+            <thead>
+              <tr>
+            <th aria-sort="descending"><button type="button" class="queue-sort-button" data-queue-sort-key="id" data-queue-sort-type="number">ID<span aria-hidden="true" data-queue-sort-indicator>↓</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="dataset" data-queue-sort-type="text">Dataset<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="kind" data-queue-sort-type="text">Input Type<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="nr-mode" data-queue-sort-type="text">NR Mode<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="cdr-stage" data-queue-sort-type="text">CDR Type<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="combined" data-queue-sort-type="text">Combined<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="rows" data-queue-sort-type="number">Rows<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="columns" data-queue-sort-type="number">Columns<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="size" data-queue-sort-type="number">Size<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="status" data-queue-sort-type="text">Status<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="progress" data-queue-sort-type="number">Progress<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="uploaded" data-queue-sort-type="text">Uploaded<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="updated" data-queue-sort-type="text">Updated<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody data-dataset-card-body="cdr-final">
+              {% for dataset in final_cdrs %}{{ dataset_row(dataset, 'cdr') }}{% else %}
+              <tr data-dataset-card-empty><td colspan="14"><article class="empty-state-inline">No Final CDRs. Upload a CDR and choose Final as its CDR Type.</article></td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <details class="dataset-card dataset-card-cdr dataset-card-daily" data-dataset-card="cdr-daily"{% if daily_cdrs %} open{% endif %}>
+        <summary class="dataset-card-head">
+          <div><p class="eyebrow">CDRs</p><h3>Daily CDRs <span class="dataset-card-count">{{ daily_cdrs | length }}</span></h3></div>
+          <p class="form-note">The incremental or cumulative CDRs received while a campaign runs. The combined tables include them until the Final CDR of their campaign arrives; a cumulative Daily CDR replaces the previous ones.</p>
+        </summary>
+        <div class="table-wrap queue-table-wrap">
+          <table class="queue-table queue-table-daily" data-queue-sortable-table>
+            <thead>
+              <tr>
+            <th aria-sort="descending"><button type="button" class="queue-sort-button" data-queue-sort-key="id" data-queue-sort-type="number">ID<span aria-hidden="true" data-queue-sort-indicator>↓</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="dataset" data-queue-sort-type="text">Dataset<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="kind" data-queue-sort-type="text">Input Type<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="nr-mode" data-queue-sort-type="text">NR Mode<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="cdr-stage" data-queue-sort-type="text">CDR Type<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="combined" data-queue-sort-type="text">Combined<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="rows" data-queue-sort-type="number">Rows<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="columns" data-queue-sort-type="number">Columns<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="size" data-queue-sort-type="number">Size<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="status" data-queue-sort-type="text">Status<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="progress" data-queue-sort-type="number">Progress<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="uploaded" data-queue-sort-type="text">Uploaded<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="updated" data-queue-sort-type="text">Updated<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody data-dataset-card-body="cdr-daily">
+              {% for dataset in daily_cdrs %}{{ dataset_row(dataset, 'cdr') }}{% else %}
+              <tr data-dataset-card-empty><td colspan="14"><article class="empty-state-inline">No Daily CDRs. Upload a CDR and choose Daily as its CDR Type.</article></td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </details>
+      {% if combined_tables %}
+      <section class="dataset-card dataset-card-combined" data-dataset-card="combined">
+        <div class="table-wrap queue-table-wrap">
+          <table class="queue-table queue-table-combined">
+            <tbody>
           {% if combined_tables %}
           <tr class="combined-dataset-section-row" data-combined-dataset-structure-row data-mobile-card-section-header>
             <td colspan="12">
@@ -405,8 +554,46 @@
             </td>
           </tr>
           {% endfor %}
-        </tbody>
-      </table>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      {% endif %}
+      <div class="dataset-card-grid">
+        {% for card_key, card_title, card_note, card_datasets in [
+          ('vendor-mapping', 'Vendor Mapping & Cell Inventory', 'Vodafone and Three multivendor mappings: the cells of each operator with their vendor, site and configuration.', vendor_datasets),
+          ('geospatial', 'Geographic Datasets', 'Region and Cluster polygons that map CDR samples and inventory sites to their area.', geo_datasets),
+          ('other', 'Other Datasets', 'Smart Orchestrator logs and other supported datasets.', other_datasets),
+        ] %}
+        {% if card_key != 'other' or card_datasets %}
+        <section class="dataset-card dataset-card-compact dataset-card-{{ card_key }}" data-dataset-card="{{ card_key }}">
+          <header class="dataset-card-head">
+            <div><p class="eyebrow">Reference data</p><h3>{{ card_title }} <span class="dataset-card-count">{{ card_datasets | length }}</span></h3></div>
+            <p class="form-note">{{ card_note }}</p>
+          </header>
+          <div class="table-wrap queue-table-wrap">
+            <table class="queue-table queue-table-compact" data-queue-sortable-table>
+              <thead>
+                <tr>
+            <th aria-sort="descending"><button type="button" class="queue-sort-button" data-queue-sort-key="id" data-queue-sort-type="number">ID<span aria-hidden="true" data-queue-sort-indicator>↓</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="dataset" data-queue-sort-type="text">Dataset<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="rows" data-queue-sort-type="number">Rows<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="status" data-queue-sort-type="text">Status<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="updated" data-queue-sort-type="text">Updated<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody data-dataset-card-body="{{ card_key }}">
+                {% for dataset in card_datasets %}{{ compact_dataset_row(dataset) }}{% else %}
+                <tr data-dataset-card-empty><td colspan="6"><article class="empty-state-inline">No datasets yet.</article></td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        {% endif %}
+        {% endfor %}
+      </div>
     </div>
     <section class="auto-calculated-field-progress datasets-materialization-status" data-auto-calculated-field-progress data-status-url="/api/workspace/auto-calculated-fields/materialization" aria-live="polite">
       <div class="auto-calculated-field-progress-heading">
@@ -798,6 +985,20 @@
     return 'NSA';
   }
 
+  // Mirrors src/modules/cdr_stage.py: "final" in the name, then daily words, then dates
+  // (a range is a Final CDR; a single date after the start of the name is a Daily CDR).
+  function inferCdrStage(fileName) {
+    const stem = String(fileName || '').replace(/\.[^.]+$/, '');
+    const words = ` ${stem.replace(/([a-z])(?=[A-Z])/g, '$1 ').toLowerCase().replace(/[^a-z0-9]+/g, ' ')} `;
+    if (/[^a-z]final[^a-z]/.test(words)) return 'final';
+    if (/[^a-z](daily|diario|diaria|dia|day|incremental|cumulative|acumulado)[^a-z]/.test(words)) return 'daily';
+    const dates = [...stem.matchAll(/(?<!\d)(20\d{2})[-_.]?(0[1-9]|1[0-2])[-_.]?(0[1-9]|[12]\d|3[01])(?!\d)/g)];
+    const distinct = new Set(dates.map((match) => match.slice(1).join('')));
+    if (distinct.size >= 2) return 'final';
+    if (distinct.size === 1 && dates.some((match) => match.index > 0)) return 'daily';
+    return 'final';
+  }
+
   picker.addEventListener('change', () => {
     items.replaceChildren();
     const files = Array.from(picker.files || []);
@@ -825,6 +1026,7 @@
       entries.forEach((entry) => {
         const isCdr = cdrTypes.has(entry.select.value);
         entry.nrModeField.hidden = !isCdr;
+        entry.stageField.hidden = !isCdr;
         for (const [kind, field, mappingSelect] of entry.mappingSelectors) {
           const previous = mappingSelect.value;
           const choices = mappingChoices(kind, entry);
@@ -862,10 +1064,22 @@
       nrModeSelect.value = inferNrMode(file.name);
       nrModeField.append(nrModeSelect);
       nrModeField.hidden = !cdrTypes.has(select.value);
+      // Final CDRs replace the Daily CDRs of their campaigns in the combined tables.
+      const stageField = document.createElement('label');
+      stageField.className = 'upload-nr-mode-field upload-cdr-stage-field';
+      stageField.textContent = 'CDR Type';
+      stageField.title = 'A Final CDR is delivered after the campaign; Daily CDRs arrive while it runs and are replaced by the Final CDR of their campaign in the combined tables';
+      const stageSelect = document.createElement('select');
+      stageSelect.name = 'cdr_stages';
+      stageSelect.setAttribute('aria-label', `CDR Type for ${file.name}`);
+      [['final', 'Final'], ['daily', 'Daily']].forEach(([value, label]) => stageSelect.add(new Option(label, value)));
+      stageSelect.value = inferCdrStage(file.name);
+      stageField.append(stageSelect);
+      stageField.hidden = !cdrTypes.has(select.value);
       const mappings = document.createElement('div');
       mappings.className = 'upload-vendor-mapping-selectors';
       mappings.hidden = !cdrTypes.has(select.value);
-      const entry = {index, file, select, nrModeField, mappings, mappingSelectors: []};
+      const entry = {index, file, select, nrModeField, stageField, mappings, mappingSelectors: []};
       const addMappingSelector = (kind, labelText, fieldName) => {
         const field = document.createElement('label');
         field.textContent = labelText;
@@ -881,7 +1095,7 @@
       addMappingSelector('mapping_region', 'Region mapping', 'region_mapping_dataset_ids');
       addMappingSelector('clusters', 'Cluster mapping', 'cluster_mapping_dataset_ids');
       select.addEventListener('change', refreshMappingChoices);
-      item.append(name, select, nrModeField, mappings);
+      item.append(name, select, nrModeField, stageField, mappings);
       items.append(item);
       entries.push(entry);
     });

@@ -13,9 +13,18 @@ inside it. The keywords of every domain and cause suggest a root cause from the
 CDR failure classification, and the Root Cause Analysis summarises the labelled
 calls per domain and cause, call type, NR mode, technology and eNB/gNB.
 
-Follow-up is keyed by a stable ``call_key`` derived from the call itself (its
-service, Operator, Campaign and test/session identifier), so statuses and
-comments survive reprocessing or uploading the same CDR again.
+Follow-up is keyed by a stable ``call_key`` derived from the call itself: its
+NetCheck ``JOIN_ID`` when the CDR has one, otherwise its service, Operator,
+Campaign and test/session identifier. Statuses, comments and analysis fields
+therefore survive reprocessing, uploading the same CDR again, and the move from
+the Daily CDRs of a campaign to its Final CDR. A call can be in several CDRs:
+the list shows it once, with the data of the most recent CDR (a Final CDR before
+the Daily ones, then the newest data) and tells when a newer CDR changed it.
+Speech calls are listed once per call; each of their samples keeps its own
+follow-up (``sample_key``).
+
+Every call of every CDR, qualified or not, is counted in ``nq_call_population``
+so the share of Non-Qualified Calls of each campaign and operator can be shown.
 
 Its Executive Summary and Progress Status report is a Reporting artifact
 (PowerPoint, Word or Excel) registered with ``register_report_artifact_provider``.
@@ -33,6 +42,7 @@ from io import BytesIO
 from threading import Lock
 from typing import Any
 
+from src.modules.cdr_stage import dataset_cdr_stage
 from src.modules.column_names import campaign_sort_key, column_identity
 from src.modules.value_maps import ValueMapper, field_kind
 from src.modules.mapping_order import dimension_order_key
@@ -45,6 +55,10 @@ NQ_CALL_HISTORY_TABLE = 'nq_call_history'
 NQ_CALL_OPTIONS_TABLE = 'nq_call_options'
 NQ_TEAM_MEMBERS_TABLE = 'nq_team_members'
 NQ_ROOT_CAUSES_TABLE = 'nq_root_causes'
+NQ_CALL_POPULATION_TABLE = 'nq_call_population'
+NQ_CALL_VERSIONS_TABLE = 'nq_call_versions'
+NQ_FIELDS_TABLE = 'nq_analysis_fields'
+NQ_FIELD_VALUES_TABLE = 'nq_analysis_field_values'
 # Database Management titles of the module tables.
 NQ_TABLE_TITLES = {
     NQ_CALLS_TABLE: 'NQ Calls',
@@ -55,14 +69,21 @@ NQ_TABLE_TITLES = {
     NQ_CALL_OPTIONS_TABLE: 'NQ Call Options',
     NQ_TEAM_MEMBERS_TABLE: 'NQ Team Members',
     NQ_ROOT_CAUSES_TABLE: 'NQ Root Causes',
+    NQ_CALL_POPULATION_TABLE: 'NQ Call Population',
+    NQ_CALL_VERSIONS_TABLE: 'NQ Call Versions',
+    NQ_FIELDS_TABLE: 'NQ Analysis Fields',
+    NQ_FIELD_VALUES_TABLE: 'NQ Analysis Field Values',
 }
 SERVICES = ('voice', 'speech', 'data')
 SERVICE_LABELS = {'voice': 'Voice', 'speech': 'Speech', 'data': 'Data'}
 QUALIFIED_RESULT = 'completed'
 # Bump when the indexed fields or the call key change so every CDR is indexed again.
-INDEX_VERSION = 2
+INDEX_VERSION = 3
+# The call key of version 3: the JOIN_ID first, and Speech calls (not samples).
+KEY_SCHEME = '3'
+KEY_SCHEME_STATE_KEY = 'nq_calls_key_scheme'
 TRACKING_FORMAT = 'nq-call-tracking'
-TRACKING_FORMAT_VERSION = 1
+TRACKING_FORMAT_VERSION = 2
 UNASSIGNED = '__unassigned__'
 MAX_COMMENT_LENGTH = 5000
 PAGE_SIZES = (25, 50, 100, 200)
@@ -170,7 +191,16 @@ FIELD_SOURCES: dict[str, tuple[str, ...]] = {
 }
 CALL_FIELDS = tuple(FIELD_SOURCES)
 NUMERIC_FIELDS = frozenset({'latitude', 'longitude'})
-IDENTIFIER_SOURCES = ('Test_ID', 'Session_ID_A', 'Session_id', 'JOIN_ID')
+# NetCheck's identifier of each voice call and data test, the same in the Daily and Final CDRs.
+JOIN_SOURCES = ('JOIN_ID',)
+# Without a JOIN_ID: the test of a Data CDR, the session (the call) of a Voice or Speech CDR.
+IDENTIFIER_SOURCES = {
+    'data': ('Test_ID', 'Session_id'),
+    'voice': ('Session_ID_A', 'Session_id', 'Test_ID'),
+    'speech': ('Session_ID_A', 'Session_id'),
+}
+# A Speech sample inside its call.
+SAMPLE_SOURCES = ('Test_ID', 'Sample_ID', 'Sequence_ID_per_File_ID')
 SUBSCRIBER_SOURCES = ('Subscriber',)
 # Filters on indexed fields; the tracking filters are handled separately.
 FIELD_FILTERS = (
@@ -198,7 +228,8 @@ SORT_COLUMNS = {
     'campaign': 'campaign', 'city': 'city', 'technology': 'technology', 'test_name': 'test_name',
     'result': 'result', 'failure': 'failure_classification', 'status': 'status', 'team': 'team',
     'assignee': 'assignee', 'root_cause': 'root_domain', 'cause': 'root_cause', 'comments': 'comment_count',
-    'updated_at': 'updated_at',
+    'updated_at': 'updated_at', 'join_id': 'join_id', 'region': 'region', 'cluster': 'cluster', 'nr_mode': 'nr_mode',
+    'cell_id': 'cell_id', 'direction': 'direction', 'end_time': 'end_time', 'cdr': 'dataset_id', 'version': 'version_state',
 }
 # The breakdowns of the Summary, in the order of the page and of the one-slide Executive Summary.
 BREAKDOWNS = (
@@ -209,8 +240,14 @@ BREAKDOWNS = (
 )
 SEARCH_FIELDS = (
     'operator', 'operator_vendor', 'vendor', 'campaign', 'region', 'cluster', 'city', 'technology', 'test_name', 'result',
-    'failure_classification', 'failure_category', 'failure_subcategory', 'failure_comment', 'cell_id',
+    'failure_classification', 'failure_category', 'failure_subcategory', 'failure_comment', 'cell_id', 'join_id', 'extra_json',
 )
+# How the CDRs see a call (see ``_base_sql``); "current" is the latest version with nothing to tell.
+VERSION_STATES = ('current', 'changed', 'newer', 'not_in_final', 'qualified')
+VERSION_LABELS = {
+    'current': 'Latest version', 'changed': 'Changed between CDRs', 'newer': 'Newer version in another CDR',
+    'not_in_final': 'Not in the Final CDR', 'qualified': 'Completed in a newer CDR',
+}
 
 SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS {NQ_CALLS_TABLE} (
@@ -220,6 +257,10 @@ CREATE TABLE IF NOT EXISTS {NQ_CALLS_TABLE} (
     service TEXT NOT NULL,
     nr_mode TEXT NOT NULL DEFAULT '',
     {', '.join(f"{field} REAL" if field in NUMERIC_FIELDS else f"{field} TEXT NOT NULL DEFAULT ''" for field in CALL_FIELDS)},
+    join_id TEXT NOT NULL DEFAULT '',
+    sample_key TEXT NOT NULL DEFAULT '',
+    sample_id TEXT NOT NULL DEFAULT '',
+    extra_json TEXT NOT NULL DEFAULT '{{}}',
     PRIMARY KEY (dataset_id, source_row_id)
 );
 CREATE INDEX IF NOT EXISTS idx_{NQ_CALLS_TABLE}_call_key ON {NQ_CALLS_TABLE}(call_key);
@@ -227,8 +268,53 @@ CREATE TABLE IF NOT EXISTS {NQ_CALL_SOURCES_TABLE} (
     dataset_id INTEGER PRIMARY KEY,
     revision TEXT NOT NULL,
     call_count INTEGER NOT NULL DEFAULT 0,
-    synced_at TEXT NOT NULL
+    synced_at TEXT NOT NULL,
+    stage_rank INTEGER NOT NULL DEFAULT 1,
+    data_date TEXT NOT NULL DEFAULT '',
+    population_count INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS {NQ_CALL_POPULATION_TABLE} (
+    dataset_id INTEGER NOT NULL,
+    call_key TEXT NOT NULL,
+    service TEXT NOT NULL,
+    campaign TEXT NOT NULL DEFAULT '',
+    operator TEXT NOT NULL DEFAULT '',
+    nr_mode TEXT NOT NULL DEFAULT '',
+    is_nq INTEGER NOT NULL DEFAULT 0,
+    is_latest INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (dataset_id, call_key)
+);
+CREATE INDEX IF NOT EXISTS idx_{NQ_CALL_POPULATION_TABLE}_key ON {NQ_CALL_POPULATION_TABLE}(call_key);
+CREATE INDEX IF NOT EXISTS idx_{NQ_CALL_POPULATION_TABLE}_latest ON {NQ_CALL_POPULATION_TABLE}(is_latest, service);
+CREATE TABLE IF NOT EXISTS {NQ_CALL_VERSIONS_TABLE} (
+    call_key TEXT PRIMARY KEY,
+    latest_dataset_id INTEGER NOT NULL,
+    latest_is_nq INTEGER NOT NULL DEFAULT 1,
+    in_final INTEGER NOT NULL DEFAULT 0,
+    final_covered INTEGER NOT NULL DEFAULT 0,
+    changed INTEGER NOT NULL DEFAULT 0,
+    cdr_count INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS {NQ_FIELDS_TABLE} (
+    field_key TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    field_type TEXT NOT NULL,
+    options_json TEXT NOT NULL DEFAULT '[]',
+    position INTEGER NOT NULL DEFAULT 0,
+    in_table INTEGER NOT NULL DEFAULT 0,
+    in_summary INTEGER NOT NULL DEFAULT 0,
+    required_to_close INTEGER NOT NULL DEFAULT 0,
+    description TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS {NQ_FIELD_VALUES_TABLE} (
+    call_key TEXT NOT NULL,
+    field_key TEXT NOT NULL,
+    value TEXT NOT NULL DEFAULT '',
+    updated_by TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (call_key, field_key)
+);
+CREATE INDEX IF NOT EXISTS idx_{NQ_FIELD_VALUES_TABLE}_field ON {NQ_FIELD_VALUES_TABLE}(field_key, value);
 CREATE TABLE IF NOT EXISTS {NQ_CALL_TRACKING_TABLE} (
     call_key TEXT PRIMARY KEY,
     status TEXT NOT NULL DEFAULT '',
@@ -337,6 +423,17 @@ def ensure_nq_tables(task_repository: Any) -> None:
             # The index is rebuilt from the CDRs whenever its fields change.
             connection.execute(f'DROP TABLE {NQ_CALLS_TABLE}')
             connection.execute(f'DROP TABLE IF EXISTS {NQ_CALL_SOURCES_TABLE}')
+            indexed = set()
+        # Columns added later keep the indexed rows, so the follow-up can move to the new call keys.
+        for column, definition in (('join_id', "TEXT NOT NULL DEFAULT ''"), ('sample_key', "TEXT NOT NULL DEFAULT ''"),
+                                   ('sample_id', "TEXT NOT NULL DEFAULT ''"), ('extra_json', "TEXT NOT NULL DEFAULT '{}'")):
+            if indexed and column not in indexed:
+                connection.execute(f'ALTER TABLE {NQ_CALLS_TABLE} ADD COLUMN {column} {definition}')
+        sources = {str(row[1]) for row in connection.execute(f'PRAGMA table_info({NQ_CALL_SOURCES_TABLE})').fetchall()}
+        for column, definition in (('stage_rank', 'INTEGER NOT NULL DEFAULT 1'), ('data_date', "TEXT NOT NULL DEFAULT ''"),
+                                   ('population_count', 'INTEGER NOT NULL DEFAULT 0')):
+            if sources and column not in sources:
+                connection.execute(f'ALTER TABLE {NQ_CALL_SOURCES_TABLE} ADD COLUMN {column} {definition}')
         connection.executescript(SCHEMA)
         if not existed:
             connection.executemany(
@@ -403,19 +500,94 @@ def _resolve_column(columns: list[str], candidates: tuple[str, ...]) -> str | No
     return next(iter(_resolve_columns(columns, candidates)), None)
 
 
-def call_key_for(service: str, values: dict[str, Any], identifier: str = '', subscriber: str = '') -> str:
-    """A stable identity for a call: the same call keeps it across uploads and reprocessing."""
-    base = (service, _text(values.get('operator')).casefold(), _text(values.get('campaign')).casefold())
-    if identifier:
-        parts = (*base, 'id', identifier)
+def call_key_for(service: str, values: dict[str, Any], identifier: str = '', subscriber: str = '', join_id: str = '') -> str:
+    """A stable identity for a call: the same call keeps it across uploads, reprocessing and CDRs.
+
+    The NetCheck JOIN_ID identifies each voice call and data test in the Daily and the Final
+    CDRs alike; without it, the call is its service, Operator, Campaign and test or session
+    identifier (or its subscriber, test name and start and end times).
+    """
+    if join_id:
+        parts: tuple[str, ...] = (service, 'join', join_id.casefold())
     else:
-        parts = (*base, subscriber.casefold(), _text(values.get('test_name')).casefold(),
-                 _text(values.get('start_time')), _text(values.get('end_time')))
+        base = (service, _text(values.get('operator')).casefold(), _text(values.get('campaign')).casefold())
+        if identifier:
+            parts = (*base, 'id', identifier)
+        else:
+            parts = (*base, subscriber.casefold(), _text(values.get('test_name')).casefold(),
+                     _text(values.get('start_time')), _text(values.get('end_time')))
     return hashlib.sha1('\x1f'.join(parts).encode('utf-8')).hexdigest()[:24]
 
 
-def _dataset_revision(row: Any) -> str:
-    return '|'.join(str(row[key] or '') for key in ('updated_at', 'processed_at', 'row_count', 'normalization_version')) + f'|v{INDEX_VERSION}'
+def sample_key_for(call_key: str, sample: str) -> str:
+    """The identity of one Speech sample inside its call."""
+    return hashlib.sha1('\x1f'.join((call_key, 'sample', sample)).encode('utf-8')).hexdigest()[:24]
+
+
+TABLE_COLUMNS_STATE_KEY = 'nq_calls_table_columns'
+# Optional columns of the Calls table, with their labels.
+OPTIONAL_COLUMNS = {
+    'join_id': 'JOIN_ID', 'region': 'Region', 'cluster': 'Cluster', 'nr_mode': 'NR Mode', 'cell_id': 'Cell ID',
+    'direction': 'Direction', 'end_time': 'End Time', 'cdr': 'CDR',
+}
+MAX_CDR_COLUMNS = 12
+
+
+def table_columns(repository: Any) -> dict[str, list[str]]:
+    """The optional Calls table columns of the workspace: built-in ones and CDR columns."""
+    try:
+        stored = json.loads(repository.get_workspace_state(TABLE_COLUMNS_STATE_KEY) or '{}')
+    except (TypeError, ValueError):
+        stored = {}
+    stored = stored if isinstance(stored, dict) else {}
+    builtin = [column for column in _strings(stored.get('builtin')) if column in OPTIONAL_COLUMNS]
+    cdr = [column for column in _strings(stored.get('cdr')) if column.strip()][:MAX_CDR_COLUMNS]
+    return {'builtin': builtin, 'cdr': cdr}
+
+
+def save_table_columns(repository: Any, builtin: Any, cdr: Any, username: str) -> dict[str, list[str]]:
+    unknown = [column for column in _strings(builtin) if column not in OPTIONAL_COLUMNS]
+    if unknown:
+        raise ValueError(f'Unknown columns: {", ".join(unknown)}.')
+    cdr_columns = list(dict.fromkeys(column.strip()[:120] for column in _strings(cdr) if column.strip()))
+    if len(cdr_columns) > MAX_CDR_COLUMNS:
+        raise ValueError(f'Choose at most {MAX_CDR_COLUMNS} CDR columns.')
+    repository.set_workspace_state(TABLE_COLUMNS_STATE_KEY, json.dumps({'builtin': _strings(builtin), 'cdr': cdr_columns}))
+    if hasattr(repository, 'try_add_log'):
+        repository.try_add_log(username, 'nq_table_columns', 'Non-Qualified Calls table columns updated.')
+    return table_columns(repository)
+
+
+def available_cdr_columns(task_repository: Any) -> list[str]:
+    """Every column of the indexed CDRs, for the CDR columns of the Calls table."""
+    ids = [int(row['id']) for row in _cdr_datasets(task_repository)]
+    if not ids:
+        return []
+    names: dict[str, str] = {}
+    with task_repository.connection() as connection:
+        rows = connection.execute(
+            f"SELECT dataset_id, column_name FROM dataset_source_columns WHERE dataset_id IN ({', '.join('?' for _ in ids)})", ids,
+        ).fetchall()
+        described = {int(row['dataset_id']) for row in rows}
+        columns = [str(row['column_name']) for row in rows]
+        # CDRs without their source headings list the columns of their table.
+        for dataset_id in ids:
+            if dataset_id not in described:
+                columns.extend(str(row[1]) for row in connection.execute(f'PRAGMA table_info({_quote(f"dataset_rows_{dataset_id}")})'))
+    for column in columns:
+        names.setdefault(column_identity(column), column)
+    return sorted(names.values(), key=str.casefold)
+
+
+def _dataset_revision(row: Any, signature: str = '') -> str:
+    stage = dataset_cdr_stage(row['dataset_kind'], row['cdr_stage'] if 'cdr_stage' in row.keys() else None, row['file_name'])
+    return ('|'.join(str(row[key] or '') for key in ('updated_at', 'processed_at', 'row_count', 'normalization_version'))
+            + f'|{stage}|v{INDEX_VERSION}|{signature}')
+
+
+def _columns_signature(cdr_columns: list[str]) -> str:
+    return hashlib.sha1(json.dumps(sorted(column_identity(column) for column in cdr_columns)).encode('utf-8')).hexdigest()[:12] \
+        if cdr_columns else ''
 
 
 def _cdr_datasets(task_repository: Any) -> list[Any]:
@@ -425,22 +597,75 @@ def _cdr_datasets(task_repository: Any) -> list[Any]:
     ]
 
 
-def _dataset_calls(connection: Any, dataset: Any) -> list[tuple[Any, ...]]:
-    """The NQ rows of one CDR, ready to insert into ``nq_calls``."""
+_CALL_COLUMNS = ('dataset_id', 'source_row_id', 'call_key', 'service', 'nr_mode', *CALL_FIELDS,
+                 'join_id', 'sample_key', 'sample_id', 'extra_json')
+# The identity of a call needs only these fields.
+_KEY_FIELDS = ('operator', 'campaign', 'test_name', 'start_time', 'end_time')
+
+
+def _time_text(value: Any) -> str:
+    return _text(value).replace('T', ' ')[:19]
+
+
+def _dataset_calls(connection: Any, dataset: Any, cdr_columns: tuple[str, ...] = ()) -> dict[str, Any]:
+    """The NQ rows of one CDR, ready to insert into ``nq_calls``, and every call of it for ``nq_call_population``.
+
+    Speech CDRs list one row per sample: their samples share the call key of their call (the
+    JOIN_ID or the A-side session) and each one has its own ``sample_key``.
+    """
     dataset_id = int(dataset['id'])
     service = str(dataset['dataset_kind'])
     table = f'dataset_rows_{dataset_id}'
+    empty = {'calls': [], 'population': [], 'data_date': ''}
     columns = [str(row[1]) for row in connection.execute(f'PRAGMA table_info({_quote(table)})').fetchall()]
     if not columns:
-        return []
+        return empty
     resolved = {field: _resolve_columns(columns, candidates) for field, candidates in FIELD_SOURCES.items()}
     if not resolved['result']:
-        return []
+        return empty
     result_column = resolved['result'][0]
-    identifier_column = _resolve_column(columns, IDENTIFIER_SOURCES)
+    join_column = _resolve_column(columns, JOIN_SOURCES)
+    identifier_column = _resolve_column(columns, IDENTIFIER_SOURCES.get(service, IDENTIFIER_SOURCES['data']))
     subscriber_column = _resolve_column(columns, SUBSCRIBER_SOURCES)
+    sample_column = _resolve_column(columns, SAMPLE_SOURCES) if service == 'speech' else None
+    extra = {name: column for name in cdr_columns if (column := _resolve_column(columns, (name,)))}
+    nr_mode = _text(dataset['nr_mode'])
+
+    def identity(row: Any, aliases: dict[str, str], values: dict[str, Any]) -> tuple[str, str]:
+        join_id = _text(row[aliases[join_column]]) if join_column else ''
+        identifier = _text(row[aliases[identifier_column]]) if identifier_column else ''
+        subscriber = _text(row[aliases[subscriber_column]]) if subscriber_column else ''
+        return call_key_for(service, values, identifier, subscriber, join_id), join_id
+
+    # Every call of the CDR, with whether it is Non-Qualified: the population of the NQ rates.
+    key_selected = list(dict.fromkeys(column for column in (
+        result_column, join_column, identifier_column, subscriber_column,
+        *(column for field in _KEY_FIELDS for column in resolved[field])) if column))
+    key_aliases = {column: f'c{index}' for index, column in enumerate(key_selected)}
+    population: dict[str, list[Any]] = {}
+    data_date = ''
+    for row in connection.execute(
+        f"SELECT {', '.join(f'{_quote(column)} AS {key_aliases[column]}' for column in key_selected)} FROM {_quote(table)}"
+    ):
+        result = _text(row[key_aliases[result_column]]).casefold()
+        if not result:
+            continue
+        values = {field: next((text for column in resolved[field] if (text := _text(row[key_aliases[column]]))), '')
+                  for field in _KEY_FIELDS}
+        key, _join_id = identity(row, key_aliases, values)
+        is_nq = int(result != QUALIFIED_RESULT)
+        entry = population.get(key)
+        if entry is None:
+            population[key] = [dataset_id, key, service, values['campaign'], values['operator'], nr_mode, is_nq]
+        elif is_nq:
+            entry[6] = 1
+        moment = _time_text(values['start_time'])
+        if moment > data_date:
+            data_date = moment
+
     selected = list(dict.fromkeys(
-        column for column in (*(item for items in resolved.values() for item in items), identifier_column, subscriber_column)
+        column for column in (*(item for items in resolved.values() for item in items), join_column, identifier_column,
+                              subscriber_column, sample_column, *extra.values())
         if column
     ))
     aliases = {column: f'c{index}' for index, column in enumerate(selected)}
@@ -450,7 +675,6 @@ def _dataset_calls(connection: Any, dataset: Any) -> list[tuple[Any, ...]]:
         f"SELECT rowid AS source_row_id, {', '.join(f'{_quote(column)} AS {aliases[column]}' for column in selected)} "
         f"FROM {_quote(table)} WHERE {normalized} > ? OR ({normalized} < ? AND {normalized} > '')"
     )
-    nr_mode = _text(dataset['nr_mode'])
     calls = []
     for row in connection.execute(query, (QUALIFIED_RESULT, QUALIFIED_RESULT)).fetchall():
         values: dict[str, Any] = {}
@@ -460,20 +684,117 @@ def _dataset_calls(connection: Any, dataset: Any) -> list[tuple[Any, ...]]:
                 values[field] = next((number for column in candidates if (number := _number(row[aliases[column]])) is not None), None)
             else:
                 values[field] = next((text for column in candidates if (text := _text(row[aliases[column]]))), '')
-        identifier = _text(row[aliases[identifier_column]]) if identifier_column else ''
-        subscriber = _text(row[aliases[subscriber_column]]) if subscriber_column else ''
-        key = call_key_for(service, values, identifier, subscriber)
-        calls.append((dataset_id, int(row['source_row_id']), key, service, nr_mode, *(values[field] for field in CALL_FIELDS)))
-    return calls
+        key, join_id = identity(row, aliases, values)
+        sample_id = sample_key = ''
+        if service == 'speech':
+            sample_id = (_text(row[aliases[sample_column]]) if sample_column else '') or values['start_time'] or str(row['source_row_id'])
+            sample_key = sample_key_for(key, sample_id)
+        extras = {name: _text(row[aliases[column]]) for name, column in extra.items()}
+        calls.append((dataset_id, int(row['source_row_id']), key, service, nr_mode, *(values[field] for field in CALL_FIELDS),
+                      join_id, sample_key, sample_id, json.dumps(extras, ensure_ascii=False)))
+    return {'calls': calls, 'population': list(population.values()), 'data_date': data_date}
+
+
+def _move_follow_up(connection: Any, old_rows: list[Any], calls: list[tuple[Any, ...]]) -> int:
+    """Move the follow-up of the previous call keys to the new ones (once, when the call key changes).
+
+    Each previous key goes to the call (or Speech sample) of the row it was shown with. When two
+    previous keys reach the same call, the newest follow-up wins and comments, history and analysis
+    fields are kept from both.
+    """
+    position = {name: index for index, name in enumerate(_CALL_COLUMNS)}
+    target = {(int(call[position['dataset_id']]), int(call[position['source_row_id']])):
+              str(call[position['sample_key']] or call[position['call_key']]) for call in calls}
+    shown: dict[str, tuple[int, tuple[int, int]]] = {}
+    for row in old_rows:
+        old_key, rowid = str(row['call_key']), int(row['rowid'])
+        if old_key not in shown or rowid > shown[old_key][0]:
+            shown[old_key] = (rowid, (int(row['dataset_id']), int(row['source_row_id'])))
+    mapping = {old: target[place] for old, (_rowid, place) in shown.items() if place in target and target[place] != old}
+    mapping = {old: new for old, new in mapping.items() if new not in mapping}
+    for old, new in mapping.items():
+        previous = connection.execute(f'SELECT * FROM {NQ_CALL_TRACKING_TABLE} WHERE call_key = ?', (old,)).fetchone()
+        if previous is not None:
+            current = connection.execute(f'SELECT updated_at FROM {NQ_CALL_TRACKING_TABLE} WHERE call_key = ?', (new,)).fetchone()
+            if current is None:
+                connection.execute(f'UPDATE {NQ_CALL_TRACKING_TABLE} SET call_key = ? WHERE call_key = ?', (new, old))
+            elif str(previous['updated_at']) > str(current['updated_at']):
+                connection.execute(f'DELETE FROM {NQ_CALL_TRACKING_TABLE} WHERE call_key = ?', (new,))
+                connection.execute(f'UPDATE {NQ_CALL_TRACKING_TABLE} SET call_key = ? WHERE call_key = ?', (new, old))
+            else:
+                connection.execute(f'DELETE FROM {NQ_CALL_TRACKING_TABLE} WHERE call_key = ?', (old,))
+        for table in (NQ_CALL_COMMENTS_TABLE, NQ_CALL_HISTORY_TABLE):
+            connection.execute(f'UPDATE {table} SET call_key = ? WHERE call_key = ?', (new, old))
+        connection.execute(
+            f'INSERT OR IGNORE INTO {NQ_FIELD_VALUES_TABLE} (call_key, field_key, value, updated_by, updated_at) '
+            f'SELECT ?, field_key, value, updated_by, updated_at FROM {NQ_FIELD_VALUES_TABLE} WHERE call_key = ?', (new, old))
+        connection.execute(f'DELETE FROM {NQ_FIELD_VALUES_TABLE} WHERE call_key = ?', (old,))
+    return len(mapping)
+
+
+def _rebuild_versions(connection: Any, affected: set[str]) -> None:
+    """Which CDR holds the latest version of each call and how the versions differ.
+
+    The latest version is the one of a Final CDR before the Daily ones, then of the CDR with the
+    newest data. Only the calls of the changed CDRs are recalculated, except whether a Final CDR
+    covers the campaign of the calls that are only in Daily CDRs.
+    """
+    connection.execute('CREATE TEMP TABLE IF NOT EXISTS nq_affected_keys (call_key TEXT PRIMARY KEY)')
+    connection.execute('DELETE FROM nq_affected_keys')
+    keys = list(affected)
+    for start in range(0, len(keys), 5000):
+        connection.executemany('INSERT OR IGNORE INTO nq_affected_keys (call_key) VALUES (?)',
+                               [(key,) for key in keys[start:start + 5000]])
+    connection.execute(
+        f'UPDATE {NQ_CALL_POPULATION_TABLE} SET is_latest = 0 '
+        f'WHERE is_latest = 1 AND call_key IN (SELECT call_key FROM nq_affected_keys)')
+    connection.execute(f"""
+        UPDATE {NQ_CALL_POPULATION_TABLE} SET is_latest = 1 WHERE rowid IN (
+            SELECT rid FROM (
+                SELECT p.rowid AS rid, ROW_NUMBER() OVER (
+                    PARTITION BY p.call_key ORDER BY s.stage_rank DESC, s.data_date DESC, p.dataset_id DESC) AS rn
+                FROM {NQ_CALL_POPULATION_TABLE} p
+                JOIN {NQ_CALL_SOURCES_TABLE} s ON s.dataset_id = p.dataset_id
+                WHERE p.call_key IN (SELECT call_key FROM nq_affected_keys)
+            ) WHERE rn = 1)
+    """)
+    connection.execute(f'DELETE FROM {NQ_CALL_VERSIONS_TABLE} WHERE call_key IN (SELECT call_key FROM nq_affected_keys)')
+    connection.execute(f"""
+        INSERT INTO {NQ_CALL_VERSIONS_TABLE} (call_key, latest_dataset_id, latest_is_nq, in_final, changed, cdr_count)
+        SELECT k.call_key, l.dataset_id, l.is_nq,
+               EXISTS (SELECT 1 FROM {NQ_CALL_POPULATION_TABLE} f JOIN {NQ_CALL_SOURCES_TABLE} s ON s.dataset_id = f.dataset_id
+                       WHERE f.call_key = k.call_key AND s.stage_rank = 1),
+               (SELECT COUNT(DISTINCT c.result || '|' || c.failure_classification || '|' || c.failure_category)
+                FROM {NQ_CALLS_TABLE} c WHERE c.call_key = k.call_key) > 1,
+               (SELECT COUNT(*) FROM {NQ_CALL_POPULATION_TABLE} n WHERE n.call_key = k.call_key)
+        FROM (SELECT DISTINCT call_key FROM {NQ_CALLS_TABLE} WHERE call_key IN (SELECT call_key FROM nq_affected_keys)) k
+        JOIN {NQ_CALL_POPULATION_TABLE} l ON l.call_key = k.call_key AND l.is_latest = 1
+    """)
+    # A Final CDR covers the campaigns (of its service and NR Mode) it contains.
+    connection.execute('CREATE TEMP TABLE IF NOT EXISTS nq_final_campaigns (service TEXT, nr_mode TEXT, campaign TEXT)')
+    connection.execute('DELETE FROM nq_final_campaigns')
+    connection.execute(f"""
+        INSERT INTO nq_final_campaigns (service, nr_mode, campaign)
+        SELECT DISTINCT p.service, p.nr_mode, lower(p.campaign) FROM {NQ_CALL_POPULATION_TABLE} p
+        JOIN {NQ_CALL_SOURCES_TABLE} s ON s.dataset_id = p.dataset_id WHERE s.stage_rank = 1
+    """)
+    connection.execute(f"""
+        UPDATE {NQ_CALL_VERSIONS_TABLE} SET final_covered = CASE WHEN in_final = 0 AND EXISTS (
+            SELECT 1 FROM {NQ_CALL_POPULATION_TABLE} p JOIN nq_final_campaigns f
+              ON f.service = p.service AND f.nr_mode = p.nr_mode AND f.campaign = lower(p.campaign)
+            WHERE p.call_key = {NQ_CALL_VERSIONS_TABLE}.call_key AND p.is_latest = 1) THEN 1 ELSE 0 END
+    """)
 
 
 def sync_nq_calls(task_repository: Any) -> dict[str, Any]:
-    """Index the NQ calls of new or changed CDRs and forget removed ones."""
+    """Index the NQ calls and the population of new or changed CDRs and forget removed ones."""
     ensure_nq_tables(task_repository)
     path = str(task_repository.db_path)
     with _sync_locks_guard:
         lock = _sync_locks.setdefault(path, Lock())
     with lock:
+        cdr_columns = table_columns(task_repository)['cdr']
+        signature = _columns_signature(cdr_columns)
         datasets = {int(row['id']): row for row in _cdr_datasets(task_repository)}
         with task_repository.connection() as connection:
             indexed = {
@@ -481,22 +802,52 @@ def sync_nq_calls(task_repository: Any) -> dict[str, Any]:
                 for row in connection.execute(f'SELECT dataset_id, revision FROM {NQ_CALL_SOURCES_TABLE}').fetchall()
             }
         removed = [dataset_id for dataset_id in indexed if dataset_id not in datasets]
-        changed = [row for dataset_id, row in datasets.items() if indexed.get(dataset_id) != _dataset_revision(row)]
+        changed = [row for dataset_id, row in datasets.items() if indexed.get(dataset_id) != _dataset_revision(row, signature)]
+        migrating = str(task_repository.get_workspace_state(KEY_SCHEME_STATE_KEY) or '') != KEY_SCHEME
+        moved = 0
         if removed or changed:
             # Read every changed CDR before taking the write transaction.
             with task_repository.connection() as connection:
-                fresh = {int(row['id']): _dataset_calls(connection, row) for row in changed}
-            placeholders = ', '.join('?' for _ in range(5 + len(CALL_FIELDS)))
+                fresh = {int(row['id']): _dataset_calls(connection, row, tuple(cdr_columns)) for row in changed}
+                touched = [*removed, *fresh]
+                marks = ', '.join('?' for _ in touched)
+                affected = {str(row[0]) for row in connection.execute(
+                    f'SELECT DISTINCT call_key FROM {NQ_CALL_POPULATION_TABLE} WHERE dataset_id IN ({marks})', touched)}
+                old_rows = connection.execute(
+                    f'SELECT rowid, dataset_id, source_row_id, call_key FROM {NQ_CALLS_TABLE} WHERE dataset_id IN ({marks})',
+                    touched).fetchall() if migrating else []
+            columns = ', '.join(_CALL_COLUMNS)
+            placeholders = ', '.join('?' for _ in _CALL_COLUMNS)
             with task_repository.connection() as connection:
-                for dataset_id in [*removed, *fresh]:
+                for dataset_id in touched:
                     connection.execute(f'DELETE FROM {NQ_CALLS_TABLE} WHERE dataset_id = ?', (dataset_id,))
                     connection.execute(f'DELETE FROM {NQ_CALL_SOURCES_TABLE} WHERE dataset_id = ?', (dataset_id,))
-                for dataset_id, calls in fresh.items():
-                    connection.executemany(f'INSERT OR REPLACE INTO {NQ_CALLS_TABLE} VALUES ({placeholders})', calls)
+                    connection.execute(f'DELETE FROM {NQ_CALL_POPULATION_TABLE} WHERE dataset_id = ?', (dataset_id,))
+                for dataset_id, content in fresh.items():
+                    row = datasets[dataset_id]
+                    connection.executemany(f'INSERT OR REPLACE INTO {NQ_CALLS_TABLE} ({columns}) VALUES ({placeholders})',
+                                           content['calls'])
+                    connection.executemany(
+                        f'INSERT OR REPLACE INTO {NQ_CALL_POPULATION_TABLE} '
+                        '(dataset_id, call_key, service, campaign, operator, nr_mode, is_nq) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                        content['population'])
+                    stage = dataset_cdr_stage(row['dataset_kind'], row['cdr_stage'] if 'cdr_stage' in row.keys() else None,
+                                              row['file_name'])
                     connection.execute(
-                        f'INSERT INTO {NQ_CALL_SOURCES_TABLE} (dataset_id, revision, call_count, synced_at) VALUES (?, ?, ?, ?)',
-                        (dataset_id, _dataset_revision(datasets[dataset_id]), len(calls), now_iso()),
+                        f'INSERT INTO {NQ_CALL_SOURCES_TABLE} (dataset_id, revision, call_count, synced_at, stage_rank, '
+                        'data_date, population_count) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                        (dataset_id, _dataset_revision(row, signature), len({call[2] for call in content['calls']}), now_iso(),
+                         int(stage != 'daily'), content['data_date'], len(content['population'])),
                     )
+                    affected.update(entry[1] for entry in content['population'])
+                if old_rows:
+                    moved = _move_follow_up(connection, old_rows, [call for content in fresh.values() for call in content['calls']])
+                _rebuild_versions(connection, affected)
+        if migrating:
+            task_repository.set_workspace_state(KEY_SCHEME_STATE_KEY, KEY_SCHEME)
+            if moved and hasattr(task_repository, 'try_add_log'):
+                task_repository.try_add_log('system', 'nq_call_keys_upgraded',
+                                            f'Non-Qualified Calls follow-up of {moved} calls moved to their JOIN_ID call keys.')
         with task_repository.connection() as connection:
             total = connection.execute(f'SELECT COUNT(DISTINCT call_key) FROM {NQ_CALLS_TABLE}').fetchone()[0]
             synced_at = connection.execute(f'SELECT MAX(synced_at) FROM {NQ_CALL_SOURCES_TABLE}').fetchone()[0]
@@ -627,6 +978,243 @@ def save_options(
     if hasattr(task_repository, 'try_add_log'):
         task_repository.try_add_log(username, 'nq_call_options', 'Non-Qualified Calls statuses and teams updated.')
     return list_options(task_repository)
+
+
+# ---------------------------------------------------------------------------
+# Analysis fields: the workspace's own follow-up fields
+# ---------------------------------------------------------------------------
+FIELD_TYPES = {
+    'list': 'List', 'text': 'Text', 'long_text': 'Long text', 'number': 'Number', 'date': 'Date', 'yes_no': 'Yes / No',
+}
+MAX_FIELDS = 60
+MAX_FIELD_TEXT = 2000
+YES_NO = ('Yes', 'No')
+_FIELD_KEY = re.compile(r'[^a-z0-9]+')
+
+
+def _field_key(label: str, taken: set[str]) -> str:
+    base = _FIELD_KEY.sub('_', label.casefold()).strip('_')[:40] or 'field'
+    key, index = base, 2
+    while key in taken:
+        key, index = f'{base}_{index}', index + 1
+    return key
+
+
+def list_fields(task_repository: Any) -> list[dict[str, Any]]:
+    """The analysis fields of the workspace, in order, with their options."""
+    with task_repository.connection() as connection:
+        rows = connection.execute(f'SELECT * FROM {NQ_FIELDS_TABLE} ORDER BY position, label COLLATE NOCASE').fetchall()
+    fields = []
+    for row in rows:
+        try:
+            options = json.loads(row['options_json'] or '[]')
+        except (TypeError, ValueError):
+            options = []
+        fields.append({
+            'key': str(row['field_key']), 'label': str(row['label']), 'type': str(row['field_type']),
+            'options': [{'name': str(item.get('name') or ''), 'color': str(item.get('color') or '')}
+                        for item in options if isinstance(item, dict) and item.get('name')],
+            'in_table': bool(row['in_table']), 'in_summary': bool(row['in_summary']),
+            'required_to_close': bool(row['required_to_close']), 'description': str(row['description'] or ''),
+        })
+    return fields
+
+
+def _normalize_fields(items: Any, existing: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    if not isinstance(items, list):
+        raise ValueError('The analysis field list is invalid.')
+    if len(items) > MAX_FIELDS:
+        raise ValueError(f'Keep at most {MAX_FIELDS} analysis fields.')
+    normalized: list[dict[str, Any]] = []
+    labels: set[str] = set()
+    taken = set(existing)
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError('The analysis field list is invalid.')
+        label = re.sub(r'\s+', ' ', str(item.get('label') or '')).strip()[:60]
+        if not label:
+            raise ValueError('Every analysis field needs a name.')
+        if label.casefold() in labels:
+            raise ValueError(f'The analysis field "{label}" is repeated.')
+        labels.add(label.casefold())
+        field_type = str(item.get('type') or 'text')
+        if field_type not in FIELD_TYPES:
+            raise ValueError(f'Choose a type for "{label}".')
+        key = str(item.get('key') or '')
+        if key in taken and key not in existing:
+            key = ''
+        if key not in existing and not re.fullmatch(r'[a-z0-9_]{1,40}', key):
+            # New fields get a key from their name; imported fields keep theirs.
+            key = _field_key(label, taken)
+        taken.add(key)
+        options: list[dict[str, str]] = []
+        if field_type == 'list':
+            names: set[str] = set()
+            for option in item.get('options') or []:
+                if not isinstance(option, dict):
+                    raise ValueError(f'The values of "{label}" are invalid.')
+                name = re.sub(r'\s+', ' ', str(option.get('name') or '')).strip()[:80]
+                if not name or name.casefold() in names:
+                    continue
+                names.add(name.casefold())
+                color = str(option.get('color') or '').strip()
+                options.append({'name': name, 'color': color if COLOR_PATTERN.fullmatch(color) else '',
+                                'previous': re.sub(r'\s+', ' ', str(option.get('previous') or '')).strip()})
+            if not options:
+                raise ValueError(f'Add at least one value to the list "{label}".')
+        normalized.append({
+            'key': key, 'label': label, 'type': field_type, 'options': options,
+            'in_table': bool(item.get('in_table')), 'in_summary': bool(item.get('in_summary')) and field_type in {'list', 'yes_no'},
+            'required_to_close': bool(item.get('required_to_close')),
+            'description': str(item.get('description') or '').strip()[:300],
+        })
+    return normalized
+
+
+def save_fields(task_repository: Any, items: Any, username: str) -> list[dict[str, Any]]:
+    """Replace the analysis fields; renamed list values follow on every call, values in use cannot be removed."""
+    existing = {field['key']: field for field in list_fields(task_repository)}
+    normalized = _normalize_fields(items, existing)
+    kept = {field['key'] for field in normalized}
+    with task_repository.connection() as connection:
+        def used(key: str, value: str | None = None) -> int:
+            sql = f"SELECT COUNT(*) FROM {NQ_FIELD_VALUES_TABLE} WHERE field_key = ? AND value <> ''"
+            params: list[Any] = [key]
+            if value is not None:
+                sql += ' AND value = ? COLLATE NOCASE'
+                params.append(value)
+            return int(connection.execute(sql, params).fetchone()[0])
+
+        for key, field in existing.items():
+            if key not in kept and used(key):
+                raise ValueError(f'The analysis field "{field["label"]}" has values; clear them before removing it.')
+        for field in normalized:
+            previous = existing.get(field['key'])
+            if previous is None:
+                continue
+            if previous['type'] != field['type'] and used(field['key']):
+                raise ValueError(f'"{field["label"]}" has values: its type cannot change.')
+            if field['type'] != 'list' or previous['type'] != 'list':
+                continue
+            old = {option['name'].casefold(): option['name'] for option in previous['options']}
+            renamed = {option['previous'].casefold(): option['name'] for option in field['options']
+                       if option['previous'] and option['previous'].casefold() in old}
+            names = {option['name'].casefold() for option in field['options']} | set(renamed)
+            for key, name in old.items():
+                if key not in names and used(field['key'], name):
+                    raise ValueError(f'The value "{name}" of "{field["label"]}" is in use; rename it or change those calls first.')
+            for key, name in renamed.items():
+                if old[key] != name:
+                    connection.execute(
+                        f'UPDATE {NQ_FIELD_VALUES_TABLE} SET value = ? WHERE field_key = ? AND value = ? COLLATE NOCASE',
+                        (name, field['key'], old[key]))
+        connection.execute(f'DELETE FROM {NQ_FIELDS_TABLE}')
+        connection.executemany(
+            f'INSERT INTO {NQ_FIELDS_TABLE} (field_key, label, field_type, options_json, position, in_table, in_summary, '
+            'required_to_close, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [(field['key'], field['label'], field['type'],
+              json.dumps([{'name': option['name'], 'color': option['color']} for option in field['options']], ensure_ascii=False),
+              index, int(field['in_table']), int(field['in_summary']), int(field['required_to_close']), field['description'])
+             for index, field in enumerate(normalized)],
+        )
+    if hasattr(task_repository, 'try_add_log'):
+        task_repository.try_add_log(username, 'nq_analysis_fields', 'Non-Qualified Calls analysis fields updated.')
+    return list_fields(task_repository)
+
+
+def _field_value(field: dict[str, Any], value: Any) -> str:
+    """A valid value of an analysis field ('' clears it)."""
+    text = str(value if value is not None else '').strip()
+    if not text:
+        return ''
+    kind = field['type']
+    if kind == 'list':
+        names = {option['name'].casefold(): option['name'] for option in field['options']}
+        if text.casefold() not in names:
+            raise ValueError(f'Choose one of the values of {field["label"]}.')
+        return names[text.casefold()]
+    if kind == 'yes_no':
+        names = {name.casefold(): name for name in YES_NO}
+        if text.casefold() not in names:
+            raise ValueError(f'{field["label"]} is Yes or No.')
+        return names[text.casefold()]
+    if kind == 'number':
+        number = _number(text.replace(',', '.'))
+        if number is None:
+            raise ValueError(f'{field["label"]} is a number.')
+        return str(int(number)) if number.is_integer() else str(number)
+    if kind == 'date':
+        try:
+            return datetime.strptime(text[:10], '%Y-%m-%d').strftime('%Y-%m-%d')
+        except ValueError as exc:
+            raise ValueError(f'{field["label"]} is a date (YYYY-MM-DD).') from exc
+    limit = MAX_FIELD_TEXT if kind == 'long_text' else 300
+    if len(text) > limit:
+        raise ValueError(f'{field["label"]} accepts up to {limit} characters.')
+    return text if kind == 'long_text' else re.sub(r'\s+', ' ', text)
+
+
+def field_values(connection: Any, keys: list[str]) -> dict[str, dict[str, str]]:
+    values: dict[str, dict[str, str]] = {}
+    for start in range(0, len(keys), 500):
+        chunk = keys[start:start + 500]
+        for row in connection.execute(
+            f"SELECT call_key, field_key, value FROM {NQ_FIELD_VALUES_TABLE} WHERE value <> '' "
+            f"AND call_key IN ({', '.join('?' for _ in chunk)})", chunk,
+        ):
+            values.setdefault(str(row['call_key']), {})[str(row['field_key'])] = str(row['value'])
+    return values
+
+
+_SKIPPED_HINTS = ('python', 'from cdr', 'taken from cdr', 'value to be taken', 'will come')
+
+
+def fields_from_workbook(content: bytes) -> dict[str, Any]:
+    """Analysis fields proposed by a workbook whose first row names the fields and the rows below list their values.
+
+    A column of values becomes a list; Yes and No a Yes / No field; "User Define" a text (a
+    date or number when the name says so); values that come from the CDR or a script are left
+    out (the CDR fields are in the call details).
+    """
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(BytesIO(content), read_only=True, data_only=True)
+    sheet = workbook.worksheets[0]
+    rows = list(sheet.iter_rows(values_only=True))
+    if not rows:
+        raise ValueError('The workbook is empty.')
+    proposed: list[dict[str, Any]] = []
+    skipped: list[str] = []
+    labels: set[str] = set()
+    for index, header in enumerate(rows[0]):
+        label = re.sub(r'\s+', ' ', str(header or '')).strip()[:60]
+        if not label or label.casefold() in labels:
+            continue
+        labels.add(label.casefold())
+        values: list[str] = []
+        seen: set[str] = set()
+        for row in rows[1:]:
+            text = re.sub(r'\s+', ' ', str(row[index] if index < len(row) and row[index] is not None else '')).strip()
+            if text and text.casefold() not in seen:
+                seen.add(text.casefold())
+                values.append(text)
+        lowered = [value.casefold() for value in values]
+        name = label.casefold()
+        if any(hint in value for value in lowered for hint in _SKIPPED_HINTS):
+            skipped.append(label)
+            continue
+        if lowered and set(lowered) <= {'yes', 'no'}:
+            field_type, options = 'yes_no', []
+        elif not values or lowered == ['user define']:
+            field_type = 'date' if 'date' in name else 'number' if any(word in name for word in ('latitude', 'longitude')) else \
+                'long_text' if any(word in name for word in ('finding', 'comment', 'measure')) else 'text'
+            options = []
+        else:
+            field_type = 'list'
+            options = [{'name': value[:80], 'color': ''} for value in values if value.casefold() != 'user define']
+        proposed.append({'label': label, 'type': field_type, 'options': options, 'in_table': False, 'in_summary': False,
+                         'required_to_close': False, 'description': ''})
+    return {'fields': proposed, 'skipped': skipped}
 
 
 # ---------------------------------------------------------------------------
@@ -935,8 +1523,20 @@ def _value_maps(task_repository: Any) -> dict[str, str]:
     return maps
 
 
-def _base_sql(default: str, task_repository: Any) -> tuple[str, list[Any]]:
-    """One row per call (the newest CDR wins when a call is uploaded twice) with its follow-up."""
+def _scope(filters: dict[str, Any] | None) -> list[int]:
+    """The CDRs chosen in the CDRs filter (none means every CDR)."""
+    return [int(value) for value in _strings((filters or {}).get('datasets')) if value.lstrip('-').isdigit()]
+
+
+def _base_sql(default: str, task_repository: Any, dataset_ids: list[int] | None = None) -> tuple[str, list[Any]]:
+    """One row per call with its follow-up: the version of the most recent CDR among the chosen ones.
+
+    A Final CDR comes before the Daily ones, then the CDR with the newest data. ``version_state``
+    tells how the other CDRs see the call: ``qualified`` (the latest CDR has it Completed),
+    ``not_in_final`` (only in Daily CDRs while a Final CDR covers its campaign), ``newer`` (a newer
+    CDR outside the chosen ones has it) or ``changed`` (its result or failure differs between CDRs).
+    Speech calls count their Non-Qualified samples in ``nq_samples``.
+    """
     maps = _value_maps(task_repository)
     columns = ', '.join(
         f'COALESCE((SELECT m.value FROM json_each(?) m WHERE m.key = c.{column}), c.{column}) AS {column}'
@@ -948,8 +1548,11 @@ def _base_sql(default: str, task_repository: Any) -> tuple[str, list[Any]]:
     # Vendor_Operator: the mapped Operator_Vendor the other way round.
     columns += ", COALESCE((SELECT m.value FROM json_each(?) m WHERE m.key = c.operator_vendor), '') AS vendor_operator"
     map_params.append(maps['vendor_operator'])
+    scope = list(dict.fromkeys(int(value) for value in dataset_ids or []))
+    scope_sql = f"WHERE n.dataset_id IN ({', '.join('?' for _ in scope)})" if scope else ''
     sql = f"""
         SELECT {columns},
+               c.join_id, c.extra_json, c.nq_samples,
                COALESCE(NULLIF(t.status, ''), ?) AS status,
                COALESCE(t.team, '') AS team,
                COALESCE(t.assignee, '') AS assignee,
@@ -958,12 +1561,56 @@ def _base_sql(default: str, task_repository: Any) -> tuple[str, list[Any]]:
                COALESCE(t.version, 0) AS version,
                COALESCE(t.updated_by, '') AS updated_by,
                COALESCE(t.updated_at, '') AS updated_at,
-               (SELECT COUNT(*) FROM {NQ_CALL_COMMENTS_TABLE} m WHERE m.call_key = c.call_key AND m.deleted_at = '') AS comment_count
-        FROM {NQ_CALLS_TABLE} c
+               (SELECT COUNT(*) FROM {NQ_CALL_COMMENTS_TABLE} m WHERE m.call_key = c.call_key AND m.deleted_at = '') AS comment_count,
+               COALESCE(v.latest_dataset_id, c.dataset_id) AS latest_dataset_id,
+               COALESCE(v.cdr_count, 1) AS cdr_count,
+               CASE WHEN v.latest_is_nq = 0 THEN 'qualified'
+                    WHEN v.in_final = 0 AND v.final_covered = 1 THEN 'not_in_final'
+                    WHEN v.latest_dataset_id IS NOT NULL AND v.latest_dataset_id <> c.dataset_id THEN 'newer'
+                    WHEN v.changed = 1 THEN 'changed' ELSE '' END AS version_state,
+               (SELECT json_group_object(f.field_key, f.value) FROM {NQ_FIELD_VALUES_TABLE} f
+                WHERE f.call_key = c.call_key AND f.value <> '') AS field_values_json
+        FROM (
+            SELECT n.*, COUNT(*) OVER (PARTITION BY n.call_key, n.dataset_id) AS nq_samples,
+                   ROW_NUMBER() OVER (PARTITION BY n.call_key
+                                      ORDER BY s.stage_rank DESC, s.data_date DESC, n.dataset_id DESC, n.start_time, n.rowid) AS rn
+            FROM {NQ_CALLS_TABLE} n JOIN {NQ_CALL_SOURCES_TABLE} s ON s.dataset_id = n.dataset_id
+            {scope_sql}
+        ) c
         LEFT JOIN {NQ_CALL_TRACKING_TABLE} t ON t.call_key = c.call_key
-        WHERE c.rowid IN (SELECT MAX(rowid) FROM {NQ_CALLS_TABLE} GROUP BY call_key)
+        LEFT JOIN {NQ_CALL_VERSIONS_TABLE} v ON v.call_key = c.call_key
+        WHERE c.rn = 1
     """
-    return sql, [*map_params, default]
+    # Placeholders in order: the value maps, the default status (select list), then the CDRs (subquery).
+    return sql, [*map_params, default, *scope]
+
+
+def _sample_sql(default: str, task_repository: Any) -> tuple[str, list[Any]]:
+    """The Speech samples with their own follow-up, as call rows keyed by their ``sample_key``."""
+    maps = _value_maps(task_repository)
+    columns = ', '.join(
+        f'COALESCE((SELECT m.value FROM json_each(?) m WHERE m.key = c.{column}), c.{column}) AS {column}'
+        if column in MAPPED_FIELDS else f'c.{column}'
+        for column in ('dataset_id', 'source_row_id', 'service', 'nr_mode', *CALL_FIELDS)
+    )
+    params = [maps[column] for column in ('dataset_id', 'source_row_id', 'service', 'nr_mode', *CALL_FIELDS) if column in MAPPED_FIELDS]
+    sql = f"""
+        SELECT {columns}, c.sample_key AS call_key, c.call_key AS parent_key, c.sample_id, c.join_id, c.extra_json,
+               1 AS nq_samples, '' AS vendor_operator,
+               COALESCE(NULLIF(t.status, ''), ?) AS status, COALESCE(t.team, '') AS team,
+               COALESCE(t.assignee, '') AS assignee, COALESCE(t.root_domain, '') AS root_domain,
+               COALESCE(t.root_cause, '') AS root_cause, COALESCE(t.version, 0) AS version,
+               COALESCE(t.updated_by, '') AS updated_by, COALESCE(t.updated_at, '') AS updated_at,
+               (SELECT COUNT(*) FROM {NQ_CALL_COMMENTS_TABLE} m WHERE m.call_key = c.sample_key AND m.deleted_at = '') AS comment_count,
+               c.dataset_id AS latest_dataset_id, 1 AS cdr_count, '' AS version_state,
+               (SELECT json_group_object(f.field_key, f.value) FROM {NQ_FIELD_VALUES_TABLE} f
+                WHERE f.call_key = c.sample_key AND f.value <> '') AS field_values_json
+        FROM {NQ_CALLS_TABLE} c
+        JOIN {NQ_CALL_SOURCES_TABLE} s ON s.dataset_id = c.dataset_id
+        LEFT JOIN {NQ_CALL_TRACKING_TABLE} t ON t.call_key = c.sample_key
+        WHERE c.sample_key <> ''
+    """
+    return sql, [*params, default]
 
 
 def _strings(values: Any) -> list[str]:
@@ -983,10 +1630,14 @@ def normalize_saved_filters(filters: Any) -> dict[str, Any]:
     """The known filters of a selection: value lists, flags and the search text."""
     filters = filters if isinstance(filters, dict) else {}
     saved: dict[str, Any] = {}
-    for field in (*FIELD_FILTERS, *TRACKING_FILTERS, *EXTRA_FILTERS, 'datasets'):
+    for field in (*FIELD_FILTERS, *TRACKING_FILTERS, *EXTRA_FILTERS, 'datasets', 'version'):
         values = _strings(filters.get(field))[:5000]
         if values:
             saved[field] = values
+    fields = filters.get('fields') if isinstance(filters.get('fields'), dict) else {}
+    chosen = {str(key): _strings(values)[:5000] for key, values in fields.items() if _strings(values)}
+    if chosen:
+        saved['fields'] = chosen
     saved.update({flag: True for flag in FLAG_FILTERS if filters.get(flag) is True})
     search = str(filters.get('search') or '').strip()[:200]
     if search:
@@ -1062,7 +1713,7 @@ def _resolve_key_filters(task_repository: Any, filters: dict[str, Any]) -> dict[
     suggestions_needed = bool(wanted['effective_domain'] or wanted['effective_cause'] or wanted['rca_state'])
     options = list_options(task_repository)
     taxonomy = list_root_causes(task_repository)
-    base, base_params = _base_sql(default_status(options), task_repository)
+    base, base_params = _base_sql(default_status(options), task_repository, _scope(filters))
     with task_repository.connection() as connection:
         calls = connection.execute(f'WITH calls AS ({base}) SELECT * FROM calls', base_params).fetchall()
         notes = _comment_texts(connection, [str(call['call_key']) for call in calls if not call['root_domain']]) \
@@ -1099,10 +1750,34 @@ def _filter_sql(filters: dict[str, Any], username: str, closed_statuses: list[st
         values = ['' if value == UNASSIGNED else value for value in values]
         clauses.append(f"{field} IN ({', '.join('?' for _ in values)})")
         params.extend(values)
-    dataset_ids = [int(value) for value in _strings(filters.get('datasets')) if value.lstrip('-').isdigit()]
-    if dataset_ids:
-        clauses.append(f"dataset_id IN ({', '.join('?' for _ in dataset_ids)})")
-        params.extend(dataset_ids)
+    # The CDRs filter chooses the versions in the base query. A call whose latest CDR has it
+    # Completed is listed only on request, or while that CDR is not among the chosen ones.
+    versions = ['' if value == 'current' else value for value in _strings(filters.get('version')) if value in VERSION_STATES]
+    scope = _scope(filters)
+    if versions:
+        clauses.append(f"version_state IN ({', '.join('?' for _ in versions)})")
+        params.extend(versions)
+    elif scope:
+        clauses.append(f"(version_state <> 'qualified' OR latest_dataset_id NOT IN ({', '.join('?' for _ in scope)}))")
+        params.extend(scope)
+    else:
+        clauses.append("version_state <> 'qualified'")
+    fields = filters.get('fields') if isinstance(filters.get('fields'), dict) else {}
+    for key, values in fields.items():
+        values = _strings(values)
+        if not values:
+            continue
+        chosen = [value for value in values if value != UNASSIGNED]
+        parts = []
+        if chosen:
+            parts.append(f"EXISTS (SELECT 1 FROM {NQ_FIELD_VALUES_TABLE} f WHERE f.call_key = calls.call_key AND f.field_key = ? "
+                         f"AND f.value IN ({', '.join('?' for _ in chosen)}))")
+            params.extend([str(key), *chosen])
+        if UNASSIGNED in values:
+            parts.append(f"NOT EXISTS (SELECT 1 FROM {NQ_FIELD_VALUES_TABLE} f WHERE f.call_key = calls.call_key "
+                         "AND f.field_key = ? AND f.value <> '')")
+            params.append(str(key))
+        clauses.append('(' + ' OR '.join(parts) + ')')
     states = _strings(filters.get('state'))
     for state in states:
         if state == 'closed':
@@ -1146,16 +1821,36 @@ def _filter_sql(filters: dict[str, Any], username: str, closed_statuses: list[st
         haystack = " || ' ' || ".join(f"COALESCE({field}, '')" for field in SEARCH_FIELDS)
         clauses.append(
             f"(instr(lower({haystack}), ?) > 0 OR EXISTS (SELECT 1 FROM {NQ_CALL_COMMENTS_TABLE} s "
-            f"WHERE s.call_key = calls.call_key AND s.deleted_at = '' AND instr(lower(s.body), ?) > 0))"
+            f"WHERE s.call_key = calls.call_key AND s.deleted_at = '' AND instr(lower(s.body), ?) > 0) "
+            f"OR EXISTS (SELECT 1 FROM {NQ_FIELD_VALUES_TABLE} f WHERE f.call_key = calls.call_key AND instr(lower(f.value), ?) > 0))"
         )
-        params.extend([search, search])
+        params.extend([search, search, search])
     return (' WHERE ' + ' AND '.join(clauses)) if clauses else '', params
 
 
 def _call_payload(row: Any) -> dict[str, Any]:
     payload = {key: row[key] for key in row.keys()}
     payload['service_label'] = SERVICE_LABELS.get(str(payload.get('service')), str(payload.get('service') or ''))
+    for source, target in (('field_values_json', 'fields'), ('extra_json', 'extra')):
+        try:
+            value = json.loads(payload.pop(source, None) or '{}')
+        except (TypeError, ValueError):
+            value = {}
+        payload[target] = value if isinstance(value, dict) else {}
     return payload
+
+
+def _order_sql(sort: str, task_repository: Any) -> str:
+    """The ORDER BY expression of a sort key: a column, an analysis field or a CDR column."""
+    if sort.startswith('field:'):
+        key = sort.split(':', 1)[1]
+        if key in {field['key'] for field in list_fields(task_repository)}:
+            return f"COALESCE(json_extract(field_values_json, '$.\"{key}\"'), '')"
+    if sort.startswith('cdr:'):
+        name = sort.split(':', 1)[1]
+        if name in table_columns(task_repository)['cdr']:
+            return f"COALESCE(json_extract(extra_json, '$.\"{name.replace(chr(34), '')}\"'), '')"
+    return SORT_COLUMNS.get(sort, 'start_time')
 
 
 def _comments_by_call(connection: Any, keys: list[str]) -> dict[str, dict[str, Any]]:
@@ -1176,11 +1871,12 @@ def query_calls(task_repository: Any, request: dict[str, Any], username: str) ->
     filters = request.get('filters') if isinstance(request.get('filters'), dict) else {}
     filters = _resolve_key_filters(task_repository, filters)
     closed = [item['name'] for item in options['statuses'] if item['closed']]
-    base, base_params = _base_sql(default_status(options), task_repository)
+    base, base_params = _base_sql(default_status(options), task_repository, _scope(filters))
     where, params = _filter_sql(filters, username, closed)
     filtered = f'WITH calls AS ({base}) SELECT * FROM calls{where}'
     all_params = [*base_params, *params]
-    sort = SORT_COLUMNS.get(str(request.get('sort') or ''), 'start_time')
+    sort_key = str(request.get('sort') or '')
+    sort = _order_sql(sort_key, task_repository)
     direction = 'ASC' if str(request.get('direction') or '').lower() == 'asc' else 'DESC'
     page_size = int(request.get('page_size') or 50)
     page_size = page_size if page_size in PAGE_SIZES else 50
@@ -1197,9 +1893,12 @@ def query_calls(task_repository: Any, request: dict[str, Any], username: str) ->
         last_comments = _comments_by_call(connection, [call['call_key'] for call in calls])
         notes = _comment_texts(connection, [call['call_key'] for call in calls])
         taxonomy = list_root_causes(task_repository)
+        names = {int(row['id']): str(row['file_name']) for row in connection.execute('SELECT id, file_name FROM datasets')}
         for call in calls:
             call['last_comment'] = last_comments.get(call['call_key'])
             call['suggested_root_cause'] = suggest_root_cause(call, taxonomy, notes.get(call['call_key'], ''))
+            call['dataset_name'] = names.get(int(call['dataset_id']), '')
+            call['latest_dataset_name'] = names.get(int(call['latest_dataset_id'] or call['dataset_id']), '')
         breakdowns = []
         mapping_settings = task_repository.chart_mapping_settings()
         for field, label in BREAKDOWNS:
@@ -1217,6 +1916,17 @@ def query_calls(task_repository: Any, request: dict[str, Any], username: str) ->
             elif field == 'campaign':
                 items.sort(key=lambda item: campaign_sort_key(item['value']))
             breakdowns.append({'field': field, 'label': label, 'items': items})
+        # The analysis fields shown in the Summary, as one more breakdown each.
+        for definition in [field for field in list_fields(task_repository) if field['in_summary']]:
+            values = connection.execute(
+                f"SELECT COALESCE(json_extract(field_values_json, '$.\"{definition['key']}\"'), '') AS value, COUNT(*) AS count "
+                f"FROM ({filtered}) GROUP BY value ORDER BY count DESC, value LIMIT 12", all_params,
+            ).fetchall()
+            order = [option['name'] for option in definition['options']] or list(YES_NO)
+            items = [{'value': str(row['value'] or ''), 'count': int(row['count'])} for row in values]
+            items.sort(key=lambda item: (order.index(item['value']) if item['value'] in order else len(order), -item['count']))
+            breakdowns.append({'field': f"field:{definition['key']}", 'label': f"By {definition['label']}", 'items': items,
+                               'colors': {option['name']: option['color'] for option in definition['options'] if option['color']}})
         closed_marks = ', '.join('?' for _ in closed) or "''"
         summary = connection.execute(
             f"SELECT COUNT(*) AS total, "
@@ -1233,7 +1943,8 @@ def query_calls(task_repository: Any, request: dict[str, Any], username: str) ->
     summary_payload['open'] = summary_payload['total'] - summary_payload['closed']
     return {
         'calls': calls, 'total': total, 'page': page, 'pages': pages, 'page_size': page_size,
-        'sort': next((key for key, column in SORT_COLUMNS.items() if column == sort), 'start_time'),
+        'sort': sort_key if sort_key.startswith(('field:', 'cdr:')) and sort != 'start_time'
+        else next((key for key, column in SORT_COLUMNS.items() if column == sort), 'start_time'),
         'direction': direction.lower(), 'summary': summary_payload, 'breakdowns': breakdowns,
     }
 
@@ -1305,7 +2016,7 @@ def progress_stats(task_repository: Any, filters: dict[str, Any], username: str,
     granularity = granularity if granularity in PROGRESS_GRANULARITIES else 'month'
     options = list_options(task_repository)
     closed_names = {item['name'].casefold() for item in options['statuses'] if item['closed']}
-    base, base_params = _base_sql(default_status(options), task_repository)
+    base, base_params = _base_sql(default_status(options), task_repository, _scope(filters))
     where, params = _filter_sql(_resolve_key_filters(task_repository, filters), username,
                                 [item['name'] for item in options['statuses'] if item['closed']])
     with task_repository.connection() as connection:
@@ -1543,7 +2254,7 @@ def root_cause_stats(task_repository: Any, filters: dict[str, Any], username: st
     """
     options = list_options(task_repository)
     taxonomy = list_root_causes(task_repository)
-    base, base_params = _base_sql(default_status(options), task_repository)
+    base, base_params = _base_sql(default_status(options), task_repository, _scope(filters))
     where, params = _filter_sql(_resolve_key_filters(task_repository, filters), username,
                                 [item['name'] for item in options['statuses'] if item['closed']])
     with task_repository.connection() as connection:
@@ -1628,6 +2339,89 @@ def root_cause_stats(task_repository: Any, filters: dict[str, Any], username: st
     }
 
 
+# The filters that also apply to every call (qualified or not) of the NQ rates.
+RATE_FILTERS = ('datasets', 'service', 'campaign', 'operator', 'nr_mode')
+
+
+def nq_rates(task_repository: Any, filters: dict[str, Any]) -> dict[str, Any]:
+    """Calls, Non-Qualified Calls and their share for each campaign and operator.
+
+    Every call counts once, in the most recent of the chosen CDRs that has it (a Final CDR before
+    the Daily ones), so a call that is Completed there is no longer Non-Qualified. Only the CDRs,
+    Service, Campaign, Operator and NR Mode filters apply: the other filters describe Non-Qualified
+    Calls only. Operators show their Operator Map label.
+    """
+    scope = _scope(filters)
+    services = _strings(filters.get('service'))
+    campaigns = set(_strings(filters.get('campaign')))
+    nr_modes = {'' if value in {UNASSIGNED, 'Unknown'} else value for value in _strings(filters.get('nr_mode'))}
+    mapper = ValueMapper.from_repository(task_repository)
+    operators = {str(mapper.map(field_kind('operator'), value)) for value in _strings(filters.get('operator'))}
+    where, params = [], []
+    if services:
+        where.append(f"p.service IN ({', '.join('?' for _ in services)})")
+        params.extend(services)
+    if scope:
+        where.append(f"p.dataset_id IN ({', '.join('?' for _ in scope)})")
+        params.extend(scope)
+        source = f"""
+            SELECT service, campaign, operator, nr_mode, COUNT(*) AS total, SUM(is_nq) AS nq FROM (
+                SELECT p.service, p.campaign, p.operator, p.nr_mode, p.is_nq, ROW_NUMBER() OVER (
+                    PARTITION BY p.call_key ORDER BY s.stage_rank DESC, s.data_date DESC, p.dataset_id DESC) AS rn
+                FROM {NQ_CALL_POPULATION_TABLE} p JOIN {NQ_CALL_SOURCES_TABLE} s ON s.dataset_id = p.dataset_id
+                WHERE {' AND '.join(where)}
+            ) WHERE rn = 1 GROUP BY service, campaign, operator, nr_mode"""
+    else:
+        where.append('p.is_latest = 1')
+        source = f"""
+            SELECT p.service, p.campaign, p.operator, p.nr_mode, COUNT(*) AS total, SUM(p.is_nq) AS nq
+            FROM {NQ_CALL_POPULATION_TABLE} p WHERE {' AND '.join(where)}
+            GROUP BY p.service, p.campaign, p.operator, p.nr_mode"""
+    with task_repository.connection() as connection:
+        rows = connection.execute(source, params).fetchall()
+    groups: dict[str, dict[tuple[str, str], list[int]]] = {}
+    for row in rows:
+        campaign, operator = str(row['campaign'] or ''), str(mapper.map(field_kind('operator'), row['operator'] or '') or '')
+        if campaigns and campaign not in campaigns:
+            continue
+        if operators and operator not in operators:
+            continue
+        if nr_modes and str(row['nr_mode'] or '') not in nr_modes:
+            continue
+        for service in (str(row['service']), 'all'):
+            cell = groups.setdefault(service, {}).setdefault((campaign, operator), [0, 0])
+            cell[0] += int(row['total'] or 0)
+            cell[1] += int(row['nq'] or 0)
+    mapping_settings = task_repository.chart_mapping_settings()
+
+    def matrix(service: str) -> dict[str, Any]:
+        cells = groups.get(service, {})
+        campaign_list = sorted({campaign for campaign, _operator in cells}, key=campaign_sort_key)
+        operator_list = sorted({operator for _campaign, operator in cells}, key=lambda value: dimension_order_key(
+            'operator', value, mapping_settings['operator_mapping_groups'], mapping_settings['vendor_mapping_groups']))
+
+        def summary(total: int, nq: int) -> dict[str, Any]:
+            return {'total': total, 'nq': nq, 'rate': round(nq * 100 / total, 2) if total else None}
+
+        return {
+            'service': service, 'label': 'All services' if service == 'all' else SERVICE_LABELS.get(service, service),
+            'campaigns': campaign_list, 'operators': operator_list,
+            'cells': {campaign: {operator: summary(*cells[(campaign, operator)]) for operator in operator_list
+                                 if (campaign, operator) in cells} for campaign in campaign_list},
+            'campaign_totals': {campaign: summary(*map(sum, zip(*(value for (row, _operator), value in cells.items()
+                                                                   if row == campaign)))) for campaign in campaign_list},
+            'operator_totals': {operator: summary(*map(sum, zip(*(value for (_row, column), value in cells.items()
+                                                                   if column == operator)))) for operator in operator_list},
+            'total': summary(*map(sum, zip(*cells.values()))) if cells else summary(0, 0),
+        }
+
+    ordered = [service for service in (*SERVICES, 'all') if service in groups]
+    # "All services" adds calls and data tests: it is listed last, and only with several services.
+    if len([service for service in ordered if service != 'all']) < 2:
+        ordered = [service for service in ordered if service != 'all']
+    return {'matrices': [matrix(service) for service in ordered], 'filters': list(RATE_FILTERS)}
+
+
 def indexed_datasets(task_repository: Any) -> list[dict[str, Any]]:
     with task_repository.connection() as connection:
         counts = {int(row['dataset_id']): int(row['call_count'])
@@ -1643,8 +2437,49 @@ def indexed_datasets(task_repository: Any) -> list[dict[str, Any]]:
 # One call: details, follow-up and comments
 # ---------------------------------------------------------------------------
 def _call_row(connection: Any, call_key: str, default: str, task_repository: Any) -> Any:
+    """A call (its latest version) or a Speech sample, with its follow-up."""
     base, params = _base_sql(default, task_repository)
-    return connection.execute(f'WITH calls AS ({base}) SELECT * FROM calls WHERE call_key = ?', [*params, call_key]).fetchone()
+    row = connection.execute(f'WITH calls AS ({base}) SELECT * FROM calls WHERE call_key = ?', [*params, call_key]).fetchone()
+    if row is not None:
+        return row
+    sample, sample_params = _sample_sql(default, task_repository)
+    return connection.execute(
+        f'WITH samples AS ({sample}) SELECT * FROM samples WHERE call_key = ? ORDER BY dataset_id DESC LIMIT 1',
+        [*sample_params, call_key]).fetchone()
+
+
+def _call_versions(connection: Any, call_key: str) -> list[dict[str, Any]]:
+    """Every CDR that contains the call: Final or Daily, its newest data, and the call's result in it."""
+    rows = connection.execute(f"""
+        SELECT p.dataset_id, p.is_nq, p.is_latest, s.stage_rank, s.data_date, d.file_name,
+               (SELECT c.result FROM {NQ_CALLS_TABLE} c WHERE c.call_key = p.call_key AND c.dataset_id = p.dataset_id
+                ORDER BY c.start_time LIMIT 1) AS result,
+               (SELECT c.failure_classification FROM {NQ_CALLS_TABLE} c WHERE c.call_key = p.call_key AND c.dataset_id = p.dataset_id
+                ORDER BY c.start_time LIMIT 1) AS failure_classification
+        FROM {NQ_CALL_POPULATION_TABLE} p
+        JOIN {NQ_CALL_SOURCES_TABLE} s ON s.dataset_id = p.dataset_id
+        LEFT JOIN datasets d ON d.id = p.dataset_id
+        WHERE p.call_key = ?
+        ORDER BY s.stage_rank DESC, s.data_date DESC, p.dataset_id DESC
+    """, (call_key,)).fetchall()
+    return [{
+        'dataset_id': int(row['dataset_id']), 'name': str(row['file_name'] or ''),
+        'stage': 'Final' if int(row['stage_rank']) else 'Daily', 'data_date': str(row['data_date'] or ''),
+        'non_qualified': bool(row['is_nq']), 'latest': bool(row['is_latest']),
+        'result': str(row['result'] or ('Completed' if not row['is_nq'] else '')),
+        'failure_classification': str(row['failure_classification'] or ''),
+    } for row in rows]
+
+
+def _call_samples(connection: Any, call: dict[str, Any], default: str, task_repository: Any) -> list[dict[str, Any]]:
+    """The Non-Qualified samples of a Speech call in the CDR of its shown version, with their follow-up."""
+    if call.get('service') != 'speech' or call.get('parent_key'):
+        return []
+    sample, params = _sample_sql(default, task_repository)
+    rows = connection.execute(
+        f'WITH samples AS ({sample}) SELECT * FROM samples WHERE parent_key = ? AND dataset_id = ? ORDER BY start_time, source_row_id',
+        [*params, call['call_key'], int(call['dataset_id'])]).fetchall()
+    return [_call_payload(row) for row in rows]
 
 
 def _comment_payload(row: Any) -> dict[str, Any]:
@@ -1657,12 +2492,19 @@ def _comment_payload(row: Any) -> dict[str, Any]:
 
 
 def call_detail(task_repository: Any, call_key: str) -> dict[str, Any] | None:
+    """A call or a Speech sample: its fields, follow-up, comments, history, CDR versions and samples."""
     options = list_options(task_repository)
     with task_repository.connection() as connection:
         row = _call_row(connection, call_key, default_status(options), task_repository)
         if row is None:
             return None
         call = _call_payload(row)
+        versions = _call_versions(connection, str(call.get('parent_key') or call_key))
+        samples = _call_samples(connection, call, default_status(options), task_repository)
+        parent = None
+        if call.get('parent_key'):
+            parent_row = _call_row(connection, str(call['parent_key']), default_status(options), task_repository)
+            parent = _call_payload(parent_row) if parent_row is not None else None
         comments = [_comment_payload(item) for item in connection.execute(
             f'SELECT * FROM {NQ_CALL_COMMENTS_TABLE} WHERE call_key = ? ORDER BY id', (call_key,),
         ).fetchall()]
@@ -1684,8 +2526,12 @@ def call_detail(task_repository: Any, call_key: str) -> dict[str, Any] | None:
         fields = [[key, _text(source[key])] for key in source.keys() if _text(source[key])]
     call['dataset_name'] = str(dataset['file_name']) if dataset else ''
     notes = '\n'.join(comment['body'] for comment in comments if not comment['deleted_at'])
-    call['suggested_root_cause'] = suggest_root_cause(call, list_root_causes(task_repository), notes)
-    return {'call': call, 'comments': comments, 'history': history, 'fields': fields}
+    taxonomy = list_root_causes(task_repository)
+    call['suggested_root_cause'] = suggest_root_cause(call, taxonomy, notes)
+    for sample in samples:
+        sample['suggested_root_cause'] = suggest_root_cause(sample, taxonomy, '')
+    return {'call': call, 'comments': comments, 'history': history, 'fields': fields, 'versions': versions,
+            'samples': samples, 'parent': parent}
 
 
 def _record_history(connection: Any, call_key: str, field: str, old: str, new: str, username: str, when: str) -> None:
@@ -1731,9 +2577,22 @@ def _validate_changes(changes: dict[str, Any], options: dict[str, list[dict[str,
         validated['root_cause'] = causes.get(cause.casefold(), '')
     if changes.get('apply_suggestion'):
         validated['apply_suggestion'] = '1'
-    if not validated:
+    if not validated and not changes.get('fields'):
         raise ValueError('There is nothing to change.')
     return validated
+
+
+def _validate_field_changes(changes: dict[str, Any], definitions: list[dict[str, Any]]) -> dict[str, str]:
+    values = changes.get('fields')
+    if values is None:
+        return {}
+    if not isinstance(values, dict):
+        raise ValueError('The analysis fields are invalid.')
+    known = {field['key']: field for field in definitions}
+    unknown = [str(key) for key in values if str(key) not in known]
+    if unknown:
+        raise ValueError(f'Unknown analysis fields: {", ".join(unknown)}.')
+    return {str(key): _field_value(known[str(key)], value) for key, value in values.items()}
 
 
 class TrackingConflict(Exception):
@@ -1754,7 +2613,10 @@ def update_tracking(
     """
     options = list_options(task_repository)
     taxonomy = list_root_causes(task_repository)
+    definitions = list_fields(task_repository)
     validated = _validate_changes(changes, options, users, taxonomy)
+    field_changes = _validate_field_changes(changes, definitions)
+    required = [field for field in definitions if field['required_to_close']]
     apply_suggestion = bool(validated.pop('apply_suggestion', None))
     closed = {item['name'].casefold() for item in options['statuses'] if item['closed']}
     members = team_members(options)
@@ -1782,11 +2644,18 @@ def update_tracking(
                     raise ValueError(f'{current["assignee"]} is not a member of the {current["team"]} team.')
                 current['assignee'] = ''
             differences = {field: value for field, value in current.items() if str(row[field]) != value}
-            if not differences:
+            stored = field_values(connection, [call_key]).get(call_key, {})
+            field_differences = {key: value for key, value in field_changes.items() if stored.get(key, '') != value}
+            if not differences and not field_differences:
                 continue
             if (taxonomy['require_to_close'] and current['status'].casefold() in closed and not current['root_domain']
                     and ('status' in differences or 'root_domain' in differences)):
                 raise ValueError(f'Set a root cause before closing a call as {current["status"]}.')
+            if current['status'].casefold() in closed and required:
+                merged = {**stored, **field_changes}
+                missing = [field['label'] for field in required if not merged.get(field['key'])]
+                if missing and ('status' in differences or field_differences):
+                    raise ValueError(f'Fill {", ".join(missing)} before closing a call as {current["status"]}.')
             connection.execute(
                 f'INSERT INTO {NQ_CALL_TRACKING_TABLE} (call_key, status, team, assignee, root_domain, root_cause, version, '
                 'updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?) ON CONFLICT(call_key) DO UPDATE SET '
@@ -1798,6 +2667,12 @@ def update_tracking(
             )
             for field, value in differences.items():
                 _record_history(connection, call_key, field, str(row[field]), value, username, when)
+            for key, value in field_differences.items():
+                connection.execute(
+                    f'INSERT INTO {NQ_FIELD_VALUES_TABLE} (call_key, field_key, value, updated_by, updated_at) VALUES (?, ?, ?, ?, ?) '
+                    'ON CONFLICT(call_key, field_key) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, '
+                    'updated_at = excluded.updated_at', (call_key, key, value, username, when))
+                _record_history(connection, call_key, f'field:{key}', stored.get(key, ''), value, username, when)
             changed.append(call_key)
     return changed
 
@@ -1900,7 +2775,8 @@ EXPORT_COLUMNS = (
     ('Assignee', 'assignee'), ('Root Domain', 'root_domain'), ('Root Cause', 'root_cause'),
     ('Suggested Root Domain', 'suggested_domain'), ('Suggested Root Cause', 'suggested_cause'), ('Comments', 'comment_count'), ('Last Comment', 'last_comment_text'),
     ('Last Comment By', 'last_comment_by'), ('Last Comment At', 'last_comment_at'), ('Updated By', 'updated_by'),
-    ('Updated At', 'updated_at'), ('CDR', 'dataset_name'), ('Call Key', 'call_key'),
+    ('Updated At', 'updated_at'), ('CDR', 'dataset_name'), ('CDR Version', 'version_label'), ('Latest CDR', 'latest_dataset_name'),
+    ('JOIN_ID', 'join_id'), ('NQ Samples', 'nq_samples'), ('Call Key', 'call_key'),
 )
 
 
@@ -1912,7 +2788,7 @@ def export_workbook(task_repository: Any, filters: dict[str, Any], username: str
 
     options = list_options(task_repository)
     closed = [item['name'] for item in options['statuses'] if item['closed']]
-    base, base_params = _base_sql(default_status(options), task_repository)
+    base, base_params = _base_sql(default_status(options), task_repository, _scope(filters))
     where, params = _filter_sql(_resolve_key_filters(task_repository, filters), username, closed)
     with task_repository.connection() as connection:
         rows = connection.execute(
@@ -1930,8 +2806,23 @@ def export_workbook(task_repository: Any, filters: dict[str, Any], username: str
                 f'SELECT * FROM {NQ_CALL_COMMENTS_TABLE} WHERE call_key IN ({marks}) ORDER BY id', chunk).fetchall())
             history.extend(connection.execute(
                 f'SELECT * FROM {NQ_CALL_HISTORY_TABLE} WHERE call_key IN ({marks}) ORDER BY id', chunk).fetchall())
+        definitions = list_fields(task_repository)
+        sample_sql, sample_params = _sample_sql(default_status(options), task_repository)
+        samples = [_call_payload(row) for row in connection.execute(
+            f'WITH samples AS ({sample_sql}) SELECT * FROM samples WHERE parent_key IN (SELECT value FROM json_each(?)) '
+            'ORDER BY parent_key, start_time',
+            [*sample_params, json.dumps([call['call_key'] for call in calls if call['service'] == 'speech'])]).fetchall()]
+        sample_keys = [sample['call_key'] for sample in samples]
+        for start in range(0, len(sample_keys), 500):
+            chunk = sample_keys[start:start + 500]
+            marks = ', '.join('?' for _ in chunk)
+            comments.extend(connection.execute(
+                f'SELECT * FROM {NQ_CALL_COMMENTS_TABLE} WHERE call_key IN ({marks}) ORDER BY id', chunk).fetchall())
+            history.extend(connection.execute(
+                f'SELECT * FROM {NQ_CALL_HISTORY_TABLE} WHERE call_key IN ({marks}) ORDER BY id', chunk).fetchall())
     latest = {str(row['call_key']): row for row in comments if not row['deleted_at']}
     by_key = {call['call_key']: call for call in calls}
+    by_key.update({sample['call_key']: sample for sample in samples})
     taxonomy = list_root_causes(task_repository)
     notes: dict[str, list[str]] = {}
     for row in comments:
@@ -1947,6 +2838,8 @@ def export_workbook(task_repository: Any, filters: dict[str, Any], username: str
         call['last_comment_by'] = str(comment['created_by']) if comment else ''
         call['last_comment_at'] = str(comment['created_at']) if comment else ''
         call['dataset_name'] = names.get(int(call['dataset_id']), '')
+        call['latest_dataset_name'] = names.get(int(call.get('latest_dataset_id') or call['dataset_id']), '')
+        call['version_label'] = VERSION_LABELS.get(call.get('version_state') or 'current', '')
 
     workbook = Workbook()
     header_font = Font(bold=True, color='FFFFFF')
@@ -1967,11 +2860,35 @@ def export_workbook(task_repository: Any, filters: dict[str, Any], username: str
 
     calls_sheet = workbook.active
     calls_sheet.title = 'NQ Calls'
+    # The analysis fields follow the root cause columns.
+    position = next(index for index, (_label, key) in enumerate(EXPORT_COLUMNS) if key == 'suggested_cause') + 1
+    columns = [*EXPORT_COLUMNS[:position], *((field['label'], f"field:{field['key']}") for field in definitions),
+               *EXPORT_COLUMNS[position:]]
+
+    def cell(call: dict[str, Any], key: str) -> Any:
+        value = call.get('fields', {}).get(key[6:], '') if key.startswith('field:') else call.get(key)
+        return value if value is not None else ''
+
     write_sheet(
-        calls_sheet, [label for label, _key in EXPORT_COLUMNS],
-        [[call.get(key) if call.get(key) is not None else '' for _label, key in EXPORT_COLUMNS] for call in calls],
-        [max(12, min(48, len(label) + 6)) for label, _key in EXPORT_COLUMNS],
+        calls_sheet, [label for label, _key in columns],
+        [[cell(call, key) for _label, key in columns] for call in calls],
+        [max(12, min(48, len(label) + 6)) for label, _key in columns],
     )
+    if samples:
+        # Speech samples with their own follow-up, below the call they belong to.
+        sample_columns = [('Call Start Time', 'parent_start'), ('Operator', 'operator'), ('Campaign', 'campaign'),
+                          ('Sample', 'sample_id'), ('Start Time', 'start_time'), ('Result', 'result'),
+                          ('Failure Classification', 'failure_classification'), ('Failure Category', 'failure_category'),
+                          ('Status', 'status'), ('Team', 'team'), ('Assignee', 'assignee'), ('Root Domain', 'root_domain'),
+                          ('Root Cause', 'root_cause'), *((field['label'], f"field:{field['key']}") for field in definitions),
+                          ('Comments', 'comment_count'), ('Call Key', 'parent_key'), ('Sample Key', 'call_key')]
+        for sample in samples:
+            sample['parent_start'] = by_key.get(str(sample['parent_key']), {}).get('start_time', '')
+        write_sheet(
+            workbook.create_sheet('Speech Samples'), [label for label, _key in sample_columns],
+            [[cell(sample, key) for _label, key in sample_columns] for sample in samples],
+            [max(12, min(40, len(label) + 6)) for label, _key in sample_columns],
+        )
 
     def call_context(call_key: str) -> list[Any]:
         call = by_key.get(call_key, {})
@@ -1989,7 +2906,7 @@ def export_workbook(task_repository: Any, filters: dict[str, Any], username: str
         workbook.create_sheet('History'),
         ['Service', 'Operator', 'Campaign', 'Start Time', 'Change', 'Previous Value', 'New Value', 'Changed By',
          'Changed At', 'Call Key'],
-        [[*call_context(str(row['call_key'])), HISTORY_LABELS.get(str(row['field']), str(row['field'])),
+        [[*call_context(str(row['call_key'])), history_label(str(row['field']), definitions),
           row['old_value'], row['new_value'], row['changed_by'], row['changed_at'], row['call_key']] for row in history],
         [10, 16, 16, 24, 18, 40, 40, 16, 26, 28],
     )
@@ -2008,6 +2925,13 @@ HISTORY_LABELS = {
 }
 
 
+def history_label(field: str, definitions: list[dict[str, Any]]) -> str:
+    if field.startswith('field:'):
+        key = field[6:]
+        return next((item['label'] for item in definitions if item['key'] == key), key)
+    return HISTORY_LABELS.get(field, field)
+
+
 # ---------------------------------------------------------------------------
 # Portability: export, import, transfers and backups
 # ---------------------------------------------------------------------------
@@ -2023,10 +2947,14 @@ def export_tracking_document(task_repository: Any) -> bytes:
             f'FROM {NQ_CALL_COMMENTS_TABLE} ORDER BY id')]
         history = [dict(row) for row in connection.execute(
             f'SELECT uid, call_key, field, old_value, new_value, changed_by, changed_at FROM {NQ_CALL_HISTORY_TABLE} ORDER BY id')]
+        values = [dict(row) for row in connection.execute(
+            f"SELECT call_key, field_key, value, updated_by, updated_at FROM {NQ_FIELD_VALUES_TABLE} "
+            "ORDER BY call_key, field_key")]
     document = {
         'format': TRACKING_FORMAT, 'version': TRACKING_FORMAT_VERSION, 'options': list_options(task_repository),
-        'root_causes': list_root_causes(task_repository),
-        'tracking': tracking, 'comments': comments, 'history': history,
+        'root_causes': list_root_causes(task_repository), 'fields': list_fields(task_repository),
+        'table_columns': table_columns(task_repository),
+        'tracking': tracking, 'comments': comments, 'history': history, 'field_values': values,
     }
     return json.dumps(document, ensure_ascii=False, indent=2).encode('utf-8')
 
@@ -2053,7 +2981,46 @@ def import_tracking_document(task_repository: Any, payload: bytes | str) -> int:
 
     options = document.get('options') if isinstance(document.get('options'), dict) else {}
     tracking, comments, history = records('tracking'), records('comments'), records('history')
+    value_records = records('field_values')
     touched: set[str] = set()
+    # Missing analysis fields are added and the values of the list fields are merged.
+    incoming_fields = [item for item in document.get('fields') or [] if isinstance(item, dict) and item.get('key') and item.get('label')]
+    if incoming_fields:
+        current_fields = list_fields(task_repository)
+        by_key = {field['key']: field for field in current_fields}
+        labels = {field['label'].casefold() for field in current_fields}
+        merged = [dict(field) for field in current_fields]
+        for item in incoming_fields:
+            target = next((field for field in merged if field['key'] == item['key']), None)
+            if target is None:
+                if str(item['label']).casefold() in labels or str(item.get('type')) not in FIELD_TYPES:
+                    continue
+                merged.append({**item, 'options': [option for option in item.get('options') or [] if isinstance(option, dict)]})
+                continue
+            if target['type'] == 'list' and str(item.get('type')) == 'list':
+                names = {option['name'].casefold() for option in target['options']}
+                target['options'] = [*target['options'], *(
+                    option for option in item.get('options') or []
+                    if isinstance(option, dict) and str(option.get('name') or '').casefold() not in names)]
+        if merged != current_fields:
+            existing = by_key
+            normalized = _normalize_fields(merged, existing)
+            with task_repository.connection() as connection:
+                connection.execute(f'DELETE FROM {NQ_FIELDS_TABLE}')
+                connection.executemany(
+                    f'INSERT INTO {NQ_FIELDS_TABLE} (field_key, label, field_type, options_json, position, in_table, in_summary, '
+                    'required_to_close, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [(field['key'], field['label'], field['type'],
+                      json.dumps([{'name': option['name'], 'color': option['color']} for option in field['options']],
+                                 ensure_ascii=False),
+                      index, int(field['in_table']), int(field['in_summary']), int(field['required_to_close']),
+                      field['description']) for index, field in enumerate(normalized)])
+    columns = document.get('table_columns')
+    if isinstance(columns, dict) and not task_repository.get_workspace_state(TABLE_COLUMNS_STATE_KEY):
+        try:
+            save_table_columns(task_repository, columns.get('builtin') or [], columns.get('cdr') or [], 'import')
+        except ValueError:
+            pass
     with task_repository.connection() as connection:
         for kind, key in (('status', 'statuses'), ('team', 'teams')):
             items = options.get(key) if isinstance(options.get(key), list) else []
@@ -2138,6 +3105,21 @@ def import_tracking_document(task_repository: Any, payload: bytes | str) -> int:
                 (uid, call_key, _text(item.get('field')), str(item.get('old_value') or ''), str(item.get('new_value') or ''),
                  _text(item.get('changed_by')) or 'import', _text(item.get('changed_at'))),
             )
+        for item in value_records:
+            call_key, field_key = _text(item.get('call_key')), _text(item.get('field_key'))
+            if not call_key or not field_key:
+                continue
+            existing = connection.execute(
+                f'SELECT updated_at FROM {NQ_FIELD_VALUES_TABLE} WHERE call_key = ? AND field_key = ?', (call_key, field_key),
+            ).fetchone()
+            incoming = _text(item.get('updated_at'))
+            if existing is not None and str(existing['updated_at']) >= incoming:
+                continue
+            connection.execute(
+                f'INSERT OR REPLACE INTO {NQ_FIELD_VALUES_TABLE} (call_key, field_key, value, updated_by, updated_at) '
+                'VALUES (?, ?, ?, ?, ?)',
+                (call_key, field_key, str(item.get('value') or ''), _text(item.get('updated_by')) or 'import', incoming))
+            touched.add(call_key)
     return len(touched)
 
 
@@ -2192,6 +3174,13 @@ def install_non_qualified_calls_routes(core: Any) -> None:
 
     class ExportPayload(BaseModel):
         filters: dict[str, Any] = Field(default_factory=dict)
+
+    class FieldsPayload(BaseModel):
+        fields: list[dict[str, Any]] = Field(default_factory=list)
+
+    class TableColumnsPayload(BaseModel):
+        builtin: list[str] = Field(default_factory=list)
+        cdr: list[str] = Field(default_factory=list)
 
     def workspace_repository(user):
         if not core.active_workspace:
@@ -2256,7 +3245,7 @@ def install_non_qualified_calls_routes(core: Any) -> None:
         ('operator_vendor', 'Operator_Vendor'), ('vendor_operator', 'Vendor_Operator'), ('vendor', 'Vendor'),
         ('region', 'Region'), ('cluster', 'Cluster'), ('city', 'City'), ('result', 'Result'), ('failure_classification', 'Failure Classification'),
         ('status', 'Status'), ('team', 'Team'), ('assignee', 'Assignee'), ('root_domain', 'Root Domain'),
-        ('root_cause', 'Root Cause'),
+        ('root_cause', 'Root Cause'), ('version', 'CDR Version'),
     )
     report_settings = (
         {'key': 'granularity', 'label': 'Progress periods', 'default': 'month',
@@ -2278,6 +3267,7 @@ def install_non_qualified_calls_routes(core: Any) -> None:
         taxonomy = list_root_causes(repository)
         values['root_domain'] = [[UNASSIGNED, NOT_CLASSIFIED], *[domain['name'] for domain in taxonomy['domains']]]
         values['root_cause'] = list(dict.fromkeys(cause['name'] for domain in taxonomy['domains'] for cause in domain['causes']))
+        values['version'] = [[key, label] for key, label in VERSION_LABELS.items()]
         return values
 
     def summary_parts(repository, filters: dict[str, Any], username: str, granularity: str, include_suggestions: bool = True):
@@ -2290,9 +3280,11 @@ def install_non_qualified_calls_routes(core: Any) -> None:
         executive = query_calls(repository, {'filters': filters, 'page_size': 25}, username)
         progress = progress_stats(repository, filters, username, granularity)
         options = {**list_options(repository),
-                   'root_causes': root_cause_stats(repository, filters, username, include_suggestions)}
+                   'root_causes': root_cause_stats(repository, filters, username, include_suggestions),
+                   'rates': nq_rates(repository, filters)}
         names = {str(item['id']): item['name'] for item in indexed_datasets(repository)}
-        return executive, progress, options, selection_lines(filters, names, granularity)
+        labels = {field['key']: field['label'] for field in list_fields(repository)}
+        return executive, progress, options, selection_lines(filters, names, granularity, labels)
 
     def write_summary_document(export_format: str, destination: Path, executive, progress, options, lines) -> None:
         from src.modules.non_qualified_calls_export import export_powerpoint, export_word
@@ -2360,7 +3352,50 @@ def install_non_qualified_calls_routes(core: Any) -> None:
             'saved_filters': saved_filters(repository),
             'root_causes': list_root_causes(repository), 'root_cause_defaults': default_root_causes(),
             'root_cause_rule_fields': RULE_FIELDS, 'default_root_cause_rule': DEFAULT_ROOT_CAUSE_RULE,
+            'fields': list_fields(repository), 'field_types': FIELD_TYPES,
+            'table_columns': table_columns(repository), 'optional_columns': OPTIONAL_COLUMNS,
+            'cdr_columns': available_cdr_columns(repository), 'max_cdr_columns': MAX_CDR_COLUMNS,
+            'version_labels': VERSION_LABELS,
         })
+
+    @core.app.put('/api/non-qualified-calls/fields')
+    def nq_save_fields(payload: FieldsPayload, user=Depends(editor_user)) -> JSONResponse:
+        """The analysis fields of the workspace (user-editor and above)."""
+        repository = workspace_repository(user)
+        return JSONResponse({'fields': translate(lambda: save_fields(repository, payload.fields, user.username))})
+
+    @core.app.post('/api/non-qualified-calls/fields/from-excel')
+    async def nq_fields_from_excel(request: Request, user=Depends(editor_user)) -> JSONResponse:
+        """Analysis fields proposed by a workbook (names in the first row, values below), to review before saving."""
+        workspace_repository(user)
+        form = await request.form()
+        upload = form.get('workbook')
+        if upload is None or not hasattr(upload, 'read'):
+            raise HTTPException(400, 'Choose an Excel workbook.')
+        content = await upload.read()
+        if len(content) > 10 * 1024 * 1024:
+            raise HTTPException(400, 'The workbook is larger than 10 MB.')
+        try:
+            return JSONResponse(fields_from_workbook(content))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001 - an unreadable file is a user error.
+            raise HTTPException(400, f'The workbook could not be read: {exc}') from exc
+
+    @core.app.put('/api/non-qualified-calls/table-columns')
+    def nq_save_table_columns(payload: TableColumnsPayload, user=Depends(editor_user)) -> JSONResponse:
+        """The optional columns of the Calls table: built-in ones and CDR columns (indexed again)."""
+        repository = workspace_repository(user)
+        columns = translate(lambda: save_table_columns(repository, payload.builtin, payload.cdr, user.username))
+        sync_nq_calls(repository)
+        return JSONResponse({'table_columns': columns})
+
+    @core.app.post('/api/non-qualified-calls/rates')
+    def nq_rates_route(payload: ExportPayload, user=Depends(core.current_user)) -> JSONResponse:
+        """Calls and Non-Qualified Calls of every campaign and operator."""
+        repository = workspace_repository(user)
+        sync_nq_calls(repository)
+        return JSONResponse(nq_rates(repository, payload.filters))
 
     @core.app.put('/api/non-qualified-calls/filters')
     def nq_save_filters(payload: QueryPayload, user=Depends(core.current_user)) -> JSONResponse:

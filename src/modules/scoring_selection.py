@@ -7,6 +7,7 @@ from typing import Any
 
 from src.branding import canonical_format
 from src.modules.column_names import column_identity
+from src.modules.cdr_stage import combined_dataset_ids
 from src.modules.nr_mode import normalize_nr_mode
 from src.modules.repository import Repository
 from src.modules.scoring_vendors import scoring_vendor_name, scoring_vendor_operators
@@ -49,11 +50,15 @@ def _operator_options(repository: Repository) -> list[str]:
 
 
 def _available_cdr_rows(repository: Repository) -> list[dict[str, Any]]:
+    # The CDRs of the combined tables: Final CDRs, and Daily CDRs until a Final CDR replaces them.
+    included = combined_dataset_ids(repository)
     available: list[dict[str, Any]] = []
     for raw_row in repository.list_datasets():
         row = dict(raw_row)
         kind = str(row.get('dataset_kind') or '').strip().casefold()
         if str(row.get('status') or '').strip().casefold() != 'ready' or kind not in {'data', 'voice', 'speech'}:
+            continue
+        if int(row['id']) not in included:
             continue
         mode = normalize_nr_mode(row.get('nr_mode'))
         if mode not in {'NSA', 'SA'}:

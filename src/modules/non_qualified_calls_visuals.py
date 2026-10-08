@@ -433,3 +433,84 @@ def root_cause_panels(stats: dict[str, Any]) -> list[tuple[str, BytesIO]]:
             _donut_card(panel, index * (width + gap), 0, width, panel.height, f"{row['name']} · {_number(row['total'])} calls", items)
         panels.append(('Root Cause Analysis · Classic vs WhatsApp', panel.png()))
     return panels
+
+
+def _heat(rate: float | None, highest: float) -> tuple[str, str]:
+    """The fill and text colours of an NQ rate: pale green for none, deep red for the highest of the matrix."""
+    if rate is None:
+        return '#f7f2f4', MUTED
+    share = 0.0 if highest <= 0 else min(1.0, rate / highest)
+    low, high = (0xEA, 0xF6, 0xEE), (0xC8, 0x10, 0x2E)
+    mid = (0xF6, 0xC3, 0x5B)
+    if share < 0.5:
+        start, end, step = low, mid, share * 2
+    else:
+        start, end, step = mid, high, (share - 0.5) * 2
+    rgb = tuple(round(a + (b - a) * step) for a, b in zip(start, end))
+    luminance = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255
+    return '#%02x%02x%02x' % rgb, ('#ffffff' if luminance < 0.55 else TEXT)
+
+
+def rate_panels(rates: dict[str, Any], rows_per_panel: int = 8) -> list[tuple[str, BytesIO]]:
+    """The NQ rate of each campaign and operator as a heat map: the share, and the NQ and total calls below it."""
+    panels: list[tuple[str, BytesIO]] = []
+    for matrix in rates.get('matrices') or []:
+        campaigns, operators = matrix['campaigns'], matrix['operators']
+        if not campaigns or not operators:
+            continue
+        values = [cell['rate'] for row in matrix['cells'].values() for cell in row.values() if cell['rate'] is not None]
+        highest = max(values or [0])
+        pages = [campaigns[index:index + rows_per_panel] for index in range(0, len(campaigns), rows_per_panel)]
+        for number, page in enumerate(pages, start=1):
+            # As tall as its rows, so a short matrix does not leave an empty slide-sized card.
+            panel = Panel(height=min(PANEL_HEIGHT, 0.62 + 0.5 * (len(page) + 2) + 0.2))
+            panel.card(0, 0, panel.width, panel.height)
+            total = matrix['total']
+            panel.text(0.2, 0.16, f"{matrix['label']} · NQ rate by Campaign and Operator", 12, bold=True, color=DARK)
+            overall = f"{total['rate']:.1f}%" if total['rate'] is not None else '—'
+            panel.text(panel.width - 0.2, 0.18, f"Overall {overall} · {_number(total['nq'])} of {_number(total['total'])} calls",
+                       10, bold=True, color=RASPBERRY, anchor='ra')
+            left, top = 0.2, 0.62
+            label_width = 1.5
+            columns = [*operators, 'Total']
+            cell_width = (panel.width - 0.4 - label_width) / len(columns)
+            row_height = min(0.5, (panel.height - top - 0.15) / (len(page) + 2))
+            panel.draw.rounded_rectangle([_px(left), _px(top), _px(panel.width - 0.2), _px(top + row_height)],
+                                         radius=_px(0.06), fill='#fcedf2')
+            panel.text(left + 0.12, top + row_height / 2, 'Campaign', 9, bold=True, color=DARK, anchor='lm')
+            for index, operator in enumerate(columns):
+                x = left + label_width + cell_width * index
+                panel.text(x + cell_width / 2, top + row_height / 2, operator, 9, bold=True, color=DARK,
+                           width=cell_width - 0.1, anchor='mm')
+
+            def draw_cell(x: float, y: float, cell: dict[str, Any] | None, bold: bool = False) -> None:
+                rate = cell['rate'] if cell else None
+                fill, ink = _heat(rate, highest)
+                pad = 0.04
+                panel.draw.rounded_rectangle([_px(x + pad), _px(y + pad), _px(x + cell_width - pad), _px(y + row_height - pad)],
+                                             radius=_px(0.06), fill=fill)
+                if cell is None:
+                    panel.text(x + cell_width / 2, y + row_height / 2, '—', 9, color=MUTED, anchor='mm')
+                    return
+                panel.text(x + cell_width / 2, y + row_height * 0.38, f'{rate:.1f}%' if rate is not None else '—',
+                           10.5, bold=True, color=ink, anchor='mm')
+                panel.text(x + cell_width / 2, y + row_height * 0.74, f"{_number(cell['nq'])} / {_number(cell['total'])}",
+                           7.5, bold=bold, color=ink, width=cell_width - 0.12, anchor='mm')
+
+            for row_index, campaign in enumerate([*page, 'Total']):
+                y = top + row_height * (row_index + 1)
+                is_total = campaign == 'Total'
+                panel.text(left + 0.12, y + row_height / 2, campaign if is_total else campaign_label(campaign), 9,
+                           bold=True, color=DARK if is_total else TEXT, width=label_width - 0.16, anchor='lm')
+                for index, operator in enumerate(columns):
+                    x = left + label_width + cell_width * index
+                    if is_total:
+                        cell = total if operator == 'Total' else matrix['operator_totals'].get(operator)
+                    elif operator == 'Total':
+                        cell = matrix['campaign_totals'].get(campaign)
+                    else:
+                        cell = matrix['cells'].get(campaign, {}).get(operator)
+                    draw_cell(x, y, cell, bold=is_total or operator == 'Total')
+            suffix = f' · {number}/{len(pages)}' if len(pages) > 1 else ''
+            panels.append((f"NQ Rate by Campaign and Operator · {matrix['label']}{suffix}", panel.png()))
+    return panels

@@ -50,7 +50,7 @@ Help Navigation groups chapters under General, Main Modules, Administrative Modu
 - [CDR Analysis](datasets-analysis.md) — interactive single-dataset analysis and exports.
 - [E2E Dashboards](e2e-dashboards.md) — saved Dashboards, synchronized filters and slide layouts.
 - [Reporting (old)](reporting-old.md) — classic Reports, Chart Sets, interactive previews and jobs.
-- [Non-Qualified Calls](non-qualified-calls.md) — summary, drill-down and shared follow-up (status, team, assignee and comments) of every call and test that did not complete.
+- [Non-Qualified Calls](non-qualified-calls.md) — summary, NQ rate by campaign and operator, drill-down and shared follow-up (status, team, assignee, root cause, analysis fields and comments) of every call and test that did not complete, across Daily and Final CDRs.
 - [Reporting](reporting.md) — scheduled Reporting Jobs that email CDR Analysis, Network Insights, Dashboard and Scoring artifacts.
 - [Chart Builder](chart-builder.md) — temporary ad-hoc chart construction.
 - [Query Builder](query-builder.md) — guided query design, SQL editing, execution and saved queries.

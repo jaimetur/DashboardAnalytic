@@ -1023,8 +1023,10 @@ def install_report_task_routes(core: Any) -> None:
         """The CDRs an automatic choice selects now: the newest complete set or every complete set of the NR Mode."""
         if selection == 'all_complete':
             return core.select_all_complete_cdrs(task_repository, nr_mode)
+        included = core.combined_dataset_ids(task_repository)
         candidates = [row for row in task_repository.list_datasets()
                       if row['status'] == 'ready' and str(row['dataset_kind']) in {'data', 'voice', 'speech'}
+                      and int(row['id']) in included
                       and core.dataset_nr_mode(row['dataset_kind'], row['nr_mode'], row['file_name']) == nr_mode]
         if not candidates:
             raise RuntimeError(f"There are no ready {nr_mode} CDRs.")

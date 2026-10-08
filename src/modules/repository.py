@@ -26,6 +26,7 @@ from src.modules.column_names import (
     operator_vendor_value, vendor_filter_column, vendor_filter_value, vendor_filter_values, vendor_match_values,
 )
 from src.modules.nr_mode import NR_MODE_DATASET_KINDS, infer_nr_mode, normalize_nr_mode
+from src.modules.cdr_stage import CDR_STAGE_KINDS, infer_cdr_stage, normalize_cdr_stage, normalize_combined_mode
 from src.modules.report_layouts import normalize_catalog_layouts, rename_template_vendor_fields
 from src.modules.runtime_config import ignore_event_time_filtering
 
@@ -169,6 +170,8 @@ CREATE TABLE IF NOT EXISTS dataset_profiles (
     cluster_mapping_dataset_id INTEGER,
     dataset_kind TEXT,
     nr_mode TEXT,
+    cdr_stage TEXT,
+    combined_mode TEXT NOT NULL DEFAULT 'auto',
     row_count INTEGER,
     column_count INTEGER,
     default_metric TEXT,
@@ -960,11 +963,21 @@ class Repository:
             conn.execute("ALTER TABLE dataset_profiles ADD COLUMN processing_step TEXT NOT NULL DEFAULT ''")
         if 'nr_mode' not in existing_columns:
             conn.execute("ALTER TABLE dataset_profiles ADD COLUMN nr_mode TEXT")
+        if 'cdr_stage' not in existing_columns:
+            conn.execute("ALTER TABLE dataset_profiles ADD COLUMN cdr_stage TEXT")
+            # The CDRs uploaded before Daily CDRs existed are Final CDRs.
+            kinds = tuple(sorted(CDR_STAGE_KINDS))
+            conn.execute(
+                f"UPDATE dataset_profiles SET cdr_stage = 'final' "
+                f"WHERE LOWER(COALESCE(dataset_kind, '')) IN ({', '.join('?' for _ in kinds)})", kinds,
+            )
+        if 'combined_mode' not in existing_columns:
+            conn.execute("ALTER TABLE dataset_profiles ADD COLUMN combined_mode TEXT NOT NULL DEFAULT 'auto'")
         self._backfill_dataset_nr_modes(conn)
 
     @staticmethod
     def _backfill_dataset_nr_modes(conn: sqlite3.Connection, dataset_id: int | None = None) -> None:
-        """Suggest a missing CDR NR Mode from its file name and clear it for other files."""
+        """Suggest a missing CDR NR Mode and stage (Final or Daily) from its file name and clear them for other files."""
         kinds = tuple(sorted(NR_MODE_DATASET_KINDS))
         placeholders = ', '.join('?' for _ in kinds)
         scope = ' AND d.id = ?' if dataset_id is not None else ''
@@ -986,6 +999,26 @@ class Repository:
             f"""
             UPDATE dataset_profiles SET nr_mode = NULL
             WHERE nr_mode IS NOT NULL AND LOWER(COALESCE(dataset_kind, '')) NOT IN ({placeholders})
+            """ + (' AND dataset_id = ?' if dataset_id is not None else ''),
+            (*kinds, *scope_parameters),
+        )
+        stage_rows = conn.execute(
+            f"""
+            SELECT d.id, d.file_name FROM datasets d
+            JOIN dataset_profiles p ON p.dataset_id = d.id
+            WHERE LOWER(COALESCE(p.dataset_kind, '')) IN ({placeholders})
+              AND COALESCE(p.cdr_stage, '') NOT IN ('final', 'daily'){scope}
+            """,
+            (*kinds, *scope_parameters),
+        ).fetchall()
+        conn.executemany(
+            'UPDATE dataset_profiles SET cdr_stage = ? WHERE dataset_id = ?',
+            [(infer_cdr_stage(row['file_name']), int(row['id'])) for row in stage_rows],
+        )
+        conn.execute(
+            f"""
+            UPDATE dataset_profiles SET cdr_stage = NULL
+            WHERE cdr_stage IS NOT NULL AND LOWER(COALESCE(dataset_kind, '')) NOT IN ({placeholders})
             """ + (' AND dataset_id = ?' if dataset_id is not None else ''),
             (*kinds, *scope_parameters),
         )
@@ -3769,6 +3802,10 @@ class Repository:
         completing = fields.get('status') == 'ready'
         if 'nr_mode' in fields:
             fields['nr_mode'] = normalize_nr_mode(fields['nr_mode'])
+        if 'cdr_stage' in fields:
+            fields['cdr_stage'] = normalize_cdr_stage(fields['cdr_stage'])
+        if 'combined_mode' in fields:
+            fields['combined_mode'] = normalize_combined_mode(fields['combined_mode']) or 'auto'
         assignments = ', '.join(f"{column} = ?" for column in fields)
         values = list(fields.values())
         assignments += ', updated_at = ?'
@@ -3780,8 +3817,8 @@ class Repository:
                 + (" AND status <> 'stopped'" if completing else ''),
                 (*values, dataset_id),
             )
-            if 'dataset_kind' in fields or 'nr_mode' in fields:
-                # Every CDR has an NR Mode; other dataset types never do.
+            if 'dataset_kind' in fields or 'nr_mode' in fields or 'cdr_stage' in fields:
+                # Every CDR has an NR Mode and a stage; other dataset types never do.
                 self._backfill_dataset_nr_modes(conn, dataset_id)
 
     def replace_dataset_source_columns(self, dataset_id: int, columns: Iterable[object]) -> None:
@@ -3814,7 +3851,7 @@ class Repository:
             return conn.execute(
                 """
                 SELECT d.id, d.file_name, d.stored_path, d.uploaded_by, d.uploaded_at,
-                       p.status, p.progress, p.processing_step, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.region_mapping_applied, p.region_mapping_dataset_id, p.cluster_mapping_applied, p.cluster_mapping_dataset_id, p.dataset_kind, p.nr_mode, p.row_count, p.column_count,
+                       p.status, p.progress, p.processing_step, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.region_mapping_applied, p.region_mapping_dataset_id, p.cluster_mapping_applied, p.cluster_mapping_dataset_id, p.dataset_kind, p.nr_mode, p.cdr_stage, p.combined_mode, p.row_count, p.column_count,
                        p.default_metric, p.default_aggregation, p.available_metrics_json,
                        p.available_aggregations_json, p.filter_options_json, p.summary_json,
                        p.kpis_json, p.last_error, p.processing_started_at, p.processed_at,
@@ -3832,7 +3869,7 @@ class Repository:
                 conn.execute(
                     """
                     SELECT d.id, d.file_name, d.stored_path, d.uploaded_by, d.uploaded_at,
-                           p.status, p.progress, p.processing_step, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.region_mapping_applied, p.region_mapping_dataset_id, p.cluster_mapping_applied, p.cluster_mapping_dataset_id, p.dataset_kind, p.nr_mode, p.row_count, p.column_count,
+                           p.status, p.progress, p.processing_step, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.region_mapping_applied, p.region_mapping_dataset_id, p.cluster_mapping_applied, p.cluster_mapping_dataset_id, p.dataset_kind, p.nr_mode, p.cdr_stage, p.combined_mode, p.row_count, p.column_count,
                            p.default_metric, p.default_aggregation, p.available_metrics_json,
                            p.available_aggregations_json, p.filter_options_json, p.summary_json,
                            p.kpis_json, p.last_error, p.processing_started_at, p.processed_at,

@@ -740,3 +740,231 @@ def test_operators_and_vendors_are_shown_and_filtered_with_their_mapped_labels(c
     assert calls and {call['operator'] for call in calls} == {'VF'}
     # A source spelling saved in the shared filters before selects its mapped label.
     assert query(client, filters={'operator': ['Vodafone UK']})['total'] == len(calls)
+
+
+def add_stage_cdr(tmp_path: Path, name: str, kind: str, rows: pd.DataFrame, stage: str) -> int:
+    dataset_id = add_cdr(tmp_path, name, kind, rows)
+    core.repository.update_dataset_profile(dataset_id, cdr_stage=stage)
+    return dataset_id
+
+
+def joined_voice(rows: list[tuple[str, int, str, str]], campaign: str = 'UK_Q3_SA_2026') -> pd.DataFrame:
+    """Voice calls as (JOIN_ID, Session_ID_A, result, start time)."""
+    return pd.DataFrame({
+        'JOIN_ID': [row[0] for row in rows], 'Session_ID_A': [row[1] for row in rows],
+        'Operator': ['Vodafone UK'] * len(rows), 'Campaign': [campaign] * len(rows),
+        'Session_Type': ['WhatsApp CALL'] * len(rows), 'Call_Status': [row[2] for row in rows],
+        'status': [row[2] for row in rows], 'Call_Start_Time': [row[3] for row in rows],
+        'Failure_Classification': ['RF Problems' if row[2] != 'Completed' else '' for row in rows],
+    })
+
+
+def test_join_id_identifies_calls_even_when_their_session_repeats(client, tmp_path):
+    enable_module()
+    # Two WhatsApp attempts share their A-side session but each has its own JOIN_ID.
+    add_cdr(tmp_path, 'UK_Voice_Q3.xlsx', 'voice', joined_voice([
+        ('0xAAA', 1043677052930, 'Failed', '2026-09-03 13:24:13'), ('0xBBB', 1043677052930, 'Failed', '2026-09-03 13:24:45'),
+        ('0xCCC', 1043677052931, 'Completed', '2026-09-03 14:00:00'),
+    ]))
+    login(client)
+    result = query(client)
+    assert result['total'] == 2
+    assert {call['join_id'] for call in result['calls']} == {'0xAAA', '0xBBB'}
+    assert nq.call_key_for('voice', {'operator': 'EE', 'campaign': 'Other'}, '1', join_id='0xAAA') == \
+        nq.call_key_for('voice', {'operator': 'Vodafone UK', 'campaign': 'UK_Q3_SA_2026'}, '2', join_id='0xaaa')
+
+
+def test_daily_follow_up_moves_to_the_final_cdr_and_versions_are_told(client, tmp_path):
+    enable_module()
+    daily = add_stage_cdr(tmp_path, 'UK_Voice_20260921.xlsx', 'voice', joined_voice([
+        ('0x1', 1, 'Failed', '2026-09-21 10:00:00'), ('0x2', 2, 'Dropped', '2026-09-21 11:00:00'),
+        ('0x3', 3, 'Failed', '2026-09-21 12:00:00'), ('0x4', 4, 'Completed', '2026-09-21 13:00:00'),
+    ]), 'daily')
+    login(client)
+    calls = {call['join_id']: call for call in query(client)['calls']}
+    assert set(calls) == {'0x1', '0x2', '0x3'}
+    key = calls['0x1']['call_key']
+    client.patch(f'/api/non-qualified-calls/calls/{key}', json={'changes': {'status': 'Under Investigation'}})
+    client.post(f'/api/non-qualified-calls/calls/{key}/comments', json={'body': 'Analysed on the Daily CDR.'})
+
+    # The Final CDR: 0x1 changed its failure, 0x2 is Completed, 0x3 dropped out and 0x5 is new.
+    final_rows = joined_voice([
+        ('0x1', 1, 'Dropped', '2026-09-21 10:00:00'), ('0x2', 2, 'Completed', '2026-09-21 11:00:00'),
+        ('0x4', 4, 'Completed', '2026-09-21 13:00:00'), ('0x5', 5, 'Failed', '2026-09-22 09:00:00'),
+    ])
+    final = add_stage_cdr(tmp_path, 'UK_Voice_Q3_Final.xlsx', 'voice', final_rows, 'final')
+    calls = {call['join_id']: call for call in query(client)['calls']}
+    # The analysis follows the call to the Final CDR, which is its shown version.
+    assert calls['0x1']['call_key'] == key and calls['0x1']['status'] == 'Under Investigation'
+    assert calls['0x1']['dataset_id'] == final and calls['0x1']['result'] == 'Dropped'
+    assert calls['0x1']['version_state'] == 'changed' and calls['0x1']['comment_count'] == 1
+    assert calls['0x3']['version_state'] == 'not_in_final'
+    assert '0x2' not in calls and calls['0x5']['version_state'] == ''
+    # Completed in the Final CDR: listed on request, or while only the Daily CDR is chosen.
+    assert [call['join_id'] for call in query(client, filters={'version': ['qualified']})['calls']] == ['0x2']
+    only_daily = {call['join_id']: call for call in query(client, filters={'datasets': [str(daily)]})['calls']}
+    assert set(only_daily) == {'0x1', '0x2', '0x3'}
+    assert only_daily['0x1']['version_state'] == 'newer' and only_daily['0x1']['status'] == 'Under Investigation'
+    assert only_daily['0x2']['version_state'] == 'qualified'
+    detail = client.get(f'/api/non-qualified-calls/calls/{key}').json()
+    assert [(version['stage'], version['latest']) for version in detail['versions']] == [('Final', True), ('Daily', False)]
+    # Deleting the Daily CDR keeps the analysis of the calls the Final CDR still has.
+    client.post(f'/datasets-analysis/delete/{daily}', follow_redirects=False)
+    calls = {call['join_id']: call for call in query(client)['calls']}
+    assert set(calls) == {'0x1', '0x5'} and calls['0x1']['status'] == 'Under Investigation'
+
+
+def test_speech_calls_are_listed_once_and_their_samples_keep_their_own_follow_up(client, tmp_path):
+    enable_module()
+    add_cdr(tmp_path, 'UK_Speech_Q3.xlsx', 'speech', pd.DataFrame({
+        'JOIN_ID': ['0xS1', '0xS1', '0xS1', '0xS2'], 'Session_ID_A': [10, 10, 10, 11], 'Test_ID': [1, 2, 3, 4],
+        'Operator': ['EE'] * 4, 'Campaign': ['UK_Q3_2026'] * 4, 'Test_Status': ['Failed', 'Completed', 'Failed', 'Completed'],
+        'status': ['Failed', 'Completed', 'Failed', 'Completed'],
+        'Test_Start_Time': ['2026-09-03 10:00:01', '2026-09-03 10:00:10', '2026-09-03 10:00:20', '2026-09-03 11:00:00'],
+    }))
+    login(client)
+    result = query(client)
+    assert result['total'] == 1 and result['calls'][0]['nq_samples'] == 2
+    call_key = result['calls'][0]['call_key']
+    detail = client.get(f'/api/non-qualified-calls/calls/{call_key}').json()
+    assert len(detail['samples']) == 2
+    sample_key = detail['samples'][1]['call_key']
+    changed = client.patch(f'/api/non-qualified-calls/calls/{sample_key}', json={'changes': {'status': 'Resolved'}})
+    assert changed.status_code == 200 and changed.json()['call']['parent_key'] == call_key
+    client.post(f'/api/non-qualified-calls/calls/{sample_key}/comments', json={'body': 'Sample with garbled audio.'})
+    assert query(client)['calls'][0]['status'] == 'Open'
+    detail = client.get(f'/api/non-qualified-calls/calls/{call_key}').json()
+    assert [sample['status'] for sample in detail['samples']] == ['Open', 'Resolved']
+    workbook = load_workbook(io.BytesIO(client.post('/api/non-qualified-calls/export', json={'filters': {}}).content))
+    assert 'Speech Samples' in workbook.sheetnames and len(list(workbook['Speech Samples'].values)) == 3
+
+
+def test_nq_rate_of_each_campaign_and_operator(client, tmp_path):
+    enable_module()
+    add_cdr(tmp_path, 'NetCheck_UK_CDR_Voice_2026_Q1.xlsx', 'voice', voice_rows())
+    add_cdr(tmp_path, 'NetCheck_UK_CDR_Data_2026_Q1.xlsx', 'data', data_rows())
+    login(client)
+    rates = client.post('/api/non-qualified-calls/rates', json={'filters': {}}).json()
+    voice = next(matrix for matrix in rates['matrices'] if matrix['service'] == 'voice')
+    cells = voice['cells']['UK_Q1_2026']
+    assert cells['EE'] == {'total': 2, 'nq': 1, 'rate': 50.0}
+    assert voice['total'] == {'total': 3, 'nq': 2, 'rate': 66.67}
+    assert [matrix['service'] for matrix in rates['matrices']] == ['voice', 'data', 'all']
+    only_data = client.post('/api/non-qualified-calls/rates', json={'filters': {'service': ['data']}}).json()
+    assert [matrix['service'] for matrix in only_data['matrices']] == ['data']
+    document = client.post('/api/non-qualified-calls/export/powerpoint', json={'filters': {}})
+    assert document.status_code == 200
+
+
+def test_analysis_fields_are_configured_filled_filtered_required_and_exported(client, tmp_path):
+    enable_module()
+    add_cdr(tmp_path, 'NetCheck_UK_CDR_Voice_2026_Q1.xlsx', 'voice', voice_rows())
+    login(client)
+    saved = client.put('/api/non-qualified-calls/fields', json={'fields': [
+        {'label': 'Final Category', 'type': 'list', 'in_table': True, 'in_summary': True, 'required_to_close': True,
+         'options': [{'name': 'Poor Coverage LTE', 'color': '#c8102e'}, {'name': 'E2E'}]},
+        {'label': 'Findings', 'type': 'long_text'}, {'label': 'Notice to VF3', 'type': 'yes_no'},
+        {'label': 'Planned Date', 'type': 'date'},
+    ]})
+    assert saved.status_code == 200, saved.text
+    keys = {field['label']: field['key'] for field in saved.json()['fields']}
+    key = query(client)['calls'][0]['call_key']
+    url = f'/api/non-qualified-calls/calls/{key}'
+    assert client.patch(url, json={'changes': {'fields': {keys['Final Category']: 'Unknown'}}}).status_code == 400
+    assert client.patch(url, json={'changes': {'fields': {keys['Planned Date']: '21/09/2026'}}}).status_code == 400
+    # A required field must be filled before closing.
+    refused = client.patch(url, json={'changes': {'status': 'Resolved'}})
+    assert refused.status_code == 400 and 'Final Category' in refused.json()['detail']
+    filled = client.patch(url, json={'changes': {'fields': {keys['Final Category']: 'poor coverage lte', keys['Findings']: 'Weak signal\nin the tunnel',
+                                                          keys['Notice to VF3']: 'yes', keys['Planned Date']: '2026-10-15'}}})
+    assert filled.status_code == 200, filled.text
+    call = filled.json()['call']
+    assert call['fields'][keys['Final Category']] == 'Poor Coverage LTE' and call['fields'][keys['Notice to VF3']] == 'Yes'
+    assert call['version'] == 1
+    history = filled.json()['history']
+    assert ('field:' + keys['Final Category'], 'Poor Coverage LTE') in {(entry['field'], entry['new_value']) for entry in history}
+    assert client.patch(url, json={'changes': {'status': 'Resolved'}}).status_code == 200
+    assert query(client, filters={'fields': {keys['Final Category']: ['Poor Coverage LTE']}})['total'] == 1
+    assert query(client, filters={'fields': {keys['Final Category']: [nq.UNASSIGNED]}})['total'] == 1
+    assert query(client, filters={'search': 'in the tunnel'})['total'] == 1
+    breakdown = next(item for item in query(client)['breakdowns'] if item['field'] == f"field:{keys['Final Category']}")
+    assert {item['value']: item['count'] for item in breakdown['items']} == {'Poor Coverage LTE': 1, '': 1}
+    sorted_calls = query(client, sort=f"field:{keys['Final Category']}", direction='desc')['calls']
+    assert sorted_calls[0]['call_key'] == key
+    # Renaming a value follows on every call; a value in use cannot be removed.
+    fields = client.get('/api/non-qualified-calls/state').json()['fields']
+    fields[0]['options'][0] = {'name': 'Poor Coverage 4G', 'previous': 'Poor Coverage LTE'}
+    assert client.put('/api/non-qualified-calls/fields', json={'fields': fields}).status_code == 200
+    assert client.get(url).json()['call']['fields'][keys['Final Category']] == 'Poor Coverage 4G'
+    fields[0]['options'] = [{'name': 'E2E'}]
+    assert client.put('/api/non-qualified-calls/fields', json={'fields': fields}).status_code == 400
+    workbook = load_workbook(io.BytesIO(client.post('/api/non-qualified-calls/export', json={'filters': {}}).content))
+    header = list(workbook['NQ Calls'].values)[0]
+    assert 'Final Category' in header and header.index('Final Category') > header.index('Root Cause')
+    # The analysis travels with the NQ Call Tracking package.
+    document = json.loads(core._nq_call_tracking_payload(core.active_workspace))
+    assert {field['label'] for field in document['fields']} >= {'Final Category', 'Findings'}
+    with core.repository.connection() as connection:
+        connection.execute(f'DELETE FROM {nq.NQ_FIELD_VALUES_TABLE}')
+        connection.execute(f'DELETE FROM {nq.NQ_FIELDS_TABLE}')
+    core._restore_workspace_nq_call_tracking(core.active_workspace, json.dumps(document).encode('utf-8'))
+    assert client.get(url).json()['call']['fields'][keys['Final Category']] == 'Poor Coverage 4G'
+
+
+def test_analysis_fields_are_proposed_from_a_user_input_workbook(client, tmp_path):
+    from openpyxl import Workbook
+
+    enable_module()
+    login(client)
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(['Failure Type', 'Auto_RCA_Category_A', 'Tunnel Failure', 'Findings', 'Planned Date', 'Netcheck Category'])
+    sheet.append(['CALL', 'Will Come from Python Script- Yuriy', 'Yes', 'User Define', 'User Define', 'Value to be Taken from CDR'])
+    sheet.append(['MRAB', None, 'No', None, None, None])
+    output = io.BytesIO()
+    workbook.save(output)
+    response = client.post('/api/non-qualified-calls/fields/from-excel',
+                           files={'workbook': ('User_Input_List.xlsx', output.getvalue(), 'application/vnd.ms-excel')})
+    assert response.status_code == 200, response.text
+    proposed = {field['label']: field for field in response.json()['fields']}
+    assert proposed['Failure Type']['type'] == 'list' and [item['name'] for item in proposed['Failure Type']['options']] == ['CALL', 'MRAB']
+    assert proposed['Tunnel Failure']['type'] == 'yes_no' and proposed['Findings']['type'] == 'long_text'
+    assert proposed['Planned Date']['type'] == 'date'
+    assert response.json()['skipped'] == ['Auto_RCA_Category_A', 'Netcheck Category']
+
+
+def test_cdr_columns_and_optional_columns_of_the_calls_table(client, tmp_path):
+    enable_module()
+    rows = voice_rows()
+    rows['Cellname_A'] = ['LEEDS_1', 'YORK_2', 'LEEDS_3']
+    add_cdr(tmp_path, 'NetCheck_UK_CDR_Voice_2026_Q1.xlsx', 'voice', rows)
+    login(client)
+    state = client.get('/api/non-qualified-calls/state').json()
+    assert 'Cellname_A' in state['cdr_columns'] and 'join_id' in state['optional_columns']
+    saved = client.put('/api/non-qualified-calls/table-columns', json={'builtin': ['join_id', 'region'], 'cdr': ['Cellname_A']})
+    assert saved.status_code == 200 and saved.json()['table_columns'] == {'builtin': ['join_id', 'region'], 'cdr': ['Cellname_A']}
+    calls = query(client, sort='cdr:Cellname_A', direction='asc')['calls']
+    assert [call['extra']['Cellname_A'] for call in calls] == ['LEEDS_3', 'YORK_2']
+    assert client.put('/api/non-qualified-calls/table-columns', json={'builtin': ['unknown'], 'cdr': []}).status_code == 400
+
+
+def test_follow_up_moves_once_to_the_join_id_call_keys(client, tmp_path):
+    enable_module()
+    rows = joined_voice([('0x9', 77, 'Failed', '2026-09-03 10:00:00')], campaign='UK_Q3_2026')
+    dataset_id = add_cdr(tmp_path, 'UK_Voice_Q3.xlsx', 'voice', rows)
+    login(client)
+    new_key = query(client)['calls'][0]['call_key']
+    # Recreate the index of the previous version: the call keyed by its session, with its follow-up.
+    old_key = nq.call_key_for('voice', {'operator': 'Vodafone UK', 'campaign': 'UK_Q3_2026'}, '77')
+    with core.repository.connection() as connection:
+        connection.execute(f'UPDATE {nq.NQ_CALLS_TABLE} SET call_key = ?', (old_key,))
+        connection.execute(f"UPDATE {nq.NQ_CALL_SOURCES_TABLE} SET revision = 'old'")
+        connection.execute(f"INSERT INTO {nq.NQ_CALL_TRACKING_TABLE} (call_key, status, version, updated_by, updated_at) "
+                           "VALUES (?, 'Under Investigation', 1, 'super', '2026-09-04T10:00:00')", (old_key,))
+        connection.execute(f"INSERT INTO {nq.NQ_CALL_COMMENTS_TABLE} (uid, call_key, body, created_by, created_at) "
+                           "VALUES ('c1', ?, 'Before the upgrade.', 'super', '2026-09-04T10:00:00')", (old_key,))
+    core.repository.set_workspace_state(nq.KEY_SCHEME_STATE_KEY, '')
+    call = query(client)['calls'][0]
+    assert call['call_key'] == new_key and call['status'] == 'Under Investigation' and call['comment_count'] == 1
+    assert core.repository.get_workspace_state(nq.KEY_SCHEME_STATE_KEY) == nq.KEY_SCHEME
+    assert dataset_id

@@ -8951,13 +8951,15 @@ if (queueNode) {
   const selectedDatasetField = document.querySelector('input[name="dataset_id"], select[name="dataset_id"]');
   const waitingPanel = document.querySelector('.queue-waiting-copy');
   const queueTypeFilter = document.querySelector('[data-queue-type-filter]');
-  const sortableQueueTable = queueNode.querySelector('[data-queue-sortable-table]');
-  const queueSortButtons = Array.from(sortableQueueTable?.querySelectorAll('[data-queue-sort-key]') || []);
-  const queueSortState = {key: 'id', direction: 'desc'};
+  // Each dataset card (Final CDRs, Daily CDRs, mappings…) is sorted on its own.
+  const sortableQueueTables = Array.from(queueNode.querySelectorAll('[data-queue-sortable-table]'));
+  const queueSortStates = new Map(sortableQueueTables.map((table) => [table, {key: 'id', direction: 'desc'}]));
   const formatQueueCount = (value) => Math.max(0, Number(value) || 0).toLocaleString('en-US', {maximumFractionDigits: 0});
-  const applyQueueSort = () => {
+  const applyQueueSort = (sortableQueueTable = sortableQueueTables[0]) => {
     const body = sortableQueueTable?.tBodies?.[0];
     if (!body) return;
+    const queueSortState = queueSortStates.get(sortableQueueTable);
+    const queueSortButtons = Array.from(sortableQueueTable.querySelectorAll('[data-queue-sort-key]'));
     const button = queueSortButtons.find((candidate) => candidate.dataset.queueSortKey === queueSortState.key);
     const type = button?.dataset.queueSortType || 'text';
     const direction = queueSortState.direction === 'desc' ? -1 : 1;
@@ -8985,13 +8987,16 @@ if (queueNode) {
     });
     sortableQueueTable.dispatchEvent(new CustomEvent('mobile-card-pagination:refresh', {bubbles: true}));
   };
-  queueSortButtons.forEach((button) => button.addEventListener('click', () => {
-    const key = button.dataset.queueSortKey || 'id';
-    queueSortState.direction = queueSortState.key === key && queueSortState.direction === 'asc' ? 'desc' : 'asc';
-    queueSortState.key = key;
-    applyQueueSort();
-  }));
-  applyQueueSort();
+  sortableQueueTables.forEach((table) => {
+    const state = queueSortStates.get(table);
+    table.querySelectorAll('[data-queue-sort-key]').forEach((button) => button.addEventListener('click', () => {
+      const key = button.dataset.queueSortKey || 'id';
+      state.direction = state.key === key && state.direction === 'asc' ? 'desc' : 'asc';
+      state.key = key;
+      applyQueueSort(table);
+    }));
+    applyQueueSort(table);
+  });
   const applyQueueTypeFilter = () => {
     const selectedKind = queueTypeFilter?.value || '';
     const combinedRows = Array.from(document.querySelectorAll('[data-combined-dataset-row]'));
@@ -9002,7 +9007,12 @@ if (queueNode) {
     document.querySelectorAll('[data-combined-dataset-structure-row]').forEach((row) => {
       row.hidden = hideCombinedStructure;
     });
-    queueNode.querySelector('.queue-table')?.dispatchEvent(new CustomEvent('mobile-card-pagination:refresh', {bubbles: true, detail: {reset: true}}));
+    // A type filter leaves only the cards that hold datasets of that type.
+    queueNode.querySelectorAll('[data-dataset-card]').forEach((card) => {
+      card.hidden = Boolean(selectedKind) && !card.querySelector('[data-dataset-row]:not([hidden])');
+      card.querySelectorAll('[data-dataset-card-empty]').forEach((row) => { row.hidden = Boolean(card.querySelector('[data-dataset-row]')); });
+    });
+    queueNode.querySelectorAll('.queue-table').forEach((table) => table.dispatchEvent(new CustomEvent('mobile-card-pagination:refresh', {bubbles: true, detail: {reset: true}})));
   };
   queueTypeFilter?.addEventListener('change', applyQueueTypeFilter);
   applyQueueTypeFilter();
@@ -9040,6 +9050,17 @@ if (queueNode) {
     if (document.activeElement !== select && !select.disabled) select.value = mode;
   };
 
+  // A Final or Daily CDR lives in the card of its stage.
+  const syncQueueCdrStageCell = (row, dataset) => {
+    const cell = row.querySelector('[data-queue-cdr-stage]');
+    const select = cell?.querySelector('[data-dataset-cdr-stage-select]');
+    if (!(select instanceof HTMLSelectElement) || !dataset.cdr_stage) return;
+    cell.dataset.queueSortValue = dataset.cdr_stage === 'daily' ? 'Daily' : 'Final';
+    if (document.activeElement !== select && !select.disabled) select.value = dataset.cdr_stage;
+    moveQueueRowToStage(row, dataset.cdr_stage);
+  };
+  const syncQueueCombinedCell = (row, dataset) => syncCombinedInclusion(row, dataset.combined_included, dataset.combined_reason, dataset.combined_mode);
+
   const updateQueueRow = (dataset) => {
     const row = document.querySelector(`[data-dataset-row][data-dataset-id="${dataset.id}"]`);
     if (!row) return;
@@ -9064,6 +9085,8 @@ if (queueNode) {
     if (kind) kind.textContent = dataset.input_kind_label || 'Other';
     if (kind) kind.dataset.queueSortValue = dataset.input_kind_label || 'Other';
     syncQueueNrModeCell(row.querySelector('[data-queue-nr-mode]'), dataset);
+    syncQueueCdrStageCell(row, dataset);
+    syncQueueCombinedCell(row, dataset);
     if (rows) { rows.textContent = formatQueueCount(dataset.row_count); rows.dataset.queueSortValue = String(dataset.row_count || 0); }
     if (columns) { columns.textContent = formatQueueCount(dataset.column_count); columns.dataset.queueSortValue = String(dataset.column_count || 0); }
     if (size) { size.textContent = dataset.size_mb_label || '0.00 MB'; size.dataset.queueSortValue = String(dataset.size_bytes || 0); }
@@ -9252,7 +9275,7 @@ if (queueNode) {
       document.dispatchEvent(new CustomEvent('workspace-dataset-status-updated', {detail: {datasets}}));
       const combinedTables = Array.isArray(payload.combined_tables) ? payload.combined_tables : [];
       combinedTables.forEach(updateCombinedQueueRow);
-      applyQueueSort();
+      sortableQueueTables.forEach((table) => applyQueueSort(table));
       applyQueueTypeFilter();
       if (refreshWorkspaceAfterCompletion) {
         if (!suppressReload) {
@@ -10047,6 +10070,77 @@ for (const [triggerSelector, optionsSelector] of [
   window.addEventListener('scroll', positionOptions, true);
 }
 
+// Whether the combined CDR tables include a CDR, and why (Final CDR, replaced by a Final CDR…).
+function syncCombinedInclusion(row, included, reason, mode) {
+  const cell = row?.querySelector('[data-queue-combined]');
+  if (!(cell instanceof HTMLElement) || included === undefined) return;
+  cell.dataset.queueSortValue = included ? '1' : '0';
+  const state = cell.querySelector('[data-combined-state]');
+  if (state) {
+    state.textContent = included ? 'Included' : 'Excluded';
+    state.className = `queue-combined-state ${included ? 'is-included' : 'is-excluded'}`;
+    state.title = reason || '';
+  }
+  const note = cell.querySelector('[data-combined-reason]');
+  if (note) note.textContent = reason || '';
+  const select = cell.querySelector('[data-dataset-combined-select]');
+  if (select instanceof HTMLSelectElement && mode && document.activeElement !== select && !select.disabled) select.value = mode;
+}
+
+// A CDR marked Final or Daily moves to the card of its stage.
+function moveQueueRowToStage(row, stage) {
+  const target = document.querySelector(`[data-dataset-card-body="${stage === 'daily' ? 'cdr-daily' : 'cdr-final'}"]`);
+  if (!(row instanceof HTMLTableRowElement) || !target || row.parentElement === target) return;
+  target.append(row);
+  document.querySelectorAll('[data-dataset-card]').forEach((card) => {
+    card.querySelectorAll('[data-dataset-card-empty]').forEach((empty) => { empty.hidden = Boolean(card.querySelector('[data-dataset-row]')); });
+    const count = card.querySelector('.dataset-card-count');
+    if (count) count.textContent = String(card.querySelectorAll('[data-dataset-row][data-dataset-id]').length);
+  });
+  if (stage === 'daily') target.closest('details')?.setAttribute('open', '');
+}
+
+function applyCombinedInclusion(combined) {
+  Object.entries(combined || {}).forEach(([datasetId, item]) => {
+    const row = document.querySelector(`[data-dataset-row][data-dataset-id="${datasetId}"]`);
+    syncCombinedInclusion(row, item.included, item.reason, item.mode);
+  });
+}
+
+// The CDR Type (Final or Daily) and the combined-table choice of a CDR, saved at once.
+document.addEventListener('change', async (event) => {
+  const select = event.target instanceof HTMLSelectElement
+    ? event.target.closest('[data-dataset-cdr-stage-select], [data-dataset-combined-select]') : null;
+  if (!(select instanceof HTMLSelectElement) || !select.dataset.updateUrl) return;
+  const isStage = select.matches('[data-dataset-cdr-stage-select]');
+  const previous = select.dataset.savedValue || [...select.options].find((option) => option.defaultSelected)?.value || '';
+  select.disabled = true;
+  try {
+    const response = await fetch(select.dataset.updateUrl, {
+      method: 'POST', credentials: 'same-origin',
+      headers: {'Content-Type': 'application/json', Accept: 'application/json'},
+      body: JSON.stringify(isStage ? {cdr_stage: select.value} : {combined_mode: select.value}),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.detail || 'The CDR could not be updated.');
+    select.dataset.savedValue = select.value;
+    applyCombinedInclusion(payload.combined);
+    if (isStage) {
+      const row = select.closest('[data-dataset-row]');
+      const cell = select.closest('[data-queue-cdr-stage]');
+      if (cell instanceof HTMLElement) cell.dataset.queueSortValue = select.value === 'daily' ? 'Daily' : 'Final';
+      moveQueueRowToStage(row, select.value);
+    }
+  } catch (error) {
+    if (previous) select.value = previous;
+    showInfoDialog(error instanceof Error ? error.message : 'The CDR could not be updated.', {
+      title: isStage ? 'CDR Type update failed' : 'Combined tables update failed', tone: 'error',
+    });
+  } finally {
+    select.disabled = false;
+  }
+});
+
 document.addEventListener('change', async (event) => {
   const select = event.target instanceof HTMLSelectElement ? event.target.closest('[data-dataset-nr-mode-select]') : null;
   if (!(select instanceof HTMLSelectElement) || !select.dataset.updateUrl) return;
@@ -10062,6 +10156,8 @@ document.addEventListener('change', async (event) => {
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.detail || 'The NR Mode could not be updated.');
     if (cell instanceof HTMLElement) cell.dataset.queueSortValue = String(payload.nr_mode || select.value);
+    // A Final CDR replaces the Daily CDRs of its NR Mode only.
+    applyCombinedInclusion(payload.combined);
   } catch (error) {
     if (previous) select.value = previous;
     showInfoDialog(error instanceof Error ? error.message : 'The NR Mode could not be updated.', {

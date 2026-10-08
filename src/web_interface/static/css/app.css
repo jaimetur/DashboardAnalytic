@@ -4165,3 +4165,64 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
 .campaign-map-actions { display: flex; justify-content: flex-end; gap: .6rem; }
 .campaign-maps-panel .collapsible-panel-body > .form-note:last-of-type { margin-top: 1.2rem; }
 @media (max-width: 900px) { .campaign-map-settings { grid-template-columns: minmax(0, 1fr); } }
+
+/* Workspace datasets in cards: Final and Daily CDRs, the combined tables, then the reference data. */
+.dataset-cards { display: grid; gap: 1.1rem; margin: 0 1.45rem 1.45rem; }
+.dataset-card { display: grid; gap: 0.7rem; min-width: 0; max-width: 100%; overflow: hidden; padding: 1rem 1.1rem 1.1rem; border: 1px solid var(--line); border-radius: calc(var(--radius) - 4px); background: var(--panel-strong); box-shadow: 0 10px 24px rgba(16, 49, 74, 0.06); }
+.dataset-card-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 0.35rem 1.2rem; }
+.dataset-card-head .eyebrow { margin: 0 0 0.2rem; }
+.dataset-card-head h3 { display: flex; align-items: center; gap: 0.55rem; margin: 0; font-size: 1.12rem; }
+.dataset-card-head .form-note { flex: 1 1 22rem; max-width: 48rem; margin: 0; text-align: right; }
+.dataset-card-count { display: inline-grid; place-items: center; min-width: 1.6rem; height: 1.6rem; padding: 0 0.45rem; border-radius: 999px; background: var(--brand); color: #fff; font-size: 0.8rem; font-weight: 850; }
+.dataset-card-final { border-top: 5px solid #1d4f8f; }
+.dataset-card-daily { border-top: 5px solid #d08a1c; }
+.dataset-card .queue-table-wrap { max-width: 100%; overflow-x: auto; }
+.dataset-card-daily { display: block; }
+.dataset-card-daily > .queue-table-wrap { margin-top: 0.7rem; }
+.dataset-card-daily > summary { cursor: pointer; list-style: none; }
+.dataset-card-daily > summary::-webkit-details-marker { display: none; }
+.dataset-card-daily > summary h3::after { content: '▾'; color: var(--muted); font-size: 0.9rem; transition: transform 0.15s ease; }
+.dataset-card-daily:not([open]) > summary h3::after { transform: rotate(-90deg); }
+.dataset-card-combined { padding-top: 0.6rem; border-top: 5px solid #8fa5b1; }
+.dataset-card-vendor-mapping { border-top: 5px solid #6941a4; }
+.dataset-card-geospatial { border-top: 5px solid #2e8b57; }
+.dataset-card-other { border-top: 5px solid #7b8790; }
+.dataset-card-final .dataset-card-count { background: #1d4f8f; }
+.dataset-card-daily .dataset-card-count { background: #d08a1c; }
+.dataset-card-vendor-mapping .dataset-card-count { background: #6941a4; }
+.dataset-card-geospatial .dataset-card-count { background: #2e8b57; }
+.dataset-card-other .dataset-card-count { background: #7b8790; }
+.dataset-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 34rem), 1fr)); gap: 1.1rem; }
+/* CDR cards add the CDR Type and Combined columns after NR Mode. */
+.dataset-card-cdr .queue-table { min-width: 1480px; }
+.dataset-card-cdr .queue-table th:nth-child(5), .dataset-card-cdr .queue-table td:nth-child(5) { width: 112px; }
+.queue-cdr-stage-select { min-width: 5.6rem; }
+.dataset-card-cdr .queue-table th:nth-child(6), .dataset-card-cdr .queue-table td:nth-child(6) { width: 190px; }
+.dataset-card-cdr .queue-table th:nth-child(9), .dataset-card-cdr .queue-table td:nth-child(9) { width: auto; }
+.dataset-card-cdr .queue-table th:nth-child(10), .dataset-card-cdr .queue-table td:nth-child(10) { width: auto; }
+.dataset-card-cdr .queue-table th:nth-child(11), .dataset-card-cdr .queue-table td:nth-child(11) { width: 170px; }
+.dataset-card-cdr .queue-table th:nth-child(12), .dataset-card-cdr .queue-table td:nth-child(12),
+.dataset-card-cdr .queue-table th:nth-child(13), .dataset-card-cdr .queue-table td:nth-child(13) { width: 116px; }
+.queue-cdr-stage-select:has(option[value="final"]:checked) { border-color: #8db4e2; background-color: #dcebff; color: #1f4f7f; }
+.queue-cdr-stage-select:has(option[value="daily"]:checked) { border-color: #e8c27a; background-color: #fff1d6; color: #8a5300; }
+.queue-combined-cell { display: grid; gap: 0.3rem; justify-items: start; }
+.queue-combined-state { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.12rem 0.55rem; border-radius: 999px; font-size: 0.74rem; font-weight: 850; }
+.queue-combined-state.is-included { background: #e2f4e8; color: #1d6b3f; }
+.queue-combined-state.is-included::before { content: '✓'; }
+.queue-combined-state.is-excluded { background: #f0f1f3; color: #5b6377; }
+.queue-combined-state.is-excluded::before { content: '–'; }
+.queue-combined-select { min-width: 6rem; padding: 0.25rem 0.45rem; font-size: 0.8rem; font-weight: 700; }
+.queue-combined-reason { color: var(--muted); font-size: 0.74rem; line-height: 1.25; overflow-wrap: anywhere; }
+/* Reference data cards are compact: dataset, rows, status with progress, last update and actions. */
+.dataset-card-compact .queue-table { min-width: 0; width: 100%; }
+.dataset-card-compact .queue-table th:nth-child(2), .dataset-card-compact .queue-table td:nth-child(2) { width: auto; min-width: 12rem; max-width: none; }
+.dataset-card-compact .queue-table th:nth-child(4), .dataset-card-compact .queue-table td:nth-child(4) { width: 11rem; }
+.dataset-card-compact .queue-table th:nth-child(5), .dataset-card-compact .queue-table td:nth-child(5) { width: 7rem; }
+.dataset-card-compact .queue-table th:nth-child(6), .dataset-card-compact .queue-table td:nth-child(6) { width: auto; }
+.dataset-card-compact .queue-dataset-kind { color: var(--muted); font-size: 0.8rem; font-weight: 700; }
+.dataset-card-compact .queue-progress-cell .queue-status-pill { justify-self: start; margin-bottom: 0.25rem; }
+.queue-card > .dataset-cards + .datasets-materialization-status { margin-top: 0; }
+@media (max-width: 640px) {
+  .dataset-cards { margin: 0 1rem 1rem; }
+  .dataset-card-head .form-note { text-align: left; }
+}

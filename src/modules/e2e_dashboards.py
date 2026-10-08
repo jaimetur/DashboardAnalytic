@@ -1424,9 +1424,11 @@ def install_dashboard_routes(core):
 
     def ordered_ready_datasets(task_repository, nr_mode):
         """Return ready CDRs of one NR Mode per kind, newest first."""
+        # The CDRs of the combined tables: Final CDRs, and Daily CDRs until a Final CDR replaces them.
+        included = core.combined_dataset_ids(task_repository)
         ready = [
             core.serialize_dataset_row(row) for row in task_repository.list_datasets()
-            if row['status'] == 'ready' and row['dataset_kind'] in KINDS
+            if row['status'] == 'ready' and row['dataset_kind'] in KINDS and int(row['id']) in included
         ]
 
         def recency(row):
@@ -2498,11 +2500,13 @@ def install_dashboard_routes(core):
             or str(definition.date_to) != date_bounds['max']
         ):
             return False
+        included = core.combined_dataset_ids(task_repository)
         for kind, selected in selected_by_kind.items():
             selected_ids = {int(row['id']) for row in selected}
             ready_ids = {
                 int(row['id']) for row in task_repository.list_datasets()
                 if row['status'] == 'ready' and str(row['dataset_kind'] or '').casefold() == kind
+                and int(row['id']) in included
             }
             if selected_ids != ready_ids:
                 return False
@@ -2713,9 +2717,11 @@ def install_dashboard_routes(core):
             if {identity(column) for column in requested}.issubset(current):
                 continue
             rows_changed = columns_changed = False
+            included = core.combined_dataset_ids(task_repository, kind)
             all_ready_sources = [
                 row for row in task_repository.list_datasets()
                 if row['status'] == 'ready' and str(row['dataset_kind'] or '').casefold() == kind
+                and int(row['id']) in included
             ]
             for row in all_ready_sources:
                 # A newly requested Dashboard-specific column belongs to the

@@ -7198,7 +7198,8 @@ def test_workspace_lists_combined_cdr_with_preview_and_kind_filter_metadata(clie
     assert 'CDR-Data (combined)' in workspace_response.text
     assert 'data-dataset-row data-dataset-kind="data"' in workspace_response.text
     assert workspace_response.text.count('<th') >= 22
-    assert workspace_response.text.count('data-queue-sort-key="columns"') == 1
+    # The Final and Daily CDR cards have a Columns header each; the reference data cards are compact.
+    assert workspace_response.text.count('data-queue-sort-key="columns"') == 2
     assert workspace_response.text.count('>Columns</th>') == 1
     assert 'data-combined-dataset-structure-row' in workspace_response.text
     dataset_columns = int(app_module.repository.get_dataset(1)['column_count'])
@@ -10026,7 +10027,8 @@ def test_workspace_dataset_table_defaults_to_descending_ids_and_has_sortable_col
     for key in ('dataset', 'kind', 'rows', 'columns', 'size', 'status', 'progress', 'uploaded', 'updated'):
         assert f'data-queue-sort-key="{key}"' in table
     script = client.get('/static/js/app.js').text
-    assert "const queueSortState = {key: 'id', direction: 'desc'};" in script
+    # Each dataset card sorts on its own, newest IDs first.
+    assert "new Map(sortableQueueTables.map((table) => [table, {key: 'id', direction: 'desc'}]))" in script
     assert 'combinedBoundary' in script
 
 

@@ -26,7 +26,7 @@ FILTER_LABELS = (
     ('root_cause', 'Root Cause'), ('nr_mode', 'NR Mode'), ('call_type', 'Call Type'), ('period', 'Period'),
     ('age', 'Age of Open Calls'), ('root_pair', 'Root Domain · Cause'),
     ('effective_domain', 'Root Domain (with suggestions)'), ('effective_cause', 'Root Domain · Cause (with suggestions)'),
-    ('node', 'eNB / gNB'), ('state', 'Follow-up'), ('rca_state', 'Root Cause'),
+    ('node', 'eNB / gNB'), ('state', 'Follow-up'), ('rca_state', 'Root Cause'), ('version', 'CDR Version'),
 )
 STATE_LABELS = {
     'closed': 'Closed', 'attended': 'Attended', 'not_attended': 'Not attended', 'with_team': 'With team',
@@ -37,7 +37,14 @@ GRANULARITY_LABELS = {'week': 'Week', 'month': 'Month', 'quarter': 'Quarter', 'y
 RASPBERRY = RGBColor(0xB0, 0x23, 0x4F)
 
 
-def selection_lines(filters: dict[str, Any], dataset_names: dict[str, str], granularity: str) -> list[str]:
+VERSION_LABELS = {
+    'current': 'Latest version', 'changed': 'Changed between CDRs', 'newer': 'Newer version in another CDR',
+    'not_in_final': 'Not in the Final CDR', 'qualified': 'Completed in a newer CDR',
+}
+
+
+def selection_lines(filters: dict[str, Any], dataset_names: dict[str, str], granularity: str,
+                    field_labels: dict[str, str] | None = None) -> list[str]:
     """Readable filters of the report; empty filters include every value."""
     lines = []
     for key, label in FILTER_LABELS:
@@ -49,8 +56,13 @@ def selection_lines(filters: dict[str, Any], dataset_names: dict[str, str], gran
         # "RF||Coverage" and "month:2026-07" read "RF · Coverage" and "2026-07".
         values = [value.partition(':')[2] if key == 'period' else value.strip('|').replace('||', ' · ') for value in values]
         values = [STATE_LABELS.get(value, value) if key in {'state', 'rca_state'} else value for value in values]
+        values = [VERSION_LABELS.get(value, value) if key == 'version' else value for value in values]
         if values:
             lines.append(f'{label}: {", ".join(values)}')
+    for key, chosen in (filters.get('fields') or {}).items():
+        values = ['Empty' if value == '__unassigned__' else str(value) for value in chosen or [] if str(value).strip()]
+        if values:
+            lines.append(f'{(field_labels or {}).get(key, key)}: {", ".join(values)}')
     lines.extend(text for key, text in FLAG_LABELS.items() if filters.get(key))
     if filters.get('search'):
         lines.append(f"Search: {filters['search']}")
@@ -229,7 +241,7 @@ def report_panels(summary: dict[str, Any], breakdowns: list[dict[str, Any]], pro
                   options: dict[str, Any]) -> list[tuple[str, Any]]:
     """The Executive Summary and Progress View drawn like the page, as (title, PNG) panels."""
     from src.modules.non_qualified_calls_visuals import (
-        executive_summary_panels, progress_view_panels, root_cause_panels, table_panels,
+        executive_summary_panels, progress_view_panels, rate_panels, root_cause_panels, table_panels,
     )
 
     label = GRANULARITY_LABELS.get(progress['granularity'], 'Month')
@@ -240,7 +252,8 @@ def report_panels(summary: dict[str, Any], breakdowns: list[dict[str, Any]], pro
         analysis = [*root_cause_panels(root_causes),
                     *(panel for title, columns, rows in root_cause_tables(root_causes)
                       for panel in table_panels(title, columns, rows))]
-    return [*executive_summary_panels(summary, breakdowns, options), *progress_view_panels(progress, options, label),
+    rates = rate_panels(options['rates']) if options.get('rates') else []
+    return [*executive_summary_panels(summary, breakdowns, options), *rates, *progress_view_panels(progress, options, label),
             *tables, *analysis]
 
 

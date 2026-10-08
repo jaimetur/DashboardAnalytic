@@ -15,6 +15,7 @@ import pandas as pd
 
 from src.modules.column_names import campaign_sort_key, column_identity, resolve_column_name
 from src.modules.scoring_vendors import scoring_vendor_name, scoring_vendor_operators
+from src.modules.cdr_stage import combined_dataset_ids
 from src.modules.nr_mode import NR_MODES, normalize_nr_mode
 from src.modules.repository import Repository, local_now_iso
 from src.modules.scoring_config import (
@@ -392,10 +393,12 @@ def validate_complete_scoring_cdr_selection(
 def select_all_complete_cdrs(repository: Repository, nr_mode: str) -> list[int]:
     """Every ready CDR of the NR Mode whose campaigns all have Data, Voice and Speech CDRs."""
     mode = normalize_nr_mode(nr_mode)
+    included = combined_dataset_ids(repository)
     candidates = [
         row for row in repository.list_datasets()
         if str(row['status'] or '').casefold() == 'ready'
         and str(row['dataset_kind'] or '').strip().casefold() in CDR_DATASET_KINDS
+        and int(row['id']) in included
         and normalize_nr_mode(row['nr_mode']) == mode
         and repository.dataset_rows_table_exists(int(row['id']))
         and repository.dataset_row_count(int(row['id'])) > 0
@@ -428,10 +431,12 @@ def select_latest_companion_cdrs(repository: Repository, dataset_id: int) -> lis
         str(campaign).strip() for campaign in anchor.get('campaigns', []) if str(campaign).strip()
     }
 
+    included = combined_dataset_ids(repository) | {anchor_id}
     candidates = [
         row for row in repository.list_datasets()
         if str(row['status'] or '').casefold() == 'ready'
         and str(row['dataset_kind'] or '').strip().casefold() in CDR_DATASET_KINDS
+        and int(row['id']) in included
         and normalize_nr_mode(row['nr_mode']) == anchor_mode
         and repository.dataset_rows_table_exists(int(row['id']))
         and repository.dataset_row_count(int(row['id'])) > 0

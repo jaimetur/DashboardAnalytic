@@ -43,7 +43,7 @@ Workspace accepts `CSV`, `XLS`, `XLSX` and `XLSM` for tabular datasets, and `Geo
 1. Open the target workspace.
 2. Select one or more files in **Data Ingestion**.
 3. Review the proposed type for every file.
-4. For CDRs, review the proposed **NR Mode** (NSA or SA) and optionally choose ready VFUK/3UK mappings.
+4. For CDRs, review the proposed **NR Mode** (NSA or SA) and **CDR Type** (Final or Daily) and optionally choose ready VFUK/3UK mappings.
 5. Confirm the batch.
 6. Follow every item in **Queue and Status**.
 7. Continue only when the status is **Processed**.
@@ -71,6 +71,26 @@ Every CDR (Data, Voice or Speech) belongs to one NR Mode, **NSA** or **SA**; oth
 
 The **NR Mode** column follows Input Type in the Datasets table. Its selector corrects the NR Mode of an existing CDR without reprocessing it, and the change is recorded in App Logs. CDRs created before this column existed receive the filename proposal automatically. E2E Dashboards only use CDRs of their own NR Mode.
 
+### CDR Type: Final and Daily
+
+Every CDR is a **Final** CDR, delivered after its measurement campaign, or a **Daily** CDR, received while the campaign runs, either incremental (the calls of one day) or cumulative (every call so far). During upload the CDR Type is proposed from the filename and can be changed per file before processing starts:
+
+- `Final` in the name → Final, even when it also has a date.
+- `Daily`, `Diario`, `Day`, `Incremental` or `Cumulative` in the name → Daily.
+- A date range (two different dates, for example `20250903-20251011`) → Final.
+- A single date that is not the export date at the start of the name (`UK_Voice_CDR_20260921.xlsx`) → Daily; `20260921_UK_Voice.xlsx` → Final.
+- Anything else → Final. The CDRs uploaded before Daily CDRs existed are Final CDRs.
+
+The **CDR Type** selector of the Final and Daily CDR tables changes it without reprocessing the CDR, moves the CDR to the other table and is recorded in App Logs.
+
+The **Combined** column tells whether the combined CDR tables include the CDR, and why. With **Auto** (the default):
+
+- Final CDRs are included.
+- A Daily CDR is included until an included Final CDR of the same type and NR Mode covers one of its campaigns: it reads *Replaced by the Final CDR …*.
+- When a newer Daily CDR of the same type contains every call (`JOIN_ID`) of an older one, the older one is excluded: a cumulative Daily CDR replaces the previous ones, while incremental Daily CDRs are all included.
+
+**Include** and **Exclude** choose by hand. The combined tables follow every change at once — a new CDR, a CDR Type, NR Mode or Combined choice, or a deleted CDR (deleting a Final CDR brings back the Daily CDRs it replaced) — so E2E Dashboards, Network Insights, Scoring & GAP Analysis and Reporting can use the Daily CDRs while the campaign runs and the Final CDRs when they arrive. Scoring & GAP Analysis, E2E Dashboards and the CDRs chosen automatically by Reporting Jobs offer the CDRs that the combined tables include. CDR Analysis opens any CDR, and [Non-Qualified Calls](non-qualified-calls.md#daily-and-final-cdrs) reads every CDR and lists each call once.
+
 ### Background Processing
 
 Ready CDRs queue default Operator scoring when compatible companion CDRs are available. Open [Scoring & GAP Analysis](scoring-gap-analysis.md) to select one CDR of each type, filter cached Region/City/Operator/Vendor/Campaign values (including Main Cities), choose aggregations, consult saved results and export CSV/PPT files.
@@ -94,11 +114,22 @@ The global floating task cards remain visible while workspace work continues. Th
 - Source headers are preserved. Field resolution ignores letter case and separators such as spaces, underscores and hyphens; `Subscriber` and legacy `Suscriber` identify the same field.
 - A genuinely repeated header within one source worksheet receives `_Duplicate_2`, `_Duplicate_3`, and so on. Empty source headers receive a positional `Unnamed_N` name. Technical SQLite collision suffixes such as `__2` are not retained.
 
+### Datasets cards
+
+The **Datasets** panel groups the datasets in cards, each with its own count and sortable table:
+
+- **Final CDRs** and **Daily CDRs** (which folds), at full width, with the CDR Type and Combined columns.
+- **Combined CDR tables**, the generated read-only query sources.
+- **Vendor Mapping & Cell Inventory** (the Vodafone and Three multivendor mappings) and **Geographic Datasets** (Region and Cluster polygons), side by side with compact tables: dataset and type, rows, status with progress, last update and actions.
+- **Other Datasets** (Smart Orchestrator logs and other supported datasets), when there are any.
+
+The **Dataset Type** filter and the bulk actions above the cards apply to every card; a filter hides the cards without datasets of that type.
+
 ### Combined Table Recreation
 
-The **Datasets** table shows comma-grouped Rows and Columns for each individual and combined dataset, and separates generated, read-only query sources from uploaded datasets with a dedicated heading, description and repeated column header. Combined tables cannot be imported separately: CDR processing creates them from all ready individual CDRs of the same type.
+The Datasets tables show comma-grouped Rows and Columns for each individual and combined dataset. Combined tables cannot be imported separately: CDR processing creates them from the ready individual CDRs of the same type that they include (see [CDR Type](#cdr-type-final-and-daily)).
 
-The circular **Recreate combined table** action checks every ready individual CDR of that type in the background before rebuilding the combined table. If an individual table uses an older normalization version, the job migrates it from its original source file first; one recreation each for Data, Voice and Speech therefore upgrades both their individual and combined tables.
+The circular **Recreate combined table** action checks every ready individual CDR of that type that the table includes in the background before rebuilding the combined table. If an individual table uses an older normalization version, the job migrates it from its original source file first; one recreation each for Data, Voice and Speech therefore upgrades both their individual and combined tables.
 
 Its live task detail identifies the individual table being migrated. Opening a combined preview performs the same compatibility check, and its Loading Dataset panel explains when all individual tables of that CDR type may need migration.
 
@@ -181,7 +212,7 @@ The Datasets panel also lists `CDR-Data (combined)`, `CDR-Voice (combined)` and 
 Recreate runs in the background and reports progress through Materialization status. It rebuilds from every ready source dataset, recovers an empty or inconsistent individual row store from its uploaded source file when available, and verifies that each dataset's contribution and final row count match.
 
 > [!NOTE]
-> **Read-only role.** `user-viewer` accounts see the workspace datasets but cannot upload, delete, reprocess, stop, map or clear them, change their NR Mode or recreate combined tables; these controls are hidden and the server rejects them.
+> **Read-only role.** `user-viewer` accounts see the workspace datasets but cannot upload, delete, reprocess, stop, map or clear them, change their NR Mode, CDR Type or Combined choice or recreate combined tables; these controls are hidden and the server rejects them.
 
 ### Vendor Mapping
 

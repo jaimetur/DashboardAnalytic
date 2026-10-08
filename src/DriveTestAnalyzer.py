@@ -81,6 +81,10 @@ from src.modules.email_delivery import DEFAULT_MAX_ATTACHMENTS_MB, EMAIL_SECURIT
 from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column, add_vfuk_gcid_column, apply_operator_mappings, ensure_fixed_cdr_fields, get_dataset_source_columns, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.geospatial import assign_clusters, assign_regions, validate_cluster_mapping, validate_region_mapping
 from src.modules.nr_mode import NR_MODES, dataset_nr_mode, infer_nr_mode, normalize_nr_mode
+from src.modules.cdr_stage import (
+    CDR_STAGE_LABELS, CDR_STAGES, COMBINED_MODE_LABELS, COMBINED_MODES, combined_dataset_ids, combined_inclusion,
+    dataset_cdr_stage, infer_cdr_stage, normalize_cdr_stage, normalize_combined_mode,
+)
 from src.modules.scoring_vendors import normalize_scoring_vendor_result, scoring_vendor_name, scoring_vendor_names, scoring_vendor_operators
 from src.modules.scoring_jobs import (
     create_scoring_job,
@@ -3408,6 +3412,9 @@ def serialize_dataset_row(row) -> dict[str, Any]:
     item['input_kind_label'] = INPUT_KIND_LABELS.get(item.get('dataset_kind') or 'generic', 'Other')
     item['nr_mode'] = dataset_nr_mode(item.get('dataset_kind'), item.get('nr_mode'), item.get('file_name'))
     item['nr_mode_label'] = item['nr_mode'] or '—'
+    item['cdr_stage'] = dataset_cdr_stage(item.get('dataset_kind'), item.get('cdr_stage'), item.get('file_name'))
+    item['cdr_stage_label'] = CDR_STAGE_LABELS.get(item['cdr_stage'] or '', '—')
+    item['combined_mode'] = normalize_combined_mode(item.get('combined_mode')) or 'auto'
     item['progress'] = int(item.get('progress') or 0)
     started_at = parse_dataset_timestamp(item.get('processing_started_at'))
     finished_at = parse_dataset_timestamp(item.get('processed_at'))
@@ -3467,6 +3474,19 @@ def add_workspace_region_capabilities(datasets: list[dict[str, Any]]) -> None:
         # Mapping again overwrites the previous tool-applied Region mapping.
         dataset['can_map_regions'] = has_region_mappings and dataset.get('is_ready') and dataset.get('dataset_kind') in CDR_DATASET_KINDS
         dataset['can_clear_regions'] = dataset.get('is_ready') and dataset.get('dataset_kind') in CDR_DATASET_KINDS and mapped
+
+
+def add_combined_inclusion(datasets: list[dict[str, Any]], task_repository: Repository | None = None) -> None:
+    """Whether the combined CDR tables include each CDR, and why, for the Workspace tables."""
+    try:
+        inclusion = combined_inclusion(task_repository or repository)
+    except Exception:  # noqa: BLE001 - the Workspace still lists its datasets.
+        inclusion = {}
+    for dataset in datasets:
+        item = inclusion.get(int(dataset['id']))
+        dataset['combined_included'] = bool(item and item['included'])
+        dataset['combined_reason'] = item['reason'] if item else (
+            'Included when the CDR is ready' if dataset.get('dataset_kind') in CDR_DATASET_KINDS else '')
 
 
 def add_workspace_mapping_capabilities(datasets: list[dict[str, Any]]) -> None:
@@ -4473,6 +4493,9 @@ def rebuild_dataset_artifacts(
         processed_at=now_iso(),
         last_error=None,
     )
+    if dataset_kind in CDR_DATASET_KINDS and update_combined_reporting:
+        # A Daily CDR replaced by a Final CDR, or a Final CDR that replaces Daily CDRs, changes the combined tables.
+        try_sync_combined_cdr_inclusion(task_repository)
     return {
         'df': df,
         'summary': summary,
@@ -4635,6 +4658,7 @@ def persist_mapped_cdr_frame(
             )
     if dataset_kind in CDR_DATASET_KINDS:
         cache_cdr_catalogue(dataset_id, frame, task_repository)
+        try_sync_combined_cdr_inclusion(task_repository)
     summary = summarise_dataset(frame)
     available_metrics = derive_available_metrics(frame, dataset_kind)
     analysis = build_analysis(frame, {'aggregation': 'all', 'extra_filters': {}}, '')
@@ -5229,6 +5253,8 @@ def render_template(request: Request, template_name: str, context: dict[str, Any
         'app_version': __version__,
         'app_release_date': __release_date__,
         'nr_modes': NR_MODES,
+        'cdr_stage_options': [(stage, CDR_STAGE_LABELS[stage]) for stage in CDR_STAGES],
+        'combined_mode_options': [(mode, COMBINED_MODE_LABELS[mode]) for mode in COMBINED_MODES],
         'asset_version': asset_version,
         'static_path': lambda asset_path: str(request.app.url_path_for('static', path=asset_path)),
         'active_workspace': active_workspace,
@@ -5424,6 +5450,59 @@ def build_dataset_view_state(
     return datasets, ready_datasets, input_kind_options, selected_dataset
 
 
+def sync_combined_cdr_inclusion(task_repository: Repository | None = None) -> dict[str, int]:
+    """Keep each combined CDR table equal to the CDRs it includes (see ``cdr_stage.combined_inclusion``).
+
+    The rows of excluded, replaced or deleted CDRs leave the table and the
+    included CDRs that are missing are copied from their individual tables.
+    """
+    task_repository = task_repository or repository
+    inclusion = combined_inclusion(task_repository)
+    dimensions = None
+    totals = {'added': 0, 'removed': 0}
+    for kind in ('data', 'voice', 'speech'):
+        table_name = task_repository.reporting_rows_table_name(kind)
+        with task_repository.connection() as connection:
+            exists = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table_name,)).fetchone()
+            present = {int(row[0]) for row in connection.execute(
+                f'SELECT DISTINCT dataset_id FROM {task_repository._quote_identifier(table_name)}')} if exists else set()
+        processing = {
+            int(row['id']) for row in task_repository.list_datasets()
+            if str(row['status'] or '') in {'queued', 'processing'}
+        }
+        included = {dataset_id for dataset_id, item in inclusion.items() if item['kind'] == kind and item['included']}
+        # Rows of a CDR still being processed stay until it is ready.
+        stale = sorted(present - included - processing)
+        missing = sorted(included - present)
+        if stale:
+            with workspace_write_lock(task_repository.db_path), task_repository.connection() as connection:
+                connection.execute(
+                    f"DELETE FROM {task_repository._quote_identifier(table_name)} "
+                    f"WHERE dataset_id IN ({', '.join('?' for _ in stale)})", stale,
+                )
+        for dataset_id in missing:
+            if dimensions is None:
+                dimensions = load_repository_calculated_dimensions(task_repository)
+            with workspace_write_lock(task_repository.db_path):
+                task_repository.copy_dataset_rows_to_reporting(
+                    dataset_id, kind, combined_reporting_required_columns(dimensions, kind, task_repository),
+                )
+        if stale or missing:
+            mark_combined_reporting_updated(task_repository, kind, rows_changed=True)
+        totals['added'] += len(missing)
+        totals['removed'] += len(stale)
+    return totals
+
+
+def try_sync_combined_cdr_inclusion(task_repository: Repository | None = None) -> None:
+    """Sync the combined CDR tables after a change; a failure is logged and retried by the next change."""
+    try:
+        sync_combined_cdr_inclusion(task_repository)
+    except Exception as exc:  # noqa: BLE001 - the CDR change itself already succeeded.
+        print(f'Combined CDR tables could not be synced: {exc}', file=sys.stderr, flush=True)
+
+
 def workspace_combined_tables(
     task_repository: Repository | None = None, *, workspace_id: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -5454,6 +5533,7 @@ def workspace_combined_tables(
                 active_recreations[kind] = dict(job)
     combined: list[dict[str, Any]] = []
     all_datasets = task_repository.list_datasets()
+    inclusion = combined_inclusion(task_repository)
     pending_counts: dict[str, str] = {}
     with task_repository.connection() as connection:
         for kind in ('data', 'voice', 'speech'):
@@ -5489,7 +5569,8 @@ def workspace_combined_tables(
             if not updated_at:
                 dataset_dates = [str(dataset['updated_at'] or dataset['uploaded_at'] or '') for dataset in kind_datasets]
                 updated_at = max(dataset_dates, default='')
-            source_datasets = [dataset for dataset in kind_datasets if dataset['status'] == 'ready']
+            included_ids = {dataset_id for dataset_id, item in inclusion.items() if item['kind'] == kind and item['included']}
+            source_datasets = [dataset for dataset in kind_datasets if dataset['status'] == 'ready' and int(dataset['id']) in included_ids]
             expected_row_count = sum(int(dataset['row_count'] or 0) for dataset in source_datasets)
             recreation_job = active_recreations.get(kind)
             is_recalculating = recreation_job is not None
@@ -5514,6 +5595,9 @@ def workspace_combined_tables(
                 ),
                 'needs_recalculation': needs_recalculation,
                 'updated_at_label': format_local_timestamp(updated_at) if updated_at else '—',
+                'cdr_count': len(source_datasets),
+                'final_count': sum(1 for dataset in source_datasets if inclusion[int(dataset['id'])]['stage'] == 'final'),
+                'daily_count': sum(1 for dataset in source_datasets if inclusion[int(dataset['id'])]['stage'] == 'daily'),
             })
     for state_key, value in pending_counts.items():
         task_repository.set_workspace_state(state_key, value)
@@ -5526,9 +5610,11 @@ def combined_cdr_integrity(kind: str, task_repository: Repository | None = None)
     normalized_kind = str(kind or '').casefold()
     if normalized_kind not in CDR_DATASET_KINDS:
         raise ValueError('Unknown combined CDR table.')
+    included_ids = combined_dataset_ids(task_repository, normalized_kind)
     source_datasets = [
         dataset for dataset in task_repository.list_datasets()
         if dataset['status'] == 'ready' and str(dataset['dataset_kind'] or '').casefold() == normalized_kind
+        and int(dataset['id']) in included_ids
     ]
     expected_row_count = sum(int(dataset['row_count'] or 0) for dataset in source_datasets)
     row_count = task_repository.reporting_row_count(normalized_kind)
@@ -5554,9 +5640,11 @@ def recreate_combined_cdr_table(
     dimensions = load_repository_calculated_dimensions(task_repository)
     required_columns = combined_reporting_required_columns(dimensions, kind, task_repository)
     all_datasets = list(task_repository.list_datasets())
+    included_ids = combined_dataset_ids(task_repository, kind)
     datasets = [
         dataset for dataset in all_datasets
         if dataset['status'] == 'ready' and str(dataset['dataset_kind'] or '').casefold() == kind
+        and int(dataset['id']) in included_ids
     ]
     ready_mappings = {
         mapping_kind: next(
@@ -10504,6 +10592,7 @@ def workspace(
     region_mapping_datasets = [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'mapping_region']
     cluster_mapping_datasets = [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'clusters']
     add_workspace_mapping_capabilities(datasets)
+    add_combined_inclusion(datasets)
     mappable_cdr_datasets = [dataset for dataset in datasets if dataset.get('can_map_mappings')]
     clearable_cdr_datasets = [dataset for dataset in datasets if dataset.get('can_clear_mappings')]
     mappable_region_cdr_datasets = []
@@ -16193,6 +16282,7 @@ def legacy_reporting_redirect(request: Request, legacy_path: str = '') -> Redire
 def dataset_status(user: SessionUser = Depends(current_user)) -> dict[str, Any]:
     datasets = [serialize_dataset_row(row) for row in repository.list_datasets()]
     add_workspace_mapping_capabilities(datasets)
+    add_combined_inclusion(datasets)
     combined_tables: list[dict[str, Any]] = []
     if active_workspace:
         require_workspace_access(user, active_workspace.id)
@@ -16212,6 +16302,7 @@ async def upload_dataset(
     region_mapping_dataset_ids: Annotated[list[str] | None, Form()] = None,
     cluster_mapping_dataset_ids: Annotated[list[str] | None, Form()] = None,
     nr_modes: Annotated[list[str] | None, Form()] = None,
+    cdr_stages: Annotated[list[str] | None, Form()] = None,
     user: SessionUser = Depends(workspace_editor_user),
 ) -> Response:
     if not dataset_files:
@@ -16269,6 +16360,14 @@ async def upload_dataset(
         if str(value or '').strip() and normalize_nr_mode(value) is None:
             raise HTTPException(status_code=422, detail='Unsupported NR Mode selection.')
         selected_nr_modes.append(normalize_nr_mode(value))
+    # One CDR Type (Final or Daily) per uploaded file, suggested from the file name when blank.
+    if cdr_stages and len(cdr_stages) != len(dataset_files):
+        raise HTTPException(status_code=422, detail='Choose one CDR Type for every uploaded file.')
+    selected_cdr_stages: list[str | None] = []
+    for value in cdr_stages or [None] * len(dataset_files):
+        if str(value or '').strip() and normalize_cdr_stage(value) is None:
+            raise HTTPException(status_code=422, detail='Unsupported CDR Type selection.')
+        selected_cdr_stages.append(normalize_cdr_stage(value))
 
     def parse_mapping_selection(values: list[str] | None, label: str) -> list[str | None]:
         if not values:
@@ -16333,6 +16432,10 @@ async def upload_dataset(
                 dataset_id, dataset_kind=selected_kind,
                 nr_mode=(
                     selected_nr_modes[index] or infer_nr_mode(dataset_file.filename or destination.name)
+                    if selected_kind in CDR_DATASET_KINDS else None
+                ),
+                cdr_stage=(
+                    selected_cdr_stages[index] or infer_cdr_stage(dataset_file.filename or destination.name)
                     if selected_kind in CDR_DATASET_KINDS else None
                 ),
             )
@@ -16734,7 +16837,75 @@ def update_dataset_nr_mode(
             'dataset_id': dataset_id, 'file': dataset['file_name'],
             'previous_nr_mode': previous, 'nr_mode': nr_mode,
         }))
-    return JSONResponse({'dataset_id': dataset_id, 'nr_mode': nr_mode})
+        # A Final CDR replaces the Daily CDRs of its NR Mode only.
+        try_sync_combined_cdr_inclusion(repository)
+    return JSONResponse({'dataset_id': dataset_id, 'nr_mode': nr_mode, 'combined': combined_inclusion_payload()})
+
+
+def combined_inclusion_payload(task_repository: Repository | None = None) -> dict[str, dict[str, Any]]:
+    """Whether the combined tables include each ready CDR, with the reason, for the Workspace page."""
+    return {
+        str(dataset_id): {'included': bool(item['included']), 'reason': item['reason'], 'mode': item['mode'], 'stage': item['stage']}
+        for dataset_id, item in combined_inclusion(task_repository or repository).items()
+    }
+
+
+class DatasetCdrStageUpdate(BaseModel):
+    cdr_stage: str
+
+
+@app.post('/workspace/datasets/{dataset_id}/cdr-stage')
+def update_dataset_cdr_stage(
+    dataset_id: int, payload: DatasetCdrStageUpdate, user: SessionUser = Depends(workspace_editor_user),
+) -> JSONResponse:
+    """Mark one CDR as Final or Daily without reprocessing it."""
+    if active_workspace:
+        require_workspace_access(user, active_workspace.id)
+    dataset = repository.get_dataset(dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail='Dataset not found')
+    if str(dataset['dataset_kind'] or '').casefold() not in CDR_DATASET_KINDS:
+        raise HTTPException(status_code=400, detail='The CDR Type is only available for CDR datasets.')
+    stage = normalize_cdr_stage(payload.cdr_stage)
+    if stage is None:
+        raise HTTPException(status_code=422, detail='Choose Final or Daily.')
+    previous = dataset_cdr_stage(dataset['dataset_kind'], dataset['cdr_stage'], dataset['file_name'])
+    if previous != stage:
+        repository.update_dataset_profile(dataset_id, cdr_stage=stage)
+        repository.add_log(user.username, 'update_dataset_cdr_stage', json.dumps({
+            'dataset_id': dataset_id, 'file': dataset['file_name'], 'previous_cdr_stage': previous, 'cdr_stage': stage,
+        }))
+        try_sync_combined_cdr_inclusion(repository)
+    return JSONResponse({'dataset_id': dataset_id, 'cdr_stage': stage, 'combined': combined_inclusion_payload()})
+
+
+class DatasetCombinedModeUpdate(BaseModel):
+    combined_mode: str
+
+
+@app.post('/workspace/datasets/{dataset_id}/combined-mode')
+def update_dataset_combined_mode(
+    dataset_id: int, payload: DatasetCombinedModeUpdate, user: SessionUser = Depends(workspace_editor_user),
+) -> JSONResponse:
+    """Choose whether the combined CDR tables include one CDR: automatically, always or never."""
+    if active_workspace:
+        require_workspace_access(user, active_workspace.id)
+    dataset = repository.get_dataset(dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail='Dataset not found')
+    if str(dataset['dataset_kind'] or '').casefold() not in CDR_DATASET_KINDS:
+        raise HTTPException(status_code=400, detail='Only CDR datasets are part of the combined CDR tables.')
+    mode = normalize_combined_mode(payload.combined_mode)
+    if mode is None:
+        raise HTTPException(status_code=422, detail='Choose Auto, Include or Exclude.')
+    previous = normalize_combined_mode(dataset['combined_mode']) or 'auto'
+    if previous != mode:
+        repository.update_dataset_profile(dataset_id, combined_mode=mode)
+        repository.add_log(user.username, 'update_dataset_combined_mode', json.dumps({
+            'dataset_id': dataset_id, 'file': dataset['file_name'], 'previous_combined_mode': previous, 'combined_mode': mode,
+        }))
+        try_sync_combined_cdr_inclusion(repository)
+    return JSONResponse({'dataset_id': dataset_id, 'combined_mode': mode, 'combined': combined_inclusion_payload()})
 
 
 @app.post('/dashboard/retry/{dataset_id}', include_in_schema=False)
@@ -17235,6 +17406,7 @@ def delete_workspace_datasets(
 
     repository.remove_orphaned_dataset_row_tables()
     repository.remove_orphaned_reporting_rows()
+    try_sync_combined_cdr_inclusion(repository)
     invalidate_workspace_size_cache()
     resolved_paths = {str(path.resolve()) for path in deleted_paths}
     for cache in (ANALYSIS_CACHE, DATAFRAME_CACHE):
@@ -17272,6 +17444,9 @@ def delete_dataset(dataset_id: int, return_to: str = Form(''), user: SessionUser
     # imposing a full-table cleanup on every Admin page load.
     repository.remove_orphaned_dataset_row_tables()
     repository.remove_orphaned_reporting_rows()
+    if str(dataset_payload.get('dataset_kind') or '').casefold() in CDR_DATASET_KINDS:
+        # Deleting a Final CDR brings back the Daily CDRs it replaced.
+        try_sync_combined_cdr_inclusion(repository)
     invalidate_workspace_size_cache()
     stale_keys = [key for key in ANALYSIS_CACHE if str(dataset_path.resolve()) in key]
     for key in stale_keys:
