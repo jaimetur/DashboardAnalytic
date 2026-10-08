@@ -4,9 +4,11 @@ For every KPI of every scoring group, the tests that make the KPI lose points ge
 weight: the tests that miss the KPI condition (a failed call, POLQA below 1.6, a
 transfer below 2 Mbit/s...) weigh one each, and for averages, medians and P90 each test
 weighs what it misses the KPI's High threshold by. The share of each area (City,
-Region or Cluster of the CDR rows, and the ITL3 area (the UK NUTS3 level) containing the
-test) is the sum of its tests' weights over the total, so the points an operator loses in
-a KPI can be placed on a map with any scoring's points.
+Region or Cluster of the CDR rows, and the map area containing the test: the ITL3 area (the UK
+NUTS3 level) or the area of the workspace's Map Areas of its country, see ``map_areas``) is the
+sum of its tests' weights over the total, so the points an operator loses in a KPI can be placed
+on a map with any scoring's points. The points each City (or route) loses in each map area are
+kept too (``City|Area``), to show the losses of a City alone on the map.
 
 The ITL3 boundaries are the ONS "International Territorial Level 3 (January 2025)
 Boundaries UK BUC" (Open Government Licence v3.0) in ``assets/geo``. Workspaces with a
@@ -31,7 +33,11 @@ COORDINATE_SOURCES = {
     'speech': (('Recording_Latitude', 'Recording_Longitude'), ('Playing_Latitude', 'Playing_Longitude')),
 }
 BOUNDARY_FIELDS = {'ITL3': ('uk-itl3-2025.geojson', 'ITL325NM')}
-MAP_FIELDS = (*AREA_FIELDS, *BOUNDARY_FIELDS)
+# The map areas of every country (the ITL3 areas in the UK) and the losses of each City in each one.
+AREA = 'Area'
+CITY_AREA = 'City|Area'
+CITY_AREA_SEPARATOR = '\x1f'
+MAP_FIELDS = (*AREA_FIELDS, AREA)
 BOUNDARY_DIRECTORY = PROJECT_ROOT / 'assets' / 'geo'
 NOT_SPECIFIED = 'Not specified'
 AREA_COLUMN = '__area_{}'
@@ -49,8 +55,11 @@ def source_columns(kind: str) -> list[str]:
     return columns
 
 
-def attach_location(frame: pd.DataFrame, source: pd.DataFrame, kind: str, resolve) -> None:
-    """Copy the area and coordinate columns of the source rows into the scoring frame."""
+def attach_location(frame: pd.DataFrame, source: pd.DataFrame, kind: str, resolve, areas=None) -> None:
+    """Copy the area and coordinate columns of the source rows into the scoring frame.
+
+    ``areas`` (a ``map_areas.AreaIndex``) names the map area of each test; without it, the UK's.
+    """
     for field, aliases in AREA_FIELDS.items():
         column = next((resolved for alias in aliases if (resolved := resolve(source.columns, alias)) is not None), None)
         if column is not None:
@@ -60,8 +69,10 @@ def attach_location(frame: pd.DataFrame, source: pd.DataFrame, kind: str, resolv
         if latitude is not None and longitude is not None:
             frame[LATITUDE] = pd.to_numeric(source[latitude], errors='coerce')
             frame[LONGITUDE] = pd.to_numeric(source[longitude], errors='coerce')
-            for field in BOUNDARY_FIELDS:
-                frame[AREA_COLUMN.format(field)] = boundary_names(field, frame[LATITUDE], frame[LONGITUDE])
+            if areas is None:
+                from src.modules.map_areas import area_index
+                areas = area_index(None)
+            frame[AREA_COLUMN.format(AREA)] = areas.names_of(frame[LATITUDE], frame[LONGITUDE])
             break
     level_2 = resolve(source.columns, 'G_Level_2')
     # Drive City tests are places; other tests (Connecting Roads) follow a route.
@@ -142,12 +153,27 @@ def mapping_boundaries(path: Path, field: str, tolerance: float = .002) -> dict[
 
 
 def map_boundaries(result: dict[str, Any] | None, field: str) -> dict[str, list[list[list[float]]]]:
-    """Polygons of a points-lost field: the bundled layer or the workspace mapping saved with the job."""
-    if field in BOUNDARY_FIELDS:
-        return bundled_boundaries(field)
+    """Polygons of a points-lost field: the map areas or the workspace mapping saved with the job.
+
+    The map areas are the bundled ITL3 areas when the tests are in the UK and the areas of the other
+    countries saved with the job.
+    """
     document = result.get('points_loss') if isinstance(result, dict) else None
+    if field == AREA:
+        areas = (document or {}).get('map_areas') if isinstance(document, dict) else None
+        if not isinstance(areas, dict):
+            return {}
+        uk = bundled_boundaries('ITL3') if any(item.get('code') == 'GBR' for item in areas.get('countries') or []) else {}
+        return {**uk, **(areas.get('boundaries') or {})}
     saved = (document or {}).get('boundaries') if isinstance(document, dict) else None
     return dict((saved or {}).get(field) or {})
+
+
+def map_background(result: dict[str, Any] | None, field: str) -> list[list[list[float]]]:
+    """The outlines of the countries whose areas are saved with the job, drawn in grey under them."""
+    document = result.get('points_loss') if isinstance(result, dict) else None
+    areas = (document or {}).get('map_areas') if isinstance(document, dict) and field == AREA else None
+    return list(areas.get('background') or []) if isinstance(areas, dict) else []
 
 
 def _numeric(frame: pd.DataFrame, field: str) -> pd.Series:
@@ -207,6 +233,15 @@ def area_shares(frame: pd.DataFrame, weights: pd.Series) -> dict[str, dict[str, 
             continue
         by_area = weights.groupby(frame[column].fillna(NOT_SPECIFIED).replace('', NOT_SPECIFIED)).sum()
         shares[field] = {str(area): round(float(value) / total, 6) for area, value in by_area.items() if value > 0}
+    city, area = AREA_COLUMN.format('City'), AREA_COLUMN.format(AREA)
+    if city in frame and area in frame:
+        # Where each City (or route) loses: the share of each City in each map area.
+        lost = weights[weights > 0]
+        if not lost.empty:
+            pairs = (frame.loc[lost.index, city].fillna(NOT_SPECIFIED).astype(str) + CITY_AREA_SEPARATOR
+                     + frame.loc[lost.index, area].fillna(NOT_SPECIFIED).astype(str))
+            by_pair = lost.groupby(pairs).sum()
+            shares[CITY_AREA] = {str(pair): round(float(value) / total, 6) for pair, value in by_pair.items() if value > 0}
     return shares
 
 
@@ -217,6 +252,9 @@ class AreaGeometry:
         self.areas: dict[str, dict[str, dict[str, Any]]] = {field: {} for field in AREA_FIELDS}
         self.background: list[list[float]] = []
         self._seen = 0
+        # The map areas with tests, and a sample of the tests outside every map area.
+        self.used_areas: set[str] = set()
+        self.unplaced: list[tuple[float, float]] = []
 
     def add(self, frame: pd.DataFrame) -> None:
         if LATITUDE not in frame or LONGITUDE not in frame:
@@ -225,6 +263,14 @@ class AreaGeometry:
                         & ~((frame[LATITUDE] == 0) & (frame[LONGITUDE] == 0))]
         if located.empty:
             return
+        map_area = AREA_COLUMN.format(AREA)
+        if map_area in located:
+            self.used_areas.update(str(name) for name in located[map_area].dropna().unique())
+            outside = located[located[map_area].isna()]
+            room = 5000 - len(self.unplaced)
+            if room > 0 and not outside.empty:
+                sample = outside[[LATITUDE, LONGITUDE]].iloc[::max(1, len(outside) // room)].head(room)
+                self.unplaced.extend((float(lat), float(lon)) for lat, lon in sample.itertuples(index=False))
         step = max(1, len(located) // 1500)
         for latitude, longitude in located[[LATITUDE, LONGITUDE]].iloc[::step].itertuples(index=False):
             self._seen += 1
@@ -236,12 +282,12 @@ class AreaGeometry:
                 continue
             for area, group in located.groupby(located[column].fillna(NOT_SPECIFIED)):
                 entry = self.areas[field].setdefault(str(area), {
-                    'latitude_sum': 0.0, 'longitude_sum': 0.0, 'tests': 0, 'places': 0, 'points': [], 'itl3': {}})
-                # The ITL3 areas of the tests of each City or route, to show it alone on the ITL3 map.
-                itl3 = AREA_COLUMN.format('ITL3')
-                if field == 'City' and itl3 in group:
-                    for name, count in group[itl3].dropna().value_counts().items():
-                        entry['itl3'][str(name)] = entry['itl3'].get(str(name), 0) + int(count)
+                    'latitude_sum': 0.0, 'longitude_sum': 0.0, 'tests': 0, 'places': 0, 'points': [], 'area_tests': {}})
+                # The map areas of the tests of each City or route, to show it alone on the map.
+                map_area = AREA_COLUMN.format(AREA)
+                if field == 'City' and map_area in group:
+                    for name, count in group[map_area].dropna().value_counts().items():
+                        entry['area_tests'][str(name)] = entry['area_tests'].get(str(name), 0) + int(count)
                 entry['latitude_sum'] += float(group[LATITUDE].sum())
                 entry['longitude_sum'] += float(group[LONGITUDE].sum())
                 entry['tests'] += len(group)
@@ -251,6 +297,16 @@ class AreaGeometry:
                     sample = group[[LATITUDE, LONGITUDE]].iloc[::max(1, len(group) // room)].head(room)
                     entry['points'].extend([round(float(lat), 4), round(float(lon), 4)]
                                            for lat, lon in sample.itertuples(index=False))
+
+    def map_areas(self, index) -> dict[str, Any]:
+        """The map areas of the tests (see ``map_areas.AreaIndex.document``) and the countries without them."""
+        from src.modules.map_areas import country_codes
+
+        unplaced = pd.DataFrame(self.unplaced, columns=['latitude', 'longitude'])
+        codes = country_codes(unplaced['latitude'], unplaced['longitude']).dropna() if not unplaced.empty else pd.Series(dtype='string')
+        mapped = {code for code, _label, _areas in index.layers}
+        missing = [str(code) for code, count in codes.value_counts().items() if count >= 20 and code not in mapped]
+        return index.document(self.used_areas, missing)
 
     def document(self) -> dict[str, Any]:
         areas = {}
@@ -265,47 +321,34 @@ class AreaGeometry:
                     # A City value of Connecting Roads tests is a route between cities.
                     'kind': 'place' if entry['places'] * 2 >= entry['tests'] else 'route',
                     'points': entry['points'] if entry['places'] * 2 < entry['tests'] else [],
-                    **({'itl3': entry['itl3']} if entry['itl3'] else {}),
+                    **({'area_tests': entry['area_tests']} if entry['area_tests'] else {}),
                 }
                 for area, entry in entries.items()
             }
         return {'areas': areas, 'background': self.background}
 
 
-def row_area_links(areas: list[dict[str, Any]], field: str = 'ITL3') -> dict[str, list[str]]:
-    """The boundary areas of each City or route, the one with most of its tests first.
+def row_area_links(areas: list[dict[str, Any]]) -> dict[str, list[str]]:
+    """The map areas of each City or route, the one with most of its tests first.
 
-    A City or route belongs to the areas holding its tests (``itl3``, at least 2% of them);
-    results calculated before that was kept use the areas of its location or route points.
+    A City or route belongs to the areas holding at least 2% of its tests (``area_tests``).
     """
-    from shapely import points as shapely_points
-
-    index = _boundary_index(field) if field in BOUNDARY_FIELDS else None
     links: dict[str, list[str]] = {}
     for area in areas:
-        if area.get('name') == NOT_SPECIFIED:
-            continue
-        counts = dict(area.get('itl3') or {}) if field == 'ITL3' else {}
-        if not counts and index is not None:
-            spots = ([(lon, lat) for lat, lon in area['route']] if area.get('kind') == 'route' and area.get('route')
-                     else [(area['longitude'], area['latitude'])] if area.get('latitude') is not None else [])
-            if spots:
-                _geometries, names, tree = index
-                _rows, polygons = tree.query(shapely_points(spots), predicate='intersects')
-                for polygon in polygons:
-                    counts[names[polygon]] = counts.get(names[polygon], 0) + 1
+        counts = area.get('area_tests') or {}
         total = sum(counts.values())
-        if total:
-            ordered = sorted(counts, key=lambda name: -counts[name])
-            links[area['name']] = [name for name in ordered if counts[name] / total >= .02] or ordered[:1]
+        if area.get('name') == NOT_SPECIFIED or not total:
+            continue
+        ordered = sorted(counts, key=lambda name: -counts[name])
+        links[area['name']] = [name for name in ordered if counts[name] / total >= .02] or ordered[:1]
     return links
 
 
-def row_area_values(areas: list[dict[str, Any]], field: str = 'ITL3') -> dict[str, float]:
-    """Each boundary area with the points of the City or route that loses most in it."""
+def row_area_values(areas: list[dict[str, Any]]) -> dict[str, float]:
+    """Each map area with the points of the City or route that loses most in it."""
     points = {area['name']: float(area['points']) for area in areas}
     values: dict[str, float] = {}
-    for row, names in row_area_links(areas, field).items():
+    for row, names in row_area_links(areas).items():
         for name in names:
             values[name] = max(values.get(name, 0.0), points[row])
     return values
@@ -352,14 +395,22 @@ def points_loss_maps(result: dict[str, Any], keys: list[str]) -> list[dict[str, 
     maps = []
     for (identity, environment), fields in series.items():
         context = dict(zip(keys, identity))
+        # The points each City loses in each map area, kept on the City map.
+        city_areas: dict[str, dict[str, float]] = {}
+        for pair, points in (fields.get(CITY_AREA) or {}).items():
+            city, _separator, area = pair.partition(CITY_AREA_SEPARATOR)
+            city_areas.setdefault(city, {})[area] = points
         for field, areas in fields.items():
-            if not areas:
+            if not areas or field == CITY_AREA:
                 continue
             item = {'context': context, 'field': field, 'areas': areas, 'total': sum(areas.values()),
                     'environment': environment}
+            if field == 'City' and city_areas:
+                item['area_losses'] = city_areas
             if environment is None:
                 split = by_environment.get(identity, {}).get(field, {})
                 item['environments'] = {area: [name for name, _points in sorted(
                     split.get(area, {}).items(), key=lambda pair: -pair[1]) if name] for area in areas}
             maps.append(item)
     return maps
+

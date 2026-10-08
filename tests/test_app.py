@@ -2641,6 +2641,10 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
         'exported-dashboard': {'name': 'Exported Dashboard'},
     }))
     app_module.repository.set_main_cities(['London', 'Leeds'])
+    from src.modules import map_areas
+    map_areas.save_layer(app_module.repository, country_code='ESP', level='ADM3', level_label='municipality', origin='Imported',
+                         source='test', license_text='CC BY 4.0', attribution='test', username='super',
+                         boundaries={'Madrid': [[[-3.9, 40.3], [-3.5, 40.3], [-3.5, 40.6], [-3.9, 40.3]]]})
     full_response = client.get('/admin/import-export/export?export_target=full-environment')
     assert full_response.status_code == 200
     with zipfile.ZipFile(BytesIO(full_response.content)) as archive:
@@ -2662,6 +2666,9 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
         assert exported_mappings['operator_mappings'][0]['color'] == '#E15759'
         assert exported_mappings['vendor_mappings'][0]['canonical'] == 'Ericsson'
         assert exported_mappings['vendor_mappings'][0]['color'] == '#2E8B57'
+        # Map Areas travel with the Mappings & Reference Data, with their polygons.
+        assert [layer['country_code'] for layer in exported_mappings['map_areas']['layers']] == ['ESP']
+        assert list(exported_mappings['map_areas']['layers'][0]['boundaries']) == ['Madrid']
         exported_main_cities = json.loads(archive.read('workspaces/Default/main-cities/main-cities.json'))
         assert exported_main_cities['cities'] == ['London', 'Leeds']
         assert 'config/workspace-registry.db' not in archive.namelist()
@@ -2673,6 +2680,7 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     )
     assert full_import_response.status_code == 303
     assert len(app_module.workspace_registry.list()) == 1
+    assert [layer['country_code'] for layer in map_areas.list_layers(app_module.repository)] == ['ESP']
 
 
 def test_full_workspace_export_can_leave_out_the_input_folder(client, tmp_path) -> None:

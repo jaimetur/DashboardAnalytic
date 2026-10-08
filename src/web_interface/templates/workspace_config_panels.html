@@ -265,6 +265,44 @@
     </div>
   </details>
 
+  <details id="map-areas" class="panel collapsible-panel operator-mappings-panel map-areas-panel" open data-panel-state-key="workspace-config:map-areas">
+    <summary class="collapsible-summary">
+      <div><p class="eyebrow">Workspace normalization</p><h2>Map Areas</h2></div>
+      <span class="collapse-chip">Collapse</span>
+    </summary>
+    <div class="collapsible-panel-body">
+      {% if active_workspace %}
+      <p class="lede">The administrative areas the Points Lost Map of Scoring &amp; GAP Analysis colours in each country of the tests of <strong>"{{ active_workspace.name }}"</strong>, such as municipalities in Spain or counties in the USA. The United Kingdom always uses the bundled ITL3 areas. Calculate the scoring again after adding or changing the areas of a country.</p>
+      <div class="campaign-maps map-areas" data-map-areas>
+        <section>
+          <h3>Countries of the tests</h3>
+          <p class="form-note">Found from a sample of the coordinates of the ready CDRs. Choose the level of the areas of each country (the suggested one is the finest that allows commercial use) and download them from <a href="https://www.geoboundaries.org" target="_blank" rel="noopener">geoBoundaries</a>; check the licence of each level before using it.</p>
+          <div class="table-wrap" data-map-area-countries><p class="form-note">Finding the countries of the tests…</p></div>
+          <button type="button" class="secondary-button" data-map-area-detect>Find the countries again</button>
+        </section>
+        <section>
+          <h3>Saved Map Areas</h3>
+          <div class="table-wrap" data-map-area-layers></div>
+        </section>
+        <section>
+          <h3>Import areas from a file</h3>
+          <p class="form-note">A GeoJSON, or a ZIP holding one Shapefile, with one polygon per area. Importing the areas of a country replaces the saved ones.</p>
+          <form class="map-area-import" data-map-area-import>
+            <label>File<input type="file" name="file" accept=".geojson,.json,.zip" required></label>
+            <label>Country (ISO code)<input type="text" name="country_code" maxlength="3" placeholder="ESP" required></label>
+            <label>Area name<input type="text" name="level_label" maxlength="40" placeholder="municipality" value="area"></label>
+            <label>Name attribute<input type="text" name="name_field" maxlength="60" placeholder="Detected when empty"></label>
+            <button type="submit">Import areas</button>
+          </form>
+        </section>
+        <p class="campaign-map-message" data-map-area-message role="status" aria-live="polite"></p>
+      </div>
+      <p class="form-note">Country borders: Natural Earth (public domain). The Map Areas travel with the Mappings &amp; Reference Data in Import / Export, transfers and backups.</p>
+      <script defer src="{{ static_path('js/map_areas.js') }}?v={{ asset_version('js/map_areas.js') }}"></script>
+      {% else %}<p class="form-note">Open a workspace before managing Map Areas.</p>{% endif %}
+    </div>
+  </details>
+
   <details id="spectrum-holdings" class="panel collapsible-panel operator-mappings-panel spectrum-holdings-panel" open data-panel-state-key="workspace-config:spectrum-holdings">
     <summary class="collapsible-summary">
       <div><p class="eyebrow">Network Insights</p><h2>Spectrum Holdings</h2></div>

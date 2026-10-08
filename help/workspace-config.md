@@ -1,6 +1,6 @@
 # Workspace Config
 
-Workspace Config is a dedicated page for settings owned by the active workspace: Report Templates Management, Main Cities, Mappings & Reference Data (Operator, Vendor and Campaign Maps and Spectrum Holdings) and Scoring & GAP Analysis Setup. These settings remain workspace-scoped and are included in the applicable import, export, transfer, backup and restore workflows.
+Workspace Config is a dedicated page for settings owned by the active workspace: Report Templates Management, Main Cities, Mappings & Reference Data (Operator, Vendor and Campaign Maps, Map Areas and Spectrum Holdings) and Scoring & GAP Analysis Setup. These settings remain workspace-scoped and are included in the applicable import, export, transfer, backup and restore workflows.
 
 > [!IMPORTANT]
 > **Workspace settings.** Every edit on this page belongs to the active workspace. Application Config controls shared runtime settings.
@@ -20,6 +20,7 @@ Open **Config → Workspace Config** from the main navigation at `/workspace-con
 | Report Template reference | [Open section](#report-template-reference) |
 | Mappings & Reference Data | [Open section](#mappings-reference-data) |
 | Campaign Maps | [Open section](#campaign-maps) |
+| Map Areas | [Open section](#map-areas) |
 | Spectrum Holdings | [Open section](#spectrum-holdings) |
 | CDR type | [Open section](#cdr-type) |
 | Main Cities | [Open section](#main-cities) |
@@ -400,7 +401,7 @@ Operator and Vendor aliases resolve to the canonical values configured in Worksp
 
 ## Mappings & Reference Data
 
-The Mappings & Reference Data panel contains Operator Maps, Vendor Maps, Campaign Maps and Spectrum Holdings as independently collapsible subpanels. Their light blue headers distinguish them from the dark parent header. Existing mapping controls and saved expansion states remain available inside each subpanel.
+The Mappings & Reference Data panel contains Operator Maps, Vendor Maps, Campaign Maps, Map Areas and Spectrum Holdings as independently collapsible subpanels. Their light blue headers distinguish them from the dark parent header. Existing mapping controls and saved expansion states remain available inside each subpanel.
 
 ### Operator Maps
 
@@ -431,6 +432,16 @@ Campaign Maps set how every chart, table, legend, filter and PowerPoint or Word 
 - **Exceptions** give their own label to campaigns that do not follow the pattern, one or more source campaigns per label. They are ordered by the year and quarter of their label, after the campaigns of that quarter, or first, in the table order, when the label has none. Campaigns without a year and quarter and without an exception keep their name.
 
 The **Preview** lists the campaigns of the ready CDRs of the workspace with the labels and order of the map being edited. **Default map** fills the default map; **Save Campaign Maps** applies it and refreshes chart caches. Labels are only visual: filters, stored CDR values and saved selections keep the original campaigns.
+
+### Map Areas
+
+Map Areas are the administrative areas the **Points Lost Map** of [Scoring & GAP Analysis](scoring-gap-analysis.md#points-lost-map) colours in each country of the tests, such as municipalities in Spain, counties in the USA or census divisions in Canada. The United Kingdom always uses the bundled ITL3 areas; every other country needs its own areas, and its tests are shown as bubbles until it has them.
+
+- **Countries of the tests** lists the countries found in a sample of the coordinates of the ready CDRs, with their share of the tests and their Map Areas. **Choose areas…** lists the administrative levels that [geoBoundaries](https://www.geoboundaries.org) offers for the country, each with its number of areas and its licence; the suggested level is the finest one with up to 12,000 areas that allows commercial use, and levels whose licence does not allow it ask before downloading. **Download** saves the areas, simplified, in the workspace (a large country can take a minute). The server must be able to reach geoboundaries.org and github.com; otherwise import the areas from a file.
+- **Saved Map Areas** lists one layer per country with its areas, source, licence and last update, and **Delete** removes it.
+- **Import areas from a file** reads a GeoJSON, or a ZIP holding one Shapefile, with one polygon per area: give the country (ISO 3166 alpha-3 code, such as `ESP`), the name of the areas (such as *municipality*) and, when it is not detected, the attribute that holds their names. It replaces the saved areas of that country.
+
+Areas with the same name in one country are numbered. Calculate the scoring again after adding or changing the areas of a country: each job keeps the polygons of the areas its tests are in and the outline of their countries. The Map Areas are stored in the **Map Area Layers** table, and travel with the Mappings & Reference Data in Import / Export, transfers and backups. Country borders: Natural Earth (public domain).
 
 ### Spectrum Holdings
 

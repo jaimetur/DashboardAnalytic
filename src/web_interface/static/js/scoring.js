@@ -260,6 +260,10 @@
   const deletingJobIds = new Set();
   let jobs = [];
   let calculationMatchKey = '';
+  // The status of the selected CDRs and filters (calculating, recalculating, already calculated or ready) stays
+  // while the job list refreshes every few seconds; jobs submitted with Recalculate say so.
+  let selectionStatus = {key: '', text: '', kind: ''};
+  const recalculatingJobs = new Set();
   let calculationMatchRevision = 0;
   let calculationMatchTimer = null;
   let submittingCalculation = false;
@@ -804,13 +808,17 @@
         const existing = response.job;
         calculateButton.disabled = Boolean(existing);
         recalculateButton.disabled = !existing || isActive(existing);
+        let text = 'Ready to calculate a new scoring job.';
+        let kind = '';
         if (existing && isActive(existing)) {
-          setMessage('A scoring job with these parameters is already queued or running.');
+          const verb = recalculatingJobs.has(String(jobIdOf(existing))) ? 'Recalculating' : 'Calculating';
+          text = `${verb} the scoring of the selected CDRs and filters…`;
+          kind = 'busy';
         } else if (existing) {
-          setMessage('A scoring job with these parameters already exists. Use Recalculate to update it.');
-        } else {
-          setMessage('Ready to calculate a new scoring job.');
+          text = 'A scoring job with these parameters already exists. Use Recalculate to update it.';
         }
+        selectionStatus = {key, text, kind};
+        setMessage(text, kind);
       } catch (error) {
         if (revision === calculationMatchRevision && !submittingCalculation) {
           setMessage(error.message || 'Unable to check existing scoring jobs.', 'error');
@@ -854,6 +862,8 @@
         ? `No ready ${unavailableLabels.join(', ')} CDR datasets are available for this NR Mode. `
         : '';
       setMessage(`${status}Select at least one dataset from each CDR type: ${missingLabels.join(', ')}.`);
+    } else if (selectionStatus.key && selectionStatus.key === JSON.stringify(calculationPayload())) {
+      setMessage(selectionStatus.text, selectionStatus.kind);
     } else if (message.dataset.kind !== 'error' && message.dataset.kind !== 'success') {
       setMessage(`${selectedCount} CDR${selectedCount === 1 ? '' : 's'} selected across Data, Voice and Speech. Operator aggregation is included automatically.`);
     }
@@ -4943,8 +4953,9 @@
     pane.append(section);
   }
 
-  // Points lost per area: the ITL3 areas (or the workspace Clusters and Regions) coloured
-  // by the points lost, and the cities, routes or clusters that lose most.
+  // Points lost per area: the map areas (the ITL3 areas in the UK, the workspace's Map Areas elsewhere,
+  // or the workspace Clusters and Regions) coloured by the points lost, and the cities, routes or
+  // clusters that lose most.
   const lossBoundaryCache = new Map();
   const lossLow = [249, 214, 92];
   const lossHigh = [200, 16, 46];
@@ -4959,12 +4970,13 @@
     const key = `${jobId}:${field}`;
     if (!lossBoundaryCache.has(key)) {
       lossBoundaryCache.set(key, requestJson(`${jobsUrl}/${encodeURIComponent(jobId)}/boundaries/${encodeURIComponent(field)}`)
-        .then(body => body?.boundaries || {}).catch(() => ({})));
+        .then(body => ({boundaries: body?.boundaries || {}, outlines: body?.background || []}))
+        .catch(() => ({boundaries: {}, outlines: []})));
     }
     return lossBoundaryCache.get(key);
   }
 
-  function lossMapSvg(boundaries, values, areas, background, describe = null) {
+  function lossMapSvg(boundaries, values, areas, background, describe = null, outlines = []) {
     const svgNs = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(svgNs, 'svg');
     svg.classList.add('scoring-loss-map-svg');
@@ -4991,6 +5003,13 @@
       element.append(title);
     };
     if (rings.length) {
+      // The outlines of the countries, in grey under their areas.
+      for (const ring of outlines) {
+        const path = document.createElementNS(svgNs, 'path');
+        path.setAttribute('d', `M${ring.map(([x, y]) => project(x, y).map(value => value.toFixed(1)).join(',')).join('L')}Z`);
+        path.setAttribute('class', 'scoring-loss-map-outline');
+        svg.append(path);
+      }
       for (const [name, ring] of rings) {
         const path = document.createElementNS(svgNs, 'path');
         path.setAttribute('d', `M${ring.map(([x, y]) => project(x, y).map(value => value.toFixed(1)).join(',')).join('L')}Z`);
@@ -5046,7 +5065,7 @@
     const maps = insightItems(payload, 'points_loss_maps', environment).filter(item => !item.is_reference);
     if (!maps.length) return;
     const seriesKey = item => `${item.operator}|${JSON.stringify(item.context)}`;
-    const layers = new Map(maps.filter(item => item.field === 'ITL3').map(item => [seriesKey(item), item]));
+    const layers = new Map(maps.filter(item => item.field === 'Area').map(item => [seriesKey(item), item]));
     const entries = [];
     for (const item of maps) {
       if (item.field === 'City') entries.push({ranking: item, layer: layers.get(seriesKey(item)) || null, title: 'City'});
@@ -5072,17 +5091,60 @@
     }
     controls.append(viewControl);
     const candidates = inScope.filter(item => item.entry.title === view).map(item => item.entry);
+    // Per City on map areas, one choice for every map: the points of the city or route that loses most among those
+    // measured in each area (the default), or the real points lost there by the city or route that loses most there.
+    // The colours of the areas never change with the chosen rows or areas, and changing the choice keeps them chosen.
+    let mode = 'top';
+    let modeSelect = null;
+    if (view === 'City' && candidates.some(entry => entry.layer)) {
+      const real = candidates.some(entry => entry.ranking.areas.some(area => Object.keys(area.area_losses || {}).length));
+      const modeControl = document.createElement('label');
+      modeControl.className = 'scoring-environment-filter scoring-insight-select';
+      modeControl.append(document.createTextNode('Colour areas by'));
+      modeSelect = document.createElement('select');
+      modeSelect.dataset.lossColourMode = '';
+      for (const [value, text] of [['top', 'Points of the city or route that loses most in each area'],
+        ['losses', 'Points lost in each area by the city or route that loses most there']]) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = text;
+        modeSelect.append(option);
+      }
+      mode = real && insightSelections.get('points-loss-colour') === 'losses' ? 'losses' : 'top';
+      modeSelect.value = mode;
+      if (!real) {
+        modeSelect.options[1].disabled = true;
+        modeSelect.options[1].title = 'Calculate the scoring again to keep the points each city or route loses in each area';
+      }
+      modeControl.append(modeSelect);
+      controls.append(modeControl);
+    }
     const grid = document.createElement('div');
     grid.className = `scoring-loss-map-grid${chosen.length > 1 ? ' is-multiple' : ''}`;
-    for (const entry of candidates.filter(item => chosen.includes(item.ranking.operator))) {
-      grid.append(pointsLossMapCard(entry, payload, jobId, chosen.length > 1));
+    const cards = candidates.filter(item => chosen.includes(item.ranking.operator))
+      .map(entry => pointsLossMapCard(entry, payload, jobId, chosen.length > 1, mode));
+    grid.append(...cards);
+    modeSelect?.addEventListener('change', () => {
+      insightSelections.set('points-loss-colour', modeSelect.value);
+      persistScoringViewState();
+      cards.forEach(card => card.setColourMode?.(modeSelect.value));
+    });
+    section.append(heading, controls);
+    // Tests in a country without map areas: they are placed once its areas are added and the job calculated again.
+    const unmapped = view === 'City' ? candidates.find(entry => entry.layer?.unmapped_countries?.length)?.layer.unmapped_countries || [] : [];
+    if (unmapped.length) {
+      const warning = document.createElement('p');
+      warning.className = 'scoring-insight-note scoring-loss-unmapped';
+      warning.textContent = `The tests in ${unmapped.map(item => item.name).join(', ')} are on no map area: add the Map Areas of `
+        + `${unmapped.length > 1 ? 'these countries' : 'this country'} in Workspace Config and calculate the scoring again.`;
+      section.append(warning);
     }
-    section.append(heading, controls, grid);
+    section.append(grid);
     pane.append(section);
   }
 
   // One operator's map with the note and the ranking of the areas where it loses most points.
-  function pointsLossMapCard(entry, payload, jobId, compact) {
+  function pointsLossMapCard(entry, payload, jobId, compact, mode = 'top') {
     const {ranking, layer} = entry;
     const card = document.createElement('article');
     card.className = 'scoring-loss-map-card';
@@ -5100,11 +5162,24 @@
     if (color) { operator.style.color = color; title.style.color = color; }
     const listedText = document.createElement('strong');
     listedText.textContent = `The ${bars.length} ${entry.title === 'City' ? 'cities and routes' : `${entry.title.toLowerCase()}s`} listed`;
-    const byRows = layer && layer.field === 'ITL3' && ranking.field !== 'ITL3';
-    note.append(byRows ? 'The map colours each ITL3 area by the points ' : 'The map shows where ',
-      operator, byRows ? ` loses in the city or route that loses most in it (${insightNumber(ranking.total, 1)} ${scoringLabel()} points lost in total; hover an area to see them). `
-        : ` loses its ${scoringLabel()} points (${insightNumber(ranking.total, 1)} in total). `, listedText,
-      ` account for ${ranking.total ? Math.round(listed / ranking.total * 100) : 0}% of the points lost.`);
+    const byRows = layer && layer.field === 'Area' && ranking.field === 'City';
+    const realData = byRows && ranking.areas.some(area => Object.keys(area.area_losses || {}).length);
+    const areaLabel = layer?.area_label || 'area';
+    const total = `${insightNumber(ranking.total, 1)} ${scoringLabel()} points lost in total; hover an area to see them`;
+    const writeNote = colourMode => {
+      note.replaceChildren();
+      if (byRows && colourMode === 'losses' && realData) {
+        note.append(`The map colours each ${areaLabel} by the points lost in it by the city or route of `, operator,
+          ` that loses most there (${total}). `);
+      } else if (byRows) {
+        note.append(`The map colours each ${areaLabel} by the points `, operator,
+          ` loses in the city or route that loses most among those measured in it (${total}). `);
+      } else {
+        note.append('The map shows where ', operator, ` loses its ${scoringLabel()} points (${insightNumber(ranking.total, 1)} in total). `);
+      }
+      note.append(listedText, ` account for ${ranking.total ? Math.round(listed / ranking.total * 100) : 0}% of the points lost.`);
+    };
+    writeNote(mode);
     const content = document.createElement('div');
     content.className = `scoring-loss-map${compact ? ' is-compact' : ''}`;
     const mapBox = document.createElement('div');
@@ -5133,70 +5208,72 @@
       row.dataset.area = bars[index]?.name || '';
       row.dataset.points = String(bars[index]?.points || 0);
     });
-    (layer ? lossBoundaries(jobId, layer.field) : Promise.resolve({})).then(boundaries => {
-      const links = lossAreaLinks(ranking, layer, layer ? boundaries : {});
-      // ITL3 areas take the points of the city or route that loses most in them (its tests are there).
-      const rowAreas = byRows ? lossRowValues(ranking.areas, links) : null;
-      const describe = rowAreas ? (name, _value) => {
-        const lines = rowAreas.rows[name] || [];
-        const lost = values[name] ? ` (${insightNumber(values[name], 2)} points lost in this area)` : '';
-        return lines.length ? `${name}${lost}\n${lines.slice(0, 4).map(([row, points]) => `${row}: ${insightNumber(points, 2)} points lost`).join('\n')}`
-          : `${name}: no listed city or route`;
-      } : null;
-      const svg = lossMapSvg(layer ? boundaries : {}, rowAreas ? rowAreas.values : values, ranking.areas,
-        payload?.views?.insights?.points_loss_background || [], describe);
+    (layer ? lossBoundaries(jobId, layer.field) : Promise.resolve({boundaries: {}, outlines: []})).then(({boundaries, outlines}) => {
+      // Each colouring: each city or route with its map areas (the share of its tests in each, or the points it
+      // loses in each one) and the colour of every area.
+      const colourings = {};
+      for (const colourMode of byRows ? (realData ? ['top', 'losses'] : ['top']) : ['top']) {
+        const real = colourMode === 'losses';
+        const links = lossAreaLinks(ranking, layer, real);
+        const rowAreas = byRows ? lossRowValues(ranking.areas, links, real) : null;
+        const describe = name => {
+          if (!rowAreas) return `${name}: ${insightNumber(values[name] || 0, 2)} points lost`;
+          const lines = rowAreas.rows[name] || [];
+          const lost = values[name] ? ` (${insightNumber(values[name], 2)} points lost in this area)` : '';
+          return lines.length ? `${name}${lost}\n${lines.slice(0, 4).map(([row, points]) => `${row}: ${insightNumber(points, 2)} points lost${real ? ' here' : ''}`).join('\n')}`
+            : `${name}: no listed city or route`;
+        };
+        colourings[colourMode] = {links, values: rowAreas ? rowAreas.values : values, describe};
+      }
+      const current = colourings[mode] || colourings.top;
+      const svg = lossMapSvg(layer ? boundaries : {}, current.values, ranking.areas,
+        payload?.views?.insights?.points_loss_background || [], (name) => current.describe(name), outlines);
       mapBox.replaceChildren(svg);
-      const select = lossMapSelection(card, svg, rows, links);
+      const select = lossMapSelection(card, svg, rows, current.links);
       select.zoom = enableMapZoom(mapBox, svg, select);
+      // Changing the colouring keeps the chosen rows or areas, so both colourings compare easily.
+      card.setColourMode = colourMode => {
+        const next = colourings[colourMode] || colourings.top;
+        writeNote(colourings[colourMode] ? colourMode : 'top');
+        select.recolour(next.values, next.describe, next.links);
+      };
     });
     return card;
   }
 
-  // The map areas of each listed City, route, Region or Cluster, with the share of its tests in each.
-  function lossAreaLinks(ranking, layer, boundaries) {
+  // The map areas of each listed City, route, Region or Cluster: the points it loses in each one (real), or the
+  // share of its tests in each one, leaving out areas with a few stray tests (under 2% of them).
+  function lossAreaLinks(ranking, layer, real) {
     const links = new Map();
-    const inside = ([x, y], ring) => {
-      let found = false;
-      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-        const [xi, yi] = ring[i], [xj, yj] = ring[j];
-        if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) found = !found;
-      }
-      return found;
-    };
-    // Results calculated before the ITL3 areas of each City were kept: the areas holding its location.
-    const locate = area => {
-      const spots = area.kind === 'route' && area.route?.length ? area.route.map(([lat, lon]) => [lon, lat])
-        : area.latitude !== null && area.latitude !== undefined ? [[area.longitude, area.latitude]] : [];
-      const counts = {};
-      for (const spot of spots) {
-        const name = Object.keys(boundaries).find(key => boundaries[key].some(ring => inside(spot, ring)));
-        if (name) counts[name] = (counts[name] || 0) + 1;
-      }
-      return counts;
-    };
     for (const area of ranking.areas) {
-      const shares = !layer || layer.field === ranking.field ? {[area.name]: 1}
-        : Object.keys(area.itl3 || {}).length ? area.itl3 : locate(area);
+      if (!layer || layer.field === ranking.field) { links.set(area.name, {[area.name]: area.points}); continue; }
+      if (real) {
+        const losses = Object.entries(area.area_losses || {}).filter(([, points]) => points > 0);
+        if (losses.length) links.set(area.name, Object.fromEntries(losses));
+        continue;
+      }
+      const shares = area.area_tests || {};
       const total = Object.values(shares).reduce((sum, value) => sum + value, 0);
       if (total <= 0) continue;
-      // Areas with a few stray tests (under 2% of them) do not belong to the city or route.
       const kept = Object.entries(shares).filter(([, value]) => value / total >= .02);
       const used = kept.length ? kept : [Object.entries(shares).sort((left, right) => right[1] - left[1])[0]];
-      const sum = used.reduce((total, [, value]) => total + value, 0);
+      const sum = used.reduce((count, [, value]) => count + value, 0);
       links.set(area.name, Object.fromEntries(used.map(([name, value]) => [name, value / sum])));
     }
     return links;
   }
 
-  // The points of the city or route that loses most in each map area, and every one measured there.
-  function lossRowValues(areas, links) {
+  // Each map area with the largest loss of one city or route in it (its real points lost there, or its total
+  // points when the area holds its tests), and every one measured there.
+  function lossRowValues(areas, links, real) {
     const values = {};
     const rows = {};
     for (const area of areas) {
       if (area.name === 'Not specified') continue;
-      for (const name of Object.keys(links.get(area.name) || {})) {
-        values[name] = Math.max(values[name] || 0, area.points);
-        (rows[name] ||= []).push([area.name, area.points]);
+      for (const [name, lost] of Object.entries(links.get(area.name) || {})) {
+        const points = real ? lost : area.points;
+        values[name] = Math.max(values[name] || 0, points);
+        (rows[name] ||= []).push([area.name, points]);
       }
     }
     Object.values(rows).forEach(list => list.sort((left, right) => right[1] - left[1]));
@@ -5205,33 +5282,19 @@
 
   // Choosing rows of the ranking shows their areas alone on the map, and choosing areas on the map
   // (a click, or Shift and a dragged rectangle) leaves the rows of those areas lit in the ranking.
-  function lossMapSelection(card, svg, rows, links) {
+  // Every area keeps its colour: choosing only dims the areas (and rows) left out.
+  function lossMapSelection(card, svg, rows, initialLinks) {
+    let links = initialLinks;
     const marks = [...svg.querySelectorAll('[data-area]')];
-    marks.forEach(mark => { mark.dataset.fill = mark.getAttribute('fill') || ''; });
     const chosenRows = new Set();
     const chosenAreas = new Set();
     const refresh = () => {
       if (chosenRows.size) {
-        // The areas of the chosen rows' tests, with the points of the row that loses most in each.
-        const values = {};
-        for (const row of chosenRows) {
-          const points = Number(rows.find(item => item.dataset.area === row)?.dataset.points) || 0;
-          for (const area of Object.keys(links.get(row) || {})) values[area] = Math.max(values[area] || 0, points);
-        }
-        // The scale of the whole map, so a chosen area keeps the colour of its points.
-        const positive = [...Object.values(values), ...marks.map(mark => Number(mark.dataset.value) || 0)].filter(value => value > 0);
-        const low = positive.length ? Math.min(...positive) : 0;
-        const span = (positive.length ? Math.max(...positive) : 0) - low || 1;
-        marks.forEach(mark => {
-          const value = values[mark.dataset.area] || 0;
-          mark.setAttribute('fill', value > 0 ? lossColor((value - low) / span) : '#eaecef');
-          mark.classList.toggle('is-dimmed', !(value > 0));
-        });
+        const lit = new Set();
+        for (const row of chosenRows) Object.keys(links.get(row) || {}).forEach(area => lit.add(area));
+        marks.forEach(mark => mark.classList.toggle('is-dimmed', !lit.has(mark.dataset.area)));
       } else {
-        marks.forEach(mark => {
-          mark.setAttribute('fill', mark.dataset.fill);
-          mark.classList.toggle('is-dimmed', chosenAreas.size > 0 && !chosenAreas.has(mark.dataset.area));
-        });
+        marks.forEach(mark => mark.classList.toggle('is-dimmed', chosenAreas.size > 0 && !chosenAreas.has(mark.dataset.area)));
       }
       const lit = row => (chosenRows.size ? chosenRows.has(row)
         : !chosenAreas.size || Object.keys(links.get(row) || {}).some(area => chosenAreas.has(area)));
@@ -5296,6 +5359,21 @@
     });
     const selection = {
       zoom: null,
+      // Another colouring: the areas take its colours and links, and the chosen rows or areas stay chosen.
+      recolour(values, describe, nextLinks) {
+        const positive = Object.values(values).filter(value => value > 0);
+        const low = positive.length ? Math.min(...positive) : 0;
+        const span = (positive.length ? Math.max(...positive) : 0) - low || 1;
+        marks.forEach(mark => {
+          const value = values[mark.dataset.area] || 0;
+          mark.setAttribute('fill', value > 0 ? lossColor((value - low) / span) : '#eaecef');
+          mark.dataset.value = String(value);
+          const title = mark.querySelector('title');
+          if (title) title.textContent = describe(mark.dataset.area, value);
+        });
+        links = nextLinks;
+        refresh();
+      },
       // A click on an area chooses it; a click outside every area shows all.
       onClick(element, event) {
         const name = element?.closest?.('[data-area]')?.dataset.area;
@@ -6056,6 +6134,11 @@
       const job = body.job || body;
       const id = jobIdOf(job);
       if (!id) throw new Error('The scoring service did not return a job identifier.');
+      if (force) recalculatingJobs.add(String(id)); else recalculatingJobs.delete(String(id));
+      if (isActive(job)) {
+        selectionStatus = {key: JSON.stringify(calculationPayload()), kind: 'busy',
+          text: `${force ? 'Recalculating' : 'Calculating'} the scoring of the selected CDRs and filters…`};
+      }
       selectedJobId = id;
       selectedJob = job;
       userSelectedJob = true;
@@ -6065,7 +6148,9 @@
         const result = {job, scoring: body.scoring || [], gap: body.gap || [], warnings: body.warnings || []};
         resultCache.set(id, result);
       }
-      setMessage(cached ? 'Loaded the previously calculated result.' : 'Scoring job added to the background queue.', 'success');
+      if (cached) setMessage('Loaded the previously calculated result.', 'success');
+      else if (isActive(job)) setMessage(selectionStatus.text, 'busy');
+      else setMessage('Scoring job added to the background queue.', 'success');
       await refreshJobs();
       if (isActive(selectedJob)) {
         renderJobs();

@@ -1610,7 +1610,7 @@ def test_kpi_gap_profile_and_points_lost_map_share_location_and_operators():
     # Per City, Per Region and Per Cluster are always listed; those without results are disabled.
     assert "insightSelect('points-loss-view', allViews.map(item => [item, `Per ${item}`]), 'Analysis')" in maps
     assert "option.disabled = !views.includes(option.value);" in maps
-    assert "grid.append(pointsLossMapCard(entry, payload, jobId, chosen.length > 1));" in maps
+    assert ".map(entry => pointsLossMapCard(entry, payload, jobId, chosen.length > 1, mode));" in maps
     # Every operator is chosen by default.
     assert "if (!chosen.length) chosen = [...names];" in controls
     # Maps zoom with a dragged rectangle or the floating buttons, which hide as soon as the pointer leaves.
@@ -1652,3 +1652,12 @@ def test_charts_maps_and_tables_open_larger_and_charts_zoom():
     assert "else enableContentZoom(card, scroll);" in script and "else if (!isTable) enableContentZoom(holder, holder);" in script
     # The larger view takes the whole screen but 5% on each side.
     assert 'width: 90vw; height: 90vh; height: 90dvh;' in template
+
+
+def test_the_calculation_message_stays_while_the_selected_job_calculates():
+    script = (Path(__file__).resolve().parents[1] / 'src/web_interface/static/js/scoring.js').read_text(encoding='utf-8')
+    # The status of the selected CDRs and filters is kept while the job list refreshes every few seconds.
+    assert "text = `${verb} the scoring of the selected CDRs and filters…`;" in script
+    assert "const verb = recalculatingJobs.has(String(jobIdOf(existing))) ? 'Recalculating' : 'Calculating';" in script
+    assert "} else if (selectionStatus.key && selectionStatus.key === JSON.stringify(calculationPayload())) {" in script
+    assert 'already queued or running' not in script

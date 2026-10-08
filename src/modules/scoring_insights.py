@@ -55,6 +55,11 @@ def _points_loss_maps(result: dict[str, Any] | None, score_tables: list[dict[str
     styles = next((table.get('operator_styles') for table in score_tables if table.get('operator_styles')), {}) or {}
     references = {table.get('baseline_operator') for table in score_tables}
     geometry = document.get('areas') or {}
+    # What the map areas are, such as ITL3 areas or municipalities, and the countries without them.
+    countries = (document.get('map_areas') or {}).get('countries') or []
+    labels = list(dict.fromkeys(item.get('label') or 'area' for item in countries))
+    area_label = labels[0] if len(labels) == 1 else 'map area'
+    unmapped = (document.get('map_areas') or {}).get('unmapped_countries') or []
     maps = []
     for item in points_loss_maps(result, keys):
         context = item['context']
@@ -67,8 +72,10 @@ def _points_loss_maps(result: dict[str, Any] | None, score_tables: list[dict[str
             areas.append({'name': name, 'points': points, 'share': points / item['total'] if item['total'] else 0,
                           'latitude': place.get('latitude'), 'longitude': place.get('longitude'),
                           'kind': place.get('kind', 'place'), 'route': place.get('points') or [],
-                          # The ITL3 areas holding its tests and how many: the City (or route) alone on the map.
-                          'itl3': place.get('itl3') or {},
+                          # The map areas holding its tests and how many, and the points it loses in each one:
+                          # the City (or route) alone on the map.
+                          'area_tests': place.get('area_tests') or {},
+                          'area_losses': (item.get('area_losses') or {}).get(name) or {},
                           # All environments: the environments where the area loses points, most first.
                           'environments': (item.get('environments') or {}).get(name, [])})
         maps.append({
@@ -77,6 +84,7 @@ def _points_loss_maps(result: dict[str, Any] | None, score_tables: list[dict[str
             'context': {field: value for field, value in context.items()
                         if field != 'operator' and value not in (None, '')},
             'areas': areas, 'total': item['total'],
+            **({'area_label': area_label, 'unmapped_countries': unmapped} if item['field'] == 'Area' else {}),
         })
     maps.sort(key=lambda item: ((styles.get(item['operator']) or {}).get('position', 99), str(item['operator']),
                                 json.dumps(item['context'], sort_keys=True, default=str), item['field']))

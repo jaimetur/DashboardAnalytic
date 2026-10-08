@@ -67,6 +67,7 @@ Runtime `config/` and `data/` directories use project-local defaults but are exc
 - `src/modules/analytics.py`: single-dataset analytical calculations.
 - `src/modules/exports.py`: CDR Analysis Word and PowerPoint output, including the multi-dataset Summary CDR Analysis.
 - `src/modules/network_insights_export.py`: Summary Network Insights PowerPoint and Word output.
+- `src/modules/map_areas.py`: Map Areas of a workspace (`map_area_layers`): the countries of the tests, the geoBoundaries levels and downloads, imported layers and the area of each test used by the Scoring points-lost map.
 - `src/modules/report_tasks.py`: Reporting Jobs (`report_tasks`, `report_task_runs`), schedules, artifact generation, email bodies, the scheduler and the artifact provider registry for other modules.
 - `src/modules/email_delivery.py`: SMTP settings (Application Config → Email Delivery) and sending.
 - `src/modules/non_qualified_calls.py`: Non-Qualified Calls: indexing of the NQ calls of every CDR (`nq_calls`, `nq_call_sources`), their follow-up (`nq_call_tracking`, `nq_call_comments`, `nq_call_history`, `nq_call_options`), the summary and drill-down queries, the Excel export, the NQ Call Tracking portability document and its routes.

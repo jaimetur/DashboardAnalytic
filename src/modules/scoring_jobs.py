@@ -1146,6 +1146,10 @@ def run_scoring_job(repository: Repository, job_id: int) -> dict[str, Any] | Non
             parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()
         ):
             call_kwargs['baseline_aliases'] = job.get('baseline_aliases', [])
+        if 'map_areas' in parameters:
+            # The tests are placed in the workspace's Map Areas of their country (the ITL3 areas in the UK).
+            from src.modules.map_areas import area_index
+            call_kwargs['map_areas'] = area_index(repository)
         result = calculate(frames, job['levels'], **call_kwargs)
         if not isinstance(result, dict):
             raise TypeError('The scoring engine must return a result object.')

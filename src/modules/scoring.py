@@ -261,8 +261,12 @@ def calculate_scoring(
     baseline_operator: str = 'EE', configuration: dict | None = None,
     baseline_aliases: Iterable[str] = (),
     operator_mappings: dict[str, str] | None = None,
+    map_areas=None,
 ) -> dict:
-    """Calculate KPI scores at the selected dimensions without reallocating missing weights."""
+    """Calculate KPI scores at the selected dimensions without reallocating missing weights.
+
+    ``map_areas`` (a ``map_areas.AreaIndex``) places the tests in the map areas of their country.
+    """
     config = _required_configuration(configuration)
     metrics = config['metrics']
     metric_by_code = {metric['code']: metric for metric in metrics}
@@ -291,6 +295,9 @@ def calculate_scoring(
     # Where each KPI loses its points: area shares of the tests that cause the loss.
     loss_shares: list[dict] = []
     geometry = points_loss.AreaGeometry()
+    if map_areas is None:
+        from src.modules.map_areas import area_index
+        map_areas = area_index(None)
     normalized_operator_mappings = {
         str(alias).strip().casefold(): str(canonical).strip()
         for alias, canonical in (operator_mappings or {}).items()
@@ -342,7 +349,7 @@ def calculate_scoring(
         if missing_group:
             warnings.append(f'{kind.title()}: missing grouping columns: {", ".join(missing_group)}; no scores calculated.')
             continue
-        points_loss.attach_location(frame, source, kind, resolve_column_name)
+        points_loss.attach_location(frame, source, kind, resolve_column_name, map_areas)
         frame['environment'] = None
         environment_masks = {}
         for environment, context in config['scope']['environments'].items():
@@ -451,7 +458,8 @@ def calculate_scoring(
     gap = _gap_rows(rows, keys, baseline_operator, baseline_aliases, warnings)
     gap_totals = _gap_totals(totals, keys, baseline_operator, baseline_aliases)
     return {'scoring': rows, 'global_kpis': global_kpis,
-            'points_loss': {'version': 1, **geometry.document(), 'shares': loss_shares},
+            'points_loss': {'version': 2, **geometry.document(), 'map_areas': geometry.map_areas(map_areas),
+                            'shares': loss_shares},
             'totals': totals, 'charts': [dict(row) for row in totals], 'gap': gap,
             'gap_totals': gap_totals, 'warnings': list(dict.fromkeys(warnings)), 'notices': notices,
             'environment_scaling': environment_scaling(totals),

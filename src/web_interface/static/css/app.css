@@ -4157,6 +4157,11 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
 .campaign-map-message:empty { display: none; }
 .campaign-map-message.is-error { color: #a3263a; }
 .campaign-map-message.is-success { color: #2e7d32; }
+.map-area-import { display: grid; grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr)) auto; gap: .6rem; align-items: end; }
+.map-area-chooser { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.map-area-chooser select { max-width: 32rem; }
+.map-area-missing { color: #8a5300; }
+@media (max-width: 900px) { .map-area-import { grid-template-columns: minmax(0, 1fr); } }
 .campaign-map-actions { display: flex; justify-content: flex-end; gap: .6rem; }
 .campaign-maps-panel .collapsible-panel-body > .form-note:last-of-type { margin-top: 1.2rem; }
 @media (max-width: 900px) { .campaign-map-settings { grid-template-columns: minmax(0, 1fr); } }

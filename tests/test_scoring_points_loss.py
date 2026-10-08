@@ -48,15 +48,15 @@ def test_points_lost_are_spread_over_the_cities_routes_and_itl3_areas():
     job, result = _result()
     maps = build_scoring_views(job, result)['insights']['points_loss_maps']
     vodafone = {item['field']: item for item in maps if item['operator'] == 'Vodafone UK' and item['environment'] == 'Combined'}
-    assert {'City', 'ITL3'} <= set(vodafone)
+    assert {'City', 'Area'} <= set(vodafone) and vodafone['Area']['area_label'] == 'ITL3 area'
     cities = {area['name']: area for area in vodafone['City']['areas']}
     # Leeds loses most of the city points; the road is a route between cities.
     assert next(iter(cities)) in {'Leeds', 'Sheffield to Leeds'}
     assert cities['Leeds']['points'] > cities['Manchester']['points'] and 'London' not in cities
     assert cities['Sheffield to Leeds']['kind'] == 'route' and cities['Sheffield to Leeds']['route']
-    # The ITL3 areas share the same total: the tests are placed in the polygon that contains them.
-    areas = {area['name']: area['points'] for area in vodafone['ITL3']['areas']}
-    assert vodafone['ITL3']['total'] == pytest.approx(vodafone['City']['total'])
+    # The map areas (ITL3 in the UK) share the same total: the tests are placed in the polygon that contains them.
+    areas = {area['name']: area['points'] for area in vodafone['Area']['areas']}
+    assert vodafone['Area']['total'] == pytest.approx(vodafone['City']['total'])
     # Leeds also takes the end of the road that enters it.
     assert cities['Leeds']['points'] < areas['Leeds'] < cities['Leeds']['points'] + cities['Sheffield to Leeds']['points']
     # EE completes every call: it loses no points and gets no map.
@@ -68,21 +68,29 @@ def test_points_lost_are_spread_over_the_cities_routes_and_itl3_areas():
         city = next(item for item in maps if item['operator'] == 'Vodafone UK' and item['environment'] == environment
                     and item['field'] == 'City')
         assert all(not area['environments'] for area in city['areas'])
-    # The ITL3 areas of each City's tests (of every operator), to show it alone on the map.
-    assert cities['Leeds']['itl3'] == {'Leeds': 120} and set(cities['Sheffield to Leeds']['itl3']) >= {'Sheffield', 'Leeds'}
+    # The map areas of each City's tests (of every operator), to show it alone on the map.
+    assert cities['Leeds']['area_tests'] == {'Leeds': 120}
+    assert set(cities['Sheffield to Leeds']['area_tests']) >= {'Sheffield', 'Leeds'}
+    # The points each City loses in each area add up to its points, and a route loses them along its way.
+    assert cities['Leeds']['area_losses'] == {'Leeds': pytest.approx(cities['Leeds']['points'])}
+    road = cities['Sheffield to Leeds']['area_losses']
+    assert len(road) > 1 and sum(road.values()) == pytest.approx(cities['Sheffield to Leeds']['points'])
+    assert areas['Leeds'] == pytest.approx(cities['Leeds']['points'] + road.get('Leeds', 0))
 
 
-def test_itl3_areas_take_the_points_of_the_city_or_route_that_loses_most_in_them():
+def test_map_areas_take_the_points_of_the_city_or_route_that_loses_most_in_them():
     areas = [
-        {'name': 'London', 'points': 12.5, 'kind': 'place', 'itl3': {'Westminster and City of London': 60, 'Camden': 39,
-                                                                     'West Surrey': 1}},
-        {'name': 'Coventry', 'points': 5.5, 'kind': 'place', 'itl3': {'Coventry': 50}},
-        {'name': 'Coventry to Corby', 'points': 1.7, 'kind': 'route', 'itl3': {'Coventry': 10, 'Leicestershire': 30}},
-        # Calculated before the ITL3 areas of each City were kept: the area of its location.
-        {'name': 'Leeds', 'points': 3.6, 'kind': 'place', 'latitude': 53.80, 'longitude': -1.55},
+        {'name': 'London', 'points': 12.5, 'kind': 'place',
+         'area_tests': {'Westminster and City of London': 60, 'Camden': 39, 'West Surrey': 1},
+         'area_losses': {'Westminster and City of London': 8.0, 'Camden': 4.4, 'West Surrey': .1}},
+        {'name': 'Coventry', 'points': 5.5, 'kind': 'place', 'area_tests': {'Coventry': 50}, 'area_losses': {'Coventry': 5.5}},
+        {'name': 'Coventry to Corby', 'points': 1.7, 'kind': 'route', 'area_tests': {'Coventry': 10, 'Leicestershire': 30},
+         'area_losses': {'Coventry': 1.2, 'Leicestershire': .5}},
     ]
+    # The points of the city or route that loses most among those measured in each area (2% of its tests or more).
     assert points_loss.row_area_values(areas) == {
-        'Westminster and City of London': 12.5, 'Camden': 12.5, 'Coventry': 5.5, 'Leicestershire': 1.7, 'Leeds': 3.6}
+        'Westminster and City of London': 12.5, 'Camden': 12.5, 'Coventry': 5.5, 'Leicestershire': 1.7}
+
 
 
 def test_bundled_itl3_boundaries_cover_the_uk():
@@ -152,9 +160,11 @@ def test_job_api_serves_the_map_layers_without_the_raw_shares(scoring_api, monke
 
     payload = client.get(f'/api/scoring/jobs/{job_id}').json()
     assert 'points_loss' not in payload
-    assert any(item['field'] == 'ITL3' for item in payload['views']['insights']['points_loss_maps'])
-    layer = client.get(f'/api/scoring/jobs/{job_id}/boundaries/ITL3').json()
-    assert layer['field'] == 'ITL3' and len(layer['boundaries']) == 182
+    assert any(item['field'] == 'Area' for item in payload['views']['insights']['points_loss_maps'])
+    # UK tests use the bundled ITL3 areas; no country outline is needed under them.
+    layer = client.get(f'/api/scoring/jobs/{job_id}/boundaries/Area').json()
+    assert layer['field'] == 'Area' and len(layer['boundaries']) == 182 and layer['background'] == []
+    assert client.get(f'/api/scoring/jobs/{job_id}/boundaries/ITL3').status_code == 404
     # Without a Clusters dataset applied to the CDRs the Cluster layer has no polygons.
     assert client.get(f'/api/scoring/jobs/{job_id}/boundaries/Cluster').json()['boundaries'] == {}
     assert client.get(f'/api/scoring/jobs/{job_id}/boundaries/Unknown').status_code == 404
@@ -166,7 +176,13 @@ def test_the_web_map_links_the_ranking_and_the_areas():
     script = (Path(__file__).resolve().parents[1] / 'src/web_interface/static/js/scoring.js').read_text(encoding='utf-8')
     # Each column is headed by its operator; rows and areas choose each other, and chosen rows centre the map.
     assert "title.className = 'scoring-loss-map-operator';" in script
-    assert 'function lossMapSelection(card, svg, rows, links)' in script and 'selection.zoom.fit({x, y, width, height});' in script
+    assert 'function lossMapSelection(card, svg, rows, initialLinks)' in script and 'selection.zoom.fit({x, y, width, height});' in script
+    # Every area keeps its colour: choosing rows or areas only dims the others.
+    assert "marks.forEach(mark => mark.classList.toggle('is-dimmed', !lit.has(mark.dataset.area)));" in script
+    # One choice above the maps, the city or route that loses most by default; changing it keeps the chosen rows.
+    assert "for (const [value, text] of [['top', 'Points of the city or route that loses most in each area']," in script
+    assert "cards.forEach(card => card.setColourMode?.(modeSelect.value));" in script
+    assert "mode = real && insightSelections.get('points-loss-colour') === 'losses' ? 'losses' : 'top';" in script
     assert 'if (event.shiftKey && onSelect) onSelect(area, event); else apply(area);' in script
     # All Environments names the environments of each area.
     assert "...(withEnvironments ? ['Environment'] : [])" in script

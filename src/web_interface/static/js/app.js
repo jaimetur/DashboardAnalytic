@@ -6698,7 +6698,7 @@ function importWarningDetails(payload) {
   if (kind === 'mappings-reference-data') {
     return {
       title: 'Overwrite Mappings & Reference Data?',
-      message: 'Choose the destination workspaces next. Their complete Operator and Vendor aliases, order and theme colors will be replaced. Stored CDR values will not be modified or rematerialized.',
+      message: 'Choose the destination workspaces next. Their complete Operator and Vendor aliases, order and theme colors, Campaign Maps, Map Areas and Spectrum Holdings will be replaced. Stored CDR values will not be modified or rematerialized.',
     };
   }
   if (kind === 'main-cities') {

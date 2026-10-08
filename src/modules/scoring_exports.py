@@ -25,7 +25,7 @@ from src.modules.cdr_reporting import (
 )
 from src.modules.column_names import campaign_sort_key, compact_campaign_value
 from src.modules.scoring import most_reliable_result
-from src.modules.scoring_points_loss import map_boundaries
+from src.modules.scoring_points_loss import map_background, map_boundaries
 from src.modules.scoring_insight_slides import (
     TITLE_BLUE, add_campaign_comparison_slides, add_kpi_gap_profile_slides, add_location_card_slides,
     add_points_loss_slides, add_trend_slides,
@@ -2392,6 +2392,7 @@ def _add_insight_slides(presentation, views: dict, environment: str, scoring: st
         add_points_loss_slides(presentation, _latest_campaign_maps(maps), insights.get('points_loss_background') or [],
                                scoring_label=label, subtitle=subtitle, new_slide=_slide,
                                boundaries=views.get('_points_loss_boundaries'),
+                               outlines=views.get('_points_loss_outlines'),
                                environment_labels={name: _scoring_environment_title(name, configuration)
                                                    for name in configuration.get('scope', {}).get('environments', {})})
     if _option(options, 'tables', 'campaign_comparison'):
@@ -2427,6 +2428,7 @@ def _add_scoring_block(presentation, job: dict[str, Any], result: dict[str, Any]
             boundary_cache[field] = map_boundaries(result, field)
         return boundary_cache[field]
     views['_points_loss_boundaries'] = points_loss_boundaries
+    views['_points_loss_outlines'] = lambda field: map_background(result, field)
     configuration = job.get('configuration') or result.get('configuration') or {}
     for matrix_key in ('score_tables', 'gap_summary_tables', 'gap_tables',
                        'hierarchy_score_tables', 'hierarchy_gap_tables'):

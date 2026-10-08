@@ -557,7 +557,8 @@ def _ring_centroid(ring: list[list[float]]) -> tuple[float, float, float]:
 
 def render_points_loss_choropleth(boundaries: dict[str, list[list[list[float]]]], values: dict[str, float], *,
                                   height: int = 1300, labels: int = 8, label_room: int = 420,
-                                  places: list[tuple[str, str]] | None = None) -> bytes:
+                                  places: list[tuple[str, str]] | None = None,
+                                  outlines: list[list[list[float]]] | None = None) -> bytes:
     """PNG map: every polygon of the layer, those with losses coloured by the points lost.
 
     The areas that lose most are labelled, or ``places`` (a label and the area it is drawn on).
@@ -586,6 +587,10 @@ def render_points_loss_choropleth(boundaries: dict[str, list[list[list[float]]]]
     def project(x: float, y: float) -> tuple[float, float]:
         return margin + (x - west) * scale_x / unit, height - margin - (y - south) / unit
 
+    # The outlines of the countries, in grey under their areas.
+    for ring in outlines or []:
+        if len(ring) > 2:
+            draw.polygon([project(x, y) for x, y in ring], fill=(241, 243, 245), outline=(225, 228, 232))
     peak = max(values.values(), default=0) or 1
     floor_value = min((value for value in values.values() if value > 0), default=0)
     span = (peak - floor_value) or 1
@@ -663,22 +668,26 @@ def _loss_bars(slide, bars: list[dict[str, Any]], *, left: float, top: float, wi
         point.format.fill.fore_color.rgb = RGBColor(*_loss_color((area['points'] - low) / ((peak - low) or 1)))
 
 
-LOSS_FIELD_TITLES = {'ITL3': 'ITL3 Area', 'City': 'City', 'Cluster': 'Cluster', 'Region': 'Region'}
+LOSS_FIELD_TITLES = {'Area': 'Map Area', 'City': 'City', 'Cluster': 'Cluster', 'Region': 'Region'}
 
 
 def add_points_loss_slides(presentation, maps: list[dict[str, Any]], background: list[list[float]], *,
                            scoring_label: str, subtitle: str, new_slide: Callable,
                            boundaries: Callable[[str], dict] | None = None,
-                           environment_labels: dict[str, str] | None = None) -> None:
+                           environment_labels: dict[str, str] | None = None,
+                           outlines: Callable[[str], list] | None = None) -> None:
     """Points lost per area, like the NetCheck points-loss slides: a map and the areas that lose most.
 
-    The main slide colours the ITL3 areas (the UK NUTS3 level) by the points lost and
-    ranks the cities and Connecting Roads routes; without ITL3 areas the cities are
-    bubbles on the test locations. Clusters and Regions with polygons get their own slide.
+    The main slide colours the map areas (the ITL3 areas in the UK, the workspace's Map Areas
+    elsewhere) by the points of the city or Connecting Roads route that loses most among those
+    measured in each one, as the web map does by default, and ranks the cities and routes; without
+    map areas the cities are bubbles on the test locations. Clusters and Regions with polygons get
+    their own slide.
     """
     from io import BytesIO
 
     boundaries = boundaries or (lambda _field: {})
+    outlines = outlines or (lambda _field: [])
     by_series: dict[tuple, dict[str, dict[str, Any]]] = {}
     for item in maps:
         series = (item['operator'], tuple(sorted((key, str(value)) for key, value in item['context'].items())))
@@ -687,8 +696,8 @@ def add_points_loss_slides(presentation, maps: list[dict[str, Any]], background:
     for fields in by_series.values():
         city = fields.get('City')
         if city is not None:
-            layer = fields.get('ITL3')
-            slides.append((city, 'City', layer if layer is not None and boundaries('ITL3') else None))
+            layer = fields.get('Area')
+            slides.append((city, 'City', layer if layer is not None and boundaries('Area') else None))
         for field in ('Cluster', 'Region'):
             if fields.get(field) is not None and boundaries(field):
                 slides.append((fields[field], field, fields[field]))
@@ -704,9 +713,9 @@ def add_points_loss_slides(presentation, maps: list[dict[str, Any]], background:
                 if area.get('environments') else area for area in bars]
         share = sum(area['points'] for area in bars) / ranking['total'] if ranking['total'] else 0
         plural = {'City': 'cities and routes', 'Cluster': 'clusters', 'Region': 'regions'}.get(field, 'areas')
-        by_rows = layer is not None and layer['field'] == 'ITL3' and field == 'City'
-        map_text = (f"The map colours each {LOSS_FIELD_TITLES.get(layer['field'], layer['field'])} by the points "
-                    if layer is not None else 'The map shows where ')
+        by_rows = layer is not None and layer['field'] == 'Area' and field == 'City'
+        area_label = (layer or {}).get('area_label') or LOSS_FIELD_TITLES.get((layer or {}).get('field'), 'area')
+        map_text = f"The map colours each {area_label} by the points " if layer is not None else 'The map shows where '
         # The operator, large and in its colour, above the map and the ranking.
         heading = slide.shapes.add_textbox(Inches(.45), Inches(1.35), Inches(12.4), Inches(.5))
         heading.name = 'Scoring Points Lost Operator'
@@ -715,7 +724,7 @@ def add_points_loss_slides(presentation, maps: list[dict[str, Any]], background:
         intro.text_frame.word_wrap = True
         _write_runs(intro.text_frame, [
             (map_text, False, None), (ranking['label'], True, ranking.get('color') or None),
-            (f" loses in the city or route that loses most in it ({_points(ranking['total'], 1)} {scoring_label} points lost in total). "
+            (f" loses in the city or route that loses most among those measured in it ({_points(ranking['total'], 1)} {scoring_label} points lost in total). "
              if by_rows else
              f" loses in it ({_points(ranking['total'], 1)} {scoring_label} points lost in total). " if layer is not None
              else f" loses its {scoring_label} points ({_points(ranking['total'], 1)} in total). ", False, None),
@@ -724,14 +733,19 @@ def add_points_loss_slides(presentation, maps: list[dict[str, Any]], background:
         ], size=11, color='#17232D')
         map_top, map_height, map_width = 2.35, 4.5, 6.0
         if layer is not None:
-            # ITL3 areas take the points of the city or route that loses most in them, as on the web.
+            # As the web map does by default: the points of the city or route that loses most among those
+            # measured in each area.
             from src.modules.scoring_points_loss import row_area_links, row_area_values
             values = (row_area_values(ranking['areas']) if by_rows else
                       {area['name']: area['points'] for area in layer['areas'] if area['name'] != 'Not specified'})
             # The cities and routes that lose most are labelled once, on their main area.
-            links = row_area_links(ranking['areas']) if by_rows else {}
-            places = [(area['name'], links[area['name']][0]) for area in ranking['areas'] if links.get(area['name'])] if by_rows else None
-            image = render_points_loss_choropleth(boundaries(layer['field']), values, places=places)
+            if by_rows:
+                links = row_area_links(ranking['areas'])
+                places = [(area['name'], links[area['name']][0]) for area in ranking['areas'] if links.get(area['name'])]
+            else:
+                places = None
+            image = render_points_loss_choropleth(boundaries(layer['field']), values, places=places,
+                                                  outlines=outlines(layer['field']))
         else:
             image = render_points_loss_map(ranking['areas'], background)
         from PIL import Image

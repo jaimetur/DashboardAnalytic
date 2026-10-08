@@ -6848,21 +6848,28 @@ DASHBOARD_STATE_KEY = 'e2e_dashboards_v2'
 
 
 def _mappings_reference_data_archive_payload(workspace: Workspace) -> bytes:
-    """Serialize complete Operator and Vendor chart mappings, Spectrum Holdings and the Campaign Map."""
+    """Serialize complete Operator and Vendor chart mappings, Spectrum Holdings, the Campaign Map and the Map Areas."""
     from src.modules.campaign_maps import load_campaign_map
+    from src.modules.map_areas import layers_document
     from src.modules.network_insights import load_spectrum_holdings
 
     task_repository = Repository(
         workspace.database_path, repository.global_db_path, workspace_registry.registry_path,
     )
-    return json.dumps({
+    map_areas = layers_document(task_repository)
+    document = {
         'format': 'drivetest-analyzer-mappings-reference-data',
         'version': 1,
         'operator_mappings': task_repository.list_operator_mapping_groups(),
         'vendor_mappings': task_repository.list_vendor_mapping_groups(),
         'spectrum_holdings': load_spectrum_holdings(task_repository),
         'campaign_map': load_campaign_map(task_repository),
-    }, ensure_ascii=False, indent=2).encode('utf-8')
+        'map_areas': map_areas,
+    }
+    # Map Areas hold many coordinates: the document is then written without indentation.
+    if map_areas['layers']:
+        return json.dumps(document, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+    return json.dumps(document, ensure_ascii=False, indent=2).encode('utf-8')
 
 
 def _archive_workspace_mappings_reference_data(
@@ -6878,7 +6885,7 @@ def _archive_workspace_mappings_reference_data(
 
 
 def _restore_workspace_mappings_reference_data(workspace: Workspace, payload: bytes) -> None:
-    """Replace the Operator and Vendor Maps, Spectrum Holdings and the Campaign Map of the workspace."""
+    """Replace the Operator and Vendor Maps, Spectrum Holdings, the Campaign Map and the Map Areas of the workspace."""
     try:
         document = json.loads(payload.decode('utf-8'))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -6911,6 +6918,12 @@ def _restore_workspace_mappings_reference_data(workspace: Workspace, payload: by
     task_repository.replace_vendor_mapping_groups(document['vendor_mappings'])
     save_spectrum_holdings(task_repository, spectrum_holdings)
     save_campaign_map(task_repository, campaign_map)
+    if isinstance(document.get('map_areas'), dict):
+        from src.modules.map_areas import import_layers_document
+        try:
+            import_layers_document(task_repository, document['map_areas'], 'system', replace=True)
+        except ValueError as exc:
+            raise ValueError(f'Map Areas for "{workspace.name}" are invalid: {exc}') from exc
     if active_workspace and workspace.id == active_workspace.id:
         ANALYSIS_CACHE.clear()
         PREPARED_ANALYSIS_FRAME_CACHE.clear()
@@ -9677,6 +9690,7 @@ def render_admin_template(
         'user_groups': 'User Groups',
         'user_group_members': 'User Group Members',
         'report_tasks': 'Report Tasks',
+        'map_area_layers': 'Map Area Layers',
         'report_task_runs': 'Report Task Runs',
         **NQ_TABLE_TITLES,
     }
@@ -15599,14 +15613,16 @@ def scoring_jobs_result(job_id: int, user: SessionUser = Depends(current_user)) 
 
 @app.get('/api/scoring/jobs/{job_id}/boundaries/{field}')
 def scoring_jobs_boundaries(job_id: int, field: str, user: SessionUser = Depends(current_user)) -> dict[str, Any]:
-    """Polygons of a points-lost map layer: the bundled ITL3 areas or the job's Clusters or Region Mapping."""
-    from src.modules.scoring_points_loss import MAP_FIELDS, map_boundaries
+    """Polygons of a points-lost map layer: the map areas (with the outlines of their countries) or the job's
+    Clusters or Region Mapping."""
+    from src.modules.scoring_points_loss import MAP_FIELDS, map_background, map_boundaries
     if field not in MAP_FIELDS:
         raise HTTPException(status_code=404, detail='Unknown points-lost map layer.')
     job = get_scoring_job(scoring_repository(user), job_id, include_result=True)
     if not job:
         raise HTTPException(status_code=404, detail='Scoring job not found.')
-    return {'field': field, 'boundaries': map_boundaries(job.get('result') or {}, field)}
+    result = job.get('result') or {}
+    return {'field': field, 'boundaries': map_boundaries(result, field), 'background': map_background(result, field)}
 
 
 @app.delete('/api/scoring/jobs/{job_id}')
@@ -19012,6 +19028,86 @@ def save_workspace_campaign_map(payload: CampaignMapPayload, user: SessionUser =
     DATAFRAME_CACHE.clear()
     _clear_chart_preview_caches()
     return {'campaign_map': config, 'preview': campaign_map_preview(workspace_campaign_values(), config)}
+
+
+def _map_areas_workspace() -> None:
+    if not active_workspace:
+        raise HTTPException(status_code=409, detail='Open a workspace before editing Map Areas.')
+
+
+@app.get('/api/workspace-config/map-areas')
+def get_workspace_map_areas(user: SessionUser = Depends(current_user)) -> dict[str, Any]:
+    """The Map Areas of the active workspace: one layer of administrative areas per country."""
+    from src.modules.map_areas import list_layers
+    _map_areas_workspace()
+    return {'layers': list_layers(repository)}
+
+
+@app.get('/api/workspace-config/map-areas/countries')
+def get_workspace_map_area_countries(user: SessionUser = Depends(current_user)) -> dict[str, Any]:
+    """The countries of the tests of the workspace CDRs, with the Map Areas each one has."""
+    from src.modules.map_areas import detect_countries
+    _map_areas_workspace()
+    return {'countries': detect_countries(repository)}
+
+
+@app.get('/api/workspace-config/map-areas/levels/{country_code}')
+def get_workspace_map_area_levels(country_code: str, user: SessionUser = Depends(config_editor_user)) -> dict[str, Any]:
+    """The administrative levels geoBoundaries offers for a country, with their licences."""
+    from src.modules.map_areas import geoboundaries_levels
+    _map_areas_workspace()
+    try:
+        return {'levels': geoboundaries_levels(country_code)}
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+class MapAreaDownloadPayload(BaseModel):
+    country_code: str
+    level: str
+
+
+@app.post('/api/workspace-config/map-areas/download')
+def download_workspace_map_areas(payload: MapAreaDownloadPayload, user: SessionUser = Depends(config_editor_user)) -> dict[str, Any]:
+    """Download the administrative areas of a country from geoBoundaries into the workspace."""
+    from src.modules.map_areas import download_geoboundaries
+    _map_areas_workspace()
+    try:
+        layer = download_geoboundaries(repository, payload.country_code, payload.level, user.username)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    repository.add_log(user.username, 'map_areas_download', json.dumps(
+        {'country': layer['country_code'], 'level': layer['level'], 'areas': layer['unit_count']}))
+    return {'layer': layer}
+
+
+@app.post('/api/workspace-config/map-areas/import')
+async def import_workspace_map_areas(
+    file: UploadFile = File(...), country_code: str = Form(...), level_label: str = Form('area'),
+    name_field: str = Form(''), user: SessionUser = Depends(config_editor_user),
+) -> dict[str, Any]:
+    """Import the administrative areas of a country from a GeoJSON or a ZIP holding a Shapefile."""
+    from src.modules.map_areas import import_layer
+    _map_areas_workspace()
+    content = await file.read()
+    try:
+        layer = await asyncio.to_thread(import_layer, repository, file.filename or '', content, country_code=country_code,
+                                        level_label=level_label, name_field=name_field, username=user.username)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    repository.add_log(user.username, 'map_areas_import', json.dumps(
+        {'country': layer['country_code'], 'file': file.filename, 'areas': layer['unit_count']}))
+    return {'layer': layer}
+
+
+@app.delete('/api/workspace-config/map-areas/{layer_id}')
+def delete_workspace_map_areas(layer_id: int, user: SessionUser = Depends(config_editor_user)) -> dict[str, Any]:
+    from src.modules.map_areas import delete_layer
+    _map_areas_workspace()
+    if not delete_layer(repository, layer_id):
+        raise HTTPException(status_code=404, detail='Map Areas not found.')
+    repository.add_log(user.username, 'map_areas_delete', json.dumps({'layer_id': layer_id}))
+    return {'deleted': layer_id}
 
 
 @app.post('/workspace-config/vendor-mappings/save')

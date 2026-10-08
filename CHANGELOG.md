@@ -6,18 +6,21 @@
 ## Release: v0.6.1
 ### Release Date: 2026-10-08
 #### ⚠️ Breaking Changes:
+- **Points Lost Map of earlier Scoring jobs:** the map now colours the map areas of every country, so Scoring jobs calculated before this version show their cities as bubbles until they are calculated again.
 
 #### 🌟 New Features:
+- **Map Areas:** Workspace Config finds the countries of the tests of the CDRs and downloads the administrative areas of each one from geoBoundaries (with the suggested level and the licence of each level, for example municipalities in Spain or counties in the USA) or imports them from a GeoJSON or Shapefile; the Points Lost Map colours them like the bundled ITL3 areas of the United Kingdom. They are stored in the **Map Area Layers** table and travel with the Mappings & Reference Data in Import / Export, transfers and backups.
 
 #### 🚀 Enhancements:
 - **Scoring report editor:** with several scenarios, the settings whose value differs between them (filters, aggregation levels, scorings, environments and chart, table and GAP options) are highlighted in amber in every scenario, and the highlights follow each change.
 - **Renamed Operators and Vendors in saved filters:** renaming a canonical Operator or Vendor in the Operator Maps or Vendor Maps also renames it, besides Report Templates and Dashboards, in the Operator, Operator_Vendor, Vendor_Operator and Vendor filters of Reporting Jobs (GAP reference operator and Scoring report scenarios included), saved Scoring report configurations, the last Scoring calculation, the CDR Analysis filters and the Non-Qualified Calls filters.
 - **Job Editor Close button:** the Job Editor closes with a red **Close** button with an exit icon instead of a round ×.
 - **Module tab labels on phones:** phones and other small screens (up to 760 px wide) never show the module labels (ALPHA, BETA, NEW…) on the tabs.
-- **Points Lost Map:** each map is headed by its operator in large type (web, PowerPoint and Word); maps and rankings are also shown for each environment, and the All Environments ranking names the environments of each area; the ITL3 areas take the points of the city or route that loses most in them (London colours every London area); choosing rows of the ranking shows their areas alone and centres the map on them, and choosing areas on the map (a click, or Shift and a dragged rectangle) dims the rows measured elsewhere.
+- **Points Lost Map:** each map is headed by its operator in large type (web, PowerPoint and Word); maps and rankings are also shown for each environment, and the All Environments ranking names the environments of each area; the map areas are coloured, as chosen in **Colour areas by**, by the points of the city or route that loses most among those measured in them (default) or by the points lost in them by the city or route that loses most there; choosing rows of the ranking (click, Ctrl/⌘+click, Shift+click) dims the other areas and centres the map on theirs, and choosing areas on the map (a click, or Shift and a dragged rectangle) dims the rows measured elsewhere, while every area keeps its colour and changing **Colour areas by** keeps the choice; chosen rows share one colour.
 
 #### 🐛 Bug fixes:
 - **Job Editor drafts:** reloading the Reporting page no longer reopens the unsaved values of a job that changed on the server since then (imported, transferred, saved from another browser or renamed in the Maps), which could show old filters such as an Operator with its former name; its saved version opens instead.
+- **Scoring calculation notice:** while the scoring of the selected CDRs and filters is calculating or recalculating, the yellow notice says so steadily instead of alternating with the number of selected CDRs each time the job list refreshes.
 
 #### 📚 Documentation:
 - The **Vendor mapping rule** card of Workspace describes the current rule: every Vodafone and Three Operator is mapped (other spellings, such as Vodafone SA or VF_SA, keep their own name as prefix), Operators without a Vendor get `<Operator> - All`, and the result fills `Operator_Vendor`, `Vendor` and `Vendor_Operator`.
