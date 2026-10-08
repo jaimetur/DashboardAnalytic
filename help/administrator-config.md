@@ -66,7 +66,7 @@ Each feature has three settings:
 
 An account matching both lists loses the feature: Forbidden always wins. For example, set **By default: Nobody** and allow the `admin` role, or keep **All users** and forbid one user group. Each list combines Roles, Groups and Users in one selector with a filter; the selector summarises the selection, such as `1 role · 2 users`.
 
-A feature that is not active for a user disappears from the main tabs and the Modules menu, and its pages and API answer 403. Workspace switching, dataset uploads and processing remain available everywhere. By default every module is active for all users except Non-Qualified Calls (in development, Nobody) and Reporting (old) (Nobody, allowed for super-admins and EJAITUR). [Reporting](reporting.md) is active for all users; settings saved while it was restricted to super-admins by default are opened to everyone once. The settings are stored in the application database.
+A feature that is not active for a user disappears from the main tabs and the Modules menu, and its pages and API answer 403. Workspace switching, dataset uploads and processing remain available everywhere. A new deployment starts with every module active for all users except Reporting (old), which is off (**Nobody**) for every role, group and user until an admin activates it. [Reporting](reporting.md) is active for all users; settings saved while it was restricted to super-admins by default are opened to everyone once. Saved settings keep their values. The settings are stored in the application database.
 
 Reporting Jobs can only include artifacts of the modules active for their author; see [Reporting](reporting.md).
 
@@ -142,9 +142,9 @@ For super-admins, complete unimported packages appear in **Recovered transfer pa
 
 - **Module Title** and **Short title**, the name shown on the tab and the one used on narrow windows (empty uses the title). The Modules menu and the Help use the Module Title too: the chapter of a renamed module takes its new title in the Help navigation and as its heading, and the Help text names the module with it (section headings keep their name so their links keep working; Workspace, Reporting and Builders, also ordinary words of the Help, change where the Help names the module as a link to its chapter or in bold).
 - **Icon**, shown before the title, and **Colour**, the accent of the tab: its top line and icon when not selected and its gradient when selected. The default colour keeps the palette of the module.
-- The **Label** in the corner of the tab (for example ALPHA, BETA, NEW or STABLE, or empty for none), its colour, and an optional icon with its own colour. Phones and other small screens never show the labels on the tabs.
+- The **Label** in the corner of the tab (for example ALPHA, BETA or NEW, or empty for none), its colour, and an optional icon with its own colour. By default the modules in development are labelled (ALPHA, BETA or NEW) and the stable ones (Workspace, CDR Analysis and E2E Dashboards) have an empty label. Phones and other small screens never show the labels on the tabs.
 
-The Preview column draws each tab as it looks when it is not selected. Colours show their hexadecimal value below them to copy or paste it. **Show a label on the tab of each main module** hides every label at once, and **Reset tabs and labels to defaults** restores the default order, titles, icons, colours and labels. Interface Settings belong to the application configuration, so they travel with **App Config** in Import / Export, transfers to another server, Full Environment packages and backups.
+The Preview column draws each tab as it looks when it is not selected. Colours show their hexadecimal value below them to copy or paste it. **Show a label on the tab of each main module**, off on a new deployment, shows or hides every label at once, and **Reset tabs and labels to defaults** restores the default order, titles, icons, colours and labels. Interface Settings belong to the application configuration, so they travel with **App Config** in Import / Export, transfers to another server, Full Environment packages and backups.
 
 ## Database Management
 

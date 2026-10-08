@@ -16,7 +16,7 @@ Persisted values are stored in the application database and take precedence over
 
 ## Runtime settings
 
-- **IANA Timezone** controls displayed timestamps and newly stored local timestamps. Choose a name such as `Europe/Madrid`.
+- **IANA Timezone** controls displayed timestamps and newly stored local timestamps. Choose a name such as `Europe/Madrid`. Without it, or the `TZ` environment variable, the server's own timezone is used (UTC when the server has none).
 - **Report Chart Renderer** selects `dashboard-canvas` or the legacy `pil` renderer.
 - **Chromium Executable** optionally selects an executable browser for Canvas rendering. Leave it empty to use the deployment setting or automatic detection.
 - **Ignore event time filtering** ignores date and template conditions based on `Event_Start_Time` or `Event_End_Time`.

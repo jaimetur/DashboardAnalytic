@@ -1059,7 +1059,7 @@ def test_cluster_and_region_prefer_polygons_and_fallback_to_inventory(client, tm
         assert table['rows'] == [{'group': name, 'sites': 2, 'cells': 3}]
     page = client.get('/network-insights').text
     assert 'value="cluster" disabled' not in page
-    _add_ready_polygon(tmp_path, 'mapping_region', 'Polygon Region')
+    _add_ready_polygon(tmp_path, 'regions', 'Polygon Region')
     _add_ready_polygon(tmp_path, 'clusters', 'Polygon Cluster')
     for group, name in [('region', 'Polygon Region'), ('cluster', 'Polygon Cluster')]:
         response = client.get(f'/api/network-insights/deployment?group={group}')

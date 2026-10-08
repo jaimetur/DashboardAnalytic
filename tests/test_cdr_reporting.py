@@ -3331,7 +3331,7 @@ def test_powerpoint_report_can_disable_tooltip_sidecars(tmp_path) -> None:
     assert not list(chart_directory.glob('*.hover.json'))
 
 
-def test_reporting_module_is_available_to_authenticated_users(client) -> None:
+def test_reporting_module_is_available_to_authenticated_users(client, reporting_old) -> None:
     response = client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     assert response.status_code == 303
 
@@ -3375,7 +3375,7 @@ def test_reporting_module_is_available_to_authenticated_users(client) -> None:
     assert 'data-report-chart-job-stop' in page.text
 
 
-def test_processing_report_and_chart_jobs_can_be_stopped_then_deleted(client) -> None:
+def test_processing_report_and_chart_jobs_can_be_stopped_then_deleted(client, reporting_old) -> None:
     import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
@@ -3417,7 +3417,7 @@ def test_processing_report_and_chart_jobs_can_be_stopped_then_deleted(client) ->
     assert client.post(chart['delete_url']).status_code == 200
 
 
-def test_chart_set_selector_excludes_published_but_processing_job(client) -> None:
+def test_chart_set_selector_excludes_published_but_processing_job(client, reporting_old) -> None:
     import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
@@ -3555,7 +3555,7 @@ def test_interrupted_chart_set_reuses_only_verified_assets(tmp_path: Path) -> No
     assert not (directory / 'chart-002.png').exists()
 
 
-def test_retrying_a_failed_chart_job_reuses_its_row(client) -> None:
+def test_retrying_a_failed_chart_job_reuses_its_row(client, reporting_old) -> None:
     import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
@@ -3573,7 +3573,7 @@ def test_retrying_a_failed_chart_job_reuses_its_row(client) -> None:
     assert [row['id'] for row in app_module.repository.list_report_chart_jobs(limit=None)] == before_ids
 
 
-def test_deleting_a_ready_chart_job_removes_its_chart_set(client) -> None:
+def test_deleting_a_ready_chart_job_removes_its_chart_set(client, reporting_old) -> None:
     import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
@@ -3597,7 +3597,7 @@ def test_deleting_a_ready_chart_job_removes_its_chart_set(client) -> None:
     assert not (app_module.report_charts_directory() / chart_set['generation']).exists()
 
 
-def test_reporting_multivendor_requires_a_previously_mapped_selected_cdr(client) -> None:
+def test_reporting_multivendor_requires_a_previously_mapped_selected_cdr(client, reporting_old) -> None:
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     uploads = [
         ('NetCheck_CDR_Data.csv', 'data', b'RAT,Operator,Mean_Data_Rate\nENDC,Vodafone UK,42\n'),
@@ -3623,7 +3623,7 @@ def test_reporting_multivendor_requires_a_previously_mapped_selected_cdr(client)
     assert 'requires every selected Data, Voice and Speech CDR to have a Workspace Vendor mapping' in report.text
 
 
-def test_netcheck_reporting_generates_template_backed_pptx(client) -> None:
+def test_netcheck_reporting_generates_template_backed_pptx(client, reporting_old) -> None:
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     uploads = [
         ('NetCheck_CDR_Data.csv', b'RAT,Operator,Mean_Data_Rate,Test_Result\nENDC,Vodafone UK,42,Success\n', 'text/csv'),
@@ -3711,7 +3711,7 @@ def test_reporting_chart_dataset_reuses_one_source_frame_and_projects_chart_colu
     assert 'Metric_A' not in second_frame.columns
 
 
-def test_reporting_generates_template_chart_previews(client, monkeypatch) -> None:
+def test_reporting_generates_template_chart_previews(client, reporting_old, monkeypatch) -> None:
     import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
@@ -3847,7 +3847,7 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     assert client.get(f"/api/reporting-old/chart-sets/{payload['generation']}").status_code == 404
 
 
-def test_reporting_accepts_partial_cdr_sources_and_marks_missing_chart_sources(client, monkeypatch) -> None:
+def test_reporting_accepts_partial_cdr_sources_and_marks_missing_chart_sources(client, reporting_old, monkeypatch) -> None:
     import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
@@ -3887,7 +3887,7 @@ def test_reporting_accepts_partial_cdr_sources_and_marks_missing_chart_sources(c
     assert context.json()['dataset_ids'] == []
 
 
-def test_chart_preview_focus_row_matches_the_editors_sorted_row(client) -> None:
+def test_chart_preview_focus_row_matches_the_editors_sorted_row(client, reporting_old) -> None:
     import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
@@ -3981,7 +3981,7 @@ def test_template_chart_image_preview_uses_combined_reporting_rows(client, monke
     assert observed['multivendor'] is False
 
 
-def test_reporting_requires_at_least_one_cdr_source(client) -> None:
+def test_reporting_requires_at_least_one_cdr_source(client, reporting_old) -> None:
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     form = {'technology': 'nsa', 'report_scope': 'single', 'slides_templates': 'nsa:NSA Slide Template'}
     report = client.post('/reporting-old/netcheck-cdr', data=form)
@@ -3991,7 +3991,7 @@ def test_reporting_requires_at_least_one_cdr_source(client) -> None:
     assert report.json()['detail'] == 'Select at least one Data, Voice or Speech CDR.'
 
 
-def test_partial_cdr_report_worker_receives_unavailable_frames(client, monkeypatch) -> None:
+def test_partial_cdr_report_worker_receives_unavailable_frames(client, reporting_old, monkeypatch) -> None:
     import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
@@ -4031,7 +4031,7 @@ def test_temporary_preview_accepts_dataset_ids_with_legacy_multiplication_separa
     assert app_module._temporary_preview_dataset_ids({'dataset_ids': '2 × 5'}, {}, 'voice') == [2, 5]
 
 
-def test_report_chart_generation_failures_return_json_and_are_logged(client, monkeypatch) -> None:
+def test_report_chart_generation_failures_return_json_and_are_logged(client, reporting_old, monkeypatch) -> None:
     import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
@@ -4073,7 +4073,7 @@ def test_report_chart_generation_failures_return_json_and_are_logged(client, mon
     assert 'Synthetic renderer failure' in app_logs_page
 
 
-def test_report_generation_failures_show_the_error_and_are_logged(client, monkeypatch) -> None:
+def test_report_generation_failures_show_the_error_and_are_logged(client, reporting_old, monkeypatch) -> None:
     import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
@@ -4108,7 +4108,7 @@ def test_report_generation_failures_show_the_error_and_are_logged(client, monkey
     assert 'Report job 1 failed: Synthetic PowerPoint failure' in client.get('/app-logs').text
 
 
-def test_reporting_concatenates_multiple_campaign_cdrs_per_source(client, monkeypatch) -> None:
+def test_reporting_concatenates_multiple_campaign_cdrs_per_source(client, reporting_old, monkeypatch) -> None:
     import src.DriveTestAnalyzer as app_module
 
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)

@@ -129,11 +129,12 @@ DOCUMENT_HELP_ICONS: dict[str, str] = {
 
 STAGE_COLOURS = {'alpha': '#D7263D', 'beta': '#FFD60A', 'new': '#2563EB', 'stable': '#1F8A4C'}
 
+# Stable modules carry no label text: only the modules still in development are labelled.
 DEFAULT_MODULE_LABELS: dict[str, dict[str, str]] = {
-    'workspace': {'text': 'STABLE', 'color': STAGE_COLOURS['stable'], 'icon': '', 'icon_color': '#FFFFFF'},
-    'datasets-analysis': {'text': 'STABLE', 'color': STAGE_COLOURS['stable'], 'icon': '', 'icon_color': '#FFFFFF'},
+    'workspace': {'text': '', 'color': STAGE_COLOURS['stable'], 'icon': '', 'icon_color': '#FFFFFF'},
+    'datasets-analysis': {'text': '', 'color': STAGE_COLOURS['stable'], 'icon': '', 'icon_color': '#FFFFFF'},
     'network-insights': {'text': 'ALPHA', 'color': STAGE_COLOURS['alpha'], 'icon': '', 'icon_color': '#FFFFFF'},
-    'e2e-dashboards': {'text': 'STABLE', 'color': STAGE_COLOURS['stable'], 'icon': '', 'icon_color': '#FFFFFF'},
+    'e2e-dashboards': {'text': '', 'color': STAGE_COLOURS['stable'], 'icon': '', 'icon_color': '#FFFFFF'},
     'scoring': {'text': 'NEW', 'color': STAGE_COLOURS['new'], 'icon': 'star', 'icon_color': '#FFD60A'},
     'non-qualified-calls': {'text': 'ALPHA', 'color': STAGE_COLOURS['alpha'], 'icon': '', 'icon_color': '#FFFFFF'},
     'reporting': {'text': 'BETA', 'color': STAGE_COLOURS['beta'], 'icon': '', 'icon_color': '#3D2A00'},

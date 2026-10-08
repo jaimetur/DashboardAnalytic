@@ -86,11 +86,11 @@ def test_definitions_keep_every_module_option_and_need_an_artifact():
 def test_features_activation_controls_modules_by_role_group_and_user(client):
     analyst_id = workspace_user('analyst', 'user-viewer')
     login(client)
-    # Defaults: Non-Qualified Calls hidden, Reporting (old) for its listed users, the rest for everyone.
+    # Defaults: every module for everyone except Reporting (old), off for every role and user.
     page = client.get('/workspace').text
-    assert 'href="/reporting"' in page and 'href="/reporting-old"' in page
-    assert 'href="/non-qualified-calls"' not in page
-    order = [page.index(f'href="{path}"') for path in ('/datasets-analysis', '/e2e-dashboards', '/reporting-old', '/scoring', '/network-insights', '/reporting')]
+    assert 'href="/reporting"' in page and 'href="/non-qualified-calls"' in page
+    assert 'href="/reporting-old"' not in page
+    order = [page.index(f'href="{path}"') for path in ('/datasets-analysis', '/e2e-dashboards', '/scoring', '/network-insights', '/non-qualified-calls', '/reporting')]
     assert order == sorted(order)
     session(client, 'analyst', 'user-viewer')
     assert 'href="/reporting"' in client.get('/workspace').text
@@ -143,6 +143,9 @@ def test_help_readme_and_changelog_are_public_except_reporting_old(client):
     assert 'reporting-old.md' not in client.get('/api/documents/help').json()['content']
     assert 'Email Delivery' in client.get('/api/documents/help/app-config.md').json()['content']
     login(client)
+    index = [item['relative_path'] for item in client.get('/api/documents/help-index').json()['documents']]
+    assert 'reporting-old.md' not in index
+    core.save_feature_activation_settings({**core.feature_activation_settings(), 'reporting-old': {'default': 'all'}})
     index = [item['relative_path'] for item in client.get('/api/documents/help-index').json()['documents']]
     assert index.index('e2e-dashboards.md') < index.index('reporting-old.md') < index.index('scoring-gap-analysis.md') < index.index('reporting.md')
     assert client.get('/api/documents/help/reporting-old.md').status_code == 200
@@ -371,8 +374,12 @@ def test_feature_rules_saved_before_forbidden_lists_keep_their_meaning():
     assert rule == {'default': 'none', 'allow': {'roles': ['admin'], 'groups': [], 'users': [7]},
                     'deny': {'roles': [], 'groups': [], 'users': []}}
     assert core.normalized_feature_rule({'mode': 'all'})['default'] == 'all'
+    # Reporting (old) is off for every role and user of a new deployment; the other modules are on.
     defaults = core.normalized_feature_rule(None, core.FEATURE_DEFAULTS['reporting-old'])
-    assert defaults['default'] == 'none' and defaults['allow_usernames'] == ['ejaitur']
+    assert defaults == {'default': 'none', 'allow': {'roles': [], 'groups': [], 'users': []},
+                        'deny': {'roles': [], 'groups': [], 'users': []}}
+    assert all(core.normalized_feature_rule(None, core.FEATURE_DEFAULTS.get(key))['default'] == 'all'
+               for key in core.FEATURE_KEYS if key != 'reporting-old')
 
 
 def test_network_insights_entries_keep_their_own_selection_and_read_single_selections():

@@ -43,7 +43,7 @@ Before version 0.6.0 the application was named Dashboard Analytic. Variables wit
 
 `user-editor`, `admin` and `super-admin` accounts can choose **Config → Application Config** to persist runtime settings in the application database. Values saved there take precedence over Docker and environment variables, and apply to every workspace.
 
-- **Timezone** accepts an IANA name such as `Europe/Madrid`. It controls displayed timestamps and newly stored local timestamps.
+- **Timezone** accepts an IANA name such as `Europe/Madrid`. It controls displayed timestamps and newly stored local timestamps. Without it, or `TZ`, the server's own timezone is used (UTC when the server has none).
 - **Report Chart Renderer** selects `dashboard-canvas` or the legacy `pil` renderer.
 - **Chromium Executable** accepts an absolute executable path. Saving it restarts the shared Canvas renderer, so the next chart uses the selected browser.
 - **Ignore event time filtering** ignores Dashboard, CDR Analysis and template conditions based on `Event_Start_Time` or `Event_End_Time`. Use it when source timestamps are incomplete and must not exclude valid rows.

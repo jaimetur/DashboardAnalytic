@@ -74,7 +74,7 @@ Cards identify the real active preparation or rendering task. An **Interrupt tas
 
 Cards can be minimized without interrupting their tasks, retain that state while moving between modules or reloading the page, refresh automatically, and retain a completed task briefly so its final state is visible before the card disappears. Persistent generation jobs remain available in their module table after the floating notification closes.
 
-Workspace data jobs run on the server in this order: Vendor and Region mapping datasets by ID, other datasets by ID, combined CDR table recreation, then Auto-calculated Field materialization. One data job runs per Workspace at a time. The server also caps total background concurrency to leave an interactive CPU available.
+Workspace data jobs run on the server in this order: Vendor Mappings and Regions, Clusters and Vendors polygons by ID, other datasets by ID, combined CDR table recreation, then Auto-calculated Field materialization. One data job runs per Workspace at a time. The server also caps total background concurrency to leave an interactive CPU available.
 
 Queued and processing datasets can be stopped individually or with **Stop All**; large CDR workers run in lower-priority processes and respond to the same Stop request.
 
@@ -109,7 +109,7 @@ Workspace is the entry point for data and storage management.
 
 - Create, edit, duplicate, delete, import and export Auto-calculated Fields from the Workspace panel.
 - A field is applied only to the CDR types selected in **Available for**.
-- Save persists field definitions. Save & Materialize, importing or rematerializing starts a background job. The Materialization status panel shows its percentage and completion state.
+- Save persists field definitions. Save & Materialize, importing or rematerializing starts a background job. The CDR Tables Updates card shows its percentage and completion state.
 - Existing combined `CDR-Data`, `CDR-Voice` and `CDR-Speech` tables appear in their own card of Datasets, below the Final and Daily CDRs. They include the Final CDRs and the Daily CDRs that no Final CDR replaces yet (see [CDR Type](workspace-management.md#cdr-type-final-and-daily)). Preview them with the same filters as individual CDRs.
 - Use the circular **Recreate** action when a combined table needs rebuilding. It restores missing individual persisted rows from their source file when possible, then verifies contributed and total row counts.
 
@@ -201,7 +201,7 @@ The operational guide is [E2E Dashboards](e2e-dashboards.md). Template creation,
 
 ## Non-Qualified Calls
 
-Non-Qualified Calls follows Scoring & GAP Analysis in the main tabs. It lists every Voice and Speech call and every Data test whose result is not Completed (Failed, Dropped, Cutoff…) in the ready CDRs of the workspace, summarises them by service, result, status, team, failure classification and Operator with drill-down into the calls, shows the NQ rate of each campaign and operator, and lets the teams follow each call up with a status, a responsible team, an assignee, a root cause, the workspace's own analysis fields and a shared, traceable comment thread. Each call is identified by its `JOIN_ID`, so its analysis is shared by the Daily and Final CDRs that contain it. The follow-up exports to Excel and travels with workspace packages, transfers and backups. The module is in development and hidden from every user until it is activated in Admin → Features Activation. See [Non-Qualified Calls](non-qualified-calls.md).
+Non-Qualified Calls follows Scoring & GAP Analysis in the main tabs. It lists every Voice and Speech call and every Data test whose result is not Completed (Failed, Dropped, Cutoff…) in the ready CDRs of the workspace, summarises them by service, result, status, team, failure classification and Operator with drill-down into the calls, shows the NQ rate of each campaign and operator, and lets the teams follow each call up with a status, a responsible team, an assignee, a root cause, the workspace's own analysis fields and a shared, traceable comment thread. Each call is identified by its `JOIN_ID`, so its analysis is shared by the Daily and Final CDRs that contain it. The follow-up exports to Excel and travels with workspace packages, transfers and backups. It is active for every user of a new deployment and can be restricted in Admin → Features Activation. See [Non-Qualified Calls](non-qualified-calls.md).
 
 ## Reporting
 
@@ -209,7 +209,7 @@ Non-Qualified Calls follows Scoring & GAP Analysis in the main tabs. It lists ev
 
 ## Reporting (old)
 
-Reporting (old) combines processed CDRs and a Report Template from the active workspace. It is available only to the users, roles and groups it is activated for in Admin → Features Activation (by default super-admins and EJAITUR).
+Reporting (old) combines processed CDRs and a Report Template from the active workspace. It is available only to the users, roles and groups it is activated for in Admin → Features Activation (off for everyone on a new deployment).
 
 ### Reporting module selector
 

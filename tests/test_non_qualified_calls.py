@@ -81,17 +81,23 @@ def query(client, **payload):
     return response.json()
 
 
-def test_module_is_hidden_until_activated_and_marks_tabs_in_development(client):
+def test_module_is_active_by_default_and_marks_tabs_in_development(client):
     login(client)
+    # Every module but Reporting (old) is active for every user of a new deployment.
+    assert client.get('/api/non-qualified-calls/state').status_code == 200
+    assert 'href="/non-qualified-calls"' in client.get('/workspace').text
+    settings = core.feature_activation_settings()
+    settings['non-qualified-calls'] = {'default': 'none'}
+    core.save_feature_activation_settings(settings)
     assert client.get('/api/non-qualified-calls/state').status_code == 403
+    assert 'href="/non-qualified-calls"' not in client.get('/workspace').text
+    # Once turned on, the module tabs show their stage: ALPHA, BETA or NEW; stable modules have no label.
+    core.repository.set_application_state(core.MODULE_STAGE_LABELS_STATE_KEY, '1')
     page = client.get('/workspace').text
-    assert 'href="/non-qualified-calls"' not in page
-    # Each module tab shows its stage: ALPHA, BETA, NEW or STABLE.
     assert '<span class="module-tab-label-mobile">Network</span><svg class="module-tab-new module-tab-new-network-insights"' in page
     assert '<span class="module-tab-label-mobile">Scoring</span><svg class="module-tab-new module-tab-new-scoring"' in page
-    assert '<span>Workspace</span><svg class="module-tab-new module-tab-new-workspace"' in page
-    assert '<span class="module-tab-label-mobile">Analysis</span><svg class="module-tab-new module-tab-new-datasets-analysis"' in page
-    assert '>STABLE</text>' in page and '>ALPHA</text>' in page and '>BETA</text>' in page and '>NEW</text>' in page
+    assert 'module-tab-new-workspace' not in page and 'module-tab-new-datasets-analysis' not in page
+    assert '>STABLE</text>' not in page and '>ALPHA</text>' in page and '>BETA</text>' in page and '>NEW</text>' in page
     enable_module()
     page = client.get('/non-qualified-calls')
     assert page.status_code == 200

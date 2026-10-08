@@ -91,3 +91,12 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
             shutil.copytree(slides_templates_dir, app_module.active_workspace.slides_templates_dir, dirs_exist_ok=True)
         app_module.register_workspace_template_files(app_module.active_workspace)
         yield test_client
+
+
+@pytest.fixture()
+def reporting_old(client: TestClient) -> TestClient:
+    """Reporting (old) is off for every user by default; the tests of the old module turn it on."""
+    rules = app_module.feature_activation_settings()
+    rules['reporting-old'] = {'default': 'all'}
+    app_module.save_feature_activation_settings(rules)
+    return client

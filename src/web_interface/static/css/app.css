@@ -781,6 +781,8 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .workspace-calculated-dimensions-content { display: grid; gap: 1rem; padding-top: 0.8rem; }
 .workspace-calculated-dimensions-intro { display: block; }
 .workspace-calculated-dimensions-intro .lede { min-width: 0; margin: 0; }
+.workspace-calculated-dimensions-status { margin: 0.5rem 0 0; font-weight: 700; color: var(--brand); }
+.workspace-calculated-dimensions-status a { margin-left: 0.35rem; }
 .auto-calculated-field-progress { display: grid; gap: 0.55rem; padding: 0.8rem 0.95rem; border: 1px solid #cfe0e8; border-radius: 12px; background: linear-gradient(135deg, #f7fbfd, #eef7f6); }
 .auto-calculated-field-progress-heading { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; }
 .auto-calculated-field-progress-heading strong { color: #294b5d; font-size: 0.84rem; }
@@ -837,7 +839,8 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .queue-table tr.combined-dataset-section-row td { width: auto !important; padding: 1.05rem 0.9rem 0.8rem; border-top: 3px solid #8fa5b1; border-bottom: 1px solid #ccd8de; background: linear-gradient(135deg, #e9f0f3, #f6f9fa); color: #294b5d; }
 .queue-table tr.combined-dataset-columns-header th { position: static; padding: 0.62rem 0.75rem; border-bottom: 2px solid #aebfc8; background: #dfe8ec; color: #3d5867; font-size: 0.74rem; font-weight: 800; letter-spacing: 0.035em; text-transform: uppercase; }
 .combined-dataset-section-copy { display: grid; gap: 0.28rem; }
-.combined-dataset-section-copy strong { font-size: 0.9rem; letter-spacing: 0.035em; text-transform: uppercase; }
+.combined-dataset-section-copy strong { display: flex; align-items: center; gap: 0.55rem; font-size: 0.9rem; letter-spacing: 0.035em; text-transform: uppercase; }
+.queue-table tr.combined-dataset-columns-header th.combined-dataset-pair-head span { display: block; margin-top: 0.3rem; opacity: 0.85; }
 .combined-dataset-section-copy p { max-width: 1100px; margin: 0; color: #526b79; font-size: 0.8rem; line-height: 1.45; }
 .workspace-calculated-dimensions-list { display: grid; align-content: start; gap: 0.4rem; min-height: 24rem; max-height: 24rem; overflow-y: auto; padding: 0.7rem; border: 1px solid #d9e6ed; border-radius: 10px; background: #fff; scrollbar-gutter: stable; }
 .workspace-calculated-dimension-columns, .workspace-calculated-dimension-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(7rem, auto); column-gap: 0.8rem; }
@@ -1668,6 +1671,20 @@ body[data-embedded-template-editor] .slides-templates-editor-table-wrap .form-ac
 .vendor-mapping-fields { display: grid; gap: 0.9rem; }
 .vendor-mapping-fields label { display: grid; gap: 0.38rem; }
 .vendor-mapping-fields .form-note { padding: 0.75rem 0.9rem; border-radius: 12px; background: rgba(16, 49, 74, 0.06); }
+/* Vendor source (Network Inventory or Vendor polygons) and the Vendor polygons to apply. */
+.vendor-mapping-fields :is(.vendor-mapping-source, .vendor-mapping-polygons) { display: flex; flex-wrap: wrap; gap: 0.45rem 1.2rem; margin: 0; padding: 0.7rem 0.9rem; border: 1px solid var(--line); border-radius: 12px; }
+.vendor-mapping-fields :is(.vendor-mapping-source, .vendor-mapping-polygons)[hidden], .vendor-mapping-inventory[hidden] { display: none; }
+.vendor-mapping-fields :is(.vendor-mapping-source, .vendor-mapping-polygons) legend { padding: 0 0.3rem; font-weight: 800; }
+.vendor-mapping-fields :is(.vendor-mapping-source, .vendor-mapping-polygons) label { display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 700; }
+.vendor-mapping-inventory { display: grid; gap: 0.9rem; }
+/* Geographic Datasets: the type of each shape and, for Vendor polygons, their editable Operator. */
+.queue-geo-type-cell { display: table-cell; }
+.queue-geo-type { display: inline-flex; padding: 0.22rem 0.6rem; border-radius: 999px; font-size: 0.74rem; font-weight: 800; }
+.queue-geo-type-regions { background: #dcebff; color: #1f4f7f; }
+.queue-geo-type-clusters { background: #e7f5ec; color: #1d6b3f; }
+.queue-geo-type-vendors { background: #efe6fb; color: #5a3591; }
+.queue-operator-pill { display: block; width: 100%; max-width: 100%; min-width: 0; min-height: 0; height: 1.65rem; margin-top: 0.35rem; padding: 0 1rem 0 0.45rem; border: 1px solid #c9b4ea; border-radius: 999px; background: #f8f3ff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%235a3591' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 0.45rem center / 0.55rem; color: #5a3591; font-size: 0.72rem; font-weight: 800; appearance: none; -webkit-appearance: none; }
+.queue-operator-pill-inline { width: auto; max-width: 100%; }
 .vendor-mapping-cdr-list { display: grid; gap: 0.48rem; margin: 0; padding: 0.8rem 0.9rem; border: 1px solid rgba(16, 49, 74, 0.16); border-radius: 14px; background: rgba(16, 49, 74, 0.035); }
 .vendor-mapping-cdr-list legend { padding: 0 0.3rem; color: var(--brand); font-size: 0.86rem; font-weight: 800; }
 .vendor-mapping-cdr-choice { display: flex; align-items: center; gap: 0.55rem; cursor: pointer; color: var(--text); font-weight: 650; }
@@ -1790,6 +1807,17 @@ body[data-embedded-template-editor] .slides-templates-editor-table-wrap .form-ac
 }
 .dataset-preview-stack, .dataset-preview-panel { width: 100%; max-width: 100%; min-width: 0; }
 .dataset-preview-panel { position: relative; z-index: 1; overflow: hidden; }
+/* Region and Cluster polygons previewed on a map, over the grey outline of their countries. */
+.polygon-map-canvas { border: 1px solid var(--line); border-radius: 14px; background: #eef3f6; overflow: hidden; }
+.polygon-map-svg { display: block; width: 100%; height: min(70vh, 640px); cursor: grab; touch-action: none; user-select: none; }
+.polygon-map-svg.is-dragging { cursor: grabbing; }
+.polygon-map-outline { fill: #fbfaf7; stroke: #b9c3cb; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.polygon-map-shape { fill-opacity: 0.62; stroke: #ffffff; stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+.polygon-map-shape:hover, .polygon-map-shape.is-highlighted { fill-opacity: 0.9; stroke: var(--text); stroke-width: 2; }
+.polygon-map-label { font-size: 11px; font-weight: 700; fill: var(--text); text-anchor: middle; dominant-baseline: middle; pointer-events: none; paint-order: stroke; stroke: rgba(255, 255, 255, 0.85); stroke-width: 3px; }
+.polygon-map-legend { display: flex; flex-wrap: wrap; gap: 0.35rem 0.9rem; margin: 0.9rem 0 0; padding: 0; list-style: none; font-size: 0.82rem; color: var(--muted); }
+.polygon-map-legend li { display: inline-flex; align-items: center; gap: 0.4rem; cursor: default; }
+.polygon-map-swatch { width: 0.8rem; height: 0.8rem; border-radius: 3px; opacity: 0.8; }
 .dataset-preview-table-wrap { width: 100%; max-width: 100%; min-width: 0; height: min(65vh, 38rem); max-height: none; overflow-x: scroll !important; overflow-y: scroll !important; scrollbar-gutter: stable both-edges; overscroll-behavior: contain; }
 .dataset-preview-table { width: max-content; min-width: 1200px; }
 .dataset-preview-table thead th { padding: 0; vertical-align: top; }
@@ -2199,8 +2227,11 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .queue-table th:nth-child(10), .queue-table td:nth-child(10),
 .queue-table th:nth-child(11), .queue-table td:nth-child(11) { width: 116px; }
 .queue-nr-mode-select { min-width: 4.4rem; padding: 0.3rem 0.45rem; font-weight: 700; }
-.queue-table [data-queue-uploaded], .queue-table [data-queue-updated] { white-space: pre-line; overflow-wrap: normal; }
-.queue-table [data-queue-updated] { white-space: pre; }
+.queue-table :is([data-queue-uploaded], [data-queue-updated], [data-combined-dataset-updated]) { white-space: nowrap; overflow-wrap: normal; }
+/* The time of a date has its own colour; narrow reference cards show it under the date. */
+.queue-table .queue-time { color: #2f7fa8; font-weight: 600; }
+.dataset-card-compact .queue-table [data-queue-updated] { white-space: normal; }
+.dataset-card-compact .queue-table [data-queue-updated] .queue-time { display: block; }
 .queue-sort-button { display: inline-flex; align-items: center; justify-content: flex-start; gap: 0.32rem; width: 100%; min-width: 0; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; color: inherit; font: inherit; letter-spacing: inherit; text-align: left; text-transform: inherit; }
 .queue-sort-button:hover, .queue-sort-button:focus-visible { background: transparent; color: var(--brand); box-shadow: none; }
 .queue-sort-button [data-queue-sort-indicator] { flex: 0 0 auto; color: var(--brand); font-size: 0.9em; }
@@ -4169,10 +4200,24 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
 /* Workspace datasets in cards: Final and Daily CDRs, the combined tables, then the reference data. */
 .dataset-cards { display: grid; gap: 1.1rem; margin: 0 1.45rem 1.45rem; }
 .dataset-card { display: grid; gap: 0.7rem; min-width: 0; max-width: 100%; overflow: hidden; padding: 1rem 1.1rem 1.1rem; border: 1px solid var(--line); border-radius: calc(var(--radius) - 4px); background: var(--panel-strong); box-shadow: 0 10px 24px rgba(16, 49, 74, 0.06); }
-.dataset-card-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 0.35rem 1.2rem; }
+/* The Dataset Type filter hides the cards without datasets of that type. */
+.dataset-card[hidden] { display: none; }
+.dataset-card { position: relative; align-content: start; }
+/* Every card: eyebrow, title and count, then the description under them; the icon sits in the top right corner. */
+.dataset-card-head { display: block; padding-right: 4.2rem; }
 .dataset-card-head .eyebrow { margin: 0 0 0.2rem; }
 .dataset-card-head h3 { display: flex; align-items: center; gap: 0.55rem; margin: 0; font-size: 1.12rem; }
-.dataset-card-head .form-note { flex: 1 1 22rem; max-width: 48rem; margin: 0; text-align: right; }
+/* Each Datasets card has an icon in its colour. */
+.dataset-card-icon { position: absolute; top: 1rem; right: 1.1rem; display: grid; place-items: center; width: 3.1rem; height: 3.1rem; border-radius: 14px; color: var(--dataset-card-colour, #3d5867); background: color-mix(in srgb, var(--dataset-card-colour, #3d5867) 13%, #fff); }
+.dataset-card-icon svg { width: 1.9rem; height: 1.9rem; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.combined-dataset-section-copy { padding-right: 4.2rem; }
+.dataset-card-icon-final { --dataset-card-colour: #1d4f8f; }
+.dataset-card-icon-daily { --dataset-card-colour: #d08a1c; }
+.dataset-card-icon-network-inventory { --dataset-card-colour: #6941a4; }
+.dataset-card-icon-geospatial { --dataset-card-colour: #2e8b57; }
+.dataset-card-icon-other { --dataset-card-colour: #7b8790; }
+.dataset-card-icon-combined { --dataset-card-colour: #3d5867; }
+.dataset-card-head .form-note { max-width: 60rem; margin: 0.35rem 0 0; text-align: left; }
 .dataset-card-count { display: inline-grid; place-items: center; min-width: 1.6rem; height: 1.6rem; padding: 0 0.45rem; border-radius: 999px; background: var(--brand); color: #fff; font-size: 0.8rem; font-weight: 850; }
 .dataset-card-final { border-top: 5px solid #1d4f8f; }
 .dataset-card-daily { border-top: 5px solid #d08a1c; }
@@ -4184,43 +4229,92 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
 .dataset-card-daily > summary h3::after { content: '▾'; color: var(--muted); font-size: 0.9rem; transition: transform 0.15s ease; }
 .dataset-card-daily:not([open]) > summary h3::after { transform: rotate(-90deg); }
 .dataset-card-combined { padding-top: 0.6rem; border-top: 5px solid #8fa5b1; }
-.dataset-card-vendor-mapping { border-top: 5px solid #6941a4; }
+.dataset-card-network-inventory { border-top: 5px solid #6941a4; }
 .dataset-card-geospatial { border-top: 5px solid #2e8b57; }
 .dataset-card-other { border-top: 5px solid #7b8790; }
 .dataset-card-final .dataset-card-count { background: #1d4f8f; }
 .dataset-card-daily .dataset-card-count { background: #d08a1c; }
-.dataset-card-vendor-mapping .dataset-card-count { background: #6941a4; }
+.dataset-card-network-inventory .dataset-card-count { background: #6941a4; }
 .dataset-card-geospatial .dataset-card-count { background: #2e8b57; }
 .dataset-card-other .dataset-card-count { background: #7b8790; }
 .dataset-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 34rem), 1fr)); gap: 1.1rem; }
-/* CDR cards add the CDR Type and Combined columns after NR Mode. */
-.dataset-card-cdr .queue-table { min-width: 1480px; }
-.dataset-card-cdr .queue-table th:nth-child(5), .dataset-card-cdr .queue-table td:nth-child(5) { width: 112px; }
-.queue-cdr-stage-select { min-width: 5.6rem; }
-.dataset-card-cdr .queue-table th:nth-child(6), .dataset-card-cdr .queue-table td:nth-child(6) { width: 190px; }
-.dataset-card-cdr .queue-table th:nth-child(9), .dataset-card-cdr .queue-table td:nth-child(9) { width: auto; }
-.dataset-card-cdr .queue-table th:nth-child(10), .dataset-card-cdr .queue-table td:nth-child(10) { width: auto; }
-.dataset-card-cdr .queue-table th:nth-child(11), .dataset-card-cdr .queue-table td:nth-child(11) { width: 170px; }
-.dataset-card-cdr .queue-table th:nth-child(12), .dataset-card-cdr .queue-table td:nth-child(12),
-.dataset-card-cdr .queue-table th:nth-child(13), .dataset-card-cdr .queue-table td:nth-child(13) { width: 116px; }
+/* CDR cards add the CDR Type and In Combined? columns after NR Mode and stack Rows over Columns and Uploaded over Updated.
+   Every value uses one font size and only the second value of a stacked cell is smaller; NR Mode, CDR Type and the
+   Combined choice are small pills with their own arrow, and the actions sit on two rows, so the table fits a laptop window. */
+.dataset-card-cdr .queue-table { min-width: 1230px; width: 100%; table-layout: fixed; }
+.dataset-card-cdr .queue-table :is(th, td) { padding-left: 0.55rem; padding-right: 0.55rem; }
+.dataset-card-cdr .queue-table td { font-size: 0.82rem; overflow-wrap: anywhere; }
+.dataset-card-cdr .queue-table td .queue-dataset-name { font-size: inherit; }
+.dataset-card-cdr .queue-dataset-path { font-size: 0.74rem; overflow-wrap: anywhere; }
+.dataset-card-cdr .queue-table th:nth-child(1), .dataset-card-cdr .queue-table td:nth-child(1) { width: 42px; }
+.dataset-card-cdr .queue-table th:nth-child(2), .dataset-card-cdr .queue-table td:nth-child(2) { width: auto; min-width: 0; max-width: none; }
+.dataset-card-cdr .queue-table th:nth-child(3), .dataset-card-cdr .queue-table td:nth-child(3) { width: 90px; }
+.dataset-card-cdr .queue-table th:nth-child(4), .dataset-card-cdr .queue-table td:nth-child(4) { width: 76px; }
+.dataset-card-cdr .queue-table th:nth-child(5), .dataset-card-cdr .queue-table td:nth-child(5) { width: 78px; }
+.dataset-card-cdr .queue-table th:nth-child(6), .dataset-card-cdr .queue-table td:nth-child(6) { width: 104px; }
+.dataset-card-cdr .queue-table th:nth-child(7), .dataset-card-cdr .queue-table td:nth-child(7) { width: 80px; }
+.dataset-card-cdr .queue-table th:nth-child(8), .dataset-card-cdr .queue-table td:nth-child(8) { width: 82px; }
+.dataset-card-cdr .queue-table th:nth-child(9), .dataset-card-cdr .queue-table td:nth-child(9) { width: 96px; }
+.dataset-card-cdr .queue-table th:nth-child(10), .dataset-card-cdr .queue-table td:nth-child(10) { width: 104px; }
+.dataset-card-cdr .queue-table th:nth-child(11), .dataset-card-cdr .queue-table td:nth-child(11) { width: 152px; }
+.dataset-card-cdr .queue-table th:nth-child(12), .dataset-card-cdr .queue-table td:nth-child(12) { width: 124px; }
+.dataset-card-cdr .queue-table .queue-actions { display: grid; grid-template-columns: repeat(3, 2rem); gap: 0.3rem; min-width: 0; }
+.dataset-card-cdr .queue-progress-cell { min-width: 0; }
+.dataset-card-cdr .queue-progress-cell .progress-shell { width: 100%; min-width: 0; }
+.dataset-card-cdr .queue-status-pill { padding: 0.28rem 0.55rem; font-size: 0.74rem; white-space: nowrap; }
+.dataset-card-cdr .queue-stacked-cell > span { overflow-wrap: normal; }
+.dataset-card-cdr .queue-stacked-cell .queue-stacked-sub { font-size: 0.74rem; }
+/* Small pills: NR Mode, CDR Type and the Combined choice, with a drawn arrow so their value is never hidden. */
+.dataset-card-cdr :is(.queue-nr-mode-select, .queue-cdr-stage-select, .queue-combined-select) {
+  appearance: none; -webkit-appearance: none; width: 100%; min-width: 0; max-width: 100%; min-height: 0; height: 1.65rem;
+  padding: 0 1.15rem 0 0.55rem; border-radius: 999px; font-size: 0.74rem; font-weight: 800; line-height: 1;
+  text-overflow: clip; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%2360707b' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 0.45rem center; background-size: 0.55rem;
+}
+.dataset-card-cdr .queue-combined-state { font-size: 0.7rem; padding: 0.1rem 0.5rem; }
+.dataset-card-cdr .queue-combined-reason { font-size: 0.7rem; }
+/* The CDRs in the combined tables have a very light green background and the others a very light grey one. */
+.dataset-card-cdr .queue-table tbody tr.queue-row-in-combined[data-dataset-row] { background: #f1faf3; }
+.dataset-card-cdr .queue-table tbody tr.queue-row-not-combined[data-dataset-row] { background: #f1f2f4; }
+.queue-table th.queue-sort-pair { vertical-align: bottom; }
+.queue-table th.queue-sort-pair .queue-sort-button { display: flex; }
+.queue-table th.queue-sort-pair .queue-sort-button + .queue-sort-button { margin-top: 0.3rem; opacity: 0.85; font-size: 0.92em; }
+.queue-stacked-cell > span { display: block; white-space: nowrap; }
+.queue-stacked-cell .queue-stacked-sub { margin-top: 0.2rem; color: var(--muted); font-size: 0.85em; }
+.queue-table .queue-stacked-cell [data-queue-uploaded], .queue-table .queue-stacked-cell [data-queue-updated] { white-space: nowrap; }
 .queue-cdr-stage-select:has(option[value="final"]:checked) { border-color: #8db4e2; background-color: #dcebff; color: #1f4f7f; }
 .queue-cdr-stage-select:has(option[value="daily"]:checked) { border-color: #e8c27a; background-color: #fff1d6; color: #8a5300; }
 .queue-combined-cell { display: grid; gap: 0.3rem; justify-items: start; }
 .queue-combined-state { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.12rem 0.55rem; border-radius: 999px; font-size: 0.74rem; font-weight: 850; }
-.queue-combined-state.is-included { background: #e2f4e8; color: #1d6b3f; }
+/* Solid pills, so Yes and No stand out on the light green and grey row backgrounds. */
+.queue-combined-state.is-included { background: #2f8f57; color: #fff; }
 .queue-combined-state.is-included::before { content: '✓'; }
-.queue-combined-state.is-excluded { background: #f0f1f3; color: #5b6377; }
+.queue-combined-state.is-excluded { background: #6b7482; color: #fff; }
 .queue-combined-state.is-excluded::before { content: '–'; }
 .queue-combined-select { min-width: 6rem; padding: 0.25rem 0.45rem; font-size: 0.8rem; font-weight: 700; }
 .queue-combined-reason { color: var(--muted); font-size: 0.74rem; line-height: 1.25; overflow-wrap: anywhere; }
 /* Reference data cards are compact: dataset, rows, status with progress, last update and actions. */
 .dataset-card-compact .queue-table { min-width: 0; width: 100%; }
-.dataset-card-compact .queue-table th:nth-child(2), .dataset-card-compact .queue-table td:nth-child(2) { width: auto; min-width: 12rem; max-width: none; }
-.dataset-card-compact .queue-table th:nth-child(4), .dataset-card-compact .queue-table td:nth-child(4) { width: 11rem; }
-.dataset-card-compact .queue-table th:nth-child(5), .dataset-card-compact .queue-table td:nth-child(5) { width: 7rem; }
-.dataset-card-compact .queue-table th:nth-child(6), .dataset-card-compact .queue-table td:nth-child(6) { width: auto; }
-.dataset-card-compact .queue-dataset-kind { color: var(--muted); font-size: 0.8rem; font-weight: 700; }
-.dataset-card-compact .queue-progress-cell .queue-status-pill { justify-self: start; margin-bottom: 0.25rem; }
+.dataset-card-compact .queue-table :is(th, td) { padding-left: 0.55rem; padding-right: 0.55rem; }
+.dataset-card-compact .queue-table th:nth-child(1), .dataset-card-compact .queue-table td:nth-child(1) { width: 42px; }
+.dataset-card-compact .queue-table th:nth-child(2), .dataset-card-compact .queue-table td:nth-child(2) { width: auto; min-width: 9rem; max-width: none; }
+.dataset-card-compact .queue-table th:nth-child(3), .dataset-card-compact .queue-table td:nth-child(3) { width: 4.6rem; }
+.dataset-card-compact .queue-table th:nth-child(4), .dataset-card-compact .queue-table td:nth-child(4) { width: 7.2rem; }
+.dataset-card-compact .queue-table th:nth-child(5), .dataset-card-compact .queue-table td:nth-child(5) { width: 6.4rem; }
+.dataset-card-compact .queue-table th:nth-child(6), .dataset-card-compact .queue-table td:nth-child(6) { width: 7.8rem; }
+/* Reference datasets keep Preview, Reprocess and Delete, side by side, so the table fits half a laptop window. */
+.dataset-card-compact .queue-progress-cell { min-width: 0; }
+.dataset-card-compact .queue-table .queue-actions { display: grid; grid-template-columns: repeat(3, 2rem); gap: 0.3rem; min-width: 0; }
+/* Geographic Datasets: Type instead of Rows, wide enough for the Operator of Vendor polygons. */
+.dataset-card-geospatial .queue-table th:nth-child(2), .dataset-card-geospatial .queue-table td:nth-child(2) { min-width: 6.5rem; }
+.dataset-card-geospatial .queue-table th:nth-child(3), .dataset-card-geospatial .queue-table td:nth-child(3) { width: 8rem; }
+.dataset-card-geospatial .queue-table th:nth-child(4), .dataset-card-geospatial .queue-table td:nth-child(4) { width: 6.3rem; }
+.dataset-card-geospatial .queue-table th:nth-child(5), .dataset-card-geospatial .queue-table td:nth-child(5) { width: 5.9rem; }
+/* The same font sizes as the CDR cards: one size for every value, smaller second values and pills. */
+.dataset-card-compact .queue-table td { font-size: 0.82rem; }
+.dataset-card-compact .queue-table td .queue-dataset-name { font-size: inherit; }
+.dataset-card-compact .queue-dataset-kind { color: var(--muted); font-size: 0.74rem; font-weight: 700; }
+.dataset-card-compact .queue-progress-cell .queue-status-pill { justify-self: start; margin-bottom: 0.25rem; padding: 0.28rem 0.55rem; font-size: 0.74rem; white-space: nowrap; }
 .queue-card > .dataset-cards + .datasets-materialization-status { margin-top: 0; }
 @media (max-width: 640px) {
   .dataset-cards { margin: 0 1rem 1rem; }

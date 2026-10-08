@@ -733,7 +733,7 @@ def inventory_polygon_sources(repository) -> tuple:
     """Identify ready boundary inputs and their revisions for spatial cache invalidation."""
     sources = []
     for row in repository.list_datasets():
-        if row['status'] == 'ready' and row['dataset_kind'] in {'mapping_region', 'clusters'}:
+        if row['status'] == 'ready' and row['dataset_kind'] in {'regions', 'clusters'}:
             path = Path(str(row['stored_path']))
             sources.append((row['dataset_kind'], int(row['id']), str(row['updated_at'] or ''),
                             str(path), path.stat().st_mtime_ns))
@@ -747,7 +747,7 @@ def inventory_polygon_lookup(sources: tuple):
     from shapely import STRtree
 
     lookups = {}
-    for dimension, kind in [('Region', 'mapping_region'), ('Cluster', 'clusters')]:
+    for dimension, kind in [('Region', 'regions'), ('Cluster', 'clusters')]:
         geometries, names = [], []
         for source_kind, _identifier, _revision, path, _mtime in sources:
             if source_kind != kind:
@@ -1029,7 +1029,7 @@ def inventory_projection(task_repository: Any, dataset: dict[str, Any]) -> pd.Da
     coordinates = ', '.join(inventory_coordinate_expressions(columns, quote))
     polygon_kinds = {source[0] for source in inventory_polygon_sources(task_repository)}
     for field, dimension in [('region', 'Region'), ('cluster', 'Cluster')]:
-        if not expressions[field] and ('mapping_region' if field == 'region' else 'clusters') not in polygon_kinds:
+        if not expressions[field] and ('regions' if field == 'region' else 'clusters') not in polygon_kinds:
             continue
         original = expressions[field] or "''"
         expressions[field] = f"inventory_polygon_name('{dimension}', {coordinates}, {original})"

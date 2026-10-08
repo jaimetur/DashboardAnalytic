@@ -2,7 +2,7 @@
 
 Non-Qualified Calls brings the CDR Drive Test follow-up into DriveTest Analyzer: an executive summary of every call and test that did not complete, a drill-down table of those calls, a shared follow-up of each one with a status, a responsible team, an assignee, a root cause and a comment thread that every user of the workspace sees, and a Root Cause Analysis of where the calls fail.
 
-The module is in development, so its main tab shows a red **NEW** label. It is hidden from every user until an admin or super-admin activates it in [Admin → Features Activation](administrator-config.md).
+The module is in development, so its main tab can show a red **ALPHA** label (see Interface Settings). It is active for every user of a new deployment; admins and super-admins restrict it in [Admin → Features Activation](administrator-config.md).
 
 ## Which calls are Non-Qualified
 

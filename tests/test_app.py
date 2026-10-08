@@ -2079,12 +2079,12 @@ def test_workspace_calculated_dimensions_panel_exports_and_imports_json(client) 
     assert page.text.index('<h2>Datasets</h2>') < page.text.index('id="calculated-dimensions"')
     assert page.text.index('data-auto-calculated-field-progress') < page.text.index('id="calculated-dimensions"')
     materialization_panel = page.text.split('data-auto-calculated-field-progress', 1)[1].split('</section>', 1)[0]
-    assert '<span>Re-materialize auto-calculate fields</span>' in materialization_panel
-    assert materialization_panel.index('data-auto-calculated-field-rematerialize') < materialization_panel.index('data-auto-calculated-field-progress-status')
+    assert '>CDR Tables Updates<' in materialization_panel and 'data-auto-calculated-field-progress-status' in materialization_panel
+    assert 'data-auto-calculated-field-rematerialize' not in materialization_panel
     calculated_panel = page.text.split('id="calculated-dimensions"', 1)[1]
     assert 'workspace-calculated-dimensions-intro' in calculated_panel
-    assert 'data-auto-calculated-field-rematerialize' not in calculated_panel
-    assert calculated_panel.index('data-workspace-manage-calculated-dimensions') < calculated_panel.index('workspace-calculated-dimensions-export-link')
+    assert '<span>Re-materialize All Fields</span>' in calculated_panel
+    assert calculated_panel.index('data-workspace-manage-calculated-dimensions') < calculated_panel.index('workspace-calculated-dimensions-export-link') < calculated_panel.index('data-auto-calculated-field-rematerialize')
 
     current_definitions = client.get('/api/workspace/calculated-dimensions')
     assert current_definitions.status_code == 200
@@ -2283,7 +2283,7 @@ def test_renaming_calculated_dimension_rebuilds_references_in_templates_and_dash
     assert dashboards['dashboard-1']['filters'] == {'Test Classification': ['Video'], 'Operator': ['EE']}
 
 
-def test_reporting_deletion_requires_admin(client) -> None:
+def test_reporting_deletion_requires_admin(client, reporting_old) -> None:
     import src.DriveTestAnalyzer as app_module
 
     endpoints = [
@@ -4016,6 +4016,7 @@ def test_admin_dataset_rows_can_be_reordered_in_descending_order_and_all_ids_are
     def record_reprocessing(
         _tasks, dataset_id, _path, _username,
         vodafone_mapping_dataset_id, three_mapping_dataset_id, region_mapping_dataset_id, cluster_mapping_dataset_id=None,
+        **_mapping_options,
     ):
         reprocessing_calls.append({
             'dataset_id': dataset_id,
@@ -4306,7 +4307,8 @@ def test_reupload_preserves_original_upload_date_for_dataset_ordering(client) ->
     assert workspace.text.index('data-queue-sort-key="uploaded"') < workspace.text.index('data-queue-sort-key="updated"')
     styles = client.get('/static/css/app.css').text
     assert '.queue-table th:nth-child(2), .queue-table td:nth-child(2) { width: 290px; min-width: 290px; max-width: 290px; overflow-wrap: anywhere; }' in styles
-    assert '.queue-table [data-queue-updated] { white-space: pre; }' in styles
+    assert '.queue-table :is([data-queue-uploaded], [data-queue-updated], [data-combined-dataset-updated]) { white-space: nowrap; overflow-wrap: normal; }' in styles
+    assert '<span class="queue-time">' in workspace.text
     assert 'Default (' in workspace.text
 
 
@@ -6199,7 +6201,7 @@ def test_workspace_import_replaces_an_open_workspace_and_removes_old_files(clien
     assert not (imported.database_path.parent / 'slides-templates').exists()
 
 
-def test_workspace_import_keeps_chart_sets_visible_in_reporting(client, tmp_path: Path) -> None:
+def test_workspace_import_keeps_chart_sets_visible_in_reporting(client, reporting_old, tmp_path: Path) -> None:
     import src.DriveTestAnalyzer as app_module
 
     login_super(client)
@@ -6231,7 +6233,7 @@ def test_workspace_import_keeps_chart_sets_visible_in_reporting(client, tmp_path
     assert generation in reporting.text
 
 
-def test_delete_all_reports_removes_orphaned_output_directories(client) -> None:
+def test_delete_all_reports_removes_orphaned_output_directories(client, reporting_old) -> None:
     import src.DriveTestAnalyzer as app_module
 
     login_super(client)
@@ -7200,17 +7202,17 @@ def test_workspace_lists_combined_cdr_with_preview_and_kind_filter_metadata(clie
     assert workspace_response.text.count('<th') >= 22
     # The Final and Daily CDR cards have a Columns header each; the reference data cards are compact.
     assert workspace_response.text.count('data-queue-sort-key="columns"') == 2
-    assert workspace_response.text.count('>Columns</th>') == 1
+    assert workspace_response.text.count('class="combined-dataset-pair-head">Rows<span>Columns</span></th>') == 1
     assert 'data-combined-dataset-structure-row' in workspace_response.text
     dataset_columns = int(app_module.repository.get_dataset(1)['column_count'])
-    assert f'data-queue-sort-cell="columns">{dataset_columns:,}</td>' in workspace_response.text
+    assert f'data-queue-sort-cell="columns" title="Columns">{dataset_columns:,}</span>' in workspace_response.text
     assert 'href="/workspace/combined/data/preview"' in workspace_response.text
     assert 'Combined CDR tables' in workspace_response.text
     assert 'they cannot be uploaded or imported as separate datasets' in workspace_response.text
     assert workspace_response.text.index('class="combined-dataset-section-row"') < workspace_response.text.index('data-combined-dataset-row')
     assert workspace_response.text.index('data-combined-dataset-row') < workspace_response.text.index('data-auto-calculated-field-progress')
     combined_columns = len(app_module.repository.list_reporting_row_columns('data'))
-    assert f'data-combined-dataset-columns>{combined_columns:,}</td>' in workspace_response.text
+    assert f'data-combined-dataset-columns title="Columns">{combined_columns:,}</span>' in workspace_response.text
     workspace_template = app_module.PROJECT_ROOT / 'src' / 'web_interface' / 'templates' / 'workspace.html'
     assert workspace_template.read_text(encoding='utf-8').count("'{:,}'.format(") >= 4
     live_status = client.get('/api/datasets/status')
@@ -7359,10 +7361,11 @@ def test_queued_dataset_actions_remain_compact_icons_during_live_updates(client)
     login(client)
     import src.DriveTestAnalyzer as app_module
 
+    # A queued CDR: the reference datasets have no Map or Clear actions.
     source = app_module.settings.input_dir / 'queued.csv'
     source.write_text('value\n1\n', encoding='utf-8')
     dataset_id, _ = app_module.repository.add_dataset(source.name, str(source), 'admin')
-    app_module.repository.update_dataset_profile(dataset_id, status='queued', progress=0)
+    app_module.repository.update_dataset_profile(dataset_id, status='queued', progress=0, dataset_kind='voice')
 
     page = client.get('/workspace')
     assert page.status_code == 200
@@ -8212,11 +8215,13 @@ def test_workspace_queue_type_filter_lists_all_supported_types_in_order(client) 
         'CDR-Voice',
         'Multivendor Mapping — Three UK (3UK)',
         'Multivendor Mapping — Vodafone UK (VFUK)',
-        'Other supported dataset',
+        'Regions — Geospatial',
+        'Clusters — Geospatial',
         'Smart Orchestrator Logs',
     ]
     positions = [filter_html.index(label) for label in labels]
     assert positions == sorted(positions)
+    assert 'Other supported dataset' not in filter_html
     assert 'value="data" disabled' in filter_html
     assert '<summary class="collapsible-summary">\n      <div>\n        <p class="eyebrow">Data Processing</p>' in response.text
 
@@ -8319,7 +8324,7 @@ def test_dashboard_ignores_non_ready_dataset_id_in_selector_flow(client) -> None
     assert 'option value="2"' not in selector_fragment
 
 
-def test_reporting_preselects_two_latest_ready_cdrs_of_each_type(client) -> None:
+def test_reporting_preselects_two_latest_ready_cdrs_of_each_type(client, reporting_old) -> None:
     login_super(client)
     uploads = [
         ('old-data.csv', 'data', b'Mean_Data_Rate,RAT_A\n10,ENDC\n'),
@@ -8600,6 +8605,10 @@ def test_admin_cannot_assign_or_modify_super_admin_roles(client) -> None:
 
 
 def test_top_navigation_shows_document_links(client) -> None:
+    import src.DriveTestAnalyzer as app_module
+
+    # The stage labels of the tabs are off by default; this test checks them.
+    app_module.repository.set_application_state(app_module.MODULE_STAGE_LABELS_STATE_KEY, '1')
     login(client)
     response = client.get("/workspace")
     assert response.status_code == 200
@@ -8848,7 +8857,7 @@ def test_admin_import_converts_a_legacy_catalogue_when_requested(client) -> None
     assert 'Legacy quality' in stored
 
 
-def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(client) -> None:
+def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(client, reporting_old) -> None:
     from src.modules.cdr_reporting import CATALOG_HEADERS
     import src.DriveTestAnalyzer as app_module
 
@@ -9013,7 +9022,7 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert 'filename="Updated Q4.csv"' in selected_export.headers['content-disposition']
 
 
-def test_reporting_chart_viewer_uses_hover_canvas_dataset_and_zoom_controls(client) -> None:
+def test_reporting_chart_viewer_uses_hover_canvas_dataset_and_zoom_controls(client, reporting_old) -> None:
     import src.DriveTestAnalyzer as app_module
 
     login_super(client)
@@ -9337,6 +9346,14 @@ def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
 def test_reporting_old_help_follows_its_feature(client) -> None:
     import src.DriveTestAnalyzer as app_module
 
+    # Reporting (old) is off for every role by default, super-admins included.
+    token = 'help-reporting-off'
+    app_module.SESSIONS[token] = app_module.SessionUser(username='someone', role='super-admin')
+    client.cookies.set(app_module.SESSION_COOKIE, token)
+    assert client.get('/documents/view/help/reporting-old.md').status_code == 403
+    rules = app_module.feature_activation_settings()
+    rules['reporting-old'] = {'default': 'none', 'allow': {'roles': ['super-admin', 'user-viewer']}}
+    app_module.save_feature_activation_settings(rules)
     for username, role in [('someone', 'super-admin'), ('EJAITUR', 'user-viewer')]:
         token = f'help-reporting-{role}'
         app_module.SESSIONS[token] = app_module.SessionUser(username=username, role=role)
@@ -10324,19 +10341,22 @@ def test_module_stage_labels_can_be_hidden_only_by_super_admins(client) -> None:
     admin_page = client.get('/admin').text
     assert 'id="interface-settings"' not in admin_page
     assert client.post('/admin/interface-settings', data={}, follow_redirects=False).status_code == 403
-    assert 'class="module-tab-new module-tab-new-workspace"' in client.get('/workspace').text
+    # The labels are off by default.
+    assert 'module-tab-new' not in client.get('/workspace').text
 
     client.post('/logout', follow_redirects=False)
     login_super(client)
-    assert 'name="show_module_stage_labels" value="true" data-no-persist checked' in client.get('/admin').text
-    hidden = client.post('/admin/interface-settings', data={}, follow_redirects=False)
-    assert hidden.status_code == 303
-    page = client.get('/workspace').text
-    assert 'module-tab-new' not in page
     assert 'name="show_module_stage_labels" value="true" data-no-persist >' in client.get('/admin').text
+    shown = client.post('/admin/interface-settings', data={'show_module_stage_labels': 'true'}, follow_redirects=False)
+    assert shown.status_code == 303
+    page = client.get('/workspace').text
+    # Stable modules carry no label text: only the modules in development are labelled.
+    assert 'class="module-tab-new module-tab-new-network-insights"' in page
+    assert 'module-tab-new-workspace' not in page and '>STABLE</text>' not in page
+    assert 'name="show_module_stage_labels" value="true" data-no-persist checked' in client.get('/admin').text
 
-    client.post('/admin/interface-settings', data={'show_module_stage_labels': 'true'}, follow_redirects=False)
-    assert 'class="module-tab-new module-tab-new-workspace"' in client.get('/workspace').text
+    client.post('/admin/interface-settings', data={}, follow_redirects=False)
+    assert 'module-tab-new' not in client.get('/workspace').text
 
 
 
@@ -10362,7 +10382,8 @@ def test_module_labels_are_configured_per_module_by_super_admins(client) -> None
     assert app_module.load_module_labels(app_module.repository)['scoring']['icon'] == ''
 
     client.post('/admin/interface-settings', data={'show_module_stage_labels': 'true', 'reset_module_labels': '1'}, follow_redirects=False)
-    assert app_module.load_module_labels(app_module.repository)['workspace']['text'] == 'STABLE'
+    assert app_module.load_module_labels(app_module.repository)['workspace']['text'] == ''
+    assert app_module.load_module_labels(app_module.repository)['scoring']['text'] == 'NEW'
 
 
 def test_module_tabs_take_order_title_icon_and_colour_from_interface_settings(client) -> None:

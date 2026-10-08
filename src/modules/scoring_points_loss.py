@@ -134,18 +134,28 @@ def bundled_boundaries(field: str, precision: int = 3) -> dict[str, list[list[li
     return boundaries
 
 
-def mapping_boundaries(path: Path, field: str, tolerance: float = .002) -> dict[str, list[list[list[float]]]]:
-    """Simplified outer rings of a workspace Clusters or Region Mapping dataset, by its attribute."""
-    from src.modules.geospatial import _cluster_field, _read_region_mapping, _region_field
+def mapping_boundaries(
+    path: Path, field: str, tolerance: float = .002, operator: str | None = None,
+) -> dict[str, list[list[list[float]]]]:
+    """Simplified outer rings of a workspace Regions, Clusters or Vendors dataset, by its attribute.
 
-    label = 'Clusters' if field == 'Cluster' else 'Region Mapping'
+    Vendor polygons are named ``<Operator> · <Vendor>`` with ``operator`` or, without it, their Operator attribute.
+    """
+    from src.modules.geospatial import _cluster_field, _operator_field, _read_region_mapping, _region_field, _vendor_field
+
+    label = {'Cluster': 'Clusters', 'Vendor': 'Vendor polygons'}.get(field, 'Regions')
     polygons = _read_region_mapping(path, label)
     if polygons.empty or polygons.crs is None:
         return {}
-    name_field = _cluster_field(polygons.columns) if field == 'Cluster' else _region_field(polygons.columns)
+    name_field = {'Cluster': _cluster_field, 'Vendor': _vendor_field}.get(field, _region_field)(polygons.columns)
     polygons = polygons.to_crs('EPSG:4326')
+    names = polygons[name_field].astype(str).str.strip()
+    if field == 'Vendor':
+        operator_field = _operator_field(polygons.columns)
+        operators = pd.Series(operator or '', index=polygons.index) if operator or not operator_field else polygons[operator_field].astype(str).str.strip()
+        names = [f'{owner} · {vendor}' if owner else vendor for owner, vendor in zip(operators, names)]
     boundaries: dict[str, list] = {}
-    for name, geometry in zip(polygons[name_field].astype(str).str.strip(), polygons.geometry):
+    for name, geometry in zip(names, polygons.geometry):
         if geometry is None or geometry.is_empty or geometry.geom_type not in {'Polygon', 'MultiPolygon'}:
             continue
         boundaries.setdefault(name, []).extend(_rings(geometry.simplify(tolerance, preserve_topology=True), 4))

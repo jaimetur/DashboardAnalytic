@@ -6,9 +6,9 @@ one day) or cumulative (every call so far). Every CDR has a stage, suggested fro
 its file name and chosen on upload.
 
 The combined CDR tables (and the modules that read them) include each ready CDR
-according to its ``combined_mode``:
+according to its ``in_combined`` choice:
 
-* ``include`` / ``exclude``: chosen by the user;
+* ``yes`` / ``no``: chosen by the user;
 * ``auto``: Final CDRs are included; a Daily CDR is included until an included
   Final CDR of the same type and NR Mode covers one of its campaigns, or until a
   newer Daily CDR of the same type contains every one of its calls (a cumulative
@@ -28,8 +28,8 @@ CDR_STAGES = ('final', 'daily')
 CDR_STAGE_LABELS = {'final': 'Final', 'daily': 'Daily'}
 DEFAULT_CDR_STAGE = 'final'
 CDR_STAGE_KINDS = frozenset({'data', 'voice', 'speech'})
-COMBINED_MODES = ('auto', 'include', 'exclude')
-COMBINED_MODE_LABELS = {'auto': 'Auto', 'include': 'Include', 'exclude': 'Exclude'}
+IN_COMBINED_VALUES = ('auto', 'yes', 'no')
+IN_COMBINED_LABELS = {'auto': 'Auto', 'yes': 'Yes', 'no': 'No'}
 
 _FINAL_WORD = re.compile(r'(?<![a-z])final(?![a-z])')
 _DAILY_WORDS = re.compile(r'(?<![a-z])(daily|diario|diaria|dia|day|incremental|cumulative|acumulado)(?![a-z])')
@@ -46,9 +46,10 @@ def normalize_cdr_stage(value: object) -> str | None:
     return text if text in CDR_STAGES else None
 
 
-def normalize_combined_mode(value: object) -> str | None:
+def normalize_in_combined(value: object) -> str | None:
+    """``auto``, ``yes`` or ``no`` for a supported value (any case), otherwise ``None``."""
     text = str(value or '').strip().casefold()
-    return text if text in COMBINED_MODES else None
+    return text if text in IN_COMBINED_VALUES else None
 
 
 def infer_cdr_stage(file_name: object) -> str:
@@ -209,14 +210,14 @@ def combined_inclusion(repository: Any) -> dict[int, dict[str, Any]]:
     for dataset in datasets:
         dataset_id = int(dataset['id'])
         stage = dataset_cdr_stage(dataset['dataset_kind'], _row(dataset, 'cdr_stage'), dataset['file_name']) or DEFAULT_CDR_STAGE
-        mode = normalize_combined_mode(_row(dataset, 'combined_mode')) or 'auto'
-        info[dataset_id] = {'stage': stage, 'mode': mode, 'kind': str(dataset['dataset_kind']).casefold(),
+        choice = normalize_in_combined(_row(dataset, 'in_combined')) or 'auto'
+        info[dataset_id] = {'stage': stage, 'in_combined': choice, 'kind': str(dataset['dataset_kind']).casefold(),
                             'nr_mode': str(_row(dataset, 'nr_mode', '') or '').upper(),
                             'campaigns': {campaign.casefold() for campaign in facts[dataset_id]['campaigns']},
                             'data_date': facts[dataset_id]['data_date']}
 
     def manual(item: dict[str, Any]) -> bool | None:
-        return {'include': True, 'exclude': False}.get(item['mode'])
+        return {'yes': True, 'no': False}.get(item['in_combined'])
 
     finals = [dataset_id for dataset_id, item in info.items()
               if item['stage'] == 'final' and manual(item) is not False]
@@ -227,7 +228,7 @@ def combined_inclusion(repository: Any) -> dict[int, dict[str, Any]]:
             item.update(included=chosen, reason='Included manually' if chosen else 'Excluded manually')
             continue
         if item['stage'] == 'final':
-            item.update(included=True, reason='Final CDR')
+            item.update(included=True, reason='Final CDRs are always included')
             continue
         replacing = next((final_id for final_id in finals
                           if info[final_id]['kind'] == item['kind']
@@ -236,11 +237,11 @@ def combined_inclusion(repository: Any) -> dict[int, dict[str, Any]]:
         if replacing is not None:
             item.update(included=False, reason=f'Replaced by the Final CDR {names[replacing]}', replaced_by=replacing)
             continue
-        item.update(included=True, reason='Daily CDR')
+        item.update(included=True, reason='No Final CDR of its campaign yet')
     # A cumulative Daily CDR contains every call of the previous ones of its campaign: only the newest stays.
     memo: dict[int, set[str] | None] = {}
     for dataset_id, item in info.items():
-        if not item.get('included') or item['stage'] != 'daily' or item['mode'] != 'auto':
+        if not item.get('included') or item['stage'] != 'daily' or item['in_combined'] != 'auto':
             continue
         newer = sorted((other_id for other_id, other in info.items()
                         if other_id != dataset_id and other['stage'] == 'daily' and other.get('included')

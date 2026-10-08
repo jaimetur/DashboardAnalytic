@@ -479,12 +479,16 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
   const progressJobList = document.querySelector('[data-auto-calculated-field-job-list]');
   const rematerializeButton = document.querySelector('[data-auto-calculated-field-rematerialize]');
   let progressTimer = null;
+  let activeJobsSignature = null;
+  // Each job of the CDR Tables Updates card is named by what it does.
   const materializationJobLabel = (job) => {
     if (job.operation === 'combined_recreation' && job.combined_kind) {
       return `Combined CDR-${String(job.combined_kind).toUpperCase()}`;
     }
-    if (job.operation) return 'Auto-calculated Fields';
-    return 'Materialized CDR tables';
+    if (job.operation === 'combined_inclusion') return 'Combined CDR tables';
+    if (job.operation === 'automatic_materialization') return 'CDR tables reconciliation';
+    if (job.operation === 'auto_calculated_fields' || job.status === 'pending') return 'Auto-calculated Fields';
+    return 'CDR tables';
   };
   const renderMaterializationJobs = (jobs) => {
     if (!(progressJobList instanceof HTMLElement)) return;
@@ -537,12 +541,12 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
       const stateLabel = job.cancel_requested ? 'Stopping' : job.status === 'queued' ? 'Queued' : job.status === 'pending' ? 'Pending' : job.status === 'processing' ? 'In progress' : job.status === 'stopped' ? 'Stopped' : job.status === 'failed' ? 'Failed' : 'Up to date';
       if (state instanceof HTMLElement) state.textContent = `${stateLabel} · ${percent}%`;
       if (track instanceof HTMLElement) {
-        track.setAttribute('aria-label', `${materializationJobLabel(job)} materialization`);
+        track.setAttribute('aria-label', `${materializationJobLabel(job)} update`);
         track.setAttribute('aria-valuenow', String(percent));
       }
       if (bar instanceof HTMLElement && bar.style.width !== `${percent}%`) bar.style.width = `${percent}%`;
       if (percentLabel instanceof HTMLElement) percentLabel.textContent = `${percent}%`;
-      if (copy instanceof HTMLElement) copy.textContent = job.error || job.message || 'All materialized fields are up to date.';
+      if (copy instanceof HTMLElement) copy.textContent = job.error || job.message || 'All CDR tables are up to date.';
       const existingStop = progressRow?.querySelector('.auto-calculated-field-stop-button');
       if (processing && job.workspace_id) {
         const stop = existingStop instanceof HTMLButtonElement ? existingStop : document.createElement('button');
@@ -624,6 +628,23 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
         progressQueuedStatus.textContent = `${queuedJobs.length} queued`;
       }
       renderMaterializationJobs(jobs);
+      // When a job starts, changes state or ends, the Datasets tables (and the combined tables) refresh in place.
+      const signature = activeJobs.map((job) => `${job.id}:${job.status}`).join('|');
+      if (activeJobsSignature !== null && signature !== activeJobsSignature) {
+        window.dispatchEvent(new CustomEvent('workspace-dataset-table-refresh-requested'));
+      }
+      activeJobsSignature = signature;
+      // The Auto-calculated Fields panel says when its fields are being materialized.
+      const fieldJobs = activeJobs.filter((job) => ['auto_calculated_fields', 'automatic_materialization'].includes(job.operation));
+      const panelStatus = host.querySelector('[data-auto-calculated-field-panel-status]');
+      const panelStatusText = panelStatus?.querySelector('[data-auto-calculated-field-panel-status-text]');
+      if (panelStatus instanceof HTMLElement && panelStatusText instanceof HTMLElement) {
+        panelStatus.hidden = fieldJobs.length === 0;
+        const running = fieldJobs.find((job) => job.status === 'processing') || fieldJobs[0];
+        panelStatusText.textContent = running
+          ? `${materializationJobLabel(running)}: ${running.status === 'queued' ? 'queued' : `${materializationJobProgressPercent(running)}% materialized`}.`
+          : '';
+      }
       if (progressTimer) window.clearTimeout(progressTimer);
       progressTimer = window.setTimeout(refreshMaterializationProgress, hasActiveJobs ? 900 : 5000);
     } catch (error) {
@@ -657,8 +678,8 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
   refreshMaterializationProgress();
   rematerializeButton?.addEventListener('click', async () => {
     const accepted = await showConfirmDialog(
-      'All auto-calculated fields will be rematerialized in every applicable CDR table. This can take a while and will run in the background. Continue?',
-      {title: 'Rematerialize Auto-calculated Fields', confirmLabel: 'Rematerialize All', tone: 'warning'},
+      'Every auto-calculated field will be materialized again in every applicable CDR table. This can take a while and runs in the background, shown in CDR Tables Updates. Continue?',
+      {title: 'Re-materialize All Fields', confirmLabel: 'Re-materialize All', tone: 'warning'},
     );
     if (!accepted || !(rematerializeButton instanceof HTMLButtonElement)) return;
     rematerializeButton.disabled = true;
@@ -2028,6 +2049,113 @@ window.createUnifiedDatasetViewer = ({host, payload, requestPage, exportControl 
   };
   return {viewer, reload: () => toolbar.previewRequest({page: 0, column_filters: {}, filter_column: null})};
 };
+
+// Dataset preview of a Regions, Clusters or Vendors dataset: its polygons on a map, over the outline of
+// their countries. The wheel zooms, dragging pans and a double click shows every polygon again.
+document.querySelectorAll('[data-polygon-map]').forEach((panel) => {
+  const canvas = panel.querySelector('[data-polygon-map-canvas]');
+  const legend = panel.querySelector('[data-polygon-map-legend]');
+  let data = {};
+  try { data = JSON.parse(panel.querySelector('[data-polygon-map-data]')?.textContent || '{}'); } catch { data = {}; }
+  const boundaries = data.boundaries || {};
+  const names = Object.keys(boundaries).sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
+  const rings = names.flatMap((name) => boundaries[name].map((ring) => [name, ring]));
+  if (!canvas || !rings.length) return;
+  const svgNs = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNs, 'svg');
+  svg.classList.add('polygon-map-svg');
+  const points = rings.flatMap(([, ring]) => ring);
+  const xs = points.map((point) => point[0]);
+  const ys = points.map((point) => point[1]);
+  const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const scaleX = Math.cos((minY + maxY) / 2 * Math.PI / 180);
+  const height = 640;
+  const unit = (maxY - minY) / (height - 40) || 1e-6;
+  const width = Math.max(320, (maxX - minX) * scaleX / unit + 40);
+  const project = (x, y) => [20 + (x - minX) * scaleX / unit, height - 20 - (y - minY) / unit];
+  const pathData = (ring) => `M${ring.map(([x, y]) => project(x, y).map((value) => value.toFixed(1)).join(',')).join('L')}Z`;
+  const full = [0, 0, width, height];
+  let view = [...full];
+  const applyView = () => svg.setAttribute('viewBox', view.map((value) => value.toFixed(1)).join(' '));
+  applyView();
+  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  for (const ring of data.background || []) {
+    const outline = document.createElementNS(svgNs, 'path');
+    outline.setAttribute('d', pathData(ring));
+    outline.setAttribute('class', 'polygon-map-outline');
+    svg.append(outline);
+  }
+  const color = (index) => `hsl(${(index * 137.508) % 360} 62% 58%)`;
+  const shapes = new Map(names.map((name) => [name, []]));
+  for (const [name, ring] of rings) {
+    const shape = document.createElementNS(svgNs, 'path');
+    shape.setAttribute('d', pathData(ring));
+    shape.setAttribute('class', 'polygon-map-shape');
+    shape.setAttribute('fill', color(names.indexOf(name)));
+    shape.dataset.polygonName = name;
+    const title = document.createElementNS(svgNs, 'title');
+    title.textContent = name;
+    shape.append(title);
+    shapes.get(name).push(shape);
+    svg.append(shape);
+  }
+  if (names.length <= 40) {
+    // The name of each polygon at the centre of its largest ring.
+    for (const name of names) {
+      const largest = boundaries[name].reduce((best, ring) => (ring.length > best.length ? ring : best), []);
+      const projected = largest.map(([x, y]) => project(x, y));
+      const label = document.createElementNS(svgNs, 'text');
+      label.setAttribute('x', (projected.reduce((sum, [x]) => sum + x, 0) / projected.length).toFixed(1));
+      label.setAttribute('y', (projected.reduce((sum, [, y]) => sum + y, 0) / projected.length).toFixed(1));
+      label.setAttribute('class', 'polygon-map-label');
+      label.textContent = name;
+      svg.append(label);
+    }
+  }
+  const highlight = (name, on) => shapes.get(name)?.forEach((shape) => shape.classList.toggle('is-highlighted', on));
+  names.forEach((name, index) => {
+    const item = document.createElement('li');
+    const swatch = document.createElement('span');
+    swatch.className = 'polygon-map-swatch';
+    swatch.style.background = color(index);
+    item.append(swatch, document.createTextNode(name));
+    item.addEventListener('mouseenter', () => highlight(name, true));
+    item.addEventListener('mouseleave', () => highlight(name, false));
+    legend?.append(item);
+  });
+  const svgPoint = (event) => {
+    const box = svg.getBoundingClientRect();
+    const scale = Math.max(view[2] / box.width, view[3] / box.height);
+    const offsetX = (box.width * scale - view[2]) / 2;
+    const offsetY = (box.height * scale - view[3]) / 2;
+    return [view[0] + (event.clientX - box.left) * scale - offsetX, view[1] + (event.clientY - box.top) * scale - offsetY, scale];
+  };
+  svg.addEventListener('wheel', (event) => {
+    event.preventDefault();
+    const [x, y] = svgPoint(event);
+    const factor = event.deltaY < 0 ? 0.8 : 1.25;
+    const nextWidth = Math.min(full[2] * 4, Math.max(full[2] / 200, view[2] * factor));
+    const ratio = nextWidth / view[2];
+    view = [x - (x - view[0]) * ratio, y - (y - view[1]) * ratio, view[2] * ratio, view[3] * ratio];
+    applyView();
+  }, {passive: false});
+  let drag = null;
+  svg.addEventListener('pointerdown', (event) => {
+    drag = {x: event.clientX, y: event.clientY, view: [...view], scale: svgPoint(event)[2]};
+    svg.setPointerCapture(event.pointerId);
+    svg.classList.add('is-dragging');
+  });
+  svg.addEventListener('pointermove', (event) => {
+    if (!drag) return;
+    view = [drag.view[0] - (event.clientX - drag.x) * drag.scale, drag.view[1] - (event.clientY - drag.y) * drag.scale, view[2], view[3]];
+    applyView();
+  });
+  const endDrag = () => { drag = null; svg.classList.remove('is-dragging'); };
+  svg.addEventListener('pointerup', endDrag);
+  svg.addEventListener('pointercancel', endDrag);
+  svg.addEventListener('dblclick', () => { view = [...full]; applyView(); });
+  canvas.append(svg);
+});
 
 document.querySelectorAll('[data-preview-dataset-switch]').forEach((input) => {
   const switcher = input.closest('.preview-dataset-switcher');
@@ -8981,7 +9109,10 @@ if (queueNode) {
     queueSortButtons.forEach((candidate) => {
       const active = candidate.dataset.queueSortKey === queueSortState.key;
       const heading = candidate.closest('th');
-      if (heading) heading.setAttribute('aria-sort', active ? (queueSortState.direction === 'desc' ? 'descending' : 'ascending') : 'none');
+      // A heading with two fields (Rows and Columns, Uploaded and Updated) is sorted when either one is.
+      const headingActive = Boolean(heading && [...heading.querySelectorAll('[data-queue-sort-key]')]
+        .some((button) => button.dataset.queueSortKey === queueSortState.key));
+      if (heading) heading.setAttribute('aria-sort', headingActive ? (queueSortState.direction === 'desc' ? 'descending' : 'ascending') : 'none');
       const indicator = candidate.querySelector('[data-queue-sort-indicator]');
       if (indicator) indicator.textContent = active ? (queueSortState.direction === 'desc' ? '↓' : '↑') : '↕';
     });
@@ -9001,7 +9132,10 @@ if (queueNode) {
     const selectedKind = queueTypeFilter?.value || '';
     const combinedRows = Array.from(document.querySelectorAll('[data-combined-dataset-row]'));
     document.querySelectorAll('[data-dataset-row]').forEach((row) => {
-      row.hidden = Boolean(selectedKind && row.dataset.datasetKind !== selectedKind);
+      // "Other Datasets" keeps the rows of the Other Datasets card, whatever their type.
+      row.hidden = selectedKind === '__other__'
+        ? !row.closest('[data-dataset-card="other"]')
+        : Boolean(selectedKind && row.dataset.datasetKind !== selectedKind);
     });
     const hideCombinedStructure = !combinedRows.some((row) => !row.hidden);
     document.querySelectorAll('[data-combined-dataset-structure-row]').forEach((row) => {
@@ -9016,7 +9150,21 @@ if (queueNode) {
   };
   queueTypeFilter?.addEventListener('change', applyQueueTypeFilter);
   applyQueueTypeFilter();
-  const formatQueueTimestamp = (value) => String(value || '').replace('T', ' ').replace(' ', '\n');
+  // A date and its time, the time in its own colour (see the queue_timestamp macro of workspace.html).
+  const renderQueueTimestamp = (element, value) => {
+    const [date, time] = String(value || '').replace('T', ' ').split(' ', 2);
+    const dateNode = document.createElement('span');
+    dateNode.className = 'queue-date';
+    dateNode.textContent = date || '';
+    const nodes = [dateNode];
+    if (time) {
+      const timeNode = document.createElement('span');
+      timeNode.className = 'queue-time';
+      timeNode.textContent = time;
+      nodes.push(document.createTextNode(' '), timeNode);
+    }
+    element.replaceChildren(...nodes);
+  };
   const formatQueueElapsed = (value) => {
     const total = Math.max(0, Math.floor(Number(value) || 0));
     const hours = Math.floor(total / 3600);
@@ -9059,7 +9207,7 @@ if (queueNode) {
     if (document.activeElement !== select && !select.disabled) select.value = dataset.cdr_stage;
     moveQueueRowToStage(row, dataset.cdr_stage);
   };
-  const syncQueueCombinedCell = (row, dataset) => syncCombinedInclusion(row, dataset.combined_included, dataset.combined_reason, dataset.combined_mode);
+  const syncQueueCombinedCell = (row, dataset) => syncCombinedInclusion(row, dataset.combined_included, dataset.combined_reason, dataset.in_combined);
 
   const updateQueueRow = (dataset) => {
     const row = document.querySelector(`[data-dataset-row][data-dataset-id="${dataset.id}"]`);
@@ -9119,11 +9267,11 @@ if (queueNode) {
       if (progressSeparator) progressSeparator.hidden = elapsed.hidden;
     }
     if (uploaded) {
-      uploaded.textContent = formatQueueTimestamp(dataset.uploaded_at_local || dataset.uploaded_at);
+      renderQueueTimestamp(uploaded, dataset.uploaded_at_local || dataset.uploaded_at);
       uploaded.dataset.queueSortValue = dataset.uploaded_at || '';
     }
     if (updated) {
-      updated.textContent = formatQueueTimestamp(dataset.updated_at_local || dataset.updated_at || dataset.uploaded_at_local || dataset.uploaded_at);
+      renderQueueTimestamp(updated, dataset.updated_at_local || dataset.updated_at || dataset.uploaded_at_local || dataset.uploaded_at);
       updated.dataset.queueSortValue = dataset.updated_at || dataset.uploaded_at || '';
     }
     // A profile can be in the small persistence window between status updates.
@@ -9152,6 +9300,9 @@ if (queueNode) {
       }
       const openHref = `/datasets-analysis?${openParams.toString()}`;
       const isCdr = ['data', 'voice', 'speech'].includes(datasetKind);
+      // Reference datasets (inventories, polygons and other datasets) have no analysis or mappings to apply.
+      const compact = Boolean(actions.closest('.queue-table-compact'));
+      const polygonPreview = ['regions', 'clusters', 'vendors'].includes(datasetKind);
       const canMapMappings = Boolean(dataset.can_map_mappings);
       const canClearMappings = Boolean(dataset.can_clear_mappings);
       const fileName = String(dataset.file_name || 'dataset')
@@ -9180,9 +9331,9 @@ if (queueNode) {
       actions.dataset.actionState = actionState;
       actions.innerHTML = `
         ${isReady
-          ? `<a class="ghost-link action-link-preview" href="/workspace/preview/${dataset.id}" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview" title="Preview dataset" aria-label="Preview dataset">Preview</a>`
+          ? `<a class="ghost-link action-link-preview" href="/workspace/preview/${dataset.id}" target="_blank" rel="noopener" data-preview-open-link data-loading-label="${polygonPreview ? 'Drawing the polygons' : 'Generating dataset preview'}" title="${polygonPreview ? 'Show the polygons on a map' : 'Preview dataset'}" aria-label="${polygonPreview ? 'Show the polygons on a map' : 'Preview dataset'}">Preview</a>`
           : '<button type="button" class="ghost-link action-link-preview" disabled title="Preview is only available for ready datasets" aria-label="Preview unavailable">Preview</button>'}
-        ${isReady && isCdr
+        ${compact ? '' : `${isReady && isCdr
           ? `<a class="ghost-link action-link-primary" href="${openHref}" data-datasets-analysis-open-link data-dataset-id="${dataset.id}" title="Show analysis" aria-label="Show analysis"${datasetKind ? ` data-input-kind="${String(datasetKind)}"` : ''}>Show Analysis</a>`
           : '<button type="button" class="ghost-link action-link-primary" disabled title="Analysis is only available for ready CDR datasets" aria-label="Analysis unavailable">Show Analysis</button>'}
         ${canMapMappings
@@ -9190,7 +9341,7 @@ if (queueNode) {
           : '<button type="button" class="ghost-link action-link-map-vendors" disabled title="Map Vendor, Region & Cluster is not available for this dataset">Map</button>'}
         ${canClearMappings
           ? `<button type="button" class="action-link-clear-vendors" data-mapping-clear-open data-dataset-id="${dataset.id}" title="Clear Vendor, Region & Cluster Mapping">Clear</button>`
-          : '<button type="button" class="action-link-clear-vendors" disabled title="No Vendor, Region & Cluster Mapping is available">Clear</button>'}
+          : '<button type="button" class="action-link-clear-vendors" disabled title="No Vendor, Region & Cluster Mapping is available">Clear</button>'}`}
         ${canStop
           ? `<form method="post" action="/datasets-analysis/stop/${dataset.id}" data-confirm="Stop processing for '${fileName}'?" data-confirm-title="Stop processing" data-confirm-label="Stop processing"><button type="submit" class="warning-button icon-action action-link-stop" aria-label="Stop processing" title="Stop processing">Stop Processing</button></form>`
           : `<form method="post" action="/datasets-analysis/retry/${dataset.id}" data-confirm="Reprocess dataset '${fileName}' from its source file?" data-confirm-title="Reprocess dataset" data-confirm-label="Reprocess dataset" data-loading-label="Reprocessing dataset"><button type="submit" class="warning-button icon-action action-link-reprocess" aria-label="Reprocess dataset" title="Reprocess dataset"${canReprocess ? '' : ' disabled'}>Reprocess Dataset</button></form>`}
@@ -9228,13 +9379,16 @@ if (queueNode) {
     const percent = row.querySelector('[data-combined-dataset-progress-percent]');
     const updated = row.querySelector('[data-combined-dataset-updated]');
     const warning = Boolean(combined.has_missing_rows || combined.is_recalculating || combined.needs_recalculation);
-    const statusLabel = combined.is_recalculating ? 'Recalculating' : combined.has_missing_rows
+    const statusLabel = combined.is_recalculating ? (combined.recreation_label || 'Recalculating') : combined.has_missing_rows
       ? 'Missing Rows' : combined.needs_recalculation ? 'Recalc Needed' : 'Ready';
     const progressValue = Number.isFinite(Number(combined.recreation_progress))
       ? Math.max(0, Math.min(100, Number(combined.recreation_progress))) : 100;
     if (rows instanceof HTMLElement) rows.textContent = formatQueueCount(combined.row_count);
     if (columns instanceof HTMLElement) columns.textContent = formatQueueCount(combined.column_count);
-    if (updated instanceof HTMLElement) updated.textContent = combined.updated_at_label || '—';
+    if (updated instanceof HTMLElement) {
+      if (combined.updated_at_label && combined.updated_at_label !== '—') renderQueueTimestamp(updated, combined.updated_at_label);
+      else updated.textContent = '—';
+    }
     row.classList.toggle('combined-dataset-ready', !warning);
     row.classList.toggle('combined-dataset-warning', warning);
     if (status instanceof HTMLElement) {
@@ -10071,20 +10225,23 @@ for (const [triggerSelector, optionsSelector] of [
 }
 
 // Whether the combined CDR tables include a CDR, and why (Final CDR, replaced by a Final CDR…).
-function syncCombinedInclusion(row, included, reason, mode) {
+function syncCombinedInclusion(row, included, reason, choice) {
   const cell = row?.querySelector('[data-queue-combined]');
   if (!(cell instanceof HTMLElement) || included === undefined) return;
+  // The CDRs in the combined tables have a light green background, the others a light grey one.
+  row.classList.toggle('queue-row-in-combined', Boolean(included));
+  row.classList.toggle('queue-row-not-combined', !included);
   cell.dataset.queueSortValue = included ? '1' : '0';
   const state = cell.querySelector('[data-combined-state]');
   if (state) {
-    state.textContent = included ? 'Included' : 'Excluded';
+    state.textContent = included ? 'Yes' : 'No';
     state.className = `queue-combined-state ${included ? 'is-included' : 'is-excluded'}`;
     state.title = reason || '';
   }
   const note = cell.querySelector('[data-combined-reason]');
   if (note) note.textContent = reason || '';
   const select = cell.querySelector('[data-dataset-combined-select]');
-  if (select instanceof HTMLSelectElement && mode && document.activeElement !== select && !select.disabled) select.value = mode;
+  if (select instanceof HTMLSelectElement && choice && document.activeElement !== select && !select.disabled) select.value = choice;
 }
 
 // A CDR marked Final or Daily moves to the card of its stage.
@@ -10103,8 +10260,10 @@ function moveQueueRowToStage(row, stage) {
 function applyCombinedInclusion(combined) {
   Object.entries(combined || {}).forEach(([datasetId, item]) => {
     const row = document.querySelector(`[data-dataset-row][data-dataset-id="${datasetId}"]`);
-    syncCombinedInclusion(row, item.included, item.reason, item.mode);
+    syncCombinedInclusion(row, item.included, item.reason, item.in_combined);
   });
+  // The combined tables follow in the background: show that update in the CDR Tables Updates card now.
+  window.dispatchEvent(new CustomEvent('auto-calculated-field-job-status'));
 }
 
 // The CDR Type (Final or Daily) and the combined-table choice of a CDR, saved at once.
@@ -10119,7 +10278,7 @@ document.addEventListener('change', async (event) => {
     const response = await fetch(select.dataset.updateUrl, {
       method: 'POST', credentials: 'same-origin',
       headers: {'Content-Type': 'application/json', Accept: 'application/json'},
-      body: JSON.stringify(isStage ? {cdr_stage: select.value} : {combined_mode: select.value}),
+      body: JSON.stringify(isStage ? {cdr_stage: select.value} : {in_combined: select.value}),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.detail || 'The CDR could not be updated.');
@@ -10136,6 +10295,29 @@ document.addEventListener('change', async (event) => {
     showInfoDialog(error instanceof Error ? error.message : 'The CDR could not be updated.', {
       title: isStage ? 'CDR Type update failed' : 'Combined tables update failed', tone: 'error',
     });
+  } finally {
+    select.disabled = false;
+  }
+});
+
+// The Operator of Vendor polygons without an Operator attribute; the CDRs take it when they are mapped again.
+document.addEventListener('change', async (event) => {
+  const select = event.target instanceof HTMLSelectElement ? event.target.closest('[data-dataset-dataset-operator-select]') : null;
+  if (!(select instanceof HTMLSelectElement) || !select.dataset.updateUrl) return;
+  const previous = select.dataset.savedValue ?? [...select.options].find((option) => option.defaultSelected)?.value ?? '';
+  select.disabled = true;
+  try {
+    const response = await fetch(select.dataset.updateUrl, {
+      method: 'POST', credentials: 'same-origin',
+      headers: {'Content-Type': 'application/json', Accept: 'application/json'},
+      body: JSON.stringify({dataset_operator: select.value}),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.detail || 'The Operator could not be updated.');
+    select.dataset.savedValue = select.value;
+  } catch (error) {
+    select.value = previous;
+    showInfoDialog(error instanceof Error ? error.message : 'The Operator could not be updated.', {title: 'Operator update failed', tone: 'error'});
   } finally {
     select.disabled = false;
   }

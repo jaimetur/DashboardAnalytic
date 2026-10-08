@@ -13,8 +13,8 @@
       <div class="preview-dataset-switch-control"><input type="search" value="{{ preview_dataset_value }}" placeholder="Select Workspace Dataset" autocomplete="off" data-preview-dataset-switch aria-haspopup="listbox" aria-expanded="false"><button type="button" data-preview-dataset-switch-toggle aria-label="Open workspace datasets" title="Open workspace datasets"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7 5 6 5-6"/></svg></button></div>
       <span class="preview-dataset-switch-menu" role="listbox" data-preview-dataset-switch-menu hidden>{% for option in preview_dataset_options %}<button type="button" role="option" data-url="{{ option.url }}" data-dataset-label="{{ option.label }}">{{ option.label }}</button>{% endfor %}</span>
     </div>
-    <p class="lede">{% if server_paginated_preview %}Read-only, paginated view of all processed rows and all {{ visible_column_count }} available columns. Fixed derived fields are light green, analytical derivations are amber, and auto-calculated fields are purple.{% else %}Read-only sample of the processed dataset. The preview shows the first {{ preview_rows | length }} rows and all {{ visible_column_count }} available columns.{% if preview_sheet_options %} VFUK mapping previews are limited to the 4G and 5G source sheets.{% endif %}{% endif %}</p>
-    {% if not server_paginated_preview %}
+    <p class="lede">{% if polygon_map %}Read-only map of the {{ polygon_map.boundaries | length }} {{ polygon_map.field }} polygons of the dataset{% if polygon_map.countries %} ({{ polygon_map.countries | join(', ') }}){% endif %}. Point at a polygon to see its name.{% elif server_paginated_preview %}Read-only, paginated view of all processed rows and all {{ visible_column_count }} available columns. Fixed derived fields are light green, analytical derivations are amber, and auto-calculated fields are purple.{% else %}Read-only sample of the processed dataset. The preview shows the first {{ preview_rows | length }} rows and all {{ visible_column_count }} available columns.{% if preview_sheet_options %} VFUK mapping previews are limited to the 4G and 5G source sheets.{% endif %}{% endif %}</p>
+    {% if not server_paginated_preview and not polygon_map %}
     <form class="preview-row-limit-form" action="{{ preview_action | default('/workspace/preview/' ~ dataset.id) }}" method="get" data-loading-label="Refreshing dataset preview">
       {% if embedded_preview %}<input type="hidden" name="embedded" value="1">{% endif %}
       <label>Rows to preview
@@ -59,7 +59,11 @@
     <section class="summary-grid compact-summary preview-summary-grid">
       <article><span>Input Type</span><strong>{{ dataset.input_kind_label }}</strong></article>
       <article><span>Processed Rows</span><strong>{{ dataset.row_count or 0 }}</strong></article>
+      {% if polygon_map %}
+      <article><span>{{ polygon_map.field }} Polygons</span><strong>{{ polygon_map.boundaries | length }}</strong></article>
+      {% else %}
       <article><span>Available Columns</span><strong>{{ visible_column_count }}</strong></article>
+      {% endif %}
       <article><span>{{ preview_metadata_label | default('Uploaded By') }}</span><strong>{{ preview_metadata_value | default(dataset.uploaded_by) }}</strong></article>
     </section>
     <div class="inline-actions preview-actions">
@@ -72,6 +76,24 @@
     </div>
   </article>
 
+  {% if polygon_map %}
+  <article class="panel dataset-preview-panel polygon-map-panel" data-polygon-map>
+    <div class="section-head tight-head">
+      <div>
+        <p class="eyebrow">{{ polygon_map.field }} polygons</p>
+        <h2>Polygons Map</h2>
+      </div>
+      <span class="pill">{{ polygon_map.boundaries | length }} {{ polygon_map.field }}{{ '' if polygon_map.boundaries | length == 1 else 's' }}</span>
+    </div>
+    {% if polygon_map.boundaries %}
+    <script type="application/json" data-polygon-map-data>{{ {'boundaries': polygon_map.boundaries, 'background': polygon_map.background} | tojson }}</script>
+    <div class="polygon-map-canvas" data-polygon-map-canvas></div>
+    <ul class="polygon-map-legend" data-polygon-map-legend aria-label="{{ polygon_map.field }} polygons"></ul>
+    {% else %}
+    <section class="empty-state-inline">{{ polygon_map.error or 'The dataset has no polygons to draw.' }}</section>
+    {% endif %}
+  </article>
+  {% else %}
   <article class="panel dataset-preview-panel">
     <div class="section-head tight-head">
       <div>
@@ -139,5 +161,6 @@
     <section class="empty-state-inline">No processed rows are available for preview.</section>
     {% endif %}
   </article>
+  {% endif %}
 </section>
 {% endblock %}

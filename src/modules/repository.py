@@ -26,7 +26,7 @@ from src.modules.column_names import (
     operator_vendor_value, vendor_filter_column, vendor_filter_value, vendor_filter_values, vendor_match_values,
 )
 from src.modules.nr_mode import NR_MODE_DATASET_KINDS, infer_nr_mode, normalize_nr_mode
-from src.modules.cdr_stage import CDR_STAGE_KINDS, infer_cdr_stage, normalize_cdr_stage, normalize_combined_mode
+from src.modules.cdr_stage import CDR_STAGE_KINDS, infer_cdr_stage, normalize_cdr_stage, normalize_in_combined
 from src.modules.report_layouts import normalize_catalog_layouts, rename_template_vendor_fields
 from src.modules.runtime_config import ignore_event_time_filtering
 
@@ -171,7 +171,8 @@ CREATE TABLE IF NOT EXISTS dataset_profiles (
     dataset_kind TEXT,
     nr_mode TEXT,
     cdr_stage TEXT,
-    combined_mode TEXT NOT NULL DEFAULT 'auto',
+    in_combined TEXT NOT NULL DEFAULT 'auto',
+    dataset_operator TEXT,
     row_count INTEGER,
     column_count INTEGER,
     default_metric TEXT,
@@ -971,8 +972,19 @@ class Repository:
                 f"UPDATE dataset_profiles SET cdr_stage = 'final' "
                 f"WHERE LOWER(COALESCE(dataset_kind, '')) IN ({', '.join('?' for _ in kinds)})", kinds,
             )
-        if 'combined_mode' not in existing_columns:
-            conn.execute("ALTER TABLE dataset_profiles ADD COLUMN combined_mode TEXT NOT NULL DEFAULT 'auto'")
+        if 'in_combined' not in existing_columns:
+            conn.execute("ALTER TABLE dataset_profiles ADD COLUMN in_combined TEXT NOT NULL DEFAULT 'auto'")
+        if 'combined_mode' in existing_columns:
+            # The choice was first saved as combined_mode (include/exclude); it is now In Combined? (yes/no).
+            conn.execute("ALTER TABLE dataset_profiles DROP COLUMN combined_mode")
+        if 'polygon_operator' in existing_columns and 'dataset_operator' not in existing_columns:
+            # The Operator column first held only the Operator of Vendor polygons.
+            conn.execute("ALTER TABLE dataset_profiles RENAME COLUMN polygon_operator TO dataset_operator")
+        elif 'dataset_operator' not in existing_columns:
+            # The Operator of a reference dataset: Vendor polygons and Network Inventories.
+            conn.execute("ALTER TABLE dataset_profiles ADD COLUMN dataset_operator TEXT")
+        # Region polygons were first the "mapping_region" kind; they are now Regions, like Clusters.
+        conn.execute("UPDATE dataset_profiles SET dataset_kind = 'regions' WHERE dataset_kind = 'mapping_region'")
         self._backfill_dataset_nr_modes(conn)
 
     @staticmethod
@@ -3804,8 +3816,8 @@ class Repository:
             fields['nr_mode'] = normalize_nr_mode(fields['nr_mode'])
         if 'cdr_stage' in fields:
             fields['cdr_stage'] = normalize_cdr_stage(fields['cdr_stage'])
-        if 'combined_mode' in fields:
-            fields['combined_mode'] = normalize_combined_mode(fields['combined_mode']) or 'auto'
+        if 'in_combined' in fields:
+            fields['in_combined'] = normalize_in_combined(fields['in_combined']) or 'auto'
         assignments = ', '.join(f"{column} = ?" for column in fields)
         values = list(fields.values())
         assignments += ', updated_at = ?'
@@ -3851,7 +3863,7 @@ class Repository:
             return conn.execute(
                 """
                 SELECT d.id, d.file_name, d.stored_path, d.uploaded_by, d.uploaded_at,
-                       p.status, p.progress, p.processing_step, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.region_mapping_applied, p.region_mapping_dataset_id, p.cluster_mapping_applied, p.cluster_mapping_dataset_id, p.dataset_kind, p.nr_mode, p.cdr_stage, p.combined_mode, p.row_count, p.column_count,
+                       p.status, p.progress, p.processing_step, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.region_mapping_applied, p.region_mapping_dataset_id, p.cluster_mapping_applied, p.cluster_mapping_dataset_id, p.dataset_kind, p.nr_mode, p.cdr_stage, p.in_combined, p.dataset_operator, p.row_count, p.column_count,
                        p.default_metric, p.default_aggregation, p.available_metrics_json,
                        p.available_aggregations_json, p.filter_options_json, p.summary_json,
                        p.kpis_json, p.last_error, p.processing_started_at, p.processed_at,
@@ -3869,7 +3881,7 @@ class Repository:
                 conn.execute(
                     """
                     SELECT d.id, d.file_name, d.stored_path, d.uploaded_by, d.uploaded_at,
-                           p.status, p.progress, p.processing_step, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.region_mapping_applied, p.region_mapping_dataset_id, p.cluster_mapping_applied, p.cluster_mapping_dataset_id, p.dataset_kind, p.nr_mode, p.cdr_stage, p.combined_mode, p.row_count, p.column_count,
+                           p.status, p.progress, p.processing_step, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.region_mapping_applied, p.region_mapping_dataset_id, p.cluster_mapping_applied, p.cluster_mapping_dataset_id, p.dataset_kind, p.nr_mode, p.cdr_stage, p.in_combined, p.dataset_operator, p.row_count, p.column_count,
                            p.default_metric, p.default_aggregation, p.available_metrics_json,
                            p.available_aggregations_json, p.filter_options_json, p.summary_json,
                            p.kpis_json, p.last_error, p.processing_started_at, p.processed_at,

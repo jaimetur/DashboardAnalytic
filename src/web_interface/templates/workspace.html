@@ -169,7 +169,7 @@
     <div class="upload-panel-content">
       <p class="lede">Bring the source files that feed every product workflow into one managed workspace: NetCheck CDR workbooks (Data, Voice and Speech), Smart Orchestrator Logs, and Vodafone UK (VFUK) or Three UK (3UK) Multivendor Mappings. Workspace proposes a type from each filename, lets you confirm it per file and, for CDRs, can apply an existing mapping or one uploaded in the same batch. Batch mappings are processed before their selected CDRs.</p>
       {% if user.role not in ['user-editor', 'admin', 'super-admin'] %}<p class="form-note workspace-read-only-note">The user-viewer role can explore the workspace datasets and generate jobs, but cannot upload, delete, reprocess or map datasets.</p>{% endif %}
-      <form class="upload-dropzone" action="/datasets-analysis/upload" method="post" enctype="multipart/form-data" data-background-upload data-workspace-id="{{ active_workspace.id }}" data-workspace-name="{{ active_workspace.name }}" data-upload-type-form data-vodafone-mapping-options='{{ vodafone_mapping_datasets | default([]) | tojson }}' data-three-mapping-options='{{ three_mapping_datasets | default([]) | tojson }}' data-region-mapping-options='{{ region_mapping_datasets | default([]) | tojson }}' data-cluster-mapping-options='{{ cluster_mapping_datasets | default([]) | tojson }}'>
+      <form class="upload-dropzone" action="/datasets-analysis/upload" method="post" enctype="multipart/form-data" data-background-upload data-workspace-id="{{ active_workspace.id }}" data-workspace-name="{{ active_workspace.name }}" data-upload-type-form data-vodafone-mapping-options='{{ vodafone_mapping_datasets | default([]) | tojson }}' data-three-mapping-options='{{ three_mapping_datasets | default([]) | tojson }}' data-region-mapping-options='{{ region_mapping_datasets | default([]) | tojson }}' data-cluster-mapping-options='{{ cluster_mapping_datasets | default([]) | tojson }}' data-vendor-polygon-options='{{ vendor_polygon_datasets | default([]) | tojson }}' data-operator-options='{{ operator_options | default([]) | tojson }}'{% if datasets | rejectattr('dataset_kind', 'in', ['data', 'voice', 'speech', 'mapping_vodafone', 'mapping_three', 'network_inventory', 'regions', 'clusters', 'vendors', 'smart_orchestrator_logs']) | list %} data-other-datasets{% endif %}>
       <label class="dropzone-field" data-upload-dropzone>
         <span class="dropzone-title">Drop workbooks or browse</span>
         <span class="dropzone-copy">Accepted: CSV, XLS, XLSX, XLSM, GeoJSON, JSON, ZIP (shapefile)</span>
@@ -205,20 +205,23 @@
       <label class="queue-type-filter-control">Dataset Type
         <select data-queue-type-filter>
           <option value="">All Types</option>
+          {% set has_other_datasets = datasets | rejectattr('dataset_kind', 'in', ['data', 'voice', 'speech', 'mapping_vodafone', 'mapping_three', 'network_inventory', 'regions', 'clusters', 'vendors', 'smart_orchestrator_logs']) | list | length > 0 %}
           {% set queue_type_options = [
             ('data', 'CDR-Data'),
             ('speech', 'CDR-Speech'),
             ('voice', 'CDR-Voice'),
             ('mapping_three', 'Multivendor Mapping — Three UK (3UK)'),
             ('mapping_vodafone', 'Multivendor Mapping — Vodafone UK (VFUK)'),
-            ('mapping_region', 'Region Mapping — Geospatial'),
+            ('network_inventory', 'Network Inventory'),
+            ('regions', 'Regions — Geospatial'),
             ('clusters', 'Clusters — Geospatial'),
-            ('generic', 'Other supported dataset'),
+            ('vendors', 'Vendors — Geospatial'),
             ('smart_orchestrator_logs', 'Smart Orchestrator Logs')
           ] %}
           {% for kind, label in queue_type_options %}
           <option value="{{ kind }}" {% if kind not in input_kind_options %}disabled{% endif %}>{{ label }}</option>
           {% endfor %}
+          {% if has_other_datasets %}<option value="__other__">Other Datasets</option>{% endif %}
         </select>
       </label>
       {% set stoppable_datasets = (datasets | selectattr('status', 'equalto', 'queued') | list) + (datasets | selectattr('status', 'equalto', 'processing') | list) %}
@@ -234,12 +237,13 @@
         </form>
       </div>
     </div>
+    {% macro queue_timestamp(value) %}{% set parts = (value or '').replace('T', ' ').split(' ', 1) %}<span class="queue-date">{{ parts[0] }}</span>{% if parts | length > 1 %} <span class="queue-time">{{ parts[1] }}</span>{% endif %}{% endmacro %}
     {% macro dataset_row(dataset, layout) %}
-          <tr class="{% if selected_dataset and selected_dataset.id == dataset.id %}active-row{% endif %}" data-dataset-row data-dataset-id="{{ dataset.id }}" data-dataset-kind="{{ dataset.dataset_kind or 'generic' }}" data-queue-status="{{ dataset.status }}">
+          <tr class="{% if layout == 'cdr' and dataset.is_ready %}{{ 'queue-row-in-combined' if dataset.combined_included else 'queue-row-not-combined' }}{% endif %}" data-dataset-row data-dataset-id="{{ dataset.id }}" data-dataset-kind="{{ dataset.dataset_kind or 'generic' }}" data-queue-status="{{ dataset.status }}">
             <td data-label="ID" data-queue-id data-queue-sort-value="{{ dataset.id }}" data-queue-sort-cell="id">{{ dataset.id }}</td>
             <td data-label="Dataset" data-queue-sort-value="{{ dataset.file_name }}" data-queue-sort-cell="dataset">
               <div class="queue-dataset-name" data-queue-file-name>{{ dataset.file_name }}</div>
-              <div class="queue-dataset-path" data-queue-file-path>{{ dataset.stored_path }}</div>
+              <div class="queue-dataset-path" data-queue-file-path title="{{ dataset.stored_path }}">{{ dataset.stored_path }}</div>
             </td>
             <td data-label="Input Type" data-queue-kind data-queue-sort-value="{{ dataset.input_kind_label }}" data-queue-sort-cell="kind">{{ dataset.input_kind_label }}</td>
             <td data-label="NR Mode" data-queue-nr-mode data-queue-sort-value="{{ dataset.nr_mode or '' }}" data-queue-sort-cell="nr-mode">
@@ -257,18 +261,20 @@
               </select>
               {% else %}—{% endif %}
             </td>
-            <td data-label="Combined" data-queue-combined data-queue-sort-value="{{ '1' if dataset.combined_included else '0' }}" data-queue-sort-cell="combined">
+            <td data-label="In Combined?" data-queue-combined data-queue-sort-value="{{ '1' if dataset.combined_included else '0' }}" data-queue-sort-cell="combined">
               <div class="queue-combined-cell">
-                <span class="queue-combined-state {{ 'is-included' if dataset.combined_included else 'is-excluded' }}" data-combined-state title="{{ dataset.combined_reason }}">{{ 'Included' if dataset.combined_included else 'Excluded' }}</span>
-                <select class="queue-combined-select" data-dataset-combined-select data-dataset-id="{{ dataset.id }}" data-update-url="/workspace/datasets/{{ dataset.id }}/combined-mode" aria-label="Combined tables for {{ dataset.file_name }}" title="Auto: Final CDRs are included, Daily CDRs until a Final CDR of their campaign arrives">
-                  {% for value, label in combined_mode_options %}<option value="{{ value }}"{% if dataset.combined_mode == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+                <select class="queue-combined-select" data-dataset-combined-select data-dataset-id="{{ dataset.id }}" data-update-url="/workspace/datasets/{{ dataset.id }}/in-combined" aria-label="In Combined? for {{ dataset.file_name }}" title="Auto: Final CDRs are included, Daily CDRs until a Final CDR of their campaign arrives">
+                  {% for value, label in in_combined_options %}<option value="{{ value }}"{% if dataset.in_combined == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
                 </select>
+                <span class="queue-combined-state {{ 'is-included' if dataset.combined_included else 'is-excluded' }}" data-combined-state title="{{ dataset.combined_reason }}">{{ 'Yes' if dataset.combined_included else 'No' }}</span>
                 <small class="queue-combined-reason" data-combined-reason>{{ dataset.combined_reason }}</small>
               </div>
             </td>
             {% endif %}
-            <td data-label="Rows" data-queue-rows data-queue-sort-value="{{ dataset.row_count or 0 }}" data-queue-sort-cell="rows">{{ '{:,}'.format(dataset.row_count or 0) }}</td>
-            <td data-label="Columns" data-queue-columns data-queue-sort-value="{{ dataset.column_count or 0 }}" data-queue-sort-cell="columns">{{ '{:,}'.format(dataset.column_count or 0) }}</td>
+            <td data-label="Rows / Columns" class="queue-stacked-cell">
+              <span class="queue-stacked-main" data-queue-rows data-queue-sort-value="{{ dataset.row_count or 0 }}" data-queue-sort-cell="rows" title="Rows">{{ '{:,}'.format(dataset.row_count or 0) }}</span>
+              <span class="queue-stacked-sub" data-queue-columns data-queue-sort-value="{{ dataset.column_count or 0 }}" data-queue-sort-cell="columns" title="Columns">{{ '{:,}'.format(dataset.column_count or 0) }}</span>
+            </td>
             <td data-label="Size" data-queue-size data-queue-sort-value="{{ dataset.size_bytes }}" data-queue-sort-cell="size">{{ dataset.size_mb_label }}</td>
             <td data-label="Status" data-queue-sort-value="{{ dataset.status_label }}" data-queue-sort-cell="status">
               <span class="queue-status-pill queue-status-{{ dataset.status }}" data-queue-status-pill>{{ dataset.status_label }}</span>
@@ -289,8 +295,10 @@
                 {% endif %}
               </div>
             </td>
-            <td data-label="Uploaded" data-queue-uploaded data-queue-sort-value="{{ dataset.uploaded_at or '' }}" data-queue-sort-cell="uploaded">{{ (dataset.uploaded_at_local or '').replace('T', ' ').replace(' ', '\n') }}</td>
-            <td data-label="Updated" data-queue-updated data-queue-sort-value="{{ dataset.updated_at or dataset.uploaded_at or '' }}" data-queue-sort-cell="updated">{{ (dataset.updated_at_local or dataset.uploaded_at_local or '').replace('T', ' ').replace(' ', '\n') }}</td>
+            <td data-label="Uploaded / Updated" class="queue-stacked-cell">
+              <span class="queue-stacked-main" data-queue-uploaded data-queue-sort-value="{{ dataset.uploaded_at or '' }}" data-queue-sort-cell="uploaded" title="Uploaded">{{ queue_timestamp(dataset.uploaded_at_local) }}</span>
+              <span class="queue-stacked-sub" data-queue-updated data-queue-sort-value="{{ dataset.updated_at or dataset.uploaded_at or '' }}" data-queue-sort-cell="updated" title="Updated">{{ queue_timestamp(dataset.updated_at_local or dataset.uploaded_at_local) }}</span>
+            </td>
             <td data-label="Actions">
               <div class="queue-actions">
                 {% if dataset.status == 'ready' %}
@@ -343,14 +351,33 @@
             </td>
           </tr>
     {% endmacro %}
-    {% macro compact_dataset_row(dataset) %}
-          <tr class="{% if selected_dataset and selected_dataset.id == dataset.id %}active-row{% endif %}" data-dataset-row data-dataset-id="{{ dataset.id }}" data-dataset-kind="{{ dataset.dataset_kind or 'generic' }}" data-queue-status="{{ dataset.status }}">
+    {% macro compact_dataset_row(dataset, geospatial=False) %}
+          <tr data-dataset-row data-dataset-id="{{ dataset.id }}" data-dataset-kind="{{ dataset.dataset_kind or 'generic' }}" data-queue-status="{{ dataset.status }}">
             <td data-label="ID" data-queue-id data-queue-sort-value="{{ dataset.id }}" data-queue-sort-cell="id">{{ dataset.id }}</td>
             <td data-label="Dataset" data-queue-sort-value="{{ dataset.file_name }}" data-queue-sort-cell="dataset">
               <div class="queue-dataset-name" data-queue-file-name>{{ dataset.file_name }}</div>
-              <div class="queue-dataset-kind" data-queue-kind data-queue-sort-value="{{ dataset.input_kind_label }}">{{ dataset.input_kind_label }}</div>
+              {% if not geospatial %}<div class="queue-dataset-kind" data-queue-kind data-queue-sort-value="{{ dataset.input_kind_label }}">{{ dataset.input_kind_label }}</div>{% endif %}
+              {% if dataset.dataset_kind == 'network_inventory' %}
+              <select class="queue-operator-pill queue-operator-pill-inline" data-dataset-operator-select data-update-url="/workspace/datasets/{{ dataset.id }}/dataset-operator" aria-label="Operator of {{ dataset.file_name }}" title="The Operator of this Network Inventory; map the CDRs again to apply a change">
+                <option value=""{% if not dataset.dataset_operator %} selected{% endif %}>Choose the Operator</option>
+                {% for operator in operator_options %}<option value="{{ operator }}"{% if dataset.dataset_operator == operator %} selected{% endif %}>{{ operator }}</option>{% endfor %}
+              </select>
+              {% endif %}
             </td>
+            {% if geospatial %}
+            {% set shape_type = {'regions': 'Regions', 'clusters': 'Clusters', 'vendors': 'Vendors'}.get(dataset.dataset_kind, 'Other') %}
+            <td data-label="Type" class="queue-geo-type-cell" data-queue-sort-value="{{ shape_type }} {{ dataset.dataset_operator or '' }}" data-queue-sort-cell="type">
+              <span class="queue-geo-type queue-geo-type-{{ dataset.dataset_kind }}">{{ shape_type }}</span>
+              {% if dataset.dataset_kind == 'vendors' %}
+              <select class="queue-operator-pill" data-dataset-dataset-operator-select data-update-url="/workspace/datasets/{{ dataset.id }}/dataset-operator" aria-label="Operator of {{ dataset.file_name }}" title="The Operator of these Vendor polygons, or Multi-operator to take each polygon's Operator attribute; map the CDRs again to apply a change">
+                <option value=""{% if not dataset.dataset_operator %} selected{% endif %}>Multi-operator</option>
+                {% for operator in operator_options %}<option value="{{ operator }}"{% if dataset.dataset_operator == operator %} selected{% endif %}>{{ operator }}</option>{% endfor %}
+              </select>
+              {% endif %}
+            </td>
+            {% else %}
             <td data-label="Rows" data-queue-rows data-queue-sort-value="{{ dataset.row_count or 0 }}" data-queue-sort-cell="rows">{{ '{:,}'.format(dataset.row_count or 0) }}</td>
+            {% endif %}
             <td data-label="Status" data-queue-sort-value="{{ dataset.status_label }}" data-queue-sort-cell="status">
               <div class="queue-progress-cell">
                 <span class="queue-status-pill queue-status-{{ dataset.status }}" data-queue-status-pill>{{ dataset.status_label }}</span>
@@ -368,42 +395,14 @@
                 {% endif %}
               </div>
             </td>
-            <td data-label="Updated" data-queue-updated data-queue-sort-value="{{ dataset.updated_at or dataset.uploaded_at or '' }}" data-queue-sort-cell="updated">{{ (dataset.updated_at_local or dataset.uploaded_at_local or '').replace('T', ' ').replace(' ', '\n') }}</td>
+            <td data-label="Updated" data-queue-updated data-queue-sort-value="{{ dataset.updated_at or dataset.uploaded_at or '' }}" data-queue-sort-cell="updated">{{ queue_timestamp(dataset.updated_at_local or dataset.uploaded_at_local) }}</td>
             <td data-label="Actions">
               <div class="queue-actions">
                 {% if dataset.status == 'ready' %}
-                <a class="ghost-link action-link-preview" href="/workspace/preview/{{ dataset.id }}" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview" title="Preview dataset" aria-label="Preview dataset">Preview</a>
+                {% set polygon_preview = dataset.dataset_kind in ['regions', 'clusters', 'vendors'] %}
+                <a class="ghost-link action-link-preview" href="/workspace/preview/{{ dataset.id }}" target="_blank" rel="noopener" data-preview-open-link data-loading-label="{{ 'Drawing the polygons' if polygon_preview else 'Generating dataset preview' }}" title="{{ 'Show the polygons on a map' if polygon_preview else 'Preview dataset' }}" aria-label="{{ 'Show the polygons on a map' if polygon_preview else 'Preview dataset' }}">Preview</a>
                 {% else %}
                 <button type="button" class="ghost-link action-link-preview" disabled title="Preview is only available for ready datasets" aria-label="Preview unavailable">Preview</button>
-                {% endif %}
-                {% if dataset.status == 'ready' and dataset.dataset_kind in ['data', 'voice', 'speech'] %}
-                <a
-                  class="ghost-link action-link-primary"
-                  href="/datasets-analysis?dataset_id={{ dataset.id }}{% if dataset.dataset_kind %}&input_kind={{ dataset.dataset_kind }}{% endif %}"
-                  data-datasets-analysis-open-link
-                  data-dataset-id="{{ dataset.id }}"
-                  title="Show analysis"
-                  aria-label="Show analysis"
-                  {% if dataset.dataset_kind %}data-input-kind="{{ dataset.dataset_kind }}"{% endif %}
-                >Show Analysis</a>
-                {% else %}
-                <button type="button" class="ghost-link action-link-primary" disabled title="Analysis is only available for ready CDR datasets" aria-label="Analysis unavailable">Show Analysis</button>
-                {% endif %}
-                {% if dataset.can_map_mappings %}
-                <button
-                  type="button"
-                  class="ghost-link action-link-map-vendors"
-                  data-mapping-map-open
-                  data-dataset-id="{{ dataset.id }}"
-                  data-dataset-name="{{ dataset.file_name }}"
-                title="Map Vendor, Region & Cluster">Map</button>
-                {% else %}
-                <button type="button" class="ghost-link action-link-map-vendors" disabled title="Map Vendor, Region & Cluster is not available for this dataset">Map</button>
-                {% endif %}
-                {% if dataset.can_clear_mappings %}
-                <button type="button" class="action-link-clear-vendors" data-mapping-clear-open data-dataset-id="{{ dataset.id }}" title="Clear Vendor, Region & Cluster Mapping">Clear</button>
-                {% else %}
-                <button type="button" class="action-link-clear-vendors" disabled title="No Vendor, Region & Cluster Mapping is available">Clear</button>
                 {% endif %}
                 {% if dataset.status in ['queued', 'processing'] %}
                 <form method="post" action="/datasets-analysis/stop/{{ dataset.id }}" data-confirm="Stop processing for '{{ dataset.file_name }}'?" data-confirm-title="Stop processing" data-confirm-label="Stop processing">
@@ -424,13 +423,13 @@
     {% set cdr_kinds = ['data', 'voice', 'speech'] %}
     {% set final_cdrs = datasets | selectattr('dataset_kind', 'in', cdr_kinds) | rejectattr('cdr_stage', 'equalto', 'daily') | list %}
     {% set daily_cdrs = datasets | selectattr('dataset_kind', 'in', cdr_kinds) | selectattr('cdr_stage', 'equalto', 'daily') | list %}
-    {% set vendor_datasets = datasets | selectattr('dataset_kind', 'in', ['mapping_vodafone', 'mapping_three']) | list %}
-    {% set geo_datasets = datasets | selectattr('dataset_kind', 'in', ['mapping_region', 'clusters']) | list %}
-    {% set other_datasets = datasets | rejectattr('dataset_kind', 'in', ['data', 'voice', 'speech', 'mapping_vodafone', 'mapping_three', 'mapping_region', 'clusters']) | list %}
+    {% set vendor_datasets = datasets | selectattr('dataset_kind', 'in', ['mapping_vodafone', 'mapping_three', 'network_inventory']) | list %}
+    {% set geo_datasets = datasets | selectattr('dataset_kind', 'in', ['regions', 'clusters', 'vendors']) | list %}
+    {% set other_datasets = datasets | rejectattr('dataset_kind', 'in', ['data', 'voice', 'speech', 'mapping_vodafone', 'mapping_three', 'network_inventory', 'regions', 'clusters', 'vendors']) | list %}
     <div class="dataset-cards">
       <section class="dataset-card dataset-card-cdr dataset-card-final" data-dataset-card="cdr-final">
         <header class="dataset-card-head">
-          <div><p class="eyebrow">CDRs</p><h3>Final CDRs <span class="dataset-card-count">{{ final_cdrs | length }}</span></h3></div>
+          <div><p class="eyebrow">CDRs</p><h3><span class="dataset-card-icon dataset-card-icon-final" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="m9 14 2 2 4-4"/></svg></span>Final CDRs <span class="dataset-card-count">{{ final_cdrs | length }}</span></h3></div>
           <p class="form-note">The CDRs delivered after each campaign. They replace the Daily CDRs of their campaigns in the combined tables.</p>
         </header>
         <div class="table-wrap queue-table-wrap">
@@ -442,20 +441,18 @@
             <th><button type="button" class="queue-sort-button" data-queue-sort-key="kind" data-queue-sort-type="text">Input Type<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
             <th><button type="button" class="queue-sort-button" data-queue-sort-key="nr-mode" data-queue-sort-type="text">NR Mode<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
             <th><button type="button" class="queue-sort-button" data-queue-sort-key="cdr-stage" data-queue-sort-type="text">CDR Type<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
-            <th><button type="button" class="queue-sort-button" data-queue-sort-key="combined" data-queue-sort-type="text">Combined<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
-            <th><button type="button" class="queue-sort-button" data-queue-sort-key="rows" data-queue-sort-type="number">Rows<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
-            <th><button type="button" class="queue-sort-button" data-queue-sort-key="columns" data-queue-sort-type="number">Columns<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="combined" data-queue-sort-type="text">In Combined?<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th class="queue-sort-pair"><button type="button" class="queue-sort-button" data-queue-sort-key="rows" data-queue-sort-type="number">Rows<span aria-hidden="true" data-queue-sort-indicator>↕</span></button><button type="button" class="queue-sort-button" data-queue-sort-key="columns" data-queue-sort-type="number">Columns<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
             <th><button type="button" class="queue-sort-button" data-queue-sort-key="size" data-queue-sort-type="number">Size<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
             <th><button type="button" class="queue-sort-button" data-queue-sort-key="status" data-queue-sort-type="text">Status<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
             <th><button type="button" class="queue-sort-button" data-queue-sort-key="progress" data-queue-sort-type="number">Progress<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
-            <th><button type="button" class="queue-sort-button" data-queue-sort-key="uploaded" data-queue-sort-type="text">Uploaded<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
-            <th><button type="button" class="queue-sort-button" data-queue-sort-key="updated" data-queue-sort-type="text">Updated<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th class="queue-sort-pair"><button type="button" class="queue-sort-button" data-queue-sort-key="uploaded" data-queue-sort-type="text">Uploaded<span aria-hidden="true" data-queue-sort-indicator>↕</span></button><button type="button" class="queue-sort-button" data-queue-sort-key="updated" data-queue-sort-type="text">Updated<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
             <th>Actions</th>
               </tr>
             </thead>
             <tbody data-dataset-card-body="cdr-final">
               {% for dataset in final_cdrs %}{{ dataset_row(dataset, 'cdr') }}{% else %}
-              <tr data-dataset-card-empty><td colspan="14"><article class="empty-state-inline">No Final CDRs. Upload a CDR and choose Final as its CDR Type.</article></td></tr>
+              <tr data-dataset-card-empty><td colspan="12"><article class="empty-state-inline">No Final CDRs. Upload a CDR and choose Final as its CDR Type.</article></td></tr>
               {% endfor %}
             </tbody>
           </table>
@@ -463,8 +460,8 @@
       </section>
       <details class="dataset-card dataset-card-cdr dataset-card-daily" data-dataset-card="cdr-daily"{% if daily_cdrs %} open{% endif %}>
         <summary class="dataset-card-head">
-          <div><p class="eyebrow">CDRs</p><h3>Daily CDRs <span class="dataset-card-count">{{ daily_cdrs | length }}</span></h3></div>
-          <p class="form-note">The incremental or cumulative CDRs received while a campaign runs. The combined tables include them until the Final CDR of their campaign arrives; a cumulative Daily CDR replaces the previous ones.</p>
+          <div><p class="eyebrow">CDRs</p><h3><span class="dataset-card-icon dataset-card-icon-daily" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M8 3v4M16 3v4M3.5 10h17"/><path d="M8 14h2M14 14h2M8 17.5h2"/></svg></span>Daily CDRs <span class="dataset-card-count">{{ daily_cdrs | length }}</span></h3></div>
+          <p class="form-note">The incremental or cumulative CDRs received while a campaign runs. The combined tables include them until the Final CDR of their campaign arrives; a cumulative Daily CDR replaces the previous ones in the combined tables.</p>
         </summary>
         <div class="table-wrap queue-table-wrap">
           <table class="queue-table queue-table-daily" data-queue-sortable-table>
@@ -475,25 +472,62 @@
             <th><button type="button" class="queue-sort-button" data-queue-sort-key="kind" data-queue-sort-type="text">Input Type<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
             <th><button type="button" class="queue-sort-button" data-queue-sort-key="nr-mode" data-queue-sort-type="text">NR Mode<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
             <th><button type="button" class="queue-sort-button" data-queue-sort-key="cdr-stage" data-queue-sort-type="text">CDR Type<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
-            <th><button type="button" class="queue-sort-button" data-queue-sort-key="combined" data-queue-sort-type="text">Combined<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
-            <th><button type="button" class="queue-sort-button" data-queue-sort-key="rows" data-queue-sort-type="number">Rows<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
-            <th><button type="button" class="queue-sort-button" data-queue-sort-key="columns" data-queue-sort-type="number">Columns<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="combined" data-queue-sort-type="text">In Combined?<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th class="queue-sort-pair"><button type="button" class="queue-sort-button" data-queue-sort-key="rows" data-queue-sort-type="number">Rows<span aria-hidden="true" data-queue-sort-indicator>↕</span></button><button type="button" class="queue-sort-button" data-queue-sort-key="columns" data-queue-sort-type="number">Columns<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
             <th><button type="button" class="queue-sort-button" data-queue-sort-key="size" data-queue-sort-type="number">Size<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
             <th><button type="button" class="queue-sort-button" data-queue-sort-key="status" data-queue-sort-type="text">Status<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
             <th><button type="button" class="queue-sort-button" data-queue-sort-key="progress" data-queue-sort-type="number">Progress<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
-            <th><button type="button" class="queue-sort-button" data-queue-sort-key="uploaded" data-queue-sort-type="text">Uploaded<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
-            <th><button type="button" class="queue-sort-button" data-queue-sort-key="updated" data-queue-sort-type="text">Updated<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th class="queue-sort-pair"><button type="button" class="queue-sort-button" data-queue-sort-key="uploaded" data-queue-sort-type="text">Uploaded<span aria-hidden="true" data-queue-sort-indicator>↕</span></button><button type="button" class="queue-sort-button" data-queue-sort-key="updated" data-queue-sort-type="text">Updated<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
             <th>Actions</th>
               </tr>
             </thead>
             <tbody data-dataset-card-body="cdr-daily">
               {% for dataset in daily_cdrs %}{{ dataset_row(dataset, 'cdr') }}{% else %}
-              <tr data-dataset-card-empty><td colspan="14"><article class="empty-state-inline">No Daily CDRs. Upload a CDR and choose Daily as its CDR Type.</article></td></tr>
+              <tr data-dataset-card-empty><td colspan="12"><article class="empty-state-inline">No Daily CDRs. Upload a CDR and choose Daily as its CDR Type.</article></td></tr>
               {% endfor %}
             </tbody>
           </table>
         </div>
       </details>
+      <div class="dataset-card-grid">
+        {% for card_key, card_title, card_note, card_datasets in [
+          ('network-inventory', 'Network Inventory & Vendor Mappings', 'The network inventories of the operators: every cell with its vendor, site and configuration. They give CDR samples the Vendor of their serving cells.', vendor_datasets),
+          ('geospatial', 'Geographic Datasets', 'Region, Cluster and Vendor polygons that map CDR samples and inventory sites to their area, and CDR samples to the Vendor of each Operator.', geo_datasets),
+          ('other', 'Other Datasets', 'Smart Orchestrator logs and other supported datasets.', other_datasets),
+        ] %}
+        {% if card_key != 'other' or card_datasets %}
+        <section class="dataset-card dataset-card-compact dataset-card-{{ card_key }}" data-dataset-card="{{ card_key }}">
+          <header class="dataset-card-head">
+            <div><p class="eyebrow">Reference data</p><h3><span class="dataset-card-icon dataset-card-icon-{{ card_key }}" aria-hidden="true"><svg viewBox="0 0 24 24">{% if card_key == 'network-inventory' %}<path d="M12 8.6 7.6 21.5M12 8.6l4.4 12.9"/><path d="M9.9 14.8h4.2M8.8 18.2h6.4M10.8 11.6h2.4"/><circle cx="12" cy="6.6" r="1.4"/><path d="M8.7 3.6a4.4 4.4 0 0 0 0 6M15.3 3.6a4.4 4.4 0 0 1 0 6M6.2 1.9a7.6 7.6 0 0 0 0 9.4M17.8 1.9a7.6 7.6 0 0 1 0 9.4"/>{% elif card_key == 'geospatial' %}<path d="M3 11.5 7 9.5l3 1 .5 4.5-7 1.5z" fill="currentColor" fill-opacity=".36" stroke-width="1.2"/><path d="m10 10.5 3.5-1.5 4 1-2 5.5-5 -.5z" fill="currentColor" fill-opacity=".14" stroke-width="1.2"/><path d="m17.5 10 3.5 2-1 4.5-4.5-1z" fill="currentColor" fill-opacity=".46" stroke-width="1.2"/><path d="m20 16.5 1 3-4 2-5-1 3.5-5z" fill="currentColor" fill-opacity=".22" stroke-width="1.2"/><path d="m3.5 16.5 7-1.5 5 .5-3.5 5-4 1.5-4-1.5z" fill="currentColor" fill-opacity=".3" stroke-width="1.2"/><path d="M3 11.5 7 9.5l3 1 3.5-1.5 4 1 3.5 2-1 4.5 1 3-4 2-5-1-4 1.5-4-1.5-.5-4z" fill="none"/><path d="M12 12.4s-4.4-3.8-4.4-7a4.4 4.4 0 0 1 8.8 0c0 3.2-4.4 7-4.4 7z" fill="#e5f1ea"/><circle cx="12" cy="5.3" r="1.6"/>{% else %}<path d="M3.5 7a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>{% endif %}</svg></span>{{ card_title }} <span class="dataset-card-count">{{ card_datasets | length }}</span></h3></div>
+            <p class="form-note">{{ card_note }}</p>
+          </header>
+          <div class="table-wrap queue-table-wrap">
+            <table class="queue-table queue-table-compact" data-queue-sortable-table>
+              <thead>
+                <tr>
+            <th aria-sort="descending"><button type="button" class="queue-sort-button" data-queue-sort-key="id" data-queue-sort-type="number">ID<span aria-hidden="true" data-queue-sort-indicator>↓</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="dataset" data-queue-sort-type="text">Dataset<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            {% if card_key == 'geospatial' %}
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="type" data-queue-sort-type="text">Type<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            {% else %}
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="rows" data-queue-sort-type="number">Rows<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            {% endif %}
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="status" data-queue-sort-type="text">Status<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="updated" data-queue-sort-type="text">Updated<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody data-dataset-card-body="{{ card_key }}">
+                {% for dataset in card_datasets %}{{ compact_dataset_row(dataset, card_key == 'geospatial') }}{% else %}
+                <tr data-dataset-card-empty><td colspan="6"><article class="empty-state-inline">No datasets yet.</article></td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        {% endif %}
+        {% endfor %}
+      </div>
       {% if combined_tables %}
       <section class="dataset-card dataset-card-combined" data-dataset-card="combined">
         <div class="table-wrap queue-table-wrap">
@@ -501,9 +535,9 @@
             <tbody>
           {% if combined_tables %}
           <tr class="combined-dataset-section-row" data-combined-dataset-structure-row data-mobile-card-section-header>
-            <td colspan="12">
+            <td colspan="8">
               <div class="combined-dataset-section-copy">
-                <strong>Combined CDR tables</strong>
+                <strong><span class="dataset-card-icon dataset-card-icon-combined" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 3 9 4.5-9 4.5-9-4.5z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg></span>Combined CDR tables</strong>
                 <p>Read-only query sources generated from all ready individual CDRs of the same type. They are created automatically during CDR processing or rebuilt with Recreate; they cannot be uploaded or imported as separate datasets.</p>
               </div>
             </td>
@@ -512,13 +546,9 @@
             <th scope="col">ID</th>
             <th scope="col">Dataset</th>
             <th scope="col">Input Type</th>
-            <th scope="col">NR Mode</th>
-            <th scope="col">Rows</th>
-            <th scope="col">Columns</th>
-            <th scope="col">Size</th>
+            <th scope="col" class="combined-dataset-pair-head">Rows<span>Columns</span></th>
             <th scope="col">Status</th>
             <th scope="col">Progress</th>
-            <th scope="col">Uploaded</th>
             <th scope="col">Updated</th>
             <th scope="col">Actions</th>
           </tr>
@@ -532,19 +562,18 @@
               <div class="queue-dataset-path">SQLite table: {{ combined.table_name }}</div>
             </td>
             <td data-label="Input Type">CDR-{{ combined.kind|title }} (combined)</td>
-            <td data-label="NR Mode">—</td>
-            <td data-label="Rows" data-combined-dataset-rows>{{ '{:,}'.format(combined.row_count) }}</td>
-            <td data-label="Columns" data-combined-dataset-columns>{{ '{:,}'.format(combined.column_count) }}</td>
-            <td data-label="Size">—</td>
-            <td data-label="Status"><span class="queue-status-pill queue-status-{{ 'warning' if combined_warning else 'ready' }}" data-combined-dataset-status>{% if combined.is_recalculating %}{{ 'Queued' if combined.recreation_status == 'queued' else 'Recalculating' }}{% elif combined.has_missing_rows %}Missing Rows{% elif combined.needs_recalculation %}Recalc Needed{% else %}Ready{% endif %}</span></td>
+            <td data-label="Rows / Columns" class="queue-stacked-cell">
+              <span class="queue-stacked-main" data-combined-dataset-rows title="Rows">{{ '{:,}'.format(combined.row_count) }}</span>
+              <span class="queue-stacked-sub" data-combined-dataset-columns title="Columns">{{ '{:,}'.format(combined.column_count) }}</span>
+            </td>
+            <td data-label="Status"><span class="queue-status-pill queue-status-{{ 'warning' if combined_warning else 'ready' }}" data-combined-dataset-status>{% if combined.is_recalculating %}{{ 'Queued' if combined.recreation_status == 'queued' else combined.recreation_label }}{% elif combined.has_missing_rows %}Missing Rows{% elif combined.needs_recalculation %}Recalc Needed{% else %}Ready{% endif %}</span></td>
             <td data-label="Progress">
               <div class="queue-progress-cell">
                 <div class="progress-shell visual-progress-shell"><div class="progress-bar status-{{ 'processing' if combined.is_recalculating else 'ready' }}" data-combined-dataset-progress-bar style="width: {{ combined.recreation_progress }}%"></div></div>
                 <span data-combined-dataset-progress-percent>{{ combined.recreation_progress }}%</span>
               </div>
             </td>
-            <td data-label="Uploaded">—</td>
-            <td data-label="Updated" data-combined-dataset-updated>{{ combined.updated_at_label }}</td>
+            <td data-label="Updated" data-combined-dataset-updated>{% if combined.updated_at_label and combined.updated_at_label != '—' %}{{ queue_timestamp(combined.updated_at_label) }}{% else %}—{% endif %}</td>
             <td data-label="Actions">
               <div class="queue-actions">
                 <a class="ghost-link action-link-preview" href="/workspace/combined/{{ combined.kind }}/preview" target="_blank" rel="noopener" data-preview-open-link data-combined-dataset-preview data-dataset-kind="{{ combined.kind }}" data-integrity-url="/api/workspace/combined/{{ combined.kind }}/integrity" data-loading-label="Generating dataset preview" title="Preview combined dataset" aria-label="Preview combined dataset">Preview dataset</a>
@@ -559,50 +588,11 @@
         </div>
       </section>
       {% endif %}
-      <div class="dataset-card-grid">
-        {% for card_key, card_title, card_note, card_datasets in [
-          ('vendor-mapping', 'Vendor Mapping & Cell Inventory', 'Vodafone and Three multivendor mappings: the cells of each operator with their vendor, site and configuration.', vendor_datasets),
-          ('geospatial', 'Geographic Datasets', 'Region and Cluster polygons that map CDR samples and inventory sites to their area.', geo_datasets),
-          ('other', 'Other Datasets', 'Smart Orchestrator logs and other supported datasets.', other_datasets),
-        ] %}
-        {% if card_key != 'other' or card_datasets %}
-        <section class="dataset-card dataset-card-compact dataset-card-{{ card_key }}" data-dataset-card="{{ card_key }}">
-          <header class="dataset-card-head">
-            <div><p class="eyebrow">Reference data</p><h3>{{ card_title }} <span class="dataset-card-count">{{ card_datasets | length }}</span></h3></div>
-            <p class="form-note">{{ card_note }}</p>
-          </header>
-          <div class="table-wrap queue-table-wrap">
-            <table class="queue-table queue-table-compact" data-queue-sortable-table>
-              <thead>
-                <tr>
-            <th aria-sort="descending"><button type="button" class="queue-sort-button" data-queue-sort-key="id" data-queue-sort-type="number">ID<span aria-hidden="true" data-queue-sort-indicator>↓</span></button></th>
-            <th><button type="button" class="queue-sort-button" data-queue-sort-key="dataset" data-queue-sort-type="text">Dataset<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
-            <th><button type="button" class="queue-sort-button" data-queue-sort-key="rows" data-queue-sort-type="number">Rows<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
-            <th><button type="button" class="queue-sort-button" data-queue-sort-key="status" data-queue-sort-type="text">Status<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
-            <th><button type="button" class="queue-sort-button" data-queue-sort-key="updated" data-queue-sort-type="text">Updated<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
-            <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody data-dataset-card-body="{{ card_key }}">
-                {% for dataset in card_datasets %}{{ compact_dataset_row(dataset) }}{% else %}
-                <tr data-dataset-card-empty><td colspan="6"><article class="empty-state-inline">No datasets yet.</article></td></tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        </section>
-        {% endif %}
-        {% endfor %}
-      </div>
     </div>
-    <section class="auto-calculated-field-progress datasets-materialization-status" data-auto-calculated-field-progress data-status-url="/api/workspace/auto-calculated-fields/materialization" aria-live="polite">
+    <section id="cdr-tables-updates" class="auto-calculated-field-progress datasets-materialization-status" data-auto-calculated-field-progress data-status-url="/api/workspace/auto-calculated-fields/materialization" aria-live="polite">
       <div class="auto-calculated-field-progress-heading">
-        <strong data-auto-calculated-field-progress-title>Materialization status</strong>
+        <strong data-auto-calculated-field-progress-title>CDR Tables Updates</strong>
         <div class="auto-calculated-field-progress-actions">
-          <button type="button" class="auto-calculated-field-rematerialize-button" data-auto-calculated-field-rematerialize title="Re-materialize auto-calculate fields" aria-label="Re-materialize auto-calculate fields">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0 1.2 5.2M20 4v7h-7"/></svg>
-            <span>Re-materialize auto-calculate fields</span>
-          </button>
           <div class="auto-calculated-field-progress-statuses">
             <span class="status-pill status-ready" data-auto-calculated-field-progress-status>Up to date</span>
             <span class="status-pill status-ready" data-auto-calculated-field-queued-status hidden></span>
@@ -611,16 +601,16 @@
       </div>
       <div class="auto-calculated-field-job-list" data-auto-calculated-field-job-list>
         <article class="auto-calculated-field-job" data-materialization-job-key="initial">
-          <div class="auto-calculated-field-job-heading"><strong>Materialized CDR tables</strong><span>100%</span></div>
-          <div class="auto-calculated-field-progress-track" role="progressbar" aria-label="Auto-calculated Fields materialization" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">
+          <div class="auto-calculated-field-job-heading"><strong>CDR tables</strong><span>Up to date · 100%</span></div>
+          <div class="auto-calculated-field-progress-track" role="progressbar" aria-label="CDR tables update" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">
             <span class="auto-calculated-field-progress-bar" style="width: 100%"></span>
             <span class="auto-calculated-field-progress-percent">100%</span>
           </div>
-          <p class="form-note auto-calculated-field-job-message">All materialized fields are up to date.</p>
+          <p class="form-note auto-calculated-field-job-message">All CDR tables are up to date.</p>
         </article>
       </div>
       <div class="auto-calculated-field-progress-footer">
-        <p class="form-note">Each active materialization task is shown separately.</p>
+        <p class="form-note">Auto-calculated Fields, combined table recreations and the In Combined? changes are each shown separately while they run.</p>
       </div>
     </section>
   </details>
@@ -639,6 +629,7 @@
     <div class="workspace-calculated-dimensions-content">
       <div class="workspace-calculated-dimensions-intro">
         <p class="lede">Auto-calculated fields belong to this workspace and are materialized in every applicable individual and combined CDR table.</p>
+        <p class="form-note workspace-calculated-dimensions-status" data-auto-calculated-field-panel-status hidden><span data-auto-calculated-field-panel-status-text></span> <a href="#cdr-tables-updates">See CDR Tables Updates</a></p>
       </div>
       <div class="workspace-calculated-dimensions-layout">
         <section class="workspace-calculated-dimensions-subpanel workspace-calculated-dimensions-import-panel">
@@ -665,6 +656,10 @@
             <div class="workspace-calculated-dimensions-list-actions">
               <button type="button" class="catalogue-calculated-dimensions-button" data-workspace-manage-calculated-dimensions>Edit</button>
               <a class="ghost-link workspace-calculated-dimensions-export-link" href="/workspace/calculated-dimensions/export">Export</a>
+              <button type="button" class="auto-calculated-field-rematerialize-button" data-auto-calculated-field-rematerialize title="Materialize every auto-calculated field again in every applicable CDR table" aria-label="Re-materialize All Fields">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0 1.2 5.2M20 4v7h-7"/></svg>
+                <span>Re-materialize All Fields</span>
+              </button>
             </div>
           </header>
           <div class="workspace-calculated-dimensions-list" aria-label="Auto-calculated fields">
@@ -749,9 +744,12 @@
         </section>
         {% endfor %}
       </fieldset>
+      {% set usable_inventories = network_inventory_datasets | default([]) | selectattr('can_map_vendors_from') | list %}
+      {% set has_inventory = vodafone_mapping_datasets or three_mapping_datasets or usable_inventories %}
+      {% set default_vendor_source = 'inventory' if has_inventory or not vendor_polygon_datasets else 'polygons' %}
       <div class="vendor-mapping-rules">
-      <details class="vendor-mapping-rule" open>
-        <summary>Vendor mapping rule</summary>
+      <details class="vendor-mapping-rule" open data-vendor-source-rule="inventory"{% if default_vendor_source != 'inventory' %} hidden{% endif %}>
+        <summary>Vendor mapping rule · Network Inventory</summary>
         <ol>
           <li>For each CDR sample, split <code>Cell_ID_A</code> (or an equivalent Global Cell ID field) in chronological order and retain only the first and last Global Cell ID.</li>
           <li>Look up both endpoints in the selected mapping:
@@ -773,7 +771,24 @@
           <li>If Ericsson is present at either endpoint and the other Vendor is different or missing, the result is <code>&lt;Operator&gt;_Ericsson_Mixed</code>.</li>
           <li>Every other different or missing endpoint combination returns <code>&lt;Operator&gt;_Non-Ericsson_Mixed</code>.</li>
         </ul>
-        <p><strong>O2 and EE</strong> (and Vodafone or Three without a selected mapping): no Vendor is assigned; the result is <code>&lt;Operator&gt; - All</code>.</p>
+        <p><strong>Network Inventories</strong> of any other Operator follow the same rule with the cells of their Operator (a global cell ID, or eNodeB/gNodeB ID with local cell ID, and a Vendor column).</p>
+        <p><strong>Operators without an inventory</strong> (for example O2 and EE, or Vodafone and Three without a selected mapping): no Vendor is assigned; the result is <code>&lt;Operator&gt; - All</code>.</p>
+        <p>The mapping populates the columns <code>Vendor</code>, <code>Operator_Vendor</code> and <code>Vendor_Operator</code> according to this rule.</p>
+      </details>
+      <details class="vendor-mapping-rule" open data-vendor-source-rule="polygons"{% if default_vendor_source != 'polygons' %} hidden{% endif %}>
+        <summary>Vendor mapping rule · Vendor polygons</summary>
+        <ol>
+          <li>Each selected <strong>Vendors — Geospatial</strong> dataset belongs to the Operator chosen for it or, when Multi-operator, gives each polygon the Operator of its <code>Operator</code> attribute.</li>
+          <li>For each CDR sample, find the polygon of its own Operator that contains its start position and the one that contains its end position (<code>Call_End_Latitude_A</code>/<code>Call_End_Longitude_A</code> in Voice CDRs; Data and Speech CDRs only record the start, which is then also the end).</li>
+        </ol>
+        <p>Result, for every Operator with Vendor polygons:</p>
+        <ul>
+          <li>The same Vendor at both positions returns <code>&lt;Operator&gt;_&lt;Vendor&gt;</code>.</li>
+          <li>If Ericsson is at either position and the other Vendor is different or missing, the result is <code>&lt;Operator&gt;_Ericsson_Mixed</code>.</li>
+          <li>Every other different or missing combination returns <code>&lt;Operator&gt;_Non-Ericsson_Mixed</code>.</li>
+          <li>A sample outside every polygon of its Operator, or without coordinates, returns <code>&lt;Operator&gt;_Unknown</code> (Vendor <code>Unknown</code>).</li>
+        </ul>
+        <p><strong>Operators without Vendor polygons</strong>: no Vendor is assigned; the result is <code>&lt;Operator&gt; - All</code>.</p>
         <p>The mapping populates the columns <code>Vendor</code>, <code>Operator_Vendor</code> and <code>Vendor_Operator</code> according to this rule.</p>
       </details>
       <div class="vendor-mapping-rules-side">
@@ -792,6 +807,24 @@
       </div>
       </div>
       <div class="vendor-mapping-fields">
+        {% if has_inventory and vendor_polygon_datasets %}
+        <fieldset class="vendor-mapping-source" data-vendor-source-choice>
+          <legend>Vendor source</legend>
+          <label><input type="radio" name="vendor_source" value="inventory"{% if default_vendor_source == 'inventory' %} checked{% endif %}> Network Inventory (VFUK and 3UK cells)</label>
+          <label><input type="radio" name="vendor_source" value="polygons"{% if default_vendor_source == 'polygons' %} checked{% endif %}> Vendor Polygons (Geographic Datasets)</label>
+        </fieldset>
+        {% else %}
+        <input type="hidden" name="vendor_source" value="{{ default_vendor_source }}">
+        {% endif %}
+        {% if vendor_polygon_datasets %}
+        <fieldset class="vendor-mapping-polygons" data-vendor-source-fields="polygons"{% if default_vendor_source != 'polygons' %} hidden{% endif %}>
+          <legend>Vendor polygons</legend>
+          {% for polygons in vendor_polygon_datasets %}
+          <label><input type="checkbox" name="vendor_polygon_dataset_ids" value="{{ polygons.id }}" checked> {{ polygons.file_name }} <small>· {{ polygons.dataset_operator or 'Multi-operator' }}</small></label>
+          {% endfor %}
+        </fieldset>
+        {% endif %}
+        <div class="vendor-mapping-inventory" data-vendor-source-fields="inventory"{% if default_vendor_source != 'inventory' %} hidden{% endif %}>
         {% if vodafone_mapping_datasets %}
         <label>VFUK Multivendor Mapping
           <select name="vodafone_mapping_dataset_id">
@@ -816,14 +849,23 @@
         {% else %}
         <p class="form-note">No processed 3UK Multivendor Mapping is currently available.</p>
         {% endif %}
-        <label>Region Mapping
+        {% if network_inventory_datasets %}
+        <fieldset class="vendor-mapping-polygons">
+          <legend>Network Inventories</legend>
+          {% for inventory in network_inventory_datasets %}
+          <label{% if not inventory.can_map_vendors_from or not inventory.dataset_operator %} title="{{ 'Choose its Operator in the Network Inventory card' if inventory.can_map_vendors_from else 'It has no Vendor column and cell identifier to map Vendors' }}"{% endif %}><input type="checkbox" name="network_inventory_dataset_ids" value="{{ inventory.id }}"{% if inventory.can_map_vendors_from and inventory.dataset_operator %} checked{% else %} disabled{% endif %}> {{ inventory.file_name }} <small>· {{ inventory.dataset_operator or 'No Operator' }}</small></label>
+          {% endfor %}
+        </fieldset>
+        {% endif %}
+        </div>
+        <label>Regions
           <select name="region_mapping_dataset_id"{% if not region_mapping_datasets %} disabled{% endif %}>
-            <option value="">No Region mapping</option>
+            <option value="">No Regions mapping</option>
             {% for mapping in region_mapping_datasets %}<option value="{{ mapping.id }}"{% if loop.first %} selected{% endif %}>{{ mapping.file_name }}</option>{% endfor %}
           </select>
-          {% if not region_mapping_datasets %}<small class="form-note">Upload at least one Region Mapping — Geospatial shape (GeoJSON, JSON or zipped shapefile) to the workspace to map Regions.</small>{% endif %}
+          {% if not region_mapping_datasets %}<small class="form-note">Upload at least one Regions — Geospatial shape (GeoJSON, JSON or zipped shapefile) to the workspace to map Regions.</small>{% endif %}
         </label>
-        <label>Cluster Mapping
+        <label>Clusters
           <select name="cluster_mapping_dataset_id"{% if not cluster_mapping_datasets %} disabled{% endif %}>
             <option value="">No Cluster mapping</option>
             {% for mapping in cluster_mapping_datasets %}<option value="{{ mapping.id }}"{% if loop.first %} selected{% endif %}>{{ mapping.file_name }}</option>{% endfor %}
@@ -948,9 +990,12 @@
     ['smart_orchestrator_logs', 'Smart Orchestrator Logs'],
     ['mapping_vodafone', 'Multivendor Mapping — Vodafone UK (VFUK)'],
     ['mapping_three', 'Multivendor Mapping — Three UK (3UK)'],
-    ['mapping_region', 'Region Mapping — Geospatial'],
+    ['network_inventory', 'Network Inventory'],
+    ['regions', 'Regions — Geospatial'],
     ['clusters', 'Clusters — Geospatial'],
-    ['generic', 'Other supported dataset'],
+    ['vendors', 'Vendors — Geospatial'],
+    // Other supported datasets are offered while the workspace has some.
+    ...(form.hasAttribute('data-other-datasets') ? [['generic', 'Other supported dataset']] : []),
   ];
   const cdrTypes = new Set(['data', 'voice', 'speech']);
   const parseMappingOptions = (attribute) => {
@@ -960,14 +1005,25 @@
   const threeMappings = parseMappingOptions('threeMappingOptions');
   const regionMappings = parseMappingOptions('regionMappingOptions');
   const clusterMappings = parseMappingOptions('clusterMappingOptions');
+  const vendorPolygons = parseMappingOptions('vendorPolygonOptions');
+  const operatorNames = parseMappingOptions('operatorOptions');
+  // The Operator of Vendor polygons whose name, or a usual spelling of it, is a word of the file name.
+  const operatorSpellings = {vodafone: ['vodafone', 'vf', 'vfuk'], 3: ['3', '3uk', 'three', 'h3g'], o2: ['o2', 'vmo2'], ee: ['ee']};
+  function inferOperator(fileName) {
+    const words = ` ${String(fileName || '').replace(/\.[^.]+$/, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ')} `;
+    return operatorNames.find((name) => [name.toLowerCase(), ...(operatorSpellings[name.toLowerCase()] || [])]
+      .some((spelling) => words.includes(` ${spelling} `))) || '';
+  }
   let uploadInProgress = false;
 
   function inferType(fileName) {
     const normalized = String(fileName || '').toLowerCase().replace(/[_-]+/g, ' ');
     if (normalized.includes('cluster') && /\.(geojson|json|zip)$/.test(normalized)) return 'clusters';
+    if (normalized.includes('vendor') && /\.(geojson|json|zip)$/.test(normalized)) return 'vendors';
     if (normalized.includes('vfuk') || normalized.includes('vodafone uk') || normalized.includes('vodafone')) return 'mapping_vodafone';
     if (normalized.includes('3uk') || normalized.includes('three uk') || normalized.includes('three')) return 'mapping_three';
-    if (normalized.includes('region') || normalized.includes('vendor split') || normalized.endsWith('.geojson') || normalized.endsWith('.json')) return 'mapping_region';
+    if (normalized.includes('inventory') && /\.(csv|xlsx|xlsm|xls)$/.test(normalized)) return 'network_inventory';
+    if (normalized.includes('region') || normalized.endsWith('.geojson') || normalized.endsWith('.json')) return 'regions';
     if (normalized.includes('smart orchestrator') || (normalized.includes('smart') && normalized.includes('log')) || normalized.includes('orchestrator log')) return 'smart_orchestrator_logs';
     if (normalized.includes('speech')) return 'speech';
     if (normalized.includes('voice')) return 'voice';
@@ -1015,7 +1071,7 @@
           value: `upload:${candidate.index}`,
           label: candidate.file.name,
         }));
-      const processedMappings = ({mapping_vodafone: vodafoneMappings, mapping_three: threeMappings, mapping_region: regionMappings, clusters: clusterMappings}[kind] || [])
+      const processedMappings = ({mapping_vodafone: vodafoneMappings, mapping_three: threeMappings, regions: regionMappings, clusters: clusterMappings}[kind] || [])
         .map((mapping) => ({
           value: String(mapping.id),
           label: `${mapping.file_name} · ${mapping.row_count || 0} rows`,
@@ -1027,16 +1083,27 @@
         const isCdr = cdrTypes.has(entry.select.value);
         entry.nrModeField.hidden = !isCdr;
         entry.stageField.hidden = !isCdr;
+        entry.operatorField.hidden = !['vendors', 'network_inventory'].includes(entry.select.value);
+        const multiOperator = entry.operatorSelect.options[0];
+        multiOperator.textContent = entry.select.value === 'network_inventory' ? 'Choose the Operator' : 'Multi-operator';
+        // A CDR takes its Vendor from the Network Inventory or from every Vendor polygons dataset.
+        const polygonsAvailable = vendorPolygons.length > 0 || entries.some((candidate) => candidate.select.value === 'vendors');
+        entry.vendorSourceField.hidden = !isCdr || !polygonsAvailable;
+        if (!polygonsAvailable) entry.vendorSourceSelect.value = '';
         for (const [kind, field, mappingSelect] of entry.mappingSelectors) {
           const previous = mappingSelect.value;
           const choices = mappingChoices(kind, entry);
-          mappingSelect.replaceChildren(new Option({mapping_region: 'No Region mapping', clusters: 'No Cluster mapping'}[kind] || 'No Map Vendor Column', ''));
+          mappingSelect.replaceChildren(new Option({regions: 'No Regions mapping', clusters: 'No Cluster mapping'}[kind] || 'No Map Vendor Column', ''));
           choices.forEach((choice) => mappingSelect.add(new Option(choice.label, choice.value)));
           mappingSelect.value = choices.some((choice) => choice.value === previous)
             ? previous : choices[0]?.value || '';
           field.hidden = choices.length === 0;
         }
-        const hasVisibleSelector = entry.mappingSelectors.some(([, field]) => !field.hidden);
+        const fromPolygons = entry.vendorSourceSelect.value === 'all';
+        entry.mappingSelectors.forEach(([kind, field]) => {
+          if (['mapping_vodafone', 'mapping_three'].includes(kind) && fromPolygons) field.hidden = true;
+        });
+        const hasVisibleSelector = !entry.vendorSourceField.hidden || entry.mappingSelectors.some(([, field]) => !field.hidden);
         entry.mappings.hidden = !isCdr || !hasVisibleSelector;
       });
     };
@@ -1079,7 +1146,28 @@
       const mappings = document.createElement('div');
       mappings.className = 'upload-vendor-mapping-selectors';
       mappings.hidden = !cdrTypes.has(select.value);
-      const entry = {index, file, select, nrModeField, stageField, mappings, mappingSelectors: []};
+      // The Operator of Vendor polygons without an Operator attribute.
+      const operatorField = document.createElement('label');
+      operatorField.className = 'upload-nr-mode-field upload-dataset-operator-field';
+      operatorField.textContent = 'Operator';
+      operatorField.title = 'The Operator of this Network Inventory or of these Vendor polygons (Multi-operator: the Operator attribute of each polygon)';
+      const operatorSelect = document.createElement('select');
+      operatorSelect.name = 'dataset_operators';
+      operatorSelect.setAttribute('aria-label', `Operator for ${file.name}`);
+      operatorSelect.add(new Option('Multi-operator', ''));
+      operatorNames.forEach((name) => operatorSelect.add(new Option(name, name)));
+      operatorSelect.value = inferOperator(file.name);
+      operatorField.append(operatorSelect);
+      const vendorSourceField = document.createElement('label');
+      vendorSourceField.textContent = 'Vendor source';
+      const vendorSourceSelect = document.createElement('select');
+      vendorSourceSelect.name = 'vendor_polygon_selections';
+      vendorSourceSelect.setAttribute('aria-label', `Vendor source for ${file.name}`);
+      vendorSourceSelect.add(new Option('Network Inventory', ''));
+      vendorSourceSelect.add(new Option('Vendor polygons', 'all'));
+      vendorSourceSelect.value = vodafoneMappings.length || threeMappings.length ? '' : 'all';
+      vendorSourceField.append(vendorSourceSelect);
+      const entry = {index, file, select, nrModeField, stageField, operatorField, operatorSelect, vendorSourceField, vendorSourceSelect, mappings, mappingSelectors: []};
       const addMappingSelector = (kind, labelText, fieldName) => {
         const field = document.createElement('label');
         field.textContent = labelText;
@@ -1090,12 +1178,14 @@
         mappings.append(field);
         entry.mappingSelectors.push([kind, field, mappingSelect]);
       };
+      mappings.append(vendorSourceField);
+      vendorSourceSelect.addEventListener('change', refreshMappingChoices);
       addMappingSelector('mapping_vodafone', 'VFUK mapping', 'vodafone_mapping_dataset_ids');
       addMappingSelector('mapping_three', '3UK mapping', 'three_mapping_dataset_ids');
-      addMappingSelector('mapping_region', 'Region mapping', 'region_mapping_dataset_ids');
+      addMappingSelector('regions', 'Regions mapping', 'region_mapping_dataset_ids');
       addMappingSelector('clusters', 'Cluster mapping', 'cluster_mapping_dataset_ids');
       select.addEventListener('change', refreshMappingChoices);
-      item.append(name, select, nrModeField, stageField, mappings);
+      item.append(name, select, nrModeField, stageField, operatorField, mappings);
       items.append(item);
       entries.push(entry);
     });
@@ -1294,6 +1384,15 @@
   });
   dialog.addEventListener('change', syncSelectAll);
   dialog.addEventListener('toggle', syncSelectAll);
+  // The Vendor source (Network Inventory or Vendor polygons) shows its own fields and mapping rule.
+  const syncVendorSource = () => {
+    const source = dialog.querySelector('input[name="vendor_source"]:checked, input[type="hidden"][name="vendor_source"]')?.value || 'inventory';
+    dialog.querySelectorAll('[data-vendor-source-fields], [data-vendor-source-rule]').forEach((node) => {
+      node.hidden = (node.dataset.vendorSourceFields || node.dataset.vendorSourceRule) !== source;
+    });
+  };
+  dialog.addEventListener('change', (event) => { if (event.target.name === 'vendor_source') syncVendorSource(); });
+  syncVendorSource();
   document.addEventListener('click', (event) => { if (event.target.closest?.('[data-mapping-map-open],[data-mapping-map-all-open]')) syncSelectAll(); });
   dialog.querySelector('[data-vendor-map-cancel]')?.addEventListener('click', (event) => {
     event.preventDefault();

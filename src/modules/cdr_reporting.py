@@ -1691,6 +1691,7 @@ def normalise_operator_aliases(frame: pd.DataFrame, mappings: dict[str, str] | N
 # or missing vendors.
 VENDOR_ERICSSON_MIXED = "Ericsson_Mixed"
 VENDOR_NON_ERICSSON_MIXED = "Non-Ericsson_Mixed"
+VENDOR_UNKNOWN = "Unknown"
 
 
 def _map_distinct_values(series: pd.Series, function: Callable[[object], object]) -> pd.Series:
@@ -1732,23 +1733,56 @@ def vendor_from_cells(operator: object, cells: object, vendor_lookup: dict[str, 
     ``<Operator>_Ericsson_Mixed``; every other different or missing combination
     returns ``<Operator>_Non-Ericsson_Mixed``.
     """
-    family = _vendor_mapping_family(operator)
-    normalized_operator = _normalise_operator(operator)
-    if family is None:
-        return normalized_operator
-    # The base Operator keeps its short prefix; another spelling (Vodafone VoNR, VF_SA) keeps its name.
-    if normalized_operator == family:
-        prefix = "Vodafone" if family == "Vodafone UK" else "3"
-    else:
-        prefix = str(operator or "").strip()
+    if _vendor_mapping_family(operator) is None:
+        return _normalise_operator(operator)
     global_cells = _split_global_cells(cells)
     first = vendor_lookup.get(global_cells[0]) if global_cells else None
     last = vendor_lookup.get(global_cells[-1]) if global_cells else None
+    return _vendor_from_ends(_vendor_prefix(operator), first, last)
+
+
+def _vendor_prefix(operator: object) -> str:
+    """The Operator part of ``<Operator>_<Vendor>``.
+
+    The base Vodafone or Three Operator keeps its short prefix; another spelling (Vodafone VoNR,
+    VF_SA) and every other Operator keep their name.
+    """
+    family = _vendor_mapping_family(operator)
+    normalized_operator = _normalise_operator(operator)
+    if family is not None and normalized_operator == family:
+        return "Vodafone" if family == "Vodafone UK" else "3"
+    return str(operator or "").strip() if family is not None else normalized_operator
+
+
+def _vendor_from_ends(prefix: str, first: str | None, last: str | None) -> str:
+    """The same non-empty Vendor at both ends, Ericsson_Mixed with Ericsson at one end, else Non-Ericsson_Mixed."""
     if first and first == last:
         return f"{prefix}_{first}"
     if "Ericsson" in {first, last}:
         return f"{prefix}_{VENDOR_ERICSSON_MIXED}"
     return f"{prefix}_{VENDOR_NON_ERICSSON_MIXED}"
+
+
+def vendor_from_polygons(operator: object, first: str | None, last: str | None) -> str:
+    """Vendor of a sample from the Vendor polygons at its start and end positions.
+
+    The Network Inventory rule applies to both ends; a sample outside every polygon of its Operator,
+    or without coordinates, is ``<Operator>_Unknown``.
+    """
+    prefix = _vendor_prefix(operator)
+    if not first and not last:
+        return f"{prefix}_{VENDOR_UNKNOWN}"
+    return _vendor_from_ends(prefix, first, last)
+
+
+def operator_key(value: object, aliases: dict[str, str] | None = None) -> str:
+    """One identity for every spelling of an Operator: its Vendor-mapping family or its Operator Maps name."""
+    family = _vendor_mapping_family(value)
+    if family:
+        return family.casefold()
+    text = str(value or "").strip()
+    canonical = (aliases or {}).get(text.casefold(), text)
+    return re.sub(r"[^a-z0-9]+", "", canonical.casefold())
 
 
 def _first_existing(df: pd.DataFrame, candidates: Iterable[str]) -> str | None:
@@ -1859,6 +1893,63 @@ def build_vodafone_vendor_lookup(mapping: pd.DataFrame) -> dict[str, str]:
     return lookup
 
 
+INVENTORY_VENDOR_COLUMNS = ("Vendor", "OP/ Vendor", "OP_Vendor", "OEM", "Manufacturer", "Supplier")
+INVENTORY_CELL_COLUMNS = (
+    "GCID", "Global Cell ID", "Global_Cell_ID", "Global CI", "Global_CI", "ECI", "NCI", "ECGI", "NCGI", "CGI",
+    "Cid__ECI", "CId___ECI", "Cell Identity", "Cell_Identity", "Cell ID", "Cell_ID", "CellID", "CI",
+)
+INVENTORY_NODE_COLUMNS = (("eNodeB ID", "eNodeB_ID", "eNB ID", "eNB_ID", "ENBID"), ("gNodeB ID", "gNodeB_ID", "gNB ID", "gNB_ID", "GNBID"))
+INVENTORY_LOCAL_CELL_COLUMNS = ("Local Cell ID", "Local_Cell_ID", "LCID", "Local Cell", "Sector ID")
+
+
+def inventory_vendor_columns(columns: Iterable[object]) -> dict[str, str] | None:
+    """The columns a Network Inventory needs to map Vendors, or ``None`` when it has not got them.
+
+    A Vendor column and either a global cell identifier (GCID, ECI, NCI, CGI, Cell ID…) or an
+    eNodeB/gNodeB ID with its local cell ID.
+    """
+    columns = [str(column) for column in columns]
+    vendor = next((found for name in INVENTORY_VENDOR_COLUMNS if (found := resolve_column_name(columns, name))), None)
+    if not vendor:
+        return None
+    local_cell = next((found for name in INVENTORY_LOCAL_CELL_COLUMNS if (found := resolve_column_name(columns, name))), None)
+    for kind, names in zip(("enodeb", "gnodeb"), INVENTORY_NODE_COLUMNS):
+        node = next((found for name in names if (found := resolve_column_name(columns, name))), None)
+        if node and local_cell:
+            return {"vendor": vendor, kind: node, "local_cell": local_cell}
+    cell = next((found for name in INVENTORY_CELL_COLUMNS if (found := resolve_column_name(columns, name))), None)
+    return {"vendor": vendor, "cell": cell} if cell else None
+
+
+def build_inventory_vendor_lookup(inventory: pd.DataFrame) -> dict[str, str]:
+    """Global cell ID → Vendor of a Network Inventory of any Operator.
+
+    A global identifier is used as it is; an eNodeB ID and local cell ID give ``eNodeB × 256 + cell``
+    (the LTE ECI) and a gNodeB ID ``gNodeB × 4096 + cell``, like the VFUK mapping.
+    """
+    columns = inventory_vendor_columns(inventory.columns)
+    if columns is None:
+        raise ValueError("The Network Inventory needs a Vendor column and a cell identifier (GCID, ECI, NCI, CGI or Cell ID, or eNodeB/gNodeB ID with Local Cell ID).")
+    lookup: dict[str, str] = {}
+    vendors = inventory[columns["vendor"]]
+    if "cell" in columns:
+        pairs = zip(inventory[columns["cell"]], vendors)
+        cells = ((_canonical_cell_id(cell), vendor) for cell, vendor in pairs if cell is not None and not pd.isna(cell))
+    else:
+        node_column = columns.get("enodeb") or columns.get("gnodeb")
+        shift = 8 if "enodeb" in columns else 12
+        cells = []
+        for node, local, vendor in zip(inventory[node_column], inventory[columns["local_cell"]], vendors):
+            node_id, local_id = _integer_cell_component(node), _integer_cell_component(local)
+            if node_id is not None and local_id is not None and node_id >= 0 and 0 <= local_id < (1 << shift):
+                cells.append((str((node_id << shift) | local_id), vendor))
+    for cell, vendor in cells:
+        vendor_text = str(vendor or "").strip()
+        if cell and vendor_text and vendor_text.casefold() not in {"nan", "none"}:
+            lookup[cell] = vendor_text
+    return lookup
+
+
 def enrich_multivendor(df: pd.DataFrame, vodafone_mapping: pd.DataFrame, three_mapping: pd.DataFrame) -> pd.DataFrame:
     result = df.copy()
     operator_column = _first_existing(result, ["operator", "Operator"])
@@ -1886,6 +1977,9 @@ def assign_cdr_vendors(
     df: pd.DataFrame,
     vodafone_mapping: pd.DataFrame | None = None,
     three_mapping: pd.DataFrame | None = None,
+    polygon_vendors: tuple[list[str | None], list[str | None], list[bool]] | None = None,
+    inventory_lookups: dict[str, dict[str, str]] | None = None,
+    operator_identity: Callable[[object], str] | None = None,
 ) -> pd.DataFrame:
     """Assign the agreed multivendor value to the normalized CDR ``vendor`` field.
 
@@ -1905,6 +1999,17 @@ def assign_cdr_vendors(
     if vendor_collision_columns:
         result = result.drop(columns=vendor_collision_columns)
     operator_column = _first_existing(result, ["operator", "Operator"])
+    if polygon_vendors is not None:
+        # Vendor polygons: the polygons of each sample's Operator at its start and end positions
+        # (see ``geospatial.polygon_vendor_endpoints``); Operators without polygons keep their name.
+        if not operator_column:
+            raise ValueError("The selected CDR must contain Operator to apply Vendor polygons.")
+        starts, ends, covered = polygon_vendors
+        assigned = [
+            vendor_from_polygons(operator, start, end) if has_polygons else _normalise_operator(operator)
+            for operator, start, end, has_polygons in zip(result[operator_column], starts, ends, covered, strict=True)
+        ]
+        return _with_vendor_columns(result, operator_column, assigned)
     cell_column = _first_existing(result, [
         "Cell_ID_A", "Cell_IDs_A", "Cell_ID", "Cell ID A", "Cell IDs A",
         "Global_Cell_ID_A", "Global_Cell_ID", "Global CI", "Global_CI",
@@ -1918,11 +2023,20 @@ def assign_cdr_vendors(
 
     vodafone_lookup = build_vodafone_vendor_lookup(vodafone_mapping) if vodafone_mapping is not None else {}
     three_lookup = build_three_vendor_lookup(three_mapping) if three_mapping is not None else {}
+    # Network Inventories of any Operator, by the shared identity of its spellings (see ``operator_key``).
+    inventory_lookups = inventory_lookups or {}
+    identity = operator_identity or operator_key
     assigned_vendors: list[object] = []
     for operator, cells in result[[operator_column, cell_column]].itertuples(index=False):
         normalized_operator = _normalise_operator(operator)
         family = _vendor_mapping_family(operator)
-        if family == "Vodafone UK":
+        inventory = inventory_lookups.get(identity(operator)) if inventory_lookups else None
+        if inventory is not None and not (family == "Vodafone UK" and vodafone_mapping is not None) and not (family == "3" and three_mapping is not None):
+            global_cells = _split_global_cells(cells)
+            first = inventory.get(global_cells[0]) if global_cells else None
+            last = inventory.get(global_cells[-1]) if global_cells else None
+            assigned_vendors.append(_vendor_from_ends(_vendor_prefix(operator), first, last))
+        elif family == "Vodafone UK":
             if vodafone_mapping is None:
                 assigned_vendors.append(normalized_operator)
             else:
@@ -1938,6 +2052,11 @@ def assign_cdr_vendors(
             # Operators without a multivendor mapping use their canonical
             # Operator value as the official Vendor comparison identity.
             assigned_vendors.append(normalized_operator)
+    return _with_vendor_columns(result, operator_column, assigned_vendors)
+
+
+def _with_vendor_columns(result: pd.DataFrame, operator_column: str, assigned_vendors: list[object]) -> pd.DataFrame:
+    """Write Operator_Vendor and Vendor from each sample's assigned ``<Operator>_<Vendor>``."""
     operator_values = [_normalise_operator(operator) for operator in result[operator_column].fillna('').astype(str).str.strip()]
     operator_vendors = [
         operator_vendor_value(value, operator) for value, operator in zip(assigned_vendors, operator_values, strict=False)

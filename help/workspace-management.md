@@ -24,7 +24,7 @@ Workspace Management is the first operational module. It controls isolated works
 
 ## Data Ingestion
 
-Workspace accepts `CSV`, `XLS`, `XLSX` and `XLSM` for tabular datasets, and `GeoJSON`, `JSON` or zipped shapefiles for Region Mapping and Clusters. Only successfully processed datasets can be used by Dashboard, Chart Builder or Reporting.
+Workspace accepts `CSV`, `XLS`, `XLSX` and `XLSM` for tabular datasets, and `GeoJSON`, `JSON` or zipped shapefiles for Regions, Clusters and Vendors. Only successfully processed datasets can be used by Dashboard, Chart Builder or Reporting.
 
 ### Supported Input Types
 
@@ -33,17 +33,19 @@ Workspace accepts `CSV`, `XLS`, `XLSX` and `XLSM` for tabular datasets, and `Geo
 - CDR-Speech
 - Multivendor Mapping — VFUK
 - Multivendor Mapping — 3UK
-- Region Mapping — Geospatial
+- Network Inventory — the cell inventory of any Operator, in any tabular layout
+- Regions — Geospatial
 - Clusters — Geospatial
+- Vendors — Geospatial
 - Smart Orchestrator Logs — listed for forward compatibility; ingestion and analysis are not yet implemented.
-- Other
+- Other supported dataset — offered on upload, and as **Other Datasets** in the Dataset Type filter, only while the workspace has such datasets.
 
 ### Upload Workflow
 
 1. Open the target workspace.
 2. Select one or more files in **Data Ingestion**.
 3. Review the proposed type for every file.
-4. For CDRs, review the proposed **NR Mode** (NSA or SA) and **CDR Type** (Final or Daily) and optionally choose ready VFUK/3UK mappings.
+4. For CDRs, review the proposed **NR Mode** (NSA or SA) and **CDR Type** (Final or Daily) and optionally choose the Vendor source and the ready VFUK/3UK, Regions and Clusters mappings. For Vendor polygons, review their **Operator**.
 5. Confirm the batch.
 6. Follow every item in **Queue and Status**.
 7. Continue only when the status is **Processed**.
@@ -56,11 +58,30 @@ Classification is proposed from filenames but remains reviewable. Examples:
 
 ### Cluster polygons
 
-Choose **Clusters — Geospatial** for cluster boundary files. It accepts the same geospatial formats as Region Mapping: `.geojson`, `.json` or a `.zip` containing exactly one `.shp` and its required companion files (`.shx`, `.dbf`, and `.prj` to declare its coordinate reference system). The upload proposes Clusters for geospatial filenames containing `cluster`; the type remains editable before confirmation.
+Choose **Clusters — Geospatial** for cluster boundary files. It accepts the same geospatial formats as Regions: `.geojson`, `.json` or a `.zip` containing exactly one `.shp` and its required companion files (`.shx`, `.dbf`, and `.prj` to declare its coordinate reference system). The upload proposes Clusters for geospatial filenames containing `cluster`; the type remains editable before confirmation.
 
-Cluster files must contain non-empty, valid Polygon or MultiPolygon geometries with a coordinate reference system and non-blank names in `Cluster`, `Cluster_ID`, `Cluster_Name`, `ClusterName` or `Name`. Validation registers the dataset as Processed, with no CDR NR Mode or KPI analysis. Preview exposes its validation metadata; the original polygon file remains in the workspace input directory. Clusters appear in the Dataset Type filter and their metadata table is available in Database Management.
+Cluster files must contain non-empty, valid Polygon or MultiPolygon geometries with a coordinate reference system and non-blank names in `Cluster`, `Cluster_ID`, `Cluster_Name`, `ClusterName` or `Name`. Validation registers the dataset as Processed, with no CDR NR Mode or KPI analysis. Preview draws its polygons on a map (see [Dataset Preview](#dataset-preview)); the original polygon file remains in the workspace input directory. Clusters appear in the Dataset Type filter and their metadata table is available in Database Management.
 
-Cluster polygons are the required input shown in **Network Insights → Cluster Sites Density**. Importing them does not yet calculate site density. Scoring & GAP Analysis draws the **Points Lost Map** per Cluster (and per Region with Region Mapping) on the polygons applied to the scored CDRs. Like Region Mapping, they can be applied to CDRs: the **Cluster mapping** selector beside each CDR when importing (the newest ready Clusters dataset is proposed) and the **Cluster Mapping** field of the Map dialog (shown disabled, with a note, until the workspace has a ready Clusters dataset; Region Mapping behaves the same way) fill the CDR `Cluster` column with the name of the polygon containing each sample. Existing non-empty `Cluster` values from the source CDR are kept, and samples without coordinates or outside every polygon stay empty. They are preserved by workspace duplication, export/import, transfer and backup/restore when workspace data and input files are included. Database-only backups retain registration metadata but require the original input files to recover the polygons.
+Cluster polygons are the required input shown in **Network Insights → Cluster Sites Density**. Importing them does not yet calculate site density. Scoring & GAP Analysis draws the **Points Lost Map** per Cluster (and per Region with Regions) on the polygons applied to the scored CDRs. Like Regions, they can be applied to CDRs: the **Cluster mapping** selector beside each CDR when importing (the newest ready Clusters dataset is proposed) and the **Cluster Mapping** field of the Map dialog (shown disabled, with a note, until the workspace has a ready Clusters dataset; Regions behave the same way) fill the CDR `Cluster` column with the name of the polygon containing each sample. Existing non-empty `Cluster` values from the source CDR are kept, and samples without coordinates or outside every polygon stay empty. They are preserved by workspace duplication, export/import, transfer and backup/restore when workspace data and input files are included. Database-only backups retain registration metadata but require the original input files to recover the polygons.
+
+### Network Inventories
+
+Choose **Network Inventory** for the cell inventory of any Operator, whatever its layout: it is stored like any other dataset and listed in the **Network Inventory & Vendor Mappings** card with its **Operator**, proposed from the file name (for example `O2_Network_Inventory.csv` → O2) and changeable in the card. The upload proposes Network Inventory for tabular filenames containing `inventory`.
+
+When it has a Vendor column (`Vendor`, `OP/ Vendor`, `OP_Vendor`, `OEM`, `Manufacturer` or `Supplier`) and a cell identifier — a global one (`GCID`, `Global Cell ID`, `ECI`, `NCI`, `ECGI`, `NCGI`, `CGI`, `Cell Identity` or `Cell ID`) or an `eNodeB ID`/`gNodeB ID` with its `Local Cell ID` (`eNodeB × 256 + cell`, `gNodeB × 4096 + cell`) — it also maps the Vendor of its Operator's CDR samples (see [Vendor Mapping](#vendor-mapping)).
+
+### Vendor polygons
+
+Choose **Vendors — Geospatial** for polygons that give the Vendor of an area, so that CDRs can be mapped to Vendors without a Network Inventory, for any Operator. They accept the same formats as Clusters and need a non-blank `Vendor`, `OP_Vendor`, `OP/ Vendor` or `Name` attribute. The upload proposes Vendors for geospatial filenames containing `vendor`.
+
+Each polygon belongs to one Operator:
+
+- the **Operator** chosen on upload, proposed from the file name (for example `O2_Vendor_Polygons.geojson` → O2), so there can be one file per Operator;
+- or, with **Multi-operator**, the `Operator` (or `MNO`, `Network`) attribute of each polygon, so one file can hold the Vendors of every Operator.
+
+The Geographic Datasets card shows the **Type** of every shape (Regions, Clusters or Vendors) and, for Vendors, their Operator in a pill that changes it when it was assigned wrongly; map the CDRs again to apply the change.
+
+How a CDR takes its Vendor from them is described in [Vendor Mapping](#vendor-mapping); Preview draws them on a map named `<Operator> · <Vendor>`.
 
 ### NR Mode
 
@@ -83,13 +104,35 @@ Every CDR is a **Final** CDR, delivered after its measurement campaign, or a **D
 
 The **CDR Type** selector of the Final and Daily CDR tables changes it without reprocessing the CDR, moves the CDR to the other table and is recorded in App Logs.
 
-The **Combined** column tells whether the combined CDR tables include the CDR, and why. With **Auto** (the default):
+The **In Combined?** column holds the choice (**Auto**, the default, **Yes** or **No**) and, below it, whether the combined CDR tables include the CDR (**Yes** or **No**) and why. Each CDR shows one reason, the first of these that applies:
 
-- Final CDRs are included.
-- A Daily CDR is included until an included Final CDR of the same type and NR Mode covers one of its campaigns: it reads *Replaced by the Final CDR …*.
-- When a newer Daily CDR of the same type contains every call (`JOIN_ID`) of an older one, the older one is excluded: a cumulative Daily CDR replaces the previous ones, while incremental Daily CDRs are all included.
+| Reason | When it applies | Included |
+|---|---|---|
+| *Included manually* / *Excluded manually* | The choice is **Yes** or **No**. It overrides every other rule, for Final and Daily CDRs alike. | As chosen |
+| *Final CDRs are always included* | A Final CDR set to **Auto**. A Final CDR only leaves the combined tables when it is set to **No**. | Yes |
+| *Replaced by the Final CDR …* | A Daily CDR set to **Auto** covered by a Final CDR that is included (not set to **No**), of the same type (Data, Voice or Speech), of the same NR Mode (or either has none) and that shares at least one `Campaign` value with it. The reason names that Final CDR. | No |
+| *Every call is in the newer Daily CDR …* | A Daily CDR set to **Auto** with no Final CDR yet, when the newest Daily CDR of the same type, NR Mode and campaign (by the date of its data) contains every one of its calls (`JOIN_ID`). This is how a cumulative Daily CDR replaces the previous ones; incremental Daily CDRs, each with its own calls, are all included. | No |
+| *No Final CDR of its campaign yet* | Any other Daily CDR set to **Auto**: it is the best data available while the campaign runs. | Yes |
 
-**Include** and **Exclude** choose by hand. The combined tables follow every change at once — a new CDR, a CDR Type, NR Mode or Combined choice, or a deleted CDR (deleting a Final CDR brings back the Daily CDRs it replaced) — so E2E Dashboards, Network Insights, Scoring & GAP Analysis and Reporting can use the Daily CDRs while the campaign runs and the Final CDRs when they arrive. Scoring & GAP Analysis, E2E Dashboards and the CDRs chosen automatically by Reporting Jobs offer the CDRs that the combined tables include. CDR Analysis opens any CDR, and [Non-Qualified Calls](non-qualified-calls.md#daily-and-final-cdrs) reads every CDR and lists each call once.
+A CDR left out stays in the Workspace and in CDR Analysis; only the combined tables leave it out. Setting a Final CDR to **No** stops it covering its Daily CDRs, which come back with the last two reasons.
+
+For example, for the Voice SA CDRs of the campaign UK Q3, with cumulative Daily CDRs:
+
+| CDR | CDR Type | In Combined? | Included | Reason |
+|---|---|---|---|---|
+| `UK_Voice_20260921.xlsx` | Daily | Auto | No | *Every call is in the newer Daily CDR UK_Voice_20260922.xlsx* |
+| `UK_Voice_20260922.xlsx` | Daily | Auto | Yes | *No Final CDR of its campaign yet* |
+
+When the Final CDR of the campaign arrives:
+
+| CDR | CDR Type | In Combined? | Included | Reason |
+|---|---|---|---|---|
+| `UK_Voice_Q3_Final.xlsx` | Final | Auto | Yes | *Final CDRs are always included* |
+| `UK_Voice_20260921.xlsx` | Daily | Auto | No | *Replaced by the Final CDR UK_Voice_Q3_Final.xlsx* |
+| `UK_Voice_20260922.xlsx` | Daily | Auto | No | *Replaced by the Final CDR UK_Voice_Q3_Final.xlsx* |
+| `UK_Voice_20260923.xlsx` | Daily | Yes | Yes | *Included manually* |
+
+**Yes** and **No** include or exclude the CDR by hand. The rows of the CDRs that the combined tables include have a light green background and the others a light grey one. The **Yes**/**No** answer and the colour change at once and the combined tables follow every change in a background job listed in [CDR Tables Updates](#cdr-tables-updates) — a new CDR, a CDR Type, NR Mode or In Combined? choice, or a deleted CDR (deleting a Final CDR brings back the Daily CDRs it replaced) — so E2E Dashboards, Network Insights, Scoring & GAP Analysis and Reporting can use the Daily CDRs while the campaign runs and the Final CDRs when they arrive. Scoring & GAP Analysis, E2E Dashboards and the CDRs chosen automatically by Reporting Jobs offer the CDRs that the combined tables include. CDR Analysis opens any CDR, and [Non-Qualified Calls](non-qualified-calls.md#daily-and-final-cdrs) reads every CDR and lists each call once.
 
 ### Background Processing
 
@@ -116,12 +159,12 @@ The global floating task cards remain visible while workspace work continues. Th
 
 ### Datasets cards
 
-The **Datasets** panel groups the datasets in cards, each with its own count and sortable table:
+The **Datasets** panel groups the datasets in cards, each with its icon, its own count and a sortable table; the times of the dates are shown in blue:
 
-- **Final CDRs** and **Daily CDRs** (which folds), at full width, with the CDR Type and Combined columns.
-- **Combined CDR tables**, the generated read-only query sources.
-- **Vendor Mapping & Cell Inventory** (the Vodafone and Three multivendor mappings) and **Geographic Datasets** (Region and Cluster polygons), side by side with compact tables: dataset and type, rows, status with progress, last update and actions.
+- **Final CDRs** and **Daily CDRs** (which folds), at full width, with the CDR Type and In Combined? columns; Rows sit above Columns and Uploaded above Updated in one column each, and each of them keeps its own sort button in the header.
+- **Network Inventory & Vendor Mappings** (the network inventory of each operator: every cell with its vendor, site and configuration) and **Geographic Datasets** (Region, Cluster and Vendor polygons, with their **Type**), side by side with compact tables: dataset and type, rows, status with progress, last update and actions. Reference datasets have no analysis or mappings to apply, so their actions are **Preview**, **Reprocess** and **Delete**.
 - **Other Datasets** (Smart Orchestrator logs and other supported datasets), when there are any.
+- **Combined CDR tables**, the generated read-only query sources, with their Rows over Columns, status (**Ready**, **Updating**, **Recalculating**, **Queued**, **Missing Rows** or **Recalc Needed**), progress and last update; they mix NR Modes and come from no file, so they have no NR Mode, Size or Uploaded columns.
 
 The **Dataset Type** filter and the bulk actions above the cards apply to every card; a filter hides the cards without datasets of that type.
 
@@ -133,7 +176,16 @@ The circular **Recreate combined table** action checks every ready individual CD
 
 Its live task detail identifies the individual table being migrated. Opening a combined preview performs the same compatibility check, and its Loading Dataset panel explains when all individual tables of that CDR type may need migration.
 
-The shared **Materialization status** card appears below the complete Datasets table because its progress covers both individual and combined CDR tables; when several materializations are active or queued, it presents each task with its own label, message and progress bar. Successful completion refreshes the table's counts, status, progress and Updated values in place without reloading the Workspace page.
+### CDR Tables Updates
+
+The **CDR Tables Updates** card, below the Datasets cards, lists the background jobs that rewrite the CDR tables, each with its own label, message and progress bar:
+
+- **Auto-calculated Fields**: saving, importing or rematerializing auto-calculated fields (**Re-materialize All Fields** in the Auto-calculated Fields panel).
+- **Combined CDR-DATA**, **-VOICE** or **-SPEECH**: recreating a combined table, after a CDR is processed or mapped, or with **Recreate combined table**.
+- **Combined CDR tables**: bringing the combined tables in line with a CDR Type, NR Mode or In Combined? change or a deleted CDR.
+- **CDR tables reconciliation**: the automatic check when a workspace opens with pending work or a report template needs new columns.
+
+Its pills sum up the state (**Up to date**, **N in progress**, **N queued**). With nothing to do it reads *All CDR tables are up to date*. While auto-calculated fields are materialized, the Auto-calculated Fields panel shows their progress with a link to this card. Whenever a job starts, changes state or ends, the Datasets cards, the combined CDR tables included, refresh their counts, status, progress and Updated values in place without reloading the Workspace page.
 
 ### Fixed CDR Fields
 
@@ -209,7 +261,7 @@ Version 13 retains the version-11 cleanup of obsolete `__N` collision columns an
 
 The Datasets panel also lists `CDR-Data (combined)`, `CDR-Voice (combined)` and `CDR-Speech (combined)` when they exist. They contain the ready datasets of that CDR type and can be filtered by the same type selector, previewed with the normal CDR preview and rebuilt with the circular **Recreate** action.
 
-Recreate runs in the background and reports progress through Materialization status. It rebuilds from every ready source dataset, recovers an empty or inconsistent individual row store from its uploaded source file when available, and verifies that each dataset's contribution and final row count match.
+Recreate runs in the background and reports progress through [CDR Tables Updates](#cdr-tables-updates). It rebuilds from every ready source dataset, recovers an empty or inconsistent individual row store from its uploaded source file when available, and verifies that each dataset's contribution and final row count match.
 
 > [!NOTE]
 > **Read-only role.** `user-viewer` accounts see the workspace datasets but cannot upload, delete, reprocess, stop, map or clear them, change their NR Mode, CDR Type or Combined choice or recreate combined tables; these controls are hidden and the server rejects them.
@@ -219,7 +271,12 @@ Recreate runs in the background and reports progress through Materialization sta
 > [!WARNING]
 > **Remapping.** Map a CDR again to apply a newer mapping file; it replaces the previous result without a prior Clear. Vendor Comparison requires persisted mapping on every selected CDR.
 
-Vendor mapping is required only for Vendor Comparison.
+Vendor mapping is required only for Vendor Comparison. The Vendor comes from one of two sources:
+
+- **Network Inventory**: the VFUK and 3UK Multivendor Mappings and the [Network Inventories](#network-inventories) of any other Operator, by the cells of each sample of their Operator.
+- **Vendor Polygons (Geographic Datasets)**: the [Vendor polygons](#vendor-polygons) of each sample's Operator, by its position; every Operator that has polygons.
+
+The Map dialog asks for the source when the workspace has both, and uses the only one otherwise; its Vendor mapping rule follows the chosen source.
 
 #### Supported Mapping Files
 
@@ -234,7 +291,9 @@ Vendor mapping is required only for Vendor Comparison.
   - the same non-empty Vendor at both endpoints returns `<Operator>_<Vendor>`;
   - Ericsson at either endpoint with a different or missing Vendor at the other returns `<Operator>_Ericsson_Mixed`;
   - every other different or missing combination returns `<Operator>_Non-Ericsson_Mixed`.
-- Operators without a multivendor mapping (O2, EE, and Vodafone or Three without a selected mapping) store `<Operator> - All`. CDRs mapped before this rule keep `Vodafone_Mixed Vendor`, `Vodafone_Other Vendor` or `3_Mixed Vendor` until they are mapped again.
+- A [Network Inventory](#network-inventories) applies the same rule to the cells of its own Operator (every spelling of it in Operator Maps); the VFUK and 3UK mappings take precedence for Vodafone and Three.
+- Operators without an inventory (for example O2 and EE without a Network Inventory, or Vodafone and Three without a selected mapping) store `<Operator> - All`. CDRs mapped before this rule keep `Vodafone_Mixed Vendor`, `Vodafone_Other Vendor` or `3_Mixed Vendor` until they are mapped again.
+- With **Vendor polygons**, the same rule compares the polygon of the sample's own Operator at its start and at its end position: `Call_Start_Latitude_A`/`Call_Start_Longitude_A` and `Call_End_Latitude_A`/`Call_End_Longitude_A` in Voice CDRs. Data CDRs (`Test_Start_*`) and Speech CDRs (`Recording_*`) only record the start, which is then also the end. A sample outside every polygon of its Operator, or without coordinates, stores `<Operator>_Unknown` in `Operator_Vendor` and `Unknown` in `Vendor`; Operators without polygons store `<Operator> - All`. Vodafone and Three spellings share the polygons of their network, like their cells.
 - `Vendor` removes the recognised operator prefix from the mapped `Operator_Vendor`, allowing analytics to count the physical vendors independently of the operator. `Vendor_Operator` is `Operator_Vendor` the other way round (`<Vendor>_<Operator>`, and `<Operator> - All` for operators without a vendor); it is derived when the CDRs are read, so every CDR has it without being mapped again. Every filter that offers both keeps them in sync: selecting values in one selects the same identities in the other. CDRs processed before these names are migrated once when the workspace opens: the former `Vendor` becomes `Operator_Vendor` and the former `Vendor_Only` becomes `Vendor`.
 
 #### During Upload
@@ -242,12 +301,14 @@ Vendor mapping is required only for Vendor Comparison.
 - Ready VFUK and 3UK mappings appear beside each CDR row.
 - The newest ready mapping of each type is proposed.
 - Either, both or neither may be selected.
+- Every ready Network Inventory that can map Vendors is applied as well, for the CDR samples of its Operator.
+- When the workspace (or the upload) has Vendor polygons, **Vendor source** chooses between the **Network Inventory** and **Vendor polygons**, which applies every Vendor polygons dataset; it is proposed when there is no Network Inventory.
 
 #### After Upload
 
 1. Click **Map** on a CDR (or **Map Vendor, Region & Cluster** for several).
 2. Select one or more ready CDRs, including CDRs that are already mapped. They are listed in CDR Data, Voice and Speech cards side by side, each with **Select All/None**.
-3. Confirm the VFUK and/or 3UK mapping, and optionally the Region and Cluster mappings.
+3. Choose the Vendor source when the workspace has both; confirm the VFUK and/or 3UK mapping, or the Vendor polygons to apply (all of them are selected), and optionally the Regions and Clusters mappings.
 4. Wait for processing to finish.
 
 Mapping a CDR again replaces its previous mapping; **Clear** is only needed to remove the mappings. **Clear Mappings** and **Reprocess Datasets** use the same wide dialog, with the CDRs in CDR Data, Voice and Speech panels (and Other Datasets for Reprocess) and **Select All/None** in each panel. A mapping left as "No … mapping" keeps its previous result. Re-mapping only Vendor recalculates it on the stored rows, which is much faster than rebuilding the CDR; Region and Cluster mappings rebuild the CDR from its source file. Mapping stores the `<Operator>_<Vendor>` identity in `Operator_Vendor` and the vendor name in `Vendor`; operators without an assigned vendor use `Operator - All`. The mapped value is retained in individual and combined CDRs and their dataset exports. Existing processed CDRs receive the new stored identity when mapped again.
@@ -258,7 +319,7 @@ The detailed GCID formulas and first/last-cell resolution rules are documented i
 
 ### Dataset Preview
 
-Preview opens persisted rows in a separate view.
+Preview opens persisted rows in a separate view. Regions, Clusters and Vendors datasets open a map instead: their polygons, each in its own colour and named on the map and in the legend, over the grey outline of their countries. The mouse wheel zooms, dragging pans and a double click shows every polygon again.
 
 - Default page size is 100 rows and navigation runs against the complete persisted table.
 - A searchable Workspace Dataset selector changes the active dataset. Column-name and label selectors can hide fields without filtering rows.
@@ -289,7 +350,7 @@ Use **Apply** in the field editor to keep an edit in the manager's memory, or **
 
 The main **Save** action persists all applied changes without rebuilding CDR tables; **Save & Materialize** persists them and starts the background materialization job. After either operation succeeds, the manager closes. Both actions remain disabled until a field is added, edited, reordered, duplicated or deleted.
 
-Importing JSON or pressing the green rematerialization action in the **Materialization status** panel also creates a background materialization job. Workspace remains usable while it runs. The panel shows one bar per real active task, advances within each table batch and identifies the current table, phase and completed row operations instead of remaining at zero until an entire table finishes.
+Importing JSON or pressing **Re-materialize All Fields**, next to **Edit** and **Export**, also creates a background materialization job; the button is disabled while any CDR table update runs. Workspace remains usable while it runs. The **CDR Tables Updates** card shows one bar per real active task, advances within each table batch and identifies the current table, phase and completed row operations instead of remaining at zero until an entire table finishes.
 
 Fields are applied only to their selected CDR types. The job retains preview-filter fields, fields referenced by rules and the resulting Auto-calculated Fields in the applicable combined table. It removes stale fields from CDR types to which they no longer apply.
 

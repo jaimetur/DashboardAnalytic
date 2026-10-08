@@ -98,3 +98,22 @@ def test_cluster_validation_retains_region_mapping_behavior(tmp_path):
     unsupported.write_text('Cluster\nNorth\n')
     with pytest.raises(ValueError, match='Clusters require GeoJSON'):
         validate_cluster_mapping(unsupported)
+
+
+def test_polygon_datasets_preview_their_polygons_on_a_map_without_cdr_actions(client):
+    square = lambda west, south: {'type': 'Polygon', 'coordinates': [[[west, south], [west + .1, south], [west + .1, south + .1], [west, south + .1], [west, south]]]}
+    content = json.dumps({'type': 'FeatureCollection', 'features': [
+        {'type': 'Feature', 'properties': {'Cluster': name}, 'geometry': square(west, 51.5)}
+        for name, west in (('London West', -0.3), ('London East', 0.0))
+    ]}).encode()
+    dataset = _upload_clusters(client, 'london_clusters.geojson', content)
+    page = client.get(f"/workspace/preview/{dataset['id']}").text
+    assert 'data-polygon-map' in page and 'Polygons Map' in page and 'dataset-preview-table' not in page
+    assert 'Cluster polygons of the dataset (United Kingdom)' in page
+    data = json.loads(page.split('data-polygon-map-data>', 1)[1].split('</script>', 1)[0])
+    assert sorted(data['boundaries']) == ['London East', 'London West'] and data['background']
+    # Reference datasets keep Preview, Reprocess and Delete only: they have no analysis or mappings to apply.
+    workspace = client.get('/workspace').text
+    card = workspace.split('data-dataset-card="geospatial"', 1)[1].split('</section>', 1)[0]
+    assert 'Show the polygons on a map' in card and 'action-link-reprocess' in card and 'Delete dataset' in card
+    assert 'Show Analysis' not in card and 'action-link-map-vendors' not in card and 'action-link-clear-vendors' not in card

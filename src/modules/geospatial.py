@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 import zipfile
 
 import pandas as pd
@@ -14,6 +14,13 @@ COORDINATE_COLUMNS = {
     'voice': (('Call_Start_Longitude_A', 'Call_Start_Latitude_A'),),
     'speech': (('Recording_Longitude', 'Recording_Latitude'),),
 }
+# Where a sample ends, when the CDR records it: Vendor polygons compare its start and end like the
+# first and last cells of the Network Inventory rule.
+END_COORDINATE_COLUMNS = {
+    'voice': (('Call_End_Longitude_A', 'Call_End_Latitude_A'),),
+}
+VENDOR_FIELD_CANDIDATES = ('Vendor', 'OP_Vendor', 'OP/ Vendor', 'Name')
+OPERATOR_FIELD_CANDIDATES = ('Operator', 'MNO', 'Network')
 
 
 def _geopandas():
@@ -100,6 +107,118 @@ def validate_cluster_mapping(path: Path) -> str:
     if clusters[field].fillna('').astype(str).str.strip().eq('').any():
         raise ValueError(f'The Clusters attribute {field} contains blank values.')
     return field
+
+
+def _vendor_field(columns: Iterable[object]) -> str:
+    field = next((found for candidate in VENDOR_FIELD_CANDIDATES if (found := _column(columns, candidate))), None)
+    if not field:
+        raise ValueError('The Vendor polygons must contain a Vendor, OP_Vendor or Name attribute.')
+    return field
+
+
+def _operator_field(columns: Iterable[object]) -> str | None:
+    return next((found for candidate in OPERATOR_FIELD_CANDIDATES if (found := _column(columns, candidate))), None)
+
+
+def validate_vendor_polygons(path: Path) -> tuple[str, str | None]:
+    """Validate Vendor polygons and return their Vendor attribute and their Operator attribute, if any."""
+    if path.suffix.casefold() not in {'.geojson', '.json', '.zip'}:
+        raise ValueError('Vendor polygons require GeoJSON, JSON or a ZIP containing a shapefile.')
+    polygons = _read_region_mapping(path, 'Vendor polygons')
+    if polygons.empty:
+        raise ValueError('The Vendor polygons have no geometries.')
+    if polygons.crs is None:
+        raise ValueError('The Vendor polygons must declare a coordinate reference system.')
+    if not polygons.geometry.geom_type.isin({'Polygon', 'MultiPolygon'}).all():
+        raise ValueError('The Vendor polygons must contain only polygon geometries.')
+    field = _vendor_field(polygons.columns)
+    if polygons[field].fillna('').astype(str).str.strip().eq('').any():
+        raise ValueError(f'The Vendor polygons attribute {field} contains blank values.')
+    return field, _operator_field(polygons.columns)
+
+
+def vendor_polygon_operators(path: Path) -> list[str]:
+    """The values of the Operator attribute of Vendor polygons (none without that attribute)."""
+    polygons = _read_region_mapping(path, 'Vendor polygons')
+    field = _operator_field(polygons.columns)
+    if not field:
+        return []
+    return sorted({str(value).strip() for value in polygons[field].dropna() if str(value).strip()})
+
+
+def _endpoint_columns(dataset: pd.DataFrame, pairs: Iterable[tuple[str, str]]) -> tuple[str, str] | None:
+    for longitude_name, latitude_name in pairs:
+        longitude, latitude = _column(dataset.columns, longitude_name), _column(dataset.columns, latitude_name)
+        if longitude and latitude:
+            return longitude, latitude
+    return None
+
+
+def polygon_vendor_endpoints(
+    dataset: pd.DataFrame,
+    dataset_kind: str,
+    polygon_sets: Iterable[tuple[Path, str | None]],
+    operators: Iterable[object],
+    operator_key: Callable[[object], str],
+) -> tuple[list[str | None], list[str | None], list[bool]]:
+    """The Vendor polygon at the start and at the end of each CDR sample, in row order.
+
+    ``polygon_sets`` lists each Vendor polygons file with the Operator it belongs to; without one (a
+    Multi-operator file) each polygon belongs to the Operator of its Operator attribute. A sample only takes the
+    polygons of its Operator (``operator_key`` gives the shared identity of two spellings); the third
+    list tells which samples have polygons for their Operator. Without an end position the end is the start.
+    """
+    gpd = _geopandas()
+    start_columns = _endpoint_columns(dataset, COORDINATE_COLUMNS.get(dataset_kind, ()))
+    if not start_columns:
+        raise ValueError(f'The {dataset_kind} CDR has no supported longitude/latitude columns for Vendor polygons.')
+    frames = []
+    for path, operator in polygon_sets:
+        polygons = _read_region_mapping(Path(path), 'Vendor polygons')
+        if polygons.crs is None:
+            raise ValueError('The Vendor polygons must declare a coordinate reference system.')
+        vendor_field, operator_field = _vendor_field(polygons.columns), _operator_field(polygons.columns)
+        if not operator_field and not operator:
+            raise ValueError(f'Choose the Operator of the Vendor polygons {Path(path).name}.')
+        polygons = polygons.to_crs('EPSG:4326')
+        frames.append(gpd.GeoDataFrame({
+            'polygon_vendor': polygons[vendor_field].astype(str).str.strip(),
+            'polygon_operator': (pd.Series(operator, index=polygons.index) if operator else polygons[operator_field]).map(operator_key),
+        }, geometry=polygons.geometry, crs='EPSG:4326'))
+    polygons = pd.concat(frames, ignore_index=True) if frames else gpd.GeoDataFrame(
+        {'polygon_vendor': [], 'polygon_operator': []}, geometry=[], crs='EPSG:4326')
+    polygons = gpd.GeoDataFrame(polygons, geometry='geometry', crs='EPSG:4326')
+    frame = dataset.reset_index(drop=True)
+    sample_keys = pd.Series([operator_key(value) for value in operators], index=frame.index)
+    covered = sample_keys.isin(set(polygons['polygon_operator']))
+
+    def vendors_at(columns: tuple[str, str]) -> pd.Series:
+        longitude = pd.to_numeric(frame[columns[0]], errors='coerce')
+        latitude = pd.to_numeric(frame[columns[1]], errors='coerce')
+        usable = covered & longitude.notna() & latitude.notna()
+        result = pd.Series(pd.NA, index=frame.index, dtype='object')
+        if not usable.any():
+            return result
+        points = gpd.GeoDataFrame(
+            {'sample_operator': sample_keys[usable]},
+            geometry=gpd.points_from_xy(longitude[usable], latitude[usable]), crs='EPSG:4326',
+        )
+        matches = gpd.sjoin(points, polygons, how='inner', predicate='within')
+        matches = matches[matches['sample_operator'] == matches['polygon_operator']]
+        found = matches['polygon_vendor'].groupby(level=0).first()
+        result.loc[found.index] = found
+        return result
+
+    start = vendors_at(start_columns)
+    end_columns = _endpoint_columns(dataset, END_COORDINATE_COLUMNS.get(dataset_kind, ()))
+    if end_columns:
+        end = vendors_at(end_columns)
+        no_end = pd.to_numeric(frame[end_columns[0]], errors='coerce').isna() | pd.to_numeric(frame[end_columns[1]], errors='coerce').isna()
+        end = end.where(~no_end, start)
+    else:
+        end = start
+    clean = lambda series: [None if pd.isna(value) else str(value) for value in series]
+    return clean(start), clean(end), covered.tolist()
 
 
 def assign_regions(dataset: pd.DataFrame, dataset_kind: str, mapping_path: Path) -> pd.DataFrame:

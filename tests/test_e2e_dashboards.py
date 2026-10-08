@@ -1252,7 +1252,7 @@ def test_dashboard_editing_controls_match_workspace_editor_roles(client):
             assert client.post('/api/e2e-dashboards/ppt-jobs/delete-all').status_code == 200
 
 
-def test_dashboards_lifecycle_and_layout(client):
+def test_dashboards_lifecycle_and_layout(client, reporting_old):
     payload = setup_dashboard(client)
     page = client.get('/e2e-dashboards')
     assert page.status_code == 200
@@ -2116,7 +2116,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert client.get('/api/e2e-dashboards').json() == {}
 
 
-def test_reporting_old_defaults_to_super_admins_and_ejaitur(client):
+def test_reporting_old_is_off_for_every_role_and_user_by_default(client):
     client.post('/login', data={'username': 'admin', 'password': 'admin123'})
     workspace_page = client.get('/workspace')
     assert workspace_page.status_code == 200
@@ -2125,20 +2125,13 @@ def test_reporting_old_defaults_to_super_admins_and_ejaitur(client):
     assert client.get('/reporting-old').status_code == 403
     assert client.get('/api/reporting-old/jobs').status_code == 403
 
-    super_admin_token = 'e2e-reporting-super-admin'
-    core.SESSIONS[super_admin_token] = core.SessionUser(username='someone', role='super-admin')
-    client.cookies.set(core.SESSION_COOKIE, super_admin_token)
-    super_admin_page = client.get('/reporting-old')
-    assert super_admin_page.status_code == 200
-    assert 'href="/reporting-old"' in super_admin_page.text
-
-    token = 'e2e-reporting-allowed-user'
-    core.SESSIONS[token] = core.SessionUser(username='EJAITUR', role='user')
-    client.cookies.set(core.SESSION_COOKIE, token)
-    allowed_page = client.get('/reporting-old')
-    assert allowed_page.status_code == 200
-    assert 'href="/reporting-old"' in allowed_page.text
-    assert client.get('/api/reporting-old/jobs').status_code == 200
+    for token, username, role in (('e2e-reporting-super-admin', 'someone', 'super-admin'),
+                                  ('e2e-reporting-former-user', 'EJAITUR', 'user')):
+        core.SESSIONS[token] = core.SessionUser(username=username, role=role)
+        client.cookies.set(core.SESSION_COOKIE, token)
+        assert client.get('/reporting-old').status_code == 403
+        assert 'href="/reporting-old"' not in client.get('/workspace').text
+        assert client.get('/api/reporting-old/jobs').status_code == 403
 
 
 
