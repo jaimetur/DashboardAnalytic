@@ -156,6 +156,8 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .module-tab-new text { fill: #fff; font: 800 8.4px "Segoe UI", system-ui, sans-serif; letter-spacing: .04em; }
 /* Module tab labels take their text, colours and icon from Admin → Interface Settings. */
 .module-tab-new-icon { stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+/* Phones never show the module labels (NEW, BETA…) on the tabs. */
+@media (max-width: 760px) { .module-tab .module-tab-new { display: none; } }
 /* A tab colour other than its module palette replaces the accent and the selected gradient. */
 .module-tabs-primary .module-tab.module-tab-custom-colour.active {
   background: linear-gradient(135deg, color-mix(in srgb, var(--tab-accent) 62%, #000), color-mix(in srgb, var(--tab-accent) 70%, #fff));

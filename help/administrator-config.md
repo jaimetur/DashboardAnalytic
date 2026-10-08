@@ -142,7 +142,7 @@ For super-admins, complete unimported packages appear in **Recovered transfer pa
 
 - **Module Title** and **Short title**, the name shown on the tab and the one used on narrow windows (empty uses the title). The Modules menu and the Help use the Module Title too: the chapter of a renamed module takes its new title in the Help navigation and as its heading, and the Help text names the module with it (section headings keep their name so their links keep working; Workspace, Reporting and Builders, also ordinary words of the Help, change where the Help names the module as a link to its chapter or in bold).
 - **Icon**, shown before the title, and **Colour**, the accent of the tab: its top line and icon when not selected and its gradient when selected. The default colour keeps the palette of the module.
-- The **Label** in the corner of the tab (for example ALPHA, BETA, NEW or STABLE, or empty for none), its colour, and an optional icon with its own colour.
+- The **Label** in the corner of the tab (for example ALPHA, BETA, NEW or STABLE, or empty for none), its colour, and an optional icon with its own colour. Phones and other small screens never show the labels on the tabs.
 
 The Preview column draws each tab as it looks when it is not selected. Colours show their hexadecimal value below them to copy or paste it. **Show a label on the tab of each main module** hides every label at once, and **Reset tabs and labels to defaults** restores the default order, titles, icons, colours and labels. Interface Settings belong to the application configuration, so they travel with **App Config** in Import / Export, transfers to another server, Full Environment packages and backups.
 

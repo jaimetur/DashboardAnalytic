@@ -13,6 +13,7 @@
 - **Scoring report editor:** with several scenarios, the settings whose value differs between them (filters, aggregation levels, scorings, environments and chart, table and GAP options) are highlighted in amber in every scenario, and the highlights follow each change.
 - **Renamed Operators and Vendors in saved filters:** renaming a canonical Operator or Vendor in the Operator Maps or Vendor Maps also renames it, besides Report Templates and Dashboards, in the Operator, Operator_Vendor, Vendor_Operator and Vendor filters of Reporting Jobs (GAP reference operator and Scoring report scenarios included), saved Scoring report configurations, the last Scoring calculation, the CDR Analysis filters and the Non-Qualified Calls filters.
 - **Job Editor Close button:** the Job Editor closes with a red **Close** button with an exit icon instead of a round ×.
+- **Module tab labels on phones:** phones and other small screens (up to 760 px wide) never show the module labels (ALPHA, BETA, NEW…) on the tabs.
 
 #### 🐛 Bug fixes:
 - **Job Editor drafts:** reloading the Reporting page no longer reopens the unsaved values of a job that changed on the server since then (imported, transferred, saved from another browser or renamed in the Maps), which could show old filters such as an Operator with its former name; its saved version opens instead.
