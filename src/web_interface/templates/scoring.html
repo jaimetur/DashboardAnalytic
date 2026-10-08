@@ -224,8 +224,10 @@
   .scoring-loss-map-svg [data-area] { transition: fill .15s, opacity .15s; }
   .scoring-loss-map-svg [data-area].is-dimmed { opacity: .35; }
   .scoring-loss-map-card tr.is-selectable { cursor: pointer; }
-  .scoring-loss-map-card tr.is-selectable:hover td { background: #f3f7fb; }
-  .scoring-loss-map-card tr.is-selected td { background: #fff1c7; font-weight: 700; }
+  /* While rows or areas are chosen, the stripes give way: every chosen row has the same colour. */
+  .scoring-loss-map-card.has-loss-selection .scoring-insight-table tbody tr td { background-color: transparent; }
+  .scoring-loss-map-card .scoring-insight-table tbody tr.is-selected td { background-color: #fff1c7; font-weight: 700; }
+  .scoring-loss-map-card .scoring-insight-table tbody tr.is-selectable:not(.is-selected):hover td { background-color: #eef4fa; }
   .scoring-loss-map-card tr.is-dimmed { opacity: .35; }
   .scoring-content-zoom { position: relative; touch-action: none; user-select: none; }
   .scoring-content-zoom.is-zoomed { overflow: hidden; }
