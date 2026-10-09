@@ -8945,11 +8945,20 @@ document.addEventListener('toggle', (event) => {
   window.addEventListener('scroll', () => { if (panel && !pinned) hide(); }, true);
 })();
 
-// A link to a map table (#operator-assignments, #vendor-assignments or #campaign-maps) opens its panels.
+// The panel of the page whose heading gives the anchor (#section-<heading>, see module_labels.section_anchor).
+function sectionPanel(anchor) {
+  const slug = (text) => String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const wanted = anchor.replace(/^section-/, '');
+  return [...document.querySelectorAll('main .panel')].find((panel) => !panel.parentElement?.closest('.panel')
+    && slug(panel.querySelector('h1, h2, h3')?.textContent) === wanted) || null;
+}
+
+// A link to a map table (#operator-assignments, #vendor-assignments or #campaign-maps) or to a panel of a
+// page (the sections of the Config menu and of the module tabs) opens its panels and scrolls to it.
 function openMappingHashTarget() {
   const id = decodeURIComponent(window.location.hash.slice(1));
-  const target = id ? document.getElementById(id) : null;
-  if (!target || !target.matches('[data-mapping-assignments], #campaign-maps')) return;
+  const target = id ? (document.getElementById(id) || (id.startsWith('section-') ? sectionPanel(id) : null)) : null;
+  if (!target || !target.matches('[data-mapping-assignments], #campaign-maps, .panel')) return;
   for (let element = target; element; element = element.parentElement) {
     if (element.tagName === 'DETAILS') element.open = true;
   }
@@ -8957,6 +8966,90 @@ function openMappingHashTarget() {
 }
 window.addEventListener('hashchange', openMappingHashTarget);
 if (window.location.hash) window.requestAnimationFrame(openMappingHashTarget);
+
+// The sections of each main module open below its tab on hover or focus; the tab itself still opens the module,
+// at its top when it is the page being shown.
+(() => {
+  const menus = new Map([...document.querySelectorAll('[data-module-sections-for]')].map((menu) => [menu.dataset.moduleSectionsFor, menu]));
+  let hideTimer = 0;
+  const hideAll = (except = null) => menus.forEach((menu) => { if (menu !== except && menu.matches(':popover-open')) menu.hidePopover(); });
+  const show = (tab, menu) => {
+    window.clearTimeout(hideTimer);
+    hideAll(menu);
+    if (!menu.matches(':popover-open')) menu.showPopover();
+    const bounds = tab.getBoundingClientRect();
+    const width = menu.getBoundingClientRect().width;
+    menu.style.left = `${Math.max(8, Math.min(bounds.left, window.innerWidth - width - 8))}px`;
+    menu.style.top = `${bounds.bottom + 4}px`;
+    menu.style.maxHeight = `${Math.max(160, window.innerHeight - bounds.bottom - 12)}px`;
+  };
+  const scheduleHide = (menu) => {
+    window.clearTimeout(hideTimer);
+    hideTimer = window.setTimeout(() => {
+      if (menu.matches(':popover-open') && !menu.matches(':hover') && !menu.contains(document.activeElement)) menu.hidePopover();
+    }, 200);
+  };
+  document.querySelectorAll('[data-module-sections]').forEach((tab) => {
+    const menu = menus.get(tab.dataset.moduleSections);
+    if (!menu) return;
+    tab.addEventListener('mouseenter', () => show(tab, menu));
+    tab.addEventListener('mouseleave', () => scheduleHide(menu));
+    tab.addEventListener('focus', () => show(tab, menu));
+    tab.addEventListener('blur', () => scheduleHide(menu));
+    menu.addEventListener('mouseenter', () => window.clearTimeout(hideTimer));
+    menu.addEventListener('mouseleave', () => scheduleHide(menu));
+    menu.addEventListener('focusout', () => scheduleHide(menu));
+    menu.addEventListener('click', (event) => { if (event.target.closest('a, button')) menu.hidePopover(); });
+    tab.addEventListener('click', (event) => {
+      if (tab.pathname !== window.location.pathname || event.metaKey || event.ctrlKey || event.shiftKey) return;
+      event.preventDefault();
+      hideAll();
+      if (window.location.hash) window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+      window.scrollTo({top: 0, behavior: 'smooth'});
+    });
+  });
+  document.addEventListener('keydown', (event) => { if (event.key === 'Escape') hideAll(); });
+  window.addEventListener('scroll', () => hideAll(), {passive: true});
+})();
+
+// About: the credits of the application, opened from the Help menu.
+(() => {
+  const overlay = document.querySelector('[data-about-overlay]');
+  if (!overlay) return;
+  const close = () => { overlay.hidden = true; };
+  document.querySelectorAll('[data-about-open]').forEach((button) => button.addEventListener('click', () => {
+    overlay.hidden = false;
+    overlay.querySelector('[data-about-close]')?.focus();
+  }));
+  overlay.querySelector('[data-about-close]')?.addEventListener('click', close);
+  overlay.addEventListener('click', (event) => { if (event.target === overlay) close(); });
+  document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !overlay.hidden) close(); });
+})();
+
+// Back to the top of the page: shown once a page that scrolls is scrolled down, in the colour of its module
+// (the selected tab, or the theme of the page sections navigator in the other pages).
+(() => {
+  const button = document.querySelector('[data-back-to-top]');
+  if (!button) return;
+  const activeTab = document.querySelector('.module-tabs .module-tab.active');
+  const accent = (activeTab && getComputedStyle(activeTab).getPropertyValue('--tab-accent').trim())
+    || getComputedStyle(document.getElementById('page-panel-navigator') || document.body).getPropertyValue('--panel-nav-border').trim();
+  if (accent) button.style.setProperty('--back-to-top', accent);
+  button.hidden = false;
+  const sync = () => {
+    const scrollable = document.documentElement.scrollHeight > window.innerHeight + 40;
+    button.classList.toggle('is-visible', scrollable && window.scrollY > Math.min(400, window.innerHeight / 2));
+    button.tabIndex = button.classList.contains('is-visible') ? 0 : -1;
+    button.setAttribute('aria-hidden', String(!button.classList.contains('is-visible')));
+  };
+  button.addEventListener('click', () => {
+    if (window.location.hash) window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+    window.scrollTo({top: 0, behavior: 'smooth'});
+  });
+  window.addEventListener('scroll', sync, {passive: true});
+  window.addEventListener('resize', sync);
+  sync();
+})();
 
 // The red card of every page: the Operators, Vendors and Campaigns of the CDRs that no map assigns,
 // shown until they are assigned. Editors open the assignment table from it; other roles are asked
@@ -10944,6 +11037,7 @@ window.enableExcelColumnFilters = (table, {onChange, excludeLastColumn = true} =
 for (const [triggerSelector, optionsSelector] of [
   ['[data-module-config-trigger]', '[data-module-config-options]'],
   ['[data-module-builders-trigger]', '[data-module-builders-options]'],
+  ['[data-user-menu-trigger]', '[data-user-menu-options]'],
 ]) {
   const trigger = document.querySelector(triggerSelector);
   const options = document.querySelector(optionsSelector);
@@ -10962,12 +11056,43 @@ for (const [triggerSelector, optionsSelector] of [
     options.style.bottom = 'auto';
     options.style.left = `${left}px`;
     options.style.top = `${top}px`;
+    // The sections of the Config pages open on the side with room for them.
+    options.classList.toggle('opens-left', left + menuBounds.width + 16 * 16 > window.innerWidth);
   };
+  // Choosing a page or section closes the menu, also when it stays in the page being shown.
+  options.addEventListener('click', (event) => {
+    if (event.target.closest('a, button') && options.matches(':popover-open')) options.hidePopover();
+  });
   options.addEventListener('toggle', () => {
     const open = options.matches(':popover-open');
     trigger.setAttribute('aria-expanded', String(open));
     if (open) positionOptions();
   });
+  // The menu also opens on hover and closes shortly after the pointer leaves it; a click on the
+  // trigger of a menu opened on hover keeps it open.
+  let hideTimer = 0;
+  let openedOnHover = false;
+  const scheduleHide = () => {
+    window.clearTimeout(hideTimer);
+    hideTimer = window.setTimeout(() => {
+      if (openedOnHover && options.matches(':popover-open') && !trigger.matches(':hover') && !options.matches(':hover')) {
+        options.hidePopover();
+      }
+    }, 250);
+  };
+  trigger.addEventListener('mouseenter', () => {
+    window.clearTimeout(hideTimer);
+    if (options.matches(':popover-open')) return;
+    openedOnHover = true;
+    options.showPopover();
+  });
+  trigger.addEventListener('click', (event) => {
+    if (openedOnHover && options.matches(':popover-open')) { event.preventDefault(); openedOnHover = false; }
+  });
+  options.addEventListener('toggle', () => { if (!options.matches(':popover-open')) openedOnHover = false; });
+  trigger.addEventListener('mouseleave', scheduleHide);
+  options.addEventListener('mouseenter', () => window.clearTimeout(hideTimer));
+  options.addEventListener('mouseleave', scheduleHide);
   window.addEventListener('resize', positionOptions);
   window.addEventListener('scroll', positionOptions, true);
 }

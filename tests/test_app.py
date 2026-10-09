@@ -10935,3 +10935,62 @@ def test_periodic_page_polls_do_not_count_as_application_activity(client) -> Non
     assert app_module.LAST_INTERACTIVE_APPLICATION_ACTIVITY == 0.0
     client.get('/workspace')
     assert app_module.LAST_INTERACTIVE_APPLICATION_ACTIVITY > 0.0
+
+
+def test_config_menu_lists_the_sections_of_each_config_page(client):
+    login_super(client)
+    page = client.get('/workspace').text
+    menu = page.split('id="module-config-options"', 1)[1].split('</nav>', 1)[0]
+    import re
+    links = re.findall(r'href="(/(?:application|workspace)-config)#([a-z-]+)"', menu)
+    assert ('/workspace-config', 'campaign-maps') in links and ('/application-config', 'email-delivery') in links
+    # The pages open at their top (#top); every section of the menu is a panel of its page.
+    assert ('/workspace-config', 'top') in links
+    for path in {path for path, _anchor in links}:
+        target = client.get(path).text
+        for anchor in [anchor for page_path, anchor in links if page_path == path and anchor != 'top']:
+            assert f'id="{anchor}"' in target, (path, anchor)
+
+
+def test_every_tab_lists_its_sections_with_icons_in_the_colour_of_its_module(client):
+    from src.modules.module_labels import MODULE_SECTIONS, section_anchor
+    login_super(client)
+    page = client.get('/scoring').text
+    menus = dict(re.findall(r'<nav class="module-sections-menu[^"]*" popover="manual" data-module-sections-for="([^"]+)"[^>]*>(.*?)</nav>', page, re.S))
+    for key in ('readme', 'changelog', 'help', 'app-logs', 'admin', 'workspace', 'datasets-analysis', 'ppt-dashboards',
+                'scoring', 'network-insights', 'reporting'):
+        assert key in menus, key
+        assert f'data-module-sections="{key}"' in page, key
+    # Each entry has its icon, and the menu the colour of its module.
+    assert menus['scoring'].count('class="menu-item-icon"') == 6
+    assert 'data-module-sections-for="scoring" aria-label="Scoring &amp; GAP Analysis sections" style="--menu-accent: ' in page
+    # Scoring Results lists its result tabs beside it.
+    assert 'href="/scoring#scoring-results-tables"' in menus['scoring']
+    # Help groups its chapters, Reference with the Readme and the Changelog.
+    help_menu = menus['help']
+    assert '>Help Home<' in help_menu
+    for group in ('General', 'Main Modules', 'Administrative Modules', 'Reference'):
+        assert f'<span>{group}</span>' in help_menu, group
+    reference = help_menu.split('aria-label="Reference"', 1)[1]
+    assert 'href="/documents/view/readme"' in reference and 'href="/documents/view/changelog"' in reference
+    # About, last in Help, shows the credits of the application.
+    assert help_menu.rstrip().endswith('<span>About</span></button>')
+    about = page.split('data-about-overlay>', 1)[1].split('data-about-close', 1)[0]
+    assert 'Jaime Tur' in about and 'mailto:jaime.tur@ericsson.com' in about and f'v{__version__}' in about
+    assert 'NetCheck / Umlaut CDR Analytics' in about
+    assert re.search(r'href="/documents/view/changelog#release-v[^"]+"', menus['changelog'])
+    # The User badge opens Change password; every page has the button back to the top.
+    assert 'data-user-menu-trigger' in page and 'data-change-password-open>' in page
+    assert 'data-back-to-top' in page
+    # Every listed section is a panel of its page, found by its heading.
+    templates = Path(__file__).resolve().parents[1] / 'src/web_interface/templates'
+    pages = {'workspace': 'workspace.html', 'datasets-analysis': 'datasets_analysis.html', 'ppt-dashboards': 'ppt_dashboards.html',
+             'ppt-reporting-old': 'reporting.html', 'scoring': 'scoring.html', 'network-insights': 'network_insights.html',
+             'non-qualified-calls': 'non_qualified_calls.html', 'reporting': 'report_jobs.html',
+             'chart-builder': 'chart_builder.html', 'query-builder': 'query_builder.html', 'app-logs': 'app_logs.html',
+             'admin': 'admin.html'}
+    for module, sections in MODULE_SECTIONS.items():
+        headings = {section_anchor(re.sub(r'<[^>]+>', '', heading).replace('&amp;', '&'))
+                    for heading in re.findall(r'<h[123][^>]*>(.*?)</h[123]>', (templates / pages[module]).read_text(encoding='utf-8'), re.S)}
+        for heading, *_rest in sections:
+            assert section_anchor(heading) in headings, (module, heading)

@@ -46,18 +46,22 @@ Other tabs:
 
 - Help
 - App Logs
-- Config (dropdown with Application Config and Workspace Config), for `user-editor`, `admin` and `super-admin` roles
+- Config (dropdown with Application Config and Workspace Config, each with the list of its sections on hover), for `user-editor`, `admin` and `super-admin` roles
 - Admin, for `admin` and `super-admin` roles
 
 Help Home opens by default after login. Help, the Readme and the Changelog are also available without signing in, with a **Sign in** link. Every module except Workspace requires an open workspace.
 
-Open **Builders** to choose **Chart Builder** or **Query Builder**. The Modules sidebar links to each builder directly. Within its Administrative Modules group, Application Logs is first and Administrator Config is last. The top tab for Administrator Config remains **Admin**.
+Hovering a tab, or focusing it with the keyboard, opens below it the list of its sections, each with an icon and in the colour of the module: the panels of each main module (for example Scoring Calculation, Scoring Results and Scoring Jobs in Scoring & GAP Analysis, where Scoring Results lists beside it Scoring Charts, Scoring Tables and GAP Analysis to open that results tab), App Events and Execution Log in App Logs, the panels of Admin, the chapters of the Readme and the latest releases of the Changelog. Help lists Help Home and, beside each group, the chapters of General, Main Modules, Administrative Modules and Reference (with the Readme and the Changelog), and ends with **About**, the credits of the application: its logo, name, version, release date and author. Choosing one opens that page at that section, unfolding it when it was folded; clicking the tab itself still opens the module, at its top when it is the page being shown. **Builders** and **Config** open their menu on hover too, and so does the **User** badge, with **Change password**.
+
+A round button at the bottom left, in the colour of the current module, appears once a page is scrolled down and takes it back to the top.
+
+Open **Builders** to choose **Chart Builder** or **Query Builder**, each with the list of its sections on hover. The Modules sidebar links to each builder directly. Within its Administrative Modules group, Application Logs is first and Administrator Config is last. The top tab for Administrator Config remains **Admin**.
 
 Move the pointer near a viewport edge to reveal a collapsed Modules, Sections, Navigation or Releases tab. An invisible hover area beside each tab responds even while background tasks are running; task cards leave that edge clear. The tabs recede when the pointer leaves, and keyboard focus also reveals them.
 
 Modules uses nearly the full viewport height when needed and scrolls if the window is too short for every entry. In Help, Sections lists the current document's headings.
 
-Open **Config** and choose **Application Config** for application-wide runtime settings or **Workspace Config** for PPT Templates Management, Operator Mappings, Vendor Mappings, Spectrum Holdings, Main Cities and the Scoring hierarchy/KPI/GAP settings in the active workspace. Workspace Config's Page Sections navigator jumps between the panels.
+Open **Config** and choose **Application Config** for application-wide runtime settings or **Workspace Config** for PPT Templates Management, Operator Mappings, Vendor Mappings, Spectrum Holdings, Main Cities and the Scoring hierarchy/KPI/GAP settings in the active workspace. Workspace Config's Page Sections navigator jumps between the panels. Hovering **Application Config** or **Workspace Config** in the menu opens the list of their sections (Application Runtime and Email Delivery; PPT Templates Management, Main Cities, Mappings & Reference Data with its Operator, Vendor and Campaign Maps, Map Areas and Spectrum Holdings, and Scoring & GAP Analysis Setup): choosing one opens that page at that section, unfolding it when it was folded.
 
 Help Navigation lists unnumbered documents under General, Main Modules, Administrative Modules and Reference. Main Modules follow the order of the main tabs, by default: [Workspace Management](workspace-management.md), CDR Analysis, PPT Dashboards, PPT Reporting (old), Scoring & GAP Analysis, Network Insights, Non-Qualified Calls, [Reporting](reporting.md), Chart Builder and Query Builder. Docker Deployment follows Deployment Configuration in General. App Logs is the first administrative document and Administrator Config is the last. Readme and Changelog open Reference before Project Structure and Roadmap.
 

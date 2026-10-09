@@ -114,13 +114,14 @@ from src.branding import BACKUP_FILE_PATTERNS, BACKUP_SCRATCH_PATTERNS, canonica
 from src.modules.mapping_renames import count_saved_filters, rename_saved_filters
 from src.modules.module_labels import (
     ICONS as MODULE_LABEL_ICONS, MAIN_MODULES, MAX_LABEL_LENGTH as MAX_MODULE_LABEL_LENGTH, MAX_SHORT_TITLE_LENGTH,
-    MAX_TITLE_LENGTH, MODULE_LABELS_STATE_KEY, MODULE_TABS, TAB_ICONS, load_module_labels, module_label_badges, module_tabs,
+    MAX_TITLE_LENGTH, MODULE_LABELS_STATE_KEY, MODULE_TABS, SECTION_ICONS, TAB_ICONS, load_module_labels, module_label_badges,
+    module_tabs, section_links,
     ADMINISTRATIVE_ICONS, help_chapter_icons, normalize_module_labels, ordered_help_documents, rename_modules_in_help, renamed_help_chapters,
 )
 from src.modules.output_layout import (
     CDR_ANALYSIS_FOLDER, REPORTS_CHARTS_OLD_FOLDER, REPORTS_OLD_FOLDER, migrate_output_layout, module_output_dir,
 )
-from src.version import __app_name__, __release_date__, __version__
+from src.version import __app_name__, __author__, __author_email__, __release_date__, __version__
 from src.utils.filesystem import ensure_directories, safe_join
 
 
@@ -5490,6 +5491,8 @@ def render_template(request: Request, template_name: str, context: dict[str, Any
         'app_name': __app_name__,
         'app_version': __version__,
         'app_release_date': __release_date__,
+        'app_author': __author__,
+        'app_author_email': __author_email__,
         'nr_modes': NR_MODES,
         'cdr_stage_options': [(stage, CDR_STAGE_LABELS[stage]) for stage in CDR_STAGES],
         'in_combined_options': [(value, IN_COMBINED_LABELS[value]) for value in IN_COMBINED_VALUES],
@@ -5507,6 +5510,14 @@ def render_template(request: Request, template_name: str, context: dict[str, Any
         'show_module_stage_labels': module_stage_labels_visible(),
         'module_tab_badges': module_label_badges(module_settings) if module_stage_labels_visible() else {},
         'module_tabs': module_tabs(module_settings),
+        # The sections each tab lists on hover: the builders, the administrative tabs and the documents.
+        'tab_sections': {
+            **{key: section_links(href, key) for key, href in (
+                ('chart-builder', '/chart-builder'), ('query-builder', '/query-builder'), ('app-logs', '/app-logs'),
+                ('admin', '/admin'))},
+            **document_tab_sections(template_user, module_settings),
+        },
+        'section_icons': SECTION_ICONS,
         # Analyses of the active workspace are slower while its Auto-calculated Fields are materialized.
         'workspace_materializing': bool(active_workspace) and isinstance(template_user, SessionUser) and not embedded_template_editor
         and repository.get_workspace_state('calculated_dimensions_need_materialization') == 'processing',
@@ -5546,6 +5557,82 @@ def render_template(request: Request, template_name: str, context: dict[str, Any
     response.headers['Cache-Control'] = 'no-store, max-age=0, must-revalidate'
     response.headers['Pragma'] = 'no-cache'
     return response
+
+
+def markdown_heading_id(text: str) -> str:
+    """The id the documents page gives a heading (markdown_renderer.js, defaultBuildHeadingIdFactory)."""
+    base = re.sub(r'<[^>]*>', ' ', str(text or ''))
+    base = re.sub(r'`([^`]+)`', r'\1', base)
+    base = re.sub(r'\*\*([^*]+)\*\*', r'\1', base)
+    base = re.sub(r'\*([^*]+)\*', r'\1', base)
+    base = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', base)
+    base = re.sub(r'&[a-z]+;', ' ', base, flags=re.IGNORECASE).lower()
+    base = re.sub(r'[^a-z0-9\s-]', ' ', base).strip()
+    return re.sub(r'-+', '-', re.sub(r'\s+', '-', base)) or 'section'
+
+
+@lru_cache(maxsize=8)
+def _document_headings(path: str, modified: float) -> tuple[tuple[int, str, str], ...]:
+    """The headings of a Markdown document (level, text and id), out of its code blocks."""
+    headings, seen, in_code = [], {}, False
+    for line in Path(path).read_text(encoding='utf-8', errors='replace').splitlines():
+        stripped = line.strip()
+        if stripped.startswith('```'):
+            in_code = not in_code
+            continue
+        match = None if in_code else re.match(r'^(#{1,6})\s+(.+)$', stripped)
+        if not match:
+            continue
+        base = markdown_heading_id(match.group(2))
+        seen[base] = seen.get(base, 0) + 1
+        headings.append((len(match.group(1)), match.group(2).strip(), base if seen[base] == 1 else f'{base}-{seen[base]}'))
+    return tuple(headings)
+
+
+def document_tab_sections(user: Any, module_settings: dict[str, dict[str, Any]]) -> dict[str, list[Any]]:
+    """What the Readme, Changelog and Help tabs list: the Readme chapters, the latest releases and the Help
+    chapters in the groups of the Help navigation (General, Main Modules, Administrative Modules and Reference,
+    which adds the Readme and the Changelog)."""
+    sections: dict[str, list[Any]] = {'readme': [], 'changelog': [], 'help': []}
+    for name in ('readme', 'changelog'):
+        try:
+            path = resolve_doc_path(name)
+            headings = _document_headings(str(path), path.stat().st_mtime)
+        except (HTTPException, OSError):
+            continue
+        if name == 'readme':
+            sections[name] = [(f'/documents/view/readme#{anchor}', text, SECTION_ICONS['book'], [])
+                              for level, text, anchor in headings if level == 2]
+        else:
+            releases = [match.group(1) for level, text, _ in headings if level == 2
+                        for match in [re.match(r'Release:\s+v(\S+)', text)] if match]
+            sections[name] = [(f'/documents/view/changelog#release-v{version}', f'v{version}', SECTION_ICONS['tag'], [])
+                              for version in releases[:8]]
+    renamed = renamed_help_chapters(module_settings)
+    icons = help_chapter_icons(module_settings)
+    module_documents = {document for tab in MODULE_TABS.values() for document in tab['docs']}
+    groups: dict[str, list[tuple[str, str, str, str]]] = {
+        '': [], 'General': [], 'Main Modules': [], 'Administrative Modules': [], 'Reference': [
+            ('/documents/view/readme', 'Readme', ADMINISTRATIVE_ICONS['readme']['d'], ADMINISTRATIVE_ICONS['readme']['color']),
+            ('/documents/view/changelog', 'Changelog', ADMINISTRATIVE_ICONS['changelog']['d'], ADMINISTRATIVE_ICONS['changelog']['color']),
+        ]}
+    for relative_path in ordered_help_documents(HELP_NAVIGATION_DOCUMENTS, module_settings):
+        if relative_path == OLD_REPORTING_HELP_DOCUMENT and not (user and can_access_ppt_reporting_old(user)):
+            continue
+        if not (PROJECT_ROOT / 'help' / relative_path).is_file():
+            continue
+        if relative_path == HELP_HOME_DOCUMENT:
+            groups[''].append(('/documents/view/help', 'Help Home', SECTION_ICONS['home'], ADMINISTRATIVE_ICONS['help']['color']))
+            continue
+        group = ('Main Modules' if relative_path in module_documents
+                 else 'Administrative Modules' if relative_path in {'app-logs.md', 'app-config.md', 'workspace-config.md', 'administrator-config.md'}
+                 else 'Reference' if relative_path in {'project-structure.md', 'roadmap.md'} else 'General')
+        label = renamed.get(relative_path) or HELP_DOCUMENT_LABELS.get(relative_path, help_document_label(relative_path))
+        icon = icons.get(relative_path, {})
+        groups[group].append((f'/documents/view/help/{relative_path}', label, icon.get('icon') or SECTION_ICONS['book'],
+                              icon.get('icon_color') or ''))
+    sections['help'] = [(group, links) for group, links in groups.items() if links]
+    return sections
 
 
 def resolve_doc_path(doc_name: str) -> Path:

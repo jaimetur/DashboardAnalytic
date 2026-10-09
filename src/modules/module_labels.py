@@ -225,6 +225,99 @@ def load_module_labels(repository: Any) -> dict[str, dict[str, str]]:
         return normalize_module_labels({})
 
 
+# The icons of the entries of the tab menus (the inner markup of a 24x24 stroked SVG).
+SECTION_ICONS: dict[str, str] = {
+    'select': '<path d="m4 7 2 2 3-3M4 15l2 2 3-3M12 8h8M12 16h8"/>',
+    'upload': '<path d="M12 15V4m0 0-4 4m4-4 4 4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>',
+    'table': '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M9 4v16"/>',
+    'function': '<path d="M14 4h-1a3 3 0 0 0-3 3v10a3 3 0 0 1-3 3H6M7 11h7"/><path d="m15 13 5 5m0-5-5 5"/>',
+    'summary': '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M9 10h6M9 14h6M9 18h4"/>',
+    'chart': '<path d="M4 20V4M4 20h16"/><path d="M8 16v-4M12 16V8M16 16v-6"/>',
+    'gauge': '<path d="M4 16a8 8 0 1 1 16 0"/><path d="m12 16 4-5"/><circle cx="12" cy="16" r="1.2"/>',
+    'jobs': '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+    'map': '<path d="m3 6 6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/>',
+    'antenna': '<path d="M12 10v11M8 21h8"/><circle cx="12" cy="8" r="2"/><path d="M7.5 3.5a6.5 6.5 0 0 0 0 9M16.5 3.5a6.5 6.5 0 0 1 0 9"/>',
+    'pin': '<path d="M12 21s-6-5.3-6-10a6 6 0 0 1 12 0c0 4.7-6 10-6 10z"/><circle cx="12" cy="11" r="2"/>',
+    'spectrum': '<path d="M3 12c1.5-4 3-4 4.5 0s3 4 4.5 0 3-4 4.5 0 3 4 4.5 0"/>',
+    'filter': '<path d="M4 5h16l-6 7.5V19l-4 1.5v-8z"/>',
+    'trend': '<path d="M4 18 9 12l4 3 7-8"/><path d="M15 7h5v5"/>',
+    'search': '<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/>',
+    'phone': '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/>',
+    'user-plus': '<circle cx="9" cy="8" r="3.5"/><path d="M3 20a6 6 0 0 1 12 0M18 8v6M15 11h6"/>',
+    'users': '<circle cx="9" cy="8" r="3.5"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3 6"/>',
+    'lock': '<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+    'toggle': '<rect x="3" y="7" width="18" height="10" rx="5"/><circle cx="16" cy="12" r="3"/>',
+    'sliders': '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
+    'transfer': '<path d="M4 8h14m0 0-3.5-3.5M18 8l-3.5 3.5M20 16H6m0 0 3.5-3.5M6 16l3.5 3.5"/>',
+    'database': '<ellipse cx="12" cy="5.5" rx="7" ry="2.5"/><path d="M5 5.5v13c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-13M5 12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5"/>',
+    'activity': '<path d="M3 12h4l2.5-6 5 12 2.5-6h4"/>',
+    'log': '<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M10 12h6M10 16h6"/>',
+    'book': '<path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 21V5M8 7h7"/>',
+    'tag': '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8" r="1.3"/>',
+    'code': '<path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14"/>',
+    'bookmark': '<path d="M6 3h12v18l-6-4-6 4z"/>',
+    'eye': '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>',
+    'key': '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M14.5 8.5l2 2"/>',
+    'presentation': '<rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M12 16v4M8 20h8M7 12l3-3 2 2 4-4"/>',
+    'home': '<path d="m3 11 9-7 9 7"/><path d="M5 10v10h14V10M10 20v-5h4v5"/>',
+    'cities': '<path d="M3 21h18M5 21V9l5-3v15M10 21V4l9 4v13M13 9h3M13 13h3M13 17h3"/>',
+    'link': '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+    'mail': '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3.5 6.5 8.5 6.5 8.5-6.5"/>',
+    'folder': '<path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2h7.5A2.5 2.5 0 0 1 21 9.5v7a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 16.5z"/>',
+    'info': '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/>',
+}
+
+# The sections each module lists below its tab: the heading of the panel (its anchor, see section_anchor),
+# the name in the menu and its icon, plus the parts of the section (anchor, name and icon) listed beside it on hover.
+# Builders lists them for each builder; App Logs and Admin are administrative tabs.
+MODULE_SECTIONS: dict[str, list[tuple[Any, ...]]] = {
+    'workspace': [('Select Workspace', 'Workspaces Management', 'folder'), ('Data Ingestion', 'Data Ingestion', 'upload'),
+                  ('Datasets', 'Datasets', 'table'), ('Auto-calculated Fields', 'Auto-calculated Fields', 'function')],
+    'datasets-analysis': [('Select CDR to Analyze', 'Select CDR', 'select'), ('Dataset Summary', 'Dataset Summary', 'summary'),
+                          ('Charts and Scorecards', 'Charts and Scorecards', 'chart'),
+                          ('Processed Metrics', 'Processed Metrics', 'gauge')],
+    'ppt-dashboards': [('PPT Manage Dashboards', 'PPT Manage Dashboards', 'presentation'),
+                       ('PPT Generation Jobs', 'PPT Generation Jobs', 'jobs')],
+    'ppt-reporting-old': [('NetCheck CDR Reports', 'NetCheck CDR Reports', 'presentation'), ('Charts Panel', 'Charts Panel', 'chart'),
+                          ('Log Report', 'Log Report', 'log'), ('Reports and Charts Jobs', 'Reports and Charts Jobs', 'jobs')],
+    'scoring': [('Select CDRs, filters, Split by & GAP reference', 'Scoring Calculation', 'sliders'),
+                ('Scoring results', 'Scoring Results', 'chart', [
+                    ('scoring-results-charts', 'Scoring Charts', 'chart'), ('scoring-results-tables', 'Scoring Tables', 'table'),
+                    ('scoring-results-gap', 'GAP Analysis', 'trend')]),
+                ('Scoring jobs', 'Scoring Jobs', 'jobs')],
+    'network-insights': [('Analysis Selection', 'Analysis Selection', 'select'), ('Overview', 'Overview', 'summary'),
+                         ('RF Quality', 'RF Quality', 'activity'), ('Coverage & Interference Maps', 'Coverage & Interference Maps', 'map'),
+                         ('Network Deployment', 'Network Deployment', 'antenna'),
+                         ('Cluster Sites Density', 'Cluster Sites Density', 'pin'), ('Spectrum', 'Spectrum', 'spectrum')],
+    'non-qualified-calls': [('Filters', 'Filters', 'filter'), ('Summary', 'Summary', 'summary'),
+                            ('NQ Rate by Campaign and Operator', 'NQ Rate by Campaign and Operator', 'chart'),
+                            ('Progress View', 'Progress View', 'trend'), ('Root Cause Analysis', 'Root Cause Analysis', 'search'),
+                            ('Calls', 'Calls', 'phone')],
+    'reporting': [('Reporting Jobs', 'Reporting Jobs', 'jobs'), ('Run History', 'Run History', 'log')],
+    'chart-builder': [('Interactive Preview', 'Interactive Preview', 'eye')],
+    'query-builder': [('Selected CDR tables', 'Query editor', 'code'), ('Saved queries', 'Saved queries', 'bookmark'),
+                      ('Query output', 'Results', 'table')],
+    'app-logs': [('App Events', 'App Events', 'activity'), ('Execution Log', 'Execution Log', 'log')],
+    'admin': [('Create user', 'Create user', 'user-plus'), ('Users', 'Users', 'users'), ('User Groups', 'User Groups', 'users'),
+              ('Workspace Access', 'Workspace Access', 'lock'), ('Features Activation', 'Features Activation', 'toggle'),
+              ('Interface Settings', 'Interface Settings', 'sliders'),
+              ('Import / Export / Transfer', 'Import / Export / Transfer', 'transfer'),
+              ('Database Management', 'Database Management', 'database'), ('Datasets Management', 'Datasets Management', 'table')],
+}
+
+
+def section_anchor(heading: str) -> str:
+    """The anchor of a panel of a page from its heading, as the pages resolve it (app.js, openMappingHashTarget)."""
+    return 'section-' + re.sub(r'[^a-z0-9]+', '-', str(heading).casefold()).strip('-')
+
+
+def section_links(href: str, module: str) -> list[tuple[str, str, str, list[tuple[str, str, str]]]]:
+    """The links (address, name, icon and the links of its parts) of the sections of a module page."""
+    return [(f'{href}#{section_anchor(heading)}', name, SECTION_ICONS[icon],
+             [(f'{href}#{anchor}', part, SECTION_ICONS[part_icon]) for anchor, part, part_icon in (parts[0] if parts else [])])
+            for heading, name, icon, *parts in MODULE_SECTIONS.get(module, [])]
+
+
 def module_tabs(labels: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     """The main tabs in their order, with what the navigation draws for each one."""
     tabs = []
@@ -239,6 +332,7 @@ def module_tabs(labels: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
             'tab_color': label['tab_color'],
             # A colour other than the module palette replaces its accent and selected gradient.
             'colour_style': f"--tab-accent: {label['tab_color']}" if custom_colour else '',
+            'sections': section_links(default['href'], module),
         })
     return tabs
 

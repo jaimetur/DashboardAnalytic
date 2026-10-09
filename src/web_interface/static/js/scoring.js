@@ -6521,6 +6521,17 @@
     if (currentResults) renderResult(currentResults, selectedJob, [name]);
   });
   expandedChartClose?.addEventListener('click', closeExpandedChart);
+  // The Scoring Results entries of the Scoring tab menu (#scoring-results-charts, -tables or -gap) open that
+  // results tab and scroll to the results.
+  const openResultTabFromHash = () => {
+    const name = {'scoring-results-charts': 'charts', 'scoring-results-tables': 'scoring', 'scoring-results-gap': 'gap'}[
+      decodeURIComponent(window.location.hash.slice(1))];
+    if (!name) return;
+    root.querySelector(`[data-result-tab="${name}"]`)?.click();
+    window.requestAnimationFrame(() => root.querySelector('.scoring-results-panel')?.scrollIntoView({block: 'start'}));
+  };
+  window.addEventListener('hashchange', openResultTabFromHash);
+  openResultTabFromHash();
   // Double-clicking a map or a table of the Scoring Tables and GAP Analysis tabs opens it larger.
   root.addEventListener('dblclick', event => {
     if (event.target.closest('.scoring-chart-card, .scoring-map-zoom, [data-scoring-chart-overlay]')) return;

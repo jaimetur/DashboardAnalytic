@@ -1,6 +1,9 @@
 {%- macro tab_icon(name, class_name='module-tab-icon', colour='') -%}<svg class="{{ class_name }}" viewBox="0 0 24 24" aria-hidden="true" focusable="false"{% if colour %} style="stroke: {{ colour }}"{% endif %}>{{ administrative_icons[name].d | safe }}</svg>{%- endmacro -%}
 {%- macro module_nav_icon(tab) -%}{% if tab.icon_path %}<svg class="module-navigator-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" style="stroke: {{ tab.tab_color }}">{{ tab.icon_path | safe }}</svg>{% endif %}{%- endmacro -%}
 {%- macro module_tab_content(tab) -%}{% if tab.icon_path %}<svg class="module-tab-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">{{ tab.icon_path | safe }}</svg>{% endif %}{% if tab.short_title == tab.title %}<span>{{ tab.title }}</span>{% else %}<span class="module-tab-label-desktop">{{ tab.title }}</span><span class="module-tab-label-mobile">{{ tab.short_title }}</span>{% endif %}{%- endmacro -%}
+{%- macro menu_icon(markup, colour='') -%}<svg class="menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"{% if colour %} style="stroke: {{ colour }}"{% endif %}>{{ markup | safe }}</svg>{%- endmacro -%}
+{#- The menu of a tab: its sections, each with its icon, in the colour of the module. -#}
+{%- macro sections_menu(key, title, links, accent) -%}{% if links %}<nav class="module-sections-menu{% if links | selectattr(3) | list %} module-sections-menu-grouped{% endif %}" popover="manual" data-module-sections-for="{{ key }}" aria-label="{{ title }} sections" style="--menu-accent: {{ accent }}">{% for href, label, icon, parts in links %}{% if parts %}<div class="module-config-group"><a href="{{ href }}">{{ menu_icon(icon) }}<span>{{ label }}</span><span class="module-config-chevron" aria-hidden="true">›</span></a><div class="module-config-sections" role="group" aria-label="{{ label }}">{% for part_href, part_label, part_icon in parts %}<a href="{{ part_href }}">{{ menu_icon(part_icon) }}<span>{{ part_label }}</span></a>{% endfor %}</div></div>{% else %}<a href="{{ href }}">{{ menu_icon(icon) }}<span>{{ label }}</span></a>{% endif %}{% endfor %}</nav>{% endif %}{%- endmacro -%}
 {%- macro new_badge(module) -%}{%- set badge = (module_tab_badges | default({})).get(module) -%}{%- if badge -%}<svg class="module-tab-new module-tab-new-{{ module }}" viewBox="0 0 {{ badge.width }} 14" style="width: {{ '%.2f' | format(badge.width * 1.06 / 14) }}rem" role="img" aria-label="{{ badge.text }}"><title>{{ badge.text }}</title><rect width="{{ badge.width }}" height="14" rx="4" style="fill: {{ badge.color }}"/>{%- if badge.icon_path -%}<path class="module-tab-new-icon" d="{{ badge.icon_path }}" style="{{ 'fill: ' ~ badge.icon_color ~ '; stroke: none' if badge.icon_mode == 'fill' else 'fill: none; stroke: ' ~ badge.icon_color }}"/>{%- endif -%}<text x="{{ badge.text_x }}" y="10.2" text-anchor="middle" style="fill: {{ badge.ink }}">{{ badge.text }}</text></svg>{%- endif -%}{%- endmacro -%}
 <!DOCTYPE html>
 <html lang="en">
@@ -53,7 +56,10 @@
             {% endif %}
           </div>
         </details>
-        <button type="button" class="topnav-user-control" data-change-password-open title="Click to change your password" aria-label="Change password for {{ user.username }}"><span class="topnav-link topnav-user-badge topnav-user-badge-{{ user.role }}">User: {{ user.username }} ({{ user.role }})</span></button>
+        <button type="button" class="topnav-user-control" popovertarget="topnav-user-options" aria-haspopup="true" aria-expanded="false" title="User options" aria-label="User options for {{ user.username }}" data-user-menu-trigger><span class="topnav-link topnav-user-badge topnav-user-badge-{{ user.role }}">User: {{ user.username }} ({{ user.role }})</span></button>
+        <nav id="topnav-user-options" class="module-config-options topnav-user-options" aria-label="User options" popover data-user-menu-options>
+          <button type="button" data-change-password-open>{{ menu_icon(section_icons['key']) }}<span>Change password</span></button>
+        </nav>
         <a class="topnav-link topnav-link-logout" href="/logout" title="Log out of DriveTest Analyzer">Logout</a>
       </nav>
       {% elif request.url.path.startswith('/documents/view/') %}
@@ -65,27 +71,64 @@
       {% if user and not embedded_preview %}
       <nav class="module-tabs" aria-label="E2E modules">
         <div class="module-tabs-secondary" aria-label="Documentation and administration">
-          <a class="module-tab module-tab-utility{% if request.url.path == '/documents/view/readme' %} active{% endif %}" href="/documents/view/readme" title="Open Readme">{{ tab_icon('readme') }}<span>Readme</span></a>
-          <a class="module-tab module-tab-utility{% if request.url.path == '/documents/view/changelog' %} active{% endif %}" href="/documents/view/changelog" title="Open Changelog">{{ tab_icon('changelog') }}<span>Changelog</span></a>
-          <a class="module-tab module-tab-utility{% if request.url.path.startswith('/documents/view/help') %} active{% endif %}" href="/documents/view/help" title="Open Help">{{ tab_icon('help') }}<span>Help</span></a>
-          <a class="module-tab module-tab-app-logs{% if request.url.path == '/app-logs' %} active{% endif %}" href="/app-logs" title="Open App Logs">{{ tab_icon('app-logs') }}<span>App Logs</span></a>
+          <a class="module-tab module-tab-utility{% if request.url.path == '/documents/view/readme' %} active{% endif %}" href="/documents/view/readme" title="Open Readme" data-module-sections="readme">{{ tab_icon('readme') }}<span>Readme</span></a>
+          {{ sections_menu('readme', 'Readme', tab_sections.readme, administrative_icons['readme'].color) }}
+          <a class="module-tab module-tab-utility{% if request.url.path == '/documents/view/changelog' %} active{% endif %}" href="/documents/view/changelog" title="Open Changelog" data-module-sections="changelog">{{ tab_icon('changelog') }}<span>Changelog</span></a>
+          {{ sections_menu('changelog', 'Changelog', tab_sections.changelog, administrative_icons['changelog'].color) }}
+          <a class="module-tab module-tab-utility{% if request.url.path.startswith('/documents/view/help') %} active{% endif %}" href="/documents/view/help" title="Open Help" data-module-sections="help">{{ tab_icon('help') }}<span>Help</span></a>
+          {# Help lists Help Home and its chapters in the groups of the Help navigation, each group beside it on hover. #}
+          <nav class="module-sections-menu module-sections-menu-grouped" popover="manual" data-module-sections-for="help" aria-label="Help chapters" style="--menu-accent: {{ administrative_icons['help'].color }}">
+            {% for group, links in tab_sections.help %}{% if not group %}{% for href, label, icon, colour in links %}<a href="{{ href }}">{{ menu_icon(icon, colour) }}<span>{{ label }}</span></a>{% endfor %}{% else %}
+            <div class="module-config-group">
+              <a href="{{ links[0][0] }}" tabindex="-1" aria-haspopup="true">{{ menu_icon(section_icons[{'Main Modules': 'chart', 'Administrative Modules': 'sliders', 'Reference': 'bookmark'}.get(group, 'book')]) }}<span>{{ group }}</span><span class="module-config-chevron" aria-hidden="true">›</span></a>
+              <div class="module-config-sections" role="group" aria-label="{{ group }}">
+                {% for href, label, icon, colour in links %}<a href="{{ href }}">{{ menu_icon(icon, colour) }}<span>{{ label }}</span></a>{% endfor %}
+              </div>
+            </div>{% endif %}{% endfor %}
+            <button type="button" data-about-open>{{ menu_icon(section_icons['info']) }}<span>About</span></button>
+          </nav>
+          <a class="module-tab module-tab-app-logs{% if request.url.path == '/app-logs' %} active{% endif %}" href="/app-logs" title="Open App Logs" data-module-sections="app-logs">{{ tab_icon('app-logs') }}<span>App Logs</span></a>
+          {{ sections_menu('app-logs', 'App Logs', tab_sections['app-logs'], administrative_icons['app-logs'].color) }}
           {% if user.role in ['user-editor', 'admin', 'super-admin'] %}
           <button type="button" class="module-tab module-tab-config{% if request.url.path in ['/application-config', '/workspace-config'] %} active{% endif %}" popovertarget="module-config-options" aria-haspopup="true" aria-expanded="false" aria-label="Choose configuration page" data-module-config-trigger>{{ tab_icon('config') }}<span>Config</span> <span aria-hidden="true">▾</span></button>
-          <nav id="module-config-options" class="module-config-options" aria-label="Configuration pages" popover data-module-config-options>
-            <a href="/application-config"{% if request.url.path == '/application-config' %} class="is-active" aria-current="page"{% endif %}>Application Config</a>
-            <a href="/workspace-config"{% if request.url.path == '/workspace-config' %} class="is-active" aria-current="page"{% endif %}>Workspace Config</a>
+          <nav id="module-config-options" class="module-config-options" aria-label="Configuration pages" popover data-module-config-options style="--menu-accent: {{ administrative_icons['config'].color }}">
+            {# Each page opens, on hover or focus, the list of its sections: a click goes straight to one. #}
+            {% for page_href, page_title, sections in [
+              ('/application-config', 'Application Config', [('application-runtime', 'Application Runtime', false, 'sliders'), ('email-delivery', 'Email Delivery', false, 'mail')]),
+              ('/workspace-config', 'Workspace Config', [
+                ('ppt-templates-management', 'PPT Templates Management', false, 'presentation'), ('main-cities', 'Main Cities', false, 'cities'),
+                ('mappings-reference-data', 'Mappings & Reference Data', false, 'link'), ('operator-maps', 'Operator Maps', true, 'link'),
+                ('vendor-maps', 'Vendor Maps', true, 'link'), ('campaign-maps', 'Campaign Maps', true, 'tag'), ('map-areas', 'Map Areas', true, 'map'),
+                ('spectrum-holdings', 'Spectrum Holdings', true, 'spectrum'), ('scoring-gap-analysis-setup', 'Scoring & GAP Analysis Setup', false, 'sliders')]),
+            ] %}
+            <div class="module-config-group">
+              {# #top opens the page at its top, also when it is the page being shown (otherwise a reload keeps its scroll). #}
+              <a href="{{ page_href }}#top"{% if request.url.path == page_href %} class="is-active" aria-current="page"{% endif %}>{{ tab_icon('config', 'menu-item-icon') }}<span>{{ page_title }}</span><span class="module-config-chevron" aria-hidden="true">›</span></a>
+              <div class="module-config-sections" role="group" aria-label="{{ page_title }} sections">
+                {% for anchor, label, nested, icon in sections %}<a href="{{ page_href }}#{{ anchor }}"{% if nested %} class="is-nested"{% endif %}>{{ menu_icon(section_icons[icon]) }}<span>{{ label }}</span></a>{% endfor %}
+              </div>
+            </div>
+            {% endfor %}
           </nav>
           {% endif %}
-          {% if user.role in ['admin', 'super-admin'] %}<a class="module-tab module-tab-admin{% if request.url.path == '/admin' %} active{% endif %}" href="/admin" title="Open Admin">{{ tab_icon('admin') }}<span>Admin</span></a>{% endif %}
+          {% if user.role in ['admin', 'super-admin'] %}<a class="module-tab module-tab-admin{% if request.url.path == '/admin' %} active{% endif %}" href="/admin" title="Open Admin" data-module-sections="admin">{{ tab_icon('admin') }}<span>Admin</span></a>
+          {{ sections_menu('admin', 'Admin', tab_sections.admin, administrative_icons['admin'].color) }}{% endif %}
         </div>
         <div class="module-tabs-primary">
           {% for tab in module_tabs %}{% if features[tab.key] %}
           {% if tab.key == 'builders' %}{% if active_workspace %}<button type="button" class="module-tab {{ tab.css }}{% if tab.colour_style %} module-tab-custom-colour{% endif %}{% if request.url.path in ['/chart-builder', '/query-builder'] %} active{% endif %}"{% if tab.colour_style %} style="{{ tab.colour_style }}"{% endif %} popovertarget="module-builders-options" aria-haspopup="true" aria-expanded="false" aria-label="Choose builder" data-module-builders-trigger>{{ module_tab_content(tab) }} <span aria-hidden="true">▾</span>{{ new_badge(tab.key) }}</button>
-          <nav id="module-builders-options" class="module-builders-options" aria-label="Builders" popover data-module-builders-options>
-            <a href="/chart-builder"{% if request.url.path == '/chart-builder' %} class="is-active" aria-current="page"{% endif %}>Chart Builder</a>
-            <a href="/query-builder"{% if request.url.path == '/query-builder' %} class="is-active" aria-current="page"{% endif %}>Query Builder</a>
+          <nav id="module-builders-options" class="module-builders-options" aria-label="Builders" popover data-module-builders-options style="--menu-accent: {{ tab.tab_color }}">
+            {% for builder_href, builder_title, builder_key, builder_icon in [('/chart-builder', 'Chart Builder', 'chart-builder', 'chart'), ('/query-builder', 'Query Builder', 'query-builder', 'code')] %}
+            <div class="module-config-group">
+              <a href="{{ builder_href }}#top"{% if request.url.path == builder_href %} class="is-active" aria-current="page"{% endif %}>{{ menu_icon(section_icons[builder_icon]) }}<span>{{ builder_title }}</span><span class="module-config-chevron" aria-hidden="true">›</span></a>
+              <div class="module-config-sections" role="group" aria-label="{{ builder_title }} sections">
+                {% for href, label, icon, _parts in tab_sections[builder_key] %}<a href="{{ href }}">{{ menu_icon(icon) }}<span>{{ label }}</span></a>{% endfor %}
+              </div>
+            </div>
+            {% endfor %}
           </nav>{% else %}<span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use {{ tab.title }}">{{ module_tab_content(tab) }}{{ new_badge(tab.key) }}</span>{% endif %}
-          {% elif tab.key == 'workspace' or active_workspace %}<a class="module-tab {{ tab.css }}{% if tab.colour_style %} module-tab-custom-colour{% endif %}{% if request.url.path == tab.href %} active{% endif %}"{% if tab.colour_style %} style="{{ tab.colour_style }}"{% endif %} href="{{ tab.href }}" title="Open {{ tab.nav_title }}">{{ module_tab_content(tab) }}{{ new_badge(tab.key) }}</a>
+          {% elif tab.key == 'workspace' or active_workspace %}<a class="module-tab {{ tab.css }}{% if tab.colour_style %} module-tab-custom-colour{% endif %}{% if request.url.path == tab.href %} active{% endif %}"{% if tab.colour_style %} style="{{ tab.colour_style }}"{% endif %} href="{{ tab.href }}" title="Open {{ tab.nav_title }}"{% if tab.sections %} data-module-sections="{{ tab.key }}"{% endif %}>{{ module_tab_content(tab) }}{{ new_badge(tab.key) }}</a>
+          {{ sections_menu(tab.key, tab.title, tab.sections, tab.tab_color) }}
           {% else %}<span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use {{ tab.title }}">{{ module_tab_content(tab) }}{{ new_badge(tab.key) }}</span>
           {% endif %}{% endif %}{% endfor %}
         </div>
@@ -145,6 +188,8 @@
     {% endif %}
   </div>
   {% if user and not embedded_template_editor and not embedded_preview %}
+  {# Back to the top of the page, shown once the page is scrolled down, in the colour of its module. #}
+  <button type="button" class="back-to-top" data-back-to-top title="Back to the top of the page" aria-label="Back to the top of the page" hidden><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="back-to-top-lead" d="m5 12 7-7 7 7"/><path class="back-to-top-trail" d="m5 19 7-7 7 7"/></svg></button>
   <div id="background-task-panels" class="background-task-panels" aria-live="polite" aria-label="Background tasks" hidden>
     <div class="background-task-dock background-task-dock-other" data-background-task-dock="other"></div>
     <div class="background-task-dock background-task-dock-system" data-background-task-dock="system"></div>
@@ -232,6 +277,25 @@
           <button type="submit" class="action-link-primary">Change password</button>
         </div>
       </form>
+    </div>
+  </div>
+  {% endif %}
+  {% if user and not embedded_preview %}
+  {# The credits of the application, from the About entry of the Help menu. #}
+  <div id="about-overlay" class="confirm-overlay" hidden data-about-overlay>
+    <div class="confirm-panel about-panel" role="dialog" aria-modal="true" aria-labelledby="about-title">
+      <img class="about-logo" src="{{ static_path('img/brand-mark-192.png') }}?v={{ asset_version('img/brand-mark-192.png') }}" alt="{{ app_name }} logo" width="96" height="96">
+      <p class="eyebrow">NetCheck / Umlaut CDR Analytics</p>
+      <h3 id="about-title">{{ app_name }}</h3>
+      <p class="about-summary">Drive test CDR analysis, scoring and GAP analysis, network insights and PowerPoint reporting.</p>
+      <dl class="about-details">
+        <dt>Version</dt><dd class="about-version">v{{ app_version }}</dd>
+        <dt>Release date</dt><dd>{{ app_release_date }}</dd>
+        <dt>Author</dt><dd>{{ app_author }} <a href="mailto:{{ app_author_email }}">{{ app_author_email }}</a></dd>
+        <dt>Documentation</dt><dd><a href="/documents/view/help">Help</a> · <a href="/documents/view/readme">Readme</a> · <a href="/documents/view/changelog">Changelog</a></dd>
+      </dl>
+      <p class="about-copyright">© {{ app_release_date[:4] }} {{ app_author }}. All rights reserved.</p>
+      <div class="confirm-actions"><button type="button" class="action-link-primary" data-about-close>Close</button></div>
     </div>
   </div>
   {% endif %}
