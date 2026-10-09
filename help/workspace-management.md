@@ -46,7 +46,7 @@ Workspace accepts `CSV`, `XLS`, `XLSX` and `XLSM` for tabular datasets, and `Geo
 1. Open the target workspace.
 2. Select one or more files in **Data Ingestion**.
 3. Review the proposed type for every file.
-4. For CDRs, review the proposed **NR Mode** (NSA or SA) and **CDR Type** (Final or Daily) and optionally choose the Vendor source and the ready VFUK/3UK, Regions and Clusters mappings. For Vendor polygons, review their **Operator**.
+4. For CDRs, review the proposed **NR Mode** (NSA or SA) and **CDR Type** (Final or Daily) and optionally choose the Vendor source and the ready VFUK/3UK, Regions and Clusters mappings. For Vendor polygons and Network Inventories, review their **Operator** (proposed from the file name).
 5. Confirm the batch.
 6. Follow every item in **Queue and Status**.
 7. Continue only when the status is **Processed**.
@@ -303,13 +303,13 @@ The Map dialog asks for the source when the workspace has both, and uses the onl
 - The newest ready mapping of each type is proposed.
 - Either, both or neither may be selected.
 - Every ready Network Inventory that can map Vendors is applied as well, for the CDR samples of its Operator.
-- When the workspace (or the upload) has Vendor polygons, **Vendor source** chooses between the **Network Inventory** and **Vendor polygons**, which applies every Vendor polygons dataset; it is proposed when there is no Network Inventory.
+- **Vendor source** is offered only when the CDRs have both sources, in the workspace or in the same upload: the **Network Inventory** (the VFUK Multivendor Mapping covers Vodafone, the 3UK one covers 3 and each Network Inventory its Operator) and the **Vendor polygons**, which applies every Vendor polygons dataset. The Vendor polygons are proposed when they cover every Operator of the Network Inventory source (polygons of that Operator, or multi-operator polygons whose Operator attribute includes it), and the Network Inventory otherwise. With a single source, that source is used.
 
 #### After Upload
 
 1. Click **Map** on a CDR (or **Map Vendor, Region & Cluster** for several).
 2. Select one or more ready CDRs, including CDRs that are already mapped. They are listed in CDR Data, Voice and Speech cards side by side, each with **Select All/None**.
-3. Choose the Vendor source when the workspace has both; confirm the VFUK and/or 3UK mapping, or the Vendor polygons to apply (all of them are selected), and optionally the Regions and Clusters mappings.
+3. Choose the Vendor source when the workspace has both (the Vendor polygons are proposed when they cover every Operator of the Network Inventory source); confirm the VFUK and/or 3UK mapping, or the Vendor polygons to apply (all of them are selected), and optionally the Regions and Clusters mappings.
 4. Wait for processing to finish.
 
 Mapping a CDR again replaces its previous mapping; **Clear** is only needed to remove the mappings. **Clear Mappings** and **Reprocess Datasets** use the same wide dialog, with the CDRs in CDR Data, Voice and Speech panels (and Other Datasets for Reprocess) and **Select All/None** in each panel. A mapping left as "No … mapping" keeps its previous result. Re-mapping only Vendor recalculates it on the stored rows, which is much faster than rebuilding the CDR; Region and Cluster mappings rebuild the CDR from its source file. Mapping stores the `<Operator>_<Vendor>` identity in `Operator_Vendor` and the vendor name in `Vendor`; operators without an assigned vendor use `Operator - All`. The mapped value is retained in individual and combined CDRs and their dataset exports. Existing processed CDRs receive the new stored identity when mapped again.

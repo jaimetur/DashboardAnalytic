@@ -183,7 +183,7 @@
     <div class="upload-panel-content">
       <p class="lede">Bring the source files that feed every product workflow into one managed workspace: NetCheck CDR workbooks (Data, Voice and Speech), Smart Orchestrator Logs, and Vodafone UK (VFUK) or Three UK (3UK) Multivendor Mappings. Workspace proposes a type from each filename, lets you confirm it per file and, for CDRs, can apply an existing mapping or one uploaded in the same batch. Batch mappings are processed before their selected CDRs.</p>
       {% if user.role not in ['user-editor', 'admin', 'super-admin'] %}<p class="form-note workspace-read-only-note">The user-viewer role can explore the workspace datasets and generate jobs, but cannot upload, delete, reprocess or map datasets.</p>{% endif %}
-      <form class="upload-dropzone" action="/datasets-analysis/upload" method="post" enctype="multipart/form-data" data-background-upload data-workspace-id="{{ active_workspace.id }}" data-workspace-name="{{ active_workspace.name }}" data-upload-type-form data-vodafone-mapping-options='{{ vodafone_mapping_datasets | default([]) | tojson }}' data-three-mapping-options='{{ three_mapping_datasets | default([]) | tojson }}' data-region-mapping-options='{{ region_mapping_datasets | default([]) | tojson }}' data-cluster-mapping-options='{{ cluster_mapping_datasets | default([]) | tojson }}' data-vendor-polygon-options='{{ vendor_polygon_datasets | default([]) | tojson }}' data-operator-options='{{ operator_options | default([]) | tojson }}'{% if datasets | rejectattr('dataset_kind', 'in', ['data', 'voice', 'speech', 'mapping_vodafone', 'mapping_three', 'network_inventory', 'regions', 'clusters', 'vendors', 'smart_orchestrator_logs']) | list %} data-other-datasets{% endif %}>
+      <form class="upload-dropzone" action="/datasets-analysis/upload" method="post" enctype="multipart/form-data" data-background-upload data-workspace-id="{{ active_workspace.id }}" data-workspace-name="{{ active_workspace.name }}" data-upload-type-form data-vodafone-mapping-options='{{ vodafone_mapping_datasets | default([]) | tojson }}' data-three-mapping-options='{{ three_mapping_datasets | default([]) | tojson }}' data-region-mapping-options='{{ region_mapping_datasets | default([]) | tojson }}' data-cluster-mapping-options='{{ cluster_mapping_datasets | default([]) | tojson }}' data-vendor-polygon-options='{{ vendor_polygon_datasets | default([]) | tojson }}' data-network-inventory-count="{{ network_inventory_datasets | default([]) | length }}" data-vendor-source-operators='{{ vendor_source_operators | default({}) | tojson }}' data-operator-options='{{ operator_options | default([]) | tojson }}'{% if datasets | rejectattr('dataset_kind', 'in', ['data', 'voice', 'speech', 'mapping_vodafone', 'mapping_three', 'network_inventory', 'regions', 'clusters', 'vendors', 'smart_orchestrator_logs']) | list %} data-other-datasets{% endif %}>
       <label class="dropzone-field" data-upload-dropzone>
         <span class="dropzone-title">Drop workbooks or browse</span>
         <span class="dropzone-copy">Accepted: CSV, XLS, XLSX, XLSM, GeoJSON, JSON, ZIP (shapefile)</span>
@@ -763,7 +763,10 @@
       </fieldset>
       {% set usable_inventories = network_inventory_datasets | default([]) | selectattr('can_map_vendors_from') | list %}
       {% set has_inventory = vodafone_mapping_datasets or three_mapping_datasets or usable_inventories %}
-      {% set default_vendor_source = 'inventory' if has_inventory or not vendor_polygon_datasets else 'polygons' %}
+      {# The Vendor polygons come first when they cover every Operator of the Network Inventory source. #}
+      {% set source_operators = vendor_source_operators | default({}, true) %}
+      {% set polygons_cover_inventory = source_operators.get('inventory') and not (source_operators.get('inventory', []) | reject('in', source_operators.get('polygons', [])) | list) %}
+      {% set default_vendor_source = 'polygons' if vendor_polygon_datasets and (not has_inventory or polygons_cover_inventory) else 'inventory' %}
       <div class="vendor-mapping-rules">
       <details class="vendor-mapping-rule" open data-vendor-source-rule="inventory"{% if default_vendor_source != 'inventory' %} hidden{% endif %}>
         <summary>Vendor mapping rule · Network Inventory</summary>
@@ -1039,6 +1042,8 @@
   const paintCard = (entry) => {
     const kind = entry.select.value || 'unknown';
     entry.item.dataset.kind = kind;
+    // A Daily CDR is flagged in the corner of its card.
+    entry.item.dataset.stage = cdrTypes.has(kind) ? entry.stageSelect.value : '';
     const label = entry.select.selectedOptions[0]?.value ? entry.select.selectedOptions[0].textContent : 'Choose a type';
     entry.badge.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${typeIcons[kind] || typeIcons.generic}</svg>`;
     const caption = document.createElement('span');
@@ -1053,6 +1058,11 @@
   const regionMappings = parseMappingOptions('regionMappingOptions');
   const clusterMappings = parseMappingOptions('clusterMappingOptions');
   const vendorPolygons = parseMappingOptions('vendorPolygonOptions');
+  const networkInventoryCount = Number(form.dataset.networkInventoryCount || 0);
+  // The Operators each Vendor source of the workspace covers (Operator identities).
+  const sourceOperators = (() => {
+    try { return JSON.parse(form.dataset.vendorSourceOperators || '{}') || {}; } catch (_error) { return {}; }
+  })();
   const operatorNames = parseMappingOptions('operatorOptions');
   // The Operator of Vendor polygons whose name, or a usual spelling of it, is a word of the file name.
   const operatorSpellings = {vodafone: ['vodafone', 'vf', 'vfuk'], 3: ['3', '3uk', 'three', 'h3g'], o2: ['o2', 'vmo2'], ee: ['ee']};
@@ -1127,6 +1137,22 @@
         }));
       return [...uploadedMappings, ...processedMappings];
     };
+    const polygonsCoverInventory = () => {
+      const identities = sourceOperators.identities || {};
+      const inventory = new Set(sourceOperators.inventory || []);
+      const polygons = new Set(sourceOperators.polygons || []);
+      for (const candidate of entries) {
+        const kind = candidate.select.value;
+        const operator = candidate.operatorSelect.value;
+        if (kind === 'mapping_vodafone' && sourceOperators.mapping_vodafone) inventory.add(sourceOperators.mapping_vodafone);
+        if (kind === 'mapping_three' && sourceOperators.mapping_three) inventory.add(sourceOperators.mapping_three);
+        // An inventory without its Operator yet cannot be covered.
+        if (kind === 'network_inventory') inventory.add(operator ? identities[operator] || operator : '?');
+        // The Operators of multi-operator polygons are known once they are processed.
+        if (kind === 'vendors' && operator) polygons.add(identities[operator] || operator);
+      }
+      return inventory.size > 0 && [...inventory].every((identity) => polygons.has(identity));
+    };
     const refreshMappingChoices = () => {
       entries.forEach((entry) => {
         paintCard(entry);
@@ -1136,10 +1162,20 @@
         entry.operatorField.hidden = !['vendors', 'network_inventory'].includes(entry.select.value);
         const multiOperator = entry.operatorSelect.options[0];
         multiOperator.textContent = entry.select.value === 'network_inventory' ? 'Choose the Operator' : 'Multi-operator';
-        // A CDR takes its Vendor from the Network Inventory or from every Vendor polygons dataset.
+        // A CDR takes its Vendor from the Network Inventory (Multivendor Mappings and Network Inventories)
+        // or from every Vendor polygons dataset: the choice is offered only when both exist, otherwise the
+        // source there is is used.
         const polygonsAvailable = vendorPolygons.length > 0 || entries.some((candidate) => candidate.select.value === 'vendors');
-        entry.vendorSourceField.hidden = !isCdr || !polygonsAvailable;
-        if (!polygonsAvailable) entry.vendorSourceSelect.value = '';
+        const inventoryAvailable = vodafoneMappings.length > 0 || threeMappings.length > 0 || networkInventoryCount > 0
+          || entries.some((candidate) => ['mapping_vodafone', 'mapping_three', 'network_inventory'].includes(candidate.select.value));
+        const bothSources = polygonsAvailable && inventoryAvailable;
+        entry.vendorSourceField.hidden = !isCdr || !bothSources;
+        // With both, the Vendor polygons come first when they cover every Operator of the Network Inventory
+        // source (polygons of that Operator, or multi-operator polygons that include it); otherwise the
+        // Network Inventory. What the user chooses is kept.
+        if (!bothSources || !entry.vendorSourceChosen) {
+          entry.vendorSourceSelect.value = polygonsAvailable && (!inventoryAvailable || polygonsCoverInventory()) ? 'all' : '';
+        }
         for (const [kind, field, mappingSelect] of entry.mappingSelectors) {
           const previous = mappingSelect.value;
           const choices = mappingChoices(kind, entry);
@@ -1228,7 +1264,7 @@
       vendorSourceSelect.add(new Option('Vendor polygons', 'all'));
       vendorSourceSelect.value = vodafoneMappings.length || threeMappings.length ? '' : 'all';
       vendorSourceField.append(vendorSourceSelect);
-      const entry = {index, file, item, badge, select, nrModeField, stageField, operatorField, operatorSelect, vendorSourceField, vendorSourceSelect, mappings, mappingSelectors: []};
+      const entry = {index, file, item, badge, select, nrModeField, stageField, stageSelect, operatorField, operatorSelect, vendorSourceField, vendorSourceSelect, mappings, mappingSelectors: []};
       const addMappingSelector = (kind, labelText, fieldName) => {
         const field = document.createElement('label');
         field.textContent = labelText;
@@ -1240,7 +1276,9 @@
         entry.mappingSelectors.push([kind, field, mappingSelect]);
       };
       mappings.append(vendorSourceField);
-      vendorSourceSelect.addEventListener('change', refreshMappingChoices);
+      vendorSourceSelect.addEventListener('change', () => { entry.vendorSourceChosen = true; refreshMappingChoices(); });
+      operatorSelect.addEventListener('change', refreshMappingChoices);
+      stageSelect.addEventListener('change', () => paintCard(entry));
       addMappingSelector('mapping_vodafone', 'VFUK mapping', 'vodafone_mapping_dataset_ids');
       addMappingSelector('mapping_three', '3UK mapping', 'three_mapping_dataset_ids');
       addMappingSelector('regions', 'Regions mapping', 'region_mapping_dataset_ids');
@@ -1253,7 +1291,11 @@
       const fields = document.createElement('div');
       fields.className = 'upload-type-fields';
       fields.append(typeField, nrModeField, stageField, operatorField);
-      item.append(badge, header, fields, mappings);
+      const dailyFlag = document.createElement('span');
+      dailyFlag.className = 'upload-daily-flag';
+      dailyFlag.title = 'Daily CDR: received while the campaign runs; the Final CDR of its campaign replaces it in the combined tables';
+      dailyFlag.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M12 13.5v3l2 1.2"/></svg><span>Daily CDR</span>';
+      item.append(badge, header, fields, mappings, dailyFlag);
       items.append(item);
       entries.push(entry);
     });

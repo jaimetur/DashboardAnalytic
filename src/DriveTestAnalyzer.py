@@ -31,6 +31,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager, closing, contextmanager, nullcontext
 from dataclasses import asdict, fields, replace
 from datetime import datetime, timedelta, timezone, tzinfo
+from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from threading import Event, Lock, Thread
 from time import monotonic, sleep
@@ -4363,6 +4364,61 @@ def operator_options(task_repository: Repository | None = None) -> list[str]:
     """The Operators offered for Vendor polygons: the Operator Maps Operators, or the usual UK ones."""
     names = sorted(set(operator_aliases(task_repository).values()), key=str.casefold)
     return names or ['3', 'EE', 'O2', 'Vodafone']
+
+
+@lru_cache(maxsize=64)
+def _vendor_polygon_file_operators(path: str, modified: float) -> tuple[str, ...]:
+    """The Operator attribute values of a Vendor polygons file (read again when the file changes)."""
+    from src.modules.geospatial import vendor_polygon_operators
+
+    try:
+        return tuple(vendor_polygon_operators(Path(path)))
+    except Exception:  # noqa: BLE001 - an unreadable file covers no Operator.
+        return ()
+
+
+def vendor_source_operators(
+    vodafone_mappings: list[dict[str, Any]], three_mappings: list[dict[str, Any]],
+    network_inventories: list[dict[str, Any]], vendor_polygons: list[dict[str, Any]],
+    task_repository: Repository | None = None,
+) -> dict[str, Any]:
+    """The Operators each Vendor source of the workspace covers, as Operator identities.
+
+    Uploading CDRs prefers the Vendor polygons when they cover every Operator of the Network Inventory
+    source (the VFUK and 3UK Multivendor Mappings and the Network Inventories).
+    """
+    from src.modules.cdr_reporting import operator_key
+
+    aliases = operator_aliases(task_repository)
+
+    def identity(value: object) -> str:
+        return operator_key(value, aliases)
+
+    inventory = set()
+    if vodafone_mappings:
+        inventory.add(identity('Vodafone UK'))
+    if three_mappings:
+        inventory.add(identity('3'))
+    inventory |= {identity(item['dataset_operator']) for item in network_inventories
+                  if item.get('can_map_vendors_from') and str(item.get('dataset_operator') or '').strip()}
+    polygons = set()
+    for item in vendor_polygons:
+        operator = str(item.get('dataset_operator') or '').strip()
+        if operator:
+            polygons.add(identity(operator))
+            continue
+        # Multi-operator polygons cover the Operators of their Operator attribute.
+        path = str(item.get('stored_path') or '')
+        try:
+            modified = Path(path).stat().st_mtime
+        except OSError:
+            continue
+        polygons |= {identity(value) for value in _vendor_polygon_file_operators(path, modified)}
+    return {
+        'inventory': sorted(inventory), 'polygons': sorted(polygons),
+        'identities': {name: identity(name) for name in operator_options(task_repository)},
+        'mapping_vodafone': identity('Vodafone UK'), 'mapping_three': identity('3'),
+    }
 
 
 def infer_dataset_operator(file_name: str, task_repository: Repository | None = None) -> str | None:
@@ -11291,6 +11347,8 @@ def workspace(
             'cluster_mapping_datasets': cluster_mapping_datasets,
             'vendor_polygon_datasets': vendor_polygon_datasets,
             'network_inventory_datasets': network_inventory_datasets,
+            'vendor_source_operators': vendor_source_operators(
+                vodafone_mapping_datasets, three_mapping_datasets, network_inventory_datasets, vendor_polygon_datasets),
             'operator_options': operator_options(),
             'mappable_cdr_datasets': mappable_cdr_datasets,
             'clearable_cdr_datasets': clearable_cdr_datasets,

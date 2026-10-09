@@ -1529,6 +1529,15 @@ body[data-embedded-template-editor] .slides-templates-editor-table-wrap .form-ac
 .upload-vendor-mapping-selectors[hidden] { display: none; }
 .upload-vendor-mapping-selectors label { display: grid; gap: 0.25rem; color: #5b6f7c; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
 .upload-vendor-mapping-selectors label[hidden] { display: none; }
+/* Daily CDRs: a dashed outline and a flag in the top right corner. */
+.upload-daily-flag { position: absolute; top: 0.7rem; right: 0.8rem; display: none; align-items: center; gap: 0.35rem; padding: 0.3rem 0.7rem 0.3rem 0.5rem; border-radius: 999px;
+  background: linear-gradient(135deg, #ffb547, #f07a1a); color: #fff; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.02em; box-shadow: 0 8px 18px -10px rgba(240, 122, 26, 0.95); }
+.upload-daily-flag svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.upload-type-item[data-stage="daily"] { outline: 2px dashed rgba(240, 122, 26, 0.75); outline-offset: -5px; }
+.upload-type-item[data-stage="daily"] .upload-daily-flag { display: inline-flex; animation: upload-daily-pop .35s cubic-bezier(.2, .9, .3, 1.4) both; }
+.upload-type-item[data-stage="daily"] .upload-type-header { padding-right: 7.5rem; }
+@keyframes upload-daily-pop { from { opacity: 0; transform: scale(.6) rotate(-8deg); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .upload-type-item[data-stage="daily"] .upload-daily-flag { animation: none; } }
 .dropzone-field { display: grid; gap: 0.45rem; padding: 1.2rem; border-radius: 20px; border: 1px dashed rgba(11, 122, 117, 0.42); background: linear-gradient(135deg, rgba(220, 246, 242, 0.68), rgba(235, 247, 250, 0.82)); color: var(--ink); }
 .dropzone-field.is-dragging { border-color: var(--brand); background: rgba(104, 215, 197, 0.22); box-shadow: inset 0 0 0 2px rgba(11, 122, 117, 0.16); }
 .dropzone-field input[data-file-picker-input] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }

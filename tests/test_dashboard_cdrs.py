@@ -52,3 +52,25 @@ def test_imported_dashboards_choose_the_cdrs_of_the_destination_with_the_same_na
     assert app_module._dashboards_on_destination_cdrs(
         {'report': {'datasets': {'data': [9, 3], 'voice': [6]}}}, None, destination,
     ) == {'report': {'datasets': {'data': [9], 'voice': [6]}}}
+
+
+def test_the_vendor_sources_cover_the_operators_of_their_datasets(client, tmp_path):
+    import json
+
+    import src.DriveTestAnalyzer as app_module
+
+    polygons = tmp_path / 'vendors.geojson'
+    polygons.write_text(json.dumps({'type': 'FeatureCollection', 'features': [
+        {'type': 'Feature', 'properties': {'Operator': operator, 'Vendor': 'Ericsson'},
+         'geometry': {'type': 'Polygon', 'coordinates': [[[0, 0], [1, 0], [1, 1], [0, 0]]]}}
+        for operator in ('VF', 'Three UK')]}), encoding='utf-8')
+    covered = app_module.vendor_source_operators(
+        [{'id': 1}], [{'id': 2}],
+        [{'dataset_operator': 'O2', 'can_map_vendors_from': True}, {'dataset_operator': 'EE', 'can_map_vendors_from': False}],
+        [{'dataset_operator': '', 'stored_path': str(polygons)}, {'dataset_operator': 'O2 UK', 'stored_path': ''}],
+    )
+    # VFUK covers Vodafone, 3UK covers 3 and each Network Inventory that can map Vendors its Operator.
+    assert covered['inventory'] == ['3', 'o2', 'vodafone uk']
+    # Multi-operator polygons cover the Operators of their Operator attribute.
+    assert covered['polygons'] == ['3', 'o2', 'vodafone uk']
+    assert covered['mapping_vodafone'] == 'vodafone uk' and covered['identities']['VF'] == 'vodafone uk'
