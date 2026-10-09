@@ -17498,7 +17498,11 @@ async def dataset_upload_chunk(
 
     workspace, _task_repository = _upload_workspace(user, workspace_id)
     _upload_session_of(user, workspace, upload_id)
-    data = await request.body()
+    try:
+        data = await request.body()
+    except ClientDisconnect:
+        # The page left while sending the chunk: the next page sends it again.
+        return JSONResponse({'detail': 'The chunk was interrupted.'}, status_code=400)
     try:
         received = append_chunk(sessions_root(workspace.database_path.parent), upload_id, index, int(offset), data)
     except LookupError as exc:

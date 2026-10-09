@@ -174,9 +174,10 @@
         running.delete(record.key);
       }
     };
-    // One browser tab sends each upload; the others leave it alone.
+    // One page sends each upload at a time. A new page waits for the page it replaces (or another tab) to
+    // let the upload go, then resumes it from the bytes the server has.
     if (navigator.locks?.request) {
-      navigator.locks.request(`drivetest-analyzer-upload-${record.key}`, {ifAvailable: true}, (lock) => (lock ? work() : null));
+      navigator.locks.request(`drivetest-analyzer-upload-${record.key}`, () => work());
     } else {
       work();
     }
