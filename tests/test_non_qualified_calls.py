@@ -1025,3 +1025,21 @@ def test_follow_up_moves_once_to_the_join_id_call_keys(client, tmp_path):
     assert call['call_key'] == new_key and call['status'] == 'Under Investigation' and call['comment_count'] == 1
     assert core.repository.get_workspace_state(nq.KEY_SCHEME_STATE_KEY) == nq.KEY_SCHEME
     assert dataset_id
+
+
+def test_join_id_filter_and_reindex(client, tmp_path):
+    enable_module()
+    rows = joined_voice([('0xA1', 70, 'Failed', '2026-09-03 10:00:00'), ('0xB2', 71, 'Dropped', '2026-09-03 11:00:00'),
+                         ('0xC3', 72, 'Failed', '2026-09-03 12:00:00')], campaign='UK_Q3_2026')
+    add_cdr(tmp_path, 'NetCheck_UK_CDR_Voice_2026_Q3.xlsx', 'voice', rows)
+    login(client)
+    first = client.get('/api/non-qualified-calls/state').json()['sync']
+    # Join ID: one or more JOIN_IDs typed, whatever their case; it is kept with the shared selection.
+    assert query(client, filters={'join_id': ['0xb2']})['total'] == 1
+    assert query(client, filters={'join_id': ['0xA1', '0xC3']})['total'] == 2
+    assert nq.normalize_saved_filters({'join_id': ['0xA1']}) == {'join_id': ['0xA1']}
+    # Reindex indexes every CDR again, also when none has changed.
+    assert client.get('/api/non-qualified-calls/state').json()['sync']['reindexed'] == 0
+    reindexed = client.post('/api/non-qualified-calls/reindex').json()['sync']
+    assert reindexed['reindexed'] == 1 and reindexed['calls'] == first['calls']
+

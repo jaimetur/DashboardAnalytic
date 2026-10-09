@@ -209,6 +209,8 @@ FIELD_FILTERS = (
     'technology', 'test_name', 'result', 'failure_classification', 'failure_category',
 )
 TRACKING_FILTERS = ('status', 'team', 'assignee', 'root_domain', 'root_cause')
+# Filters typed as a list of values rather than chosen among them (a JOIN_ID has too many values to list).
+TYPED_FILTERS = ('join_id',)
 TRACKING_FIELDS = ('status', 'team', 'assignee', 'root_domain', 'root_cause')
 # Filters set by clicking the Progress View and Root Cause Analysis: NR mode, call type
 # (Classic, WhatsApp, Data), a timeline period ("month:2026-07"), the age of open calls,
@@ -827,8 +829,9 @@ def _rebuild_versions(connection: Any, affected: set[str]) -> None:
     """)
 
 
-def sync_nq_calls(task_repository: Any) -> dict[str, Any]:
-    """Index the NQ calls and the population of new or changed CDRs and forget removed ones."""
+def sync_nq_calls(task_repository: Any, *, force: bool = False) -> dict[str, Any]:
+    """Index the NQ calls and the population of new or changed CDRs and forget removed ones; ``force`` indexes
+    every CDR again (Reindex)."""
     ensure_nq_tables(task_repository)
     path = str(task_repository.db_path)
     with _sync_locks_guard:
@@ -843,7 +846,8 @@ def sync_nq_calls(task_repository: Any) -> dict[str, Any]:
                 for row in connection.execute(f'SELECT dataset_id, revision FROM {NQ_CALL_SOURCES_TABLE}').fetchall()
             }
         removed = [dataset_id for dataset_id in indexed if dataset_id not in datasets]
-        changed = [row for dataset_id, row in datasets.items() if indexed.get(dataset_id) != _dataset_revision(row, signature)]
+        changed = [row for dataset_id, row in datasets.items()
+                   if force or indexed.get(dataset_id) != _dataset_revision(row, signature)]
         migrating = str(task_repository.get_workspace_state(KEY_SCHEME_STATE_KEY) or '') != KEY_SCHEME
         moved = 0
         if removed or changed:
@@ -1671,7 +1675,7 @@ def normalize_saved_filters(filters: Any) -> dict[str, Any]:
     """The known filters of a selection: value lists, flags and the search text."""
     filters = filters if isinstance(filters, dict) else {}
     saved: dict[str, Any] = {}
-    for field in (*FIELD_FILTERS, *TRACKING_FILTERS, *EXTRA_FILTERS, 'datasets', 'version'):
+    for field in (*FIELD_FILTERS, *TRACKING_FILTERS, *TYPED_FILTERS, *EXTRA_FILTERS, 'datasets', 'version'):
         values = _strings(filters.get(field))[:5000]
         if values:
             saved[field] = values
@@ -1796,6 +1800,11 @@ def _filter_sql(filters: dict[str, Any], username: str, closed_statuses: list[st
         values = ['' if value == UNASSIGNED else value for value in values]
         clauses.append(f"{field} IN ({', '.join('?' for _ in values)})")
         params.extend(values)
+    # The JOIN_IDs typed in their filter, whatever their case.
+    join_ids = [value.casefold() for value in _strings(filters.get('join_id'))]
+    if join_ids:
+        clauses.append('lower(join_id) IN (SELECT value FROM json_each(?))')
+        params.append(json.dumps(join_ids))
     # The CDRs filter chooses the versions in the base query. A call whose latest CDR has it
     # Completed is listed only on request, or while that CDR is not among the chosen ones.
     versions = ['' if value == 'current' else value for value in _strings(filters.get('version')) if value in VERSION_STATES]
@@ -3448,6 +3457,15 @@ def install_non_qualified_calls_routes(core: Any) -> None:
             'cdr_columns': available_cdr_columns(repository), 'max_cdr_columns': MAX_CDR_COLUMNS,
             'version_labels': VERSION_LABELS,
         })
+
+    @core.app.post('/api/non-qualified-calls/reindex')
+    def nq_reindex(user=Depends(core.current_user)) -> JSONResponse:
+        """Index the calls of every CDR again, keeping their follow-up."""
+        repository = workspace_repository(user)
+        sync = sync_nq_calls(repository, force=True)
+        if hasattr(repository, 'try_add_log'):
+            repository.try_add_log(user.username, 'nq_calls_reindexed', json.dumps(sync))
+        return JSONResponse({'sync': sync})
 
     @core.app.put('/api/non-qualified-calls/fields')
     def nq_save_fields(payload: FieldsPayload, user=Depends(editor_user)) -> JSONResponse:

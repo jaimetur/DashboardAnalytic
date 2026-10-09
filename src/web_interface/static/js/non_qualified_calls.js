@@ -15,7 +15,7 @@
   const SERVICE_LABELS = {voice: 'Voice', speech: 'Speech', data: 'Data'};
   const FIELD_LABELS = {
     service: 'Service', campaign: 'Campaign', operator: 'Operator', operator_vendor: 'Operator_Vendor', vendor_operator: 'Vendor_Operator', vendor: 'Vendor',
-    region: 'Region', cluster: 'Cluster', city: 'City', dataset_id: 'CDR',
+    region: 'Region', cluster: 'Cluster', city: 'City', dataset_id: 'CDR', join_id: 'Join ID',
     technology: 'Technology', test_name: 'Test Name', result: 'Result', failure_classification: 'Failure Classification',
     failure_category: 'Failure Category', status: 'Status', team: 'Team', assignee: 'Assignee', datasets: 'CDR',
     root_domain: 'Root Domain', root_cause: 'Root Cause', nr_mode: 'NR Mode', call_type: 'Call Type', period: 'Period',
@@ -253,6 +253,11 @@
     });
     root.querySelectorAll('[data-nq-flag]').forEach((box) => { if (box.checked) filters[box.dataset.nqFlag] = true; });
     Object.entries(state.extraFilters).forEach(([field, values]) => { if (values.length) filters[field] = [...values]; });
+    // The typed filters (Join ID): values separated by commas, spaces or lines.
+    root.querySelectorAll('[data-nq-typed-filter]').forEach((input) => {
+      const values = [...new Set(input.value.split(/[\s,;]+/).map((value) => value.trim()).filter(Boolean))];
+      if (values.length) filters[input.dataset.nqTypedFilter] = values;
+    });
     const search = $('nq-search').value.trim();
     if (search) filters.search = search;
     return filters;
@@ -269,6 +274,7 @@
     });
     root.querySelectorAll('[data-nq-flag]').forEach((box) => { box.checked = saved[box.dataset.nqFlag] === true; });
     state.extraFilters = Object.fromEntries(EXTRA_FILTERS.filter((field) => (saved[field] || []).length).map((field) => [field, [...saved[field]]]));
+    root.querySelectorAll('[data-nq-typed-filter]').forEach((input) => { input.value = (saved[input.dataset.nqTypedFilter] || []).join(', '); });
     $('nq-search').value = saved.search || '';
     state.savedFilters = JSON.stringify(currentFilters());
   };
@@ -355,6 +361,8 @@
   };
   const clearFilter = (field) => {
     if (field === 'search') { $('nq-search').value = ''; scheduleLoad(); return; }
+    const typed = root.querySelector(`[data-nq-typed-filter="${field}"]`);
+    if (typed) { typed.value = ''; scheduleLoad(); return; }
     if (EXTRA_FILTERS.includes(field)) { delete state.extraFilters[field]; scheduleLoad(); return; }
     const box = root.querySelector(`[data-nq-flag="${field}"]`);
     if (box) { box.checked = false; scheduleLoad(); return; }
@@ -2324,14 +2332,30 @@
     if (event.target.matches('[data-nq-filter], [data-nq-flag]')) scheduleLoad();
   });
   $('nq-search').addEventListener('input', debounce(() => { state.page = 1; loadCalls(); }, 400));
+  root.querySelectorAll('[data-nq-typed-filter]').forEach((input) => input.addEventListener('input', debounce(() => { state.page = 1; loadCalls(); }, 400)));
   $('nq-reset').addEventListener('click', () => {
     filterSelects().forEach((select) => { [...select.options].forEach((option) => { option.selected = false; }); select.dispatchEvent(new Event('change')); });
     root.querySelectorAll('[data-nq-flag]').forEach((box) => { box.checked = false; });
+    root.querySelectorAll('[data-nq-typed-filter]').forEach((input) => { input.value = ''; });
     state.extraFilters = {};
     $('nq-search').value = '';
     scheduleLoad();
   });
-  $('nq-refresh').addEventListener('click', () => loadState());
+  // Reindex: the calls of every CDR are indexed again (their follow-up is kept), then the page reloads them.
+  $('nq-refresh').addEventListener('click', async () => {
+    const button = $('nq-refresh');
+    button.disabled = true;
+    globalThis.showLoadingOverlay?.('Reindexing Non-Qualified Calls', 'Indexing the calls of every CDR again. Their follow-up is kept.');
+    try {
+      await api('/api/non-qualified-calls/reindex', {method: 'POST'});
+      await loadState();
+    } catch (error) {
+      $('nq-sync').textContent = error.message;
+    } finally {
+      globalThis.hideLoadingOverlay?.();
+      button.disabled = false;
+    }
+  });
   $('nq-page-size').addEventListener('change', (event) => { state.pageSize = Number(event.target.value) || 50; state.page = 1; loadCalls(); });
   // -- scroll position: a reload returns to where the page was, while its panels load ------------
   const SCROLL_STORAGE = `nq-scroll:${window.location.pathname}`;

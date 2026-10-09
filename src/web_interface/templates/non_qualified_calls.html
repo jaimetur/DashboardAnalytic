@@ -19,7 +19,7 @@
       <div class="nq-sync-bar">
         <div class="nq-sync-status">
           <p class="nq-sync" id="nq-sync" role="status">Indexing Non-Qualified Calls…</p>
-          <button type="button" class="nq-hero-action" id="nq-refresh" title="Reload the calls, their follow-up and any new or changed CDRs"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>Refresh</button>
+          <button type="button" class="nq-hero-action" id="nq-refresh" title="Index the calls of every CDR again (their follow-up is kept)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>Reindex</button>
         </div>
         <div class="nq-sync-exports">
           <button type="button" class="document-export-action document-export-powerpoint" data-nq-document-export="powerpoint" title="Executive Summary and Progress Status of the filtered calls"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4M7 13l3-3 2 2 4-4"/></svg>Export PowerPoint</button>
@@ -39,6 +39,7 @@
         <label>City<select data-nq-filter="city" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" data-multiselect-preset-label="Main Cities" aria-label="City"></select></label>
         <label>Service<select data-nq-filter="service" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Service"></select></label>
         <label>Technology<select data-nq-filter="technology" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Technology"></select></label>
+        <label>Join ID<input type="search" data-nq-typed-filter="join_id" placeholder="One or more JOIN_IDs…" autocomplete="off" aria-label="Join ID" title="Paste one or more JOIN_IDs, separated by commas, spaces or lines"></label>
         <label>Test Name<select data-nq-filter="test_name" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Test Name"></select></label>
         <label>Result<select data-nq-filter="result" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Result"></select></label>
         <label>Failure Classification<select data-nq-filter="failure_classification" multiple size="1" data-multiselect-no-values-label="Loading values…" data-multiselect-empty-label="All values" aria-label="Failure Classification"></select></label>
