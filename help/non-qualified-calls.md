@@ -82,7 +82,7 @@ The **Root Cause Analysis** panel shows where the filtered calls fail:
 
 ## Non-Qualified Calls panel
 
-**Join ID**, at the top of the panel, finds calls by their `JOIN_ID`: type or paste one or more, separated by commas, spaces or lines (whatever their case), to list the calls with exactly those IDs; it is kept with the shared selection and shown among the active filters.
+**Join ID**, centred in the title bar of the panel, finds calls by their `JOIN_ID`: type or paste one or more, separated by commas, spaces or lines (whatever their case), to list the calls with exactly those IDs; it is kept with the shared selection and shown among the active filters.
 
 The **Non-Qualified Calls** table lists one row per call with its start time and service (and, for a Speech call, its number of Non-Qualified samples), Operator and Vendor, Region and Cluster, City and Campaign, test and technology, result with the failure classification and category (hover a failure to read its subcategory and comment) and the CDR version badge, followed by its root domain and cause, the analysis fields shown in the table, team and assignee, status and comments. Drag a column header onto another to move that column before or after it; each browser remembers the order for each workspace, columns added later take their default place, and **Default column order** puts every column back. Reloading the page returns to the position it was scrolled to.
 

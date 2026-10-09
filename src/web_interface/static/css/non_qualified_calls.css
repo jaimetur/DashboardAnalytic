@@ -92,7 +92,7 @@
 .non-qualified-calls .nq-filter-chip { display: inline-flex; align-items: center; gap: .4rem; min-height: 0; padding: .3rem .4rem .3rem .75rem; border: 1px solid var(--nq-color); border-radius: 999px; background: var(--nq-soft); color: var(--nq-dark); font-size: .8rem; font-weight: 750; box-shadow: none; }
 .nq-filter-chip-x { display: inline-grid; place-items: center; width: 1.2rem; height: 1.2rem; border-radius: 50%; background: var(--nq-color); color: #fff; font-size: .8rem; line-height: 1; }
 .nq-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .8rem 1rem; margin-bottom: .8rem; }
-.nq-count { flex: 1 1 0; margin: 0; color: var(--nq-text); font-weight: 750; }
+.nq-count { flex: 1 1 auto; margin: 0; color: var(--nq-text); font-weight: 750; }
 /* The actions of the selected calls cover the toolbar above the table (placed by the script),
    so the table does not move, and stay at the top of the window while scrolling. */
 .nq-bulk { position: fixed; z-index: 30; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; box-sizing: border-box; padding: .45rem .7rem; border: 1px solid var(--nq-color); border-radius: 14px; background: #fff; box-shadow: 0 8px 22px rgba(60, 10, 30, .18); }
@@ -280,9 +280,13 @@
 .non-qualified-calls .nq-filters-panel:has(.multiselect-menu:not([hidden])) > .collapsible-panel-body { overflow: visible; }
 .non-qualified-calls .nq-filter-grid .multiselect-shell { position: relative; }
 .non-qualified-calls .nq-filter-grid .multiselect-trigger { box-sizing: border-box; width: 100%; min-height: 2.6rem; padding: .55rem .8rem; border: 1px solid var(--nq-border); border-radius: 11px; background: #fff; color: var(--nq-text); box-shadow: none; font-weight: 700; }
-/* Join ID, in the middle of the calls toolbar: typed values, with the look of the filters. */
-.nq-join-search { display: flex; flex: 0 1 26rem; align-items: center; gap: .55rem; margin: 0 auto; color: var(--nq-text); font-size: .86rem; font-weight: 800; }
+/* Join ID, centred in the title bar of the Non-Qualified Calls panel: typed values, with the look of the filters. */
+.nq-calls-panel > .collapsible-summary { position: relative; }
+.nq-join-search { display: flex; flex: 0 1 26rem; align-items: center; gap: .55rem; margin: 0 auto; color: var(--nq-text); font-size: .86rem; font-weight: 800; cursor: default; }
 .nq-join-search span { white-space: nowrap; }
+@media (min-width: 1100px) {
+  .nq-calls-panel > .collapsible-summary > .nq-join-search { position: absolute; top: 50%; left: 50%; width: min(26rem, 34%); margin: 0; transform: translate(-50%, -50%); }
+}
 .non-qualified-calls .nq-join-search input[data-nq-typed-filter] { box-sizing: border-box; width: 100%; min-width: 0; min-height: 2.6rem; padding: .55rem .8rem; border: 1px solid var(--nq-border); border-radius: 11px; background: #fff; color: var(--nq-text); font: inherit; font-weight: 700; }
 .non-qualified-calls .nq-join-search input[data-nq-typed-filter]:focus { border-color: var(--nq-color); box-shadow: 0 0 0 3px rgba(176, 35, 79, .14); outline: none; }
 .non-qualified-calls .nq-filter-grid .multiselect-trigger:hover, .non-qualified-calls .nq-filter-grid .multiselect-trigger[aria-expanded="true"] { border-color: var(--nq-color); box-shadow: 0 0 0 3px rgba(176, 35, 79, .14); }

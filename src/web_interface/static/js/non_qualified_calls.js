@@ -2333,6 +2333,14 @@
   });
   $('nq-search').addEventListener('input', debounce(() => { state.page = 1; loadCalls(); }, 400));
   root.querySelectorAll('[data-nq-typed-filter]').forEach((input) => input.addEventListener('input', debounce(() => { state.page = 1; loadCalls(); }, 400)));
+  // Join ID sits in the title bar of its panel, which folds the panel: using it never folds it.
+  root.querySelectorAll('[data-nq-join-search]').forEach((search) => {
+    search.addEventListener('click', (event) => {
+      event.preventDefault();
+      search.querySelector('input')?.focus();
+    });
+    search.addEventListener('keyup', (event) => { if (event.key === ' ' || event.key === 'Enter') event.preventDefault(); });
+  });
   $('nq-reset').addEventListener('click', () => {
     filterSelects().forEach((select) => { [...select.options].forEach((option) => { option.selected = false; }); select.dispatchEvent(new Event('change')); });
     root.querySelectorAll('[data-nq-flag]').forEach((box) => { box.checked = false; });

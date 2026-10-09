@@ -130,13 +130,11 @@
   </details>
 
   <details class="panel collapsible-panel nq-calls-panel" open data-panel-state-key="non-qualified-calls:calls">
-    <summary class="collapsible-summary"><div><p class="eyebrow">Drill-down</p><h2>Non-Qualified Calls</h2></div><span class="collapse-chip">Collapse</span></summary>
+    <summary class="collapsible-summary"><div><p class="eyebrow">Drill-down</p><h2>Non-Qualified Calls</h2></div>{# Finds calls by their JOIN_ID (one or more, typed or pasted), centred beside the title. #}<label class="nq-join-search" data-nq-join-search><span>Join ID</span><input type="search" data-nq-typed-filter="join_id" placeholder="Find calls by one or more JOIN_IDs…" autocomplete="off" aria-label="Join ID" title="Paste one or more JOIN_IDs, separated by commas, spaces or lines"></label><span class="collapse-chip">Collapse</span></summary>
     <div class="collapsible-panel-body">
       <div class="nq-active-filters" id="nq-active-filters" hidden></div>
       <div class="nq-toolbar">
         <p class="nq-count" id="nq-count" role="status">Loading calls…</p>
-        {# Finds calls by their JOIN_ID: one or more, typed or pasted. #}
-        <label class="nq-join-search"><span>Join ID</span><input type="search" data-nq-typed-filter="join_id" placeholder="Find calls by one or more JOIN_IDs…" autocomplete="off" aria-label="Join ID" title="Paste one or more JOIN_IDs, separated by commas, spaces or lines"></label>
         <div class="nq-toolbar-actions">
           <label class="nq-page-size">Rows<select id="nq-page-size">{% for size in nq_page_sizes %}<option value="{{ size }}"{% if size == 50 %} selected{% endif %}>{{ size }}</option>{% endfor %}</select></label>
           {% if nq_can_edit %}<button type="button" class="nq-secondary-action" id="nq-options-open" title="Configure the statuses and teams">Statuses &amp; Teams</button>
