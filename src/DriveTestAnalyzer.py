@@ -9421,8 +9421,13 @@ def _apply_import_archive(
                 ):
                     raise ValueError('A package in the selected bundle does not match its manifest.')
                 if progress_callback:
+                    # The package by its content (Dashboards, PPT Templates…), so a long one can be told apart.
+                    try:
+                        package_label = _transfer_content_label(entry_target) if entry_target else entry_kind
+                    except ValueError:
+                        package_label = entry_kind
                     progress_callback(
-                        f'importing package {index + 1} of {len(packages)}',
+                        f'importing package {index + 1} of {len(packages)} ({package_label})',
                         5.0 + (index * 90.0 / len(packages)),
                     )
                 notices.append(_apply_import_archive(

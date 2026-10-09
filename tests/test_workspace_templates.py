@@ -180,10 +180,15 @@ def test_template_and_dashboard_bundle_replaces_referenced_template(client, tmp_
     package_path = tmp_path / 'bundle.zip'
     app_module.build_export_archive_file(['ppt-templates', 'dashboards'], package_path)
 
+    phases = []
     app_module._apply_import_archive(
         package_path, app_module.read_import_manifest(package_path),
+        progress_callback=lambda phase, _progress: phases.append(phase),
         destination_workspace_ids=[destination.id],
     )
+    # The progress names each package being imported.
+    assert [phase for phase in phases if phase.startswith('importing package')] == [
+        'importing package 1 of 2 (PPT Templates)', 'importing package 2 of 2 (Dashboards)']
     rows = [row for row in destination_repo.list_report_templates('nsa') if str(row['name']) == 'Bundle Used']
     assert len(rows) == 1
     assert bytes(rows[0]['content']) == b'imported'
