@@ -3019,6 +3019,7 @@ async def lifespan(_: FastAPI):
         apply_runtime_configuration(stored_runtime_configuration)
     migrate_workspace_template_registries()
     migrate_ppt_module_names()
+    submit_background_task(empty_workspace_trash)
     # Workspace schema cleanup and interrupted-job recovery happen when a
     # workspace becomes active.  Scanning every workspace here opens and
     # checkpoints every SQLite database, which can leave startup blocked for
@@ -12703,6 +12704,17 @@ def duplicate_workspace_get(user: SessionUser = Depends(current_user)) -> Respon
     )
 
 
+def workspace_trash_root() -> Path:
+    """Where deleted workspace folders wait while their files are removed."""
+    return workspace_registry.legacy_data_dir / '.workspace-trash'
+
+
+def empty_workspace_trash() -> None:
+    """Finish the removal of workspace folders a restart interrupted."""
+    for folder in workspace_trash_root().glob('*') if workspace_trash_root().is_dir() else []:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
 @app.post('/workspace/delete')
 def delete_workspace(
     workspace_id: str = Form(...),
@@ -12724,11 +12736,22 @@ def delete_workspace(
         repository.remove_workspace_access(workspace_id)
     except ValueError as exc:
         return RedirectResponse(f'/workspace?{urlencode({"workspace_error": str(exc)})}', status_code=status.HTTP_303_SEE_OTHER)
+    # The folder is named after the workspace: it moves to the trash at once, so a new workspace with the
+    # same name never has its files removed by this deletion.
+    removed_root = workspace_root
+    tiny = delete_workspace_files and workspace_disk_usage(registered_workspace) <= 8 * 1024 * 1024
+    if delete_workspace_files:
+        removed_root = workspace_trash_root() / f'{workspace_id}-{uuid4().hex[:8]}'
+        try:
+            removed_root.parent.mkdir(parents=True, exist_ok=True)
+            workspace_root.rename(removed_root)
+        except OSError:
+            removed_root = workspace_root
     # Tiny workspaces can be removed before the redirect returns; larger
     # directories still use the worker below and keep the task visible while
     # their files are being removed.
-    if delete_workspace_files and workspace_disk_usage(registered_workspace) <= 8 * 1024 * 1024:
-        shutil.rmtree(workspace_root, ignore_errors=True)
+    if tiny:
+        shutil.rmtree(removed_root, ignore_errors=True)
     elif not delete_workspace_files:
         for database_file in (
             registered_workspace.database_path,
@@ -12753,14 +12776,10 @@ def delete_workspace(
                     return
                 job.update(status='processing', started_at=datetime.now(timezone.utc).timestamp())
         try:
+            # Keeping the files, its database was already removed before the redirect: removing it again
+            # here could remove the database of a new workspace with the same name.
             if delete_workspace_files:
-                shutil.rmtree(workspace_root, ignore_errors=True)
-            else:
-                for database_file in (
-                    registered_workspace.database_path,
-                    *(Path(f'{registered_workspace.database_path}{suffix}') for suffix in ('-wal', '-shm')),
-                ):
-                    database_file.unlink(missing_ok=True)
+                shutil.rmtree(removed_root, ignore_errors=True)
             with WORKSPACE_LIFECYCLE_JOBS_LOCK:
                 job = WORKSPACE_LIFECYCLE_JOBS.get(job_id)
                 if job:

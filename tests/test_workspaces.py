@@ -237,3 +237,32 @@ def test_a_new_workspace_never_takes_the_id_of_a_deleted_one(tmp_path: Path) -> 
     third = registry.create('Third')
     assert third.id not in {first.id, second.id}
     assert int(third.id.removeprefix('workspace-')) == int(second.id.removeprefix('workspace-')) + 1
+
+
+def test_deleting_a_workspace_never_removes_a_new_one_with_the_same_name(client, monkeypatch) -> None:
+    import src.DriveTestAnalyzer as app_module
+
+    client.post('/login', data={'username': 'super', 'password': 'super123'})
+    original = app_module.active_workspace
+    twin = app_module.workspace_registry.create('Twin')
+    app_module.activate_workspace(twin.id)
+    app_module.activate_workspace(original.id)
+    (twin.input_dir / 'old.csv').write_text('old', encoding='utf-8')
+    # A large workspace: its files are removed by a background job, which runs later here.
+    pending = []
+    monkeypatch.setattr(app_module, 'workspace_disk_usage', lambda _workspace: 10 * 1024 ** 3)
+    monkeypatch.setattr(app_module, 'submit_background_task', lambda callback, *args: pending.append((callback, args)))
+    deleted = client.post('/workspace/delete', data={'workspace_id': twin.id, 'delete_workspace_files': 'true'},
+                          follow_redirects=False)
+    assert deleted.status_code == 303
+    # The folder left its name at once, so a new workspace can take it.
+    assert not twin.database_path.parent.exists()
+    created = client.post('/workspace/create', data={'name': 'Twin'}, follow_redirects=False)
+    assert created.status_code == 303
+    new = next(item for item in app_module.workspace_registry.list() if item.name == 'Twin')
+    assert new.id != twin.id and new.database_path == twin.database_path and new.database_path.exists()
+    for callback, args in pending:
+        callback(*args)
+    # The deletion removed the old files only.
+    assert new.database_path.exists() and not (new.input_dir / 'old.csv').exists()
+    assert not any(app_module.workspace_trash_root().iterdir())
