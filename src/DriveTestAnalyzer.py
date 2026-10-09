@@ -10113,7 +10113,10 @@ def _raise_for_destination_response(response: Any, fallback: str) -> None:
         detail = str(response.json().get('detail') or '').strip()
     except (AttributeError, TypeError, ValueError):
         detail = ''
-    raise ValueError(detail or f'{fallback} (HTTP {status_code}).')
+    if not detail:
+        raise ValueError(f'{fallback} (HTTP {status_code}).')
+    # The explanation names the destination, so a rejection there is never taken for one of this server.
+    raise ValueError(detail if detail.startswith('The destination server') else f'{fallback}: {detail}')
 
 
 def _run_transfer_job(job_id: str) -> None:

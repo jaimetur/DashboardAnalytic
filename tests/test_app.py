@@ -3868,6 +3868,11 @@ def test_outgoing_transfer_reports_the_destination_reason_and_can_cancel_during_
     payload = finished_payload(rejected['id'])
     assert payload['status'] == 'failed'
     assert payload['error'] == 'The destination server could not receive the package: disk full'
+    # A rejection explained by the destination names it.
+    with pytest.raises(ValueError, match=r'^The destination server rejected the transfer request: Select a valid export option\.$'):
+        app_module._raise_for_destination_response(
+            type('Response', (), {'status_code': 400, 'json': lambda self: {'detail': 'Select a valid export option.'}})(),
+            'The destination server rejected the transfer request')
     assert payload['warnings'] == ['Input folder will be empty.']
     # The destination learns why the source stopped.
     assert state['delete_reasons'] == ['The destination server could not receive the package: disk full']
