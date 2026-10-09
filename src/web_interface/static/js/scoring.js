@@ -5228,19 +5228,25 @@
     const byRows = layer && layer.field === 'Area' && ranking.field === 'City';
     const realData = byRows && ranking.areas.some(area => Object.keys(area.area_losses || {}).length);
     const areaLabel = layer?.area_label || 'area';
-    const total = `${insightNumber(ranking.total, 1)} ${scoringLabel()} points lost in total; hover an area to see them`;
+    // The points lost and the share of the listed rows are bold, as in the KPI GAP Profile note.
+    const bold = text => {
+      const element = document.createElement('strong');
+      element.textContent = text;
+      return element;
+    };
+    const total = () => ['(', bold(`${insightNumber(ranking.total, 1)} ${scoringLabel()} points`), ' lost in total; hover an area to see them). '];
     const writeNote = colourMode => {
       note.replaceChildren();
       if (byRows && colourMode === 'losses' && realData) {
         note.append(`The map colours each ${areaLabel} by the points lost in it by the city or route of `, operator,
-          ` that loses most there (${total}). `);
+          ' that loses most there ', ...total());
       } else if (byRows) {
         note.append(`The map colours each ${areaLabel} by the points `, operator,
-          ` loses in the city or route that loses most among those measured in it (${total}). `);
+          ' loses in the city or route that loses most among those measured in it ', ...total());
       } else {
-        note.append('The map shows where ', operator, ` loses its ${scoringLabel()} points (${insightNumber(ranking.total, 1)} in total). `);
+        note.append('The map shows where ', operator, ` loses its ${scoringLabel()} points (`, bold(insightNumber(ranking.total, 1)), ' in total). ');
       }
-      note.append(listedText, ` account for ${ranking.total ? Math.round(listed / ranking.total * 100) : 0}% of the points lost.`);
+      note.append(listedText, ' account for ', bold(`${ranking.total ? Math.round(listed / ranking.total * 100) : 0}%`), ' of the points lost.');
     };
     writeNote(mode);
     const content = document.createElement('div');

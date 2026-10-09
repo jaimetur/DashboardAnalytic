@@ -740,12 +740,16 @@ def add_points_loss_slides(presentation, maps: list[dict[str, Any]], background:
         intro.text_frame.word_wrap = True
         _write_runs(intro.text_frame, [
             (map_text, False, None), (ranking['label'], True, ranking.get('color') or None),
-            (f" loses in the city or route that loses most among those measured in it ({_points(ranking['total'], 1)} {scoring_label} points lost in total). "
-             if by_rows else
-             f" loses in it ({_points(ranking['total'], 1)} {scoring_label} points lost in total). " if layer is not None
-             else f" loses its {scoring_label} points ({_points(ranking['total'], 1)} in total). ", False, None),
+            # The points lost and the share of the listed rows are bold, as on the web page.
+            *([(' loses in the city or route that loses most among those measured in it (', False, None),
+               (f"{_points(ranking['total'], 1)} {scoring_label} points", True, None), (' lost in total). ', False, None)]
+              if by_rows else
+              [(' loses in it (', False, None), (f"{_points(ranking['total'], 1)} {scoring_label} points", True, None),
+               (' lost in total). ', False, None)] if layer is not None
+              else [(f' loses its {scoring_label} points (', False, None), (_points(ranking['total'], 1), True, None),
+                    (' in total). ', False, None)]),
             (f'The {len(bars)} {plural} listed', True, None),
-            (f' account for {share * 100:.0f}% of the points lost.', False, None),
+            (' account for ', False, None), (f'{share * 100:.0f}%', True, None), (' of the points lost.', False, None),
         ], size=11, color='#17232D')
         map_top, map_height, map_width = 2.35, 4.5, 6.0
         if layer is not None:
