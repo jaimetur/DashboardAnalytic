@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 import src.DriveTestAnalyzer as app_module
 from src.config import settings
+from src.modules.workspace_countries import set_workspace_country
 
 
 BACKGROUND_UPLOAD_PATHS = (
@@ -90,6 +91,8 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
         if slides_templates_dir.is_dir():
             shutil.copytree(slides_templates_dir, app_module.active_workspace.slides_templates_dir, dirs_exist_ok=True)
         app_module.register_workspace_template_files(app_module.active_workspace)
+        # The test CDRs are NetCheck UK CDRs: the workspace is one of the United Kingdom, with its operators.
+        set_workspace_country(app_module.repository, 'GBR')
         yield test_client
 
 

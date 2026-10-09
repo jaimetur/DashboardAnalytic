@@ -1483,21 +1483,52 @@ body[data-embedded-template-editor] .slides-templates-editor-table-wrap .form-ac
 .dataset-export-actions { justify-content: flex-end; margin-top: 1rem; width: 100%; }
 .dataset-export-actions .action-link-preview { margin-right: auto; }
 .upload-dropzone { display: grid; gap: 1rem; margin-top: 1.25rem; }
-.upload-type-list { display: grid; gap: 0.35rem; padding: 0.95rem 1rem; border: 1px solid rgba(11, 122, 117, 0.20); border-radius: 16px; background: rgba(11, 122, 117, 0.05); }
-.upload-type-list.upload-type-confirmation { border-color: rgba(11, 122, 117, 0.42); background: rgba(11, 122, 117, 0.10); box-shadow: inset 0 0 0 1px rgba(11, 122, 117, 0.06); }
+/* File classification: one colourful card per file, tinted by its detected type. */
+.upload-type-list { display: grid; gap: 0.45rem; padding: 1.1rem 1.15rem 1.2rem; border: 1px solid rgba(11, 122, 117, 0.18); border-radius: 20px;
+  background: radial-gradient(circle at 100% 0, rgba(255, 186, 120, 0.22), transparent 42%), radial-gradient(circle at 0 100%, rgba(94, 182, 255, 0.16), transparent 45%), linear-gradient(135deg, #fbfdfd, #f1f8f7); }
+.upload-type-list.upload-type-confirmation { border-color: rgba(11, 122, 117, 0.32); box-shadow: 0 18px 40px -28px rgba(11, 78, 92, 0.55); }
 .upload-type-list[hidden] { display: none; }
-.upload-type-title { margin: 0; color: var(--brand-2); font-weight: 700; }
-[data-upload-type-items] { display: grid; gap: 0.65rem; margin-top: 0.35rem; }
-.upload-type-item { display: grid; grid-template-columns: minmax(0, 1fr) minmax(190px, 0.62fr) minmax(86px, auto) minmax(250px, 0.95fr); gap: 0.65rem; align-items: center; color: var(--ink); }
-.upload-nr-mode-field { display: grid; gap: 0.2rem; color: var(--brand-2); font-size: 0.72rem; font-weight: 700; }
-/* Keep the grid slot when a non-CDR file hides its NR Mode selector. */
-.upload-nr-mode-field[hidden] { display: grid; visibility: hidden; }
-.upload-nr-mode-field select { min-width: 0; padding: 0.48rem 0.55rem; border-color: rgba(11, 122, 117, 0.28); background: rgba(255,255,255,0.94); color: #10314a; font-size: 0.76rem; font-weight: 700; }
-.upload-type-item > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.upload-vendor-mapping-selectors { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.45rem; }
+.upload-type-heading { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+.upload-type-title { margin: 0; color: #0e3b4a; font-size: 1.12rem; font-weight: 800; letter-spacing: -0.01em; }
+.upload-type-title::before { content: "✨ "; }
+.upload-type-count { padding: 0.28rem 0.75rem; border-radius: 999px; background: linear-gradient(135deg, #0b7a75, #1d5f8f); color: #fff; font-size: 0.76rem; font-weight: 800; white-space: nowrap; box-shadow: 0 6px 16px -8px rgba(11, 122, 117, 0.9); }
+.upload-type-count:empty { display: none; }
+[data-upload-type-items] { display: grid; gap: 0.8rem; margin-top: 0.45rem; }
+.upload-type-item { --kind: #0b7a75; --kind-soft: rgba(11, 122, 117, 0.12); position: relative; display: grid; grid-template-columns: 4.6rem minmax(0, 1fr); grid-template-areas: "badge header" "badge fields" "badge mappings"; column-gap: 1rem; row-gap: 0.65rem;
+  padding: 0.95rem 1.1rem 1rem 0.95rem; border: 1px solid rgba(16, 49, 74, 0.08); border-radius: 18px; background: rgba(255, 255, 255, 0.92); color: var(--ink);
+  box-shadow: inset 4px 0 0 var(--kind), 0 10px 28px -24px rgba(16, 49, 74, 0.75); transition: transform .18s ease, box-shadow .18s ease;
+  animation: upload-card-in .42s cubic-bezier(.2, .9, .3, 1.2) both; animation-delay: calc(var(--upload-card-index, 0) * 70ms); }
+.upload-type-item:hover { transform: translateY(-2px); box-shadow: inset 4px 0 0 var(--kind), 0 18px 34px -22px rgba(16, 49, 74, 0.6); }
+@keyframes upload-card-in { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .upload-type-item { animation: none; transition: none; } }
+.upload-type-item[data-kind="data"] { --kind: #2f7de1; --kind-soft: rgba(47, 125, 225, 0.13); }
+.upload-type-item[data-kind="voice"] { --kind: #1f9d6b; --kind-soft: rgba(31, 157, 107, 0.14); }
+.upload-type-item[data-kind="speech"] { --kind: #8a4fd3; --kind-soft: rgba(138, 79, 211, 0.13); }
+.upload-type-item[data-kind="mapping_vodafone"] { --kind: #e60000; --kind-soft: rgba(230, 0, 0, 0.1); }
+.upload-type-item[data-kind="mapping_three"] { --kind: #1f2229; --kind-soft: rgba(31, 34, 41, 0.1); }
+.upload-type-item[data-kind="network_inventory"] { --kind: #7650b5; --kind-soft: rgba(118, 80, 181, 0.13); }
+.upload-type-item:is([data-kind="regions"], [data-kind="clusters"], [data-kind="vendors"]) { --kind: #2e8b57; --kind-soft: rgba(46, 139, 87, 0.13); }
+.upload-type-item:is([data-kind="smart_orchestrator_logs"], [data-kind="generic"]) { --kind: #b85b20; --kind-soft: rgba(184, 91, 32, 0.12); }
+.upload-type-item[data-kind="unknown"] { --kind: #c0392b; --kind-soft: rgba(192, 57, 43, 0.1); }
+.upload-type-badge { grid-area: badge; align-self: start; display: grid; justify-items: center; gap: 0.3rem; padding: 0.65rem 0.3rem 0.55rem; border-radius: 16px; background: var(--kind-soft); color: var(--kind); font-size: 0.66rem; font-weight: 800; text-align: center; line-height: 1.15; }
+.upload-type-badge svg { width: 1.9rem; height: 1.9rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.upload-type-header { grid-area: header; display: flex; align-items: center; gap: 0.6rem; min-width: 0; }
+.upload-type-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #10314a; font-size: 0.98rem; font-weight: 800; }
+.upload-type-meta { flex: 0 0 auto; padding: 0.18rem 0.55rem; border-radius: 999px; background: var(--kind-soft); color: var(--kind); font-size: 0.7rem; font-weight: 800; letter-spacing: 0.02em; }
+.upload-type-fields { grid-area: fields; display: flex; flex-wrap: wrap; gap: 0.6rem 0.75rem; align-items: end; }
+.upload-type-fields > .upload-file-type-field { flex: 0 1 22rem; }
+.upload-type-fields > .upload-nr-mode-field:not(.upload-file-type-field) { flex: 0 1 9rem; }
+.upload-type-fields > .upload-dataset-operator-field { flex: 0 1 14rem; }
+.upload-nr-mode-field { display: grid; gap: 0.25rem; color: #5b6f7c; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
+.upload-nr-mode-field[hidden] { display: none; }
+.upload-nr-mode-field select, .upload-vendor-mapping-selectors select { min-width: 0; padding: 0.52rem 0.75rem; border: 1px solid rgba(16, 49, 74, 0.12); border-radius: 12px; background: #fff; color: #10314a; font-size: 0.8rem; font-weight: 700; letter-spacing: normal; text-transform: none; transition: border-color .15s ease, box-shadow .15s ease; }
+.upload-nr-mode-field select:hover, .upload-vendor-mapping-selectors select:hover { border-color: var(--kind); }
+.upload-nr-mode-field select:focus-visible, .upload-vendor-mapping-selectors select:focus-visible { outline: none; border-color: var(--kind); box-shadow: 0 0 0 3px var(--kind-soft); }
+.upload-file-type-field select { border-color: var(--kind); background: linear-gradient(0deg, var(--kind-soft), var(--kind-soft)), #fff; }
+.upload-vendor-mapping-selectors { grid-area: mappings; display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 0.55rem 0.75rem; padding: 0.7rem 0.8rem 0.8rem; border-radius: 14px; background: rgba(16, 49, 74, 0.035); border: 1px dashed rgba(16, 49, 74, 0.12); }
 .upload-vendor-mapping-selectors[hidden] { display: none; }
-.upload-vendor-mapping-selectors label { display: grid; gap: 0.2rem; color: var(--brand-2); font-size: 0.72rem; font-weight: 700; }
-.upload-vendor-mapping-selectors select { min-width: 0; padding: 0.48rem 0.55rem; border-color: rgba(11, 122, 117, 0.28); background: rgba(255,255,255,0.94); color: #10314a; font-size: 0.76rem; }
+.upload-vendor-mapping-selectors label { display: grid; gap: 0.25rem; color: #5b6f7c; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
+.upload-vendor-mapping-selectors label[hidden] { display: none; }
 .dropzone-field { display: grid; gap: 0.45rem; padding: 1.2rem; border-radius: 20px; border: 1px dashed rgba(11, 122, 117, 0.42); background: linear-gradient(135deg, rgba(220, 246, 242, 0.68), rgba(235, 247, 250, 0.82)); color: var(--ink); }
 .dropzone-field.is-dragging { border-color: var(--brand); background: rgba(104, 215, 197, 0.22); box-shadow: inset 0 0 0 2px rgba(11, 122, 117, 0.16); }
 .dropzone-field input[data-file-picker-input] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
@@ -2542,8 +2573,9 @@ body:has(.release-navigator) .help-navigator{top:37%}
   .datasets-analysis-stack .summary-inline-actions { flex-direction: column; align-items: stretch; }
   .datasets-analysis-stack .analysis-filter-selection-help { display: none; }
   .vendor-mapping-actions { flex-direction: column-reverse; align-items: stretch; }
-  .upload-type-item { grid-template-columns: minmax(0, 1fr); }
-  .upload-nr-mode-field[hidden] { display: none; }
+  .upload-type-item { grid-template-columns: 3.4rem minmax(0, 1fr); grid-template-areas: "badge header" "fields fields" "mappings mappings"; column-gap: 0.7rem; }
+  .upload-type-badge span { display: none; }
+  .upload-type-header { flex-wrap: wrap; }
   .upload-vendor-mapping-selectors { grid-template-columns: minmax(0, 1fr); }
 }
 

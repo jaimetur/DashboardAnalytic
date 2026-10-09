@@ -194,7 +194,10 @@
         </span>
       </label>
       <section class="upload-type-list" data-upload-type-list hidden aria-live="polite">
-        <p class="upload-type-title" data-upload-type-title>Classify uploaded files</p>
+        <div class="upload-type-heading">
+          <p class="upload-type-title" data-upload-type-title>Classify uploaded files</p>
+          <span class="upload-type-count" data-upload-type-count></span>
+        </div>
         <p class="dropzone-copy" data-upload-type-copy>Select the content type for every file before processing.</p>
         <div data-upload-type-items></div>
       </section>
@@ -1012,6 +1015,36 @@
     ...(form.hasAttribute('data-other-datasets') ? [['generic', 'Other supported dataset']] : []),
   ];
   const cdrTypes = new Set(['data', 'voice', 'speech']);
+  // The badge of each file card: an icon and the short name of its type.
+  const typeIcons = {
+    data: '<path d="M4 20h16M7 16v-5M12 16V6M17 16v-8"/>',
+    voice: '<path d="M5 4h3l2 5-2.5 1.5a11 11 0 0 0 6 6L15 14l5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/>',
+    speech: '<path d="M4 12h2M8 8v8M12 5v14M16 9v6M20 11v2"/>',
+    smart_orchestrator_logs: '<path d="M5 4h14v16H5z"/><path d="M8 9h8M8 13h8M8 17h5"/>',
+    mapping_vodafone: '<path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1"/><path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1"/>',
+    network_inventory: '<circle cx="12" cy="9" r="1.6"/><path d="M12 10.6V21M9 21l3-9 3 9M8.6 5.6a4.8 4.8 0 0 0 0 6.8M15.4 5.6a4.8 4.8 0 0 1 0 6.8"/>',
+    regions: '<path d="M12 21s-6-5.3-6-11a6 6 0 0 1 12 0c0 5.7-6 11-6 11z"/><circle cx="12" cy="10" r="2.2"/>',
+    generic: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
+  };
+  typeIcons.mapping_three = typeIcons.mapping_vodafone;
+  typeIcons.clusters = typeIcons.regions;
+  typeIcons.vendors = typeIcons.regions;
+  const fileSize = (bytes) => {
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let value = Number(bytes) || 0;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit += 1; }
+    return `${value.toFixed(value >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+  };
+  const paintCard = (entry) => {
+    const kind = entry.select.value || 'unknown';
+    entry.item.dataset.kind = kind;
+    const label = entry.select.selectedOptions[0]?.value ? entry.select.selectedOptions[0].textContent : 'Choose a type';
+    entry.badge.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${typeIcons[kind] || typeIcons.generic}</svg>`;
+    const caption = document.createElement('span');
+    caption.textContent = label.split(' — ').pop().replace(/ \(.*\)$/, '');
+    entry.badge.append(caption);
+  };
   const parseMappingOptions = (attribute) => {
     try { return JSON.parse(form.dataset[attribute] || '[]'); } catch (_error) { return []; }
   };
@@ -1075,6 +1108,8 @@
     const entries = [];
     const needsConfirmation = files.length > 1;
     title.textContent = needsConfirmation ? 'Confirm file classifications' : 'Classify uploaded file';
+    const count = form.querySelector('[data-upload-type-count]');
+    if (count) count.textContent = `${files.length} file${files.length === 1 ? '' : 's'}`;
     copy.textContent = needsConfirmation
       ? 'Review the detected type for every file and correct any value before processing. A mapping in this batch can be selected for its CDR files and is processed first.'
       : 'The type has been preselected from the filename when it could be identified. Confirm or change it before processing.';
@@ -1094,6 +1129,7 @@
     };
     const refreshMappingChoices = () => {
       entries.forEach((entry) => {
+        paintCard(entry);
         const isCdr = cdrTypes.has(entry.select.value);
         entry.nrModeField.hidden = !isCdr;
         entry.stageField.hidden = !isCdr;
@@ -1124,8 +1160,19 @@
     files.forEach((file, index) => {
       const item = document.createElement('div');
       item.className = 'upload-type-item';
+      item.style.setProperty('--upload-card-index', String(index));
+      const badge = document.createElement('span');
+      badge.className = 'upload-type-badge';
+      const header = document.createElement('div');
+      header.className = 'upload-type-header';
       const name = document.createElement('span');
+      name.className = 'upload-type-name';
       name.textContent = file.name;
+      name.title = file.name;
+      const meta = document.createElement('span');
+      meta.className = 'upload-type-meta';
+      meta.textContent = `${(file.name.split('.').pop() || '').toUpperCase()} · ${fileSize(file.size)}`;
+      header.append(name, meta);
       const select = document.createElement('select');
       select.name = 'dataset_kinds';
       select.required = true;
@@ -1181,7 +1228,7 @@
       vendorSourceSelect.add(new Option('Vendor polygons', 'all'));
       vendorSourceSelect.value = vodafoneMappings.length || threeMappings.length ? '' : 'all';
       vendorSourceField.append(vendorSourceSelect);
-      const entry = {index, file, select, nrModeField, stageField, operatorField, operatorSelect, vendorSourceField, vendorSourceSelect, mappings, mappingSelectors: []};
+      const entry = {index, file, item, badge, select, nrModeField, stageField, operatorField, operatorSelect, vendorSourceField, vendorSourceSelect, mappings, mappingSelectors: []};
       const addMappingSelector = (kind, labelText, fieldName) => {
         const field = document.createElement('label');
         field.textContent = labelText;
@@ -1199,7 +1246,14 @@
       addMappingSelector('regions', 'Regions mapping', 'region_mapping_dataset_ids');
       addMappingSelector('clusters', 'Cluster mapping', 'cluster_mapping_dataset_ids');
       select.addEventListener('change', refreshMappingChoices);
-      item.append(name, select, nrModeField, stageField, operatorField, mappings);
+      const typeField = document.createElement('label');
+      typeField.className = 'upload-nr-mode-field upload-file-type-field';
+      typeField.textContent = 'File type';
+      typeField.append(select);
+      const fields = document.createElement('div');
+      fields.className = 'upload-type-fields';
+      fields.append(typeField, nrModeField, stageField, operatorField);
+      item.append(badge, header, fields, mappings);
       items.append(item);
       entries.push(entry);
     });
