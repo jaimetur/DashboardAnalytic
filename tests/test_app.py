@@ -6114,13 +6114,13 @@ def test_workspace_dataset_upload_uses_non_blocking_progress_card(client) -> Non
 
     assert page.status_code == 200
     assert 'data-background-upload' in page.text
-    assert "new XMLHttpRequest()" in page.text
-    assert "drivetest-analyzer:background-task" in page.text
-    assert 'cancel: () => request.abort()' in page.text
-    assert "detail: 'Uploading files', progress: uploadProgress" in page.text
-    assert 'if (progress !== null) uploadProgress = progress;' in page.text
-    assert "request.addEventListener('abort'" in page.text
+    # The upload goes on in the background on every page (resumable chunks, see test_upload_sessions).
+    assert 'await window.DriveTestUploads.start(form, {' in page.text
+    assert 'js/background_uploads.js' in page.text and 'id="background-uploads-config"' in page.text
     assert 'data-loading-label="Uploading datasets"' not in page.text
+    uploads_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/background_uploads.js').read_text(encoding='utf-8')
+    assert "drivetest-analyzer:background-task" in uploads_script and 'cancel: () => cancel(record)' in uploads_script
+    assert '?offset=${offset}' in uploads_script and "indexedDB.open(DATABASE, 1)" in uploads_script
 
     app_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
     assert 'formatQueuedAge' in app_script

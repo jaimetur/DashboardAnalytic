@@ -73,6 +73,7 @@ Runtime `config/` and `data/` directories use project-local defaults but are exc
 - `src/modules/repository.py`: global/workspace SQLite schemas, migrations and persistence methods.
 - `src/modules/workspaces.py`: workspace registry, lifecycle, path migration, duplication and deletion.
 - `src/modules/output_layout.py`: module folders below `output/reports/` and the one-time move of documents written with the former layout.
+- `src/modules/upload_sessions.py`: resumable dataset uploads (chunks kept in `.upload-sessions` of the workspace until the upload ends); `static/js/background_uploads.js` sends and resumes them on every page.
 - `src/modules/ingestion.py`: workbook/CSV ingestion, CDR classification helpers and derived input fields.
 - `src/modules/analytics.py`: single-dataset analytical calculations.
 - `src/modules/exports.py`: CDR Analysis Word and PowerPoint output, including the multi-dataset Summary CDR Analysis.

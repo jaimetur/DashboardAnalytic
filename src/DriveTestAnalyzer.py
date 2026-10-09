@@ -4111,6 +4111,7 @@ def enqueue_dataset_processing(
     cluster_mapping_dataset_id: int | None = None,
     vendor_polygon_dataset_ids: Iterable[int] | None = None,
     network_inventory_dataset_ids: Iterable[int] | None = None,
+    task_repository: Repository | None = None,
 ) -> Future[Any] | None:
     clear_stop_request(dataset_id)
     vendor_polygon_dataset_ids = [int(item) for item in vendor_polygon_dataset_ids or []]
@@ -4123,12 +4124,12 @@ def enqueue_dataset_processing(
         DATAFRAME_CACHE.pop(key, None)
     # BackgroundTasks runs after the response is sent. Capture the workspace
     # database now, rather than resolving the mutable active workspace later.
-    task_repository = Repository(Path(repository.db_path))
+    task_repository = task_repository or Repository(Path(repository.db_path))
     if not _register_dataset_processing(dataset_id, task_repository):
         return None
     try:
         if persist_queued_state:
-            repository.update_dataset_profile(
+            task_repository.update_dataset_profile(
                 dataset_id, status='queued', progress=0, processing_step='', last_error=None,
                 processing_queued_at=now_iso(), processing_started_at=None, processed_at=None,
                 processing_options_json=json.dumps({
@@ -17102,6 +17103,238 @@ def dataset_status(user: SessionUser = Depends(current_user)) -> dict[str, Any]:
     return {'datasets': datasets, 'combined_tables': combined_tables}
 
 
+def validated_upload_selections(
+    task_repository: Repository, file_names: list[str], form: dict[str, list[str] | None],
+) -> dict[str, list[Any]]:
+    """Validate the classification chosen for every uploaded file; one value per file for every choice."""
+    selected_kinds = [str(kind or '').strip().lower() for kind in (form.get('dataset_kinds') or [])]
+    if selected_kinds and len(selected_kinds) != len(file_names):
+        raise HTTPException(status_code=422, detail='Choose a file type for every uploaded file.')
+    if any(kind not in UPLOAD_DATASET_KINDS for kind in selected_kinds):
+        raise HTTPException(status_code=422, detail='Unsupported dataset type selection.')
+    # One NR Mode per uploaded file; values for non-CDR files are ignored. A
+    # missing or blank value keeps the NR Mode suggested by the file name.
+    nr_modes = form.get('nr_modes')
+    if nr_modes and len(nr_modes) != len(file_names):
+        raise HTTPException(status_code=422, detail='Choose one NR Mode value for every uploaded file.')
+    selected_nr_modes: list[str | None] = []
+    for value in nr_modes or [None] * len(file_names):
+        if str(value or '').strip() and normalize_nr_mode(value) is None:
+            raise HTTPException(status_code=422, detail='Unsupported NR Mode selection.')
+        selected_nr_modes.append(normalize_nr_mode(value))
+    # One CDR Type (Final or Daily) per uploaded file, suggested from the file name when blank.
+    cdr_stages = form.get('cdr_stages')
+    if cdr_stages and len(cdr_stages) != len(file_names):
+        raise HTTPException(status_code=422, detail='Choose one CDR Type for every uploaded file.')
+    selected_cdr_stages: list[str | None] = []
+    for value in cdr_stages or [None] * len(file_names):
+        if str(value or '').strip() and normalize_cdr_stage(value) is None:
+            raise HTTPException(status_code=422, detail='Unsupported CDR Type selection.')
+        selected_cdr_stages.append(normalize_cdr_stage(value))
+
+    def parse_mapping_selection(values: list[str] | None, label: str) -> list[str | None]:
+        if not values:
+            return [None] * len(file_names)
+        if len(values) != len(file_names):
+            raise HTTPException(status_code=422, detail=f'Choose one {label} value for every uploaded file.')
+        selected_ids: list[str | None] = []
+        for value in values:
+            value = str(value or '').strip()
+            selected_ids.append(value or None)
+        return selected_ids
+
+    selected_vodafone_mappings = parse_mapping_selection(form.get('vodafone_mapping_dataset_ids'), 'VFUK mapping')
+    selected_three_mappings = parse_mapping_selection(form.get('three_mapping_dataset_ids'), '3UK mapping')
+    selected_region_mappings = parse_mapping_selection(form.get('region_mapping_dataset_ids'), 'Region mapping')
+    if form.get('region_mapping_dataset_ids') is None and selected_kinds:
+        latest_region = next((row for row in task_repository.list_datasets() if row['status'] == 'ready' and row['dataset_kind'] == 'regions'), None)
+        if latest_region:
+            selected_region_mappings = [str(latest_region['id']) if kind in CDR_DATASET_KINDS else None for kind in selected_kinds]
+    selected_cluster_mappings = parse_mapping_selection(form.get('cluster_mapping_dataset_ids'), 'Cluster mapping')
+    # A CDR takes its Vendor from every Vendor polygons dataset ("all") instead of the Network Inventory.
+    selected_vendor_polygons = parse_mapping_selection(form.get('vendor_polygon_selections'), 'Vendor polygons')
+    if any(value not in {None, 'all'} for value in selected_vendor_polygons):
+        raise HTTPException(status_code=422, detail='Invalid Vendor polygons selection.')
+    # The Operator of each Vendor polygons file without an Operator attribute (blank: from the file name).
+    selected_dataset_operators = [str(value or '').strip() or None for value in parse_mapping_selection(form.get('dataset_operators'), 'Operator')]
+    if form.get('cluster_mapping_dataset_ids') is None and selected_kinds:
+        latest_clusters = next((row for row in task_repository.list_datasets() if row['status'] == 'ready' and row['dataset_kind'] == 'clusters'), None)
+        if latest_clusters:
+            selected_cluster_mappings = [str(latest_clusters['id']) if kind in CDR_DATASET_KINDS else None for kind in selected_kinds]
+
+    def validate_mapping_selection(selection: str | None, expected_kind: str, label: str) -> None:
+        if not selection:
+            return
+        if selection.startswith('upload:'):
+            try:
+                upload_index = int(selection.removeprefix('upload:'))
+                selected_kind = selected_kinds[upload_index]
+            except (IndexError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=f'Invalid {label} selection.') from exc
+            if selected_kind != expected_kind:
+                raise HTTPException(status_code=422, detail=f'The selected uploaded file is not a {label}.')
+            return
+        try:
+            mapping_id = int(selection)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f'Invalid {label} selection.') from exc
+        _reporting_dataset(mapping_id, expected_kind, task_repository)
+
+    for index, selected_kind in enumerate(selected_kinds or [''] * len(file_names)):
+        if selected_kind in CDR_DATASET_KINDS:
+            validate_mapping_selection(selected_vodafone_mappings[index], 'mapping_vodafone', 'VFUK mapping')
+            validate_mapping_selection(selected_three_mappings[index], 'mapping_three', '3UK mapping')
+            validate_mapping_selection(selected_region_mappings[index], 'regions', 'Region mapping')
+            validate_mapping_selection(selected_cluster_mappings[index], 'clusters', 'Cluster mapping')
+
+    return {
+        'kinds': selected_kinds, 'nr_modes': selected_nr_modes, 'cdr_stages': selected_cdr_stages,
+        'vodafone_mappings': selected_vodafone_mappings, 'three_mappings': selected_three_mappings,
+        'region_mappings': selected_region_mappings, 'cluster_mappings': selected_cluster_mappings,
+        'vendor_polygons': selected_vendor_polygons, 'operators': selected_dataset_operators,
+    }
+
+
+def register_uploaded_datasets(
+    task_repository: Repository, files: list[tuple[str, Path]], selections: dict[str, list[Any]], username: str,
+    background_tasks: BackgroundTasks,
+) -> list[int]:
+    """Register files saved in a workspace's input folder as datasets and queue their processing (mappings first)."""
+    queued_dataset_ids: list[int] = []
+    uploaded_datasets: list[dict[str, Any]] = []
+    for index, (file_name, destination) in enumerate(files):
+        invalidate_workspace_size_cache()
+        dataset_id, created = task_repository.add_dataset(file_name or destination.name, str(destination), username)
+        selected_kind = selections['kinds'][index] if selections['kinds'] else None
+        if selected_kind:
+            task_repository.update_dataset_profile(
+                dataset_id, dataset_kind=selected_kind,
+                nr_mode=(
+                    selections['nr_modes'][index] or infer_nr_mode(file_name or destination.name)
+                    if selected_kind in CDR_DATASET_KINDS else None
+                ),
+                cdr_stage=(
+                    selections['cdr_stages'][index] or infer_cdr_stage(file_name or destination.name)
+                    if selected_kind in CDR_DATASET_KINDS else None
+                ),
+                dataset_operator=(
+                    selections['operators'][index] or infer_dataset_operator(file_name or destination.name)
+                    if selected_kind in {'vendors', 'network_inventory'} else None
+                ),
+            )
+        uploaded_datasets.append({
+            'index': index,
+            'dataset_id': dataset_id,
+            'destination': destination,
+            'dataset_kind': selected_kind,
+            'created': created,
+            'vodafone_mapping_selection': selections['vodafone_mappings'][index],
+            'three_mapping_selection': selections['three_mappings'][index],
+            'region_mapping_selection': selections['region_mappings'][index],
+            'cluster_mapping_selection': selections['cluster_mappings'][index],
+            'vendor_polygon_selection': selections['vendor_polygons'][index],
+        })
+        queued_dataset_ids.append(dataset_id)
+
+    def resolve_mapping_selection(
+        selection: str | None, expected_kind: str, label: str,
+    ) -> int | None:
+        if not selection:
+            return None
+        if selection.startswith('upload:'):
+            try:
+                upload_index = int(selection.removeprefix('upload:'))
+                uploaded = uploaded_datasets[upload_index]
+            except (IndexError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=f'Invalid {label} selection.') from exc
+            if uploaded['dataset_kind'] != expected_kind:
+                raise HTTPException(status_code=422, detail=f'The selected uploaded file is not a {label}.')
+            return int(uploaded['dataset_id'])
+        try:
+            mapping_id = int(selection)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f'Invalid {label} selection.') from exc
+        _reporting_dataset(mapping_id, expected_kind, task_repository)
+        return mapping_id
+
+    # Process mappings before CDRs uploaded in the same request. Background
+    # workers remain parallel within each phase, while every CDR waits for all
+    # mapping files in the batch so none can use a partially refreshed mapping set.
+    batch_mapping_futures: list[Future[Any]] = []
+    for uploaded in sorted(
+        uploaded_datasets,
+        key=lambda item: (
+            0 if item['dataset_kind'] in {'mapping_vodafone', 'mapping_three', 'network_inventory', 'regions', 'clusters', 'vendors'} else 1,
+            int(item['dataset_id']),
+        ),
+    ):
+        dataset_kind = uploaded['dataset_kind']
+        vodafone_mapping_dataset_id = (
+            resolve_mapping_selection(uploaded['vodafone_mapping_selection'], 'mapping_vodafone', 'VFUK mapping')
+            if dataset_kind in CDR_DATASET_KINDS else None
+        )
+        three_mapping_dataset_id = (
+            resolve_mapping_selection(uploaded['three_mapping_selection'], 'mapping_three', '3UK mapping')
+            if dataset_kind in CDR_DATASET_KINDS else None
+        )
+        region_mapping_dataset_id = (
+            resolve_mapping_selection(uploaded['region_mapping_selection'], 'regions', 'Region mapping')
+            if dataset_kind in CDR_DATASET_KINDS else None
+        )
+        cluster_mapping_dataset_id = (
+            resolve_mapping_selection(uploaded['cluster_mapping_selection'], 'clusters', 'Cluster mapping')
+            if dataset_kind in CDR_DATASET_KINDS else None
+        )
+        vendor_polygon_dataset_ids: list[int] = []
+        if dataset_kind in CDR_DATASET_KINDS and uploaded['vendor_polygon_selection'] == 'all':
+            # Every Vendor polygons dataset of the workspace, those of this upload included.
+            vendor_polygon_dataset_ids = [
+                int(row['id']) for row in task_repository.list_datasets()
+                if row['dataset_kind'] == 'vendors' and (row['status'] == 'ready' or any(
+                    int(item['dataset_id']) == int(row['id']) for item in uploaded_datasets))
+            ]
+            vodafone_mapping_dataset_id = three_mapping_dataset_id = None
+        network_inventory_ids: list[int] = []
+        if dataset_kind in CDR_DATASET_KINDS and not vendor_polygon_dataset_ids:
+            # Every ready Network Inventory that can map Vendors (those of other Operators than Vodafone and Three).
+            network_inventory_ids = [
+                int(row['id']) for row in task_repository.list_datasets()
+                if row['dataset_kind'] == 'network_inventory' and row['status'] == 'ready' and inventory_can_map_vendors(int(row['id']), task_repository)
+            ]
+        task_repository.add_log(username, 'upload_dataset' if uploaded['created'] else 'reprocess_dataset', json.dumps({
+            'file': uploaded['destination'].name,
+            'dataset_kind': dataset_kind or 'auto-detected',
+            'dataset_id': uploaded['dataset_id'],
+            'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
+            'three_mapping_dataset_id': three_mapping_dataset_id,
+            'region_mapping_dataset_id': region_mapping_dataset_id,
+            'cluster_mapping_dataset_id': cluster_mapping_dataset_id,
+            'vendor_polygon_dataset_ids': vendor_polygon_dataset_ids,
+            'network_inventory_dataset_ids': network_inventory_ids,
+        }))
+        dependencies = list(batch_mapping_futures) if dataset_kind in CDR_DATASET_KINDS else []
+        future = enqueue_dataset_processing(
+            background_tasks,
+            int(uploaded['dataset_id']),
+            uploaded['destination'],
+            username,
+            vodafone_mapping_dataset_id,
+            three_mapping_dataset_id,
+            region_mapping_dataset_id,
+            dependencies=dependencies,
+            batch_priority=len(uploaded_datasets) > 1,
+            cluster_mapping_dataset_id=cluster_mapping_dataset_id,
+            vendor_polygon_dataset_ids=vendor_polygon_dataset_ids,
+            network_inventory_dataset_ids=network_inventory_ids,
+            task_repository=task_repository,
+        )
+        if future is not None:
+            if dataset_kind in {'mapping_vodafone', 'mapping_three', 'network_inventory', 'regions', 'clusters', 'vendors'}:
+                batch_mapping_futures.append(future)
+
+    return queued_dataset_ids
+
+
 @app.post('/dashboard/upload', response_class=HTMLResponse, include_in_schema=False)
 @app.post('/datasets-analysis/upload', response_class=HTMLResponse)
 async def upload_dataset(
@@ -17160,217 +17393,19 @@ async def upload_dataset(
             },
             status_code=400,
         )
-    selected_kinds = [str(kind or '').strip().lower() for kind in (dataset_kinds or [])]
-    if selected_kinds and len(selected_kinds) != len(dataset_files):
-        raise HTTPException(status_code=422, detail='Choose a file type for every uploaded file.')
-    if any(kind not in UPLOAD_DATASET_KINDS for kind in selected_kinds):
-        raise HTTPException(status_code=422, detail='Unsupported dataset type selection.')
-    # One NR Mode per uploaded file; values for non-CDR files are ignored. A
-    # missing or blank value keeps the NR Mode suggested by the file name.
-    if nr_modes and len(nr_modes) != len(dataset_files):
-        raise HTTPException(status_code=422, detail='Choose one NR Mode value for every uploaded file.')
-    selected_nr_modes: list[str | None] = []
-    for value in nr_modes or [None] * len(dataset_files):
-        if str(value or '').strip() and normalize_nr_mode(value) is None:
-            raise HTTPException(status_code=422, detail='Unsupported NR Mode selection.')
-        selected_nr_modes.append(normalize_nr_mode(value))
-    # One CDR Type (Final or Daily) per uploaded file, suggested from the file name when blank.
-    if cdr_stages and len(cdr_stages) != len(dataset_files):
-        raise HTTPException(status_code=422, detail='Choose one CDR Type for every uploaded file.')
-    selected_cdr_stages: list[str | None] = []
-    for value in cdr_stages or [None] * len(dataset_files):
-        if str(value or '').strip() and normalize_cdr_stage(value) is None:
-            raise HTTPException(status_code=422, detail='Unsupported CDR Type selection.')
-        selected_cdr_stages.append(normalize_cdr_stage(value))
-
-    def parse_mapping_selection(values: list[str] | None, label: str) -> list[str | None]:
-        if not values:
-            return [None] * len(dataset_files)
-        if len(values) != len(dataset_files):
-            raise HTTPException(status_code=422, detail=f'Choose one {label} value for every uploaded file.')
-        selected_ids: list[str | None] = []
-        for value in values:
-            value = str(value or '').strip()
-            selected_ids.append(value or None)
-        return selected_ids
-
-    selected_vodafone_mappings = parse_mapping_selection(vodafone_mapping_dataset_ids, 'VFUK mapping')
-    selected_three_mappings = parse_mapping_selection(three_mapping_dataset_ids, '3UK mapping')
-    selected_region_mappings = parse_mapping_selection(region_mapping_dataset_ids, 'Region mapping')
-    if region_mapping_dataset_ids is None and selected_kinds:
-        latest_region = next((row for row in repository.list_datasets() if row['status'] == 'ready' and row['dataset_kind'] == 'regions'), None)
-        if latest_region:
-            selected_region_mappings = [str(latest_region['id']) if kind in CDR_DATASET_KINDS else None for kind in selected_kinds]
-    selected_cluster_mappings = parse_mapping_selection(cluster_mapping_dataset_ids, 'Cluster mapping')
-    # A CDR takes its Vendor from every Vendor polygons dataset ("all") instead of the Network Inventory.
-    selected_vendor_polygons = parse_mapping_selection(vendor_polygon_selections, 'Vendor polygons')
-    if any(value not in {None, 'all'} for value in selected_vendor_polygons):
-        raise HTTPException(status_code=422, detail='Invalid Vendor polygons selection.')
-    # The Operator of each Vendor polygons file without an Operator attribute (blank: from the file name).
-    selected_dataset_operators = [str(value or '').strip() or None for value in parse_mapping_selection(dataset_operators, 'Operator')]
-    if cluster_mapping_dataset_ids is None and selected_kinds:
-        latest_clusters = next((row for row in repository.list_datasets() if row['status'] == 'ready' and row['dataset_kind'] == 'clusters'), None)
-        if latest_clusters:
-            selected_cluster_mappings = [str(latest_clusters['id']) if kind in CDR_DATASET_KINDS else None for kind in selected_kinds]
-
-    def validate_mapping_selection(selection: str | None, expected_kind: str, label: str) -> None:
-        if not selection:
-            return
-        if selection.startswith('upload:'):
-            try:
-                upload_index = int(selection.removeprefix('upload:'))
-                selected_kind = selected_kinds[upload_index]
-            except (IndexError, ValueError) as exc:
-                raise HTTPException(status_code=422, detail=f'Invalid {label} selection.') from exc
-            if selected_kind != expected_kind:
-                raise HTTPException(status_code=422, detail=f'The selected uploaded file is not a {label}.')
-            return
-        try:
-            mapping_id = int(selection)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=f'Invalid {label} selection.') from exc
-        _reporting_dataset(mapping_id, expected_kind)
-
-    for index, selected_kind in enumerate(selected_kinds or [''] * len(dataset_files)):
-        if selected_kind in CDR_DATASET_KINDS:
-            validate_mapping_selection(selected_vodafone_mappings[index], 'mapping_vodafone', 'VFUK mapping')
-            validate_mapping_selection(selected_three_mappings[index], 'mapping_three', '3UK mapping')
-            validate_mapping_selection(selected_region_mappings[index], 'regions', 'Region mapping')
-            validate_mapping_selection(selected_cluster_mappings[index], 'clusters', 'Cluster mapping')
-
-    queued_dataset_ids: list[int] = []
-    uploaded_datasets: list[dict[str, Any]] = []
-    for index, dataset_file in enumerate(dataset_files):
+    selections = validated_upload_selections(repository, [dataset_file.filename or '' for dataset_file in dataset_files], {
+        'dataset_kinds': dataset_kinds, 'vodafone_mapping_dataset_ids': vodafone_mapping_dataset_ids,
+        'three_mapping_dataset_ids': three_mapping_dataset_ids, 'region_mapping_dataset_ids': region_mapping_dataset_ids,
+        'cluster_mapping_dataset_ids': cluster_mapping_dataset_ids, 'nr_modes': nr_modes, 'cdr_stages': cdr_stages,
+        'vendor_polygon_selections': vendor_polygon_selections, 'dataset_operators': dataset_operators,
+    })
+    saved_files: list[tuple[str, Path]] = []
+    for dataset_file in dataset_files:
         extension = Path(dataset_file.filename or '').suffix.lower()
         destination = safe_join(settings.input_dir, dataset_file.filename or f'upload{extension}')
         await save_upload_file(dataset_file, destination)
-        invalidate_workspace_size_cache()
-        dataset_id, created = repository.add_dataset(dataset_file.filename or destination.name, str(destination), user.username)
-        selected_kind = selected_kinds[index] if selected_kinds else None
-        if selected_kind:
-            repository.update_dataset_profile(
-                dataset_id, dataset_kind=selected_kind,
-                nr_mode=(
-                    selected_nr_modes[index] or infer_nr_mode(dataset_file.filename or destination.name)
-                    if selected_kind in CDR_DATASET_KINDS else None
-                ),
-                cdr_stage=(
-                    selected_cdr_stages[index] or infer_cdr_stage(dataset_file.filename or destination.name)
-                    if selected_kind in CDR_DATASET_KINDS else None
-                ),
-                dataset_operator=(
-                    selected_dataset_operators[index] or infer_dataset_operator(dataset_file.filename or destination.name)
-                    if selected_kind in {'vendors', 'network_inventory'} else None
-                ),
-            )
-        uploaded_datasets.append({
-            'index': index,
-            'dataset_id': dataset_id,
-            'destination': destination,
-            'dataset_kind': selected_kind,
-            'created': created,
-            'vodafone_mapping_selection': selected_vodafone_mappings[index],
-            'three_mapping_selection': selected_three_mappings[index],
-            'region_mapping_selection': selected_region_mappings[index],
-            'cluster_mapping_selection': selected_cluster_mappings[index],
-            'vendor_polygon_selection': selected_vendor_polygons[index],
-        })
-        queued_dataset_ids.append(dataset_id)
-
-    def resolve_mapping_selection(
-        selection: str | None, expected_kind: str, label: str,
-    ) -> int | None:
-        if not selection:
-            return None
-        if selection.startswith('upload:'):
-            try:
-                upload_index = int(selection.removeprefix('upload:'))
-                uploaded = uploaded_datasets[upload_index]
-            except (IndexError, ValueError) as exc:
-                raise HTTPException(status_code=422, detail=f'Invalid {label} selection.') from exc
-            if uploaded['dataset_kind'] != expected_kind:
-                raise HTTPException(status_code=422, detail=f'The selected uploaded file is not a {label}.')
-            return int(uploaded['dataset_id'])
-        try:
-            mapping_id = int(selection)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=f'Invalid {label} selection.') from exc
-        _reporting_dataset(mapping_id, expected_kind)
-        return mapping_id
-
-    # Process mappings before CDRs uploaded in the same request. Background
-    # workers remain parallel within each phase, while every CDR waits for all
-    # mapping files in the batch so none can use a partially refreshed mapping set.
-    batch_mapping_futures: list[Future[Any]] = []
-    for uploaded in sorted(
-        uploaded_datasets,
-        key=lambda item: (
-            0 if item['dataset_kind'] in {'mapping_vodafone', 'mapping_three', 'network_inventory', 'regions', 'clusters', 'vendors'} else 1,
-            int(item['dataset_id']),
-        ),
-    ):
-        dataset_kind = uploaded['dataset_kind']
-        vodafone_mapping_dataset_id = (
-            resolve_mapping_selection(uploaded['vodafone_mapping_selection'], 'mapping_vodafone', 'VFUK mapping')
-            if dataset_kind in CDR_DATASET_KINDS else None
-        )
-        three_mapping_dataset_id = (
-            resolve_mapping_selection(uploaded['three_mapping_selection'], 'mapping_three', '3UK mapping')
-            if dataset_kind in CDR_DATASET_KINDS else None
-        )
-        region_mapping_dataset_id = (
-            resolve_mapping_selection(uploaded['region_mapping_selection'], 'regions', 'Region mapping')
-            if dataset_kind in CDR_DATASET_KINDS else None
-        )
-        cluster_mapping_dataset_id = (
-            resolve_mapping_selection(uploaded['cluster_mapping_selection'], 'clusters', 'Cluster mapping')
-            if dataset_kind in CDR_DATASET_KINDS else None
-        )
-        vendor_polygon_dataset_ids: list[int] = []
-        if dataset_kind in CDR_DATASET_KINDS and uploaded['vendor_polygon_selection'] == 'all':
-            # Every Vendor polygons dataset of the workspace, those of this upload included.
-            vendor_polygon_dataset_ids = [
-                int(row['id']) for row in repository.list_datasets()
-                if row['dataset_kind'] == 'vendors' and (row['status'] == 'ready' or any(
-                    int(item['dataset_id']) == int(row['id']) for item in uploaded_datasets))
-            ]
-            vodafone_mapping_dataset_id = three_mapping_dataset_id = None
-        network_inventory_ids: list[int] = []
-        if dataset_kind in CDR_DATASET_KINDS and not vendor_polygon_dataset_ids:
-            # Every ready Network Inventory that can map Vendors (those of other Operators than Vodafone and Three).
-            network_inventory_ids = [
-                int(row['id']) for row in repository.list_datasets()
-                if row['dataset_kind'] == 'network_inventory' and row['status'] == 'ready' and inventory_can_map_vendors(int(row['id']))
-            ]
-        repository.add_log(user.username, 'upload_dataset' if uploaded['created'] else 'reprocess_dataset', json.dumps({
-            'file': uploaded['destination'].name,
-            'dataset_kind': dataset_kind or 'auto-detected',
-            'dataset_id': uploaded['dataset_id'],
-            'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
-            'three_mapping_dataset_id': three_mapping_dataset_id,
-            'region_mapping_dataset_id': region_mapping_dataset_id,
-            'cluster_mapping_dataset_id': cluster_mapping_dataset_id,
-            'vendor_polygon_dataset_ids': vendor_polygon_dataset_ids,
-            'network_inventory_dataset_ids': network_inventory_ids,
-        }))
-        dependencies = list(batch_mapping_futures) if dataset_kind in CDR_DATASET_KINDS else []
-        future = enqueue_dataset_processing(
-            background_tasks,
-            int(uploaded['dataset_id']),
-            uploaded['destination'],
-            user.username,
-            vodafone_mapping_dataset_id,
-            three_mapping_dataset_id,
-            region_mapping_dataset_id,
-            dependencies=dependencies,
-            batch_priority=len(uploaded_datasets) > 1,
-            cluster_mapping_dataset_id=cluster_mapping_dataset_id,
-            vendor_polygon_dataset_ids=vendor_polygon_dataset_ids,
-            network_inventory_dataset_ids=network_inventory_ids,
-        )
-        if future is not None:
-            if dataset_kind in {'mapping_vodafone', 'mapping_three', 'network_inventory', 'regions', 'clusters', 'vendors'}:
-                batch_mapping_futures.append(future)
+        saved_files.append((dataset_file.filename or destination.name, destination))
+    queued_dataset_ids = register_uploaded_datasets(repository, saved_files, selections, user.username, background_tasks)
 
     if not queued_dataset_ids:
         return RedirectResponse('/workspace', status_code=status.HTTP_303_SEE_OTHER)
@@ -17381,6 +17416,122 @@ async def upload_dataset(
             status_code=status.HTTP_202_ACCEPTED,
         )
     return RedirectResponse(redirect_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+class DatasetUploadPayload(BaseModel):
+    workspace_id: str
+    files: list[dict[str, Any]]
+    form: dict[str, list[str] | None] = {}
+
+
+def _upload_workspace(user: SessionUser, workspace_id: str) -> tuple[Workspace, Repository]:
+    """The workspace an upload belongs to, active or not, with its own repository."""
+    require_workspace_access(user, workspace_id)
+    workspace = workspace_registry.get(workspace_id)
+    if workspace is None:
+        raise HTTPException(status_code=404, detail='The workspace of this upload no longer exists.')
+    return workspace, Repository(workspace.database_path, global_db_path=repository.global_db_path,
+                                 workspace_registry_db_path=workspace_registry.registry_path)
+
+
+def _upload_session_of(user: SessionUser, workspace: Workspace, upload_id: str) -> dict[str, Any]:
+    from src.modules.upload_sessions import load_session, sessions_root
+
+    try:
+        manifest = load_session(sessions_root(workspace.database_path.parent), upload_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if str(manifest.get('username') or '').casefold() != user.username.casefold() and user.role != 'super-admin':
+        raise HTTPException(status_code=403, detail='This upload belongs to another user.')
+    return manifest
+
+
+@app.post('/api/uploads')
+def start_dataset_upload(payload: DatasetUploadPayload, user: SessionUser = Depends(workspace_editor_user)) -> JSONResponse:
+    """Start a resumable upload of datasets to a workspace: their names, sizes and classification."""
+    from src.modules.upload_sessions import create_session, sessions_root
+
+    workspace, task_repository = _upload_workspace(user, payload.workspace_id)
+    names = [Path(str(item.get('name') or '')).name for item in payload.files]
+    invalid_extensions = sorted({Path(name).suffix.lower() for name in names if Path(name).suffix.lower() not in settings.allowed_extensions})
+    if invalid_extensions:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {', '.join(invalid_extensions)}")
+    validated_upload_selections(task_repository, names, payload.form)
+    try:
+        session = create_session(sessions_root(workspace.database_path.parent), user.username, payload.files, payload.form)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse({**session, 'workspace_id': workspace.id, 'workspace_name': workspace.name})
+
+
+@app.get('/api/uploads/{workspace_id}/{upload_id}')
+def dataset_upload_status(workspace_id: str, upload_id: str, user: SessionUser = Depends(workspace_editor_user)) -> JSONResponse:
+    from src.modules.upload_sessions import sessions_root, status as upload_status
+
+    workspace, _task_repository = _upload_workspace(user, workspace_id)
+    _upload_session_of(user, workspace, upload_id)
+    return JSONResponse({**upload_status(sessions_root(workspace.database_path.parent), upload_id),
+                         'workspace_id': workspace.id, 'workspace_name': workspace.name})
+
+
+@app.put('/api/uploads/{workspace_id}/{upload_id}/files/{index}')
+async def dataset_upload_chunk(
+    request: Request, workspace_id: str, upload_id: str, index: int, offset: int = 0,
+    user: SessionUser = Depends(workspace_editor_user),
+) -> JSONResponse:
+    """Append the bytes of one file that start at ``offset``."""
+    from src.modules.upload_sessions import append_chunk, sessions_root
+
+    workspace, _task_repository = _upload_workspace(user, workspace_id)
+    _upload_session_of(user, workspace, upload_id)
+    data = await request.body()
+    try:
+        received = append_chunk(sessions_root(workspace.database_path.parent), upload_id, index, int(offset), data)
+    except LookupError as exc:
+        # The browser resumes from the bytes the server has.
+        return JSONResponse({'detail': 'The upload continues from the bytes already received.', 'received': exc.args[0]},
+                            status_code=409)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    invalidate_workspace_size_cache()
+    return JSONResponse({'received': received})
+
+
+@app.post('/api/uploads/{workspace_id}/{upload_id}/complete')
+def complete_dataset_upload(
+    background_tasks: BackgroundTasks, workspace_id: str, upload_id: str,
+    user: SessionUser = Depends(workspace_editor_user),
+) -> JSONResponse:
+    """Register the uploaded files as datasets of the upload's workspace and queue their processing."""
+    from src.modules.upload_sessions import delete_session, sessions_root, take_files
+
+    workspace, task_repository = _upload_workspace(user, workspace_id)
+    manifest = _upload_session_of(user, workspace, upload_id)
+    root = sessions_root(workspace.database_path.parent)
+    names = [item['name'] for item in manifest['files']]
+    selections = validated_upload_selections(task_repository, names, manifest.get('form') or {})
+    try:
+        files = take_files(root, upload_id, workspace.input_dir,
+                           lambda folder, name: safe_join(folder, name or f'upload{Path(name).suffix.lower()}'))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    delete_session(root, upload_id)
+    dataset_ids = register_uploaded_datasets(task_repository, files, selections, manifest.get('username') or user.username,
+                                             background_tasks)
+    return JSONResponse({
+        'dataset_ids': dataset_ids, 'workspace_id': workspace.id, 'workspace_name': workspace.name,
+        'redirect_url': f'/workspace?dataset_id={dataset_ids[0]}' if dataset_ids else '/workspace', 'status': 'queued',
+    }, status_code=status.HTTP_202_ACCEPTED)
+
+
+@app.delete('/api/uploads/{workspace_id}/{upload_id}')
+def cancel_dataset_upload(workspace_id: str, upload_id: str, user: SessionUser = Depends(workspace_editor_user)) -> JSONResponse:
+    from src.modules.upload_sessions import delete_session, sessions_root
+
+    workspace, _task_repository = _upload_workspace(user, workspace_id)
+    _upload_session_of(user, workspace, upload_id)
+    delete_session(sessions_root(workspace.database_path.parent), upload_id)
+    return JSONResponse({'ok': True})
 
 
 def _read_dataset_management_job(task_repository: Repository) -> dict[str, Any]:
