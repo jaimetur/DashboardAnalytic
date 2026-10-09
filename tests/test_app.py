@@ -6246,6 +6246,27 @@ def test_importing_identical_auto_calculated_fields_does_not_materialize_the_wor
     assert app_module.repository.get_workspace_state('calculated_dimensions_need_materialization') == '0'
 
 
+def test_imported_auto_calculated_fields_are_materialized_in_the_background_after_the_import(client, monkeypatch) -> None:
+    import src.DriveTestAnalyzer as app_module
+
+    login_super(client)
+    workspace = app_module.active_workspace
+    current = app_module.repository.list_calculated_dimensions()
+    # The package adds a field to those of the workspace.
+    changed = [*current, {'name': 'Imported Family', 'sources': ['cdr-data'], 'default': '',
+                          'rules': [{'when': 'Test_Name|test_name CONTAINS YOUTUBE', 'value': 'YouTube'}]}]
+    started = []
+    monkeypatch.setattr(app_module, 'affected_calculated_dimension_sources', lambda previous, saved: ['data'])
+    monkeypatch.setattr(app_module, 'start_auto_calculated_field_job',
+                        lambda *args, background=True, **kwargs: started.append(background) or {'status': 'queued'})
+    deferred = []
+    app_module.import_auto_calculated_fields(changed, [workspace.id], deferred_jobs=deferred)
+    # In an import of several packages, the materialization waits until every package is imported.
+    assert started == [] and len(deferred) == 1
+    deferred[0]()
+    assert started == [True]
+
+
 def test_incoming_transfer_left_importing_by_a_restart_is_closed(client) -> None:
     import src.DriveTestAnalyzer as app_module
 

@@ -9325,8 +9325,12 @@ def import_auto_calculated_fields(
     destination_workspace_ids: Iterable[str],
     progress_callback: Callable[[str, float], None] | None = None,
     parent_task_id: str = '',
+    deferred_jobs: list[Callable[[], Any]] | None = None,
 ) -> tuple[int, int]:
-    """Replace field definitions and materialize each selected workspace once."""
+    """Replace field definitions and materialize each selected workspace once, as a background task.
+
+    The materialization of an import of several packages waits in ``deferred_jobs`` until all of them are imported.
+    """
     imported = parse_calculated_dimensions(payload)
     available = {workspace.id: workspace for workspace in workspace_registry.list()}
     selected_ids = list(dict.fromkeys(str(workspace_id) for workspace_id in destination_workspace_ids))
@@ -9356,14 +9360,13 @@ def import_auto_calculated_fields(
                 if _normalise_catalogue_dimension_name(item.name) in previous_by_key
                 and previous_by_key[_normalise_catalogue_dimension_name(item.name)].name != item.name
             }
-            job = start_auto_calculated_field_job(
-                workspace, previous, saved, imported_renames, 'system', background=False,
-                parent_task_id=parent_task_id,
-            )
-            if job.get('status') == 'failed':
-                raise RuntimeError(str(job.get('error') or 'Auto-calculated field materialization failed.'))
-            if job.get('status') == 'stopped':
-                raise InterruptedError('Import stopped while materializing Auto-calculated Fields.')
+            def materialize(workspace=workspace, previous=previous, saved=saved, renames=imported_renames):
+                return start_auto_calculated_field_job(workspace, previous, saved, renames, 'system',
+                                                       parent_task_id=parent_task_id)
+            if deferred_jobs is not None:
+                deferred_jobs.append(materialize)
+            else:
+                materialize()
         if progress_callback:
             progress_callback(
                 f'updating workspace {index + 1} of {len(selected_ids)}',
@@ -9380,6 +9383,7 @@ def _apply_import_archive(
     parent_task_id: str = '',
     includes_dashboards: bool = False,
     importing_user: str = 'import',
+    deferred_jobs: list[Callable[[], Any]] | None = None,
 ) -> str:
     """Apply a disk-backed package and return its user-facing completion message."""
     with zipfile.ZipFile(package_path) as archive, tempfile.TemporaryDirectory(prefix='drivetest-analyzer-import-') as temporary_dir:
@@ -9405,6 +9409,8 @@ def _apply_import_archive(
                 for entry in packages
             )
             notices: list[str] = []
+            # Long updates (the materialization of Auto-calculated Fields) start once every package is imported.
+            bundle_jobs: list[Callable[[], Any]] = []
             for index, entry in enumerate(packages):
                 member = str(entry.get('archive_path') or '') if isinstance(entry, dict) else ''
                 if not re.fullmatch(r'packages/[^/]+\.zip', member) or member not in archive.namelist():
@@ -9436,7 +9442,10 @@ def _apply_import_archive(
                     parent_task_id=parent_task_id,
                     includes_dashboards=bundle_includes_dashboards,
                     importing_user=importing_user,
+                    deferred_jobs=bundle_jobs,
                 ))
+            for start_job in bundle_jobs:
+                start_job()
             if progress_callback:
                 progress_callback('finalising', 100.0)
             return f'Import selection completed ({len(notices)} packages).'
@@ -9581,7 +9590,7 @@ def _apply_import_archive(
             except (KeyError, UnicodeDecodeError, json.JSONDecodeError) as exc:
                 raise ValueError('The package does not contain valid auto-calculated fields.') from exc
             imported_count, workspace_count = import_auto_calculated_fields(
-                definitions, destination_workspace_ids, progress_callback, parent_task_id,
+                definitions, destination_workspace_ids, progress_callback, parent_task_id, deferred_jobs,
             )
             return f'Imported {imported_count} auto-calculated fields into {workspace_count} workspaces.'
         if kind == 'query-builder-queries':

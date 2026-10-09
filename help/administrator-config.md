@@ -99,6 +99,8 @@ Admins can export/transfer the active workspace's Dashboards, PPT Templates, Mai
 
 Dashboard, template, mapping and field packages preselect a destination workspace with the same name as their source, where available, and allow one or more accessible destinations to be selected.
 
+Importing or transferring Auto-calculated Fields stores them at once and updates the CDR tables as a background task, only when the fields differ from those of the destination workspace; in an import or transfer of several packages it starts once every package is imported.
+
 Importing or transferring PPT Templates synchronizes the destination library with the package. Templates absent from the package are removed unless a saved local Dashboard uses them. A template used by a local Dashboard keeps its local definition when the package contains a matching name; names are matched without case differences, so the import does not create a second copy.
 
 When the same package also includes Dashboards, its PPT Templates replace the destination library because the Dashboard definitions are replaced too. Selective backup restore uses the same rule.
