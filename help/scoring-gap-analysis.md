@@ -793,3 +793,16 @@ The NetCheck 2026 Most Reliable scoring rates 10 KPIs with **650** points in Dri
 | K28 | VIDEO STREAM | VIDEO STREAMING SUCCESS RATIO [%] | 84.5000 | 45.5000 |
 
 Regression tests reproduce the workbook's City and Road totals for each operator from its KPI values, within the 0.05 points of its rounding.
+
+### NetCheck 2026-Q3
+
+From Q3 2026 NetCheck adds TikTok to Video Streaming. The **NetCheck 2026-Q3** methodology, shipped with the application beside NetCheck 2026, keeps the 20 % of Video Streaming but divides it between YouTube (13 %) and TikTok (7 %), following the NetCheck Q3 ranking templates (Best Network and Most Reliable, National and City). K28, K29 and K30 become the YouTube KPIs (`Test_Name` = `YouTube`, as every Video Streaming test of the earlier campaigns) and K33, K34 and K35 the same KPIs for TikTok (`Test_Name` = `TikTok`), with the same thresholds; every other KPI and the 650 City and 350 Road points of both scorings are those of NetCheck 2026. Choose it in the Calculation panel for the Q3 campaigns.
+
+| Code | KPI | City points | Road points | Most Reliable City / Road |
+|---|---|---:|---:|---:|
+| K28 | YOUTUBE VIDEO STREAMING SUCCESS RATIO [%] | 35.1520 | 18.9280 | 54.9250 / 29.5750 |
+| K29 | YOUTUBE VIDEO STREAMING TTFP >= 10 s [%] | 2.1970 | 1.1830 | |
+| K30 | YOUTUBE VIDEO STREAMING IRRITATING EXPERIENCE [%] | 17.5760 | 9.4640 | |
+| K33 | TIK TOK VIDEO STREAMING SUCCESS RATIO [%] | 18.9280 | 10.1920 | 29.5750 / 15.9250 |
+| K34 | TIK TOK VIDEO STREAMING TTFP >= 10 s [%] | 1.1830 | 0.6370 | |
+| K35 | TIK TOK VIDEO STREAMING IRRITATING EXPERIENCE [%] | 9.4640 | 5.0960 | |

@@ -94,3 +94,46 @@ def test_new_workspaces_take_their_vendor_maps_from_the_assets(client):
     groups = app_module.repository.list_vendor_mapping_groups()
     assert [group['canonical'] for group in groups[:len(shipped)]] == [item['canonical'] for item in shipped]
     assert [group['color'] for group in groups[:len(shipped)]] == [item['color'] for item in shipped]
+
+
+def test_netcheck_2026_q3_splits_video_streaming_between_youtube_and_tiktok():
+    def load(name):
+        return json.loads((ASSETS / 'scoring-methodologies' / name).read_text(encoding='utf-8'))['profiles'][0]
+
+    base, q3 = load('NetCheck_2026.json'), load('NetCheck_2026-Q3.json')
+    assert q3['name'] == 'NetCheck 2026-Q3' and q3['id'] != base['id']
+    video = {m['kpi']: m for m in q3['configuration']['metrics'] if m['category'] == 'VIDEO STREAM'}
+    assert sorted(video) == sorted([f'{service} VIDEO STREAMING {kpi}' for service in ('YOUTUBE', 'TIK TOK')
+                                    for kpi in ('SUCCESS RATIO [%]', 'TTFP >= 10 s [%]', 'IRRITATING EXPERIENCE [%]')])
+    tiktok = video['TIK TOK VIDEO STREAMING SUCCESS RATIO [%]']
+    assert tiktok['calculation']['filters'] == {'Type_of_Test': ['VideoStreaming'], 'Test_Name': ['TikTok']}
+    assert (tiktok['contexts']['Drive - City']['max_points'], tiktok['contexts']['Drive - City']['most_reliable_points']) == (18.928, 29.575)
+    assert video['YOUTUBE VIDEO STREAMING SUCCESS RATIO [%]']['calculation']['filters']['Test_Name'] == ['YouTube']
+    # Video Streaming keeps its 20 %: every environment keeps its Best Network and Most Reliable points.
+    for environment in ('Drive - City', 'Drive - Connecting Roads'):
+        for field in ('max_points', 'most_reliable_points'):
+            total = lambda profile: round(sum(m['contexts'][environment].get(field) or 0 for m in profile['configuration']['metrics']), 6)
+            assert total(q3) == total(base)
+    # The other KPIs are those of NetCheck 2026.
+    others = lambda profile: [m for m in profile['configuration']['metrics'] if m['category'] != 'VIDEO STREAM']
+    assert others(q3) == others(base)
+
+
+def test_a_methodology_shipped_later_reaches_existing_workspaces_once(client):
+    import src.DriveTestAnalyzer as app_module
+
+    repository = app_module.repository
+    names = lambda: [profile['name'] for profile in repository.get_scoring_profiles()['profiles']]
+    # A workspace set up before NetCheck 2026-Q3 was shipped.
+    profiles = repository.get_scoring_profiles()
+    repository.replace_scoring_profiles({**profiles, 'profiles': [p for p in profiles['profiles'] if p['name'] != 'NetCheck 2026-Q3']})
+    with repository.connection() as connection:
+        connection.execute("DELETE FROM workspace_state WHERE key = ?", (starter_content.METHODOLOGIES_STATE_KEY,))
+    active = repository.get_scoring_profiles()['active_profile_id']
+    assert 'NetCheck 2026-Q3' not in names()
+    assert starter_content.seed_starter_content(repository) == {'methodologies': 1}
+    assert 'NetCheck 2026-Q3' in names() and repository.get_scoring_profiles()['active_profile_id'] == active
+    # Deleted later, it is not given again.
+    profiles = repository.get_scoring_profiles()
+    repository.replace_scoring_profiles({**profiles, 'profiles': [p for p in profiles['profiles'] if p['name'] != 'NetCheck 2026-Q3']})
+    assert starter_content.seed_starter_content(repository) is None and 'NetCheck 2026-Q3' not in names()

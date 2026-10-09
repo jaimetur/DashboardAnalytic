@@ -54,6 +54,8 @@ def test_scoring_calculation_selector_lists_profiles_and_defaults_to_active(clie
 
     profiles = repository.get_scoring_profiles()
     active_id = profiles['active_profile_id']
+    # Only the active methodology, without the others every workspace is given.
+    profiles['profiles'] = [profile for profile in profiles['profiles'] if profile['id'] == active_id]
     alternate = deepcopy(profiles['profiles'][0])
     alternate.update({'id': 'netcheck-alt', 'name': 'Alternative methodology'})
     profiles['profiles'].append(alternate)

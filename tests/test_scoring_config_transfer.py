@@ -61,6 +61,8 @@ def test_scoring_configuration_export_import_round_trip(client, tmp_path: Path, 
     expected['metrics'][0]['mapping_method'] = mapping_method
     repository.replace_scoring_configuration(expected)
     profiles = repository.get_scoring_profiles()
+    # Only the methodology prepared here, without the others every workspace is given.
+    profiles['profiles'] = [profile for profile in profiles['profiles'] if profile['id'] == profiles['active_profile_id']]
     second_profile = copy.deepcopy(profiles['profiles'][0])
     second_profile['id'] = 'netcheck-2025'
     second_profile['name'] = 'NetCheck 2025'
