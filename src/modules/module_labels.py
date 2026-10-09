@@ -292,7 +292,7 @@ MODULE_SECTIONS: dict[str, list[tuple[Any, ...]]] = {
     'non-qualified-calls': [('Filters', 'Filters', 'filter'), ('Summary', 'Summary', 'summary'),
                             ('NQ Rate by Campaign and Operator', 'NQ Rate by Campaign and Operator', 'chart'),
                             ('Progress View', 'Progress View', 'trend'), ('Root Cause Analysis', 'Root Cause Analysis', 'search'),
-                            ('Calls', 'Calls', 'phone')],
+                            ('Non-Qualified Calls', 'Non-Qualified Calls', 'phone')],
     'reporting': [('Reporting Jobs', 'Reporting Jobs', 'jobs'), ('Run History', 'Run History', 'log')],
     'chart-builder': [('Interactive Preview', 'Interactive Preview', 'eye')],
     'query-builder': [('Selected CDR tables', 'Query editor', 'code'), ('Saved queries', 'Saved queries', 'bookmark'),
