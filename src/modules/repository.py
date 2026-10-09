@@ -998,7 +998,7 @@ class Repository:
 
     @staticmethod
     def _backfill_dataset_nr_modes(conn: sqlite3.Connection, dataset_id: int | None = None) -> None:
-        """Suggest a missing CDR NR Mode and stage (Final or Daily) from its file name and clear them for other files."""
+        """Suggest a missing CDR NR Mode and stage (Final, Weekly or Daily) from its file name and clear them for other files."""
         kinds = tuple(sorted(NR_MODE_DATASET_KINDS))
         placeholders = ', '.join('?' for _ in kinds)
         scope = ' AND d.id = ?' if dataset_id is not None else ''
@@ -1028,7 +1028,7 @@ class Repository:
             SELECT d.id, d.file_name FROM datasets d
             JOIN dataset_profiles p ON p.dataset_id = d.id
             WHERE LOWER(COALESCE(p.dataset_kind, '')) IN ({placeholders})
-              AND COALESCE(p.cdr_stage, '') NOT IN ('final', 'daily'){scope}
+              AND COALESCE(p.cdr_stage, '') NOT IN ('final', 'weekly', 'daily'){scope}
             """,
             (*kinds, *scope_parameters),
         ).fetchall()

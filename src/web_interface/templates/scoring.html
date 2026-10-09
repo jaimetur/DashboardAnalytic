@@ -62,6 +62,9 @@
   .scoring-dataset-group .scoring-dataset-list { grid-template-columns: 1fr; max-height: 11rem; }
   .scoring-dataset-option { display: flex; align-items: flex-start; gap: .65rem; min-width: 0; padding: .62rem .7rem; border: 1px solid rgba(25,42,53,.09); border-radius: 11px; background: rgba(255,255,255,.76); cursor: pointer; }
   .scoring-dataset-option[hidden] { display: none; }
+  /* Weekly and Daily CDRs stand out from the Final CDRs, as when they are uploaded. */
+  .scoring-dataset-option[data-cdr-stage="daily"] { border: 1px dashed rgba(240, 122, 26, .75); background: #fff8ef; }
+  .scoring-dataset-option[data-cdr-stage="weekly"] { border: 1px dashed rgba(123, 92, 196, .75); background: #f7f3ff; }
   .scoring-dataset-option input, .scoring-level-option input { flex: 0 0 auto; width: 1rem; height: 1rem; margin: .14rem 0 0; accent-color: var(--brand); }
   .scoring-dataset-copy { display: grid; min-width: 0; gap: .16rem; }
   .scoring-dataset-copy strong { overflow: hidden; color: var(--text); font-size: .82rem; text-overflow: ellipsis; white-space: nowrap; }
@@ -490,9 +493,9 @@
             <div class="scoring-dataset-group-head"><strong>{{ kind_label }}</strong><span data-kind-count="{{ kind }}">{{ kind_datasets | length }} available</span></div>
             <div class="scoring-dataset-list" data-kind-list="{{ kind }}">
               {% for dataset in kind_datasets %}
-              <label class="scoring-dataset-option" data-dataset-option data-dataset-kind="{{ dataset.dataset_kind }}" data-dataset-name="{{ dataset.original_name }}" data-nr-mode="{{ dataset.nr_mode or '' }}" data-uploaded-at="{{ dataset.uploaded_at or dataset.created_at or '' }}" data-catalogue="{{ dataset.catalogue | default({}, true) | tojson | forceescape }}">
+              <label class="scoring-dataset-option" data-dataset-option data-dataset-kind="{{ dataset.dataset_kind }}" data-cdr-stage="{{ dataset.cdr_stage or 'final' }}" data-dataset-name="{{ dataset.original_name }}" data-nr-mode="{{ dataset.nr_mode or '' }}" data-uploaded-at="{{ dataset.uploaded_at or dataset.created_at or '' }}" data-catalogue="{{ dataset.catalogue | default({}, true) | tojson | forceescape }}">
                 <input type="checkbox" value="{{ dataset.id }}" data-dataset-id>
-                <span class="scoring-dataset-copy"><strong title="{{ dataset.original_name }}">{{ dataset.original_name }}</strong><small>{{ kind_label }}{% if dataset.campaign %} · {{ dataset.campaign | campaign_label }}{% endif %}{% if dataset.nr_mode %} · {{ dataset.nr_mode }}{% endif %}</small></span>
+                <span class="scoring-dataset-copy"><strong title="{{ dataset.original_name }}">{{ dataset.original_name }}</strong><small>{% if dataset.cdr_stage in ('weekly', 'daily') %}<span class="cdr-stage-badge" data-cdr-stage="{{ dataset.cdr_stage }}">{{ dataset.cdr_stage | title }}</span> {% endif %}{{ kind_label }}{% if dataset.campaign %} · {{ dataset.campaign | campaign_label }}{% endif %}{% if dataset.nr_mode %} · {{ dataset.nr_mode }}{% endif %}</small></span>
               </label>
               {% endfor %}
               <p class="scoring-empty" data-kind-empty hidden>No ready {{ kind_label }} CDR datasets are available for this NR Mode.</p>

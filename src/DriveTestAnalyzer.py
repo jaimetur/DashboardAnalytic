@@ -5933,6 +5933,7 @@ def workspace_combined_tables(
                 'updated_at_label': format_local_timestamp(updated_at) if updated_at else '—',
                 'cdr_count': len(source_datasets),
                 'final_count': sum(1 for dataset in source_datasets if inclusion[int(dataset['id'])]['stage'] == 'final'),
+                'weekly_count': sum(1 for dataset in source_datasets if inclusion[int(dataset['id'])]['stage'] == 'weekly'),
                 'daily_count': sum(1 for dataset in source_datasets if inclusion[int(dataset['id'])]['stage'] == 'daily'),
             })
     for state_key, value in pending_counts.items():
@@ -16389,6 +16390,8 @@ def scoring_page(request: Request, user: SessionUser = Depends(current_user)) ->
         item['catalogue']['vendors'] = value_mapper.values('vendor', item['catalogue'].get('vendors_only') or [])
         item['campaign'] = ', '.join(item['catalogue']['campaigns'])
         item['nr_mode'] = dataset_nr_mode(item['dataset_kind'], item['nr_mode'], item['file_name'])
+        # Weekly and Daily CDRs are highlighted in the selector.
+        item['cdr_stage'] = dataset_cdr_stage(item['dataset_kind'], item.get('cdr_stage'), item['file_name'])
         datasets.append(item)
     return render_template(request, 'scoring.html', {
         'user': user, 'scoring_datasets': datasets,
@@ -17166,7 +17169,7 @@ def validated_upload_selections(
         if str(value or '').strip() and normalize_nr_mode(value) is None:
             raise HTTPException(status_code=422, detail='Unsupported NR Mode selection.')
         selected_nr_modes.append(normalize_nr_mode(value))
-    # One CDR Type (Final or Daily) per uploaded file, suggested from the file name when blank.
+    # One CDR Type (Final, Weekly or Daily) per uploaded file, suggested from the file name when blank.
     cdr_stages = form.get('cdr_stages')
     if cdr_stages and len(cdr_stages) != len(file_names):
         raise HTTPException(status_code=422, detail='Choose one CDR Type for every uploaded file.')
@@ -17946,7 +17949,7 @@ class DatasetCdrStageUpdate(BaseModel):
 def update_dataset_cdr_stage(
     dataset_id: int, payload: DatasetCdrStageUpdate, user: SessionUser = Depends(workspace_editor_user),
 ) -> JSONResponse:
-    """Mark one CDR as Final or Daily without reprocessing it."""
+    """Mark one CDR as Final, Weekly or Daily without reprocessing it."""
     if active_workspace:
         require_workspace_access(user, active_workspace.id)
     dataset = repository.get_dataset(dataset_id)
@@ -17956,7 +17959,7 @@ def update_dataset_cdr_stage(
         raise HTTPException(status_code=400, detail='The CDR Type is only available for CDR datasets.')
     stage = normalize_cdr_stage(payload.cdr_stage)
     if stage is None:
-        raise HTTPException(status_code=422, detail='Choose Final or Daily.')
+        raise HTTPException(status_code=422, detail='Choose Final, Weekly or Daily.')
     previous = dataset_cdr_stage(dataset['dataset_kind'], dataset['cdr_stage'], dataset['file_name'])
     if previous != stage:
         repository.update_dataset_profile(dataset_id, cdr_stage=stage)

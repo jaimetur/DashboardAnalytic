@@ -438,7 +438,8 @@
           </tr>
     {% endmacro %}
     {% set cdr_kinds = ['data', 'voice', 'speech'] %}
-    {% set final_cdrs = datasets | selectattr('dataset_kind', 'in', cdr_kinds) | rejectattr('cdr_stage', 'equalto', 'daily') | list %}
+    {% set final_cdrs = datasets | selectattr('dataset_kind', 'in', cdr_kinds) | rejectattr('cdr_stage', 'in', ['weekly', 'daily']) | list %}
+    {% set weekly_cdrs = datasets | selectattr('dataset_kind', 'in', cdr_kinds) | selectattr('cdr_stage', 'equalto', 'weekly') | list %}
     {% set daily_cdrs = datasets | selectattr('dataset_kind', 'in', cdr_kinds) | selectattr('cdr_stage', 'equalto', 'daily') | list %}
     {% set vendor_datasets = datasets | selectattr('dataset_kind', 'in', ['mapping_vodafone', 'mapping_three', 'network_inventory']) | list %}
     {% set geo_datasets = datasets | selectattr('dataset_kind', 'in', ['regions', 'clusters', 'vendors']) | list %}
@@ -447,7 +448,7 @@
       <section class="dataset-card dataset-card-cdr dataset-card-final" data-dataset-card="cdr-final">
         <header class="dataset-card-head">
           <div><p class="eyebrow">CDRs</p><h3><span class="dataset-card-icon dataset-card-icon-final" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="m9 14 2 2 4-4"/></svg></span>Final CDRs <span class="dataset-card-count">{{ final_cdrs | length }}</span></h3></div>
-          <p class="form-note">The CDRs delivered after each campaign. They replace the Daily CDRs of their campaigns in the combined tables.</p>
+          <p class="form-note">The CDRs delivered after each campaign. They replace the Weekly and Daily CDRs of their campaigns in the combined tables.</p>
         </header>
         <div class="table-wrap queue-table-wrap">
           <table class="queue-table" data-queue-sortable-table>
@@ -475,7 +476,38 @@
           </table>
         </div>
       </section>
-      <details class="dataset-card dataset-card-cdr dataset-card-daily" data-dataset-card="cdr-daily"{% if daily_cdrs %} open{% endif %}>
+      <details class="dataset-card dataset-card-cdr dataset-card-weekly" data-dataset-card="cdr-weekly" data-dataset-card-optional{% if weekly_cdrs %} open{% else %} hidden{% endif %}>
+        <summary class="dataset-card-head">
+          <div><p class="eyebrow">CDRs</p><h3><span class="dataset-card-icon dataset-card-icon-weekly" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M8 3v4M16 3v4M3.5 10h17"/><path d="M7 15h10"/></svg></span>Weekly CDRs <span class="dataset-card-count">{{ weekly_cdrs | length }}</span></h3></div>
+          <p class="form-note">The incremental or cumulative CDRs received every week while a campaign runs. The combined tables include them until the Final CDR of their campaign arrives; a cumulative Weekly CDR replaces the previous Weekly and Daily CDRs it contains in the combined tables.</p>
+        </summary>
+        <div class="table-wrap queue-table-wrap">
+          <table class="queue-table queue-table-weekly" data-queue-sortable-table>
+            <thead>
+              <tr>
+            <th aria-sort="descending"><button type="button" class="queue-sort-button" data-queue-sort-key="id" data-queue-sort-type="number">ID<span aria-hidden="true" data-queue-sort-indicator>↓</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="dataset" data-queue-sort-type="text">Dataset<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="kind" data-queue-sort-type="text">Input Type<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="nr-mode" data-queue-sort-type="text">NR Mode<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="cdr-stage" data-queue-sort-type="text">CDR Type<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="combined" data-queue-sort-type="text">In Combined?<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th class="queue-sort-pair"><button type="button" class="queue-sort-button" data-queue-sort-key="rows" data-queue-sort-type="number">Rows<span aria-hidden="true" data-queue-sort-indicator>↕</span></button><button type="button" class="queue-sort-button" data-queue-sort-key="columns" data-queue-sort-type="number">Columns<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="size" data-queue-sort-type="number">Size<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="status" data-queue-sort-type="text">Status<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="progress" data-queue-sort-type="number">Progress<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th class="queue-sort-pair"><button type="button" class="queue-sort-button" data-queue-sort-key="uploaded" data-queue-sort-type="text">Uploaded<span aria-hidden="true" data-queue-sort-indicator>↕</span></button><button type="button" class="queue-sort-button" data-queue-sort-key="updated" data-queue-sort-type="text">Updated<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody data-dataset-card-body="cdr-weekly">
+              {% for dataset in weekly_cdrs %}{{ dataset_row(dataset, 'cdr') }}{% else %}
+              <tr data-dataset-card-empty><td colspan="12"><article class="empty-state-inline">No Weekly CDRs. Upload a CDR and choose Weekly as its CDR Type.</article></td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </details>
+      <details class="dataset-card dataset-card-cdr dataset-card-daily" data-dataset-card="cdr-daily" data-dataset-card-optional{% if daily_cdrs %} open{% else %} hidden{% endif %}>
         <summary class="dataset-card-head">
           <div><p class="eyebrow">CDRs</p><h3><span class="dataset-card-icon dataset-card-icon-daily" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M8 3v4M16 3v4M3.5 10h17"/><path d="M8 14h2M14 14h2M8 17.5h2"/></svg></span>Daily CDRs <span class="dataset-card-count">{{ daily_cdrs | length }}</span></h3></div>
           <p class="form-note">The incremental or cumulative CDRs received while a campaign runs. The combined tables include them until the Final CDR of their campaign arrives; a cumulative Daily CDR replaces the previous ones in the combined tables.</p>
@@ -1042,8 +1074,10 @@
   const paintCard = (entry) => {
     const kind = entry.select.value || 'unknown';
     entry.item.dataset.kind = kind;
-    // A Daily CDR is flagged in the corner of its card.
+    // A Weekly or Daily CDR is flagged in the corner of its card.
     entry.item.dataset.stage = cdrTypes.has(kind) ? entry.stageSelect.value : '';
+    const flagLabel = entry.item.querySelector('[data-stage-flag-label]');
+    if (flagLabel) flagLabel.textContent = entry.stageSelect.value === 'weekly' ? 'Weekly CDR' : 'Daily CDR';
     const label = entry.select.selectedOptions[0]?.value ? entry.select.selectedOptions[0].textContent : 'Choose a type';
     entry.badge.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${typeIcons[kind] || typeIcons.generic}</svg>`;
     const caption = document.createElement('span');
@@ -1098,12 +1132,13 @@
     return 'NSA';
   }
 
-  // Mirrors src/modules/cdr_stage.py: "final" in the name, then daily words, then dates
+  // Mirrors src/modules/cdr_stage.py: "final" in the name, then weekly and daily words, then dates
   // (a range is a Final CDR; a single date after the start of the name is a Daily CDR).
   function inferCdrStage(fileName) {
     const stem = String(fileName || '').replace(/\.[^.]+$/, '');
     const words = ` ${stem.replace(/([a-z])(?=[A-Z])/g, '$1 ').toLowerCase().replace(/[^a-z0-9]+/g, ' ')} `;
     if (/[^a-z]final[^a-z]/.test(words)) return 'final';
+    if (/[^a-z](weekly|week|semanal|semana|wk)[^a-z]/.test(words)) return 'weekly';
     if (/[^a-z](daily|diario|diaria|dia|day|incremental|cumulative|acumulado)[^a-z]/.test(words)) return 'daily';
     const dates = [...stem.matchAll(/(?<!\d)(20\d{2})[-_.]?(0[1-9]|1[0-2])[-_.]?(0[1-9]|[12]\d|3[01])(?!\d)/g)];
     const distinct = new Set(dates.map((match) => match.slice(1).join('')));
@@ -1228,15 +1263,15 @@
       nrModeSelect.value = inferNrMode(file.name);
       nrModeField.append(nrModeSelect);
       nrModeField.hidden = !cdrTypes.has(select.value);
-      // Final CDRs replace the Daily CDRs of their campaigns in the combined tables.
+      // Final CDRs replace the Weekly and Daily CDRs of their campaigns in the combined tables.
       const stageField = document.createElement('label');
       stageField.className = 'upload-nr-mode-field upload-cdr-stage-field';
       stageField.textContent = 'CDR Type';
-      stageField.title = 'A Final CDR is delivered after the campaign; Daily CDRs arrive while it runs and are replaced by the Final CDR of their campaign in the combined tables';
+      stageField.title = 'A Final CDR is delivered after the campaign; Weekly and Daily CDRs arrive while it runs and are replaced by the Final CDR of their campaign in the combined tables';
       const stageSelect = document.createElement('select');
       stageSelect.name = 'cdr_stages';
       stageSelect.setAttribute('aria-label', `CDR Type for ${file.name}`);
-      [['final', 'Final'], ['daily', 'Daily']].forEach(([value, label]) => stageSelect.add(new Option(label, value)));
+      [['final', 'Final'], ['weekly', 'Weekly'], ['daily', 'Daily']].forEach(([value, label]) => stageSelect.add(new Option(label, value)));
       stageSelect.value = inferCdrStage(file.name);
       stageField.append(stageSelect);
       stageField.hidden = !cdrTypes.has(select.value);
@@ -1293,8 +1328,8 @@
       fields.append(typeField, nrModeField, stageField, operatorField);
       const dailyFlag = document.createElement('span');
       dailyFlag.className = 'upload-daily-flag';
-      dailyFlag.title = 'Daily CDR: received while the campaign runs; the Final CDR of its campaign replaces it in the combined tables';
-      dailyFlag.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M12 13.5v3l2 1.2"/></svg><span>Daily CDR</span>';
+      dailyFlag.title = 'Received while the campaign runs; the Final CDR of its campaign replaces it in the combined tables';
+      dailyFlag.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M12 13.5v3l2 1.2"/></svg><span data-stage-flag-label>Daily CDR</span>';
       item.append(badge, header, fields, mappings, dailyFlag);
       items.append(item);
       entries.push(entry);

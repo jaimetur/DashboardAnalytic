@@ -16,16 +16,16 @@ Speech CDRs list one row per speech sample: Non-Qualified Calls lists each Speec
 
 ## Daily and Final CDRs
 
-A call can be in a Daily CDR, in several cumulative Daily CDRs and in the Final CDR of its campaign (see [CDR Type](workspace-management.md#cdr-type-final-and-daily)). It is listed once, with the data of its most recent CDR: the Final CDR before the Daily ones, then the CDR with the newest calls. Its analysis is shared by every CDR that contains it, so choosing a Daily CDR, a cumulative Daily CDR or the Final CDR in the **CDRs** filter shows the same follow-up; with CDRs chosen, each call shows the data of the most recent of them.
+A call can be in a Daily CDR, in several cumulative Daily CDRs and in the Final CDR of its campaign (see [CDR Type](workspace-management.md#cdr-type-final-weekly-and-daily)). It is listed once, with the data of its most recent CDR: the Final CDR before the Daily ones, then the CDR with the newest calls. Its analysis is shared by every CDR that contains it, so choosing a Daily CDR, a cumulative Daily CDR or the Final CDR in the **CDRs** filter shows the same follow-up; with CDRs chosen, each call shows the data of the most recent of them.
 
 A badge below the result tells how the other CDRs see the call (hover it for the CDR shown and the latest one):
 
 - **Changed between CDRs**: its result or failure is different in another CDR.
 - **Newer version in another CDR**: a more recent CDR that is not chosen in the CDRs filter has the call.
-- **Not in the Final CDR**: the call is only in Daily CDRs while a Final CDR covers its campaign.
+- **Not in the Final CDR**: the call is only in Weekly or Daily CDRs while a Final CDR covers its campaign.
 - **Completed in a newer CDR**: the most recent CDR has the call Completed. These calls are listed only while that CDR is not chosen in the CDRs filter, or when **CDR Version** selects them.
 
-The **CDR Version** filter selects the calls of each case (**Latest version** are the others). **Call Details** lists every CDR that contains the call, Final or Daily, with the date of its newest calls and the call's result in it. The analysis of a call is lost from view only when no loaded CDR contains it any longer (for example, it is not in the Final CDR and its Daily CDRs are deleted); it stays in the database and comes back if a CDR with the call is loaded again.
+The **CDR Version** filter selects the calls of each case (**Latest version** are the others). **Call Details** lists every CDR that contains the call, Final, Weekly or Daily, with the date of its newest calls and the call's result in it. The analysis of a call is lost from view only when no loaded CDR contains it any longer (for example, it is not in the Final CDR and its Daily CDRs are deleted); it stays in the database and comes back if a CDR with the call is loaded again.
 
 ## Filters
 
@@ -171,7 +171,7 @@ The module stores its data in the workspace database, visible in [Admin → Data
 | Table | Content |
 | --- | --- |
 | NQ Calls | The indexed NQ rows of every CDR (rebuilt automatically), with their `JOIN_ID` and, for Speech samples, their sample identity. |
-| NQ Call Sources | Which CDR revision each indexed CDR comes from, whether it is a Final or a Daily CDR and the date of its newest call. |
+| NQ Call Sources | Which CDR revision each indexed CDR comes from, whether it is a Final, Weekly or Daily CDR and the date of its newest call. |
 | NQ Call Population | Every call of every CDR, qualified or not, for the NQ rates (rebuilt automatically). |
 | NQ Call Versions | Which CDR holds the latest version of each Non-Qualified call and how the CDRs differ (rebuilt automatically). |
 | NQ Call Tracking | The status, team, assignee, root domain and cause, and version of each followed-up call and Speech sample. |

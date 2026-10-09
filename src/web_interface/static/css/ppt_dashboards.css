@@ -1862,3 +1862,4 @@
 .ds-hidden-slide-notice p{margin:0;font-weight:700}
 /* View as Dashboard sits beside View Filters with the same height and shape. */
 .ppt-dashboards .ds-ppt-charts-view-dashboard { display: inline-flex; align-items: center; justify-content: center; align-self: end; width: auto; height: 2.55rem; min-height: 2.55rem; padding: .3rem 1rem; border-radius: 999px; font-size: .96rem; line-height: 1; }
+.ds-multivendor-option[data-cdr-stage="daily"]{border:1px dashed rgba(240,122,26,.75);background:#fff8ef}.ds-multivendor-option[data-cdr-stage="weekly"]{border:1px dashed rgba(123,92,196,.75);background:#f7f3ff}

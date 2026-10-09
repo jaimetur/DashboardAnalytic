@@ -91,7 +91,11 @@
       rows.forEach((row, index) => {
         const option = document.createElement('label');
         option.className = 'ni-dataset-option';
-        option.innerHTML = `<input type="checkbox" value="${row.id}" data-kind="${kind}"${(restored ? restored.has(Number(row.id)) : true) ? ' checked' : ''}><span>${escapeHtml(row.file_name)} · ${integer(row.row_count)} rows</span>`;
+        // Weekly and Daily CDRs are highlighted.
+        option.dataset.cdrStage = row.cdr_stage || 'final';
+        const stage = ['weekly', 'daily'].includes(row.cdr_stage)
+          ? `<span class="cdr-stage-badge" data-cdr-stage="${row.cdr_stage}">${row.cdr_stage === 'weekly' ? 'Weekly' : 'Daily'}</span> ` : '';
+        option.innerHTML = `<input type="checkbox" value="${row.id}" data-kind="${kind}"${(restored ? restored.has(Number(row.id)) : true) ? ' checked' : ''}><span>${stage}${escapeHtml(row.file_name)} · ${integer(row.row_count)} rows</span>`;
         group.append(option);
       });
       host.append(group);

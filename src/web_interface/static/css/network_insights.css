@@ -22,6 +22,8 @@
 .ni-dataset-group .form-note{margin:0}
 .network-insights .ni-dataset-option{display:flex;align-items:flex-start;gap:.5rem;padding:.25rem 0;font-size:.82rem;font-weight:650;color:#29474d;overflow-wrap:anywhere}
 .network-insights .ni-dataset-option input{width:auto;margin-top:.15rem;accent-color:var(--ni-color)}
+.network-insights .ni-dataset-option[data-cdr-stage="daily"]{margin:.1rem 0;padding:.25rem .4rem;border:1px dashed rgba(240,122,26,.75);border-radius:8px;background:#fff8ef}
+.network-insights .ni-dataset-option[data-cdr-stage="weekly"]{margin:.1rem 0;padding:.25rem .4rem;border:1px dashed rgba(123,92,196,.75);border-radius:8px;background:#f7f3ff}
 .ni-actions{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:18px}
 .ni-actions .form-note{flex:1 1 320px;margin:0;padding:.55rem .8rem;border-radius:10px;background:#f2f6f7}
 .ni-actions .form-note[data-tone="busy"]{background:#fff4cf;color:#6f5208;font-weight:700}

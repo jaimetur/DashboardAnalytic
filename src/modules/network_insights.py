@@ -1141,6 +1141,7 @@ def install_network_insights_routes(core: Any) -> None:
             rows.append({
                 'id': int(item['id']), 'kind': item['dataset_kind'], 'file_name': str(item['file_name']),
                 'nr_mode': core.dataset_nr_mode(item['dataset_kind'], item.get('nr_mode'), item['file_name']),
+                'cdr_stage': core.dataset_cdr_stage(item['dataset_kind'], item.get('cdr_stage'), item['file_name']),
                 'row_count': int(item.get('row_count') or 0),
                 'updated_at': str(item.get('updated_at') or item.get('processed_at') or ''),
             })

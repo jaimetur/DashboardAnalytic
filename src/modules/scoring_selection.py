@@ -50,7 +50,7 @@ def _operator_options(repository: Repository) -> list[str]:
 
 
 def _available_cdr_rows(repository: Repository) -> list[dict[str, Any]]:
-    # The CDRs of the combined tables: Final CDRs, and Daily CDRs until a Final CDR replaces them.
+    # The CDRs of the combined tables: Final CDRs, and Weekly and Daily CDRs until a Final CDR replaces them.
     included = combined_dataset_ids(repository)
     available: list[dict[str, Any]] = []
     for raw_row in repository.list_datasets():

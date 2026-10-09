@@ -27,7 +27,7 @@
   const VERSION_HINTS = {
     changed: 'Its result or failure is different in another CDR',
     newer: 'A more recent CDR that is not chosen in the CDRs filter has this call',
-    not_in_final: 'Only in Daily CDRs, while a Final CDR covers its campaign',
+    not_in_final: 'Only in Weekly or Daily CDRs, while a Final CDR covers its campaign',
     qualified: 'Completed in a more recent CDR',
   };
   const STATE_LABELS = {closed: 'Closed', attended: 'Attended', not_attended: 'Not attended', with_team: 'With team',

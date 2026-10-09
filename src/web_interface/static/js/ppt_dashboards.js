@@ -1039,7 +1039,15 @@
         for (const row of rows) {
           const label = node('label', undefined, 'ds-multivendor-option');
           const input = document.createElement('input'); input.type = 'checkbox'; input.value = String(row.id); input.dataset.kind = kind; input.checked = selected.has(Number(row.id));
-          label.append(input, node('span', `${row.file_name} · ${row.row_count} rows`)); options.append(label);
+          // Weekly and Daily CDRs are highlighted.
+          label.dataset.cdrStage = row.cdr_stage || 'final';
+          const text = node('span', `${row.file_name} · ${row.row_count} rows`);
+          if (['weekly', 'daily'].includes(row.cdr_stage)) {
+            const badge = node('span', row.cdr_stage === 'weekly' ? 'Weekly' : 'Daily', 'cdr-stage-badge');
+            badge.dataset.cdrStage = row.cdr_stage;
+            text.prepend(badge, ' ');
+          }
+          label.append(input, text); options.append(label);
         }
         group.append(options); choices.append(group);
       }

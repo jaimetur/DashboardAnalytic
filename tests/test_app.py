@@ -7647,8 +7647,8 @@ def test_workspace_lists_combined_cdr_with_preview_and_kind_filter_metadata(clie
     assert 'CDR-Data (combined)' in workspace_response.text
     assert 'data-dataset-row data-dataset-kind="data"' in workspace_response.text
     assert workspace_response.text.count('<th') >= 22
-    # The Final and Daily CDR cards have a Columns header each; the reference data cards are compact.
-    assert workspace_response.text.count('data-queue-sort-key="columns"') == 2
+    # The Final, Weekly and Daily CDR cards have a Columns header each; the reference data cards are compact.
+    assert workspace_response.text.count('data-queue-sort-key="columns"') == 3
     assert workspace_response.text.count('class="combined-dataset-pair-head">Rows<span>Columns</span></th>') == 1
     assert 'data-combined-dataset-structure-row' in workspace_response.text
     dataset_columns = int(app_module.repository.get_dataset(1)['column_count'])

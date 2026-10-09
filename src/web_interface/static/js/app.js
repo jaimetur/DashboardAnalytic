@@ -9889,7 +9889,8 @@ if (queueNode) {
     });
     // A type filter leaves only the cards that hold datasets of that type.
     queueNode.querySelectorAll('[data-dataset-card]').forEach((card) => {
-      card.hidden = Boolean(selectedKind) && !card.querySelector('[data-dataset-row]:not([hidden])');
+      card.hidden = (Boolean(selectedKind) && !card.querySelector('[data-dataset-row]:not([hidden])'))
+        || (card.hasAttribute('data-dataset-card-optional') && !card.querySelector('[data-dataset-row]'));
       card.querySelectorAll('[data-dataset-card-empty]').forEach((row) => { row.hidden = Boolean(card.querySelector('[data-dataset-row]')); });
     });
     queueNode.querySelectorAll('.queue-table').forEach((table) => table.dispatchEvent(new CustomEvent('mobile-card-pagination:refresh', {bubbles: true, detail: {reset: true}})));
@@ -9944,12 +9945,12 @@ if (queueNode) {
     if (document.activeElement !== select && !select.disabled) select.value = mode;
   };
 
-  // A Final or Daily CDR lives in the card of its stage.
+  // A Final, Weekly or Daily CDR lives in the card of its stage.
   const syncQueueCdrStageCell = (row, dataset) => {
     const cell = row.querySelector('[data-queue-cdr-stage]');
     const select = cell?.querySelector('[data-dataset-cdr-stage-select]');
     if (!(select instanceof HTMLSelectElement) || !dataset.cdr_stage) return;
-    cell.dataset.queueSortValue = dataset.cdr_stage === 'daily' ? 'Daily' : 'Final';
+    cell.dataset.queueSortValue = cdrStageLabel(dataset.cdr_stage) || 'Final';
     if (document.activeElement !== select && !select.disabled) select.value = dataset.cdr_stage;
     moveQueueRowToStage(row, dataset.cdr_stage);
   };
@@ -10991,17 +10992,23 @@ function syncCombinedInclusion(row, included, reason, choice) {
   if (select instanceof HTMLSelectElement && choice && document.activeElement !== select && !select.disabled) select.value = choice;
 }
 
-// A CDR marked Final or Daily moves to the card of its stage.
+// The label of a CDR Type: Final, Weekly or Daily.
+function cdrStageLabel(stage) {
+  return {final: 'Final', weekly: 'Weekly', daily: 'Daily'}[stage] || '';
+}
+
+// A CDR marked Final, Weekly or Daily moves to the card of its stage; the Weekly and Daily cards show only with CDRs.
 function moveQueueRowToStage(row, stage) {
-  const target = document.querySelector(`[data-dataset-card-body="${stage === 'daily' ? 'cdr-daily' : 'cdr-final'}"]`);
+  const target = document.querySelector(`[data-dataset-card-body="cdr-${cdrStageLabel(stage) ? stage : 'final'}"]`);
   if (!(row instanceof HTMLTableRowElement) || !target || row.parentElement === target) return;
   target.append(row);
   document.querySelectorAll('[data-dataset-card]').forEach((card) => {
     card.querySelectorAll('[data-dataset-card-empty]').forEach((empty) => { empty.hidden = Boolean(card.querySelector('[data-dataset-row]')); });
     const count = card.querySelector('.dataset-card-count');
     if (count) count.textContent = String(card.querySelectorAll('[data-dataset-row][data-dataset-id]').length);
+    if (card.hasAttribute('data-dataset-card-optional')) card.hidden = !card.querySelector('[data-dataset-row]');
   });
-  if (stage === 'daily') target.closest('details')?.setAttribute('open', '');
+  if (stage !== 'final') target.closest('details')?.setAttribute('open', '');
 }
 
 function applyCombinedInclusion(combined) {
@@ -11013,7 +11020,7 @@ function applyCombinedInclusion(combined) {
   window.dispatchEvent(new CustomEvent('auto-calculated-field-job-status'));
 }
 
-// The CDR Type (Final or Daily) and the combined-table choice of a CDR, saved at once.
+// The CDR Type (Final, Weekly or Daily) and the combined-table choice of a CDR, saved at once.
 document.addEventListener('change', async (event) => {
   const select = event.target instanceof HTMLSelectElement
     ? event.target.closest('[data-dataset-cdr-stage-select], [data-dataset-combined-select]') : null;
@@ -11034,7 +11041,7 @@ document.addEventListener('change', async (event) => {
     if (isStage) {
       const row = select.closest('[data-dataset-row]');
       const cell = select.closest('[data-queue-cdr-stage]');
-      if (cell instanceof HTMLElement) cell.dataset.queueSortValue = select.value === 'daily' ? 'Daily' : 'Final';
+      if (cell instanceof HTMLElement) cell.dataset.queueSortValue = cdrStageLabel(select.value) || 'Final';
       moveQueueRowToStage(row, select.value);
     }
   } catch (error) {
@@ -11085,7 +11092,7 @@ document.addEventListener('change', async (event) => {
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.detail || 'The NR Mode could not be updated.');
     if (cell instanceof HTMLElement) cell.dataset.queueSortValue = String(payload.nr_mode || select.value);
-    // A Final CDR replaces the Daily CDRs of its NR Mode only.
+    // A Final CDR replaces the Weekly and Daily CDRs of its NR Mode only.
     applyCombinedInclusion(payload.combined);
   } catch (error) {
     if (previous) select.value = previous;

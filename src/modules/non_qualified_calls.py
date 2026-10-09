@@ -42,7 +42,7 @@ from io import BytesIO
 from threading import Lock
 from typing import Any
 
-from src.modules.cdr_stage import dataset_cdr_stage
+from src.modules.cdr_stage import CDR_STAGE_LABELS, dataset_cdr_stage
 from src.modules.column_names import campaign_sort_key, column_identity
 from src.modules.value_maps import ValueMapper, field_kind
 from src.modules.mapping_order import dimension_order_key, mapping_group
@@ -778,7 +778,7 @@ def _rebuild_versions(connection: Any, affected: set[str]) -> None:
 
     The latest version is the one of a Final CDR before the Daily ones, then of the CDR with the
     newest data. Only the calls of the changed CDRs are recalculated, except whether a Final CDR
-    covers the campaign of the calls that are only in Daily CDRs.
+    covers the campaign of the calls that are only in Weekly or Daily CDRs.
     """
     connection.execute('CREATE TEMP TABLE IF NOT EXISTS nq_affected_keys (call_key TEXT PRIMARY KEY)')
     connection.execute('DELETE FROM nq_affected_keys')
@@ -878,7 +878,7 @@ def sync_nq_calls(task_repository: Any) -> dict[str, Any]:
                         f'INSERT INTO {NQ_CALL_SOURCES_TABLE} (dataset_id, revision, call_count, synced_at, stage_rank, '
                         'data_date, population_count) VALUES (?, ?, ?, ?, ?, ?, ?)',
                         (dataset_id, _dataset_revision(row, signature), len({call[2] for call in content['calls']}), now_iso(),
-                         int(stage != 'daily'), content['data_date'], len(content['population'])),
+                         int(stage == 'final'), content['data_date'], len(content['population'])),
                     )
                     affected.update(entry[1] for entry in content['population'])
                 if old_rows:
@@ -1574,7 +1574,7 @@ def _base_sql(default: str, task_repository: Any, dataset_ids: list[int] | None 
 
     A Final CDR comes before the Daily ones, then the CDR with the newest data. ``version_state``
     tells how the other CDRs see the call: ``qualified`` (the latest CDR has it Completed),
-    ``not_in_final`` (only in Daily CDRs while a Final CDR covers its campaign), ``newer`` (a newer
+    ``not_in_final`` (only in Weekly or Daily CDRs while a Final CDR covers its campaign), ``newer`` (a newer
     CDR outside the chosen ones has it) or ``changed`` (its result or failure differs between CDRs).
     Speech calls count their Non-Qualified samples in ``nq_samples``.
     """
@@ -2527,9 +2527,9 @@ def _call_row(connection: Any, call_key: str, default: str, task_repository: Any
 
 
 def _call_versions(connection: Any, call_key: str) -> list[dict[str, Any]]:
-    """Every CDR that contains the call: Final or Daily, its newest data, and the call's result in it."""
+    """Every CDR that contains the call: Final, Weekly or Daily, its newest data, and the call's result in it."""
     rows = connection.execute(f"""
-        SELECT p.dataset_id, p.is_nq, p.is_latest, s.stage_rank, s.data_date, d.file_name,
+        SELECT p.dataset_id, p.is_nq, p.is_latest, s.stage_rank, s.data_date, d.file_name, dp.dataset_kind, dp.cdr_stage,
                (SELECT c.result FROM {NQ_CALLS_TABLE} c WHERE c.call_key = p.call_key AND c.dataset_id = p.dataset_id
                 ORDER BY c.start_time LIMIT 1) AS result,
                (SELECT c.failure_classification FROM {NQ_CALLS_TABLE} c WHERE c.call_key = p.call_key AND c.dataset_id = p.dataset_id
@@ -2537,12 +2537,15 @@ def _call_versions(connection: Any, call_key: str) -> list[dict[str, Any]]:
         FROM {NQ_CALL_POPULATION_TABLE} p
         JOIN {NQ_CALL_SOURCES_TABLE} s ON s.dataset_id = p.dataset_id
         LEFT JOIN datasets d ON d.id = p.dataset_id
+        LEFT JOIN dataset_profiles dp ON dp.dataset_id = p.dataset_id
         WHERE p.call_key = ?
         ORDER BY s.stage_rank DESC, s.data_date DESC, p.dataset_id DESC
     """, (call_key,)).fetchall()
     return [{
         'dataset_id': int(row['dataset_id']), 'name': str(row['file_name'] or ''),
-        'stage': 'Final' if int(row['stage_rank']) else 'Daily', 'data_date': str(row['data_date'] or ''),
+        'stage': 'Final' if int(row['stage_rank']) else CDR_STAGE_LABELS.get(
+            dataset_cdr_stage(row['dataset_kind'], row['cdr_stage'], row['file_name']) or '', 'Daily'),
+        'data_date': str(row['data_date'] or ''),
         'non_qualified': bool(row['is_nq']), 'latest': bool(row['is_latest']),
         'result': str(row['result'] or ('Completed' if not row['is_nq'] else '')),
         'failure_classification': str(row['failure_classification'] or ''),

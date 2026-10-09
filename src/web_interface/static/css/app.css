@@ -1534,10 +1534,16 @@ body[data-embedded-template-editor] .slides-templates-editor-table-wrap .form-ac
   background: linear-gradient(135deg, #ffb547, #f07a1a); color: #fff; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.02em; box-shadow: 0 8px 18px -10px rgba(240, 122, 26, 0.95); }
 .upload-daily-flag svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .upload-type-item[data-stage="daily"] { outline: 2px dashed rgba(240, 122, 26, 0.75); outline-offset: -5px; }
-.upload-type-item[data-stage="daily"] .upload-daily-flag { display: inline-flex; animation: upload-daily-pop .35s cubic-bezier(.2, .9, .3, 1.4) both; }
-.upload-type-item[data-stage="daily"] .upload-type-header { padding-right: 7.5rem; }
+/* Weekly CDRs: the same in violet. */
+/* The badge of a Weekly or Daily CDR in the CDR selectors of every module. */
+.cdr-stage-badge { display: inline-flex; align-items: center; margin-right: .2rem; padding: .02rem .42rem; border-radius: 999px; background: linear-gradient(135deg, #ffb547, #f07a1a); color: #fff; font-size: .66rem; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; vertical-align: 1px; }
+.cdr-stage-badge[data-cdr-stage="weekly"] { background: linear-gradient(135deg, #a58bea, #7b5cc4); }
+.upload-type-item[data-stage="weekly"] { outline: 2px dashed rgba(123, 92, 196, 0.75); outline-offset: -5px; }
+.upload-type-item[data-stage="weekly"] .upload-daily-flag { background: linear-gradient(135deg, #a58bea, #7b5cc4); box-shadow: 0 8px 18px -10px rgba(123, 92, 196, 0.95); }
+.upload-type-item:is([data-stage="daily"], [data-stage="weekly"]) .upload-daily-flag { display: inline-flex; animation: upload-daily-pop .35s cubic-bezier(.2, .9, .3, 1.4) both; }
+.upload-type-item:is([data-stage="daily"], [data-stage="weekly"]) .upload-type-header { padding-right: 7.5rem; }
 @keyframes upload-daily-pop { from { opacity: 0; transform: scale(.6) rotate(-8deg); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) { .upload-type-item[data-stage="daily"] .upload-daily-flag { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .upload-type-item:is([data-stage="daily"], [data-stage="weekly"]) .upload-daily-flag { animation: none; } }
 .dropzone-field { display: grid; gap: 0.45rem; padding: 1.2rem; border-radius: 20px; border: 1px dashed rgba(11, 122, 117, 0.42); background: linear-gradient(135deg, rgba(220, 246, 242, 0.68), rgba(235, 247, 250, 0.82)); color: var(--ink); }
 .dropzone-field.is-dragging { border-color: var(--brand); background: rgba(104, 215, 197, 0.22); box-shadow: inset 0 0 0 2px rgba(11, 122, 117, 0.16); }
 .dropzone-field input[data-file-picker-input] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
@@ -4252,7 +4258,7 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
 .campaign-maps-panel .collapsible-panel-body > .form-note:last-of-type { margin-top: 1.2rem; }
 @media (max-width: 900px) { .campaign-map-settings { grid-template-columns: minmax(0, 1fr); } }
 
-/* Workspace datasets in cards: Final and Daily CDRs, the combined tables, then the reference data. */
+/* Workspace datasets in cards: Final, Weekly and Daily CDRs, the combined tables, then the reference data. */
 .dataset-cards { display: grid; gap: 1.1rem; margin: 0 1.45rem 1.45rem; }
 .dataset-card { display: grid; gap: 0.7rem; min-width: 0; max-width: 100%; overflow: hidden; padding: 1rem 1.1rem 1.1rem; border: 1px solid var(--line); border-radius: calc(var(--radius) - 4px); background: var(--panel-strong); box-shadow: 0 10px 24px rgba(16, 49, 74, 0.06); }
 /* The Dataset Type filter hides the cards without datasets of that type. */
@@ -4267,6 +4273,7 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
 .dataset-card-icon svg { width: 1.9rem; height: 1.9rem; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .combined-dataset-section-copy { padding-right: 4.2rem; }
 .dataset-card-icon-final { --dataset-card-colour: #1d4f8f; }
+.dataset-card-icon-weekly { --dataset-card-colour: #7b5cc4; }
 .dataset-card-icon-daily { --dataset-card-colour: #d08a1c; }
 .dataset-card-icon-network-inventory { --dataset-card-colour: #6941a4; }
 .dataset-card-icon-geospatial { --dataset-card-colour: #2e8b57; }
@@ -4275,19 +4282,22 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
 .dataset-card-head .form-note { max-width: 60rem; margin: 0.35rem 0 0; text-align: left; }
 .dataset-card-count { display: inline-grid; place-items: center; min-width: 1.6rem; height: 1.6rem; padding: 0 0.45rem; border-radius: 999px; background: var(--brand); color: #fff; font-size: 0.8rem; font-weight: 850; }
 .dataset-card-final { border-top: 5px solid #1d4f8f; }
+.dataset-card-weekly { border-top: 5px solid #7b5cc4; }
 .dataset-card-daily { border-top: 5px solid #d08a1c; }
 .dataset-card .queue-table-wrap { max-width: 100%; overflow-x: auto; }
-.dataset-card-daily { display: block; }
-.dataset-card-daily > .queue-table-wrap { margin-top: 0.7rem; }
-.dataset-card-daily > summary { cursor: pointer; list-style: none; }
-.dataset-card-daily > summary::-webkit-details-marker { display: none; }
-.dataset-card-daily > summary h3::after { content: '▾'; color: var(--muted); font-size: 0.9rem; transition: transform 0.15s ease; }
-.dataset-card-daily:not([open]) > summary h3::after { transform: rotate(-90deg); }
+.dataset-card:is(.dataset-card-weekly, .dataset-card-daily) { display: block; }
+.dataset-card:is(.dataset-card-weekly, .dataset-card-daily)[hidden] { display: none; }
+:is(.dataset-card-weekly, .dataset-card-daily) > .queue-table-wrap { margin-top: 0.7rem; }
+:is(.dataset-card-weekly, .dataset-card-daily) > summary { cursor: pointer; list-style: none; }
+:is(.dataset-card-weekly, .dataset-card-daily) > summary::-webkit-details-marker { display: none; }
+:is(.dataset-card-weekly, .dataset-card-daily) > summary h3::after { content: '▾'; color: var(--muted); font-size: 0.9rem; transition: transform 0.15s ease; }
+:is(.dataset-card-weekly, .dataset-card-daily):not([open]) > summary h3::after { transform: rotate(-90deg); }
 .dataset-card-combined { padding-top: 0.6rem; border-top: 5px solid #8fa5b1; }
 .dataset-card-network-inventory { border-top: 5px solid #6941a4; }
 .dataset-card-geospatial { border-top: 5px solid #2e8b57; }
 .dataset-card-other { border-top: 5px solid #7b8790; }
 .dataset-card-final .dataset-card-count { background: #1d4f8f; }
+.dataset-card-weekly .dataset-card-count { background: #7b5cc4; }
 .dataset-card-daily .dataset-card-count { background: #d08a1c; }
 .dataset-card-network-inventory .dataset-card-count { background: #6941a4; }
 .dataset-card-geospatial .dataset-card-count { background: #2e8b57; }
@@ -4339,6 +4349,7 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
 .queue-table .queue-stacked-cell [data-queue-uploaded], .queue-table .queue-stacked-cell [data-queue-updated] { white-space: nowrap; }
 .queue-cdr-stage-select:has(option[value="final"]:checked) { border-color: #8db4e2; background-color: #dcebff; color: #1f4f7f; }
 .queue-cdr-stage-select:has(option[value="daily"]:checked) { border-color: #e8c27a; background-color: #fff1d6; color: #8a5300; }
+.queue-cdr-stage-select:has(option[value="weekly"]:checked) { border-color: #c4b2ef; background-color: #efe9fc; color: #4f3594; }
 .queue-combined-cell { display: grid; gap: 0.3rem; justify-items: start; }
 .queue-combined-state { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.12rem 0.55rem; border-radius: 999px; font-size: 0.74rem; font-weight: 850; }
 /* Solid pills, so Yes and No stand out on the light green and grey row backgrounds. */

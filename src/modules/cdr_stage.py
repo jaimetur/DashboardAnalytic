@@ -1,18 +1,18 @@
-"""Final and Daily CDRs, and the CDRs that the combined CDR tables include.
+"""Final, Weekly and Daily CDRs, and the CDRs that the combined CDR tables include.
 
 A **Final** CDR is the consolidated file delivered after a measurement campaign;
-**Daily** CDRs arrive while the campaign runs, either incremental (the calls of
-one day) or cumulative (every call so far). Every CDR has a stage, suggested from
-its file name and chosen on upload.
+**Weekly** and **Daily** CDRs arrive while the campaign runs, either incremental
+(the calls of one week or day) or cumulative (every call so far). Every CDR has a
+stage, suggested from its file name and chosen on upload.
 
 The combined CDR tables (and the modules that read them) include each ready CDR
 according to its ``in_combined`` choice:
 
 * ``yes`` / ``no``: chosen by the user;
-* ``auto``: Final CDRs are included; a Daily CDR is included until an included
-  Final CDR of the same type and NR Mode covers one of its campaigns, or until a
-  newer Daily CDR of the same type contains every one of its calls (a cumulative
-  Daily CDR replaces the previous ones).
+* ``auto``: Final CDRs are included; a Weekly or Daily CDR is included until an
+  included Final CDR of the same type and NR Mode covers one of its campaigns, or
+  until a newer Weekly or Daily CDR of the same type contains every one of its calls
+  (a cumulative CDR replaces the previous ones).
 """
 
 from __future__ import annotations
@@ -24,14 +24,15 @@ from typing import Any
 
 from src.modules.column_names import column_identity
 
-CDR_STAGES = ('final', 'daily')
-CDR_STAGE_LABELS = {'final': 'Final', 'daily': 'Daily'}
+CDR_STAGES = ('final', 'weekly', 'daily')
+CDR_STAGE_LABELS = {'final': 'Final', 'weekly': 'Weekly', 'daily': 'Daily'}
 DEFAULT_CDR_STAGE = 'final'
 CDR_STAGE_KINDS = frozenset({'data', 'voice', 'speech'})
 IN_COMBINED_VALUES = ('auto', 'yes', 'no')
 IN_COMBINED_LABELS = {'auto': 'Auto', 'yes': 'Yes', 'no': 'No'}
 
 _FINAL_WORD = re.compile(r'(?<![a-z])final(?![a-z])')
+_WEEKLY_WORDS = re.compile(r'(?<![a-z])(weekly|week|semanal|semana|wk)(?![a-z])')
 _DAILY_WORDS = re.compile(r'(?<![a-z])(daily|diario|diaria|dia|day|incremental|cumulative|acumulado)(?![a-z])')
 # yyyymmdd, yyyy-mm-dd, yyyy_mm_dd or yyyy.mm.dd.
 _DATE = re.compile(r'(?<!\d)(20\d{2})[-_.]?(0[1-9]|1[0-2])[-_.]?(0[1-9]|[12]\d|3[01])(?!\d)')
@@ -41,7 +42,7 @@ _START_COLUMNS = ('event_start_time', 'Call_Start_Time', 'Test_Start_Time')
 
 
 def normalize_cdr_stage(value: object) -> str | None:
-    """``final`` or ``daily`` for a supported value (any case), otherwise ``None``."""
+    """``final``, ``weekly`` or ``daily`` for a supported value (any case), otherwise ``None``."""
     text = str(value or '').strip().casefold()
     return text if text in CDR_STAGES else None
 
@@ -53,9 +54,10 @@ def normalize_in_combined(value: object) -> str | None:
 
 
 def infer_cdr_stage(file_name: object) -> str:
-    """Suggest whether a CDR is Final or Daily from its file name.
+    """Suggest whether a CDR is Final, Weekly or Daily from its file name.
 
     * ``final`` in the name → Final;
+    * ``weekly``, ``week``, ``semanal``, ``semana``, ``wk`` → Weekly;
     * ``daily``, ``diario``, ``day``, ``incremental``, ``cumulative``… → Daily;
     * a date range (two different dates, for example ``20250903-20251011``) → Final;
     * a single date that is not the export stamp at the start of the name
@@ -67,6 +69,8 @@ def infer_cdr_stage(file_name: object) -> str:
     words = re.sub(r'[^a-z0-9]+', ' ', spaced)
     if _FINAL_WORD.search(words):
         return 'final'
+    if _WEEKLY_WORDS.search(words):
+        return 'weekly'
     if _DAILY_WORDS.search(words):
         return 'daily'
     dates = [(match.start(), ''.join(match.groups())) for match in _DATE.finditer(stem)]
@@ -178,7 +182,7 @@ def _join_ids(connection: Any, dataset_id: int) -> set[str] | None:
 
 
 def _contained(repository: Any, older: Any, newer: Any, memo: dict[int, set[str] | None]) -> bool:
-    """Whether every call (JOIN_ID) of an older Daily CDR is in a newer one, cached per revision pair."""
+    """Whether every call (JOIN_ID) of an older Weekly or Daily CDR is in a newer one, cached per revision pair."""
     key = f"{int(older['id'])}:{int(newer['id'])}"
     signature = f'{_revision(older)}#{_revision(newer)}'
     try:
@@ -238,20 +242,24 @@ def combined_inclusion(repository: Any) -> dict[int, dict[str, Any]]:
             item.update(included=False, reason=f'Replaced by the Final CDR {names[replacing]}', replaced_by=replacing)
             continue
         item.update(included=True, reason='No Final CDR of its campaign yet')
-    # A cumulative Daily CDR contains every call of the previous ones of its campaign: only the newest stays.
+    # A cumulative Weekly or Daily CDR contains every call of the previous ones of its campaign: only the newest stays.
     memo: dict[int, set[str] | None] = {}
     for dataset_id, item in info.items():
-        if not item.get('included') or item['stage'] != 'daily' or item['in_combined'] != 'auto':
+        if not item.get('included') or item['stage'] == 'final' or item['in_combined'] != 'auto':
             continue
         newer = sorted((other_id for other_id, other in info.items()
-                        if other_id != dataset_id and other['stage'] == 'daily' and other.get('included')
+                        if other_id != dataset_id and other['stage'] != 'final' and other.get('included')
                         and other['kind'] == item['kind'] and other['nr_mode'] == item['nr_mode']
                         and (other['data_date'], other_id) > (item['data_date'], dataset_id)
                         and (not item['campaigns'] or item['campaigns'] & other['campaigns'])),
                        key=lambda other_id: (info[other_id]['data_date'], other_id), reverse=True)
-        container = next((other_id for other_id in newer[:1] if _contained(repository, by_id[dataset_id], by_id[other_id], memo)), None)
+        # The newest CDR (a cumulative one has every call so far) and every newer Weekly CDR (which holds
+        # the calls of its week even when newer incremental Daily CDRs follow it).
+        candidates = list(dict.fromkeys([*newer[:1], *(other_id for other_id in newer if info[other_id]['stage'] == 'weekly')]))
+        container = next((other_id for other_id in candidates if _contained(repository, by_id[dataset_id], by_id[other_id], memo)), None)
         if container is not None:
-            item.update(included=False, reason=f'Every call is in the newer Daily CDR {names[container]}', replaced_by=container)
+            label = CDR_STAGE_LABELS[info[container]['stage']]
+            item.update(included=False, reason=f'Every call is in the newer {label} CDR {names[container]}', replaced_by=container)
     for item in info.values():
         item['campaigns'] = sorted(item['campaigns'])
     return info

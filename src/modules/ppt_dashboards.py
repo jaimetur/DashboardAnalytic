@@ -1457,7 +1457,7 @@ def install_dashboard_routes(core):
 
     def ordered_ready_datasets(task_repository, nr_mode):
         """Return ready CDRs of one NR Mode per kind, newest first."""
-        # The CDRs of the combined tables: Final CDRs, and Daily CDRs until a Final CDR replaces them.
+        # The CDRs of the combined tables: Final CDRs, and Weekly and Daily CDRs until a Final CDR replaces them.
         included = core.combined_dataset_ids(task_repository)
         ready = [
             core.serialize_dataset_row(row) for row in task_repository.list_datasets()

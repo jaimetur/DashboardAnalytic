@@ -1,4 +1,4 @@
-"""Final and Daily CDRs: the stage suggested from the file name and the CDRs of the combined tables."""
+"""Final, Weekly and Daily CDRs: the stage suggested from the file name and the CDRs of the combined tables."""
 
 from io import BytesIO
 from pathlib import Path
@@ -52,6 +52,10 @@ def test_stage_is_suggested_from_the_file_name():
     assert infer_cdr_stage('UK_Voice_CDR_20260921.xlsx') == 'daily'
     assert infer_cdr_stage('Voice_Daily_2026-09-21.csv') == 'daily'
     assert infer_cdr_stage('UK_Q3_SA_2026_Voice_DailyCDR.xlsx') == 'daily'
+    assert infer_cdr_stage('20260910 Weekly Voice CDR UK Q3 NSA 20260901 - 20260909.xlsx') == 'weekly'
+    assert infer_cdr_stage('UK_Voice_CDR_Semana_36.xlsx') == 'weekly'
+    assert infer_cdr_stage('UK_Voice_CDR_wk36.xlsx') == 'weekly'
+    assert infer_cdr_stage('UK Q3 Voice Final week 6.xlsx') == 'final'
 
 
 def test_upload_saves_the_cdr_type_and_existing_cdrs_are_final(client, tmp_path):
@@ -66,7 +70,7 @@ def test_upload_saves_the_cdr_type_and_existing_cdrs_are_final(client, tmp_path)
     assert response.status_code == 303
     stages = {row['file_name']: row['cdr_stage'] for row in core.repository.list_datasets()}
     assert stages == {'UK_Voice_20260921.csv': 'daily', 'UK_Voice_Q3.csv': 'final'}
-    assert client.post('/datasets-analysis/upload', data={'dataset_kinds': 'voice', 'cdr_stages': 'weekly'},
+    assert client.post('/datasets-analysis/upload', data={'dataset_kinds': 'voice', 'cdr_stages': 'monthly'},
                        files={'dataset_files': ('x.csv', BytesIO(b'a\n1\n'), 'text/csv')}).status_code == 422
 
 
@@ -110,7 +114,7 @@ def test_final_cdrs_replace_the_daily_cdrs_of_their_campaign_in_the_combined_tab
     assert client.post(f'/datasets-analysis/delete/{final}', follow_redirects=False).status_code == 303
     wait_for_background_dataset_work()
     assert combined_ids() == {day_one, day_two}
-    assert client.post(f'/workspace/datasets/{day_one}/cdr-stage', json={'cdr_stage': 'weekly'}).status_code == 422
+    assert client.post(f'/workspace/datasets/{day_one}/cdr-stage', json={'cdr_stage': 'monthly'}).status_code == 422
     assert client.post(f'/workspace/datasets/{day_one}/in-combined', json={'in_combined': 'include'}).status_code == 422
 
 
@@ -122,6 +126,51 @@ def test_a_cumulative_daily_cdr_replaces_the_previous_ones_in_the_combined_table
     inclusion = combined_inclusion(core.repository)
     assert inclusion[first]['included'] is False and 'newer Daily CDR' in inclusion[first]['reason']
     assert combined_ids() == {second}
+
+
+def test_a_weekly_cdr_replaces_the_daily_cdrs_it_contains_until_the_final_cdr_arrives(client, tmp_path):
+    login(client)
+    daily = add_cdr(tmp_path, 'UK_Voice_20260921.xlsx', 'voice', voice(['0xA', '0xB'], '2026-09-21'), 'daily')
+    weekly = add_cdr(tmp_path, 'UK_Voice_Weekly_W39.xlsx', 'voice', voice(['0xA', '0xB', '0xC'], '2026-09-27'), 'weekly')
+    core.sync_combined_cdr_inclusion()
+    inclusion = combined_inclusion(core.repository)
+    assert inclusion[daily]['included'] is False
+    assert inclusion[daily]['reason'] == 'Every call is in the newer Weekly CDR UK_Voice_Weekly_W39.xlsx'
+    assert inclusion[weekly]['included'] is True and inclusion[weekly]['stage'] == 'weekly'
+    final = add_cdr(tmp_path, 'UK_Voice_Q3_Final.xlsx', 'voice', voice(['0xA', '0xB', '0xC'], '2026-09-30'), 'final')
+    core.sync_combined_cdr_inclusion()
+    inclusion = combined_inclusion(core.repository)
+    assert inclusion[weekly]['reason'] == 'Replaced by the Final CDR UK_Voice_Q3_Final.xlsx'
+    assert combined_ids() == {final}
+
+
+def test_daily_cdrs_in_a_weekly_cdr_stay_out_when_newer_daily_cdrs_follow_it(client, tmp_path):
+    login(client)
+    first = add_cdr(tmp_path, 'UK_Voice_20260921.xlsx', 'voice', voice(['0xA'], '2026-09-21'), 'daily')
+    weekly = add_cdr(tmp_path, 'UK_Voice_Weekly_W39.xlsx', 'voice', voice(['0xA', '0xB'], '2026-09-27'), 'weekly')
+    later = add_cdr(tmp_path, 'UK_Voice_20260928.xlsx', 'voice', voice(['0xC'], '2026-09-28'), 'daily')
+    core.sync_combined_cdr_inclusion()
+    inclusion = combined_inclusion(core.repository)
+    # The incremental Daily CDR of the next week does not hide that the Weekly CDR holds the first one.
+    assert inclusion[first]['reason'] == 'Every call is in the newer Weekly CDR UK_Voice_Weekly_W39.xlsx'
+    assert combined_ids() == {weekly, later}
+
+
+def test_weekly_and_daily_cards_show_only_with_cdrs(client, tmp_path):
+    login(client)
+    add_cdr(tmp_path, 'UK_Voice_Q3_Final.xlsx', 'voice', voice(['0xA'], '2026-09-30'), 'final')
+
+    def card(page, name):
+        return page.split(f'data-dataset-card="{name}"', 1)[1].split('>', 1)[0]
+
+    page = client.get('/workspace').text
+    assert ' hidden' in card(page, 'cdr-weekly') and ' hidden' in card(page, 'cdr-daily')
+    weekly = add_cdr(tmp_path, 'UK_Voice_Weekly_W39.xlsx', 'voice', voice(['0xB'], '2026-09-27'), 'weekly')
+    page = client.get('/workspace').text
+    assert ' hidden' not in card(page, 'cdr-weekly') and ' hidden' in card(page, 'cdr-daily')
+    weekly_card = page.split('data-dataset-card="cdr-weekly"', 1)[1].split('data-dataset-card="cdr-daily"', 1)[0]
+    assert f'data-dataset-id="{weekly}"' in weekly_card and 'Weekly CDRs' in weekly_card
+    assert '<option value="weekly" selected>Weekly</option>' in weekly_card
 
 
 def test_workspace_shows_the_cdrs_in_cards_with_their_type_and_combined_state(client, tmp_path):
@@ -163,3 +212,20 @@ def test_combined_tables_read_updating_while_they_follow_an_in_combined_change(c
     finally:
         with core.AUTO_CALCULATED_FIELD_JOBS_LOCK:
             core.AUTO_CALCULATED_FIELD_JOBS.pop('pending-sync', None)
+
+
+def test_cdr_selectors_highlight_weekly_and_daily_cdrs(client, tmp_path):
+    login(client)
+    final = add_cdr(tmp_path, 'UK_Voice_Q3_Final.xlsx', 'voice', voice(['0xA'], '2026-09-30', 'UK_Q2_SA_2026'), 'final')
+    weekly = add_cdr(tmp_path, 'UK_Voice_Weekly_W39.xlsx', 'voice', voice(['0xB'], '2026-09-27'), 'weekly')
+    daily = add_cdr(tmp_path, 'UK_Voice_20260928.xlsx', 'voice', voice(['0xC'], '2026-09-28'), 'daily')
+    core.sync_combined_cdr_inclusion()
+    page = client.get('/scoring').text
+
+    def option(dataset_id):
+        return next(part for part in page.split('<label class="scoring-dataset-option"')[1:]
+                    if f'value="{dataset_id}"' in part.split('</label>', 1)[0]).split('</label>', 1)[0]
+
+    assert 'data-cdr-stage="final"' in option(final) and 'cdr-stage-badge' not in option(final)
+    assert 'data-cdr-stage="weekly"' in option(weekly) and '<span class="cdr-stage-badge" data-cdr-stage="weekly">Weekly</span>' in option(weekly)
+    assert 'data-cdr-stage="daily"' in option(daily) and '<span class="cdr-stage-badge" data-cdr-stage="daily">Daily</span>' in option(daily)

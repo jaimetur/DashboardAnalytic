@@ -81,7 +81,7 @@ The same parsed decision tree drives in-memory previews and parameterized SQLite
 
 Combined reporting tables are intentionally compact. They always retain reporting-core fields, Preview filter fields, source fields required by applicable Auto-calculated Field rules and resulting calculated fields. Other template-requested source fields are added lazily when a chart/report first requires them. This avoids eagerly copying every source column for every template, which would make imports and template changes unnecessarily expensive.
 
-Materialization and combined-table recreation run in background jobs. Recreate rebuilds a CDR type from the ready individual datasets it includes (Final CDRs and the Daily CDRs no Final CDR replaces), reloads an inconsistent individual store from its source file when available, and verifies both per-dataset and total counts.
+Materialization and combined-table recreation run in background jobs. Recreate rebuilds a CDR type from the ready individual datasets it includes (Final CDRs and the Weekly and Daily CDRs no Final CDR replaces), reloads an inconsistent individual store from its source file when available, and verifies both per-dataset and total counts.
 
 ## Operator normalisation
 
