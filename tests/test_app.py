@@ -3581,6 +3581,28 @@ def test_transfer_owner_can_request_job_cancellation(client) -> None:
         app_module.TRANSFER_JOBS.pop(job_id, None)
 
 
+def test_workspace_transfer_offer_without_input_or_output_folders_is_accepted(client) -> None:
+    import src.DriveTestAnalyzer as app_module
+
+    # The offer the source sends for a complete workspace without its Input and Output folders.
+    manifest = app_module.archive_manifest('workspace', workspace_components=app_module.archive_workspace_components_for_target(
+        'workspace:default', include_generated_outputs=False, include_input_files=False,
+    ))
+    workspace_components = app_module.archive_workspace_components(manifest)
+    assert 'input' not in workspace_components and 'output' not in workspace_components
+    offer = client.post(
+        '/api/import-export/transfers/offers',
+        headers={'X-Dashboard-Transfer-Secret': 'workspace-without-folders-secret-long-enough'},
+        json={'source': 'Test source', 'archive_version': 1, 'kind': 'workspace',
+              'components': app_module.archive_manifest_components(manifest),
+              'workspace_components': workspace_components, 'content': 'Workspace', 'workspaces': ['UK']},
+    )
+    assert offer.status_code == 200, offer.text
+    offer_id = offer.json()['offer_id']
+    app_module.TRANSFER_OFFERS.pop(offer_id, None)
+    app_module.repository.delete_transfer_offer(offer_id)
+
+
 def test_admin_pages_during_reception_keep_the_package_being_received(client, monkeypatch, tmp_path) -> None:
     import src.DriveTestAnalyzer as app_module
 

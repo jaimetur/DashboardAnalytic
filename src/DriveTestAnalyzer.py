@@ -19027,7 +19027,8 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
     expected_workspace_components = archive_workspace_components(expected_manifest)
     valid_workspace_components = set(WORKSPACE_ARCHIVE_COMPONENTS)
     if kind in {'workspace', 'full-environment'} or any(target.startswith('workspace:') for target in targets):
-        required_workspace_components = {'workspace_database', 'input', 'report_templates', 'auto_calculated_fields'}
+        # The Input and Output folders are optional in a workspace export or transfer.
+        required_workspace_components = {'workspace_database', 'report_templates', 'auto_calculated_fields'}
         workspace_components_valid = (
             required_workspace_components <= set(workspace_components)
             and set(workspace_components) <= valid_workspace_components
