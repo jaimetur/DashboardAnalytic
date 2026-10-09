@@ -1508,12 +1508,13 @@ const timers = [];
 const messages = [];
 const requests = [];
 const context = {
-  calculationMatchKey: '', calculationMatchRevision: 0, calculationMatchTimer: null,
+  calculationMatchKey: '', calculationMatchRevision: 0, calculationMatchTimer: null, calculationMatchRefresh: false,
   submittingCalculation: false, jobsUrl: '/api/scoring/jobs',
   calculateButton: {disabled: false}, recalculateButton: {disabled: false},
   selectedLevels: () => ['City'], selectedDatasetIds: () => [12, 14],
   scoringProfileSelect: {value: 'profile-a'}, nrFilter: {value: 'NSA'},
   baselineInput: {value: 'Operator A'}, selectedContextFilters: () => ({Region: ['North']}),
+  areaSummaryPayload: () => null,
   normalizeStatus: job => job?.status || '', isActive: job => ['queued', 'processing'].includes(job?.status),
   setMessage: (text, kind = '') => messages.push({text, kind}),
   requestJson: (...args) => new Promise((resolve, reject) => requests.push({args, resolve, reject})),
@@ -1547,6 +1548,17 @@ async function main() {
   await flush();
   const active = [context.calculateButton.disabled, context.recalculateButton.disabled];
 
+  // The job polling checks the same selection again without enabling or disabling the buttons meanwhile.
+  context.calculateButton.disabled = false;
+  context.calculationMatchRefresh = true;
+  context.updateCalculationMatch(true);
+  const refreshing = [context.calculateButton.disabled, context.recalculateButton.disabled, requests.length];
+  timers.at(-1)();
+  requests.at(-1).resolve({job: {id: 9, status: 'queued'}});
+  await flush();
+  const refreshed = [context.calculateButton.disabled, context.recalculateButton.disabled];
+  timers.splice(3); requests.splice(3);
+
   context.calculationMatchKey = '';
   context.updateCalculationMatch(true);
   const staleRevision = context.calculationMatchRevision;
@@ -1562,7 +1574,7 @@ async function main() {
   const staleResponseIgnored = context.calculationMatchRevision > staleRevision
     && context.calculateButton.disabled === false && context.recalculateButton.disabled === true
     && messages.at(-1)?.text === latestMessage;
-  process.stdout.write(JSON.stringify({pending, noMatch, completed, active, staleResponseIgnored,
+  process.stdout.write(JSON.stringify({pending, noMatch, completed, active, refreshing, refreshed, staleResponseIgnored,
     matchUrl: requests[0].args[0], matchPayload: JSON.parse(requests[0].args[1].body)}));
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
@@ -1572,12 +1584,13 @@ main().catch(error => { console.error(error); process.exitCode = 1; });
     assert result['noMatch'] == [False, True, 'Ready to calculate a new scoring job.']
     assert result['completed'] == [True, False]
     assert result['active'] == [True, True]
+    assert result['refreshing'] == [False, True, 3] and result['refreshed'] == [True, True]
     assert result['staleResponseIgnored'] is True
     assert result['matchUrl'] == '/api/scoring/jobs/match'
     assert result['matchPayload'] == {
         'dataset_ids': [12, 14], 'aggregation_levels': ['Operator', 'City'],
         'scoring_profile_id': 'profile-a', 'nr_mode': 'NSA', 'baseline_operator': 'Operator A',
-        'context_filters': {'Region': ['North']},
+        'context_filters': {'Region': ['North']}, 'area_summary': None,
     }
 
 
@@ -1601,6 +1614,9 @@ def test_kpi_gap_profile_and_points_lost_map_share_location_and_operators():
     controls = script[script.index('  function gapInsightControls(pane, items) {'):script.index('  function renderKpiGapProfiles(')]
     # One location, several operators: shared by both sections.
     assert "insightSelect('gap-insight-scope'" in controls
+    # Locations by campaign are listed chronologically, the latest chosen by default.
+    assert "scopes.sort(([, left], [, right]) => globalThis.campaignCompare(left.campaign, right.campaign));" in controls
+    assert "let scope = (byCampaign ? scopes.at(-1) : scopes[0])?.[0] ?? '{}';" in controls
     assert "chip.dataset.gapInsightOperator = item.operator;" in controls
     profiles = script[script.index('  function renderKpiGapProfiles('):script.index('  // Points lost per area:')]
     assert 'gapInsightControls(pane, profiles)' in profiles and "inScope.filter(item => chosen.includes(item.operator))" in profiles
@@ -1661,3 +1677,87 @@ def test_the_calculation_message_stays_while_the_selected_job_calculates():
     assert "const verb = recalculatingJobs.has(String(jobIdOf(existing))) ? 'Recalculating' : 'Calculating';" in script
     assert "} else if (selectionStatus.key && selectionStatus.key === JSON.stringify(calculationPayload())) {" in script
     assert 'already queued or running' not in script
+
+
+def test_a_calculating_job_shows_an_animated_progress_bar_instead_of_placeholders():
+    script = SCORING_SCRIPT.read_text(encoding='utf-8')
+    template = SCORING_TEMPLATE.read_text(encoding='utf-8')
+    load_job = _function_source(script, 'loadJob')
+    # The selected active job shows the bar at once and at every poll, never Loading… or the waiting message.
+    assert 'if (isActive(job)) renderCalculating(job);' in load_job
+    # The results of a saved job load under the same striped bar, across its whole width.
+    assert 'else renderLoadingResults();' in load_job
+    assert 'Loading Scoring Results…' in _function_source(script, 'renderLoadingResults')
+    assert "} else if (isActive(record)) {" in load_job and 'renderCalculating(record);' in load_job
+    calculating = _function_source(script, 'renderCalculating')
+    assert 'Calculating Scoring…' in calculating and "current.forEach(update);" in calculating
+    assert '@keyframes scoring-calculating-stripes' in template
+    # The job polling checks the selection again without toggling the buttons.
+    assert 'calculationMatchRefresh = true;' in _function_source(script, 'refreshJobs')
+
+
+@pytest.mark.skipif(not shutil.which('node'), reason='Node.js is required')
+def test_scoring_jobs_show_their_calculation_time_or_elapsed_time():
+    script = SCORING_SCRIPT.read_text(encoding='utf-8')
+    program = r'''
+const valueOf = (job, keys, fallback) => keys.map(key => job[key]).find(value => value !== undefined && value !== null && value !== '') ?? fallback;
+const isActive = job => ['queued', 'processing'].includes(job.status);
+''' + _function_source(script, 'jobDurationText') + r'''
+const now = Date.parse('2026-10-09T18:00:00+02:00');
+process.stdout.write(JSON.stringify([
+  jobDurationText({status: 'completed', started_at: '2026-10-09T17:58:35+02:00', finished_at: '2026-10-09T17:59:20+02:00'}, now),
+  jobDurationText({status: 'completed', started_at: '2026-10-09T17:55:00+02:00', finished_at: '2026-10-09T17:58:07+02:00'}, now),
+  jobDurationText({status: 'processing', started_at: '2026-10-09T16:40:00+02:00'}, now),
+  jobDurationText({status: 'queued', started_at: ''}, now),
+  jobDurationText({status: 'failed', started_at: '2026-10-09T17:55:00+02:00'}, now),
+]));
+'''
+    assert _run_node_json(program, {}) == ['45 s', '3 min 07 s', '1 h 20 min', '', '']
+    assert "durationMeta.textContent = isActive(job) ? 'Elapsed: ' : 'Calculation time: ';" in script
+
+
+@pytest.mark.skipif(not shutil.which('node'), reason='Node.js is required')
+def test_campaign_comparison_compares_the_chosen_baseline_and_campaign():
+    script = SCORING_SCRIPT.read_text(encoding='utf-8')
+    render = _function_source(script, 'renderCampaignComparisons')
+    assert "'Operator'" in render and "'Baseline campaign'" in render and "'Compared campaign'" in render
+    assert "String(campaigns.length - 2)" in render and "String(campaigns.length - 1)" in render
+    program = _function_source(script, 'campaignComparisonRows') + r'''
+const comparison = {campaigns: ['25-Q4', '26-Q1', '26-Q2'], kpis: [
+  {kpi_code: 'a', kpi: 'A', service: 'data', values: [{value: 1, points: 10}, {value: 2, points: 12}, {value: 3, points: 9}]},
+  {kpi_code: 'b', kpi: 'B', service: 'voice', values: [{value: 4, points: 5}, null, {value: 6, points: 8}]},
+]};
+process.stdout.write(JSON.stringify([campaignComparisonRows(comparison, 0, 2), campaignComparisonRows(comparison, 1, 2)]));
+'''
+    first, second = json.loads(subprocess.run(['node', '-e', program], capture_output=True, text=True, check=True).stdout)
+    assert [(row['kpi_code'], row['delta']) for row in first['rows']] == [('a', -1), ('b', 3)]
+    assert first['total_delta'] == 2
+    # A KPI without points in one of the campaigns has no Δ and goes last.
+    assert [(row['kpi_code'], row['delta']) for row in second['rows']] == [('a', -3), ('b', None)]
+    assert second['total_delta'] == -3
+
+
+@pytest.mark.skipif(not shutil.which('node'), reason='Node.js is required')
+def test_scoring_jobs_show_their_national_and_area_summary():
+    script = SCORING_SCRIPT.read_text(encoding='utf-8')
+    assert "areaMeta.textContent = 'National & area summary: ';" in _function_source(script, 'renderJobs')
+    program = _function_source(script, 'jobAreaSummaryText') + r'''
+process.stdout.write(JSON.stringify([
+  jobAreaSummaryText({area_summary: {time_split: 'Campaign', breakdown: 'Region', cities: ['London']}}),
+  jobAreaSummaryText({area_summary: {time_split: 'All', breakdown: null, cities: ['London', 'Leeds']}}),
+  jobAreaSummaryText({area_summary: null}),
+]));
+'''
+    shown = json.loads(subprocess.run(['node', '-e', program], capture_output=True, text=True, check=True).stdout)
+    assert shown == ['Time split: Campaign · Breakdown: Region · Separate cities: London',
+                     'Time split: All selected CDRs · Breakdown: None · Separate cities: London, Leeds', '']
+
+
+def test_the_scoring_trend_comes_before_the_national_and_areas():
+    charts = _function_source(SCORING_SCRIPT.read_text(encoding='utf-8'), 'renderInsightCharts')
+    assert charts.index("insightItems(payload, 'campaign_trends', environment)") < charts.index(
+        "insightItems(payload, 'area_summaries', environment)")
+    # The titles of the area charts: National, the separate cities and the breakdown in their own colours.
+    chart = _function_source(SCORING_SCRIPT.read_text(encoding='utf-8'), 'makeAreaTrendChart')
+    assert "area.kind === 'National' ? 'is-national' : area.kind === 'City' ? 'is-city' : 'is-breakdown'" in chart
+

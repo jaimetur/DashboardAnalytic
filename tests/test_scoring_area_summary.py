@@ -1,7 +1,11 @@
 """National & Area Summary: the National scoring next to chosen cities and each Region, Cluster or City."""
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
 from io import BytesIO
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -16,6 +20,7 @@ from src.modules.scoring_exports import export_scoring_report
 from src.modules.scoring_reports import default_scenario, has_geographic_filters, normalize_report_configuration
 from tests.scoring_synthetic import synthetic_result
 from tests.test_scoring_exports import TEMPLATE
+from tests.test_scoring_api import scoring_api  # noqa: F401  (fixture)
 from tests.test_scoring_most_reliable import _reliable_configuration
 
 SUMMARY_TITLE = 'Best Network — National & Areas'
@@ -127,6 +132,42 @@ def _synthetic_report(campaigns=('2026-Q1', '2026-Q2'), with_summary=True):
     scenario['scorings']['most_reliable']['enabled'] = False
     scenario = normalize_report_configuration({'scenarios': [scenario]})['scenarios'][0]
     return Presentation(BytesIO(export_scoring_report([{'scenario': scenario, 'job': job, 'result': result}], TEMPLATE)))
+
+
+def test_an_area_not_measured_in_the_latest_campaign_keeps_its_trend_without_a_score():
+    levels = ('Operator', 'Campaign')
+    job, result = synthetic_result(levels=levels, campaigns=('2026-Q1', '2026-Q2'))
+    # London was measured in the first campaign only (the latest one is still being measured).
+    _job, london = synthetic_result(levels=('Operator', 'City', 'Campaign'), cities=('London',), campaigns=('2026-Q1',))
+    result['area_summary'] = {'breakdown': None, 'cities': ['London'], 'passes': [
+        {'kind': 'National', 'field': None, 'levels': list(levels), 'reuses_job': True},
+        {'kind': 'City', 'field': 'city', 'levels': [*levels, 'City'], 'cities': ['London'], 'reuses_job': False,
+         'result': {key: value for key, value in london.items() if key != 'configuration'}},
+    ]}
+    combined = next(item for item in build_area_summary(job, result) if item['environment'] == 'Combined')
+    national, city = combined['areas']
+    assert (national['measured'], city['label'], city['measured']) == (True, 'London', False)
+    assert {row['operator'] for row in city['rows']} == {row['operator'] for row in national['rows']}
+    for row in city['rows']:
+        assert (row['points'], row['delta'], row['gap']) == (None, None, None)
+        assert row['trend'][0] is not None and row['trend'][1] is None
+
+
+@pytest.mark.skipif(not shutil.which('node'), reason='Node.js is required')
+def test_a_single_separate_city_is_charted_next_to_national_and_several_after_the_breakdown():
+    script = (Path(__file__).resolve().parents[1] / 'src/web_interface/static/js/scoring.js').read_text(encoding='utf-8')
+    start = script.index('  function areaChartOrder(')
+    source = script[start:script.index('\n  }\n', start) + 4]
+    program = source + r"""
+const area = (label, kind) => ({label, kind});
+const one = [area('National', 'National'), area('London', 'City'), area('North', 'Region'), area('South', 'Region')];
+const two = [area('National', 'National'), area('London', 'City'), area('Leeds', 'City'), area('North', 'Region')];
+const cities = [area('National', 'National'), area('London', 'City'), area('Leeds', 'City')];
+process.stdout.write(JSON.stringify([one, two, cities].map(areas => areaChartOrder(areas).map(item => item.label))));
+"""
+    orders = json.loads(subprocess.run(['node', '-e', program], capture_output=True, text=True, check=True).stdout)
+    assert orders == [['National', 'London', 'North', 'South'], ['National', 'North', 'London', 'Leeds'],
+                      ['National', 'London', 'Leeds']]
 
 
 def test_report_adds_the_national_and_areas_slide():
@@ -263,3 +304,56 @@ def test_the_area_summary_has_its_own_time_split(monkeypatch):
     scenario['area_summary']['time_split'] = 'Monthly'
     assert core._scenario_area_summary(None, scenario) == {'breakdown': 'Region', 'cities': ['London'],
                                                            'time_split': 'Monthly'}
+
+
+def test_the_scoring_page_calculates_and_shows_the_national_and_areas(scoring_api, monkeypatch):
+    from types import ModuleType
+
+    from src.modules import scoring_jobs
+
+    client = scoring_api['client']
+    repository = scoring_api['repository']
+    repository.replace_scoring_configuration(_reliable_configuration())
+    engine = ModuleType('src.modules.scoring')
+    engine.METHOD_VERSION = 'scoring-area-summary-api-test'
+    engine.required_input_columns = lambda kind, levels: [*levels, 'score']
+    engine.calculate_scoring = lambda frames, levels, *, baseline_operator, configuration=None, **kwargs: (
+        scoring_engine.calculate_scoring({'voice': pd.DataFrame(ROWS)}, levels, baseline_operator=baseline_operator,
+                                         configuration=configuration, **kwargs))
+    monkeypatch.setattr(scoring_jobs, '_scoring_engine', lambda: engine)
+    request = {'dataset_ids': scoring_api['complete_dataset_ids'], 'aggregation_levels': ['Operator'], 'nr_mode': 'NSA',
+               'baseline_operator': 'EE', 'area_summary': {'time_split': 'All', 'breakdown': 'Region', 'cities': []}}
+    # The summary needs the whole country.
+    filtered = client.post('/api/scoring/jobs', json={**request, 'context_filters': {'City': ['London']}})
+    assert filtered.status_code == 400 and 'whole country' in filtered.json()['detail']
+    created = client.post('/api/scoring/jobs', json=request)
+    assert created.status_code == 200, created.text
+    job_id = created.json()['job']['id']
+    assert created.json()['job']['area_summary'] == {'breakdown': 'Region', 'cities': [], 'time_split': 'All'}
+    scoring_jobs.run_scoring_job(repository, job_id)
+    assert client.post('/api/scoring/jobs/match', json=request).json()['job']['id'] == job_id
+    # A calculation without the summary is another job.
+    assert client.post('/api/scoring/jobs/match', json={**request, 'area_summary': None}).json()['job'] is None
+    result = client.get(f'/api/scoring/jobs/{job_id}').json()
+    assert 'area_summary' not in result
+    summaries = result['views']['insights']['area_summaries']
+    combined = next(item for item in summaries if item['environment'] == 'Combined')
+    assert [area['label'] for area in combined['areas']] == ['National', 'Vendor A', 'VMO2 North']
+    reliable = result['scorings']['most_reliable']['views']['insights']['area_summaries']
+    assert reliable and reliable[0]['areas'][0]['label'] == 'National'
+
+
+def test_the_calculation_selection_keeps_the_national_and_area_summary(scoring_api):
+    client = scoring_api['client']
+    assert client.get('/api/scoring/selection').json()['selection']['area_summary'] == {
+        'enabled': False, 'time_split': 'Campaign', 'breakdown': 'Region', 'cities': ['London']}
+    selection = client.get('/api/scoring/selection').json()['selection']
+    summary = {'enabled': True, 'time_split': 'weekly', 'breakdown': 'cluster', 'cities': ['London', 'Leeds']}
+    saved = client.put('/api/scoring/selection', json={'selection': {**selection, 'area_summary': summary}}).json()
+    assert saved['selection']['area_summary'] == {'enabled': True, 'time_split': 'Weekly', 'breakdown': 'Cluster',
+                                                  'cities': ['London', 'Leeds']}
+    assert client.get('/api/scoring/selection').json()['selection']['area_summary']['time_split'] == 'Weekly'
+    page = client.get('/scoring').text
+    for marker in ('data-scoring-area-enabled', 'Include National &amp; area summary', 'data-scoring-area-time-split',
+                   'data-scoring-area-breakdown', 'data-scoring-area-cities'):
+        assert marker in page

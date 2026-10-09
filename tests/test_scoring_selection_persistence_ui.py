@@ -104,6 +104,7 @@ def test_cdr_shortcuts_select_latest_two_or_all_visible_and_keep_gap_reference_i
     ))
     handlers = script[handler_start:handler_end]
     program = r'''
+const selectedAreaSummary = () => ({enabled: false});
 const selectedIds = [];
 const datasetInputs = [];
 const datasetOptions = [];
@@ -163,6 +164,7 @@ main().catch(error => {console.error(error); process.exitCode = 1;});
         'nr_mode': 'NSA', 'baseline_operator': 'GAP reference O2',
         'scoring_profile_id': 'methodology-1',
         'context_filters': {'Region': [], 'City': [], 'Operator': [], 'Vendor': [], 'Campaign': []},
+        'area_summary': {'enabled': False},
     }
     assert result['updateCount'] == 3
     assert result['saveCount'] == 3
@@ -299,6 +301,8 @@ process.stdout.write(JSON.stringify({queued, persisted}));
         'context_filters': {
             'Region': ['North'], 'City': [], 'Operator': ['EE'], 'Vendor': [], 'Campaign': ['Spring'],
         },
+        # A job without the National & area summary leaves it out.
+        'area_summary': {'enabled': False},
     }
     assert result['queued']['selectionDirty'] is True
     assert result['queued']['selectionSaveTimer'] == 42
@@ -329,6 +333,8 @@ def test_job_selection_restoration_clears_filters_on_actual_controls():
     restore = _function_source(script, 'restoreCalculationSelectionFromJob')
     program = r'''
 let restoringSelection = false, message = '';
+const areaSummaryEnabled = null, areaSummaryTimeSplit = null, areaSummaryBreakdown = null, areaSummaryCities = null;
+const syncAreaSummary = () => {}, refreshAreaSummaryCities = () => {};
 const selectionFieldOrder = ['Region', 'City'];
 const nrFilter = {value: 'NSA', options: [{value: 'NSA'}, {value: 'NR'}]};
 const datasetInput = {value: '8', checked: true, closest: () => ({hidden: false})};
@@ -397,6 +403,7 @@ const contextFilterOptions = (key, values) => values.map(value => ({value, label
 const scoringVendorName = value => value;
 const mainCityIdentities = new Set();
 const decorateOperatorOptions = () => {};
+const refreshAreaSummaryCities = () => {};
 const document = {createElement: () => ({value: '', textContent: '', selected: false, disabled: false, dataset: {}, style: {}})};
 const Event = class {constructor(type) {this.type = type;}};
 const select = {

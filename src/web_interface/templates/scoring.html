@@ -62,6 +62,12 @@
   .scoring-dataset-group .scoring-dataset-list { grid-template-columns: 1fr; max-height: 11rem; }
   .scoring-dataset-option { display: flex; align-items: flex-start; gap: .65rem; min-width: 0; padding: .62rem .7rem; border: 1px solid rgba(25,42,53,.09); border-radius: 11px; background: rgba(255,255,255,.76); cursor: pointer; }
   .scoring-dataset-option[hidden] { display: none; }
+  /* The National & area summary: its settings are enabled while it is included. */
+  .scoring-area-toggle { display: inline-flex; align-items: center; gap: .5rem; cursor: pointer; }
+  .scoring-area-toggle input { width: 1rem; height: 1rem; margin: 0; accent-color: var(--brand); }
+  .scoring-area-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 16rem)); gap: .6rem 1rem; }
+  .scoring-area-grid label { display: grid; gap: .3rem; font-size: .82rem; font-weight: 700; color: #31545a; }
+  .scoring-area-summary:not(.is-included) .scoring-area-grid { opacity: .55; }
   /* Weekly and Daily CDRs stand out from the Final CDRs, as when they are uploaded. */
   .scoring-dataset-option[data-cdr-stage="daily"] { border: 1px dashed rgba(240, 122, 26, .75); background: #fff8ef; }
   .scoring-dataset-option[data-cdr-stage="weekly"] { border: 1px dashed rgba(123, 92, 196, .75); background: #f7f3ff; }
@@ -194,6 +200,39 @@
   [data-result-pane] > * > :is(.scoring-table-section-title, h4):first-child { margin-top: 0; }
   .scoring-insight-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(30rem, 1fr)); gap: 1rem; }
   .scoring-insight-table-wrap { overflow-x: auto; }
+  /* National & Areas: the table next to a trend chart per area. */
+  .scoring-area-summary-view { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: .8rem 1rem; align-items: start; }
+  .scoring-area-summary-view > .scoring-note { grid-column: 1 / -1; margin: 0; }
+  /* National & Areas table: larger figures, a band per area, a dot in the colour of each operator and arrows on the changes. */
+  table.scoring-area-summary-table { font-size: .92rem; border-collapse: separate; border-spacing: 0; overflow: hidden; border: 1px solid #dde5eb; border-radius: 12px; }
+  table.scoring-area-summary-table th { padding: .55rem .75rem; background: linear-gradient(180deg, #f0f4f7, #e2e9ee); color: #2b3f4c; font-size: .74rem; letter-spacing: .05em; text-transform: uppercase; }
+  table.scoring-area-summary-table td { padding: .42rem .75rem; border-bottom: 0; }
+  table.scoring-area-summary-table tbody tr:nth-child(n) td { background-color: #fff; }
+  table.scoring-area-summary-table tbody tr.is-area-shaded td { background-color: #f5f8fa; }
+  table.scoring-area-summary-table tbody tr.is-area-start:not(:first-child) td { border-top: 2px solid #dde5eb; }
+  table.scoring-area-summary-table tbody tr:hover td { background-color: #eef4f8; }
+  table.scoring-area-summary-table td.scoring-area-name { box-shadow: inset 4px 0 0 #1450a8; color: #17232d; font-size: .98rem; font-weight: 800; }
+  table.scoring-area-summary-table td.scoring-area-name.is-national { box-shadow: inset 4px 0 0 #c58a00; color: #8a5a00; }
+  table.scoring-area-summary-table td.scoring-area-name.is-unmeasured { color: #7a8a96; }
+  table.scoring-area-summary-table td.scoring-area-operator { font-size: .98rem; font-weight: 800; }
+  table.scoring-area-summary-table td.scoring-area-operator::before { content: ''; display: inline-block; width: .62rem; height: .62rem; margin-right: .5rem; border-radius: 50%; background: currentColor; vertical-align: .05rem; }
+  table.scoring-area-summary-table td.scoring-area-score { font-size: 1.08rem; font-weight: 800; text-align: center; }
+  table.scoring-area-summary-table :is(th, td):nth-child(n+3) { text-align: center; }
+  table.scoring-area-summary-table td.scoring-area-reference { font-weight: 800; }
+  table.scoring-area-summary-table td:is(.scoring-area-gain, .scoring-area-loss) { font-size: .95rem; font-weight: 800; text-align: center; }
+  table.scoring-area-summary-table td.scoring-area-gain { color: #2f8a57; }
+  table.scoring-area-summary-table td.scoring-area-loss { color: #c62828; }
+  table.scoring-area-summary-table td.scoring-area-gain::before { content: '▲ '; font-size: .7em; }
+  table.scoring-area-summary-table td.scoring-area-loss::before { content: '▼ '; font-size: .7em; }
+  .scoring-area-missing { margin: .45rem 0 0; }
+  .scoring-area-trend-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; }
+  .scoring-area-trend { margin: 0; }
+  .scoring-area-trend figcaption { color: #1450a8; font-size: .78rem; font-weight: 800; }
+  .scoring-area-trend figcaption.is-national { color: #b07400; }
+  .scoring-area-trend figcaption.is-city { color: #8e3fb5; }
+  .scoring-area-trend figcaption.is-breakdown { color: #1450a8; }
+  .scoring-area-trend svg { display: block; width: 100%; height: auto; }
+  @media (max-width: 900px) { .scoring-area-summary-view { grid-template-columns: minmax(0, 1fr); } }
   .scoring-insight-banner { padding: .3rem .6rem; background: #c8102e; color: #fff; font-weight: 800; text-align: right; font-size: .85rem; }
   .scoring-insight-table { width: 100%; min-width: 0; border-collapse: collapse; font-size: .72rem; }
   .scoring-insight-table th { padding: .3rem .4rem; background: #e9ecef; color: #263746; text-align: left; font-weight: 750; white-space: normal; vertical-align: bottom; }
@@ -257,7 +296,7 @@
   .scoring-content-zoom-rect { position: absolute; z-index: 3; border: 1.5px dashed #1f6fd1; background: rgba(31, 111, 209, .12); pointer-events: none; }
   .scoring-insight-reliable { text-decoration: underline; }
   .scoring-insight-note { margin: .6rem 0 0; color: #4a5b65; font-size: .78rem; }
-  .scoring-insight-compare { max-width: 68rem; overflow-x: auto; }
+  .scoring-insight-compare { overflow-x: auto; }
   .scoring-insight-total { margin: .5rem 0 0; text-align: right; font-weight: 800; }
   .scoring-insight-loss { color: #c62835; }
   .scoring-insight-gain { color: #2f8a3e; }
@@ -386,6 +425,18 @@
   .scoring-tone-3 { --operator-accent: #927031; }
   .scoring-tone-4 { --operator-accent: #795a9c; }
   .scoring-empty { padding: 2rem 1rem; color: var(--muted); text-align: center; font-size: .84rem; }
+  /* A calculating job: blue and white stripes moving along the bar, like a barber pole. */
+  .scoring-calculating { --calc-strong: #1f6fd1; --calc-soft: #6aa8f0; --calc-title: #1450a8; --calc-track: #eef5fe; --calc-border: #9cc1ef;
+    display: grid; justify-items: center; gap: .7rem; padding: 2.4rem 1rem; }
+  /* In Scoring Tables and GAP Analysis the bar takes the colour of their tab. */
+  [data-result-pane="scoring"] .scoring-calculating { --calc-strong: #0f766e; --calc-soft: #4fb3a7; --calc-title: #0f766e; --calc-track: #ecf8f6; --calc-border: #9fd6cf; }
+  [data-result-pane="gap"] .scoring-calculating { --calc-strong: #c2410c; --calc-soft: #f08a5d; --calc-title: #c2410c; --calc-track: #fff3ec; --calc-border: #f4b99c; }
+  .scoring-calculating-title { margin: 0; color: var(--calc-title); font-size: 1.05rem; font-weight: 800; letter-spacing: .01em; }
+  .scoring-calculating-bar { width: min(36rem, 100%); height: 1.15rem; overflow: hidden; border: 1px solid var(--calc-border); border-radius: 999px; background: var(--calc-track); box-shadow: inset 0 1px 3px color-mix(in srgb, var(--calc-strong) 18%, transparent); }
+  .scoring-calculating-fill { display: block; height: 100%; border-radius: inherit; background: repeating-linear-gradient(-45deg, var(--calc-strong) 0 .7rem, var(--calc-soft) .7rem 1.05rem, #ffffff 1.05rem 1.4rem, var(--calc-soft) 1.4rem 1.75rem); background-size: 2.475rem 2.475rem; box-shadow: 0 0 12px color-mix(in srgb, var(--calc-strong) 45%, transparent); transition: width .6s ease; animation: scoring-calculating-stripes .9s linear infinite; }
+  .scoring-calculating-detail { margin: 0; color: #4a5b65; font-size: .8rem; font-weight: 650; }
+  @keyframes scoring-calculating-stripes { from { background-position: 0 0; } to { background-position: 2.475rem 0; } }
+  @media (prefers-reduced-motion: reduce) { .scoring-calculating-fill { animation: none; } }
   .scoring-chart-grid { display: grid; grid-template-columns: minmax(0,1fr); gap: .8rem; }
   .scoring-best-network-layout { display: grid; grid-template-columns: minmax(0,2fr) minmax(17rem,1fr); gap: .8rem; align-items: stretch; }
   .scoring-best-network-layout .scoring-chart-card { min-width: 0; }
@@ -541,6 +592,27 @@
         <span class="scoring-config-shortcuts scoring-levels-shortcut"><a data-config-shortcut="hierarchy" href="#" role="button" data-scoring-hierarchy-open title="Order the aggregation hierarchy of the application"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="7" y="2" width="6" height="4" rx="1"/><path d="M10 6v4M4 14v-4h12v4"/><rect x="1" y="14" width="6" height="4" rx="1"/><rect x="13" y="14" width="6" height="4" rx="1"/></svg><span>Aggregation hierarchy</span></a></span>
       </div>
       <p class="scoring-context-filter-note scoring-levels-note">Operator is required.</p>
+    </div>
+    <div class="scoring-picker scoring-area-summary" data-scoring-area-summary>
+      <div class="scoring-picker-head"><label class="scoring-area-toggle"><input type="checkbox" data-scoring-area-enabled><strong>Include National &amp; area summary</strong></label></div>
+      <div class="scoring-area-grid">
+        <label>Time split
+          <select data-scoring-area-time-split aria-label="Time split of the National &amp; area summary" title="All selected CDRs aggregates every selected CDR into one value; Campaign splits by campaign; Daily to Yearly split by the period of the start time of each test">
+            {% for value, label in [('All', 'All selected CDRs'), ('Campaign', 'Campaign'), ('Daily', 'Daily'), ('Weekly', 'Weekly'), ('Monthly', 'Monthly'), ('Quarterly', 'Quarterly'), ('Yearly', 'Yearly')] %}<option value="{{ value }}"{% if value == 'Campaign' %} selected{% endif %}>{{ label }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Breakdown
+          <select data-scoring-area-breakdown aria-label="Breakdown of the National &amp; area summary">
+            {% for value in ['None', 'Region', 'Cluster', 'City'] %}<option value="{{ value }}"{% if value == 'Region' %} selected{% endif %}>{{ value }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Separate cities
+          <select multiple size="1" data-scoring-area-cities data-multiselect-auto-close="1000" data-multiselect-empty-label="None" aria-label="Separate cities of the National &amp; area summary">
+            <option value="London" selected>London</option>
+          </select>
+        </label>
+      </div>
+      <p class="scoring-context-filter-note">The National scoring next to the separate cities and each area of the breakdown, each scored with its own measurements, in the National &amp; Areas chart of the results and slide of the reports. It is only available for the whole country: including it clears and disables the Region, Cluster and City filters. Its time split applies to it only.</p>
     </div>
     <div class="scoring-picker" aria-labelledby="scoring-gap-reference-title">
       <div class="scoring-picker-head"><strong id="scoring-gap-reference-title">GAP reference operator</strong></div>

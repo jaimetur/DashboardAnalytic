@@ -184,6 +184,8 @@ def build_area_summary(job: dict[str, Any], result: dict[str, Any], operator_map
                                     vendor_mapping_groups=vendor_mapping_groups)
         field = item.get('field')
         single = _single_value(source.get('scoring') or [], field) if field else None
+        # An area measured in a single campaign has no campaign in its scope: it is that campaign.
+        single_campaign = _single_value(source.get('scoring') or [], 'campaign') if 'Campaign' in item['levels'] else None
         by_label: dict[str, dict[str, Any]] = {}
         for scope, tables in _scopes(views.get('score_tables', [])).items():
             context = dict(scope)
@@ -191,7 +193,7 @@ def build_area_summary(job: dict[str, Any], result: dict[str, Any], operator_map
             if label in (None, ''):
                 continue
             area = by_label.setdefault(str(label), {'label': str(label), 'kind': item['kind'], 'campaigns': {}})
-            area['campaigns'][context.get('campaign')] = tables
+            area['campaigns'][context.get('campaign') or single_campaign] = tables
         found = list(by_label.values())
         if item['kind'] == 'City' or (field == 'city' and chosen):
             # The chosen cities first, in the order they were chosen.
@@ -234,9 +236,14 @@ def _environment_summary(areas: list[dict[str, Any]], environment: str,
             scaled = scaled or summary['scaled']
             points[campaign] = {item['operator']: item for item in summary['operators']}
         current = points.get(latest) if latest is not None else points.get(None)
-        if not current:
-            continue
-        before = points.get(previous) if previous is not None else None
+        # An area without measurements in the latest campaign (one still being measured, for example) keeps its
+        # operators and trend, without a score: those of the latest campaign it was measured in.
+        measured = bool(current)
+        if not measured:
+            current = next((points[campaign] for campaign in reversed(campaigns) if points.get(campaign)), None)
+            if not current:
+                continue
+        before = points.get(previous) if previous is not None and measured else None
         reference = next((item for item in current.values() if item['is_reference']), None)
         rows = []
         for operator, item in current.items():
@@ -247,16 +254,17 @@ def _environment_summary(areas: list[dict[str, Any]], environment: str,
             prior = (before or {}).get(operator)
             rows.append({
                 'operator': operator, 'label': item['label'], 'color': item['color'],
-                'is_reference': item['is_reference'], 'points': item['total'], 'complete': item['complete'],
-                'gap': None if reference is None or item['is_reference'] else item['total'] - reference['total'],
+                'is_reference': item['is_reference'], 'points': item['total'] if measured else None,
+                'complete': item['complete'] or not measured, 'order': item['total'],
+                'gap': None if reference is None or item['is_reference'] or not measured else item['total'] - reference['total'],
                 'delta': None if prior is None else item['total'] - prior['total'],
                 'trend': [((points.get(campaign) or {}).get(operator) or {}).get('total') for campaign in campaigns],
             })
         if not rows:
             continue
         # The reference first, then the operators from the highest score.
-        rows.sort(key=lambda row: (not row['is_reference'], -row['points']))
-        rows_by_area.append({'label': area['label'], 'kind': area['kind'], 'rows': rows})
+        rows.sort(key=lambda row: (not row['is_reference'], -row.pop('order')))
+        rows_by_area.append({'label': area['label'], 'kind': area['kind'], 'measured': measured, 'rows': rows})
     # National alone summarises nothing.
     if len(rows_by_area) < 2:
         return None

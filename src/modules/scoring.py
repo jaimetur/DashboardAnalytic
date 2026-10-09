@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 import re
+from functools import lru_cache
 from typing import Iterable
 
 import pandas as pd
@@ -269,6 +270,7 @@ def _key_name(value: str) -> str:
     return re.sub(r'[^a-z0-9]+', '_', value.casefold()).strip('_')
 
 
+@lru_cache(maxsize=4096)
 def _operator_identity(value: str) -> str:
     identity = column_identity(value)
     if identity.endswith('uk'):
@@ -276,10 +278,14 @@ def _operator_identity(value: str) -> str:
     return 'ee' if identity in {'ee', 'everythingeverywhere'} else identity
 
 
-def _is_baseline(value: str, baseline_operator: str, baseline_aliases: Iterable[str]) -> bool:
+@lru_cache(maxsize=256)
+def _baseline_identities(baseline_operator: str, baseline_aliases: tuple[str, ...]) -> frozenset[str]:
     aliases = {str(baseline_operator), *(str(alias) for alias in baseline_aliases)}
-    identities = {_operator_identity(alias) for alias in aliases if alias.strip()}
-    return _operator_identity(str(value)) in identities
+    return frozenset(_operator_identity(alias) for alias in aliases if alias.strip())
+
+
+def _is_baseline(value: str, baseline_operator: str, baseline_aliases: Iterable[str]) -> bool:
+    return _operator_identity(str(value)) in _baseline_identities(str(baseline_operator), tuple(baseline_aliases))
 
 
 def calculate_scoring(
@@ -512,10 +518,11 @@ def calculate_scoring(
 def _gap_rows(rows: list[dict], keys: list[str], baseline_operator: str, baseline_aliases: list[str],
               warnings: list[str]) -> list[dict]:
     gap = []
+    references = _reference_index(rows, 'kpi_code', keys, baseline_operator, baseline_aliases)
     for row in rows:
         if _is_baseline(str(row['operator']), baseline_operator, baseline_aliases):
             continue
-        baseline = _reference_for(row, rows, 'kpi_code', keys, baseline_operator, baseline_aliases)
+        baseline = _reference_for(row, references, 'kpi_code', keys)
         if baseline is None:
             warnings.append(f'Baseline {baseline_operator} is unavailable for one or more comparison groups.')
         elif baseline['weighted_points'] is not None and row['weighted_points'] is not None:
@@ -587,21 +594,33 @@ def most_reliable_result(result: dict, baseline_operator: str = 'EE', configurat
             'scoring_kind': MOST_RELIABLE_SCORING}
 
 
-def _reference_for(row, records, identity, keys, baseline_operator, baseline_aliases):
-    candidates = [other for other in records
-                  if _is_baseline(str(other['operator']), baseline_operator, baseline_aliases)
-                  and other[identity] == row[identity]
-                  and all(other.get(key) == row.get(key) for key in keys if key not in {'operator', 'vendor'})]
+def _reference_group(row, identity, keys) -> tuple:
+    return (row[identity], *(row.get(key) for key in keys if key not in {'operator', 'vendor'}))
+
+
+def _reference_index(records, identity, keys, baseline_operator, baseline_aliases) -> dict[tuple, list[dict]]:
+    """The rows of the reference operator by comparison group (the identity and the keys other than operator and
+    vendor), so each row finds its reference without going through every row."""
+    index: dict[tuple, list[dict]] = {}
+    for other in records:
+        if _is_baseline(str(other['operator']), baseline_operator, baseline_aliases):
+            index.setdefault(_reference_group(other, identity, keys), []).append(other)
+    return index
+
+
+def _reference_for(row, references, identity, keys):
+    candidates = references.get(_reference_group(row, identity, keys), [])
     exact = next((other for other in candidates if other.get('vendor') == row.get('vendor')), None)
     return exact if exact is not None else next((other for other in candidates if other.get('vendor') == 'All'), None)
 
 
 def _gap_totals(totals: list[dict], keys: list[str], baseline_operator: str, baseline_aliases: list[str]) -> list[dict]:
     gap_totals = []
+    references = _reference_index(totals, 'category', keys, baseline_operator, baseline_aliases)
     for row in totals:
         if _is_baseline(str(row['operator']), baseline_operator, baseline_aliases):
             continue
-        baseline = _reference_for(row, totals, 'category', keys, baseline_operator, baseline_aliases)
+        baseline = _reference_for(row, references, 'category', keys)
         if baseline is not None:
             complete = baseline['complete_coverage'] and row['complete_coverage']
             gap_totals.append({**{key: row.get(key) for key in keys}, 'category': row['category'],

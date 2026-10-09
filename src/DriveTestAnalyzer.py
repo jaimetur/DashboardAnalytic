@@ -17,6 +17,7 @@ except ImportError:  # pragma: no cover - Windows does not expose resource.
     resource = None
 import re
 import secrets
+import gzip
 import hashlib
 import math
 import ipaddress
@@ -27,6 +28,7 @@ import warnings
 import tempfile
 import time as time_module
 import zipfile
+from collections import OrderedDict
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager, closing, contextmanager, nullcontext
 from dataclasses import asdict, fields, replace
@@ -55,6 +57,7 @@ except ImportError:  # pragma: no cover - geopandas installs it
     pass
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from pydantic import BaseModel, Field
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -11885,6 +11888,31 @@ def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
                         'progress': max(0, min(100, int(row['progress'] or 0))),
                         **timestamps,
                     })
+            if 'scoring_jobs' in tables:
+                # Scoring & GAP Analysis calculations run in the background too, with their elapsed time.
+                recent = (datetime.now().astimezone() - timedelta(seconds=5)).isoformat()
+                for row in connection.execute(
+                    "SELECT id, nr_mode, status, progress, message, created_at, started_at, finished_at FROM scoring_jobs "
+                    "WHERE status IN ('queued', 'processing') OR (finished_at IS NOT NULL AND finished_at >= ?) ORDER BY id",
+                    (recent,),
+                ).fetchall():
+                    timestamps = {}
+                    for key, column in (('queued_at', 'created_at'), ('started_at', 'started_at'), ('completed_at', 'finished_at')):
+                        moment = parse_dataset_timestamp(row[column]) if row[column] else None
+                        timestamps[key] = moment.timestamp() if moment else None
+                    status = str(row['status'] or 'queued')
+                    tasks.append({
+                        'id': f'scoring-job:{workspace.id}:{row["id"]}',
+                        'label': f'Scoring calculation #{row["id"]} ({row["nr_mode"]})',
+                        'detail': str(row['message'] or '').strip() or ('Waiting to calculate scoring' if status == 'queued' else 'Calculating'),
+                        'status': {'completed': 'ready', 'failed': 'failed', 'stopped': 'failed'}.get(status, status),
+                        'progress': max(0, min(100, int(row['progress'] or 0))),
+                        **timestamps,
+                        'duration_seconds': (
+                            max(0.0, timestamps['completed_at'] - timestamps['started_at'])
+                            if timestamps['completed_at'] and timestamps['started_at'] else None
+                        ),
+                    })
     except sqlite3.Error:
         # A worker may briefly hold the database while publishing a progress
         # update. The next browser poll will retry without disrupting the page.
@@ -16328,6 +16356,8 @@ class ScoringJobRequest(BaseModel):
     baseline_operator: str = 'EE'
     scoring_profile_id: str | None = None
     context_filters: dict[str, list[str]] = Field(default_factory=dict)
+    # The National & area summary: its breakdown, separate cities and time split.
+    area_summary: dict[str, Any] | None = None
 
 
 class ScoringSelectionRequest(BaseModel):
@@ -16338,6 +16368,7 @@ class ScoringSelectionRequest(BaseModel):
     baseline_operator: str = 'EE'
     scoring_profile_id: str = ''
     context_filters: dict[str, Any] = Field(default_factory=dict)
+    area_summary: dict[str, Any] | None = None
     client_id: str | None = None
     client_revision: int | None = Field(default=None, gt=0)
 
@@ -16534,6 +16565,7 @@ def scoring_selection_put(
         'baseline_operator': payload.baseline_operator,
         'scoring_profile_id': payload.scoring_profile_id,
         'context_filters': payload.context_filters,
+        'area_summary': payload.area_summary,
     }
     selection, warnings = normalize_scoring_selection(task_repository, selection_payload)
     accepted = save_scoring_selection(
@@ -16558,7 +16590,7 @@ def scoring_jobs_match(payload: ScoringJobRequest, user: SessionUser = Depends(c
         job = find_matching_scoring_job(
             task_repository, selected_ids, payload.aggregation_levels, payload.nr_mode,
             baseline_operator=payload.baseline_operator, context_filters=payload.context_filters,
-            scoring_profile_id=payload.scoring_profile_id,
+            scoring_profile_id=payload.scoring_profile_id, area_summary=payload.area_summary,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -16576,7 +16608,7 @@ def scoring_jobs_create(payload: ScoringJobRequest, user: SessionUser = Depends(
             task_repository, selected_ids, payload.aggregation_levels, payload.nr_mode,
             force=payload.force, username=user.username, baseline_operator=payload.baseline_operator,
             context_filters=payload.context_filters,
-            scoring_profile_id=payload.scoring_profile_id,
+            scoring_profile_id=payload.scoring_profile_id, area_summary=payload.area_summary,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -16585,16 +16617,51 @@ def scoring_jobs_create(payload: ScoringJobRequest, user: SessionUser = Depends(
     return {'job': job, 'cached': cached}
 
 
+# The results of completed scoring jobs, as served (JSON compressed with gzip), so opening a job again does not
+# build its views again. A recalculation or a change of the Operator or Vendor Maps gives another key.
+SCORING_RESULTS_CACHE: OrderedDict[tuple, bytes] = OrderedDict()
+SCORING_RESULTS_CACHE_SIZE = 6
+SCORING_RESULTS_CACHE_LOCK = Lock()
+
+
 @app.get('/api/scoring/jobs/{job_id}')
-def scoring_jobs_result(job_id: int, user: SessionUser = Depends(current_user)) -> dict[str, Any]:
+def scoring_jobs_result(job_id: int, request: Request, user: SessionUser = Depends(current_user)) -> Response:
     task_repository = scoring_repository(user)
     job = get_scoring_job(task_repository, job_id, include_result=True)
     if not job:
         raise HTTPException(status_code=404, detail='Scoring job not found.')
+    operator_groups = task_repository.list_operator_mapping_groups()
+    vendor_groups = task_repository.list_vendor_mapping_groups()
+    fallback = (task_repository.get_scoring_configuration()
+                if not (job.get('result') or {}).get('configuration') and not job.get('configuration') else None)
+    key = None
+    if str(job.get('status') or '') == 'completed':
+        fingerprint = hashlib.sha1(json.dumps([operator_groups, vendor_groups, fallback], sort_keys=True,
+                                              default=str).encode('utf-8')).hexdigest()
+        key = (str(task_repository.db_path), job_id, job.get('updated_at'), job.get('finished_at'), fingerprint)
+    with SCORING_RESULTS_CACHE_LOCK:
+        packed = SCORING_RESULTS_CACHE.get(key) if key else None
+        if packed is not None:
+            SCORING_RESULTS_CACHE.move_to_end(key)
+    if packed is None:
+        payload = _scoring_job_payload(job, operator_groups, vendor_groups, fallback)
+        packed = gzip.compress(json.dumps(jsonable_encoder(payload), ensure_ascii=False, allow_nan=False,
+                                          separators=(',', ':')).encode('utf-8'), 5)
+        if key:
+            with SCORING_RESULTS_CACHE_LOCK:
+                SCORING_RESULTS_CACHE[key] = packed
+                while len(SCORING_RESULTS_CACHE) > SCORING_RESULTS_CACHE_SIZE:
+                    SCORING_RESULTS_CACHE.popitem(last=False)
+    if 'gzip' in request.headers.get('accept-encoding', '').lower():
+        return Response(packed, media_type='application/json', headers={'Content-Encoding': 'gzip', 'Vary': 'Accept-Encoding'})
+    return Response(gzip.decompress(packed), media_type='application/json')
+
+
+def _scoring_job_payload(job: dict[str, Any], operator_groups: list[dict], vendor_groups: list[dict],
+                         fallback: dict[str, Any] | None) -> dict[str, Any]:
+    """The saved results of a scoring job with the views of both scorings and their National & area summaries."""
     from src.modules.scoring_views import build_scoring_views, normalize_result_gaps, refresh_baseline_warning, scoring_coverage_notes
-    result = normalize_scoring_vendor_result(
-        normalize_result_gaps(job.get('result') or {}), task_repository.list_operator_mapping_groups(),
-    )
+    result = normalize_scoring_vendor_result(normalize_result_gaps(job.get('result') or {}), operator_groups)
     views = {}
     scorings = {}
     if result.get('scoring') or result.get('score_rows'):
@@ -16602,21 +16669,31 @@ def scoring_jobs_result(job_id: int, user: SessionUser = Depends(current_user)) 
         from src.modules.scoring_config import MOST_RELIABLE_SCORING, SCORING_LABELS
         baseline = str(job.get('baseline_operator') or 'EE')
         try:
-            fallback = (task_repository.get_scoring_configuration()
-                        if not result.get('configuration') and not job.get('configuration') else None)
             views = build_scoring_views(
-                job, result, task_repository.list_operator_mapping_groups(), fallback,
-                vendor_mapping_groups=task_repository.list_vendor_mapping_groups(),
+                job, result, operator_groups, fallback,
+                vendor_mapping_groups=vendor_groups,
             )
             refresh_baseline_warning(result, views, baseline)
+            # The National & area summary of the job, shown with the scoring charts.
+            from src.modules.scoring_area_summary import build_area_summary
+            views.setdefault('insights', {})['area_summaries'] = build_area_summary(
+                job if job.get('configuration') or result.get('configuration') else {**job, 'configuration': fallback},
+                result, operator_groups,
+                vendor_mapping_groups=vendor_groups,
+            )
             # The Most Reliable scoring is derived from the same saved KPI scores and filters.
             reliable = most_reliable_result(result, baseline, job.get('configuration') or fallback)
             if reliable is not None:
                 reliable_views = build_scoring_views(
-                    job, reliable, task_repository.list_operator_mapping_groups(),
-                    vendor_mapping_groups=task_repository.list_vendor_mapping_groups(),
+                    job, reliable, operator_groups,
+                    vendor_mapping_groups=vendor_groups,
                 )
                 refresh_baseline_warning(reliable, reliable_views, baseline)
+                reliable_views.setdefault('insights', {})['area_summaries'] = build_area_summary(
+                    {**job, 'configuration': reliable['configuration']}, reliable,
+                    operator_groups,
+                    vendor_mapping_groups=vendor_groups,
+                )
                 scorings[MOST_RELIABLE_SCORING] = {
                     'label': SCORING_LABELS[MOST_RELIABLE_SCORING], 'views': reliable_views,
                     'configuration': reliable['configuration'], 'notices': reliable['notices'],

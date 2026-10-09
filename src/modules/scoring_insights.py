@@ -274,7 +274,8 @@ def _campaign_trends(summaries: dict[tuple, dict[str, Any]], levels: list[str], 
 
 def _campaign_comparisons(scopes: dict[tuple, dict[str, dict[str, Any]]], levels: list[str],
                           environment: str) -> list[dict[str, Any]]:
-    """Each operator's KPI points in the two latest campaigns of every group, latest minus previous."""
+    """Each operator's KPI points in the two latest campaigns of every group, latest minus previous, plus the KPI
+    values and points of every campaign of the group (campaigns and kpis) so any two of them can be compared."""
     if 'Campaign' not in levels:
         return []
     groups: dict[tuple, list[dict[str, Any]]] = {}
@@ -291,6 +292,10 @@ def _campaign_comparisons(scopes: dict[tuple, dict[str, dict[str, Any]]], levels
             continue
         previous, latest = tables[-2], tables[-1]
         previous_rows = {row['kpi_code']: row for row in _kpi_rows(previous)}
+        # Every KPI with points in a campaign of the group, in the order of the latest campaign first.
+        campaign_rows = [{row['kpi_code']: row for row in _kpi_rows(table)} for table in tables]
+        kpi_codes = list(dict.fromkeys(row['kpi_code'] for table in reversed(tables) for row in _kpi_rows(table)
+                                       if (_number(row.get('max_points')) or 0) > 0))
         for operator in latest.get('operators', []):
             rows = []
             for row in _kpi_rows(latest):
@@ -309,6 +314,16 @@ def _campaign_comparisons(scopes: dict[tuple, dict[str, dict[str, Any]]], levels
             if not any(row['delta'] is not None for row in rows):
                 continue
             rows.sort(key=lambda item: (item['delta'] is None, item['delta'] if item['delta'] is not None else 0))
+            kpis = []
+            for code in kpi_codes:
+                row = next(rows_by_code[code] for rows_by_code in reversed(campaign_rows) if code in rows_by_code)
+                values = []
+                for rows_by_code in campaign_rows:
+                    value = (((rows_by_code.get(code) or {}).get('values') or {}).get(operator) or {})
+                    points = _number(value.get('points'))
+                    values.append({'value': _number(value.get('value')), 'points': points} if points is not None else None)
+                kpis.append({'kpi_code': code, 'kpi': row.get('kpi'), 'category': row.get('category'),
+                             'service': _service(row), 'values': values})
             style = (latest.get('operator_styles') or {}).get(operator) or {}
             comparisons.append({
                 'environment': environment, 'operator': operator, 'label': style.get('label') or operator,
@@ -316,6 +331,7 @@ def _campaign_comparisons(scopes: dict[tuple, dict[str, dict[str, Any]]], levels
                 'previous_campaign': _display('Campaign', previous['context'].get('campaign')),
                 'latest_campaign': _display('Campaign', latest['context'].get('campaign')),
                 'rows': rows, 'total_delta': sum(row['delta'] for row in rows if row['delta'] is not None),
+                'campaigns': [_display('Campaign', table['context'].get('campaign')) for table in tables], 'kpis': kpis,
             })
     return comparisons
 

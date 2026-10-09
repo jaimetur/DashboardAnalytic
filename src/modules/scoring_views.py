@@ -5,6 +5,7 @@ import copy
 import json
 import math
 import re
+from functools import lru_cache
 from typing import Any
 
 from src.modules.column_names import campaign_sort_key
@@ -1654,7 +1655,9 @@ def _field(record: dict[str, Any], *names: str) -> Any:
     return None
 
 
+@lru_cache(maxsize=8192)
 def _key(value: Any) -> str:
+    # Cached: the same field names are compared for every record of every view.
     return re.sub(r'[^a-z0-9]+', '', str(value).casefold())
 
 

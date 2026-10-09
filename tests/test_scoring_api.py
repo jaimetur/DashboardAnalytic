@@ -211,6 +211,8 @@ def test_scoring_selection_defaults_use_catalogue_metadata_without_reading_cdr_r
             'context_filters': {
                 'Region': [], 'City': [], 'Operator': [], 'Vendor': [], 'Campaign': [],
             },
+            # The National & area summary is not included by default.
+            'area_summary': {'enabled': False, 'time_split': 'Campaign', 'breakdown': 'Region', 'cities': ['London']},
         },
         'warnings': [],
         'persisted': False,
@@ -226,6 +228,7 @@ def test_scoring_selection_persists_for_workspace_and_rejects_delayed_tab_update
         'baseline_operator': 'O2',
         'scoring_profile_id': 'netcheck-2026',
         'context_filters': {'Region': ['North'], 'City': [], 'Operator': [], 'Vendor': [], 'Campaign': []},
+        'area_summary': {'enabled': False, 'time_split': 'Campaign', 'breakdown': 'Region', 'cities': ['London']},
     }
     saved = client.put('/api/scoring/selection', json={
         'selection': common_selection, 'client_id': 'tab-a', 'client_revision': 1,
@@ -937,3 +940,36 @@ def test_scoring_delete_requires_login_and_workspace_access(scoring_api, monkeyp
     denied = client.delete(f'/api/scoring/jobs/{job_id}')
     assert denied.status_code == 403
     assert scoring_jobs.get_scoring_job(scoring_api['repository'], job_id) is not None
+
+
+def test_scoring_calculations_appear_in_the_background_tasks_with_their_time(scoring_api):
+    from datetime import datetime, timedelta
+
+    client = scoring_api['client']
+    repository = scoring_api['repository']
+    created = client.post('/api/scoring/jobs', json={
+        'dataset_ids': scoring_api['complete_dataset_ids'], 'aggregation_levels': ['Operator'], 'nr_mode': 'NSA',
+        'baseline_operator': 'EE',
+    })
+    job_id = created.json()['job']['id']
+
+    def task():
+        groups = client.get('/api/background-tasks').json()
+        return next((item for group in groups.get('groups', []) for item in group['tasks']
+                     if item['id'].startswith('scoring-job:') and item['id'].endswith(f':{job_id}')), None)
+
+    queued = task()
+    assert queued['label'] == f'Scoring calculation #{job_id} (NSA)' and queued['status'] == 'queued'
+    started = datetime.now().astimezone() - timedelta(seconds=75)
+    with repository.connection() as connection:
+        connection.execute("UPDATE scoring_jobs SET status = 'processing', progress = 40, message = 'Reading processed CDR rows', "
+                           'started_at = ? WHERE id = ?', (started.isoformat(), job_id))
+    running = task()
+    assert running['status'] == 'processing' and running['detail'] == 'Reading processed CDR rows'
+    assert abs(running['started_at'] - started.timestamp()) < 1
+    with repository.connection() as connection:
+        connection.execute("UPDATE scoring_jobs SET status = 'completed', progress = 100, finished_at = ? WHERE id = ?",
+                           (datetime.now().astimezone().isoformat(), job_id))
+    # A finished calculation stays a few seconds, with its calculation time.
+    finished = task()
+    assert finished['status'] == 'ready' and 74 <= finished['duration_seconds'] <= 80

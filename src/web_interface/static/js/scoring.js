@@ -260,6 +260,13 @@
   const calculateButton = root.querySelector('[data-calculate-scoring]');
   const recalculateButton = root.querySelector('[data-recalculate-scoring]');
   const calculationPanel = root.querySelector('.scoring-controls');
+  // The National & area summary of the calculation: included or not, its time split, breakdown and separate cities.
+  const areaSummaryPanel = root.querySelector('[data-scoring-area-summary]');
+  const areaSummaryEnabled = root.querySelector('[data-scoring-area-enabled]');
+  const areaSummaryTimeSplit = root.querySelector('[data-scoring-area-time-split]');
+  const areaSummaryBreakdown = root.querySelector('[data-scoring-area-breakdown]');
+  const areaSummaryCities = root.querySelector('[data-scoring-area-cities]');
+  const geographicFilterKeys = ['Region', 'Cluster', 'City'];
   const message = root.querySelector('[data-scoring-message]');
   const jobLists = [...root.querySelectorAll('[data-job-list]')];
   const jobList = jobLists[0];
@@ -292,6 +299,8 @@
   const deletingJobIds = new Set();
   let jobs = [];
   let calculationMatchKey = '';
+  // Set by the job polling: check the same selection again without disabling the buttons meanwhile.
+  let calculationMatchRefresh = false;
   // The status of the selected CDRs and filters (calculating, recalculating, already calculated or ready) stays
   // while the job list refreshes every few seconds; jobs submitted with Recalculate say so.
   let selectionStatus = {key: '', text: '', kind: ''};
@@ -496,6 +505,68 @@
       select.dispatchEvent(new Event('multiselect:options-updated'));
       if (key === 'Operator') decorateOperatorOptions(select);
     }
+    refreshAreaSummaryCities(selectedIds);
+  }
+
+  // The separate cities are the cities of the selected CDRs, Main Cities first, plus the cities chosen before.
+  function refreshAreaSummaryCities(selectedIds = new Set(selectedDatasetIds())) {
+    if (!areaSummaryCities) return;
+    const chosen = [...areaSummaryCities.selectedOptions].map(option => option.value).filter(Boolean);
+    const catalogueKey = filterCatalogueKeys.get('City');
+    const values = [];
+    for (const datasetId of selectedIds) values.push(...uniqueCatalogueValues(datasetCatalogues.get(String(datasetId))?.[catalogueKey]));
+    const known = new Set(values.map(value => value.toLocaleLowerCase()));
+    const options = [...contextFilterOptions('City', [...new Set(values)]).map(entry => entry.value),
+      ...chosen.filter(value => !known.has(value.toLocaleLowerCase()))];
+    const presetCities = options.filter(value => mainCityIdentities.has(value.trim().toLocaleLowerCase()));
+    const signature = JSON.stringify({options, chosen, presetCities, disabled: areaSummaryCities.disabled});
+    if (areaSummaryCities.dataset.scoringCatalogueSignature === signature) return;
+    areaSummaryCities.dataset.scoringCatalogueSignature = signature;
+    areaSummaryCities.dataset.multiselectPresetLabel = 'Main Cities';
+    areaSummaryCities.dataset.multiselectPresetValues = presetCities.join('|');
+    const selected = new Set(chosen.map(value => value.toLocaleLowerCase()));
+    areaSummaryCities.replaceChildren(...options.map(value => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = value;
+      option.selected = selected.has(value.toLocaleLowerCase());
+      return option;
+    }));
+    areaSummaryCities.dispatchEvent(new Event('multiselect:options-updated'));
+  }
+
+  function selectedAreaSummary() {
+    return {
+      enabled: Boolean(areaSummaryEnabled?.checked),
+      time_split: String(areaSummaryTimeSplit?.value || 'Campaign'),
+      breakdown: String(areaSummaryBreakdown?.value || 'Region'),
+      cities: areaSummaryCities ? [...areaSummaryCities.selectedOptions].map(option => option.value).filter(Boolean) : [],
+    };
+  }
+
+  // Included, the summary needs the whole country: the Region, Cluster and City filters are cleared and disabled.
+  function syncAreaSummary({clearFilters = false} = {}) {
+    if (!areaSummaryPanel) return;
+    const included = Boolean(areaSummaryEnabled?.checked);
+    areaSummaryPanel.classList.toggle('is-included', included);
+    for (const control of [areaSummaryTimeSplit, areaSummaryBreakdown]) if (control) control.disabled = !included;
+    for (const key of geographicFilterKeys) {
+      const select = contextFilterSelects.get(key);
+      if (!select) continue;
+      if (included && clearFilters) {
+        for (const option of select.options) option.selected = false;
+        select.removeAttribute('data-scoring-remembered-values');
+      }
+      if (select.disabled !== included) {
+        select.disabled = included;
+        select.title = included ? 'Disabled by the National & area summary, which needs the whole country' : '';
+        select.dispatchEvent(new Event('multiselect:options-updated'));
+      }
+    }
+    if (areaSummaryCities && areaSummaryCities.disabled !== !included) {
+      areaSummaryCities.disabled = !included;
+      areaSummaryCities.dispatchEvent(new Event('multiselect:options-updated'));
+    }
   }
 
   function applyHierarchy(hierarchy) {
@@ -610,6 +681,7 @@
       baseline_operator: String(baselineInput?.value || ''),
       scoring_profile_id: String(scoringProfileSelect?.value || activeProfileId),
       context_filters: Object.fromEntries(selectionFieldOrder.map(key => [key, filters[key] || []])),
+      area_summary: selectedAreaSummary(),
     };
   }
 
@@ -627,6 +699,10 @@
       baseline_operator: String(selection?.baseline_operator || ''),
       scoring_profile_id: String(selection?.scoring_profile_id || ''),
       context_filters: normalizedFilters,
+      area_summary: (({enabled, time_split: timeSplit, breakdown, cities} = {}) => ({
+        enabled: Boolean(enabled), time_split: String(timeSplit || 'Campaign'), breakdown: String(breakdown || 'Region'),
+        cities: (Array.isArray(cities) ? cities : []).map(String),
+      }))(selection?.area_summary || {}),
     });
   }
 
@@ -728,6 +804,30 @@
         select.removeAttribute?.('data-scoring-remembered-values');
         select.dispatchEvent(new Event('change', {bubbles: true}));
       }
+      const summary = selection?.area_summary && typeof selection.area_summary === 'object' ? selection.area_summary : {};
+      if (areaSummaryEnabled) areaSummaryEnabled.checked = Boolean(summary.enabled);
+      if (areaSummaryTimeSplit && [...areaSummaryTimeSplit.options].some(option => option.value === summary.time_split)) {
+        areaSummaryTimeSplit.value = summary.time_split;
+      }
+      if (areaSummaryBreakdown && [...areaSummaryBreakdown.options].some(option => option.value === summary.breakdown)) {
+        areaSummaryBreakdown.value = summary.breakdown;
+      }
+      if (areaSummaryCities && Array.isArray(summary.cities)) {
+        const cities = summary.cities.map(String);
+        const known = new Set([...areaSummaryCities.options].map(option => option.value.toLocaleLowerCase()));
+        for (const city of cities) {
+          if (known.has(city.toLocaleLowerCase())) continue;
+          const option = document.createElement('option');
+          option.value = city;
+          option.textContent = city;
+          areaSummaryCities.append(option);
+        }
+        const wanted = new Set(cities.map(city => city.toLocaleLowerCase()));
+        for (const option of areaSummaryCities.options) option.selected = wanted.has(option.value.toLocaleLowerCase());
+        delete areaSummaryCities.dataset.scoringCatalogueSignature;
+        refreshAreaSummaryCities();
+      }
+      syncAreaSummary();
       updateSelection();
       if (unavailableFilters.length) {
         setMessage(`Some saved context filter values are no longer available: ${unavailableFilters.join(' · ')}. Review the selection before calculating.`, 'warning');
@@ -745,6 +845,9 @@
       baseline_operator: job.baseline_operator,
       scoring_profile_id: job.scoring_profile_id,
       context_filters: job.context_filters || {},
+      // A job without the National & area summary leaves it out and keeps its settings.
+      area_summary: job.area_summary ? {...job.area_summary, breakdown: job.area_summary.breakdown || 'None', enabled: true}
+        : {enabled: false},
     });
     scheduleSelectionSave();
   }
@@ -830,19 +933,30 @@
       nr_mode: nrFilter.value || 'NSA',
       baseline_operator: baselineInput.value.trim(),
       context_filters: selectedContextFilters(),
+      area_summary: areaSummaryPayload(),
     };
+  }
+
+  function areaSummaryPayload() {
+    const summary = selectedAreaSummary();
+    return summary.enabled ? {time_split: summary.time_split, breakdown: summary.breakdown, cities: summary.cities} : null;
   }
 
   function updateCalculationMatch(ready) {
     if (submittingCalculation) return;
     const payload = calculationPayload();
     const key = ready ? JSON.stringify(payload) : '';
-    if (key && key === calculationMatchKey) return;
+    const refresh = calculationMatchRefresh && key === calculationMatchKey;
+    calculationMatchRefresh = false;
+    if (key && key === calculationMatchKey && !refresh) return;
     calculationMatchKey = key;
     const revision = ++calculationMatchRevision;
     window.clearTimeout(calculationMatchTimer);
-    calculateButton.disabled = true;
-    recalculateButton.disabled = true;
+    // A new selection waits for its answer with both buttons disabled; a refresh keeps them as they are.
+    if (!refresh) {
+      calculateButton.disabled = true;
+      recalculateButton.disabled = true;
+    }
     if (!ready || !payload.baseline_operator) return;
     calculationMatchTimer = window.setTimeout(async () => {
       try {
@@ -1085,6 +1199,29 @@
     return Array.isArray(levels) ? (levels.length ? levels.join(' → ') : 'Operator') : String(levels || 'Operator');
   }
 
+  // The settings of the National & area summary of a job, or '' when it has none.
+  function jobAreaSummaryText(job) {
+    const summary = job?.area_summary;
+    if (!summary || typeof summary !== 'object') return '';
+    const split = {All: 'All selected CDRs'}[summary.time_split] || summary.time_split || 'Campaign';
+    const cities = (Array.isArray(summary.cities) ? summary.cities : []).filter(Boolean);
+    return [`Time split: ${split}`, `Breakdown: ${summary.breakdown || 'None'}`,
+      `Separate cities: ${cities.length ? cities.join(', ') : 'None'}`].join(' · ');
+  }
+
+  // The calculation time of a job (start to finish), or its elapsed time while it runs.
+  function jobDurationText(job, now = Date.now()) {
+    const started = Date.parse(valueOf(job, ['started_at'], '') || '');
+    if (!Number.isFinite(started)) return '';
+    const finished = Date.parse(valueOf(job, ['finished_at'], '') || '');
+    const end = Number.isFinite(finished) ? finished : (isActive(job) ? now : NaN);
+    if (!Number.isFinite(end)) return '';
+    const seconds = Math.max(0, Math.round((end - started) / 1000));
+    if (seconds < 60) return `${seconds} s`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)} min ${String(seconds % 60).padStart(2, '0')} s`;
+    return `${Math.floor(seconds / 3600)} h ${String(Math.floor((seconds % 3600) / 60)).padStart(2, '0')} min`;
+  }
+
   function progressValue(job) {
     const raw = Number(valueOf(job, ['progress', 'progress_percent', 'percentage'], 0));
     if (!Number.isFinite(raw)) return 0;
@@ -1171,6 +1308,18 @@
       referenceValue.textContent = baseline;
       meta.append(referenceValue);
       button.append(meta);
+      const areaSummary = jobAreaSummaryText(job);
+      if (areaSummary) {
+        // The National & area summary of the job, when it includes one: its time split, breakdown and cities.
+        const areaMeta = document.createElement('span');
+        areaMeta.className = 'scoring-job-meta';
+        areaMeta.textContent = 'National & area summary: ';
+        const areaValue = document.createElement('strong');
+        areaValue.className = 'scoring-job-area-summary';
+        areaValue.textContent = areaSummary;
+        areaMeta.append(areaValue);
+        button.append(areaMeta);
+      }
       const cdrNames = jobCdrNames(job);
       const cdrButton = document.createElement('button');
       cdrButton.type = 'button';
@@ -1190,6 +1339,18 @@
         profileValue.textContent = profileName;
         profileMeta.append(profileValue);
         button.append(profileMeta);
+      }
+      const duration = jobDurationText(job);
+      if (duration) {
+        // How long the calculation took, or has taken so far while it runs.
+        const durationMeta = document.createElement('span');
+        durationMeta.className = 'scoring-job-meta';
+        durationMeta.textContent = isActive(job) ? 'Elapsed: ' : 'Calculation time: ';
+        const durationValue = document.createElement('strong');
+        durationValue.className = 'scoring-job-duration';
+        durationValue.textContent = duration;
+        durationMeta.append(durationValue);
+        button.append(durationMeta);
       }
       if (isActive(job)) {
         const progress = document.createElement('span');
@@ -4686,7 +4847,7 @@
       .join(' · ');
   }
 
-  function insightSelect(key, options, label) {
+  function insightSelect(key, options, label, fallback = options[0]?.[0]) {
     const wrapper = document.createElement('label');
     wrapper.className = 'scoring-environment-filter scoring-insight-select';
     wrapper.append(document.createTextNode(label));
@@ -4699,7 +4860,7 @@
       select.append(option);
     }
     const stored = insightSelections.get(key);
-    select.value = options.some(([value]) => value === stored) ? stored : options[0]?.[0] ?? '';
+    select.value = options.some(([value]) => value === stored) ? stored : fallback ?? '';
     wrapper.append(select);
     return {wrapper, value: select.value};
   }
@@ -4824,8 +4985,154 @@
     return svg;
   }
 
+  // The National & area summary: each operator's score per area, its change from the previous campaign or
+  // period and its GAP to the reference, with a trend chart per area on the same scale.
+  function makeAreaSummaryView(summary) {
+    const view = document.createElement('div');
+    view.className = 'scoring-area-summary-view';
+    // Campaigns as the Campaign Maps show them; periods (2026-W07, 2026-07…) as they are.
+    const period = value => (typeof globalThis.campaignLabel === 'function' ? globalThis.campaignLabel(value) || value : value);
+    const signed = value => (value === null || value === undefined ? '—'
+      : `${Number(value) > 0 ? '+' : ''}${insightNumber(value, 1)}`);
+    const tone = value => (value === null || value === undefined || Math.abs(Number(value)) < .05 ? ''
+      : Number(value) > 0 ? 'scoring-area-gain' : 'scoring-area-loss');
+    const headers = ['Area', 'Operator', summary.latest_campaign ? `Score ${period(summary.latest_campaign)}` : 'Score'];
+    if (summary.previous_campaign) headers.push(`Δ vs ${period(summary.previous_campaign)}`);
+    headers.push(`Δ vs ${summary.reference_label || 'reference'}`);
+    const rows = [];
+    // Each area is a band of rows: its first row starts it, and every other area is shaded.
+    const rowClasses = [];
+    const unmeasured = [];
+    (summary.areas || []).forEach((area, areaIndex) => {
+      const measured = area.measured !== false;
+      if (!measured) unmeasured.push(area.label);
+      area.rows.forEach((item, index) => {
+        const color = safeHexColor(item.color);
+        const missing = measured ? '' : `Not measured in ${period(summary.latest_campaign)}`;
+        const cells = [
+          {text: index ? '' : area.label, title: index ? '' : missing,
+            className: `scoring-area-name${area.kind === 'National' ? ' is-national' : ''}${measured ? '' : ' is-unmeasured'}`},
+          {text: item.label, style: color ? {color} : {},
+            className: `scoring-area-operator${item.is_reference ? ' scoring-area-reference' : ''}`},
+          {text: item.points === null || item.points === undefined ? '—' : `${insightNumber(item.points, 1)}${item.complete ? '' : '*'}`,
+            style: color ? {color} : {}, className: 'scoring-area-score',
+            title: missing || (item.complete ? '' : 'Incomplete KPI coverage')},
+        ];
+        if (summary.previous_campaign) cells.push({text: signed(item.delta), className: tone(item.delta)});
+        cells.push(item.is_reference ? '' : {text: signed(item.gap), className: tone(item.gap)});
+        rows.push(cells);
+        rowClasses.push(`${index ? '' : 'is-area-start'}${areaIndex % 2 ? ' is-area-shaded' : ''}`.trim());
+      });
+    });
+    const tableWrap = document.createElement('div');
+    tableWrap.className = 'scoring-insight-table-wrap';
+    const table = insightTable(headers, rows, {className: 'scoring-area-summary-table'});
+    [...table.tBodies[0].rows].forEach((row, index) => { if (rowClasses[index]) row.className = rowClasses[index]; });
+    tableWrap.append(table);
+    if (unmeasured.length) {
+      const missingNote = document.createElement('p');
+      missingNote.className = 'scoring-note scoring-area-missing';
+      missingNote.textContent = `${unmeasured.join(', ')}: not measured in ${period(summary.latest_campaign)}; `
+        + 'the charts show the earlier campaigns.';
+      tableWrap.append(missingNote);
+    }
+    view.append(tableWrap);
+    const campaigns = (Array.isArray(summary.campaigns) ? summary.campaigns : []).map(period);
+    if (campaigns.length >= 2) {
+      const values = (summary.areas || []).flatMap(area => area.rows.flatMap(item => item.trend))
+        .filter(value => value !== null && value !== undefined && Number.isFinite(Number(value))).map(Number);
+      const spread = Math.max(...values) - Math.min(...values);
+      const padding = Math.max(1, spread * .15);
+      const step = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500].find(unit => unit * 5 >= spread + 2 * padding) || 1000;
+      const low = Math.floor((Math.min(...values) - padding) / step) * step;
+      const high = Math.ceil((Math.max(...values) + padding) / step) * step;
+      const grid = document.createElement('div');
+      grid.className = 'scoring-area-trend-grid';
+      for (const area of areaChartOrder(summary.areas || [])) grid.append(makeAreaTrendChart(area, campaigns, low, high, step));
+      view.append(grid);
+    }
+    const note = document.createElement('p');
+    note.className = 'scoring-note';
+    note.textContent = `Each area is scored with its own measurements, as the National scoring is: the area scores are not shares `
+      + `of the National points. Maximum scoring: ${insightNumber(summary.maximum)} points`
+      + `${summary.scaled ? ' (environments without measurements in an area are scaled)' : ''}.`;
+    view.append(note);
+    return view;
+  }
+
+  // The charts of the areas: National, then a single separate city next to it before the breakdown, or several
+  // separate cities after the breakdown.
+  function areaChartOrder(areas) {
+    const cities = areas.filter(area => area.kind === 'City');
+    if (cities.length < 2 || cities.length === areas.filter(area => area.kind !== 'National').length) return areas;
+    return [...areas.filter(area => area.kind !== 'City'), ...cities];
+  }
+
+  function makeAreaTrendChart(area, campaigns, low, high, step) {
+    const figure = document.createElement('figure');
+    figure.className = 'scoring-area-trend';
+    const caption = document.createElement('figcaption');
+    // National, the separate cities and the areas of the breakdown each have their own colour.
+    caption.className = area.kind === 'National' ? 'is-national' : area.kind === 'City' ? 'is-city' : 'is-breakdown';
+    caption.textContent = area.label;
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    const width = 360, height = 170, left = 42, right = 34, top = 10, bottom = 26;
+    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', `${area.label} scoring trend`);
+    const x = index => left + (width - left - right) * (campaigns.length > 1 ? index / (campaigns.length - 1) : .5);
+    const y = value => top + (height - top - bottom) * (1 - (value - low) / Math.max(1, high - low));
+    for (let value = low; value <= high + .001; value += step) {
+      svg.append(svgElement(svg, 'line', {x1: left, x2: width - right, y1: y(value), y2: y(value), stroke: '#e3e6e9'}));
+      const label = svgElement(svg, 'text', {x: left - 6, y: y(value) + 3, 'text-anchor': 'end', 'font-size': 9, fill: '#4a5b65'});
+      label.textContent = insightNumber(value);
+      svg.append(label);
+    }
+    campaigns.forEach((campaign, index) => {
+      const label = svgElement(svg, 'text', {x: x(index), y: height - 8, 'text-anchor': 'middle', 'font-size': 9, fill: '#263746'});
+      label.textContent = campaign;
+      svg.append(label);
+    });
+    area.rows.forEach((item, seriesIndex) => {
+      const color = safeHexColor(item.color) || insightFallbackColors[seriesIndex % insightFallbackColors.length];
+      const points = item.trend.map((value, index) => (value === null || value === undefined ? null : [x(index), y(Number(value)), value]));
+      const path = points.filter(Boolean).map(([px, py], index) => `${index ? 'L' : 'M'}${px},${py}`).join(' ');
+      svg.append(svgElement(svg, 'path', {d: path, fill: 'none', stroke: color, 'stroke-width': 2}));
+      points.forEach((point, index) => {
+        if (!point) return;
+        const marker = svgElement(svg, 'circle', {cx: point[0], cy: point[1], r: 3.2, fill: color});
+        setChartTooltip(marker, `${item.label} · ${campaigns[index]}: ${insightNumber(point[2], 1)} points`, true);
+        svg.append(marker);
+      });
+      const last = points.filter(Boolean).at(-1);
+      if (last) {
+        const label = svgElement(svg, 'text', {x: last[0] + 5, y: last[1] + 3, 'font-size': 9, 'font-weight': 700, fill: color});
+        label.textContent = insightNumber(last[2]);
+        svg.append(label);
+      }
+    });
+    figure.append(caption, svg);
+    return figure;
+  }
+
   function renderInsightCharts(pane, payload, environment) {
     if (!environment) return;
+    // The Scoring Trend first, above the National & Areas.
+    const trends = insightItems(payload, 'campaign_trends', environment);
+    if (trends.length) {
+      const {wrapper, value} = insightSelect('trend', trends.map((trend, index) => [String(index), trend.title || 'All series']), 'Series');
+      const trend = trends[Number(value)] || trends[0];
+      const card = makeExpandableChartCard(`${scoringLabel()} Scoring Trend`,
+        [environmentLabel(environment), trend.title].filter(Boolean).join(' · '), makeTrendChart(trend));
+      if (trends.length > 1) card.insertBefore(wrapper, card.children[1]);
+      pane.append(card);
+    }
+    for (const summary of insightItems(payload, 'area_summaries', environment)) {
+      const split = summary.time_split === 'All' ? 'All selected CDRs' : summary.time_split === 'Campaign' ? 'Per campaign'
+        : `${summary.time_split} periods`;
+      pane.append(makeExpandableChartCard(`${scoringLabel()} — National & Areas`,
+        [environmentLabel(environment), `Time split: ${split}`].filter(Boolean).join(' · '), makeAreaSummaryView(summary)));
+    }
     let groups = insightItems(payload, 'location_cards', environment);
     const campaigns = [...new Set(groups.map(group => group.campaign).filter(Boolean))];
     if (campaigns.length > 1) {
@@ -4835,15 +5142,6 @@
     for (const group of groups) {
       pane.append(makeExpandableChartCard(`${scoringLabel()} Scoring per ${group.level}`,
         [environmentLabel(environment), group.title].filter(Boolean).join(' · '), makeLocationCardsView(group)));
-    }
-    const trends = insightItems(payload, 'campaign_trends', environment);
-    if (trends.length) {
-      const {wrapper, value} = insightSelect('trend', trends.map((trend, index) => [String(index), trend.title || 'All series']), 'Series');
-      const trend = trends[Number(value)] || trends[0];
-      const card = makeExpandableChartCard(`${scoringLabel()} Scoring Trend`,
-        [environmentLabel(environment), trend.title].filter(Boolean).join(' · '), makeTrendChart(trend));
-      if (trends.length > 1) card.insertBefore(wrapper, card.children[1]);
-      pane.append(card);
     }
   }
 
@@ -4926,10 +5224,13 @@
     const controls = document.createElement('div');
     controls.className = 'scoring-loss-controls';
     const scopes = [...new Map(items.map(item => [scopeKey(item), item.context || {}])).entries()];
-    let scope = scopes[0]?.[0] ?? '{}';
+    // Locations by campaign are listed chronologically (in the order of the Campaign Maps), the latest chosen by default.
+    const byCampaign = scopes.length > 1 && scopes.every(([, context]) => context.campaign) && typeof globalThis.campaignCompare === 'function';
+    if (byCampaign) scopes.sort(([, left], [, right]) => globalThis.campaignCompare(left.campaign, right.campaign));
+    let scope = (byCampaign ? scopes.at(-1) : scopes[0])?.[0] ?? '{}';
     if (scopes.length > 1) {
       const {wrapper, value} = insightSelect('gap-insight-scope', scopes.map(([key, context]) => [key, lossScopeLabel(context).value]),
-        lossScopeLabel(scopes[0][1]).title);
+        lossScopeLabel(scopes[0][1]).title, scope);
       controls.append(wrapper);
       scope = value;
     }
@@ -5672,10 +5973,21 @@
     const heading = document.createElement('h4');
     heading.className = 'scoring-table-section-title';
     heading.textContent = 'Campaign Comparison';
+    // Choose the operator (of each group when there are several), the baseline campaign and the campaign compared
+    // with it: by default the previous and the latest campaigns.
     const {wrapper, value} = insightSelect('campaign-comparison', comparisons.map((item, index) => [
-      String(index), [item.label, item.title, `${item.previous_campaign} → ${item.latest_campaign}`].filter(Boolean).join(' · '),
-    ]), 'Comparison');
-    const comparison = comparisons[Number(value)] || comparisons[0];
+      String(index), [item.label, item.title].filter(Boolean).join(' · '),
+    ]), 'Operator');
+    const chosen = comparisons[Number(value)] || comparisons[0];
+    const campaigns = Array.isArray(chosen.campaigns) && chosen.campaigns.length >= 2 ? chosen.campaigns
+      : [chosen.previous_campaign, chosen.latest_campaign];
+    const campaignOptions = campaigns.map((campaign, index) => [String(index), campaign]);
+    const {wrapper: baselineWrapper, value: baselineValue} = insightSelect(
+      'campaign-comparison-baseline', campaignOptions, 'Baseline campaign', String(campaigns.length - 2));
+    const {wrapper: targetWrapper, value: targetValue} = insightSelect(
+      'campaign-comparison-target', campaignOptions, 'Compared campaign', String(campaigns.length - 1));
+    const baseline = Number(baselineValue), target = Number(targetValue);
+    const comparison = {previous_campaign: campaigns[baseline], latest_campaign: campaigns[target], ...campaignComparisonRows(chosen, baseline, target)};
     const scale = Math.max(0, ...comparison.rows.map(row => Math.abs(Number(row.delta) || 0)));
     const deltaCell = delta => {
       const cell = {text: insightNumber(delta, 2), className: 'scoring-insight-number scoring-insight-delta'};
@@ -5702,8 +6014,31 @@
     const body = document.createElement('div');
     body.className = 'scoring-insight-compare';
     body.append(table, total);
-    section.append(heading, wrapper, body);
+    const controls = document.createElement('div');
+    controls.className = 'scoring-loss-controls';
+    controls.append(wrapper, baselineWrapper, targetWrapper);
+    section.append(heading, controls, body);
     pane.append(section);
+  }
+
+  // The rows of a Campaign Comparison between two of its campaigns (by position): each KPI with its value and
+  // points in both, and the points of the compared campaign minus those of the baseline, from the largest loss.
+  function campaignComparisonRows(comparison, baseline, target) {
+    if (!Array.isArray(comparison.kpis) || !Array.isArray(comparison.campaigns)) {
+      return {rows: comparison.rows || [], total_delta: comparison.total_delta};
+    }
+    const rows = comparison.kpis.map(kpi => {
+      const before = kpi.values?.[baseline] || {}, after = kpi.values?.[target] || {};
+      const beforePoints = before.points ?? null, afterPoints = after.points ?? null;
+      return {
+        kpi_code: kpi.kpi_code, kpi: kpi.kpi, service: kpi.service || '',
+        previous_value: before.value ?? null, previous_points: beforePoints,
+        latest_value: after.value ?? null, latest_points: afterPoints,
+        delta: beforePoints !== null && afterPoints !== null ? afterPoints - beforePoints : null,
+      };
+    }).filter(row => row.previous_points !== null || row.latest_points !== null);
+    rows.sort((left, right) => (left.delta === null) - (right.delta === null) || (left.delta ?? 0) - (right.delta ?? 0));
+    return {rows, total_delta: rows.reduce((sum, row) => sum + (row.delta ?? 0), 0)};
   }
 
   function renderNotices(notices) {
@@ -6077,6 +6412,48 @@
     setExportLinks(jobIdOf(job || payload.job || {}), true);
   }
 
+  // While the selected job calculates, the results show an animated progress bar. Each poll updates it in place,
+  // so the stripes keep moving instead of starting again.
+  function renderCalculating(job) {
+    const progress = Math.round(progressValue(job));
+    const detail = String(valueOf(job, ['message'], '') || '').trim();
+    const update = (element) => {
+      element.querySelector('.scoring-calculating-fill').style.width = `${Math.max(6, progress)}%`;
+      element.querySelector('.scoring-calculating-bar').setAttribute('aria-valuenow', String(progress));
+      element.querySelector('.scoring-calculating-detail').textContent = [`${progress}%`, detail].filter(Boolean).join(' · ');
+    };
+    const current = resultPanes.map(pane => pane.querySelector(':scope > .scoring-calculating:not(.is-loading)'));
+    if (current.length && current.every(Boolean)) {
+      current.forEach(update);
+      return;
+    }
+    renderNoResult('');
+    for (const pane of resultPanes) {
+      const element = document.createElement('div');
+      element.className = 'scoring-calculating';
+      element.setAttribute('role', 'status');
+      element.innerHTML = '<p class="scoring-calculating-title">Calculating Scoring…</p>'
+        + '<div class="scoring-calculating-bar" role="progressbar" aria-label="Scoring calculation" aria-valuemin="0" aria-valuemax="100">'
+        + '<span class="scoring-calculating-fill"></span></div><p class="scoring-calculating-detail"></p>';
+      update(element);
+      pane.replaceChildren(element);
+    }
+  }
+
+  // While the results of a saved job load, the results show the same striped bar, moving across its whole width.
+  function renderLoadingResults() {
+    renderNoResult('');
+    for (const pane of resultPanes) {
+      const element = document.createElement('div');
+      element.className = 'scoring-calculating is-loading';
+      element.setAttribute('role', 'status');
+      element.innerHTML = '<p class="scoring-calculating-title">Loading Scoring Results…</p>'
+        + '<div class="scoring-calculating-bar" role="progressbar" aria-label="Loading scoring results">'
+        + '<span class="scoring-calculating-fill" style="width: 100%"></span></div>';
+      pane.replaceChildren(element);
+    }
+  }
+
   function renderNoResult(text) {
     environmentControl.hidden = false;
     syncResultScoring(null);
@@ -6108,7 +6485,8 @@
     if (currentResultsJobId !== id) {
       currentResults = null;
       currentResultsJobId = null;
-      renderNoResult('Loading scoring results…');
+      if (isActive(job)) renderCalculating(job);
+      else renderLoadingResults();
     }
     try {
       const payload = await requestJson(`${jobsUrl}/${encodeURIComponent(id)}`);
@@ -6125,6 +6503,11 @@
         currentResultsJobId = null;
         const error = valueOf(record, ['error', 'error_message', 'last_error'], 'This scoring job failed without an error message.');
         renderNoResult(error);
+      } else if (isActive(record)) {
+        currentResults = null;
+        currentResultsJobId = null;
+        renderCalculating(record);
+        setExportLinks('', false);
       } else {
         currentResults = null;
         currentResultsJobId = null;
@@ -6175,7 +6558,7 @@
         currentResultsJobId = null;
         renderNoResult('Run a scoring job or select a saved job to see its results.');
       }
-      calculationMatchKey = '';
+      calculationMatchRefresh = true;
       updateSelection();
       const anyActive = jobs.some(isActive);
       if (anyActive && !timer) timer = window.setInterval(refreshJobs, 3500);
@@ -6339,6 +6722,12 @@
       return;
     }
     if (event.target === baselineInput || event.target.matches('[data-aggregation-level], [data-scoring-context-filter]')) {
+      updateSelection();
+      scheduleSelectionSave();
+      return;
+    }
+    if (event.target.matches?.('[data-scoring-area-enabled], [data-scoring-area-summary] select')) {
+      syncAreaSummary({clearFilters: event.target === areaSummaryEnabled});
       updateSelection();
       scheduleSelectionSave();
       return;

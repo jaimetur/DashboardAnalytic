@@ -86,6 +86,28 @@ def test_campaign_comparison_subtracts_the_previous_campaign():
     assert comparison['total_delta'] == pytest.approx(total('2026-Q2') - total('2026-Q1'))
 
 
+def test_campaign_comparison_keeps_every_campaign_to_compare_any_two():
+    _job, result, insights = _insights()
+    comparison = next(item for item in _combined(insights['campaign_comparisons'])
+                      if item['operator'] == 'EE' and 'London' in item['title'])
+    assert comparison['campaigns'] == ['2025-Q2', '2025-Q3', '2025-Q4', '2026-Q1', '2026-Q2']
+    # The points of each KPI in every campaign add up to the scoring of that campaign.
+
+    def total(campaign):
+        return next(row['weighted_points'] for row in result['totals']
+                    if row['city'] == 'London' and row['operator'] == 'EE' and row['campaign'] == campaign
+                    and row['environment'] == 'Combined' and row['category'] == 'Overall')
+    for index, campaign in enumerate(comparison['campaigns']):
+        points = sum(kpi['values'][index]['points'] for kpi in comparison['kpis'] if kpi['values'][index])
+        assert points == pytest.approx(total(campaign))
+    # The latest and previous campaigns give the rows of the default comparison.
+    latest = {row['kpi_code']: row['delta'] for row in comparison['rows']}
+    for kpi in comparison['kpis']:
+        before, after = kpi['values'][-2], kpi['values'][-1]
+        if before and after:
+            assert latest[kpi['kpi_code']] == pytest.approx(after['points'] - before['points'])
+
+
 def test_kpi_gap_profiles_rank_points_lost_and_reference_gaps():
     _job, _result, insights = _insights(levels=('Operator',))
     profile = next(item for item in _combined(insights['kpi_gap_profiles']) if item['operator'] == 'Three UK')

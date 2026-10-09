@@ -118,7 +118,17 @@ def _fallback_selection(
         'baseline_operator': baseline,
         'scoring_profile_id': active_profile_id if profiles else '',
         'context_filters': {field: [] for field in SCORING_CONTEXT_FILTER_FIELDS if field not in SCORING_OPTIONAL_CONTEXT_FILTERS},
+        'area_summary': _normalize_area_summary(None),
     }
+
+
+def _normalize_area_summary(raw: object) -> dict[str, Any]:
+    """The National & area summary of the calculation: not included by default."""
+    from src.modules.scoring_reports import DEFAULT_AREA_SUMMARY, _normalize_area_summary as normalize
+    summary = normalize(raw if isinstance(raw, dict) else {**DEFAULT_AREA_SUMMARY, 'enabled': False}, False)
+    # Main Cities are chosen as their cities in this panel.
+    summary.pop('main_cities', None)
+    return summary
 
 
 def _normalize_context_filters(
@@ -262,6 +272,7 @@ def _normalize_selection(
         'baseline_operator': baseline,
         'scoring_profile_id': selected_profile_id,
         'context_filters': context_filters,
+        'area_summary': _normalize_area_summary(raw_selection.get('area_summary')),
     }, list(dict.fromkeys(warnings))
 
 
