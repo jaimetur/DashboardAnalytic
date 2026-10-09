@@ -2923,6 +2923,8 @@ def test_full_environment_import_remaps_permissions_to_replaced_workspace_id(cli
     app_module.close_active_workspace()
     app_module.workspace_registry.remove(source_workspace.id)
     app_module.repository.remove_workspace_access(source_workspace.id)
+    # As on another server, where a different workspace has the id the package's workspace had here.
+    app_module.workspace_registry.set_state('last_workspace_number', '0')
     occupying_workspace = app_module.workspace_registry.create('Local Only')
     replacement = app_module.workspace_registry.create('Imported Team')
     assert occupying_workspace.id == source_workspace.id
