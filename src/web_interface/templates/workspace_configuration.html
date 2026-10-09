@@ -9,7 +9,7 @@
       </div>
       {% if active_workspace %}<span class="pill">{{ active_workspace.name }}</span>{% endif %}
     </div>
-    {% if active_workspace %}<p class="lede">Manage Report Templates and the Operator and Vendor mappings used by this workspace.</p>
+    {% if active_workspace %}<p class="lede">Manage PPT Templates and the Operator and Vendor mappings used by this workspace.</p>
     <form method="post" action="/workspace-config/cdr-type" class="workspace-cdr-type-form">
       <label>CDR type
         <select name="cdr_type" aria-describedby="workspace-cdr-type-note">
@@ -20,7 +20,7 @@
       <p class="form-note" id="workspace-cdr-type-note">The CDR files this workspace processes. Umlaut CDR files will be supported in a future release.</p>
     </form>
     {% if cdr_type_notice %}<p class="form-note" role="status">{{ cdr_type_notice }}</p>{% endif %}
-    {% else %}<p class="lede">Open a workspace to manage its Report Templates and mappings.</p>{% endif %}
+    {% else %}<p class="lede">Open a workspace to manage its PPT Templates and mappings.</p>{% endif %}
   </article>
   {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
   {% include 'workspace_config_panels.html' %}

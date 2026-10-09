@@ -3943,11 +3943,11 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     const sourceRow = Array.from(table.querySelectorAll('tbody tr'))[rowIndex];
     const sourceSlide = rowValue(sourceRow, 'Slide');
     const sourceBlockIndex = sourceBlocks.findIndex((block) => block.slide === sourceSlide);
-    showLoadingOverlay('Loading Report Templates', 'Please wait while the available destinations are loaded.');
+    showLoadingOverlay('Loading PPT Templates', 'Please wait while the available destinations are loaded.');
     try {
       const response = await fetch(editor.dataset.templateOptionsUrl, {credentials: 'same-origin'});
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.detail || 'Unable to load Report Templates.');
+      if (!response.ok) throw new Error(payload.detail || 'Unable to load PPT Templates.');
       hideLoadingOverlay();
       const templates = Array.isArray(payload.templates) ? payload.templates : [];
       const selection = await showCatalogueExportDialog(kind, templates, sourceBlocks);
@@ -4567,8 +4567,8 @@ document.querySelectorAll('[data-catalogue-import-form]').forEach((form) => {
     }
     if (shouldConvert) {
       const accepted = await showConfirmDialog(
-        'This CSV uses an older or different column layout. Compatible fields will be migrated to the current Report Templates format; new presentation fields will be left blank where they do not exist.',
-        {title: 'Convert Report Templates?', confirmLabel: 'Convert and Import'},
+        'This CSV uses an older or different column layout. Compatible fields will be migrated to the current PPT Templates format; new presentation fields will be left blank where they do not exist.',
+        {title: 'Convert PPT Templates?', confirmLabel: 'Convert and Import'},
       );
       if (!accepted) return;
     }
@@ -4587,7 +4587,7 @@ document.querySelectorAll('[data-catalogue-import-form]').forEach((form) => {
     if (convert) convert.value = shouldConvert ? '1' : '0';
     if (overwrite) overwrite.value = existing ? '1' : '0';
     form.dataset.catalogueSubmitting = '1';
-    showLoadingOverlay('Importing Report Templates', 'Validating and storing the selected template in the workspace.');
+    showLoadingOverlay('Importing PPT Templates', 'Validating and storing the selected template in the workspace.');
     preserveAdminScrollPosition();
     HTMLFormElement.prototype.submit.call(form);
   });
@@ -5415,7 +5415,7 @@ function setupWorkspaceUserPickers() {
 
 // Workspace content exported from the active workspace; its Full Workspace package already contains all of it.
 const workspaceElementExportTargets = new Set([
-  'dashboards', 'slides-templates', 'main-cities', 'mappings-reference-data', 'scoring-configuration',
+  'dashboards', 'ppt-templates', 'main-cities', 'mappings-reference-data', 'scoring-configuration',
   'auto-calculated-fields', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking',
 ]);
 
@@ -6757,16 +6757,16 @@ function importWarningDetails(payload) {
     return payload.includes_slides_templates
       ? {
         title: 'Overwrite configuration and templates?',
-        message: 'This will overwrite the configuration files and Report Templates included in the package. The local workspace registry and existing workspaces will be preserved.',
+        message: 'This will overwrite the configuration files and PPT Templates included in the package. The local workspace registry and existing workspaces will be preserved.',
       }
       : {
         title: 'Overwrite configuration?',
         message: 'This will overwrite the configuration files included in the package. The local workspace registry and existing workspaces will be preserved.',
       };
   }
-  if (kind === 'slides-templates') {
+  if (kind === 'ppt-templates') {
     return {
-      title: 'Overwrite Report Templates?',
+      title: 'Overwrite PPT Templates?',
       message: 'Choose the destination workspaces next. Templates with matching names will be overwritten only in those workspaces. Importing templates does not rebuild CDR tables.',
     };
   }
@@ -6817,14 +6817,14 @@ function importWarningDetails(payload) {
     : ' New workspaces will be created from the package.';
   return {
     title: 'Overwrite full environment?',
-    message: `This will overwrite the configuration files and Report Templates included in the package.${collisionCopy} The local workspace registry will be rebuilt from the imported workspaces.`,
+    message: `This will overwrite the configuration files and PPT Templates included in the package.${collisionCopy} The local workspace registry will be rebuilt from the imported workspaces.`,
   };
 }
 
 function importPackageContents(payload) {
   const labels = {
     config: 'Application Config', workspace: 'Full Workspace', 'full-environment': 'Full Environment',
-    dashboards: 'Dashboards', 'slides-templates': 'Report Templates',
+    dashboards: 'Dashboards', 'ppt-templates': 'PPT Templates',
     'mappings-reference-data': 'Mappings & Reference Data', 'main-cities': 'Main Cities',
     'scoring-configuration': 'Scoring & GAP Analysis Configuration',
     'auto-calculated-fields': 'Auto-calculated Fields',
@@ -6833,7 +6833,7 @@ function importPackageContents(payload) {
   };
   const targets = Array.isArray(payload.targets) && payload.targets.length ? payload.targets : [payload.kind];
   const workspaceTargets = new Set([
-    'dashboards', 'slides-templates', 'main-cities', 'mappings-reference-data',
+    'dashboards', 'ppt-templates', 'main-cities', 'mappings-reference-data',
     'scoring-configuration', 'auto-calculated-fields',
   ]);
   const workspaceContents = targets.length && targets.every((item) => workspaceTargets.has(String(item)));
@@ -6852,7 +6852,7 @@ function selectAutoCalculatedFieldWorkspaces(workspaces, kind = 'auto-calculated
   const panel = document.createElement('section'); panel.className = 'confirm-panel auto-calculated-field-workspace-dialog';
   panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true');
   const title = document.createElement('h3'); title.textContent = 'Select destination workspaces';
-  const copy = document.createElement('p'); copy.textContent = kind === 'slides-templates'
+  const copy = document.createElement('p'); copy.textContent = kind === 'ppt-templates'
     ? 'Templates will be imported into every selected workspace. The original workspace is preselected when it exists. Matching template names will be overwritten.'
     : kind === 'dashboards'
       ? 'Dashboard definitions and their saved filters will replace the Dashboard list in every selected workspace. The original workspace is preselected when present; generated caches are not imported.'
@@ -7675,11 +7675,11 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       reviewingOffer = true;
       const transferContentLabels = {
         config: 'Application Config',
-        'config-with-templates': 'Application Config and Report Templates',
+        'config-with-templates': 'Application Config and PPT Templates',
         workspace: 'Full Workspace',
         'full-environment': 'Full Environment',
         dashboards: 'Dashboards',
-        'slides-templates': 'Report Templates',
+        'ppt-templates': 'PPT Templates',
         'mappings-reference-data': 'Mappings & Reference Data',
         'main-cities': 'Main Cities',
         'scoring-configuration': 'Scoring & GAP Analysis Configuration',
@@ -7687,7 +7687,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
         workspace_database: 'Workspace database',
         input: 'Input CDR files',
         output: 'Generated outputs',
-        report_templates: 'Report Templates',
+        report_templates: 'PPT Templates',
         main_cities: 'Main Cities',
         mappings_reference_data: 'Mappings & Reference Data',
         scoring_configuration: 'Scoring & GAP Analysis Configuration',
@@ -7713,7 +7713,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       try {
         const importEffect = offer.kind === 'auto-calculated-fields'
           ? 'Next, choose the destination workspaces. After reception, matching field names will be updated and their applicable CDR tables will be materialized in the background.'
-          : offer.kind === 'slides-templates'
+          : offer.kind === 'ppt-templates'
             ? 'Next, choose the destination workspaces. The original workspace will be preselected when present. Matching templates will be overwritten; CDR tables will not be rebuilt.'
             : offer.kind === 'dashboards'
               ? 'Next, choose the destination workspaces. The original workspace will be preselected when present. Dashboard definitions and saved filters will be restored; generated caches are not transferred.'
@@ -7738,7 +7738,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
         confirmOverlay?.classList.remove('incoming-transfer-confirm', 'incoming-transfer-offer');
       }
       let destinationWorkspaceIds = [];
-      if (accepted && (offer.requires_destination_workspaces || ['auto-calculated-fields', 'slides-templates', 'dashboards', 'mappings-reference-data'].includes(offer.kind))) {
+      if (accepted && (offer.requires_destination_workspaces || ['auto-calculated-fields', 'ppt-templates', 'dashboards', 'mappings-reference-data'].includes(offer.kind))) {
         const matchingIds = (payload.destination_workspaces || []).filter((workspace) =>
           (offer.workspaces || []).some((name) => String(name).toLowerCase() === workspace.name.toLowerCase())
         ).map((workspace) => workspace.id);
@@ -8145,7 +8145,7 @@ const catalogueImportError = document.querySelector('[data-catalogue-import-erro
 if (catalogueImportError?.textContent.trim()) {
   requestAnimationFrame(() => {
     showInfoDialog(catalogueImportError.textContent.trim(), {
-      title: 'Report Templates Import Failed',
+      title: 'PPT Templates Import Failed',
       onClose: clearCatalogueImportQuery,
     });
   });
@@ -8155,7 +8155,7 @@ const catalogueImportNotice = document.querySelector('[data-catalogue-import-not
 if (catalogueImportNotice?.textContent.trim()) {
   requestAnimationFrame(() => {
     showInfoDialog(catalogueImportNotice.textContent.trim(), {
-      title: 'Report Templates Imported',
+      title: 'PPT Templates Imported',
       onClose: clearCatalogueImportQuery,
     });
   });

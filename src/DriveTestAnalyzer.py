@@ -6155,7 +6155,7 @@ ARCHIVE_KIND_COMPONENTS = {
     'config': ('app_database',),
     'workspace': ('workspace_components',),
     'full-environment': ('app_database', 'workspace_components'),
-    'slides-templates': ('workspace_components',),
+    'ppt-templates': ('workspace_components',),
     'auto-calculated-fields': ('workspace_components',),
     'dashboards': ('workspace_components',),
     'mappings-reference-data': ('workspace_components',),
@@ -6164,7 +6164,7 @@ ARCHIVE_KIND_COMPONENTS = {
     'bundle': (),
 }
 WORKSPACE_ELEMENT_EXPORT_TARGETS = frozenset({
-    'slides-templates', 'auto-calculated-fields', 'dashboards', 'mappings-reference-data', 'query-builder-queries',
+    'ppt-templates', 'auto-calculated-fields', 'dashboards', 'mappings-reference-data', 'query-builder-queries',
     'reporting-jobs', 'nq-call-tracking', 'main-cities', 'scoring-configuration',
 })
 STATIC_EXPORT_TARGETS = frozenset({'config', 'config-with-templates', 'full-environment'})
@@ -6212,7 +6212,7 @@ def archive_workspace_components(manifest: dict[str, Any]) -> list[str]:
     fallback = {
         'workspace': ('workspace_database', 'input', 'output', 'report_templates', 'auto_calculated_fields'),
         'full-environment': ('workspace_database', 'input', 'output', 'report_templates', 'auto_calculated_fields'),
-        'slides-templates': ('report_templates',),
+        'ppt-templates': ('report_templates',),
         'auto-calculated-fields': ('auto_calculated_fields',),
         'dashboards': ('dashboards',),
         'mappings-reference-data': ('mappings_reference_data',),
@@ -6294,7 +6294,7 @@ def archive_workspace_components_for_target(
     target: str, *, include_generated_outputs: bool = True, include_input_files: bool = True,
 ) -> list[str]:
     """Describe workspace-level content for an Export or Transfer target."""
-    if target == 'slides-templates':
+    if target == 'ppt-templates':
         return ['report_templates']
     if target == 'auto-calculated-fields':
         return ['auto_calculated_fields']
@@ -6641,7 +6641,7 @@ def create_recurring_database_backup(
                     report_progress(f'Exporting Dashboards for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                     _archive_workspace_dashboards(archive, workspace, archive_workspace_root, archived_bytes)
                 if 'report_templates' in components:
-                    report_progress(f'Archiving Report Templates for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
+                    report_progress(f'Archiving PPT Templates for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                     _archive_workspace_report_templates(archive, workspace, f'{archive_workspace_root}/report-templates', archived_bytes)
                 if 'mappings_reference_data' in components:
                     report_progress(f'Exporting Mappings & Reference Data for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
@@ -7110,7 +7110,7 @@ def restore_database_backup(
                             progress_callback(f'Restoring Report Template for {workspace_name}: {Path(name).name}', completed_steps, total_steps)
                         relative = PurePosixPath(name).relative_to(PurePosixPath(f'{prefix}report-templates'))
                         if len(relative.parts) != 3 or relative.parts[0] not in {'library', 'default'} or relative.parts[1] not in TEMPLATE_NAMES:
-                            raise ValueError(f'Backup Report Templates for "{workspace_name}" have an invalid path.')
+                            raise ValueError(f'Backup PPT Templates for "{workspace_name}" have an invalid path.')
                         destination = templates_staging / 'report-templates' / Path(*relative.parts)
                         destination.parent.mkdir(parents=True, exist_ok=True)
                         destination.write_bytes(archive.read(name))
@@ -7952,8 +7952,9 @@ def export_archive_filename(target: str | Iterable[str]) -> str:
     generated_at = datetime.now().strftime('%Y%m%d-%H%M%S')
     if target == 'config':
         return f'drivetest-analyzer-config_{generated_at}.zip'
-    if target == 'slides-templates':
-        return f'drivetest-analyzer-slides-templates_{generated_at}.zip'
+    if target == 'ppt-templates':
+        workspace_name = active_workspace.name if active_workspace else 'workspace'
+        return f'{workspace_name}_ppt-templates_{generated_at}.zip'
     if target == 'auto-calculated-fields':
         workspace_name = active_workspace.name if active_workspace else 'workspace'
         return f'{workspace_name}_auto-calculated-fields_{generated_at}.zip'
@@ -7979,7 +7980,7 @@ def export_archive_filename(target: str | Iterable[str]) -> str:
         workspace_name = active_workspace.name if active_workspace else 'workspace'
         return f'{workspace_name}_nq-call-tracking_{generated_at}.zip'
     if target == 'config-with-templates':
-        return f'drivetest-analyzer-config-with-slides-templates_{generated_at}.zip'
+        return f'drivetest-analyzer-config-with-ppt-templates_{generated_at}.zip'
     if target == 'full-environment':
         return f'drivetest-analyzer-full-environment_{generated_at}.zip'
     if target.startswith('workspace:'):
@@ -8052,14 +8053,14 @@ def _build_single_export_archive_file(
             )
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
             archive_configuration(archive, include_templates=include_templates)
-        elif target == 'slides-templates':
+        elif target == 'ppt-templates':
             source_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
             source_workspace = workspace_registry.get(source_id) if source_id else None
             if not source_workspace:
-                raise ValueError('Open a workspace before exporting Report Templates.')
+                raise ValueError('Open a workspace before exporting PPT Templates.')
             archive_path = f'workspaces/{source_workspace.name}/report-templates'
             manifest = archive_manifest(
-                'slides-templates', includes_slides_templates=True,
+                'ppt-templates', includes_slides_templates=True,
                 workspace_components=archive_workspace_components_for_target(target),
                 source_workspace={'id': source_workspace.id, 'name': source_workspace.name}, archive_path=archive_path,
             )
@@ -8334,7 +8335,7 @@ def estimate_export_bytes(
                 total += _file_size(path)
         if target == 'config-with-templates':
             total += _tree_size(settings.slides_templates_dir)
-    elif target == 'slides-templates':
+    elif target == 'ppt-templates':
         source_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
         source_workspace = workspace_registry.get(source_id) if source_id else None
         if source_workspace:
@@ -8467,10 +8468,10 @@ def _recovered_transfer_details(manifest: dict[str, Any]) -> tuple[str, list[str
         workspaces = [str(entry.get('name') or '') for entry in entries if isinstance(entry, dict) and entry.get('name')] if isinstance(entries, list) else []
         return (' + '.join(labels) or 'Export selection', list(dict.fromkeys(workspaces)))
     if kind == 'config':
-        return ('Config + Report Templates' if manifest.get('includes_slides_templates') else 'Config', [])
-    if kind == 'slides-templates':
+        return ('Config + PPT Templates' if manifest.get('includes_slides_templates') else 'Config', [])
+    if kind == 'ppt-templates':
         source = manifest.get('source_workspace') or {}
-        return ('Report Templates', [str(source['name'])] if isinstance(source, dict) and source.get('name') else [])
+        return ('PPT Templates', [str(source['name'])] if isinstance(source, dict) and source.get('name') else [])
     if kind == 'auto-calculated-fields':
         source = manifest.get('source_workspace')
         name = str(source.get('name') or '') if isinstance(source, dict) else ''
@@ -8535,7 +8536,7 @@ def _recover_unimported_transfer_packages() -> None:
             manifest = read_import_manifest(package_path)
             kind = str(manifest.get('kind') or '')
             if kind not in {
-                'config', 'workspace', 'full-environment', 'slides-templates',
+                'config', 'workspace', 'full-environment', 'ppt-templates',
                 'auto-calculated-fields', 'dashboards', 'mappings-reference-data', 'main-cities',
                 'scoring-configuration', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking', 'database-backup', 'bundle',
             }:
@@ -9009,7 +9010,7 @@ def migrate_ppt_module_names() -> None:
 
 
 def migrate_workspace_template_registries() -> None:
-    """Finish the one-time migration from the old global Report Templates registry."""
+    """Finish the one-time migration from the old global PPT Templates registry."""
     migration_key = 'workspace_templates_registry_v2'
     if workspace_registry.get_state(migration_key) == '1':
         return
@@ -9053,12 +9054,12 @@ def import_slides_templates_archive(
 ) -> int:
     templates_payload = staging_root / 'report-templates'
     if not templates_payload.exists():
-        raise ValueError('The Report Templates archive does not contain template files.')
+        raise ValueError('The PPT Templates archive does not contain template files.')
     selected = list(dict.fromkeys(destination_workspace_ids))
     if not selected:
         selected = matching_template_workspaces(manifest or {}, workspace_registry.list())
     if not selected:
-        raise ValueError('Select at least one destination workspace for the Report Templates.')
+        raise ValueError('Select at least one destination workspace for the PPT Templates.')
     destinations = [workspace_registry.get(identifier) for identifier in selected]
     if any(workspace is None for workspace in destinations):
         raise ValueError('A destination workspace no longer exists.')
@@ -9075,7 +9076,7 @@ def import_slides_templates_archive(
         content = path.read_bytes()
         previous = incoming.get(key)
         if previous and (previous['name'] != name or previous['content'] != content):
-            raise ValueError(f'The package contains conflicting Report Templates named "{name}".')
+            raise ValueError(f'The package contains conflicting PPT Templates named "{name}".')
         incoming[key] = {
             'name': name, 'content': content,
             'is_default': relative.parts[0] == 'default' or bool(previous and previous['is_default']),
@@ -9193,7 +9194,7 @@ def import_config_archive(staging_root: Path, manifest: dict[str, Any], *, keep_
         relative_path = path.relative_to(config_payload)
         if relative_path in {Path('application.db'), Path(workspace_registry.registry_path.name)}:
             continue
-        # Report Templates are workspace database records. Configuration ZIPs
+        # PPT Templates are workspace database records. Configuration ZIPs
         # created by older versions may still carry a CSV compatibility tree;
         # never restore that obsolete runtime directory.
         if relative_path.parts[0] == 'report-templates':
@@ -9377,20 +9378,20 @@ def _apply_import_archive(
             if progress_callback:
                 progress_callback('finalising', 100.0)
             return 'Configuration imported successfully. Local workspaces were preserved.'
-        if kind == 'slides-templates':
+        if kind == 'ppt-templates':
             archive_path = str(manifest.get('archive_path') or 'report-templates')
             if archive_path != 'report-templates' and not re.fullmatch(r'workspaces/[^/]+/report-templates', archive_path):
-                raise ValueError('The Report Templates package contains an invalid template path.')
+                raise ValueError('The PPT Templates package contains an invalid template path.')
             _safe_extract_archive_prefix(archive, staging_root, archive_path, extracted)
             if progress_callback:
-                progress_callback('importing Report Templates', 90.0)
+                progress_callback('importing PPT Templates', 90.0)
             import_slides_templates_archive(
                 staging_root if archive_path == 'report-templates' else staging_root / Path(archive_path).parent,
                 destination_workspace_ids, manifest, includes_dashboards=includes_dashboards,
             )
             if progress_callback:
                 progress_callback('finalising', 100.0)
-            return 'Report Templates imported successfully.'
+            return 'PPT Templates imported successfully.'
         if kind == 'dashboards':
             member = str(manifest.get('archive_path') or '')
             if member not in archive.namelist() or not re.fullmatch(r'workspaces/[^/]+/dashboards/dashboards\.json', member):
@@ -9772,8 +9773,8 @@ def _transfer_content_label(target: str | Iterable[str]) -> str:
     target = targets[0]
     labels = {
         'config': 'Config',
-        'slides-templates': 'Report Templates',
-        'config-with-templates': 'Config + Report Templates',
+        'ppt-templates': 'PPT Templates',
+        'config-with-templates': 'Config + PPT Templates',
         'full-environment': 'Full Environment',
         'auto-calculated-fields': 'Auto-calculated Fields',
         'dashboards': 'Dashboards',
@@ -10324,7 +10325,7 @@ def transfer_job_payload(job_id: str, user: SessionUser) -> dict[str, Any] | Non
 def require_import_export_permission(user: SessionUser, target: str) -> None:
     """Authorize imports; admins may restore templates and fields into accessible workspaces."""
     if user.role == 'super-admin' or target in {
-        'slides-templates', 'auto-calculated-fields', 'dashboards', 'mappings-reference-data', 'main-cities',
+        'ppt-templates', 'auto-calculated-fields', 'dashboards', 'mappings-reference-data', 'main-cities',
         'scoring-configuration', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking',
     }:
         return
@@ -10359,7 +10360,7 @@ def require_export_permission(user: SessionUser, target: str) -> None:
     """Authorize exports and transfers without exposing other workspaces."""
     if user.role == 'super-admin':
         return
-    if target in {'auto-calculated-fields', 'slides-templates', 'dashboards', 'mappings-reference-data', 'main-cities', 'scoring-configuration', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking'}:
+    if target in {'auto-calculated-fields', 'ppt-templates', 'dashboards', 'mappings-reference-data', 'main-cities', 'scoring-configuration', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking'}:
         if active_workspace and repository.user_has_workspace_access(user.username, active_workspace.id):
             return
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Open a workspace you can access first.')
@@ -10481,7 +10482,7 @@ def render_admin_template(
         'chart_mapping_groups': 'Chart mapping groups',
         'operator_mappings': 'Operator Mappings',
         'vendor_mappings': 'Vendor Mappings',
-        'report_templates': 'Report Templates',
+        'report_templates': 'PPT Templates',
         'saved_query_builder_queries': 'Query Builder Queries',
         'workspace_state': 'Workspace State',
         'transfer_offers': 'Server transfer offers',
@@ -10524,7 +10525,7 @@ def render_admin_template(
     export_options = [
         {'value': 'config', 'label': 'Application Config'},
         {'value': 'dashboards', 'label': 'Dashboards (from active workspace)', 'disabled': not active_workspace},
-        {'value': 'slides-templates', 'label': 'Report Templates (from active workspace)', 'disabled': not active_workspace},
+        {'value': 'ppt-templates', 'label': 'PPT Templates (from active workspace)', 'disabled': not active_workspace},
         {'value': 'main-cities', 'label': 'Main Cities (from active workspace)', 'disabled': not active_workspace},
         {'value': 'mappings-reference-data', 'label': 'Mappings & Reference Data (from active workspace)', 'disabled': not active_workspace},
         {'value': 'scoring-configuration', 'label': 'Scoring & GAP Analysis Configuration (from active workspace)', 'disabled': not active_workspace},
@@ -10532,7 +10533,7 @@ def render_admin_template(
         {'value': 'query-builder-queries', 'label': 'Query Builder Queries (from active workspace)', 'disabled': not active_workspace},
         {'value': 'reporting-jobs', 'label': 'Reporting Jobs (from active workspace)', 'disabled': not active_workspace},
         {'value': 'nq-call-tracking', 'label': 'NQ Call Tracking (from active workspace)', 'disabled': not active_workspace},
-        {'value': 'full-environment', 'label': 'Full Environment (Application Config + Dashboards + Report Templates + Main Cities + Mappings & Reference Data + Scoring & GAP Analysis Configuration + Auto-calculated Fields + Query Builder Queries + Reporting Jobs + NQ Call Tracking + Selected Workspaces)'},
+        {'value': 'full-environment', 'label': 'Full Environment (Application Config + Dashboards + PPT Templates + Main Cities + Mappings & Reference Data + Scoring & GAP Analysis Configuration + Auto-calculated Fields + Query Builder Queries + Reporting Jobs + NQ Call Tracking + Selected Workspaces)'},
         *[
             {'value': f'workspace:{workspace.id}', 'label': f'Full Workspace: {workspace.name}'}
             for workspace in accessible_workspaces(user)
@@ -10545,14 +10546,14 @@ def render_admin_template(
         export_options = [
             option for option in export_options
             if option['value'] in {
-                'slides-templates', 'auto-calculated-fields', 'dashboards', 'mappings-reference-data', 'main-cities', 'scoring-configuration',
+                'ppt-templates', 'auto-calculated-fields', 'dashboards', 'mappings-reference-data', 'main-cities', 'scoring-configuration',
             } or option['value'].startswith('workspace:')
         ]
     export_option_groups = [
         ('Configuration Content', [option for option in export_options if option['value'] == 'config']),
         ('Current Workspace Content', [
             option for option in export_options
-            if option['value'] in {'dashboards', 'slides-templates', 'main-cities', 'mappings-reference-data', 'scoring-configuration', 'auto-calculated-fields', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking'}
+            if option['value'] in {'dashboards', 'ppt-templates', 'main-cities', 'mappings-reference-data', 'scoring-configuration', 'auto-calculated-fields', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking'}
         ]),
         ('Full Workspace', [option for option in export_options if option['value'].startswith('workspace:')]),
         ('Full Environment', [option for option in export_options if option['value'] == 'full-environment']),
@@ -19565,7 +19566,7 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
         raise HTTPException(status_code=400, detail='The transfer offer is invalid.')
     kind = str(payload.get('kind') or '')
     if kind not in {
-            'config', 'workspace', 'full-environment', 'slides-templates',
+            'config', 'workspace', 'full-environment', 'ppt-templates',
             'auto-calculated-fields', 'dashboards', 'mappings-reference-data', 'main-cities',
             'scoring-configuration', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking', 'database-backup', 'bundle',
     }:
@@ -20224,7 +20225,7 @@ def _retain_import_upload(upload_id: str, package_path: Path, user: SessionUser)
     manifest = read_import_manifest(package_path)
     kind = str(manifest.get('kind') or '')
     if kind not in {
-        'config', 'workspace', 'full-environment', 'slides-templates',
+        'config', 'workspace', 'full-environment', 'ppt-templates',
         'auto-calculated-fields', 'dashboards', 'mappings-reference-data', 'main-cities',
         'scoring-configuration', 'query-builder-queries', 'reporting-jobs', 'nq-call-tracking', 'database-backup', 'bundle',
     }:

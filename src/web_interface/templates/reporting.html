@@ -46,8 +46,8 @@
       <label>NR Mode
         <select name="technology" required data-report-technology><option value="nsa">NSA (Non-Standalone)</option><option value="sa">SA (Standalone)</option></select>
       </label>
-      <label>Report Templates
-        <select name="slides_templates" required data-report-catalogue aria-label="Report Templates">
+      <label>PPT Templates
+        <select name="slides_templates" required data-report-catalogue aria-label="PPT Templates">
           {% for technology, catalogues in report_catalogues.items() %}
           {% for catalogue in catalogues %}
           <option value="{{ technology }}:{{ catalogue.identifier }}" data-catalogue-technology="{{ technology }}" data-catalogue-active="{{ 'true' if catalogue.active else 'false' }}"{% if technology == 'nsa' and catalogue.active %} selected{% endif %}>{{ technology | upper }} · {{ catalogue.name }}{% if catalogue.active %} · Default{% endif %}</option>
@@ -61,7 +61,7 @@
       <input type="hidden" name="vendor_comparison" value="operator_vendor">
       <div class="form-actions reporting-submit-action"><button type="submit">Generate PowerPoint Report</button><button type="button" class="report-charts-button" data-report-charts-button>Generate Report Charts</button></div>
       </form>
-      <p id="cdr-selection-help" class="form-note">Select at least one CDR from any supported type. Types without a selection remain in the report as charts labelled Unavailable source type. Use Ctrl/Cmd-click to select several CDRs of the same type. Their processed rows are concatenated using the union of their columns, preserving Campaign values for cross-campaign comparisons. Choose Report Templates matching the selected technology; they apply only to this report and do not change the workspace default. Map Vendors from Workspace before choosing Multivendor. The common Template_01.pptx supplies masters and layouts for every report: the selected template creates each slide from scratch, fills its chart placeholders from the selected CDRs and keeps commentary areas blank for the analyst.</p>
+      <p id="cdr-selection-help" class="form-note">Select at least one CDR from any supported type. Types without a selection remain in the report as charts labelled Unavailable source type. Use Ctrl/Cmd-click to select several CDRs of the same type. Their processed rows are concatenated using the union of their columns, preserving Campaign values for cross-campaign comparisons. Choose PPT Templates matching the selected technology; they apply only to this report and do not change the workspace default. Map Vendors from Workspace before choosing Multivendor. The common Template_01.pptx supplies masters and layouts for every report: the selected template creates each slide from scratch, fills its chart placeholders from the selected CDRs and keeps commentary areas blank for the analyst.</p>
     </div>
   </details>
 

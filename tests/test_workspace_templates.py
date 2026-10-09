@@ -84,7 +84,7 @@ def test_template_registry_is_workspace_owned(tmp_path):
 
 def test_template_package_matches_source_and_imports_to_multiple_workspaces(client, tmp_path):
     source = app_module.active_workspace
-    package, _name = app_module.build_export_archive('slides-templates')
+    package, _name = app_module.build_export_archive('ppt-templates')
     manifest = app_module.read_import_manifest(package)
     assert manifest['source_workspace']['name'] == source.name
     other = app_module.workspace_registry.create('Other')
@@ -178,7 +178,7 @@ def test_template_and_dashboard_bundle_replaces_referenced_template(client, tmp_
         'local-dashboard': {'template_technology': 'nsa', 'template': 'Bundle Used'},
     }))
     package_path = tmp_path / 'bundle.zip'
-    app_module.build_export_archive_file(['slides-templates', 'dashboards'], package_path)
+    app_module.build_export_archive_file(['ppt-templates', 'dashboards'], package_path)
 
     app_module._apply_import_archive(
         package_path, app_module.read_import_manifest(package_path),
@@ -220,7 +220,7 @@ def test_template_export_pins_source_when_active_workspace_changes(client, tmp_p
     other = app_module.workspace_registry.create('Other')
     app_module.activate_workspace(other.id)
     path = tmp_path / 'source.zip'
-    app_module.build_export_archive_file('slides-templates', path, [source.id])
+    app_module.build_export_archive_file('ppt-templates', path, [source.id])
     with zipfile.ZipFile(path) as archive:
         assert json.loads(archive.read('manifest.json'))['source_workspace']['name'] == source.name
         assert any(name.endswith('.csv') for name in archive.namelist())
@@ -231,7 +231,7 @@ def test_template_export_pins_source_when_active_workspace_changes(client, tmp_p
 
 def test_inspection_preselects_only_matching_workspace_and_requires_access(client, tmp_path, monkeypatch):
     source = app_module.active_workspace
-    package, _name = app_module.build_export_archive('slides-templates')
+    package, _name = app_module.build_export_archive('ppt-templates')
     client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
     other = app_module.workspace_registry.create('Restricted')
     result = client.post('/admin/import-export/inspect/upload', content=package,
@@ -302,8 +302,8 @@ def test_template_transfer_requires_and_retains_multiple_destinations(client):
     other = app_module.workspace_registry.create('Second destination')
     headers = {'X-Dashboard-Transfer-Secret': 'template-transfer-secret-with-sufficient-length'}
     offered = client.post('/api/import-export/transfers/offers', headers=headers, json={
-        'source': 'Template test source', 'archive_version': 1, 'kind': 'slides-templates',
-        'content': 'Slides Templates', 'workspaces': [source.name],
+        'source': 'Template test source', 'archive_version': 1, 'kind': 'ppt-templates',
+        'content': 'PPT Templates', 'workspaces': [source.name],
     })
     assert offered.status_code == 200
     offer_id = offered.json()['offer_id']
@@ -344,5 +344,5 @@ def test_database_management_groups_template_registry_with_workspace_tables(clie
     assert response.status_code == 200
     groups = dict(re.findall(r'<optgroup label="([^"]+)">(.*?)</optgroup>', response.text, re.S))
     assert 'value="report_templates"' in groups['Workspace Tables']
-    assert 'Report Templates' in groups['Workspace Tables']
+    assert 'PPT Templates' in groups['Workspace Tables']
     assert 'value="report_templates"' not in groups['Config Tables']

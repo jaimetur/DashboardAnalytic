@@ -2545,7 +2545,7 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     assert 'Mappings &amp; Reference Data (from active workspace)</option>' in admin_response.text
     assert admin_response.text.index('Main Cities (from active workspace)</option>') < admin_response.text.index('Mappings &amp; Reference Data (from active workspace)</option>')
     assert 'Scoring &amp; GAP Analysis Configuration (from active workspace)' in admin_response.text
-    assert 'Full Environment (Application Config + Dashboards + Report Templates + Main Cities + Mappings &amp; Reference Data + Scoring &amp; GAP Analysis Configuration + Auto-calculated Fields + Query Builder Queries + Reporting Jobs + NQ Call Tracking + Selected Workspaces)' in admin_response.text
+    assert 'Full Environment (Application Config + Dashboards + PPT Templates + Main Cities + Mappings &amp; Reference Data + Scoring &amp; GAP Analysis Configuration + Auto-calculated Fields + Query Builder Queries + Reporting Jobs + NQ Call Tracking + Selected Workspaces)' in admin_response.text
     assert admin_response.text.index('Main Cities (workspace city selection)') < admin_response.text.index('Mappings &amp; Reference Data (Operator and Vendor aliases, order and theme colors')
     assert 'Scoring &amp; GAP Analysis Configuration (KPI methodology profiles and GAP KPI priorities)' in admin_response.text
     assert "main_cities: 'Main Cities', mappings_reference_data: 'Mappings & Reference Data', scoring_configuration: 'Scoring & GAP Analysis Configuration'" in admin_response.text
@@ -3399,7 +3399,7 @@ def test_incoming_transfer_offer_survives_process_memory_loss(client, monkeypatc
         headers={'X-Dashboard-Transfer-Secret': secret},
         json={
             'source': 'Docker source', 'archive_version': 1,
-            'kind': 'slides-templates', 'content': 'Slides Templates', 'workspaces': [],
+            'kind': 'ppt-templates', 'content': 'PPT Templates', 'workspaces': [],
         },
     )
     assert offer.status_code == 200
@@ -3419,7 +3419,7 @@ def test_equivalent_pending_transfer_offer_is_reused_with_the_new_secret(client,
     monkeypatch.setattr(app_module, 'export_package_dir', lambda: tmp_path)
     payload = {
         'source': 'Retrying Docker source', 'archive_version': 1,
-        'kind': 'slides-templates', 'content': 'Slides Templates', 'workspaces': [],
+        'kind': 'ppt-templates', 'content': 'PPT Templates', 'workspaces': [],
     }
     first_secret = 'first-retry-transfer-secret-long-enough'
     second_secret = 'second-retry-transfer-secret-long-enough'
@@ -3462,7 +3462,7 @@ def test_new_transfer_offer_supersedes_old_pending_requests_from_same_server(cli
                 headers={'X-Dashboard-Transfer-Secret': f'superseding-transfer-secret-{index:02d}-long-enough'},
                 json={
                     'source': f'Persistent Docker source {index}', 'archive_version': 1,
-                    'kind': 'slides-templates', 'content': f'Slides Templates {index}', 'workspaces': [],
+                    'kind': 'ppt-templates', 'content': f'PPT Templates {index}', 'workspaces': [],
                 },
             )
             assert response.status_code == 200
@@ -3484,7 +3484,7 @@ def test_persisted_pending_transfer_offer_expires_after_approval_window(client, 
         headers={'X-Dashboard-Transfer-Secret': secret},
         json={
             'source': 'Expiring source', 'archive_version': 1,
-            'kind': 'slides-templates', 'content': 'Slides Templates', 'workspaces': [],
+            'kind': 'ppt-templates', 'content': 'PPT Templates', 'workspaces': [],
         },
     )
     offer_id = response.json()['offer_id']
@@ -4064,7 +4064,7 @@ def test_admin_export_and_transfer_are_limited_to_templates_and_accessible_works
     panel = client.get('/admin')
     assert panel.status_code == 200
     assert 'data-panel-state-key="admin:import-export"' in panel.text
-    assert 'Report Templates (from active workspace)</option>' in panel.text
+    assert 'PPT Templates (from active workspace)</option>' in panel.text
     assert 'Main Cities (from active workspace)</option>' in panel.text
     assert 'Transfer to other server' in panel.text
     assert 'value="config"' not in panel.text
@@ -4075,12 +4075,14 @@ def test_admin_export_and_transfer_are_limited_to_templates_and_accessible_works
     blocked_export = client.get('/admin/import-export/export?export_target=config')
     assert blocked_export.status_code == 403
 
-    templates_export = client.get('/admin/import-export/export?export_target=slides-templates')
+    templates_export = client.get('/admin/import-export/export?export_target=ppt-templates')
     assert templates_export.status_code == 200
     with zipfile.ZipFile(BytesIO(templates_export.content)) as archive:
         manifest = json.loads(archive.read('manifest.json'))
-        assert manifest['kind'] == 'slides-templates'
+        assert manifest['kind'] == 'ppt-templates'
         assert manifest['archive_path'].endswith('/report-templates')
+    # Named like the other exports of a workspace element.
+    assert 'Default_ppt-templates_' in templates_export.headers['content-disposition']
 
     main_cities_export = client.get('/admin/import-export/export?export_target=main-cities')
     assert main_cities_export.status_code == 200

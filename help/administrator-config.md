@@ -84,7 +84,7 @@ Reporting Jobs can only include artifacts of the modules active for their author
 
 - Application Config
 - Dashboards from the active workspace
-- Report Templates from the active workspace
+- PPT Templates from the active workspace
 - Main Cities from the active workspace
 - Mappings & Reference Data from the active workspace
 - Scoring & GAP Analysis Configuration from the active workspace (all saved methodologies, default methodology, KPI definitions and GAP KPI priorities)
@@ -95,15 +95,15 @@ Reporting Jobs can only include artifacts of the modules active for their author
 - An accessible workspace
 - Full Environment with selected workspaces
 
-Admins can export/transfer the active workspace's Dashboards, Report Templates, Main Cities, Mappings & Reference Data, Scoring & GAP Analysis Configuration, Auto-calculated Fields, Query Builder Queries, Reporting Jobs and NQ Call Tracking, plus complete workspaces they can access. Super-admins can also export Application Config and a Full Environment.
+Admins can export/transfer the active workspace's Dashboards, PPT Templates, Main Cities, Mappings & Reference Data, Scoring & GAP Analysis Configuration, Auto-calculated Fields, Query Builder Queries, Reporting Jobs and NQ Call Tracking, plus complete workspaces they can access. Super-admins can also export Application Config and a Full Environment.
 
 Dashboard, template, mapping and field packages preselect a destination workspace with the same name as their source, where available, and allow one or more accessible destinations to be selected.
 
-Importing or transferring Report Templates synchronizes the destination library with the package. Templates absent from the package are removed unless a saved local Dashboard uses them. A template used by a local Dashboard keeps its local definition when the package contains a matching name; names are matched without case differences, so the import does not create a second copy.
+Importing or transferring PPT Templates synchronizes the destination library with the package. Templates absent from the package are removed unless a saved local Dashboard uses them. A template used by a local Dashboard keeps its local definition when the package contains a matching name; names are matched without case differences, so the import does not create a second copy.
 
-When the same package also includes Dashboards, its Report Templates replace the destination library because the Dashboard definitions are replaced too. Selective backup restore uses the same rule.
+When the same package also includes Dashboards, its PPT Templates replace the destination library because the Dashboard definitions are replaced too. Selective backup restore uses the same rule.
 
-A Full Environment always contains Application Config and the complete database/input content, Dashboard definitions, Report Templates, Main Cities, Mappings & Reference Data, Scoring & GAP Analysis Configuration, Auto-calculated Fields, Query Builder Queries, Reporting Jobs and NQ Call Tracking for every selected workspace. Selecting Full Environment only chooses the package type; the workspace picker opens when **Export ZIP** or **Transfer to other server** is pressed.
+A Full Environment always contains Application Config and the complete database/input content, Dashboard definitions, PPT Templates, Main Cities, Mappings & Reference Data, Scoring & GAP Analysis Configuration, Auto-calculated Fields, Query Builder Queries, Reporting Jobs and NQ Call Tracking for every selected workspace. Selecting Full Environment only chooses the package type; the workspace picker opens when **Export ZIP** or **Transfer to other server** is pressed.
 
 **Include generated Reports, Chart Sets and Dashboard PPT jobs** controls whether their `output/` trees, and the [Reporting](reporting.md) run history, are included. Reporting Job imports add new jobs and replace jobs with the same name; their dataset references are matched by file name in the destination workspace. At least one workspace is required.
 
@@ -120,7 +120,7 @@ Exports run as disk-backed jobs and show estimated progress. The ZIP download st
 
 1. Select a DriveTest Analyzer ZIP or Scoring & GAP Analysis Configuration JSON and wait for its upload.
 2. Review the manifest-detected content, affected workspaces and overwrite warnings.
-3. For Dashboard, Report Template, Main Cities, Mappings & Reference Data, Scoring & GAP Analysis Configuration or Auto-calculated Field packages, choose one or more accessible destination workspaces; a matching source name is preselected when available.
+3. For Dashboard, PPT Template, Main Cities, Mappings & Reference Data, Scoring & GAP Analysis Configuration or Auto-calculated Field packages, choose one or more accessible destination workspaces; a matching source name is preselected when available.
 4. Confirm import.
 5. Follow the background import in the floating task card.
 
@@ -172,7 +172,7 @@ In **Backup**, select one or more content types:
 - **Configuration Content: Application database** stores the shared application configuration, including the Scoring aggregation hierarchy.
 - **Workspace Content: Workspace Database** stores the selected workspace SQLite databases.
 - **Workspace Content: Dashboards** stores one JSON file with every Dashboard definition and its comments for each selected workspace.
-- **Workspace Content: Report Templates** stores one CSV file for each Report Template.
+- **Workspace Content: PPT Templates** stores one CSV file for each PPT Template.
 - **Workspace Content: Main Cities** stores the workspace city selection.
 - **Workspace Content: Mappings & Reference Data** stores one JSON file containing every canonical Operator and Vendor, alias, row position and thematic colour, plus the Spectrum Holdings and Campaign Maps.
 - **Workspace Content: Scoring & GAP Analysis Configuration** stores all saved methodologies, their default selection, KPI definitions and GAP KPI priorities; import and restore recover every Scoring Setup subpanel together.
@@ -181,7 +181,7 @@ In **Backup**, select one or more content types:
 - **Workspace Content: Input** stores raw dataset files when explicitly selected.
 - **Workspace Content: Output** stores generated Reports, Chart Sets and Dashboard PowerPoint jobs when explicitly selected.
 
-Application database, Workspace Database, Dashboards, Report Templates, Main Cities, Mappings & Reference Data, Scoring & GAP Analysis Configuration and Auto-calculated Fields are selected by default. Main Cities precedes Mappings & Reference Data in Export and Backup/Restore component lists.
+Application database, Workspace Database, Dashboards, PPT Templates, Main Cities, Mappings & Reference Data, Scoring & GAP Analysis Configuration and Auto-calculated Fields are selected by default. Main Cities precedes Mappings & Reference Data in Export and Backup/Restore component lists.
 
 The Backup content menu expands beyond the selector on desktop to show descriptions and wraps long text within the available width, including on mobile. Input and Output are opt-in. Selecting any workspace content reveals **Workspaces to include**, containing only workspaces you can access.
 
@@ -212,7 +212,7 @@ Tables are grouped by ownership:
 
 The **Generated jobs** table contains Report and Chart Set rows, distinguished by `job_type`. Dashboard PowerPoint history is stored separately in **Dashboard PPT jobs** because each row retains its Dashboard definition and applied filter snapshot.
 
-The **Report Templates** table is the active workspace's `report_templates` table. It stores each template name, technology, default flag, timestamps and CSV content. Existing CSV templates are migrated automatically when their workspace is opened; compatibility CSV copies are generated only for portable packages.
+The **PPT Templates** table is the active workspace's `report_templates` table. It stores each template name, technology, default flag, timestamps and CSV content. Existing CSV templates are migrated automatically when their workspace is opened; compatibility CSV copies are generated only for portable packages.
 
 #### Operator Mappings and Vendor Mappings tables
 
