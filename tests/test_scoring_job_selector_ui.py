@@ -65,7 +65,7 @@ const jobCdrSummary = () => 'Example CDR.xlsx';
 const isActive = job => job.status === 'processing';
 const progressValue = () => 40;
 const deletingJobIds = new Set();
-''' + _function_source(script, 'syncJobLists') + _function_source(script, 'renderJobs') + r'''
+''' + _function_source(script, 'jobAreaSummaryText') + _function_source(script, 'jobDurationText') + _function_source(script, 'syncJobLists') + _function_source(script, 'renderJobs') + r'''
 renderJobs();
 const latest = selectedJobCard.textContent;
 const cards = jobList.children.map(row => ({id: row.children[0].dataset.jobId,
