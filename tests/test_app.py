@@ -263,6 +263,34 @@ def test_query_builder_restore_rejects_unresolved_sources_before_saving_any_quer
     assert saved_queries == []
 
 
+def test_query_builder_restore_keeps_queries_without_selected_cdrs(monkeypatch, tmp_path: Path) -> None:
+    import src.DriveTestAnalyzer as app_module
+
+    saved_queries = []
+
+    class DatasetRepository:
+        def __init__(self, *_args):
+            pass
+
+        def list_datasets(self):
+            return []
+
+        def save_query_builder_query(self, *args):
+            saved_queries.append(args)
+
+    class DestinationWorkspace:
+        name = 'Destination'
+        database_path = tmp_path / 'destination.db'
+
+    monkeypatch.setattr(app_module, 'Repository', DatasetRepository)
+    # The starter example queries have no selected CDRs: they travel and are restored as they are.
+    payload = json.dumps({'queries': [
+        {'name': 'Example', 'query_sql': 'SELECT 1', 'dataset_ids': [], 'dataset_names': [], 'dataset_descriptors': []},
+    ]}).encode('utf-8')
+    assert app_module._restore_workspace_query_builder_queries(DestinationWorkspace(), payload) == 1
+    assert saved_queries == [('Example', '', 'SELECT 1', [], 'import')]
+
+
 def test_query_builder_preview_updates_completed_filter_while_another_is_incomplete() -> None:
     node_binary = shutil.which('node')
     if node_binary is None:

@@ -7795,7 +7795,8 @@ def _resolve_query_builder_dataset_ids(
     else:
         raise ValueError(f'Saved query "{query_name}" does not include dataset references.')
     if not references:
-        raise ValueError(f'Saved query "{query_name}" has no dataset sources to restore.')
+        # A query without selected CDRs (such as the starter example queries) is restored as it is.
+        return []
 
     resolved_ids: list[int] = []
     for reference in references:
