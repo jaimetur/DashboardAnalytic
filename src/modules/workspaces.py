@@ -325,8 +325,16 @@ class WorkspaceRegistry:
     def create(self, name: str) -> Workspace:
         normalized_name = self._validate_name(name)
         with self._connection() as conn:
-            workspace_id = str(conn.execute('SELECT COALESCE(MAX(CAST(substr(id, 11) AS INTEGER)), 0) + 1 AS next_id FROM workspaces WHERE id GLOB "workspace-*"').fetchone()['next_id'])
-            workspace_id = f'workspace-{workspace_id}'
+            # Identifiers are never reused: a deleted workspace's id would otherwise pass to the next one,
+            # with what the browser and the server still keep for the deleted one.
+            highest = int(conn.execute('SELECT COALESCE(MAX(CAST(substr(id, 11) AS INTEGER)), 0) AS highest FROM workspaces WHERE id GLOB "workspace-*"').fetchone()['highest'])
+            last = conn.execute("SELECT value FROM workspace_state WHERE key = 'last_workspace_number'").fetchone()
+            number = max(highest, int(last['value']) if last and str(last['value']).isdigit() else 0) + 1
+            conn.execute(
+                "INSERT INTO workspace_state (key, value) VALUES ('last_workspace_number', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (str(number),),
+            )
+            workspace_id = f'workspace-{number}'
             now = self._now()
             data_root = self._workspace_root(normalized_name)
             db_path = data_root / f'{normalized_name}.db'

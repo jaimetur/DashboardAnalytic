@@ -60,6 +60,7 @@
 - **Root cause in the call panel:** the cause list of a Non-Qualified Call opens above its detail panel, so the cause can be changed there too (formerly it opened hidden behind the panel).
 - **CDRs of imported Dashboards:** Dashboards imported or transferred into another workspace choose the CDRs of that workspace with the same name and type instead of keeping the ids of the source workspace's CDRs, and a Dashboard leaves out chosen CDRs deleted from its workspace (with none left it uses the newest CDRs), so it no longer fails to open with "Selected data CDR was not found".
 - **CDR Tables Updates of a new workspace:** a workspace whose CDR tables were marked for an update that no job runs (such as a new workspace without CDRs) runs it instead of showing "Updating CDR tables · 0%" forever.
+- **Workspace ids:** a new workspace no longer takes the id of a deleted one, which made the Workspace page show "Workspace deleted" and hide the new workspace when it was created shortly after deleting the last one.
 
 #### 📚 Documentation:
 - The **Vendor mapping rule** card of Workspace describes the current rule: every Vodafone and Three Operator is mapped (other spellings, such as Vodafone SA or VF_SA, keep their own name as prefix), Operators without a Vendor get `<Operator> - All`, and the result fills `Operator_Vendor`, `Vendor` and `Vendor_Operator`.

@@ -223,3 +223,17 @@ def test_global_database_replacement_preserves_local_transfer_offers(tmp_path: P
     assert repository.list_transfer_offers() == [offer]
     with sqlite3.connect(application_db) as conn:
         assert conn.execute('SELECT username FROM users').fetchone() == ('imported',)
+
+
+def test_a_new_workspace_never_takes_the_id_of_a_deleted_one(tmp_path: Path) -> None:
+    registry = WorkspaceRegistry(
+        tmp_path / 'workspace-registry.db', tmp_path / 'data', tmp_path / 'slides-templates',
+    )
+    registry.initialize()
+    first = registry.create('First')
+    second = registry.create('Second')
+    registry.delete(second.id, delete_files=True)
+    # Otherwise the Workspace page takes the new workspace for the deleted one and removes its row.
+    third = registry.create('Third')
+    assert third.id not in {first.id, second.id}
+    assert int(third.id.removeprefix('workspace-')) == int(second.id.removeprefix('workspace-')) + 1
