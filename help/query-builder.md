@@ -74,8 +74,8 @@ Runs and page changes continue in the background while Query Builder checks thei
 
 - Give the query a name and optional description to save it in the active workspace database. Query Builder loads the saved library from that database and does not automatically recreate removed or built-in examples.
 - Saving checks the SQL and selected source columns without executing the full query. Run it separately to inspect results.
-- Loading a saved query restores its SQL and source selections. Generated SQL that matches the Assistance Mode controls also restores those controls; custom or unsupported SQL remains in **SQL Mode**.
+- Loading a saved query restores its SQL and its source selections; a query without CDRs (such as an imported one) keeps the CDRs chosen in the panels, so they can be chosen before or after loading it. Generated SQL that matches the Assistance Mode controls also restores those controls; custom or unsupported SQL remains in **SQL Mode**.
 - Saved queries retain SQL and source references, so queries saved before Assistance Mode remain available in the same editor.
 - Use the delete button in the Saved queries library to remove a query after confirmation. The library and load picker refresh after deletion.
 - Export an individual saved query as JSON for inspection or archiving. Use a Query Builder Queries package or workspace backup/export ZIP to import saved queries into another workspace.
-- Workspace query packages match source datasets by file name, or by source file content and CDR type when names differ. A transfer reports unmatched or ambiguous sources instead of saving a query with missing selections. SQL conditions that inspect `source_dataset_name` still use the destination's file name, so review them after renaming a dataset.
+- Exported, transferred and backed-up queries carry their name, description and SQL, without CDRs: choose the CDRs when using an imported query. SQL conditions that inspect `source_dataset_name` use the file names of the CDRs chosen, so review them in another workspace.

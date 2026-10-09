@@ -172,98 +172,25 @@ vm.runInNewContext(`${helper}\nrequestExecutionResult('background-test','same-qu
     assert result['calls'][1] == ['poll', '/api/query-builder/run/background-test']
 
 
-def test_query_builder_dataset_restore_matches_exact_name_then_unique_kind_and_hash(tmp_path: Path, monkeypatch) -> None:
+def test_query_builder_queries_are_exported_without_cdrs(client) -> None:
     import src.DriveTestAnalyzer as app_module
 
-    source_path = tmp_path / 'source.csv'
-    source_path.write_bytes(b'Operator,Value\nVodafone,1\n')
-    renamed_path = tmp_path / 'renamed.csv'
-    renamed_path.write_bytes(source_path.read_bytes())
-    other_path = tmp_path / 'other.csv'
-    other_path.write_bytes(b'Operator,Value\nThree,2\n')
-
-    source_descriptor = {
-        'name': 'source.csv', 'kind': 'data',
-        'sha256': app_module._query_builder_source_sha256(source_path),
-    }
-
-    class DatasetRepository:
-        def __init__(self, datasets):
-            self.datasets = datasets
-
-        def list_datasets(self):
-            return self.datasets
-
-    renamed_repo = DatasetRepository([
-        {'id': 41, 'file_name': 'renamed.csv', 'stored_path': str(renamed_path), 'dataset_kind': 'data'},
-    ])
-    assert app_module._resolve_query_builder_dataset_ids(
-        renamed_repo, {'dataset_descriptors': [source_descriptor]}, 'Portable query',
-    ) == [41]
-
-    exact_repo = DatasetRepository([
-        {'id': 42, 'file_name': 'source.csv', 'stored_path': str(other_path), 'dataset_kind': 'voice'},
-        {'id': 43, 'file_name': 'source.csv', 'stored_path': str(other_path), 'dataset_kind': 'data'},
-    ])
-    original_hash = app_module._query_builder_source_sha256
-    monkeypatch.setattr(app_module, '_query_builder_source_sha256', lambda _path: pytest.fail('Exact name and kind match should not hash files.'))
-    assert app_module._resolve_query_builder_dataset_ids(
-        exact_repo, {'dataset_descriptors': [source_descriptor]}, 'Portable query',
-    ) == [43]  # Exact name and kind take precedence without hashing.
-    monkeypatch.setattr(app_module, '_query_builder_source_sha256', original_hash)
-
-    ambiguous_repo = DatasetRepository([
-        {'id': 44, 'file_name': 'renamed-a.csv', 'stored_path': str(renamed_path), 'dataset_kind': 'data'},
-        {'id': 45, 'file_name': 'renamed-b.csv', 'stored_path': str(renamed_path), 'dataset_kind': 'data'},
-    ])
-    with pytest.raises(ValueError, match='matches multiple local datasets by kind and file hash'):
-        app_module._resolve_query_builder_dataset_ids(
-            ambiguous_repo, {'dataset_descriptors': [source_descriptor]}, 'Portable query',
-        )
-
-    with pytest.raises(ValueError, match='could not be matched to a local dataset'):
-        app_module._resolve_query_builder_dataset_ids(
-            DatasetRepository([]), {'dataset_descriptors': [source_descriptor]}, 'Portable query',
-        )
+    login(client)
+    app_module.repository.save_query_builder_query('With CDRs', 'Uses two CDRs', 'SELECT 1', [5, 6], 'admin')
+    query_id = next(int(row['id']) for row in app_module.repository.list_query_builder_queries() if row['name'] == 'With CDRs')
+    # Neither the library nor a single saved query carry CDRs: they are chosen when the query is used.
+    library = app_module._query_builder_queries_payload(app_module.active_workspace)
+    exported = next(item for item in library['queries'] if item['name'] == 'With CDRs')
+    assert exported == {'name': 'With CDRs', 'description': 'Uses two CDRs', 'query_sql': 'SELECT 1', 'created_by': 'admin'}
+    single = client.get(f'/api/query-builder/saved/{query_id}/export').json()
+    assert single['query'] == exported
+    # Loading a query without CDRs keeps the CDRs chosen in the panels.
+    template = (Path(__file__).resolve().parents[1] / 'src/web_interface/templates/query_builder.html').read_text(encoding='utf-8')
+    load = template[template.index('  const loadSavedQuery = '):template.index("  document.querySelector('[data-sql-load-saved]')")]
+    assert 'if (selected.size) {' in load and "' Choose the CDRs to run it on.'" in load
 
 
-def test_query_builder_restore_rejects_unresolved_sources_before_saving_any_queries(monkeypatch, tmp_path: Path) -> None:
-    import src.DriveTestAnalyzer as app_module
-
-    source_path = tmp_path / 'present.csv'
-    source_path.write_bytes(b'value\n1\n')
-    saved_queries = []
-
-    class DatasetRepository:
-        def __init__(self, *_args):
-            pass
-
-        def list_datasets(self):
-            return [{'id': 9, 'file_name': 'present.csv', 'stored_path': str(source_path), 'dataset_kind': 'data'}]
-
-        def save_query_builder_query(self, *args):
-            saved_queries.append(args)
-
-    class DestinationWorkspace:
-        name = 'Destination'
-        database_path = tmp_path / 'destination.db'
-
-    monkeypatch.setattr(app_module, 'Repository', DatasetRepository)
-    payload = json.dumps({'queries': [
-        {
-            'name': 'Resolvable', 'query_sql': 'SELECT 1', 'dataset_names': ['present.csv'],
-        },
-        {
-            'name': 'Missing', 'query_sql': 'SELECT 1', 'dataset_names': ['missing.csv'],
-        },
-    ]}).encode('utf-8')
-
-    with pytest.raises(ValueError, match='dataset "missing.csv" could not be matched'):
-        app_module._restore_workspace_query_builder_queries(DestinationWorkspace(), payload)
-    assert saved_queries == []
-
-
-def test_query_builder_restore_keeps_queries_without_selected_cdrs(monkeypatch, tmp_path: Path) -> None:
+def test_query_builder_restore_saves_queries_without_cdrs(monkeypatch, tmp_path: Path) -> None:
     import src.DriveTestAnalyzer as app_module
 
     saved_queries = []
@@ -283,12 +210,13 @@ def test_query_builder_restore_keeps_queries_without_selected_cdrs(monkeypatch, 
         database_path = tmp_path / 'destination.db'
 
     monkeypatch.setattr(app_module, 'Repository', DatasetRepository)
-    # The starter example queries have no selected CDRs: they travel and are restored as they are.
+    # Queries are restored without CDRs, also those of packages from earlier versions that named their CDRs.
     payload = json.dumps({'queries': [
-        {'name': 'Example', 'query_sql': 'SELECT 1', 'dataset_ids': [], 'dataset_names': [], 'dataset_descriptors': []},
+        {'name': 'Example', 'query_sql': 'SELECT 1'},
+        {'name': 'Earlier', 'query_sql': 'SELECT 2', 'dataset_ids': [19], 'dataset_names': ['missing.csv']},
     ]}).encode('utf-8')
-    assert app_module._restore_workspace_query_builder_queries(DestinationWorkspace(), payload) == 1
-    assert saved_queries == [('Example', '', 'SELECT 1', [], 'import')]
+    assert app_module._restore_workspace_query_builder_queries(DestinationWorkspace(), payload) == 2
+    assert saved_queries == [('Example', '', 'SELECT 1', [], 'import'), ('Earlier', '', 'SELECT 2', [], 'import')]
 
 
 def test_query_builder_preview_updates_completed_filter_while_another_is_incomplete() -> None:

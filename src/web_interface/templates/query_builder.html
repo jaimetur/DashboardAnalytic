@@ -700,12 +700,16 @@
     const savedSql = JSON.parse(control.dataset.query);
     const selected = new Set(JSON.parse(control.dataset.datasetIds));
     setMode('sql');
-    [...sources.options].forEach(option => { option.selected = selected.has(Number(option.value)); });
-    sources.dispatchEvent(new Event('change', {bubbles:true}));
+    // A query without CDRs (imported or exported queries have none) keeps the CDRs chosen in the panels.
+    if (selected.size) {
+      [...sources.options].forEach(option => { option.selected = selected.has(Number(option.value)); });
+      sources.dispatchEvent(new Event('change', {bubbles:true}));
+    }
     editor.value = savedSql;
-    status.textContent = restoreAssistedQuery(savedSql)
+    status.textContent = (restoreAssistedQuery(savedSql)
       ? 'Saved query loaded in Assistance Mode. Its SQL is available in SQL Mode.'
-      : 'Saved query loaded in SQL Mode. This query cannot be shown in Assistance Mode.';
+      : 'Saved query loaded in SQL Mode. This query cannot be shown in Assistance Mode.')
+      + ([...sources.options].some(option => option.selected) ? '' : ' Choose the CDRs to run it on.');
   };
   document.querySelector('[data-sql-load-saved]').addEventListener('click', () => loadSavedQuery(document.querySelector('[data-sql-saved-picker]')?.selectedOptions[0]));
   document.querySelectorAll('[data-sql-load]').forEach(button => button.addEventListener('click', () => loadSavedQuery(button)));
