@@ -682,7 +682,7 @@ def filter_ppt_reporting_old_help_content(content: str, document_name: str) -> s
                 skipping_level = 0
             else:
                 continue
-        if heading and re.fullmatch(r'Reporting \(old\)', heading.group(2), re.IGNORECASE):
+        if heading and re.fullmatch(r'PPT Reporting \(old\)', heading.group(2), re.IGNORECASE):
             skipping_level = len(heading.group(1))
             continue
         # Index rows and list items that only point to the old chapter.

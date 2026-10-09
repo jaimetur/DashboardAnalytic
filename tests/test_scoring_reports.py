@@ -190,7 +190,8 @@ def test_report_api_generates_scenarios_and_remembers_the_configuration(scoring_
     configuration = {'scenarios': [national, leeds]}
     saved = client.post('/api/scoring/report-configurations', json={'name': 'Weekly', 'configuration': configuration})
     assert saved.status_code == 200, saved.text
-    assert [item['name'] for item in client.get('/api/scoring/report-configurations').json()['configurations']] == ['Weekly']
+    # Next to the configurations every workspace starts with (assets/scoring-report-configurations).
+    assert 'Weekly' in [item['name'] for item in client.get('/api/scoring/report-configurations').json()['configurations']]
 
     # The report uses the CDRs, NR Mode, methodology and GAP reference of the Calculation panel.
     job = scoring_jobs.get_scoring_job(repository, job_id)
@@ -209,10 +210,10 @@ def test_report_api_generates_scenarios_and_remembers_the_configuration(scoring_
 
     exported = client.get('/api/scoring/report-configurations/export').json()
     assert exported['format'] == 'drivetest-analyzer-scoring-report-configurations'
-    assert client.delete('/api/scoring/report-configurations?name=Weekly').json()['configurations'] == []
+    assert 'Weekly' not in [item['name'] for item in client.delete('/api/scoring/report-configurations?name=Weekly').json()['configurations']]
     imported = client.post('/api/scoring/report-configurations/import',
                            files={'package': ('reports.json', json.dumps(exported), 'application/json')})
-    assert [item['name'] for item in imported.json()['configurations']] == ['Weekly']
+    assert 'Weekly' in [item['name'] for item in imported.json()['configurations']]
     bad = client.post('/api/scoring/report/ppt', json={'configuration': {'scenarios': []}, **selection})
     assert bad.status_code == 400
 

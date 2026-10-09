@@ -187,7 +187,11 @@ def test_template_and_dashboard_bundle_replaces_referenced_template(client, tmp_
     rows = [row for row in destination_repo.list_report_templates('nsa') if str(row['name']) == 'Bundle Used']
     assert len(rows) == 1
     assert bytes(rows[0]['content']) == b'imported'
-    assert destination_repo.get_workspace_state(app_module.DASHBOARD_STATE_KEY) == '{}'
+    # The Dashboards of the bundle (the source's starter Dashboards) replace the local ones.
+    imported = json.loads(destination_repo.get_workspace_state(app_module.DASHBOARD_STATE_KEY))
+    assert 'local-dashboard' not in imported
+    assert sorted(item['name'] for item in imported.values()) == sorted(
+        item['name'] for item in json.loads(source_repo.get_workspace_state(app_module.DASHBOARD_STATE_KEY)).values())
 
 
 def test_selective_template_restore_keeps_only_dashboard_references(client, tmp_path):
@@ -220,7 +224,9 @@ def test_template_export_pins_source_when_active_workspace_changes(client, tmp_p
     with zipfile.ZipFile(path) as archive:
         assert json.loads(archive.read('manifest.json'))['source_workspace']['name'] == source.name
         assert any(name.endswith('.csv') for name in archive.namelist())
-    assert app_module.report_catalogue_options('nsa') == []
+    # The options are the other workspace's own templates: only the ones every workspace starts with.
+    starter = {path.stem for path in (app_module.PROJECT_ROOT / 'assets' / 'ppt-templates' / 'nsa').glob('*.csv')}
+    assert {item['identifier'] for item in app_module.report_catalogue_options('nsa')} == starter
 
 
 def test_inspection_preselects_only_matching_workspace_and_requires_access(client, tmp_path, monkeypatch):

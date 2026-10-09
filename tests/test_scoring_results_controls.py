@@ -1624,7 +1624,7 @@ def test_kpi_gap_profile_and_points_lost_map_share_location_and_operators():
     assert "const scroller = svg.closest('.scoring-chart-scroll');" in zoom and "fitToVisibleBox(!whole);" in zoom
     # Toggling an operator keeps at least one; the GAP comparison follows a single operator and the reverse.
     assert "if (!chosen.length) return;\n      insightSelections.set('gap-insight-operators', JSON.stringify(chosen));" in script
-    assert "if (hierarchyGapOperator.value.startsWith('operator:')) insightSelections.set('gap-insight-operators'" in script
+    assert "if (hierarchyGapOperator.value.startsWith('operator:')) {\n        insightSelections.set('gap-insight-operators'" in script
     # The selections are kept on reload and reset when the page is opened again.
     assert "const insightSelections = new Map(pageReloaded ? Object.entries(restoredScoringViewState.insightSelections || {}) : []);" in script
     assert "insight_selections: typeof insightSelections === 'undefined' ? {} : Object.fromEntries(insightSelections)," in script

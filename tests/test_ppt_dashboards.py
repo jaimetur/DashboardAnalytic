@@ -316,6 +316,12 @@ def test_dashboard_end_navigation_controls_use_line_svgs():
     assert '⏭' not in template
 
 
+def without_starter_dashboards():
+    """Start without the Dashboards every workspace is given (assets/ppt-dashboards)."""
+    with core.repository.connection() as connection:
+        connection.execute("DELETE FROM workspace_state WHERE key = 'ppt_dashboards_v2'")
+
+
 def setup_dashboard(client):
     client.post('/login', data={'username': 'super', 'password': 'super123'})
     response = client.post('/datasets-analysis/upload', data={'dataset_kinds': 'data'}, files={
@@ -1254,6 +1260,7 @@ def test_dashboard_editing_controls_match_workspace_editor_roles(client):
 
 def test_dashboards_lifecycle_and_layout(client, ppt_reporting_old):
     payload = setup_dashboard(client)
+    without_starter_dashboards()
     page = client.get('/ppt-dashboards')
     assert page.status_code == 200
     assert re.search(r'data-authenticated-session="[^"]+"', page.text)
@@ -2681,6 +2688,7 @@ def test_dashboard_preview_identifies_title_and_transition_slides(client):
 
 def test_dashboard_state_migrates_from_legacy_storage(client):
     payload = setup_dashboard(client)
+    without_starter_dashboards()
     core.repository.set_workspace_state('ppt_dashboard_sets_v1', '{"legacy": ' + json.dumps(payload) + '}')
     result = client.get('/api/ppt-dashboards')
     assert result.status_code == 200
@@ -3554,6 +3562,7 @@ def test_background_work_builds_one_dashboard_at_a_time_in_creation_order(client
     import src.modules.ppt_dashboards as dashboards_module
 
     payload = _compact_read_dashboard(client)
+    without_starter_dashboards()
     monkeypatch.setattr(core, 'IDLE_DASHBOARD_WARMUP_SECONDS', 3600)
     for name in ('first', 'second', 'third'):
         assert client.put(f'/api/ppt-dashboards/{name}', json={**payload, 'name': name.title()}).status_code == 200
