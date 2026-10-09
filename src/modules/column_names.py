@@ -92,11 +92,14 @@ def campaign_parts(value: object) -> tuple[str | None, str | None, str | None]:
 # a marker are written only when the campaign has that part: "{-mode}" writes "-SA" for
 # an SA campaign and nothing otherwise. Campaigns are ordered by year and quarter, and
 # the campaigns of one quarter by ``mode_order`` ("" is the campaign without a mode).
+# ``modes_in_label`` are the modes {mode} writes: without NSA, an NSA campaign reads like one
+# without a mode (2026-Q3), and both are the same campaign.
 # Exceptions give their own label to campaigns that do not follow the pattern; they are
 # ordered by the year and quarter of their label, or first (in their table order) when
 # the label has none. The default map, used by the workspaces without their own, is
 # ``assets/labels-campaigns/default-campaign-map.json``.
 DEFAULT_CAMPAIGN_MODE_ORDER = ('', 'NSA', 'SA')
+DEFAULT_CAMPAIGN_LABEL_MODES = ('NSA', 'SA')
 
 
 def _default_campaign_map() -> dict:
@@ -110,6 +113,7 @@ def _default_campaign_map() -> dict:
     shipped = shipped if isinstance(shipped, dict) else {}
     return {'format': str(shipped.get('format') or '').strip() or '{year}-Q{quarter}{-mode}',
             'mode_order': list(shipped.get('mode_order') or DEFAULT_CAMPAIGN_MODE_ORDER),
+            'modes_in_label': list(shipped.get('modes_in_label', DEFAULT_CAMPAIGN_LABEL_MODES)),
             'exceptions': list(shipped.get('exceptions') or [])}
 
 
@@ -121,7 +125,7 @@ _campaign_map_resolver: Callable[[], dict | None] | None = None
 
 
 def normalize_campaign_map(config: object) -> dict:
-    """A valid Campaign Map: label format, order of the radio modes and exceptions."""
+    """A valid Campaign Map: label format, order of the radio modes, modes shown in the label and exceptions."""
     config = config if isinstance(config, dict) else {}
     label_format = str(config.get('format') or '').strip() or DEFAULT_CAMPAIGN_FORMAT
     if len(label_format) > 80:
@@ -136,6 +140,10 @@ def normalize_campaign_map(config: object) -> dict:
     modes = [str(value or '').strip().upper() for value in config.get('mode_order') or []]
     modes = [mode for mode in dict.fromkeys(modes) if mode in DEFAULT_CAMPAIGN_MODE_ORDER]
     modes += [mode for mode in DEFAULT_CAMPAIGN_MODE_ORDER if mode not in modes]
+    raw_label_modes = config.get('modes_in_label', DEFAULT_CAMPAIGN_LABEL_MODES)
+    raw_label_modes = raw_label_modes if isinstance(raw_label_modes, (list, tuple)) else DEFAULT_CAMPAIGN_LABEL_MODES
+    label_modes = {str(value or '').strip().upper() for value in raw_label_modes}
+    modes_in_label = [mode for mode in DEFAULT_CAMPAIGN_LABEL_MODES if mode in label_modes]
     exceptions, seen_sources, seen_labels = [], set(), set()
     for item in config.get('exceptions') or []:
         if not isinstance(item, dict):
@@ -159,7 +167,7 @@ def normalize_campaign_map(config: object) -> dict:
         seen_labels.add(label.casefold())
         seen_sources.update(source.casefold() for source in sources)
         exceptions.append({'label': label, 'sources': sources})
-    return {'format': label_format, 'mode_order': modes, 'exceptions': exceptions}
+    return {'format': label_format, 'mode_order': modes, 'modes_in_label': modes_in_label, 'exceptions': exceptions}
 
 
 def set_campaign_map_resolver(resolver: Callable[[], dict | None] | None) -> None:
@@ -225,7 +233,10 @@ def format_campaign(value: object, config: dict | None = None) -> str:
     year, quarter, mode = campaign_parts(text)
     if not year or not quarter:
         return text
-    parts = {'year': year, 'yy': year[-2:], 'quarter': quarter[1:], 'mode': mode or '', 'market': campaign_market(text)}
+    # {mode} writes only the modes shown in the label.
+    shown = config.get('modes_in_label', DEFAULT_CAMPAIGN_LABEL_MODES)
+    parts = {'year': year, 'yy': year[-2:], 'quarter': quarter[1:], 'mode': mode if mode in shown else '',
+             'market': campaign_market(text)}
 
     def marker(match: re.Match) -> str:
         filled = parts[match.group(2)]

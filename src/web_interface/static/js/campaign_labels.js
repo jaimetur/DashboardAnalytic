@@ -4,13 +4,13 @@
  * the pages show and order campaigns exactly as the charts, tables and reports built on
  * the server: a label format with markers ({year}, {yy}, {quarter}, {mode}, {market};
  * characters inside the braces are written only when the part exists), the order of the
- * radio modes inside a quarter and exceptions for campaigns that do not follow the
+ * radio modes inside a quarter, the modes shown in the label and exceptions for campaigns that do not follow the
  * pattern. Filters always keep the original campaign values.
  */
 (() => {
   'use strict';
 
-  const DEFAULT_MAP = {format: '{year}-Q{quarter}{-mode}', mode_order: ['', 'NSA', 'SA'], exceptions: []};
+  const DEFAULT_MAP = {format: '{year}-Q{quarter}{-mode}', mode_order: ['', 'NSA', 'SA'], modes_in_label: ['NSA', 'SA'], exceptions: []};
   const MARKER = /\{([^A-Za-z{}]*)(year|yy|quarter|mode|market)([^A-Za-z{}]*)\}/g;
 
   const readMap = () => {
@@ -57,7 +57,9 @@
     if (exception) return exception.item.label;
     const {year, quarter, mode} = campaignParts(text);
     if (!year || !quarter) return text;
-    const parts = {year, yy: year.slice(-2), quarter, mode, market: campaignMarket(text)};
+    // {mode} writes only the modes shown in the label.
+    const shown = map.modes_in_label || DEFAULT_MAP.modes_in_label;
+    const parts = {year, yy: year.slice(-2), quarter, mode: shown.includes(mode) ? mode : '', market: campaignMarket(text)};
     return String(map.format || DEFAULT_MAP.format)
       .replace(MARKER, (_match, before, name, after) => (parts[name] ? `${before}${parts[name]}${after}` : ''));
   };

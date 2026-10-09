@@ -1,4 +1,4 @@
-/* Workspace Config → Campaign Maps: label format, order of the radio modes and exceptions. */
+/* Workspace Config → Campaign Maps: label format, order of the radio modes, the modes shown in the label and exceptions. */
 (() => {
   'use strict';
 
@@ -18,7 +18,7 @@
   };
   const campaigns = readJson('campaign-map-campaigns', []);
   // The default map of the application (assets/labels-campaigns/default-campaign-map.json).
-  const DEFAULT_MAP = {format: '{year}-Q{quarter}{-mode}', mode_order: ['', 'NSA', 'SA'], exceptions: [],
+  const DEFAULT_MAP = {format: '{year}-Q{quarter}{-mode}', mode_order: ['', 'NSA', 'SA'], modes_in_label: ['NSA', 'SA'], exceptions: [],
     ...(readJson('campaign-map-default', {}) || {})};
   const saved = {...DEFAULT_MAP, ...(readJson('campaign-map', {}) || {})};
 
@@ -35,11 +35,24 @@
     iconButton('↓', 'Move down', () => { item.nextElementSibling?.after(item); after(); }),
   ];
 
-  const renderModes = (modes) => {
+  // Each mode with its place in the quarter and whether {mode} writes it in the label.
+  const renderModes = (modes, shown) => {
     $('[data-campaign-modes]').replaceChildren(...modes.map((mode) => {
       const item = node('li', undefined, 'campaign-map-mode');
       item.dataset.mode = mode;
-      item.append(node('span', MODE_LABELS[mode] ?? mode), ...moveButtons(item, schedulePreview));
+      item.append(node('span', MODE_LABELS[mode] ?? mode));
+      if (mode) {
+        const toggle = node('label', undefined, 'campaign-map-mode-label');
+        const box = node('input');
+        box.type = 'checkbox';
+        box.checked = shown.includes(mode);
+        box.dataset.modeInLabel = mode;
+        box.addEventListener('change', schedulePreview);
+        toggle.title = `Unchecked, ${mode} campaigns read like the campaigns without a mode (for example 2026-Q2) and are the same campaign`;
+        toggle.append(box, node('span', 'Show in label'));
+        item.append(toggle);
+      }
+      item.append(...moveButtons(item, schedulePreview));
       return item;
     }));
   };
@@ -73,13 +86,16 @@
   };
   const fill = (map) => {
     $('[data-campaign-format]').value = map.format || DEFAULT_MAP.format;
-    renderModes(map.mode_order?.length ? map.mode_order : DEFAULT_MAP.mode_order);
+    renderModes(map.mode_order?.length ? map.mode_order : DEFAULT_MAP.mode_order,
+      Array.isArray(map.modes_in_label) ? map.modes_in_label : DEFAULT_MAP.modes_in_label);
     $('[data-campaign-exceptions]').replaceChildren(...(map.exceptions || []).map(exceptionRow));
     schedulePreview();
   };
   const collect = () => ({
     format: $('[data-campaign-format]').value.trim(),
     mode_order: [...root.querySelectorAll('[data-campaign-modes] [data-mode]')].map((item) => item.dataset.mode),
+    modes_in_label: [...root.querySelectorAll('[data-campaign-modes] [data-mode-in-label]')]
+      .filter((box) => box.checked).map((box) => box.dataset.modeInLabel),
     exceptions: [...root.querySelectorAll('[data-campaign-exceptions] tr')].map((row) => ({
       label: row.querySelector('input').value.trim(),
       sources: row.querySelector('textarea').value.split(/\n/).map((value) => value.trim()).filter(Boolean),

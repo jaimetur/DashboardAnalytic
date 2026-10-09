@@ -85,3 +85,26 @@ def test_workspace_config_edits_previews_and_saves_the_map(client, tmp_path):
     assert load_campaign_map(core.repository)['exceptions'][0]['sources'] == ['UK_Q1_2026']
     client.put('/api/workspace-config/campaign-map', json={'campaign_map': None})
     assert compact_campaign_value('UK_Q2_SA_2026') == '2026-Q2-SA'
+
+
+def test_modes_shown_in_the_label_drop_the_hidden_mode_without_exceptions(client, tmp_path):
+    config = normalize_campaign_map({**DEFAULT_CAMPAIGN_MAP, 'modes_in_label': ['SA']})
+    assert config['modes_in_label'] == ['SA']
+    assert normalize_campaign_map(DEFAULT_CAMPAIGN_MAP)['modes_in_label'] == ['NSA', 'SA']
+    # NSA campaigns read like the campaigns without a mode of their quarter; SA keeps its mode.
+    assert [format_campaign(value, config) for value in ('UK_Q2_NSA_2026', 'UK_Q2_2026', 'UK_Q2_SA_2026')] == [
+        '2026-Q2', '2026-Q2', '2026-Q2-SA']
+    assert campaign_sort_key('UK_Q2_NSA_2026', config) < campaign_sort_key('UK_Q2_SA_2026', config)
+
+    voice = voice_rows()
+    voice['Campaign'] = ['UK_Q2_SA_2026', 'UK_Q2_NSA_2026', 'UK_Q1_2026']
+    add_cdr(tmp_path, 'NetCheck_UK_CDR_Voice_2026_Q2.xlsx', 'voice', voice)
+    login(client)
+    saved = client.put('/api/workspace-config/campaign-map', json={'campaign_map': {**DEFAULT_CAMPAIGN_MAP, 'modes_in_label': ['SA']}})
+    assert saved.status_code == 200, saved.text
+    assert compact_campaign_value('UK_Q2_NSA_2026') == '2026-Q2' and compact_campaign_value('UK_Q2_SA_2026') == '2026-Q2-SA'
+    # It travels with the Mappings & Reference Data.
+    document = json.loads(core._mappings_reference_data_archive_payload(core.active_workspace))
+    assert document['campaign_map']['modes_in_label'] == ['SA']
+    client.put('/api/workspace-config/campaign-map', json={'campaign_map': None})
+    assert compact_campaign_value('UK_Q2_NSA_2026') == '2026-Q2-NSA'

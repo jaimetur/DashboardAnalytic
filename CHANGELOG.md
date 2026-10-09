@@ -49,6 +49,7 @@
 - **Split by:** the Aggregation levels of Scoring & GAP Analysis (Calculation panel, job cards, report scenarios, Reporting Jobs and the covers of its PowerPoint and Word documents) are now called **Split by**, which tells what they do: split the results into separate scorings.
 - **Rows Split and Columns Split:** the Rows Aggregation and Column Aggregation columns of the PPT Templates are now called **Rows Split** and **Columns Split** in the PPT Templates Editor, the shipped templates and the template files; the templates of every workspace are converted when it is opened and template files with the former names are still read.
 - **Query Builder CDR panels:** the Source Datasets of Query Builder are chosen in a Data, a Voice and a Speech panel, as in the other modules, instead of one long list: each CDR shows its campaigns and NR Mode, Weekly and Daily CDRs are highlighted, and each panel has its count and **Select All / None**.
+- **Campaign modes in the label:** **Show in label**, next to NSA and SA in the Campaign Maps, chooses the modes that `{mode}` writes, so NSA campaigns can read `2026-Q3` while SA ones read `2026-Q3-SA` without an exception per campaign.
 
 #### 🐛 Bug fixes:
 - **Job Editor drafts:** reloading the Reporting page no longer reopens the unsaved values of a job that changed on the server since then (imported, transferred, saved from another browser or renamed in the Maps), which could show old filters such as an Operator with its former name; its saved version opens instead.

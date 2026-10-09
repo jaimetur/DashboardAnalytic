@@ -4259,6 +4259,8 @@ body[data-authenticated-role="user-viewer"] .queue-nr-mode-select { pointer-even
 .campaign-map-mode { display: flex; align-items: center; gap: .5rem; padding: .45rem .7rem; border: 1px solid var(--line, #d9dee5); border-radius: 10px; counter-increment: campaign-mode; }
 .campaign-map-mode::before { content: counter(campaign-mode) '.'; color: var(--muted, #6b7a85); font-weight: 800; }
 .campaign-map-mode span { flex: 1 1 auto; font-weight: 700; }
+.campaign-map-mode .campaign-map-mode-label { display: inline-flex; align-items: center; gap: .35rem; color: var(--muted, #6b7a85); font-size: .8rem; cursor: pointer; }
+.campaign-map-mode .campaign-map-mode-label span { flex: none; font-weight: 650; }
 .campaign-map-exceptions-wrap:has(tbody:empty) { display: none; }
 .campaign-map-exceptions-wrap + [data-campaign-exception-add] { margin-top: 1rem; }
 .campaign-map-preview { max-height: 22rem; overflow: auto; }
