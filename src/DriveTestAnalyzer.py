@@ -287,7 +287,7 @@ def apply_runtime_configuration(values: dict[str, Any]) -> None:
     max_background_tasks = configured_background_task_limit(values.get('max_background_tasks'))
     os.environ['DRIVETEST_ANALYZER_MAX_BACKGROUND_TASKS'] = str(max_background_tasks)
     # Keep at least one logical CPU available for interactive requests.
-    BACKGROUND_TASK_SCHEDULER.configure(min(max_background_tasks, max(1, (os.cpu_count() or 2) - 1), 4))
+    BACKGROUND_TASK_SCHEDULER.configure(min(max_background_tasks, max(1, (os.cpu_count() or 2) - 1)))
 
 
 def _reporting_memory_mb() -> float:
@@ -3637,12 +3637,16 @@ def defer_workspace_dataset_dispatch(task_repository: Repository):
 
 def _submit_workspace_job(
     task_repository: Repository, callback: Callable[..., Any], /, *args: Any,
-    phase: int, dataset_id: int = 0, dataset_kind: str = '', batch_priority: bool = False,
+    phase: int, dataset_id: int = 0, dataset_kind: str = '', batch_priority: bool = False, parallel: bool = False,
 ) -> Future[Any]:
-    """Run one heavy Workspace job at a time, preserving FIFO outside explicit batches."""
+    """Run one heavy Workspace job at a time, preserving FIFO outside explicit batches.
+
+    ``parallel`` jobs (processing one dataset in its own worker process) run beside each other, up to
+    Maximum simultaneous tasks, and never beside the other jobs of their Workspace.
+    """
     return _dataset_processing_executor(task_repository).submit_ordered(
         callback, *args, workspace_key=str(task_repository.db_path.resolve()),
-        priority=workspace_dataset_job_priority(phase, dataset_id, dataset_kind, batch_priority),
+        priority=workspace_dataset_job_priority(phase, dataset_id, dataset_kind, batch_priority), parallel=parallel,
     )
 
 
@@ -4186,6 +4190,7 @@ def enqueue_dataset_processing(
                 dataset_id=dataset_id,
                 dataset_kind=queued_kind,
                 batch_priority=batch_priority,
+                parallel=True,
             )
             return _track_dataset_future(dataset_id, task_repository, future)
 
@@ -17197,12 +17202,20 @@ def validated_upload_selections(
 
 def register_uploaded_datasets(
     task_repository: Repository, files: list[tuple[str, Path]], selections: dict[str, list[Any]], username: str,
-    background_tasks: BackgroundTasks,
+    background_tasks: BackgroundTasks, *, indexes: list[int] | None = None, batch: dict[str, Any] | None = None,
 ) -> list[int]:
-    """Register files saved in a workspace's input folder as datasets and queue their processing (mappings first)."""
+    """Register files saved in a workspace's input folder as datasets and queue their processing (mappings first).
+
+    ``indexes`` are the positions of the files in their upload batch (all of them by default), and ``batch``
+    keeps, across calls for the files of one batch, the datasets registered by position and the processing
+    of its mappings, which its CDRs wait for.
+    """
+    indexes = list(indexes) if indexes is not None else list(range(len(files)))
+    batch = batch if batch is not None else {'registered': {}, 'futures': [], 'size': len(files)}
+    registered = batch.setdefault('registered', {})
     queued_dataset_ids: list[int] = []
     uploaded_datasets: list[dict[str, Any]] = []
-    for index, (file_name, destination) in enumerate(files):
+    for index, (file_name, destination) in zip(indexes, files):
         invalidate_workspace_size_cache()
         dataset_id, created = task_repository.add_dataset(file_name or destination.name, str(destination), username)
         selected_kind = selections['kinds'][index] if selections['kinds'] else None
@@ -17234,6 +17247,7 @@ def register_uploaded_datasets(
             'cluster_mapping_selection': selections['cluster_mappings'][index],
             'vendor_polygon_selection': selections['vendor_polygons'][index],
         })
+        registered[int(index)] = {'dataset_id': int(dataset_id), 'dataset_kind': selected_kind}
         queued_dataset_ids.append(dataset_id)
 
     def resolve_mapping_selection(
@@ -17244,8 +17258,8 @@ def register_uploaded_datasets(
         if selection.startswith('upload:'):
             try:
                 upload_index = int(selection.removeprefix('upload:'))
-                uploaded = uploaded_datasets[upload_index]
-            except (IndexError, ValueError) as exc:
+                uploaded = registered[upload_index]
+            except (KeyError, ValueError) as exc:
                 raise HTTPException(status_code=422, detail=f'Invalid {label} selection.') from exc
             if uploaded['dataset_kind'] != expected_kind:
                 raise HTTPException(status_code=422, detail=f'The selected uploaded file is not a {label}.')
@@ -17260,7 +17274,7 @@ def register_uploaded_datasets(
     # Process mappings before CDRs uploaded in the same request. Background
     # workers remain parallel within each phase, while every CDR waits for all
     # mapping files in the batch so none can use a partially refreshed mapping set.
-    batch_mapping_futures: list[Future[Any]] = []
+    batch_mapping_futures: list[Future[Any]] = batch.setdefault('futures', [])
     for uploaded in sorted(
         uploaded_datasets,
         key=lambda item: (
@@ -17291,7 +17305,7 @@ def register_uploaded_datasets(
             vendor_polygon_dataset_ids = [
                 int(row['id']) for row in task_repository.list_datasets()
                 if row['dataset_kind'] == 'vendors' and (row['status'] == 'ready' or any(
-                    int(item['dataset_id']) == int(row['id']) for item in uploaded_datasets))
+                    int(item['dataset_id']) == int(row['id']) for item in registered.values()))
             ]
             vodafone_mapping_dataset_id = three_mapping_dataset_id = None
         network_inventory_ids: list[int] = []
@@ -17322,7 +17336,7 @@ def register_uploaded_datasets(
             three_mapping_dataset_id,
             region_mapping_dataset_id,
             dependencies=dependencies,
-            batch_priority=len(uploaded_datasets) > 1,
+            batch_priority=int(batch.get('size') or len(uploaded_datasets)) > 1,
             cluster_mapping_dataset_id=cluster_mapping_dataset_id,
             vendor_polygon_dataset_ids=vendor_polygon_dataset_ids,
             network_inventory_dataset_ids=network_inventory_ids,
@@ -17497,31 +17511,66 @@ async def dataset_upload_chunk(
     return JSONResponse({'received': received})
 
 
-@app.post('/api/uploads/{workspace_id}/{upload_id}/complete')
-def complete_dataset_upload(
-    background_tasks: BackgroundTasks, workspace_id: str, upload_id: str,
-    user: SessionUser = Depends(workspace_editor_user),
+# The processing of the mappings of each upload batch, which its CDRs wait for.
+UPLOAD_BATCH_FUTURES: dict[str, list[Future[Any]]] = {}
+UPLOAD_BATCH_LOCK = Lock()
+
+
+def _register_upload_files(
+    user: SessionUser, workspace_id: str, upload_id: str, indexes: list[int] | None, background_tasks: BackgroundTasks,
 ) -> JSONResponse:
-    """Register the uploaded files as datasets of the upload's workspace and queue their processing."""
-    from src.modules.upload_sessions import delete_session, sessions_root, take_files
+    """Register complete files of an upload (all the complete ones without ``indexes``) and queue their processing."""
+    from src.modules.upload_sessions import mark_registered, registered_files, sessions_root, status as upload_status, take_file
 
     workspace, task_repository = _upload_workspace(user, workspace_id)
     manifest = _upload_session_of(user, workspace, upload_id)
     root = sessions_root(workspace.database_path.parent)
     names = [item['name'] for item in manifest['files']]
-    selections = validated_upload_selections(task_repository, names, manifest.get('form') or {})
-    try:
-        files = take_files(root, upload_id, workspace.input_dir,
-                           lambda folder, name: safe_join(folder, name or f'upload{Path(name).suffix.lower()}'))
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    delete_session(root, upload_id)
-    dataset_ids = register_uploaded_datasets(task_repository, files, selections, manifest.get('username') or user.username,
-                                             background_tasks)
+    with UPLOAD_BATCH_LOCK:
+        selections = validated_upload_selections(task_repository, names, manifest.get('form') or {})
+        registered = registered_files(root, upload_id)
+        current = upload_status(root, upload_id)
+        if indexes is None:
+            indexes = [index for index, item in enumerate(manifest['files']) if current['received'][index] >= item['size']]
+        indexes = [index for index in indexes if index not in registered]
+        files = []
+        try:
+            for index in indexes:
+                files.append(take_file(root, upload_id, index, workspace.input_dir,
+                                       lambda folder, name: safe_join(folder, name or f'upload{Path(name).suffix.lower()}')))
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        batch = {'registered': registered, 'futures': UPLOAD_BATCH_FUTURES.setdefault(upload_id, []), 'size': len(names)}
+        dataset_ids = register_uploaded_datasets(
+            task_repository, files, selections, manifest.get('username') or user.username, background_tasks,
+            indexes=indexes, batch=batch,
+        ) if files else []
+        done = mark_registered(root, upload_id, batch['registered'])
+        if done:
+            UPLOAD_BATCH_FUTURES.pop(upload_id, None)
+    all_ids = [item['dataset_id'] for _index, item in sorted(batch['registered'].items())]
     return JSONResponse({
-        'dataset_ids': dataset_ids, 'workspace_id': workspace.id, 'workspace_name': workspace.name,
-        'redirect_url': f'/workspace?dataset_id={dataset_ids[0]}' if dataset_ids else '/workspace', 'status': 'queued',
+        'dataset_ids': dataset_ids, 'workspace_id': workspace.id, 'workspace_name': workspace.name, 'done': done,
+        'redirect_url': f'/workspace?dataset_id={all_ids[0]}' if all_ids else '/workspace', 'status': 'queued',
     }, status_code=status.HTTP_202_ACCEPTED)
+
+
+@app.post('/api/uploads/{workspace_id}/{upload_id}/files/{index}/complete')
+def complete_dataset_upload_file(
+    background_tasks: BackgroundTasks, workspace_id: str, upload_id: str, index: int,
+    user: SessionUser = Depends(workspace_editor_user),
+) -> JSONResponse:
+    """Register one file as soon as it is uploaded, so it is processed while the next ones upload."""
+    return _register_upload_files(user, workspace_id, upload_id, [int(index)], background_tasks)
+
+
+@app.post('/api/uploads/{workspace_id}/{upload_id}/complete')
+def complete_dataset_upload(
+    background_tasks: BackgroundTasks, workspace_id: str, upload_id: str,
+    user: SessionUser = Depends(workspace_editor_user),
+) -> JSONResponse:
+    """Register every uploaded file not registered yet; the upload ends once all of them are."""
+    return _register_upload_files(user, workspace_id, upload_id, None, background_tasks)
 
 
 @app.delete('/api/uploads/{workspace_id}/{upload_id}')

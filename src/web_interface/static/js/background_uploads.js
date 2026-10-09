@@ -2,7 +2,8 @@
  *
  * The files chosen in Workspace and their classification are kept in the browser (IndexedDB) until
  * the upload ends, and every file is sent in chunks to the upload session of the workspace the upload
- * started in. Each page of the application resumes the pending uploads of the signed-in user from the
+ * started in. The mappings, polygons and inventories go first, and each file is registered as soon as
+ * it is uploaded, so it is processed while the next ones upload. Each page of the application resumes the pending uploads of the signed-in user from the
  * bytes the server already has, so changing page, module or workspace never interrupts them. The
  * progress is shown in the floating background task cards.
  */
@@ -76,6 +77,10 @@
     const payload = await response.json().catch(() => ({}));
     return {response, payload};
   };
+  // The files that other files of the batch use come first.
+  const REFERENCE_KINDS = new Set(['mapping_vodafone', 'mapping_three', 'network_inventory', 'regions', 'clusters', 'vendors']);
+  const uploadOrder = (record) => record.files.map((_file, index) => index)
+    .sort((left, right) => Number(!REFERENCE_KINDS.has(record.kinds?.[left])) - Number(!REFERENCE_KINDS.has(record.kinds?.[right])) || left - right);
   const sessionUrl = (record) => `/api/uploads/${encodeURIComponent(record.workspace_id)}/${encodeURIComponent(record.upload_id)}`;
   const wait = (milliseconds) => new Promise((resolve) => { window.setTimeout(resolve, milliseconds); });
 
@@ -95,11 +100,20 @@
       return;
     }
     if (!response.ok) throw new Error(payload.detail || 'The upload could not be resumed.');
+    if (payload.done) {
+      // Ended from another page: its datasets are already processing.
+      await removeRecord(record);
+      publish(record, {status: 'completed', detail: `Upload completed: processing in ${record.workspace_name}`, progress: 100});
+      return;
+    }
     const sizes = record.files.map((file) => file.size);
     const total = sizes.reduce((sum, size) => sum + size, 0) || 1;
     const received = [...payload.received];
+    const registered = [...(payload.registered || [])];
     const progress = () => Math.min(99, received.reduce((sum, value) => sum + value, 0) * 100 / total);
-    for (let index = 0; index < record.files.length; index += 1) {
+    const order = uploadOrder(record);
+    let finished = null;
+    for (const [position, index] of order.entries()) {
       while (received[index] < sizes[index]) {
         const offset = received[index];
         const chunk = record.files[index].slice(offset, offset + CHUNK_BYTES);
@@ -110,13 +124,20 @@
         received[index] = Number(sent.payload.received ?? offset);
         publish(record, {
           status: 'processing', progress: progress(),
-          detail: `Uploading ${record.names[index]} (${index + 1} of ${record.files.length})`,
+          detail: `Uploading ${record.names[index]} (${position + 1} of ${record.files.length})`,
           duration_seconds: Math.max(0, Date.now() / 1000 - record.started_at),
         });
       }
+      if (!registered[index]) {
+        // Uploaded: it is processed while the next files upload.
+        const done = await request(`${sessionUrl(record)}/files/${index}/complete`, {method: 'POST', signal: controller.signal});
+        if (!done.response.ok) throw new Error(done.payload.detail || 'The dataset could not be registered.');
+        registered[index] = true;
+        finished = done;
+      }
     }
-    publish(record, {status: 'processing', progress: 99, detail: 'Queuing the processing'});
-    const done = await request(`${sessionUrl(record)}/complete`, {method: 'POST', signal: controller.signal});
+    const done = finished?.payload.done ? finished
+      : await request(`${sessionUrl(record)}/complete`, {method: 'POST', signal: controller.signal});
     if (!done.response.ok) throw new Error(done.payload.detail || 'The datasets could not be registered.');
     await removeRecord(record);
     publish(record, {status: 'completed', detail: `Upload completed: processing in ${record.workspace_name}`, progress: 100});
@@ -178,7 +199,7 @@
     const record = {
       key: `${workspaceId}/${payload.upload_id}`, upload_id: payload.upload_id, workspace_id: workspaceId,
       workspace_name: payload.workspace_name || workspaceName, username: config.username, files,
-      names: files.map((file) => file.name), started_at: Date.now() / 1000,
+      names: files.map((file) => file.name), kinds: form.dataset_kinds || [], started_at: Date.now() / 1000,
     };
     const stored = await saveRecord(record);
     publish(record, {status: 'processing', progress: 0, detail: 'Starting upload', duration_seconds: 0});

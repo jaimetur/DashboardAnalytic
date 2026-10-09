@@ -54,6 +54,8 @@ def main() -> None:
 
         Thread(target=stop_with_parent, name='dataset-parent-watchdog', daemon=True).start()
 
+    # Other dataset workers of the Workspace may be writing their datasets: wait for them instead of failing.
+    Repository.busy_timeout_seconds = 1800.0
     task_repository = Repository(
         args.workspace_db,
         global_db_path=repository.global_db_path,

@@ -60,7 +60,7 @@
         <div class="configuration-card-head"><p class="eyebrow">Background Work</p><h3>Parallel Tasks</h3></div>
         <label>Maximum simultaneous tasks
           <input type="number" name="max_background_tasks" value="{{ configuration.max_background_tasks }}" min="1" max="32" step="1" required>
-          <span class="table-help">Workspace data jobs run one at a time: mappings first, datasets by ID, then combined tables and materialization. The effective server limit is at most 4 tasks and reserves one logical CPU for interactive requests.</span>
+          <span class="table-help">Uploaded datasets of a workspace are processed in parallel up to this limit (mappings first); its combined tables, Auto-calculated Fields and Scoring jobs run one at a time. The effective limit reserves one logical CPU for interactive requests (with 8 CPUs, up to 7 tasks).</span>
         </label>
       </section>
 

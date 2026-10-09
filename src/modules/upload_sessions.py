@@ -3,8 +3,10 @@
 The browser keeps the chosen files and their classification until the upload ends, and sends each
 file in chunks. Every chunk is appended to the upload session of the workspace the upload started in
 (``.upload-sessions/<id>`` beside its database), so the upload continues after changing page, module
-or workspace and from where it stopped. When every file is complete the files move to the input
-folder of that workspace and are processed there.
+or workspace and from where it stopped. Each file moves to the input folder of that workspace and is
+processed there as soon as all its bytes arrive (the mappings of the batch first, which its CDRs wait
+for); once every file is registered the session only records that the upload ended, until it is
+removed as stale.
 """
 from __future__ import annotations
 
@@ -54,7 +56,8 @@ def create_session(root: Path, username: str, files: list[dict[str, Any]], form:
     folder.mkdir(parents=True)
     for index in range(len(entries)):
         _part(folder, index).touch()
-    manifest = {'id': upload_id, 'username': username, 'created_at': time.time(), 'files': entries, 'form': form}
+    manifest = {'id': upload_id, 'username': username, 'created_at': time.time(), 'files': entries, 'form': form,
+                'registered': {}}
     (folder / MANIFEST).write_text(json.dumps(manifest), encoding='utf-8')
     return status(root, upload_id)
 
@@ -75,8 +78,40 @@ def status(root: Path, upload_id: str) -> dict[str, Any]:
                 for index in range(len(manifest['files']))]
     # The session is touched while it is used, so it is not removed as stale.
     (folder / MANIFEST).touch()
+    registered = manifest.get('registered') or {}
     return {'upload_id': manifest['id'], 'files': manifest['files'], 'received': received,
+            'registered': [str(index) in registered for index in range(len(manifest['files']))],
+            # Every file is registered: the session is kept a while so a page resuming it learns it ended.
+            'done': len(registered) >= len(manifest['files']),
             'complete': all(size >= item['size'] for size, item in zip(received, manifest['files']))}
+
+
+def registered_files(root: Path, upload_id: str) -> dict[int, dict[str, Any]]:
+    """The datasets the files of an upload became, by position in the upload."""
+    return {int(index): item for index, item in (load_session(root, upload_id).get('registered') or {}).items()}
+
+
+def mark_registered(root: Path, upload_id: str, registered: dict[int, dict[str, Any]]) -> bool:
+    """Save the datasets registered so far; True once every file of the upload is registered."""
+    manifest = load_session(root, upload_id)
+    manifest['registered'] = {str(index): item for index, item in registered.items()}
+    (_folder(root, upload_id) / MANIFEST).write_text(json.dumps(manifest), encoding='utf-8')
+    return len(manifest['registered']) >= len(manifest['files'])
+
+
+def take_file(root: Path, upload_id: str, index: int, destination_folder: Path, destination) -> tuple[str, Path]:
+    """Move one complete file of an upload to its destination; ``destination(folder, name)`` names it."""
+    manifest = load_session(root, upload_id)
+    if not 0 <= int(index) < len(manifest['files']):
+        raise ValueError('Unknown file of the upload.')
+    item = manifest['files'][index]
+    part = _part(_folder(root, upload_id), index)
+    if not part.exists() or part.stat().st_size < int(item['size']):
+        raise ValueError('The file has not finished uploading.')
+    target = destination(destination_folder, item['name'])
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(part), str(target))
+    return item['name'], target
 
 
 def append_chunk(root: Path, upload_id: str, index: int, offset: int, data: bytes) -> int:
@@ -97,22 +132,6 @@ def append_chunk(root: Path, upload_id: str, index: int, offset: int, data: byte
         with part.open('ab') as handle:
             handle.write(new)
     return received + len(new)
-
-
-def take_files(root: Path, upload_id: str, destination_folder: Path, destination) -> list[tuple[str, Path]]:
-    """Move the complete files of an upload to their destinations; ``destination(folder, name)`` names each."""
-    manifest = load_session(root, upload_id)
-    current = status(root, upload_id)
-    if not current['complete']:
-        raise ValueError('The upload has not finished.')
-    folder = _folder(root, upload_id)
-    moved = []
-    for index, item in enumerate(manifest['files']):
-        target = destination(destination_folder, item['name'])
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(_part(folder, index)), str(target))
-        moved.append((item['name'], target))
-    return moved
 
 
 def delete_session(root: Path, upload_id: str) -> None:

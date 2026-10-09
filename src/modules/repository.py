@@ -437,12 +437,16 @@ class Repository:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.global_db_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # How long a connection waits for another process writing the database. Dataset worker processes,
+    # which run in parallel and each write their whole dataset at once, wait much longer.
+    busy_timeout_seconds = 30.0
+
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.db_path, timeout=30.0, factory=_CoordinatedConnection)
+        conn = sqlite3.connect(self.db_path, timeout=self.busy_timeout_seconds, factory=_CoordinatedConnection)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA busy_timeout = 30000")
+        conn.execute(f"PRAGMA busy_timeout = {int(self.busy_timeout_seconds * 1000)}")
         conn.configure_workspace_write_coordinator(self.db_path)
         try:
             yield conn

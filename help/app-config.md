@@ -20,7 +20,7 @@ Persisted values are stored in the application database and take precedence over
 - **Report Chart Renderer** selects `dashboard-canvas` or the legacy `pil` renderer.
 - **Chromium Executable** optionally selects an executable browser for Canvas rendering. Leave it empty to use the deployment setting or automatic detection.
 - **Ignore event time filtering** ignores date and template conditions based on `Event_Start_Time` or `Event_End_Time`.
-- **Maximum simultaneous tasks** sets the requested background task limit from 1 to 32. The effective server limit is capped at four and reserves one logical CPU for interactive requests.
+- **Maximum simultaneous tasks** sets the background task limit from 1 to 32: the datasets of a workspace are processed in parallel up to this limit (the mappings of an upload first, which its CDRs wait for), while its combined tables, Auto-calculated Fields and Scoring jobs run one at a time. The effective limit reserves one logical CPU for interactive requests (with 8 CPUs, up to 7 tasks).
 
 Select **Save Configuration** to persist the values. Saving restarts the shared Canvas renderer so later charts use the selected renderer and browser.
 
